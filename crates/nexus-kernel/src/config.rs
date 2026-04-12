@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use crate::error::ConfigError;
+
 /// Configuration for a Kernel instance.
 ///
 /// Load from disk via `KernelConfig::load`, or construct programmatically
@@ -33,6 +35,51 @@ impl KernelConfig {
             ..Self::default()
         }
     }
+
+    /// Load from `<forge_root>/.nexus/config.toml`, falling back to defaults
+    /// for any fields not specified. Returns a default config (without error)
+    /// if the file doesn't exist.
+    ///
+    /// # Errors
+    /// - `ConfigError::TomlParse` if the file exists but is not valid TOML.
+    /// - `ConfigError::Invalid` if a field has an out-of-range value or the
+    ///   file can't be read.
+    pub fn load(forge_root: &std::path::Path) -> std::result::Result<Self, ConfigError> {
+        let config_path = forge_root.join(".nexus").join("config.toml");
+
+        // If no config file exists, return defaults with forge_root set.
+        if !config_path.exists() {
+            return Ok(Self {
+                forge_root: forge_root.to_path_buf(),
+                ..Self::default()
+            });
+        }
+
+        // Read and parse.
+        let content = std::fs::read_to_string(&config_path).map_err(|e| ConfigError::Invalid {
+            path: config_path.clone(),
+            reason: format!("failed to read: {e}"),
+        })?;
+
+        let raw: RawConfig = toml::from_str(&content).map_err(|source| ConfigError::TomlParse {
+            path: config_path.clone(),
+            source,
+        })?;
+
+        if raw.event_bus_capacity == Some(0) {
+            return Err(ConfigError::Invalid {
+                path: config_path,
+                reason: "event_bus_capacity must be > 0".to_string(),
+            });
+        }
+
+        Ok(Self {
+            forge_root: forge_root.to_path_buf(),
+            event_bus_capacity: raw.event_bus_capacity.unwrap_or(2048),
+            plugin_search_paths: raw.plugin_search_paths.unwrap_or_default(),
+            hot_reload_enabled: raw.hot_reload_enabled.unwrap_or(true),
+        })
+    }
 }
 
 impl Default for KernelConfig {
@@ -44,6 +91,15 @@ impl Default for KernelConfig {
             hot_reload_enabled: true,
         }
     }
+}
+
+/// Raw TOML shape for deserialization. All fields optional so missing
+/// values fall back to defaults.
+#[derive(Debug, serde::Deserialize)]
+struct RawConfig {
+    event_bus_capacity: Option<usize>,
+    plugin_search_paths: Option<Vec<PathBuf>>,
+    hot_reload_enabled: Option<bool>,
 }
 
 #[cfg(test)]
@@ -62,12 +118,78 @@ mod tests {
     fn for_testing_sets_forge_root() {
         let cfg = KernelConfig::for_testing(PathBuf::from("/tmp/test"));
         assert_eq!(cfg.forge_root, PathBuf::from("/tmp/test"));
-        assert_eq!(cfg.event_bus_capacity, 2048); // default preserved
+        assert_eq!(cfg.event_bus_capacity, 2048);
     }
 
     #[test]
     fn config_is_clone() {
         let cfg = KernelConfig::default();
         let _cloned = cfg.clone();
+    }
+
+    #[test]
+    fn load_missing_file_returns_defaults() {
+        let tmp = std::env::temp_dir().join("nexus-test-no-config");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let cfg = KernelConfig::load(&tmp).unwrap();
+        assert_eq!(cfg.forge_root, tmp);
+        assert_eq!(cfg.event_bus_capacity, 2048);
+        assert!(cfg.hot_reload_enabled);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn load_valid_config_applies_overrides() {
+        let tmp = std::env::temp_dir().join("nexus-test-valid-config");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join(".nexus")).unwrap();
+        std::fs::write(
+            tmp.join(".nexus/config.toml"),
+            "event_bus_capacity = 4096\nhot_reload_enabled = false\n",
+        )
+        .unwrap();
+
+        let cfg = KernelConfig::load(&tmp).unwrap();
+        assert_eq!(cfg.event_bus_capacity, 4096);
+        assert!(!cfg.hot_reload_enabled);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn load_malformed_toml_returns_parse_error() {
+        let tmp = std::env::temp_dir().join("nexus-test-bad-config");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join(".nexus")).unwrap();
+        std::fs::write(
+            tmp.join(".nexus/config.toml"),
+            "this is not valid toml = = =",
+        )
+        .unwrap();
+
+        let err = KernelConfig::load(&tmp).unwrap_err();
+        assert!(matches!(err, ConfigError::TomlParse { .. }));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn load_zero_capacity_returns_invalid_error() {
+        let tmp = std::env::temp_dir().join("nexus-test-zero-cap");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join(".nexus")).unwrap();
+        std::fs::write(
+            tmp.join(".nexus/config.toml"),
+            "event_bus_capacity = 0\n",
+        )
+        .unwrap();
+
+        let err = KernelConfig::load(&tmp).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid { .. }));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
