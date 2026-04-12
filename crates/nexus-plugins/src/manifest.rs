@@ -321,6 +321,163 @@ pub fn load_manifest(manifest_path: &Path) -> Result<PluginManifest, PluginError
     parse_manifest(&toml_str, &path_str)
 }
 
+// ─── Parsing tests ────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+
+    /// Minimal valid manifest TOML (only required fields).
+    const MINIMAL: &str = r#"
+[plugin]
+id = "com.example.test"
+name = "Test"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+"#;
+
+    /// Full manifest TOML with every optional section and field populated.
+    const FULL: &str = r#"
+[plugin]
+id = "com.example.test"
+name = "Test"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[capabilities]
+required = ["fs.read", "kv.read"]
+optional = ["net.http"]
+
+[wasm]
+module = "test.wasm"
+memory_mb = 32
+fuel = 5000000
+
+[settings]
+schema = "settings.json"
+
+[[registrations.cli_subcommand]]
+id = "test.run"
+handler_id = 1
+description = "Run test"
+
+[[registrations.ipc_command]]
+id = "test.query"
+handler_id = 100
+
+[[registrations.event_subscriber]]
+id = "test.on-file"
+filter = "FileCreated"
+handler_id = 200
+
+[lifecycle]
+on_init = true
+on_start = true
+on_stop = true
+"#;
+
+    #[test]
+    fn parse_minimal_manifest() {
+        let m = parse_manifest(MINIMAL, "manifest.toml").unwrap();
+        assert_eq!(m.id, "com.example.test");
+        assert_eq!(m.name, "Test");
+        assert_eq!(m.version, "1.0.0");
+        assert!(matches!(m.trust_level, TrustLevel::Community));
+        assert_eq!(m.api_version, "1");
+        assert_eq!(m.wasm.module, "test.wasm");
+        assert_eq!(m.wasm.memory_mb, 16); // default
+        assert_eq!(m.wasm.fuel, 10_000_000); // default
+        assert!(m.settings.is_none());
+        assert!(m.registrations.cli_subcommands.is_empty());
+        assert!(m.registrations.ipc_commands.is_empty());
+        assert!(m.registrations.event_subscribers.is_empty());
+    }
+
+    #[test]
+    fn parse_full_manifest() {
+        let m = parse_manifest(FULL, "manifest.toml").unwrap();
+        assert_eq!(m.capabilities.required, ["fs.read", "kv.read"]);
+        assert_eq!(m.capabilities.optional, ["net.http"]);
+        assert_eq!(m.wasm.memory_mb, 32);
+        assert_eq!(m.wasm.fuel, 5_000_000);
+        assert!(m.settings.is_some());
+        assert_eq!(m.settings.unwrap().schema, "settings.json");
+        assert_eq!(m.registrations.cli_subcommands.len(), 1);
+        assert_eq!(m.registrations.cli_subcommands[0].handler_id, 1);
+        assert_eq!(m.registrations.ipc_commands.len(), 1);
+        assert_eq!(m.registrations.ipc_commands[0].handler_id, 100);
+        assert_eq!(m.registrations.event_subscribers.len(), 1);
+        assert_eq!(m.registrations.event_subscribers[0].handler_id, 200);
+        assert!(m.lifecycle.on_init);
+        assert!(m.lifecycle.on_start);
+        assert!(m.lifecycle.on_stop);
+    }
+
+    #[test]
+    fn parse_invalid_toml_returns_error() {
+        let err = parse_manifest("this is not valid toml ][", "manifest.toml").unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestInvalid { .. }),
+            "expected ManifestInvalid, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_unknown_trust_level_returns_error() {
+        let toml = MINIMAL.replace("community", "superuser");
+        let err = parse_manifest(&toml, "manifest.toml").unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestInvalid { .. }),
+            "expected ManifestInvalid, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_missing_wasm_section_returns_error() {
+        let toml = r#"
+[plugin]
+id = "com.example.test"
+name = "Test"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+"#;
+        let err = parse_manifest(toml, "manifest.toml").unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestInvalid { .. }),
+            "expected ManifestInvalid, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_empty_capabilities_defaults_to_empty() {
+        let m = parse_manifest(MINIMAL, "manifest.toml").unwrap();
+        assert!(m.capabilities.required.is_empty());
+        assert!(m.capabilities.optional.is_empty());
+    }
+
+    #[test]
+    fn parse_empty_registrations_defaults_to_empty() {
+        let m = parse_manifest(MINIMAL, "manifest.toml").unwrap();
+        assert!(m.registrations.cli_subcommands.is_empty());
+        assert!(m.registrations.ipc_commands.is_empty());
+        assert!(m.registrations.event_subscribers.is_empty());
+    }
+
+    #[test]
+    fn parse_lifecycle_defaults_to_false() {
+        let m = parse_manifest(MINIMAL, "manifest.toml").unwrap();
+        assert!(!m.lifecycle.on_init);
+        assert!(!m.lifecycle.on_start);
+        assert!(!m.lifecycle.on_stop);
+    }
+}
+
 /// Validate a parsed [`PluginManifest`] against semantic rules.
 ///
 /// `plugin_dir` is the directory that contains the plugin's files (WASM
