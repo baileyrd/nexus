@@ -43,6 +43,35 @@ pub struct PluginInfo {
     pub capabilities: CapabilitySet,
 }
 
+use async_trait::async_trait;
+
+use crate::context::PluginContext;
+use crate::error::Result;
+
+/// The plugin lifecycle contract. Plugins implement this trait to
+/// participate in the kernel's three-phase lifecycle: init → start → stop.
+///
+/// Plugins are dropped after `on_stop` returns. Hot-reload calls `on_stop`
+/// on the old instance and `on_init` on the new one; state should be
+/// persisted via `PluginContext::kv_set` in `on_stop` and restored via
+/// `kv_get` in `on_init`.
+#[async_trait]
+pub trait PluginLifecycle: Send + Sync {
+    /// Called once, after the plugin has been loaded and its manifest parsed,
+    /// before any events are delivered. Use for state initialization and
+    /// optional KV restore.
+    async fn on_init(&mut self, ctx: &dyn PluginContext) -> Result<()>;
+
+    /// Called after `on_init` succeeds. The plugin is now "running" —
+    /// subscribed events will be delivered and IPC calls can be received.
+    async fn on_start(&mut self, ctx: &dyn PluginContext) -> Result<()>;
+
+    /// Called when the kernel is stopping this plugin. Persist any state
+    /// you want to survive across reloads. After this returns, the plugin
+    /// instance is dropped.
+    async fn on_stop(&mut self, ctx: &dyn PluginContext) -> Result<()>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

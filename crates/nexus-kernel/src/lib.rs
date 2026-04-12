@@ -9,6 +9,7 @@
 
 mod capability;
 mod config;
+mod context;
 mod error;
 mod event;
 mod event_bus;
@@ -18,6 +19,7 @@ mod plugin_registry;
 
 pub use capability::{Capability, CapabilityParseError, CapabilitySet};
 pub use config::KernelConfig;
+pub use context::PluginContext;
 pub use error::{
     BusError, CapabilityError, ConfigError, Error, IpcError, KvError, PluginError, RecvError,
     Result,
@@ -25,5 +27,5 @@ pub use error::{
 pub use event::{EventFilter, EventMetadata, NexusEvent, PublishedEvent, StopReason};
 pub use event_bus::{EventBus, EventSubscription};
 pub use log::LogLevel;
-pub use plugin::{PluginInfo, PluginStatus, TrustLevel};
+pub use plugin::{PluginInfo, PluginLifecycle, PluginStatus, TrustLevel};
 pub use plugin_registry::PluginRegistry;
