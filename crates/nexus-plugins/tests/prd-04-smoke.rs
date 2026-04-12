@@ -224,3 +224,27 @@ fn plugin_error_variants_display_correctly() {
         );
     }
 }
+
+#[test]
+fn scaffold_types_accessible() {
+    let _: Option<nexus_plugins::PluginTemplate> = None;
+    let _: Option<nexus_plugins::ScaffoldConfig> = None;
+}
+
+#[test]
+fn scaffold_generates_compilable_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("smoke-plugin");
+    let config = nexus_plugins::ScaffoldConfig {
+        plugin_id: "com.test.scaffold.smoke".to_string(),
+        plugin_name: "Scaffold Smoke".to_string(),
+        author: "Tester".to_string(),
+        description: "Smoke test plugin.".to_string(),
+    };
+    nexus_plugins::scaffold(&out, nexus_plugins::PluginTemplate::Community, &config).unwrap();
+    let manifest = std::fs::read_to_string(out.join("manifest.toml")).unwrap();
+    assert!(manifest.contains("com.test.scaffold.smoke"));
+    let lib_rs = std::fs::read_to_string(out.join("src/lib.rs")).unwrap();
+    assert!(lib_rs.contains("nexus_dispatch"));
+    assert!(lib_rs.contains("nexus_alloc"));
+}
