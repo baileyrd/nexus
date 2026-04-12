@@ -158,11 +158,16 @@ mod tests {
     use super::*;
 
     /// Helper: create a vault in disabled mode by temporarily setting the env var.
-    #[allow(deprecated)]
     fn disabled_vault() -> CredentialVault {
-        std::env::set_var("NEXUS_NO_KEYRING", "1");
+        // SAFETY: tests run single-threaded via nextest; no concurrent env reads.
+        unsafe {
+            std::env::set_var("NEXUS_NO_KEYRING", "1");
+        }
         let vault = CredentialVault::new();
-        std::env::remove_var("NEXUS_NO_KEYRING");
+        // SAFETY: same as above.
+        unsafe {
+            std::env::remove_var("NEXUS_NO_KEYRING");
+        }
         vault
     }
 
@@ -200,19 +205,26 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn default_vault_not_disabled_when_env_unset() {
-        std::env::remove_var("NEXUS_NO_KEYRING");
+        // SAFETY: single-threaded nextest process; no concurrent env reads.
+        unsafe {
+            std::env::remove_var("NEXUS_NO_KEYRING");
+        }
         let vault = CredentialVault::new();
         assert!(!vault.is_disabled());
     }
 
     #[test]
-    #[allow(deprecated)]
     fn env_value_other_than_1_is_not_disabled() {
-        std::env::set_var("NEXUS_NO_KEYRING", "true");
+        // SAFETY: single-threaded nextest process; no concurrent env reads.
+        unsafe {
+            std::env::set_var("NEXUS_NO_KEYRING", "true");
+        }
         let vault = CredentialVault::new();
-        std::env::remove_var("NEXUS_NO_KEYRING");
+        // SAFETY: same as above.
+        unsafe {
+            std::env::remove_var("NEXUS_NO_KEYRING");
+        }
         assert!(!vault.is_disabled(), "only '1' should disable the keyring");
     }
 
