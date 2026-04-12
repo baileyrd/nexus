@@ -10,6 +10,7 @@
 
 mod error;
 pub mod manifest;
+mod sandbox;
 
 pub use error::PluginError;
 pub use manifest::{
@@ -17,3 +18,4 @@ pub use manifest::{
     PluginManifest, Registrations, SettingsConfig, WasmConfig,
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
+pub use sandbox::{PluginData, WasmSandbox};
