@@ -86,7 +86,11 @@ impl WasmSandbox {
                 })?;
         }
 
-        let linker: Linker<PluginData> = Linker::new(&engine);
+        let mut linker: Linker<PluginData> = Linker::new(&engine);
+        crate::host_fns::register_host_fns(&mut linker).map_err(|e| PluginError::WasmLoadFailed {
+            plugin_id: plugin_id.clone(),
+            reason: format!("host function registration failed: {e}"),
+        })?;
 
         let instance =
             linker
