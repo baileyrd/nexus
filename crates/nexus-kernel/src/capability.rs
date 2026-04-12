@@ -104,6 +104,12 @@ impl Capability {
     ];
 }
 
+impl std::fmt::Display for Capability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 use std::collections::HashSet;
 
 /// A set of capabilities granted to a plugin at load time.
@@ -218,6 +224,13 @@ mod tests {
         let set = CapabilitySet::from_iter([Capability::FsRead]);
         let cloned = set.clone();
         assert!(cloned.contains(Capability::FsRead));
+    }
+
+    #[test]
+    fn display_matches_as_str() {
+        for &cap in Capability::ALL {
+            assert_eq!(format!("{cap}"), cap.as_str());
+        }
     }
 
     #[test]
