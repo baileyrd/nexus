@@ -6,7 +6,7 @@
 
 **Architecture:** Cargo workspace with two crates (`nexus-types` stub + `nexus-kernel`). Kernel owns the event bus (tokio broadcast), capability enum, plugin lifecycle traits, and `PluginContext` definition. Methods whose behavior depends on crates not yet built (`nexus-security`, `nexus-storage`, `nexus-plugins`) are defined in the contract but stubbed with `todo!()` or return the appropriate error variant.
 
-**Tech Stack:** Rust (latest stable), tokio 1.35+, tracing 0.1, serde 1.0, uuid 1.0, chrono 0.4, thiserror 1.0, async-trait 0.1, toml 0.8, nextest as test runner.
+**Tech Stack:** Rust (latest stable, edition 2024), tokio 1.35+, tracing 0.1, serde 1.0, uuid 1.0, chrono 0.4, thiserror 2.0, async-trait 0.1, toml 0.8, nextest as test runner.
 
 **Parent docs:**
 - [`2026-04-11-nexus-roadmap-design.md`](../specs/2026-04-11-nexus-roadmap-design.md)
@@ -146,7 +146,7 @@ members = [
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 publish = false
 
@@ -167,7 +167,7 @@ toml = "0.8"
 # Utilities
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-thiserror = "1.0"
+thiserror = "2.0"
 async-trait = "0.1"
 ```
 
