@@ -1,0 +1,274 @@
+//! Event bus: tokio broadcast channel wrapper.
+
+use std::sync::Arc;
+
+use tokio::sync::broadcast;
+
+use crate::error::{BusError, RecvError, Result};
+use crate::event::{EventFilter, EventMetadata, NexusEvent, PublishedEvent};
+
+/// The kernel's event bus. Fans out `PublishedEvent`s to all subscribers
+/// via a bounded tokio broadcast channel.
+///
+/// Owned by the `Kernel` struct; subscribers receive handles via
+/// `EventBus::subscribe`. Publishers must go through the kernel
+/// (`publish_kernel` is `pub(crate)` so plugins can't reach it directly).
+#[derive(Debug)]
+pub struct EventBus {
+    sender: broadcast::Sender<Arc<PublishedEvent>>,
+}
+
+impl EventBus {
+    /// Create a new bus with the given ring buffer capacity.
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        let (sender, _receiver) = broadcast::channel(capacity);
+        Self { sender }
+    }
+
+    /// Publish a kernel-owned event. Not callable from plugins.
+    ///
+    /// # Errors
+    /// Returns `BusError::Closed` if the bus has been shut down.
+    pub(crate) fn publish_kernel(&self, event: NexusEvent) -> Result<()> {
+        let metadata = EventMetadata {
+            event_id: uuid::Uuid::new_v4(),
+            timestamp: chrono::Utc::now(),
+            source_plugin_id: "kernel".to_string(),
+            span_id: current_span_id(),
+        };
+        let published = Arc::new(PublishedEvent { metadata, event });
+        // broadcast::Sender::send returns the number of active receivers,
+        // or an error if there are none — that's not an error condition for us.
+        let _ = self.sender.send(published);
+        Ok(())
+    }
+
+    /// Subscribe to events matching the filter. The subscription is dropped
+    /// automatically when it goes out of scope.
+    #[must_use]
+    pub fn subscribe(&self, filter: EventFilter) -> EventSubscription {
+        EventSubscription {
+            receiver: self.sender.subscribe(),
+            filter,
+        }
+    }
+
+    /// Number of active subscribers (useful for debug/metrics).
+    #[must_use]
+    pub fn subscriber_count(&self) -> usize {
+        self.sender.receiver_count()
+    }
+}
+
+/// A subscription handle returned by `EventBus::subscribe`. Dropped
+/// subscriptions auto-unsubscribe (tokio broadcast semantics).
+pub struct EventSubscription {
+    receiver: broadcast::Receiver<Arc<PublishedEvent>>,
+    filter: EventFilter,
+}
+
+impl EventSubscription {
+    /// Receive the next event matching the filter. Non-matching events are
+    /// skipped internally.
+    ///
+    /// # Errors
+    /// - `RecvError::Lagged(n)` — subscriber fell behind; `n` events lost.
+    /// - `RecvError::Closed` — bus is shut down.
+    pub async fn recv(&mut self) -> std::result::Result<Arc<PublishedEvent>, RecvError> {
+        loop {
+            let event = match self.receiver.recv().await {
+                Ok(e) => e,
+                Err(broadcast::error::RecvError::Lagged(n)) => return Err(RecvError::Lagged(n)),
+                Err(broadcast::error::RecvError::Closed) => return Err(RecvError::Closed),
+            };
+            if matches_filter(&event.event, &self.filter) {
+                return Ok(event);
+            }
+            // non-matching: keep looping
+        }
+    }
+
+    /// Try to receive without blocking. Returns `Ok(None)` if no matching
+    /// events are currently available.
+    ///
+    /// # Errors
+    /// - `RecvError::Lagged(n)` — subscriber fell behind.
+    /// - `RecvError::Closed` — bus is shut down.
+    pub fn try_recv(&mut self) -> std::result::Result<Option<Arc<PublishedEvent>>, RecvError> {
+        loop {
+            let event = match self.receiver.try_recv() {
+                Ok(e) => e,
+                Err(broadcast::error::TryRecvError::Empty) => return Ok(None),
+                Err(broadcast::error::TryRecvError::Lagged(n)) => return Err(RecvError::Lagged(n)),
+                Err(broadcast::error::TryRecvError::Closed) => return Err(RecvError::Closed),
+            };
+            if matches_filter(&event.event, &self.filter) {
+                return Ok(Some(event));
+            }
+        }
+    }
+}
+
+/// Check whether an event matches a filter.
+fn matches_filter(event: &NexusEvent, filter: &EventFilter) -> bool {
+    match filter {
+        EventFilter::All => true,
+        EventFilter::Variant(name) => variant_name(event) == *name,
+        EventFilter::CustomPrefix(prefix) => {
+            if let NexusEvent::Custom { type_id, .. } = event {
+                type_id.starts_with(prefix.as_str())
+            } else {
+                false
+            }
+        }
+        EventFilter::CustomExact(wanted) => {
+            if let NexusEvent::Custom { type_id, .. } = event {
+                type_id == wanted
+            } else {
+                false
+            }
+        }
+    }
+}
+
+/// Get the variant name of a `NexusEvent` for filter matching.
+#[allow(clippy::match_same_arms)]
+fn variant_name(event: &NexusEvent) -> &'static str {
+    match event {
+        NexusEvent::FileCreated { .. }      => "FileCreated",
+        NexusEvent::FileModified { .. }     => "FileModified",
+        NexusEvent::FileDeleted { .. }      => "FileDeleted",
+        NexusEvent::FileRenamed { .. }      => "FileRenamed",
+        NexusEvent::PluginLoaded { .. }     => "PluginLoaded",
+        NexusEvent::PluginStarted { .. }    => "PluginStarted",
+        NexusEvent::PluginStopped { .. }    => "PluginStopped",
+        NexusEvent::PluginCrashed { .. }    => "PluginCrashed",
+        NexusEvent::CapabilityGranted { .. } => "CapabilityGranted",
+        NexusEvent::CapabilityDenied { .. }  => "CapabilityDenied",
+        NexusEvent::IndexingStarted { .. }   => "IndexingStarted",
+        NexusEvent::IndexingProgress { .. }  => "IndexingProgress",
+        NexusEvent::IndexingCompleted { .. } => "IndexingCompleted",
+        NexusEvent::Custom { .. }            => "Custom",
+    }
+}
+
+/// Get the current `tracing` span id, if any.
+fn current_span_id() -> Option<String> {
+    // tracing::Span::current() always returns a span, but it's the None span
+    // when no actual span is active. We use its metadata or None.
+    let span = tracing::Span::current();
+    if span.is_disabled() {
+        None
+    } else {
+        span.id().map(|id| format!("{id:?}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn publish_and_receive_single_event() {
+        let bus = EventBus::new(16);
+        let mut sub = bus.subscribe(EventFilter::All);
+
+        bus.publish_kernel(NexusEvent::FileCreated {
+            path: PathBuf::from("a.md"),
+            content_hash: "hash".to_string(),
+        }).unwrap();
+
+        let published = sub.recv().await.unwrap();
+        match &published.event {
+            NexusEvent::FileCreated { path, .. } => assert_eq!(path, &PathBuf::from("a.md")),
+            _ => panic!("wrong event variant"),
+        }
+        assert_eq!(published.metadata.source_plugin_id, "kernel");
+    }
+
+    #[tokio::test]
+    async fn filter_variant_skips_non_matching_events() {
+        let bus = EventBus::new(16);
+        let mut sub = bus.subscribe(EventFilter::Variant("FileDeleted"));
+
+        // Publish a Created event — should be skipped by the filter
+        bus.publish_kernel(NexusEvent::FileCreated {
+            path: PathBuf::from("a.md"),
+            content_hash: "hash".to_string(),
+        }).unwrap();
+
+        // Publish a Deleted event — should be received
+        bus.publish_kernel(NexusEvent::FileDeleted {
+            path: PathBuf::from("b.md"),
+        }).unwrap();
+
+        let published = sub.recv().await.unwrap();
+        match &published.event {
+            NexusEvent::FileDeleted { path } => assert_eq!(path, &PathBuf::from("b.md")),
+            _ => panic!("filter let wrong event through"),
+        }
+    }
+
+    #[tokio::test]
+    async fn filter_custom_prefix_matches_custom_events() {
+        let bus = EventBus::new(16);
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix("com.test.".to_string()));
+
+        bus.publish_kernel(NexusEvent::Custom {
+            type_id: "com.test.ping".to_string(),
+            emitting_plugin: "com.test".to_string(),
+            payload: serde_json::json!({}),
+        }).unwrap();
+
+        let published = sub.recv().await.unwrap();
+        match &published.event {
+            NexusEvent::Custom { type_id, .. } => assert_eq!(type_id, "com.test.ping"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn try_recv_returns_none_when_empty() {
+        let bus = EventBus::new(16);
+        let mut sub = bus.subscribe(EventFilter::All);
+        let result = sub.try_recv().unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn subscriber_count_reflects_active_subscriptions() {
+        let bus = EventBus::new(16);
+        assert_eq!(bus.subscriber_count(), 0);
+
+        let _sub1 = bus.subscribe(EventFilter::All);
+        assert_eq!(bus.subscriber_count(), 1);
+
+        {
+            let _sub2 = bus.subscribe(EventFilter::All);
+            assert_eq!(bus.subscriber_count(), 2);
+        }
+        // sub2 dropped
+        assert_eq!(bus.subscriber_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn metadata_has_fresh_uuid_per_publish() {
+        let bus = EventBus::new(16);
+        let mut sub = bus.subscribe(EventFilter::All);
+
+        bus.publish_kernel(NexusEvent::FileCreated {
+            path: PathBuf::from("a"),
+            content_hash: "h".to_string(),
+        }).unwrap();
+        bus.publish_kernel(NexusEvent::FileCreated {
+            path: PathBuf::from("b"),
+            content_hash: "h".to_string(),
+        }).unwrap();
+
+        let e1 = sub.recv().await.unwrap();
+        let e2 = sub.recv().await.unwrap();
+        assert_ne!(e1.metadata.event_id, e2.metadata.event_id);
+    }
+}

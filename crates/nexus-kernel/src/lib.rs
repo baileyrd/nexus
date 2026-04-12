@@ -11,6 +11,7 @@ mod capability;
 mod config;
 mod error;
 mod event;
+mod event_bus;
 mod log;
 
 pub use capability::{Capability, CapabilityParseError, CapabilitySet};
@@ -20,4 +21,5 @@ pub use error::{
     Result,
 };
 pub use event::{EventFilter, EventMetadata, NexusEvent, PublishedEvent, StopReason};
+pub use event_bus::{EventBus, EventSubscription};
 pub use log::LogLevel;
