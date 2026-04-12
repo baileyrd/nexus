@@ -8,6 +8,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod audit;
 mod error;
 mod risk;
 
