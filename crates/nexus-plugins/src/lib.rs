@@ -15,6 +15,7 @@ mod loader;
 mod sandbox;
 mod settings;
 mod hot_reload;
+mod scaffold;
 
 /// Trait for key-value storage backends. Implemented by the kernel.
 /// Namespace is the plugin ID — plugins cannot access each other's data.
@@ -42,6 +43,7 @@ pub trait KvStore: Send + Sync {
 }
 
 pub use error::PluginError;
+pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 pub use loader::PluginLoader;
 pub use manifest::{
     CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
