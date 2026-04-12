@@ -488,6 +488,10 @@ api_version = "1"
 /// # Errors
 /// Returns [`PluginError::ManifestValidation`] describing the first rule that
 /// is violated.
+///
+/// # Panics
+/// Panics if the internal ID validation regex fails to compile (should never
+/// happen — the pattern is a compile-time constant).
 pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), PluginError> {
     let id = &manifest.id;
 
