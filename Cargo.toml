@@ -5,6 +5,7 @@ members = [
     "crates/nexus-kernel",
     "crates/nexus-security",
     "crates/nexus-storage",
+    "crates/nexus-plugins",
 ]
 
 [workspace.package]
@@ -50,6 +51,18 @@ comrak = "0.28"
 # File watching
 notify = "7"
 notify-debouncer-mini = "0.5"
+
+# WASM runtime
+wasmtime = "18"
+
+# JSON Schema validation
+jsonschema = "0.17"
+
+# Semver parsing
+semver = "1"
+
+# Regex (lightweight)
+regex-lite = "0.1"
 
 # Parallelism
 rayon = "1.10"
