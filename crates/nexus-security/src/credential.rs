@@ -54,8 +54,7 @@ impl CredentialVault {
             .map_err(|e| platform_error(e.to_string()))?;
 
         match entry.get_password() {
-            Ok(_) => Ok(()),
-            Err(keyring::Error::NoEntry) => Ok(()), // keyring works, entry just missing
+            Ok(_) | Err(keyring::Error::NoEntry) => Ok(()), // keyring works, entry just missing
             Err(e) => Err(platform_error(e.to_string())),
         }
     }

@@ -65,7 +65,7 @@ impl ForgePathValidator {
         }
 
         // 2. Normalize path components
-        let normalized = self.normalize(requested)?;
+        let normalized = Self::normalize(requested)?;
 
         // 3. Join with forge root
         let joined = self.forge_root.join(&normalized);
@@ -88,7 +88,7 @@ impl ForgePathValidator {
 
     /// Normalize path components: collapse `.`, reject `..` that escapes root.
     /// Strips leading `/` so absolute paths are treated as relative.
-    fn normalize(&self, path: &Path) -> Result<PathBuf, SecurityError> {
+    fn normalize(path: &Path) -> Result<PathBuf, SecurityError> {
         let mut components = Vec::new();
 
         for component in path.components() {
@@ -102,11 +102,10 @@ impl ForgePathValidator {
                     }
                     components.pop();
                 }
-                std::path::Component::CurDir | std::path::Component::RootDir => {
-                    // Skip `.` and leading `/`
-                }
-                std::path::Component::Prefix(_) => {
-                    // Windows prefix — treat as no-op for forge-relative paths
+                std::path::Component::CurDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_) => {
+                    // Skip `.`, leading `/`, and Windows drive prefixes
                 }
             }
         }
