@@ -12,7 +12,9 @@ mod error;
 mod forge;
 mod atomic;
 pub(crate) mod schema;
+mod parser;
 
 pub use atomic::atomic_write;
 pub use error::StorageError;
 pub use forge::{Forge, ForgeLock};
+pub use parser::{content_hash, parse_markdown, ParsedBlock, ParsedFile, ParsedLink, ParsedTag, Property};
