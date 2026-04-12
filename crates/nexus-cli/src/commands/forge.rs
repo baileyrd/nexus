@@ -16,9 +16,9 @@ pub fn init(app: &App, dir: Option<PathBuf>) -> Result<()> {
         anyhow::bail!("forge already exists at '{}'", target.display());
     }
 
-    // Initialise the forge via StorageEngine::init.
-    nexus_storage::StorageEngine::init(&target)
-        .map_err(|e| anyhow::anyhow!("failed to initialise forge: {e}"))?;
+    // Initialise the forge via App::init_forge, which wraps StorageEngine::init.
+    let tmp_app = App::new(target.clone(), app.format());
+    tmp_app.init_forge()?;
 
     let location = target.display().to_string();
 

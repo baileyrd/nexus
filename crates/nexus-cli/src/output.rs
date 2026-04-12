@@ -124,9 +124,9 @@ pub fn print_list(format: OutputFormat, headers: &[&str], rows: &[Vec<String>]) 
         }
         OutputFormat::Table => {
             let mut table = Table::new();
-            table.set_header(headers.iter().map(|h| Cell::new(h)));
+            table.set_header(headers.iter().map(Cell::new));
             for row in rows {
-                table.add_row(row.iter().map(|v| Cell::new(v)));
+                table.add_row(row.iter().map(Cell::new));
             }
             println!("{table}");
         }
