@@ -9,10 +9,15 @@
 
 mod capability;
 mod config;
+mod error;
 mod event;
 mod log;
 
 pub use capability::{Capability, CapabilityParseError, CapabilitySet};
 pub use config::KernelConfig;
+pub use error::{
+    BusError, CapabilityError, ConfigError, Error, IpcError, KvError, PluginError, RecvError,
+    Result,
+};
 pub use event::{EventFilter, EventMetadata, NexusEvent, PublishedEvent, StopReason};
 pub use log::LogLevel;
