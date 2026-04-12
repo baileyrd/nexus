@@ -11,6 +11,7 @@
 mod error;
 mod host_fns;
 pub mod manifest;
+mod loader;
 mod sandbox;
 mod settings;
 
@@ -40,6 +41,7 @@ pub trait KvStore: Send + Sync {
 }
 
 pub use error::PluginError;
+pub use loader::PluginLoader;
 pub use manifest::{
     CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
     PluginManifest, Registrations, SettingsConfig, WasmConfig,
