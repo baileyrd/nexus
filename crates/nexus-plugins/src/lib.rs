@@ -12,6 +12,7 @@ mod error;
 mod host_fns;
 pub mod manifest;
 mod sandbox;
+mod settings;
 
 /// Trait for key-value storage backends. Implemented by the kernel.
 /// Namespace is the plugin ID — plugins cannot access each other's data.
@@ -45,3 +46,4 @@ pub use manifest::{
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
 pub use sandbox::{PluginData, WasmSandbox};
+pub use settings::SettingsManager;
