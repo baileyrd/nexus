@@ -68,7 +68,7 @@ pub struct StorageEngine {
     pool: r2d2::Pool<SqliteConnectionManager>,
     write_conn: Mutex<rusqlite::Connection>,
     search_index: SearchIndex,
-    _watcher: Option<watcher::Watcher>,
+    watcher: Option<watcher::Watcher>,
 }
 
 impl std::fmt::Debug for StorageEngine {
@@ -124,6 +124,10 @@ impl StorageEngine {
     /// # Errors
     ///
     /// Returns [`StorageError`] on I/O or database failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
     pub fn write_file(&self, path: &str, content: &[u8]) -> Result<FileMetadata, StorageError> {
         // 1. Atomic write to disk.
         let abs_target = self.forge.root().join(path);
@@ -188,6 +192,10 @@ impl StorageEngine {
     /// # Errors
     ///
     /// Returns [`StorageError`] on I/O or database failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
     pub fn delete_file(&self, path: &str) -> Result<(), StorageError> {
         // Remove from disk if it exists.
         let abs = self.forge.root().join(path);
@@ -321,6 +329,10 @@ impl StorageEngine {
     /// # Errors
     ///
     /// Returns [`StorageError`] on I/O or database failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
     pub fn rebuild_index(&self) -> Result<RebuildStats, StorageError> {
         let start = std::time::Instant::now();
         let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
@@ -335,25 +347,35 @@ impl StorageEngine {
         reconcile(&conn, self.forge.root())?;
 
         // Count what ended up in the DB.
-        let files_processed: usize = conn
-            .query_row("SELECT COUNT(*) FROM files WHERE is_deleted = 0;", [], |r| {
-                r.get::<_, i64>(0)
-            })
-            .unwrap_or(0) as usize;
+        let files_processed: usize = usize::try_from(
+            conn.query_row(
+                "SELECT COUNT(*) FROM files WHERE is_deleted = 0;",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0),
+        )
+        .unwrap_or(0);
 
-        let blocks_indexed: usize = conn
-            .query_row("SELECT COUNT(*) FROM blocks;", [], |r| r.get::<_, i64>(0))
-            .unwrap_or(0) as usize;
+        let blocks_indexed: usize = usize::try_from(
+            conn.query_row("SELECT COUNT(*) FROM blocks;", [], |r| r.get::<_, i64>(0))
+                .unwrap_or(0),
+        )
+        .unwrap_or(0);
 
-        let links_found: usize = conn
-            .query_row("SELECT COUNT(*) FROM links;", [], |r| r.get::<_, i64>(0))
-            .unwrap_or(0) as usize;
+        let links_found: usize = usize::try_from(
+            conn.query_row("SELECT COUNT(*) FROM links;", [], |r| r.get::<_, i64>(0))
+                .unwrap_or(0),
+        )
+        .unwrap_or(0);
 
-        let tags_found: usize = conn
-            .query_row("SELECT COUNT(*) FROM tags;", [], |r| r.get::<_, i64>(0))
-            .unwrap_or(0) as usize;
+        let tags_found: usize = usize::try_from(
+            conn.query_row("SELECT COUNT(*) FROM tags;", [], |r| r.get::<_, i64>(0))
+                .unwrap_or(0),
+        )
+        .unwrap_or(0);
 
-        let duration_ms = start.elapsed().as_millis() as u64;
+        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
         Ok(RebuildStats {
             files_processed,
@@ -425,7 +447,7 @@ impl StorageEngine {
     /// Return the watcher event receiver, if the watcher started successfully.
     #[must_use]
     pub fn watch_changes(&self) -> Option<&std::sync::mpsc::Receiver<StorageEvent>> {
-        self._watcher.as_ref().map(|w| w.events())
+        self.watcher.as_ref().map(watcher::Watcher::events)
     }
 
     // ── Accessor ──────────────────────────────────────────────────────────────
@@ -476,7 +498,7 @@ fn open_internal(
     let search_index = SearchIndex::open(&forge.search_dir())?;
 
     // 7. Start file watcher (best-effort).
-    let _watcher = Watcher::start(forge.root(), config.debounce_ms).ok();
+    let watcher = Watcher::start(forge.root(), config.debounce_ms).ok();
 
     // 8. If not new: run reconcile against write_conn.
     if !is_new {
@@ -489,7 +511,7 @@ fn open_internal(
         pool,
         write_conn: Mutex::new(write_conn),
         search_index,
-        _watcher,
+        watcher,
     })
 }
 
@@ -505,12 +527,13 @@ fn infer_file_type(path: &str) -> String {
 /// Return the current Unix timestamp in seconds.
 fn unix_now() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        .try_into()
-        .unwrap_or(0)
+    i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    )
+    .unwrap_or(0)
 }
 
 // ── Integration tests ─────────────────────────────────────────────────────────
