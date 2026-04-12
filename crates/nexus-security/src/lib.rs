@@ -10,7 +10,9 @@
 
 pub mod audit;
 mod error;
+mod path;
 mod risk;
 
 pub use error::SecurityError;
+pub use path::ForgePathValidator;
 pub use risk::{risk_level, RiskLevel};
