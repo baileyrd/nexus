@@ -271,4 +271,57 @@ mod tests {
         let e2 = sub.recv().await.unwrap();
         assert_ne!(e1.metadata.event_id, e2.metadata.event_id);
     }
+
+    #[tokio::test]
+    async fn slow_subscriber_gets_lagged_error() {
+        // Capacity of 2; publish 5 events without consuming; should lag.
+        let bus = EventBus::new(2);
+        let mut sub = bus.subscribe(EventFilter::All);
+
+        for i in 0..5 {
+            bus.publish_kernel(NexusEvent::FileCreated {
+                path: PathBuf::from(format!("{i}.md")),
+                content_hash: format!("hash-{i}"),
+            }).unwrap();
+        }
+
+        // First recv should return Lagged, not an actual event.
+        let result = sub.recv().await;
+        match result {
+            Err(RecvError::Lagged(n)) => assert!(n >= 1, "expected at least 1 lagged, got {n}"),
+            other => panic!("expected Lagged error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn recv_returns_closed_when_bus_dropped() {
+        let bus = EventBus::new(16);
+        let mut sub = bus.subscribe(EventFilter::All);
+
+        drop(bus);
+
+        let result = sub.recv().await;
+        assert!(matches!(result, Err(RecvError::Closed)));
+    }
+
+    #[tokio::test]
+    async fn lagged_subscriber_can_recover_and_keep_receiving() {
+        let bus = EventBus::new(2);
+        let mut sub = bus.subscribe(EventFilter::All);
+
+        // Cause a lag
+        for i in 0..5 {
+            bus.publish_kernel(NexusEvent::FileCreated {
+                path: PathBuf::from(format!("{i}.md")),
+                content_hash: "h".to_string(),
+            }).unwrap();
+        }
+
+        // First recv — lagged
+        assert!(matches!(sub.recv().await, Err(RecvError::Lagged(_))));
+
+        // Subsequent recvs should return actual events from what's still in the buffer
+        let event = sub.recv().await.unwrap();
+        assert!(matches!(event.event, NexusEvent::FileCreated { .. }));
+    }
 }
