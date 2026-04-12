@@ -169,6 +169,17 @@ pub struct EventMetadata {
     pub span_id: Option<String>,
 }
 
+/// An event as it flows through the bus: payload + metadata.
+///
+/// The bus transports `Arc<PublishedEvent>` to avoid cloning for each subscriber.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublishedEvent {
+    /// Kernel-populated metadata.
+    pub metadata: EventMetadata,
+    /// The event payload.
+    pub event: NexusEvent,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +293,24 @@ mod tests {
         let json = serde_json::to_string(&metadata).unwrap();
         assert!(json.contains("span-42"));
         assert!(json.contains("com.test"));
+    }
+
+    #[test]
+    fn published_event_holds_metadata_and_payload() {
+        let metadata = EventMetadata {
+            event_id: uuid::Uuid::nil(),
+            timestamp: chrono::Utc::now(),
+            source_plugin_id: "kernel".to_string(),
+            span_id: None,
+        };
+        let event = NexusEvent::FileCreated {
+            path: PathBuf::from("test.md"),
+            content_hash: "hash".to_string(),
+        };
+        let published = PublishedEvent { metadata, event };
+        match &published.event {
+            NexusEvent::FileCreated { path, .. } => assert_eq!(path, &PathBuf::from("test.md")),
+            _ => panic!("wrong event"),
+        }
     }
 }

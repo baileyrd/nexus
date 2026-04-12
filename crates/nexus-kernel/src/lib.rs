@@ -14,5 +14,5 @@ mod log;
 
 pub use capability::{Capability, CapabilityParseError, CapabilitySet};
 pub use config::KernelConfig;
-pub use event::{EventFilter, EventMetadata, NexusEvent, StopReason};
+pub use event::{EventFilter, EventMetadata, NexusEvent, PublishedEvent, StopReason};
 pub use log::LogLevel;
