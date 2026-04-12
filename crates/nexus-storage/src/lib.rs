@@ -24,4 +24,4 @@ pub use parser::{content_hash, parse_markdown, ParsedBlock, ParsedFile, ParsedLi
 pub use index::{BlockRecord, FileFilter, FileMetadata, FileRecord, LinkRecord, RebuildStats, TagResult};
 pub use index::{insert_file, query_files, query_blocks, query_links, query_backlinks, query_tags, delete_file, soft_delete_file, file_by_path};
 pub use search::{SearchIndex, SearchResult};
-pub use watcher::{relative_path, should_ignore, StorageEvent};
+pub use watcher::{relative_path, should_ignore, StorageEvent, Watcher};
