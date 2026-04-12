@@ -92,6 +92,48 @@ impl Kernel {
         tracing::info!("nexus kernel started");
         Ok(())
     }
+
+    /// Graceful shutdown. Stops all plugins in reverse topological order,
+    /// drains the event bus, flushes the audit log, closes DB connections.
+    /// Idempotent — safe to call twice.
+    ///
+    /// In PRD 01 scope, shutdown flips a flag and returns. Real drain
+    /// behavior fills in when `nexus-plugins` and `nexus-storage` land.
+    ///
+    /// # Errors
+    /// Returns `Error::Plugin` if any plugin fails to stop. In PRD 01
+    /// scope, this cannot happen (no plugins are loaded).
+    pub async fn shutdown(&self) -> Result<()> {
+        // Flip the shutdown flag. Idempotent: subsequent calls see the flag
+        // already set and short-circuit.
+        let was_already_shutdown =
+            self.shutdown_flag.swap(true, std::sync::atomic::Ordering::SeqCst);
+
+        if was_already_shutdown {
+            tracing::debug!("nexus kernel shutdown called on already-shutdown kernel; no-op");
+            return Ok(());
+        }
+
+        tracing::info!("nexus kernel shutting down");
+
+        // In PRD 01 scope, nothing to drain. nexus-plugins and nexus-storage
+        // will fill in real drain logic when they land.
+        tracing::debug!("no plugins to stop; no storage to flush");
+
+        tracing::info!("nexus kernel shutdown complete");
+        Ok(())
+    }
+
+    /// Get a read-only handle to the plugin registry. Used by `nexus-cli` for
+    /// introspection commands like `nexus plugin list`.
+    ///
+    /// Synchronous accessor in PRD 01 scope. When `nexus-plugins` adds
+    /// runtime mutations, this signature may change to return a
+    /// `RwLockReadGuard` — a refactor local to this file.
+    #[must_use]
+    pub fn plugins(&self) -> &PluginRegistry {
+        &self.plugins
+    }
 }
 
 #[cfg(test)]
@@ -130,5 +172,30 @@ mod tests {
         kernel.start().await.unwrap();
         // Calling start again should not fail in PRD 01 scope.
         kernel.start().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn shutdown_succeeds_on_fresh_kernel() {
+        let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-shutdown-test"));
+        let kernel = Kernel::new(config).unwrap();
+        kernel.start().await.unwrap();
+        kernel.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn shutdown_is_idempotent() {
+        let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-shutdown-idem"));
+        let kernel = Kernel::new(config).unwrap();
+        kernel.start().await.unwrap();
+        kernel.shutdown().await.unwrap();
+        kernel.shutdown().await.unwrap();  // no panic, no error
+    }
+
+    #[test]
+    fn plugins_accessor_returns_empty_registry_before_start() {
+        let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-plugins-accessor"));
+        let kernel = Kernel::new(config).unwrap();
+        let registry = kernel.plugins();
+        assert!(registry.is_empty());
     }
 }
