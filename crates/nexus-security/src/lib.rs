@@ -9,5 +9,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 mod error;
+mod risk;
 
 pub use error::SecurityError;
+pub use risk::{risk_level, RiskLevel};
