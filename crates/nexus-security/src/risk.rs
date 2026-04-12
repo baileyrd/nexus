@@ -17,6 +17,24 @@ pub enum RiskLevel {
     High,
 }
 
+impl RiskLevel {
+    /// Returns `true` if this is `RiskLevel::High`.
+    #[must_use]
+    pub const fn is_high(self) -> bool {
+        matches!(self, RiskLevel::High)
+    }
+}
+
+impl std::fmt::Display for RiskLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RiskLevel::Low => f.write_str("LOW"),
+            RiskLevel::Medium => f.write_str("MEDIUM"),
+            RiskLevel::High => f.write_str("HIGH"),
+        }
+    }
+}
+
 /// Returns the risk level for a capability.
 ///
 /// The match is exhaustive over all `Capability` variants. Adding a variant
@@ -118,5 +136,19 @@ mod tests {
         let a = RiskLevel::High;
         let b = a;
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn is_high_returns_true_only_for_high() {
+        assert!(RiskLevel::High.is_high());
+        assert!(!RiskLevel::Medium.is_high());
+        assert!(!RiskLevel::Low.is_high());
+    }
+
+    #[test]
+    fn display_formats_as_uppercase() {
+        assert_eq!(format!("{}", RiskLevel::Low), "LOW");
+        assert_eq!(format!("{}", RiskLevel::Medium), "MEDIUM");
+        assert_eq!(format!("{}", RiskLevel::High), "HIGH");
     }
 }
