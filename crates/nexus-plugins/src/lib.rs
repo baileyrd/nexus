@@ -9,5 +9,11 @@
 #![allow(clippy::module_name_repetitions)]
 
 mod error;
+pub mod manifest;
 
 pub use error::PluginError;
+pub use manifest::{
+    CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
+    PluginManifest, Registrations, SettingsConfig, WasmConfig,
+};
+pub use manifest::{load_manifest, parse_manifest, validate};
