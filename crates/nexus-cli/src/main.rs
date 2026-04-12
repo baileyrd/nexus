@@ -1,4 +1,7 @@
+mod app;
+mod commands;
 mod output;
+mod stubs;
 
 use std::path::PathBuf;
 
@@ -250,6 +253,20 @@ struct StubArgs {
 // Entry point
 // ---------------------------------------------------------------------------
 
+/// Resolve the forge root from CLI flag, env var, or default location.
+fn default_forge_path(override_path: Option<PathBuf>) -> PathBuf {
+    if let Some(p) = override_path {
+        return p;
+    }
+    if let Ok(p) = std::env::var("NEXUS_FORGE_PATH") {
+        return PathBuf::from(p);
+    }
+    // Fall back to $HOME/.nexus/default
+    std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join(".nexus").join("default"))
+        .unwrap_or_else(|| PathBuf::from(".nexus/default"))
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -267,80 +284,72 @@ fn main() {
         .with_ansi(output::use_color(cli.no_color))
         .init();
 
-    match cli.command {
+    let forge_root = default_forge_path(cli.forge_path);
+    let mut app = app::App::new(forge_root, format);
+
+    let result = match cli.command {
         Commands::Forge(args) => match args.command {
-            ForgeCommand::Init { dir } => {
-                let target = dir
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-                println!("forge init: {}", target.display());
-            }
-            ForgeCommand::Status => {
-                println!("forge status");
-            }
+            ForgeCommand::Init { dir } => commands::forge::init(&app, dir),
+            ForgeCommand::Status => commands::forge::status(&mut app),
         },
 
         Commands::Content(args) => match args.command {
             ContentCommand::Create { path, content, stdin } => {
-                println!("content create: path={path} content={content:?} stdin={stdin}");
+                commands::content::create(&mut app, &path, content.as_deref(), stdin)
             }
-            ContentCommand::Read { path, raw } => {
-                println!("content read: path={path} raw={raw}");
-            }
+            ContentCommand::Read { path, raw } => commands::content::read(&mut app, &path, raw),
             ContentCommand::Delete { path, force } => {
-                println!("content delete: path={path} force={force}");
+                commands::content::delete(&mut app, &path, force)
             }
             ContentCommand::Search { query, limit } => {
-                println!("content search: query={query} limit={limit}");
+                commands::content::search(&mut app, &query, limit)
             }
         },
 
         Commands::Plugin(args) => match args.command {
-            PluginCommand::Install { dir } => {
-                println!("plugin install: {}", dir.display());
-            }
-            PluginCommand::List => {
-                println!("plugin list");
-            }
+            PluginCommand::Install { dir } => commands::plugin::install(&mut app, &dir),
+            PluginCommand::List => commands::plugin::list(&mut app),
             PluginCommand::Call { plugin_id, command, args } => {
-                println!("plugin call: plugin={plugin_id} command={command} args={args:?}");
+                let args_json = args.as_deref().unwrap_or("{}");
+                commands::plugin::call(&mut app, &plugin_id, &command, args_json)
             }
             PluginCommand::Uninstall { plugin_id } => {
-                println!("plugin uninstall: {plugin_id}");
+                commands::plugin::uninstall(&mut app, &plugin_id)
             }
             PluginCommand::Scaffold { plugin_type, id, name, author, output } => {
-                println!(
-                    "plugin scaffold: type={plugin_type} id={id} name={name} author={author} output={output:?}"
-                );
+                commands::plugin::scaffold(
+                    &plugin_type,
+                    Some(&id),
+                    Some(&name),
+                    Some(&author),
+                    output.as_deref(),
+                )
             }
         },
 
-        Commands::Watch(args) => {
-            println!("watch: glob={}", args.glob);
-        }
+        Commands::Watch(args) => commands::watch::run(&mut app, &args.glob),
 
         Commands::Logs(args) => match args.command {
             LogsCommand::Tail { level, lines } => {
-                println!("logs tail: level={level} lines={lines}");
+                commands::logs::tail(&app, Some(&level), lines)
             }
-            LogsCommand::Show { date } => {
-                println!("logs show: date={date}");
-            }
-            LogsCommand::Path => {
-                println!("logs path");
-            }
+            LogsCommand::Show { date } => commands::logs::show(&app, &date),
+            LogsCommand::Path => commands::logs::path(&app),
         },
 
-        // Stub commands
-        Commands::Db(args) => eprintln!("db: not yet implemented (args: {:?})", args.args),
-        Commands::Ai(args) => eprintln!("ai: not yet implemented (args: {:?})", args.args),
-        Commands::Proc(args) => eprintln!("proc: not yet implemented (args: {:?})", args.args),
-        Commands::Term(args) => eprintln!("term: not yet implemented (args: {:?})", args.args),
-        Commands::Mcp(args) => eprintln!("mcp: not yet implemented (args: {:?})", args.args),
-        Commands::Sync(args) => eprintln!("sync: not yet implemented (args: {:?})", args.args),
-        Commands::Git(args) => eprintln!("git: not yet implemented (args: {:?})", args.args),
-        Commands::Run(args) => eprintln!("run: not yet implemented (args: {:?})", args.args),
-    }
+        // Stub commands — implemented in later milestones.
+        Commands::Db(_) => stubs::not_implemented("db"),
+        Commands::Ai(_) => stubs::not_implemented("ai"),
+        Commands::Proc(_) => stubs::not_implemented("proc"),
+        Commands::Term(_) => stubs::not_implemented("term"),
+        Commands::Mcp(_) => stubs::not_implemented("mcp"),
+        Commands::Sync(_) => stubs::not_implemented("sync"),
+        Commands::Git(_) => stubs::not_implemented("git"),
+        Commands::Run(_) => stubs::not_implemented("run"),
+    };
 
-    // Suppress unused-variable warning for `format` until dispatch is wired up.
-    let _ = format;
+    if let Err(err) = result {
+        eprintln!("Error: {err:#}");
+        std::process::exit(1);
+    }
 }
