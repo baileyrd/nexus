@@ -11,6 +11,7 @@
 mod error;
 mod forge;
 mod atomic;
+pub(crate) mod schema;
 
 pub use atomic::atomic_write;
 pub use error::StorageError;
