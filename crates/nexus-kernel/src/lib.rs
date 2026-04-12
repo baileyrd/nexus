@@ -6,3 +6,7 @@
 #![deny(missing_docs)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+
+mod log;
+
+pub use log::LogLevel;
