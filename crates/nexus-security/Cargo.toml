@@ -1,0 +1,19 @@
+[package]
+name = "nexus-security"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nexus security: capability risk metadata, credential vault, audit logging, path validation"
+
+[dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
+nexus-types = { path = "../nexus-types" }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+keyring = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }

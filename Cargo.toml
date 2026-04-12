@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/nexus-types",
     "crates/nexus-kernel",
+    "crates/nexus-security",
 ]
 
 [workspace.package]
@@ -30,3 +31,9 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2.0"
 async-trait = "0.1"
+
+# Keyring (OS credential storage)
+keyring = "3"
+
+# Test utilities
+tempfile = "3"
