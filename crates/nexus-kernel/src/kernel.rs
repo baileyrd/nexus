@@ -67,6 +67,31 @@ impl Kernel {
     pub fn config(&self) -> &KernelConfig {
         &self.config
     }
+
+    /// Start the kernel. Discovers plugins from `config.plugin_search_paths`,
+    /// loads them in topological order, and calls their lifecycle hooks.
+    ///
+    /// In PRD 01 scope, plugin discovery is a no-op (plugins are the
+    /// `nexus-plugins` crate's concern). The kernel starts with an empty
+    /// plugin set and is ready to accept event bus subscribers.
+    ///
+    /// # Errors
+    /// Returns `Error::Plugin` if any plugin fails to load or initialize.
+    /// In PRD 01 scope, this cannot happen (no plugins are loaded).
+    pub async fn start(&self) -> Result<()> {
+        tracing::info!(
+            forge_root = ?self.config.forge_root,
+            event_bus_capacity = self.config.event_bus_capacity,
+            "nexus kernel starting"
+        );
+
+        // Plugin discovery is a no-op in PRD 01 scope.
+        // nexus-plugins will fill this in when it lands.
+        tracing::debug!("plugin discovery not yet implemented; starting with empty plugin set");
+
+        tracing::info!("nexus kernel started");
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -89,5 +114,21 @@ mod tests {
         let bus2 = kernel.event_bus();
         // Both are Arc clones pointing at the same bus
         assert_eq!(Arc::as_ptr(&bus1), Arc::as_ptr(&bus2));
+    }
+
+    #[tokio::test]
+    async fn start_succeeds_with_empty_plugin_set() {
+        let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-start-test"));
+        let kernel = Kernel::new(config).unwrap();
+        kernel.start().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn start_is_idempotent_across_multiple_calls() {
+        let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-start-idem"));
+        let kernel = Kernel::new(config).unwrap();
+        kernel.start().await.unwrap();
+        // Calling start again should not fail in PRD 01 scope.
+        kernel.start().await.unwrap();
     }
 }
