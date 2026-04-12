@@ -7,8 +7,10 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+mod capability;
 mod event;
 mod log;
 
+pub use capability::{Capability, CapabilityParseError};
 pub use event::StopReason;
 pub use log::LogLevel;
