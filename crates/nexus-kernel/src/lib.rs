@@ -11,6 +11,6 @@ mod capability;
 mod event;
 mod log;
 
-pub use capability::{Capability, CapabilityParseError};
+pub use capability::{Capability, CapabilityParseError, CapabilitySet};
 pub use event::StopReason;
 pub use log::LogLevel;
