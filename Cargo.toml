@@ -60,5 +60,11 @@ sha2 = "0.10"
 # YAML frontmatter
 serde_yaml = "0.9"
 
+# System interfaces
+libc = "0.2"
+
+# File time manipulation
+filetime = "0.2"
+
 # Test utilities
 tempfile = "3"

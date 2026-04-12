@@ -1,4 +1,4 @@
-//! Nexus storage engine: forge layout, atomic writes, SQLite index,
+//! Nexus storage engine: forge layout, atomic writes, `SQLite` index,
 //! markdown parsing, file watching, and Tantivy full-text search.
 //!
 //! See `docs/superpowers/specs/2026-04-12-nexus-prd-03-storage-design.md`
@@ -9,5 +9,9 @@
 #![allow(clippy::module_name_repetitions)]
 
 mod error;
+mod forge;
+mod atomic;
 
+pub use atomic::atomic_write;
 pub use error::StorageError;
+pub use forge::{Forge, ForgeLock};

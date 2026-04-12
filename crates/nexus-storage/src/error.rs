@@ -57,7 +57,7 @@ pub enum StorageError {
     #[error("invalid configuration: {0}")]
     ConfigInvalid(String),
 
-    /// SQLite error.
+    /// `SQLite` error.
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
 
