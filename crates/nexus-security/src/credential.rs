@@ -92,11 +92,11 @@ impl CredentialVault {
         crate::audit::log_credential_access(name, "retrieve");
 
         let entry = keyring::Entry::new(SERVICE_NAME, name)
-            .map_err(|e| SecurityError::CredentialNotFound(e.to_string()))?;
+            .map_err(|e| platform_error(e.to_string()))?;
 
         entry.get_password().map_err(|e| match e {
             keyring::Error::NoEntry => SecurityError::CredentialNotFound(name.to_string()),
-            other => SecurityError::CredentialNotFound(other.to_string()),
+            other => platform_error(other.to_string()),
         })
     }
 
@@ -113,11 +113,11 @@ impl CredentialVault {
         crate::audit::log_credential_access(name, "delete");
 
         let entry = keyring::Entry::new(SERVICE_NAME, name)
-            .map_err(|e| SecurityError::CredentialNotFound(e.to_string()))?;
+            .map_err(|e| platform_error(e.to_string()))?;
 
         entry.delete_credential().map_err(|e| match e {
             keyring::Error::NoEntry => SecurityError::CredentialNotFound(name.to_string()),
-            other => SecurityError::CredentialNotFound(other.to_string()),
+            other => platform_error(other.to_string()),
         })
     }
 
