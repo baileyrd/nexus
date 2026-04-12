@@ -83,6 +83,9 @@ pub fn content_hash(content: &[u8]) -> String {
 
 /// Parse a markdown/MDX string into a [`ParsedFile`].
 ///
+/// Extracts YAML frontmatter, parses the body with comrak, and returns
+/// structured blocks, links, and tags.
+///
 /// # Errors
 ///
 /// Returns [`StorageError::ParseError`] if YAML frontmatter is malformed.
