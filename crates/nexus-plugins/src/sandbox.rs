@@ -152,12 +152,15 @@ impl WasmSandbox {
             plugin_id: plugin_id.clone(),
             reason: format!("args serialisation failed: {e}"),
         })?;
-        let args_len = args_bytes.len() as u32;
+        let args_len = u32::try_from(args_bytes.len()).map_err(|_| PluginError::ExecutionFailed {
+            plugin_id: plugin_id.clone(),
+            reason: "args JSON too large for WASM (> 4 GiB)".to_string(),
+        })?;
 
         // Allocate in WASM memory.
         let args_ptr = nexus_alloc
             .call(&mut self.store, args_len)
-            .map_err(|e| map_trap_error(e, &plugin_id))?;
+            .map_err(|e| map_trap_error(&e, &plugin_id))?;
 
         // Copy JSON bytes into WASM memory.
         memory
@@ -170,7 +173,7 @@ impl WasmSandbox {
         // Call dispatch.
         let ret = nexus_dispatch
             .call(&mut self.store, (handler_id, args_ptr, args_len))
-            .map_err(|e| map_trap_error(e, &plugin_id))?;
+            .map_err(|e| map_trap_error(&e, &plugin_id))?;
 
         // Unpack packed pointer+length.
         let result_ptr = (ret >> 32) as u32;
@@ -198,7 +201,7 @@ impl WasmSandbox {
     /// Propagates errors from [`dispatch`](WasmSandbox::dispatch), remapped to
     /// [`PluginError::LifecycleError`].
     pub fn call_on_init(&mut self) -> Result<(), PluginError> {
-        self.dispatch(0, &serde_json::Value::Object(Default::default()))
+        self.dispatch(0, &serde_json::json!({}))
             .map(|_| ())
             .map_err(|e| to_lifecycle_error(e, "on_init"))
     }
@@ -209,7 +212,7 @@ impl WasmSandbox {
     /// Propagates errors from [`dispatch`](WasmSandbox::dispatch), remapped to
     /// [`PluginError::LifecycleError`].
     pub fn call_on_start(&mut self) -> Result<(), PluginError> {
-        self.dispatch(1, &serde_json::Value::Object(Default::default()))
+        self.dispatch(1, &serde_json::json!({}))
             .map(|_| ())
             .map_err(|e| to_lifecycle_error(e, "on_start"))
     }
@@ -220,13 +223,14 @@ impl WasmSandbox {
     /// Propagates errors from [`dispatch`](WasmSandbox::dispatch), remapped to
     /// [`PluginError::LifecycleError`].
     pub fn call_on_stop(&mut self) -> Result<(), PluginError> {
-        self.dispatch(2, &serde_json::Value::Object(Default::default()))
+        self.dispatch(2, &serde_json::json!({}))
             .map(|_| ())
             .map_err(|e| to_lifecycle_error(e, "on_stop"))
     }
 
     /// Return an immutable reference to the [`PluginData`] stored inside the
     /// wasmtime [`Store`].
+    #[must_use]
     pub fn plugin_data(&self) -> &PluginData {
         self.store.data()
     }
@@ -238,7 +242,7 @@ impl WasmSandbox {
 ///
 /// Fuel-exhaustion traps become [`PluginError::ExecutionTimeout`]; everything
 /// else becomes [`PluginError::ExecutionFailed`].
-fn map_trap_error(err: wasmtime::Error, plugin_id: &str) -> PluginError {
+fn map_trap_error(err: &wasmtime::Error, plugin_id: &str) -> PluginError {
     if err
         .downcast_ref::<Trap>()
         .is_some_and(|t| *t == Trap::OutOfFuel)
@@ -362,7 +366,7 @@ mod tests {
         let mut sandbox =
             WasmSandbox::new(&bytes, &test_config(), test_plugin_data()).unwrap();
         let result = sandbox
-            .dispatch(999, &serde_json::Value::Object(Default::default()))
+            .dispatch(999, &serde_json::json!({}))
             .unwrap();
         assert!(
             result.get("error").is_some(),
