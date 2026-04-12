@@ -7,6 +7,8 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+mod event;
 mod log;
 
+pub use event::StopReason;
 pub use log::LogLevel;
