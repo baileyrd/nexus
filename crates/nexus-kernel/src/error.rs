@@ -41,36 +41,194 @@ pub enum Error {
     Io(#[from] std::io::Error),
 }
 
-/// Placeholder for PluginError (filled in in Task 15).
+/// Errors related to plugin lifecycle, loading, and dependency resolution.
 #[derive(Debug, thiserror::Error)]
 pub enum PluginError {
-    /// Placeholder variant, replaced in Task 15.
-    #[error("plugin error placeholder")]
-    Placeholder,
+    /// Plugin failed to load from disk.
+    #[error("plugin '{plugin_id}' failed to load: {reason}")]
+    LoadFailed {
+        /// Plugin id.
+        plugin_id: String,
+        /// Human-readable failure reason.
+        reason: String,
+    },
+
+    /// Plugin's `on_init` hook failed.
+    #[error("plugin '{plugin_id}' failed to initialize: {reason}")]
+    InitFailed {
+        /// Plugin id.
+        plugin_id: String,
+        /// Human-readable reason.
+        reason: String,
+    },
+
+    /// Plugin's `on_start` hook failed.
+    #[error("plugin '{plugin_id}' failed to start: {reason}")]
+    StartFailed {
+        /// Plugin id.
+        plugin_id: String,
+        /// Human-readable reason.
+        reason: String,
+    },
+
+    /// Plugin's `on_stop` hook failed.
+    #[error("plugin '{plugin_id}' failed to stop: {reason}")]
+    StopFailed {
+        /// Plugin id.
+        plugin_id: String,
+        /// Human-readable reason.
+        reason: String,
+    },
+
+    /// Plugin crashed during execution.
+    #[error("plugin '{plugin_id}' crashed: {reason}")]
+    Crashed {
+        /// Plugin id.
+        plugin_id: String,
+        /// Human-readable reason.
+        reason: String,
+    },
+
+    /// Plugin panicked during a lifecycle phase.
+    #[error("plugin '{plugin_id}' panicked during {phase}")]
+    Panicked {
+        /// Plugin id.
+        plugin_id: String,
+        /// Which phase (e.g., "init", "start", "stop").
+        phase: &'static str,
+    },
+
+    /// Dependency cycle detected among plugins.
+    #[error("dependency cycle among plugins: {plugins:?}")]
+    DependencyCycle {
+        /// Plugin ids involved in the cycle.
+        plugins: Vec<String>,
+    },
+
+    /// A plugin's required dependency is not loaded.
+    #[error("plugin '{plugin_id}' missing required dependency '{missing}'")]
+    MissingDependency {
+        /// Plugin that has the missing dependency.
+        plugin_id: String,
+        /// The dependency that wasn't found.
+        missing: String,
+    },
+
+    /// A plugin's required dependency is the wrong version.
+    #[error("plugin '{plugin_id}' dependency '{missing}' version mismatch: required {required}, found {found}")]
+    DependencyVersionMismatch {
+        /// Plugin with the version mismatch.
+        plugin_id: String,
+        /// Dependency name.
+        missing: String,
+        /// Version constraint from the manifest.
+        required: String,
+        /// Actual version found on disk.
+        found: String,
+    },
+
+    /// Two plugins declared the same id.
+    #[error("duplicate plugin id '{plugin_id}'")]
+    DuplicatePluginId {
+        /// The duplicated id.
+        plugin_id: String,
+    },
+
+    /// Plugin lookup by id failed.
+    #[error("plugin '{plugin_id}' not found")]
+    NotFound {
+        /// The id that wasn't found.
+        plugin_id: String,
+    },
 }
 
-/// Placeholder for CapabilityError (filled in in Task 15).
+/// Errors related to the capability system.
 #[derive(Debug, thiserror::Error)]
 pub enum CapabilityError {
-    /// Placeholder variant, replaced in Task 15.
-    #[error("capability error placeholder")]
-    Placeholder,
+    /// A plugin requested a capability it was not granted.
+    #[error("capability '{cap:?}' denied to plugin '{plugin_id}'")]
+    Denied {
+        /// Plugin id.
+        plugin_id: String,
+        /// The denied capability.
+        cap: crate::capability::Capability,
+    },
+
+    /// A manifest contained an unrecognized capability string.
+    #[error("unknown capability string '{0}'")]
+    UnknownString(String),
 }
 
-/// Placeholder for IpcError (filled in in Task 15).
+/// Errors from IPC calls between plugins.
 #[derive(Debug, thiserror::Error)]
 pub enum IpcError {
-    /// Placeholder variant, replaced in Task 15.
-    #[error("IPC error placeholder")]
-    Placeholder,
+    /// The target plugin is not loaded.
+    #[error("target plugin '{plugin_id}' not found")]
+    PluginNotFound {
+        /// The target plugin id.
+        plugin_id: String,
+    },
+
+    /// The target plugin doesn't register that command.
+    #[error("command '{command}' not found on plugin '{plugin_id}'")]
+    CommandNotFound {
+        /// The target plugin id.
+        plugin_id: String,
+        /// The requested command id.
+        command: String,
+    },
+
+    /// The IPC call timed out.
+    #[error("IPC call to '{plugin_id}'.'{command}' timed out after {timeout_ms}ms")]
+    Timeout {
+        /// The target plugin id.
+        plugin_id: String,
+        /// The command id.
+        command: String,
+        /// Timeout that was exceeded.
+        timeout_ms: u64,
+    },
+
+    /// The target plugin crashed during the IPC call.
+    #[error("plugin '{plugin_id}' crashed during IPC call to '{command}'")]
+    PluginCrashedDuringCall {
+        /// The target plugin id.
+        plugin_id: String,
+        /// The command id.
+        command: String,
+    },
+
+    /// Failed to serialize the argument payload.
+    #[error("IPC argument serialization failed: {reason}")]
+    SerializationFailed {
+        /// Reason from the serializer.
+        reason: String,
+    },
+
+    /// Failed to deserialize the return value.
+    #[error("IPC return value deserialization failed: {reason}")]
+    DeserializationFailed {
+        /// Reason from the deserializer.
+        reason: String,
+    },
 }
 
-/// Placeholder for KvError (filled in in Task 15).
+/// Errors from the KV store.
 #[derive(Debug, thiserror::Error)]
 pub enum KvError {
-    /// Placeholder variant, replaced in Task 15.
-    #[error("KV error placeholder")]
-    Placeholder,
+    /// Key not found in the store.
+    #[error("key '{key}' not found")]
+    NotFound {
+        /// The missing key.
+        key: String,
+    },
+
+    /// Generic KV store failure (wraps the storage backend error).
+    #[error("KV store backend error: {reason}")]
+    BackendError {
+        /// Human-readable reason from the backend.
+        reason: String,
+    },
 }
 
 /// Event bus errors.
@@ -175,5 +333,57 @@ mod tests {
         let msg = format!("{err}");
         assert!(msg.contains("com.foo"));
         assert!(msg.contains("com.bar.event"));
+    }
+
+    #[test]
+    fn plugin_error_crashed_displays_id_and_reason() {
+        let err = PluginError::Crashed {
+            plugin_id: "com.test".to_string(),
+            reason: "segfault".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("com.test"));
+        assert!(msg.contains("segfault"));
+    }
+
+    #[test]
+    fn capability_error_denied_debug_prints_variant() {
+        let err = CapabilityError::Denied {
+            plugin_id: "com.test".to_string(),
+            cap: crate::capability::Capability::FsRead,
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("FsRead"));
+        assert!(msg.contains("com.test"));
+    }
+
+    #[test]
+    fn ipc_error_timeout_includes_duration() {
+        let err = IpcError::Timeout {
+            plugin_id: "com.test".to_string(),
+            command: "ping".to_string(),
+            timeout_ms: 5000,
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("5000"));
+    }
+
+    #[test]
+    fn kv_error_not_found_shows_key() {
+        let err = KvError::NotFound {
+            key: "state".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("state"));
+    }
+
+    #[test]
+    fn plugin_error_dep_cycle_lists_plugins() {
+        let err = PluginError::DependencyCycle {
+            plugins: vec!["a".to_string(), "b".to_string()],
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("a"));
+        assert!(msg.contains("b"));
     }
 }
