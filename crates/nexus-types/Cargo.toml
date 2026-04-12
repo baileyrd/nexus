@@ -1,0 +1,10 @@
+[package]
+name = "nexus-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Shared types used by the Nexus kernel and plugins"
+
+[dependencies]
+serde = { workspace = true }
