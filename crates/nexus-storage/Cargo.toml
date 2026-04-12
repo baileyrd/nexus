@@ -1,0 +1,29 @@
+[package]
+name = "nexus-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nexus storage engine: forge layout, atomic writes, SQLite index, markdown parsing, file watching, Tantivy search"
+
+[dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
+nexus-types = { path = "../nexus-types" }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+rusqlite = { workspace = true }
+r2d2 = { workspace = true }
+r2d2_sqlite = { workspace = true }
+tantivy = { workspace = true }
+comrak = { workspace = true }
+notify = { workspace = true }
+notify-debouncer-mini = { workspace = true }
+rayon = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

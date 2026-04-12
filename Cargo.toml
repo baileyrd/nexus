@@ -4,6 +4,7 @@ members = [
     "crates/nexus-types",
     "crates/nexus-kernel",
     "crates/nexus-security",
+    "crates/nexus-storage",
 ]
 
 [workspace.package]
@@ -34,6 +35,30 @@ async-trait = "0.1"
 
 # Keyring (OS credential storage)
 keyring = "3"
+
+# SQLite
+rusqlite = { version = "0.31", features = ["bundled", "backup"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+
+# Full-text search
+tantivy = "0.22"
+
+# Markdown parsing
+comrak = "0.28"
+
+# File watching
+notify = "7"
+notify-debouncer-mini = "0.5"
+
+# Parallelism
+rayon = "1.10"
+
+# Hashing
+sha2 = "0.10"
+
+# YAML frontmatter
+serde_yaml = "0.9"
 
 # Test utilities
 tempfile = "3"
