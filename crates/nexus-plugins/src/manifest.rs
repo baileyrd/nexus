@@ -3,9 +3,11 @@
 //! The entry points are [`parse_manifest`], [`load_manifest`], and
 //! [`validate`]. All three are re-exported from the crate root.
 
+use std::collections::HashSet;
 use std::path::Path;
 
-use nexus_kernel::TrustLevel;
+use nexus_kernel::{Capability, TrustLevel};
+use regex_lite::Regex;
 use serde::Deserialize;
 
 use crate::PluginError;
@@ -486,7 +488,302 @@ api_version = "1"
 /// # Errors
 /// Returns [`PluginError::ManifestValidation`] describing the first rule that
 /// is violated.
-pub fn validate(_manifest: &PluginManifest, _plugin_dir: &Path) -> Result<(), PluginError> {
-    // Implemented in a follow-up commit.
+pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), PluginError> {
+    let id = &manifest.id;
+
+    // Rule 1: ID format.
+    let id_re =
+        Regex::new(r"^[a-z0-9]+([-._][a-z0-9]+)*\.[a-z0-9]+([-._][a-z0-9]+)*$").unwrap();
+    if !id_re.is_match(id) {
+        return Err(PluginError::ManifestValidation {
+            plugin_id: id.clone(),
+            reason: format!(
+                "plugin id '{id}' does not match the required pattern \
+                 ^[a-z0-9]+([-._][a-z0-9]+)*\\.[a-z0-9]+([-._][a-z0-9]+)*$"
+            ),
+        });
+    }
+
+    // Rule 2: semver.
+    semver::Version::parse(&manifest.version).map_err(|e| PluginError::ManifestValidation {
+        plugin_id: id.clone(),
+        reason: format!("version '{}' is not valid semver: {e}", manifest.version),
+    })?;
+
+    // Rule 3: all capability strings must be known.
+    for cap_str in manifest
+        .capabilities
+        .required
+        .iter()
+        .chain(manifest.capabilities.optional.iter())
+    {
+        Capability::from_str(cap_str).map_err(|_| PluginError::ManifestValidation {
+            plugin_id: id.clone(),
+            reason: format!("unknown capability '{cap_str}'"),
+        })?;
+    }
+
+    // Rule 4: handler_id values must be unique across all registrations.
+    let mut seen_handlers: HashSet<u32> = HashSet::new();
+    for h in manifest
+        .registrations
+        .cli_subcommands
+        .iter()
+        .map(|r| r.handler_id)
+        .chain(
+            manifest
+                .registrations
+                .ipc_commands
+                .iter()
+                .map(|r| r.handler_id),
+        )
+        .chain(
+            manifest
+                .registrations
+                .event_subscribers
+                .iter()
+                .map(|r| r.handler_id),
+        )
+    {
+        if !seen_handlers.insert(h) {
+            return Err(PluginError::ManifestValidation {
+                plugin_id: id.clone(),
+                reason: format!("duplicate handler_id {h}"),
+            });
+        }
+    }
+
+    // Rule 5: memory_mb in [1, 256].
+    if manifest.wasm.memory_mb < 1 || manifest.wasm.memory_mb > 256 {
+        return Err(PluginError::ManifestValidation {
+            plugin_id: id.clone(),
+            reason: format!(
+                "wasm.memory_mb {} is out of range [1, 256]",
+                manifest.wasm.memory_mb
+            ),
+        });
+    }
+
+    // Rule 6: fuel > 0 unless trust_level is Core.
+    if manifest.wasm.fuel == 0 && manifest.trust_level != TrustLevel::Core {
+        return Err(PluginError::ManifestValidation {
+            plugin_id: id.clone(),
+            reason: "wasm.fuel must be > 0 for community plugins".to_string(),
+        });
+    }
+
+    // Rule 7: wasm module file must exist.
+    let wasm_path = plugin_dir.join(&manifest.wasm.module);
+    if !wasm_path.exists() {
+        return Err(PluginError::ManifestValidation {
+            plugin_id: id.clone(),
+            reason: format!(
+                "wasm module '{}' not found in plugin directory",
+                manifest.wasm.module
+            ),
+        });
+    }
+
+    // Rule 8: settings schema file must exist if specified.
+    if let Some(settings) = &manifest.settings {
+        let schema_path = plugin_dir.join(&settings.schema);
+        if !schema_path.exists() {
+            return Err(PluginError::ManifestValidation {
+                plugin_id: id.clone(),
+                reason: format!(
+                    "settings schema '{}' not found in plugin directory",
+                    settings.schema
+                ),
+            });
+        }
+    }
+
     Ok(())
+}
+
+// ─── Validation tests ─────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    const MINIMAL: &str = r#"
+[plugin]
+id = "com.example.test"
+name = "Test"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+"#;
+
+    const FULL: &str = r#"
+[plugin]
+id = "com.example.test"
+name = "Test"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[capabilities]
+required = ["fs.read", "kv.read"]
+optional = ["net.http"]
+
+[wasm]
+module = "test.wasm"
+memory_mb = 32
+fuel = 5000000
+
+[settings]
+schema = "settings.json"
+
+[[registrations.cli_subcommand]]
+id = "test.run"
+handler_id = 1
+description = "Run test"
+
+[[registrations.ipc_command]]
+id = "test.query"
+handler_id = 100
+
+[[registrations.event_subscriber]]
+id = "test.on-file"
+filter = "FileCreated"
+handler_id = 200
+
+[lifecycle]
+on_init = true
+on_start = true
+on_stop = true
+"#;
+
+    fn make_test_plugin_dir(wasm_name: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(wasm_name), b"fake-wasm").unwrap();
+        dir
+    }
+
+    fn make_test_plugin_dir_with_schema(wasm_name: &str) -> tempfile::TempDir {
+        let dir = make_test_plugin_dir(wasm_name);
+        std::fs::write(dir.path().join("settings.json"), b"{}").unwrap();
+        dir
+    }
+
+    fn valid_manifest() -> PluginManifest {
+        parse_manifest(MINIMAL, "manifest.toml").unwrap()
+    }
+
+    #[test]
+    fn validate_accepts_valid_manifest() {
+        let dir = make_test_plugin_dir("test.wasm");
+        validate(&valid_manifest(), dir.path()).unwrap();
+    }
+
+    #[test]
+    fn validate_rejects_invalid_id() {
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.id = "COM.Example.Test".to_string();
+        let err = validate(&m, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("pattern")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_invalid_semver() {
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.version = "not-a-version".to_string();
+        let err = validate(&m, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("semver")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_unknown_capability() {
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.capabilities.required.push("fs.teleport".to_string());
+        let err = validate(&m, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("unknown capability")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_handler_id() {
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.registrations.cli_subcommands.push(CliSubcommandReg {
+            id: "cmd.a".to_string(),
+            handler_id: 42,
+            description: "A".to_string(),
+        });
+        m.registrations.ipc_commands.push(IpcCommandReg {
+            id: "ipc.a".to_string(),
+            handler_id: 42,
+        });
+        let err = validate(&m, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("duplicate handler_id")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_memory_out_of_range() {
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.wasm.memory_mb = 512;
+        let err = validate(&m, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("out of range")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_zero_fuel_for_community() {
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.wasm.fuel = 0;
+        let err = validate(&m, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("fuel")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_allows_zero_fuel_for_core() {
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.wasm.fuel = 0;
+        m.trust_level = TrustLevel::Core;
+        validate(&m, dir.path()).unwrap();
+    }
+
+    #[test]
+    fn validate_rejects_missing_wasm_file() {
+        let dir = make_test_plugin_dir("other.wasm");
+        let err = validate(&valid_manifest(), dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("not found")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_manifest_with_existing_settings_schema() {
+        let dir = make_test_plugin_dir_with_schema("test.wasm");
+        let m = parse_manifest(FULL, "manifest.toml").unwrap();
+        validate(&m, dir.path()).unwrap();
+    }
 }
