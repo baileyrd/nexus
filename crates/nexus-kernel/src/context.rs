@@ -87,7 +87,7 @@ pub trait PluginContext: Send + Sync {
     /// plugin's id (reverse-DNS namespace). Kernel populates metadata.
     ///
     /// # Errors
-    /// - `BusError::TypeIdNamespaceMismatch` if type_id doesn't namespace-match.
+    /// - `BusError::TypeIdNamespaceMismatch` if `type_id` doesn't namespace-match.
     /// - `BusError::Closed` if the bus is shut down.
     fn publish(&self, type_id: &str, payload: serde_json::Value) -> Result<()>;
 

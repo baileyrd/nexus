@@ -29,9 +29,9 @@ pub enum Capability {
     KvWrite,
     /// Call IPC commands on other plugins (HIGH risk).
     IpcCall,
-    /// Query SQLite tables registered by the plugin.
+    /// Query `SQLite` tables registered by the plugin.
     DbQuery,
-    /// Write to SQLite tables registered by the plugin.
+    /// Write to `SQLite` tables registered by the plugin.
     DbWrite,
 }
 
@@ -68,6 +68,7 @@ impl Capability {
     ///
     /// # Errors
     /// Returns an error if `s` is not a recognized capability name.
+    #[allow(clippy::should_implement_trait)] // intentional inherent method — parse errors don't need the FromStr trait plumbing
     pub fn from_str(s: &str) -> Result<Self, CapabilityParseError> {
         match s {
             "fs.read"            => Ok(Capability::FsRead),
@@ -124,6 +125,7 @@ impl CapabilitySet {
 
     /// Build a set from an iterator of capabilities.
     #[must_use]
+    #[allow(clippy::should_implement_trait)] // intentional inherent method — sidesteps FromIterator for ergonomic naming
     pub fn from_iter(iter: impl IntoIterator<Item = Capability>) -> Self {
         Self {
             set: iter.into_iter().collect(),

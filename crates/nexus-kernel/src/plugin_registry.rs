@@ -59,11 +59,13 @@ impl PluginRegistry {
 
     /// Insert or update a plugin info entry. Not part of the public contract —
     /// `nexus-plugins` will call this during load.
+    #[allow(dead_code)] // wired up by nexus-plugins (PRD 04)
     pub(crate) fn upsert(&mut self, info: PluginInfo) {
         self.plugins.insert(info.id.clone(), info);
     }
 
     /// Remove a plugin from the registry. Not part of the public contract.
+    #[allow(dead_code)] // wired up by nexus-plugins (PRD 04)
     pub(crate) fn remove(&mut self, plugin_id: &str) -> Option<PluginInfo> {
         self.plugins.remove(plugin_id)
     }

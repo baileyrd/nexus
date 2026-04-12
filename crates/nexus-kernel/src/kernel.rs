@@ -78,6 +78,7 @@ impl Kernel {
     /// # Errors
     /// Returns `Error::Plugin` if any plugin fails to load or initialize.
     /// In PRD 01 scope, this cannot happen (no plugins are loaded).
+    #[allow(clippy::unused_async)] // will await plugin discovery when nexus-plugins lands
     pub async fn start(&self) -> Result<()> {
         tracing::info!(
             forge_root = ?self.config.forge_root,
@@ -103,6 +104,7 @@ impl Kernel {
     /// # Errors
     /// Returns `Error::Plugin` if any plugin fails to stop. In PRD 01
     /// scope, this cannot happen (no plugins are loaded).
+    #[allow(clippy::unused_async)] // will await plugin stop + bus drain when nexus-plugins lands
     pub async fn shutdown(&self) -> Result<()> {
         // Flip the shutdown flag. Idempotent: subsequent calls see the flag
         // already set and short-circuit.

@@ -244,7 +244,7 @@ pub enum BusError {
     TypeIdNamespaceMismatch {
         /// Plugin that attempted to publish.
         plugin_id: String,
-        /// The rejected type_id.
+        /// The rejected `type_id`.
         type_id: String,
     },
 
@@ -383,7 +383,7 @@ mod tests {
             plugins: vec!["a".to_string(), "b".to_string()],
         };
         let msg = format!("{err}");
-        assert!(msg.contains("a"));
-        assert!(msg.contains("b"));
+        assert!(msg.contains('a'));
+        assert!(msg.contains('b'));
     }
 }

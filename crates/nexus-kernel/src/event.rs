@@ -1,4 +1,4 @@
-//! Event types: NexusEvent, EventMetadata, EventFilter, StopReason.
+//! Event types: `NexusEvent`, `EventMetadata`, `EventFilter`, `StopReason`.
 
 use std::path::PathBuf;
 

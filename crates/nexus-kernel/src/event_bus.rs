@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use crate::error::{BusError, RecvError, Result};
+use crate::error::{RecvError, Result};
 use crate::event::{EventFilter, EventMetadata, NexusEvent, PublishedEvent};
 
 /// The kernel's event bus. Fans out `PublishedEvent`s to all subscribers
@@ -30,6 +30,7 @@ impl EventBus {
     ///
     /// # Errors
     /// Returns `BusError::Closed` if the bus has been shut down.
+    #[allow(dead_code, clippy::unnecessary_wraps)] // wired up by nexus-plugins (PRD 04)
     pub(crate) fn publish_kernel(&self, event: NexusEvent) -> Result<()> {
         let metadata = EventMetadata {
             event_id: uuid::Uuid::new_v4(),
@@ -154,6 +155,7 @@ fn variant_name(event: &NexusEvent) -> &'static str {
 }
 
 /// Get the current `tracing` span id, if any.
+#[allow(dead_code)] // used by publish_kernel (see above)
 fn current_span_id() -> Option<String> {
     // tracing::Span::current() always returns a span, but it's the None span
     // when no actual span is active. We use its metadata or None.
