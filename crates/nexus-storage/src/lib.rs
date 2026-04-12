@@ -27,3 +27,658 @@ pub use index::{insert_file, query_files, query_blocks, query_links, query_backl
 pub use search::{SearchIndex, SearchResult};
 pub use reconcile::{ReconcileDelta, reconcile};
 pub use watcher::{relative_path, should_ignore, StorageEvent, Watcher};
+
+use std::path::Path;
+use std::sync::Mutex;
+
+use r2d2_sqlite::SqliteConnectionManager;
+
+// ── StorageConfig ─────────────────────────────────────────────────────────────
+
+/// Configuration for [`StorageEngine`].
+#[derive(Debug, Clone)]
+pub struct StorageConfig {
+    /// Number of read connections in the r2d2 pool. Default: 4.
+    pub pool_size: u32,
+    /// Debounce delay for the file watcher in milliseconds. Default: 300.
+    pub debounce_ms: u64,
+    /// Number of Rayon threads (0 = auto-detect). Default: 0.
+    pub rayon_threads: usize,
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            pool_size: 4,
+            debounce_ms: 300,
+            rayon_threads: 0,
+        }
+    }
+}
+
+// ── StorageEngine ─────────────────────────────────────────────────────────────
+
+/// Facade that composes all storage subsystems into a single public API.
+///
+/// Obtain an instance via [`StorageEngine::init`] (new forge) or
+/// [`StorageEngine::open`] (existing forge).
+pub struct StorageEngine {
+    forge: Forge,
+    _lock: ForgeLock,
+    pool: r2d2::Pool<SqliteConnectionManager>,
+    write_conn: Mutex<rusqlite::Connection>,
+    search_index: SearchIndex,
+    _watcher: Option<watcher::Watcher>,
+}
+
+impl std::fmt::Debug for StorageEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StorageEngine")
+            .field("root", &self.forge.root())
+            .finish_non_exhaustive()
+    }
+}
+
+impl StorageEngine {
+    // ── Constructors ──────────────────────────────────────────────────────────
+
+    /// Create and initialise a brand-new forge at `root`.
+    ///
+    /// Calls [`Forge::init`] to create the directory structure, then opens
+    /// all subsystems with [`StorageConfig::default`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on any I/O, lock, or database failure.
+    pub fn init(root: &Path) -> Result<Self, StorageError> {
+        let forge = Forge::new(root);
+        forge.init()?;
+        open_internal(forge, &StorageConfig::default(), true)
+    }
+
+    /// Open an existing forge at `root` with custom configuration.
+    ///
+    /// Verifies that `.forge/` exists (returns [`StorageError::FileNotFound`]
+    /// otherwise) then opens all subsystems.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::FileNotFound`] when the forge directory does not
+    /// exist, or [`StorageError`] on any lock, I/O, or database failure.
+    pub fn open(root: &Path, config: &StorageConfig) -> Result<Self, StorageError> {
+        let forge = Forge::new(root);
+        if !forge.forge_dir().exists() {
+            return Err(StorageError::FileNotFound(
+                forge.forge_dir().display().to_string(),
+            ));
+        }
+        open_internal(forge, config, false)
+    }
+
+    // ── File operations ───────────────────────────────────────────────────────
+
+    /// Write `content` to `path` (vault-relative) atomically and update the index.
+    ///
+    /// `path` must be relative to the forge root (e.g. `"notes/hello.md"`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O or database failure.
+    pub fn write_file(&self, path: &str, content: &[u8]) -> Result<FileMetadata, StorageError> {
+        // 1. Atomic write to disk.
+        let abs_target = self.forge.root().join(path);
+        atomic_write(&abs_target, content, &self.forge.temp_dir())?;
+
+        // 2. Parse content as markdown.
+        let text = std::str::from_utf8(content).map_err(|e| StorageError::CorruptFile {
+            path: path.to_string(),
+            reason: e.to_string(),
+        })?;
+        let parsed = parse_markdown(text)?;
+
+        // 3. Lock write_conn.
+        let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+
+        // 4. Delete existing index entry if the path is already indexed.
+        if let Some(existing) = file_by_path(&conn, path)? {
+            // Clean up FTS rows first (they don't cascade).
+            conn.execute(
+                "DELETE FROM fts_blocks WHERE file_path = ?1",
+                rusqlite::params![path],
+            )?;
+            delete_file(&conn, existing.id)?;
+        }
+
+        // 5. Insert the new entry.
+        let size_bytes = content.len() as u64;
+        let file_type = infer_file_type(path);
+        insert_file(&conn, path, &file_type, size_bytes, &parsed)?;
+
+        // 6. Return FileMetadata.
+        let meta = FileMetadata {
+            path: path.to_string(),
+            size_bytes,
+            modified_at: unix_now(),
+            content_hash: parsed.content_hash,
+        };
+        Ok(meta)
+    }
+
+    /// Read the raw bytes of the file at `path` from disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::FileNotFound`] when the file does not exist,
+    /// or [`StorageError::Io`] on other I/O failures.
+    pub fn read_file(&self, path: &str) -> Result<Vec<u8>, StorageError> {
+        let abs = self.forge.root().join(path);
+        std::fs::read(&abs).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                StorageError::FileNotFound(path.to_string())
+            } else {
+                StorageError::Io(e)
+            }
+        })
+    }
+
+    /// Delete a file from disk and remove its index entry.
+    ///
+    /// Silently succeeds when the file does not exist on disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O or database failure.
+    pub fn delete_file(&self, path: &str) -> Result<(), StorageError> {
+        // Remove from disk if it exists.
+        let abs = self.forge.root().join(path);
+        if abs.exists() {
+            std::fs::remove_file(&abs)?;
+        }
+
+        // Remove from index.
+        let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        if let Some(record) = file_by_path(&conn, path)? {
+            conn.execute(
+                "DELETE FROM fts_blocks WHERE file_path = ?1",
+                rusqlite::params![path],
+            )?;
+            delete_file(&conn, record.id)?;
+        }
+
+        Ok(())
+    }
+
+    /// List all indexed files whose path starts with `prefix`.
+    ///
+    /// Use an empty string to list everything.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
+    pub fn list_files(&self, prefix: &str) -> Result<Vec<FileMetadata>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        let filter = FileFilter {
+            prefix: if prefix.is_empty() {
+                None
+            } else {
+                Some(prefix.to_string())
+            },
+            ..Default::default()
+        };
+        let records = query_files(&conn, &filter)?;
+        Ok(records
+            .into_iter()
+            .map(|r| FileMetadata {
+                path: r.path,
+                size_bytes: r.size_bytes,
+                modified_at: r.modified_at,
+                content_hash: r.content_hash,
+            })
+            .collect())
+    }
+
+    /// Return `true` if a file with the given `path` is present in the index.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
+    pub fn file_exists(&self, path: &str) -> Result<bool, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        Ok(file_by_path(&conn, path)?.is_some())
+    }
+
+    // ── Index queries ─────────────────────────────────────────────────────────
+
+    /// Query the file index with optional prefix and type filters.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
+    pub fn query_files(&self, filter: &FileFilter) -> Result<Vec<FileRecord>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        query_files(&conn, filter)
+    }
+
+    /// Return all blocks belonging to the file identified by `file_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
+    pub fn query_blocks(&self, file_id: u64) -> Result<Vec<BlockRecord>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        query_blocks(&conn, file_id)
+    }
+
+    /// Return all outgoing links from the file identified by `file_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
+    pub fn query_links(&self, file_id: u64) -> Result<Vec<LinkRecord>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        query_links(&conn, file_id)
+    }
+
+    /// Return all backlinks pointing to the file identified by `file_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
+    pub fn query_backlinks(&self, file_id: u64) -> Result<Vec<LinkRecord>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        query_backlinks(&conn, file_id)
+    }
+
+    /// Return all tags with `name`, joined to their originating file path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
+    pub fn query_tags(&self, name: &str) -> Result<Vec<TagResult>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        query_tags(&conn, name)
+    }
+
+    /// Rebuild the `SQLite` index from scratch by reconciling the filesystem.
+    ///
+    /// Clears all index tables, then runs a full reconciliation pass. Returns
+    /// summary statistics.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O or database failure.
+    pub fn rebuild_index(&self) -> Result<RebuildStats, StorageError> {
+        let start = std::time::Instant::now();
+        let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+
+        // Clear all tables (FTS first, then files which cascades the rest).
+        conn.execute_batch(
+            "DELETE FROM fts_blocks;
+             DELETE FROM files;",
+        )?;
+
+        // Run reconcile to re-index from disk.
+        reconcile(&conn, self.forge.root())?;
+
+        // Count what ended up in the DB.
+        let files_processed: usize = conn
+            .query_row("SELECT COUNT(*) FROM files WHERE is_deleted = 0;", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap_or(0) as usize;
+
+        let blocks_indexed: usize = conn
+            .query_row("SELECT COUNT(*) FROM blocks;", [], |r| r.get::<_, i64>(0))
+            .unwrap_or(0) as usize;
+
+        let links_found: usize = conn
+            .query_row("SELECT COUNT(*) FROM links;", [], |r| r.get::<_, i64>(0))
+            .unwrap_or(0) as usize;
+
+        let tags_found: usize = conn
+            .query_row("SELECT COUNT(*) FROM tags;", [], |r| r.get::<_, i64>(0))
+            .unwrap_or(0) as usize;
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        Ok(RebuildStats {
+            files_processed,
+            blocks_indexed,
+            links_found,
+            tags_found,
+            duration_ms,
+        })
+    }
+
+    // ── Search ────────────────────────────────────────────────────────────────
+
+    /// Search the Tantivy index for `query`, returning up to `limit` results.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Search`] on any Tantivy failure.
+    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, StorageError> {
+        self.search_index.search(query, limit)
+    }
+
+    /// Rebuild the Tantivy search index from the current `SQLite` state.
+    ///
+    /// Clears all Tantivy documents, then re-indexes every block from the
+    /// `blocks` table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on database or Tantivy failure.
+    pub fn rebuild_search_index(&self) -> Result<(), StorageError> {
+        self.search_index.clear()?;
+
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+
+        // Iterate all blocks joined with files.
+        let mut stmt = conn.prepare(
+            "SELECT b.id, b.block_type, b.content, f.path
+             FROM blocks b JOIN files f ON f.id = b.file_id
+             WHERE f.is_deleted = 0;",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+
+        for row in rows {
+            let (block_id, block_type, content, file_path) = row?;
+            self.search_index.add_block(
+                &file_path,
+                u64::try_from(block_id).unwrap_or(0),
+                &block_type,
+                &content,
+            )?;
+        }
+
+        self.search_index.commit()?;
+        Ok(())
+    }
+
+    // ── Watcher ───────────────────────────────────────────────────────────────
+
+    /// Return the watcher event receiver, if the watcher started successfully.
+    #[must_use]
+    pub fn watch_changes(&self) -> Option<&std::sync::mpsc::Receiver<StorageEvent>> {
+        self._watcher.as_ref().map(|w| w.events())
+    }
+
+    // ── Accessor ──────────────────────────────────────────────────────────────
+
+    /// Return a reference to the underlying [`Forge`].
+    #[must_use]
+    pub fn forge(&self) -> &Forge {
+        &self.forge
+    }
+}
+
+// ── Internal helpers ──────────────────────────────────────────────────────────
+
+/// Shared implementation for [`StorageEngine::init`] and [`StorageEngine::open`].
+fn open_internal(
+    forge: Forge,
+    config: &StorageConfig,
+    is_new: bool,
+) -> Result<StorageEngine, StorageError> {
+    // 1. Acquire exclusive forge lock.
+    let lock = forge.acquire_lock()?;
+
+    // 2. Clean stale temp files.
+    forge.clean_temp()?;
+
+    // 3. Create r2d2 connection pool.
+    let db_path = forge.index_db_path();
+    let manager = SqliteConnectionManager::file(&db_path);
+    let pool = r2d2::Pool::builder()
+        .max_size(config.pool_size)
+        .build(manager)
+        .map_err(|e| StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+
+    // 4. Configure pragmas and run migrations on a pool connection.
+    {
+        let conn = pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        schema::configure_pragmas(&conn)?;
+        schema::migrate(&conn)?;
+    }
+
+    // 5. Open a separate write connection with pragmas.
+    let write_conn = rusqlite::Connection::open(&db_path)?;
+    schema::configure_pragmas(&write_conn)?;
+
+    // 6. Open SearchIndex.
+    let search_index = SearchIndex::open(&forge.search_dir())?;
+
+    // 7. Start file watcher (best-effort).
+    let _watcher = Watcher::start(forge.root(), config.debounce_ms).ok();
+
+    // 8. If not new: run reconcile against write_conn.
+    if !is_new {
+        reconcile(&write_conn, forge.root())?;
+    }
+
+    Ok(StorageEngine {
+        forge,
+        _lock: lock,
+        pool,
+        write_conn: Mutex::new(write_conn),
+        search_index,
+        _watcher,
+    })
+}
+
+/// Infer a file-type string from a vault-relative path.
+fn infer_file_type(path: &str) -> String {
+    if path.starts_with("attachments/") {
+        "attachment".to_string()
+    } else {
+        "markdown".to_string()
+    }
+}
+
+/// Return the current Unix timestamp in seconds.
+fn unix_now() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .try_into()
+        .unwrap_or(0)
+}
+
+// ── Integration tests ─────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn tmp() -> TempDir {
+        tempfile::tempdir().expect("tempdir")
+    }
+
+    // ── 1. init_creates_working_engine ────────────────────────────────────────
+
+    #[test]
+    fn init_creates_working_engine() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        assert!(
+            engine.forge().forge_dir().join("index.db").exists(),
+            ".forge/index.db should exist"
+        );
+        assert!(
+            engine.forge().notes_dir().exists(),
+            "notes/ should exist"
+        );
+    }
+
+    // ── 2. write_and_read_file ────────────────────────────────────────────────
+
+    #[test]
+    fn write_and_read_file() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        let content = b"# Hello\n\nWorld paragraph.";
+        engine.write_file("notes/hello.md", content).expect("write");
+
+        let read_back = engine.read_file("notes/hello.md").expect("read");
+        assert_eq!(read_back, content);
+    }
+
+    // ── 3. write_file_is_indexed ──────────────────────────────────────────────
+
+    #[test]
+    fn write_file_is_indexed() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        engine
+            .write_file("notes/indexed.md", b"# Indexed\n\nContent.")
+            .expect("write");
+
+        assert!(engine.file_exists("notes/indexed.md").expect("file_exists"));
+        let files = engine.list_files("notes/").expect("list_files");
+        assert_eq!(files.len(), 1);
+    }
+
+    // ── 4. delete_file_removes_from_index ────────────────────────────────────
+
+    #[test]
+    fn delete_file_removes_from_index() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        engine
+            .write_file("notes/gone.md", b"# Gone\n\nBye.")
+            .expect("write");
+        assert!(engine.file_exists("notes/gone.md").expect("file_exists"));
+
+        engine.delete_file("notes/gone.md").expect("delete");
+
+        assert!(!engine.file_exists("notes/gone.md").expect("file_exists"));
+        assert!(
+            !dir.path().join("notes/gone.md").exists(),
+            "file should be removed from disk"
+        );
+    }
+
+    // ── 5. query_blocks_after_write ───────────────────────────────────────────
+
+    #[test]
+    fn query_blocks_after_write() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        engine
+            .write_file("notes/blocks.md", b"# Title\n\nParagraph text.")
+            .expect("write");
+
+        let files = engine.list_files("notes/").expect("list_files");
+        assert_eq!(files.len(), 1);
+
+        // Get the file record to obtain the file ID.
+        let filter = FileFilter::default();
+        let records = engine.query_files(&filter).expect("query_files");
+        assert_eq!(records.len(), 1);
+
+        let blocks = engine.query_blocks(records[0].id).expect("query_blocks");
+        assert!(
+            blocks.len() >= 2,
+            "expected >= 2 blocks, got {}",
+            blocks.len()
+        );
+    }
+
+    // ── 6. query_tags_after_write ─────────────────────────────────────────────
+
+    #[test]
+    fn query_tags_after_write() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        engine
+            .write_file("notes/tagged.md", b"# Tagged\n\nThis has #rust tag.")
+            .expect("write");
+
+        let tags = engine.query_tags("rust").expect("query_tags");
+        assert_eq!(tags.len(), 1, "expected 1 tag result for 'rust', got {}", tags.len());
+    }
+
+    // ── 7. rebuild_index_reindexes_all ────────────────────────────────────────
+
+    #[test]
+    fn rebuild_index_reindexes_all() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        engine
+            .write_file("notes/a.md", b"# Alpha\n\nContent A.")
+            .expect("write a");
+        engine
+            .write_file("notes/b.md", b"# Beta\n\nContent B.")
+            .expect("write b");
+
+        let stats = engine.rebuild_index().expect("rebuild_index");
+        assert_eq!(
+            stats.files_processed, 2,
+            "expected 2 files_processed, got {}",
+            stats.files_processed
+        );
+    }
+
+    // ── 8. read_nonexistent_file_returns_error ────────────────────────────────
+
+    #[test]
+    fn read_nonexistent_file_returns_error() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        let result = engine.read_file("notes/nonexistent.md");
+        assert!(
+            matches!(result, Err(StorageError::FileNotFound(_))),
+            "expected FileNotFound, got: {result:?}"
+        );
+    }
+
+    // ── 9. open_nonexistent_forge_returns_error ────────────────────────────────
+
+    #[test]
+    fn open_nonexistent_forge_returns_error() {
+        let dir = tmp();
+        let result = StorageEngine::open(dir.path(), &StorageConfig::default());
+        assert!(
+            matches!(result, Err(StorageError::FileNotFound(_))),
+            "expected FileNotFound, got: {result:?}"
+        );
+    }
+}
