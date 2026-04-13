@@ -11,6 +11,7 @@ use crate::app::{Mode, TuiApp};
 mod backlinks;
 mod file_tree;
 mod status_bar;
+mod tasks;
 mod viewer;
 
 /// Render the full TUI layout.
@@ -29,34 +30,39 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
 
     file_tree::render(frame, app, tree_area);
 
-    // Split right pane for backlinks when visible.
-    let (viewer_area, backlinks_area) = if app.backlinks.visible {
-        let [va, ba] = Layout::vertical([
-            Constraint::Percentage(70),
-            Constraint::Percentage(30),
-        ])
-        .areas(right_area);
-        (va, Some(ba))
+    // Right pane: task view replaces the viewer when active.
+    if app.task_view.active {
+        tasks::render(frame, app, right_area);
     } else {
-        (right_area, None)
-    };
+        // Split right pane for backlinks when visible.
+        let (viewer_area, backlinks_area) = if app.backlinks.visible {
+            let [va, ba] = Layout::vertical([
+                Constraint::Percentage(70),
+                Constraint::Percentage(30),
+            ])
+            .areas(right_area);
+            (va, Some(ba))
+        } else {
+            (right_area, None)
+        };
 
-    // Viewer area: split off a find bar when in Find mode.
-    if app.mode == Mode::Find {
-        let [viewer_body, find_bar] = Layout::vertical([
-            Constraint::Min(0),
-            Constraint::Length(1),
-        ])
-        .areas(viewer_area);
-        viewer::render(frame, app, viewer_body);
-        render_find_bar(frame, app, find_bar);
-    } else {
-        viewer::render(frame, app, viewer_area);
-    }
+        // Viewer area: split off a find bar when in Find mode.
+        if app.mode == Mode::Find {
+            let [viewer_body, find_bar] = Layout::vertical([
+                Constraint::Min(0),
+                Constraint::Length(1),
+            ])
+            .areas(viewer_area);
+            viewer::render(frame, app, viewer_body);
+            render_find_bar(frame, app, find_bar);
+        } else {
+            viewer::render(frame, app, viewer_area);
+        }
 
-    // Render backlinks panel if visible.
-    if let Some(bl_area) = backlinks_area {
-        backlinks::render(frame, app, bl_area);
+        // Render backlinks panel if visible.
+        if let Some(bl_area) = backlinks_area {
+            backlinks::render(frame, app, bl_area);
+        }
     }
 
     status_bar::render(frame, app, status);

@@ -7,7 +7,9 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use nexus_storage::{BacklinkResult, FileFilter, SearchResult, StorageConfig, StorageEngine};
+use nexus_storage::{
+    BacklinkResult, FileFilter, SearchResult, StorageConfig, StorageEngine, TaskFilter, TaskRecord,
+};
 use ratatui::widgets::ListState;
 
 // ── Mode / Focus ──────────────────────────────────────────────────────────────
@@ -331,6 +333,78 @@ impl Default for BacklinksState {
     }
 }
 
+// ── TaskViewState ────────────────────────────────────────────────────────────
+
+/// A single task entry for display in the task list view.
+#[derive(Debug, Clone)]
+pub struct TaskEntry {
+    /// Database primary key.
+    pub id: u64,
+    /// Whether the task is completed.
+    pub completed: bool,
+    /// Task text content.
+    pub content: String,
+    /// Vault-relative file path containing this task.
+    pub file_path: String,
+    /// 1-indexed line number in the source file.
+    pub line_number: u32,
+}
+
+/// State for the task list view that replaces the viewer when active.
+pub struct TaskViewState {
+    /// Whether the task view is currently active (replaces viewer).
+    pub active: bool,
+    /// All task entries.
+    pub entries: Vec<TaskEntry>,
+    /// Index of the currently selected task.
+    pub selected: usize,
+    /// `ratatui` list state; kept in sync with `selected`.
+    pub list_state: ListState,
+}
+
+impl TaskViewState {
+    /// Create a new, inactive `TaskViewState`.
+    pub fn new() -> Self {
+        Self {
+            active: false,
+            entries: Vec::new(),
+            selected: 0,
+            list_state: ListState::default(),
+        }
+    }
+
+    /// Toggle the task view on or off.
+    pub fn toggle(&mut self) {
+        self.active = !self.active;
+    }
+
+    /// Load task entries from a list of `TaskRecord`s.
+    pub fn load(&mut self, records: Vec<TaskRecord>) {
+        self.entries = records
+            .into_iter()
+            .map(|r| TaskEntry {
+                id: r.id,
+                completed: r.completed,
+                content: r.content,
+                file_path: r.file_path,
+                line_number: r.line_number,
+            })
+            .collect();
+        self.selected = 0;
+        self.list_state.select(if self.entries.is_empty() {
+            None
+        } else {
+            Some(0)
+        });
+    }
+}
+
+impl Default for TaskViewState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── TuiApp ────────────────────────────────────────────────────────────────────
 
 /// Top-level application state.
@@ -349,6 +423,8 @@ pub struct TuiApp {
     pub find: FindState,
     /// Backlinks panel state.
     pub backlinks: BacklinksState,
+    /// Task list view state.
+    pub task_view: TaskViewState,
     /// Underlying storage engine.
     pub storage: StorageEngine,
     /// Path to the forge root.
@@ -376,6 +452,7 @@ impl TuiApp {
             search: SearchState::new(),
             find: FindState::new(),
             backlinks: BacklinksState::new(),
+            task_view: TaskViewState::new(),
             storage,
             forge_root,
             should_quit: false,
@@ -546,6 +623,14 @@ impl TuiApp {
         match self.storage.backlinks(&path) {
             Ok(results) => self.backlinks.load(results),
             Err(_) => self.backlinks.load(Vec::new()),
+        }
+    }
+
+    /// Load all tasks into the task view state.
+    pub fn load_tasks(&mut self) {
+        match self.storage.query_tasks(&TaskFilter::default()) {
+            Ok(records) => self.task_view.load(records),
+            Err(_) => self.task_view.load(Vec::new()),
         }
     }
 
