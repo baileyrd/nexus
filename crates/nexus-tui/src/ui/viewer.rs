@@ -145,15 +145,8 @@ fn highlight_line(line: &str) -> Vec<Span<'static>> {
         )];
     }
 
-    // Unordered list items
-    if line.starts_with("- ") || line.starts_with("* ") || line.starts_with("+ ") {
-        return vec![Span::styled(
-            line.to_owned(),
-            Style::default().fg(Color::White),
-        )];
-    }
-
-    // Default: inline highlighting
+    // Unordered list items and all other lines: fall through to inline highlighting
+    // so [[wikilinks]], `code`, and #tags are colored within list items too.
     highlight_inline(line)
 }
 
