@@ -48,7 +48,26 @@
       "Bash(sqlite3 /dev/null \"SELECT 1\")",
       "Bash(cargo run:*)",
       "WebSearch",
-      "Bash(find /home/baileyrd/.cargo/registry/src/index.crates.io-* -path \"*/rmcp-1.4.0/src/model*\" -name \"*.rs\")"
+      "Bash(find /home/baileyrd/.cargo/registry/src/index.crates.io-* -path \"*/rmcp-1.4.0/src/model*\" -name \"*.rs\")",
+      "Bash(NEXUS_FORGE_PATH=/home/baileyrd/notes cargo run -p nexus-cli -- --help)",
+      "Bash(NEXUS_FORGE_PATH=/home/baileyrd/notes ./target/release/nexus forge:*)",
+      "Bash(NEXUS_FORGE_PATH=/home/baileyrd/notes ./target/release/nexus content search \"kernel\" --limit 5)",
+      "Bash(NEXUS_FORGE_PATH=/home/baileyrd/notes ./target/release/nexus graph status)",
+      "Bash(sqlite3 /home/baileyrd/notes/.forge/index.db \"SELECT COUNT\\(*\\) FROM files WHERE is_deleted = 0;\")",
+      "Bash(sqlite3 /home/baileyrd/notes/.forge/index.db \"PRAGMA wal_checkpoint\\(TRUNCATE\\);\")",
+      "Bash(sqlite3 /home/baileyrd/notes/.forge/index.db \"SELECT path FROM files LIMIT 5;\")",
+      "Bash(sqlite3 /home/baileyrd/notes/.forge/index.db \"SELECT COUNT\\(*\\) FROM files;\")",
+      "Bash(sqlite3 /home/baileyrd/notes/.forge/index.db \"SELECT path, is_deleted FROM files LIMIT 5;\")",
+      "Bash(sqlite3 /home/baileyrd/notes/.forge/index.db \"SELECT path FROM files WHERE is_deleted = 0 LIMIT 5;\")",
+      "Bash(find /home/baileyrd/projects/nexus -name \"*.rs\" -type f -exec grep -l \"git\\\\|Git\" {} \\\\;)",
+      "Bash(find crates/nexus-storage/src -name \"*.rs\" -exec wc -l {} +)",
+      "Bash(find crates/nexus-storage/src -name \"*.rs\" -type f -exec wc -l {} \\\\;)",
+      "Bash(find:*)",
+      "Bash(./target/debug/nexus completions:*)",
+      "Bash(/usr/bin/grep -E \"^\\(test result|FAILED|running\\)\")",
+      "Bash(/usr/bin/grep -E \"^error\")",
+      "mcp__remind-me__remind_me_auto_capture",
+      "mcp__remind-me__remind_me_reindex"
     ]
   }
 }

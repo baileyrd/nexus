@@ -194,7 +194,8 @@ fn register_host_kv_get(linker: &mut Linker<PluginData>) -> Result<(), PluginErr
                     return HOST_ERROR;
                 }
                 mem_data[o_start..end].copy_from_slice(&value);
-                value.len() as i32
+                // Safe: value.len() <= o_cap, and o_cap <= i32::MAX (derived from i32 out_cap).
+                i32::try_from(value.len()).unwrap_or(HOST_ERROR)
             },
         )
         .map_err(|e| PluginError::WasmLoadFailed {
@@ -367,20 +368,19 @@ fn register_host_write_file(linker: &mut Linker<PluginData>) -> Result<(), Plugi
                 // For writes, the file may not exist yet; check parent directory.
                 let parent = absolute.parent().unwrap_or(&absolute);
                 if !forge_root.as_os_str().is_empty() {
-                    let canon_parent = match parent.canonicalize() {
-                        Ok(p) => p,
-                        Err(_) => {
-                            // Parent doesn't exist yet — create it and re-check.
-                            if let Err(e) = std::fs::create_dir_all(parent) {
-                                tracing::warn!(plugin_id = %plugin_id, "host::write_file: mkdir failed: {e}");
+                    let canon_parent = if let Ok(p) = parent.canonicalize() {
+                        p
+                    } else {
+                        // Parent doesn't exist yet — create it and re-check.
+                        if let Err(e) = std::fs::create_dir_all(parent) {
+                            tracing::warn!(plugin_id = %plugin_id, "host::write_file: mkdir failed: {e}");
+                            return HOST_ERROR;
+                        }
+                        match parent.canonicalize() {
+                            Ok(p) => p,
+                            Err(e) => {
+                                tracing::warn!(plugin_id = %plugin_id, "host::write_file: canonicalize failed: {e}");
                                 return HOST_ERROR;
-                            }
-                            match parent.canonicalize() {
-                                Ok(p) => p,
-                                Err(e) => {
-                                    tracing::warn!(plugin_id = %plugin_id, "host::write_file: canonicalize failed: {e}");
-                                    return HOST_ERROR;
-                                }
                             }
                         }
                     };
@@ -416,7 +416,7 @@ fn register_host_write_file(linker: &mut Linker<PluginData>) -> Result<(), Plugi
 ///
 /// Stub for plugin-to-plugin IPC. Phase 1: always returns `HOST_ERROR` since
 /// calling into another plugin sandbox from within WASM execution requires
-/// re-entrant access to the PluginLoader, which is deferred to Phase 2.
+/// re-entrant access to the `PluginLoader`, which is deferred to Phase 2.
 ///
 /// Requires `IpcCall` capability (denied early so the plugin gets a clear
 /// signal rather than a generic error).
@@ -532,7 +532,8 @@ fn register_host_read_file(linker: &mut Linker<PluginData>) -> Result<(), Plugin
                     return HOST_ERROR;
                 }
                 mem_data[o_start..end].copy_from_slice(&contents);
-                contents.len() as i32
+                // Safe: contents.len() <= o_cap, and o_cap <= i32::MAX (derived from i32 out_cap).
+                i32::try_from(contents.len()).unwrap_or(HOST_ERROR)
             },
         )
         .map_err(|e| PluginError::WasmLoadFailed {

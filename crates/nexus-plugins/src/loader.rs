@@ -1,11 +1,10 @@
-//! Plugin loader: scans a directory for plugins, loads WASM sandboxes,
-//! registers CLI/IPC dispatch tables, manages plugin lifecycle, and
-//! dispatches kernel events to subscriber plugins.
+//! Plugin loader: scans a directory for plugins, loads WASM sandboxes for
+//! community plugins, registers native Rust handlers for core plugins,
+//! manages plugin lifecycle, and dispatches kernel events to subscriber plugins.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
 
 use nexus_kernel::{
     Capability, CapabilitySet, EventBus, EventFilter, EventSubscription,
@@ -17,6 +16,160 @@ use crate::sandbox::{PluginData, WasmSandbox};
 use crate::settings::SettingsManager;
 use crate::PluginError;
 
+// ─── CorePlugin trait ─────────────────────────────────────────────────────────
+
+/// Native Rust interface for core plugins.
+///
+/// Core plugins are compiled into the Nexus binary (or linked as a dylib) and
+/// have unrestricted access to kernel internals. They implement this trait
+/// directly in Rust rather than compiling to WASM.
+///
+/// Register an implementation with [`PluginLoader::register_core`].
+pub trait CorePlugin: Send + Sync {
+    /// Called when the plugin is initialised (after dependencies are ready).
+    ///
+    /// # Errors
+    /// Return [`PluginError`] to abort plugin startup.
+    fn on_init(&mut self) -> Result<(), PluginError> {
+        Ok(())
+    }
+    /// Called when the plugin transitions to the Started state.
+    ///
+    /// # Errors
+    /// Return [`PluginError`] to abort plugin startup.
+    fn on_start(&mut self) -> Result<(), PluginError> {
+        Ok(())
+    }
+    /// Called on graceful shutdown.
+    fn on_stop(&mut self) {}
+    /// Called when the plugin is enabled after being disabled.
+    ///
+    /// # Errors
+    /// Return [`PluginError`] on failure.
+    fn on_enable(&mut self) -> Result<(), PluginError> {
+        Ok(())
+    }
+    /// Called when the plugin is disabled.
+    fn on_disable(&mut self) {}
+    /// Called after the user updates this plugin's settings.
+    ///
+    /// # Errors
+    /// Return [`PluginError`] on failure.
+    fn on_settings_changed(&mut self, _settings: &serde_json::Value) -> Result<(), PluginError> {
+        Ok(())
+    }
+    /// Dispatch a handler call identified by `handler_id` with JSON `args`.
+    ///
+    /// `handler_id` values correspond to those declared in the plugin manifest's
+    /// `[registrations]` sections (same numbering as the WASM ABI).
+    ///
+    /// # Errors
+    /// Return [`PluginError`] on dispatch failure.
+    fn dispatch(
+        &mut self,
+        handler_id: u32,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError>;
+}
+
+// ─── PluginBackend ────────────────────────────────────────────────────────────
+
+/// The runtime backend for a loaded plugin.
+///
+/// - `Core` — native Rust; no sandbox overhead, unrestricted kernel access.
+/// - `Community` — WASM-sandboxed; capability-gated, fuel-metered.
+enum PluginBackend {
+    Core(Box<dyn CorePlugin>),
+    Community(WasmSandbox),
+}
+
+impl PluginBackend {
+    fn dispatch(
+        &mut self,
+        handler_id: u32,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        match self {
+            Self::Core(p) => p.dispatch(handler_id, args),
+            Self::Community(s) => s.dispatch(handler_id, args),
+        }
+    }
+
+    fn call_on_init(&mut self) -> Result<(), PluginError> {
+        match self {
+            Self::Core(p) => p.on_init(),
+            Self::Community(s) => s.call_on_init(),
+        }
+    }
+
+    fn call_on_start(&mut self) -> Result<(), PluginError> {
+        match self {
+            Self::Core(p) => p.on_start(),
+            Self::Community(s) => s.call_on_start(),
+        }
+    }
+
+    fn call_on_stop(&mut self) -> Result<(), PluginError> {
+        match self {
+            Self::Core(p) => {
+                p.on_stop();
+                Ok(())
+            }
+            Self::Community(s) => s.call_on_stop(),
+        }
+    }
+
+    fn call_on_load(&mut self) -> Result<(), PluginError> {
+        match self {
+            // Core plugins have no separate on_load; on_init serves that role.
+            Self::Core(_) => Ok(()),
+            Self::Community(s) => s.call_on_load(),
+        }
+    }
+
+    fn call_on_unload(&mut self) -> Result<(), PluginError> {
+        match self {
+            Self::Core(_) => Ok(()),
+            Self::Community(s) => s.call_on_unload(),
+        }
+    }
+
+    fn call_on_enable(&mut self) -> Result<(), PluginError> {
+        match self {
+            Self::Core(p) => p.on_enable(),
+            Self::Community(s) => s.call_on_enable(),
+        }
+    }
+
+    fn call_on_disable(&mut self) -> Result<(), PluginError> {
+        match self {
+            Self::Core(p) => {
+                p.on_disable();
+                Ok(())
+            }
+            Self::Community(s) => s.call_on_disable(),
+        }
+    }
+
+    fn call_on_settings_changed(
+        &mut self,
+        settings: &serde_json::Value,
+    ) -> Result<(), PluginError> {
+        match self {
+            Self::Core(p) => p.on_settings_changed(settings),
+            Self::Community(s) => s.call_on_settings_changed(settings),
+        }
+    }
+
+    /// Returns a mutable reference to the inner `WasmSandbox`, if community.
+    fn as_wasm_sandbox_mut(&mut self) -> Option<&mut WasmSandbox> {
+        match self {
+            Self::Community(s) => Some(s),
+            Self::Core(_) => None,
+        }
+    }
+}
+
 // ─── Internal structs ─────────────────────────────────────────────────────────
 
 struct PluginRegistrations {
@@ -25,9 +178,9 @@ struct PluginRegistrations {
     ipc_commands: Vec<String>,
 }
 
-/// A live event subscription wired to a WASM plugin handler.
+/// A live event subscription wired to a plugin handler.
 struct PluginEventSub {
-    /// WASM handler invoked when a matching event arrives.
+    /// Handler invoked when a matching event arrives.
     handler_id: u32,
     /// Live subscription handle (dropped → auto-unsubscribe).
     subscription: EventSubscription,
@@ -35,7 +188,8 @@ struct PluginEventSub {
 
 struct LoadedPlugin {
     manifest: PluginManifest,
-    sandbox: WasmSandbox,
+    backend: PluginBackend,
+    capabilities: CapabilitySet,
     status: PluginStatus,
     plugin_dir: PathBuf,
     registrations: PluginRegistrations,
@@ -111,19 +265,26 @@ impl PluginLoader {
         Ok(found)
     }
 
-    /// Load a plugin from `plugin_dir`.
+    /// Load a **community** plugin from `plugin_dir`.
+    ///
+    /// Community plugins are WASM-sandboxed and distributed as `.wasm` files.
+    /// The plugin directory must contain `manifest.toml` with
+    /// `trust_level = "community"` and a `[wasm]` section.
+    ///
+    /// For **core** plugins (native Rust), use [`register_core`] instead.
+    ///
+    /// [`register_core`]: PluginLoader::register_core
     ///
     /// # Steps
     /// 1. Parse `manifest.toml` via [`manifest::load_manifest`].
     /// 2. Validate the manifest via [`manifest::validate`].
-    /// 3. Reject duplicate plugin IDs.
-    /// 4. Register settings schema with [`SettingsManager`] if declared.
-    /// 5. Read the WASM bytes.
-    /// 6. Build [`PluginData`] with the appropriate capabilities.
-    /// 7. Create [`WasmSandbox`].
-    /// 8. Call `on_init` and `on_start` lifecycle hooks if declared.
-    /// 9. Register CLI subcommands, rejecting conflicts.
-    /// 10. Set status to [`PluginStatus::Running`] and return [`PluginInfo`].
+    /// 3. Reject non-community manifests (core plugins must use `register_core`).
+    /// 4. Reject duplicate plugin IDs.
+    /// 5. Register settings schema with [`SettingsManager`] if declared.
+    /// 6. Read the WASM bytes and create a [`WasmSandbox`].
+    /// 7. Call `on_load` / `on_init` / `on_start` lifecycle hooks if declared.
+    /// 8. Register CLI subcommands, rejecting conflicts.
+    /// 9. Set status to [`PluginStatus::Running`] and return [`PluginInfo`].
     ///
     /// # Errors
     /// Returns [`PluginError`] on any failure.
@@ -135,24 +296,39 @@ impl PluginLoader {
         // Step 2: Validate
         manifest::validate(&manifest, plugin_dir)?;
 
-        // Step 3: Reject duplicate plugin ID
+        // Step 3: Reject core plugins — they must use register_core()
+        if manifest.trust_level == TrustLevel::Core {
+            return Err(PluginError::ManifestInvalid {
+                path: manifest_path.display().to_string(),
+                reason: "core plugins must be registered via PluginLoader::register_core(), \
+                         not loaded from a WASM directory"
+                    .to_string(),
+            });
+        }
+
+        // Step 4: Reject duplicate plugin ID
         let plugin_id = manifest.id.clone();
         if self.loaded.contains_key(&plugin_id) {
             return Err(PluginError::DuplicatePlugin(plugin_id));
         }
 
-        // Step 4: Register settings schema if declared
+        // Step 5: Register settings schema if declared
         if let Some(ref settings_cfg) = manifest.settings {
             let schema_path = plugin_dir.join(&settings_cfg.schema);
             let schema_json = std::fs::read_to_string(&schema_path)?;
             self.settings.register_schema(&plugin_id, &schema_json)?;
         }
 
-        // Step 5: Read WASM bytes
-        let wasm_path = plugin_dir.join(&manifest.wasm.module);
+        // Step 6: Read WASM bytes and build sandbox.
+        // wasm is guaranteed Some for community plugins (validated in step 2).
+        let wasm_cfg = manifest.wasm.as_ref().ok_or_else(|| PluginError::ManifestInvalid {
+            path: manifest_path.display().to_string(),
+            reason: "internal: community plugin passed validation without a [wasm] section"
+                .to_string(),
+        })?;
+        let wasm_path = plugin_dir.join(&wasm_cfg.module);
         let wasm_bytes = std::fs::read(&wasm_path)?;
 
-        // Step 6: Build PluginData with capabilities
         let capabilities = build_capabilities(&manifest);
         let plugin_data = PluginData {
             plugin_id: plugin_id.clone(),
@@ -160,22 +336,93 @@ impl PluginLoader {
             forge_root: plugin_dir.to_path_buf(),
             ..Default::default()
         };
+        let mut backend = PluginBackend::Community(
+            WasmSandbox::new(&wasm_bytes, wasm_cfg, plugin_data)?,
+        );
 
-        // Step 7: Create WasmSandbox
-        let mut sandbox = WasmSandbox::new(&wasm_bytes, &manifest.wasm, plugin_data)?;
-
-        // Step 8: Call lifecycle hooks
+        // Step 7: Call lifecycle hooks
         if manifest.lifecycle.on_load {
-            sandbox.call_on_load()?;
+            backend.call_on_load()?;
         }
         if manifest.lifecycle.on_init {
-            sandbox.call_on_init()?;
+            backend.call_on_init()?;
         }
         if manifest.lifecycle.on_start {
-            sandbox.call_on_start()?;
+            backend.call_on_start()?;
         }
 
-        // Step 9: Register CLI subcommands (reject duplicates)
+        self.finish_loading(manifest, backend, capabilities, plugin_dir)
+    }
+
+    /// Register a **core** plugin backed by a native Rust implementation.
+    ///
+    /// Core plugins are compiled into the Nexus binary and have unrestricted
+    /// kernel access. They are not sandboxed and do not run through the WASM
+    /// runtime.
+    ///
+    /// The `manifest` must have `trust_level = "core"` and no `[wasm]` section.
+    /// Pass the plugin directory (where `plugin.toml` and optional
+    /// `settings.json` live) so that settings schema loading and error messages
+    /// work correctly.
+    ///
+    /// `on_init` and `on_start` are called on `plugin` during registration if
+    /// declared in the manifest lifecycle flags.
+    ///
+    /// # Errors
+    /// Returns [`PluginError`] if the manifest is invalid, the plugin ID is
+    /// already registered, or a lifecycle hook returns an error.
+    pub fn register_core(
+        &mut self,
+        manifest: PluginManifest,
+        plugin_dir: &Path,
+        mut plugin: Box<dyn CorePlugin>,
+    ) -> Result<PluginInfo, PluginError> {
+        // Validate the manifest (ensures trust_level=core, no [wasm] section, etc.).
+        manifest::validate(&manifest, plugin_dir)?;
+
+        if manifest.trust_level != TrustLevel::Core {
+            return Err(PluginError::ManifestInvalid {
+                path: plugin_dir.join("plugin.toml").display().to_string(),
+                reason: "register_core requires trust_level = 'core'".to_string(),
+            });
+        }
+
+        let plugin_id = manifest.id.clone();
+        if self.loaded.contains_key(&plugin_id) {
+            return Err(PluginError::DuplicatePlugin(plugin_id));
+        }
+
+        // Register settings schema if declared
+        if let Some(ref settings_cfg) = manifest.settings {
+            let schema_path = plugin_dir.join(&settings_cfg.schema);
+            let schema_json = std::fs::read_to_string(&schema_path)?;
+            self.settings.register_schema(&plugin_id, &schema_json)?;
+        }
+
+        // Call lifecycle hooks directly on the native implementation.
+        if manifest.lifecycle.on_init {
+            plugin.on_init()?;
+        }
+        if manifest.lifecycle.on_start {
+            plugin.on_start()?;
+        }
+
+        let capabilities = build_capabilities(&manifest);
+        let backend = PluginBackend::Core(plugin);
+        self.finish_loading(manifest, backend, capabilities, plugin_dir)
+    }
+
+    /// Shared final step: register CLI/IPC, wire event subscriptions, insert.
+    fn finish_loading(
+        &mut self,
+        manifest: PluginManifest,
+        backend: PluginBackend,
+        capabilities: CapabilitySet,
+        plugin_dir: &Path,
+    ) -> Result<PluginInfo, PluginError> {
+        let plugin_id = manifest.id.clone();
+
+        // Register CLI subcommands (reject duplicates)
         for sub in &manifest.registrations.cli_subcommands {
             if let Some(existing_plugin) = self.cli_registry.get(&sub.id) {
                 return Err(PluginError::DuplicateCliSubcommand {
@@ -189,12 +436,10 @@ impl PluginLoader {
         }
         let mut registered_cli: Vec<String> = Vec::new();
         for sub in &manifest.registrations.cli_subcommands {
-            self.cli_registry
-                .insert(sub.id.clone(), plugin_id.clone());
+            self.cli_registry.insert(sub.id.clone(), plugin_id.clone());
             registered_cli.push(sub.id.clone());
         }
 
-        // Collect IPC registrations
         let registered_ipc: Vec<String> = manifest
             .registrations
             .ipc_commands
@@ -223,7 +468,8 @@ impl PluginLoader {
             plugin_id,
             LoadedPlugin {
                 manifest,
-                sandbox,
+                backend,
+                capabilities,
                 status: PluginStatus::Running,
                 plugin_dir: plugin_dir.to_path_buf(),
                 registrations: PluginRegistrations {
@@ -251,12 +497,12 @@ impl PluginLoader {
             .remove(plugin_id)
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
 
-        // Best-effort on_stop then on_unload
+        // Best-effort on_stop then on_unload — plugin is removed regardless of errors.
         if loaded.manifest.lifecycle.on_stop {
-            let _ = loaded.sandbox.call_on_stop();
+            let _ = loaded.backend.call_on_stop();
         }
         if loaded.manifest.lifecycle.on_unload {
-            let _ = loaded.sandbox.call_on_unload();
+            let _ = loaded.backend.call_on_unload();
         }
 
         // Deregister CLI subcommands
@@ -272,16 +518,16 @@ impl PluginLoader {
     pub fn list(&self) -> Vec<PluginInfo> {
         self.loaded
             .values()
-            .map(|lp| plugin_info_from(&lp.manifest, lp.status, &lp.sandbox.plugin_data().capabilities))
+            .map(|lp| plugin_info_from(&lp.manifest, lp.status, &lp.capabilities))
             .collect()
     }
 
     /// Look up a single plugin by ID, returning a [`PluginInfo`] snapshot.
     #[must_use]
     pub fn get(&self, plugin_id: &str) -> Option<PluginInfo> {
-        self.loaded.get(plugin_id).map(|lp| {
-            plugin_info_from(&lp.manifest, lp.status, &lp.sandbox.plugin_data().capabilities)
-        })
+        self.loaded
+            .get(plugin_id)
+            .map(|lp| plugin_info_from(&lp.manifest, lp.status, &lp.capabilities))
     }
 
     /// Dispatch a CLI subcommand call.
@@ -317,7 +563,7 @@ impl PluginLoader {
             .map(|r| r.handler_id)
             .ok_or_else(|| PluginError::PluginNotFound(subcommand.to_string()))?;
 
-        lp.sandbox.dispatch(handler_id, args)
+        lp.backend.dispatch(handler_id, args)
     }
 
     /// Dispatch an IPC command call with capability verification.
@@ -340,7 +586,7 @@ impl PluginLoader {
         let caller_has_cap = self
             .loaded
             .get(caller_plugin_id)
-            .map(|lp| lp.sandbox.plugin_data().capabilities.contains(Capability::IpcCall))
+            .map(|lp| lp.capabilities.contains(Capability::IpcCall))
             .ok_or_else(|| PluginError::PluginNotFound(caller_plugin_id.to_string()))?;
 
         if !caller_has_cap {
@@ -381,7 +627,7 @@ impl PluginLoader {
             .map(|r| r.handler_id)
             .ok_or_else(|| PluginError::PluginNotFound(command_id.to_string()))?;
 
-        lp.sandbox.dispatch(handler_id, args)
+        lp.backend.dispatch(handler_id, args)
     }
 
     /// Enable the plugin with `plugin_id`.
@@ -399,7 +645,7 @@ impl PluginLoader {
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
         lp.status = PluginStatus::Running;
         if lp.manifest.lifecycle.on_enable {
-            lp.sandbox.call_on_enable()?;
+            lp.backend.call_on_enable()?;
         }
         Ok(())
     }
@@ -419,7 +665,7 @@ impl PluginLoader {
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
         lp.status = PluginStatus::Stopped;
         if lp.manifest.lifecycle.on_disable {
-            lp.sandbox.call_on_disable()?;
+            lp.backend.call_on_disable()?;
         }
         Ok(())
     }
@@ -446,13 +692,13 @@ impl PluginLoader {
             .get_mut(plugin_id)
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
         if lp.manifest.lifecycle.on_settings_changed {
-            lp.sandbox.call_on_settings_changed(settings)?;
+            lp.backend.call_on_settings_changed(settings)?;
         }
         Ok(())
     }
 
     /// Drain pending events from all plugin subscriptions and dispatch them to
-    /// the appropriate WASM handlers.
+    /// the appropriate plugin handlers (WASM or native).
     ///
     /// Call this in your event loop (e.g. every tick). Each call is synchronous
     /// and non-blocking; events that have not yet arrived are silently skipped.
@@ -466,24 +712,18 @@ impl PluginLoader {
 
         for (plugin_id, lp) in &mut self.loaded {
             for sub in &mut lp.event_subs {
-                loop {
-                    match sub.subscription.try_recv() {
-                        Ok(Some(evt)) => {
-                            let payload = serde_json::to_value(&*evt)
-                                .unwrap_or(serde_json::Value::Null);
-                            pending.push((plugin_id.clone(), sub.handler_id, payload));
-                        }
-                        Ok(None) => break,
-                        // Lagged or closed — skip silently.
-                        Err(_) => break,
-                    }
+                // Drain until no more events or the subscription is lagged/closed.
+                while let Ok(Some(evt)) = sub.subscription.try_recv() {
+                    let payload = serde_json::to_value(&*evt)
+                        .unwrap_or(serde_json::Value::Null);
+                    pending.push((plugin_id.clone(), sub.handler_id, payload));
                 }
             }
         }
 
         for (plugin_id, handler_id, payload) in pending {
             if let Some(lp) = self.loaded.get_mut(&plugin_id) {
-                lp.sandbox.dispatch(handler_id, &payload).map_err(|e| {
+                lp.backend.dispatch(handler_id, &payload).map_err(|e| {
                     tracing::warn!(plugin_id = %plugin_id, "event dispatch failed: {e}");
                     e
                 })?;
@@ -510,9 +750,14 @@ impl PluginLoader {
     // ─── Internal helpers for hot-reload ──────────────────────────────────────
 
     /// Return a mutable reference to the [`WasmSandbox`] for `plugin_id`.
+    ///
+    /// Returns `None` if the plugin is not loaded or is a core (native) plugin.
+    /// Hot-reload only applies to community WASM plugins.
     #[allow(dead_code)]
     pub(crate) fn sandbox_mut(&mut self, plugin_id: &str) -> Option<&mut WasmSandbox> {
-        self.loaded.get_mut(plugin_id).map(|lp| &mut lp.sandbox)
+        self.loaded
+            .get_mut(plugin_id)
+            .and_then(|lp| lp.backend.as_wasm_sandbox_mut())
     }
 
     /// Return a reference to the [`PluginManifest`] for `plugin_id`.
@@ -529,16 +774,30 @@ impl PluginLoader {
         }
     }
 
-    /// Replace the [`WasmSandbox`] for `plugin_id`, returning the old one.
+    /// Replace the [`WasmSandbox`] for `plugin_id` during hot-reload.
+    ///
+    /// Only valid for community WASM plugins. Returns `None` if the plugin
+    /// is not loaded or is a core plugin.
     #[allow(dead_code)]
     pub(crate) fn replace_sandbox(
         &mut self,
         plugin_id: &str,
         sandbox: WasmSandbox,
     ) -> Option<WasmSandbox> {
-        self.loaded
-            .get_mut(plugin_id)
-            .map(|lp| std::mem::replace(&mut lp.sandbox, sandbox))
+        self.loaded.get_mut(plugin_id).and_then(|lp| {
+            if let PluginBackend::Community(_) = &lp.backend {
+                let old_backend =
+                    std::mem::replace(&mut lp.backend, PluginBackend::Community(sandbox));
+                // Extract the old WasmSandbox from the replaced backend.
+                if let PluginBackend::Community(old) = old_backend {
+                    Some(old)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
     }
 }
 

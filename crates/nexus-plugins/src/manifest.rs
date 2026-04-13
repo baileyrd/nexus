@@ -33,7 +33,10 @@ pub struct PluginManifest {
     /// Capability declarations.
     pub capabilities: ManifestCapabilities,
     /// WASM module configuration.
-    pub wasm: WasmConfig,
+    ///
+    /// `None` for `trust_level = "core"` plugins — they are native Rust and
+    /// do not run through the WASM sandbox. Required for community plugins.
+    pub wasm: Option<WasmConfig>,
     /// Optional settings schema reference.
     pub settings: Option<SettingsConfig>,
     /// Extension-point registrations.
@@ -120,6 +123,7 @@ pub struct EventSubscriberReg {
 
 /// Lifecycle hook enablement flags.
 #[derive(Debug, Clone, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct LifecycleConfig {
     /// Called when the binary is loaded into memory. Handler id 3.
     pub on_load: bool,
@@ -129,7 +133,7 @@ pub struct LifecycleConfig {
     pub on_start: bool,
     /// Called on graceful shutdown. Handler id 2.
     pub on_stop: bool,
-    /// Called after on_stop; final cleanup. Handler id 6.
+    /// Called after `on_stop`; final cleanup. Handler id 6.
     pub on_unload: bool,
     /// Called when the plugin is enabled (after being disabled). Handler id 4.
     pub on_enable: bool,
@@ -146,7 +150,8 @@ struct TomlManifest {
     plugin: TomlPlugin,
     #[serde(default)]
     capabilities: TomlCapabilities,
-    wasm: TomlWasm,
+    /// Absent for core plugins; required for community plugins (enforced in [`validate`]).
+    wasm: Option<TomlWasm>,
     settings: Option<TomlSettings>,
     #[serde(default)]
     registrations: TomlRegistrations,
@@ -228,6 +233,7 @@ struct TomlEventSubscriberReg {
 }
 
 #[derive(Deserialize, Default)]
+#[allow(clippy::struct_excessive_bools)]
 struct TomlLifecycle {
     #[serde(default)] on_load: bool,
     #[serde(default)] on_init: bool,
@@ -255,6 +261,13 @@ fn parse_trust_level(s: &str, path: &str) -> Result<TrustLevel, PluginError> {
 fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError> {
     let trust_level = parse_trust_level(&raw.plugin.trust_level, path)?;
 
+    let wasm = raw.wasm.map(|w| WasmConfig {
+        module: w.module,
+        memory_mb: w.memory_mb,
+        fuel: w.fuel,
+        max_execution_ms: w.max_execution_ms,
+    });
+
     Ok(PluginManifest {
         id: raw.plugin.id,
         name: raw.plugin.name,
@@ -265,12 +278,7 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
             required: raw.capabilities.required,
             optional: raw.capabilities.optional,
         },
-        wasm: WasmConfig {
-            module: raw.wasm.module,
-            memory_mb: raw.wasm.memory_mb,
-            fuel: raw.wasm.fuel,
-            max_execution_ms: raw.wasm.max_execution_ms,
-        },
+        wasm,
         settings: raw.settings.map(|s| SettingsConfig { schema: s.schema }),
         registrations: Registrations {
             cli_subcommands: raw
@@ -417,9 +425,10 @@ on_stop = true
         assert_eq!(m.version, "1.0.0");
         assert!(matches!(m.trust_level, TrustLevel::Community));
         assert_eq!(m.api_version, "1");
-        assert_eq!(m.wasm.module, "test.wasm");
-        assert_eq!(m.wasm.memory_mb, 16); // default
-        assert_eq!(m.wasm.fuel, 10_000_000); // default
+        let wasm = m.wasm.as_ref().unwrap();
+        assert_eq!(wasm.module, "test.wasm");
+        assert_eq!(wasm.memory_mb, 16); // default
+        assert_eq!(wasm.fuel, 10_000_000); // default
         assert!(m.settings.is_none());
         assert!(m.registrations.cli_subcommands.is_empty());
         assert!(m.registrations.ipc_commands.is_empty());
@@ -431,8 +440,9 @@ on_stop = true
         let m = parse_manifest(FULL, "manifest.toml").unwrap();
         assert_eq!(m.capabilities.required, ["fs.read", "kv.read"]);
         assert_eq!(m.capabilities.optional, ["net.http"]);
-        assert_eq!(m.wasm.memory_mb, 32);
-        assert_eq!(m.wasm.fuel, 5_000_000);
+        let wasm = m.wasm.as_ref().unwrap();
+        assert_eq!(wasm.memory_mb, 32);
+        assert_eq!(wasm.fuel, 5_000_000);
         assert!(m.settings.is_some());
         assert_eq!(m.settings.unwrap().schema, "settings.json");
         assert_eq!(m.registrations.cli_subcommands.len(), 1);
@@ -466,7 +476,9 @@ on_stop = true
     }
 
     #[test]
-    fn parse_missing_wasm_section_returns_error() {
+    fn parse_missing_wasm_section_yields_none() {
+        // Parsing succeeds — wasm = None is valid at parse time.
+        // Validation (separate step) will reject a community plugin with wasm = None.
         let toml = r#"
 [plugin]
 id = "com.example.test"
@@ -475,11 +487,23 @@ version = "1.0.0"
 trust_level = "community"
 api_version = "1"
 "#;
-        let err = parse_manifest(toml, "manifest.toml").unwrap_err();
-        assert!(
-            matches!(err, PluginError::ManifestInvalid { .. }),
-            "expected ManifestInvalid, got {err:?}"
-        );
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        assert!(m.wasm.is_none());
+    }
+
+    #[test]
+    fn parse_core_plugin_without_wasm_section_succeeds() {
+        let toml = r#"
+[plugin]
+id = "dev.nexus.core-example"
+name = "Core Example"
+version = "1.0.0"
+trust_level = "core"
+api_version = "1"
+"#;
+        let m = parse_manifest(toml, "plugin.toml").unwrap();
+        assert!(matches!(m.trust_level, TrustLevel::Core));
+        assert!(m.wasm.is_none());
     }
 
     #[test]
@@ -518,6 +542,7 @@ api_version = "1"
 /// # Panics
 /// Panics if the internal ID validation regex fails to compile (should never
 /// happen — the pattern is a compile-time constant).
+#[allow(clippy::too_many_lines)]
 pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), PluginError> {
     let id = &manifest.id;
 
@@ -583,35 +608,57 @@ pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), Plug
         }
     }
 
-    // Rule 5: memory_mb in [1, 256].
-    if manifest.wasm.memory_mb < 1 || manifest.wasm.memory_mb > 256 {
-        return Err(PluginError::ManifestValidation {
-            plugin_id: id.clone(),
-            reason: format!(
-                "wasm.memory_mb {} is out of range [1, 256]",
-                manifest.wasm.memory_mb
-            ),
-        });
-    }
+    // Rules 5–7 only apply to community plugins (which run in the WASM sandbox).
+    // Core plugins are native Rust and have no [wasm] section.
+    match manifest.trust_level {
+        TrustLevel::Community => {
+            let wasm = manifest.wasm.as_ref().ok_or_else(|| PluginError::ManifestValidation {
+                plugin_id: id.clone(),
+                reason: "community plugins must declare a [wasm] section".to_string(),
+            })?;
 
-    // Rule 6: fuel > 0 unless trust_level is Core.
-    if manifest.wasm.fuel == 0 && manifest.trust_level != TrustLevel::Core {
-        return Err(PluginError::ManifestValidation {
-            plugin_id: id.clone(),
-            reason: "wasm.fuel must be > 0 for community plugins".to_string(),
-        });
-    }
+            // Rule 5: memory_mb in [1, 256].
+            if wasm.memory_mb < 1 || wasm.memory_mb > 256 {
+                return Err(PluginError::ManifestValidation {
+                    plugin_id: id.clone(),
+                    reason: format!(
+                        "wasm.memory_mb {} is out of range [1, 256]",
+                        wasm.memory_mb
+                    ),
+                });
+            }
 
-    // Rule 7: wasm module file must exist.
-    let wasm_path = plugin_dir.join(&manifest.wasm.module);
-    if !wasm_path.exists() {
-        return Err(PluginError::ManifestValidation {
-            plugin_id: id.clone(),
-            reason: format!(
-                "wasm module '{}' not found in plugin directory",
-                manifest.wasm.module
-            ),
-        });
+            // Rule 6: fuel must be > 0 for community plugins.
+            if wasm.fuel == 0 {
+                return Err(PluginError::ManifestValidation {
+                    plugin_id: id.clone(),
+                    reason: "wasm.fuel must be > 0 for community plugins".to_string(),
+                });
+            }
+
+            // Rule 7: wasm module file must exist.
+            let wasm_path = plugin_dir.join(&wasm.module);
+            if !wasm_path.exists() {
+                return Err(PluginError::ManifestValidation {
+                    plugin_id: id.clone(),
+                    reason: format!(
+                        "wasm module '{}' not found in plugin directory",
+                        wasm.module
+                    ),
+                });
+            }
+        }
+        TrustLevel::Core => {
+            // Rule 5c: core plugins must NOT have a [wasm] section.
+            if manifest.wasm.is_some() {
+                return Err(PluginError::ManifestValidation {
+                    plugin_id: id.clone(),
+                    reason: "core plugins are native Rust and must not declare a [wasm] section; \
+                             remove [wasm] or change trust_level to 'community'"
+                        .to_string(),
+                });
+            }
+        }
     }
 
     // Rule 8: settings schema file must exist if specified.
@@ -768,10 +815,22 @@ on_stop = true
     }
 
     #[test]
+    fn validate_rejects_community_without_wasm_section() {
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.wasm = None; // community plugin with no wasm section
+        let err = validate(&m, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("[wasm] section")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
     fn validate_rejects_memory_out_of_range() {
         let dir = make_test_plugin_dir("test.wasm");
         let mut m = valid_manifest();
-        m.wasm.memory_mb = 512;
+        m.wasm.as_mut().unwrap().memory_mb = 512;
         let err = validate(&m, dir.path()).unwrap_err();
         assert!(
             matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("out of range")),
@@ -783,7 +842,7 @@ on_stop = true
     fn validate_rejects_zero_fuel_for_community() {
         let dir = make_test_plugin_dir("test.wasm");
         let mut m = valid_manifest();
-        m.wasm.fuel = 0;
+        m.wasm.as_mut().unwrap().fuel = 0;
         let err = validate(&m, dir.path()).unwrap_err();
         assert!(
             matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("fuel")),
@@ -792,12 +851,42 @@ on_stop = true
     }
 
     #[test]
-    fn validate_allows_zero_fuel_for_core() {
-        let dir = make_test_plugin_dir("test.wasm");
-        let mut m = valid_manifest();
-        m.wasm.fuel = 0;
-        m.trust_level = TrustLevel::Core;
+    fn validate_core_plugin_without_wasm_section_passes() {
+        // Core plugins are native Rust — no [wasm] section required or allowed.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let core_toml = r#"
+[plugin]
+id = "dev.nexus.core-test"
+name = "Core Test"
+version = "1.0.0"
+trust_level = "core"
+api_version = "1"
+"#;
+        let m = parse_manifest(core_toml, "plugin.toml").unwrap();
         validate(&m, dir.path()).unwrap();
+    }
+
+    #[test]
+    fn validate_rejects_core_plugin_with_wasm_section() {
+        // Core plugins must not declare [wasm]; that's a configuration error.
+        let dir = make_test_plugin_dir("test.wasm");
+        let core_toml = r#"
+[plugin]
+id = "dev.nexus.core-wasm-mistake"
+name = "Core Oops"
+version = "1.0.0"
+trust_level = "core"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+"#;
+        let m = parse_manifest(core_toml, "plugin.toml").unwrap();
+        let err = validate(&m, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("native Rust")),
+            "got {err:?}"
+        );
     }
 
     #[test]

@@ -44,7 +44,7 @@ pub trait KvStore: Send + Sync {
 
 pub use error::PluginError;
 pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
-pub use loader::PluginLoader;
+pub use loader::{CorePlugin, PluginLoader};
 pub use manifest::{
     CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
     PluginManifest, Registrations, SettingsConfig, WasmConfig,
@@ -105,6 +105,25 @@ impl PluginManager {
             None
         };
         Ok(Self { loader, reloader })
+    }
+
+    /// Register a native Rust **core** plugin.
+    ///
+    /// Core plugins are compiled into the binary and bypass the WASM sandbox.
+    /// `manifest` must have `trust_level = "core"` and no `[wasm]` section.
+    /// `plugin_dir` is where `plugin.toml` and optional `settings.json` live.
+    ///
+    /// See [`PluginLoader::register_core`] for the full contract.
+    ///
+    /// # Errors
+    /// Propagates errors from the underlying loader.
+    pub fn register_core(
+        &mut self,
+        manifest: PluginManifest,
+        plugin_dir: &std::path::Path,
+        plugin: Box<dyn CorePlugin>,
+    ) -> Result<nexus_kernel::PluginInfo, PluginError> {
+        self.loader.register_core(manifest, plugin_dir, plugin)
     }
 
     /// Scan the plugins directory and load every subdirectory that contains a
@@ -307,12 +326,18 @@ impl PluginManager {
         let wasm_bytes = std::fs::read(wasm_path)?;
 
         // Retrieve the manifest and plugin_dir from the loader.
+        // Hot-reload is only triggered for community (WASM) plugins; core plugins
+        // are never reloaded this way.
         let (wasm_config, lifecycle, plugin_data) = {
             let m = self
                 .loader
                 .manifest(plugin_id)
                 .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
-            let wasm_config = m.wasm.clone();
+            let wasm_config = m.wasm.clone().ok_or_else(|| PluginError::ReloadFailed {
+                plugin_id: plugin_id.to_string(),
+                reason: "hot-reload attempted on a core plugin — this should never happen"
+                    .to_string(),
+            })?;
             let lifecycle = m.lifecycle.clone();
             let pd = PluginData {
                 plugin_id: plugin_id.to_string(),

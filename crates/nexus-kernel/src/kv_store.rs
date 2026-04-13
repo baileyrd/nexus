@@ -88,7 +88,7 @@ impl SqliteKvStore {
     /// Get a value by key within a namespace.
     ///
     /// # Errors
-    /// Returns `KvError::BackendError` on SQLite failures.
+    /// Returns `KvError::BackendError` on `SQLite` failures.
     pub fn get(&self, namespace: &str, key: &str) -> Result<Option<Vec<u8>>, KvError> {
         let conn = self.conn.lock().map_err(|e| KvError::BackendError {
             reason: format!("lock poisoned: {e}"),
@@ -115,7 +115,7 @@ impl SqliteKvStore {
     /// Set a value by key within a namespace (upsert).
     ///
     /// # Errors
-    /// Returns `KvError::BackendError` on SQLite failures.
+    /// Returns `KvError::BackendError` on `SQLite` failures.
     pub fn set(&self, namespace: &str, key: &str, value: &[u8]) -> Result<(), KvError> {
         let conn = self.conn.lock().map_err(|e| KvError::BackendError {
             reason: format!("lock poisoned: {e}"),
@@ -137,7 +137,7 @@ impl SqliteKvStore {
     /// does not exist.
     ///
     /// # Errors
-    /// Returns `KvError::BackendError` on SQLite failures.
+    /// Returns `KvError::BackendError` on `SQLite` failures.
     pub fn delete(&self, namespace: &str, key: &str) -> Result<(), KvError> {
         let conn = self.conn.lock().map_err(|e| KvError::BackendError {
             reason: format!("lock poisoned: {e}"),
