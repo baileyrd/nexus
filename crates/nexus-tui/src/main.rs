@@ -3,13 +3,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 use anyhow::{Context, Result};
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, KeyEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::DefaultTerminal;
 
 mod app;
+mod input;
 mod ui;
 
 use app::TuiApp;
@@ -58,34 +59,8 @@ fn run(terminal: &mut DefaultTerminal, app: &mut TuiApp) -> Result<()> {
         terminal.draw(|frame| ui::render(frame, app))?;
 
         if event::poll(Duration::from_millis(16))? {
-            if let event::Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        event::KeyCode::Char('q') => {
-                            app.should_quit = true;
-                        }
-                        event::KeyCode::Up | event::KeyCode::Char('k') => {
-                            app.tree.move_up();
-                        }
-                        event::KeyCode::Down | event::KeyCode::Char('j') => {
-                            app.tree.move_down();
-                        }
-                        event::KeyCode::Enter => {
-                            let visible = app.visible_entries();
-                            let is_dir = visible
-                                .get(app.tree.selected)
-                                .map(|e| e.is_dir)
-                                .unwrap_or(false);
-                            if is_dir {
-                                app.toggle_dir();
-                            } else {
-                                let _ = app.open_selected_file();
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
+            let evt = event::read()?;
+            input::handle_event(app, evt)?;
         }
 
         if app.should_quit {
