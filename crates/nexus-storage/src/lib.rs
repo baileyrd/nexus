@@ -19,6 +19,7 @@ mod watcher;
 mod reconcile;
 mod tasks;
 mod graph;
+mod search_scope;
 
 pub use atomic::atomic_write;
 pub use error::StorageError;
@@ -28,6 +29,7 @@ pub use tasks::{ParsedTask, TaskRecord, TaskFilter, insert_tasks, query_tasks, t
 pub use index::{BlockRecord, FileFilter, FileMetadata, FileRecord, LinkRecord, RebuildStats, TagResult};
 pub use index::{insert_file, query_files, query_blocks, query_links, query_backlinks, query_tags, delete_file, soft_delete_file, file_by_path};
 pub use search::{SearchIndex, SearchResult};
+pub use search_scope::{ScopeFilter, parse_scoped_query};
 pub use reconcile::{ReconcileDelta, reconcile};
 pub use watcher::{relative_path, should_ignore, StorageEvent, Watcher};
 pub use graph::{KnowledgeGraph, BacklinkResult, OutgoingLink, UnresolvedLink, GraphStats, EdgeData};
@@ -503,11 +505,53 @@ impl StorageEngine {
 
     /// Search the Tantivy index for `query`, returning up to `limit` results.
     ///
+    /// Supports scope operators: `tag:NAME`, `path:PREFIX`, `prop:KEY:VALUE`.
+    /// Scopes are extracted from the query, Tantivy searches the remaining
+    /// text, and results are post-filtered via SQLite.
+    ///
     /// # Errors
     ///
-    /// Returns [`StorageError::Search`] on any Tantivy failure.
+    /// Returns [`StorageError`] on Tantivy or database failure.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, StorageError> {
-        self.search_index.search(query, limit)
+        let (text, filters) = search_scope::parse_scoped_query(query);
+
+        // Run Tantivy on the plain-text portion.
+        let results = if text.is_empty() {
+            // Scope-only query: return all blocks up to limit (unscored).
+            let conn = self.pool.get().map_err(|e| StorageError::Database(
+                rusqlite::Error::InvalidParameterName(e.to_string()),
+            ))?;
+            let mut stmt = conn.prepare(
+                "SELECT f.path, b.id, b.block_type, b.content
+                 FROM blocks b JOIN files f ON f.id = b.file_id
+                 WHERE f.is_deleted = 0
+                 ORDER BY f.path, b.start_line
+                 LIMIT ?1;"
+            )?;
+            let limit_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
+            let rows = stmt.query_map(rusqlite::params![limit_i64], |row| {
+                Ok(SearchResult {
+                    file_path: row.get(0)?,
+                    block_id: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+                    block_type: row.get(2)?,
+                    excerpt: String::new(),
+                    score: 0.0,
+                })
+            })?;
+            rows.filter_map(|r| r.ok()).collect()
+        } else {
+            self.search_index.search(&text, limit)?
+        };
+
+        // Post-filter with scopes if any.
+        if filters.is_empty() {
+            Ok(results)
+        } else {
+            let conn = self.pool.get().map_err(|e| StorageError::Database(
+                rusqlite::Error::InvalidParameterName(e.to_string()),
+            ))?;
+            search_scope::filter_results(&conn, results, &filters)
+        }
     }
 
     /// Rebuild the Tantivy search index from the current `SQLite` state.
