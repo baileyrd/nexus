@@ -388,6 +388,40 @@ impl StorageEngine {
         })
     }
 
+    // ── Tasks ─────────────────────────────────────────────────────────────
+
+    /// Query tasks with optional filters.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
+    pub fn query_tasks(&self, filter: &TaskFilter) -> Result<Vec<TaskRecord>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        tasks::query_tasks(&conn, filter)
+    }
+
+    /// Toggle a task's completion state in both the database and the source file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on database or I/O failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn toggle_task(&self, task_id: u64) -> Result<TaskRecord, StorageError> {
+        let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        let record = tasks::toggle_task(&conn, task_id)?;
+
+        // Write back to file
+        let abs_path = self.forge.root().join(&record.file_path);
+        tasks::toggle_task_in_file(&abs_path, record.line_number, record.completed)?;
+
+        Ok(record)
+    }
+
     // ── Search ────────────────────────────────────────────────────────────────
 
     /// Search the Tantivy index for `query`, returning up to `limit` results.
