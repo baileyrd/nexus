@@ -169,3 +169,90 @@ fn combined_markdown_features() {
     let link = pf.links.iter().find(|l| l.link_type == "wikilink").unwrap();
     assert_eq!(link.fragment, Some("^ref1".to_string()));
 }
+
+#[test]
+fn search_with_tag_scope() {
+    let (_dir, engine) = engine();
+
+    engine
+        .write_file("notes/rust.md", b"---\ntags:\n  - rust\n---\n# Rust Guide\n\nAsync programming in Rust.\n")
+        .unwrap();
+    engine
+        .write_file("notes/python.md", b"---\ntags:\n  - python\n---\n# Python Guide\n\nAsync programming in Python.\n")
+        .unwrap();
+
+    engine.rebuild_search_index().unwrap();
+
+    let all = engine.search("programming", 10).unwrap();
+    assert!(all.len() >= 2, "expected at least 2 results, got {}", all.len());
+
+    let scoped = engine.search("tag:rust programming", 10).unwrap();
+    assert_eq!(scoped.len(), 1, "expected 1 result for tag:rust, got {}", scoped.len());
+    assert_eq!(scoped[0].file_path, "notes/rust.md");
+}
+
+#[test]
+fn search_with_path_scope() {
+    let (_dir, engine) = engine();
+
+    engine
+        .write_file("notes/a.md", b"# Notes\n\nImportant content here.\n")
+        .unwrap();
+    engine
+        .write_file("docs/b.md", b"# Docs\n\nImportant content here.\n")
+        .unwrap();
+
+    engine.rebuild_search_index().unwrap();
+
+    let scoped = engine.search("path:notes/ important", 10).unwrap();
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(scoped[0].file_path, "notes/a.md");
+}
+
+#[test]
+fn search_with_prop_scope() {
+    let (_dir, engine) = engine();
+
+    engine
+        .write_file(
+            "notes/done.md",
+            b"---\nstatus: done\n---\n# Done Task\n\nCompleted work here.\n",
+        )
+        .unwrap();
+    engine
+        .write_file(
+            "notes/wip.md",
+            b"---\nstatus: wip\n---\n# WIP Task\n\nCompleted work here.\n",
+        )
+        .unwrap();
+
+    engine.rebuild_search_index().unwrap();
+
+    let scoped = engine.search("prop:status:done work", 10).unwrap();
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(scoped[0].file_path, "notes/done.md");
+}
+
+#[test]
+fn search_with_combined_scopes() {
+    let (_dir, engine) = engine();
+
+    engine
+        .write_file(
+            "notes/match.md",
+            b"---\ntags:\n  - rust\n---\n# Match\n\nAsync programming patterns.\n",
+        )
+        .unwrap();
+    engine
+        .write_file(
+            "docs/nomatch.md",
+            b"---\ntags:\n  - rust\n---\n# No Match\n\nAsync programming patterns.\n",
+        )
+        .unwrap();
+
+    engine.rebuild_search_index().unwrap();
+
+    let scoped = engine.search("tag:rust path:notes/ programming", 10).unwrap();
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(scoped[0].file_path, "notes/match.md");
+}
