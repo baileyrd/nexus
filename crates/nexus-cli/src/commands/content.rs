@@ -8,7 +8,8 @@ use crate::output::{print_list, print_success, OutputFormat};
 /// Create a new content node at `path`.
 pub fn create(app: &mut App, path: &str, content: Option<&str>, stdin: bool) -> Result<()> {
     let body: String = if let Some(text) = content {
-        text.to_string()
+        // Interpret escape sequences so users can pass newlines via --content "line1\nline2"
+        text.replace("\\n", "\n").replace("\\t", "\t")
     } else if stdin {
         let mut buf = String::new();
         std::io::stdin()
