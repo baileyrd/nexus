@@ -200,6 +200,124 @@ pub fn branch(app: &App, command: Option<crate::BranchCommand>) -> Result<()> {
     Ok(())
 }
 
+/// Fetch refs from a remote.
+pub fn fetch(app: &App, remote: &str) -> Result<()> {
+    let engine = open_engine(app)?;
+    engine.fetch(remote).map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!("Fetched from {remote}.");
+    Ok(())
+}
+
+/// Push a branch to a remote.
+pub fn push(app: &App, remote: &str, branch: Option<&str>) -> Result<()> {
+    let engine = open_engine(app)?;
+    let branch = match branch {
+        Some(b) => b.to_string(),
+        None => engine
+            .state()
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .branch
+            .ok_or_else(|| anyhow::anyhow!("detached HEAD — specify a branch"))?,
+    };
+    engine
+        .push(remote, &branch)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!("Pushed {branch} to {remote}.");
+    Ok(())
+}
+
+/// Pull from a remote (fetch + merge).
+pub fn pull(app: &App, remote: &str, branch: Option<&str>) -> Result<()> {
+    let engine = open_engine(app)?;
+    let branch = match branch {
+        Some(b) => b.to_string(),
+        None => engine
+            .state()
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .branch
+            .ok_or_else(|| anyhow::anyhow!("detached HEAD — specify a branch"))?,
+    };
+    let result = engine
+        .pull(remote, &branch)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if !result.conflicts.is_empty() {
+        println!("Pull completed with {} conflict(s):", result.conflicts.len());
+        for f in &result.conflicts {
+            println!("  C {f}");
+        }
+        println!("Resolve conflicts then commit, or run: nexus git merge --abort");
+    } else if let Some(hash) = &result.commit_hash {
+        let kind = if result.fast_forward { "fast-forward" } else { "merge" };
+        println!("Pulled {branch} from {remote} ({kind}, {hash}).");
+    } else {
+        println!("Already up to date.");
+    }
+    Ok(())
+}
+
+/// Merge a branch or abort an in-progress merge.
+pub fn merge(app: &App, branch: Option<&str>, abort: bool) -> Result<()> {
+    let engine = open_engine(app)?;
+
+    if abort {
+        engine.abort_merge().map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("Merge aborted.");
+        return Ok(());
+    }
+
+    let branch = branch.ok_or_else(|| anyhow::anyhow!("specify a branch to merge"))?;
+    let result = engine
+        .merge(branch)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if !result.conflicts.is_empty() {
+        println!("Merge produced {} conflict(s):", result.conflicts.len());
+        for f in &result.conflicts {
+            println!("  C {f}");
+        }
+        println!("Resolve conflicts then commit, or run: nexus git merge --abort");
+    } else if let Some(hash) = &result.commit_hash {
+        let kind = if result.fast_forward { "Fast-forward" } else { "Merge commit" };
+        println!("{kind}: {hash}");
+    } else {
+        println!("Already up to date.");
+    }
+    Ok(())
+}
+
+/// List files with unresolved conflicts.
+pub fn conflicts(app: &App) -> Result<()> {
+    let engine = open_engine(app)?;
+    let files = engine
+        .conflict_files()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    if files.is_empty() {
+        println!("No conflicts.");
+    } else {
+        for f in &files {
+            println!("  C {f}");
+        }
+    }
+    Ok(())
+}
+
+/// List configured remotes.
+pub fn remotes(app: &App) -> Result<()> {
+    let engine = open_engine(app)?;
+    let remotes = engine
+        .remotes()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    if remotes.is_empty() {
+        println!("No remotes configured.");
+    } else {
+        for r in &remotes {
+            println!("  {r}");
+        }
+    }
+    Ok(())
+}
+
 fn print_hunks(hunks: &[nexus_git::HunkDiff]) {
     for hunk in hunks {
         println!(

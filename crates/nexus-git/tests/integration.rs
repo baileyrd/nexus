@@ -255,3 +255,193 @@ fn unstage_all_reverts_index() {
     let new_s = statuses.iter().find(|s| s.path == Path::new("new.txt")).unwrap();
     assert_eq!(new_s.status, FileStatus::Untracked);
 }
+
+// ── Merge Tests ──────────────────────────────────────────────────────────────
+
+#[test]
+fn merge_fast_forward() {
+    let (dir, engine) = setup();
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    commit(dir.path(), "initial");
+
+    let main = engine.state().unwrap().branch.unwrap();
+
+    // Create feature branch, add a commit.
+    engine.create_branch("feature-ff").unwrap();
+    engine.switch_branch("feature-ff").unwrap();
+    fs::write(dir.path().join("feature.txt"), "feature").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("feature work").unwrap();
+
+    // Switch back to main and merge.
+    engine.switch_branch(&main).unwrap();
+    let result = engine.merge("feature-ff").unwrap();
+
+    assert!(result.fast_forward, "should be fast-forward");
+    assert!(result.conflicts.is_empty());
+    assert!(result.commit_hash.is_some());
+    assert!(dir.path().join("feature.txt").exists(), "feature.txt should exist after merge");
+}
+
+#[test]
+fn merge_with_commit() {
+    let (dir, engine) = setup();
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    commit(dir.path(), "initial");
+
+    let main = engine.state().unwrap().branch.unwrap();
+
+    // Create feature branch and commit.
+    engine.create_branch("feature-mc").unwrap();
+    engine.switch_branch("feature-mc").unwrap();
+    fs::write(dir.path().join("feature.txt"), "feature").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("feature commit").unwrap();
+
+    // Switch back to main, make a diverging commit.
+    engine.switch_branch(&main).unwrap();
+    fs::write(dir.path().join("main-only.txt"), "main").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("main commit").unwrap();
+
+    // Merge — should create a merge commit (not fast-forward).
+    let result = engine.merge("feature-mc").unwrap();
+    assert!(!result.fast_forward);
+    assert!(result.conflicts.is_empty());
+    assert!(result.commit_hash.is_some());
+
+    // Both files should exist.
+    assert!(dir.path().join("feature.txt").exists());
+    assert!(dir.path().join("main-only.txt").exists());
+}
+
+#[test]
+fn merge_with_conflicts() {
+    let (dir, engine) = setup();
+    fs::write(dir.path().join("shared.txt"), "original").unwrap();
+    commit(dir.path(), "initial");
+
+    let main = engine.state().unwrap().branch.unwrap();
+
+    // Feature branch modifies shared.txt.
+    engine.create_branch("feature-conflict").unwrap();
+    engine.switch_branch("feature-conflict").unwrap();
+    fs::write(dir.path().join("shared.txt"), "feature version").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("feature change").unwrap();
+
+    // Main also modifies shared.txt.
+    engine.switch_branch(&main).unwrap();
+    fs::write(dir.path().join("shared.txt"), "main version").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("main change").unwrap();
+
+    // Merge — should report conflicts.
+    let result = engine.merge("feature-conflict").unwrap();
+    assert!(!result.conflicts.is_empty(), "expected conflicts");
+    assert!(
+        result.conflicts.iter().any(|f| f == "shared.txt"),
+        "shared.txt should be conflicted, got: {:?}",
+        result.conflicts
+    );
+    assert!(result.commit_hash.is_none(), "should not auto-commit on conflict");
+
+    // conflict_files should also report the conflict.
+    let conflicts = engine.conflict_files().unwrap();
+    assert!(!conflicts.is_empty());
+}
+
+#[test]
+fn merge_abort_restores_state() {
+    let (dir, engine) = setup();
+    fs::write(dir.path().join("shared.txt"), "original").unwrap();
+    commit(dir.path(), "initial");
+
+    let main = engine.state().unwrap().branch.unwrap();
+
+    // Create conflicting branches.
+    engine.create_branch("feature-abort").unwrap();
+    engine.switch_branch("feature-abort").unwrap();
+    fs::write(dir.path().join("shared.txt"), "feature").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("feature").unwrap();
+
+    engine.switch_branch(&main).unwrap();
+    fs::write(dir.path().join("shared.txt"), "main").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("main").unwrap();
+
+    // Start merge (produces conflicts).
+    let result = engine.merge("feature-abort").unwrap();
+    assert!(!result.conflicts.is_empty());
+
+    // Abort.
+    engine.abort_merge().unwrap();
+
+    // Should be back to clean state.
+    let state = engine.state().unwrap();
+    assert_eq!(state.repo_state, nexus_git::RepoState::Clean);
+    // shared.txt should have main's content.
+    let content = fs::read_to_string(dir.path().join("shared.txt")).unwrap();
+    assert_eq!(content, "main");
+}
+
+#[test]
+fn push_pull_local_bare_repo() {
+    // Set up a bare repo as "remote".
+    let bare_dir = tempfile::tempdir().unwrap();
+    git2::Repository::init_bare(bare_dir.path()).unwrap();
+
+    // Set up a working repo and add the bare as a remote.
+    let (dir, engine) = setup();
+    {
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        repo.remote("origin", &format!("file://{}", bare_dir.path().display()))
+            .unwrap();
+    }
+
+    // Create a commit and push.
+    fs::write(dir.path().join("file.txt"), "content").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("initial").unwrap();
+
+    let main = engine.state().unwrap().branch.unwrap();
+    engine.push("origin", &main).unwrap();
+
+    // Clone into a second working copy to verify push worked.
+    let clone_dir = tempfile::tempdir().unwrap();
+    git2::Repository::clone(
+        &format!("file://{}", bare_dir.path().display()),
+        clone_dir.path(),
+    )
+    .unwrap();
+    assert!(
+        clone_dir.path().join("file.txt").exists(),
+        "cloned repo should have file.txt"
+    );
+
+    // Make a commit in the clone and push.
+    {
+        let clone_repo = git2::Repository::open(clone_dir.path()).unwrap();
+        let mut config = clone_repo.config().unwrap();
+        config.set_str("user.name", "Clone User").unwrap();
+        config.set_str("user.email", "clone@test.com").unwrap();
+    }
+    fs::write(clone_dir.path().join("new.txt"), "from clone").unwrap();
+    commit(clone_dir.path(), "clone commit");
+    {
+        let clone_repo = git2::Repository::open(clone_dir.path()).unwrap();
+        let mut remote = clone_repo.find_remote("origin").unwrap();
+        remote
+            .push(&[&format!("refs/heads/{main}:refs/heads/{main}")], None)
+            .unwrap();
+    }
+
+    // Pull in original repo.
+    let result = engine.pull("origin", &main).unwrap();
+    assert!(result.conflicts.is_empty());
+    assert!(
+        dir.path().join("new.txt").exists(),
+        "pulled file should exist"
+    );
+}

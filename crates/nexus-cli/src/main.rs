@@ -541,6 +541,40 @@ enum GitCommand {
         #[command(subcommand)]
         command: Option<BranchCommand>,
     },
+    /// Fetch refs from a remote
+    Fetch {
+        /// Remote name (default: origin)
+        #[arg(default_value = "origin")]
+        remote: String,
+    },
+    /// Push a branch to a remote
+    Push {
+        /// Remote name (default: origin)
+        #[arg(default_value = "origin")]
+        remote: String,
+        /// Branch to push (default: current branch)
+        branch: Option<String>,
+    },
+    /// Pull from a remote (fetch + merge)
+    Pull {
+        /// Remote name (default: origin)
+        #[arg(default_value = "origin")]
+        remote: String,
+        /// Branch to pull (default: current branch)
+        branch: Option<String>,
+    },
+    /// Merge a branch into the current branch
+    Merge {
+        /// Branch name to merge
+        branch: Option<String>,
+        /// Abort an in-progress merge
+        #[arg(long)]
+        abort: bool,
+    },
+    /// List files with unresolved merge conflicts
+    Conflicts,
+    /// List configured remotes
+    Remotes,
 }
 
 /// Branch subcommands.
@@ -738,6 +772,12 @@ fn main() {
             GitCommand::Unstage { path, all } => commands::git::unstage(&app, path.as_deref(), all),
             GitCommand::Commit { message } => commands::git::commit(&app, &message),
             GitCommand::Branch { command } => commands::git::branch(&app, command),
+            GitCommand::Fetch { remote } => commands::git::fetch(&app, &remote),
+            GitCommand::Push { remote, branch } => commands::git::push(&app, &remote, branch.as_deref()),
+            GitCommand::Pull { remote, branch } => commands::git::pull(&app, &remote, branch.as_deref()),
+            GitCommand::Merge { branch, abort } => commands::git::merge(&app, branch.as_deref(), abort),
+            GitCommand::Conflicts => commands::git::conflicts(&app),
+            GitCommand::Remotes => commands::git::remotes(&app),
         },
         Commands::Run(_) => stubs::not_implemented("run"),
     };

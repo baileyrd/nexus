@@ -14,6 +14,14 @@ pub enum GitError {
     /// File not found in the repository.
     #[error("file not found in repository: {0}")]
     FileNotFound(String),
+
+    /// Working tree has uncommitted changes.
+    #[error("working tree is dirty — commit or stash changes first")]
+    DirtyWorkTree,
+
+    /// Merge produced conflicts.
+    #[error("merge conflicts in {0} file(s)")]
+    MergeConflict(usize),
 }
 
 #[cfg(test)]

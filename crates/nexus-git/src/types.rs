@@ -140,6 +140,17 @@ pub struct LogEntry {
     pub parents: Vec<String>,
 }
 
+/// Result of a merge operation.
+#[derive(Debug, Clone)]
+pub struct MergeResult {
+    /// Whether the merge was a fast-forward.
+    pub fast_forward: bool,
+    /// Files with unresolved conflicts (empty if none).
+    pub conflicts: Vec<String>,
+    /// Commit hash of the merge commit (None if conflicts or up-to-date).
+    pub commit_hash: Option<String>,
+}
+
 /// Information about a local branch.
 #[derive(Debug, Clone)]
 pub struct BranchInfo {

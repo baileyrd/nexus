@@ -456,6 +456,182 @@ impl GitEngine {
         Ok(())
     }
 
+    // ── Level 2: Remote Operations ─────────────────────────────────────────
+
+    /// List configured remote names.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn remotes(&self) -> Result<Vec<String>, GitError> {
+        let remotes = self.repo.remotes()?;
+        Ok(remotes.iter().filter_map(|r| r.map(String::from)).collect())
+    }
+
+    /// Fetch all refs from a remote.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 or network failure.
+    pub fn fetch(&self, remote_name: &str) -> Result<(), GitError> {
+        let mut remote = self.repo.find_remote(remote_name)?;
+        let mut fo = git2::FetchOptions::new();
+        fo.remote_callbacks(make_callbacks());
+        let refspecs: &[&str] = &[];
+        remote.fetch(refspecs, Some(&mut fo), None)?;
+        Ok(())
+    }
+
+    /// Push a branch to a remote.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 or network failure.
+    pub fn push(&self, remote_name: &str, branch: &str) -> Result<(), GitError> {
+        let mut remote = self.repo.find_remote(remote_name)?;
+        let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+        let mut po = git2::PushOptions::new();
+        po.remote_callbacks(make_callbacks());
+        remote.push(&[&refspec], Some(&mut po))?;
+        Ok(())
+    }
+
+    /// Pull from a remote: fetch + merge the tracking branch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on network failure, merge conflict, or libgit2 error.
+    pub fn pull(&self, remote_name: &str, branch: &str) -> Result<MergeResult, GitError> {
+        self.fetch(remote_name)?;
+        let remote_ref = format!("{remote_name}/{branch}");
+        self.merge(&remote_ref)
+    }
+
+    // ── Level 2: Merge Operations ───────────────────────────────────────────
+
+    /// Merge a branch (local or remote-tracking) into HEAD.
+    ///
+    /// Returns a [`MergeResult`] describing the outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn merge(&self, branch_name: &str) -> Result<MergeResult, GitError> {
+        // Resolve the branch to an annotated commit.
+        let annotated = self.repo.find_reference(&format!("refs/heads/{branch_name}"))
+            .or_else(|_| self.repo.find_reference(&format!("refs/remotes/{branch_name}")))
+            .and_then(|reference| self.repo.reference_to_annotated_commit(&reference))?;
+
+        let (analysis, _preference) = self.repo.merge_analysis(&[&annotated])?;
+
+        if analysis.is_up_to_date() {
+            return Ok(MergeResult {
+                fast_forward: false,
+                conflicts: Vec::new(),
+                commit_hash: None,
+            });
+        }
+
+        if analysis.is_fast_forward() {
+            // Fast-forward: just advance HEAD.
+            let target_oid = annotated.id();
+            let mut head_ref = self.repo.head()?;
+            head_ref.set_target(target_oid, &format!("fast-forward to {branch_name}"))?;
+            self.repo.checkout_head(Some(
+                git2::build::CheckoutBuilder::new().force(),
+            ))?;
+            return Ok(MergeResult {
+                fast_forward: true,
+                conflicts: Vec::new(),
+                commit_hash: Some(format!("{}", &target_oid.to_string()[..7])),
+            });
+        }
+
+        // Normal merge.
+        self.repo.merge(&[&annotated], None, None)?;
+
+        // Check for conflicts.
+        let index = self.repo.index()?;
+        if index.has_conflicts() {
+            let conflicts: Vec<String> = index
+                .conflicts()?
+                .filter_map(|c| c.ok())
+                .filter_map(|c| {
+                    c.our
+                        .as_ref()
+                        .or(c.their.as_ref())
+                        .and_then(|e| String::from_utf8(e.path.clone()).ok())
+                })
+                .collect();
+            return Ok(MergeResult {
+                fast_forward: false,
+                conflicts,
+                commit_hash: None,
+            });
+        }
+
+        // No conflicts — create merge commit.
+        let mut index = self.repo.index()?;
+        let tree_id = index.write_tree()?;
+        let tree = self.repo.find_tree(tree_id)?;
+        let sig = self.repo.signature()?;
+        let head_commit = self.repo.head()?.peel_to_commit()?;
+        let merge_commit = self.repo.find_commit(annotated.id())?;
+
+        let message = format!("Merge branch '{branch_name}'");
+        let oid = self.repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            &message,
+            &tree,
+            &[&head_commit, &merge_commit],
+        )?;
+
+        self.repo.cleanup_state()?;
+
+        Ok(MergeResult {
+            fast_forward: false,
+            conflicts: Vec::new(),
+            commit_hash: Some(format!("{}", &oid.to_string()[..7])),
+        })
+    }
+
+    /// List files with unresolved merge conflicts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn conflict_files(&self) -> Result<Vec<String>, GitError> {
+        let index = self.repo.index()?;
+        if !index.has_conflicts() {
+            return Ok(Vec::new());
+        }
+        let files: Vec<String> = index
+            .conflicts()?
+            .filter_map(|c| c.ok())
+            .filter_map(|c| {
+                c.our
+                    .as_ref()
+                    .or(c.their.as_ref())
+                    .and_then(|e| String::from_utf8(e.path.clone()).ok())
+            })
+            .collect();
+        Ok(files)
+    }
+
+    /// Abort an in-progress merge, restoring the pre-merge state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn abort_merge(&self) -> Result<(), GitError> {
+        let head = self.repo.head()?.peel_to_commit()?;
+        self.repo.reset(head.as_object(), git2::ResetType::Hard, None)?;
+        self.repo.cleanup_state()?;
+        Ok(())
+    }
+
     /// Get the HEAD tree, or `None` for an empty repo.
     fn head_tree(&self) -> Result<Option<git2::Tree<'_>>, GitError> {
         match self.repo.head() {
@@ -469,6 +645,37 @@ impl GitEngine {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+fn make_callbacks() -> git2::RemoteCallbacks<'static> {
+    let mut callbacks = git2::RemoteCallbacks::new();
+    callbacks.credentials(|_url, username_from_url, allowed_types| {
+        let username = username_from_url.unwrap_or("git");
+        // Try SSH agent first.
+        if allowed_types.contains(git2::CredentialType::SSH_KEY) {
+            if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
+                return Ok(cred);
+            }
+            // Try default SSH keys.
+            if let Some(home) = std::env::var_os("HOME") {
+                let home = std::path::PathBuf::from(home);
+                for key_name in &["id_ed25519", "id_rsa"] {
+                    let key_path = home.join(".ssh").join(key_name);
+                    if key_path.exists() {
+                        if let Ok(cred) = git2::Cred::ssh_key(username, None, &key_path, None) {
+                            return Ok(cred);
+                        }
+                    }
+                }
+            }
+        }
+        // Try default credentials (for HTTPS).
+        if allowed_types.contains(git2::CredentialType::DEFAULT) {
+            return git2::Cred::default();
+        }
+        Err(git2::Error::from_str("no credentials available"))
+    });
+    callbacks
+}
 
 fn map_status(s: git2::Status) -> FileStatus {
     if s.is_conflicted() {
