@@ -67,7 +67,9 @@
       "Bash(/usr/bin/grep -E \"^\\(test result|FAILED|running\\)\")",
       "Bash(/usr/bin/grep -E \"^error\")",
       "mcp__remind-me__remind_me_auto_capture",
-      "mcp__remind-me__remind_me_reindex"
+      "mcp__remind-me__remind_me_reindex",
+      "Bash(xargs -I {} basename {})",
+      "Bash(sed 's/ `.*//')"
     ]
   }
 }
