@@ -5,7 +5,8 @@ mod stubs;
 
 use std::path::PathBuf;
 
-use clap::{ArgAction, Parser, Subcommand};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 
 // ---------------------------------------------------------------------------
 // Top-level CLI
@@ -18,6 +19,10 @@ struct Cli {
     #[arg(long, global = true, env = "NEXUS_FORGE_PATH")]
     forge_path: Option<PathBuf>,
 
+    /// Path to a custom config file
+    #[arg(long, global = true, env = "NEXUS_CONFIG")]
+    config: Option<PathBuf>,
+
     /// Output format: text, json, jsonl, table
     #[arg(long, global = true, default_value = "text")]
     format: String,
@@ -25,6 +30,10 @@ struct Cli {
     /// Increase verbosity (repeat for more: -v, -vv, -vvv)
     #[arg(short, long, global = true, action = ArgAction::Count)]
     verbose: u8,
+
+    /// Suppress non-error output
+    #[arg(short, long, global = true)]
+    quiet: bool,
 
     /// Disable color output
     #[arg(long, global = true)]
@@ -79,6 +88,12 @@ enum Commands {
     Git(GitArgs),
     /// Run a script or task (coming soon)
     Run(StubArgs),
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +316,24 @@ enum PluginCommand {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Enable a plugin
+    Enable {
+        /// Plugin identifier
+        plugin_id: String,
+    },
+    /// Disable a plugin
+    Disable {
+        /// Plugin identifier
+        plugin_id: String,
+    },
+    /// View or update plugin settings
+    Settings {
+        /// Plugin identifier
+        plugin_id: String,
+        /// New settings as JSON (omit to show current settings)
+        #[arg(long)]
+        set: Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +365,7 @@ enum LogsCommand {
         #[arg(short, long, default_value = "info")]
         level: String,
         /// Number of historical lines to show before streaming
-        #[arg(short, long, default_value_t = 50)]
+        #[arg(short = 'n', long, default_value_t = 50)]
         lines: usize,
     },
     /// Show logs for a specific date (YYYY-MM-DD)
@@ -643,6 +676,14 @@ fn main() {
 
     let format = output::OutputFormat::from_str(&cli.format);
 
+    // --quiet suppresses non-error output (wired into output helpers in
+    // a future milestone; accepted here so scripts can pass it today).
+    let _quiet = cli.quiet;
+
+    // --config path is accepted and forwarded to the kernel config loader
+    // (wired in a future milestone when the config subsystem is complete).
+    let _config_path = cli.config;
+
     // Initialise tracing at the requested verbosity level.
     let level = match cli.verbose {
         0 => tracing::Level::WARN,
@@ -710,6 +751,15 @@ fn main() {
                     Some(&author),
                     output.as_deref(),
                 )
+            }
+            PluginCommand::Enable { plugin_id } => {
+                commands::plugin::enable(&mut app, &plugin_id)
+            }
+            PluginCommand::Disable { plugin_id } => {
+                commands::plugin::disable(&mut app, &plugin_id)
+            }
+            PluginCommand::Settings { plugin_id, set } => {
+                commands::plugin::settings(&mut app, &plugin_id, set.as_deref())
             }
         },
 
@@ -795,6 +845,12 @@ fn main() {
             }
         },
         Commands::Run(_) => stubs::not_implemented("run"),
+
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            generate(shell, &mut cmd, "nexus", &mut std::io::stdout());
+            Ok(())
+        }
     };
 
     if let Err(err) = result {

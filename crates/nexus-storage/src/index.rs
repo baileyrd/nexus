@@ -418,6 +418,87 @@ pub fn file_by_path(conn: &Connection, path: &str) -> Result<Option<FileRecord>,
     }
 }
 
+// ── JSX component operations ─────────────────────────────────────────────────
+
+/// A row from the `jsx_components` table.
+#[derive(Debug, Clone)]
+pub struct JsxRecord {
+    /// Primary key.
+    pub id: u64,
+    /// Foreign key to the file.
+    pub file_id: u64,
+    /// Component name (e.g. `"Chart"`).
+    pub name: String,
+    /// Raw props as a JSON string.
+    pub props_json: Option<String>,
+    /// 1-based line number in the source file.
+    pub line_number: Option<u32>,
+    /// Whether the tag is self-closing.
+    pub self_closing: bool,
+    /// Unix timestamp of when the record was created.
+    pub created_at: i64,
+}
+
+/// Insert a batch of JSX components for a given file.
+///
+/// # Errors
+///
+/// Returns [`StorageError::Database`] on any `SQLite` failure.
+pub fn insert_jsx_components(
+    conn: &Connection,
+    file_id: u64,
+    components: &[crate::mdx::ParsedJsxComponent],
+) -> Result<(), StorageError> {
+    let now = now_unix();
+    for comp in components {
+        conn.execute(
+            "INSERT INTO jsx_components (file_id, name, props_json, line_number, self_closing, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
+            params![
+                file_id.cast_signed(),
+                comp.name,
+                comp.props_json,
+                comp.line_number,
+                comp.self_closing,
+                now,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Query all JSX components belonging to a file.
+///
+/// # Errors
+///
+/// Returns [`StorageError::Database`] on any `SQLite` failure.
+pub fn query_jsx_components(
+    conn: &Connection,
+    file_id: u64,
+) -> Result<Vec<JsxRecord>, StorageError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, file_id, name, props_json, line_number, self_closing, created_at
+         FROM jsx_components WHERE file_id = ?1 ORDER BY line_number;",
+    )?;
+    let rows = stmt.query_map(params![file_id.cast_signed()], |row| {
+        Ok(JsxRecord {
+            id: u64::try_from(row.get::<_, i64>(0)?).unwrap_or(0),
+            file_id: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+            name: row.get(2)?,
+            props_json: row.get(3)?,
+            line_number: row.get::<_, Option<u32>>(4)?,
+            self_closing: row.get::<_, bool>(5)?,
+            created_at: row.get(6)?,
+        })
+    })?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row?);
+    }
+    Ok(results)
+}
+
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 /// Attempt to resolve a link target to an existing file ID.

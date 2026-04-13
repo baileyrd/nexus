@@ -102,16 +102,15 @@ fn manifest_parse_and_validate_roundtrip() {
 
 #[test]
 fn wasm_sandbox_rejects_invalid_bytes() {
-    use nexus_kernel::CapabilitySet;
-
     let config = WasmConfig {
         module: "test.wasm".to_string(),
         memory_mb: 16,
         fuel: 10_000_000,
+        max_execution_ms: 5_000,
     };
     let pd = PluginData {
         plugin_id: "com.smoke.invalid".to_string(),
-        capabilities: CapabilitySet::empty(),
+        ..Default::default()
     };
     let result = WasmSandbox::new(b"invalid", &config, pd);
     assert!(

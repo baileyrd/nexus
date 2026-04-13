@@ -90,6 +90,7 @@ tempfile = "3"
 
 # CLI
 clap = { version = "4.6", features = ["derive", "env"] }
+clap_complete = "4.5"
 anyhow = "1"
 comfy-table = "7"
 ctrlc = "3.5"

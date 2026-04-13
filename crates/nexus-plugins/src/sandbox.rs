@@ -1,9 +1,12 @@
 //! WASM sandbox: wraps a single plugin's wasmtime Engine/Module/Store/Instance
 //! and provides the `dispatch` call used by all higher-level plugin code.
 
-use wasmtime::{Engine, Instance, Linker, Module, Store, Trap};
+use std::path::PathBuf;
+use std::sync::Arc;
 
-use nexus_kernel::CapabilitySet;
+use wasmtime::{Engine, Instance, Linker, Module, Store, StoreLimitsBuilder, Trap};
+
+use nexus_kernel::{CapabilitySet, EventBus, SqliteKvStore};
 
 use crate::{PluginError, WasmConfig};
 
@@ -18,6 +21,31 @@ pub struct PluginData {
     pub plugin_id: String,
     /// Capabilities that were granted to this plugin at load time.
     pub capabilities: CapabilitySet,
+    /// Kernel KV store (injected by kernel at load time). `None` in test
+    /// sandboxes that don't need storage.
+    pub kv: Option<Arc<SqliteKvStore>>,
+    /// Kernel event bus (injected by kernel at load time). `None` in test
+    /// sandboxes.
+    pub event_bus: Option<Arc<EventBus>>,
+    /// Forge root path used to confine file I/O from host functions.
+    pub forge_root: PathBuf,
+    /// wasmtime resource limiter — enforces `memory_mb` cap.
+    /// [`WasmSandbox::new`] overwrites this with the config-derived limit;
+    /// callers may supply any placeholder (e.g. `StoreLimitsBuilder::new().build()`).
+    pub limits: wasmtime::StoreLimits,
+}
+
+impl Default for PluginData {
+    fn default() -> Self {
+        Self {
+            plugin_id: String::new(),
+            capabilities: CapabilitySet::empty(),
+            kv: None,
+            event_bus: None,
+            forge_root: PathBuf::new(),
+            limits: StoreLimitsBuilder::new().build(),
+        }
+    }
 }
 
 // ─── WasmSandbox ─────────────────────────────────────────────────────────────
@@ -76,6 +104,10 @@ impl WasmSandbox {
         })?;
 
         let mut store = Store::new(&engine, plugin_data);
+        store.data_mut().limits = StoreLimitsBuilder::new()
+            .memory_size(config.memory_mb as usize * 1024 * 1024)
+            .build();
+        store.limiter(|data| &mut data.limits);
 
         if config.fuel > 0 {
             store
@@ -232,6 +264,61 @@ impl WasmSandbox {
             .map_err(|e| to_lifecycle_error(e, "on_stop"))
     }
 
+    /// Call the plugin's `on_load` lifecycle hook (handler id 3).
+    ///
+    /// # Errors
+    /// Propagates errors from [`dispatch`](WasmSandbox::dispatch), remapped to
+    /// [`PluginError::LifecycleError`].
+    pub fn call_on_load(&mut self) -> Result<(), PluginError> {
+        self.dispatch(3, &serde_json::json!({}))
+            .map(|_| ())
+            .map_err(|e| to_lifecycle_error(e, "on_load"))
+    }
+
+    /// Call the plugin's `on_enable` lifecycle hook (handler id 4).
+    ///
+    /// # Errors
+    /// Propagates errors from [`dispatch`](WasmSandbox::dispatch), remapped to
+    /// [`PluginError::LifecycleError`].
+    pub fn call_on_enable(&mut self) -> Result<(), PluginError> {
+        self.dispatch(4, &serde_json::json!({}))
+            .map(|_| ())
+            .map_err(|e| to_lifecycle_error(e, "on_enable"))
+    }
+
+    /// Call the plugin's `on_disable` lifecycle hook (handler id 5).
+    ///
+    /// # Errors
+    /// Propagates errors from [`dispatch`](WasmSandbox::dispatch), remapped to
+    /// [`PluginError::LifecycleError`].
+    pub fn call_on_disable(&mut self) -> Result<(), PluginError> {
+        self.dispatch(5, &serde_json::json!({}))
+            .map(|_| ())
+            .map_err(|e| to_lifecycle_error(e, "on_disable"))
+    }
+
+    /// Call the plugin's `on_unload` lifecycle hook (handler id 6).
+    ///
+    /// # Errors
+    /// Propagates errors from [`dispatch`](WasmSandbox::dispatch), remapped to
+    /// [`PluginError::LifecycleError`].
+    pub fn call_on_unload(&mut self) -> Result<(), PluginError> {
+        self.dispatch(6, &serde_json::json!({}))
+            .map(|_| ())
+            .map_err(|e| to_lifecycle_error(e, "on_unload"))
+    }
+
+    /// Call the plugin's `on_settings_changed` lifecycle hook (handler id 7).
+    ///
+    /// # Errors
+    /// Propagates errors from [`dispatch`](WasmSandbox::dispatch), remapped to
+    /// [`PluginError::LifecycleError`].
+    pub fn call_on_settings_changed(&mut self, settings: &serde_json::Value) -> Result<(), PluginError> {
+        self.dispatch(7, settings)
+            .map(|_| ())
+            .map_err(|e| to_lifecycle_error(e, "on_settings_changed"))
+    }
+
     /// Return an immutable reference to the [`PluginData`] stored inside the
     /// wasmtime [`Store`].
     #[must_use]
@@ -290,6 +377,7 @@ mod tests {
         let pd = PluginData {
             plugin_id: "com.test.plugin".to_string(),
             capabilities: CapabilitySet::empty(),
+            ..Default::default()
         };
         assert_eq!(pd.plugin_id, "com.test.plugin");
         // CapabilitySet::empty() has no capabilities granted.
@@ -302,10 +390,11 @@ mod tests {
             module: "test.wasm".to_string(),
             memory_mb: 16,
             fuel: 10_000_000,
+            max_execution_ms: 5_000,
         };
         let pd = PluginData {
             plugin_id: "com.test.invalid".to_string(),
-            capabilities: CapabilitySet::empty(),
+            ..Default::default()
         };
         let result = WasmSandbox::new(b"not valid wasm", &config, pd);
         assert!(
@@ -327,13 +416,14 @@ mod tests {
             module: "test.wasm".to_string(),
             memory_mb: 16,
             fuel: 10_000_000,
+            max_execution_ms: 5_000,
         }
     }
 
     fn test_plugin_data() -> PluginData {
         PluginData {
             plugin_id: "com.test.minimal".to_string(),
-            capabilities: CapabilitySet::empty(),
+            ..Default::default()
         }
     }
 

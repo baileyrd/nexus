@@ -1,6 +1,6 @@
-//! PRD 06 smoke tests — block refs, callouts, tasks, alias resolution.
+//! PRD 06 smoke tests — block refs, callouts, tasks, alias resolution, MDX.
 
-use nexus_storage::{parse_markdown, FileFilter, StorageEngine, TaskFilter};
+use nexus_storage::{parse_markdown, parse_mdx, FileFilter, StorageEngine, TaskFilter};
 
 fn engine() -> (tempfile::TempDir, StorageEngine) {
     let dir = tempfile::tempdir().unwrap();
@@ -282,4 +282,103 @@ fn daily_note_template_is_indexed() {
 
     // Verify file exists
     assert!(engine.file_exists("notes/daily/2026-04-13.md").unwrap());
+}
+
+// ── MDX / JSX tests ─────────────────────────────────────────────────────────
+
+#[test]
+fn mdx_parse_extracts_components() {
+    let mdx = r#"# Interactive Guide
+
+<Chart data={[1,2,3]} type="bar" />
+
+Some explanation text.
+
+<Alert type="warning">
+Watch out for this!
+</Alert>
+
+Final paragraph.
+"#;
+    let result = parse_mdx(mdx).unwrap();
+    assert_eq!(result.components.len(), 2);
+    assert_eq!(result.components[0].name, "Chart");
+    assert!(result.components[0].self_closing);
+    assert_eq!(result.components[1].name, "Alert");
+    assert!(!result.components[1].self_closing);
+
+    // Markdown blocks still parsed
+    let blocks = &result.parsed_file.blocks;
+    assert!(blocks.iter().any(|b| b.content == "Interactive Guide"));
+    assert!(blocks.iter().any(|b| b.content == "Some explanation text."));
+    assert!(blocks.iter().any(|b| b.content == "Final paragraph."));
+}
+
+#[test]
+fn mdx_write_file_persists_components() {
+    let (_dir, engine) = engine();
+    let content = b"# Title\n\n<Widget count={42} />\n\n<Panel>\nContent\n</Panel>\n";
+    engine.write_file("notes/guide.mdx", content).unwrap();
+
+    // File indexed as "mdx" type
+    let files = engine.query_files(&FileFilter::default()).unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].file_type, "mdx");
+
+    // JSX components persisted
+    let jsx = nexus_storage::query_jsx_components(
+        &engine.pool_connection().unwrap(),
+        files[0].id,
+    )
+    .unwrap();
+    assert_eq!(jsx.len(), 2);
+    assert_eq!(jsx[0].name, "Widget");
+    assert!(jsx[0].self_closing);
+    assert_eq!(jsx[1].name, "Panel");
+    assert!(!jsx[1].self_closing);
+}
+
+#[test]
+fn mdx_wikilinks_and_tags_extracted() {
+    let (_dir, engine) = engine();
+    let content = b"See [[other-note]] #design\n\n<Chart />\n";
+    engine.write_file("notes/linked.mdx", content).unwrap();
+
+    // Wikilinks work
+    let links = engine.outgoing_links("notes/linked.mdx").unwrap();
+    assert!(links.iter().any(|l| l.target_path == "other-note"));
+
+    // Tags work
+    let tags = engine.query_tags("design").unwrap();
+    assert_eq!(tags.len(), 1);
+}
+
+#[test]
+fn mdx_rewrite_replaces_components() {
+    let (_dir, engine) = engine();
+
+    // First write
+    engine
+        .write_file("notes/comp.mdx", b"<Alpha />\n<Beta />\n")
+        .unwrap();
+    let files = engine.query_files(&FileFilter::default()).unwrap();
+    let jsx1 = nexus_storage::query_jsx_components(
+        &engine.pool_connection().unwrap(),
+        files[0].id,
+    )
+    .unwrap();
+    assert_eq!(jsx1.len(), 2);
+
+    // Rewrite with different components
+    engine
+        .write_file("notes/comp.mdx", b"<Gamma />\n")
+        .unwrap();
+    let files2 = engine.query_files(&FileFilter::default()).unwrap();
+    let jsx2 = nexus_storage::query_jsx_components(
+        &engine.pool_connection().unwrap(),
+        files2[0].id,
+    )
+    .unwrap();
+    assert_eq!(jsx2.len(), 1);
+    assert_eq!(jsx2[0].name, "Gamma");
 }

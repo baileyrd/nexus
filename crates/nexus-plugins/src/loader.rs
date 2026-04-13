@@ -1,10 +1,16 @@
 //! Plugin loader: scans a directory for plugins, loads WASM sandboxes,
-//! registers CLI/IPC dispatch tables, and manages plugin lifecycle.
+//! registers CLI/IPC dispatch tables, manages plugin lifecycle, and
+//! dispatches kernel events to subscriber plugins.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use nexus_kernel::{Capability, CapabilitySet, PluginInfo, PluginStatus, TrustLevel};
+
+use nexus_kernel::{
+    Capability, CapabilitySet, EventBus, EventFilter, EventSubscription,
+    PluginInfo, PluginStatus, TrustLevel,
+};
 
 use crate::manifest::{self, PluginManifest};
 use crate::sandbox::{PluginData, WasmSandbox};
@@ -17,8 +23,14 @@ struct PluginRegistrations {
     cli_subcommands: Vec<String>,
     #[allow(dead_code)]
     ipc_commands: Vec<String>,
-    #[allow(dead_code)]
-    event_subscriptions: Vec<String>,
+}
+
+/// A live event subscription wired to a WASM plugin handler.
+struct PluginEventSub {
+    /// WASM handler invoked when a matching event arrives.
+    handler_id: u32,
+    /// Live subscription handle (dropped → auto-unsubscribe).
+    subscription: EventSubscription,
 }
 
 struct LoadedPlugin {
@@ -27,6 +39,8 @@ struct LoadedPlugin {
     status: PluginStatus,
     plugin_dir: PathBuf,
     registrations: PluginRegistrations,
+    /// Active event subscriptions for this plugin.
+    event_subs: Vec<PluginEventSub>,
 }
 
 // ─── PluginLoader ─────────────────────────────────────────────────────────────
@@ -41,6 +55,10 @@ pub struct PluginLoader {
     /// Maps `subcommand_id` → `plugin_id`
     cli_registry: HashMap<String, String>,
     settings: SettingsManager,
+    /// Optional reference to the kernel event bus; set via [`set_event_bus`].
+    ///
+    /// [`set_event_bus`]: PluginLoader::set_event_bus
+    event_bus: Option<Arc<EventBus>>,
 }
 
 impl PluginLoader {
@@ -55,7 +73,17 @@ impl PluginLoader {
             loaded: HashMap::new(),
             cli_registry: HashMap::new(),
             settings: SettingsManager::new(),
+            event_bus: None,
         }
+    }
+
+    /// Inject the kernel event bus.
+    ///
+    /// Must be called before loading plugins that declare event subscriptions.
+    /// Already-loaded plugins will not retroactively subscribe; reload them to
+    /// pick up the new bus.
+    pub fn set_event_bus(&mut self, bus: Arc<EventBus>) {
+        self.event_bus = Some(bus);
     }
 
     /// Walk `plugins_dir` and return the paths of subdirectories that contain
@@ -129,12 +157,17 @@ impl PluginLoader {
         let plugin_data = PluginData {
             plugin_id: plugin_id.clone(),
             capabilities: capabilities.clone(),
+            forge_root: plugin_dir.to_path_buf(),
+            ..Default::default()
         };
 
         // Step 7: Create WasmSandbox
         let mut sandbox = WasmSandbox::new(&wasm_bytes, &manifest.wasm, plugin_data)?;
 
         // Step 8: Call lifecycle hooks
+        if manifest.lifecycle.on_load {
+            sandbox.call_on_load()?;
+        }
         if manifest.lifecycle.on_init {
             sandbox.call_on_init()?;
         }
@@ -161,19 +194,28 @@ impl PluginLoader {
             registered_cli.push(sub.id.clone());
         }
 
-        // Collect IPC and event registrations
+        // Collect IPC registrations
         let registered_ipc: Vec<String> = manifest
             .registrations
             .ipc_commands
             .iter()
             .map(|r| r.id.clone())
             .collect();
-        let registered_events: Vec<String> = manifest
-            .registrations
-            .event_subscribers
-            .iter()
-            .map(|r| r.id.clone())
-            .collect();
+
+        // Wire event subscriptions to the kernel bus (if available).
+        let event_subs: Vec<PluginEventSub> = if let Some(ref bus) = self.event_bus {
+            manifest
+                .registrations
+                .event_subscribers
+                .iter()
+                .map(|reg| PluginEventSub {
+                    handler_id: reg.handler_id,
+                    subscription: bus.subscribe(parse_event_filter(&reg.filter)),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         let info = plugin_info_from(&manifest, PluginStatus::Running, &capabilities);
 
@@ -187,8 +229,8 @@ impl PluginLoader {
                 registrations: PluginRegistrations {
                     cli_subcommands: registered_cli,
                     ipc_commands: registered_ipc,
-                    event_subscriptions: registered_events,
                 },
+                event_subs,
             },
         );
 
@@ -209,9 +251,12 @@ impl PluginLoader {
             .remove(plugin_id)
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
 
-        // Best-effort on_stop
+        // Best-effort on_stop then on_unload
         if loaded.manifest.lifecycle.on_stop {
             let _ = loaded.sandbox.call_on_stop();
+        }
+        if loaded.manifest.lifecycle.on_unload {
+            let _ = loaded.sandbox.call_on_unload();
         }
 
         // Deregister CLI subcommands
@@ -275,6 +320,39 @@ impl PluginLoader {
         lp.sandbox.dispatch(handler_id, args)
     }
 
+    /// Dispatch an IPC command call with capability verification.
+    ///
+    /// Like [`dispatch_ipc`](Self::dispatch_ipc) but first checks that
+    /// `caller_plugin_id` holds the [`Capability::IpcCall`] capability.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if the caller or target is
+    /// unknown, or [`PluginError::CapabilityDenied`] if the caller lacks
+    /// `IpcCall`.
+    pub fn dispatch_ipc_checked(
+        &mut self,
+        caller_plugin_id: &str,
+        target_plugin_id: &str,
+        command_id: &str,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        // Verify calling plugin exists and has IpcCall capability.
+        let caller_has_cap = self
+            .loaded
+            .get(caller_plugin_id)
+            .map(|lp| lp.sandbox.plugin_data().capabilities.contains(Capability::IpcCall))
+            .ok_or_else(|| PluginError::PluginNotFound(caller_plugin_id.to_string()))?;
+
+        if !caller_has_cap {
+            return Err(PluginError::CapabilityDenied {
+                plugin_id: caller_plugin_id.to_string(),
+                capability: "ipc.call".to_string(),
+            });
+        }
+
+        self.dispatch_ipc(target_plugin_id, command_id, args)
+    }
+
     /// Dispatch an IPC command call.
     ///
     /// Looks up the plugin by `plugin_id`, finds the handler ID for
@@ -304,6 +382,115 @@ impl PluginLoader {
             .ok_or_else(|| PluginError::PluginNotFound(command_id.to_string()))?;
 
         lp.sandbox.dispatch(handler_id, args)
+    }
+
+    /// Enable the plugin with `plugin_id`.
+    ///
+    /// Sets its status to [`PluginStatus::Running`] and calls `on_enable` if
+    /// declared.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if the plugin is not loaded.
+    /// Propagates `on_enable` errors.
+    pub fn enable(&mut self, plugin_id: &str) -> Result<(), PluginError> {
+        let lp = self
+            .loaded
+            .get_mut(plugin_id)
+            .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
+        lp.status = PluginStatus::Running;
+        if lp.manifest.lifecycle.on_enable {
+            lp.sandbox.call_on_enable()?;
+        }
+        Ok(())
+    }
+
+    /// Disable the plugin with `plugin_id`.
+    ///
+    /// Sets its status to [`PluginStatus::Stopped`] and calls `on_disable` if
+    /// declared.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if the plugin is not loaded.
+    /// Propagates `on_disable` errors.
+    pub fn disable(&mut self, plugin_id: &str) -> Result<(), PluginError> {
+        let lp = self
+            .loaded
+            .get_mut(plugin_id)
+            .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
+        lp.status = PluginStatus::Stopped;
+        if lp.manifest.lifecycle.on_disable {
+            lp.sandbox.call_on_disable()?;
+        }
+        Ok(())
+    }
+
+    /// Persist `settings` and notify the plugin via `on_settings_changed` if
+    /// declared.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if the plugin is not loaded.
+    /// Propagates settings I/O / validation errors and `on_settings_changed`
+    /// errors.
+    pub fn update_settings(
+        &mut self,
+        plugin_id: &str,
+        settings: &serde_json::Value,
+    ) -> Result<(), PluginError> {
+        let plugin_dir = self
+            .plugin_dir(plugin_id)
+            .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?
+            .to_path_buf();
+        self.settings.save_settings(plugin_id, &plugin_dir, settings)?;
+        let lp = self
+            .loaded
+            .get_mut(plugin_id)
+            .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
+        if lp.manifest.lifecycle.on_settings_changed {
+            lp.sandbox.call_on_settings_changed(settings)?;
+        }
+        Ok(())
+    }
+
+    /// Drain pending events from all plugin subscriptions and dispatch them to
+    /// the appropriate WASM handlers.
+    ///
+    /// Call this in your event loop (e.g. every tick). Each call is synchronous
+    /// and non-blocking; events that have not yet arrived are silently skipped.
+    ///
+    /// # Errors
+    /// Returns the first dispatch error encountered; subscriptions that lag or
+    /// are closed are silently skipped so they don't block other plugins.
+    pub fn poll_events(&mut self) -> Result<(), PluginError> {
+        // Collect (plugin_id, handler_id, event_json) tuples to dispatch.
+        let mut pending: Vec<(String, u32, serde_json::Value)> = Vec::new();
+
+        for (plugin_id, lp) in &mut self.loaded {
+            for sub in &mut lp.event_subs {
+                loop {
+                    match sub.subscription.try_recv() {
+                        Ok(Some(evt)) => {
+                            let payload = serde_json::to_value(&*evt)
+                                .unwrap_or(serde_json::Value::Null);
+                            pending.push((plugin_id.clone(), sub.handler_id, payload));
+                        }
+                        Ok(None) => break,
+                        // Lagged or closed — skip silently.
+                        Err(_) => break,
+                    }
+                }
+            }
+        }
+
+        for (plugin_id, handler_id, payload) in pending {
+            if let Some(lp) = self.loaded.get_mut(&plugin_id) {
+                lp.sandbox.dispatch(handler_id, &payload).map_err(|e| {
+                    tracing::warn!(plugin_id = %plugin_id, "event dispatch failed: {e}");
+                    e
+                })?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Return a reference to the [`SettingsManager`].
@@ -356,6 +543,25 @@ impl PluginLoader {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Parse a manifest filter string into an [`EventFilter`].
+///
+/// Rules:
+/// - `"*"` or `""` → [`EventFilter::All`]
+/// - ends with `".*"` → [`EventFilter::CustomPrefix`] (the prefix before `*`)
+/// - otherwise → [`EventFilter::CustomExact`]
+///
+/// Note: [`EventFilter::Variant`] requires a `&'static str` so it cannot be
+/// used for dynamically-loaded manifest filter strings.
+fn parse_event_filter(filter: &str) -> EventFilter {
+    match filter {
+        "" | "*" => EventFilter::All,
+        f if f.ends_with(".*") => {
+            EventFilter::CustomPrefix(f[..f.len() - 1].to_string()) // strip "*", keep "."
+        }
+        f => EventFilter::CustomExact(f.to_string()),
+    }
+}
 
 fn build_capabilities(manifest: &PluginManifest) -> CapabilitySet {
     match manifest.trust_level {

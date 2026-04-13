@@ -63,6 +63,9 @@ pub struct WasmConfig {
     /// Wasmtime fuel budget. Default: `10_000_000`.
     /// Core plugins may set this to `0` to disable metering.
     pub fuel: u64,
+    /// Maximum wall-clock milliseconds a single dispatch call may take.
+    /// Default: `5000`. Set to `0` to disable.
+    pub max_execution_ms: u64,
 }
 
 /// Optional settings schema reference.
@@ -116,14 +119,24 @@ pub struct EventSubscriberReg {
 }
 
 /// Lifecycle hook enablement flags.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LifecycleConfig {
-    /// Whether the plugin exports an `on_init` handler.
+    /// Called when the binary is loaded into memory. Handler id 3.
+    pub on_load: bool,
+    /// Called after dependencies are initialized. Handler id 0.
     pub on_init: bool,
-    /// Whether the plugin exports an `on_start` handler.
+    /// Called when the plugin transitions to Started. Handler id 1.
     pub on_start: bool,
-    /// Whether the plugin exports an `on_stop` handler.
+    /// Called on graceful shutdown. Handler id 2.
     pub on_stop: bool,
+    /// Called after on_stop; final cleanup. Handler id 6.
+    pub on_unload: bool,
+    /// Called when the plugin is enabled (after being disabled). Handler id 4.
+    pub on_enable: bool,
+    /// Called when the plugin is disabled by the user. Handler id 5.
+    pub on_disable: bool,
+    /// Called when the user updates the plugin's settings. Handler id 7.
+    pub on_settings_changed: bool,
 }
 
 // ─── Private TOML shadow types ────────────────────────────────────────────────
@@ -165,6 +178,8 @@ struct TomlWasm {
     memory_mb: u32,
     #[serde(default = "default_fuel")]
     fuel: u64,
+    #[serde(default = "default_max_execution_ms")]
+    max_execution_ms: u64,
 }
 
 fn default_memory_mb() -> u32 {
@@ -172,6 +187,9 @@ fn default_memory_mb() -> u32 {
 }
 fn default_fuel() -> u64 {
     10_000_000
+}
+fn default_max_execution_ms() -> u64 {
+    5_000
 }
 
 #[derive(Deserialize)]
@@ -211,12 +229,14 @@ struct TomlEventSubscriberReg {
 
 #[derive(Deserialize, Default)]
 struct TomlLifecycle {
-    #[serde(default)]
-    on_init: bool,
-    #[serde(default)]
-    on_start: bool,
-    #[serde(default)]
-    on_stop: bool,
+    #[serde(default)] on_load: bool,
+    #[serde(default)] on_init: bool,
+    #[serde(default)] on_start: bool,
+    #[serde(default)] on_stop: bool,
+    #[serde(default)] on_unload: bool,
+    #[serde(default)] on_enable: bool,
+    #[serde(default)] on_disable: bool,
+    #[serde(default)] on_settings_changed: bool,
 }
 
 // ─── Conversion helpers ───────────────────────────────────────────────────────
@@ -249,6 +269,7 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
             module: raw.wasm.module,
             memory_mb: raw.wasm.memory_mb,
             fuel: raw.wasm.fuel,
+            max_execution_ms: raw.wasm.max_execution_ms,
         },
         settings: raw.settings.map(|s| SettingsConfig { schema: s.schema }),
         registrations: Registrations {
@@ -283,9 +304,14 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
                 .collect(),
         },
         lifecycle: LifecycleConfig {
+            on_load: raw.lifecycle.on_load,
             on_init: raw.lifecycle.on_init,
             on_start: raw.lifecycle.on_start,
             on_stop: raw.lifecycle.on_stop,
+            on_unload: raw.lifecycle.on_unload,
+            on_enable: raw.lifecycle.on_enable,
+            on_disable: raw.lifecycle.on_disable,
+            on_settings_changed: raw.lifecycle.on_settings_changed,
         },
     })
 }

@@ -148,20 +148,15 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
-/// Scan `notes/` and `attachments/` under `forge_root`.
+/// Scan all user-facing directories under `forge_root`.
 ///
-/// Returns a list of `(relative_path, content_hash, size_bytes)` tuples for
-/// every non-ignored file found.
+/// Walks the entire forge root, skipping metadata directories (`.forge/`,
+/// `.git/`, etc.) via [`should_ignore`]. Returns a list of
+/// `(relative_path, content_hash, size_bytes)` tuples for every non-ignored
+/// file found.
 fn scan_directory(forge_root: &Path) -> Result<Vec<(String, String, u64)>, StorageError> {
     let mut results = Vec::new();
-
-    for subdir in &["notes", "attachments"] {
-        let dir = forge_root.join(subdir);
-        if dir.exists() {
-            scan_dir_recursive(&dir, forge_root, &mut results)?;
-        }
-    }
-
+    scan_dir_recursive(forge_root, forge_root, &mut results)?;
     Ok(results)
 }
 

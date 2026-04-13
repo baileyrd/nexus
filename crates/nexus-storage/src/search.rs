@@ -9,6 +9,7 @@ use tantivy::schema::{Field, Schema, Value, INDEXED, STORED, TEXT};
 use tantivy::{doc, Index, IndexWriter, ReloadPolicy, TantivyDocument};
 use tantivy::query::QueryParser;
 use tantivy::collector::TopDocs;
+use tantivy::snippet::SnippetGenerator;
 
 use crate::StorageError;
 
@@ -44,7 +45,7 @@ fn build_schema() -> (Schema, Field, Field, Field, Field, Field) {
     let path = builder.add_text_field("path", STORED);
     let block_id = builder.add_u64_field("block_id", STORED);
     let block_type = builder.add_text_field("block_type", STORED);
-    let content = builder.add_text_field("content", TEXT);
+    let content = builder.add_text_field("content", TEXT | STORED);
     let mtime = builder.add_date_field("mtime", STORED | INDEXED);
     (builder.build(), path, block_id, block_type, content, mtime)
 }
@@ -172,6 +173,11 @@ impl SearchIndex {
 
         let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
 
+        // Build a snippet generator for ~150-char excerpts with matched terms
+        // highlighted. We fall back to an empty excerpt if this fails (e.g. the
+        // content field has no tokenizer registered).
+        let snippet_gen = SnippetGenerator::create(&searcher, &*query, self.content_field).ok();
+
         let mut results = Vec::with_capacity(top_docs.len());
         for (score, doc_address) in top_docs {
             let doc: TantivyDocument = searcher.doc(doc_address)?;
@@ -193,11 +199,21 @@ impl SearchIndex {
                 .unwrap_or_default()
                 .to_string();
 
+            // Generate a plain-text excerpt by stripping the HTML highlight
+            // tags that SnippetGenerator adds around matched terms.
+            let excerpt = snippet_gen
+                .as_ref()
+                .map(|gen| {
+                    let html = gen.snippet_from_doc(&doc).to_html();
+                    html.replace("<b>", "").replace("</b>", "")
+                })
+                .unwrap_or_default();
+
             results.push(SearchResult {
                 file_path,
                 block_id,
                 block_type,
-                excerpt: String::new(),
+                excerpt,
                 score,
             });
         }
@@ -317,6 +333,30 @@ mod tests {
         // open() should create it
         let _idx = SearchIndex::open(&search_dir).unwrap();
         assert!(search_dir.exists());
+    }
+
+    #[test]
+    fn search_populates_excerpt() {
+        let idx = SearchIndex::open_in_memory().unwrap();
+        idx.add_block(
+            "notes/test.md",
+            1,
+            "paragraph",
+            "the quick brown fox jumps over the lazy dog",
+        )
+        .unwrap();
+        idx.commit().unwrap();
+
+        let results = idx.search("fox", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(
+            !results[0].excerpt.is_empty(),
+            "excerpt should be non-empty when SnippetGenerator is used"
+        );
+        assert!(
+            results[0].excerpt.contains("fox"),
+            "excerpt should contain the search term"
+        );
     }
 
     #[test]

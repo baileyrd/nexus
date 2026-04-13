@@ -10,10 +10,12 @@
 mod capability;
 mod config;
 mod context;
+mod context_impl;
 mod error;
 mod event;
 mod event_bus;
 mod kernel;
+mod kv_store;
 mod log;
 mod plugin;
 mod plugin_registry;
@@ -21,6 +23,7 @@ mod plugin_registry;
 pub use capability::{Capability, CapabilityParseError, CapabilitySet};
 pub use config::KernelConfig;
 pub use context::PluginContext;
+pub use context_impl::KernelPluginContext;
 pub use error::{
     BusError, CapabilityError, ConfigError, Error, IpcError, KvError, PluginError, RecvError,
     Result,
@@ -28,6 +31,7 @@ pub use error::{
 pub use event::{EventFilter, EventMetadata, NexusEvent, PublishedEvent, StopReason};
 pub use event_bus::{EventBus, EventSubscription};
 pub use kernel::Kernel;
+pub use kv_store::SqliteKvStore;
 pub use log::LogLevel;
 pub use plugin::{PluginInfo, PluginLifecycle, PluginStatus, TrustLevel};
 pub use plugin_registry::PluginRegistry;

@@ -20,6 +20,7 @@ nexus-ai = { path = "../nexus-ai" }
 nexus-mcp = { path = "../nexus-mcp" }
 nexus-git = { path = "../nexus-git" }
 clap = { workspace = true }
+clap_complete = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 comfy-table = { workspace = true }

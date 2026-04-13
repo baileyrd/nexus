@@ -70,9 +70,11 @@ memory_mb = 16
 fuel = 0
 
 [lifecycle]
+on_load = true
 on_init = true
 on_start = true
 on_stop = true
+on_unload = true
 "#;
 
 const MANIFEST_TOML_COMMUNITY: &str = r#"[plugin]
@@ -92,28 +94,29 @@ memory_mb = 16
 fuel = 10000000
 
 [lifecycle]
+on_load = true
 on_init = true
 on_start = true
 on_stop = true
+on_unload = true
 "#;
 
 const SRC_LIB_RS_TEMPLATE: &str = r#"//! {{plugin-name}} — Nexus plugin.
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::{alloc, Layout};
 
 // ─── Allocator export ─────────────────────────────────────────────────────────
 
-/// WASM allocator shim required by the Nexus host.
-///
-/// # Safety
-/// Delegates directly to the system allocator.
+/// WASM allocator required by the Nexus host to copy data into WASM memory.
 #[no_mangle]
-pub unsafe extern "C" fn nexus_alloc(size: u32, align: u32) -> u32 {
-    let layout = match Layout::from_size_align(size as usize, align as usize) {
-        Ok(l) => l,
-        Err(_) => return 0,
-    };
-    System.alloc(layout) as u32
+pub extern "C" fn nexus_alloc(size: u32) -> u32 {
+    if size == 0 {
+        return 0;
+    }
+    unsafe {
+        let layout = Layout::from_size_align(size as usize, 1).unwrap();
+        alloc(layout) as u32
+    }
 }
 
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
@@ -121,69 +124,75 @@ pub unsafe extern "C" fn nexus_alloc(size: u32, align: u32) -> u32 {
 /// Primary dispatch entry-point called by the Nexus host.
 ///
 /// `handler_id` selects which handler to invoke:
-/// - `0`   → `on_init`
-/// - `1`   → `on_start`
-/// - `2`   → `on_stop`
-/// - `100` → echo (example handler)
+/// - `0` → `on_init`
+/// - `1` → `on_start`
+/// - `2` → `on_stop`
+/// - `3` → `on_load`
+/// - `4` → `on_enable`
+/// - `5` → `on_disable`
+/// - `6` → `on_unload`
+/// - `7` → `on_settings_changed`
+/// - `100`+ → user-defined handlers
 ///
 /// `ptr` / `len` point to a UTF-8 JSON payload in WASM linear memory.
-/// Returns a pointer to a null-terminated JSON result string, or 0 on error.
+///
+/// Returns a packed `u64`: high 32 bits = result pointer, low 32 bits = result
+/// byte length. The result bytes are valid JSON.
 #[no_mangle]
-pub extern "C" fn nexus_dispatch(handler_id: u32, ptr: u32, len: u32) -> u32 {
+pub extern "C" fn nexus_dispatch(handler_id: u32, ptr: u32, len: u32) -> u64 {
     let input = if len == 0 {
-        b"null".as_slice()
+        &[][..]
     } else {
         unsafe { std::slice::from_raw_parts(ptr as *const u8, len as usize) }
     };
 
-    let result: &[u8] = match handler_id {
+    let result: Vec<u8> = match handler_id {
         0 => on_init(input),
         1 => on_start(input),
         2 => on_stop(input),
+        3 => on_load(input),
+        4 => on_enable(input),
+        5 => on_disable(input),
+        6 => on_unload(input),
+        7 => on_settings_changed(input),
         100 => echo(input),
-        _ => b"null",
+        _ => b"{\"error\":\"unknown handler\"}".to_vec(),
     };
 
-    write_result(result)
+    write_result(&result)
 }
 
 // ─── Lifecycle handlers ───────────────────────────────────────────────────────
 
-fn on_init(_input: &[u8]) -> &'static [u8] {
-    b"null"
-}
-
-fn on_start(_input: &[u8]) -> &'static [u8] {
-    b"null"
-}
-
-fn on_stop(_input: &[u8]) -> &'static [u8] {
-    b"null"
-}
+fn on_init(_input: &[u8]) -> Vec<u8> { b"{}".to_vec() }
+fn on_start(_input: &[u8]) -> Vec<u8> { b"{}".to_vec() }
+fn on_stop(_input: &[u8]) -> Vec<u8> { b"{}".to_vec() }
+fn on_load(_input: &[u8]) -> Vec<u8> { b"{}".to_vec() }
+fn on_enable(_input: &[u8]) -> Vec<u8> { b"{}".to_vec() }
+fn on_disable(_input: &[u8]) -> Vec<u8> { b"{}".to_vec() }
+fn on_unload(_input: &[u8]) -> Vec<u8> { b"{}".to_vec() }
+fn on_settings_changed(input: &[u8]) -> Vec<u8> { input.to_vec() }
 
 // ─── Example handler: echo ────────────────────────────────────────────────────
 
 /// Returns the input JSON payload unchanged.
-fn echo(input: &[u8]) -> &[u8] {
-    input
+fn echo(input: &[u8]) -> Vec<u8> {
+    input.to_vec()
 }
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
-/// Leak `bytes` into WASM linear memory and return its pointer.
+/// Allocate `bytes` in WASM linear memory and return a packed `u64` result.
 ///
-/// The host is responsible for reading the result before the next dispatch
-/// call overwrites the static buffer.
-fn write_result(bytes: &[u8]) -> u32 {
-    // Use a static mutable buffer so we don't need a heap allocator for
-    // small results.  For production use you would Box::leak or similar.
-    static mut BUF: [u8; 65536] = [0u8; 65536];
-    let len = bytes.len().min(65535);
-    unsafe {
-        BUF[..len].copy_from_slice(&bytes[..len]);
-        BUF[len] = 0;
-        BUF.as_ptr() as u32
+/// High 32 bits = pointer to the result, low 32 bits = byte length.
+fn write_result(bytes: &[u8]) -> u64 {
+    let result_ptr = nexus_alloc(bytes.len() as u32);
+    if result_ptr != 0 && !bytes.is_empty() {
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), result_ptr as *mut u8, bytes.len());
+        }
     }
+    ((result_ptr as u64) << 32) | (bytes.len() as u64)
 }
 "#;
 

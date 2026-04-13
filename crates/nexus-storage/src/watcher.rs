@@ -58,8 +58,9 @@ pub fn should_ignore(path: &Path) -> bool {
     // Check path components for ignored directories.
     let path_str = path.to_string_lossy();
     if path_str.contains(".git")
-        || path_str.contains(".forge/temp")
+        || path_str.contains(".forge")
         || path_str.contains("node_modules")
+        || path_str.contains("target/")
     {
         return true;
     }

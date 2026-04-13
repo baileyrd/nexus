@@ -26,6 +26,49 @@ impl EventBus {
         Self { sender }
     }
 
+    /// Publish an event emitted by a plugin. Enforces two invariants:
+    ///
+    /// - Only `NexusEvent::Custom` is accepted — plugins cannot emit kernel events.
+    /// - The `type_id` must start with `source_plugin_id` (namespace anti-spoofing).
+    ///
+    /// The kernel populates `emitting_plugin` from `source_plugin_id`; the
+    /// plugin cannot override it.
+    ///
+    /// # Errors
+    /// - `BusError::PluginPublishingKernelEvent` if `event` is not `Custom`.
+    /// - `BusError::TypeIdNamespaceMismatch` if `type_id` doesn't start with `source_plugin_id`.
+    pub fn publish_plugin(
+        &self,
+        source_plugin_id: &str,
+        type_id: &str,
+        payload: serde_json::Value,
+    ) -> Result<()> {
+        use crate::error::BusError;
+
+        if !type_id.starts_with(source_plugin_id) {
+            return Err(BusError::TypeIdNamespaceMismatch {
+                plugin_id: source_plugin_id.to_string(),
+                type_id: type_id.to_string(),
+            }
+            .into());
+        }
+
+        let event = NexusEvent::Custom {
+            type_id: type_id.to_string(),
+            emitting_plugin: source_plugin_id.to_string(),
+            payload,
+        };
+        let metadata = EventMetadata {
+            event_id: uuid::Uuid::new_v4(),
+            timestamp: chrono::Utc::now(),
+            source_plugin_id: source_plugin_id.to_string(),
+            span_id: current_span_id(),
+        };
+        let published = Arc::new(PublishedEvent { metadata, event });
+        let _ = self.sender.send(published);
+        Ok(())
+    }
+
     /// Publish a kernel-owned event. Not callable from plugins.
     ///
     /// # Errors
@@ -304,6 +347,45 @@ mod tests {
 
         let result = sub.recv().await;
         assert!(matches!(result, Err(RecvError::Closed)));
+    }
+
+    #[tokio::test]
+    async fn publish_plugin_emits_custom_event() {
+        let bus = EventBus::new(16);
+        let mut sub = bus.subscribe(EventFilter::All);
+
+        bus.publish_plugin(
+            "com.example.plugin",
+            "com.example.plugin.ping",
+            serde_json::json!({"key": "value"}),
+        )
+        .unwrap();
+
+        let published = sub.recv().await.unwrap();
+        assert_eq!(published.metadata.source_plugin_id, "com.example.plugin");
+        match &published.event {
+            NexusEvent::Custom { type_id, emitting_plugin, .. } => {
+                assert_eq!(type_id, "com.example.plugin.ping");
+                assert_eq!(emitting_plugin, "com.example.plugin");
+            }
+            _ => panic!("expected Custom event"),
+        }
+    }
+
+    #[test]
+    fn publish_plugin_rejects_namespace_mismatch() {
+        let bus = EventBus::new(16);
+        let result = bus.publish_plugin(
+            "com.legit.plugin",
+            "com.evil.spoofed",
+            serde_json::json!({}),
+        );
+        assert!(matches!(
+            result,
+            Err(crate::error::Error::Bus(
+                crate::error::BusError::TypeIdNamespaceMismatch { .. }
+            ))
+        ));
     }
 
     #[tokio::test]

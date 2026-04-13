@@ -175,6 +175,21 @@ impl PluginManager {
         self.loader.dispatch_ipc(plugin_id, command_id, args)
     }
 
+    /// Dispatch an IPC command call with capability verification.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::CapabilityDenied`] if `caller_plugin_id` lacks
+    /// `IpcCall`, or [`PluginError::PluginNotFound`] if either plugin is unknown.
+    pub fn dispatch_ipc_checked(
+        &mut self,
+        caller_plugin_id: &str,
+        plugin_id: &str,
+        command_id: &str,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        self.loader.dispatch_ipc_checked(caller_plugin_id, plugin_id, command_id, args)
+    }
+
     /// Load the settings for the plugin identified by `plugin_id`.
     ///
     /// # Errors
@@ -189,19 +204,49 @@ impl PluginManager {
         self.loader.settings().load_settings(plugin_id, &plugin_dir)
     }
 
-    /// Persist `settings` for the plugin identified by `plugin_id`.
+    /// Persist `settings` for the plugin identified by `plugin_id` and notify
+    /// it via `on_settings_changed` if declared.
     ///
     /// # Errors
     /// Returns [`PluginError::PluginNotFound`] if the plugin is not loaded, or
     /// propagates settings validation / I/O errors.
     pub fn set_settings(&mut self, plugin_id: &str, settings: &serde_json::Value) -> Result<(), PluginError> {
-        // Clone plugin_dir first to avoid borrow conflicts.
-        let plugin_dir = self
-            .loader
-            .plugin_dir(plugin_id)
-            .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?
-            .to_path_buf();
-        self.loader.settings().save_settings(plugin_id, &plugin_dir, settings)
+        self.loader.update_settings(plugin_id, settings)
+    }
+
+    /// Enable the plugin identified by `plugin_id`.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if the plugin is not loaded.
+    /// Propagates `on_enable` errors.
+    pub fn enable(&mut self, plugin_id: &str) -> Result<(), PluginError> {
+        self.loader.enable(plugin_id)
+    }
+
+    /// Disable the plugin identified by `plugin_id`.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if the plugin is not loaded.
+    /// Propagates `on_disable` errors.
+    pub fn disable(&mut self, plugin_id: &str) -> Result<(), PluginError> {
+        self.loader.disable(plugin_id)
+    }
+
+    /// Inject the kernel event bus so that plugins can receive events.
+    ///
+    /// Must be called before loading plugins with event subscriptions.
+    pub fn set_event_bus(&mut self, bus: std::sync::Arc<nexus_kernel::EventBus>) {
+        self.loader.set_event_bus(bus);
+    }
+
+    /// Drain pending kernel events and dispatch them to subscribing plugins.
+    ///
+    /// Call this in your event loop (e.g. every tick or on each user interaction).
+    ///
+    /// # Errors
+    /// Returns the first dispatch error encountered.
+    pub fn poll_events(&mut self) -> Result<(), PluginError> {
+        self.loader.poll_events()
     }
 
     /// Drain pending hot-reload events and reload the affected plugins.
@@ -275,6 +320,7 @@ impl PluginManager {
                     .loader
                     .get(plugin_id)
                     .map_or_else(nexus_kernel::CapabilitySet::empty, |i| i.capabilities),
+                ..Default::default()
             };
             (wasm_config, lifecycle, pd)
         };

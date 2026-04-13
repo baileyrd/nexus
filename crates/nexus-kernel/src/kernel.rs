@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicBool;
 use crate::config::KernelConfig;
 use crate::error::Result;
 use crate::event_bus::EventBus;
+use crate::kv_store::SqliteKvStore;
 use crate::plugin_registry::PluginRegistry;
 
 /// The Nexus kernel. Owns the event bus and plugin registry.
@@ -29,6 +30,7 @@ use crate::plugin_registry::PluginRegistry;
 pub struct Kernel {
     config: KernelConfig,
     event_bus: Arc<EventBus>,
+    kv_store: Arc<SqliteKvStore>,
     plugins: PluginRegistry,
     shutdown_flag: Arc<AtomicBool>,
 }
@@ -44,12 +46,17 @@ impl Kernel {
     /// forward compatibility with future validation.
     pub fn new(config: KernelConfig) -> Result<Self> {
         let event_bus = Arc::new(EventBus::new(config.event_bus_capacity));
+        let forge_dir = config.forge_root.join(".forge");
+        std::fs::create_dir_all(&forge_dir)?;
+        let kv_path = forge_dir.join("kv.sqlite3");
+        let kv_store = Arc::new(SqliteKvStore::open(&kv_path)?);
         let plugins = PluginRegistry::new();
         let shutdown_flag = Arc::new(AtomicBool::new(false));
 
         Ok(Self {
             config,
             event_bus,
+            kv_store,
             plugins,
             shutdown_flag,
         })
@@ -60,6 +67,13 @@ impl Kernel {
     #[must_use]
     pub fn event_bus(&self) -> Arc<EventBus> {
         Arc::clone(&self.event_bus)
+    }
+
+    /// Get a handle to the kernel KV store. Used by `nexus-plugins` to
+    /// inject storage into plugin sandboxes.
+    #[must_use]
+    pub fn kv_store(&self) -> Arc<SqliteKvStore> {
+        Arc::clone(&self.kv_store)
     }
 
     /// Read-only access to the kernel config.

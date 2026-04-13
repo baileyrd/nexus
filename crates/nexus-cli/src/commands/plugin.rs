@@ -76,6 +76,52 @@ pub fn uninstall(app: &mut App, plugin_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Enable the plugin identified by `plugin_id`.
+pub fn enable(app: &mut App, plugin_id: &str) -> Result<()> {
+    app.plugins()?.enable(plugin_id)?;
+    let format = app.format();
+    print_success(
+        format,
+        &format!("Plugin '{plugin_id}' enabled."),
+        &serde_json::json!({ "id": plugin_id, "status": "running" }),
+    );
+    Ok(())
+}
+
+/// Disable the plugin identified by `plugin_id`.
+pub fn disable(app: &mut App, plugin_id: &str) -> Result<()> {
+    app.plugins()?.disable(plugin_id)?;
+    let format = app.format();
+    print_success(
+        format,
+        &format!("Plugin '{plugin_id}' disabled."),
+        &serde_json::json!({ "id": plugin_id, "status": "stopped" }),
+    );
+    Ok(())
+}
+
+/// View or update settings for the plugin identified by `plugin_id`.
+///
+/// If `set_json` is `None`, the current settings are printed.
+/// If `set_json` is `Some`, the settings are updated from the JSON string.
+pub fn settings(app: &mut App, plugin_id: &str, set_json: Option<&str>) -> Result<()> {
+    let format = app.format();
+    if let Some(json_str) = set_json {
+        let new_settings: serde_json::Value = serde_json::from_str(json_str)
+            .map_err(|e| anyhow::anyhow!("invalid JSON: {e}"))?;
+        app.plugins()?.set_settings(plugin_id, &new_settings)?;
+        print_success(
+            format,
+            &format!("Settings updated for '{plugin_id}'."),
+            &new_settings,
+        );
+    } else {
+        let current = app.plugins()?.get_settings(plugin_id)?;
+        print_value(format, &current);
+    }
+    Ok(())
+}
+
 /// Scaffold a new plugin project.
 pub fn scaffold(
     type_str: &str,
