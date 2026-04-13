@@ -20,6 +20,7 @@ mod reconcile;
 mod tasks;
 mod graph;
 mod search_scope;
+mod export;
 
 pub use atomic::atomic_write;
 pub use error::StorageError;
@@ -33,6 +34,7 @@ pub use search_scope::{ScopeFilter, parse_scoped_query};
 pub use reconcile::{ReconcileDelta, reconcile};
 pub use watcher::{relative_path, should_ignore, StorageEvent, Watcher};
 pub use graph::{KnowledgeGraph, BacklinkResult, OutgoingLink, UnresolvedLink, GraphStats, EdgeData};
+pub use export::export_to_html;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
@@ -605,6 +607,59 @@ impl StorageEngine {
     #[must_use]
     pub fn watch_changes(&self) -> Option<&std::sync::mpsc::Receiver<StorageEvent>> {
         self.watcher.as_ref().map(watcher::Watcher::events)
+    }
+
+    // ── Watcher Reconcile ────────────────────────────────────────────────────
+
+    /// Process pending file watcher events, re-indexing changed files.
+    ///
+    /// Drains all pending events from the watcher (non-blocking). For each event:
+    /// - `FileCreated`/`FileModified`: re-reads from disk and re-indexes
+    /// - `FileDeleted`: removes from index and graph
+    /// - `FileRenamed`: removes old path, indexes new path
+    ///
+    /// Returns the number of events processed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O or database failure.
+    pub fn process_watcher_events(&self) -> Result<usize, StorageError> {
+        let rx = match self.watcher.as_ref() {
+            Some(w) => w.events(),
+            None => return Ok(0),
+        };
+
+        let mut count = 0;
+        loop {
+            match rx.try_recv() {
+                Ok(event) => {
+                    match &event {
+                        StorageEvent::FileCreated { path, .. }
+                        | StorageEvent::FileModified { path, .. } => {
+                            let abs = self.forge.root().join(path);
+                            if let Ok(bytes) = std::fs::read(&abs) {
+                                let _ = self.write_file(path, &bytes);
+                            }
+                        }
+                        StorageEvent::FileDeleted { path } => {
+                            let _ = self.delete_file(path);
+                        }
+                        StorageEvent::FileRenamed { from, to, .. } => {
+                            let _ = self.delete_file(from);
+                            let abs = self.forge.root().join(to);
+                            if let Ok(bytes) = std::fs::read(&abs) {
+                                let _ = self.write_file(to, &bytes);
+                            }
+                        }
+                    }
+                    count += 1;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+
+        Ok(count)
     }
 
     // ── Accessor ──────────────────────────────────────────────────────────────

@@ -263,6 +263,25 @@ pub fn backlinks(app: &mut App, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Export a note to HTML.
+pub fn export(app: &mut App, path: &str, output: Option<&str>) -> Result<()> {
+    let storage = app.storage()?;
+    let bytes = storage
+        .read_file(path)
+        .map_err(|e| anyhow::anyhow!("failed to read file '{path}': {e}"))?;
+    let text = String::from_utf8_lossy(&bytes);
+    let title = path.rsplit('/').next().unwrap_or(path).trim_end_matches(".md");
+    let html = nexus_storage::export_to_html(&text, title);
+    if let Some(out_path) = output {
+        std::fs::write(out_path, &html)
+            .map_err(|e| anyhow::anyhow!("failed to write '{out_path}': {e}"))?;
+        println!("Exported to {out_path}");
+    } else {
+        print!("{html}");
+    }
+    Ok(())
+}
+
 /// Create or open a daily note.
 pub fn daily(app: &mut App, date: Option<&str>) -> Result<()> {
     use chrono::{Local, NaiveDate};

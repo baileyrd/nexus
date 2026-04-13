@@ -7,7 +7,10 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use nexus_storage::{FileFilter, SearchResult, StorageConfig, StorageEngine};
+use nexus_storage::{
+    BacklinkResult, FileFilter, GraphStats, SearchResult, StorageConfig, StorageEngine, TaskFilter,
+    TaskRecord,
+};
 use ratatui::widgets::ListState;
 
 // ── Mode / Focus ──────────────────────────────────────────────────────────────
@@ -280,6 +283,158 @@ impl Default for FindState {
     }
 }
 
+// ── BacklinksState ───────────────────────────────────────────────────────────
+
+/// State for the toggleable backlinks panel.
+pub struct BacklinksState {
+    /// Whether the backlinks panel is visible.
+    pub visible: bool,
+    /// Backlink entries as `(source_path, link_text)` pairs.
+    pub entries: Vec<(String, String)>,
+    /// Index of the currently selected backlink entry.
+    pub selected: usize,
+    /// `ratatui` list state; kept in sync with `selected`.
+    pub list_state: ListState,
+}
+
+impl BacklinksState {
+    /// Create a new, hidden `BacklinksState`.
+    pub fn new() -> Self {
+        Self {
+            visible: false,
+            entries: Vec::new(),
+            selected: 0,
+            list_state: ListState::default(),
+        }
+    }
+
+    /// Toggle the visibility of the backlinks panel.
+    pub fn toggle(&mut self) {
+        self.visible = !self.visible;
+    }
+
+    /// Load backlink entries from a list of `BacklinkResult`s.
+    pub fn load(&mut self, results: Vec<BacklinkResult>) {
+        self.entries = results
+            .into_iter()
+            .map(|r| (r.source_path, r.link_text))
+            .collect();
+        self.selected = 0;
+        self.list_state.select(if self.entries.is_empty() {
+            None
+        } else {
+            Some(0)
+        });
+    }
+}
+
+impl Default for BacklinksState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── TaskViewState ────────────────────────────────────────────────────────────
+
+/// A single task entry for display in the task list view.
+#[derive(Debug, Clone)]
+pub struct TaskEntry {
+    /// Database primary key.
+    pub id: u64,
+    /// Whether the task is completed.
+    pub completed: bool,
+    /// Task text content.
+    pub content: String,
+    /// Vault-relative file path containing this task.
+    pub file_path: String,
+    /// 1-indexed line number in the source file.
+    pub line_number: u32,
+}
+
+/// State for the task list view that replaces the viewer when active.
+pub struct TaskViewState {
+    /// Whether the task view is currently active (replaces viewer).
+    pub active: bool,
+    /// All task entries.
+    pub entries: Vec<TaskEntry>,
+    /// Index of the currently selected task.
+    pub selected: usize,
+    /// `ratatui` list state; kept in sync with `selected`.
+    pub list_state: ListState,
+}
+
+impl TaskViewState {
+    /// Create a new, inactive `TaskViewState`.
+    pub fn new() -> Self {
+        Self {
+            active: false,
+            entries: Vec::new(),
+            selected: 0,
+            list_state: ListState::default(),
+        }
+    }
+
+    /// Toggle the task view on or off.
+    pub fn toggle(&mut self) {
+        self.active = !self.active;
+    }
+
+    /// Load task entries from a list of `TaskRecord`s.
+    pub fn load(&mut self, records: Vec<TaskRecord>) {
+        self.entries = records
+            .into_iter()
+            .map(|r| TaskEntry {
+                id: r.id,
+                completed: r.completed,
+                content: r.content,
+                file_path: r.file_path,
+                line_number: r.line_number,
+            })
+            .collect();
+        self.selected = 0;
+        self.list_state.select(if self.entries.is_empty() {
+            None
+        } else {
+            Some(0)
+        });
+    }
+}
+
+impl Default for TaskViewState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── StatusInfo ───────────────────────────────────────────────────────────────
+
+/// Cached status bar statistics.
+pub struct StatusInfo {
+    /// Total number of files in the forge.
+    pub file_count: usize,
+    /// Total number of links (graph edges).
+    pub link_count: usize,
+    /// Number of pending (incomplete) tasks.
+    pub pending_task_count: usize,
+}
+
+impl StatusInfo {
+    /// Create a zeroed `StatusInfo`.
+    pub fn new() -> Self {
+        Self {
+            file_count: 0,
+            link_count: 0,
+            pending_task_count: 0,
+        }
+    }
+}
+
+impl Default for StatusInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── TuiApp ────────────────────────────────────────────────────────────────────
 
 /// Top-level application state.
@@ -296,6 +451,12 @@ pub struct TuiApp {
     pub search: SearchState,
     /// In-file find state.
     pub find: FindState,
+    /// Backlinks panel state.
+    pub backlinks: BacklinksState,
+    /// Task list view state.
+    pub task_view: TaskViewState,
+    /// Cached status bar statistics.
+    pub status_info: StatusInfo,
     /// Underlying storage engine.
     pub storage: StorageEngine,
     /// Path to the forge root.
@@ -322,12 +483,16 @@ impl TuiApp {
             viewer: ViewerState::new(),
             search: SearchState::new(),
             find: FindState::new(),
+            backlinks: BacklinksState::new(),
+            task_view: TaskViewState::new(),
+            status_info: StatusInfo::new(),
             storage,
             forge_root,
             should_quit: false,
         };
 
         app.refresh_tree()?;
+        app.refresh_status();
         Ok(app)
     }
 
@@ -471,7 +636,67 @@ impl TuiApp {
         let text = String::from_utf8_lossy(&bytes).into_owned();
         self.viewer.load_content(path, text);
         self.focus = Focus::Viewer;
+        // Refresh backlinks for the newly opened file.
+        if self.backlinks.visible {
+            self.load_backlinks();
+        }
         Ok(())
+    }
+
+    /// Load backlinks for the currently viewed file into the backlinks panel.
+    ///
+    /// Does nothing if no file is loaded in the viewer.
+    pub fn load_backlinks(&mut self) {
+        let path = match self.viewer.file_path.as_deref() {
+            Some(p) => p.to_owned(),
+            None => {
+                self.backlinks.load(Vec::new());
+                return;
+            }
+        };
+        match self.storage.backlinks(&path) {
+            Ok(results) => self.backlinks.load(results),
+            Err(_) => self.backlinks.load(Vec::new()),
+        }
+    }
+
+    /// Load all tasks into the task view state.
+    pub fn load_tasks(&mut self) {
+        match self.storage.query_tasks(&TaskFilter::default()) {
+            Ok(records) => self.task_view.load(records),
+            Err(_) => self.task_view.load(Vec::new()),
+        }
+    }
+
+    /// Refresh cached status bar statistics from the storage engine.
+    pub fn refresh_status(&mut self) {
+        let file_count = self
+            .tree
+            .entries
+            .iter()
+            .filter(|e| !e.is_dir)
+            .count();
+
+        let link_count = self
+            .storage
+            .graph_stats()
+            .map(|s: GraphStats| s.edge_count)
+            .unwrap_or(0);
+
+        let pending_task_count = self
+            .storage
+            .query_tasks(&TaskFilter {
+                completed: Some(false),
+                file_path: None,
+            })
+            .map(|tasks| tasks.len())
+            .unwrap_or(0);
+
+        self.status_info = StatusInfo {
+            file_count,
+            link_count,
+            pending_task_count,
+        };
     }
 
     /// Toggle the expanded/collapsed state of the selected directory entry.

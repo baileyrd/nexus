@@ -49,15 +49,12 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
         Span::raw("")
     };
 
-    // ── File count ────────────────────────────────────────────────────────────
-    let file_count = app
-        .tree
-        .entries
-        .iter()
-        .filter(|e| !e.is_dir)
-        .count();
-    let count_span = Span::styled(
-        format!("{file_count} files"),
+    // ── Stats ─────────────────────────────────────────────────────────────────
+    let file_count = app.status_info.file_count;
+    let link_count = app.status_info.link_count;
+    let pending_count = app.status_info.pending_task_count;
+    let stats_span = Span::styled(
+        format!("{file_count} files | {link_count} links | {pending_count} tasks"),
         Style::default().fg(Color::DarkGray),
     );
 
@@ -73,7 +70,7 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
         file_span,
         scroll_span,
         sep.clone(),
-        count_span,
+        stats_span,
         sep,
         help_span,
     ]);
