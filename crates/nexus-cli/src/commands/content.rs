@@ -198,3 +198,67 @@ pub fn task_toggle(app: &mut App, task_id: u64) -> Result<()> {
 
     Ok(())
 }
+
+/// Show outgoing links from a file.
+pub fn links(app: &mut App, path: &str) -> Result<()> {
+    let storage = app.storage()?;
+    let outgoing = storage
+        .outgoing_links(path)
+        .map_err(|e| anyhow::anyhow!("failed to get links: {e}"))?;
+
+    let format = app.format();
+
+    if outgoing.is_empty() {
+        println!("No outgoing links.");
+        return Ok(());
+    }
+
+    let headers = &["Target", "Type", "Text", "Resolved", "Fragment"];
+    let rows: Vec<Vec<String>> = outgoing
+        .iter()
+        .map(|l| {
+            vec![
+                l.target_path.clone(),
+                l.link_type.clone(),
+                l.link_text.clone(),
+                if l.is_resolved { "yes".to_string() } else { "no".to_string() },
+                l.fragment.clone().unwrap_or_default(),
+            ]
+        })
+        .collect();
+
+    print_list(format, headers, &rows);
+
+    Ok(())
+}
+
+/// Show all files that link to the given file.
+pub fn backlinks(app: &mut App, path: &str) -> Result<()> {
+    let storage = app.storage()?;
+    let bl = storage
+        .backlinks(path)
+        .map_err(|e| anyhow::anyhow!("failed to get backlinks: {e}"))?;
+
+    let format = app.format();
+
+    if bl.is_empty() {
+        println!("No backlinks found.");
+        return Ok(());
+    }
+
+    let headers = &["Source", "Type", "Text"];
+    let rows: Vec<Vec<String>> = bl
+        .iter()
+        .map(|b| {
+            vec![
+                b.source_path.clone(),
+                b.link_type.clone(),
+                b.link_text.clone(),
+            ]
+        })
+        .collect();
+
+    print_list(format, headers, &rows);
+
+    Ok(())
+}
