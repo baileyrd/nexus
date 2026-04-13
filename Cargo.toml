@@ -11,6 +11,7 @@ members = [
     "crates/nexus-cli",
     "crates/nexus-tui",
     "crates/nexus-git",
+    "crates/nexus-formats",
 ]
 
 [workspace.package]
