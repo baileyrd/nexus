@@ -93,3 +93,6 @@ ctrlc = "3.5"
 # TUI
 ratatui = "0.30"
 crossterm = "0.29"
+
+# Knowledge graph
+petgraph = "0.7"
