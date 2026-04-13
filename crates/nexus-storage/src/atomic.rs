@@ -34,13 +34,13 @@ pub fn atomic_write(
     temp_dir: &Path,
 ) -> Result<(), StorageError> {
     // Ensure parent dirs exist.
-    if let Some(parent) = target.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent).map_err(|e| StorageError::WriteFailed {
-            path: target.display().to_string(),
-            reason: e.to_string(),
-        })?;
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| StorageError::WriteFailed {
+                path: target.display().to_string(),
+                reason: e.to_string(),
+            })?;
+        }
     }
 
     let mut delay = Duration::from_millis(100);

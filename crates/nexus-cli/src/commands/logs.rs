@@ -45,10 +45,10 @@ pub fn tail(app: &App, level: Option<&str>, lines: usize) -> Result<()> {
     let level_upper = level.map(|l| l.to_uppercase());
 
     for line in tail_lines {
-        if let Some(ref lvl) = level_upper
-            && !line.to_uppercase().contains(lvl.as_str())
-        {
-            continue;
+        if let Some(ref lvl) = level_upper {
+            if !line.to_uppercase().contains(lvl.as_str()) {
+                continue;
+            }
         }
         println!("{line}");
     }

@@ -12,13 +12,13 @@ members = [
 
 [workspace.package]
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
 
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "1.35", features = ["full"] }
+tokio = { version = "1.51", features = ["full"] }
 
 # Logging/tracing
 tracing = "0.1"
@@ -28,10 +28,10 @@ tracing-appender = "0.2"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
+toml = "1.1"
 
 # Utilities
-uuid = { version = "1.0", features = ["v4", "serde"] }
+uuid = { version = "1.23", features = ["v4", "v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2.0"
 async-trait = "0.1"
@@ -40,25 +40,25 @@ async-trait = "0.1"
 keyring = "3"
 
 # SQLite
-rusqlite = { version = "0.31", features = ["bundled", "backup"] }
+rusqlite = { version = "0.39", features = ["bundled", "backup"] }
 r2d2 = "0.8"
-r2d2_sqlite = "0.24"
+r2d2_sqlite = "0.33"
 
 # Full-text search
-tantivy = "0.22"
+tantivy = "0.26"
 
 # Markdown parsing
-comrak = "0.28"
+comrak = "0.52"
 
 # File watching
-notify = "7"
-notify-debouncer-mini = "0.5"
+notify = "8"
+notify-debouncer-mini = "0.7"
 
 # WASM runtime
-wasmtime = "18"
+wasmtime = "42"
 
 # JSON Schema validation
-jsonschema = "0.17"
+jsonschema = "0.46"
 
 # Semver parsing
 semver = "1"
@@ -67,10 +67,10 @@ semver = "1"
 regex-lite = "0.1"
 
 # Parallelism
-rayon = "1.10"
+rayon = "1.11"
 
 # Hashing
-sha2 = "0.10"
+sha2 = "0.11"
 
 # YAML frontmatter
 serde_yaml = "0.9"
@@ -85,11 +85,11 @@ filetime = "0.2"
 tempfile = "3"
 
 # CLI
-clap = { version = "4.4", features = ["derive", "env"] }
+clap = { version = "4.6", features = ["derive", "env"] }
 anyhow = "1"
 comfy-table = "7"
-ctrlc = "3.4"
+ctrlc = "3.5"
 
 # TUI
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30"
+crossterm = "0.29"

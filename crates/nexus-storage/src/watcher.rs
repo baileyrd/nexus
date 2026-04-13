@@ -65,14 +65,15 @@ pub fn should_ignore(path: &Path) -> bool {
     }
 
     // Check filename suffixes.
-    if let Some(name) = path.file_name().and_then(|n| n.to_str())
-        && (name.ends_with('~')
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if name.ends_with('~')
             || Path::new(name)
                 .extension()
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("swp"))
-            || name == ".DS_Store")
-    {
-        return true;
+            || name == ".DS_Store"
+        {
+            return true;
+        }
     }
 
     false

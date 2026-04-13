@@ -73,19 +73,23 @@ impl SettingsManager {
         };
 
         let compiled =
-            jsonschema::JSONSchema::compile(schema).map_err(|e| PluginError::SettingsInvalid {
+            jsonschema::options().build(schema).map_err(|e| PluginError::SettingsInvalid {
                 plugin_id: plugin_id.to_string(),
                 reason: format!("invalid schema: {e}"),
             })?;
 
-        if let Err(errors) = compiled.validate(settings) {
-            let reason: Vec<String> = errors.map(|e| e.to_string()).collect();
+        let errors: Vec<String> = compiled
+            .iter_errors(settings)
+            .map(|e| e.to_string())
+            .collect();
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
             Err(PluginError::SettingsInvalid {
                 plugin_id: plugin_id.to_string(),
-                reason: reason.join("; "),
+                reason: errors.join("; "),
             })
-        } else {
-            Ok(())
         }
     }
 

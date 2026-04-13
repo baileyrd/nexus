@@ -78,7 +78,13 @@ pub struct ParsedTag {
 /// Compute the SHA-256 hex digest of `content`.
 #[must_use]
 pub fn content_hash(content: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(content))
+    Sha256::digest(content)
+        .iter()
+        .fold(String::with_capacity(64), |mut acc, b| {
+            use std::fmt::Write;
+            let _ = write!(acc, "{b:02x}");
+            acc
+        })
 }
 
 /// Parse a markdown/MDX string into a [`ParsedFile`].
@@ -257,13 +263,15 @@ fn extract_frontmatter(
             };
 
             // Extract tags from the `tags` key.
-            if key == "tags" && let serde_yaml::Value::Sequence(seq) = v {
-                for item in seq {
-                    if let serde_yaml::Value::String(tag) = item {
-                        tags.push(ParsedTag {
-                            name: tag.clone(),
-                            source: "frontmatter".to_string(),
-                        });
+            if key == "tags" {
+                if let serde_yaml::Value::Sequence(seq) = v {
+                    for item in seq {
+                        if let serde_yaml::Value::String(tag) = item {
+                            tags.push(ParsedTag {
+                                name: tag.clone(),
+                                source: "frontmatter".to_string(),
+                            });
+                        }
                     }
                 }
             }

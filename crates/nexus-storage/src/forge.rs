@@ -136,10 +136,10 @@ impl Forge {
             if !meta.is_file() {
                 continue;
             }
-            if let Ok(mtime) = meta.modified()
-                && mtime < cutoff
-            {
-                let _ = fs::remove_file(entry.path());
+            if let Ok(mtime) = meta.modified() {
+                if mtime < cutoff {
+                    let _ = fs::remove_file(entry.path());
+                }
             }
         }
         Ok(())
