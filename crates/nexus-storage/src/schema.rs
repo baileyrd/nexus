@@ -11,7 +11,7 @@ use crate::StorageError;
 use rusqlite::Connection;
 
 /// The current schema version this crate expects.
-pub const CURRENT_VERSION: u32 = 4;
+pub const CURRENT_VERSION: u32 = 6;
 
 /// Configure `SQLite` pragmas for optimal performance and consistency.
 ///
@@ -84,6 +84,26 @@ pub fn migrate(conn: &Connection) -> Result<u32, StorageError> {
         apply_migration_004(&tx)?;
         tx.execute(
             "INSERT INTO _schema_version (version, applied_at) VALUES (4, unixepoch());",
+            [],
+        )?;
+        tx.commit()?;
+    }
+
+    if current < 5 {
+        let tx = conn.unchecked_transaction()?;
+        apply_migration_005(&tx)?;
+        tx.execute(
+            "INSERT INTO _schema_version (version, applied_at) VALUES (5, unixepoch());",
+            [],
+        )?;
+        tx.commit()?;
+    }
+
+    if current < 6 {
+        let tx = conn.unchecked_transaction()?;
+        apply_migration_006(&tx)?;
+        tx.execute(
+            "INSERT INTO _schema_version (version, applied_at) VALUES (6, unixepoch());",
             [],
         )?;
         tx.commit()?;
@@ -208,6 +228,97 @@ fn apply_migration_004(conn: &Connection) -> Result<(), StorageError> {
             created_at  INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_embeddings_file ON embeddings(file_path);",
+    )?;
+    Ok(())
+}
+
+/// Create the `jsx_components` table for MDX component tracking.
+fn apply_migration_005(conn: &Connection) -> Result<(), StorageError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS jsx_components (
+            id           INTEGER PRIMARY KEY,
+            file_id      INTEGER NOT NULL,
+            name         TEXT NOT NULL,
+            props_json   TEXT,
+            line_number  INTEGER,
+            self_closing BOOLEAN DEFAULT 0,
+            created_at   INTEGER NOT NULL,
+            FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_jsx_file ON jsx_components(file_id);
+        CREATE INDEX IF NOT EXISTS idx_jsx_name ON jsx_components(name);",
+    )?;
+    Ok(())
+}
+
+/// Create tables for canvas nodes/edges and bases databases.
+fn apply_migration_006(conn: &Connection) -> Result<(), StorageError> {
+    conn.execute_batch(
+        "-- Canvas nodes
+        CREATE TABLE IF NOT EXISTS canvas_nodes (
+            id           INTEGER PRIMARY KEY,
+            file_id      INTEGER NOT NULL,
+            node_id      TEXT NOT NULL,
+            node_type    TEXT NOT NULL,
+            x            REAL NOT NULL,
+            y            REAL NOT NULL,
+            width        REAL NOT NULL,
+            height       REAL NOT NULL,
+            color        TEXT,
+            label        TEXT,
+            collapsed    BOOLEAN DEFAULT 0,
+            content_json TEXT,
+            FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_canvas_nodes_file ON canvas_nodes(file_id);
+
+        -- Canvas edges
+        CREATE TABLE IF NOT EXISTS canvas_edges (
+            id           INTEGER PRIMARY KEY,
+            file_id      INTEGER NOT NULL,
+            edge_id      TEXT NOT NULL,
+            from_node    TEXT NOT NULL,
+            to_node      TEXT NOT NULL,
+            edge_type    TEXT NOT NULL DEFAULT 'solid',
+            label        TEXT,
+            color        TEXT,
+            FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_canvas_edges_file ON canvas_edges(file_id);
+
+        -- Bases databases
+        CREATE TABLE IF NOT EXISTS bases (
+            id            INTEGER PRIMARY KEY,
+            path          TEXT NOT NULL UNIQUE,
+            name          TEXT NOT NULL,
+            schema_json   TEXT NOT NULL,
+            metadata_json TEXT,
+            created_at    INTEGER NOT NULL,
+            modified_at   INTEGER NOT NULL
+        );
+
+        -- Base records
+        CREATE TABLE IF NOT EXISTS bases_records (
+            id          INTEGER PRIMARY KEY,
+            base_id     INTEGER NOT NULL,
+            record_id   TEXT NOT NULL,
+            data_json   TEXT NOT NULL,
+            created_at  INTEGER NOT NULL,
+            modified_at INTEGER NOT NULL,
+            FOREIGN KEY(base_id) REFERENCES bases(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_bases_records_base ON bases_records(base_id);
+
+        -- Base views
+        CREATE TABLE IF NOT EXISTS bases_views (
+            id          INTEGER PRIMARY KEY,
+            base_id     INTEGER NOT NULL,
+            name        TEXT NOT NULL,
+            view_type   TEXT NOT NULL,
+            config_json TEXT NOT NULL,
+            FOREIGN KEY(base_id) REFERENCES bases(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_bases_views_base ON bases_views(base_id);",
     )?;
     Ok(())
 }
@@ -598,7 +709,186 @@ mod tests {
         assert_eq!(count, 1, "embeddings table should contain the inserted row");
     }
 
-    // ── 18. migrate_v3_adds_typed_property_columns ───────────────────────────
+    // ── 18. migrate_v5_creates_jsx_components_table ────────────────────────
+    #[test]
+    fn migrate_v5_creates_jsx_components_table() {
+        let conn = in_memory_db();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
+             VALUES ('comp.mdx', 'mdx', 'h11', 10, 0, 0);",
+            [],
+        )
+        .unwrap();
+        let fid: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO jsx_components (file_id, name, props_json, line_number, self_closing, created_at)
+             VALUES (?1, 'Chart', '{\"type\":\"bar\"}', 5, 0, 1000);",
+            rusqlite::params![fid],
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM jsx_components WHERE file_id = ?1;",
+                rusqlite::params![fid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "jsx_components table should contain the inserted row");
+    }
+
+    // ── 19. migrate_v6_creates_canvas_nodes_table ──────────────────────────
+    #[test]
+    fn migrate_v6_creates_canvas_nodes_table() {
+        let conn = in_memory_db();
+        configure_pragmas(&conn).unwrap();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
+             VALUES ('test.canvas', 'canvas', 'h1', 10, 0, 0);",
+            [],
+        )
+        .unwrap();
+        let fid: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO canvas_nodes (file_id, node_id, node_type, x, y, width, height, content_json)
+             VALUES (?1, 'n1', 'text', 0.0, 0.0, 300.0, 200.0, '{\"text\":\"hello\"}');",
+            rusqlite::params![fid],
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM canvas_nodes WHERE file_id = ?1;",
+                rusqlite::params![fid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    // ── 20. migrate_v6_creates_canvas_edges_table ──────────────────────────
+    #[test]
+    fn migrate_v6_creates_canvas_edges_table() {
+        let conn = in_memory_db();
+        configure_pragmas(&conn).unwrap();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
+             VALUES ('test.canvas', 'canvas', 'h1', 10, 0, 0);",
+            [],
+        )
+        .unwrap();
+        let fid: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO canvas_edges (file_id, edge_id, from_node, to_node, edge_type)
+             VALUES (?1, 'e1', 'n1', 'n2', 'solid');",
+            rusqlite::params![fid],
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM canvas_edges WHERE file_id = ?1;",
+                rusqlite::params![fid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    // ── 21. migrate_v6_creates_bases_table ──────────────────────────────────
+    #[test]
+    fn migrate_v6_creates_bases_table() {
+        let conn = in_memory_db();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO bases (path, name, schema_json, created_at, modified_at)
+             VALUES ('tasks.bases', 'Tasks', '{}', 0, 0);",
+            [],
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM bases;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    // ── 22. migrate_v6_cascade_deletes_canvas_nodes ─────────────────────────
+    #[test]
+    fn migrate_v6_cascade_deletes_canvas_nodes() {
+        let conn = in_memory_db();
+        configure_pragmas(&conn).unwrap();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
+             VALUES ('del.canvas', 'canvas', 'h1', 10, 0, 0);",
+            [],
+        )
+        .unwrap();
+        let fid: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO canvas_nodes (file_id, node_id, node_type, x, y, width, height)
+             VALUES (?1, 'n1', 'text', 0.0, 0.0, 100.0, 100.0);",
+            rusqlite::params![fid],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO canvas_edges (file_id, edge_id, from_node, to_node, edge_type)
+             VALUES (?1, 'e1', 'n1', 'n2', 'solid');",
+            rusqlite::params![fid],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM files WHERE id = ?1;", rusqlite::params![fid])
+            .unwrap();
+        let nodes: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM canvas_nodes WHERE file_id = ?1;",
+                rusqlite::params![fid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let edges: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM canvas_edges WHERE file_id = ?1;",
+                rusqlite::params![fid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(nodes, 0, "cascade should remove canvas nodes");
+        assert_eq!(edges, 0, "cascade should remove canvas edges");
+    }
+
+    // ── 23. migrate_v6_cascade_deletes_bases_records ────────────────────────
+    #[test]
+    fn migrate_v6_cascade_deletes_bases_records() {
+        let conn = in_memory_db();
+        configure_pragmas(&conn).unwrap();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO bases (path, name, schema_json, created_at, modified_at)
+             VALUES ('del.bases', 'Del', '{}', 0, 0);",
+            [],
+        )
+        .unwrap();
+        let bid: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO bases_records (base_id, record_id, data_json, created_at, modified_at)
+             VALUES (?1, 'r1', '{}', 0, 0);",
+            rusqlite::params![bid],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM bases WHERE id = ?1;", rusqlite::params![bid])
+            .unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM bases_records WHERE base_id = ?1;",
+                rusqlite::params![bid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "cascade should remove bases records");
+    }
+
+    // ── 24. migrate_v3_adds_typed_property_columns ───────────────────────────
     #[test]
     fn migrate_v3_adds_typed_property_columns() {
         let conn = in_memory_db();

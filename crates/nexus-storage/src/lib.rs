@@ -21,6 +21,10 @@ mod tasks;
 mod graph;
 mod search_scope;
 mod export;
+pub mod mdx;
+mod canvas;
+pub mod config;
+pub mod bases;
 
 pub use atomic::atomic_write;
 pub use error::StorageError;
@@ -35,6 +39,13 @@ pub use reconcile::{ReconcileDelta, reconcile};
 pub use watcher::{relative_path, should_ignore, StorageEvent, Watcher};
 pub use graph::{KnowledgeGraph, BacklinkResult, OutgoingLink, UnresolvedLink, GraphStats, EdgeData};
 pub use export::export_to_html;
+pub use mdx::{ParsedJsxComponent, MdxParseResult, parse_mdx};
+pub use index::{JsxRecord, insert_jsx_components, query_jsx_components};
+pub use canvas::{
+    CanvasFile, CanvasNode, CanvasNodeType, CanvasEdge, CanvasEdgeType,
+    CanvasNodeRecord, CanvasEdgeRecord,
+    parse_canvas, serialize_canvas, extract_file_links,
+};
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
@@ -142,55 +153,103 @@ impl StorageEngine {
         let abs_target = self.forge.root().join(path);
         atomic_write(&abs_target, content, &self.forge.temp_dir())?;
 
-        // 2. Parse content as markdown.
+        // 2. Decode content as UTF-8.
         let text = std::str::from_utf8(content).map_err(|e| StorageError::CorruptFile {
             path: path.to_string(),
             reason: e.to_string(),
         })?;
-        let parsed = parse_markdown(text)?;
 
         // 3. Lock write_conn.
         let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
 
         // 4. Delete existing index entry if the path is already indexed.
         if let Some(existing) = file_by_path(&conn, path)? {
-            // Clean up FTS rows first (they don't cascade).
             conn.execute(
                 "DELETE FROM fts_blocks WHERE file_path = ?1",
                 rusqlite::params![path],
             )?;
+            canvas::delete_canvas(&conn, existing.id as i64)?;
             delete_file(&conn, existing.id)?;
         }
 
-        // 5. Insert the new entry.
         let size_bytes = content.len() as u64;
         let file_type = infer_file_type(path);
-        insert_file(&conn, path, &file_type, size_bytes, &parsed)?;
 
-        // 6. Update knowledge graph.
-        {
-            let mut g = self.graph.write().expect("graph lock poisoned");
-            g.add_note(path);
-            g.remove_links_from(path);
-            for link in &parsed.links {
-                let target = link.target_path.as_deref()
-                    .unwrap_or(&link.link_text);
-                g.add_link(path, target, graph::EdgeData {
-                    link_type: link.link_type.clone(),
-                    link_text: link.link_text.clone(),
-                    fragment: link.fragment.clone(),
-                });
+        // 5. Branch by file type.
+        if path.ends_with(".canvas") {
+            // ── Canvas path ──────────────────────────────────────────────
+            let canvas_data = canvas::parse_canvas(text)?;
+            let content_hash = content_hash(text.as_bytes());
+            let empty_parsed = ParsedFile {
+                content_hash: content_hash.clone(),
+                blocks: Vec::new(),
+                links: Vec::new(),
+                tags: Vec::new(),
+                frontmatter: Vec::new(),
+                tasks: Vec::new(),
+            };
+            let file_id = insert_file(&conn, path, &file_type, size_bytes, &empty_parsed)?;
+            canvas::insert_canvas(&conn, file_id as i64, &canvas_data)?;
+
+            // Update knowledge graph: file-type nodes create links.
+            {
+                let mut g = self.graph.write().expect("graph lock poisoned");
+                g.add_note(path);
+                g.remove_links_from(path);
+                for target in canvas::extract_file_links(&canvas_data) {
+                    g.add_link(path, &target, graph::EdgeData {
+                        link_type: "canvas-embed".to_string(),
+                        link_text: target.clone(),
+                        fragment: None,
+                    });
+                }
             }
-        }
 
-        // 7. Return FileMetadata.
-        let meta = FileMetadata {
-            path: path.to_string(),
-            size_bytes,
-            modified_at: unix_now(),
-            content_hash: parsed.content_hash,
-        };
-        Ok(meta)
+            Ok(FileMetadata {
+                path: path.to_string(),
+                size_bytes,
+                modified_at: unix_now(),
+                content_hash,
+            })
+        } else {
+            // ── Markdown / MDX path ──────────────────────────────────────
+            let is_mdx = path.ends_with(".mdx");
+            let (parsed, jsx_components) = if is_mdx {
+                let result = mdx::parse_mdx(text)?;
+                (result.parsed_file, result.components)
+            } else {
+                (parse_markdown(text)?, Vec::new())
+            };
+
+            let file_id = insert_file(&conn, path, &file_type, size_bytes, &parsed)?;
+
+            if !jsx_components.is_empty() {
+                insert_jsx_components(&conn, file_id, &jsx_components)?;
+            }
+
+            // Update knowledge graph.
+            {
+                let mut g = self.graph.write().expect("graph lock poisoned");
+                g.add_note(path);
+                g.remove_links_from(path);
+                for link in &parsed.links {
+                    let target = link.target_path.as_deref()
+                        .unwrap_or(&link.link_text);
+                    g.add_link(path, target, graph::EdgeData {
+                        link_type: link.link_type.clone(),
+                        link_text: link.link_text.clone(),
+                        fragment: link.fragment.clone(),
+                    });
+                }
+            }
+
+            Ok(FileMetadata {
+                path: path.to_string(),
+                size_bytes,
+                modified_at: unix_now(),
+                content_hash: parsed.content_hash,
+            })
+        }
     }
 
     /// Read the raw bytes of the file at `path` from disk.
@@ -208,6 +267,74 @@ impl StorageEngine {
                 StorageError::Io(e)
             }
         })
+    }
+
+    // ── Canvas operations ─────────────────────────────────────────────────
+
+    /// Read and parse a `.canvas` file from disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O or parse failure.
+    pub fn read_canvas(&self, path: &str) -> Result<CanvasFile, StorageError> {
+        let bytes = self.read_file(path)?;
+        let text = std::str::from_utf8(&bytes).map_err(|e| StorageError::CorruptFile {
+            path: path.to_string(),
+            reason: e.to_string(),
+        })?;
+        canvas::parse_canvas(text)
+    }
+
+    /// Query canvas nodes for a file by its index ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any SQLite failure.
+    pub fn canvas_nodes(&self, file_id: i64) -> Result<Vec<CanvasNodeRecord>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        canvas::query_canvas_nodes(&conn, file_id)
+    }
+
+    /// Query canvas edges for a file by its index ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any SQLite failure.
+    pub fn canvas_edges(&self, file_id: i64) -> Result<Vec<CanvasEdgeRecord>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        canvas::query_canvas_edges(&conn, file_id)
+    }
+
+    // ── Bases operations ──────────────────────────────────────────────────
+
+    /// Index a base in SQLite.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any SQLite failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn index_base(&self, path: &str, base: &bases::Base) -> Result<i64, StorageError> {
+        let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        bases::insert_base(&conn, path, base)
+    }
+
+    /// List all indexed bases.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any SQLite failure.
+    pub fn list_bases(&self) -> Result<Vec<bases::BaseSummary>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        bases::query_bases(&conn)
     }
 
     /// Delete a file from disk and remove its index entry.
@@ -751,6 +878,10 @@ fn open_internal(
 fn infer_file_type(path: &str) -> String {
     if path.starts_with("attachments/") {
         "attachment".to_string()
+    } else if path.ends_with(".canvas") {
+        "canvas".to_string()
+    } else if path.ends_with(".mdx") {
+        "mdx".to_string()
     } else {
         "markdown".to_string()
     }

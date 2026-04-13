@@ -58,6 +58,13 @@ enum Commands {
     // Stub commands — implemented in later milestones
     // -----------------------------------------------------------------------
 
+    /// Canvas file operations
+    Canvas(CanvasArgs),
+    /// Configuration management
+    Config(ConfigArgs),
+    /// Bases (database) operations
+    Bases(BasesArgs),
+
     /// AI assistant operations
     Ai(AiArgs),
     /// Process management (coming soon)
@@ -93,6 +100,8 @@ enum ForgeCommand {
     },
     /// Show forge status
     Status,
+    /// Rebuild the index from files on disk
+    Reindex,
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +345,141 @@ enum LogsCommand {
 }
 
 // ---------------------------------------------------------------------------
+// Canvas
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct CanvasArgs {
+    #[command(subcommand)]
+    command: CanvasCommand,
+}
+
+#[derive(Subcommand)]
+enum CanvasCommand {
+    /// Create a new empty canvas file
+    Create {
+        /// Vault-relative path for the canvas file
+        path: String,
+    },
+    /// Show canvas summary (nodes, edges)
+    Show {
+        /// Path to the canvas file
+        path: String,
+    },
+    /// Add a node to a canvas
+    AddNode {
+        /// Path to the canvas file
+        path: String,
+        /// Node type: file, text, link, group, database, terminal
+        #[arg(long = "type")]
+        node_type: String,
+        /// Horizontal position
+        #[arg(long, default_value_t = 0.0)]
+        x: f64,
+        /// Vertical position
+        #[arg(long, default_value_t = 0.0)]
+        y: f64,
+        /// Node width
+        #[arg(long, default_value_t = 300.0)]
+        width: f64,
+        /// Node height
+        #[arg(long, default_value_t = 200.0)]
+        height: f64,
+        /// Content (file path, text, URL, command — depends on type)
+        #[arg(long)]
+        content: Option<String>,
+        /// Display label
+        #[arg(long)]
+        label: Option<String>,
+    },
+    /// Add an edge between two nodes
+    AddEdge {
+        /// Path to the canvas file
+        path: String,
+        /// Source node ID
+        #[arg(long)]
+        from: String,
+        /// Target node ID
+        #[arg(long)]
+        to: String,
+        /// Edge style: solid, dashed, dotted
+        #[arg(long = "type", default_value = "solid")]
+        edge_type: String,
+        /// Relationship label
+        #[arg(long)]
+        label: Option<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct ConfigArgs {
+    #[command(subcommand)]
+    command: ConfigCommand,
+}
+
+#[derive(Subcommand)]
+enum ConfigCommand {
+    /// Show current configuration
+    Show {
+        /// Config file to show: app, workspace, mcp, ai, all
+        #[arg(long, default_value = "all")]
+        file: String,
+    },
+    /// Reset a config file to defaults
+    Reset {
+        /// Config file to reset: app, workspace, mcp, ai
+        #[arg(long)]
+        file: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Bases
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct BasesArgs {
+    #[command(subcommand)]
+    command: BasesCommand,
+}
+
+#[derive(Subcommand)]
+enum BasesCommand {
+    /// Create a new base with a schema
+    Create {
+        /// Path for the .bases directory
+        path: String,
+        /// Schema definition as JSON
+        #[arg(long)]
+        schema: String,
+    },
+    /// List all bases
+    List,
+    /// Show base details
+    Show {
+        /// Path to the .bases directory
+        path: String,
+    },
+    /// Add a record to a base
+    AddRecord {
+        /// Path to the .bases directory
+        path: String,
+        /// Record data as JSON
+        #[arg(long)]
+        data: String,
+    },
+    /// Query records from a base
+    Query {
+        /// Path to the .bases directory
+        path: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Stub — used for not-yet-implemented command groups
 // ---------------------------------------------------------------------------
 
@@ -388,6 +532,7 @@ fn main() {
         Commands::Forge(args) => match args.command {
             ForgeCommand::Init { dir } => commands::forge::init(&app, dir),
             ForgeCommand::Status => commands::forge::status(&mut app),
+            ForgeCommand::Reindex => commands::forge::reindex(&mut app),
         },
 
         Commands::Content(args) => match args.command {
@@ -454,6 +599,37 @@ fn main() {
             GraphCommand::Neighbors { path, depth } => {
                 commands::graph::neighbors(&mut app, &path, depth)
             }
+        },
+
+        Commands::Canvas(args) => match args.command {
+            CanvasCommand::Create { path } => commands::canvas::create(&mut app, &path),
+            CanvasCommand::Show { path } => commands::canvas::show(&mut app, &path),
+            CanvasCommand::AddNode {
+                path, node_type, x, y, width, height, content, label,
+            } => commands::canvas::add_node(
+                &mut app, &path, &node_type, x, y, width, height,
+                content.as_deref(), label.as_deref(),
+            ),
+            CanvasCommand::AddEdge { path, from, to, edge_type, label } => {
+                commands::canvas::add_edge(&mut app, &path, &from, &to, &edge_type, label.as_deref())
+            }
+        },
+
+        Commands::Config(args) => match args.command {
+            ConfigCommand::Show { file } => commands::config::show(&app, &file),
+            ConfigCommand::Reset { file } => commands::config::reset(&app, &file),
+        },
+
+        Commands::Bases(args) => match args.command {
+            BasesCommand::Create { path, schema } => {
+                commands::bases::create(&mut app, &path, &schema)
+            }
+            BasesCommand::List => commands::bases::list(&mut app),
+            BasesCommand::Show { path } => commands::bases::show(&mut app, &path),
+            BasesCommand::AddRecord { path, data } => {
+                commands::bases::add_record(&mut app, &path, &data)
+            }
+            BasesCommand::Query { path } => commands::bases::query(&mut app, &path),
         },
 
         Commands::Ai(args) => match args.command {
