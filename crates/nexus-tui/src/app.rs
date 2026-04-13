@@ -8,7 +8,8 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use nexus_storage::{
-    BacklinkResult, FileFilter, SearchResult, StorageConfig, StorageEngine, TaskFilter, TaskRecord,
+    BacklinkResult, FileFilter, GraphStats, SearchResult, StorageConfig, StorageEngine, TaskFilter,
+    TaskRecord,
 };
 use ratatui::widgets::ListState;
 
@@ -405,6 +406,35 @@ impl Default for TaskViewState {
     }
 }
 
+// ── StatusInfo ───────────────────────────────────────────────────────────────
+
+/// Cached status bar statistics.
+pub struct StatusInfo {
+    /// Total number of files in the forge.
+    pub file_count: usize,
+    /// Total number of links (graph edges).
+    pub link_count: usize,
+    /// Number of pending (incomplete) tasks.
+    pub pending_task_count: usize,
+}
+
+impl StatusInfo {
+    /// Create a zeroed `StatusInfo`.
+    pub fn new() -> Self {
+        Self {
+            file_count: 0,
+            link_count: 0,
+            pending_task_count: 0,
+        }
+    }
+}
+
+impl Default for StatusInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── TuiApp ────────────────────────────────────────────────────────────────────
 
 /// Top-level application state.
@@ -425,6 +455,8 @@ pub struct TuiApp {
     pub backlinks: BacklinksState,
     /// Task list view state.
     pub task_view: TaskViewState,
+    /// Cached status bar statistics.
+    pub status_info: StatusInfo,
     /// Underlying storage engine.
     pub storage: StorageEngine,
     /// Path to the forge root.
@@ -453,12 +485,14 @@ impl TuiApp {
             find: FindState::new(),
             backlinks: BacklinksState::new(),
             task_view: TaskViewState::new(),
+            status_info: StatusInfo::new(),
             storage,
             forge_root,
             should_quit: false,
         };
 
         app.refresh_tree()?;
+        app.refresh_status();
         Ok(app)
     }
 
@@ -632,6 +666,37 @@ impl TuiApp {
             Ok(records) => self.task_view.load(records),
             Err(_) => self.task_view.load(Vec::new()),
         }
+    }
+
+    /// Refresh cached status bar statistics from the storage engine.
+    pub fn refresh_status(&mut self) {
+        let file_count = self
+            .tree
+            .entries
+            .iter()
+            .filter(|e| !e.is_dir)
+            .count();
+
+        let link_count = self
+            .storage
+            .graph_stats()
+            .map(|s: GraphStats| s.edge_count)
+            .unwrap_or(0);
+
+        let pending_task_count = self
+            .storage
+            .query_tasks(&TaskFilter {
+                completed: Some(false),
+                file_path: None,
+            })
+            .map(|tasks| tasks.len())
+            .unwrap_or(0);
+
+        self.status_info = StatusInfo {
+            file_count,
+            link_count,
+            pending_task_count,
+        };
     }
 
     /// Toggle the expanded/collapsed state of the selected directory entry.
