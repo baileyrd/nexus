@@ -11,7 +11,7 @@ use crate::StorageError;
 use rusqlite::Connection;
 
 /// The current schema version this crate expects.
-pub const CURRENT_VERSION: u32 = 3;
+pub const CURRENT_VERSION: u32 = 4;
 
 /// Configure `SQLite` pragmas for optimal performance and consistency.
 ///
@@ -74,6 +74,16 @@ pub fn migrate(conn: &Connection) -> Result<u32, StorageError> {
         apply_migration_003(&tx)?;
         tx.execute(
             "INSERT INTO _schema_version (version, applied_at) VALUES (3, unixepoch());",
+            [],
+        )?;
+        tx.commit()?;
+    }
+
+    if current < 4 {
+        let tx = conn.unchecked_transaction()?;
+        apply_migration_004(&tx)?;
+        tx.execute(
+            "INSERT INTO _schema_version (version, applied_at) VALUES (4, unixepoch());",
             [],
         )?;
         tx.commit()?;
@@ -182,6 +192,22 @@ fn apply_migration_003(conn: &Connection) -> Result<(), StorageError> {
         "ALTER TABLE properties ADD COLUMN value_num REAL;
          ALTER TABLE properties ADD COLUMN value_date INTEGER;
          ALTER TABLE properties ADD COLUMN value_bool BOOLEAN;",
+    )?;
+    Ok(())
+}
+
+/// Create the `embeddings` table for storing chunk vectors.
+fn apply_migration_004(conn: &Connection) -> Result<(), StorageError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS embeddings (
+            id          INTEGER PRIMARY KEY,
+            file_path   TEXT NOT NULL,
+            block_id    INTEGER NOT NULL,
+            chunk_text  TEXT NOT NULL,
+            embedding   BLOB NOT NULL,
+            created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_embeddings_file ON embeddings(file_path);",
     )?;
     Ok(())
 }
@@ -555,7 +581,24 @@ mod tests {
         assert_eq!(fragment, "heading");
     }
 
-    // ── 17. migrate_v3_adds_typed_property_columns ───────────────────────────
+    // ── 17. migrate_v4_creates_embeddings_table ────────────────────────────
+    #[test]
+    fn migrate_v4_creates_embeddings_table() {
+        let conn = in_memory_db();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO embeddings (file_path, block_id, chunk_text, embedding, created_at)
+             VALUES ('embed.md', 1, 'some chunk', X'00000000', unixepoch());",
+            [],
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM embeddings;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "embeddings table should contain the inserted row");
+    }
+
+    // ── 18. migrate_v3_adds_typed_property_columns ───────────────────────────
     #[test]
     fn migrate_v3_adds_typed_property_columns() {
         let conn = in_memory_db();

@@ -11,7 +11,7 @@
 mod error;
 mod forge;
 mod atomic;
-pub(crate) mod schema;
+pub mod schema;
 mod parser;
 mod index;
 mod search;
