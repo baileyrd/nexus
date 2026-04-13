@@ -141,6 +141,23 @@ enum ContentCommand {
         #[arg(short, long, default_value_t = 20)]
         limit: usize,
     },
+    /// List tasks across the forge
+    Tasks {
+        /// Show only completed tasks
+        #[arg(long)]
+        completed: bool,
+        /// Show all tasks (completed and pending)
+        #[arg(long)]
+        all: bool,
+        /// Filter to tasks in a specific file
+        #[arg(long)]
+        file: Option<String>,
+    },
+    /// Toggle a task's completion state
+    TaskToggle {
+        /// Task ID to toggle
+        id: u64,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +320,12 @@ fn main() {
             }
             ContentCommand::Search { query, limit } => {
                 commands::content::search(&mut app, &query, limit)
+            }
+            ContentCommand::Tasks { completed, all, file } => {
+                commands::content::tasks(&mut app, completed, all, file.as_deref())
+            }
+            ContentCommand::TaskToggle { id } => {
+                commands::content::task_toggle(&mut app, id)
             }
         },
 

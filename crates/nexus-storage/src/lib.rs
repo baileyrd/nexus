@@ -17,11 +17,13 @@ mod index;
 mod search;
 mod watcher;
 mod reconcile;
+mod tasks;
 
 pub use atomic::atomic_write;
 pub use error::StorageError;
 pub use forge::{Forge, ForgeLock};
 pub use parser::{content_hash, parse_markdown, ParsedBlock, ParsedFile, ParsedLink, ParsedTag, Property};
+pub use tasks::{ParsedTask, TaskRecord, TaskFilter, insert_tasks, query_tasks, toggle_task, toggle_task_in_file};
 pub use index::{BlockRecord, FileFilter, FileMetadata, FileRecord, LinkRecord, RebuildStats, TagResult};
 pub use index::{insert_file, query_files, query_blocks, query_links, query_backlinks, query_tags, delete_file, soft_delete_file, file_by_path};
 pub use search::{SearchIndex, SearchResult};
@@ -384,6 +386,40 @@ impl StorageEngine {
             tags_found,
             duration_ms,
         })
+    }
+
+    // ── Tasks ─────────────────────────────────────────────────────────────
+
+    /// Query tasks with optional filters.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
+    pub fn query_tasks(&self, filter: &TaskFilter) -> Result<Vec<TaskRecord>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        tasks::query_tasks(&conn, filter)
+    }
+
+    /// Toggle a task's completion state in both the database and the source file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on database or I/O failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn toggle_task(&self, task_id: u64) -> Result<TaskRecord, StorageError> {
+        let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        let record = tasks::toggle_task(&conn, task_id)?;
+
+        // Write back to file
+        let abs_path = self.forge.root().join(&record.file_path);
+        tasks::toggle_task_in_file(&abs_path, record.line_number, record.completed)?;
+
+        Ok(record)
     }
 
     // ── Search ────────────────────────────────────────────────────────────────

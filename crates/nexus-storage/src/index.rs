@@ -61,6 +61,10 @@ pub struct BlockRecord {
     pub start_line: u32,
     /// 1-based end line.
     pub end_line: u32,
+    /// Block reference anchor id.
+    pub block_ref_id: Option<String>,
+    /// Callout type for callout blocks.
+    pub callout_type: Option<String>,
 }
 
 /// A row from the `links` table.
@@ -80,6 +84,8 @@ pub struct LinkRecord {
     pub link_type: String,
     /// Whether `target_file_id` was successfully resolved.
     pub is_resolved: bool,
+    /// Fragment identifier from the link target.
+    pub fragment: Option<String>,
 }
 
 /// A tag together with the file it came from.
@@ -157,8 +163,8 @@ pub fn insert_file(
     // ── 2. Blocks + FTS ──────────────────────────────────────────────────────
     for block in &parsed.blocks {
         conn.execute(
-            "INSERT INTO blocks (file_id, block_type, level, content, start_line, end_line)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
+            "INSERT INTO blocks (file_id, block_type, level, content, start_line, end_line, block_ref_id, callout_type)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);",
             params![
                 file_id.cast_signed(),
                 block.block_type,
@@ -166,6 +172,8 @@ pub fn insert_file(
                 block.content,
                 block.start_line,
                 block.end_line,
+                block.block_ref_id,
+                block.callout_type,
             ],
         )?;
         let block_rowid = conn.last_insert_rowid();
@@ -179,11 +187,12 @@ pub fn insert_file(
 
     // ── 3. Links ─────────────────────────────────────────────────────────────
     for link in &parsed.links {
-        let (target_file_id, is_resolved) = resolve_link(conn, link.target_path.as_deref());
+        let resolve_target = link.target_path.as_deref().or(Some(link.link_text.as_str()));
+        let (target_file_id, is_resolved) = resolve_link(conn, resolve_target);
         conn.execute(
             "INSERT INTO links
-                (source_file_id, target_path, target_file_id, link_text, link_type, is_resolved)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
+                (source_file_id, target_path, target_file_id, link_text, link_type, is_resolved, fragment)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
             params![
                 file_id.cast_signed(),
                 link.target_path,
@@ -191,6 +200,7 @@ pub fn insert_file(
                 link.link_text,
                 link.link_type,
                 is_resolved,
+                link.fragment,
             ],
         )?;
     }
@@ -207,6 +217,9 @@ pub fn insert_file(
     for prop in &parsed.frontmatter {
         insert_property(conn, file_id, prop)?;
     }
+
+    // ── 6. Tasks ────────────────────────────────────────────────────────────
+    crate::tasks::insert_tasks(conn, file_id, &parsed.tasks)?;
 
     Ok(file_id)
 }
@@ -266,7 +279,7 @@ pub fn query_files(conn: &Connection, filter: &FileFilter) -> Result<Vec<FileRec
 /// Returns [`StorageError::Database`] on any `SQLite` failure.
 pub fn query_blocks(conn: &Connection, file_id: u64) -> Result<Vec<BlockRecord>, StorageError> {
     let mut stmt = conn.prepare(
-        "SELECT id, file_id, block_type, level, content, start_line, end_line
+        "SELECT id, file_id, block_type, level, content, start_line, end_line, block_ref_id, callout_type
          FROM blocks WHERE file_id = ?1 ORDER BY start_line;",
     )?;
     let rows = stmt.query_map(params![file_id.cast_signed()], |row| {
@@ -278,6 +291,8 @@ pub fn query_blocks(conn: &Connection, file_id: u64) -> Result<Vec<BlockRecord>,
             content: row.get(4)?,
             start_line: u32::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
             end_line: u32::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
+            block_ref_id: row.get(7)?,
+            callout_type: row.get(8)?,
         })
     })?;
 
@@ -295,7 +310,7 @@ pub fn query_blocks(conn: &Connection, file_id: u64) -> Result<Vec<BlockRecord>,
 /// Returns [`StorageError::Database`] on any `SQLite` failure.
 pub fn query_links(conn: &Connection, file_id: u64) -> Result<Vec<LinkRecord>, StorageError> {
     let mut stmt = conn.prepare(
-        "SELECT id, source_file_id, target_path, target_file_id, link_text, link_type, is_resolved
+        "SELECT id, source_file_id, target_path, target_file_id, link_text, link_type, is_resolved, fragment
          FROM links WHERE source_file_id = ?1;",
     )?;
     let rows = stmt.query_map(params![file_id.cast_signed()], map_link_record)?;
@@ -314,7 +329,7 @@ pub fn query_links(conn: &Connection, file_id: u64) -> Result<Vec<LinkRecord>, S
 /// Returns [`StorageError::Database`] on any `SQLite` failure.
 pub fn query_backlinks(conn: &Connection, file_id: u64) -> Result<Vec<LinkRecord>, StorageError> {
     let mut stmt = conn.prepare(
-        "SELECT id, source_file_id, target_path, target_file_id, link_text, link_type, is_resolved
+        "SELECT id, source_file_id, target_path, target_file_id, link_text, link_type, is_resolved, fragment
          FROM links WHERE target_file_id = ?1;",
     )?;
     let rows = stmt.query_map(params![file_id.cast_signed()], map_link_record)?;
@@ -433,10 +448,26 @@ fn resolve_link(conn: &Connection, target: Option<&str>) -> (Option<u64>, bool) 
         |row| row.get::<_, i64>(0),
     );
 
-    match id_result {
-        Ok(id) => (Some(u64::try_from(id).unwrap_or(0)), true),
-        Err(_) => (None, false),
+    if let Ok(id) = id_result {
+        return (Some(u64::try_from(id).unwrap_or(0)), true);
     }
+
+    // Alias match: check if any file has this as an alias in frontmatter properties.
+    let alias_result = conn.query_row(
+        "SELECT file_id, value FROM properties WHERE key = 'aliases' AND value LIKE ?1;",
+        params![format!("%\"{target}\"%")],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+    );
+
+    if let Ok((fid, json_value)) = alias_result {
+        if let Ok(aliases) = serde_json::from_str::<Vec<String>>(&json_value) {
+            if aliases.iter().any(|a| a == target) {
+                return (Some(u64::try_from(fid).unwrap_or(0)), true);
+            }
+        }
+    }
+
+    (None, false)
 }
 
 /// Insert a single property row, ignoring duplicate `(file_id, key)` pairs.
@@ -479,6 +510,7 @@ fn map_link_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<LinkRecord> {
         link_text: row.get(4)?,
         link_type: row.get(5)?,
         is_resolved: row.get::<_, bool>(6)?,
+        fragment: row.get(7)?,
     })
 }
 
@@ -524,6 +556,8 @@ mod tests {
                     raw_markdown: None,
                     start_line: 1,
                     end_line: 1,
+                    block_ref_id: None,
+                    callout_type: None,
                 },
                 ParsedBlock {
                     block_type: "paragraph".to_string(),
@@ -532,17 +566,21 @@ mod tests {
                     raw_markdown: None,
                     start_line: 3,
                     end_line: 3,
+                    block_ref_id: None,
+                    callout_type: None,
                 },
             ],
             links: vec![ParsedLink {
                 link_text: "other note".to_string(),
                 target_path: Some("other-note".to_string()),
                 link_type: "wikilink".to_string(),
+                fragment: None,
             }],
             tags: vec![ParsedTag {
                 name: "rust".to_string(),
                 source: "inline".to_string(),
             }],
+            tasks: vec![],
         }
     }
 
@@ -693,6 +731,7 @@ mod tests {
             blocks: vec![],
             links: vec![],
             tags: vec![],
+            tasks: vec![],
         };
         let a_id = insert_file(&conn, "notes/a.md", "markdown", 10, &file_a).unwrap();
 
@@ -705,8 +744,10 @@ mod tests {
                 link_text: "a".to_string(),
                 target_path: Some("notes/a.md".to_string()),
                 link_type: "wikilink".to_string(),
+                fragment: None,
             }],
             tags: vec![],
+            tasks: vec![],
         };
         insert_file(&conn, "notes/b.md", "markdown", 10, &file_b).unwrap();
 

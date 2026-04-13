@@ -11,7 +11,7 @@ use crate::StorageError;
 use rusqlite::Connection;
 
 /// The current schema version this crate expects.
-pub const CURRENT_VERSION: u32 = 1;
+pub const CURRENT_VERSION: u32 = 2;
 
 /// Configure `SQLite` pragmas for optimal performance and consistency.
 ///
@@ -54,6 +54,16 @@ pub fn migrate(conn: &Connection) -> Result<u32, StorageError> {
         apply_migration_001(&tx)?;
         tx.execute(
             "INSERT INTO _schema_version (version, applied_at) VALUES (1, unixepoch());",
+            [],
+        )?;
+        tx.commit()?;
+    }
+
+    if current < 2 {
+        let tx = conn.unchecked_transaction()?;
+        apply_migration_002(&tx)?;
+        tx.execute(
+            "INSERT INTO _schema_version (version, applied_at) VALUES (2, unixepoch());",
             [],
         )?;
         tx.commit()?;
@@ -152,6 +162,35 @@ fn apply_migration_001(conn: &Connection) -> Result<(), StorageError> {
             block_content,
             block_type   UNINDEXED
         );",
+    )?;
+    Ok(())
+}
+
+fn apply_migration_002(conn: &Connection) -> Result<(), StorageError> {
+    conn.execute_batch(
+        "-- Task tracking
+        CREATE TABLE IF NOT EXISTS tasks (
+            id          INTEGER PRIMARY KEY,
+            file_id     INTEGER NOT NULL,
+            content     TEXT NOT NULL,
+            completed   BOOLEAN DEFAULT 0,
+            line_number INTEGER NOT NULL,
+            created_at  INTEGER NOT NULL,
+            updated_at  INTEGER NOT NULL,
+            FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_tasks_file ON tasks(file_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(completed);
+
+        -- Block reference anchors and callout type
+        ALTER TABLE blocks ADD COLUMN block_ref_id TEXT;
+        ALTER TABLE blocks ADD COLUMN callout_type TEXT;
+
+        -- Link fragment
+        ALTER TABLE links ADD COLUMN fragment TEXT;
+
+        -- Partial index for block refs
+        CREATE INDEX IF NOT EXISTS idx_blocks_ref ON blocks(block_ref_id) WHERE block_ref_id IS NOT NULL;",
     )?;
     Ok(())
 }
@@ -411,5 +450,88 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1, "FTS5 MATCH query should return the inserted row");
+    }
+
+    // ── 14. migrate_v2_creates_tasks_table ────────────────────────────────
+    #[test]
+    fn migrate_v2_creates_tasks_table() {
+        let conn = in_memory_db();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
+             VALUES ('tasks.md', 'markdown', 'h8', 10, 0, 0);",
+            [],
+        )
+        .unwrap();
+        let fid: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO tasks (file_id, content, completed, line_number, created_at, updated_at)
+             VALUES (?1, 'Buy groceries', 0, 5, 1000, 1000);",
+            rusqlite::params![fid],
+        )
+        .unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tasks WHERE file_id = ?1;", rusqlite::params![fid], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "tasks table should contain the inserted row");
+    }
+
+    // ── 15. migrate_v2_adds_block_ref_id_column ───────────────────────────
+    #[test]
+    fn migrate_v2_adds_block_ref_id_column() {
+        let conn = in_memory_db();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
+             VALUES ('ref.md', 'markdown', 'h9', 10, 0, 0);",
+            [],
+        )
+        .unwrap();
+        let fid: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO blocks (file_id, block_type, content, start_line, end_line, block_ref_id, callout_type)
+             VALUES (?1, 'paragraph', 'Some block', 1, 2, 'anchor42', 'warning');",
+            rusqlite::params![fid],
+        )
+        .unwrap();
+        let bid: i64 = conn.last_insert_rowid();
+        let (ref_id, callout): (String, String) = conn
+            .query_row(
+                "SELECT block_ref_id, callout_type FROM blocks WHERE id = ?1;",
+                rusqlite::params![bid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(ref_id, "anchor42");
+        assert_eq!(callout, "warning");
+    }
+
+    // ── 16. migrate_v2_adds_link_fragment_column ──────────────────────────
+    #[test]
+    fn migrate_v2_adds_link_fragment_column() {
+        let conn = in_memory_db();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
+             VALUES ('frag.md', 'markdown', 'h10', 10, 0, 0);",
+            [],
+        )
+        .unwrap();
+        let fid: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO links (source_file_id, link_text, link_type, fragment)
+             VALUES (?1, 'note#heading', 'wiki', 'heading');",
+            rusqlite::params![fid],
+        )
+        .unwrap();
+        let lid: i64 = conn.last_insert_rowid();
+        let fragment: String = conn
+            .query_row(
+                "SELECT fragment FROM links WHERE id = ?1;",
+                rusqlite::params![lid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fragment, "heading");
     }
 }

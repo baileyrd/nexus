@@ -137,3 +137,64 @@ pub fn search(app: &mut App, query: &str, limit: usize) -> Result<()> {
 
     Ok(())
 }
+
+/// List tasks across the forge.
+pub fn tasks(app: &mut App, completed: bool, all: bool, file: Option<&str>) -> Result<()> {
+    let storage = app.storage()?;
+
+    let filter = nexus_storage::TaskFilter {
+        completed: if all {
+            None
+        } else if completed {
+            Some(true)
+        } else {
+            Some(false)
+        },
+        file_path: file.map(String::from),
+    };
+
+    let tasks = storage
+        .query_tasks(&filter)
+        .map_err(|e| anyhow::anyhow!("failed to query tasks: {e}"))?;
+
+    let format = app.format();
+
+    if tasks.is_empty() {
+        println!("No tasks found.");
+        return Ok(());
+    }
+
+    let headers = &["ID", "Status", "Content", "File"];
+    let rows: Vec<Vec<String>> = tasks
+        .iter()
+        .map(|t| {
+            vec![
+                t.id.to_string(),
+                if t.completed { "[x]".to_string() } else { "[ ]".to_string() },
+                t.content.clone(),
+                format!("{}:{}", t.file_path, t.line_number),
+            ]
+        })
+        .collect();
+
+    print_list(format, headers, &rows);
+
+    Ok(())
+}
+
+/// Toggle a task's completion state.
+pub fn task_toggle(app: &mut App, task_id: u64) -> Result<()> {
+    let storage = app.storage_mut()?;
+
+    let record = storage
+        .toggle_task(task_id)
+        .map_err(|e| anyhow::anyhow!("failed to toggle task {task_id}: {e}"))?;
+
+    let status = if record.completed { "completed" } else { "pending" };
+    println!(
+        "Task {} toggled to {}: {} ({}:{})",
+        record.id, status, record.content, record.file_path, record.line_number
+    );
+
+    Ok(())
+}
