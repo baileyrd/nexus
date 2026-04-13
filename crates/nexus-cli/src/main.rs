@@ -514,6 +514,53 @@ enum GitCommand {
         #[arg(short, long)]
         file: Option<String>,
     },
+    /// Stage a file for commit
+    Stage {
+        /// File path to stage (omit with --all to stage everything)
+        path: Option<String>,
+        /// Stage all changes
+        #[arg(short, long)]
+        all: bool,
+    },
+    /// Unstage a file
+    Unstage {
+        /// File path to unstage (omit with --all to unstage everything)
+        path: Option<String>,
+        /// Unstage all changes
+        #[arg(short, long)]
+        all: bool,
+    },
+    /// Create a commit from staged changes
+    Commit {
+        /// Commit message
+        #[arg(short, long)]
+        message: String,
+    },
+    /// Branch operations
+    Branch {
+        #[command(subcommand)]
+        command: Option<BranchCommand>,
+    },
+}
+
+/// Branch subcommands.
+#[derive(Subcommand)]
+enum BranchCommand {
+    /// Create a new branch from HEAD
+    Create {
+        /// Branch name
+        name: String,
+    },
+    /// Switch to a branch
+    Switch {
+        /// Branch name
+        name: String,
+    },
+    /// Delete a branch
+    Delete {
+        /// Branch name
+        name: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -687,6 +734,10 @@ fn main() {
             GitCommand::Diff { path } => commands::git::diff(&app, path.as_deref()),
             GitCommand::Blame { path } => commands::git::blame(&app, &path),
             GitCommand::Log { limit, file } => commands::git::log(&app, limit, file.as_deref()),
+            GitCommand::Stage { path, all } => commands::git::stage(&app, path.as_deref(), all),
+            GitCommand::Unstage { path, all } => commands::git::unstage(&app, path.as_deref(), all),
+            GitCommand::Commit { message } => commands::git::commit(&app, &message),
+            GitCommand::Branch { command } => commands::git::branch(&app, command),
         },
         Commands::Run(_) => stubs::not_implemented("run"),
     };

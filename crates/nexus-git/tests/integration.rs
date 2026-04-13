@@ -139,3 +139,119 @@ fn log_limit_respected() {
     let log = engine.log(5).unwrap();
     assert_eq!(log.len(), 5);
 }
+
+// ── Level 2: Write Operations ────────────────────────────────────────────────
+
+#[test]
+fn staging_and_commit_workflow() {
+    let (dir, engine) = setup();
+
+    // Create and stage files.
+    fs::write(dir.path().join("a.txt"), "alpha").unwrap();
+    fs::write(dir.path().join("b.txt"), "beta").unwrap();
+
+    engine.stage_file(Path::new("a.txt")).unwrap();
+    let statuses = engine.file_statuses().unwrap();
+    let a_status = statuses.iter().find(|s| s.path == Path::new("a.txt")).unwrap();
+    assert_eq!(a_status.status, FileStatus::Added);
+    // b.txt should still be untracked.
+    let b_status = statuses.iter().find(|s| s.path == Path::new("b.txt")).unwrap();
+    assert_eq!(b_status.status, FileStatus::Untracked);
+
+    // Stage all remaining.
+    engine.stage_all().unwrap();
+
+    // Commit.
+    let hash = engine.commit("add files").unwrap();
+    assert_eq!(hash.len(), 7);
+    assert!(!engine.state().unwrap().is_dirty);
+
+    // Log shows the commit.
+    let log = engine.log(10).unwrap();
+    assert_eq!(log.len(), 1);
+    assert!(log[0].message.contains("add files"));
+
+    // Modify, stage, unstage, verify.
+    fs::write(dir.path().join("a.txt"), "alpha updated").unwrap();
+    engine.stage_file(Path::new("a.txt")).unwrap();
+    assert_eq!(
+        engine.file_status(Path::new("a.txt")).unwrap(),
+        FileStatus::Staged,
+    );
+    engine.unstage_file(Path::new("a.txt")).unwrap();
+    assert_eq!(
+        engine.file_status(Path::new("a.txt")).unwrap(),
+        FileStatus::Modified,
+    );
+}
+
+#[test]
+fn branch_create_switch_delete() {
+    let (dir, engine) = setup();
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    commit(dir.path(), "initial");
+
+    // Create branches.
+    engine.create_branch("feature-x").unwrap();
+    engine.create_branch("feature-y").unwrap();
+
+    let branches = engine.branches().unwrap();
+    let names: Vec<&str> = branches.iter().map(|b| b.name.as_str()).collect();
+    assert!(names.contains(&"feature-x"));
+    assert!(names.contains(&"feature-y"));
+
+    // One should be head.
+    assert!(branches.iter().any(|b| b.is_head));
+
+    // Switch to feature-x.
+    engine.switch_branch("feature-x").unwrap();
+    assert_eq!(engine.state().unwrap().branch.as_deref(), Some("feature-x"));
+
+    // Create a commit on feature-x.
+    fs::write(dir.path().join("feature.txt"), "feature work").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("feature commit").unwrap();
+
+    // Switch back to main/master.
+    let main_branch = branches.iter().find(|b| b.is_head).unwrap().name.clone();
+    engine.switch_branch(&main_branch).unwrap();
+
+    // feature.txt should not exist on main.
+    assert!(
+        !dir.path().join("feature.txt").exists(),
+        "feature.txt should not exist on main branch"
+    );
+
+    // Delete feature-y (not current, not ahead).
+    engine.delete_branch("feature-y").unwrap();
+    let branches = engine.branches().unwrap();
+    assert!(!branches.iter().any(|b| b.name == "feature-y"));
+
+    // Cannot delete current branch.
+    let current = engine.state().unwrap().branch.unwrap();
+    assert!(engine.delete_branch(&current).is_err());
+}
+
+#[test]
+fn unstage_all_reverts_index() {
+    let (dir, engine) = setup();
+    fs::write(dir.path().join("file.txt"), "content").unwrap();
+    commit(dir.path(), "initial");
+
+    fs::write(dir.path().join("file.txt"), "changed").unwrap();
+    fs::write(dir.path().join("new.txt"), "new").unwrap();
+    engine.stage_all().unwrap();
+
+    // Both should be staged.
+    let statuses = engine.file_statuses().unwrap();
+    assert!(statuses.iter().any(|s| s.status == FileStatus::Staged || s.status == FileStatus::Added));
+
+    // Unstage all.
+    engine.unstage_all().unwrap();
+    let statuses = engine.file_statuses().unwrap();
+    // file.txt should be Modified, new.txt should be Untracked.
+    let file_s = statuses.iter().find(|s| s.path == Path::new("file.txt")).unwrap();
+    assert_eq!(file_s.status, FileStatus::Modified);
+    let new_s = statuses.iter().find(|s| s.path == Path::new("new.txt")).unwrap();
+    assert_eq!(new_s.status, FileStatus::Untracked);
+}

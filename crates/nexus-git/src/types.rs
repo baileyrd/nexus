@@ -140,6 +140,17 @@ pub struct LogEntry {
     pub parents: Vec<String>,
 }
 
+/// Information about a local branch.
+#[derive(Debug, Clone)]
+pub struct BranchInfo {
+    /// Branch name.
+    pub name: String,
+    /// Whether this is the currently checked-out branch.
+    pub is_head: bool,
+    /// Upstream tracking branch name (e.g. `"origin/main"`).
+    pub upstream: Option<String>,
+}
+
 /// A file with its status.
 #[derive(Debug, Clone)]
 pub struct StatusEntry {

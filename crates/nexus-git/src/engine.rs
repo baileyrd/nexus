@@ -1,4 +1,4 @@
-//! Git engine wrapping `git2::Repository` for read-only operations.
+//! Git engine wrapping `git2::Repository` for read and write operations.
 
 use std::path::{Path, PathBuf};
 
@@ -8,7 +8,7 @@ use git2::{DiffOptions, Repository, StatusOptions};
 use crate::error::GitError;
 use crate::types::*;
 
-/// Read-only git engine backed by `git2::Repository`.
+/// Git engine backed by `git2::Repository`.
 ///
 /// Not `Send`/`Sync` because `git2::Repository` is not thread-safe.
 /// Create one per CLI invocation or TUI refresh cycle.
@@ -286,6 +286,174 @@ impl GitEngine {
         }
 
         Ok(entries)
+    }
+
+    // ── Level 2: Write Operations ──────────────────────────────────────────
+
+    /// Stage a single file by path (repo-relative).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn stage_file(&self, path: &Path) -> Result<(), GitError> {
+        let mut index = self.repo.index()?;
+        // If the file was deleted from disk, remove from index; otherwise add.
+        let abs = self.repo_root().join(path);
+        if abs.exists() {
+            index.add_path(path)?;
+        } else {
+            index.remove_path(path)?;
+        }
+        index.write()?;
+        Ok(())
+    }
+
+    /// Stage all changes (tracked modifications and untracked files).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn stage_all(&self) -> Result<(), GitError> {
+        let mut index = self.repo.index()?;
+        index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
+        index.write()?;
+        Ok(())
+    }
+
+    /// Unstage a single file (reset its index entry to HEAD).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn unstage_file(&self, path: &Path) -> Result<(), GitError> {
+        let head = self.repo.head()?;
+        let commit = head.peel_to_commit()?;
+        self.repo.reset_default(Some(commit.as_object()), [path])?;
+        Ok(())
+    }
+
+    /// Unstage all files (reset the index to match HEAD).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn unstage_all(&self) -> Result<(), GitError> {
+        let head = self.repo.head()?;
+        let commit = head.peel_to_commit()?;
+        self.repo.reset(
+            commit.as_object(),
+            git2::ResetType::Mixed,
+            None,
+        )?;
+        Ok(())
+    }
+
+    /// Create a commit from the current index with the given message.
+    ///
+    /// Returns the short hex hash of the new commit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn commit(&self, message: &str) -> Result<String, GitError> {
+        let mut index = self.repo.index()?;
+        let tree_id = index.write_tree()?;
+        let tree = self.repo.find_tree(tree_id)?;
+        let sig = self.repo.signature()?;
+
+        let parents: Vec<git2::Commit<'_>> = match self.repo.head() {
+            Ok(head) => vec![head.peel_to_commit()?],
+            Err(_) => vec![],
+        };
+        let parent_refs: Vec<&git2::Commit<'_>> = parents.iter().collect();
+
+        let oid = self.repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            message,
+            &tree,
+            &parent_refs,
+        )?;
+
+        Ok(format!("{}", &oid.to_string()[..7]))
+    }
+
+    /// List local branches.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn branches(&self) -> Result<Vec<BranchInfo>, GitError> {
+        let head_name = self
+            .repo
+            .head()
+            .ok()
+            .and_then(|h| h.shorthand().map(String::from));
+
+        let mut result = Vec::new();
+        for branch in self.repo.branches(Some(git2::BranchType::Local))? {
+            let (branch, _) = branch?;
+            let name = branch
+                .name()?
+                .unwrap_or("")
+                .to_string();
+            let is_head = head_name.as_deref() == Some(&name);
+            let upstream = branch
+                .upstream()
+                .ok()
+                .and_then(|u| u.name().ok().flatten().map(String::from));
+
+            result.push(BranchInfo {
+                name,
+                is_head,
+                upstream,
+            });
+        }
+        Ok(result)
+    }
+
+    /// Create a new branch from HEAD.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn create_branch(&self, name: &str) -> Result<(), GitError> {
+        let head = self.repo.head()?;
+        let commit = head.peel_to_commit()?;
+        self.repo.branch(name, &commit, false)?;
+        Ok(())
+    }
+
+    /// Switch to an existing branch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] if the branch doesn't exist, or on libgit2 failure.
+    /// Does NOT check for dirty working tree — caller should check `state().is_dirty` first.
+    pub fn switch_branch(&self, name: &str) -> Result<(), GitError> {
+        let refname = format!("refs/heads/{name}");
+        self.repo.set_head(&refname)?;
+        self.repo.checkout_head(Some(
+            git2::build::CheckoutBuilder::new().force(),
+        ))?;
+        Ok(())
+    }
+
+    /// Delete a local branch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] if the branch is the current HEAD or doesn't exist.
+    pub fn delete_branch(&self, name: &str) -> Result<(), GitError> {
+        let mut branch = self.repo.find_branch(name, git2::BranchType::Local)?;
+        if branch.is_head() {
+            return Err(GitError::Git(git2::Error::from_str(
+                "cannot delete the currently checked-out branch",
+            )));
+        }
+        branch.delete()?;
+        Ok(())
     }
 
     /// Get the HEAD tree, or `None` for an empty repo.
@@ -605,5 +773,134 @@ mod tests {
         // Dirty.
         fs::write(dir.path().join("file.txt"), "changed").unwrap();
         assert!(engine.state().unwrap().is_dirty);
+    }
+
+    // ── Level 2 tests ────────────────────────────────────────────────────────
+
+    #[test]
+    fn stage_file_marks_as_staged() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("new.txt"), "content").unwrap();
+
+        // Before staging: untracked.
+        let s = engine.file_status(Path::new("new.txt")).unwrap();
+        assert_eq!(s, FileStatus::Untracked);
+
+        // After staging: added.
+        engine.stage_file(Path::new("new.txt")).unwrap();
+        let s = engine.file_status(Path::new("new.txt")).unwrap();
+        assert_eq!(s, FileStatus::Added);
+    }
+
+    #[test]
+    fn stage_all_stages_everything() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("a.txt"), "a").unwrap();
+        fs::write(dir.path().join("b.txt"), "b").unwrap();
+
+        engine.stage_all().unwrap();
+        let statuses = engine.file_statuses().unwrap();
+        assert!(
+            statuses.iter().all(|s| s.status == FileStatus::Added),
+            "all files should be staged (Added), got: {statuses:?}"
+        );
+    }
+
+    #[test]
+    fn unstage_file_reverts_staging() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "content").unwrap();
+        make_commit(&engine, "initial");
+
+        fs::write(dir.path().join("file.txt"), "changed").unwrap();
+        engine.stage_file(Path::new("file.txt")).unwrap();
+        assert_eq!(
+            engine.file_status(Path::new("file.txt")).unwrap(),
+            FileStatus::Staged,
+        );
+
+        engine.unstage_file(Path::new("file.txt")).unwrap();
+        assert_eq!(
+            engine.file_status(Path::new("file.txt")).unwrap(),
+            FileStatus::Modified,
+        );
+    }
+
+    #[test]
+    fn commit_creates_log_entry() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "content").unwrap();
+        engine.stage_all().unwrap();
+        let hash = engine.commit("test commit").unwrap();
+
+        assert_eq!(hash.len(), 7);
+        let log = engine.log(10).unwrap();
+        assert_eq!(log.len(), 1);
+        assert!(log[0].message.contains("test commit"));
+        assert!(!engine.state().unwrap().is_dirty);
+    }
+
+    #[test]
+    fn commit_initial_and_followup() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("a.txt"), "a").unwrap();
+        engine.stage_all().unwrap();
+        engine.commit("first").unwrap();
+
+        fs::write(dir.path().join("b.txt"), "b").unwrap();
+        engine.stage_all().unwrap();
+        engine.commit("second").unwrap();
+
+        let log = engine.log(10).unwrap();
+        assert_eq!(log.len(), 2);
+    }
+
+    #[test]
+    fn create_and_list_branches() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "content").unwrap();
+        make_commit(&engine, "initial");
+
+        engine.create_branch("feature-a").unwrap();
+        let branches = engine.branches().unwrap();
+        let names: Vec<&str> = branches.iter().map(|b| b.name.as_str()).collect();
+        assert!(names.contains(&"feature-a"), "feature-a should be in branches: {names:?}");
+    }
+
+    #[test]
+    fn switch_branch_changes_head() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "content").unwrap();
+        make_commit(&engine, "initial");
+
+        engine.create_branch("dev").unwrap();
+        engine.switch_branch("dev").unwrap();
+
+        let state = engine.state().unwrap();
+        assert_eq!(state.branch.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn delete_branch_removes_it() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "content").unwrap();
+        make_commit(&engine, "initial");
+
+        engine.create_branch("to-delete").unwrap();
+        assert!(engine.branches().unwrap().iter().any(|b| b.name == "to-delete"));
+
+        engine.delete_branch("to-delete").unwrap();
+        assert!(!engine.branches().unwrap().iter().any(|b| b.name == "to-delete"));
+    }
+
+    #[test]
+    fn delete_current_branch_fails() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "content").unwrap();
+        make_commit(&engine, "initial");
+
+        let branch_name = engine.state().unwrap().branch.unwrap();
+        let result = engine.delete_branch(&branch_name);
+        assert!(result.is_err(), "deleting current branch should fail");
     }
 }

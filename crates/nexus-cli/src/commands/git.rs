@@ -118,6 +118,88 @@ pub fn log(app: &App, limit: usize, file: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Stage a file or all changes.
+pub fn stage(app: &App, path: Option<&str>, all: bool) -> Result<()> {
+    let engine = open_engine(app)?;
+    if all {
+        engine.stage_all().map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("Staged all changes.");
+    } else if let Some(p) = path {
+        engine
+            .stage_file(std::path::Path::new(p))
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("Staged: {p}");
+    } else {
+        anyhow::bail!("Specify a file path or use --all");
+    }
+    Ok(())
+}
+
+/// Unstage a file or all changes.
+pub fn unstage(app: &App, path: Option<&str>, all: bool) -> Result<()> {
+    let engine = open_engine(app)?;
+    if all {
+        engine.unstage_all().map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("Unstaged all changes.");
+    } else if let Some(p) = path {
+        engine
+            .unstage_file(std::path::Path::new(p))
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("Unstaged: {p}");
+    } else {
+        anyhow::bail!("Specify a file path or use --all");
+    }
+    Ok(())
+}
+
+/// Create a commit from staged changes.
+pub fn commit(app: &App, message: &str) -> Result<()> {
+    let engine = open_engine(app)?;
+    let hash = engine.commit(message).map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!("[{hash}] {message}");
+    Ok(())
+}
+
+/// Branch operations: list, create, switch, delete.
+pub fn branch(app: &App, command: Option<crate::BranchCommand>) -> Result<()> {
+    let engine = open_engine(app)?;
+
+    match command {
+        None => {
+            // List branches.
+            let branches = engine.branches().map_err(|e| anyhow::anyhow!("{e}"))?;
+            for b in &branches {
+                let marker = if b.is_head { "* " } else { "  " };
+                let upstream = b
+                    .upstream
+                    .as_deref()
+                    .map(|u| format!(" -> {u}"))
+                    .unwrap_or_default();
+                println!("{marker}{}{upstream}", b.name);
+            }
+        }
+        Some(crate::BranchCommand::Create { name }) => {
+            engine
+                .create_branch(&name)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Created branch: {name}");
+        }
+        Some(crate::BranchCommand::Switch { name }) => {
+            engine
+                .switch_branch(&name)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Switched to branch: {name}");
+        }
+        Some(crate::BranchCommand::Delete { name }) => {
+            engine
+                .delete_branch(&name)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Deleted branch: {name}");
+        }
+    }
+    Ok(())
+}
+
 fn print_hunks(hunks: &[nexus_git::HunkDiff]) {
     for hunk in hunks {
         println!(

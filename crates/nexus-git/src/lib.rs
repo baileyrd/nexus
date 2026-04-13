@@ -1,7 +1,6 @@
-//! Nexus git integration: read-only status, diff, blame, and log via libgit2.
+//! Nexus git integration: status, diff, blame, log, staging, commits, branches.
 //!
-//! Provides [`GitEngine`] for discovering and querying git repositories.
-//! All operations are read-only (Level 1 passive awareness).
+//! Provides [`GitEngine`] for discovering and interacting with git repositories.
 
 #![deny(missing_docs)]
 #![warn(clippy::pedantic)]
