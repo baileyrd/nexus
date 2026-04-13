@@ -7,6 +7,7 @@ use comrak::{Arena, Options, parse_document};
 use sha2::{Digest, Sha256};
 
 use crate::StorageError;
+use crate::tasks::ParsedTask;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -23,6 +24,8 @@ pub struct ParsedFile {
     pub links: Vec<ParsedLink>,
     /// All tags found in the document.
     pub tags: Vec<ParsedTag>,
+    /// Task items extracted from checkbox lists.
+    pub tasks: Vec<ParsedTask>,
 }
 
 /// A single YAML frontmatter property.
@@ -119,6 +122,7 @@ pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
     let mut blocks = Vec::new();
     let mut links = Vec::new();
     let mut tags = fm_tags;
+    let mut tasks = Vec::new();
 
     // Walk top-level children of the document root.
     for child in root.children() {
@@ -174,6 +178,7 @@ pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
                 });
             }
             NodeValue::List(_) => {
+                extract_tasks(child, &mut tasks);
                 let raw_text = collect_text(child);
                 let (text, block_ref_id) = extract_block_ref(&raw_text);
                 extract_wikilinks_and_embeds(&text, &mut links);
@@ -234,6 +239,7 @@ pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
         blocks,
         links,
         tags,
+        tasks,
     })
 }
 
@@ -499,6 +505,22 @@ fn extract_inline_tags(text: &str, tags: &mut Vec<ParsedTag>) {
 /// Returns `true` if `c` is valid inside a tag name.
 fn is_tag_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '/' || c == '-'
+}
+
+/// Walk list-item children of a list node, extracting task items.
+fn extract_tasks<'a>(list_node: &'a AstNode<'a>, tasks: &mut Vec<ParsedTask>) {
+    for item in list_node.children() {
+        let ast = item.data.borrow();
+        if let NodeValue::TaskItem(nti) = &ast.value {
+            let text = collect_text(item).trim().to_string();
+            let line = u32::try_from(ast.sourcepos.start.line).unwrap_or(0);
+            tasks.push(ParsedTask {
+                content: text,
+                completed: nti.symbol.is_some(),
+                line_number: line,
+            });
+        }
+    }
 }
 
 /// Detect whether a blockquote is a callout.
@@ -837,5 +859,26 @@ mod tests {
         let pf = parse_markdown(md).unwrap();
         let blocks: Vec<_> = pf.blocks.iter().filter(|b| b.block_type == "callout").collect();
         assert!(blocks.is_empty(), "regular blockquote should not be a callout");
+    }
+
+    // ── task extraction ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_tasks_from_list() {
+        let md = "- [ ] Buy groceries\n- [x] Write tests\n- [ ] Deploy app\n";
+        let pf = parse_markdown(md).unwrap();
+        assert_eq!(pf.tasks.len(), 3);
+        assert!(!pf.tasks[0].completed);
+        assert_eq!(pf.tasks[0].content, "Buy groceries");
+        assert!(pf.tasks[1].completed);
+        assert_eq!(pf.tasks[1].content, "Write tests");
+        assert!(!pf.tasks[2].completed);
+    }
+
+    #[test]
+    fn parse_no_tasks_in_regular_list() {
+        let md = "- item one\n- item two\n";
+        let pf = parse_markdown(md).unwrap();
+        assert!(pf.tasks.is_empty());
     }
 }

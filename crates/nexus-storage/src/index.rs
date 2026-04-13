@@ -548,6 +548,7 @@ mod tests {
                 name: "rust".to_string(),
                 source: "inline".to_string(),
             }],
+            tasks: vec![],
         }
     }
 
@@ -698,6 +699,7 @@ mod tests {
             blocks: vec![],
             links: vec![],
             tags: vec![],
+            tasks: vec![],
         };
         let a_id = insert_file(&conn, "notes/a.md", "markdown", 10, &file_a).unwrap();
 
@@ -713,6 +715,7 @@ mod tests {
                 fragment: None,
             }],
             tags: vec![],
+            tasks: vec![],
         };
         insert_file(&conn, "notes/b.md", "markdown", 10, &file_b).unwrap();
 
