@@ -256,3 +256,22 @@ fn search_with_combined_scopes() {
     assert_eq!(scoped.len(), 1);
     assert_eq!(scoped[0].file_path, "notes/match.md");
 }
+
+#[test]
+fn daily_note_template_is_indexed() {
+    let (_dir, engine) = engine();
+
+    let content =
+        b"---\ndate: 2026-04-13\ntags: [daily]\n---\n# April 13, 2026\n\n## Tasks\n\n## Notes\n";
+    engine
+        .write_file("notes/daily/2026-04-13.md", content)
+        .unwrap();
+
+    // Verify the daily tag is indexed
+    let tags = engine.query_tags("daily").unwrap();
+    assert_eq!(tags.len(), 1);
+    assert_eq!(tags[0].file_path, "notes/daily/2026-04-13.md");
+
+    // Verify file exists
+    assert!(engine.file_exists("notes/daily/2026-04-13.md").unwrap());
+}
