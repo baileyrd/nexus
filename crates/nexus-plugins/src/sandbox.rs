@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use wasmtime::{Engine, Instance, Linker, Module, Store, StoreLimitsBuilder, Trap};
 
-use nexus_kernel::{CapabilitySet, EventBus, SqliteKvStore};
+use nexus_kernel::{CapabilitySet, EventBus, KvStore};
 
 use crate::{PluginError, WasmConfig};
 
@@ -23,7 +23,7 @@ pub struct PluginData {
     pub capabilities: CapabilitySet,
     /// Kernel KV store (injected by kernel at load time). `None` in test
     /// sandboxes that don't need storage.
-    pub kv: Option<Arc<SqliteKvStore>>,
+    pub kv: Option<Arc<dyn KvStore>>,
     /// Kernel event bus (injected by kernel at load time). `None` in test
     /// sandboxes.
     pub event_bus: Option<Arc<EventBus>>,

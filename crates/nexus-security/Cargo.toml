@@ -8,10 +8,12 @@ description = "Nexus security: capability risk metadata, credential vault, audit
 
 [dependencies]
 nexus-kernel = { path = "../nexus-kernel" }
+nexus-plugins = { path = "../nexus-plugins" }
 nexus-types = { path = "../nexus-types" }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 keyring = { workspace = true }
 
 [dev-dependencies]

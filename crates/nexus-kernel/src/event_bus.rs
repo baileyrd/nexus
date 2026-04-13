@@ -202,10 +202,6 @@ fn matches_filter(event: &NexusEvent, filter: &EventFilter) -> bool {
 #[allow(clippy::match_same_arms)]
 fn variant_name(event: &NexusEvent) -> &'static str {
     match event {
-        NexusEvent::FileCreated { .. }      => "FileCreated",
-        NexusEvent::FileModified { .. }     => "FileModified",
-        NexusEvent::FileDeleted { .. }      => "FileDeleted",
-        NexusEvent::FileRenamed { .. }      => "FileRenamed",
         NexusEvent::PluginLoaded { .. }     => "PluginLoaded",
         NexusEvent::PluginStarted { .. }    => "PluginStarted",
         NexusEvent::PluginStopped { .. }    => "PluginStopped",
@@ -232,21 +228,25 @@ fn current_span_id() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+
+    /// Helper: a kernel-owned event for test publishing.
+    fn plugin_loaded_event(id: &str) -> NexusEvent {
+        NexusEvent::PluginLoaded {
+            plugin_id: id.to_string(),
+            version: "1.0.0".to_string(),
+        }
+    }
 
     #[tokio::test]
     async fn publish_and_receive_single_event() {
         let bus = EventBus::new(16);
         let mut sub = bus.subscribe(EventFilter::All);
 
-        bus.publish_kernel(NexusEvent::FileCreated {
-            path: PathBuf::from("a.md"),
-            content_hash: "hash".to_string(),
-        }).unwrap();
+        bus.publish_kernel(plugin_loaded_event("com.test")).unwrap();
 
         let published = sub.recv().await.unwrap();
         match &published.event {
-            NexusEvent::FileCreated { path, .. } => assert_eq!(path, &PathBuf::from("a.md")),
+            NexusEvent::PluginLoaded { plugin_id, .. } => assert_eq!(plugin_id, "com.test"),
             _ => panic!("wrong event variant"),
         }
         assert_eq!(published.metadata.source_plugin_id, "kernel");
@@ -255,22 +255,19 @@ mod tests {
     #[tokio::test]
     async fn filter_variant_skips_non_matching_events() {
         let bus = EventBus::new(16);
-        let mut sub = bus.subscribe(EventFilter::Variant("FileDeleted"));
+        let mut sub = bus.subscribe(EventFilter::Variant("PluginStarted"));
 
-        // Publish a Created event — should be skipped by the filter
-        bus.publish_kernel(NexusEvent::FileCreated {
-            path: PathBuf::from("a.md"),
-            content_hash: "hash".to_string(),
-        }).unwrap();
+        // Publish a PluginLoaded event — should be skipped by the filter
+        bus.publish_kernel(plugin_loaded_event("com.a")).unwrap();
 
-        // Publish a Deleted event — should be received
-        bus.publish_kernel(NexusEvent::FileDeleted {
-            path: PathBuf::from("b.md"),
+        // Publish a PluginStarted event — should be received
+        bus.publish_kernel(NexusEvent::PluginStarted {
+            plugin_id: "com.b".to_string(),
         }).unwrap();
 
         let published = sub.recv().await.unwrap();
         match &published.event {
-            NexusEvent::FileDeleted { path } => assert_eq!(path, &PathBuf::from("b.md")),
+            NexusEvent::PluginStarted { plugin_id } => assert_eq!(plugin_id, "com.b"),
             _ => panic!("filter let wrong event through"),
         }
     }
@@ -322,14 +319,8 @@ mod tests {
         let bus = EventBus::new(16);
         let mut sub = bus.subscribe(EventFilter::All);
 
-        bus.publish_kernel(NexusEvent::FileCreated {
-            path: PathBuf::from("a"),
-            content_hash: "h".to_string(),
-        }).unwrap();
-        bus.publish_kernel(NexusEvent::FileCreated {
-            path: PathBuf::from("b"),
-            content_hash: "h".to_string(),
-        }).unwrap();
+        bus.publish_kernel(plugin_loaded_event("com.a")).unwrap();
+        bus.publish_kernel(plugin_loaded_event("com.b")).unwrap();
 
         let e1 = sub.recv().await.unwrap();
         let e2 = sub.recv().await.unwrap();
@@ -343,10 +334,7 @@ mod tests {
         let mut sub = bus.subscribe(EventFilter::All);
 
         for i in 0..5 {
-            bus.publish_kernel(NexusEvent::FileCreated {
-                path: PathBuf::from(format!("{i}.md")),
-                content_hash: format!("hash-{i}"),
-            }).unwrap();
+            bus.publish_kernel(plugin_loaded_event(&format!("com.test.{i}"))).unwrap();
         }
 
         // First recv should return Lagged, not an actual event.
@@ -414,10 +402,7 @@ mod tests {
 
         // Cause a lag
         for i in 0..5 {
-            bus.publish_kernel(NexusEvent::FileCreated {
-                path: PathBuf::from(format!("{i}.md")),
-                content_hash: "h".to_string(),
-            }).unwrap();
+            bus.publish_kernel(plugin_loaded_event(&format!("com.test.{i}"))).unwrap();
         }
 
         // First recv — lagged
@@ -425,6 +410,6 @@ mod tests {
 
         // Subsequent recvs should return actual events from what's still in the buffer
         let event = sub.recv().await.unwrap();
-        assert!(matches!(event.event, NexusEvent::FileCreated { .. }));
+        assert!(matches!(event.event, NexusEvent::PluginLoaded { .. }));
     }
 }

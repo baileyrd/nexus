@@ -115,7 +115,7 @@ pub struct IpcCommandReg {
 pub struct EventSubscriberReg {
     /// Unique subscriber identifier.
     pub id: String,
-    /// Event filter expression (e.g. `"FileCreated"`).
+    /// Event filter expression (e.g. `"com.nexus.storage.file_created"`).
     pub filter: String,
     /// WASM handler function index dispatched to when a matching event fires.
     pub handler_id: u32,

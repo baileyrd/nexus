@@ -17,31 +17,6 @@ mod settings;
 mod hot_reload;
 mod scaffold;
 
-/// Trait for key-value storage backends. Implemented by the kernel.
-/// Namespace is the plugin ID — plugins cannot access each other's data.
-pub trait KvStore: Send + Sync {
-    /// Get a value by key within a namespace.
-    ///
-    /// # Errors
-    /// Returns [`PluginError`] if the storage backend encounters an I/O or
-    /// internal error.
-    fn get(&self, namespace: &str, key: &str) -> Result<Option<Vec<u8>>, PluginError>;
-
-    /// Set a value by key within a namespace.
-    ///
-    /// # Errors
-    /// Returns [`PluginError`] if the storage backend encounters an I/O or
-    /// internal error.
-    fn set(&self, namespace: &str, key: &str, value: &[u8]) -> Result<(), PluginError>;
-
-    /// Delete a key within a namespace.
-    ///
-    /// # Errors
-    /// Returns [`PluginError`] if the storage backend encounters an I/O or
-    /// internal error.
-    fn delete(&self, namespace: &str, key: &str) -> Result<(), PluginError>;
-}
-
 pub use error::PluginError;
 pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 pub use loader::{CorePlugin, PluginLoader};

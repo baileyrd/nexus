@@ -31,7 +31,7 @@ pub use error::{
 pub use event::{EventFilter, EventMetadata, NexusEvent, PublishedEvent, StopReason};
 pub use event_bus::{EventBus, EventSubscription};
 pub use kernel::Kernel;
-pub use kv_store::SqliteKvStore;
+pub use kv_store::KvStore;
 pub use log::LogLevel;
-pub use plugin::{PluginInfo, PluginLifecycle, PluginStatus, TrustLevel};
+pub use plugin::{PluginInfo, PluginStatus, TrustLevel};
 pub use plugin_registry::PluginRegistry;

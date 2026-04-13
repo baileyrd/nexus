@@ -56,8 +56,8 @@ impl App {
     /// Open the storage engine lazily (creates on first call, reuses after).
     ///
     /// Also starts the storage core plugin on first call, wiring the forge
-    /// watcher to the kernel event bus so `NexusEvent::FileCreated` /
-    /// `FileModified` / `FileDeleted` / `FileRenamed` flow to subscribers.
+    /// watcher to the kernel event bus so `com.nexus.storage.file_created` /
+    /// `file_modified` / `file_deleted` / `file_renamed` events flow to subscribers.
     ///
     /// # Errors
     ///

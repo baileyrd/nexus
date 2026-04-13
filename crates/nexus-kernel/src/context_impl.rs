@@ -14,10 +14,10 @@ use async_trait::async_trait;
 
 use crate::capability::{Capability, CapabilitySet};
 use crate::context::PluginContext;
-use crate::error::{BusError, CapabilityError, Error, IpcError, KvError, Result};
+use crate::error::{BusError, CapabilityError, Error, IpcError, Result};
 use crate::event::EventFilter;
 use crate::event_bus::{EventBus, EventSubscription};
-use crate::kv_store::SqliteKvStore;
+use crate::kv_store::KvStore;
 use crate::log::LogLevel;
 
 /// Concrete kernel implementation of [`PluginContext`].
@@ -28,7 +28,7 @@ pub struct KernelPluginContext {
     plugin_id: String,
     plugin_version: String,
     capabilities: CapabilitySet,
-    kv: Arc<SqliteKvStore>,
+    kv: Arc<dyn KvStore>,
     event_bus: Arc<EventBus>,
     /// Canonical form of the forge root, used for path confinement.
     forge_root_canonical: PathBuf,
@@ -47,7 +47,7 @@ impl KernelPluginContext {
         plugin_id: impl Into<String>,
         plugin_version: impl Into<String>,
         capabilities: CapabilitySet,
-        kv: Arc<SqliteKvStore>,
+        kv: Arc<dyn KvStore>,
         event_bus: Arc<EventBus>,
         forge_root: &Path,
     ) -> Result<Self> {
@@ -202,21 +202,21 @@ impl PluginContext for KernelPluginContext {
         self.require_capability(Capability::KvRead)?;
         self.kv
             .get(&self.plugin_id, key)
-            .map_err(|e| Error::Kv(KvError::BackendError { reason: e.to_string() }))
+            .map_err(Error::Kv)
     }
 
     async fn kv_set(&self, key: &str, value: &[u8]) -> Result<()> {
         self.require_capability(Capability::KvWrite)?;
         self.kv
             .set(&self.plugin_id, key, value)
-            .map_err(|e| Error::Kv(KvError::BackendError { reason: e.to_string() }))
+            .map_err(Error::Kv)
     }
 
     async fn kv_delete(&self, key: &str) -> Result<()> {
         self.require_capability(Capability::KvWrite)?;
         self.kv
             .delete(&self.plugin_id, key)
-            .map_err(|e| Error::Kv(KvError::BackendError { reason: e.to_string() }))
+            .map_err(Error::Kv)
     }
 
     // ---- Events ----------------------------------------------------------
@@ -275,9 +275,10 @@ impl PluginContext for KernelPluginContext {
 mod tests {
     use super::*;
     use crate::event::NexusEvent;
+    use crate::kv_store::SqliteKvStore;
 
     fn make_context(dir: &Path, caps: &[Capability]) -> KernelPluginContext {
-        let kv = Arc::new(SqliteKvStore::in_memory().unwrap());
+        let kv: Arc<dyn KvStore> = Arc::new(SqliteKvStore::in_memory().unwrap());
         let bus = Arc::new(EventBus::new(16));
         KernelPluginContext::new(
             "com.test.plugin",

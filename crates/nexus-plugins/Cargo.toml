@@ -8,7 +8,6 @@ description = "Nexus plugin system: manifest parsing, WASM sandbox, host functio
 
 [dependencies]
 nexus-kernel = { path = "../nexus-kernel" }
-nexus-security = { path = "../nexus-security" }
 nexus-types = { path = "../nexus-types" }
 thiserror = { workspace = true }
 serde = { workspace = true }

@@ -1,7 +1,5 @@
 //! Event types: `NexusEvent`, `EventMetadata`, `EventFilter`, `StopReason`.
 
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 
 use crate::capability::Capability;
@@ -9,43 +7,13 @@ use crate::capability::Capability;
 /// All events the Nexus kernel knows about.
 ///
 /// This is a closed enum for kernel-owned events plus a single `Custom`
-/// variant for plugin-emitted signals. Each phase of the roadmap adds
-/// variants here when it reaches its milestone. M1 includes storage, plugin
-/// lifecycle, capability, and indexing events.
+/// variant for plugin-emitted signals. The kernel only defines events it
+/// generates itself (plugin lifecycle and capability events). Domain events
+/// (file changes, git commits, etc.) are published by core plugins as
+/// `Custom` events with namespaced type IDs (e.g., `com.nexus.storage.*`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum NexusEvent {
-    // ---- M1: storage events ----
-
-    /// A file was created in the forge.
-    FileCreated {
-        /// Path of the created file, relative to forge root.
-        path: PathBuf,
-        /// Content hash (SHA-256 hex) of the file.
-        content_hash: String,
-    },
-    /// A file's contents changed.
-    FileModified {
-        /// Path of the modified file.
-        path: PathBuf,
-        /// New content hash.
-        content_hash: String,
-    },
-    /// A file was deleted.
-    FileDeleted {
-        /// Path of the deleted file.
-        path: PathBuf,
-    },
-    /// A file was renamed (detected via hash match within the debounce window).
-    FileRenamed {
-        /// Old path.
-        from: PathBuf,
-        /// New path.
-        to: PathBuf,
-        /// Content hash (unchanged across rename).
-        content_hash: String,
-    },
-
     // ---- M1: plugin lifecycle events ----
 
     /// A plugin has been loaded from disk and its manifest parsed.
@@ -126,7 +94,7 @@ pub enum StopReason {
 pub enum EventFilter {
     /// Match every event on the bus. High-traffic; intended for debug/tracing.
     All,
-    /// Match a single kernel-event variant by its name (e.g., `"FileCreated"`).
+    /// Match a single kernel-event variant by its name (e.g., `"PluginLoaded"`).
     Variant(&'static str),
     /// Match `NexusEvent::Custom` events whose `type_id` starts with this prefix.
     CustomPrefix(String),
@@ -185,7 +153,7 @@ mod tests {
 
     #[test]
     fn event_filter_is_clone() {
-        let f1 = EventFilter::Variant("FileCreated");
+        let f1 = EventFilter::Variant("PluginLoaded");
         let _f2 = f1.clone();
     }
 
@@ -199,14 +167,14 @@ mod tests {
     }
 
     #[test]
-    fn file_created_event_constructs_and_serializes() {
-        let event = NexusEvent::FileCreated {
-            path: PathBuf::from("welcome.md"),
-            content_hash: "abc123".to_string(),
+    fn plugin_loaded_event_constructs_and_serializes() {
+        let event = NexusEvent::PluginLoaded {
+            plugin_id: "com.test.plugin".to_string(),
+            version: "1.0.0".to_string(),
         };
         let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("\"type\":\"FileCreated\""));
-        assert!(json.contains("welcome.md"));
+        assert!(json.contains("\"type\":\"PluginLoaded\""));
+        assert!(json.contains("com.test.plugin"));
     }
 
     #[test]
@@ -228,24 +196,6 @@ mod tests {
         };
         match event {
             NexusEvent::Custom { type_id, .. } => assert_eq!(type_id, "com.example.test.ping"),
-            _ => panic!("wrong variant"),
-        }
-    }
-
-    #[test]
-    fn file_renamed_is_single_event_not_two() {
-        // Confirms the enum shape: one event carries both from and to,
-        // not a Delete + Create pair.
-        let event = NexusEvent::FileRenamed {
-            from: PathBuf::from("old.md"),
-            to: PathBuf::from("new.md"),
-            content_hash: "abc".to_string(),
-        };
-        match event {
-            NexusEvent::FileRenamed { from, to, .. } => {
-                assert_eq!(from, PathBuf::from("old.md"));
-                assert_eq!(to, PathBuf::from("new.md"));
-            }
             _ => panic!("wrong variant"),
         }
     }
@@ -283,13 +233,13 @@ mod tests {
             source_plugin_id: "kernel".to_string(),
             span_id: None,
         };
-        let event = NexusEvent::FileCreated {
-            path: PathBuf::from("test.md"),
-            content_hash: "hash".to_string(),
+        let event = NexusEvent::PluginLoaded {
+            plugin_id: "com.test".to_string(),
+            version: "1.0.0".to_string(),
         };
         let published = PublishedEvent { metadata, event };
         match &published.event {
-            NexusEvent::FileCreated { path, .. } => assert_eq!(path, &PathBuf::from("test.md")),
+            NexusEvent::PluginLoaded { plugin_id, .. } => assert_eq!(plugin_id, "com.test"),
             _ => panic!("wrong event"),
         }
     }

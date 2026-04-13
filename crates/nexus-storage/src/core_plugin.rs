@@ -1,8 +1,7 @@
 //! Core plugin: bridges the forge watcher to the kernel event bus.
 //!
 //! Registers as `com.nexus.storage` and translates [`StorageEvent`]s into
-//! first-class [`NexusEvent`]s (FileCreated, FileModified, etc.) on the kernel
-//! event bus.
+//! `com.nexus.storage.*` custom events on the kernel event bus.
 //!
 //! # Re-indexing
 //!
@@ -16,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use nexus_kernel::{EventBus, NexusEvent};
+use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, PluginError};
 
 use crate::StorageConfig;
@@ -163,16 +162,18 @@ fn bridge_loop(
     }
 }
 
-/// Translate one [`StorageEvent`] into a [`NexusEvent`] and publish on the bus.
+/// Translate one [`StorageEvent`] into a `com.nexus.storage.*` custom event
+/// and publish on the bus.
 fn publish_event(event: &StorageEvent, bus: &EventBus) {
     match event {
         StorageEvent::FileCreated { path, content_hash } => {
-            let _ = bus.publish_core(
+            let _ = bus.publish_plugin(
                 PLUGIN_ID,
-                NexusEvent::FileCreated {
-                    path: PathBuf::from(path),
-                    content_hash: content_hash.clone(),
-                },
+                "com.nexus.storage.file_created",
+                serde_json::json!({
+                    "path": path,
+                    "content_hash": content_hash,
+                }),
             );
         }
 
@@ -194,33 +195,34 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
                     serde_json::json!({ "triggered_by": "git-batch-mode" }),
                 );
             } else {
-                let _ = bus.publish_core(
+                let _ = bus.publish_plugin(
                     PLUGIN_ID,
-                    NexusEvent::FileModified {
-                        path: PathBuf::from(path),
-                        content_hash: content_hash.clone(),
-                    },
+                    "com.nexus.storage.file_modified",
+                    serde_json::json!({
+                        "path": path,
+                        "content_hash": content_hash,
+                    }),
                 );
             }
         }
 
         StorageEvent::FileDeleted { path } => {
-            let _ = bus.publish_core(
+            let _ = bus.publish_plugin(
                 PLUGIN_ID,
-                NexusEvent::FileDeleted {
-                    path: PathBuf::from(path),
-                },
+                "com.nexus.storage.file_deleted",
+                serde_json::json!({ "path": path }),
             );
         }
 
         StorageEvent::FileRenamed { from, to, content_hash } => {
-            let _ = bus.publish_core(
+            let _ = bus.publish_plugin(
                 PLUGIN_ID,
-                NexusEvent::FileRenamed {
-                    from: PathBuf::from(from),
-                    to: PathBuf::from(to),
-                    content_hash: content_hash.clone(),
-                },
+                "com.nexus.storage.file_renamed",
+                serde_json::json!({
+                    "from": from,
+                    "to": to,
+                    "content_hash": content_hash,
+                }),
             );
         }
     }

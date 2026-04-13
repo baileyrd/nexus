@@ -1,4 +1,5 @@
-//! SQLite-backed key-value store for plugin state persistence.
+//! Key-value store trait and SQLite-backed implementation for plugin state
+//! persistence.
 //!
 //! Each plugin gets an isolated namespace. The store is used by
 //! `PluginContext::kv_get` / `kv_set` / `kv_delete` and by the hot-reload
@@ -11,13 +12,45 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::KvError;
 
+// ─── KvStore trait ──────────────────────────────────────────────────────────
+
+/// Abstract key-value storage backend for plugin state persistence.
+///
+/// Each namespace is isolated — plugins access only their own data.
+/// The kernel provides a concrete `SqliteKvStore` implementation internally;
+/// consumers (including `nexus-plugins`) interact through this trait.
+pub trait KvStore: Send + Sync + std::fmt::Debug {
+    /// Get a value by key within a namespace.
+    ///
+    /// # Errors
+    /// Returns `KvError::BackendError` on storage failures.
+    fn get(&self, namespace: &str, key: &str) -> Result<Option<Vec<u8>>, KvError>;
+
+    /// Set a value by key within a namespace (upsert).
+    ///
+    /// # Errors
+    /// Returns `KvError::BackendError` on storage failures.
+    fn set(&self, namespace: &str, key: &str, value: &[u8]) -> Result<(), KvError>;
+
+    /// Delete a key within a namespace. Returns `Ok(())` even if the key
+    /// does not exist.
+    ///
+    /// # Errors
+    /// Returns `KvError::BackendError` on storage failures.
+    fn delete(&self, namespace: &str, key: &str) -> Result<(), KvError>;
+}
+
+// ─── SqliteKvStore ──────────────────────────────────────────────────────────
+
 /// SQLite-backed key-value store. Thread-safe via internal `Mutex`.
 ///
 /// Schema: `kv_store(namespace TEXT, key TEXT, value BLOB, PRIMARY KEY(namespace, key))`
 ///
 /// Plugins interact with this through `PluginContext`; the namespace is
 /// always the plugin's id, enforced by the context impl.
-pub struct SqliteKvStore {
+///
+/// Not exported publicly — consumers use [`KvStore`] trait objects.
+pub(crate) struct SqliteKvStore {
     conn: Mutex<Connection>,
 }
 
@@ -155,9 +188,21 @@ impl SqliteKvStore {
     }
 }
 
-/// Trait alias so `nexus-plugins` can depend on the interface without
-/// pulling in `rusqlite`.  Mirrors the `KvStore` trait in `nexus-plugins`
-/// but lives in the kernel crate for ownership reasons.
+impl KvStore for SqliteKvStore {
+    fn get(&self, namespace: &str, key: &str) -> Result<Option<Vec<u8>>, KvError> {
+        self.get(namespace, key)
+    }
+
+    fn set(&self, namespace: &str, key: &str, value: &[u8]) -> Result<(), KvError> {
+        self.set(namespace, key, value)
+    }
+
+    fn delete(&self, namespace: &str, key: &str) -> Result<(), KvError> {
+        self.delete(namespace, key)
+    }
+}
+
+/// Convenience constructor for `KvError::BackendError`.
 impl crate::error::KvError {
     /// Convert a plugin-crate `PluginError` style message into a `KvError`.
     #[must_use]

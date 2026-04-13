@@ -111,7 +111,7 @@ fn smoke_all_public_types_importable() {
         BusError, Capability, CapabilityError, CapabilityParseError, CapabilitySet, ConfigError,
         Error, EventBus, EventFilter, EventMetadata, EventSubscription, IpcError, Kernel,
         KernelConfig, KvError, LogLevel, NexusEvent, PluginContext, PluginError, PluginInfo,
-        PluginLifecycle, PluginRegistry, PluginStatus, PublishedEvent, RecvError, Result,
+        PluginRegistry, PluginStatus, PublishedEvent, RecvError, Result,
         StopReason, TrustLevel,
     };
 
@@ -147,7 +147,6 @@ fn smoke_all_public_types_importable() {
         let _: std::marker::PhantomData<EventSubscription> = std::marker::PhantomData;
         let _: std::marker::PhantomData<PluginRegistry>   = std::marker::PhantomData;
         let _: std::marker::PhantomData<dyn PluginContext> = std::marker::PhantomData;
-        let _: std::marker::PhantomData<dyn PluginLifecycle> = std::marker::PhantomData;
         type _R = Result<()>;
     }
 }

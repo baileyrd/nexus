@@ -9,11 +9,13 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod audit;
+mod core_plugin;
 mod credential;
 mod error;
 mod path;
 mod risk;
 
+pub use core_plugin::SecurityCorePlugin;
 pub use credential::CredentialVault;
 pub use error::SecurityError;
 pub use path::ForgePathValidator;
