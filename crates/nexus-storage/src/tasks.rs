@@ -1,5 +1,7 @@
 //! Task extraction, storage, and file-writeback operations.
 
+use std::path::Path;
+
 use rusqlite::{Connection, params};
 
 use crate::StorageError;
@@ -169,6 +171,77 @@ pub fn toggle_task(
     )?;
 
     Ok(record)
+}
+
+/// Toggle a checkbox on disk at the given `line_number` (1-indexed).
+///
+/// When `new_state` is `true`, replaces `- [ ] ` with `- [x] `.
+/// When `new_state` is `false`, replaces `- [x] ` with `- [ ] `.
+///
+/// # Errors
+///
+/// Returns [`StorageError::IndexInconsistency`] when the target line does
+/// not contain the expected checkbox marker.
+/// Returns [`StorageError::WriteFailed`] on I/O failure during read or write.
+pub fn toggle_task_in_file(
+    file_path: &Path,
+    line_number: u32,
+    new_state: bool,
+) -> Result<(), StorageError> {
+    let content = std::fs::read_to_string(file_path).map_err(|e| StorageError::WriteFailed {
+        path: file_path.display().to_string(),
+        reason: e.to_string(),
+    })?;
+
+    let lines: Vec<&str> = content.lines().collect();
+    let idx = (line_number as usize).wrapping_sub(1);
+
+    if idx >= lines.len() {
+        return Err(StorageError::IndexInconsistency {
+            details: format!(
+                "line {line_number} out of range (file has {} lines)",
+                lines.len()
+            ),
+        });
+    }
+
+    let line = lines[idx];
+
+    let updated_line: String = if new_state {
+        // Expect unchecked, replace with checked.
+        if let Some(rest) = line.strip_prefix("- [ ] ") {
+            format!("- [x] {rest}")
+        } else {
+            return Err(StorageError::IndexInconsistency {
+                details: format!(
+                    "expected '- [ ] ' at line {line_number}, found: {line}"
+                ),
+            });
+        }
+    } else {
+        // Expect checked, replace with unchecked.
+        if let Some(rest) = line.strip_prefix("- [x] ") {
+            format!("- [ ] {rest}")
+        } else {
+            return Err(StorageError::IndexInconsistency {
+                details: format!(
+                    "expected '- [x] ' at line {line_number}, found: {line}"
+                ),
+            });
+        }
+    };
+
+    // Allocate owned strings so we can swap in the updated line.
+    let mut owned_lines: Vec<String> = lines.iter().map(|l| (*l).to_string()).collect();
+    owned_lines[idx] = updated_line;
+
+    let output = owned_lines.join("\n") + "\n";
+    std::fs::write(file_path, output).map_err(|e| StorageError::WriteFailed {
+        path: file_path.display().to_string(),
+        reason: e.to_string(),
+    })?;
+
+    Ok(())
 }
 
 // ── Private helpers ──────────────────────────────────────────────────────────
@@ -359,6 +432,55 @@ mod tests {
             2,
             "expected 2 tasks after replace, got {}",
             after_second.len()
+        );
+    }
+
+    // ── 5. toggle_task_in_file_checks ────────────────────────────────────────
+
+    #[test]
+    fn toggle_task_in_file_checks() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("tasks.md");
+        std::fs::write(&file, "# Tasks\n- [ ] Pending task\n").unwrap();
+
+        toggle_task_in_file(&file, 2, true).unwrap();
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            content.contains("- [x] Pending task"),
+            "expected checked task, got: {content}"
+        );
+    }
+
+    // ── 6. toggle_task_in_file_unchecks ──────────────────────────────────────
+
+    #[test]
+    fn toggle_task_in_file_unchecks() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("tasks.md");
+        std::fs::write(&file, "# Tasks\n- [x] Done task\n").unwrap();
+
+        toggle_task_in_file(&file, 2, false).unwrap();
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            content.contains("- [ ] Done task"),
+            "expected unchecked task, got: {content}"
+        );
+    }
+
+    // ── 7. toggle_task_in_file_stale_line_errors ─────────────────────────────
+
+    #[test]
+    fn toggle_task_in_file_stale_line_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("plain.md");
+        std::fs::write(&file, "Just a paragraph.\n").unwrap();
+
+        let result = toggle_task_in_file(&file, 1, true);
+        assert!(
+            matches!(result, Err(StorageError::IndexInconsistency { .. })),
+            "expected IndexInconsistency error, got: {result:?}"
         );
     }
 }
