@@ -7,6 +7,7 @@ members = [
     "crates/nexus-storage",
     "crates/nexus-plugins",
     "crates/nexus-cli",
+    "crates/nexus-tui",
 ]
 
 [workspace.package]
@@ -88,3 +89,7 @@ clap = { version = "4.4", features = ["derive", "env"] }
 anyhow = "1"
 comfy-table = "7"
 ctrlc = "3.4"
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
