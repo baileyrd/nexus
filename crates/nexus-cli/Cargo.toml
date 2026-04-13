@@ -19,6 +19,8 @@ nexus-types = { path = "../nexus-types" }
 nexus-ai = { path = "../nexus-ai" }
 nexus-mcp = { path = "../nexus-mcp" }
 nexus-git = { path = "../nexus-git" }
+nexus-database = { path = "../nexus-database" }
+csv = { workspace = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }

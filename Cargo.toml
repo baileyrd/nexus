@@ -12,6 +12,7 @@ members = [
     "crates/nexus-tui",
     "crates/nexus-git",
     "crates/nexus-formats",
+    "crates/nexus-database",
 ]
 
 [workspace.package]
@@ -88,6 +89,9 @@ filetime = "0.2"
 
 # Test utilities
 tempfile = "3"
+
+# CSV
+csv = "1.3"
 
 # CLI
 clap = { version = "4.6", features = ["derive", "env"] }

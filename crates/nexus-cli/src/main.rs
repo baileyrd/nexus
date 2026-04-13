@@ -505,10 +505,52 @@ enum BasesCommand {
         #[arg(long)]
         data: String,
     },
-    /// Query records from a base
+    /// Query records from a base (with optional filters and sorting)
     Query {
         /// Path to the .bases directory
         path: String,
+        /// Filter expression (e.g., "status = Done"). Repeatable.
+        #[arg(long)]
+        filter: Vec<String>,
+        /// Sort expression (e.g., "priority desc"). Repeatable.
+        #[arg(long)]
+        sort: Vec<String>,
+        /// Maximum number of records to return
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Number of records to skip
+        #[arg(long)]
+        offset: Option<u32>,
+    },
+    /// Import records from a CSV file
+    Import {
+        /// Path to the .bases directory
+        path: String,
+        /// CSV file to import from
+        #[arg(long)]
+        file: String,
+        /// Whether the CSV has a header row
+        #[arg(long, default_value = "true")]
+        header: bool,
+    },
+    /// Export records to a CSV file
+    Export {
+        /// Path to the .bases directory
+        path: String,
+        /// CSV file to export to
+        #[arg(long)]
+        file: String,
+    },
+    /// Evaluate a formula against a record
+    Formula {
+        /// Path to the .bases directory
+        path: String,
+        /// Record ID
+        #[arg(long)]
+        record: String,
+        /// Formula expression (e.g., 'if(prop("status") == "done", 1, 0)')
+        #[arg(long)]
+        expr: String,
     },
 }
 
@@ -809,7 +851,26 @@ fn main() {
             BasesCommand::AddRecord { path, data } => {
                 commands::bases::add_record(&mut app, &path, &data)
             }
-            BasesCommand::Query { path } => commands::bases::query(&mut app, &path),
+            BasesCommand::Query {
+                path,
+                filter,
+                sort,
+                limit,
+                offset,
+            } => commands::bases::query(&mut app, &path, &filter, &sort, limit, offset),
+            BasesCommand::Import {
+                path,
+                file,
+                header,
+            } => commands::bases::import(&mut app, &path, &file, header),
+            BasesCommand::Export { path, file } => {
+                commands::bases::export(&mut app, &path, &file)
+            }
+            BasesCommand::Formula {
+                path,
+                record,
+                expr,
+            } => commands::bases::formula(&mut app, &path, &record, &expr),
         },
 
         Commands::Ai(args) => match args.command {

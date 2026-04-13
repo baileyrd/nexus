@@ -11,7 +11,7 @@ use crate::StorageError;
 use rusqlite::Connection;
 
 /// The current schema version this crate expects.
-pub const CURRENT_VERSION: u32 = 6;
+pub const CURRENT_VERSION: u32 = 7;
 
 /// Configure `SQLite` pragmas for optimal performance and consistency.
 ///
@@ -112,6 +112,16 @@ pub fn migrate(conn: &Connection) -> Result<u32, StorageError> {
         apply_migration_006(&tx)?;
         tx.execute(
             "INSERT INTO _schema_version (version, applied_at) VALUES (6, unixepoch());",
+            [],
+        )?;
+        tx.commit()?;
+    }
+
+    if current < 7 {
+        let tx = conn.unchecked_transaction()?;
+        apply_migration_007(&tx)?;
+        tx.execute(
+            "INSERT INTO _schema_version (version, applied_at) VALUES (7, unixepoch());",
             [],
         )?;
         tx.commit()?;
@@ -327,6 +337,22 @@ fn apply_migration_006(conn: &Connection) -> Result<(), StorageError> {
             FOREIGN KEY(base_id) REFERENCES bases(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_bases_views_base ON bases_views(base_id);",
+    )?;
+    Ok(())
+}
+
+fn apply_migration_007(conn: &Connection) -> Result<(), StorageError> {
+    conn.execute_batch(
+        "-- Schema version tracking for database engine migrations
+        CREATE TABLE IF NOT EXISTS bases_schema_versions (
+            id          INTEGER PRIMARY KEY,
+            base_id     INTEGER NOT NULL,
+            version     INTEGER NOT NULL,
+            operation   TEXT NOT NULL,
+            applied_at  INTEGER NOT NULL,
+            FOREIGN KEY(base_id) REFERENCES bases(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_bsv_base ON bases_schema_versions(base_id);",
     )?;
     Ok(())
 }
