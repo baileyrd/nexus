@@ -169,6 +169,12 @@ enum ContentCommand {
         /// Path of the file
         path: String,
     },
+    /// Create or open today's daily note
+    Daily {
+        /// Date in YYYY-MM-DD format (defaults to today)
+        #[arg(long)]
+        date: Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -366,6 +372,9 @@ fn main() {
             }
             ContentCommand::Links { path } => commands::content::links(&mut app, &path),
             ContentCommand::Backlinks { path } => commands::content::backlinks(&mut app, &path),
+            ContentCommand::Daily { date } => {
+                commands::content::daily(&mut app, date.as_deref())
+            }
         },
 
         Commands::Plugin(args) => match args.command {

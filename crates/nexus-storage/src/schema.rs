@@ -11,7 +11,7 @@ use crate::StorageError;
 use rusqlite::Connection;
 
 /// The current schema version this crate expects.
-pub const CURRENT_VERSION: u32 = 2;
+pub const CURRENT_VERSION: u32 = 3;
 
 /// Configure `SQLite` pragmas for optimal performance and consistency.
 ///
@@ -64,6 +64,16 @@ pub fn migrate(conn: &Connection) -> Result<u32, StorageError> {
         apply_migration_002(&tx)?;
         tx.execute(
             "INSERT INTO _schema_version (version, applied_at) VALUES (2, unixepoch());",
+            [],
+        )?;
+        tx.commit()?;
+    }
+
+    if current < 3 {
+        let tx = conn.unchecked_transaction()?;
+        apply_migration_003(&tx)?;
+        tx.execute(
+            "INSERT INTO _schema_version (version, applied_at) VALUES (3, unixepoch());",
             [],
         )?;
         tx.commit()?;
@@ -162,6 +172,16 @@ fn apply_migration_001(conn: &Connection) -> Result<(), StorageError> {
             block_content,
             block_type   UNINDEXED
         );",
+    )?;
+    Ok(())
+}
+
+/// Add typed property columns for numeric, date, and boolean values.
+fn apply_migration_003(conn: &Connection) -> Result<(), StorageError> {
+    conn.execute_batch(
+        "ALTER TABLE properties ADD COLUMN value_num REAL;
+         ALTER TABLE properties ADD COLUMN value_date INTEGER;
+         ALTER TABLE properties ADD COLUMN value_bool BOOLEAN;",
     )?;
     Ok(())
 }
@@ -533,5 +553,25 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fragment, "heading");
+    }
+
+    // ── 17. migrate_v3_adds_typed_property_columns ───────────────────────────
+    #[test]
+    fn migrate_v3_adds_typed_property_columns() {
+        let conn = in_memory_db();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
+             VALUES ('typed.md', 'markdown', 'h1', 10, 0, 0);",
+            [],
+        )
+        .unwrap();
+        let fid: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO properties (file_id, key, value, property_type, value_num, value_date, value_bool)
+             VALUES (?1, 'count', '42', 'number', 42.0, NULL, NULL);",
+            rusqlite::params![fid],
+        )
+        .unwrap();
     }
 }

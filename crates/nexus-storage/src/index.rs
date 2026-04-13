@@ -3,6 +3,7 @@
 //! Provides CRUD operations over the `files`, `blocks`, `links`, `tags`,
 //! `properties`, and `fts_blocks` tables defined in the schema migration.
 
+use chrono::NaiveDate;
 use rusqlite::{Connection, params};
 
 use crate::StorageError;
@@ -471,17 +472,89 @@ fn resolve_link(conn: &Connection, target: Option<&str>) -> (Option<u64>, bool) 
 }
 
 /// Insert a single property row, ignoring duplicate `(file_id, key)` pairs.
+/// Populates typed columns (`value_num`, `value_date`, `value_bool`) based on
+/// the JSON value and `property_type` hint.
 fn insert_property(
     conn: &Connection,
     file_id: u64,
     prop: &Property,
 ) -> Result<(), StorageError> {
+    let (value_num, value_date, value_bool) =
+        extract_typed_values(&prop.value, prop.property_type.as_deref());
     conn.execute(
-        "INSERT OR IGNORE INTO properties (file_id, key, value, property_type)
-         VALUES (?1, ?2, ?3, ?4);",
-        params![file_id.cast_signed(), prop.key, prop.value, prop.property_type],
+        "INSERT OR IGNORE INTO properties (file_id, key, value, property_type, value_num, value_date, value_bool)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
+        params![
+            file_id.cast_signed(),
+            prop.key,
+            prop.value,
+            prop.property_type,
+            value_num,
+            value_date,
+            value_bool,
+        ],
     )?;
     Ok(())
+}
+
+/// Extract typed values from a JSON-serialized property value.
+fn extract_typed_values(
+    json_value: &str,
+    property_type: Option<&str>,
+) -> (Option<f64>, Option<i64>, Option<bool>) {
+    let mut num = None;
+    let mut date = None;
+    let mut bool_val = None;
+
+    match property_type {
+        Some("number") => {
+            // JSON value like "42" or "3.14"
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_value) {
+                num = v.as_f64();
+            }
+        }
+        Some("string") => {
+            // Check if the string value looks like YYYY-MM-DD
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_value) {
+                if let Some(s) = v.as_str() {
+                    if let Some(ts) = parse_date_to_unix(s) {
+                        date = Some(ts);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Check for boolean regardless of type hint
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_value) {
+        if let Some(b) = v.as_bool() {
+            bool_val = Some(b);
+        }
+    }
+
+    (num, date, bool_val)
+}
+
+/// Parse a "YYYY-MM-DD" string to a Unix timestamp (midnight UTC).
+/// Returns `None` if the string doesn't match the expected format.
+fn parse_date_to_unix(s: &str) -> Option<i64> {
+    // Simple validation: must be exactly 10 chars, format YYYY-MM-DD
+    if s.len() != 10 || s.as_bytes()[4] != b'-' || s.as_bytes()[7] != b'-' {
+        return None;
+    }
+    let year: i32 = s[0..4].parse().ok()?;
+    let month: u32 = s[5..7].parse().ok()?;
+    let day: u32 = s[8..10].parse().ok()?;
+
+    // Validate ranges
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || year < 1970 {
+        return None;
+    }
+
+    // Use chrono for accurate conversion
+    let date = NaiveDate::from_ymd_opt(year, month, day)?;
+    Some(date.and_hms_opt(0, 0, 0)?.and_utc().timestamp())
 }
 
 /// Map a `SQLite` row to a [`FileRecord`].
@@ -807,5 +880,66 @@ mod tests {
             )
             .unwrap();
         assert!(count > 0, "FTS should have at least one match for 'content'");
+    }
+
+    // ── 15. insert_property_populates_typed_columns ──────────────────────────
+    #[test]
+    fn insert_property_populates_typed_columns() {
+        let conn = setup_db();
+        let parsed = ParsedFile {
+            content_hash: "typed1".to_string(),
+            frontmatter: vec![
+                Property {
+                    key: "count".to_string(),
+                    value: "42".to_string(),
+                    property_type: Some("number".to_string()),
+                },
+                Property {
+                    key: "date".to_string(),
+                    value: "\"2026-04-13\"".to_string(),
+                    property_type: Some("string".to_string()),
+                },
+                Property {
+                    key: "draft".to_string(),
+                    value: "true".to_string(),
+                    property_type: Some("string".to_string()),
+                },
+            ],
+            blocks: vec![],
+            links: vec![],
+            tags: vec![],
+            tasks: vec![],
+        };
+        let file_id = insert_file(&conn, "notes/typed.md", "markdown", 100, &parsed).unwrap();
+
+        // Check value_num
+        let num: Option<f64> = conn
+            .query_row(
+                "SELECT value_num FROM properties WHERE file_id = ?1 AND key = 'count';",
+                params![file_id.cast_signed()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(num, Some(42.0));
+
+        // Check value_date
+        let date: Option<i64> = conn
+            .query_row(
+                "SELECT value_date FROM properties WHERE file_id = ?1 AND key = 'date';",
+                params![file_id.cast_signed()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(date.is_some(), "date should be populated");
+
+        // Check value_bool
+        let bool_val: Option<bool> = conn
+            .query_row(
+                "SELECT value_bool FROM properties WHERE file_id = ?1 AND key = 'draft';",
+                params![file_id.cast_signed()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(bool_val, Some(true));
     }
 }

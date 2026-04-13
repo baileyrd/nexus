@@ -262,3 +262,40 @@ pub fn backlinks(app: &mut App, path: &str) -> Result<()> {
 
     Ok(())
 }
+
+/// Create or open a daily note.
+pub fn daily(app: &mut App, date: Option<&str>) -> Result<()> {
+    use chrono::{Local, NaiveDate};
+
+    let date = if let Some(d) = date {
+        NaiveDate::parse_from_str(d, "%Y-%m-%d")
+            .map_err(|e| anyhow::anyhow!("invalid date format (expected YYYY-MM-DD): {e}"))?
+    } else {
+        Local::now().date_naive()
+    };
+
+    let path = format!("notes/daily/{}.md", date.format("%Y-%m-%d"));
+
+    let storage = app.storage_mut()?;
+
+    // Check if already exists
+    if storage.file_exists(&path).unwrap_or(false) {
+        println!("Daily note already exists: {path}");
+        return Ok(());
+    }
+
+    let title = date.format("%B %d, %Y");
+    let date_str = date.format("%Y-%m-%d");
+
+    let content = format!(
+        "---\ndate: {date_str}\ntags: [daily]\n---\n# {title}\n\n## Tasks\n\n## Notes\n"
+    );
+
+    let meta = storage
+        .write_file(&path, content.as_bytes())
+        .map_err(|e| anyhow::anyhow!("failed to create daily note: {e}"))?;
+
+    println!("Created: {}", meta.path);
+
+    Ok(())
+}
