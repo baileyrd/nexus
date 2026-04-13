@@ -58,8 +58,8 @@ enum Commands {
     // Stub commands — implemented in later milestones
     // -----------------------------------------------------------------------
 
-    /// AI assistant operations (coming soon)
-    Ai(StubArgs),
+    /// AI assistant operations
+    Ai(AiArgs),
     /// Process management (coming soon)
     Proc(StubArgs),
     /// Terminal management (coming soon)
@@ -201,6 +201,35 @@ enum GraphCommand {
         #[arg(short, long, default_value_t = 1)]
         depth: usize,
     },
+}
+
+// ---------------------------------------------------------------------------
+// AI
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct AiArgs {
+    #[command(subcommand)]
+    command: AiCommand,
+}
+
+#[derive(Subcommand)]
+enum AiCommand {
+    /// Ask a question using RAG
+    Ask {
+        /// The question to ask
+        question: String,
+    },
+    /// Generate embeddings
+    Embed {
+        /// Embed a specific file only
+        #[arg(long)]
+        file: Option<String>,
+    },
+    /// Show AI/embedding status
+    Status,
+    /// Show AI configuration
+    Config,
 }
 
 // ---------------------------------------------------------------------------
@@ -416,8 +445,14 @@ fn main() {
             }
         },
 
+        Commands::Ai(args) => match args.command {
+            AiCommand::Ask { question } => commands::ai::ask(&mut app, &question),
+            AiCommand::Embed { file } => commands::ai::embed(&mut app, file.as_deref()),
+            AiCommand::Status => commands::ai::status(&mut app),
+            AiCommand::Config => commands::ai::config(),
+        },
+
         // Stub commands — implemented in later milestones.
-        Commands::Ai(_) => stubs::not_implemented("ai"),
         Commands::Proc(_) => stubs::not_implemented("proc"),
         Commands::Term(_) => stubs::not_implemented("term"),
         Commands::Mcp(_) => stubs::not_implemented("mcp"),

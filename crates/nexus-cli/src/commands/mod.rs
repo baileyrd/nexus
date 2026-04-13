@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod content;
 pub mod forge;
 pub mod graph;
