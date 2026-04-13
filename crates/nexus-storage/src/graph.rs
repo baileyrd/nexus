@@ -1,7 +1,7 @@
 //! In-memory knowledge graph built on petgraph.
 //!
 //! Represents notes as nodes and links as directed edges.
-//! Rebuilt from SQLite on startup, updated incrementally on file changes.
+//! Rebuilt from `SQLite` on startup, updated incrementally on file changes.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -80,8 +80,15 @@ pub struct KnowledgeGraph {
     phantom_nodes: HashSet<NodeIndex>,
 }
 
+impl Default for KnowledgeGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KnowledgeGraph {
     /// Create an empty knowledge graph.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             graph: StableGraph::new(),
@@ -144,6 +151,7 @@ impl KnowledgeGraph {
     }
 
     /// Return graph statistics.
+    #[must_use] 
     pub fn stats(&self) -> GraphStats {
         GraphStats {
             node_count: self.graph.node_count(),
@@ -153,6 +161,7 @@ impl KnowledgeGraph {
     }
 
     /// Return all files that link TO `path`.
+    #[must_use] 
     pub fn backlinks(&self, path: &str) -> Vec<BacklinkResult> {
         let Some(&idx) = self.path_to_node.get(path) else {
             return Vec::new();
@@ -171,6 +180,7 @@ impl KnowledgeGraph {
     }
 
     /// Return all links FROM `path` to other files.
+    #[must_use] 
     pub fn outgoing_links(&self, path: &str) -> Vec<OutgoingLink> {
         let Some(&idx) = self.path_to_node.get(path) else {
             return Vec::new();
@@ -191,6 +201,7 @@ impl KnowledgeGraph {
     }
 
     /// Return all phantom nodes (unresolved link targets) with their referrers.
+    #[must_use] 
     pub fn unresolved_links(&self) -> Vec<UnresolvedLink> {
         self.phantom_nodes
             .iter()
@@ -211,6 +222,7 @@ impl KnowledgeGraph {
 
     /// BFS traversal from `path` up to `depth` hops in both directions.
     /// Returns unique paths excluding the start node.
+    #[must_use] 
     pub fn neighbors(&self, path: &str, depth: usize) -> Vec<String> {
         let Some(&start) = self.path_to_node.get(path) else {
             return Vec::new();
@@ -239,14 +251,14 @@ impl KnowledgeGraph {
         result
     }
 
-    /// Build the knowledge graph from the SQLite index.
+    /// Build the knowledge graph from the `SQLite` index.
     ///
     /// Queries all non-deleted files as nodes and all links as edges.
     /// Unresolved link targets become phantom nodes.
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError::Database`] on any SQLite failure.
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn rebuild_from_db(conn: &rusqlite::Connection) -> Result<Self, crate::StorageError> {
         let mut kg = Self::new();
 
@@ -254,7 +266,7 @@ impl KnowledgeGraph {
         let mut stmt = conn.prepare("SELECT path FROM files WHERE is_deleted = 0;")?;
         let paths: Vec<String> = stmt
             .query_map([], |row| row.get(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         for path in &paths {
             kg.add_note(path);
@@ -277,7 +289,7 @@ impl KnowledgeGraph {
                     row.get(4)?,
                 ))
             })?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         for (source, target, link_text, link_type, fragment) in links {

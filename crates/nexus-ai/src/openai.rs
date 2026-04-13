@@ -1,4 +1,4 @@
-//! OpenAI AI and embedding provider implementation.
+//! `OpenAI` AI and embedding provider implementation.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ const CHAT_URL: &str = "https://api.openai.com/v1/chat/completions";
 /// Embeddings endpoint.
 const EMBEDDINGS_URL: &str = "https://api.openai.com/v1/embeddings";
 
-/// AI provider backed by the OpenAI API.
+/// AI provider backed by the `OpenAI` API.
 ///
 /// Implements both [`AiProvider`] (chat) and [`EmbeddingProvider`].
 pub struct OpenAiProvider {
@@ -33,10 +33,11 @@ pub struct OpenAiProvider {
 }
 
 impl OpenAiProvider {
-    /// Create a new OpenAI provider.
+    /// Create a new `OpenAI` provider.
     ///
     /// If `model` is `None`, defaults to `gpt-4o` for chat and
     /// `text-embedding-3-small` for embeddings.
+    #[must_use] 
     pub fn new(api_key: String, model: Option<String>, max_tokens: u32) -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -49,7 +50,7 @@ impl OpenAiProvider {
 
 // -- Chat types --
 
-/// Request body for OpenAI chat completions.
+/// Request body for `OpenAI` chat completions.
 #[derive(Serialize)]
 struct ChatRequest<'a> {
     model: &'a str,
@@ -57,14 +58,14 @@ struct ChatRequest<'a> {
     messages: Vec<ChatRequestMessage<'a>>,
 }
 
-/// A message in an OpenAI chat request.
+/// A message in an `OpenAI` chat request.
 #[derive(Serialize)]
 struct ChatRequestMessage<'a> {
     role: &'a str,
     content: &'a str,
 }
 
-/// Response from the OpenAI chat completions endpoint.
+/// Response from the `OpenAI` chat completions endpoint.
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<ChatChoice>,
@@ -84,14 +85,14 @@ struct ChatChoiceMessage {
 
 // -- Embedding types --
 
-/// Request body for OpenAI embeddings.
+/// Request body for `OpenAI` embeddings.
 #[derive(Serialize)]
 struct EmbeddingRequest<'a> {
     model: &'a str,
     input: &'a [String],
 }
 
-/// Response from the OpenAI embeddings endpoint.
+/// Response from the `OpenAI` embeddings endpoint.
 #[derive(Deserialize)]
 struct EmbeddingResponse {
     data: Vec<EmbeddingData>,

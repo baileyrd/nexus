@@ -6,7 +6,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use git2::{DiffOptions, Repository, StatusOptions};
 
 use crate::error::GitError;
-use crate::types::*;
+use crate::types::{GitState, RepoState, StatusEntry, FileStatus, HunkDiff, BlameEntry, LogEntry, BranchInfo, MergeResult, DiffLineKind, DiffLine};
 
 /// Git engine backed by `git2::Repository`.
 ///
@@ -37,6 +37,7 @@ impl GitEngine {
     /// # Panics
     ///
     /// Panics if the repository is bare (no workdir).
+    #[must_use] 
     pub fn repo_root(&self) -> &Path {
         self.repo.workdir().expect("bare repos not supported")
     }
@@ -54,9 +55,7 @@ impl GitEngine {
 
         let head_oid = match self.repo.head() {
             Ok(head) => head
-                .target()
-                .map(|oid| format!("{}", &oid.to_string()[..7]))
-                .unwrap_or_else(|| "(none)".to_string()),
+                .target().map_or_else(|| "(none)".to_string(), |oid| oid.to_string()[..7].to_string()),
             Err(_) => "(none)".to_string(),
         };
 
@@ -71,7 +70,6 @@ impl GitEngine {
         };
 
         let repo_state = match self.repo.state() {
-            git2::RepositoryState::Clean => RepoState::Clean,
             git2::RepositoryState::Merge => RepoState::Merge,
             git2::RepositoryState::Rebase
             | git2::RepositoryState::RebaseMerge => RepoState::Rebase,
@@ -169,6 +167,10 @@ impl GitEngine {
     /// # Errors
     ///
     /// Returns [`GitError`] on any libgit2 failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a blame hunk index is out of range (should not happen).
     pub fn blame(&self, path: &Path) -> Result<Vec<BlameEntry>, GitError> {
         let blame = self.repo.blame_file(path, None)?;
         let mut entries = Vec::new();
@@ -188,7 +190,7 @@ impl GitEngine {
             let date = git_time_to_chrono(&sig.when());
 
             entries.push(BlameEntry {
-                commit_hash: format!("{}", &commit_id.to_string()[..7]),
+                commit_hash: commit_id.to_string()[..7].to_string(),
                 author: String::from_utf8_lossy(sig.name_bytes()).to_string(),
                 date,
                 message,
@@ -206,13 +208,11 @@ impl GitEngine {
     ///
     /// Returns [`GitError`] on any libgit2 failure.
     pub fn log(&self, limit: usize) -> Result<Vec<LogEntry>, GitError> {
-        let head = match self.repo.head() {
-            Ok(h) => h,
-            Err(_) => return Ok(Vec::new()), // empty repo
+        let Ok(head) = self.repo.head() else {
+            return Ok(Vec::new()); // empty repo
         };
-        let head_oid = match head.target() {
-            Some(oid) => oid,
-            None => return Ok(Vec::new()),
+        let Some(head_oid) = head.target() else {
+            return Ok(Vec::new());
         };
 
         let mut revwalk = self.repo.revwalk()?;
@@ -237,13 +237,11 @@ impl GitEngine {
     ///
     /// Returns [`GitError`] on any libgit2 failure.
     pub fn log_file(&self, path: &Path, limit: usize) -> Result<Vec<LogEntry>, GitError> {
-        let head = match self.repo.head() {
-            Ok(h) => h,
-            Err(_) => return Ok(Vec::new()),
+        let Ok(head) = self.repo.head() else {
+            return Ok(Vec::new());
         };
-        let head_oid = match head.target() {
-            Some(oid) => oid,
-            None => return Ok(Vec::new()),
+        let Some(head_oid) = head.target() else {
+            return Ok(Vec::new());
         };
 
         let mut revwalk = self.repo.revwalk()?;
@@ -376,7 +374,7 @@ impl GitEngine {
             &parent_refs,
         )?;
 
-        Ok(format!("{}", &oid.to_string()[..7]))
+        Ok(oid.to_string()[..7].to_string())
     }
 
     /// List local branches.
@@ -543,7 +541,7 @@ impl GitEngine {
             return Ok(MergeResult {
                 fast_forward: true,
                 conflicts: Vec::new(),
-                commit_hash: Some(format!("{}", &target_oid.to_string()[..7])),
+                commit_hash: Some(target_oid.to_string()[..7].to_string()),
             });
         }
 
@@ -555,7 +553,7 @@ impl GitEngine {
         if index.has_conflicts() {
             let conflicts: Vec<String> = index
                 .conflicts()?
-                .filter_map(|c| c.ok())
+                .filter_map(std::result::Result::ok)
                 .filter_map(|c| {
                     c.our
                         .as_ref()
@@ -593,7 +591,7 @@ impl GitEngine {
         Ok(MergeResult {
             fast_forward: false,
             conflicts: Vec::new(),
-            commit_hash: Some(format!("{}", &oid.to_string()[..7])),
+            commit_hash: Some(oid.to_string()[..7].to_string()),
         })
     }
 
@@ -609,7 +607,7 @@ impl GitEngine {
         }
         let files: Vec<String> = index
             .conflicts()?
-            .filter_map(|c| c.ok())
+            .filter_map(std::result::Result::ok)
             .filter_map(|c| {
                 c.our
                     .as_ref()
@@ -708,13 +706,13 @@ fn git_time_to_chrono(time: &git2::Time) -> DateTime<Utc> {
 fn commit_to_log_entry(commit: &git2::Commit<'_>) -> LogEntry {
     let sig = commit.author();
     LogEntry {
-        hash: format!("{}", &commit.id().to_string()[..7]),
+        hash: commit.id().to_string()[..7].to_string(),
         author: String::from_utf8_lossy(sig.name_bytes()).to_string(),
         date: git_time_to_chrono(&sig.when()),
         message: commit.message().unwrap_or("").to_string(),
         parents: commit
             .parent_ids()
-            .map(|id| format!("{}", &id.to_string()[..7]))
+            .map(|id| id.to_string()[..7].to_string())
             .collect(),
     }
 }
@@ -763,14 +761,14 @@ fn collect_file_hunks(diff: &git2::Diff<'_>) -> Result<Vec<(String, Vec<HunkDiff
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let patch = git2::Patch::from_diff(diff, delta_idx)?;
-        if let Some(patch) = patch {
+        let diff_patch = git2::Patch::from_diff(diff, delta_idx)?;
+        if let Some(diff_patch) = diff_patch {
             let mut hunks = Vec::new();
-            for hunk_idx in 0..patch.num_hunks() {
-                let (hunk, _count) = patch.hunk(hunk_idx)?;
+            for hunk_idx in 0..diff_patch.num_hunks() {
+                let (hunk, _count) = diff_patch.hunk(hunk_idx)?;
                 let mut lines = Vec::new();
-                for line_idx in 0..patch.num_lines_in_hunk(hunk_idx)? {
-                    let line = patch.line_in_hunk(hunk_idx, line_idx)?;
+                for line_idx in 0..diff_patch.num_lines_in_hunk(hunk_idx)? {
+                    let line = diff_patch.line_in_hunk(hunk_idx, line_idx)?;
                     let kind = match line.origin() {
                         '+' => DiffLineKind::Added,
                         '-' => DiffLineKind::Removed,

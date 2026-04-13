@@ -22,6 +22,7 @@ pub struct Chunk {
 /// standalone chunks.  Non-heading blocks have the most recent heading
 /// prepended (if any) and are split further when they exceed
 /// `max_chunk_size`.  Empty blocks are silently skipped.
+#[must_use] 
 pub fn chunks_from_blocks(
     file_path: &str,
     blocks: &[(u64, String, String, Option<i32>)],
@@ -77,9 +78,7 @@ fn split_on_sentences(text: &str, max_size: usize) -> Vec<String> {
     let mut current = String::new();
 
     for sentence in sentences {
-        if current.is_empty() {
-            current.push_str(sentence);
-        } else if current.len() + sentence.len() <= max_size {
+        if current.is_empty() || current.len() + sentence.len() <= max_size {
             current.push_str(sentence);
         } else {
             parts.push(current);

@@ -2,7 +2,7 @@
 //!
 //! This crate defines the core abstractions for interacting with AI
 //! language models and embedding services, along with concrete
-//! implementations for Anthropic, OpenAI, and Ollama.
+//! implementations for Anthropic, `OpenAI`, and Ollama.
 
 #![deny(missing_docs)]
 #![warn(clippy::pedantic)]

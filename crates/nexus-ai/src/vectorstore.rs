@@ -38,6 +38,10 @@ pub struct ChunkMatch {
 ///
 /// Deletes any existing rows for the file and inserts the new set inside
 /// a single transaction.
+///
+/// # Errors
+///
+/// Returns [`AiError`] if the database transaction, delete, or insert fails.
 pub fn upsert(conn: &Connection, file_path: &str, chunks: &[ChunkEmbedding]) -> Result<(), AiError> {
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM embeddings WHERE file_path = ?1;", params![file_path])?;
@@ -48,9 +52,11 @@ pub fn upsert(conn: &Connection, file_path: &str, chunks: &[ChunkEmbedding]) -> 
         )?;
         for chunk in chunks {
             let blob = embedding_to_blob(&chunk.embedding);
+            #[allow(clippy::cast_possible_wrap)]
+            let block_id = chunk.block_id as i64;
             stmt.execute(params![
                 chunk.file_path,
-                chunk.block_id as i64,
+                block_id,
                 chunk.chunk_text,
                 blob,
             ])?;
@@ -61,6 +67,10 @@ pub fn upsert(conn: &Connection, file_path: &str, chunks: &[ChunkEmbedding]) -> 
 }
 
 /// Delete all embeddings associated with `file_path`.
+///
+/// # Errors
+///
+/// Returns [`AiError`] if the database delete statement fails.
 pub fn delete_by_file(conn: &Connection, file_path: &str) -> Result<(), AiError> {
     conn.execute("DELETE FROM embeddings WHERE file_path = ?1;", params![file_path])?;
     Ok(())
@@ -71,6 +81,10 @@ pub fn delete_by_file(conn: &Connection, file_path: &str) -> Result<(), AiError>
 /// Loads all stored embeddings, computes cosine similarity against
 /// `query_embedding`, and returns the top `limit` results sorted by
 /// descending score.
+///
+/// # Errors
+///
+/// Returns [`AiError`] if the database query fails.
 pub fn search(
     conn: &Connection,
     query_embedding: &[f32],
@@ -86,9 +100,9 @@ pub fn search(
             let block_id: i64 = row.get(1)?;
             let chunk_text: String = row.get(2)?;
             let blob: Vec<u8> = row.get(3)?;
-            Ok((file_path, block_id as u64, chunk_text, blob))
+            Ok((file_path, block_id.cast_unsigned(), chunk_text, blob))
         })?
-        .filter_map(|r| r.ok())
+        .filter_map(std::result::Result::ok)
         .map(|(file_path, block_id, chunk_text, blob)| {
             let emb = blob_to_embedding(&blob);
             let score = cosine_similarity(query_embedding, &emb);
@@ -108,9 +122,14 @@ pub fn search(
 }
 
 /// Count the total number of stored embeddings.
+///
+/// # Errors
+///
+/// Returns [`AiError`] if the database count query fails.
 pub fn count(conn: &Connection) -> Result<usize, AiError> {
     let n: i64 = conn.query_row("SELECT COUNT(*) FROM embeddings;", [], |r| r.get(0))?;
-    Ok(n as usize)
+    // COUNT(*) is always non-negative and fits in usize on all targets.
+    usize::try_from(n).map_err(|_| AiError::Provider("embedding count overflowed usize".into()))
 }
 
 // ---------------------------------------------------------------------------

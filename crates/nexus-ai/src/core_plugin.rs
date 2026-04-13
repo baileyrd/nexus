@@ -50,16 +50,17 @@ impl CorePlugin for AiCorePlugin {
     /// Succeeds even when no provider is found (AI is optional).
     fn on_init(&mut self) -> Result<(), PluginError> {
         self.config = detect_provider();
-        match &self.config {
-            Some(cfg) => tracing::debug!(
+        if let Some(cfg) = &self.config {
+            tracing::debug!(
                 plugin_id = PLUGIN_ID,
                 provider = %cfg.provider,
                 "AI provider detected"
-            ),
-            None => tracing::debug!(
+            );
+        } else {
+            tracing::debug!(
                 plugin_id = PLUGIN_ID,
                 "no AI provider detected; AI features disabled"
-            ),
+            );
         }
         Ok(())
     }

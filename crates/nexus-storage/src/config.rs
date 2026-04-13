@@ -17,6 +17,7 @@ use crate::StorageError;
 /// Top-level application settings loaded from `.forge/app.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct AppConfig {
     /// Core forge settings.
     pub core: CoreSettings,
@@ -32,18 +33,6 @@ pub struct AppConfig {
     pub git: GitSettings,
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            core: CoreSettings::default(),
-            editor: EditorSettings::default(),
-            preview: PreviewSettings::default(),
-            search: SearchSettings::default(),
-            plugins: PluginSettings::default(),
-            git: GitSettings::default(),
-        }
-    }
-}
 
 /// Core forge settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,10 +102,11 @@ impl Default for EditorSettings {
 /// Preview rendering settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct PreviewSettings {
     /// Enable Mermaid diagram rendering.
     pub enable_mermaid: bool,
-    /// Enable KaTeX math rendering.
+    /// Enable `KaTeX` math rendering.
     pub enable_katex: bool,
     /// Enable syntax highlighting in code blocks.
     pub enable_highlight: bool,
@@ -160,18 +150,12 @@ impl Default for SearchSettings {
 /// Plugin configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct PluginSettings {
     /// List of enabled plugin IDs.
     pub enabled: Vec<String>,
 }
 
-impl Default for PluginSettings {
-    fn default() -> Self {
-        Self {
-            enabled: Vec::new(),
-        }
-    }
-}
 
 // ── GitSettings ──────────────────────────────────────────────────────────────
 

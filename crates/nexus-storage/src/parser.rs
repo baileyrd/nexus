@@ -105,6 +105,7 @@ pub fn content_hash(content: &[u8]) -> String {
 /// # Errors
 ///
 /// Returns [`StorageError::ParseError`] if YAML frontmatter is malformed.
+#[allow(clippy::too_many_lines)]
 pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
     let hash = content_hash(content.as_bytes());
 

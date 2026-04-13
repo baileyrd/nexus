@@ -17,6 +17,10 @@ pub const CURRENT_VERSION: u32 = 6;
 ///
 /// Sets WAL journal mode, NORMAL synchronous mode, a 16 MB page cache,
 /// and enforces foreign-key constraints.
+///
+/// # Errors
+///
+/// Returns `StorageError` if the database operation fails.
 pub fn configure_pragmas(conn: &Connection) -> Result<(), StorageError> {
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
@@ -33,6 +37,10 @@ pub fn configure_pragmas(conn: &Connection) -> Result<(), StorageError> {
 /// migration runs inside a transaction; a failure rolls back automatically.
 /// Calling this function multiple times is a no-op after the database has
 /// already been migrated to `CURRENT_VERSION`.
+///
+/// # Errors
+///
+/// Returns `StorageError` if the database operation fails.
 pub fn migrate(conn: &Connection) -> Result<u32, StorageError> {
     // Ensure the version-tracking table exists.
     conn.execute_batch(

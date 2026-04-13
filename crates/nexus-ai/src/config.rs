@@ -33,10 +33,11 @@ impl Default for AiConfig {
 ///
 /// Checks, in order:
 /// 1. `ANTHROPIC_API_KEY` -> Anthropic
-/// 2. `OPENAI_API_KEY`    -> OpenAI
+/// 2. `OPENAI_API_KEY`    -> `OpenAI`
 /// 3. `OLLAMA_BASE_URL`   -> Ollama
 ///
 /// Returns `None` if no provider is detected.
+#[must_use] 
 pub fn detect_provider() -> Option<AiConfig> {
     if let Ok(key) = env::var("ANTHROPIC_API_KEY") {
         return Some(AiConfig {
@@ -64,9 +65,10 @@ pub fn detect_provider() -> Option<AiConfig> {
 
 /// Detect the best available embedding provider from environment variables.
 ///
-/// Prefers OpenAI (higher-quality embeddings), falls back to Ollama.
+/// Prefers `OpenAI` (higher-quality embeddings), falls back to Ollama.
 ///
 /// Returns `None` if no embedding provider is detected.
+#[must_use] 
 pub fn detect_embedding_provider() -> Option<AiConfig> {
     if let Ok(key) = env::var("OPENAI_API_KEY") {
         return Some(AiConfig {

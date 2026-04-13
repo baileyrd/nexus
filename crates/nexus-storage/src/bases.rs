@@ -1,4 +1,4 @@
-//! Bases database format parser, serializer, and SQLite persistence.
+//! Bases database format parser, serializer, and `SQLite` persistence.
 //!
 //! A `.bases` path is a directory containing:
 //! - `schema.json` — field definitions
@@ -417,11 +417,11 @@ pub fn init_base(dir: &Path, name: &str, schema: &BaseSchema) -> Result<Base, St
 
 // ── DB Operations ────────────────────────────────────────────────────────────
 
-/// Insert a base and its records into SQLite.
+/// Insert a base and its records into `SQLite`.
 ///
 /// # Errors
 ///
-/// Returns [`StorageError::Database`] on any SQLite failure.
+/// Returns [`StorageError::Database`] on any `SQLite` failure.
 pub fn insert_base(
     conn: &Connection,
     path: &str,
@@ -486,7 +486,7 @@ pub fn insert_base(
 ///
 /// # Errors
 ///
-/// Returns [`StorageError::Database`] on any SQLite failure.
+/// Returns [`StorageError::Database`] on any `SQLite` failure.
 pub fn query_bases(conn: &Connection) -> Result<Vec<BaseSummary>, StorageError> {
     let mut stmt = conn.prepare_cached(
         "SELECT b.id, b.path, b.name,
@@ -512,7 +512,7 @@ pub fn query_bases(conn: &Connection) -> Result<Vec<BaseSummary>, StorageError> 
 ///
 /// # Errors
 ///
-/// Returns [`StorageError::Database`] on any SQLite failure.
+/// Returns [`StorageError::Database`] on any `SQLite` failure.
 pub fn delete_base(conn: &Connection, base_id: i64) -> Result<(), StorageError> {
     conn.execute(
         "DELETE FROM bases WHERE id = ?1;",
@@ -535,7 +535,7 @@ pub fn validate_record(
     for (field_name, field_def) in &schema.fields {
         let required = field_def
             .get("required")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
         if required && !record.fields.contains_key(field_name) && field_name != "id" {
             return Err(StorageError::CorruptFile {
@@ -646,8 +646,7 @@ fn toml_value_to_json(value: &toml::Value) -> serde_json::Value {
         toml::Value::String(s) => serde_json::Value::String(s.clone()),
         toml::Value::Integer(i) => serde_json::Value::Number((*i).into()),
         toml::Value::Float(f) => serde_json::Number::from_f64(*f)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
+            .map_or(serde_json::Value::Null, serde_json::Value::Number),
         toml::Value::Boolean(b) => serde_json::Value::Bool(*b),
         toml::Value::Array(arr) => {
             serde_json::Value::Array(arr.iter().map(toml_value_to_json).collect())

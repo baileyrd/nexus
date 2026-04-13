@@ -14,6 +14,12 @@ use comrak::{Arena, Options, format_html, parse_document};
 ///
 /// * `content` - Markdown source text.
 /// * `title`   - Plain text used for the `<title>` element (HTML-escaped).
+///
+/// # Panics
+///
+/// Panics if the comrak HTML renderer fails to write to a `String`.
+#[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn export_to_html(content: &str, title: &str) -> String {
     // Build comrak options matching the project parser.
     let mut opts = Options::default();

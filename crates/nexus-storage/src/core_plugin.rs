@@ -5,7 +5,7 @@
 //!
 //! # Re-indexing
 //!
-//! The bridge thread publishes bus events; it does **not** update the SQLite
+//! The bridge thread publishes bus events; it does **not** update the `SQLite`
 //! index.  Callers that need real-time index updates should call
 //! [`StorageEngine::process_watcher_events`] on their own polling loop, or
 //! call [`StorageEngine::rebuild_index`] / [`StorageEngine::reconcile_index`]
@@ -52,6 +52,7 @@ impl StorageCorePlugin {
     /// `debounce_ms` controls how long the watcher waits before flushing a
     /// burst of filesystem notifications.  [`StorageConfig::debounce_ms`] is a
     /// good default to pass here.
+    #[must_use] 
     pub fn new(forge_root: PathBuf, config: &StorageConfig, event_bus: Arc<EventBus>) -> Self {
         Self {
             forge_root,
@@ -139,6 +140,7 @@ impl CorePlugin for StorageCorePlugin {
 ///
 /// The bridge only handles event translation and publication.  Index updates
 /// (`write_file`, `delete_file`, etc.) remain the caller's responsibility.
+#[allow(clippy::needless_pass_by_value)]
 fn bridge_loop(
     watcher: Watcher,
     bus: Arc<EventBus>,

@@ -188,6 +188,7 @@ fn try_parse_jsx_tag(line: &str) -> Option<JsxMatch> {
 ///
 /// Handles `key="string"`, `key={expression}`, and bare `key` (boolean true).
 /// Returns `None` for empty props.
+#[allow(clippy::too_many_lines)]
 fn parse_props(raw: &str) -> Option<String> {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -304,7 +305,7 @@ fn parse_props(raw: &str) -> Option<String> {
                 }
                 let val: String = chars[val_start..i].iter().collect();
                 let json_val = serde_json::from_str::<serde_json::Value>(&val)
-                    .unwrap_or_else(|_| serde_json::Value::String(val));
+                    .unwrap_or(serde_json::Value::String(val));
                 props.insert(key, json_val);
             }
         }

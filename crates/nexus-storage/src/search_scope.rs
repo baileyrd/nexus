@@ -1,7 +1,7 @@
 //! Scoped search query parsing and post-filtering.
 //!
 //! Extracts `tag:`, `path:`, and `prop:` prefixes from search queries
-//! and filters Tantivy results using SQLite lookups.
+//! and filters Tantivy results using `SQLite` lookups.
 
 use rusqlite::Connection;
 
@@ -34,6 +34,7 @@ pub enum ScopeFilter {
 ///
 /// Tokens that don't match a prefix (or malformed `prop:` without a value)
 /// are kept as plain-text query terms.
+#[must_use] 
 pub fn parse_scoped_query(input: &str) -> (String, Vec<ScopeFilter>) {
     let mut filters = Vec::new();
     let mut text_parts = Vec::new();
@@ -71,13 +72,14 @@ pub fn parse_scoped_query(input: &str) -> (String, Vec<ScopeFilter>) {
     (text_parts.join(" "), filters)
 }
 
-/// Filter search results using scope filters and SQLite lookups.
+/// Filter search results using scope filters and `SQLite` lookups.
 ///
 /// Results must pass ALL filters (AND logic). Original scores are preserved.
 ///
 /// # Errors
 ///
-/// Returns [`StorageError::Database`] on any SQLite failure.
+/// Returns [`StorageError::Database`] on any `SQLite` failure.
+#[allow(clippy::unnecessary_wraps)]
 pub fn filter_results(
     conn: &Connection,
     results: Vec<SearchResult>,
@@ -89,7 +91,7 @@ pub fn filter_results(
 
     let mut filtered = Vec::new();
     for result in results {
-        if passes_all_filters(conn, &result.file_path, filters)? {
+        if passes_all_filters(conn, &result.file_path, filters) {
             filtered.push(result);
         }
     }
@@ -101,7 +103,7 @@ fn passes_all_filters(
     conn: &Connection,
     file_path: &str,
     filters: &[ScopeFilter],
-) -> Result<bool, StorageError> {
+) -> bool {
     for filter in filters {
         match filter {
             ScopeFilter::Tag(name) => {
@@ -116,12 +118,12 @@ fn passes_all_filters(
                     )
                     .unwrap_or(false);
                 if !found {
-                    return Ok(false);
+                    return false;
                 }
             }
             ScopeFilter::Path(prefix) => {
                 if !file_path.starts_with(prefix.as_str()) {
-                    return Ok(false);
+                    return false;
                 }
             }
             ScopeFilter::Property { key, value } => {
@@ -138,12 +140,12 @@ fn passes_all_filters(
                     )
                     .unwrap_or(false);
                 if !found {
-                    return Ok(false);
+                    return false;
                 }
             }
         }
     }
-    Ok(true)
+    true
 }
 
 #[cfg(test)]

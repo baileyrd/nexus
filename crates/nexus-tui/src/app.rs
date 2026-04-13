@@ -339,7 +339,8 @@ impl Default for BacklinksState {
 /// A single task entry for display in the task list view.
 #[derive(Debug, Clone)]
 pub struct TaskEntry {
-    /// Database primary key.
+    /// Database primary key (retained for future task-toggle operations).
+    #[allow(dead_code)]
     pub id: u64,
     /// Whether the task is completed.
     pub completed: bool,

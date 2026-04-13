@@ -30,6 +30,7 @@ pub struct GitCorePlugin {
 
 impl GitCorePlugin {
     /// Create a new (unstarted) plugin for the forge at `forge_root`.
+    #[must_use] 
     pub fn new(forge_root: PathBuf) -> Self {
         Self {
             forge_root,

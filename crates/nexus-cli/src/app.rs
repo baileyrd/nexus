@@ -49,6 +49,7 @@ impl App {
     }
 
     /// Return the kernel event bus handle.
+    #[allow(dead_code)]
     pub fn event_bus(&self) -> Arc<EventBus> {
         Arc::clone(&self.event_bus)
     }

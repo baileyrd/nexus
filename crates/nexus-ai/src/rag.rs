@@ -3,6 +3,8 @@
 //! Combines the vector store, embedding provider, and chat provider to
 //! answer questions grounded in the user's personal knowledge base.
 
+use std::fmt::Write as _;
+
 use rusqlite::Connection;
 
 use crate::chunker::chunks_from_blocks;
@@ -30,6 +32,11 @@ pub struct RagResponse {
 /// Embeds the `question`, searches the vector store for relevant chunks,
 /// builds a grounded system prompt with the retrieved context, and sends
 /// the conversation to the AI provider.
+///
+/// # Errors
+///
+/// Returns [`AiError`] if embedding the question fails, the vector store
+/// query fails, or the AI provider chat call fails.
 pub async fn query(
     conn: &Connection,
     ai: &dyn AiProvider,
@@ -64,6 +71,11 @@ pub async fn query(
 ///
 /// Chunks the blocks, embeds all chunks in a single batch, and upserts
 /// them into the `embeddings` table.  Returns the number of chunks stored.
+///
+/// # Errors
+///
+/// Returns [`AiError`] if embedding generation fails or the vector store
+/// upsert fails.
 pub async fn index_file(
     conn: &Connection,
     embedder: &dyn EmbeddingProvider,
@@ -112,12 +124,13 @@ fn build_rag_prompt(sources: &[ChunkMatch]) -> String {
     );
 
     for (i, source) in sources.iter().enumerate() {
-        prompt.push_str(&format!(
+        let _ = write!(
+            prompt,
             "Source {}: [[{}]]\n{}\n\n",
             i + 1,
             source.file_path,
             source.chunk_text,
-        ));
+        );
     }
 
     prompt

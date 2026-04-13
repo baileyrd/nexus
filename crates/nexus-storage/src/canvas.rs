@@ -1,4 +1,4 @@
-//! Canvas file format parser, serializer, and SQLite persistence.
+//! Canvas file format parser, serializer, and `SQLite` persistence.
 //!
 //! Implements the `.canvas` JSON format (Obsidian-compatible) with node
 //! types (file, text, link, group, database, terminal) and typed edges.
@@ -84,6 +84,7 @@ pub enum CanvasNodeType {
 
 impl CanvasNodeType {
     /// Returns the string representation.
+    #[must_use] 
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::File => "file",
@@ -136,6 +137,7 @@ pub enum CanvasEdgeType {
 
 impl CanvasEdgeType {
     /// Returns the string representation.
+    #[must_use] 
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Solid => "solid",
@@ -145,6 +147,7 @@ impl CanvasEdgeType {
     }
 
     /// Parse from string.
+    #[must_use] 
     pub fn from_str_lossy(s: &str) -> Self {
         match s {
             "dashed" => Self::Dashed,
@@ -232,11 +235,11 @@ pub fn serialize_canvas(canvas: &CanvasFile) -> Result<String, StorageError> {
 
 // ── DB Operations ────────────────────────────────────────────────────────────
 
-/// Persist canvas nodes and edges to SQLite.
+/// Persist canvas nodes and edges to `SQLite`.
 ///
 /// # Errors
 ///
-/// Returns [`StorageError::Database`] on any SQLite failure.
+/// Returns [`StorageError::Database`] on any `SQLite` failure.
 pub fn insert_canvas(
     conn: &Connection,
     file_id: i64,
@@ -286,7 +289,7 @@ pub fn insert_canvas(
 ///
 /// # Errors
 ///
-/// Returns [`StorageError::Database`] on any SQLite failure.
+/// Returns [`StorageError::Database`] on any `SQLite` failure.
 pub fn query_canvas_nodes(
     conn: &Connection,
     file_id: i64,
@@ -322,7 +325,7 @@ pub fn query_canvas_nodes(
 ///
 /// # Errors
 ///
-/// Returns [`StorageError::Database`] on any SQLite failure.
+/// Returns [`StorageError::Database`] on any `SQLite` failure.
 pub fn query_canvas_edges(
     conn: &Connection,
     file_id: i64,
@@ -354,7 +357,7 @@ pub fn query_canvas_edges(
 ///
 /// # Errors
 ///
-/// Returns [`StorageError::Database`] on any SQLite failure.
+/// Returns [`StorageError::Database`] on any `SQLite` failure.
 pub fn delete_canvas(conn: &Connection, file_id: i64) -> Result<(), StorageError> {
     conn.execute(
         "DELETE FROM canvas_nodes WHERE file_id = ?1;",
@@ -383,6 +386,7 @@ fn node_content_json(node: &CanvasNode) -> Option<String> {
 }
 
 /// Extract file paths referenced by file-type nodes.
+#[must_use] 
 pub fn extract_file_links(canvas: &CanvasFile) -> Vec<String> {
     canvas
         .nodes

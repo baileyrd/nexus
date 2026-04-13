@@ -45,6 +45,7 @@ pub fn show(app: &mut App, path: &str) -> Result<()> {
 }
 
 /// Add a node to an existing canvas file.
+#[allow(clippy::too_many_arguments)]
 pub fn add_node(
     app: &mut App,
     path: &str,

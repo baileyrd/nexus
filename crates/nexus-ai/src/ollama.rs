@@ -34,6 +34,7 @@ impl OllamaProvider {
     /// If `base_url` is `None`, defaults to `http://localhost:11434`.
     /// If `model` is `None`, defaults to `llama3.2` for chat and
     /// `nomic-embed-text` for embeddings.
+    #[must_use] 
     pub fn new(base_url: Option<String>, model: Option<String>) -> Self {
         Self {
             client: reqwest::Client::new(),

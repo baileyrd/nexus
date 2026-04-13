@@ -170,7 +170,7 @@ impl StorageEngine {
                 "DELETE FROM fts_blocks WHERE file_path = ?1",
                 rusqlite::params![path],
             )?;
-            canvas::delete_canvas(&conn, existing.id as i64)?;
+            canvas::delete_canvas(&conn, existing.id.cast_signed())?;
             delete_file(&conn, existing.id)?;
         }
 
@@ -191,7 +191,7 @@ impl StorageEngine {
                 tasks: Vec::new(),
             };
             let file_id = insert_file(&conn, path, &file_type, size_bytes, &empty_parsed)?;
-            canvas::insert_canvas(&conn, file_id as i64, &canvas_data)?;
+            canvas::insert_canvas(&conn, file_id.cast_signed(), &canvas_data)?;
 
             // Update knowledge graph: file-type nodes create links.
             {
@@ -215,7 +215,9 @@ impl StorageEngine {
             })
         } else {
             // ── Markdown / MDX path ──────────────────────────────────────
-            let is_mdx = path.ends_with(".mdx");
+            let is_mdx = Path::new(path)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("mdx"));
             let (parsed, jsx_components) = if is_mdx {
                 let result = mdx::parse_mdx(text)?;
                 (result.parsed_file, result.components)
@@ -291,7 +293,7 @@ impl StorageEngine {
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError::Database`] on any SQLite failure.
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn canvas_nodes(&self, file_id: i64) -> Result<Vec<CanvasNodeRecord>, StorageError> {
         let conn = self.pool.get().map_err(|e| StorageError::Database(
             rusqlite::Error::InvalidParameterName(e.to_string()),
@@ -303,7 +305,7 @@ impl StorageEngine {
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError::Database`] on any SQLite failure.
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn canvas_edges(&self, file_id: i64) -> Result<Vec<CanvasEdgeRecord>, StorageError> {
         let conn = self.pool.get().map_err(|e| StorageError::Database(
             rusqlite::Error::InvalidParameterName(e.to_string()),
@@ -313,11 +315,11 @@ impl StorageEngine {
 
     // ── Bases operations ──────────────────────────────────────────────────
 
-    /// Index a base in SQLite.
+    /// Index a base in `SQLite`.
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError::Database`] on any SQLite failure.
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
     ///
     /// # Panics
     ///
@@ -331,7 +333,7 @@ impl StorageEngine {
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError::Database`] on any SQLite failure.
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
     pub fn list_bases(&self) -> Result<Vec<bases::BaseSummary>, StorageError> {
         let conn = self.pool.get().map_err(|e| StorageError::Database(
             rusqlite::Error::InvalidParameterName(e.to_string()),
@@ -571,6 +573,10 @@ impl StorageEngine {
     /// # Errors
     ///
     /// Returns [`StorageError`] if the graph lock is poisoned.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal graph `RwLock` is poisoned.
     pub fn backlinks(&self, path: &str) -> Result<Vec<graph::BacklinkResult>, StorageError> {
         let g = self.graph.read().expect("graph lock poisoned");
         Ok(g.backlinks(path))
@@ -581,6 +587,10 @@ impl StorageEngine {
     /// # Errors
     ///
     /// Returns [`StorageError`] if the graph lock is poisoned.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal graph `RwLock` is poisoned.
     pub fn outgoing_links(&self, path: &str) -> Result<Vec<graph::OutgoingLink>, StorageError> {
         let g = self.graph.read().expect("graph lock poisoned");
         Ok(g.outgoing_links(path))
@@ -591,6 +601,10 @@ impl StorageEngine {
     /// # Errors
     ///
     /// Returns [`StorageError`] if the graph lock is poisoned.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal graph `RwLock` is poisoned.
     pub fn unresolved_links(&self) -> Result<Vec<graph::UnresolvedLink>, StorageError> {
         let g = self.graph.read().expect("graph lock poisoned");
         Ok(g.unresolved_links())
@@ -601,6 +615,10 @@ impl StorageEngine {
     /// # Errors
     ///
     /// Returns [`StorageError`] if the graph lock is poisoned.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal graph `RwLock` is poisoned.
     pub fn graph_stats(&self) -> Result<graph::GraphStats, StorageError> {
         let g = self.graph.read().expect("graph lock poisoned");
         Ok(g.stats())
@@ -611,6 +629,10 @@ impl StorageEngine {
     /// # Errors
     ///
     /// Returns [`StorageError`] if the graph lock is poisoned.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal graph `RwLock` is poisoned.
     pub fn graph_neighbors(&self, path: &str, depth: usize) -> Result<Vec<String>, StorageError> {
         let g = self.graph.read().expect("graph lock poisoned");
         Ok(g.neighbors(path, depth))
@@ -656,7 +678,7 @@ impl StorageEngine {
     ///
     /// Supports scope operators: `tag:NAME`, `path:PREFIX`, `prop:KEY:VALUE`.
     /// Scopes are extracted from the query, Tantivy searches the remaining
-    /// text, and results are post-filtered via SQLite.
+    /// text, and results are post-filtered via `SQLite`.
     ///
     /// # Errors
     ///
@@ -687,7 +709,7 @@ impl StorageEngine {
                     score: 0.0,
                 })
             })?;
-            rows.filter_map(|r| r.ok()).collect()
+            rows.filter_map(std::result::Result::ok).collect()
         } else {
             self.search_index.search(&text, limit)?
         };
@@ -777,33 +799,27 @@ impl StorageEngine {
         };
 
         let mut count = 0;
-        loop {
-            match rx.try_recv() {
-                Ok(event) => {
-                    match &event {
-                        StorageEvent::FileCreated { path, .. }
-                        | StorageEvent::FileModified { path, .. } => {
-                            let abs = self.forge.root().join(path);
-                            if let Ok(bytes) = std::fs::read(&abs) {
-                                let _ = self.write_file(path, &bytes);
-                            }
-                        }
-                        StorageEvent::FileDeleted { path } => {
-                            let _ = self.delete_file(path);
-                        }
-                        StorageEvent::FileRenamed { from, to, .. } => {
-                            let _ = self.delete_file(from);
-                            let abs = self.forge.root().join(to);
-                            if let Ok(bytes) = std::fs::read(&abs) {
-                                let _ = self.write_file(to, &bytes);
-                            }
-                        }
+        while let Ok(event) = rx.try_recv() {
+            match &event {
+                StorageEvent::FileCreated { path, .. }
+                | StorageEvent::FileModified { path, .. } => {
+                    let abs = self.forge.root().join(path);
+                    if let Ok(bytes) = std::fs::read(&abs) {
+                        let _ = self.write_file(path, &bytes);
                     }
-                    count += 1;
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                StorageEvent::FileDeleted { path } => {
+                    let _ = self.delete_file(path);
+                }
+                StorageEvent::FileRenamed { from, to, .. } => {
+                    let _ = self.delete_file(from);
+                    let abs = self.forge.root().join(to);
+                    if let Ok(bytes) = std::fs::read(&abs) {
+                        let _ = self.write_file(to, &bytes);
+                    }
+                }
             }
+            count += 1;
         }
 
         Ok(count)
@@ -898,9 +914,15 @@ fn open_internal(
 fn infer_file_type(path: &str) -> String {
     if path.starts_with("attachments/") {
         "attachment".to_string()
-    } else if path.ends_with(".canvas") {
+    } else if Path::new(path)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("canvas"))
+    {
         "canvas".to_string()
-    } else if path.ends_with(".mdx") {
+    } else if Path::new(path)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("mdx"))
+    {
         "mdx".to_string()
     } else {
         "markdown".to_string()

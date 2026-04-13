@@ -35,6 +35,7 @@ pub struct AutoCommitResult {
 
 impl AutoCommitter {
     /// Create a new auto-committer for the given repository root.
+    #[must_use] 
     pub fn new(repo_root: &Path, debounce_secs: u64) -> Self {
         Self {
             repo_root: repo_root.to_path_buf(),
@@ -123,9 +124,7 @@ fn generate_message(statuses: &[crate::types::StatusEntry]) -> String {
         .take(5)
         .map(|s| {
             s.path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| s.path.to_string_lossy().to_string())
+                .file_name().map_or_else(|| s.path.to_string_lossy().to_string(), |n| n.to_string_lossy().to_string())
         })
         .collect();
 
