@@ -28,6 +28,8 @@ pub struct AppConfig {
     pub search: SearchSettings,
     /// Plugin configuration.
     pub plugins: PluginSettings,
+    /// Git integration settings.
+    pub git: GitSettings,
 }
 
 impl Default for AppConfig {
@@ -38,6 +40,7 @@ impl Default for AppConfig {
             preview: PreviewSettings::default(),
             search: SearchSettings::default(),
             plugins: PluginSettings::default(),
+            git: GitSettings::default(),
         }
     }
 }
@@ -167,6 +170,22 @@ impl Default for PluginSettings {
         Self {
             enabled: Vec::new(),
         }
+    }
+}
+
+// ── GitSettings ──────────────────────────────────────────────────────────────
+
+/// Git integration settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GitSettings {
+    /// Whether git integration is enabled.
+    pub enabled: bool,
+}
+
+impl Default for GitSettings {
+    fn default() -> Self {
+        Self { enabled: true }
     }
 }
 

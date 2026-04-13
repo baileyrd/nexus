@@ -14,6 +14,7 @@ path = "src/main.rs"
 nexus-storage = { path = "../nexus-storage" }
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-types = { path = "../nexus-types" }
+nexus-git = { path = "../nexus-git" }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 anyhow = { workspace = true }

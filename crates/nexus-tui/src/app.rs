@@ -416,6 +416,8 @@ pub struct StatusInfo {
     pub link_count: usize,
     /// Number of pending (incomplete) tasks.
     pub pending_task_count: usize,
+    /// Git branch name and dirty flag, if in a git repo.
+    pub git_branch: Option<(String, bool)>,
 }
 
 impl StatusInfo {
@@ -425,6 +427,7 @@ impl StatusInfo {
             file_count: 0,
             link_count: 0,
             pending_task_count: 0,
+            git_branch: None,
         }
     }
 }
@@ -692,10 +695,19 @@ impl TuiApp {
             .map(|tasks| tasks.len())
             .unwrap_or(0);
 
+        let git_branch = nexus_git::GitEngine::open(&self.forge_root)
+            .ok()
+            .and_then(|engine| engine.state().ok())
+            .map(|state| {
+                let branch = state.branch.unwrap_or_else(|| "detached".to_string());
+                (branch, state.is_dirty)
+            });
+
         self.status_info = StatusInfo {
             file_count,
             link_count,
             pending_task_count,
+            git_branch,
         };
     }
 

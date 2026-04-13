@@ -1,0 +1,16 @@
+[package]
+name = "nexus-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nexus git integration: read-only status, diff, blame, log via libgit2"
+
+[dependencies]
+git2 = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

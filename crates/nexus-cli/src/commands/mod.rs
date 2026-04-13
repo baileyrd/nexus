@@ -4,6 +4,7 @@ pub mod canvas;
 pub mod config;
 pub mod content;
 pub mod forge;
+pub mod git;
 pub mod graph;
 pub mod logs;
 pub mod mcp;

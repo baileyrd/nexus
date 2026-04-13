@@ -31,6 +31,18 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
 
     let sep = Span::styled(" │ ", Style::default().fg(Color::DarkGray));
 
+    // ── Git branch ───────────────────────────────────────────────────────────
+    let git_span = match &app.status_info.git_branch {
+        Some((branch, is_dirty)) => {
+            let dirty = if *is_dirty { "*" } else { "" };
+            Span::styled(
+                format!("\u{e0a0} {branch}{dirty}"),
+                Style::default().fg(Color::Magenta),
+            )
+        }
+        None => Span::raw(""),
+    };
+
     // ── File path ─────────────────────────────────────────────────────────────
     let file_span = match app.viewer.file_path.as_deref() {
         Some(path) => Span::styled(path.to_owned(), Style::default().fg(Color::White)),
@@ -64,16 +76,13 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
         Style::default().fg(Color::DarkGray),
     );
 
-    let line = Line::from(vec![
-        mode_span,
-        sep.clone(),
-        file_span,
-        scroll_span,
-        sep.clone(),
-        stats_span,
-        sep,
-        help_span,
-    ]);
+    let mut spans = vec![mode_span, sep.clone()];
+    if !git_span.content.is_empty() {
+        spans.push(git_span);
+        spans.push(sep.clone());
+    }
+    spans.extend([file_span, scroll_span, sep.clone(), stats_span, sep, help_span]);
+    let line = Line::from(spans);
 
     let bar = Paragraph::new(line)
         .style(Style::default().bg(Color::Rgb(30, 30, 40)));

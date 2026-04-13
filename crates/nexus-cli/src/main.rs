@@ -75,8 +75,8 @@ enum Commands {
     Mcp,
     /// Sync operations (coming soon)
     Sync(StubArgs),
-    /// Git operations (coming soon)
-    Git(StubArgs),
+    /// Git operations (read-only)
+    Git(GitArgs),
     /// Run a script or task (coming soon)
     Run(StubArgs),
 }
@@ -480,6 +480,43 @@ enum BasesCommand {
 }
 
 // ---------------------------------------------------------------------------
+// Git
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct GitArgs {
+    #[command(subcommand)]
+    command: GitCommand,
+}
+
+#[derive(Subcommand)]
+enum GitCommand {
+    /// Show repository info (branch, HEAD, dirty state)
+    Info,
+    /// Show file statuses (modified, staged, untracked)
+    Status,
+    /// Show diff for a file or all staged changes
+    Diff {
+        /// File path to diff (omit for staged changes)
+        path: Option<String>,
+    },
+    /// Show blame annotations for a file
+    Blame {
+        /// File path to blame
+        path: String,
+    },
+    /// Show commit log
+    Log {
+        /// Maximum number of entries
+        #[arg(short, long, default_value_t = 20)]
+        limit: usize,
+        /// Filter to a specific file
+        #[arg(short, long)]
+        file: Option<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Stub — used for not-yet-implemented command groups
 // ---------------------------------------------------------------------------
 
@@ -644,7 +681,13 @@ fn main() {
         Commands::Term(_) => stubs::not_implemented("term"),
         Commands::Mcp => commands::mcp::serve(&app),
         Commands::Sync(_) => stubs::not_implemented("sync"),
-        Commands::Git(_) => stubs::not_implemented("git"),
+        Commands::Git(args) => match args.command {
+            GitCommand::Info => commands::git::info(&app),
+            GitCommand::Status => commands::git::status(&app),
+            GitCommand::Diff { path } => commands::git::diff(&app, path.as_deref()),
+            GitCommand::Blame { path } => commands::git::blame(&app, &path),
+            GitCommand::Log { limit, file } => commands::git::log(&app, limit, file.as_deref()),
+        },
         Commands::Run(_) => stubs::not_implemented("run"),
     };
 
