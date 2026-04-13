@@ -203,6 +203,24 @@ pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
                     callout_type: None,
                 });
             }
+            NodeValue::BlockQuote => {
+                let raw_text = collect_text(child);
+                let (block_type, callout_type, content_after_callout) =
+                    detect_callout(&raw_text);
+                let (content, block_ref_id) = extract_block_ref(&content_after_callout);
+                extract_wikilinks_and_embeds(&content, &mut links);
+                extract_inline_tags(&content, &mut tags);
+                blocks.push(ParsedBlock {
+                    block_type,
+                    level: None,
+                    content,
+                    raw_markdown: None,
+                    start_line,
+                    end_line,
+                    block_ref_id,
+                    callout_type,
+                });
+            }
             _ => {}
         }
     }
@@ -483,6 +501,33 @@ fn is_tag_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '/' || c == '-'
 }
 
+/// Detect whether a blockquote is a callout.
+///
+/// If `text` starts with `[!TYPE]` where TYPE is ASCII alphabetic, returns
+/// `("callout", Some(lowercase_type), title_and_body)`. Otherwise returns
+/// `("blockquote", None, original_text)`.
+fn detect_callout(text: &str) -> (String, Option<String>, String) {
+    let trimmed = text.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("[!") {
+        if let Some(close) = rest.find(']') {
+            let callout_type_raw = &rest[..close];
+            if !callout_type_raw.is_empty()
+                && callout_type_raw.chars().all(|c| c.is_ascii_alphabetic())
+            {
+                let after_bracket = &rest[close + 1..];
+                // Title is text on the same line after `]`, body is remaining lines.
+                let content = after_bracket.trim().to_string();
+                return (
+                    "callout".to_string(),
+                    Some(callout_type_raw.to_ascii_lowercase()),
+                    content,
+                );
+            }
+        }
+    }
+    ("blockquote".to_string(), None, text.to_string())
+}
+
 /// Detect a trailing block reference anchor (` ^some-id`) at the end of content.
 ///
 /// Returns `(cleaned_content, Some(id))` when a valid anchor is found, or
@@ -761,5 +806,36 @@ mod tests {
         assert_eq!(wl.target_path, Some("note".to_string()));
         assert_eq!(wl.fragment, Some("Heading".to_string()));
         assert_eq!(wl.link_text, "display text");
+    }
+
+    // ── callout detection ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_callout_with_title() {
+        let md = "> [!warning] Be careful\n> This is dangerous\n";
+        let pf = parse_markdown(md).unwrap();
+        let callout = pf.blocks.iter().find(|b| b.block_type == "callout");
+        assert!(callout.is_some(), "no callout block found");
+        let c = callout.unwrap();
+        assert_eq!(c.callout_type, Some("warning".to_string()));
+        assert!(c.content.contains("Be careful"));
+    }
+
+    #[test]
+    fn parse_callout_no_title() {
+        let md = "> [!tip]\n> Just a tip\n";
+        let pf = parse_markdown(md).unwrap();
+        let callout = pf.blocks.iter().find(|b| b.block_type == "callout");
+        assert!(callout.is_some(), "no callout block found");
+        let c = callout.unwrap();
+        assert_eq!(c.callout_type, Some("tip".to_string()));
+    }
+
+    #[test]
+    fn parse_regular_blockquote_not_callout() {
+        let md = "> Just a regular quote\n";
+        let pf = parse_markdown(md).unwrap();
+        let blocks: Vec<_> = pf.blocks.iter().filter(|b| b.block_type == "callout").collect();
+        assert!(blocks.is_empty(), "regular blockquote should not be a callout");
     }
 }
