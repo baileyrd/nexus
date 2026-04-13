@@ -7,6 +7,7 @@ members = [
     "crates/nexus-storage",
     "crates/nexus-plugins",
     "crates/nexus-ai",
+    "crates/nexus-mcp",
     "crates/nexus-cli",
     "crates/nexus-tui",
 ]
@@ -100,3 +101,7 @@ petgraph = "0.7"
 
 # HTTP client (AI provider calls)
 reqwest = { version = "0.12", features = ["json"] }
+
+# MCP server
+rmcp = { version = "1.3", features = ["server", "transport-io"] }
+schemars = "1"
