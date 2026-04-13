@@ -524,6 +524,8 @@ mod tests {
                     raw_markdown: None,
                     start_line: 1,
                     end_line: 1,
+                    block_ref_id: None,
+                    callout_type: None,
                 },
                 ParsedBlock {
                     block_type: "paragraph".to_string(),
@@ -532,12 +534,15 @@ mod tests {
                     raw_markdown: None,
                     start_line: 3,
                     end_line: 3,
+                    block_ref_id: None,
+                    callout_type: None,
                 },
             ],
             links: vec![ParsedLink {
                 link_text: "other note".to_string(),
                 target_path: Some("other-note".to_string()),
                 link_type: "wikilink".to_string(),
+                fragment: None,
             }],
             tags: vec![ParsedTag {
                 name: "rust".to_string(),
@@ -705,6 +710,7 @@ mod tests {
                 link_text: "a".to_string(),
                 target_path: Some("notes/a.md".to_string()),
                 link_type: "wikilink".to_string(),
+                fragment: None,
             }],
             tags: vec![],
         };

@@ -39,7 +39,8 @@ pub struct Property {
 /// A single content block extracted from the AST.
 #[derive(Debug, Clone)]
 pub struct ParsedBlock {
-    /// Kind of block: "heading", "paragraph", "codeblock", "list", "table".
+    /// Kind of block: "heading", "paragraph", "codeblock", "list", "table",
+    /// "callout", or "blockquote".
     pub block_type: String,
     /// Heading level 1-6; `None` for non-headings.
     pub level: Option<i32>,
@@ -51,6 +52,10 @@ pub struct ParsedBlock {
     pub start_line: u32,
     /// 1-based end line in the source.
     pub end_line: u32,
+    /// Block reference anchor ID (e.g. `"abc123"` from trailing ` ^abc123`).
+    pub block_ref_id: Option<String>,
+    /// Callout type for callout blocks (e.g. `"warning"`, `"tip"`).
+    pub callout_type: Option<String>,
 }
 
 /// A link found in the document.
@@ -62,6 +67,8 @@ pub struct ParsedLink {
     pub target_path: Option<String>,
     /// Kind of link: "wikilink", "markdown", or "embed".
     pub link_type: String,
+    /// Heading or block-ref fragment (e.g. `"Heading"` from `[[note#Heading]]`).
+    pub fragment: Option<String>,
 }
 
 /// A tag found in the document.
@@ -122,7 +129,8 @@ pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
 
         match &ast.value {
             NodeValue::Heading(h) => {
-                let text = collect_text(child);
+                let raw_text = collect_text(child);
+                let (text, block_ref_id) = extract_block_ref(&raw_text);
                 extract_wikilinks_and_embeds(&text, &mut links);
                 extract_inline_tags(&text, &mut tags);
                 blocks.push(ParsedBlock {
@@ -132,10 +140,13 @@ pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
                     raw_markdown: None,
                     start_line,
                     end_line,
+                    block_ref_id,
+                    callout_type: None,
                 });
             }
             NodeValue::Paragraph => {
-                let text = collect_text(child);
+                let raw_text = collect_text(child);
+                let (text, block_ref_id) = extract_block_ref(&raw_text);
                 extract_wikilinks_and_embeds(&text, &mut links);
                 extract_markdown_links(child, &mut links);
                 extract_inline_tags(&text, &mut tags);
@@ -146,6 +157,8 @@ pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
                     raw_markdown: None,
                     start_line,
                     end_line,
+                    block_ref_id,
+                    callout_type: None,
                 });
             }
             NodeValue::CodeBlock(cb) => {
@@ -156,10 +169,13 @@ pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
                     raw_markdown: None,
                     start_line,
                     end_line,
+                    block_ref_id: None,
+                    callout_type: None,
                 });
             }
             NodeValue::List(_) => {
-                let text = collect_text(child);
+                let raw_text = collect_text(child);
+                let (text, block_ref_id) = extract_block_ref(&raw_text);
                 extract_wikilinks_and_embeds(&text, &mut links);
                 extract_markdown_links(child, &mut links);
                 extract_inline_tags(&text, &mut tags);
@@ -170,6 +186,8 @@ pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
                     raw_markdown: None,
                     start_line,
                     end_line,
+                    block_ref_id,
+                    callout_type: None,
                 });
             }
             NodeValue::Table(_) => {
@@ -181,6 +199,8 @@ pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
                     raw_markdown: None,
                     start_line,
                     end_line,
+                    block_ref_id: None,
+                    callout_type: None,
                 });
             }
             _ => {}
@@ -343,6 +363,8 @@ fn yaml_value_to_json(value: &serde_yaml::Value) -> serde_json::Value {
 }
 
 /// Scan `text` for `[[wikilinks]]` and `![[embeds]]`, appending to `links`.
+///
+/// Handles fragments: `[[note#Heading]]` and `[[note#Heading|display]]`.
 fn extract_wikilinks_and_embeds(text: &str, links: &mut Vec<ParsedLink>) {
     // Use a manual scan so we can check for preceding '!'.
     let bytes = text.as_bytes();
@@ -357,25 +379,46 @@ fn extract_wikilinks_and_embeds(text: &str, links: &mut Vec<ParsedLink>) {
             if let Some(rel) = text[start..].find("]]") {
                 let inner = &text[start..start + rel];
                 if is_embed {
+                    let (target, fragment) = split_fragment(inner);
+                    let target_path = if target.is_empty() {
+                        inner.to_string()
+                    } else {
+                        target
+                    };
                     links.push(ParsedLink {
                         link_text: inner.to_string(),
-                        target_path: Some(inner.to_string()),
+                        target_path: Some(target_path),
                         link_type: "embed".to_string(),
+                        fragment,
                     });
                 } else if let Some(pipe) = inner.find('|') {
-                    let target = inner[..pipe].to_string();
+                    let target_with_frag = &inner[..pipe];
                     let display = inner[pipe + 1..].to_string();
+                    let (target, fragment) = split_fragment(target_with_frag);
                     links.push(ParsedLink {
                         link_text: display,
                         target_path: Some(target),
                         link_type: "wikilink".to_string(),
+                        fragment,
                     });
                 } else {
-                    links.push(ParsedLink {
-                        link_text: inner.to_string(),
-                        target_path: None,
-                        link_type: "wikilink".to_string(),
-                    });
+                    let (target, fragment) = split_fragment(inner);
+                    if fragment.is_some() {
+                        // Has a fragment: target is the part before `#`.
+                        links.push(ParsedLink {
+                            link_text: inner.to_string(),
+                            target_path: Some(target),
+                            link_type: "wikilink".to_string(),
+                            fragment,
+                        });
+                    } else {
+                        links.push(ParsedLink {
+                            link_text: inner.to_string(),
+                            target_path: None,
+                            link_type: "wikilink".to_string(),
+                            fragment: None,
+                        });
+                    }
                 }
                 i = start + rel + 2; // move past ']]'
                 continue;
@@ -395,6 +438,7 @@ fn extract_markdown_links<'a>(node: &'a AstNode<'a>, links: &mut Vec<ParsedLink>
                 link_text: text,
                 target_path: if url.is_empty() { None } else { Some(url) },
                 link_type: "markdown".to_string(),
+                fragment: None,
             });
         }
     }
@@ -437,6 +481,40 @@ fn extract_inline_tags(text: &str, tags: &mut Vec<ParsedTag>) {
 /// Returns `true` if `c` is valid inside a tag name.
 fn is_tag_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '/' || c == '-'
+}
+
+/// Detect a trailing block reference anchor (` ^some-id`) at the end of content.
+///
+/// Returns `(cleaned_content, Some(id))` when a valid anchor is found, or
+/// `(original_content, None)` otherwise. The id must consist solely of
+/// `[a-zA-Z0-9_-]` characters.
+fn extract_block_ref(content: &str) -> (String, Option<String>) {
+    if let Some(pos) = content.rfind(" ^") {
+        let candidate = &content[pos + 2..];
+        if !candidate.is_empty()
+            && candidate
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            let cleaned = content[..pos].to_string();
+            return (cleaned, Some(candidate.to_string()));
+        }
+    }
+    (content.to_string(), None)
+}
+
+/// Split a link target on the first `#` to separate the path from a fragment.
+///
+/// Returns `(path, Some(fragment))` when `#` is present, or
+/// `(original, None)` otherwise.
+fn split_fragment(target: &str) -> (String, Option<String>) {
+    if let Some(hash_pos) = target.find('#') {
+        let path = target[..hash_pos].to_string();
+        let fragment = target[hash_pos + 1..].to_string();
+        (path, Some(fragment))
+    } else {
+        (target.to_string(), None)
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -625,5 +703,63 @@ mod tests {
         let pf = parse_markdown("- item one\n- item two\n").unwrap();
         let lst = pf.blocks.iter().find(|b| b.block_type == "list");
         assert!(lst.is_some(), "no list block found");
+    }
+
+    // ── block references ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_block_ref_anchor() {
+        let pf = parse_markdown("Hello world ^abc123\n").unwrap();
+        assert_eq!(pf.blocks[0].block_ref_id, Some("abc123".to_string()));
+        assert_eq!(pf.blocks[0].content, "Hello world");
+    }
+
+    #[test]
+    fn parse_block_ref_mid_paragraph_ignored() {
+        let pf = parse_markdown("Hello ^mid world\n").unwrap();
+        assert_eq!(pf.blocks[0].block_ref_id, None);
+        assert!(pf.blocks[0].content.contains("^mid"));
+    }
+
+    #[test]
+    fn parse_heading_with_block_ref() {
+        let pf = parse_markdown("## Section Title ^sec1\n").unwrap();
+        let b = &pf.blocks[0];
+        assert_eq!(b.block_ref_id, Some("sec1".to_string()));
+        assert_eq!(b.content, "Section Title");
+    }
+
+    // ── link fragments ───────────────────────────────────────────────────
+
+    #[test]
+    fn parse_wikilink_with_heading_fragment() {
+        let pf = parse_markdown("See [[note#Heading]]\n").unwrap();
+        let wl = pf.links.iter().find(|l| l.link_type == "wikilink").unwrap();
+        assert_eq!(wl.target_path, Some("note".to_string()));
+        assert_eq!(wl.fragment, Some("Heading".to_string()));
+    }
+
+    #[test]
+    fn parse_wikilink_with_block_ref_fragment() {
+        let pf = parse_markdown("See [[note#^ref1]]\n").unwrap();
+        let wl = pf.links.iter().find(|l| l.link_type == "wikilink").unwrap();
+        assert_eq!(wl.target_path, Some("note".to_string()));
+        assert_eq!(wl.fragment, Some("^ref1".to_string()));
+    }
+
+    #[test]
+    fn parse_wikilink_no_fragment() {
+        let pf = parse_markdown("See [[note]]\n").unwrap();
+        let wl = pf.links.iter().find(|l| l.link_type == "wikilink").unwrap();
+        assert_eq!(wl.fragment, None);
+    }
+
+    #[test]
+    fn parse_wikilink_display_text_with_fragment() {
+        let pf = parse_markdown("See [[note#Heading|display text]]\n").unwrap();
+        let wl = pf.links.iter().find(|l| l.link_type == "wikilink").unwrap();
+        assert_eq!(wl.target_path, Some("note".to_string()));
+        assert_eq!(wl.fragment, Some("Heading".to_string()));
+        assert_eq!(wl.link_text, "display text");
     }
 }
