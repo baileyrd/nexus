@@ -1,0 +1,1 @@
+/mnt/c/Users/baile/dev/nexus/crates/nexus-plugins/tests/fixtures/minimal-plugin/target/wasm32-unknown-unknown/release/minimal_plugin.wasm: /mnt/c/Users/baile/dev/nexus/crates/nexus-plugins/tests/fixtures/minimal-plugin/src/lib.rs
