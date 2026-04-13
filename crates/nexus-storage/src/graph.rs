@@ -3,7 +3,6 @@
 //! Represents notes as nodes and links as directed edges.
 //! Rebuilt from SQLite on startup, updated incrementally on file changes.
 
-#[allow(unused_imports)]
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use petgraph::stable_graph::{NodeIndex, StableGraph};
@@ -152,6 +151,149 @@ impl KnowledgeGraph {
             unresolved_count: self.phantom_nodes.len(),
         }
     }
+
+    /// Return all files that link TO `path`.
+    pub fn backlinks(&self, path: &str) -> Vec<BacklinkResult> {
+        let Some(&idx) = self.path_to_node.get(path) else {
+            return Vec::new();
+        };
+        self.graph
+            .edges_directed(idx, Direction::Incoming)
+            .map(|edge| {
+                let source_idx = edge.source();
+                BacklinkResult {
+                    source_path: self.graph[source_idx].path.clone(),
+                    link_text: edge.weight().link_text.clone(),
+                    link_type: edge.weight().link_type.clone(),
+                }
+            })
+            .collect()
+    }
+
+    /// Return all links FROM `path` to other files.
+    pub fn outgoing_links(&self, path: &str) -> Vec<OutgoingLink> {
+        let Some(&idx) = self.path_to_node.get(path) else {
+            return Vec::new();
+        };
+        self.graph
+            .edges_directed(idx, Direction::Outgoing)
+            .map(|edge| {
+                let target_idx = edge.target();
+                OutgoingLink {
+                    target_path: self.graph[target_idx].path.clone(),
+                    link_text: edge.weight().link_text.clone(),
+                    link_type: edge.weight().link_type.clone(),
+                    is_resolved: !self.phantom_nodes.contains(&target_idx),
+                    fragment: edge.weight().fragment.clone(),
+                }
+            })
+            .collect()
+    }
+
+    /// Return all phantom nodes (unresolved link targets) with their referrers.
+    pub fn unresolved_links(&self) -> Vec<UnresolvedLink> {
+        self.phantom_nodes
+            .iter()
+            .map(|&idx| {
+                let target_path = self.graph[idx].path.clone();
+                let referenced_by: Vec<String> = self
+                    .graph
+                    .edges_directed(idx, Direction::Incoming)
+                    .map(|e| self.graph[e.source()].path.clone())
+                    .collect();
+                UnresolvedLink {
+                    target_path,
+                    referenced_by,
+                }
+            })
+            .collect()
+    }
+
+    /// BFS traversal from `path` up to `depth` hops in both directions.
+    /// Returns unique paths excluding the start node.
+    pub fn neighbors(&self, path: &str, depth: usize) -> Vec<String> {
+        let Some(&start) = self.path_to_node.get(path) else {
+            return Vec::new();
+        };
+
+        let mut visited = HashSet::new();
+        visited.insert(start);
+        let mut queue = VecDeque::new();
+        queue.push_back((start, 0usize));
+        let mut result = Vec::new();
+
+        while let Some((node, d)) = queue.pop_front() {
+            if d >= depth {
+                continue;
+            }
+            for direction in [Direction::Outgoing, Direction::Incoming] {
+                for neighbor in self.graph.neighbors_directed(node, direction) {
+                    if visited.insert(neighbor) {
+                        result.push(self.graph[neighbor].path.clone());
+                        queue.push_back((neighbor, d + 1));
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Build the knowledge graph from the SQLite index.
+    ///
+    /// Queries all non-deleted files as nodes and all links as edges.
+    /// Unresolved link targets become phantom nodes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any SQLite failure.
+    pub fn rebuild_from_db(conn: &rusqlite::Connection) -> Result<Self, crate::StorageError> {
+        let mut kg = Self::new();
+
+        // 1. Add all files as nodes
+        let mut stmt = conn.prepare("SELECT path FROM files WHERE is_deleted = 0;")?;
+        let paths: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        for path in &paths {
+            kg.add_note(path);
+        }
+
+        // 2. Add all links as edges
+        let mut stmt = conn.prepare(
+            "SELECT f.path, l.target_path, l.link_text, l.link_type, l.fragment
+             FROM links l
+             JOIN files f ON f.id = l.source_file_id
+             WHERE f.is_deleted = 0 AND l.target_path IS NOT NULL;",
+        )?;
+        let links: Vec<(String, String, String, String, Option<String>)> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        for (source, target, link_text, link_type, fragment) in links {
+            kg.add_link(
+                &source,
+                &target,
+                EdgeData {
+                    link_type,
+                    link_text,
+                    fragment,
+                },
+            );
+        }
+
+        Ok(kg)
+    }
 }
 
 #[cfg(test)]
@@ -276,5 +418,226 @@ mod tests {
         kg.remove_links_from("notes/a.md");
         assert_eq!(kg.stats().edge_count, 0);
         assert_eq!(kg.stats().node_count, 3);
+    }
+
+    // ── Task 4: Query method tests ───────────────────────────────────────────
+
+    #[test]
+    fn backlinks_returns_incoming() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_note("notes/a.md");
+        kg.add_note("notes/b.md");
+        kg.add_link(
+            "notes/a.md",
+            "notes/b.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "b".to_string(),
+                fragment: None,
+            },
+        );
+        let bl = kg.backlinks("notes/b.md");
+        assert_eq!(bl.len(), 1);
+        assert_eq!(bl[0].source_path, "notes/a.md");
+        assert_eq!(bl[0].link_text, "b");
+    }
+
+    #[test]
+    fn backlinks_empty_for_no_incoming() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_note("notes/a.md");
+        let bl = kg.backlinks("notes/a.md");
+        assert!(bl.is_empty());
+    }
+
+    #[test]
+    fn outgoing_links_shows_resolved_status() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_note("notes/a.md");
+        kg.add_note("notes/b.md");
+        kg.add_link(
+            "notes/a.md",
+            "notes/b.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "b".to_string(),
+                fragment: None,
+            },
+        );
+        kg.add_link(
+            "notes/a.md",
+            "notes/missing.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "missing".to_string(),
+                fragment: Some("heading".to_string()),
+            },
+        );
+        let out = kg.outgoing_links("notes/a.md");
+        assert_eq!(out.len(), 2);
+        let resolved = out.iter().find(|l| l.target_path == "notes/b.md").unwrap();
+        assert!(resolved.is_resolved);
+        let unresolved = out
+            .iter()
+            .find(|l| l.target_path == "notes/missing.md")
+            .unwrap();
+        assert!(!unresolved.is_resolved);
+        assert_eq!(unresolved.fragment, Some("heading".to_string()));
+    }
+
+    #[test]
+    fn unresolved_links_lists_phantoms() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_note("notes/a.md");
+        kg.add_note("notes/b.md");
+        kg.add_link(
+            "notes/a.md",
+            "notes/missing1.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "m1".to_string(),
+                fragment: None,
+            },
+        );
+        kg.add_link(
+            "notes/b.md",
+            "notes/missing1.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "m1".to_string(),
+                fragment: None,
+            },
+        );
+        kg.add_link(
+            "notes/a.md",
+            "notes/missing2.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "m2".to_string(),
+                fragment: None,
+            },
+        );
+        let unresolved = kg.unresolved_links();
+        assert_eq!(unresolved.len(), 2);
+        let m1 = unresolved
+            .iter()
+            .find(|u| u.target_path == "notes/missing1.md")
+            .unwrap();
+        assert_eq!(m1.referenced_by.len(), 2);
+    }
+
+    #[test]
+    fn neighbors_bfs_depth_1() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_note("notes/a.md");
+        kg.add_note("notes/b.md");
+        kg.add_note("notes/c.md");
+        kg.add_link(
+            "notes/a.md",
+            "notes/b.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "b".to_string(),
+                fragment: None,
+            },
+        );
+        kg.add_link(
+            "notes/b.md",
+            "notes/c.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "c".to_string(),
+                fragment: None,
+            },
+        );
+        let n = kg.neighbors("notes/a.md", 1);
+        assert_eq!(n.len(), 1);
+        assert!(n.contains(&"notes/b.md".to_string()));
+    }
+
+    #[test]
+    fn neighbors_bfs_depth_2() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_note("notes/a.md");
+        kg.add_note("notes/b.md");
+        kg.add_note("notes/c.md");
+        kg.add_link(
+            "notes/a.md",
+            "notes/b.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "b".to_string(),
+                fragment: None,
+            },
+        );
+        kg.add_link(
+            "notes/b.md",
+            "notes/c.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "c".to_string(),
+                fragment: None,
+            },
+        );
+        let n = kg.neighbors("notes/a.md", 2);
+        assert_eq!(n.len(), 2);
+        assert!(n.contains(&"notes/b.md".to_string()));
+        assert!(n.contains(&"notes/c.md".to_string()));
+    }
+
+    // ── Task 5: rebuild_from_db test ─────────────────────────────────────────
+
+    #[test]
+    fn rebuild_from_db() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::schema::configure_pragmas(&conn).unwrap();
+        crate::schema::migrate(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
+             VALUES ('notes/a.md', 'markdown', 'h1', 10, 0, 0);",
+            [],
+        )
+        .unwrap();
+        let a_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO files (path, file_type, content_hash, size_bytes, created_at, modified_at)
+             VALUES ('notes/b.md', 'markdown', 'h2', 10, 0, 0);",
+            [],
+        )
+        .unwrap();
+        let b_id = conn.last_insert_rowid();
+
+        // a links to b (resolved)
+        conn.execute(
+            "INSERT INTO links (source_file_id, target_path, target_file_id, link_text, link_type, is_resolved)
+             VALUES (?1, 'notes/b.md', ?2, 'b', 'wikilink', 1);",
+            rusqlite::params![a_id, b_id],
+        )
+        .unwrap();
+
+        // a links to missing (unresolved)
+        conn.execute(
+            "INSERT INTO links (source_file_id, target_path, link_text, link_type, is_resolved)
+             VALUES (?1, 'notes/missing.md', 'missing', 'wikilink', 0);",
+            rusqlite::params![a_id],
+        )
+        .unwrap();
+
+        let kg = KnowledgeGraph::rebuild_from_db(&conn).unwrap();
+
+        let stats = kg.stats();
+        assert_eq!(stats.node_count, 3); // a, b, missing(phantom)
+        assert_eq!(stats.edge_count, 2);
+        assert_eq!(stats.unresolved_count, 1);
+
+        let bl = kg.backlinks("notes/b.md");
+        assert_eq!(bl.len(), 1);
+        assert_eq!(bl[0].source_path, "notes/a.md");
+
+        let unresolved = kg.unresolved_links();
+        assert_eq!(unresolved.len(), 1);
+        assert_eq!(unresolved[0].target_path, "notes/missing.md");
     }
 }
