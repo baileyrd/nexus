@@ -51,12 +51,13 @@ enum Commands {
     /// View logs
     Logs(LogsArgs),
 
+    /// Knowledge graph operations
+    Graph(GraphArgs),
+
     // -----------------------------------------------------------------------
     // Stub commands — implemented in later milestones
     // -----------------------------------------------------------------------
 
-    /// Database operations (coming soon)
-    Db(StubArgs),
     /// AI assistant operations (coming soon)
     Ai(StubArgs),
     /// Process management (coming soon)
@@ -157,6 +158,42 @@ enum ContentCommand {
     TaskToggle {
         /// Task ID to toggle
         id: u64,
+    },
+    /// Show outgoing links from a file
+    Links {
+        /// Path of the file
+        path: String,
+    },
+    /// Show files that link to this file
+    Backlinks {
+        /// Path of the file
+        path: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Graph
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct GraphArgs {
+    #[command(subcommand)]
+    command: GraphCommand,
+}
+
+#[derive(Subcommand)]
+enum GraphCommand {
+    /// Show knowledge graph statistics
+    Status,
+    /// List unresolved (broken) links
+    Unresolved,
+    /// Show files within N hops of a file
+    Neighbors {
+        /// Path of the file
+        path: String,
+        /// Maximum traversal depth
+        #[arg(short, long, default_value_t = 1)]
+        depth: usize,
     },
 }
 
@@ -327,6 +364,8 @@ fn main() {
             ContentCommand::TaskToggle { id } => {
                 commands::content::task_toggle(&mut app, id)
             }
+            ContentCommand::Links { path } => commands::content::links(&mut app, &path),
+            ContentCommand::Backlinks { path } => commands::content::backlinks(&mut app, &path),
         },
 
         Commands::Plugin(args) => match args.command {
@@ -360,8 +399,15 @@ fn main() {
             LogsCommand::Path => commands::logs::path(&app),
         },
 
+        Commands::Graph(args) => match args.command {
+            GraphCommand::Status => commands::graph::status(&mut app),
+            GraphCommand::Unresolved => commands::graph::unresolved(&mut app),
+            GraphCommand::Neighbors { path, depth } => {
+                commands::graph::neighbors(&mut app, &path, depth)
+            }
+        },
+
         // Stub commands — implemented in later milestones.
-        Commands::Db(_) => stubs::not_implemented("db"),
         Commands::Ai(_) => stubs::not_implemented("ai"),
         Commands::Proc(_) => stubs::not_implemented("proc"),
         Commands::Term(_) => stubs::not_implemented("term"),
