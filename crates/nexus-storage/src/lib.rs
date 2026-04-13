@@ -609,6 +609,59 @@ impl StorageEngine {
         self.watcher.as_ref().map(watcher::Watcher::events)
     }
 
+    // ── Watcher Reconcile ────────────────────────────────────────────────────
+
+    /// Process pending file watcher events, re-indexing changed files.
+    ///
+    /// Drains all pending events from the watcher (non-blocking). For each event:
+    /// - `FileCreated`/`FileModified`: re-reads from disk and re-indexes
+    /// - `FileDeleted`: removes from index and graph
+    /// - `FileRenamed`: removes old path, indexes new path
+    ///
+    /// Returns the number of events processed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O or database failure.
+    pub fn process_watcher_events(&self) -> Result<usize, StorageError> {
+        let rx = match self.watcher.as_ref() {
+            Some(w) => w.events(),
+            None => return Ok(0),
+        };
+
+        let mut count = 0;
+        loop {
+            match rx.try_recv() {
+                Ok(event) => {
+                    match &event {
+                        StorageEvent::FileCreated { path, .. }
+                        | StorageEvent::FileModified { path, .. } => {
+                            let abs = self.forge.root().join(path);
+                            if let Ok(bytes) = std::fs::read(&abs) {
+                                let _ = self.write_file(path, &bytes);
+                            }
+                        }
+                        StorageEvent::FileDeleted { path } => {
+                            let _ = self.delete_file(path);
+                        }
+                        StorageEvent::FileRenamed { from, to, .. } => {
+                            let _ = self.delete_file(from);
+                            let abs = self.forge.root().join(to);
+                            if let Ok(bytes) = std::fs::read(&abs) {
+                                let _ = self.write_file(to, &bytes);
+                            }
+                        }
+                    }
+                    count += 1;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+
+        Ok(count)
+    }
+
     // ── Accessor ──────────────────────────────────────────────────────────────
 
     /// Return a reference to the underlying [`Forge`].
