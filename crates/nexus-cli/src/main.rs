@@ -64,8 +64,8 @@ enum Commands {
     Proc(StubArgs),
     /// Terminal management (coming soon)
     Term(StubArgs),
-    /// Model Context Protocol operations (coming soon)
-    Mcp(StubArgs),
+    /// Start MCP server (stdio mode)
+    Mcp,
     /// Sync operations (coming soon)
     Sync(StubArgs),
     /// Git operations (coming soon)
@@ -455,7 +455,7 @@ fn main() {
         // Stub commands — implemented in later milestones.
         Commands::Proc(_) => stubs::not_implemented("proc"),
         Commands::Term(_) => stubs::not_implemented("term"),
-        Commands::Mcp(_) => stubs::not_implemented("mcp"),
+        Commands::Mcp => commands::mcp::serve(&app),
         Commands::Sync(_) => stubs::not_implemented("sync"),
         Commands::Git(_) => stubs::not_implemented("git"),
         Commands::Run(_) => stubs::not_implemented("run"),
