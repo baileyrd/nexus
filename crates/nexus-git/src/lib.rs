@@ -10,7 +10,9 @@ mod error;
 mod engine;
 mod types;
 mod auto_commit;
+pub mod core_plugin;
 
+pub use core_plugin::GitCorePlugin;
 pub use error::GitError;
 pub use engine::GitEngine;
 pub use types::*;

@@ -69,6 +69,28 @@ impl EventBus {
         Ok(())
     }
 
+    /// Publish a kernel-tier event on behalf of a core plugin.
+    ///
+    /// Core plugins (native Rust, `trust_level = "core"`) may publish any
+    /// first-class [`NexusEvent`] variant, including forge file events.
+    /// The metadata `source_plugin_id` is set to `plugin_id`.
+    ///
+    /// To emit plugin-namespaced custom events use [`publish_plugin`] instead.
+    ///
+    /// # Errors
+    /// Returns `BusError::Closed` if the bus has been shut down.
+    pub fn publish_core(&self, plugin_id: &str, event: NexusEvent) -> Result<()> {
+        let metadata = EventMetadata {
+            event_id: uuid::Uuid::new_v4(),
+            timestamp: chrono::Utc::now(),
+            source_plugin_id: plugin_id.to_string(),
+            span_id: current_span_id(),
+        };
+        let published = Arc::new(PublishedEvent { metadata, event });
+        let _ = self.sender.send(published);
+        Ok(())
+    }
+
     /// Publish a kernel-owned event. Not callable from plugins.
     ///
     /// # Errors
@@ -190,9 +212,6 @@ fn variant_name(event: &NexusEvent) -> &'static str {
         NexusEvent::PluginCrashed { .. }    => "PluginCrashed",
         NexusEvent::CapabilityGranted { .. } => "CapabilityGranted",
         NexusEvent::CapabilityDenied { .. }  => "CapabilityDenied",
-        NexusEvent::IndexingStarted { .. }   => "IndexingStarted",
-        NexusEvent::IndexingProgress { .. }  => "IndexingProgress",
-        NexusEvent::IndexingCompleted { .. } => "IndexingCompleted",
         NexusEvent::Custom { .. }            => "Custom",
     }
 }

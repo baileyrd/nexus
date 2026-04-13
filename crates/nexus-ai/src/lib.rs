@@ -18,7 +18,9 @@ mod openai;
 mod provider;
 mod rag;
 mod vectorstore;
+pub mod core_plugin;
 
+pub use core_plugin::AiCorePlugin;
 pub use anthropic::AnthropicProvider;
 pub use chunker::{chunks_from_blocks, Chunk};
 pub use config::{detect_embedding_provider, detect_provider, AiConfig};

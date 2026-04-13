@@ -25,8 +25,10 @@ pub mod mdx;
 mod canvas;
 pub mod config;
 pub mod bases;
+pub mod core_plugin;
 
 pub use atomic::atomic_write;
+pub use core_plugin::StorageCorePlugin;
 pub use error::StorageError;
 pub use forge::{Forge, ForgeLock};
 pub use parser::{content_hash, parse_markdown, ParsedBlock, ParsedFile, ParsedLink, ParsedTag, Property};
@@ -542,6 +544,24 @@ impl StorageEngine {
             tags_found,
             duration_ms,
         })
+    }
+
+    /// Incremental reconcile: sync the index against the filesystem without
+    /// clearing existing data.
+    ///
+    /// Adds new files, updates changed ones, and soft-deletes removed ones.
+    /// Cheaper than [`rebuild_index`] — use after a git batch-mode burst.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O or database failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn reconcile_index(&self) -> Result<ReconcileDelta, StorageError> {
+        let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        reconcile(&conn, self.forge.root())
     }
 
     // ── Graph queries ────────────────────────────────────────────────────────

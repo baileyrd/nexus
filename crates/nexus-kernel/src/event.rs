@@ -92,26 +92,6 @@ pub enum NexusEvent {
         capability: Capability,
     },
 
-    // ---- M1: indexing events ----
-
-    /// Storage engine has begun indexing.
-    IndexingStarted {
-        /// Total number of files the indexer will process.
-        total_files: usize,
-    },
-    /// Storage engine indexing progress update.
-    IndexingProgress {
-        /// Files processed so far.
-        files_processed: usize,
-        /// Total files in the batch.
-        total_files: usize,
-    },
-    /// Storage engine indexing completed.
-    IndexingCompleted {
-        /// Wall-clock duration of the indexing pass, in milliseconds.
-        duration_ms: u64,
-    },
-
     // ---- Plugin-emitted custom events ----
 
     /// A plugin-emitted signal. Anti-spoofing enforced at publish time:
