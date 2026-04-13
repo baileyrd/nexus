@@ -20,6 +20,7 @@ mod reconcile;
 mod tasks;
 mod graph;
 mod search_scope;
+mod export;
 
 pub use atomic::atomic_write;
 pub use error::StorageError;
@@ -33,6 +34,7 @@ pub use search_scope::{ScopeFilter, parse_scoped_query};
 pub use reconcile::{ReconcileDelta, reconcile};
 pub use watcher::{relative_path, should_ignore, StorageEvent, Watcher};
 pub use graph::{KnowledgeGraph, BacklinkResult, OutgoingLink, UnresolvedLink, GraphStats, EdgeData};
+pub use export::export_to_html;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};

@@ -175,6 +175,14 @@ enum ContentCommand {
         #[arg(long)]
         date: Option<String>,
     },
+    /// Export a note to HTML
+    Export {
+        /// Path of the note to export
+        path: String,
+        /// Output file path (prints to stdout if omitted)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -403,6 +411,9 @@ fn main() {
             ContentCommand::Backlinks { path } => commands::content::backlinks(&mut app, &path),
             ContentCommand::Daily { date } => {
                 commands::content::daily(&mut app, date.as_deref())
+            }
+            ContentCommand::Export { path, output } => {
+                commands::content::export(&mut app, &path, output.as_deref())
             }
         },
 
