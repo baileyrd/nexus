@@ -18,6 +18,7 @@ mod search;
 mod watcher;
 mod reconcile;
 mod tasks;
+mod graph;
 
 pub use atomic::atomic_write;
 pub use error::StorageError;
@@ -29,6 +30,7 @@ pub use index::{insert_file, query_files, query_blocks, query_links, query_backl
 pub use search::{SearchIndex, SearchResult};
 pub use reconcile::{ReconcileDelta, reconcile};
 pub use watcher::{relative_path, should_ignore, StorageEvent, Watcher};
+pub use graph::{KnowledgeGraph, BacklinkResult, OutgoingLink, UnresolvedLink, GraphStats, EdgeData};
 
 use std::path::Path;
 use std::sync::Mutex;
