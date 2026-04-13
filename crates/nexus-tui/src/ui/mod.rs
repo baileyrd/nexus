@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::app::{Mode, TuiApp};
 
+mod backlinks;
 mod file_tree;
 mod status_bar;
 mod viewer;
@@ -20,13 +21,25 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
     ])
     .areas(frame.area());
 
-    let [tree_area, viewer_area] = Layout::horizontal([
+    let [tree_area, right_area] = Layout::horizontal([
         Constraint::Percentage(25),
         Constraint::Percentage(75),
     ])
     .areas(body);
 
     file_tree::render(frame, app, tree_area);
+
+    // Split right pane for backlinks when visible.
+    let (viewer_area, backlinks_area) = if app.backlinks.visible {
+        let [va, ba] = Layout::vertical([
+            Constraint::Percentage(70),
+            Constraint::Percentage(30),
+        ])
+        .areas(right_area);
+        (va, Some(ba))
+    } else {
+        (right_area, None)
+    };
 
     // Viewer area: split off a find bar when in Find mode.
     if app.mode == Mode::Find {
@@ -39,6 +52,11 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
         render_find_bar(frame, app, find_bar);
     } else {
         viewer::render(frame, app, viewer_area);
+    }
+
+    // Render backlinks panel if visible.
+    if let Some(bl_area) = backlinks_area {
+        backlinks::render(frame, app, bl_area);
     }
 
     status_bar::render(frame, app, status);

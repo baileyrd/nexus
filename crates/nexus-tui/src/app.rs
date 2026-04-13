@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use nexus_storage::{FileFilter, SearchResult, StorageConfig, StorageEngine};
+use nexus_storage::{BacklinkResult, FileFilter, SearchResult, StorageConfig, StorageEngine};
 use ratatui::widgets::ListState;
 
 // ── Mode / Focus ──────────────────────────────────────────────────────────────
@@ -280,6 +280,57 @@ impl Default for FindState {
     }
 }
 
+// ── BacklinksState ───────────────────────────────────────────────────────────
+
+/// State for the toggleable backlinks panel.
+pub struct BacklinksState {
+    /// Whether the backlinks panel is visible.
+    pub visible: bool,
+    /// Backlink entries as `(source_path, link_text)` pairs.
+    pub entries: Vec<(String, String)>,
+    /// Index of the currently selected backlink entry.
+    pub selected: usize,
+    /// `ratatui` list state; kept in sync with `selected`.
+    pub list_state: ListState,
+}
+
+impl BacklinksState {
+    /// Create a new, hidden `BacklinksState`.
+    pub fn new() -> Self {
+        Self {
+            visible: false,
+            entries: Vec::new(),
+            selected: 0,
+            list_state: ListState::default(),
+        }
+    }
+
+    /// Toggle the visibility of the backlinks panel.
+    pub fn toggle(&mut self) {
+        self.visible = !self.visible;
+    }
+
+    /// Load backlink entries from a list of `BacklinkResult`s.
+    pub fn load(&mut self, results: Vec<BacklinkResult>) {
+        self.entries = results
+            .into_iter()
+            .map(|r| (r.source_path, r.link_text))
+            .collect();
+        self.selected = 0;
+        self.list_state.select(if self.entries.is_empty() {
+            None
+        } else {
+            Some(0)
+        });
+    }
+}
+
+impl Default for BacklinksState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── TuiApp ────────────────────────────────────────────────────────────────────
 
 /// Top-level application state.
@@ -296,6 +347,8 @@ pub struct TuiApp {
     pub search: SearchState,
     /// In-file find state.
     pub find: FindState,
+    /// Backlinks panel state.
+    pub backlinks: BacklinksState,
     /// Underlying storage engine.
     pub storage: StorageEngine,
     /// Path to the forge root.
@@ -322,6 +375,7 @@ impl TuiApp {
             viewer: ViewerState::new(),
             search: SearchState::new(),
             find: FindState::new(),
+            backlinks: BacklinksState::new(),
             storage,
             forge_root,
             should_quit: false,
@@ -471,7 +525,28 @@ impl TuiApp {
         let text = String::from_utf8_lossy(&bytes).into_owned();
         self.viewer.load_content(path, text);
         self.focus = Focus::Viewer;
+        // Refresh backlinks for the newly opened file.
+        if self.backlinks.visible {
+            self.load_backlinks();
+        }
         Ok(())
+    }
+
+    /// Load backlinks for the currently viewed file into the backlinks panel.
+    ///
+    /// Does nothing if no file is loaded in the viewer.
+    pub fn load_backlinks(&mut self) {
+        let path = match self.viewer.file_path.as_deref() {
+            Some(p) => p.to_owned(),
+            None => {
+                self.backlinks.load(Vec::new());
+                return;
+            }
+        };
+        match self.storage.backlinks(&path) {
+            Ok(results) => self.backlinks.load(results),
+            Err(_) => self.backlinks.load(Vec::new()),
+        }
     }
 
     /// Toggle the expanded/collapsed state of the selected directory entry.

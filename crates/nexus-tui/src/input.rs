@@ -65,6 +65,14 @@ fn handle_normal_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             };
             return Ok(());
         }
+        // Toggle backlinks panel
+        (KeyModifiers::NONE, KeyCode::Char('b')) => {
+            app.backlinks.toggle();
+            if app.backlinks.visible {
+                app.load_backlinks();
+            }
+            return Ok(());
+        }
         _ => {}
     }
 
