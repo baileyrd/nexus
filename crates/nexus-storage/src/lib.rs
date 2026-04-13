@@ -33,7 +33,7 @@ pub use watcher::{relative_path, should_ignore, StorageEvent, Watcher};
 pub use graph::{KnowledgeGraph, BacklinkResult, OutgoingLink, UnresolvedLink, GraphStats, EdgeData};
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, RwLock};
 
 use r2d2_sqlite::SqliteConnectionManager;
 
@@ -73,6 +73,7 @@ pub struct StorageEngine {
     write_conn: Mutex<rusqlite::Connection>,
     search_index: SearchIndex,
     watcher: Option<watcher::Watcher>,
+    graph: Arc<RwLock<graph::KnowledgeGraph>>,
 }
 
 impl std::fmt::Debug for StorageEngine {
@@ -162,7 +163,23 @@ impl StorageEngine {
         let file_type = infer_file_type(path);
         insert_file(&conn, path, &file_type, size_bytes, &parsed)?;
 
-        // 6. Return FileMetadata.
+        // 6. Update knowledge graph.
+        {
+            let mut g = self.graph.write().expect("graph lock poisoned");
+            g.add_note(path);
+            g.remove_links_from(path);
+            for link in &parsed.links {
+                let target = link.target_path.as_deref()
+                    .unwrap_or(&link.link_text);
+                g.add_link(path, target, graph::EdgeData {
+                    link_type: link.link_type.clone(),
+                    link_text: link.link_text.clone(),
+                    fragment: link.fragment.clone(),
+                });
+            }
+        }
+
+        // 7. Return FileMetadata.
         let meta = FileMetadata {
             path: path.to_string(),
             size_bytes,
@@ -215,6 +232,12 @@ impl StorageEngine {
                 rusqlite::params![path],
             )?;
             delete_file(&conn, record.id)?;
+        }
+
+        // Remove from graph.
+        {
+            let mut g = self.graph.write().expect("graph lock poisoned");
+            g.remove_note(path);
         }
 
         Ok(())
@@ -390,6 +413,58 @@ impl StorageEngine {
         })
     }
 
+    // ── Graph queries ────────────────────────────────────────────────────────
+
+    /// Return all files that link to the file at `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the graph lock is poisoned.
+    pub fn backlinks(&self, path: &str) -> Result<Vec<graph::BacklinkResult>, StorageError> {
+        let g = self.graph.read().expect("graph lock poisoned");
+        Ok(g.backlinks(path))
+    }
+
+    /// Return all outgoing links from the file at `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the graph lock is poisoned.
+    pub fn outgoing_links(&self, path: &str) -> Result<Vec<graph::OutgoingLink>, StorageError> {
+        let g = self.graph.read().expect("graph lock poisoned");
+        Ok(g.outgoing_links(path))
+    }
+
+    /// Return all unresolved (broken) links in the forge.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the graph lock is poisoned.
+    pub fn unresolved_links(&self) -> Result<Vec<graph::UnresolvedLink>, StorageError> {
+        let g = self.graph.read().expect("graph lock poisoned");
+        Ok(g.unresolved_links())
+    }
+
+    /// Return knowledge graph statistics.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the graph lock is poisoned.
+    pub fn graph_stats(&self) -> Result<graph::GraphStats, StorageError> {
+        let g = self.graph.read().expect("graph lock poisoned");
+        Ok(g.stats())
+    }
+
+    /// Return all files within `depth` hops of `path` in the knowledge graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the graph lock is poisoned.
+    pub fn graph_neighbors(&self, path: &str, depth: usize) -> Result<Vec<String>, StorageError> {
+        let g = self.graph.read().expect("graph lock poisoned");
+        Ok(g.neighbors(path, depth))
+    }
+
     // ── Tasks ─────────────────────────────────────────────────────────────
 
     /// Query tasks with optional filters.
@@ -543,6 +618,14 @@ fn open_internal(
         reconcile(&write_conn, forge.root())?;
     }
 
+    // 9. Build knowledge graph from DB.
+    let kg = if is_new {
+        graph::KnowledgeGraph::new()
+    } else {
+        graph::KnowledgeGraph::rebuild_from_db(&write_conn)?
+    };
+    let graph = Arc::new(RwLock::new(kg));
+
     Ok(StorageEngine {
         forge,
         _lock: lock,
@@ -550,6 +633,7 @@ fn open_internal(
         write_conn: Mutex::new(write_conn),
         search_index,
         watcher,
+        graph,
     })
 }
 
