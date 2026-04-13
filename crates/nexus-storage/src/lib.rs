@@ -614,6 +614,17 @@ impl StorageEngine {
     pub fn forge(&self) -> &Forge {
         &self.forge
     }
+
+    /// Get a read connection from the pool.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] if the pool is exhausted.
+    pub fn pool_connection(&self) -> Result<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>, StorageError> {
+        self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))
+    }
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
