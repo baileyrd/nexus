@@ -185,16 +185,16 @@ fn highlight_inline(line: &str) -> Vec<Span<'static>> {
 
     while i < len {
         // ── backtick inline code ────────────────────────────────────────────
-        if chars[i] == '`' {
-            if let Some(close) = chars[i + 1..].iter().position(|&c| c == '`') {
-                let close_abs = i + 1 + close;
-                flush_plain!(i);
-                let text: String = chars[i..=close_abs].iter().collect();
-                spans.push(Span::styled(text, Style::default().fg(Color::Yellow)));
-                i = close_abs + 1;
-                plain_start = i;
-                continue;
-            }
+        if chars[i] == '`'
+            && let Some(close) = chars[i + 1..].iter().position(|&c| c == '`')
+        {
+            let close_abs = i + 1 + close;
+            flush_plain!(i);
+            let text: String = chars[i..=close_abs].iter().collect();
+            spans.push(Span::styled(text, Style::default().fg(Color::Yellow)));
+            i = close_abs + 1;
+            plain_start = i;
+            continue;
         }
 
         // ── [[wikilink]] ────────────────────────────────────────────────────
