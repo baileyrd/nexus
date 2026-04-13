@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::Path;
 
-use nexus_git::{DiffLineKind, FileStatus, GitEngine, RepoState};
+use nexus_git::{AutoCommitter, DiffLineKind, FileStatus, GitEngine, RepoState};
 
 /// Create a temp dir, init a git repo, configure user, and return engine.
 fn setup() -> (tempfile::TempDir, GitEngine) {
@@ -444,4 +444,37 @@ fn push_pull_local_bare_repo() {
         dir.path().join("new.txt").exists(),
         "pulled file should exist"
     );
+}
+
+// ── Auto-Commit Tests ────────────────────────────────────────────────────────
+
+#[test]
+fn auto_commit_full_workflow() {
+    let (dir, _engine) = setup();
+
+    // Create an initial commit so the repo isn't empty.
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    commit(dir.path(), "initial");
+
+    let mut committer = AutoCommitter::new(dir.path(), 0);
+
+    // Clean state — nothing to commit.
+    let r1 = committer.check_and_commit().unwrap();
+    assert!(r1.commit_hash.is_none());
+
+    // Make changes — should auto-commit.
+    fs::write(dir.path().join("notes.md"), "# Notes\n").unwrap();
+    fs::write(dir.path().join("todo.md"), "# Todo\n").unwrap();
+    let r2 = committer.check_and_commit().unwrap();
+    assert!(r2.commit_hash.is_some());
+    assert_eq!(r2.files_changed, 2);
+    assert!(r2.message.unwrap().starts_with("auto:"));
+
+    // Verify the commit appears in the log.
+    let engine = GitEngine::open(dir.path()).unwrap();
+    let log = engine.log(10).unwrap();
+    assert!(log.iter().any(|e| e.message.starts_with("auto:")));
+
+    // Working tree should be clean now.
+    assert!(!engine.state().unwrap().is_dirty);
 }

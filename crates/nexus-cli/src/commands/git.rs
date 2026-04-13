@@ -318,6 +318,48 @@ pub fn remotes(app: &App) -> Result<()> {
     Ok(())
 }
 
+/// Auto-commit dirty changes (one-shot or watch mode).
+pub fn auto_commit(app: &App, watch: bool, interval: u64, debounce: u64) -> Result<()> {
+    let mut committer = nexus_git::AutoCommitter::new(app.forge_root(), debounce);
+
+    if watch {
+        println!("Auto-commit watch mode (interval: {interval}s, debounce: {debounce}s). Ctrl+C to stop.");
+        loop {
+            match committer.check_and_commit() {
+                Ok(result) => {
+                    if let Some(hash) = &result.commit_hash {
+                        println!(
+                            "[{hash}] {} ({} file(s))",
+                            result.message.as_deref().unwrap_or("auto-commit"),
+                            result.files_changed,
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!("auto-commit error: {e}");
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(interval));
+        }
+    } else {
+        let result = committer
+            .check_and_commit()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        if let Some(hash) = &result.commit_hash {
+            println!(
+                "[{hash}] {} ({} file(s))",
+                result.message.as_deref().unwrap_or("auto-commit"),
+                result.files_changed,
+            );
+        } else if result.debounced {
+            println!("Skipped (debounce window).");
+        } else {
+            println!("Working tree clean — nothing to commit.");
+        }
+    }
+    Ok(())
+}
+
 fn print_hunks(hunks: &[nexus_git::HunkDiff]) {
     for hunk in hunks {
         println!(

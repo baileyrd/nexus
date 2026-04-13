@@ -575,6 +575,18 @@ enum GitCommand {
     Conflicts,
     /// List configured remotes
     Remotes,
+    /// Auto-commit dirty changes
+    AutoCommit {
+        /// Run in watch mode (loop with timer)
+        #[arg(long)]
+        watch: bool,
+        /// Interval in seconds for watch mode (default: 1800)
+        #[arg(long, default_value_t = 1800)]
+        interval: u64,
+        /// Debounce window in seconds (default: 5)
+        #[arg(long, default_value_t = 5)]
+        debounce: u64,
+    },
 }
 
 /// Branch subcommands.
@@ -778,6 +790,9 @@ fn main() {
             GitCommand::Merge { branch, abort } => commands::git::merge(&app, branch.as_deref(), abort),
             GitCommand::Conflicts => commands::git::conflicts(&app),
             GitCommand::Remotes => commands::git::remotes(&app),
+            GitCommand::AutoCommit { watch, interval, debounce } => {
+                commands::git::auto_commit(&app, watch, interval, debounce)
+            }
         },
         Commands::Run(_) => stubs::not_implemented("run"),
     };

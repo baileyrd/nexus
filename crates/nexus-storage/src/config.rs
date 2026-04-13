@@ -181,11 +181,25 @@ impl Default for PluginSettings {
 pub struct GitSettings {
     /// Whether git integration is enabled.
     pub enabled: bool,
+    /// Enable automatic commits of dirty working tree.
+    pub auto_commit: bool,
+    /// Auto-commit interval in seconds (0 = timer disabled). Default: 1800 (30 min).
+    pub auto_commit_interval_secs: u64,
+    /// Auto-commit on file save events.
+    pub auto_commit_on_save: bool,
+    /// Debounce window in seconds for batching rapid saves. Default: 5.
+    pub auto_commit_debounce_secs: u64,
 }
 
 impl Default for GitSettings {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            auto_commit: false,
+            auto_commit_interval_secs: 1800,
+            auto_commit_on_save: false,
+            auto_commit_debounce_secs: 5,
+        }
     }
 }
 
