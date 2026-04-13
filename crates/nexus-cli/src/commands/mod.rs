@@ -3,5 +3,6 @@ pub mod content;
 pub mod forge;
 pub mod graph;
 pub mod logs;
+pub mod mcp;
 pub mod plugin;
 pub mod watch;
