@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { ModeToggle } from "./components/ModeToggle";
 import { ThemePicker } from "./components/ThemePicker";
+import { WorkspaceView } from "./components/layout/WorkspaceView";
 import { useThemeStore } from "./stores/theme";
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
         <ModeToggle />
       </header>
       <main>
+        <WorkspaceView />
         <ThemePicker />
       </main>
     </div>
