@@ -8,11 +8,13 @@ import {
   type ThemeMetadata,
 } from "../ipc/theme";
 
+type VariableMap = { [key in string]?: string };
+
 interface ThemeState {
   currentThemeId: string | null;
   themes: ThemeMetadata[];
   snippets: SnippetMetadata[];
-  variables: Record<string, string>;
+  variables: VariableMap;
   loading: boolean;
   error: string | null;
   loadAll: () => Promise<void>;
@@ -22,10 +24,12 @@ interface ThemeState {
 
 // Push every CSS variable onto :root so the whole DOM sees the change. Runs
 // synchronously — Chromium applies the new cascade on the next paint.
-function writeVariables(vars: Record<string, string>) {
+function writeVariables(vars: VariableMap) {
   const root = document.documentElement;
   for (const [key, value] of Object.entries(vars)) {
-    root.style.setProperty(key, value);
+    if (value !== undefined) {
+      root.style.setProperty(key, value);
+    }
   }
 }
 

@@ -10,13 +10,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::variables::VariableMap;
 use crate::{Result, ThemeError};
 
 /// The mode(s) in which a snippet applies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../../app/src/bindings/")]
 pub enum SnippetMode {
     /// Applies in both light and dark modes.
     #[default]
@@ -28,8 +30,9 @@ pub enum SnippetMode {
 }
 
 /// Where a snippet's CSS rules apply.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
+#[ts(export, export_to = "../../../app/src/bindings/")]
 pub enum SnippetScope {
     /// Applied to `<html>` for all surfaces.
     #[default]

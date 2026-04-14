@@ -119,3 +119,6 @@ schemars = "1"
 # Tauri desktop shell
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
+
+# TypeScript type generation for IPC boundary
+ts-rs = { version = "11", features = ["serde-compat"] }

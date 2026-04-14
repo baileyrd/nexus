@@ -16,6 +16,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
+ts-rs = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

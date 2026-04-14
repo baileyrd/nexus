@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::{Platform, VariableMap};
 
@@ -90,8 +91,9 @@ pub struct ThemeHeader {
 }
 
 /// Broad category for a theme — used for filtering in the picker UI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
+#[ts(export, export_to = "../../../app/src/bindings/")]
 pub enum ThemeCategory {
     /// Light mode theme.
     #[default]

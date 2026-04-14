@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 pub use crate::manifest::ThemeCategory;
 use crate::manifest::ThemeManifest;
@@ -44,8 +45,9 @@ pub struct Theme {
 
 /// Which light/dark mode the UI is in. The resolver may use this to decide
 /// whether a [`crate::CssSnippet`] applies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../../app/src/bindings/")]
 pub enum ThemeMode {
     /// Force light mode.
     Light,
@@ -158,7 +160,8 @@ impl Theme {
 
 /// Compact theme description returned by listing APIs — matches PRD §10.1
 /// `ThemeMetadata`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct ThemeMetadata {
     /// Theme id (directory stem / built-in constant).
     pub id: String,
