@@ -5,9 +5,8 @@
 //! touch `SQLite` directly.
 
 use std::fmt::Write as _;
-use std::sync::Arc;
 
-use nexus_kernel::IpcDispatcher;
+use nexus_kernel::KernelPluginContext;
 use serde::{Deserialize, Serialize};
 
 use crate::chunker::chunks_from_blocks;
@@ -38,7 +37,7 @@ pub struct RagResponse {
 /// # Errors
 /// Returns [`AiError`] if embedding, vector search, or the chat call fails.
 pub async fn query(
-    dispatcher: &Arc<dyn IpcDispatcher>,
+    ctx: &KernelPluginContext,
     ai: &dyn AiProvider,
     embedder: &dyn EmbeddingProvider,
     question: &str,
@@ -50,7 +49,7 @@ pub async fn query(
         .next()
         .ok_or_else(|| AiError::Provider("embedding returned no vectors".into()))?;
 
-    let sources = vectorstore::search(dispatcher, &q_embedding, limit).await?;
+    let sources = vectorstore::search(ctx, &q_embedding, limit).await?;
     let system = build_rag_prompt(&sources);
 
     let messages = vec![ChatMessage {
@@ -73,7 +72,7 @@ pub async fn query(
 /// # Errors
 /// Returns [`AiError`] if embedding or the storage call fails.
 pub async fn index_file(
-    dispatcher: &Arc<dyn IpcDispatcher>,
+    ctx: &KernelPluginContext,
     embedder: &dyn EmbeddingProvider,
     file_path: &str,
     blocks: &[(u64, String, String, Option<i32>)],
@@ -81,7 +80,7 @@ pub async fn index_file(
     let chunks = chunks_from_blocks(file_path, blocks, DEFAULT_MAX_CHUNK_SIZE);
 
     if chunks.is_empty() {
-        vectorstore::delete_by_file(dispatcher, file_path).await?;
+        vectorstore::delete_by_file(ctx, file_path).await?;
         return Ok(0);
     }
 
@@ -100,7 +99,7 @@ pub async fn index_file(
         .collect();
 
     let n = chunk_embeddings.len();
-    vectorstore::upsert(dispatcher, file_path, &chunk_embeddings).await?;
+    vectorstore::upsert(ctx, file_path, &chunk_embeddings).await?;
     Ok(n)
 }
 

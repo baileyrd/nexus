@@ -13,7 +13,7 @@ use std::pin::Pin;
 
 use nexus_kernel::{
     Capability, CapabilitySet, EventBus, EventFilter, EventSubscription, IpcDispatcher, IpcError,
-    IpcFuture, PluginInfo, PluginStatus, TrustLevel,
+    IpcFuture, KernelPluginContext, PluginInfo, PluginStatus, TrustLevel,
 };
 
 use crate::manifest::{self, PluginManifest};
@@ -93,6 +93,17 @@ pub trait CorePlugin: Send + Sync {
         let _ = (handler_id, args);
         None
     }
+
+    /// Called once by the bootstrap after all core plugins are registered and
+    /// the shared [`IpcDispatcher`] is assembled, handing the plugin its own
+    /// [`KernelPluginContext`]. Plugins that need to issue nested `ipc_call`s
+    /// (e.g. an AI plugin calling storage for vector search) should capture
+    /// the context here so async handlers can clone it into their futures.
+    ///
+    /// Default impl is a no-op — plugins that never initiate IPC can ignore
+    /// this hook entirely. Registration / `on_init` happens BEFORE this call,
+    /// so anything that uses the context must defer to `dispatch_async`.
+    fn wire_context(&mut self, _ctx: Arc<KernelPluginContext>) {}
 }
 
 /// Boxed future returned by [`CorePlugin::dispatch_async`].
@@ -175,6 +186,14 @@ impl PluginBackend {
         match self {
             Self::Core(_) => Ok(()),
             Self::Community(s) => s.call_on_unload(),
+        }
+    }
+
+    /// Hand the plugin its [`KernelPluginContext`]. Core-only; WASM sandboxes
+    /// receive their runtime state through a different mechanism.
+    fn call_wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
+        if let Self::Core(p) = self {
+            p.wire_context(ctx);
         }
     }
 
@@ -741,6 +760,27 @@ impl PluginLoader {
         Ok(())
     }
 
+    /// Hand a registered core plugin its [`KernelPluginContext`] so it can
+    /// issue nested `ipc_call`s through the canonical plugin-facing surface.
+    ///
+    /// Typically invoked by bootstrap after all core plugins are registered
+    /// and the shared dispatcher is constructed.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if `plugin_id` is not loaded.
+    pub fn wire_context(
+        &mut self,
+        plugin_id: &str,
+        ctx: Arc<KernelPluginContext>,
+    ) -> Result<(), PluginError> {
+        let lp = self
+            .loaded
+            .get_mut(plugin_id)
+            .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
+        lp.backend.call_wire_context(ctx);
+        Ok(())
+    }
+
     /// Drain pending events from all plugin subscriptions and dispatch them to
     /// the appropriate plugin handlers (WASM or native).
     ///
@@ -927,6 +967,25 @@ impl SharedPluginLoader {
     /// Panics if the inner mutex is poisoned by a previous panic.
     pub fn lock(&self) -> std::sync::MutexGuard<'_, PluginLoader> {
         self.0.lock().expect("plugin loader mutex poisoned")
+    }
+
+    /// Convenience wrapper over [`PluginLoader::wire_context`] that handles
+    /// the internal mutex.
+    ///
+    /// # Errors
+    /// See [`PluginLoader::wire_context`].
+    ///
+    /// # Panics
+    /// Panics if the inner mutex is poisoned.
+    pub fn wire_context(
+        &self,
+        plugin_id: &str,
+        ctx: Arc<KernelPluginContext>,
+    ) -> Result<(), PluginError> {
+        self.0
+            .lock()
+            .expect("plugin loader mutex poisoned")
+            .wire_context(plugin_id, ctx)
     }
 }
 

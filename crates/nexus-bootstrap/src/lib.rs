@@ -125,7 +125,7 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
     // Register every in-tree core plugin. Order matters where lifecycle hooks
     // of later plugins rely on earlier ones publishing events; in practice
     // each plugin is independent today.
-    let ai_dispatcher_slot = register_core_plugins(&mut loader, &forge_root, &event_bus)?;
+    register_core_plugins(&mut loader, &forge_root, &event_bus)?;
 
     // Register the invoker (CLI or TUI) as a Core plugin so it holds a real
     // plugin identity with Capability::ALL.
@@ -143,10 +143,22 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
     let shared = Arc::new(SharedPluginLoader::new(loader));
     let dispatcher: Arc<dyn IpcDispatcher> = Arc::clone(&shared) as Arc<dyn IpcDispatcher>;
 
-    // AI plugin needs the shared dispatcher so its async handlers can issue
-    // nested `ipc_call`s into storage. Set-once — ignoring the `Err` is fine
-    // because the slot is freshly created in `register_core_plugins`.
-    let _ = ai_dispatcher_slot.set(Arc::clone(&dispatcher));
+    // Hand the AI plugin its own KernelPluginContext so `ask`/`index_file`
+    // handlers can issue nested `ipc_call`s into storage through the same
+    // plugin-facing surface the invoker uses — no raw-dispatcher leak.
+    let ai_ctx = KernelPluginContext::new(
+        "com.nexus.ai",
+        env!("CARGO_PKG_VERSION"),
+        CapabilitySet::from_iter(Capability::ALL.iter().copied()),
+        Arc::clone(&kv_store),
+        Arc::clone(&event_bus),
+        &forge_root,
+        Some(Arc::clone(&dispatcher)),
+    )
+    .context("failed to build kernel plugin context for com.nexus.ai")?;
+    shared
+        .wire_context("com.nexus.ai", Arc::new(ai_ctx))
+        .map_err(|e| anyhow::anyhow!("failed to wire AI plugin context: {e}"))?;
 
     let context = KernelPluginContext::new(
         invoker_id,
@@ -170,7 +182,7 @@ fn register_core_plugins(
     loader: &mut PluginLoader,
     forge_root: &std::path::Path,
     event_bus: &Arc<EventBus>,
-) -> Result<Arc<std::sync::OnceLock<Arc<dyn IpcDispatcher>>>> {
+) -> Result<()> {
     use nexus_ai::AiCorePlugin;
     use nexus_database::DatabaseCorePlugin;
     use nexus_security::SecurityCorePlugin;
@@ -257,8 +269,6 @@ fn register_core_plugins(
         )
         .context("failed to register com.nexus.database")?;
 
-    let ai_plugin = AiCorePlugin::new();
-    let ai_dispatcher_slot = ai_plugin.dispatcher_slot();
     loader
         .register_core(
             core_manifest_with_ipc(
@@ -280,11 +290,11 @@ fn register_core_plugins(
                 ],
             ),
             forge_root,
-            Box::new(ai_plugin),
+            Box::new(AiCorePlugin::new()),
         )
         .context("failed to register com.nexus.ai")?;
 
-    Ok(ai_dispatcher_slot)
+    Ok(())
 }
 
 #[derive(Clone, Copy)]

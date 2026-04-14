@@ -15,9 +15,9 @@
 //! All five are async handlers — they issue `com.nexus.storage` IPC calls
 //! for vector ops and HTTP requests to the provider APIs.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
-use nexus_kernel::IpcDispatcher;
+use nexus_kernel::KernelPluginContext;
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Serialize;
 
@@ -47,28 +47,22 @@ pub const HANDLER_CONFIG: u32 = 5;
 pub struct AiCorePlugin {
     ai_config: Option<AiConfig>,
     embed_config: Option<AiConfig>,
-    /// Late-injected by the bootstrap runtime once the plugin loader exists.
-    /// Empty while AI commands are dispatched before injection finalises —
-    /// handlers return a clear error in that window.
-    dispatcher: Arc<OnceLock<Arc<dyn IpcDispatcher>>>,
+    /// Plugin-facing kernel context, installed via [`CorePlugin::wire_context`]
+    /// after the shared plugin loader + dispatcher are assembled. Handlers
+    /// clone the `Arc` into their spawned futures. `None` if a handler fires
+    /// before bootstrap finishes wiring — those handlers return a clear error.
+    context: Option<Arc<KernelPluginContext>>,
 }
 
 impl AiCorePlugin {
-    /// Construct an unstarted plugin with an empty dispatcher slot.
+    /// Construct an unstarted plugin.
     #[must_use]
     pub fn new() -> Self {
         Self {
             ai_config: None,
             embed_config: None,
-            dispatcher: Arc::new(OnceLock::new()),
+            context: None,
         }
-    }
-
-    /// Return a handle to the dispatcher slot so the bootstrap can populate
-    /// it after the plugin loader is wrapped in a `SharedPluginLoader`.
-    #[must_use]
-    pub fn dispatcher_slot(&self) -> Arc<OnceLock<Arc<dyn IpcDispatcher>>> {
-        Arc::clone(&self.dispatcher)
     }
 
     /// Return the detected AI chat-provider configuration, if any.
@@ -116,8 +110,8 @@ impl CorePlugin for AiCorePlugin {
         })
     }
 
-    /// Async dispatch path. Captures the dispatcher + configs into the
-    /// returned future so nothing outlives the `&mut self` borrow.
+    /// Async dispatch path. Captures the context + configs into the returned
+    /// future so nothing outlives the `&mut self` borrow.
     fn dispatch_async(
         &mut self,
         handler_id: u32,
@@ -130,30 +124,36 @@ impl CorePlugin for AiCorePlugin {
             return Some(Box::pin(async move { Ok(response) }));
         }
 
-        let dispatcher = self.dispatcher.get().cloned();
+        let ctx = self.context.clone();
         let ai_cfg = self.ai_config.clone();
         let embed_cfg = self.embed_config.clone();
         let args = args.clone();
 
         Some(Box::pin(async move {
-            let dispatcher = dispatcher.ok_or_else(|| {
-                exec_err("AI plugin dispatcher not injected (bootstrap incomplete)")
+            let ctx = ctx.ok_or_else(|| {
+                exec_err("AI plugin context not wired (bootstrap incomplete)")
             })?;
             match handler_id {
-                HANDLER_ASK => handle_ask(&dispatcher, ai_cfg, embed_cfg, &args).await,
-                HANDLER_INDEX_FILE => handle_index_file(&dispatcher, embed_cfg, &args).await,
-                HANDLER_VECTORSTORE_COUNT => handle_vectorstore_count(&dispatcher).await,
-                HANDLER_STATUS => handle_status(&dispatcher, ai_cfg, embed_cfg).await,
+                HANDLER_ASK => handle_ask(&ctx, ai_cfg, embed_cfg, &args).await,
+                HANDLER_INDEX_FILE => handle_index_file(&ctx, embed_cfg, &args).await,
+                HANDLER_VECTORSTORE_COUNT => handle_vectorstore_count(&ctx).await,
+                HANDLER_STATUS => handle_status(&ctx, ai_cfg, embed_cfg).await,
                 _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
             }
         }))
+    }
+
+    /// Capture the kernel plugin context so async handlers can issue nested
+    /// `ipc_call`s into storage through the canonical plugin surface.
+    fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
+        self.context = Some(ctx);
     }
 }
 
 // ─── Handler implementations ────────────────────────────────────────────────
 
 async fn handle_ask(
-    dispatcher: &Arc<dyn IpcDispatcher>,
+    ctx: &KernelPluginContext,
     ai_cfg: Option<AiConfig>,
     embed_cfg: Option<AiConfig>,
     args: &serde_json::Value,
@@ -175,14 +175,14 @@ async fn handle_ask(
     let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
 
-    let response = rag::query(dispatcher, ai.as_ref(), embedder.as_ref(), question, limit)
+    let response = rag::query(ctx, ai.as_ref(), embedder.as_ref(), question, limit)
         .await
         .map_err(|e| exec_err(format!("rag query failed: {e}")))?;
     serde_json::to_value(&response).map_err(|e| exec_err(format!("ask: serialize: {e}")))
 }
 
 async fn handle_index_file(
-    dispatcher: &Arc<dyn IpcDispatcher>,
+    ctx: &KernelPluginContext,
     embed_cfg: Option<AiConfig>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
@@ -202,27 +202,27 @@ async fn handle_index_file(
         embed_cfg.ok_or_else(|| exec_err("index_file: no AI embedding provider configured"))?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
 
-    let count = rag::index_file(dispatcher, embedder.as_ref(), file_path, &blocks)
+    let count = rag::index_file(ctx, embedder.as_ref(), file_path, &blocks)
         .await
         .map_err(|e| exec_err(format!("index_file: {e}")))?;
     Ok(serde_json::json!({ "indexed_chunks": count }))
 }
 
 async fn handle_vectorstore_count(
-    dispatcher: &Arc<dyn IpcDispatcher>,
+    ctx: &KernelPluginContext,
 ) -> Result<serde_json::Value, PluginError> {
-    let count = vectorstore::count(dispatcher)
+    let count = vectorstore::count(ctx)
         .await
         .map_err(|e| exec_err(format!("vectorstore_count: {e}")))?;
     Ok(serde_json::json!({ "count": count }))
 }
 
 async fn handle_status(
-    dispatcher: &Arc<dyn IpcDispatcher>,
+    ctx: &KernelPluginContext,
     ai_cfg: Option<AiConfig>,
     embed_cfg: Option<AiConfig>,
 ) -> Result<serde_json::Value, PluginError> {
-    let count = vectorstore::count(dispatcher)
+    let count = vectorstore::count(ctx)
         .await
         .map_err(|e| exec_err(format!("status: vectorstore_count: {e}")))?;
     Ok(serde_json::json!({

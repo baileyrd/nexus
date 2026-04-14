@@ -1,20 +1,24 @@
 //! Vector-store IPC client for `com.nexus.storage`.
 //!
 //! The AI plugin does not open its own `SQLite` connection — storage is the
-//! sole owner of the forge database. These helpers issue `ipc_call`s to
-//! storage's `vector_*` handlers. The [`ChunkEmbedding`] and [`ChunkMatch`]
-//! types match the JSON shape emitted by `nexus_storage::vectorstore` so
-//! responses deserialize directly.
+//! sole owner of the forge database. These helpers issue `ipc_call`s via
+//! the AI plugin's [`KernelPluginContext`] to storage's `vector_*` handlers.
+//! The [`ChunkEmbedding`] and [`ChunkMatch`] types match the JSON shape
+//! emitted by `nexus_storage::vectorstore` so responses deserialize directly.
 
-use std::sync::Arc;
+use std::time::Duration;
 
-use nexus_kernel::{ipc_call, IpcDispatcher};
+use nexus_kernel::{KernelPluginContext, PluginContext};
 use serde::{Deserialize, Serialize};
 
 use crate::error::AiError;
 
 /// Plugin id of the storage core plugin.
 const STORAGE_PLUGIN: &str = "com.nexus.storage";
+
+/// Timeout applied to every nested storage `ipc_call` from the AI plugin.
+/// These are local SQLite queries — 30s is an extreme upper bound.
+const STORAGE_IPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A chunk together with its embedding vector, ready for storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,12 +51,12 @@ pub struct ChunkMatch {
 /// # Errors
 /// Returns [`AiError::Provider`] wrapping any dispatcher or handler error.
 pub async fn upsert(
-    dispatcher: &Arc<dyn IpcDispatcher>,
+    ctx: &KernelPluginContext,
     file_path: &str,
     chunks: &[ChunkEmbedding],
 ) -> Result<(), AiError> {
     let args = serde_json::json!({ "file_path": file_path, "chunks": chunks });
-    ipc_call(dispatcher, STORAGE_PLUGIN, "vector_insert", args)
+    ctx.ipc_call(STORAGE_PLUGIN, "vector_insert", args, STORAGE_IPC_TIMEOUT)
         .await
         .map_err(|e| AiError::Provider(format!("storage vector_insert: {e}")))?;
     Ok(())
@@ -63,12 +67,13 @@ pub async fn upsert(
 /// # Errors
 /// Returns [`AiError::Provider`] on dispatcher failure or malformed response.
 pub async fn search(
-    dispatcher: &Arc<dyn IpcDispatcher>,
+    ctx: &KernelPluginContext,
     query_embedding: &[f32],
     limit: usize,
 ) -> Result<Vec<ChunkMatch>, AiError> {
     let args = serde_json::json!({ "embedding": query_embedding, "limit": limit });
-    let response = ipc_call(dispatcher, STORAGE_PLUGIN, "vector_query", args)
+    let response = ctx
+        .ipc_call(STORAGE_PLUGIN, "vector_query", args, STORAGE_IPC_TIMEOUT)
         .await
         .map_err(|e| AiError::Provider(format!("storage vector_query: {e}")))?;
     serde_json::from_value(response)
@@ -80,13 +85,18 @@ pub async fn search(
 /// # Errors
 /// Returns [`AiError::Provider`] on dispatcher failure.
 pub async fn delete_by_file(
-    dispatcher: &Arc<dyn IpcDispatcher>,
+    ctx: &KernelPluginContext,
     file_path: &str,
 ) -> Result<(), AiError> {
     let args = serde_json::json!({ "path": file_path });
-    ipc_call(dispatcher, STORAGE_PLUGIN, "vector_delete_by_file", args)
-        .await
-        .map_err(|e| AiError::Provider(format!("storage vector_delete_by_file: {e}")))?;
+    ctx.ipc_call(
+        STORAGE_PLUGIN,
+        "vector_delete_by_file",
+        args,
+        STORAGE_IPC_TIMEOUT,
+    )
+    .await
+    .map_err(|e| AiError::Provider(format!("storage vector_delete_by_file: {e}")))?;
     Ok(())
 }
 
@@ -94,15 +104,16 @@ pub async fn delete_by_file(
 ///
 /// # Errors
 /// Returns [`AiError::Provider`] on dispatcher failure or malformed response.
-pub async fn count(dispatcher: &Arc<dyn IpcDispatcher>) -> Result<usize, AiError> {
-    let response = ipc_call(
-        dispatcher,
-        STORAGE_PLUGIN,
-        "vectorstore_count",
-        serde_json::json!({}),
-    )
-    .await
-    .map_err(|e| AiError::Provider(format!("storage vectorstore_count: {e}")))?;
+pub async fn count(ctx: &KernelPluginContext) -> Result<usize, AiError> {
+    let response = ctx
+        .ipc_call(
+            STORAGE_PLUGIN,
+            "vectorstore_count",
+            serde_json::json!({}),
+            STORAGE_IPC_TIMEOUT,
+        )
+        .await
+        .map_err(|e| AiError::Provider(format!("storage vectorstore_count: {e}")))?;
     response
         .get("count")
         .and_then(serde_json::Value::as_u64)
