@@ -26,6 +26,7 @@ mod canvas;
 pub mod config;
 pub mod bases;
 pub mod core_plugin;
+pub mod vectorstore;
 
 pub use atomic::atomic_write;
 pub use core_plugin::StorageCorePlugin;
@@ -842,6 +843,64 @@ impl StorageEngine {
         self.pool.get().map_err(|e| StorageError::Database(
             rusqlite::Error::InvalidParameterName(e.to_string()),
         ))
+    }
+
+    // ── Vector store ──────────────────────────────────────────────────────────
+
+    /// Upsert embeddings for a file (replaces all prior rows for that file).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on transaction or insert failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn vector_insert(
+        &self,
+        file_path: &str,
+        chunks: &[vectorstore::ChunkEmbedding],
+    ) -> Result<(), StorageError> {
+        let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        vectorstore::upsert(&conn, file_path, chunks)
+    }
+
+    /// Search the vector store for the `limit` most similar chunks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the underlying query fails.
+    pub fn vector_query(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+    ) -> Result<Vec<vectorstore::ChunkMatch>, StorageError> {
+        let conn = self.pool_connection()?;
+        vectorstore::search(&conn, query_embedding, limit)
+    }
+
+    /// Delete every embedding row for `file_path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the delete statement fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn vector_delete_by_file(&self, file_path: &str) -> Result<(), StorageError> {
+        let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+        vectorstore::delete_by_file(&conn, file_path)
+    }
+
+    /// Count all stored embeddings.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the count query fails.
+    pub fn vectorstore_count(&self) -> Result<usize, StorageError> {
+        let conn = self.pool_connection()?;
+        vectorstore::count(&conn)
     }
 }
 

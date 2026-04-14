@@ -62,6 +62,14 @@ pub const HANDLER_UNRESOLVED_LINKS: u32 = 14;
 pub const HANDLER_GRAPH_NEIGHBORS: u32 = 15;
 /// Handler id for `query_tags`. Args: `{ "name": String }`; Returns: `Vec<TagResult>`.
 pub const HANDLER_QUERY_TAGS: u32 = 16;
+/// Handler id for `vector_insert`. Args: `{ "file_path": String, "chunks": Vec<ChunkEmbedding> }`; Returns: `{}`.
+pub const HANDLER_VECTOR_INSERT: u32 = 17;
+/// Handler id for `vector_query`. Args: `{ "embedding": Vec<f32>, "limit": usize }`; Returns: `Vec<ChunkMatch>`.
+pub const HANDLER_VECTOR_QUERY: u32 = 18;
+/// Handler id for `vector_delete_by_file`. Args: `{ "path": String }`; Returns: `{}`.
+pub const HANDLER_VECTOR_DELETE_BY_FILE: u32 = 19;
+/// Handler id for `vectorstore_count`. Args: `{}`; Returns: `{ "count": usize }`.
+pub const HANDLER_VECTORSTORE_COUNT: u32 = 20;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -334,6 +342,55 @@ impl CorePlugin for StorageCorePlugin {
                     .query_tags(name)
                     .map_err(|e| exec_err(format!("query_tags: {e}")))?;
                 to_value(&tags, "query_tags")
+            }
+            HANDLER_VECTOR_INSERT => {
+                let file_path = args
+                    .get("file_path")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| exec_err("vector_insert: missing 'file_path' string".to_string()))?
+                    .to_string();
+                let chunks: Vec<crate::vectorstore::ChunkEmbedding> = args
+                    .get("chunks")
+                    .ok_or_else(|| exec_err("vector_insert: missing 'chunks'".to_string()))
+                    .and_then(|v| {
+                        serde_json::from_value(v.clone())
+                            .map_err(|e| exec_err(format!("vector_insert: chunks decode: {e}")))
+                    })?;
+                engine
+                    .vector_insert(&file_path, &chunks)
+                    .map_err(|e| exec_err(format!("vector_insert: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_VECTOR_QUERY => {
+                let embedding: Vec<f32> = args
+                    .get("embedding")
+                    .ok_or_else(|| exec_err("vector_query: missing 'embedding'".to_string()))
+                    .and_then(|v| {
+                        serde_json::from_value(v.clone())
+                            .map_err(|e| exec_err(format!("vector_query: embedding decode: {e}")))
+                    })?;
+                let limit = args
+                    .get("limit")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|v| usize::try_from(v).ok())
+                    .unwrap_or(5);
+                let matches = engine
+                    .vector_query(&embedding, limit)
+                    .map_err(|e| exec_err(format!("vector_query: {e}")))?;
+                to_value(&matches, "vector_query")
+            }
+            HANDLER_VECTOR_DELETE_BY_FILE => {
+                let path = path_arg(args, "vector_delete_by_file")?;
+                engine
+                    .vector_delete_by_file(&path)
+                    .map_err(|e| exec_err(format!("vector_delete_by_file: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_VECTORSTORE_COUNT => {
+                let count = engine
+                    .vectorstore_count()
+                    .map_err(|e| exec_err(format!("vectorstore_count: {e}")))?;
+                Ok(serde_json::json!({ "count": count }))
             }
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }
