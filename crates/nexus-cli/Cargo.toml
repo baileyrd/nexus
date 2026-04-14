@@ -11,6 +11,7 @@ name = "nexus"
 path = "src/main.rs"
 
 [dependencies]
+nexus-bootstrap = { path = "../nexus-bootstrap" }
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-security = { path = "../nexus-security" }
 nexus-storage = { path = "../nexus-storage" }

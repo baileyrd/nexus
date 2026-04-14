@@ -11,7 +11,6 @@ use ratatui::DefaultTerminal;
 
 mod app;
 mod input;
-mod ipc;
 mod ui;
 
 use app::TuiApp;

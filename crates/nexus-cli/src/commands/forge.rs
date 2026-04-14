@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use nexus_storage::{StorageConfig, StorageEngine};
+use nexus_bootstrap::{init_forge, storage as ipc};
 
 use crate::app::App;
 use crate::output::{print_success, OutputFormat};
@@ -19,15 +19,16 @@ pub fn init(app: &App, dir: Option<PathBuf>) -> Result<()> {
         anyhow::bail!("forge already exists at '{}'", target.display());
     }
 
-    // Initialise the forge via App::init_forge, which wraps StorageEngine::init.
-    let tmp_app = App::new(target.clone(), app.format());
-    tmp_app.init_forge()?;
+    // Create the `.forge/` directory structure and initial schema. This is
+    // the one storage operation that has to precede runtime startup because
+    // the storage plugin's `on_init` opens an existing forge.
+    init_forge(&target)?;
 
-    // Open the freshly-created forge and reconcile any pre-existing files.
-    let engine = StorageEngine::open(&target, &StorageConfig::default())
-        .map_err(|e| anyhow::anyhow!("failed to open new forge for indexing: {e}"))?;
-    let stats = engine
-        .rebuild_index()
+    // Build a runtime anchored at the new forge and reindex any pre-existing
+    // files through the plugin boundary.
+    let mut staging = App::new(target.clone(), app.format());
+    let (runtime, rt) = staging.runtime()?;
+    let stats = ipc::rebuild_index(runtime, rt)
         .map_err(|e| anyhow::anyhow!("failed to index existing files: {e}"))?;
 
     let location = target.display().to_string();
@@ -61,17 +62,15 @@ pub fn init(app: &App, dir: Option<PathBuf>) -> Result<()> {
 
 /// Show the status of the open forge.
 pub fn status(app: &mut App) -> Result<()> {
-    let storage = app.storage()?;
+    let format = app.format();
+    let location = app.forge_root().display().to_string();
+    let (runtime, rt) = app.runtime()?;
 
-    let records = storage
-        .query_files(&nexus_storage::FileFilter::default())
+    let records = ipc::query_files(runtime, rt)
         .map_err(|e| anyhow::anyhow!("failed to query files: {e}"))?;
 
     let file_count = records.len();
     let total_size: u64 = records.iter().map(|r| r.size_bytes).sum();
-    let location = app.forge_root().display().to_string();
-
-    let format = app.format();
 
     match format {
         OutputFormat::Json | OutputFormat::Jsonl => {
@@ -100,15 +99,15 @@ pub fn status(app: &mut App) -> Result<()> {
 /// Clears the existing index and re-indexes every file in the forge,
 /// updating blocks, links, tags, and tasks.
 pub fn reindex(app: &mut App) -> Result<()> {
-    let storage = app.storage()?;
-    let stats = storage
-        .rebuild_index()
+    let format = app.format();
+    let (runtime, rt) = app.runtime()?;
+    let stats = ipc::rebuild_index(runtime, rt)
         .map_err(|e| anyhow::anyhow!("reindex failed: {e}"))?;
 
-    match app.format() {
+    match format {
         OutputFormat::Json | OutputFormat::Jsonl => {
             print_success(
-                app.format(),
+                format,
                 "reindex complete",
                 &serde_json::json!({
                     "files_processed": stats.files_processed,

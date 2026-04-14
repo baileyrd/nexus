@@ -2,9 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use nexus_bootstrap::{build_cli_runtime, Runtime};
 use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, PluginManager, PluginManagerConfig};
 use nexus_storage::{StorageCorePlugin, StorageConfig, StorageEngine};
+use tokio::runtime::Runtime as TokioRuntime;
 
 use crate::output::OutputFormat;
 
@@ -14,13 +16,19 @@ pub struct App {
     format: OutputFormat,
     /// Kernel event bus — shared with the storage bridge thread.
     event_bus: Arc<EventBus>,
-    /// The storage engine (lazy).
+    /// The storage engine (lazy). Retained for subcommands that have not yet
+    /// migrated to `ipc_call` (canvas, bases, ai, mcp, watch).
     storage: Option<StorageEngine>,
     /// Storage core plugin that bridges watcher events onto the kernel bus
     /// (lazy, started alongside `storage`).
     storage_plugin: Option<StorageCorePlugin>,
     /// Community-plugin manager (lazy).
     plugins: Option<PluginManager>,
+    /// Bootstrap-assembled runtime (lazy). Used by subcommands that have
+    /// migrated to the plugin-IPC boundary.
+    runtime: Option<Runtime>,
+    /// Tokio runtime used to block on async `ipc_call`s.
+    rt: Option<TokioRuntime>,
 }
 
 impl App {
@@ -35,7 +43,39 @@ impl App {
             storage: None,
             storage_plugin: None,
             plugins: None,
+            runtime: None,
+            rt: None,
         }
+    }
+
+    /// Lazily build the Nexus runtime (kernel + all core plugins + CLI as a
+    /// Core plugin) and return a reference plus a Tokio runtime for blocking
+    /// on async `ipc_call`s.
+    ///
+    /// First-use opens the storage engine inside the plugin, so the forge
+    /// directory must already exist. Subcommands that run *before* forge
+    /// init (e.g. `forge init`) must not call this — they use
+    /// [`nexus_bootstrap::init_forge`] first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the runtime or Tokio runtime cannot be built.
+    pub fn runtime(&mut self) -> Result<(&Runtime, &TokioRuntime)> {
+        if self.runtime.is_none() {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .context("failed to start tokio runtime")?;
+            let runtime = build_cli_runtime(self.forge_root.clone())
+                .with_context(|| format!("failed to build runtime at {}", self.forge_root.display()))?;
+            self.runtime = Some(runtime);
+            self.rt = Some(rt);
+        }
+        Ok((
+            self.runtime.as_ref().expect("just initialised"),
+            self.rt.as_ref().expect("just initialised"),
+        ))
     }
 
     /// Return the forge root directory.
@@ -136,21 +176,4 @@ impl App {
         Ok(self.plugins.as_mut().expect("just initialised"))
     }
 
-    /// Initialise a new forge at `forge_root` without opening it.
-    ///
-    /// Creates the directory structure expected by the storage engine.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the forge already exists or directory creation fails.
-    pub fn init_forge(&self) -> Result<()> {
-        StorageEngine::init(&self.forge_root)
-            .with_context(|| {
-                format!(
-                    "failed to initialise forge at '{}'",
-                    self.forge_root.display()
-                )
-            })?;
-        Ok(())
-    }
 }

@@ -7,11 +7,11 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use nexus_bootstrap::storage as ipc;
+use nexus_bootstrap::storage::{BacklinkResult, SearchResult, TaskFilter, TaskRecord};
 use nexus_bootstrap::{build_tui_runtime, Runtime};
 use ratatui::widgets::ListState;
 use tokio::runtime::Runtime as TokioRuntime;
-
-use crate::ipc::{self, BacklinkResult, SearchResult, TaskFilter, TaskRecord};
 
 // ── Mode / Focus ──────────────────────────────────────────────────────────────
 

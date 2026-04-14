@@ -29,6 +29,8 @@ use nexus_plugins::{
     parse_manifest, CorePlugin, PluginError, PluginLoader, PluginManifest, SharedPluginLoader,
 };
 
+pub mod storage;
+
 /// Plugin id for the in-tree Nexus CLI invoker.
 pub const CLI_PLUGIN_ID: &str = "com.nexus.cli";
 /// Plugin id for the in-tree Nexus TUI invoker.
@@ -57,6 +59,22 @@ pub struct Runtime {
 /// be loaded, or any core plugin fails to register or initialize.
 pub fn build_cli_runtime(forge_root: PathBuf) -> Result<Runtime> {
     build(forge_root, CLI_PLUGIN_ID, "Nexus CLI")
+}
+
+/// Create an empty forge at `forge_root`.
+///
+/// This is the one storage operation the CLI cannot do through `ipc_call`:
+/// the storage plugin's `on_init` opens an existing forge, so the forge must
+/// exist before a runtime can be built. Exposed from the bootstrap crate so
+/// `nexus-cli` does not need to depend on `nexus-storage` directly just for
+/// `nexus forge init`.
+///
+/// # Errors
+/// Propagates any [`nexus_storage::StorageError`] from `StorageEngine::init`.
+pub fn init_forge(forge_root: &std::path::Path) -> Result<()> {
+    nexus_storage::StorageEngine::init(forge_root)
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("failed to initialise forge: {e}"))
 }
 
 /// Build a runtime with the TUI registered as the invoker plugin.

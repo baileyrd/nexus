@@ -1,42 +1,40 @@
-//! Typed wrappers around `ipc_call` for the storage subsystem.
+//! Typed IPC-client helpers for the `com.nexus.storage` core plugin.
 //!
-//! The TUI no longer depends on `nexus-storage` directly. Instead it calls
-//! into the `com.nexus.storage` core plugin over the kernel IPC boundary.
-//! This module holds:
-//! - Local data-transfer objects mirroring the on-the-wire JSON shape of the
-//!   storage plugin's responses. Named the same as the storage types so
-//!   call-site code is unchanged.
-//! - One helper per storage command, each doing
-//!   `block_on → ipc_call → deserialize`.
+//! CLI and TUI callers reach storage exclusively through these helpers — no
+//! direct `nexus-storage` dependency needed. Each helper:
 //!
-//! Field sets are what the TUI actually reads — not a 1:1 mirror of the
-//! storage types. If the TUI starts using a new field, add it here too.
+//! 1. Serializes arguments to JSON.
+//! 2. `block_on`s the async `ipc_call` on the provided Tokio runtime.
+//! 3. Deserializes the response into a typed DTO.
+//!
+//! DTO field sets are intentionally minimal — only what the current callers
+//! read. Extra JSON fields in the response are ignored by serde, so adding
+//! fields upstream does not break callers here.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use nexus_bootstrap::Runtime;
 use nexus_kernel::PluginContext;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime as TokioRuntime;
 
+use crate::Runtime;
+
 const STORAGE_PLUGIN: &str = "com.nexus.storage";
-const IPC_TIMEOUT: Duration = Duration::from_secs(10);
+const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
-/// Mirror of `nexus_storage::FileRecord` for the fields the TUI reads.
+/// Mirror of `nexus_storage::FileRecord` with the fields CLI/TUI read.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FileRecord {
     /// Forge-relative path of the file.
     pub path: String,
     /// File size in bytes.
-    #[allow(dead_code)]
     pub size_bytes: u64,
 }
 
-/// Mirror of `nexus_storage::BacklinkResult` with only the fields the TUI
-/// actually reads. Extra JSON fields are ignored by serde.
+/// Mirror of `nexus_storage::BacklinkResult`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BacklinkResult {
     /// Path of the file containing the link.
@@ -64,7 +62,6 @@ pub struct SearchResult {
     /// Path to the file containing the matching block.
     pub file_path: String,
     /// Excerpt of the matching content.
-    #[allow(dead_code)]
     pub excerpt: String,
 }
 
@@ -75,7 +72,22 @@ pub struct GraphStats {
     pub edge_count: usize,
 }
 
-/// Mirror of `nexus_storage::TaskFilter` for outgoing args.
+/// Mirror of `nexus_storage::RebuildStats`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RebuildStats {
+    /// Number of files processed.
+    pub files_processed: usize,
+    /// Total blocks indexed.
+    pub blocks_indexed: usize,
+    /// Total links found.
+    pub links_found: usize,
+    /// Total tags found.
+    pub tags_found: usize,
+    /// Wall-clock time in milliseconds.
+    pub duration_ms: u64,
+}
+
+/// Outgoing `TaskFilter`. Defaults are `None` for both fields.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct TaskFilter {
     /// Only return tasks with this completion state.
@@ -84,7 +96,7 @@ pub struct TaskFilter {
     pub file_path: Option<String>,
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Internal helper ──────────────────────────────────────────────────────────
 
 fn call<T: serde::de::DeserializeOwned>(
     runtime: &Runtime,
@@ -103,6 +115,8 @@ fn call<T: serde::de::DeserializeOwned>(
         .with_context(|| format!("storage ipc response '{command}' decode failed"))
 }
 
+// ── Public helpers ───────────────────────────────────────────────────────────
+
 /// List every file in the forge index.
 pub fn query_files(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<FileRecord>> {
     call(runtime, rt, "query_files", serde_json::json!({}))
@@ -111,10 +125,10 @@ pub fn query_files(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<FileRecor
 /// Read a file's bytes by forge-relative path.
 pub fn read_file(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<Vec<u8>> {
     #[derive(Deserialize)]
-    struct ReadFileResp {
+    struct Resp {
         bytes: Vec<u8>,
     }
-    let resp: ReadFileResp = call(runtime, rt, "read_file", serde_json::json!({ "path": path }))?;
+    let resp: Resp = call(runtime, rt, "read_file", serde_json::json!({ "path": path }))?;
     Ok(resp.bytes)
 }
 
@@ -151,4 +165,9 @@ pub fn search(
         "search",
         serde_json::json!({ "query": query, "limit": limit }),
     )
+}
+
+/// Rebuild the forge index from files on disk.
+pub fn rebuild_index(runtime: &Runtime, rt: &TokioRuntime) -> Result<RebuildStats> {
+    call(runtime, rt, "rebuild_index", serde_json::json!({}))
 }
