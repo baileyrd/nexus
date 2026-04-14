@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability — allows the main window to invoke the built-in core commands plus all commands registered by this app.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

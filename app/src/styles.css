@@ -1,0 +1,163 @@
+/* Base cascade — every variable is a graceful fallback so the UI renders
+ * even before the Rust side has responded with an applied theme. */
+:root {
+  color-scheme: light dark;
+
+  font-family: var(
+    --nx-type-sans,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    sans-serif
+  );
+  font-size: 14px;
+  line-height: 1.5;
+
+  color: var(--nx-text-primary, #1a1a1a);
+  background: var(--nx-bg-primary, #ffffff);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  padding: var(--nx-space-lg, 32px) var(--nx-space-lg, 32px)
+    var(--nx-space-md, 16px);
+  border-bottom: 1px solid var(--nx-bg-tertiary, #e8eaef);
+  background: var(--nx-bg-secondary, #f8f9fa);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: var(--nx-type-h1-size, 32px);
+  font-weight: var(--nx-type-h1-weight, 700);
+  line-height: var(--nx-type-h1-line-height, 1.2);
+}
+
+.app-header .tagline {
+  margin: 4px 0 0;
+  color: var(--nx-text-secondary, #4a4a4a);
+  font-size: 0.9em;
+}
+
+main {
+  padding: var(--nx-space-lg, 32px);
+  flex: 1;
+}
+
+.theme-picker header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--nx-space-sm, 8px);
+  margin-bottom: var(--nx-space-md, 16px);
+}
+
+.theme-picker h2 {
+  margin: 0;
+}
+
+.theme-picker .hint {
+  color: var(--nx-text-tertiary, #7a7a7a);
+  font-size: 0.9em;
+}
+
+.theme-picker .error {
+  color: var(--nx-color-error, #e74c3c);
+}
+
+.theme-picker ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--nx-space-md, 16px);
+}
+
+.theme-picker button {
+  width: 100%;
+  text-align: left;
+  padding: var(--nx-space-md, 16px);
+  border: 1px solid var(--nx-bg-tertiary, #e8eaef);
+  border-radius: 8px;
+  background: var(--nx-bg-elevated, #ffffff);
+  color: var(--nx-text-primary, #1a1a1a);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "name  category"
+    "desc  desc"
+    "badge badge";
+  column-gap: var(--nx-space-sm, 8px);
+  row-gap: 6px;
+  transition:
+    background 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.theme-picker button:hover {
+  background: var(--nx-interactive-hover, rgba(74, 144, 226, 0.08));
+  transform: translateY(-1px);
+}
+
+.theme-picker button:focus-visible {
+  outline: 2px solid var(--nx-color-primary, #4a90e2);
+  outline-offset: 2px;
+}
+
+.theme-picker button.active {
+  border-color: var(--nx-color-primary, #4a90e2);
+  box-shadow: 0 0 0 1px var(--nx-color-primary, #4a90e2) inset;
+}
+
+.theme-picker .name {
+  grid-area: name;
+  font-weight: 600;
+}
+
+.theme-picker .category {
+  grid-area: category;
+  font-size: 0.75em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--nx-text-tertiary, #7a7a7a);
+}
+
+.theme-picker .desc {
+  grid-area: desc;
+  color: var(--nx-text-secondary, #4a4a4a);
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+
+.theme-picker .badge {
+  grid-area: badge;
+  justify-self: start;
+  font-size: 0.7em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--nx-bg-tertiary, #e8eaef);
+  color: var(--nx-text-tertiary, #7a7a7a);
+}

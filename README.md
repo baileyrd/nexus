@@ -17,6 +17,8 @@ nexus-ai            Provider traits (Claude, OpenAI, Ollama, llama.cpp), embeddi
 nexus-mcp           MCP server over stdio — 13 tools for forge operations
 nexus-cli           `nexus` binary — headless CLI with full subcommands
 nexus-tui           `nexus-tui` binary — ratatui-based terminal interface
+nexus-theme         Theming engine: CSS variables, theme packages, layout, snippet cascade
+nexus-app           Tauri 2 desktop shell — hosts the React frontend (see `app/`)
 nexus-types         Shared type definitions
 ```
 
@@ -74,6 +76,18 @@ nexus-tui
 nexus graph status                     # Node/edge counts, density
 nexus graph unresolved                 # Broken [[wikilinks]]
 nexus graph neighbors projects/nexus.md --depth 2
+```
+
+### Desktop (Tauri) shell
+
+Early scaffold — currently just renders a theme picker against the
+live `nexus-theme` engine. Needs Node.js and the Linux webview libs
+(`webkit2gtk-4.1`, `libsoup-3.0`) on top of the Rust toolchain.
+
+```bash
+cd app
+npm install
+npm run tauri:dev    # launches the Rust shell + Vite + webview
 ```
 
 ### MCP Server

@@ -69,7 +69,13 @@
       "mcp__remind-me__remind_me_auto_capture",
       "mcp__remind-me__remind_me_reindex",
       "Bash(xargs -I {} basename {})",
-      "Bash(sed 's/ `.*//')"
+      "Bash(sed 's/ `.*//')",
+      "Bash(npm --version)",
+      "Bash(pkg-config --exists webkit2gtk-4.1)",
+      "Bash(pkg-config --exists javascriptcoregtk-4.1)",
+      "Bash(pkg-config --exists libsoup-3.0)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)"
     ]
   }
 }
