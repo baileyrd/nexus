@@ -16,10 +16,6 @@ pub enum Error {
     #[error(transparent)]
     Canvas(#[from] CanvasError),
 
-    /// Bases format error.
-    #[error(transparent)]
-    Bases(#[from] BasesError),
-
     /// Config file error.
     #[error(transparent)]
     Config(#[from] ConfigError),
@@ -27,10 +23,6 @@ pub enum Error {
     /// Filename / slug utility error.
     #[error(transparent)]
     Util(#[from] UtilError),
-
-    /// Format version error.
-    #[error(transparent)]
-    Version(#[from] VersionError),
 
     /// Underlying I/O error.
     #[error("I/O error: {0}")]
@@ -88,35 +80,6 @@ pub enum CanvasError {
     },
 }
 
-/// Errors from the bases format.
-#[derive(Debug, thiserror::Error)]
-pub enum BasesError {
-    /// A required constituent file is absent.
-    #[error("missing required file '{path}'")]
-    MissingFile {
-        /// Path to the absent file.
-        path: String,
-    },
-
-    /// A constituent file exists but cannot be parsed.
-    #[error("corrupt file '{path}': {reason}")]
-    CorruptFile {
-        /// Path of the corrupt file.
-        path: String,
-        /// Parse error message.
-        reason: String,
-    },
-
-    /// The stored version is not compatible with the current reader.
-    #[error("version mismatch: expected ~1.x, got '{found}' in '{path}'")]
-    VersionMismatch {
-        /// Path of the file.
-        path: String,
-        /// The version string found in the file.
-        found: String,
-    },
-}
-
 /// Errors from config file loading.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -168,17 +131,6 @@ pub enum UtilError {
     },
 }
 
-/// Errors from format version parsing.
-#[derive(Debug, thiserror::Error)]
-pub enum VersionError {
-    /// The version string is not parseable.
-    #[error("cannot parse version string '{input}'")]
-    ParseFailed {
-        /// The input that failed.
-        input: String,
-    },
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -213,16 +165,6 @@ mod tests {
         let msg = format!("{e}");
         assert!(msg.contains("board.canvas"));
         assert!(msg.contains("version"));
-    }
-
-    #[test]
-    fn bases_error_version_mismatch_display() {
-        let e = BasesError::VersionMismatch {
-            path: "tasks.bases/metadata.json".into(),
-            found: "3.0".into(),
-        };
-        let msg = format!("{e}");
-        assert!(msg.contains("3.0"));
     }
 
     #[test]
