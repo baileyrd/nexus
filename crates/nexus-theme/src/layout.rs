@@ -233,7 +233,65 @@ pub struct SidebarPanel {
     pub visible: bool,
 }
 
+/// What a ribbon icon does when clicked.
+///
+/// Ribbon items are references: `command` / `view_id` are resolved at runtime
+/// through a UI contribution registry that core and plugins populate. The
+/// data model never owns the *meaning* of an id — only the list of items to
+/// show.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[ts(export, export_to = "../../../app/src/bindings/")]
+pub enum RibbonAction {
+    /// Toggle the panel with this id inside the same sidebar.
+    TogglePanel {
+        /// Target panel id (matches [`SidebarPanel::id`]).
+        #[serde(rename = "panelId")]
+        panel_id: String,
+    },
+    /// Invoke a named command registered in the UI contribution registry.
+    InvokeCommand {
+        /// Command id (`"workspace.new-note"`, `"git.commit"`, …).
+        command: String,
+    },
+    /// Open a registered view (editor, canvas, graph, …) in the focused pane.
+    OpenView {
+        /// View id registered by core or a plugin.
+        #[serde(rename = "viewId")]
+        view_id: String,
+    },
+}
+
+/// A single icon on a sidebar's activity ribbon (the narrow icon rail).
+///
+/// Ribbon items are just references — the icon to render, the tooltip to
+/// show, and the action to dispatch. The actual implementation lives in the
+/// UI contribution registry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../../app/src/bindings/")]
+pub struct RibbonItem {
+    /// Stable id of this ribbon entry (`"explorer"`, `"git.status"`, …).
+    pub id: String,
+    /// Icon id resolved by the UI.
+    pub icon: String,
+    /// Hover tooltip and accessible label.
+    pub tooltip: String,
+    /// What clicking the item does.
+    pub action: RibbonAction,
+    /// Owning plugin id, if the item came from a plugin. `None` for core.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub plugin: Option<String>,
+}
+
 /// A docked sidebar (left or right).
+///
+/// A sidebar has two independent surfaces (per PRD §8 and the Obsidian
+/// reference): the narrow **ribbon** of icons at the docked edge, and the
+/// wider **panel area** that shows the currently-selected panel's content.
+/// Clicking a ribbon item typically toggles a panel, but plugins can also
+/// register ribbon items that invoke commands or open views — see
+/// [`RibbonAction`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../../app/src/bindings/")]
@@ -246,7 +304,11 @@ pub struct Sidebar {
     pub collapsed: bool,
     /// Show icons only (no titles).
     pub mini_mode: bool,
-    /// Registered panels.
+    /// Ribbon items (narrow icon rail at the docked edge). Contributed by
+    /// core or plugins; resolved through the UI contribution registry.
+    #[serde(default)]
+    pub ribbon: Vec<RibbonItem>,
+    /// Registered panels shown in the wide panel area.
     pub panels: Vec<SidebarPanel>,
     /// Panel ids in display order.
     pub panel_order: Vec<String>,
@@ -261,6 +323,7 @@ impl Sidebar {
             width: 280,
             collapsed: true,
             mini_mode: false,
+            ribbon: Vec::new(),
             panels: Vec::new(),
             panel_order: Vec::new(),
         }

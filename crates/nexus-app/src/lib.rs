@@ -40,6 +40,7 @@ pub fn run() {
             commands::set_mode,
             commands::get_default_layout,
             commands::get_layout_preset,
+            commands::list_layout_presets,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch nexus-app");

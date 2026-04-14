@@ -1,0 +1,152 @@
+# Obsidian-style layout: single editor pane with both sidebars open,
+# each exposing an activity ribbon of panel toggles at the docked edge.
+#
+# Ribbon + panel ids are references into the UI contribution registry —
+# core ships the ones listed here; plugins register additional ids and any
+# preset can reference them.
+
+id = "obsidian"
+name = "Obsidian"
+description = "Single editor pane with activity ribbons on both sides and a linked panel tray."
+focusedPaneId = "pane-obsidian-main"
+
+[root]
+type = "leaf"
+id = "pane-obsidian-main"
+tabs = []
+collapsed = false
+
+# ── Left sidebar ─────────────────────────────────────────────────────────────
+# Ribbon (narrow rail): navigation / view toggles.
+# Panels (wider tray): the currently-selected source.
+
+[leftSidebar]
+side = "left"
+width = 280
+collapsed = false
+miniMode = false
+panelOrder = ["explorer", "search", "bookmarks", "tags", "graph"]
+
+[[leftSidebar.ribbon]]
+id = "explorer"
+icon = "folder"
+tooltip = "Files"
+action = { kind = "togglePanel", panelId = "explorer" }
+
+[[leftSidebar.ribbon]]
+id = "search"
+icon = "search"
+tooltip = "Search"
+action = { kind = "togglePanel", panelId = "search" }
+
+[[leftSidebar.ribbon]]
+id = "bookmarks"
+icon = "bookmark"
+tooltip = "Bookmarks"
+action = { kind = "togglePanel", panelId = "bookmarks" }
+
+[[leftSidebar.ribbon]]
+id = "tags"
+icon = "tag"
+tooltip = "Tags"
+action = { kind = "togglePanel", panelId = "tags" }
+
+[[leftSidebar.ribbon]]
+id = "graph"
+icon = "graph"
+tooltip = "Graph view"
+action = { kind = "togglePanel", panelId = "graph" }
+
+[[leftSidebar.panels]]
+id = "explorer"
+title = "Files"
+icon = "folder"
+visible = false
+
+[[leftSidebar.panels]]
+id = "search"
+title = "Search"
+icon = "search"
+visible = false
+
+[[leftSidebar.panels]]
+id = "bookmarks"
+title = "Bookmarks"
+icon = "bookmark"
+visible = true
+
+[[leftSidebar.panels]]
+id = "tags"
+title = "Tags"
+icon = "tag"
+visible = false
+
+[[leftSidebar.panels]]
+id = "graph"
+title = "Graph"
+icon = "graph"
+visible = false
+
+# ── Right sidebar ────────────────────────────────────────────────────────────
+# Contextual surfaces for the current note: backlinks, outgoing links, tags,
+# and the active-note outline.
+
+[rightSidebar]
+side = "right"
+width = 300
+collapsed = false
+miniMode = false
+panelOrder = ["backlinks", "outgoing-links", "tags-note", "outline"]
+
+[[rightSidebar.ribbon]]
+id = "backlinks"
+icon = "link-incoming"
+tooltip = "Backlinks"
+action = { kind = "togglePanel", panelId = "backlinks" }
+
+[[rightSidebar.ribbon]]
+id = "outgoing-links"
+icon = "link-outgoing"
+tooltip = "Outgoing links"
+action = { kind = "togglePanel", panelId = "outgoing-links" }
+
+[[rightSidebar.ribbon]]
+id = "tags-note"
+icon = "tag"
+tooltip = "Tags for this note"
+action = { kind = "togglePanel", panelId = "tags-note" }
+
+[[rightSidebar.ribbon]]
+id = "outline"
+icon = "list-indent"
+tooltip = "Outline"
+action = { kind = "togglePanel", panelId = "outline" }
+
+[[rightSidebar.panels]]
+id = "backlinks"
+title = "Backlinks"
+icon = "link-incoming"
+visible = false
+
+[[rightSidebar.panels]]
+id = "outgoing-links"
+title = "Outgoing links"
+icon = "link-outgoing"
+visible = false
+
+[[rightSidebar.panels]]
+id = "tags-note"
+title = "Tags"
+icon = "tag"
+visible = false
+
+[[rightSidebar.panels]]
+id = "outline"
+title = "Outline"
+icon = "list-indent"
+visible = true
+
+[bottomPanel]
+height = 200
+collapsed = true
+tabs = []

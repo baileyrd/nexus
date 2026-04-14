@@ -33,6 +33,7 @@ pub mod error;
 pub mod layout;
 pub mod layout_manager;
 pub mod manifest;
+pub mod preset;
 pub mod resolver;
 pub mod snippet;
 pub mod theme;
@@ -41,10 +42,11 @@ pub mod watcher;
 
 pub use error::ThemeError;
 pub use layout::{
-    BottomPanel, Direction, LayoutNode, PaneId, PaneNode, Sidebar, SidebarPanel, SidebarSide,
-    Surface, Tab, TabId, WorkspaceLayout,
+    BottomPanel, Direction, LayoutNode, PaneId, PaneNode, RibbonAction, RibbonItem, Sidebar,
+    SidebarPanel, SidebarSide, Surface, Tab, TabId, WorkspaceLayout,
 };
 pub use manifest::ThemeManifest;
+pub use preset::{LayoutPreset, PresetInfo, PresetRegistry, PresetSourceKind};
 pub use resolver::{ResolvedTheme, ResolverInput};
 pub use snippet::CssSnippet;
 pub use theme::{Theme, ThemeCategory, ThemeMode};

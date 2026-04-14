@@ -1,0 +1,41 @@
+id = "coding"
+name = "Coding"
+description = "Explorer left, editor centre, debugger right, terminal bottom."
+focusedPaneId = "pane-coding-editor"
+
+[root]
+type = "leaf"
+id = "pane-coding-editor"
+tabs = []
+collapsed = false
+
+[leftSidebar]
+side = "left"
+width = 280
+collapsed = false
+miniMode = false
+panelOrder = ["explorer"]
+
+[[leftSidebar.panels]]
+id = "explorer"
+title = "Explorer"
+icon = "folder"
+visible = true
+
+[rightSidebar]
+side = "right"
+width = 280
+collapsed = false
+miniMode = false
+panelOrder = ["debugger"]
+
+[[rightSidebar.panels]]
+id = "debugger"
+title = "Debugger"
+icon = "bug"
+visible = true
+
+[bottomPanel]
+height = 240
+collapsed = false
+tabs = []

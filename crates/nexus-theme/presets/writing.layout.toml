@@ -1,0 +1,31 @@
+id = "writing"
+name = "Writing"
+description = "Single pane, sidebars collapsed — for focused writing."
+focusedPaneId = "pane-writing"
+
+[root]
+type = "leaf"
+id = "pane-writing"
+tabs = []
+collapsed = false
+
+[leftSidebar]
+side = "left"
+width = 280
+collapsed = true
+miniMode = false
+panels = []
+panelOrder = []
+
+[rightSidebar]
+side = "right"
+width = 280
+collapsed = true
+miniMode = false
+panels = []
+panelOrder = []
+
+[bottomPanel]
+height = 200
+collapsed = true
+tabs = []

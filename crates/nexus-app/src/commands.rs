@@ -18,7 +18,7 @@ use std::sync::Mutex;
 
 use nexus_theme::api::{AppliedTheme, SnippetMetadata, ThemeConfig, ThemeEngine};
 use nexus_theme::theme::ThemeMetadata;
-use nexus_theme::{ThemeMode, VariableMap, WorkspaceLayout};
+use nexus_theme::{PresetInfo, PresetRegistry, ThemeMode, VariableMap, WorkspaceLayout};
 use tauri::State;
 
 /// Tauri-managed engine handle shared across commands.
@@ -90,23 +90,30 @@ pub fn set_mode(mode: ThemeMode, state: State<'_, EngineState>) -> AppliedTheme 
 
 /// Return the default workspace layout shown on first launch.
 ///
-/// Today this is the "reviewing" preset — a two-pane row split with a
-/// right sidebar — which gives the split-pane renderer something to
-/// actually render.
+/// Today this is the Obsidian preset — ribbon + panel sidebars on both
+/// sides, single editor pane — which exercises the most layout surfaces.
 #[tauri::command]
 pub fn get_default_layout() -> WorkspaceLayout {
-    WorkspaceLayout::preset_reviewing()
+    PresetRegistry::with_core_presets()
+        .get("obsidian")
+        .expect("obsidian preset must be embedded")
 }
 
-/// Return a built-in layout preset by name.
+/// Return a named layout preset hydrated into a fresh [`WorkspaceLayout`].
 ///
-/// Unknown names fall back to `writing`. Supported: `writing`,
-/// `reviewing`, `coding`.
+/// `name` is the preset id from [`list_layout_presets`]. Returns an error
+/// string if the preset is unknown or fails to parse.
 #[tauri::command]
-pub fn get_layout_preset(name: String) -> WorkspaceLayout {
-    match name.as_str() {
-        "reviewing" => WorkspaceLayout::preset_reviewing(),
-        "coding" => WorkspaceLayout::preset_coding(),
-        _ => WorkspaceLayout::preset_writing(),
-    }
+pub fn get_layout_preset(name: String) -> Result<WorkspaceLayout, String> {
+    PresetRegistry::with_core_presets()
+        .get(&name)
+        .map_err(|e| e.to_string())
+}
+
+/// List every available layout preset (embedded / user / plugin), sorted by
+/// id. Used by the frontend picker to render entries dynamically rather than
+/// hardcoding a union type.
+#[tauri::command]
+pub fn list_layout_presets() -> Vec<PresetInfo> {
+    PresetRegistry::with_core_presets().list()
 }

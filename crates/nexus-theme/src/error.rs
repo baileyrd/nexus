@@ -90,6 +90,20 @@ pub enum ThemeError {
         #[source]
         source: serde_json::Error,
     },
+
+    /// TOML parsing error for a layout preset file.
+    #[error("failed to parse layout preset at {path}: {source}")]
+    PresetToml {
+        /// Source path or synthetic marker (`"<embedded:obsidian>"`).
+        path: PathBuf,
+        /// Underlying TOML parse error.
+        #[source]
+        source: toml::de::Error,
+    },
+
+    /// Requested layout preset id not registered.
+    #[error("layout preset not found: {0}")]
+    PresetNotFound(String),
 }
 
 impl ThemeError {

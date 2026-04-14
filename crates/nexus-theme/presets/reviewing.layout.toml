@@ -1,0 +1,48 @@
+id = "reviewing"
+name = "Reviewing"
+description = "Row-split editor/preview with a comments panel on the right."
+focusedPaneId = "pane-review-left"
+
+[root]
+type = "split"
+id = "split-review-root"
+direction = "row"
+sizes = [0.5, 0.5]
+
+[[root.children]]
+type = "leaf"
+id = "pane-review-left"
+tabs = []
+collapsed = false
+
+[[root.children]]
+type = "leaf"
+id = "pane-review-right"
+tabs = []
+collapsed = false
+
+[leftSidebar]
+side = "left"
+width = 280
+collapsed = true
+miniMode = false
+panels = []
+panelOrder = []
+
+[rightSidebar]
+side = "right"
+width = 320
+collapsed = false
+miniMode = false
+panelOrder = ["comments"]
+
+[[rightSidebar.panels]]
+id = "comments"
+title = "Comments"
+icon = "message"
+visible = true
+
+[bottomPanel]
+height = 200
+collapsed = true
+tabs = []
