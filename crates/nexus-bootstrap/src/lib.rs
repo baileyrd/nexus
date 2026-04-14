@@ -147,7 +147,7 @@ fn register_core_plugins(
 
     loader
         .register_core(
-            core_manifest(
+            core_manifest_with_ipc(
                 "com.nexus.storage",
                 "Storage",
                 LifecycleFlags {
@@ -155,6 +155,14 @@ fn register_core_plugins(
                     on_start: true,
                     on_stop: true,
                 },
+                &[
+                    ("query_files", nexus_storage::core_plugin::HANDLER_QUERY_FILES),
+                    ("read_file", nexus_storage::core_plugin::HANDLER_READ_FILE),
+                    ("backlinks", nexus_storage::core_plugin::HANDLER_BACKLINKS),
+                    ("query_tasks", nexus_storage::core_plugin::HANDLER_QUERY_TASKS),
+                    ("graph_stats", nexus_storage::core_plugin::HANDLER_GRAPH_STATS),
+                    ("rebuild_index", nexus_storage::core_plugin::HANDLER_REBUILD_INDEX),
+                ],
             ),
             forge_root,
             Box::new(StorageCorePlugin::new(
@@ -229,10 +237,19 @@ impl LifecycleFlags {
     };
 }
 
-/// Generate a core-plugin manifest inline. No IPC commands yet — those will
-/// be added per-subsystem in later phases.
+/// Generate a core-plugin manifest inline with no IPC commands declared.
 fn core_manifest(id: &str, name: &str, lc: LifecycleFlags) -> PluginManifest {
-    let toml = format!(
+    core_manifest_with_ipc(id, name, lc, &[])
+}
+
+/// Generate a core-plugin manifest with IPC command registrations.
+fn core_manifest_with_ipc(
+    id: &str,
+    name: &str,
+    lc: LifecycleFlags,
+    ipc_commands: &[(&str, u32)],
+) -> PluginManifest {
+    let mut toml = format!(
         r#"
 [plugin]
 id = "{id}"
@@ -250,6 +267,11 @@ on_stop = {stop}
         start = lc.on_start,
         stop = lc.on_stop,
     );
+    for (cmd_id, handler_id) in ipc_commands {
+        toml.push_str(&format!(
+            "\n[[registrations.ipc_command]]\nid = \"{cmd_id}\"\nhandler_id = {handler_id}\n"
+        ));
+    }
     parse_manifest(&toml, "bootstrap.toml")
         .unwrap_or_else(|e| panic!("bootstrap manifest for {id} failed to parse: {e}"))
 }

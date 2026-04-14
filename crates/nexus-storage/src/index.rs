@@ -5,6 +5,7 @@
 
 use chrono::NaiveDate;
 use rusqlite::{Connection, params};
+use serde::{Deserialize, Serialize};
 
 use crate::StorageError;
 use crate::parser::{ParsedFile, Property};
@@ -12,7 +13,7 @@ use crate::parser::{ParsedFile, Property};
 // ── Public types ──────────────────────────────────────────────────────────────
 
 /// A row from the `files` table.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileRecord {
     /// Primary key.
     pub id: u64,
@@ -103,7 +104,8 @@ pub struct TagResult {
 }
 
 /// Filter options for [`query_files`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct FileFilter {
     /// Only return files whose path starts with this prefix.
     pub prefix: Option<String>,
@@ -114,7 +116,7 @@ pub struct FileFilter {
 }
 
 /// Summary statistics returned after a full index rebuild.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RebuildStats {
     /// Number of files processed.
     pub files_processed: usize,

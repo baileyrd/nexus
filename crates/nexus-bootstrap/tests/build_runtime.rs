@@ -11,8 +11,9 @@ use nexus_kernel::{IpcError, PluginContext};
 
 fn scratch_forge() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
-    // Kernel::new will create .forge itself; just ensure the parent exists.
-    std::fs::create_dir_all(dir.path()).unwrap();
+    // Storage plugin's on_init opens a StorageEngine, which requires a fully
+    // initialized forge (schema, WAL, etc.), not just an empty dir.
+    nexus_storage::StorageEngine::init(dir.path()).expect("init scratch forge");
     dir
 }
 
@@ -31,18 +32,39 @@ fn tui_runtime_builds_and_reports_expected_identity() {
 }
 
 #[tokio::test]
-async fn cli_runtime_ipc_call_routes_to_registered_core_plugins() {
-    let forge = scratch_forge();
-    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build cli runtime");
+async fn cli_runtime_storage_query_files_roundtrips() {
+    let dir = scratch_forge();
+    let runtime = build_cli_runtime(dir.path().to_path_buf()).expect("build cli runtime");
 
-    // None of the subsystem plugins register IPC commands yet, so every call
-    // should come back as CommandNotFound — which proves routing works:
-    // the dispatcher looked up the target plugin and asked for the command.
-    let err = runtime
+    let value = runtime
         .context
         .ipc_call(
             "com.nexus.storage",
             "query_files",
+            serde_json::json!({}),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("query_files dispatches cleanly");
+
+    assert!(value.is_array(), "expected array, got {value}");
+    assert_eq!(
+        value.as_array().unwrap().len(),
+        0,
+        "fresh forge should have no files"
+    );
+}
+
+#[tokio::test]
+async fn cli_runtime_storage_unknown_command_returns_command_not_found() {
+    let dir = scratch_forge();
+    let runtime = build_cli_runtime(dir.path().to_path_buf()).expect("build cli runtime");
+
+    let err = runtime
+        .context
+        .ipc_call(
+            "com.nexus.storage",
+            "not-a-real-command",
             serde_json::json!({}),
             Duration::from_secs(1),
         )
@@ -53,9 +75,9 @@ async fn cli_runtime_ipc_call_routes_to_registered_core_plugins() {
         matches!(
             err,
             IpcError::CommandNotFound { ref plugin_id, ref command }
-                if plugin_id == "com.nexus.storage" && command == "query_files"
+                if plugin_id == "com.nexus.storage" && command == "not-a-real-command"
         ),
-        "expected CommandNotFound for storage/query_files, got {err:?}"
+        "got {err:?}"
     );
 }
 

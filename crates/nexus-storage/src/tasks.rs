@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use rusqlite::{Connection, params};
+use serde::{Deserialize, Serialize};
 
 use crate::StorageError;
 
@@ -22,7 +23,7 @@ pub struct ParsedTask {
 // ── DB record types ──────────────────────────────────────────────────────────
 
 /// A task record from the database.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRecord {
     /// Primary key.
     pub id: u64,
@@ -43,7 +44,8 @@ pub struct TaskRecord {
 }
 
 /// Filter options for querying tasks.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TaskFilter {
     /// Only return tasks with this completion state.
     pub completed: Option<bool>,

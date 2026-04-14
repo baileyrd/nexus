@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use petgraph::stable_graph::{NodeIndex, StableGraph};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
+use serde::{Deserialize, Serialize};
 
 // ── Node and Edge data ───────────────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ pub struct EdgeData {
 }
 
 /// A file that links TO the queried path.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacklinkResult {
     /// Path of the file containing the link.
     pub source_path: String,
@@ -63,7 +64,7 @@ pub struct UnresolvedLink {
 }
 
 /// Summary statistics for the knowledge graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphStats {
     /// Total number of nodes (files + phantoms).
     pub node_count: usize,

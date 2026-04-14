@@ -12,17 +12,36 @@
 //! explicitly after batches of changes.
 
 use std::path::PathBuf;
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, PluginError};
 
-use crate::StorageConfig;
+use crate::{FileFilter, StorageConfig, StorageEngine, TaskFilter};
 use crate::watcher::{StorageEvent, Watcher};
 
 /// Reverse-DNS identifier for this plugin.
-const PLUGIN_ID: &str = "com.nexus.storage";
+pub const PLUGIN_ID: &str = "com.nexus.storage";
+
+// ── IPC handler ids ──────────────────────────────────────────────────────────
+//
+// These are stable within the plugin — the manifest in nexus-bootstrap maps
+// command ids to these numbers. If you add a handler, append; never reuse a
+// retired id.
+
+/// Handler id for `query_files`. Args: [`FileFilter`]; Returns: `Vec<FileRecord>`.
+pub const HANDLER_QUERY_FILES: u32 = 1;
+/// Handler id for `read_file`. Args: `{ "path": String }`; Returns: `{ "bytes": Vec<u8> }`.
+pub const HANDLER_READ_FILE: u32 = 2;
+/// Handler id for `backlinks`. Args: `{ "path": String }`; Returns: `Vec<BacklinkResult>`.
+pub const HANDLER_BACKLINKS: u32 = 3;
+/// Handler id for `query_tasks`. Args: [`TaskFilter`]; Returns: `Vec<TaskRecord>`.
+pub const HANDLER_QUERY_TASKS: u32 = 4;
+/// Handler id for `graph_stats`. Args: `{}`; Returns: [`crate::GraphStats`].
+pub const HANDLER_GRAPH_STATS: u32 = 5;
+/// Handler id for `rebuild_index`. Args: `{}`; Returns: [`crate::RebuildStats`].
+pub const HANDLER_REBUILD_INDEX: u32 = 6;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -40,8 +59,14 @@ const PLUGIN_ID: &str = "com.nexus.storage";
 /// hooks directly from the CLI's `App`.
 pub struct StorageCorePlugin {
     forge_root: PathBuf,
-    debounce_ms: u64,
+    config: StorageConfig,
     event_bus: Arc<EventBus>,
+    /// Opened by `on_init`; used by the IPC dispatch handlers.
+    ///
+    /// Wrapped in [`Mutex`] purely so the plugin stays `Sync` — `StorageEngine`
+    /// itself owns a `Watcher` whose `mpsc::Receiver` is `Send` but not `Sync`.
+    /// Storage methods all take `&self` so no fine-grained locking is needed.
+    engine: Option<Mutex<StorageEngine>>,
     stop_tx: Option<mpsc::SyncSender<()>>,
     bridge_thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -52,20 +77,31 @@ impl StorageCorePlugin {
     /// `debounce_ms` controls how long the watcher waits before flushing a
     /// burst of filesystem notifications.  [`StorageConfig::debounce_ms`] is a
     /// good default to pass here.
-    #[must_use] 
+    #[must_use]
     pub fn new(forge_root: PathBuf, config: &StorageConfig, event_bus: Arc<EventBus>) -> Self {
         Self {
             forge_root,
-            debounce_ms: config.debounce_ms,
+            config: config.clone(),
             event_bus,
+            engine: None,
             stop_tx: None,
             bridge_thread: None,
         }
     }
+
+    /// Direct access to the underlying engine for the bootstrap/CLI during
+    /// migration. Returns `None` before `on_init` has run successfully.
+    ///
+    /// Callers must lock the returned [`Mutex`]; in practice the lock is
+    /// always held briefly because [`StorageEngine`] methods all take `&self`.
+    #[must_use]
+    pub fn engine(&self) -> Option<&Mutex<StorageEngine>> {
+        self.engine.as_ref()
+    }
 }
 
 impl CorePlugin for StorageCorePlugin {
-    /// Verify that the forge directory exists.
+    /// Verify that the forge exists and open the storage engine.
     fn on_init(&mut self) -> Result<(), PluginError> {
         let forge_dir = self.forge_root.join(".forge");
         if !forge_dir.exists() {
@@ -78,13 +114,23 @@ impl CorePlugin for StorageCorePlugin {
                 ),
             });
         }
+
+        // Open the storage engine. IPC handlers read from this handle.
+        let engine = StorageEngine::open(&self.forge_root, &self.config).map_err(|e| {
+            PluginError::LifecycleError {
+                plugin_id: PLUGIN_ID.to_string(),
+                hook: "on_init".to_string(),
+                reason: format!("failed to open storage engine: {e}"),
+            }
+        })?;
+        self.engine = Some(Mutex::new(engine));
         Ok(())
     }
 
     /// Start the forge watcher and the bridge thread that translates
     /// [`StorageEvent`]s into [`NexusEvent`]s on the kernel bus.
     fn on_start(&mut self) -> Result<(), PluginError> {
-        let watcher = Watcher::start(&self.forge_root, self.debounce_ms)
+        let watcher = Watcher::start(&self.forge_root, self.config.debounce_ms)
             .map_err(|e| PluginError::LifecycleError {
                 plugin_id: PLUGIN_ID.to_string(),
                 hook: "on_start".to_string(),
@@ -118,19 +164,103 @@ impl CorePlugin for StorageCorePlugin {
         }
     }
 
-    /// IPC dispatch — no commands registered yet; returns an error for all IDs.
+    /// Route an IPC call to the corresponding storage operation.
+    ///
+    /// Handler ids are defined as `HANDLER_*` constants at the top of this
+    /// module; the [`nexus_plugins::PluginManifest`] registered by the
+    /// bootstrap maps each command id to one of those numbers.
     fn dispatch(
         &mut self,
         handler_id: u32,
-        _args: &serde_json::Value,
+        args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        Err(PluginError::ExecutionFailed {
+        let engine_mutex = self.engine.as_ref().ok_or_else(|| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
-            reason: format!(
-                "unknown handler id {handler_id}; IPC commands not yet registered"
-            ),
-        })
+            reason: "storage engine not initialised (on_init did not run)".to_string(),
+        })?;
+        let engine = engine_mutex.lock().map_err(|_| exec_err("engine lock poisoned".to_string()))?;
+
+        match handler_id {
+            HANDLER_QUERY_FILES => {
+                let filter: FileFilter = parse_args(args, "query_files")?;
+                let records = engine
+                    .query_files(&filter)
+                    .map_err(|e| exec_err(format!("query_files: {e}")))?;
+                to_value(&records, "query_files")
+            }
+            HANDLER_READ_FILE => {
+                let path = path_arg(args, "read_file")?;
+                let bytes = engine
+                    .read_file(&path)
+                    .map_err(|e| exec_err(format!("read_file: {e}")))?;
+                Ok(serde_json::json!({ "bytes": bytes }))
+            }
+            HANDLER_BACKLINKS => {
+                let path = path_arg(args, "backlinks")?;
+                let results = engine
+                    .backlinks(&path)
+                    .map_err(|e| exec_err(format!("backlinks: {e}")))?;
+                to_value(&results, "backlinks")
+            }
+            HANDLER_QUERY_TASKS => {
+                let filter: TaskFilter = parse_args(args, "query_tasks")?;
+                let records = engine
+                    .query_tasks(&filter)
+                    .map_err(|e| exec_err(format!("query_tasks: {e}")))?;
+                to_value(&records, "query_tasks")
+            }
+            HANDLER_GRAPH_STATS => {
+                let stats = engine
+                    .graph_stats()
+                    .map_err(|e| exec_err(format!("graph_stats: {e}")))?;
+                to_value(&stats, "graph_stats")
+            }
+            HANDLER_REBUILD_INDEX => {
+                let stats = engine
+                    .rebuild_index()
+                    .map_err(|e| exec_err(format!("rebuild_index: {e}")))?;
+                to_value(&stats, "rebuild_index")
+            }
+            _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
+        }
     }
+}
+
+// ── Dispatch helpers ─────────────────────────────────────────────────────────
+
+fn exec_err(reason: String) -> PluginError {
+    PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason,
+    }
+}
+
+fn parse_args<T: serde::de::DeserializeOwned>(
+    value: &serde_json::Value,
+    command: &str,
+) -> Result<T, PluginError> {
+    // Empty object and null both mean "no args" — accept both.
+    if value.is_null() || matches!(value.as_object(), Some(o) if o.is_empty()) {
+        return serde_json::from_value(serde_json::json!({}))
+            .map_err(|e| exec_err(format!("{command}: default args invalid: {e}")));
+    }
+    serde_json::from_value(value.clone())
+        .map_err(|e| exec_err(format!("{command}: invalid args: {e}")))
+}
+
+fn path_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
+    value
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| exec_err(format!("{command}: missing 'path' string argument")))
+}
+
+fn to_value<T: serde::Serialize>(
+    v: &T,
+    command: &str,
+) -> Result<serde_json::Value, PluginError> {
+    serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize failed: {e}")))
 }
 
 // ── Bridge thread ──────────────────────────────────────────────────────────────
