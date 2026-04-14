@@ -15,6 +15,7 @@ members = [
     "crates/nexus-database",
     "crates/nexus-theme",
     "crates/nexus-app",
+    "crates/nexus-bootstrap",
 ]
 
 [workspace.package]
