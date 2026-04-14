@@ -2,20 +2,24 @@ import { create } from "zustand";
 import {
   getDefaultLayout,
   getLayoutPreset,
-  type LayoutPresetName,
+  listLayoutPresets,
+  type PresetInfo,
   type WorkspaceLayout,
 } from "../ipc/layout";
 
 interface LayoutState {
   layout: WorkspaceLayout | null;
+  presets: PresetInfo[];
   loading: boolean;
   error: string | null;
   load: () => Promise<void>;
-  loadPreset: (name: LayoutPresetName) => Promise<void>;
+  loadPresetList: () => Promise<void>;
+  loadPreset: (id: string) => Promise<void>;
 }
 
 export const useLayoutStore = create<LayoutState>((set) => ({
   layout: null,
+  presets: [],
   loading: false,
   error: null,
 
@@ -29,10 +33,19 @@ export const useLayoutStore = create<LayoutState>((set) => ({
     }
   },
 
-  loadPreset: async (name: LayoutPresetName) => {
+  loadPresetList: async () => {
+    try {
+      const presets = await listLayoutPresets();
+      set({ presets });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  loadPreset: async (id: string) => {
     set({ loading: true, error: null });
     try {
-      const layout = await getLayoutPreset(name);
+      const layout = await getLayoutPreset(id);
       set({ layout, loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
