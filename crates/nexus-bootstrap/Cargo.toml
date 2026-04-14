@@ -8,12 +8,14 @@ description = "Nexus runtime bootstrap: assembles kernel, plugin loader, and cor
 
 [dependencies]
 nexus-kernel = { path = "../nexus-kernel" }
+nexus-kv = { path = "../nexus-kv" }
 nexus-plugins = { path = "../nexus-plugins" }
 nexus-security = { path = "../nexus-security" }
 nexus-storage = { path = "../nexus-storage" }
 nexus-git = { path = "../nexus-git" }
 nexus-database = { path = "../nexus-database" }
 nexus-ai = { path = "../nexus-ai" }
+nexus-types = { path = "../nexus-types" }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -24,3 +26,4 @@ tokio = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true }
+toml = { workspace = true }

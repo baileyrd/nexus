@@ -320,10 +320,10 @@ impl PluginContext for KernelPluginContext {
 mod tests {
     use super::*;
     use crate::event::NexusEvent;
-    use crate::kv_store::SqliteKvStore;
+    use crate::kv_store::InMemoryKvStore;
 
     fn make_context(dir: &Path, caps: &[Capability]) -> KernelPluginContext {
-        let kv: Arc<dyn KvStore> = Arc::new(SqliteKvStore::in_memory().unwrap());
+        let kv: Arc<dyn KvStore> = Arc::new(InMemoryKvStore::new());
         let bus = Arc::new(EventBus::new(16));
         KernelPluginContext::new(
             "com.test.plugin",

@@ -23,6 +23,10 @@ const FORBIDDEN: &[(&str, &str)] = &[
     // MCP dispatches `nexus_ask` via `ipc_call(AI_PLUGIN, "ask", ...)`; it
     // must not link the AI engine directly.
     ("nexus-mcp", "nexus-ai"),
+    // Kernel is backend-agnostic: the KV trait lives here, but the SQLite
+    // impl is in `nexus-kv` and must be injected via `Kernel::new`.
+    ("nexus-kernel", "rusqlite"),
+    ("nexus-kernel", "nexus-kv"),
 ];
 
 #[test]

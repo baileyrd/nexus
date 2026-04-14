@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 use crate::config::KernelConfig;
 use crate::error::Result;
 use crate::event_bus::EventBus;
-use crate::kv_store::{KvStore, SqliteKvStore};
+use crate::kv_store::KvStore;
 use crate::plugin_registry::PluginRegistry;
 
 /// The Nexus kernel. Owns the event bus and plugin registry.
@@ -14,7 +14,8 @@ use crate::plugin_registry::PluginRegistry;
 /// Usage:
 /// ```ignore
 /// let config = KernelConfig::for_testing(PathBuf::from("/tmp/test"));
-/// let kernel = Kernel::new(config)?;
+/// let kv = Arc::new(nexus_kv::InMemoryKvStore::new());
+/// let kernel = Kernel::new(config, kv)?;
 /// kernel.start().await?;
 /// // ... do work ...
 /// kernel.shutdown().await?;
@@ -40,16 +41,18 @@ impl Kernel {
     /// state, but does NOT start background tasks, discover plugins, or emit
     /// events. Call `start()` to bring the kernel up.
     ///
+    /// `kv_store` is injected — pick a backend from `nexus-kv`
+    /// ([`nexus_kv::SqliteKvStore`](../../nexus_kv/struct.SqliteKvStore.html)
+    /// for the real runtime,
+    /// [`nexus_kv::InMemoryKvStore`](../../nexus_kv/struct.InMemoryKvStore.html)
+    /// for tests).
+    ///
     /// # Errors
     /// Currently infallible in PRD 01 scope (all validation happens earlier
     /// via `KernelConfig::load`). The `Result` return type is preserved for
     /// forward compatibility with future validation.
-    pub fn new(config: KernelConfig) -> Result<Self> {
+    pub fn new(config: KernelConfig, kv_store: Arc<dyn KvStore>) -> Result<Self> {
         let event_bus = Arc::new(EventBus::new(config.event_bus_capacity));
-        let forge_dir = config.forge_root.join(".forge");
-        std::fs::create_dir_all(&forge_dir)?;
-        let kv_path = forge_dir.join("kv.sqlite3");
-        let kv_store: Arc<dyn KvStore> = Arc::new(SqliteKvStore::open(&kv_path)?);
         let plugins = PluginRegistry::new();
         let shutdown_flag = Arc::new(AtomicBool::new(false));
 
@@ -156,19 +159,24 @@ impl Kernel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kv_store::InMemoryKvStore;
     use std::path::PathBuf;
+
+    fn kv() -> Arc<dyn KvStore> {
+        Arc::new(InMemoryKvStore::new())
+    }
 
     #[test]
     fn new_succeeds_with_default_config() {
         let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-kernel-test"));
-        let kernel = Kernel::new(config).unwrap();
+        let kernel = Kernel::new(config, kv()).unwrap();
         assert_eq!(kernel.config().forge_root, PathBuf::from("/tmp/nexus-kernel-test"));
     }
 
     #[test]
     fn event_bus_handle_is_clonable_arc() {
         let config = KernelConfig::for_testing(PathBuf::from("/tmp"));
-        let kernel = Kernel::new(config).unwrap();
+        let kernel = Kernel::new(config, kv()).unwrap();
         let bus1 = kernel.event_bus();
         let bus2 = kernel.event_bus();
         // Both are Arc clones pointing at the same bus
@@ -178,14 +186,14 @@ mod tests {
     #[tokio::test]
     async fn start_succeeds_with_empty_plugin_set() {
         let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-start-test"));
-        let kernel = Kernel::new(config).unwrap();
+        let kernel = Kernel::new(config, kv()).unwrap();
         kernel.start().await.unwrap();
     }
 
     #[tokio::test]
     async fn start_is_idempotent_across_multiple_calls() {
         let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-start-idem"));
-        let kernel = Kernel::new(config).unwrap();
+        let kernel = Kernel::new(config, kv()).unwrap();
         kernel.start().await.unwrap();
         // Calling start again should not fail in PRD 01 scope.
         kernel.start().await.unwrap();
@@ -194,7 +202,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_succeeds_on_fresh_kernel() {
         let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-shutdown-test"));
-        let kernel = Kernel::new(config).unwrap();
+        let kernel = Kernel::new(config, kv()).unwrap();
         kernel.start().await.unwrap();
         kernel.shutdown().await.unwrap();
     }
@@ -202,7 +210,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_is_idempotent() {
         let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-shutdown-idem"));
-        let kernel = Kernel::new(config).unwrap();
+        let kernel = Kernel::new(config, kv()).unwrap();
         kernel.start().await.unwrap();
         kernel.shutdown().await.unwrap();
         kernel.shutdown().await.unwrap();  // no panic, no error
@@ -211,7 +219,7 @@ mod tests {
     #[test]
     fn plugins_accessor_returns_empty_registry_before_start() {
         let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-plugins-accessor"));
-        let kernel = Kernel::new(config).unwrap();
+        let kernel = Kernel::new(config, kv()).unwrap();
         let registry = kernel.plugins();
         assert!(registry.is_empty());
     }

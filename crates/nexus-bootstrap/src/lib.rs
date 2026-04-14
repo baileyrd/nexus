@@ -102,7 +102,19 @@ pub fn build_tui_runtime(forge_root: PathBuf) -> Result<Runtime> {
 fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> Result<Runtime> {
     let config = KernelConfig::load(&forge_root)
         .with_context(|| format!("failed to load kernel config at '{}'", forge_root.display()))?;
-    let kernel = Kernel::new(config).context("failed to build kernel")?;
+
+    // The KV store lives under `.forge/kv.sqlite3`. Create the dir here —
+    // kernel is backend-agnostic now, so dir creation is bootstrap's job.
+    let forge_dir = forge_root.join(".forge");
+    std::fs::create_dir_all(&forge_dir)
+        .with_context(|| format!("failed to create forge dir '{}'", forge_dir.display()))?;
+    let kv_path = forge_dir.join("kv.sqlite3");
+    let kv_store: Arc<dyn nexus_kernel::KvStore> =
+        Arc::new(nexus_kv::SqliteKvStore::open(&kv_path).with_context(|| {
+            format!("failed to open kernel KV store at '{}'", kv_path.display())
+        })?);
+
+    let kernel = Kernel::new(config, kv_store).context("failed to build kernel")?;
     let event_bus: Arc<EventBus> = kernel.event_bus();
     let kv_store = kernel.kv_store();
 
@@ -213,6 +225,12 @@ fn register_core_plugins(
                     ("vector_query", nexus_storage::core_plugin::HANDLER_VECTOR_QUERY),
                     ("vector_delete_by_file", nexus_storage::core_plugin::HANDLER_VECTOR_DELETE_BY_FILE),
                     ("vectorstore_count", nexus_storage::core_plugin::HANDLER_VECTORSTORE_COUNT),
+                    ("query_blocks", nexus_storage::core_plugin::HANDLER_QUERY_BLOCKS),
+                    ("config_read", nexus_storage::core_plugin::HANDLER_CONFIG_READ),
+                    ("config_reset", nexus_storage::core_plugin::HANDLER_CONFIG_RESET),
+                    ("base_index", nexus_storage::core_plugin::HANDLER_BASE_INDEX),
+                    ("base_list", nexus_storage::core_plugin::HANDLER_BASE_LIST),
+                    ("base_query", nexus_storage::core_plugin::HANDLER_BASE_QUERY),
                 ],
             ),
             forge_root,

@@ -5,10 +5,15 @@
 //! single-test proof that the nexus-kernel crate is interface-complete.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use nexus_kernel::{
-    EventFilter, Kernel, KernelConfig,
+    EventFilter, InMemoryKvStore, Kernel, KernelConfig, KvStore,
 };
+
+fn kv() -> Arc<dyn KvStore> {
+    Arc::new(InMemoryKvStore::new())
+}
 
 /// Tempdir helper — creates a unique path and ensures cleanup on drop.
 struct TempForge {
@@ -34,7 +39,7 @@ impl Drop for TempForge {
 async fn smoke_new_start_shutdown() {
     let forge = TempForge::new("new-start-shutdown");
     let config = KernelConfig::for_testing(forge.path.clone());
-    let kernel = Kernel::new(config).expect("kernel construction should succeed");
+    let kernel = Kernel::new(config, kv()).expect("kernel construction should succeed");
     kernel.start().await.expect("kernel start should succeed with empty plugin set");
     kernel.shutdown().await.expect("kernel shutdown should succeed");
 }
@@ -43,7 +48,7 @@ async fn smoke_new_start_shutdown() {
 async fn smoke_event_bus_round_trip() {
     let forge = TempForge::new("bus-roundtrip");
     let config = KernelConfig::for_testing(forge.path.clone());
-    let kernel = Kernel::new(config).unwrap();
+    let kernel = Kernel::new(config, kv()).unwrap();
     kernel.start().await.unwrap();
 
     // Subscribe, publish, receive
@@ -74,7 +79,7 @@ async fn smoke_config_loaded_from_disk() {
     assert_eq!(config.event_bus_capacity, 512);
     assert!(!config.hot_reload_enabled);
 
-    let kernel = Kernel::new(config).unwrap();
+    let kernel = Kernel::new(config, kv()).unwrap();
     kernel.start().await.unwrap();
     kernel.shutdown().await.unwrap();
 }
@@ -83,7 +88,7 @@ async fn smoke_config_loaded_from_disk() {
 async fn smoke_multiple_shutdown_calls_are_idempotent() {
     let forge = TempForge::new("idempotent-shutdown");
     let config = KernelConfig::for_testing(forge.path.clone());
-    let kernel = Kernel::new(config).unwrap();
+    let kernel = Kernel::new(config, kv()).unwrap();
     kernel.start().await.unwrap();
     kernel.shutdown().await.unwrap();
     kernel.shutdown().await.unwrap();  // must not panic or error
@@ -93,7 +98,7 @@ async fn smoke_multiple_shutdown_calls_are_idempotent() {
 async fn smoke_plugin_registry_is_empty_in_prd_01_scope() {
     let forge = TempForge::new("empty-registry");
     let config = KernelConfig::for_testing(forge.path.clone());
-    let kernel = Kernel::new(config).unwrap();
+    let kernel = Kernel::new(config, kv()).unwrap();
     kernel.start().await.unwrap();
 
     let registry = kernel.plugins();

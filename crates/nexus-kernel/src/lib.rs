@@ -33,7 +33,7 @@ pub use event::{EventFilter, EventMetadata, NexusEvent, PublishedEvent, StopReas
 pub use event_bus::{EventBus, EventSubscription};
 pub use ipc::{ipc_call, IpcDispatcher, IpcFuture};
 pub use kernel::Kernel;
-pub use kv_store::KvStore;
+pub use kv_store::{InMemoryKvStore, KvStore};
 pub use log::LogLevel;
 pub use plugin::{PluginInfo, PluginStatus, TrustLevel};
 pub use plugin_registry::PluginRegistry;

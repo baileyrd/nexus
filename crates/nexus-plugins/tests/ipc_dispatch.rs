@@ -5,13 +5,12 @@
 //! verify every error path (capability denied, unknown plugin, unknown
 //! command, missing dispatcher, handler error).
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use nexus_kernel::{
-    Capability, CapabilitySet, EventBus, IpcDispatcher, IpcError, KernelPluginContext, KvError,
-    KvStore, PluginContext,
+    Capability, CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError,
+    KernelPluginContext, KvStore, PluginContext,
 };
 use nexus_plugins::{
     parse_manifest, CorePlugin, CorePluginFuture, PluginError, PluginLoader, SharedPluginLoader,
@@ -142,47 +141,13 @@ fn fixture() -> Fixture {
     }
 }
 
-/// In-memory [`KvStore`] just for these tests — the kernel's real SqliteKvStore
-/// is `pub(crate)` so we can't use it from an integration test.
-#[derive(Debug, Default)]
-struct MemoryKv {
-    inner: Mutex<HashMap<(String, String), Vec<u8>>>,
-}
-
-impl KvStore for MemoryKv {
-    fn get(&self, namespace: &str, key: &str) -> Result<Option<Vec<u8>>, KvError> {
-        Ok(self
-            .inner
-            .lock()
-            .unwrap()
-            .get(&(namespace.to_string(), key.to_string()))
-            .cloned())
-    }
-
-    fn set(&self, namespace: &str, key: &str, value: &[u8]) -> Result<(), KvError> {
-        self.inner
-            .lock()
-            .unwrap()
-            .insert((namespace.to_string(), key.to_string()), value.to_vec());
-        Ok(())
-    }
-
-    fn delete(&self, namespace: &str, key: &str) -> Result<(), KvError> {
-        self.inner
-            .lock()
-            .unwrap()
-            .remove(&(namespace.to_string(), key.to_string()));
-        Ok(())
-    }
-}
-
 fn make_context(
     fx: &Fixture,
     plugin_id: &str,
     caps: &[Capability],
     with_dispatcher: bool,
 ) -> KernelPluginContext {
-    let kv: Arc<dyn KvStore> = Arc::new(MemoryKv::default());
+    let kv: Arc<dyn KvStore> = Arc::new(InMemoryKvStore::new());
     let bus = Arc::new(EventBus::new(16));
     KernelPluginContext::new(
         plugin_id,
@@ -378,7 +343,7 @@ async fn ipc_call_prefers_async_handler() {
 
     let dispatcher: Arc<dyn IpcDispatcher> = Arc::new(SharedPluginLoader::new(loader));
 
-    let kv: Arc<dyn KvStore> = Arc::new(MemoryKv::default());
+    let kv: Arc<dyn KvStore> = Arc::new(InMemoryKvStore::new());
     let bus = Arc::new(EventBus::new(16));
     let ctx = KernelPluginContext::new(
         "dev.test.caller",
