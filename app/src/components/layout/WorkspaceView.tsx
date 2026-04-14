@@ -1,6 +1,8 @@
 import { useEffect } from "react";
+import type { RibbonItem, SidebarPanel } from "../../bindings";
 import { useLayoutStore } from "../../stores/layout";
 import { LayoutPresetPicker } from "./LayoutPresetPicker";
+import { Ribbon } from "./Ribbon";
 import { SplitPane } from "./SplitPane";
 
 export function WorkspaceView() {
@@ -8,6 +10,7 @@ export function WorkspaceView() {
   const load = useLayoutStore((s) => s.load);
   const loading = useLayoutStore((s) => s.loading);
   const error = useLayoutStore((s) => s.error);
+  const togglePanelVisibility = useLayoutStore((s) => s.togglePanelVisibility);
 
   useEffect(() => {
     if (!layout) load();
@@ -29,7 +32,12 @@ export function WorkspaceView() {
           style={{ display: "flex" }}
         >
           {!layout.leftSidebar.collapsed && (
-            <SidebarPreview side="left" panels={layout.leftSidebar.panels} />
+            <SidebarPreview
+              side="left"
+              panels={layout.leftSidebar.panels}
+              ribbon={layout.leftSidebar.ribbon}
+              onTogglePanel={(id) => togglePanelVisibility("left", id)}
+            />
           )}
           <div className="workspace-center">
             <SplitPane
@@ -41,7 +49,12 @@ export function WorkspaceView() {
             )}
           </div>
           {!layout.rightSidebar.collapsed && (
-            <SidebarPreview side="right" panels={layout.rightSidebar.panels} />
+            <SidebarPreview
+              side="right"
+              panels={layout.rightSidebar.panels}
+              ribbon={layout.rightSidebar.ribbon}
+              onTogglePanel={(id) => togglePanelVisibility("right", id)}
+            />
           )}
         </div>
       ) : loading ? (
@@ -53,23 +66,53 @@ export function WorkspaceView() {
 
 interface SidebarPreviewProps {
   side: "left" | "right";
-  panels: { id: string; title: string; icon: string }[];
+  panels: SidebarPanel[];
+  ribbon: RibbonItem[];
+  onTogglePanel: (panelId: string) => void;
 }
 
-function SidebarPreview({ side, panels }: SidebarPreviewProps) {
+function SidebarPreview({ side, panels, ribbon, onTogglePanel }: SidebarPreviewProps) {
+  const activePanelIds = new Set(panels.filter((p) => p.visible).map((p) => p.id));
+
+  const panelList = (
+    <ul className="sidebar-panels">
+      {panels.map((p) => (
+        <li key={p.id} className={p.visible ? "active" : undefined}>
+          <span className="icon" aria-hidden>
+            ◇
+          </span>
+          <span className="title">{p.title}</span>
+        </li>
+      ))}
+      {panels.length === 0 && <li className="empty">no panels</li>}
+    </ul>
+  );
+
+  const ribbonRail = ribbon.length > 0 ? (
+    <Ribbon
+      side={side}
+      items={ribbon}
+      activePanelIds={activePanelIds}
+      onTogglePanel={onTogglePanel}
+    />
+  ) : null;
+
+  // Obsidian layout: ribbon sits on the docked edge. For the left
+  // sidebar that means ribbon first, then panels; for the right
+  // sidebar it's panels then ribbon.
   return (
     <aside className="sidebar-preview" data-side={side}>
-      <ul>
-        {panels.map((p) => (
-          <li key={p.id}>
-            <span className="icon" aria-hidden>
-              ◇
-            </span>
-            <span className="title">{p.title}</span>
-          </li>
-        ))}
-        {panels.length === 0 && <li className="empty">no panels</li>}
-      </ul>
+      {side === "left" ? (
+        <>
+          {ribbonRail}
+          {panelList}
+        </>
+      ) : (
+        <>
+          {panelList}
+          {ribbonRail}
+        </>
+      )}
     </aside>
   );
 }

@@ -169,11 +169,11 @@ button {
 }
 
 .sidebar-preview {
-  width: 200px;
+  display: flex;
+  width: 240px;
   flex-shrink: 0;
   background: var(--nx-bg-secondary, #f8f9fa);
   border-right: 1px solid var(--nx-bg-tertiary, #e8eaef);
-  padding: var(--nx-space-sm, 8px) 0;
 }
 
 .sidebar-preview[data-side="right"] {
@@ -181,24 +181,81 @@ button {
   border-left: 1px solid var(--nx-bg-tertiary, #e8eaef);
 }
 
-.sidebar-preview ul {
+.sidebar-preview .sidebar-panels {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: var(--nx-space-sm, 8px) 0;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-.sidebar-preview li {
+.sidebar-preview .sidebar-panels li {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
   color: var(--nx-text-secondary, #4a4a4a);
   font-size: 0.9em;
+  border-left: 2px solid transparent;
 }
 
-.sidebar-preview li.empty {
+.sidebar-preview .sidebar-panels li.active {
+  color: var(--nx-text-primary, #111);
+  background: var(--nx-bg-primary, #fff);
+  border-left-color: var(--nx-accent, #6c8cff);
+}
+
+.sidebar-preview .sidebar-panels li.empty {
   font-style: italic;
   color: var(--nx-text-tertiary, #7a7a7a);
+}
+
+.ribbon {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 40px;
+  flex-shrink: 0;
+  padding: var(--nx-space-sm, 8px) 0;
+  background: var(--nx-bg-tertiary, #eef0f4);
+  border-right: 1px solid var(--nx-bg-tertiary, #e8eaef);
+}
+
+.ribbon[data-side="right"] {
+  border-right: none;
+  border-left: 1px solid var(--nx-bg-tertiary, #e8eaef);
+}
+
+.ribbon-item {
+  width: 32px;
+  height: 32px;
+  margin: 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-secondary, #4a4a4a);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85em;
+  font-weight: 600;
+  transition: background 120ms, color 120ms;
+}
+
+.ribbon-item:hover:not(.active) {
+  background: var(--nx-bg-primary, #fff);
+  color: var(--nx-text-primary, #111);
+}
+
+.ribbon-item.active {
+  background: var(--nx-accent, #6c8cff);
+  color: var(--nx-accent-contrast, #fff);
+}
+
+.ribbon-item:focus-visible {
+  outline: 2px solid var(--nx-accent, #6c8cff);
+  outline-offset: 2px;
 }
 
 .bottom-preview {

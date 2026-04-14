@@ -15,6 +15,7 @@ interface LayoutState {
   load: () => Promise<void>;
   loadPresetList: () => Promise<void>;
   loadPreset: (id: string) => Promise<void>;
+  togglePanelVisibility: (side: "left" | "right", panelId: string) => void;
 }
 
 export const useLayoutStore = create<LayoutState>((set) => ({
@@ -51,4 +52,23 @@ export const useLayoutStore = create<LayoutState>((set) => ({
       set({ error: String(e), loading: false });
     }
   },
+
+  // Local-only: flips the `visible` flag on a panel so the ribbon's
+  // `togglePanel` action feels alive. Persisting through IPC is a later
+  // piece once the layout-mutation commands land.
+  togglePanelVisibility: (side, panelId) =>
+    set((state) => {
+      if (!state.layout) return {};
+      const sidebarKey = side === "left" ? "leftSidebar" : "rightSidebar";
+      const sidebar = state.layout[sidebarKey];
+      const panels = sidebar.panels.map((p) =>
+        p.id === panelId ? { ...p, visible: !p.visible } : p,
+      );
+      return {
+        layout: {
+          ...state.layout,
+          [sidebarKey]: { ...sidebar, panels },
+        },
+      };
+    }),
 }));
