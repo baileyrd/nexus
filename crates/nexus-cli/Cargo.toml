@@ -14,7 +14,6 @@ path = "src/main.rs"
 nexus-bootstrap = { path = "../nexus-bootstrap" }
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-security = { path = "../nexus-security" }
-nexus-storage = { path = "../nexus-storage" }
 nexus-plugins = { path = "../nexus-plugins" }
 nexus-types = { path = "../nexus-types" }
 nexus-mcp = { path = "../nexus-mcp" }
@@ -35,4 +34,5 @@ tracing-appender = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+nexus-storage = { path = "../nexus-storage" }
 tempfile = { workspace = true }

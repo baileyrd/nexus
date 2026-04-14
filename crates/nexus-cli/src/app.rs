@@ -2,10 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use nexus_bootstrap::{build_cli_runtime, Runtime};
+use nexus_bootstrap::{Runtime, build_cli_runtime};
 use nexus_kernel::EventBus;
-use nexus_plugins::{CorePlugin, PluginManager, PluginManagerConfig};
-use nexus_storage::{StorageCorePlugin, StorageConfig, StorageEngine};
+use nexus_plugins::{PluginManager, PluginManagerConfig};
 use tokio::runtime::Runtime as TokioRuntime;
 
 use crate::output::OutputFormat;
@@ -14,18 +13,11 @@ use crate::output::OutputFormat;
 pub struct App {
     forge_root: PathBuf,
     format: OutputFormat,
-    /// Kernel event bus — shared with the storage bridge thread.
+    /// Kernel event bus handle retained for the community plugin manager.
     event_bus: Arc<EventBus>,
-    /// The storage engine (lazy). Retained for subcommands that have not yet
-    /// migrated to `ipc_call` (canvas, bases, ai, mcp, watch).
-    storage: Option<StorageEngine>,
-    /// Storage core plugin that bridges watcher events onto the kernel bus
-    /// (lazy, started alongside `storage`).
-    storage_plugin: Option<StorageCorePlugin>,
     /// Community-plugin manager (lazy).
     plugins: Option<PluginManager>,
-    /// Bootstrap-assembled runtime (lazy). Used by subcommands that have
-    /// migrated to the plugin-IPC boundary.
+    /// Bootstrap-assembled runtime (lazy).
     runtime: Option<Runtime>,
     /// Tokio runtime used to block on async `ipc_call`s.
     rt: Option<TokioRuntime>,
@@ -40,8 +32,6 @@ impl App {
             forge_root,
             format,
             event_bus: Arc::new(EventBus::new(256)),
-            storage: None,
-            storage_plugin: None,
             plugins: None,
             runtime: None,
             rt: None,
@@ -88,66 +78,6 @@ impl App {
         self.format
     }
 
-    /// Return the kernel event bus handle.
-    #[allow(dead_code)]
-    pub fn event_bus(&self) -> Arc<EventBus> {
-        Arc::clone(&self.event_bus)
-    }
-
-    /// Open the storage engine lazily (creates on first call, reuses after).
-    ///
-    /// Also starts the storage core plugin on first call, wiring the forge
-    /// watcher to the kernel event bus so `com.nexus.storage.file_created` /
-    /// `file_modified` / `file_deleted` / `file_renamed` events flow to subscribers.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the forge directory does not exist or the engine
-    /// cannot be opened.
-    pub fn storage(&mut self) -> Result<&StorageEngine> {
-        if self.storage.is_none() {
-            let config = StorageConfig::default();
-            let engine = StorageEngine::open(&self.forge_root, &config)
-                .with_context(|| {
-                    format!(
-                        "failed to open forge at '{}'",
-                        self.forge_root.display()
-                    )
-                })?;
-            self.storage = Some(engine);
-
-            // Start the storage core plugin (watcher → kernel bus bridge).
-            let mut plugin = StorageCorePlugin::new(
-                self.forge_root.clone(),
-                &config,
-                Arc::clone(&self.event_bus),
-            );
-            if let Err(e) = plugin.on_init().and_then(|()| plugin.on_start()) {
-                tracing::warn!(
-                    error = %e,
-                    "storage core plugin failed to start; file events will not \
-                     be published to the kernel bus"
-                );
-            }
-            self.storage_plugin = Some(plugin);
-        }
-        Ok(self.storage.as_ref().expect("just initialised"))
-    }
-
-    /// Open the storage engine lazily and return a shared reference.
-    ///
-    /// All [`StorageEngine`] mutation methods use interior mutability (`&self`),
-    /// so a mutable reference is not required.  This method is an alias for
-    /// [`storage`](Self::storage) kept for call-site compatibility.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the forge directory does not exist or the engine
-    /// cannot be opened.
-    pub fn storage_mut(&mut self) -> Result<&StorageEngine> {
-        self.storage()
-    }
-
     /// Create the plugin manager lazily (creates on first call, reuses after).
     ///
     /// The plugins directory is `.forge/plugins/` relative to the forge root.
@@ -175,5 +105,4 @@ impl App {
         }
         Ok(self.plugins.as_mut().expect("just initialised"))
     }
-
 }

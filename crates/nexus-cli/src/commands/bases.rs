@@ -1,24 +1,27 @@
 //! CLI commands for bases (database) operations.
 
 use anyhow::Result;
+use nexus_bootstrap::storage as storage_ipc;
+use nexus_types::bases;
 
 use crate::app::App;
 use crate::output;
 
 /// Create a new base with the given schema JSON.
 pub fn create(app: &mut App, path: &str, schema_json: &str) -> Result<()> {
-    let schema: nexus_storage::bases::BaseSchema =
-        serde_json::from_str(schema_json).map_err(|e| anyhow::anyhow!("Invalid schema JSON: {e}"))?;
+    let schema: bases::BaseSchema = serde_json::from_str(schema_json)
+        .map_err(|e| anyhow::anyhow!("Invalid schema JSON: {e}"))?;
 
     let abs_dir = app.forge_root().join(path);
-    let base = nexus_storage::bases::init_base(&abs_dir, path, &schema)?;
+    let field_count = schema.fields.len();
+    bases::init_base(&abs_dir, path, &schema)?;
 
-    // Index in SQLite.
-    app.storage_mut()?.index_base(path, &base)?;
+    let (runtime, rt) = app.runtime()?;
+    storage_ipc::base_index(runtime, rt, path)?;
 
     output::print_success(
         app.format(),
-        &format!("Created base: {path} ({} fields)", schema.fields.len()),
+        &format!("Created base: {path} ({field_count} fields)"),
         &serde_json::json!(null),
     );
     Ok(())
@@ -26,7 +29,8 @@ pub fn create(app: &mut App, path: &str, schema_json: &str) -> Result<()> {
 
 /// List all indexed bases.
 pub fn list(app: &mut App) -> Result<()> {
-    let bases = app.storage_mut()?.list_bases()?;
+    let (runtime, rt) = app.runtime()?;
+    let bases = storage_ipc::base_list(runtime, rt)?;
     if bases.is_empty() {
         println!("No bases found.");
         return Ok(());
@@ -40,7 +44,7 @@ pub fn list(app: &mut App) -> Result<()> {
 /// Show details of a base.
 pub fn show(app: &mut App, path: &str) -> Result<()> {
     let abs_dir = app.forge_root().join(path);
-    let base = nexus_storage::bases::load_base(&abs_dir)?;
+    let base = bases::load_base(&abs_dir)?;
     println!("Base: {}", base.name);
     println!("Fields:");
     for (name, def) in &base.schema.fields {
@@ -57,24 +61,23 @@ pub fn show(app: &mut App, path: &str) -> Result<()> {
 
 /// Add a record to a base from JSON.
 pub fn add_record(app: &mut App, path: &str, data_json: &str) -> Result<()> {
-    let record: nexus_storage::bases::BaseRecord =
-        serde_json::from_str(data_json).map_err(|e| anyhow::anyhow!("Invalid record JSON: {e}"))?;
+    let record: bases::BaseRecord = serde_json::from_str(data_json)
+        .map_err(|e| anyhow::anyhow!("Invalid record JSON: {e}"))?;
 
     let abs_dir = app.forge_root().join(path);
-    let mut base = nexus_storage::bases::load_base(&abs_dir)?;
-
-    // Validate against schema.
-    nexus_storage::bases::validate_record(&base.schema, &record)?;
+    let mut base = bases::load_base(&abs_dir)?;
+    bases::validate_record(&base.schema, &record)?;
 
     base.records.push(record);
-    nexus_storage::bases::save_base(&abs_dir, &base)?;
+    bases::save_base(&abs_dir, &base)?;
 
-    // Re-index.
-    app.storage_mut()?.index_base(path, &base)?;
+    let record_count = base.records.len();
+    let (runtime, rt) = app.runtime()?;
+    storage_ipc::base_index(runtime, rt, path)?;
 
     output::print_success(
         app.format(),
-        &format!("Added record to {path} (total: {})", base.records.len()),
+        &format!("Added record to {path} (total: {record_count})"),
         &serde_json::json!(null),
     );
     Ok(())
@@ -89,10 +92,10 @@ pub fn query(
     limit: Option<u32>,
     offset: Option<u32>,
 ) -> Result<()> {
-    // If no filters/sorts/pagination, fall back to simple file load.
+    // Fast path: no filters/sorts/pagination → read from disk directly.
     if filters.is_empty() && sorts.is_empty() && limit.is_none() && offset.is_none() {
         let abs_dir = app.forge_root().join(path);
-        let base = nexus_storage::bases::load_base(&abs_dir)?;
+        let base = bases::load_base(&abs_dir)?;
         if base.records.is_empty() {
             println!("No records in {path}.");
             return Ok(());
@@ -103,29 +106,10 @@ pub fn query(
         return Ok(());
     }
 
-    // Use the database engine's query system.
-    let storage = app.storage_mut()?;
-    let bases = storage.list_bases()?;
-    let base_summary = bases
-        .iter()
-        .find(|b| b.path == path)
-        .ok_or_else(|| anyhow::anyhow!("Base not found: {path}"))?;
-
-    let mut db_query = nexus_database::Query {
-        base_id: base_summary.id,
-        ..Default::default()
-    };
-    for f in filters {
-        db_query.filters.push(nexus_database::parse_filter(f)?);
-    }
-    for s in sorts {
-        db_query.sorts.push(nexus_database::parse_sort(s)?);
-    }
-    db_query.limit = limit;
-    db_query.offset = offset;
-
-    let conn = storage.pool_connection()?;
-    let result = nexus_database::execute_query(&conn, &db_query)?;
+    // Structured query — delegate to storage plugin (which holds the DB
+    // connection) via IPC.
+    let (runtime, rt) = app.runtime()?;
+    let result = storage_ipc::base_query(runtime, rt, path, filters, sorts, limit, offset)?;
 
     if result.records.is_empty() {
         println!("No matching records.");
@@ -144,7 +128,7 @@ pub fn query(
 /// Import records from a CSV file.
 pub fn import(app: &mut App, path: &str, csv_file: &str, has_header: bool) -> Result<()> {
     let abs_dir = app.forge_root().join(path);
-    let mut base = nexus_storage::bases::load_base(&abs_dir)?;
+    let mut base = bases::load_base(&abs_dir)?;
 
     let file = std::fs::File::open(csv_file)
         .map_err(|e| anyhow::anyhow!("Failed to open CSV file: {e}"))?;
@@ -167,8 +151,10 @@ pub fn import(app: &mut App, path: &str, csv_file: &str, has_header: bool) -> Re
 
     let (records, result) = nexus_database::import_csv(file, &mapping, has_header)?;
     base.records.extend(records);
-    nexus_storage::bases::save_base(&abs_dir, &base)?;
-    app.storage_mut()?.index_base(path, &base)?;
+    bases::save_base(&abs_dir, &base)?;
+
+    let (runtime, rt) = app.runtime()?;
+    storage_ipc::base_index(runtime, rt, path)?;
 
     println!(
         "Imported {} records ({} skipped)",
@@ -183,7 +169,7 @@ pub fn import(app: &mut App, path: &str, csv_file: &str, has_header: bool) -> Re
 /// Export records to a CSV file.
 pub fn export(app: &mut App, path: &str, csv_file: &str) -> Result<()> {
     let abs_dir = app.forge_root().join(path);
-    let base = nexus_storage::bases::load_base(&abs_dir)?;
+    let base = bases::load_base(&abs_dir)?;
 
     let field_names: Vec<String> = base.schema.fields.keys().cloned().collect();
     let file = std::fs::File::create(csv_file)
@@ -197,7 +183,7 @@ pub fn export(app: &mut App, path: &str, csv_file: &str) -> Result<()> {
 /// Evaluate a formula against a specific record.
 pub fn formula(app: &mut App, path: &str, record_id: &str, expr: &str) -> Result<()> {
     let abs_dir = app.forge_root().join(path);
-    let base = nexus_storage::bases::load_base(&abs_dir)?;
+    let base = bases::load_base(&abs_dir)?;
 
     let record = base
         .records

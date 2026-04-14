@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use nexus_bootstrap::storage as storage_ipc;
 use nexus_kernel::PluginContext;
 use serde_json::Value;
 
@@ -41,42 +42,23 @@ pub fn ask(app: &mut App, question: &str) -> Result<()> {
 
 /// Index one file or all files into the vector store.
 pub fn embed(app: &mut App, file: Option<&str>) -> Result<()> {
-    // Fetching files and blocks still uses direct `nexus-storage` — dropping
-    // the last storage dep from the CLI requires a `query_blocks` IPC
-    // handler, which is a follow-up slice.
-    let storage = app.storage_mut()?;
-    let conn = storage
-        .pool_connection()
-        .map_err(|e| anyhow::anyhow!("failed to get DB connection: {e}"))?;
-
     if let Some(path) = file {
-        let file_record = nexus_storage::file_by_path(&conn, path)?
-            .ok_or_else(|| anyhow::anyhow!("file not found: {path}"))?;
-        let blocks = nexus_storage::query_blocks(&conn, file_record.id)?;
-        let block_tuples: Vec<(u64, String, String, Option<i32>)> = blocks
-            .iter()
-            .map(|b| (b.id, b.block_type.clone(), b.content.clone(), b.level))
-            .collect();
-
-        let count = index_one(app, path, &block_tuples)?;
+        let blocks = fetch_blocks(app, path)?;
+        if blocks.is_empty() {
+            return Err(anyhow::anyhow!("file not found: {path}"));
+        }
+        let count = index_one(app, path, &blocks)?;
         println!("Embedded {count} chunks from {path}");
     } else {
-        let files = nexus_storage::query_files(&conn, &nexus_storage::FileFilter::default())?;
-        drop(conn); // release read handle before we start embedding in a loop
+        let files = {
+            let (runtime, rt) = app.runtime()?;
+            storage_ipc::query_files(runtime, rt)?
+        };
 
         let mut total = 0usize;
         for file_record in &files {
-            let storage = app.storage_mut()?;
-            let conn = storage.pool_connection()
-                .map_err(|e| anyhow::anyhow!("failed to get DB connection: {e}"))?;
-            let blocks = nexus_storage::query_blocks(&conn, file_record.id)?;
-            drop(conn);
-            let block_tuples: Vec<(u64, String, String, Option<i32>)> = blocks
-                .iter()
-                .map(|b| (b.id, b.block_type.clone(), b.content.clone(), b.level))
-                .collect();
-
-            let count = index_one(app, &file_record.path, &block_tuples)?;
+            let blocks = fetch_blocks(app, &file_record.path)?;
+            let count = index_one(app, &file_record.path, &blocks)?;
             total += count;
             println!("  {} — {count} chunks", file_record.path);
         }
@@ -84,6 +66,15 @@ pub fn embed(app: &mut App, file: Option<&str>) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn fetch_blocks(app: &mut App, path: &str) -> Result<Vec<(u64, String, String, Option<i32>)>> {
+    let (runtime, rt) = app.runtime()?;
+    let blocks = storage_ipc::query_blocks(runtime, rt, path)?;
+    Ok(blocks
+        .into_iter()
+        .map(|b| (b.id, b.block_type, b.content, b.level))
+        .collect())
 }
 
 /// Show AI and embedding status + indexed-chunk count.

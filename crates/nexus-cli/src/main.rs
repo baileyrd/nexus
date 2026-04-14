@@ -838,8 +838,8 @@ fn main() {
         },
 
         Commands::Config(args) => match args.command {
-            ConfigCommand::Show { file } => commands::config::show(&app, &file),
-            ConfigCommand::Reset { file } => commands::config::reset(&app, &file),
+            ConfigCommand::Show { file } => commands::config::show(&mut app, &file),
+            ConfigCommand::Reset { file } => commands::config::reset(&mut app, &file),
         },
 
         Commands::Bases(args) => match args.command {
