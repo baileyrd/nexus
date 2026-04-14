@@ -17,6 +17,7 @@ use crate::context::PluginContext;
 use crate::error::{BusError, CapabilityError, Error, IpcError, Result};
 use crate::event::EventFilter;
 use crate::event_bus::{EventBus, EventSubscription};
+use crate::ipc::IpcDispatcher;
 use crate::kv_store::KvStore;
 use crate::log::LogLevel;
 
@@ -32,6 +33,10 @@ pub struct KernelPluginContext {
     event_bus: Arc<EventBus>,
     /// Canonical form of the forge root, used for path confinement.
     forge_root_canonical: PathBuf,
+    /// Optional dispatcher for plugin-to-plugin IPC. `None` means this context
+    /// was built without a plugin loader (e.g. in unit tests) and `ipc_call`
+    /// will return [`IpcError::DispatcherUnavailable`].
+    ipc_dispatcher: Option<Arc<dyn IpcDispatcher>>,
 }
 
 impl KernelPluginContext {
@@ -50,6 +55,7 @@ impl KernelPluginContext {
         kv: Arc<dyn KvStore>,
         event_bus: Arc<EventBus>,
         forge_root: &Path,
+        ipc_dispatcher: Option<Arc<dyn IpcDispatcher>>,
     ) -> Result<Self> {
         let forge_root_canonical = forge_root.canonicalize()?;
         Ok(Self {
@@ -59,6 +65,7 @@ impl KernelPluginContext {
             kv,
             event_bus,
             forge_root_canonical,
+            ipc_dispatcher,
         })
     }
 
@@ -243,19 +250,41 @@ impl PluginContext for KernelPluginContext {
         &self,
         target_plugin_id: &str,
         command_id: &str,
-        _args: serde_json::Value,
-        _timeout: Duration,
+        args: serde_json::Value,
+        timeout: Duration,
     ) -> std::result::Result<serde_json::Value, IpcError> {
-        self.require_capability(Capability::IpcCall)
-            .map_err(|_| IpcError::PluginNotFound {
-                plugin_id: target_plugin_id.to_string(),
-            })?;
-        // Wired in Chunk 7 via a shared PluginLoader handle.
-        // For now, return PluginNotFound so callers handle the not-yet-wired case.
-        Err(IpcError::CommandNotFound {
-            plugin_id: target_plugin_id.to_string(),
-            command: command_id.to_string(),
-        })
+        if !self.capabilities.contains(Capability::IpcCall) {
+            return Err(IpcError::CapabilityDenied {
+                plugin_id: self.plugin_id.clone(),
+            });
+        }
+
+        let dispatcher = self
+            .ipc_dispatcher
+            .clone()
+            .ok_or(IpcError::DispatcherUnavailable)?;
+
+        let target = target_plugin_id.to_string();
+        let command = command_id.to_string();
+
+        let join = tokio::task::spawn_blocking({
+            let target = target.clone();
+            let command = command.clone();
+            move || dispatcher.dispatch(&target, &command, &args)
+        });
+
+        match tokio::time::timeout(timeout, join).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_panic)) => Err(IpcError::PluginCrashedDuringCall {
+                plugin_id: target,
+                command,
+            }),
+            Err(_elapsed) => Err(IpcError::Timeout {
+                plugin_id: target,
+                command,
+                timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+            }),
+        }
     }
 
     // ---- Logging ---------------------------------------------------------
@@ -287,6 +316,7 @@ mod tests {
             kv,
             bus,
             dir,
+            None,
         )
         .unwrap()
     }

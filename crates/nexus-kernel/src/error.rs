@@ -211,6 +211,18 @@ pub enum IpcError {
         /// Reason from the deserializer.
         reason: String,
     },
+
+    /// The caller lacks the `ipc.call` capability.
+    #[error("capability denied for {plugin_id}: ipc.call")]
+    CapabilityDenied {
+        /// The caller plugin id.
+        plugin_id: String,
+    },
+
+    /// The kernel was built without an [`crate::IpcDispatcher`], so IPC calls
+    /// cannot be routed. Typical in unit tests or bare kernels.
+    #[error("no IPC dispatcher configured on this kernel")]
+    DispatcherUnavailable,
 }
 
 /// Errors from the KV store.

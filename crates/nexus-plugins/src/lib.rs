@@ -19,7 +19,7 @@ mod scaffold;
 
 pub use error::PluginError;
 pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
-pub use loader::{CorePlugin, PluginLoader};
+pub use loader::{CorePlugin, PluginLoader, SharedPluginLoader};
 pub use manifest::{
     CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
     PluginManifest, Registrations, SettingsConfig, WasmConfig,

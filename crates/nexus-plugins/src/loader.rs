@@ -6,8 +6,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use std::sync::Mutex;
+
 use nexus_kernel::{
-    Capability, CapabilitySet, EventBus, EventFilter, EventSubscription,
+    Capability, CapabilitySet, EventBus, EventFilter, EventSubscription, IpcDispatcher, IpcError,
     PluginInfo, PluginStatus, TrustLevel,
 };
 
@@ -850,6 +852,82 @@ fn plugin_info_from(
         trust_level: manifest.trust_level,
         status,
         capabilities: capabilities.clone(),
+    }
+}
+
+// ─── IpcDispatcher impl ──────────────────────────────────────────────────────
+
+/// Shared handle that lets a [`nexus_kernel::KernelPluginContext`] dispatch
+/// IPC calls into a [`PluginLoader`].
+///
+/// `PluginLoader::dispatch_ipc` requires `&mut self`, so the loader has to
+/// live behind interior mutability; this newtype wraps a [`Mutex`] and
+/// implements [`IpcDispatcher`] on top.
+///
+/// Typical usage:
+/// ```ignore
+/// let loader = Arc::new(SharedPluginLoader::new(PluginLoader::new(dir)));
+/// let dispatcher: Arc<dyn IpcDispatcher> = loader.clone();
+/// // ... pass `dispatcher` into KernelPluginContext::new
+/// ```
+pub struct SharedPluginLoader(Mutex<PluginLoader>);
+
+impl SharedPluginLoader {
+    /// Wrap a loader for shared kernel access.
+    #[must_use]
+    pub fn new(loader: PluginLoader) -> Self {
+        Self(Mutex::new(loader))
+    }
+
+    /// Acquire the loader lock; panics on poison.
+    ///
+    /// # Panics
+    /// Panics if the inner mutex is poisoned by a previous panic.
+    pub fn lock(&self) -> std::sync::MutexGuard<'_, PluginLoader> {
+        self.0.lock().expect("plugin loader mutex poisoned")
+    }
+}
+
+impl IpcDispatcher for SharedPluginLoader {
+    fn dispatch(
+        &self,
+        target_plugin_id: &str,
+        command_id: &str,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, IpcError> {
+        let mut loader = self
+            .0
+            .lock()
+            .map_err(|_| IpcError::PluginCrashedDuringCall {
+                plugin_id: target_plugin_id.to_string(),
+                command: command_id.to_string(),
+            })?;
+
+        let lp = loader
+            .loaded
+            .get_mut(target_plugin_id)
+            .ok_or_else(|| IpcError::PluginNotFound {
+                plugin_id: target_plugin_id.to_string(),
+            })?;
+
+        let handler_id = lp
+            .manifest
+            .registrations
+            .ipc_commands
+            .iter()
+            .find(|r| r.id == command_id)
+            .map(|r| r.handler_id)
+            .ok_or_else(|| IpcError::CommandNotFound {
+                plugin_id: target_plugin_id.to_string(),
+                command: command_id.to_string(),
+            })?;
+
+        lp.backend
+            .dispatch(handler_id, args)
+            .map_err(|_| IpcError::PluginCrashedDuringCall {
+                plugin_id: target_plugin_id.to_string(),
+                command: command_id.to_string(),
+            })
     }
 }
 
