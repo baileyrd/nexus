@@ -1,12 +1,19 @@
-//! MCP server implementation with 13 tools for note CRUD, search, graph, tasks, and RAG.
+//! MCP server implementation: 13 tools for note CRUD, search, graph, tasks, and RAG.
+//!
+//! All storage-backed tools route through the kernel plugin IPC boundary — the
+//! server holds an `Arc<KernelPluginContext>` rather than a `StorageEngine`,
+//! so every tool call is capability-checked and auditable at the kernel.
+//! RAG (`nexus_ask`) is a stub until the AI subsystem migrates in a later
+//! phase; it returns a placeholder so clients get a clean error instead of
+//! a hang.
 
-use std::sync::Mutex;
+use std::sync::Arc;
+use std::time::Duration;
 
+use nexus_kernel::{KernelPluginContext, PluginContext};
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
-use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ListToolsResult, ServerInfo,
-};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ListToolsResult, ServerInfo};
 use rmcp::schemars;
 use rmcp::service::RequestContext;
 use rmcp::ServiceExt as _;
@@ -14,7 +21,8 @@ use rmcp::RoleServer;
 use rmcp::{tool, tool_router};
 use serde::{Deserialize, Serialize};
 
-use nexus_storage::StorageEngine;
+const STORAGE_PLUGIN: &str = "com.nexus.storage";
+const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 // ── Input types ──────────────────────────────────────────────────────────────
 
@@ -60,7 +68,7 @@ struct ListNotesInput {
 /// Input for the `nexus_search` tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct SearchInput {
-    /// Search query string. Supports scope operators: tag:NAME, path:PREFIX.
+    /// Search query string.
     query: String,
     /// Maximum number of results to return (default: 20).
     limit: Option<usize>,
@@ -80,43 +88,44 @@ struct OutgoingLinksInput {
     path: String,
 }
 
-/// Input for the `nexus_graph_status` tool (no parameters).
+/// Input for `nexus_graph_status` (no parameters).
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 struct GraphStatusInput {}
 
-/// Input for the `nexus_list_tags` tool.
+/// Input for `nexus_list_tags`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ListTagsInput {
-    /// Tag name to search for (without the # prefix).
+    /// Tag name (without the `#` prefix).
     name: String,
 }
 
-/// Input for the `nexus_list_tasks` tool.
+/// Input for `nexus_list_tasks`.
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 struct ListTasksInput {
-    /// Filter by completion state. None returns all tasks.
+    /// Filter by completion state; `None` returns both.
     completed: Option<bool>,
-    /// Filter by file path. None returns tasks from all files.
+    /// Restrict to a specific file path.
     file: Option<String>,
 }
 
-/// Input for the `nexus_toggle_task` tool.
+/// Input for `nexus_toggle_task`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ToggleTaskInput {
-    /// Database ID of the task to toggle.
+    /// The task's database ID.
     task_id: u64,
 }
 
-/// Input for the `nexus_ask` tool.
+/// Input for the `nexus_ask` RAG tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct AskInput {
-    /// Question to answer using RAG over the knowledge base.
+    /// The question to answer via RAG over the knowledge base.
+    #[allow(dead_code)]
     question: String,
 }
 
 // ── Output types ─────────────────────────────────────────────────────────────
 
-/// Output for `read_note`: contains the file content and size.
+/// Output for reading a note.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct ReadNoteOutput {
     path: String,
@@ -124,7 +133,7 @@ struct ReadNoteOutput {
     size_bytes: u64,
 }
 
-/// Output for create/update note operations.
+/// Output for creating/updating a note.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct WriteNoteOutput {
     path: String,
@@ -132,13 +141,13 @@ struct WriteNoteOutput {
     content_hash: String,
 }
 
-/// Output for `delete_note`.
+/// Output for deleting a note.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct DeleteNoteOutput {
     deleted: bool,
 }
 
-/// A single file entry in list output.
+/// A single file entry in a list response.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct FileEntry {
     path: String,
@@ -146,7 +155,7 @@ struct FileEntry {
     modified_at: i64,
 }
 
-/// Output for `list_notes`.
+/// Output for listing notes.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct ListNotesOutput {
     count: usize,
@@ -157,7 +166,6 @@ struct ListNotesOutput {
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct SearchHit {
     file_path: String,
-    block_id: u64,
     block_type: String,
     excerpt: String,
     score: f32,
@@ -175,7 +183,6 @@ struct SearchOutput {
 struct BacklinkEntry {
     source_path: String,
     link_text: String,
-    link_type: String,
 }
 
 /// Output for backlinks.
@@ -263,20 +270,19 @@ struct AskOutput {
 
 /// MCP server that exposes Nexus forge operations as tools.
 ///
-/// Holds a [`StorageEngine`] behind a [`Mutex`] (required because
-/// `StorageEngine` is `Send` but not `Sync`) and a tool router generated
-/// by the `#[tool_router]` macro.
+/// Holds an [`Arc<KernelPluginContext>`] and dispatches every tool call
+/// through `context.ipc_call("com.nexus.storage", …)`.
 pub struct NexusMcpServer {
-    storage: Mutex<StorageEngine>,
+    context: Arc<KernelPluginContext>,
     tool_router: ToolRouter<Self>,
 }
 
 impl NexusMcpServer {
-    /// Create a new MCP server backed by the given storage engine.
+    /// Create a new MCP server backed by the given plugin context.
     #[must_use]
-    pub fn new(storage: StorageEngine) -> Self {
+    pub fn new(context: Arc<KernelPluginContext>) -> Self {
         Self {
-            storage: Mutex::new(storage),
+            context,
             tool_router: Self::tool_router(),
         }
     }
@@ -284,7 +290,6 @@ impl NexusMcpServer {
     /// Start the server on stdio transport and block until disconnected.
     ///
     /// # Errors
-    ///
     /// Returns an error if the transport or server fails to start.
     pub async fn serve_stdio(self) -> Result<(), Box<dyn std::error::Error>> {
         let transport = rmcp::transport::io::stdio();
@@ -293,20 +298,38 @@ impl NexusMcpServer {
         server.waiting().await?;
         Ok(())
     }
+
+    async fn storage_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(STORAGE_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
 }
 
 // ── Tool implementations ─────────────────────────────────────────────────────
 
 #[tool_router]
 impl NexusMcpServer {
-    /// Read a note from the forge and return its content.
     #[tool(name = "nexus_read_note", description = "Read a note's content by vault-relative path")]
-    fn read_note(&self, Parameters(input): Parameters<ReadNoteInput>) -> Json<ReadNoteOutput> {
-        let storage = self.storage.lock().expect("storage mutex poisoned");
-        match storage.read_file(&input.path) {
-            Ok(bytes) => {
-                let content = String::from_utf8_lossy(&bytes).into_owned();
-                let size_bytes = bytes.len() as u64;
+    async fn read_note(&self, Parameters(input): Parameters<ReadNoteInput>) -> Json<ReadNoteOutput> {
+        #[derive(Deserialize)]
+        struct Resp {
+            bytes: Vec<u8>,
+        }
+        match self
+            .storage_call::<Resp>("read_file", serde_json::json!({ "path": &input.path }))
+            .await
+        {
+            Ok(r) => {
+                let content = String::from_utf8_lossy(&r.bytes).into_owned();
+                let size_bytes = r.bytes.len() as u64;
                 Json(ReadNoteOutput {
                     path: input.path,
                     content,
@@ -321,48 +344,35 @@ impl NexusMcpServer {
         }
     }
 
-    /// Create a new note in the forge.
     #[tool(name = "nexus_create_note", description = "Create a new note with the given path and markdown content")]
-    fn create_note(&self, Parameters(input): Parameters<CreateNoteInput>) -> Json<WriteNoteOutput> {
-        let storage = self.storage.lock().expect("storage mutex poisoned");
-        match storage.write_file(&input.path, input.content.as_bytes()) {
-            Ok(meta) => Json(WriteNoteOutput {
-                path: meta.path,
-                size_bytes: meta.size_bytes,
-                content_hash: meta.content_hash,
-            }),
-            Err(e) => Json(WriteNoteOutput {
-                path: input.path,
-                size_bytes: 0,
-                content_hash: format!("Error: {e}"),
-            }),
-        }
+    async fn create_note(
+        &self,
+        Parameters(input): Parameters<CreateNoteInput>,
+    ) -> Json<WriteNoteOutput> {
+        self.do_write_file(&input.path, &input.content).await
     }
 
-    /// Update an existing note (upsert semantics).
     #[tool(name = "nexus_update_note", description = "Update an existing note's content (creates if it does not exist)")]
-    fn update_note(&self, Parameters(input): Parameters<UpdateNoteInput>) -> Json<WriteNoteOutput> {
-        let storage = self.storage.lock().expect("storage mutex poisoned");
-        match storage.write_file(&input.path, input.content.as_bytes()) {
-            Ok(meta) => Json(WriteNoteOutput {
-                path: meta.path,
-                size_bytes: meta.size_bytes,
-                content_hash: meta.content_hash,
-            }),
-            Err(e) => Json(WriteNoteOutput {
-                path: input.path,
-                size_bytes: 0,
-                content_hash: format!("Error: {e}"),
-            }),
-        }
+    async fn update_note(
+        &self,
+        Parameters(input): Parameters<UpdateNoteInput>,
+    ) -> Json<WriteNoteOutput> {
+        self.do_write_file(&input.path, &input.content).await
     }
 
-    /// Delete a note from the forge.
     #[tool(name = "nexus_delete_note", description = "Delete a note by vault-relative path")]
-    fn delete_note(&self, Parameters(input): Parameters<DeleteNoteInput>) -> Json<DeleteNoteOutput> {
-        let storage = self.storage.lock().expect("storage mutex poisoned");
-        match storage.delete_file(&input.path) {
-            Ok(()) => Json(DeleteNoteOutput { deleted: true }),
+    async fn delete_note(
+        &self,
+        Parameters(input): Parameters<DeleteNoteInput>,
+    ) -> Json<DeleteNoteOutput> {
+        match self
+            .storage_call::<serde_json::Value>(
+                "delete_file",
+                serde_json::json!({ "path": &input.path }),
+            )
+            .await
+        {
+            Ok(_) => Json(DeleteNoteOutput { deleted: true }),
             Err(e) => {
                 tracing::error!("delete_note failed for {}: {e}", input.path);
                 Json(DeleteNoteOutput { deleted: false })
@@ -370,25 +380,37 @@ impl NexusMcpServer {
         }
     }
 
-    /// List notes in the forge, optionally filtered by path prefix.
     #[tool(name = "nexus_list_notes", description = "List notes in the forge, optionally filtered by a path prefix")]
-    fn list_notes(&self, Parameters(input): Parameters<ListNotesInput>) -> Json<ListNotesOutput> {
-        let storage = self.storage.lock().expect("storage mutex poisoned");
+    async fn list_notes(
+        &self,
+        Parameters(input): Parameters<ListNotesInput>,
+    ) -> Json<ListNotesOutput> {
+        #[derive(Deserialize)]
+        struct Rec {
+            path: String,
+            size_bytes: u64,
+            #[serde(default)]
+            modified_at: i64,
+        }
         let prefix = input.prefix.as_deref().unwrap_or("");
-        match storage.list_files(prefix) {
-            Ok(files) => {
-                let entries: Vec<FileEntry> = files
+        let args = if prefix.is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::json!({ "prefix": prefix })
+        };
+        match self.storage_call::<Vec<Rec>>("query_files", args).await {
+            Ok(records) => {
+                let files: Vec<FileEntry> = records
                     .into_iter()
-                    .map(|f| FileEntry {
-                        path: f.path,
-                        size_bytes: f.size_bytes,
-                        modified_at: f.modified_at,
+                    .map(|r| FileEntry {
+                        path: r.path,
+                        size_bytes: r.size_bytes,
+                        modified_at: r.modified_at,
                     })
                     .collect();
-                let count = entries.len();
                 Json(ListNotesOutput {
-                    count,
-                    files: entries,
+                    count: files.len(),
+                    files,
                 })
             }
             Err(e) => {
@@ -401,36 +423,45 @@ impl NexusMcpServer {
         }
     }
 
-    /// Full-text search across all indexed notes.
     #[tool(
         name = "nexus_search",
-        description = "Full-text search across notes. Supports scope operators: tag:NAME, path:PREFIX, prop:KEY:VALUE"
+        description = "Full-text search across notes. Rebuilds the search index before querying."
     )]
-    fn search_notes(&self, Parameters(input): Parameters<SearchInput>) -> Json<SearchOutput> {
-        let storage = self.storage.lock().expect("storage mutex poisoned");
-        let limit = input.limit.unwrap_or(20);
-
-        // Rebuild the search index before querying to ensure fresh results.
-        if let Err(e) = storage.rebuild_search_index() {
+    async fn search_notes(&self, Parameters(input): Parameters<SearchInput>) -> Json<SearchOutput> {
+        if let Err(e) = self
+            .storage_call::<serde_json::Value>("rebuild_search_index", serde_json::json!({}))
+            .await
+        {
             tracing::warn!("Failed to rebuild search index: {e}");
         }
-
-        match storage.search(&input.query, limit) {
-            Ok(results) => {
-                let hits: Vec<SearchHit> = results
+        #[derive(Deserialize)]
+        struct Hit {
+            file_path: String,
+            block_type: String,
+            excerpt: String,
+            score: f32,
+        }
+        let limit = input.limit.unwrap_or(20);
+        match self
+            .storage_call::<Vec<Hit>>(
+                "search",
+                serde_json::json!({ "query": &input.query, "limit": limit }),
+            )
+            .await
+        {
+            Ok(hits) => {
+                let results: Vec<SearchHit> = hits
                     .into_iter()
-                    .map(|r| SearchHit {
-                        file_path: r.file_path,
-                        block_id: r.block_id,
-                        block_type: r.block_type,
-                        excerpt: r.excerpt,
-                        score: r.score,
+                    .map(|h| SearchHit {
+                        file_path: h.file_path,
+                        block_type: h.block_type,
+                        excerpt: h.excerpt,
+                        score: h.score,
                     })
                     .collect();
-                let count = hits.len();
                 Json(SearchOutput {
-                    count,
-                    results: hits,
+                    count: results.len(),
+                    results,
                 })
             }
             Err(e) => {
@@ -443,24 +474,31 @@ impl NexusMcpServer {
         }
     }
 
-    /// Find all notes that link to a given note (backlinks).
     #[tool(name = "nexus_backlinks", description = "Find all notes that link to the specified note (backlinks)")]
-    fn backlinks(&self, Parameters(input): Parameters<BacklinksInput>) -> Json<BacklinksOutput> {
-        let storage = self.storage.lock().expect("storage mutex poisoned");
-        match storage.backlinks(&input.path) {
-            Ok(links) => {
-                let entries: Vec<BacklinkEntry> = links
+    async fn backlinks(
+        &self,
+        Parameters(input): Parameters<BacklinksInput>,
+    ) -> Json<BacklinksOutput> {
+        #[derive(Deserialize)]
+        struct Bl {
+            source_path: String,
+            link_text: String,
+        }
+        match self
+            .storage_call::<Vec<Bl>>("backlinks", serde_json::json!({ "path": &input.path }))
+            .await
+        {
+            Ok(bls) => {
+                let backlinks: Vec<BacklinkEntry> = bls
                     .into_iter()
                     .map(|b| BacklinkEntry {
                         source_path: b.source_path,
                         link_text: b.link_text,
-                        link_type: b.link_type,
                     })
                     .collect();
-                let count = entries.len();
                 Json(BacklinksOutput {
-                    count,
-                    backlinks: entries,
+                    count: backlinks.len(),
+                    backlinks,
                 })
             }
             Err(e) => {
@@ -473,16 +511,27 @@ impl NexusMcpServer {
         }
     }
 
-    /// Find all outgoing links from a given note.
     #[tool(name = "nexus_outgoing_links", description = "Find all outgoing links from the specified note")]
-    fn outgoing_links(
+    async fn outgoing_links(
         &self,
         Parameters(input): Parameters<OutgoingLinksInput>,
     ) -> Json<OutgoingLinksOutput> {
-        let storage = self.storage.lock().expect("storage mutex poisoned");
-        match storage.outgoing_links(&input.path) {
-            Ok(links) => {
-                let entries: Vec<OutgoingLinkEntry> = links
+        #[derive(Deserialize)]
+        struct Link {
+            target_path: String,
+            link_text: String,
+            link_type: String,
+            is_resolved: bool,
+        }
+        match self
+            .storage_call::<Vec<Link>>(
+                "outgoing_links",
+                serde_json::json!({ "path": &input.path }),
+            )
+            .await
+        {
+            Ok(ls) => {
+                let links: Vec<OutgoingLinkEntry> = ls
                     .into_iter()
                     .map(|l| OutgoingLinkEntry {
                         target_path: l.target_path,
@@ -491,10 +540,9 @@ impl NexusMcpServer {
                         is_resolved: l.is_resolved,
                     })
                     .collect();
-                let count = entries.len();
                 Json(OutgoingLinksOutput {
-                    count,
-                    links: entries,
+                    count: links.len(),
+                    links,
                 })
             }
             Err(e) => {
@@ -507,18 +555,25 @@ impl NexusMcpServer {
         }
     }
 
-    /// Get knowledge graph statistics.
     #[tool(name = "nexus_graph_status", description = "Get knowledge graph statistics: node count, edge count, unresolved links")]
-    fn graph_status(
+    async fn graph_status(
         &self,
         Parameters(_input): Parameters<GraphStatusInput>,
     ) -> Json<GraphStatusOutput> {
-        let storage = self.storage.lock().expect("storage mutex poisoned");
-        match storage.graph_stats() {
-            Ok(stats) => Json(GraphStatusOutput {
-                node_count: stats.node_count,
-                edge_count: stats.edge_count,
-                unresolved_count: stats.unresolved_count,
+        #[derive(Deserialize)]
+        struct Stats {
+            node_count: usize,
+            edge_count: usize,
+            unresolved_count: usize,
+        }
+        match self
+            .storage_call::<Stats>("graph_stats", serde_json::json!({}))
+            .await
+        {
+            Ok(s) => Json(GraphStatusOutput {
+                node_count: s.node_count,
+                edge_count: s.edge_count,
+                unresolved_count: s.unresolved_count,
             }),
             Err(e) => {
                 tracing::error!("graph_status failed: {e}");
@@ -531,11 +586,18 @@ impl NexusMcpServer {
         }
     }
 
-    /// List tags matching a given name.
     #[tool(name = "nexus_list_tags", description = "List all occurrences of a tag by name across the forge")]
-    fn list_tags(&self, Parameters(input): Parameters<ListTagsInput>) -> Json<ListTagsOutput> {
-        let storage = self.storage.lock().expect("storage mutex poisoned");
-        match storage.query_tags(&input.name) {
+    async fn list_tags(&self, Parameters(input): Parameters<ListTagsInput>) -> Json<ListTagsOutput> {
+        #[derive(Deserialize)]
+        struct Tag {
+            name: String,
+            file_path: String,
+            source: String,
+        }
+        match self
+            .storage_call::<Vec<Tag>>("query_tags", serde_json::json!({ "name": &input.name }))
+            .await
+        {
             Ok(tags) => {
                 let entries: Vec<TagEntry> = tags
                     .into_iter()
@@ -545,9 +607,8 @@ impl NexusMcpServer {
                         source: t.source,
                     })
                     .collect();
-                let count = entries.len();
                 Json(ListTagsOutput {
-                    count,
+                    count: entries.len(),
                     tags: entries,
                 })
             }
@@ -561,18 +622,27 @@ impl NexusMcpServer {
         }
     }
 
-    /// List tasks with optional filters.
     #[tool(
         name = "nexus_list_tasks",
         description = "List tasks (checkboxes) across notes with optional completed/file filters"
     )]
-    fn list_tasks(&self, Parameters(input): Parameters<ListTasksInput>) -> Json<ListTasksOutput> {
-        let storage = self.storage.lock().expect("storage mutex poisoned");
-        let filter = nexus_storage::TaskFilter {
-            completed: input.completed,
-            file_path: input.file,
-        };
-        match storage.query_tasks(&filter) {
+    async fn list_tasks(
+        &self,
+        Parameters(input): Parameters<ListTasksInput>,
+    ) -> Json<ListTasksOutput> {
+        #[derive(Deserialize)]
+        struct Task {
+            id: u64,
+            file_path: String,
+            content: String,
+            completed: bool,
+            line_number: u32,
+        }
+        let args = serde_json::json!({
+            "completed": input.completed,
+            "file_path": input.file,
+        });
+        match self.storage_call::<Vec<Task>>("query_tasks", args).await {
             Ok(tasks) => {
                 let entries: Vec<TaskEntry> = tasks
                     .into_iter()
@@ -584,9 +654,8 @@ impl NexusMcpServer {
                         line_number: t.line_number,
                     })
                     .collect();
-                let count = entries.len();
                 Json(ListTasksOutput {
-                    count,
+                    count: entries.len(),
                     tasks: entries,
                 })
             }
@@ -600,19 +669,27 @@ impl NexusMcpServer {
         }
     }
 
-    /// Toggle a task's completion state.
     #[tool(name = "nexus_toggle_task", description = "Toggle a task's completed/incomplete state by its database ID")]
-    fn toggle_task(
+    async fn toggle_task(
         &self,
         Parameters(input): Parameters<ToggleTaskInput>,
     ) -> Json<ToggleTaskOutput> {
-        let storage = self.storage.lock().expect("storage mutex poisoned");
-        match storage.toggle_task(input.task_id) {
-            Ok(record) => Json(ToggleTaskOutput {
-                id: record.id,
-                file_path: record.file_path,
-                content: record.content,
-                completed: record.completed,
+        #[derive(Deserialize)]
+        struct Rec {
+            id: u64,
+            file_path: String,
+            content: String,
+            completed: bool,
+        }
+        match self
+            .storage_call::<Rec>("toggle_task", serde_json::json!({ "task_id": input.task_id }))
+            .await
+        {
+            Ok(r) => Json(ToggleTaskOutput {
+                id: r.id,
+                file_path: r.file_path,
+                content: r.content,
+                completed: r.completed,
             }),
             Err(e) => Json(ToggleTaskOutput {
                 id: input.task_id,
@@ -623,112 +700,46 @@ impl NexusMcpServer {
         }
     }
 
-    /// Ask a question using RAG over the knowledge base.
     #[tool(
         name = "nexus_ask",
-        description = "Ask a question answered via RAG (retrieval-augmented generation) over your notes"
+        description = "Ask a question via RAG over your notes (pending AI plugin migration; currently returns a stub error)"
     )]
-    async fn ask(&self, Parameters(input): Parameters<AskInput>) -> Json<AskOutput> {
-        // Detect AI providers from environment.
-        let Some(chat_config) = nexus_ai::detect_provider() else {
-            return Json(AskOutput {
-                answer: "No AI provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or OLLAMA_BASE_URL.".into(),
-                model: String::new(),
-                source_count: 0,
-            });
-        };
-        let Some(embed_config) = nexus_ai::detect_embedding_provider() else {
-            return Json(AskOutput {
-                answer: "No embedding provider configured. Set OPENAI_API_KEY or OLLAMA_BASE_URL.".into(),
-                model: String::new(),
-                source_count: 0,
-            });
-        };
+    async fn ask(&self, Parameters(_input): Parameters<AskInput>) -> Json<AskOutput> {
+        // RAG is blocked on the AI plugin migration (Phase B / Q3). Until the
+        // AI subsystem exposes ipc_call handlers for rag_query, this tool
+        // returns a placeholder error so callers get a clean signal instead
+        // of a hang.
+        Json(AskOutput {
+            answer: "nexus_ask is unavailable: AI plugin IPC migration pending".into(),
+            model: String::new(),
+            source_count: 0,
+        })
+    }
 
-        // Build providers.
-        let ai: Box<dyn nexus_ai::AiProvider> = match chat_config.provider.as_str() {
-            "anthropic" => Box::new(nexus_ai::AnthropicProvider::new(
-                chat_config.api_key.unwrap_or_default(),
-                chat_config.model,
-                chat_config.max_tokens,
-            )),
-            "openai" => Box::new(nexus_ai::OpenAiProvider::new(
-                chat_config.api_key.unwrap_or_default(),
-                chat_config.model,
-                chat_config.max_tokens,
-            )),
-            "ollama" => Box::new(nexus_ai::OllamaProvider::new(
-                chat_config.base_url,
-                chat_config.model,
-            )),
-            other => {
-                return Json(AskOutput {
-                    answer: format!("Unknown AI provider: {other}"),
-                    model: String::new(),
-                    source_count: 0,
-                });
-            }
-        };
-
-        let embedder: Box<dyn nexus_ai::EmbeddingProvider> = match embed_config.provider.as_str() {
-            "openai" => Box::new(nexus_ai::OpenAiProvider::new(
-                embed_config.api_key.unwrap_or_default(),
-                embed_config.model,
-                embed_config.max_tokens,
-            )),
-            "ollama" => Box::new(nexus_ai::OllamaProvider::new(
-                embed_config.base_url,
-                embed_config.model,
-            )),
-            other => {
-                return Json(AskOutput {
-                    answer: format!("Unknown embedding provider: {other}"),
-                    model: String::new(),
-                    source_count: 0,
-                });
-            }
-        };
-
-        // Get a DB connection for the vector store. Lock the storage briefly,
-        // obtain a pooled connection, then drop the lock before awaiting.
-        let conn = {
-            let storage = self.storage.lock().expect("storage mutex poisoned");
-            match storage.pool_connection() {
-                Ok(c) => c,
-                Err(e) => {
-                    return Json(AskOutput {
-                        answer: format!("Database error: {e}"),
-                        model: String::new(),
-                        source_count: 0,
-                    });
-                }
-            }
-        };
-
-        // The PooledConnection derefs to &Connection. We need to run the async
-        // RAG query with it. Since rusqlite::Connection is not Send, we use
-        // tokio::task::block_in_place to run the async work on the current
-        // thread without moving the connection across threads.
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(nexus_ai::rag_query(
-                &conn,
-                ai.as_ref(),
-                embedder.as_ref(),
-                &input.question,
-                5,
-            ))
-        });
-
-        match result {
-            Ok(response) => Json(AskOutput {
-                answer: response.answer,
-                model: response.model,
-                source_count: response.sources.len(),
+    /// Shared write_file implementation for create_note + update_note.
+    async fn do_write_file(&self, path: &str, content: &str) -> Json<WriteNoteOutput> {
+        #[derive(Deserialize)]
+        struct Meta {
+            path: String,
+            size_bytes: u64,
+            content_hash: String,
+        }
+        match self
+            .storage_call::<Meta>(
+                "write_file",
+                serde_json::json!({ "path": path, "bytes": content.as_bytes() }),
+            )
+            .await
+        {
+            Ok(m) => Json(WriteNoteOutput {
+                path: m.path,
+                size_bytes: m.size_bytes,
+                content_hash: m.content_hash,
             }),
-            Err(e) => Json(AskOutput {
-                answer: format!("RAG query failed: {e}"),
-                model: String::new(),
-                source_count: 0,
+            Err(e) => Json(WriteNoteOutput {
+                path: path.to_string(),
+                size_bytes: 0,
+                content_hash: format!("Error: {e}"),
             }),
         }
     }

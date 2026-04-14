@@ -203,6 +203,7 @@ fn register_core_plugins(
                     ("outgoing_links", nexus_storage::core_plugin::HANDLER_OUTGOING_LINKS),
                     ("unresolved_links", nexus_storage::core_plugin::HANDLER_UNRESOLVED_LINKS),
                     ("graph_neighbors", nexus_storage::core_plugin::HANDLER_GRAPH_NEIGHBORS),
+                    ("query_tags", nexus_storage::core_plugin::HANDLER_QUERY_TAGS),
                 ],
             ),
             forge_root,

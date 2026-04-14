@@ -60,6 +60,8 @@ pub const HANDLER_OUTGOING_LINKS: u32 = 13;
 pub const HANDLER_UNRESOLVED_LINKS: u32 = 14;
 /// Handler id for `graph_neighbors`. Args: `{ "path": String, "depth": usize }`; Returns: `Vec<String>`.
 pub const HANDLER_GRAPH_NEIGHBORS: u32 = 15;
+/// Handler id for `query_tags`. Args: `{ "name": String }`; Returns: `Vec<TagResult>`.
+pub const HANDLER_QUERY_TAGS: u32 = 16;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -322,6 +324,16 @@ impl CorePlugin for StorageCorePlugin {
                     .graph_neighbors(&path, depth)
                     .map_err(|e| exec_err(format!("graph_neighbors: {e}")))?;
                 to_value(&paths, "graph_neighbors")
+            }
+            HANDLER_QUERY_TAGS => {
+                let name = args
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| exec_err("query_tags: missing 'name' string".to_string()))?;
+                let tags = engine
+                    .query_tags(name)
+                    .map_err(|e| exec_err(format!("query_tags: {e}")))?;
+                to_value(&tags, "query_tags")
             }
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }

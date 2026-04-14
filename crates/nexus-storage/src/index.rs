@@ -91,7 +91,7 @@ pub struct LinkRecord {
 }
 
 /// A tag together with the file it came from.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TagResult {
     /// Tag name (without the `#` prefix).
     pub name: String,

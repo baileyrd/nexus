@@ -1,28 +1,32 @@
 //! `nexus mcp` — start the MCP server on stdio transport.
 
-use anyhow::Result;
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use nexus_bootstrap::{build_cli_runtime, Runtime};
 
 use crate::app::App;
 
 /// Start the MCP stdio server, blocking until the client disconnects.
 ///
-/// Opens a fresh [`nexus_storage::StorageEngine`] for the MCP server (it takes
-/// ownership via [`nexus_mcp::NexusMcpServer::new`]) and runs the async
-/// transport loop on a new Tokio runtime.
+/// Builds a Nexus runtime and hands the resulting plugin context to
+/// [`nexus_mcp::NexusMcpServer`], which dispatches every tool call through
+/// `ipc_call` rather than holding a storage engine directly.
 ///
 /// # Errors
 ///
 /// Returns an error if the forge cannot be opened or the server fails to start.
 pub fn serve(app: &App) -> Result<()> {
     let forge_root = app.forge_root().to_path_buf();
+    let runtime = build_cli_runtime(forge_root.clone())
+        .with_context(|| format!("failed to build runtime at {}", forge_root.display()))?;
 
-    let storage = nexus_storage::StorageEngine::open(
-        &forge_root,
-        &nexus_storage::StorageConfig::default(),
-    )
-    .map_err(|e| anyhow::anyhow!("failed to open forge at '{}': {e}", forge_root.display()))?;
+    // Destructure Runtime so we can move `context` into an Arc while keeping
+    // the kernel and loader alive for the server's lifetime.
+    let Runtime { kernel: _kernel, context, loader: _loader } = runtime;
+    let context = Arc::new(context);
 
-    let server = nexus_mcp::NexusMcpServer::new(storage);
+    let server = nexus_mcp::NexusMcpServer::new(Arc::clone(&context));
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(server.serve_stdio())

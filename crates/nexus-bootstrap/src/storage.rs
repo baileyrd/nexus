@@ -25,13 +25,28 @@ const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
-/// Mirror of `nexus_storage::FileRecord` with the fields CLI/TUI read.
+/// Mirror of `nexus_storage::FileRecord` with the fields callers read.
+/// Extra JSON fields in the response are ignored by serde.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FileRecord {
     /// Forge-relative path of the file.
     pub path: String,
     /// File size in bytes.
     pub size_bytes: u64,
+    /// Unix timestamp of last modification.
+    #[serde(default)]
+    pub modified_at: i64,
+}
+
+/// Mirror of `nexus_storage::TagResult`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TagResult {
+    /// Tag name (without the `#` prefix).
+    pub name: String,
+    /// Forge-relative path of the file containing the tag.
+    pub file_path: String,
+    /// Where the tag came from: `"frontmatter"` or `"inline"`.
+    pub source: String,
 }
 
 /// Mirror of `nexus_storage::BacklinkResult`.
@@ -167,6 +182,29 @@ fn call<T: serde::de::DeserializeOwned>(
 /// List every file in the forge index.
 pub fn query_files(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<FileRecord>> {
     call(runtime, rt, "query_files", serde_json::json!({}))
+}
+
+/// List files whose path starts with `prefix`. Empty prefix matches all.
+pub fn query_files_with_prefix(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    prefix: &str,
+) -> Result<Vec<FileRecord>> {
+    let args = if prefix.is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::json!({ "prefix": prefix })
+    };
+    call(runtime, rt, "query_files", args)
+}
+
+/// Query all occurrences of the tag named `name` across the forge.
+pub fn query_tags(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    name: &str,
+) -> Result<Vec<TagResult>> {
+    call(runtime, rt, "query_tags", serde_json::json!({ "name": name }))
 }
 
 /// Read a file's bytes by forge-relative path.
