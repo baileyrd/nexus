@@ -195,7 +195,7 @@ fn process_events(
                 // File exists — read and hash it, emit FileModified.
                 match std::fs::read(path) {
                     Ok(bytes) => {
-                        let hash = crate::parser::content_hash(&bytes);
+                        let hash = nexus_formats::sha256_hex(&bytes);
                         let _ = storage_tx.send(StorageEvent::FileModified {
                             path: rel,
                             content_hash: hash,

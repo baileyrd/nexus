@@ -8,9 +8,11 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
+use nexus_formats::sha256_hex;
+
 use crate::StorageError;
 use crate::index::{FileFilter, FileRecord, delete_file, insert_file, query_files, soft_delete_file};
-use crate::parser::{content_hash, parse_markdown};
+use crate::parser::parse_markdown;
 use crate::watcher::should_ignore;
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -206,7 +208,7 @@ fn scan_dir_recursive(
             scan_dir_recursive(&path, forge_root, results)?;
         } else if path.is_file() {
             let bytes = std::fs::read(&path)?;
-            let hash = content_hash(&bytes);
+            let hash = sha256_hex(&bytes);
             let size = entry.metadata()?.len();
             let rel = path
                 .strip_prefix(forge_root)

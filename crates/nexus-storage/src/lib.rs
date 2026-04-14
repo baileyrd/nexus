@@ -32,7 +32,7 @@ pub use atomic::atomic_write;
 pub use core_plugin::StorageCorePlugin;
 pub use error::StorageError;
 pub use forge::{Forge, ForgeLock};
-pub use parser::{content_hash, parse_markdown, ParsedBlock, ParsedFile, ParsedLink, ParsedTag, Property};
+pub use parser::{parse_markdown, ParsedBlock, ParsedFile, ParsedLink, ParsedTag, Property};
 pub use tasks::{ParsedTask, TaskRecord, TaskFilter, insert_tasks, query_tasks, toggle_task, toggle_task_in_file};
 pub use index::{BlockRecord, FileFilter, FileMetadata, FileRecord, LinkRecord, RebuildStats, TagResult};
 pub use index::{insert_file, query_files, query_blocks, query_links, query_backlinks, query_tags, delete_file, soft_delete_file, file_by_path};
@@ -182,7 +182,7 @@ impl StorageEngine {
         if path.ends_with(".canvas") {
             // ── Canvas path ──────────────────────────────────────────────
             let canvas_data = canvas::parse_canvas(text)?;
-            let content_hash = content_hash(text.as_bytes());
+            let content_hash = nexus_formats::sha256_hex(text.as_bytes());
             let empty_parsed = ParsedFile {
                 content_hash: content_hash.clone(),
                 blocks: Vec::new(),
@@ -446,6 +446,23 @@ impl StorageEngine {
             rusqlite::Error::InvalidParameterName(e.to_string()),
         ))?;
         query_blocks(&conn, file_id)
+    }
+
+    /// Return all blocks belonging to the file at `path`.
+    ///
+    /// Returns an empty `Vec` when the path is unknown to the index.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
+    pub fn query_blocks_by_path(&self, path: &str) -> Result<Vec<BlockRecord>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        let Some(file) = file_by_path(&conn, path)? else {
+            return Ok(Vec::new());
+        };
+        query_blocks(&conn, file.id)
     }
 
     /// Return all outgoing links from the file identified by `file_id`.

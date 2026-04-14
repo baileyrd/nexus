@@ -10,6 +10,8 @@ description = "Nexus storage engine: forge layout, atomic writes, SQLite index, 
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
 nexus-types = { path = "../nexus-types" }
+nexus-database = { path = "../nexus-database" }
+nexus-formats = { path = "../nexus-formats" }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -25,7 +27,6 @@ toml = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 rayon = { workspace = true }
-sha2 = { workspace = true }
 libc = { workspace = true }
 petgraph = { workspace = true }
 chrono = { workspace = true }

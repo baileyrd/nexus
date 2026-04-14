@@ -4,7 +4,7 @@
 
 use comrak::nodes::{AstNode, NodeValue};
 use comrak::{Arena, Options, parse_document};
-use sha2::{Digest, Sha256};
+use nexus_formats::sha256_hex;
 
 use crate::StorageError;
 use crate::tasks::ParsedTask;
@@ -85,18 +85,6 @@ pub struct ParsedTag {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/// Compute the SHA-256 hex digest of `content`.
-#[must_use]
-pub fn content_hash(content: &[u8]) -> String {
-    Sha256::digest(content)
-        .iter()
-        .fold(String::with_capacity(64), |mut acc, b| {
-            use std::fmt::Write;
-            let _ = write!(acc, "{b:02x}");
-            acc
-        })
-}
-
 /// Parse a markdown/MDX string into a [`ParsedFile`].
 ///
 /// Extracts YAML frontmatter, parses the body with comrak, and returns
@@ -107,7 +95,7 @@ pub fn content_hash(content: &[u8]) -> String {
 /// Returns [`StorageError::ParseError`] if YAML frontmatter is malformed.
 #[allow(clippy::too_many_lines)]
 pub fn parse_markdown(content: &str) -> Result<ParsedFile, StorageError> {
-    let hash = content_hash(content.as_bytes());
+    let hash = sha256_hex(content.as_bytes());
 
     let (frontmatter, fm_tags, body) = extract_frontmatter(content)?;
 
@@ -590,25 +578,6 @@ fn split_fragment(target: &str) -> (String, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── content_hash ──────────────────────────────────────────────────────
-
-    #[test]
-    fn content_hash_produces_hex_string() {
-        let h = content_hash(b"hello");
-        assert_eq!(h.len(), 64);
-        assert!(h.chars().all(|c| c.is_ascii_hexdigit()), "not all hex: {h}");
-    }
-
-    #[test]
-    fn content_hash_is_deterministic() {
-        assert_eq!(content_hash(b"hello"), content_hash(b"hello"));
-    }
-
-    #[test]
-    fn content_hash_differs_for_different_input() {
-        assert_ne!(content_hash(b"hello"), content_hash(b"world"));
-    }
 
     // ── parse_markdown basics ─────────────────────────────────────────────
 
