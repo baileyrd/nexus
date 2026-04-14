@@ -11,7 +11,7 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use crate::app::{Mode, TuiApp};
+use crate::app::{Focus, Mode, TuiApp};
 
 /// Render the status bar into `area`.
 pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
@@ -71,8 +71,12 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
     );
 
     // ── Help hint ─────────────────────────────────────────────────────────────
+    let help_text = match app.focus {
+        Focus::Viewer if app.mode == Mode::Normal => "Tab: return to tree | Ctrl+? help",
+        _ => "Ctrl+? help",
+    };
     let help_span = Span::styled(
-        "Ctrl+? help",
+        help_text,
         Style::default().fg(Color::DarkGray),
     );
 
