@@ -43,6 +43,10 @@ button {
     var(--nx-space-md, 16px);
   border-bottom: 1px solid var(--nx-bg-tertiary, #e8eaef);
   background: var(--nx-bg-secondary, #f8f9fa);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nx-space-md, 16px);
 }
 
 .app-header h1 {
@@ -56,6 +60,45 @@ button {
   margin: 4px 0 0;
   color: var(--nx-text-secondary, #4a4a4a);
   font-size: 0.9em;
+}
+
+.mode-toggle {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--nx-bg-tertiary, #e8eaef);
+  border: 1px solid var(--nx-bg-tertiary, #e8eaef);
+}
+
+.mode-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-secondary, #4a4a4a);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.875em;
+  transition:
+    background 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mode-toggle button:hover:not(.active) {
+  color: var(--nx-text-primary, #1a1a1a);
+}
+
+.mode-toggle button.active {
+  background: var(--nx-bg-primary, #fff);
+  color: var(--nx-text-primary, #1a1a1a);
+  box-shadow: var(--nx-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
+}
+
+.mode-toggle button:focus-visible {
+  outline: 2px solid var(--nx-color-primary, #4a90e2);
+  outline-offset: 2px;
 }
 
 main {

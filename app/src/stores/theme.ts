@@ -3,9 +3,11 @@ import {
   applyTheme as ipcApply,
   getAvailableSnippets,
   getAvailableThemes,
+  setMode as ipcSetMode,
   toggleSnippet as ipcToggleSnippet,
   type SnippetMetadata,
   type ThemeMetadata,
+  type ThemeMode,
 } from "../ipc/theme";
 
 type VariableMap = { [key in string]?: string };
@@ -15,11 +17,27 @@ interface ThemeState {
   themes: ThemeMetadata[];
   snippets: SnippetMetadata[];
   variables: VariableMap;
+  mode: ThemeMode;
   loading: boolean;
   error: string | null;
   loadAll: () => Promise<void>;
   applyTheme: (id: string) => Promise<void>;
+  setMode: (mode: ThemeMode) => Promise<void>;
   toggleSnippet: (id: string) => Promise<void>;
+}
+
+function prefersDark(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
+}
+
+// Map the tri-state ThemeMode into a concrete built-in theme id.
+function themeIdForMode(mode: ThemeMode): string {
+  if (mode === "dark") return "nexus-dark";
+  if (mode === "light") return "nexus-light";
+  return prefersDark() ? "nexus-dark" : "nexus-light";
 }
 
 // Push every CSS variable onto :root so the whole DOM sees the change. Runs
@@ -38,6 +56,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   themes: [],
   snippets: [],
   variables: {},
+  mode: "system",
   loading: false,
   error: null,
 
@@ -67,6 +86,19 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     } catch (e) {
       set({ error: String(e), loading: false });
     }
+  },
+
+  setMode: async (mode: ThemeMode) => {
+    // Persist mode on the Rust side so config() reflects it, then apply the
+    // appropriate built-in theme so the variable cascade actually flips.
+    try {
+      await ipcSetMode(mode);
+    } catch (e) {
+      set({ error: String(e) });
+      return;
+    }
+    set({ mode });
+    await get().applyTheme(themeIdForMode(mode));
   },
 
   toggleSnippet: async (id: string) => {

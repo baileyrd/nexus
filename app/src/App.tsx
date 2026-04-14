@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { ModeToggle } from "./components/ModeToggle";
 import { ThemePicker } from "./components/ThemePicker";
 import { useThemeStore } from "./stores/theme";
 
@@ -17,8 +18,11 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Nexus</h1>
-        <p className="tagline">theming preview · PRD 07 scaffold</p>
+        <div className="app-title">
+          <h1>Nexus</h1>
+          <p className="tagline">theming preview · PRD 07 scaffold</p>
+        </div>
+        <ModeToggle />
       </header>
       <main>
         <ThemePicker />

@@ -18,7 +18,7 @@ use std::sync::Mutex;
 
 use nexus_theme::api::{AppliedTheme, SnippetMetadata, ThemeConfig, ThemeEngine};
 use nexus_theme::theme::ThemeMetadata;
-use nexus_theme::VariableMap;
+use nexus_theme::{ThemeMode, VariableMap};
 use tauri::State;
 
 /// Tauri-managed engine handle shared across commands.
@@ -80,4 +80,10 @@ pub fn reorder_snippets(
 #[tauri::command]
 pub fn get_theme_config(state: State<'_, EngineState>) -> ThemeConfig {
     lock(&state).config()
+}
+
+/// Switch the light/dark/system mode; returns the recomputed applied theme.
+#[tauri::command]
+pub fn set_mode(mode: ThemeMode, state: State<'_, EngineState>) -> AppliedTheme {
+    lock(&state).set_mode(mode)
 }

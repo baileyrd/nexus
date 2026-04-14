@@ -37,6 +37,7 @@ pub fn run() {
             commands::toggle_snippet,
             commands::reorder_snippets,
             commands::get_theme_config,
+            commands::set_mode,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch nexus-app");

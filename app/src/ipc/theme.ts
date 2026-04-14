@@ -10,6 +10,7 @@ import type {
   SnippetMetadata,
   ThemeConfig,
   ThemeMetadata,
+  ThemeMode,
 } from "../bindings";
 
 export type {
@@ -55,4 +56,8 @@ export function reorderSnippets(ids: string[]): Promise<void> {
 
 export function getThemeConfig(): Promise<ThemeConfig> {
   return invoke("get_theme_config");
+}
+
+export function setMode(mode: ThemeMode): Promise<AppliedTheme> {
+  return invoke("set_mode", { mode });
 }
