@@ -1,8 +1,9 @@
 //! Nexus AI engine: provider traits, embeddings, and RAG pipeline.
 //!
-//! This crate defines the core abstractions for interacting with AI
-//! language models and embedding services, along with concrete
-//! implementations for Anthropic, `OpenAI`, and Ollama.
+//! This crate holds the AI plugin's internals — chat provider traits
+//! (Anthropic, `OpenAI`, Ollama), embedding providers, chunker, and the
+//! retrieval-augmented generation pipeline. It does **not** touch
+//! `SQLite`; vector storage goes through `com.nexus.storage` IPC.
 
 #![deny(missing_docs)]
 #![warn(clippy::pedantic)]
@@ -30,7 +31,4 @@ pub use ollama::OllamaProvider;
 pub use openai::OpenAiProvider;
 pub use provider::{AiProvider, ChatMessage, Role};
 pub use rag::{index_file as rag_index_file, query as rag_query, RagResponse};
-pub use vectorstore::{
-    count as vectorstore_count, delete_by_file as vectorstore_delete,
-    search as vectorstore_search, upsert as vectorstore_upsert, ChunkEmbedding, ChunkMatch,
-};
+pub use vectorstore::{ChunkEmbedding, ChunkMatch};

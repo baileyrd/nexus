@@ -25,10 +25,6 @@ pub enum AiError {
     #[error("no embedding provider configured")]
     NoEmbeddingProvider,
 
-    /// Database error from rusqlite.
-    #[error("database error: {0}")]
-    Database(#[from] rusqlite::Error),
-
     /// Serialization or deserialization error.
     #[error("serialization error: {0}")]
     Serialization(String),

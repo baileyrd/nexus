@@ -877,7 +877,7 @@ fn main() {
             AiCommand::Ask { question } => commands::ai::ask(&mut app, &question),
             AiCommand::Embed { file } => commands::ai::embed(&mut app, file.as_deref()),
             AiCommand::Status => commands::ai::status(&mut app),
-            AiCommand::Config => commands::ai::config(),
+            AiCommand::Config => commands::ai::config(&mut app),
         },
 
         // Stub commands — implemented in later milestones.

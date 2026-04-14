@@ -31,7 +31,7 @@ pub use error::{
 };
 pub use event::{EventFilter, EventMetadata, NexusEvent, PublishedEvent, StopReason};
 pub use event_bus::{EventBus, EventSubscription};
-pub use ipc::{IpcDispatcher, IpcFuture};
+pub use ipc::{ipc_call, IpcDispatcher, IpcFuture};
 pub use kernel::Kernel;
 pub use kv_store::KvStore;
 pub use log::LogLevel;

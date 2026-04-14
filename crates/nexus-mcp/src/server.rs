@@ -22,7 +22,11 @@ use rmcp::{tool, tool_router};
 use serde::{Deserialize, Serialize};
 
 const STORAGE_PLUGIN: &str = "com.nexus.storage";
+const AI_PLUGIN: &str = "com.nexus.ai";
 const IPC_TIMEOUT: Duration = Duration::from_secs(30);
+/// Longer timeout for AI calls — they make outbound HTTP requests to the
+/// chat + embedding providers.
+const AI_IPC_TIMEOUT: Duration = Duration::from_secs(120);
 
 // ── Input types ──────────────────────────────────────────────────────────────
 
@@ -119,7 +123,6 @@ struct ToggleTaskInput {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct AskInput {
     /// The question to answer via RAG over the knowledge base.
-    #[allow(dead_code)]
     question: String,
 }
 
@@ -702,18 +705,44 @@ impl NexusMcpServer {
 
     #[tool(
         name = "nexus_ask",
-        description = "Ask a question via RAG over your notes (pending AI plugin migration; currently returns a stub error)"
+        description = "Ask a question via RAG over your notes"
     )]
-    async fn ask(&self, Parameters(_input): Parameters<AskInput>) -> Json<AskOutput> {
-        // RAG is blocked on the AI plugin migration (Phase B / Q3). Until the
-        // AI subsystem exposes ipc_call handlers for rag_query, this tool
-        // returns a placeholder error so callers get a clean signal instead
-        // of a hang.
-        Json(AskOutput {
-            answer: "nexus_ask is unavailable: AI plugin IPC migration pending".into(),
-            model: String::new(),
-            source_count: 0,
-        })
+    async fn ask(&self, Parameters(input): Parameters<AskInput>) -> Json<AskOutput> {
+        #[derive(Deserialize)]
+        struct Resp {
+            answer: String,
+            #[serde(default)]
+            model: String,
+            #[serde(default)]
+            sources: Vec<serde_json::Value>,
+        }
+        let args = serde_json::json!({ "question": input.question, "limit": 5 });
+        let value = match self
+            .context
+            .ipc_call(AI_PLUGIN, "ask", args, AI_IPC_TIMEOUT)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                return Json(AskOutput {
+                    answer: format!("nexus_ask failed: {e}"),
+                    model: String::new(),
+                    source_count: 0,
+                });
+            }
+        };
+        match serde_json::from_value::<Resp>(value) {
+            Ok(r) => Json(AskOutput {
+                answer: r.answer,
+                model: r.model,
+                source_count: r.sources.len(),
+            }),
+            Err(e) => Json(AskOutput {
+                answer: format!("nexus_ask: failed to decode response: {e}"),
+                model: String::new(),
+                source_count: 0,
+            }),
+        }
     }
 
     /// Shared write_file implementation for create_note + update_note.

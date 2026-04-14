@@ -1,182 +1,183 @@
-//! AI command handlers: ask, embed, status, config.
+//! AI command handlers — `nexus ai ask|embed|status|config`.
+//!
+//! Every AI call routes through `com.nexus.ai` via `ipc_call`; the CLI
+//! does not link against `nexus-ai` directly.
 
-use anyhow::Result;
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use nexus_kernel::PluginContext;
+use serde_json::Value;
+
 use crate::app::App;
 
-/// Ask a question using RAG against the forge.
+const AI_PLUGIN: &str = "com.nexus.ai";
+const IPC_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Ask a question using RAG.
 pub fn ask(app: &mut App, question: &str) -> Result<()> {
-    let storage = app.storage_mut()?;
+    let response = call(app, "ask", serde_json::json!({ "question": question, "limit": 5 }))?;
 
-    let ai_config = nexus_ai::detect_provider()
-        .ok_or_else(|| anyhow::anyhow!("{}", nexus_ai::AiError::NoProvider))?;
-    let embed_config = nexus_ai::detect_embedding_provider()
-        .ok_or_else(|| anyhow::anyhow!("{}", nexus_ai::AiError::NoEmbeddingProvider))?;
+    if let Some(answer) = response.get("answer").and_then(Value::as_str) {
+        println!("{answer}");
+    }
 
-    let ai: Box<dyn nexus_ai::AiProvider> = build_ai_provider(&ai_config)?;
-    let embedder: Box<dyn nexus_ai::EmbeddingProvider> = build_embedding_provider(&embed_config)?;
-
-    let conn = storage.pool_connection()
-        .map_err(|e| anyhow::anyhow!("failed to get DB connection: {e}"))?;
-
-    let rt = tokio::runtime::Runtime::new()?;
-    let response = rt.block_on(nexus_ai::rag_query(
-        &conn, ai.as_ref(), embedder.as_ref(), question, 5,
-    ))
-    .map_err(|e| anyhow::anyhow!("AI query failed: {e}"))?;
-
-    println!("{}", response.answer);
-
-    if !response.sources.is_empty() {
-        println!("\n--- Sources ---");
-        for source in &response.sources {
-            println!("  [{:.2}] {}", source.score, source.file_path);
+    if let Some(sources) = response.get("sources").and_then(Value::as_array) {
+        if !sources.is_empty() {
+            println!("\n--- Sources ---");
+            for src in sources {
+                let score = src.get("score").and_then(Value::as_f64).unwrap_or(0.0);
+                let path = src
+                    .get("file_path")
+                    .and_then(Value::as_str)
+                    .unwrap_or("<unknown>");
+                println!("  [{score:.2}] {path}");
+            }
         }
     }
 
     Ok(())
 }
 
-/// Generate embeddings for all files or a single file.
+/// Index one file or all files into the vector store.
 pub fn embed(app: &mut App, file: Option<&str>) -> Result<()> {
+    // Fetching files and blocks still uses direct `nexus-storage` — dropping
+    // the last storage dep from the CLI requires a `query_blocks` IPC
+    // handler, which is a follow-up slice.
     let storage = app.storage_mut()?;
-
-    let embed_config = nexus_ai::detect_embedding_provider()
-        .ok_or_else(|| anyhow::anyhow!("{}", nexus_ai::AiError::NoEmbeddingProvider))?;
-    let embedder: Box<dyn nexus_ai::EmbeddingProvider> = build_embedding_provider(&embed_config)?;
-
-    let conn = storage.pool_connection()
+    let conn = storage
+        .pool_connection()
         .map_err(|e| anyhow::anyhow!("failed to get DB connection: {e}"))?;
-
-    let rt = tokio::runtime::Runtime::new()?;
 
     if let Some(path) = file {
         let file_record = nexus_storage::file_by_path(&conn, path)?
             .ok_or_else(|| anyhow::anyhow!("file not found: {path}"))?;
         let blocks = nexus_storage::query_blocks(&conn, file_record.id)?;
-        let block_tuples: Vec<_> = blocks.iter().map(|b| {
-            (b.id, b.block_type.clone(), b.content.clone(), b.level)
-        }).collect();
+        let block_tuples: Vec<(u64, String, String, Option<i32>)> = blocks
+            .iter()
+            .map(|b| (b.id, b.block_type.clone(), b.content.clone(), b.level))
+            .collect();
 
-        let count = rt.block_on(nexus_ai::rag_index_file(
-            &conn, embedder.as_ref(), path, &block_tuples,
-        ))
-        .map_err(|e| anyhow::anyhow!("embedding failed: {e}"))?;
-
+        let count = index_one(app, path, &block_tuples)?;
         println!("Embedded {count} chunks from {path}");
     } else {
         let files = nexus_storage::query_files(&conn, &nexus_storage::FileFilter::default())?;
-        let mut total = 0;
+        drop(conn); // release read handle before we start embedding in a loop
 
+        let mut total = 0usize;
         for file_record in &files {
+            let storage = app.storage_mut()?;
+            let conn = storage.pool_connection()
+                .map_err(|e| anyhow::anyhow!("failed to get DB connection: {e}"))?;
             let blocks = nexus_storage::query_blocks(&conn, file_record.id)?;
-            let block_tuples: Vec<_> = blocks.iter().map(|b| {
-                (b.id, b.block_type.clone(), b.content.clone(), b.level)
-            }).collect();
+            drop(conn);
+            let block_tuples: Vec<(u64, String, String, Option<i32>)> = blocks
+                .iter()
+                .map(|b| (b.id, b.block_type.clone(), b.content.clone(), b.level))
+                .collect();
 
-            let count = rt.block_on(nexus_ai::rag_index_file(
-                &conn, embedder.as_ref(), &file_record.path, &block_tuples,
-            ))
-            .map_err(|e| anyhow::anyhow!("embedding failed for {}: {e}", file_record.path))?;
-
+            let count = index_one(app, &file_record.path, &block_tuples)?;
             total += count;
             println!("  {} — {count} chunks", file_record.path);
         }
-
         println!("\nEmbedded {total} chunks from {} files", files.len());
     }
 
     Ok(())
 }
 
-/// Show AI and embedding status.
+/// Show AI and embedding status + indexed-chunk count.
 pub fn status(app: &mut App) -> Result<()> {
-    let storage = app.storage()?;
-    let conn = storage.pool_connection()
-        .map_err(|e| anyhow::anyhow!("failed to get DB connection: {e}"))?;
+    let response = call(app, "status", serde_json::json!({}))?;
 
-    let embedding_count = nexus_ai::vectorstore_count(&conn)
-        .map_err(|e| anyhow::anyhow!("failed to count embeddings: {e}"))?;
+    let ai_provider = response
+        .get("ai_provider")
+        .and_then(Value::as_str)
+        .unwrap_or("none");
+    let ai_model = response
+        .get("ai_model")
+        .and_then(Value::as_str)
+        .unwrap_or("default");
+    let embed_provider = response
+        .get("embedding_provider")
+        .and_then(Value::as_str)
+        .unwrap_or("none");
+    let indexed = response
+        .get("indexed_chunks")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
 
-    let ai_provider = nexus_ai::detect_provider()
-        .map(|c| format!("{} ({})", c.provider, c.model.unwrap_or_else(|| "default".to_string())))
-        .unwrap_or_else(|| "none".to_string());
-
-    let embed_provider = nexus_ai::detect_embedding_provider()
-        .map(|c| c.provider)
-        .unwrap_or_else(|| "none".to_string());
-
-    println!("AI Provider       : {ai_provider}");
+    println!("AI Provider       : {ai_provider} ({ai_model})");
     println!("Embedding Provider: {embed_provider}");
-    println!("Indexed Chunks    : {embedding_count}");
+    println!("Indexed Chunks    : {indexed}");
 
     Ok(())
 }
 
-/// Show current AI configuration.
-pub fn config() -> Result<()> {
-    let ai = nexus_ai::detect_provider();
-    let embed = nexus_ai::detect_embedding_provider();
+/// Show current AI configuration (no network calls).
+pub fn config(app: &mut App) -> Result<()> {
+    let response = call(app, "config", serde_json::json!({}))?;
 
-    println!("--- AI Provider ---");
-    match ai {
-        Some(c) => {
-            println!("Provider : {}", c.provider);
-            println!("Model    : {}", c.model.unwrap_or_else(|| "default".to_string()));
-            println!("API Key  : {}", if c.api_key.is_some() { "set" } else { "not set" });
-            if let Some(url) = c.base_url {
-                println!("Base URL : {url}");
+    let print_section = |title: &str, view: Option<&Value>| {
+        println!("--- {title} ---");
+        match view {
+            Some(Value::Object(_)) => {
+                let provider = view
+                    .and_then(|v| v.get("provider"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("none");
+                let model = view
+                    .and_then(|v| v.get("model"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("default");
+                let has_key = view
+                    .and_then(|v| v.get("has_api_key"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let base_url = view.and_then(|v| v.get("base_url")).and_then(Value::as_str);
+                println!("Provider : {provider}");
+                println!("Model    : {model}");
+                println!("API Key  : {}", if has_key { "set" } else { "not set" });
+                if let Some(url) = base_url {
+                    println!("Base URL : {url}");
+                }
             }
+            _ => println!("Not configured"),
         }
-        None => println!("Not configured"),
-    }
+    };
 
-    println!("\n--- Embedding Provider ---");
-    match embed {
-        Some(c) => {
-            println!("Provider : {}", c.provider);
-            println!("API Key  : {}", if c.api_key.is_some() { "set" } else { "not set" });
-        }
-        None => println!("Not configured"),
-    }
+    print_section("AI Provider", response.get("ai"));
+    println!();
+    print_section("Embedding Provider", response.get("embedding"));
 
     Ok(())
 }
 
-// -- Private helpers --
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Build an AI provider from the detected configuration.
-fn build_ai_provider(config: &nexus_ai::AiConfig) -> Result<Box<dyn nexus_ai::AiProvider>> {
-    match config.provider.as_str() {
-        "anthropic" => Ok(Box::new(nexus_ai::AnthropicProvider::new(
-            config.api_key.clone().unwrap_or_default(),
-            config.model.clone(),
-            config.max_tokens,
-        ))),
-        "openai" => Ok(Box::new(nexus_ai::OpenAiProvider::new(
-            config.api_key.clone().unwrap_or_default(),
-            config.model.clone(),
-            config.max_tokens,
-        ))),
-        "ollama" => Ok(Box::new(nexus_ai::OllamaProvider::new(
-            config.base_url.clone(),
-            config.model.clone(),
-        ))),
-        other => Err(anyhow::anyhow!("unknown AI provider: {other}")),
-    }
+fn call(app: &mut App, command: &str, args: Value) -> Result<Value> {
+    let (runtime, rt) = app.runtime()?;
+    rt.block_on(
+        runtime
+            .context
+            .ipc_call(AI_PLUGIN, command, args, IPC_TIMEOUT),
+    )
+    .with_context(|| format!("AI ipc call '{command}' failed"))
 }
 
-/// Build an embedding provider from the detected configuration.
-fn build_embedding_provider(config: &nexus_ai::AiConfig) -> Result<Box<dyn nexus_ai::EmbeddingProvider>> {
-    match config.provider.as_str() {
-        "openai" => Ok(Box::new(nexus_ai::OpenAiProvider::new(
-            config.api_key.clone().unwrap_or_default(),
-            None,
-            4096,
-        ))),
-        "ollama" => Ok(Box::new(nexus_ai::OllamaProvider::new(
-            config.base_url.clone(),
-            None,
-        ))),
-        other => Err(anyhow::anyhow!("unknown embedding provider: {other}")),
-    }
+fn index_one(
+    app: &mut App,
+    file_path: &str,
+    blocks: &[(u64, String, String, Option<i32>)],
+) -> Result<usize> {
+    let response = call(
+        app,
+        "index_file",
+        serde_json::json!({ "file_path": file_path, "blocks": blocks }),
+    )?;
+    response
+        .get("indexed_chunks")
+        .and_then(Value::as_u64)
+        .and_then(|v| usize::try_from(v).ok())
+        .ok_or_else(|| anyhow::anyhow!("index_file: missing 'indexed_chunks'"))
 }

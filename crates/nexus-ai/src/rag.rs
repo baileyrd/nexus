@@ -1,11 +1,14 @@
 //! Retrieval-Augmented Generation (RAG) pipeline.
 //!
-//! Combines the vector store, embedding provider, and chat provider to
-//! answer questions grounded in the user's personal knowledge base.
+//! Combines HTTP-based embedding + chat providers with storage-owned vector
+//! search (reached through `com.nexus.storage` IPC). The pipeline does not
+//! touch `SQLite` directly.
 
 use std::fmt::Write as _;
+use std::sync::Arc;
 
-use rusqlite::Connection;
+use nexus_kernel::IpcDispatcher;
+use serde::{Deserialize, Serialize};
 
 use crate::chunker::chunks_from_blocks;
 use crate::embedding::EmbeddingProvider;
@@ -16,29 +19,26 @@ use crate::vectorstore::{self, ChunkEmbedding, ChunkMatch};
 /// Default maximum chunk size in characters.
 const DEFAULT_MAX_CHUNK_SIZE: usize = 1024;
 
-/// The response from a RAG query, including the generated answer and sources.
-#[derive(Debug, Clone)]
+/// The response from a RAG query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RagResponse {
-    /// The generated answer text.
+    /// Generated answer text.
     pub answer: String,
-    /// The source chunks used to generate the answer.
+    /// Source chunks retrieved to ground the answer.
     pub sources: Vec<ChunkMatch>,
-    /// The name of the model that generated the answer.
+    /// Name of the model that generated the answer.
     pub model: String,
 }
 
 /// Answer a question using retrieval-augmented generation.
 ///
-/// Embeds the `question`, searches the vector store for relevant chunks,
-/// builds a grounded system prompt with the retrieved context, and sends
-/// the conversation to the AI provider.
+/// Embeds the question, fetches the top `limit` matching chunks via storage
+/// IPC, builds a grounded system prompt, and calls the AI provider.
 ///
 /// # Errors
-///
-/// Returns [`AiError`] if embedding the question fails, the vector store
-/// query fails, or the AI provider chat call fails.
+/// Returns [`AiError`] if embedding, vector search, or the chat call fails.
 pub async fn query(
-    conn: &Connection,
+    dispatcher: &Arc<dyn IpcDispatcher>,
     ai: &dyn AiProvider,
     embedder: &dyn EmbeddingProvider,
     question: &str,
@@ -50,7 +50,7 @@ pub async fn query(
         .next()
         .ok_or_else(|| AiError::Provider("embedding returned no vectors".into()))?;
 
-    let sources = vectorstore::search(conn, &q_embedding, limit)?;
+    let sources = vectorstore::search(dispatcher, &q_embedding, limit).await?;
     let system = build_rag_prompt(&sources);
 
     let messages = vec![ChatMessage {
@@ -67,17 +67,13 @@ pub async fn query(
     })
 }
 
-/// Index a file's blocks into the vector store.
-///
-/// Chunks the blocks, embeds all chunks in a single batch, and upserts
-/// them into the `embeddings` table.  Returns the number of chunks stored.
+/// Index a file's blocks by chunking, embedding, and upserting via storage
+/// IPC. Returns the number of chunks stored.
 ///
 /// # Errors
-///
-/// Returns [`AiError`] if embedding generation fails or the vector store
-/// upsert fails.
+/// Returns [`AiError`] if embedding or the storage call fails.
 pub async fn index_file(
-    conn: &Connection,
+    dispatcher: &Arc<dyn IpcDispatcher>,
     embedder: &dyn EmbeddingProvider,
     file_path: &str,
     blocks: &[(u64, String, String, Option<i32>)],
@@ -85,7 +81,7 @@ pub async fn index_file(
     let chunks = chunks_from_blocks(file_path, blocks, DEFAULT_MAX_CHUNK_SIZE);
 
     if chunks.is_empty() {
-        vectorstore::delete_by_file(conn, file_path)?;
+        vectorstore::delete_by_file(dispatcher, file_path).await?;
         return Ok(0);
     }
 
@@ -103,16 +99,12 @@ pub async fn index_file(
         })
         .collect();
 
-    vectorstore::upsert(conn, file_path, &chunk_embeddings)?;
-
-    Ok(chunk_embeddings.len())
+    let n = chunk_embeddings.len();
+    vectorstore::upsert(dispatcher, file_path, &chunk_embeddings).await?;
+    Ok(n)
 }
 
 /// Build the system prompt for the RAG conversation.
-///
-/// When no sources are available, returns a generic helpful-assistant
-/// prompt.  Otherwise, enumerates the sources with `[[file_path]]`
-/// citations so the model can reference them.
 fn build_rag_prompt(sources: &[ChunkMatch]) -> String {
     if sources.is_empty() {
         return "You are a helpful assistant. Answer the user's question to the best of your ability.".to_string();
