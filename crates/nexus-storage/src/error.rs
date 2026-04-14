@@ -68,6 +68,14 @@ pub enum StorageError {
     /// File watcher error.
     #[error("watcher error: {0}")]
     Watcher(#[from] notify::Error),
+
+    /// Bases filesystem error.
+    #[error("bases error: {0}")]
+    Bases(#[from] nexus_types::bases::BasesError),
+
+    /// Config file error from `nexus-formats`.
+    #[error("config error: {0}")]
+    Config(#[from] nexus_formats::ConfigError),
 }
 
 #[cfg(test)]
