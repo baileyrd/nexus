@@ -83,7 +83,7 @@ pub fn apply_migration(
     op: SchemaOp,
 ) -> Result<SchemaMigration> {
     // Load current state.
-    let mut base = nexus_storage::bases::load_base(base_dir)?;
+    let mut base = nexus_types::bases::load_base(base_dir)?;
 
     // Apply the operation to the in-memory schema.
     match &op {
@@ -135,7 +135,7 @@ pub fn apply_migration(
     }
 
     // Persist to disk.
-    nexus_storage::bases::save_base(base_dir, &base)?;
+    nexus_types::bases::save_base(base_dir, &base)?;
 
     // Update the SQLite index in-place (UPDATE, not INSERT OR REPLACE)
     // to avoid cascade-deleting schema_versions records.
@@ -244,7 +244,7 @@ pub fn migration_history(conn: &Connection, base_id: i64) -> Result<Vec<SchemaMi
 /// Fields that fail to deserialize are skipped with a warning.
 #[must_use]
 pub fn extract_configs(
-    schema: &nexus_storage::bases::BaseSchema,
+    schema: &nexus_types::bases::BaseSchema,
 ) -> BTreeMap<String, PropertyConfig> {
     let mut configs = BTreeMap::new();
     for (name, value) in &schema.fields {
@@ -293,11 +293,11 @@ mod tests {
 
     fn create_test_base(dir: &Path, conn: &Connection) -> i64 {
         let base_dir = dir.join("Test.bases");
-        let schema = nexus_storage::bases::BaseSchema {
+        let schema = nexus_types::bases::BaseSchema {
             version: "1.0".to_string(),
             fields: serde_json::Map::new(),
         };
-        let base = nexus_storage::bases::init_base(&base_dir, "Test", &schema).unwrap();
+        let base = nexus_types::bases::init_base(&base_dir, "Test", &schema).unwrap();
         nexus_storage::bases::insert_base(conn, &base_dir.display().to_string(), &base).unwrap()
     }
 
@@ -322,7 +322,7 @@ mod tests {
         assert_eq!(migration.base_id, base_id);
 
         // Verify the property was added to the file.
-        let reloaded = nexus_storage::bases::load_base(&base_dir).unwrap();
+        let reloaded = nexus_types::bases::load_base(&base_dir).unwrap();
         assert!(reloaded.schema.fields.contains_key("title"));
     }
 
@@ -383,7 +383,7 @@ mod tests {
         .unwrap();
         assert_eq!(m.version, 2);
 
-        let reloaded = nexus_storage::bases::load_base(&base_dir).unwrap();
+        let reloaded = nexus_types::bases::load_base(&base_dir).unwrap();
         assert!(!reloaded.schema.fields.contains_key("temp"));
     }
 
@@ -415,7 +415,7 @@ mod tests {
         )
         .unwrap();
 
-        let reloaded = nexus_storage::bases::load_base(&base_dir).unwrap();
+        let reloaded = nexus_types::bases::load_base(&base_dir).unwrap();
         assert!(!reloaded.schema.fields.contains_key("old_name"));
         assert!(reloaded.schema.fields.contains_key("new_name"));
     }

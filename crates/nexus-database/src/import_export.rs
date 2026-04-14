@@ -53,7 +53,7 @@ pub fn import_csv<R: Read>(
     reader: R,
     mapping: &ColumnMapping,
     has_header: bool,
-) -> Result<(Vec<nexus_storage::bases::BaseRecord>, ImportResult)> {
+) -> Result<(Vec<nexus_types::bases::BaseRecord>, ImportResult)> {
     let mut csv_reader = csv::ReaderBuilder::new()
         .has_headers(has_header)
         .from_reader(reader);
@@ -88,7 +88,7 @@ pub fn import_csv<R: Read>(
             }
         }
 
-        records.push(nexus_storage::bases::BaseRecord {
+        records.push(nexus_types::bases::BaseRecord {
             id: record_id,
             fields,
         });
@@ -108,7 +108,7 @@ pub fn import_csv<R: Read>(
 /// Returns `DatabaseError::ImportExportError` on I/O failure.
 pub fn export_csv<W: Write>(
     writer: W,
-    records: &[nexus_storage::bases::BaseRecord],
+    records: &[nexus_types::bases::BaseRecord],
     field_names: &[String],
 ) -> Result<usize> {
     let mut csv_writer = csv::Writer::from_writer(writer);
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn export_basic_csv() {
         let records = vec![
-            nexus_storage::bases::BaseRecord {
+            nexus_types::bases::BaseRecord {
                 id: "r1".to_string(),
                 fields: {
                     let mut m = serde_json::Map::new();
@@ -223,7 +223,7 @@ mod tests {
                     m
                 },
             },
-            nexus_storage::bases::BaseRecord {
+            nexus_types::bases::BaseRecord {
                 id: "r2".to_string(),
                 fields: {
                     let mut m = serde_json::Map::new();
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn roundtrip_csv() {
-        let records = vec![nexus_storage::bases::BaseRecord {
+        let records = vec![nexus_types::bases::BaseRecord {
             id: "r1".to_string(),
             fields: {
                 let mut m = serde_json::Map::new();

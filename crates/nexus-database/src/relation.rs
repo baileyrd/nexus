@@ -16,7 +16,7 @@ pub fn resolve_relation(
     conn: &Connection,
     target_base_id: i64,
     record_ids: &[String],
-) -> Result<Vec<nexus_storage::bases::BaseRecord>> {
+) -> Result<Vec<nexus_types::bases::BaseRecord>> {
     if record_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -51,7 +51,7 @@ pub fn resolve_relation(
         let json_str = row.map_err(|e| {
             DatabaseError::RelationError(format!("row read failed: {e}"))
         })?;
-        let record: nexus_storage::bases::BaseRecord =
+        let record: nexus_types::bases::BaseRecord =
             serde_json::from_str(&json_str).map_err(|e| {
                 DatabaseError::RelationError(format!("deserialize failed: {e}"))
             })?;
@@ -73,7 +73,7 @@ pub fn resolve_relation(
 /// Returns `DatabaseError::RelationError` on resolution or aggregation failure.
 pub fn compute_rollup(
     conn: &Connection,
-    source_record: &nexus_storage::bases::BaseRecord,
+    source_record: &nexus_types::bases::BaseRecord,
     relation_field: &str,
     target_base_id: i64,
     target_property: &str,
@@ -230,7 +230,7 @@ mod tests {
         let conn = setup_db();
         let mut fields = serde_json::Map::new();
         fields.insert("related".to_string(), serde_json::json!(["t1", "t2", "t3"]));
-        let record = nexus_storage::bases::BaseRecord {
+        let record = nexus_types::bases::BaseRecord {
             id: "source".to_string(),
             fields,
         };
@@ -243,7 +243,7 @@ mod tests {
         let conn = setup_db();
         let mut fields = serde_json::Map::new();
         fields.insert("related".to_string(), serde_json::json!(["t1", "t2", "t3"]));
-        let record = nexus_storage::bases::BaseRecord {
+        let record = nexus_types::bases::BaseRecord {
             id: "source".to_string(),
             fields,
         };
@@ -256,7 +256,7 @@ mod tests {
         let conn = setup_db();
         let mut fields = serde_json::Map::new();
         fields.insert("related".to_string(), serde_json::json!(["t1", "t2"]));
-        let record = nexus_storage::bases::BaseRecord {
+        let record = nexus_types::bases::BaseRecord {
             id: "source".to_string(),
             fields,
         };
@@ -269,7 +269,7 @@ mod tests {
         let conn = setup_db();
         let mut fields = serde_json::Map::new();
         fields.insert("related".to_string(), serde_json::json!(["t1", "t2", "t3"]));
-        let record = nexus_storage::bases::BaseRecord {
+        let record = nexus_types::bases::BaseRecord {
             id: "source".to_string(),
             fields,
         };
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn rollup_missing_relation_field() {
         let conn = setup_db();
-        let record = nexus_storage::bases::BaseRecord {
+        let record = nexus_types::bases::BaseRecord {
             id: "source".to_string(),
             fields: serde_json::Map::new(),
         };

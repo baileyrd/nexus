@@ -7,9 +7,9 @@ publish.workspace = true
 description = "Nexus database engine: rich property types, query engine, formula language, relations, import/export"
 
 [dependencies]
-nexus-storage = { path = "../nexus-storage" }
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
+nexus-types = { path = "../nexus-types" }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -21,4 +21,5 @@ tracing = { workspace = true }
 csv = { workspace = true }
 
 [dev-dependencies]
+nexus-storage = { path = "../nexus-storage" }
 tempfile = { workspace = true }

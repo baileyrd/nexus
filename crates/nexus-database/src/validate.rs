@@ -1,6 +1,6 @@
 //! Type-aware property validation for database records.
 //!
-//! Extends the basic required-field check from `nexus-storage` with
+//! Extends the basic required-field check from `nexus-types::bases` with
 //! per-type validation (email format, number ranges, select option
 //! membership, date parsing, etc.).
 
@@ -278,7 +278,7 @@ fn validate_select(
 ///
 /// Returns all validation issues found (does not short-circuit on first error).
 pub fn validate_record_full(
-    record: &nexus_storage::bases::BaseRecord,
+    record: &nexus_types::bases::BaseRecord,
     configs: &BTreeMap<String, PropertyConfig>,
     validator: &dyn PropertyValidator,
 ) -> Vec<ValidationIssue> {
@@ -534,7 +534,7 @@ mod tests {
         fields.insert("email".to_string(), serde_json::json!("bad"));
         fields.insert("score".to_string(), serde_json::json!(200));
 
-        let record = nexus_storage::bases::BaseRecord {
+        let record = nexus_types::bases::BaseRecord {
             id: "r1".to_string(),
             fields,
         };

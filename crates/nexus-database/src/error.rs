@@ -37,9 +37,9 @@ pub enum DatabaseError {
     #[error("import/export error: {0}")]
     ImportExportError(String),
 
-    /// Propagated from the storage engine.
+    /// Propagated from the bases filesystem layer.
     #[error(transparent)]
-    Storage(#[from] nexus_storage::StorageError),
+    Bases(#[from] nexus_types::bases::BasesError),
 
     /// I/O error.
     #[error("I/O error: {0}")]

@@ -98,10 +98,10 @@ pub enum SortDirection {
 }
 
 /// Result of a query execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryResult {
     /// The matching records (after LIMIT/OFFSET).
-    pub records: Vec<nexus_storage::bases::BaseRecord>,
+    pub records: Vec<nexus_types::bases::BaseRecord>,
     /// Total number of matching records (before LIMIT/OFFSET).
     pub total_count: u64,
     /// Whether there are more records beyond the current page.
@@ -267,7 +267,7 @@ pub fn execute(conn: &Connection, query: &Query) -> Result<QueryResult> {
     for row in rows {
         let json_str =
             row.map_err(|e| DatabaseError::QueryError(format!("row read failed: {e}")))?;
-        let record: nexus_storage::bases::BaseRecord =
+        let record: nexus_types::bases::BaseRecord =
             serde_json::from_str(&json_str).map_err(|e| {
                 DatabaseError::QueryError(format!("failed to deserialize record: {e}"))
             })?;
