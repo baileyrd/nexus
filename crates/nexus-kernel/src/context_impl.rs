@@ -266,7 +266,23 @@ impl PluginContext for KernelPluginContext {
 
         let target = target_plugin_id.to_string();
         let command = command_id.to_string();
+        let timeout_ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
 
+        // Prefer the async path: handlers that perform HTTP / nested IPC must
+        // not block the shared plugin-loader mutex, so they expose a Future
+        // instead of a sync callable.
+        if let Some(fut) = dispatcher.dispatch_async(&target, &command, args.clone()) {
+            return match tokio::time::timeout(timeout, fut).await {
+                Ok(result) => result,
+                Err(_elapsed) => Err(IpcError::Timeout {
+                    plugin_id: target,
+                    command,
+                    timeout_ms,
+                }),
+            };
+        }
+
+        // Fall back to sync dispatch on the blocking thread pool.
         let join = tokio::task::spawn_blocking({
             let target = target.clone();
             let command = command.clone();
@@ -282,7 +298,7 @@ impl PluginContext for KernelPluginContext {
             Err(_elapsed) => Err(IpcError::Timeout {
                 plugin_id: target,
                 command,
-                timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+                timeout_ms,
             }),
         }
     }

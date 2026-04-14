@@ -8,9 +8,12 @@ use std::sync::Arc;
 
 use std::sync::Mutex;
 
+use std::future::Future;
+use std::pin::Pin;
+
 use nexus_kernel::{
     Capability, CapabilitySet, EventBus, EventFilter, EventSubscription, IpcDispatcher, IpcError,
-    PluginInfo, PluginStatus, TrustLevel,
+    IpcFuture, PluginInfo, PluginStatus, TrustLevel,
 };
 
 use crate::manifest::{self, PluginManifest};
@@ -72,7 +75,32 @@ pub trait CorePlugin: Send + Sync {
         handler_id: u32,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError>;
+
+    /// Async dispatch path for handlers that perform HTTP calls, nested
+    /// `ipc_call`s, or other `.await`-bound work.
+    ///
+    /// Returns `Some(future)` when this plugin has an async handler for
+    /// `handler_id`; returns `None` (the default) when it is sync-only and
+    /// the caller should fall back to [`dispatch`](CorePlugin::dispatch).
+    ///
+    /// Implementors must capture any state the future needs by value — the
+    /// returned future outlives the borrow on `self`.
+    fn dispatch_async(
+        &mut self,
+        handler_id: u32,
+        args: &serde_json::Value,
+    ) -> Option<CorePluginFuture> {
+        let _ = (handler_id, args);
+        None
+    }
 }
+
+/// Boxed future returned by [`CorePlugin::dispatch_async`].
+///
+/// Mirrors [`nexus_kernel::IpcFuture`] but carries the crate-native
+/// [`PluginError`]; the loader converts to [`IpcError`] before handing the
+/// future back to the kernel.
+pub type CorePluginFuture = Pin<Box<dyn Future<Output = Result<serde_json::Value, PluginError>> + Send>>;
 
 // ─── PluginBackend ────────────────────────────────────────────────────────────
 
@@ -94,6 +122,20 @@ impl PluginBackend {
         match self {
             Self::Core(p) => p.dispatch(handler_id, args),
             Self::Community(s) => s.dispatch(handler_id, args),
+        }
+    }
+
+    /// Async dispatch: delegates to the core plugin's `dispatch_async`. WASM
+    /// sandboxes never produce a future today, so community plugins always
+    /// return `None` and fall back to sync dispatch.
+    fn dispatch_async(
+        &mut self,
+        handler_id: u32,
+        args: &serde_json::Value,
+    ) -> Option<CorePluginFuture> {
+        match self {
+            Self::Core(p) => p.dispatch_async(handler_id, args),
+            Self::Community(_) => None,
         }
     }
 
@@ -928,6 +970,40 @@ impl IpcDispatcher for SharedPluginLoader {
                 plugin_id: target_plugin_id.to_string(),
                 command: command_id.to_string(),
             })
+    }
+
+    /// Hand back an async future for `command_id`, if the target plugin has
+    /// one. The loader mutex is held only long enough to look up the handler
+    /// and construct the future — it is released before the future is
+    /// awaited, so handlers may issue nested `ipc_call`s without deadlocking.
+    fn dispatch_async(
+        &self,
+        target_plugin_id: &str,
+        command_id: &str,
+        args: serde_json::Value,
+    ) -> Option<IpcFuture> {
+        let target = target_plugin_id.to_string();
+        let command = command_id.to_string();
+
+        let inner: CorePluginFuture = {
+            let mut loader = self.0.lock().ok()?;
+            let lp = loader.loaded.get_mut(&target)?;
+            let handler_id = lp
+                .manifest
+                .registrations
+                .ipc_commands
+                .iter()
+                .find(|r| r.id == command)
+                .map(|r| r.handler_id)?;
+            lp.backend.dispatch_async(handler_id, &args)?
+        };
+
+        Some(Box::pin(async move {
+            inner.await.map_err(|_| IpcError::PluginCrashedDuringCall {
+                plugin_id: target,
+                command,
+            })
+        }))
     }
 }
 

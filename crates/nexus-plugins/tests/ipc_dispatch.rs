@@ -14,7 +14,7 @@ use nexus_kernel::{
     KvStore, PluginContext,
 };
 use nexus_plugins::{
-    parse_manifest, CorePlugin, PluginError, PluginLoader, SharedPluginLoader,
+    parse_manifest, CorePlugin, CorePluginFuture, PluginError, PluginLoader, SharedPluginLoader,
 };
 
 // ── A minimal core plugin that records every dispatch and returns a canned value ──
@@ -318,6 +318,91 @@ async fn ipc_call_handler_error_becomes_crashed_during_call() {
         ),
         "got {err:?}"
     );
+}
+
+// ── Async-path tests ─────────────────────────────────────────────────────────
+
+/// A core plugin that exposes both sync and async handlers.
+struct DualPlugin;
+
+impl CorePlugin for DualPlugin {
+    fn dispatch(
+        &mut self,
+        _handler_id: u32,
+        _args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        Err(PluginError::ExecutionFailed {
+            plugin_id: "dev.test.dual".into(),
+            reason: "sync path should not be hit when async handler is present".into(),
+        })
+    }
+
+    fn dispatch_async(
+        &mut self,
+        handler_id: u32,
+        args: &serde_json::Value,
+    ) -> Option<CorePluginFuture> {
+        let args = args.clone();
+        Some(Box::pin(async move {
+            // A trivial `.await` point proves the future runs through the
+            // async executor rather than synchronously.
+            tokio::task::yield_now().await;
+            Ok(serde_json::json!({ "handler": handler_id, "echoed": args }))
+        }))
+    }
+}
+
+#[tokio::test]
+async fn ipc_call_prefers_async_handler() {
+    let forge = tempfile::tempdir().expect("forge tempdir");
+    let plugins_dir = tempfile::tempdir().expect("plugins tempdir");
+    let plugin_dir = plugins_dir.path();
+
+    let mut loader = PluginLoader::new(plugins_dir.path());
+    loader
+        .register_core(
+            core_manifest_no_ipc("dev.test.caller"),
+            plugin_dir,
+            Box::new(EchoPlugin {
+                last_call: Arc::new(Mutex::new(None)),
+            }),
+        )
+        .expect("register caller");
+    loader
+        .register_core(
+            core_manifest_with_ipc("dev.test.dual", "dual", 42),
+            plugin_dir,
+            Box::new(DualPlugin),
+        )
+        .expect("register dual");
+
+    let dispatcher: Arc<dyn IpcDispatcher> = Arc::new(SharedPluginLoader::new(loader));
+
+    let kv: Arc<dyn KvStore> = Arc::new(MemoryKv::default());
+    let bus = Arc::new(EventBus::new(16));
+    let ctx = KernelPluginContext::new(
+        "dev.test.caller",
+        "1.0.0",
+        CapabilitySet::from_iter([Capability::IpcCall].iter().copied()),
+        kv,
+        bus,
+        forge.path(),
+        Some(dispatcher),
+    )
+    .expect("construct context");
+
+    let reply = ctx
+        .ipc_call(
+            "dev.test.dual",
+            "dual",
+            serde_json::json!({ "n": 3 }),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("async ipc_call succeeds");
+
+    assert_eq!(reply["handler"], 42);
+    assert_eq!(reply["echoed"], serde_json::json!({ "n": 3 }));
 }
 
 #[tokio::test]
