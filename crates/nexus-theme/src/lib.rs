@@ -36,6 +36,7 @@ pub mod resolver;
 pub mod snippet;
 pub mod theme;
 pub mod variables;
+pub mod watcher;
 
 pub use error::ThemeError;
 pub use layout::{
@@ -47,6 +48,7 @@ pub use resolver::{ResolvedTheme, ResolverInput};
 pub use snippet::CssSnippet;
 pub use theme::{Theme, ThemeCategory, ThemeMode};
 pub use variables::VariableMap;
+pub use watcher::{ThemeReloadEvent, ThemeWatcher};
 
 /// Result alias for theme operations.
 pub type Result<T> = std::result::Result<T, ThemeError>;
