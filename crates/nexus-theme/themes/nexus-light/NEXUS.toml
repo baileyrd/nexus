@@ -1,0 +1,47 @@
+[theme]
+name = "Nexus Light"
+version = "1.0.0"
+author = "Nexus"
+description = "Clean, accessible light theme for focused work"
+license = "MIT OR Apache-2.0"
+nexus_min_version = "0.1.0"
+nexus_max_version = "*"
+display_name = "Nexus Light"
+category = "light"
+supports = ["light"]
+platform_specific = ["macos", "windows"]
+
+[variables]
+"--nx-color-primary" = "#4A90E2"
+"--nx-color-primary-light" = "#6BA3FF"
+"--nx-color-primary-dark" = "#2E5CB8"
+"--nx-bg-primary" = "#FFFFFF"
+"--nx-bg-secondary" = "#F8F9FA"
+"--nx-bg-tertiary" = "#E8EAEF"
+"--nx-bg-elevated" = "#FFFFFF"
+"--nx-text-primary" = "#1A1A1A"
+"--nx-text-secondary" = "#4A4A4A"
+"--nx-text-tertiary" = "#7A7A7A"
+"--nx-text-muted" = "#A0A0A0"
+"--nx-text-inverted" = "#FFFFFF"
+
+[typography]
+sans_font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+mono_font = "'Monaco', 'Courier New', monospace"
+serif_font = "'Georgia', 'Times New Roman', serif"
+
+[platforms.macos]
+"--nx-color-primary" = "#006AFF"
+"--nx-bg-elevated" = "rgba(255, 255, 255, 0.95)"
+
+[platforms.windows]
+"--nx-bg-secondary" = "rgba(243, 243, 243, 0.5)"
+
+[tags]
+keywords = ["light", "minimal", "accessible", "professional"]
+color_temperature = "cool"
+contrast_level = "aa"
+use_case = ["writing", "coding", "reviewing"]
+
+[version_history]
+"1.0.0" = "Initial release"

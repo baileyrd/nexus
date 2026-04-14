@@ -1,0 +1,58 @@
+[theme]
+name = "Nexus Dark"
+version = "1.0.0"
+author = "Nexus"
+description = "Low-glare dark theme with high-contrast syntax colors"
+license = "MIT OR Apache-2.0"
+nexus_min_version = "0.1.0"
+nexus_max_version = "*"
+display_name = "Nexus Dark"
+category = "dark"
+supports = ["dark"]
+platform_specific = ["macos", "windows"]
+
+[variables]
+"--nx-color-primary" = "#6BA3FF"
+"--nx-color-primary-light" = "#8FBFFF"
+"--nx-color-primary-dark" = "#3D72C4"
+"--nx-bg-primary" = "#1A1A1A"
+"--nx-bg-secondary" = "#242424"
+"--nx-bg-tertiary" = "#2F2F2F"
+"--nx-bg-overlay" = "rgba(0, 0, 0, 0.75)"
+"--nx-bg-elevated" = "#2A2A2A"
+"--nx-text-primary" = "#F5F5F5"
+"--nx-text-secondary" = "#D4D4D4"
+"--nx-text-tertiary" = "#A0A0A0"
+"--nx-text-muted" = "#737373"
+"--nx-text-inverted" = "#0F0F0F"
+"--nx-interactive-hover" = "rgba(107, 163, 255, 0.12)"
+"--nx-interactive-active" = "rgba(107, 163, 255, 0.24)"
+"--nx-syntax-keyword" = "#FF6B6B"
+"--nx-syntax-string" = "#A3E48F"
+"--nx-syntax-comment" = "#7A7A7A"
+"--nx-syntax-number" = "#FFB347"
+"--nx-syntax-function" = "#6BA3FF"
+"--nx-shadow-sm" = "0 1px 2px rgba(0, 0, 0, 0.3)"
+"--nx-shadow-md" = "0 4px 6px rgba(0, 0, 0, 0.4)"
+"--nx-shadow-lg" = "0 10px 15px rgba(0, 0, 0, 0.5)"
+"--nx-graph-grid" = "rgba(255, 255, 255, 0.05)"
+
+[typography]
+sans_font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+mono_font = "'Monaco', 'Courier New', monospace"
+
+[platforms.macos]
+"--nx-color-primary" = "#0A84FF"
+"--nx-bg-elevated" = "rgba(42, 42, 42, 0.85)"
+
+[platforms.windows]
+"--nx-bg-secondary" = "rgba(32, 32, 32, 0.7)"
+
+[tags]
+keywords = ["dark", "high-contrast", "focus"]
+color_temperature = "cool"
+contrast_level = "aa"
+use_case = ["coding", "reviewing", "long-sessions"]
+
+[version_history]
+"1.0.0" = "Initial release"
