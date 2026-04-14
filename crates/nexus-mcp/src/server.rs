@@ -1,11 +1,10 @@
 //! MCP server implementation: 13 tools for note CRUD, search, graph, tasks, and RAG.
 //!
-//! All storage-backed tools route through the kernel plugin IPC boundary — the
-//! server holds an `Arc<KernelPluginContext>` rather than a `StorageEngine`,
-//! so every tool call is capability-checked and auditable at the kernel.
-//! RAG (`nexus_ask`) is a stub until the AI subsystem migrates in a later
-//! phase; it returns a placeholder so clients get a clean error instead of
-//! a hang.
+//! All tools route through the kernel plugin IPC boundary — the server holds
+//! an `Arc<KernelPluginContext>` and issues `ipc_call`s to `com.nexus.storage`
+//! and `com.nexus.ai`, so every tool call is capability-checked and auditable
+//! at the kernel. `nexus_ask` dispatches to the AI plugin's `ask` handler
+//! (RAG over indexed notes).
 
 use std::sync::Arc;
 use std::time::Duration;

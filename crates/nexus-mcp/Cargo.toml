@@ -8,7 +8,6 @@ description = "Nexus MCP server: expose forge operations to AI clients"
 
 [dependencies]
 nexus-kernel = { path = "../nexus-kernel" }
-nexus-ai = { path = "../nexus-ai" }
 rmcp = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
