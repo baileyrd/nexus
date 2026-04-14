@@ -98,29 +98,9 @@ collapsed = false
 miniMode = false
 panelOrder = ["backlinks", "outgoing-links", "tags-note", "outline"]
 
-[[rightSidebar.ribbon]]
-id = "backlinks"
-icon = "link-incoming"
-tooltip = "Backlinks"
-action = { kind = "togglePanel", panelId = "backlinks" }
-
-[[rightSidebar.ribbon]]
-id = "outgoing-links"
-icon = "link-outgoing"
-tooltip = "Outgoing links"
-action = { kind = "togglePanel", panelId = "outgoing-links" }
-
-[[rightSidebar.ribbon]]
-id = "tags-note"
-icon = "tag"
-tooltip = "Tags for this note"
-action = { kind = "togglePanel", panelId = "tags-note" }
-
-[[rightSidebar.ribbon]]
-id = "outline"
-icon = "list-indent"
-tooltip = "Outline"
-action = { kind = "togglePanel", panelId = "outline" }
+# No ribbon on the right — the Nexus layout treats the ribbon as a
+# left-only activity rail. Right-sidebar panel switching happens via
+# panel headers / keyboard shortcuts.
 
 [[rightSidebar.panels]]
 id = "backlinks"

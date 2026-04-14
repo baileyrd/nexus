@@ -52,7 +52,7 @@ export function WorkspaceView() {
             <SidebarPreview
               side="right"
               panels={layout.rightSidebar.panels}
-              ribbon={layout.rightSidebar.ribbon}
+              ribbon={[]}
               onTogglePanel={(id) => togglePanelVisibility("right", id)}
             />
           )}
