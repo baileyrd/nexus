@@ -5,10 +5,9 @@
 //! This inverts the dependency so the kernel can route IPC calls to plugins
 //! without importing the plugin runtime — keeping kernel containment intact.
 //!
-//! Used by [`crate::PluginContext::ipc_call`] via the optional dispatcher
-//! handle held on [`crate::KernelPluginContext`]. When the handle is absent
-//! (e.g. unit tests or kernels booted without a loader), `ipc_call` reports
-//! [`IpcError::PluginNotFound`].
+//! Callers never reach for an `IpcDispatcher` directly; they go through
+//! [`crate::PluginContext::ipc_call`], which holds the dispatcher internally
+//! and applies capability checks + per-call timeouts.
 //!
 //! # Sync vs async handlers
 //!
@@ -28,7 +27,6 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use crate::error::IpcError;
 
@@ -79,37 +77,3 @@ pub trait IpcDispatcher: Send + Sync {
     }
 }
 
-/// Async-first convenience wrapper around an [`IpcDispatcher`].
-///
-/// Intended for plugin code that needs to issue a nested IPC call from inside
-/// its own async handler (e.g. the AI plugin calling `com.nexus.storage`
-/// vector commands). Prefers the async dispatch path; falls back to
-/// `tokio::task::spawn_blocking` + sync dispatch for handlers that have not
-/// opted into async.
-///
-/// # Errors
-/// - [`IpcError::PluginNotFound`], [`IpcError::CommandNotFound`],
-///   [`IpcError::PluginCrashedDuringCall`] as produced by the dispatcher.
-/// - [`IpcError::PluginCrashedDuringCall`] if the blocking task panics.
-pub async fn ipc_call(
-    dispatcher: &Arc<dyn IpcDispatcher>,
-    target_plugin_id: &str,
-    command_id: &str,
-    args: serde_json::Value,
-) -> Result<serde_json::Value, IpcError> {
-    if let Some(fut) = dispatcher.dispatch_async(target_plugin_id, command_id, args.clone()) {
-        return fut.await;
-    }
-
-    let disp = Arc::clone(dispatcher);
-    let target = target_plugin_id.to_string();
-    let command = command_id.to_string();
-
-    match tokio::task::spawn_blocking(move || disp.dispatch(&target, &command, &args)).await {
-        Ok(result) => result,
-        Err(_) => Err(IpcError::PluginCrashedDuringCall {
-            plugin_id: target_plugin_id.to_string(),
-            command: command_id.to_string(),
-        }),
-    }
-}
