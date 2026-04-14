@@ -18,7 +18,7 @@ use std::sync::Mutex;
 
 use nexus_theme::api::{AppliedTheme, SnippetMetadata, ThemeConfig, ThemeEngine};
 use nexus_theme::theme::ThemeMetadata;
-use nexus_theme::{ThemeMode, VariableMap};
+use nexus_theme::{ThemeMode, VariableMap, WorkspaceLayout};
 use tauri::State;
 
 /// Tauri-managed engine handle shared across commands.
@@ -86,4 +86,27 @@ pub fn get_theme_config(state: State<'_, EngineState>) -> ThemeConfig {
 #[tauri::command]
 pub fn set_mode(mode: ThemeMode, state: State<'_, EngineState>) -> AppliedTheme {
     lock(&state).set_mode(mode)
+}
+
+/// Return the default workspace layout shown on first launch.
+///
+/// Today this is the "reviewing" preset — a two-pane row split with a
+/// right sidebar — which gives the split-pane renderer something to
+/// actually render.
+#[tauri::command]
+pub fn get_default_layout() -> WorkspaceLayout {
+    WorkspaceLayout::preset_reviewing()
+}
+
+/// Return a built-in layout preset by name.
+///
+/// Unknown names fall back to `writing`. Supported: `writing`,
+/// `reviewing`, `coding`.
+#[tauri::command]
+pub fn get_layout_preset(name: String) -> WorkspaceLayout {
+    match name.as_str() {
+        "reviewing" => WorkspaceLayout::preset_reviewing(),
+        "coding" => WorkspaceLayout::preset_coding(),
+        _ => WorkspaceLayout::preset_writing(),
+    }
 }

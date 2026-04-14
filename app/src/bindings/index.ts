@@ -2,10 +2,22 @@
 // application code so renames only touch one file. Regenerate with:
 //   cargo test -p nexus-theme export_bindings
 export type { AppliedTheme } from "./AppliedTheme";
+export type { BottomPanel } from "./BottomPanel";
+export type { Direction } from "./Direction";
+export type { LayoutMetadata } from "./LayoutMetadata";
+export type { LayoutNode } from "./LayoutNode";
+export type { PaneId } from "./PaneId";
+export type { Sidebar } from "./Sidebar";
+export type { SidebarPanel } from "./SidebarPanel";
+export type { SidebarSide } from "./SidebarSide";
 export type { SnippetMetadata } from "./SnippetMetadata";
 export type { SnippetMode } from "./SnippetMode";
 export type { SnippetScope } from "./SnippetScope";
+export type { Surface } from "./Surface";
+export type { Tab } from "./Tab";
+export type { TabId } from "./TabId";
 export type { ThemeCategory } from "./ThemeCategory";
 export type { ThemeConfig } from "./ThemeConfig";
 export type { ThemeMetadata } from "./ThemeMetadata";
 export type { ThemeMode } from "./ThemeMode";
+export type { WorkspaceLayout } from "./WorkspaceLayout";
