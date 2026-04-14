@@ -1,16 +1,15 @@
 use anyhow::Result;
+use nexus_bootstrap::storage as ipc;
 
 use crate::app::App;
 use crate::output::{print_list, OutputFormat};
 
 /// Show knowledge graph statistics.
 pub fn status(app: &mut App) -> Result<()> {
-    let storage = app.storage()?;
-    let stats = storage
-        .graph_stats()
-        .map_err(|e| anyhow::anyhow!("failed to get graph stats: {e}"))?;
-
     let format = app.format();
+    let (runtime, rt) = app.runtime()?;
+    let stats = ipc::graph_stats(runtime, rt)
+        .map_err(|e| anyhow::anyhow!("failed to get graph stats: {e}"))?;
 
     match format {
         OutputFormat::Json | OutputFormat::Jsonl => {
@@ -35,12 +34,10 @@ pub fn status(app: &mut App) -> Result<()> {
 
 /// List all unresolved (broken) links.
 pub fn unresolved(app: &mut App) -> Result<()> {
-    let storage = app.storage()?;
-    let links = storage
-        .unresolved_links()
-        .map_err(|e| anyhow::anyhow!("failed to get unresolved links: {e}"))?;
-
     let format = app.format();
+    let (runtime, rt) = app.runtime()?;
+    let links = ipc::unresolved_links(runtime, rt)
+        .map_err(|e| anyhow::anyhow!("failed to get unresolved links: {e}"))?;
 
     if links.is_empty() {
         println!("No unresolved links.");
@@ -65,12 +62,10 @@ pub fn unresolved(app: &mut App) -> Result<()> {
 
 /// Show neighbors of a file within N hops.
 pub fn neighbors(app: &mut App, path: &str, depth: usize) -> Result<()> {
-    let storage = app.storage()?;
-    let paths = storage
-        .graph_neighbors(path, depth)
-        .map_err(|e| anyhow::anyhow!("failed to get neighbors: {e}"))?;
-
     let format = app.format();
+    let (runtime, rt) = app.runtime()?;
+    let paths = ipc::graph_neighbors(runtime, rt, path, depth)
+        .map_err(|e| anyhow::anyhow!("failed to get neighbors: {e}"))?;
 
     if paths.is_empty() {
         println!("No neighbors found.");

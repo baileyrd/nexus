@@ -193,6 +193,8 @@ fn register_core_plugins(
                     ("rebuild_search_index", nexus_storage::core_plugin::HANDLER_REBUILD_SEARCH_INDEX),
                     ("toggle_task", nexus_storage::core_plugin::HANDLER_TOGGLE_TASK),
                     ("outgoing_links", nexus_storage::core_plugin::HANDLER_OUTGOING_LINKS),
+                    ("unresolved_links", nexus_storage::core_plugin::HANDLER_UNRESOLVED_LINKS),
+                    ("graph_neighbors", nexus_storage::core_plugin::HANDLER_GRAPH_NEIGHBORS),
                 ],
             ),
             forge_root,

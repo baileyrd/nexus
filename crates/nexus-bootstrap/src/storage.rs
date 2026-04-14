@@ -102,8 +102,21 @@ pub struct OutgoingLink {
 /// Mirror of `nexus_storage::GraphStats`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GraphStats {
+    /// Total number of nodes (files + phantoms).
+    pub node_count: usize,
     /// Total number of directed edges.
     pub edge_count: usize,
+    /// Number of phantom (unresolved) nodes.
+    pub unresolved_count: usize,
+}
+
+/// Mirror of `nexus_storage::UnresolvedLink`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UnresolvedLink {
+    /// The missing target path.
+    pub target_path: String,
+    /// Paths of files that reference this target.
+    pub referenced_by: Vec<String>,
 }
 
 /// Mirror of `nexus_storage::RebuildStats`.
@@ -274,5 +287,25 @@ pub fn outgoing_links(
         rt,
         "outgoing_links",
         serde_json::json!({ "path": path }),
+    )
+}
+
+/// Return every link target that has no corresponding file.
+pub fn unresolved_links(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<UnresolvedLink>> {
+    call(runtime, rt, "unresolved_links", serde_json::json!({}))
+}
+
+/// Return paths of files within `depth` link hops of `path`.
+pub fn graph_neighbors(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    path: &str,
+    depth: usize,
+) -> Result<Vec<String>> {
+    call(
+        runtime,
+        rt,
+        "graph_neighbors",
+        serde_json::json!({ "path": path, "depth": depth }),
     )
 }

@@ -56,6 +56,10 @@ pub const HANDLER_REBUILD_SEARCH_INDEX: u32 = 11;
 pub const HANDLER_TOGGLE_TASK: u32 = 12;
 /// Handler id for `outgoing_links`. Args: `{ "path": String }`; Returns: `Vec<OutgoingLink>`.
 pub const HANDLER_OUTGOING_LINKS: u32 = 13;
+/// Handler id for `unresolved_links`. Args: `{}`; Returns: `Vec<UnresolvedLink>`.
+pub const HANDLER_UNRESOLVED_LINKS: u32 = 14;
+/// Handler id for `graph_neighbors`. Args: `{ "path": String, "depth": usize }`; Returns: `Vec<String>`.
+pub const HANDLER_GRAPH_NEIGHBORS: u32 = 15;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -300,6 +304,24 @@ impl CorePlugin for StorageCorePlugin {
                     .outgoing_links(&path)
                     .map_err(|e| exec_err(format!("outgoing_links: {e}")))?;
                 to_value(&links, "outgoing_links")
+            }
+            HANDLER_UNRESOLVED_LINKS => {
+                let links = engine
+                    .unresolved_links()
+                    .map_err(|e| exec_err(format!("unresolved_links: {e}")))?;
+                to_value(&links, "unresolved_links")
+            }
+            HANDLER_GRAPH_NEIGHBORS => {
+                let path = path_arg(args, "graph_neighbors")?;
+                let depth = args
+                    .get("depth")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|v| usize::try_from(v).ok())
+                    .ok_or_else(|| exec_err("graph_neighbors: missing 'depth' (u64)".to_string()))?;
+                let paths = engine
+                    .graph_neighbors(&path, depth)
+                    .map_err(|e| exec_err(format!("graph_neighbors: {e}")))?;
+                to_value(&paths, "graph_neighbors")
             }
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }

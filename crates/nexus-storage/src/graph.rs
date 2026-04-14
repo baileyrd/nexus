@@ -55,7 +55,7 @@ pub struct OutgoingLink {
 }
 
 /// A link target that has no corresponding file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnresolvedLink {
     /// The missing target path.
     pub target_path: String,
