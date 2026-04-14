@@ -30,6 +30,7 @@
 
 pub mod api;
 pub mod error;
+pub mod layout;
 pub mod manifest;
 pub mod resolver;
 pub mod snippet;
@@ -37,6 +38,10 @@ pub mod theme;
 pub mod variables;
 
 pub use error::ThemeError;
+pub use layout::{
+    BottomPanel, Direction, LayoutNode, PaneId, PaneNode, Sidebar, SidebarPanel, SidebarSide,
+    Surface, Tab, TabId, WorkspaceLayout,
+};
 pub use manifest::ThemeManifest;
 pub use resolver::{ResolvedTheme, ResolverInput};
 pub use snippet::CssSnippet;
