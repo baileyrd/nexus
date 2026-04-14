@@ -38,6 +38,21 @@ pub struct FileRecord {
     pub modified_at: i64,
 }
 
+/// Mirror of `nexus_storage::BlockRecord` with the fields callers read.
+/// Extra JSON fields in the response are ignored by serde.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BlockRecord {
+    /// Primary key in the `blocks` table.
+    pub id: u64,
+    /// Kind of block: `"heading"`, `"paragraph"`, etc.
+    pub block_type: String,
+    /// Plain-text content of the block.
+    pub content: String,
+    /// Heading level 1-6; `None` for non-headings.
+    #[serde(default)]
+    pub level: Option<i32>,
+}
+
 /// Mirror of `nexus_storage::TagResult`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TagResult {
@@ -198,6 +213,16 @@ pub fn query_files_with_prefix(
     call(runtime, rt, "query_files", args)
 }
 
+/// Return every block belonging to the file at `path`. Empty when the path is
+/// unknown to the index.
+pub fn query_blocks(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    path: &str,
+) -> Result<Vec<BlockRecord>> {
+    call(runtime, rt, "query_blocks", serde_json::json!({ "path": path }))
+}
+
 /// Query all occurrences of the tag named `name` across the forge.
 pub fn query_tags(
     runtime: &Runtime,
@@ -331,6 +356,84 @@ pub fn outgoing_links(
 /// Return every link target that has no corresponding file.
 pub fn unresolved_links(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<UnresolvedLink>> {
     call(runtime, rt, "unresolved_links", serde_json::json!({}))
+}
+
+/// Re-export of [`nexus_types::bases::BaseSummary`] so CLI/TUI callers don't
+/// need a direct `nexus-types` dep just to consume `base_list` results.
+pub use nexus_types::bases::BaseSummary;
+
+/// Re-export of [`nexus_database::QueryResult`] for `base_query` callers.
+pub use nexus_database::QueryResult as BaseQueryResult;
+
+/// Reindex a `.bases` directory from disk into the `SQLite` index.
+///
+/// `path` is forge-relative.
+pub fn base_index(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<i64> {
+    #[derive(Deserialize)]
+    struct Resp {
+        base_id: i64,
+    }
+    let resp: Resp = call(runtime, rt, "base_index", serde_json::json!({ "path": path }))?;
+    Ok(resp.base_id)
+}
+
+/// List every indexed base.
+pub fn base_list(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<BaseSummary>> {
+    call(runtime, rt, "base_list", serde_json::json!({}))
+}
+
+/// Run a structured query against the base at `path`. Filters/sorts are
+/// parsed server-side using `nexus_database::parse_filter`/`parse_sort`.
+pub fn base_query(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    path: &str,
+    filters: &[String],
+    sorts: &[String],
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<BaseQueryResult> {
+    call(
+        runtime,
+        rt,
+        "base_query",
+        serde_json::json!({
+            "path": path,
+            "filters": filters,
+            "sorts": sorts,
+            "limit": limit,
+            "offset": offset,
+        }),
+    )
+}
+
+/// Serialized `.forge/<file>` config payload returned by [`config_read`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConfigPayload {
+    /// Encoding of [`content`](Self::content): `"toml"` or `"json"`.
+    pub format: String,
+    /// Pretty-printed serialized config text.
+    pub content: String,
+}
+
+/// Read one of the four forge config files as pretty-printed text.
+///
+/// `kind` must be `"app"`, `"workspace"`, `"mcp"`, or `"ai"`.
+pub fn config_read(runtime: &Runtime, rt: &TokioRuntime, kind: &str) -> Result<ConfigPayload> {
+    call(runtime, rt, "config_read", serde_json::json!({ "kind": kind }))
+}
+
+/// Reset one of the four forge config files to its defaults.
+///
+/// `kind` must be `"app"`, `"workspace"`, `"mcp"`, or `"ai"`.
+pub fn config_reset(runtime: &Runtime, rt: &TokioRuntime, kind: &str) -> Result<()> {
+    let _: serde_json::Value = call(
+        runtime,
+        rt,
+        "config_reset",
+        serde_json::json!({ "kind": kind }),
+    )?;
+    Ok(())
 }
 
 /// Return paths of files within `depth` link hops of `path`.

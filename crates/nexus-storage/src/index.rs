@@ -47,7 +47,7 @@ pub struct FileMetadata {
 }
 
 /// A row from the `blocks` table.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockRecord {
     /// Primary key.
     pub id: u64,

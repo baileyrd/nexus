@@ -70,6 +70,24 @@ pub const HANDLER_VECTOR_QUERY: u32 = 18;
 pub const HANDLER_VECTOR_DELETE_BY_FILE: u32 = 19;
 /// Handler id for `vectorstore_count`. Args: `{}`; Returns: `{ "count": usize }`.
 pub const HANDLER_VECTORSTORE_COUNT: u32 = 20;
+/// Handler id for `query_blocks`. Args: `{ "path": String }`; Returns: `Vec<BlockRecord>`.
+pub const HANDLER_QUERY_BLOCKS: u32 = 21;
+/// Handler id for `config_read`. Args: `{ "kind": "app"|"workspace"|"mcp"|"ai" }`;
+/// Returns: `{ "format": "toml"|"json", "content": String }`.
+pub const HANDLER_CONFIG_READ: u32 = 22;
+/// Handler id for `config_reset`. Args: `{ "kind": "app"|"workspace"|"mcp"|"ai" }`;
+/// Returns: `{}`. Writes defaults.
+pub const HANDLER_CONFIG_RESET: u32 = 23;
+/// Handler id for `base_index`. Args: `{ "path": String }`. Loads the base
+/// from disk (via `nexus_types::bases::load_base`) and inserts it into the
+/// `SQLite` index. Returns: `{ "base_id": i64 }`.
+pub const HANDLER_BASE_INDEX: u32 = 24;
+/// Handler id for `base_list`. Args: `{}`. Returns: `Vec<BaseSummary>`.
+pub const HANDLER_BASE_LIST: u32 = 25;
+/// Handler id for `base_query`. Args:
+/// `{ "path": String, "filters": [String], "sorts": [String], "limit": Option<u32>, "offset": Option<u32> }`.
+/// Returns: [`nexus_database::QueryResult`].
+pub const HANDLER_BASE_QUERY: u32 = 26;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -202,6 +220,14 @@ impl CorePlugin for StorageCorePlugin {
         handler_id: u32,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
+        // Handlers that operate on on-disk forge files (not the SQLite index)
+        // don't need the engine lock — serve them before acquiring it.
+        match handler_id {
+            HANDLER_CONFIG_READ => return dispatch_config_read(&self.forge_root, args),
+            HANDLER_CONFIG_RESET => return dispatch_config_reset(&self.forge_root, args),
+            _ => {}
+        }
+
         let engine_mutex = self.engine.as_ref().ok_or_else(|| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: "storage engine not initialised (on_init did not run)".to_string(),
@@ -392,6 +418,82 @@ impl CorePlugin for StorageCorePlugin {
                     .map_err(|e| exec_err(format!("vectorstore_count: {e}")))?;
                 Ok(serde_json::json!({ "count": count }))
             }
+            HANDLER_QUERY_BLOCKS => {
+                let path = path_arg(args, "query_blocks")?;
+                let blocks = engine
+                    .query_blocks_by_path(&path)
+                    .map_err(|e| exec_err(format!("query_blocks: {e}")))?;
+                to_value(&blocks, "query_blocks")
+            }
+            HANDLER_BASE_INDEX => {
+                let path = path_arg(args, "base_index")?;
+                let abs_dir = self.forge_root.join(&path);
+                let base = nexus_types::bases::load_base(&abs_dir)
+                    .map_err(|e| exec_err(format!("base_index: load: {e}")))?;
+                let base_id = engine
+                    .index_base(&path, &base)
+                    .map_err(|e| exec_err(format!("base_index: {e}")))?;
+                Ok(serde_json::json!({ "base_id": base_id }))
+            }
+            HANDLER_BASE_LIST => {
+                let bases = engine
+                    .list_bases()
+                    .map_err(|e| exec_err(format!("base_list: {e}")))?;
+                to_value(&bases, "base_list")
+            }
+            HANDLER_BASE_QUERY => {
+                let path = path_arg(args, "base_query")?;
+                let filters: Vec<String> = args
+                    .get("filters")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                let sorts: Vec<String> = args
+                    .get("sorts")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                let limit = args
+                    .get("limit")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|v| u32::try_from(v).ok());
+                let offset = args
+                    .get("offset")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|v| u32::try_from(v).ok());
+
+                let bases = engine
+                    .list_bases()
+                    .map_err(|e| exec_err(format!("base_query: list_bases: {e}")))?;
+                let base_summary = bases
+                    .iter()
+                    .find(|b| b.path == path)
+                    .ok_or_else(|| exec_err(format!("base_query: base not found: {path}")))?;
+
+                let mut db_query = nexus_database::Query {
+                    base_id: base_summary.id,
+                    ..Default::default()
+                };
+                for f in &filters {
+                    db_query.filters.push(
+                        nexus_database::parse_filter(f)
+                            .map_err(|e| exec_err(format!("base_query: parse filter '{f}': {e}")))?,
+                    );
+                }
+                for s in &sorts {
+                    db_query.sorts.push(
+                        nexus_database::parse_sort(s)
+                            .map_err(|e| exec_err(format!("base_query: parse sort '{s}': {e}")))?,
+                    );
+                }
+                db_query.limit = limit;
+                db_query.offset = offset;
+
+                let conn = engine
+                    .pool_connection()
+                    .map_err(|e| exec_err(format!("base_query: pool: {e}")))?;
+                let result = nexus_database::execute_query(&conn, &db_query)
+                    .map_err(|e| exec_err(format!("base_query: {e}")))?;
+                to_value(&result, "base_query")
+            }
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }
     }
@@ -432,6 +534,75 @@ fn to_value<T: serde::Serialize>(
     command: &str,
 ) -> Result<serde_json::Value, PluginError> {
     serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize failed: {e}")))
+}
+
+// ── Config handlers ──────────────────────────────────────────────────────────
+
+fn config_kind(args: &serde_json::Value) -> Result<&str, PluginError> {
+    args.get("kind")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| exec_err("config: missing 'kind' string argument".to_string()))
+}
+
+fn dispatch_config_read(
+    forge_root: &std::path::Path,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let kind = config_kind(args)?;
+    let (format, content) = match kind {
+        "app" => {
+            let cfg = crate::config::load_app_config(forge_root)
+                .map_err(|e| exec_err(format!("config_read: {e}")))?;
+            ("toml", toml::to_string_pretty(&cfg)
+                .map_err(|e| exec_err(format!("config_read: serialize app: {e}")))?)
+        }
+        "workspace" => {
+            let state = crate::config::load_workspace_state(forge_root)
+                .map_err(|e| exec_err(format!("config_read: {e}")))?;
+            ("json", serde_json::to_string_pretty(&state)
+                .map_err(|e| exec_err(format!("config_read: serialize workspace: {e}")))?)
+        }
+        "mcp" => {
+            let cfg = crate::config::load_mcp_config(forge_root)
+                .map_err(|e| exec_err(format!("config_read: {e}")))?;
+            ("toml", toml::to_string_pretty(&cfg)
+                .map_err(|e| exec_err(format!("config_read: serialize mcp: {e}")))?)
+        }
+        "ai" => {
+            let cfg = crate::config::load_ai_config(forge_root)
+                .map_err(|e| exec_err(format!("config_read: {e}")))?;
+            ("toml", toml::to_string_pretty(&cfg)
+                .map_err(|e| exec_err(format!("config_read: serialize ai: {e}")))?)
+        }
+        other => return Err(exec_err(format!(
+            "config_read: unknown kind '{other}' (expected app|workspace|mcp|ai)"
+        ))),
+    };
+    Ok(serde_json::json!({ "format": format, "content": content }))
+}
+
+fn dispatch_config_reset(
+    forge_root: &std::path::Path,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let kind = config_kind(args)?;
+    match kind {
+        "app" => crate::config::save_app_config(forge_root, &crate::config::AppConfig::default())
+            .map_err(|e| exec_err(format!("config_reset: {e}")))?,
+        "workspace" => crate::config::save_workspace_state(
+            forge_root,
+            &crate::config::WorkspaceState::default(),
+        )
+        .map_err(|e| exec_err(format!("config_reset: {e}")))?,
+        "mcp" => crate::config::save_mcp_config(forge_root, &crate::config::McpConfig::default())
+            .map_err(|e| exec_err(format!("config_reset: {e}")))?,
+        "ai" => crate::config::save_ai_config(forge_root, &crate::config::AiConfig::default())
+            .map_err(|e| exec_err(format!("config_reset: {e}")))?,
+        other => return Err(exec_err(format!(
+            "config_reset: unknown kind '{other}' (expected app|workspace|mcp|ai)"
+        ))),
+    }
+    Ok(serde_json::json!({}))
 }
 
 // ── Bridge thread ──────────────────────────────────────────────────────────────
