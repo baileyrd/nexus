@@ -8,8 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev --config ../crates/nexus-app/tauri.conf.json",
-    "tauri:build": "tauri build --config ../crates/nexus-app/tauri.conf.json"
+    "tauri:dev": "cd ../crates/nexus-app && tauri dev",
+    "tauri:build": "cd ../crates/nexus-app && tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.0",
