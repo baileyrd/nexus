@@ -181,33 +181,93 @@ button {
   border-left: 1px solid var(--nx-bg-tertiary, #e8eaef);
 }
 
-.sidebar-preview .sidebar-panels {
-  list-style: none;
-  margin: 0;
-  padding: var(--nx-space-sm, 8px) 0;
+.sidebar-preview .panel-area {
   flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--nx-bg-primary, #fff);
 }
 
-.sidebar-preview .sidebar-panels li {
+.sidebar-preview .panel-empty {
+  padding: 16px 12px;
+  font-style: italic;
+  font-size: 0.85em;
+  color: var(--nx-text-tertiary, #7a7a7a);
+}
+
+.panel-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.panel-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--nx-bg-tertiary, #e8eaef);
+  background: var(--nx-bg-secondary, #f8f9fa);
+}
+
+.panel-title {
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: var(--nx-text-secondary, #4a4a4a);
-  font-size: 0.9em;
-  border-left: 2px solid transparent;
+  font-weight: 600;
 }
 
-.sidebar-preview .sidebar-panels li.active {
+.panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.panel-toolbar-item {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-secondary, #4a4a4a);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75em;
+  font-weight: 600;
+  transition: background 120ms, color 120ms;
+}
+
+.panel-toolbar-item:hover {
+  background: var(--nx-bg-tertiary, #eef0f4);
   color: var(--nx-text-primary, #111);
-  background: var(--nx-bg-primary, #fff);
-  border-left-color: var(--nx-accent, #6c8cff);
 }
 
-.sidebar-preview .sidebar-panels li.empty {
-  font-style: italic;
+.panel-toolbar-item:focus-visible {
+  outline: 2px solid var(--nx-accent, #6c8cff);
+  outline-offset: 1px;
+}
+
+.panel-content {
+  flex: 1 1 auto;
+  padding: 12px;
+  font-size: 0.85em;
   color: var(--nx-text-tertiary, #7a7a7a);
+}
+
+.panel-content-stub code {
+  background: var(--nx-bg-tertiary, #eef0f4);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.95em;
+}
+
+.panel-content-empty {
+  font-style: italic;
 }
 
 .ribbon {

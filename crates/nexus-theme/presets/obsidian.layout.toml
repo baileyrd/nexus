@@ -74,6 +74,12 @@ id = "bookmarks"
 title = "Bookmarks"
 icon = "bookmark"
 visible = true
+contentType = "bookmarks"
+toolbar = [
+  { id = "bookmarks.new", icon = "bookmark-plus", tooltip = "New bookmark", action = { kind = "invokeCommand", command = "bookmarks.new" } },
+  { id = "bookmarks.new-folder", icon = "folder-plus", tooltip = "New bookmark folder", action = { kind = "invokeCommand", command = "bookmarks.new-folder" } },
+  { id = "bookmarks.collapse-all", icon = "chevrons-up", tooltip = "Collapse all", action = { kind = "invokeCommand", command = "bookmarks.collapse-all" } },
+]
 
 [[leftSidebar.panels]]
 id = "tags"
@@ -125,6 +131,13 @@ id = "outline"
 title = "Outline"
 icon = "list-indent"
 visible = true
+contentType = "outline"
+toolbar = [
+  { id = "outline.sort-direction", icon = "arrow-up", tooltip = "Sort direction", action = { kind = "invokeCommand", command = "outline.sort-direction" } },
+  { id = "outline.view-tree", icon = "list-tree", tooltip = "Tree view", action = { kind = "invokeCommand", command = "outline.view-tree" } },
+  { id = "outline.sort-field", icon = "chevrons-up-down", tooltip = "Sort field", action = { kind = "invokeCommand", command = "outline.sort-field" } },
+  { id = "outline.search", icon = "search", tooltip = "Search headings", action = { kind = "invokeCommand", command = "outline.search" } },
+]
 
 [bottomPanel]
 height = 200

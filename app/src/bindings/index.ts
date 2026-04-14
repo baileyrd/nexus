@@ -7,6 +7,7 @@ export type { Direction } from "./Direction";
 export type { LayoutMetadata } from "./LayoutMetadata";
 export type { LayoutNode } from "./LayoutNode";
 export type { PaneId } from "./PaneId";
+export type { PanelToolbarItem } from "./PanelToolbarItem";
 export type { PresetInfo } from "./PresetInfo";
 export type { PresetSourceKind } from "./PresetSourceKind";
 export type { RibbonAction } from "./RibbonAction";

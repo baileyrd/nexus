@@ -216,6 +216,19 @@ pub enum SidebarSide {
 }
 
 /// One panel within a sidebar (Explorer, Search, Outline, …).
+///
+/// A panel has three surfaces (PRD §8, matching the Obsidian reference):
+///
+/// 1. **Selector** in the ribbon — toggles visibility. Owned by the sidebar.
+/// 2. **Toolbar** ([`Self::toolbar`]) — panel-local action icons rendered
+///    above the content. Owned by this panel's contributing plugin.
+/// 3. **Content** ([`Self::content_type`]) — the React component registered
+///    under that id in the UI contribution registry. Owned by this panel's
+///    contributing plugin.
+///
+/// The data model only carries references; the UI contribution registry
+/// (landing with §8 / §13) resolves icons, toolbar actions, and content
+/// components at runtime.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../../app/src/bindings/")]
@@ -231,6 +244,38 @@ pub struct SidebarPanel {
     pub plugin: Option<String>,
     /// Whether the panel is currently shown.
     pub visible: bool,
+    /// Panel-local toolbar items rendered above the content area. Empty
+    /// for panels that don't need controls (Explorer, Bookmarks, …).
+    #[serde(default)]
+    pub toolbar: Vec<PanelToolbarItem>,
+    /// Content-component id resolved by the UI contribution registry.
+    /// `None` for panels whose content is rendered by core (legacy) or
+    /// that only exist as placeholders.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+}
+
+/// One action icon in a panel's local toolbar (sort, filter, search,
+/// view-mode, …).
+///
+/// Shape mirrors [`RibbonItem`]; the same [`RibbonAction`] variants apply
+/// since clicking a toolbar icon is conceptually the same dispatch —
+/// "toggle a sub-panel", "invoke a command", or "open a view".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../../app/src/bindings/")]
+pub struct PanelToolbarItem {
+    /// Stable id (`"outline.collapse-all"`, `"tags.sort-asc"`, …).
+    pub id: String,
+    /// Icon id resolved by the UI.
+    pub icon: String,
+    /// Hover tooltip and accessible label.
+    pub tooltip: String,
+    /// What clicking the item does.
+    pub action: RibbonAction,
+    /// Owning plugin id. `None` for core.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub plugin: Option<String>,
 }
 
 /// What a ribbon icon does when clicked.
