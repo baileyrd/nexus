@@ -7,9 +7,7 @@ publish.workspace = true
 description = "Nexus git integration: read-only status, diff, blame, log via libgit2"
 
 [dependencies]
-nexus-plugins = { path = "../nexus-plugins" }
 git2 = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }

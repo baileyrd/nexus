@@ -173,7 +173,6 @@ fn register_core_plugins(
 ) -> Result<Arc<std::sync::OnceLock<Arc<dyn IpcDispatcher>>>> {
     use nexus_ai::AiCorePlugin;
     use nexus_database::DatabaseCorePlugin;
-    use nexus_git::GitCorePlugin;
     use nexus_security::SecurityCorePlugin;
     use nexus_storage::{StorageConfig, StorageCorePlugin};
 
@@ -241,21 +240,6 @@ fn register_core_plugins(
             )),
         )
         .context("failed to register com.nexus.storage")?;
-
-    loader
-        .register_core(
-            core_manifest(
-                "com.nexus.git",
-                "Git",
-                LifecycleFlags {
-                    on_init: true,
-                    ..LifecycleFlags::NONE
-                },
-            ),
-            forge_root,
-            Box::new(GitCorePlugin::new(forge_root.to_path_buf())),
-        )
-        .context("failed to register com.nexus.git")?;
 
     loader
         .register_core(

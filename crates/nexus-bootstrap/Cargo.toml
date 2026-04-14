@@ -12,7 +12,6 @@ nexus-kv = { path = "../nexus-kv" }
 nexus-plugins = { path = "../nexus-plugins" }
 nexus-security = { path = "../nexus-security" }
 nexus-storage = { path = "../nexus-storage" }
-nexus-git = { path = "../nexus-git" }
 nexus-database = { path = "../nexus-database" }
 nexus-ai = { path = "../nexus-ai" }
 nexus-types = { path = "../nexus-types" }
