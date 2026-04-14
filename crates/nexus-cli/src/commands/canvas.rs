@@ -1,45 +1,80 @@
 //! CLI commands for canvas file operations.
 
 use anyhow::Result;
+use nexus_bootstrap::storage as ipc;
+use nexus_bootstrap::{
+    parse_canvas, serialize_canvas, CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode,
+    CanvasNodeType,
+};
 
 use crate::app::App;
 use crate::output;
 
+/// Read a canvas file through storage IPC and parse it into a [`CanvasFile`].
+fn load_canvas(app: &mut App, path: &str) -> Result<CanvasFile> {
+    let (runtime, rt) = app.runtime()?;
+    let bytes = ipc::read_file(runtime, rt, path)?;
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|e| anyhow::anyhow!("canvas '{path}' is not valid UTF-8: {e}"))?;
+    Ok(parse_canvas(text)?)
+}
+
+/// Serialize `canvas` and write it back to `path` through storage IPC.
+fn save_canvas(app: &mut App, path: &str, canvas: &CanvasFile) -> Result<()> {
+    let json = serialize_canvas(canvas)?;
+    let (runtime, rt) = app.runtime()?;
+    ipc::write_file(runtime, rt, path, json.as_bytes())?;
+    Ok(())
+}
+
 /// Create a new empty canvas file.
 pub fn create(app: &mut App, path: &str) -> Result<()> {
-    let canvas = nexus_storage::CanvasFile {
+    let canvas = CanvasFile {
         nodes: vec![],
         edges: vec![],
     };
-    let json = nexus_storage::serialize_canvas(&canvas)?;
-    app.storage_mut()?.write_file(path, json.as_bytes())?;
-    output::print_success(app.format(), &format!("Created canvas: {path}"), &serde_json::json!(null));
+    save_canvas(app, path, &canvas)?;
+    output::print_success(
+        app.format(),
+        &format!("Created canvas: {path}"),
+        &serde_json::json!(null),
+    );
     Ok(())
 }
 
 /// Show a summary of a canvas file.
 pub fn show(app: &mut App, path: &str) -> Result<()> {
-    let canvas = app.storage_mut()?.read_canvas(path)?;
+    let canvas = load_canvas(app, path)?;
     println!("Canvas: {path}");
     println!("  Nodes: {}", canvas.nodes.len());
     println!("  Edges: {}", canvas.edges.len());
     for node in &canvas.nodes {
         let detail = match node.node_type {
-            nexus_storage::CanvasNodeType::File => node.file.as_deref().unwrap_or("").to_string(),
-            nexus_storage::CanvasNodeType::Text => {
+            CanvasNodeType::File => node.file.as_deref().unwrap_or("").to_string(),
+            CanvasNodeType::Text => {
                 let t = node.text.as_deref().unwrap_or("");
-                if t.len() > 40 { format!("{}...", &t[..40]) } else { t.to_string() }
+                if t.len() > 40 {
+                    format!("{}...", &t[..40])
+                } else {
+                    t.to_string()
+                }
             }
-            nexus_storage::CanvasNodeType::Link => node.url.as_deref().unwrap_or("").to_string(),
-            nexus_storage::CanvasNodeType::Group => node.label.as_deref().unwrap_or("").to_string(),
-            nexus_storage::CanvasNodeType::Database => node.source.as_deref().unwrap_or("").to_string(),
-            nexus_storage::CanvasNodeType::Terminal => node.command.as_deref().unwrap_or("").to_string(),
+            CanvasNodeType::Link => node.url.as_deref().unwrap_or("").to_string(),
+            CanvasNodeType::Group => node.label.as_deref().unwrap_or("").to_string(),
+            CanvasNodeType::Database => node.source.as_deref().unwrap_or("").to_string(),
+            CanvasNodeType::Terminal => node.command.as_deref().unwrap_or("").to_string(),
         };
         println!("  [{:>8}] {} — {}", node.node_type.as_str(), node.id, detail);
     }
     for edge in &canvas.edges {
         let label = edge.label.as_deref().unwrap_or("");
-        println!("  {} -> {} ({}) {}", edge.from_node, edge.to_node, edge.edge_type.as_str(), label);
+        println!(
+            "  {} -> {} ({}) {}",
+            edge.from_node,
+            edge.to_node,
+            edge.edge_type.as_str(),
+            label
+        );
     }
     Ok(())
 }
@@ -57,34 +92,62 @@ pub fn add_node(
     content: Option<&str>,
     label: Option<&str>,
 ) -> Result<()> {
-    let mut canvas = app.storage_mut()?.read_canvas(path)?;
+    let mut canvas = load_canvas(app, path)?;
     let id = format!("n{}", canvas.nodes.len() + 1);
     let nt = match node_type {
-        "file" => nexus_storage::CanvasNodeType::File,
-        "text" => nexus_storage::CanvasNodeType::Text,
-        "link" => nexus_storage::CanvasNodeType::Link,
-        "group" => nexus_storage::CanvasNodeType::Group,
-        "database" => nexus_storage::CanvasNodeType::Database,
-        "terminal" => nexus_storage::CanvasNodeType::Terminal,
-        _ => anyhow::bail!("Unknown node type: {node_type}. Valid: file, text, link, group, database, terminal"),
+        "file" => CanvasNodeType::File,
+        "text" => CanvasNodeType::Text,
+        "link" => CanvasNodeType::Link,
+        "group" => CanvasNodeType::Group,
+        "database" => CanvasNodeType::Database,
+        "terminal" => CanvasNodeType::Terminal,
+        _ => anyhow::bail!(
+            "Unknown node type: {node_type}. Valid: file, text, link, group, database, terminal"
+        ),
     };
-    let node = nexus_storage::CanvasNode {
+    let node = CanvasNode {
         id: id.clone(),
         node_type: nt.clone(),
-        x, y, width, height,
+        x,
+        y,
+        width,
+        height,
         color: None,
         label: label.map(str::to_string),
         collapsed: false,
-        file: if nt == nexus_storage::CanvasNodeType::File { content.map(str::to_string) } else { None },
-        text: if nt == nexus_storage::CanvasNodeType::Text { content.map(str::to_string) } else { None },
-        url: if nt == nexus_storage::CanvasNodeType::Link { content.map(str::to_string) } else { None },
-        source: if nt == nexus_storage::CanvasNodeType::Database { content.map(str::to_string) } else { None },
-        command: if nt == nexus_storage::CanvasNodeType::Terminal { content.map(str::to_string) } else { None },
+        file: if nt == CanvasNodeType::File {
+            content.map(str::to_string)
+        } else {
+            None
+        },
+        text: if nt == CanvasNodeType::Text {
+            content.map(str::to_string)
+        } else {
+            None
+        },
+        url: if nt == CanvasNodeType::Link {
+            content.map(str::to_string)
+        } else {
+            None
+        },
+        source: if nt == CanvasNodeType::Database {
+            content.map(str::to_string)
+        } else {
+            None
+        },
+        command: if nt == CanvasNodeType::Terminal {
+            content.map(str::to_string)
+        } else {
+            None
+        },
     };
     canvas.nodes.push(node);
-    let json = nexus_storage::serialize_canvas(&canvas)?;
-    app.storage_mut()?.write_file(path, json.as_bytes())?;
-    output::print_success(app.format(), &format!("Added {node_type} node {id} to {path}"), &serde_json::json!(null));
+    save_canvas(app, path, &canvas)?;
+    output::print_success(
+        app.format(),
+        &format!("Added {node_type} node {id} to {path}"),
+        &serde_json::json!(null),
+    );
     Ok(())
 }
 
@@ -97,10 +160,10 @@ pub fn add_edge(
     edge_type: &str,
     label: Option<&str>,
 ) -> Result<()> {
-    let mut canvas = app.storage_mut()?.read_canvas(path)?;
+    let mut canvas = load_canvas(app, path)?;
     let id = format!("e{}", canvas.edges.len() + 1);
-    let et = nexus_storage::CanvasEdgeType::from_str_lossy(edge_type);
-    canvas.edges.push(nexus_storage::CanvasEdge {
+    let et = CanvasEdgeType::from_str_lossy(edge_type);
+    canvas.edges.push(CanvasEdge {
         id: id.clone(),
         from_node: from.to_string(),
         to_node: to.to_string(),
@@ -108,8 +171,11 @@ pub fn add_edge(
         label: label.map(str::to_string),
         color: None,
     });
-    let json = nexus_storage::serialize_canvas(&canvas)?;
-    app.storage_mut()?.write_file(path, json.as_bytes())?;
-    output::print_success(app.format(), &format!("Added edge {id}: {from} -> {to}"), &serde_json::json!(null));
+    save_canvas(app, path, &canvas)?;
+    output::print_success(
+        app.format(),
+        &format!("Added edge {id}: {from} -> {to}"),
+        &serde_json::json!(null),
+    );
     Ok(())
 }

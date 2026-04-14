@@ -37,6 +37,14 @@ pub mod storage;
 /// this pure function.
 pub use nexus_storage::export_to_html;
 
+/// Canvas data types and pure (de)serialization helpers, re-exported so
+/// CLI/TUI canvas commands can parse and mutate canvas files locally and
+/// round-trip them through the storage plugin via `read_file`/`write_file`.
+pub use nexus_storage::{
+    parse_canvas, serialize_canvas, CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode,
+    CanvasNodeType,
+};
+
 /// Plugin id for the in-tree Nexus CLI invoker.
 pub const CLI_PLUGIN_ID: &str = "com.nexus.cli";
 /// Plugin id for the in-tree Nexus TUI invoker.
