@@ -11,13 +11,15 @@ name = "nexus-tui"
 path = "src/main.rs"
 
 [dependencies]
-nexus-storage = { path = "../nexus-storage" }
+nexus-bootstrap = { path = "../nexus-bootstrap" }
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-types = { path = "../nexus-types" }
 nexus-git = { path = "../nexus-git" }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 anyhow = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

@@ -169,14 +169,14 @@ fn handle_search_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             // Execute the search.
             let query = app.search.query.clone();
             if !query.is_empty() {
-                match app.storage.search(&query, 50) {
+                match crate::ipc::search(&app.runtime, &app.rt, &query, 50) {
                     Ok(results) => {
                         app.search.results = results;
                         app.search.selected = 0;
                         // If there are results, open the top one in the viewer.
                         if let Some(top) = app.search.results.first() {
                             let path = top.file_path.clone();
-                            let bytes = app.storage.read_file(&path);
+                            let bytes = crate::ipc::read_file(&app.runtime, &app.rt, &path);
                             if let Ok(bytes) = bytes {
                                 let text = String::from_utf8_lossy(&bytes).into_owned();
                                 app.viewer.load_content(path, text);
@@ -312,7 +312,7 @@ fn open_in_editor(app: &mut TuiApp) -> Result<()> {
     )?;
 
     // Reload file content from storage (it may have changed).
-    if let Ok(bytes) = app.storage.read_file(&path) {
+    if let Ok(bytes) = crate::ipc::read_file(&app.runtime, &app.rt, &path) {
         let text = String::from_utf8_lossy(&bytes).into_owned();
         app.viewer.load_content(path, text);
     }

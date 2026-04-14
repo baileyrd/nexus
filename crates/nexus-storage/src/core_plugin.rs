@@ -42,6 +42,8 @@ pub const HANDLER_QUERY_TASKS: u32 = 4;
 pub const HANDLER_GRAPH_STATS: u32 = 5;
 /// Handler id for `rebuild_index`. Args: `{}`; Returns: [`crate::RebuildStats`].
 pub const HANDLER_REBUILD_INDEX: u32 = 6;
+/// Handler id for `search`. Args: `{ "query": String, "limit": usize }`; Returns: `Vec<SearchResult>`.
+pub const HANDLER_SEARCH: u32 = 7;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -220,6 +222,21 @@ impl CorePlugin for StorageCorePlugin {
                     .rebuild_index()
                     .map_err(|e| exec_err(format!("rebuild_index: {e}")))?;
                 to_value(&stats, "rebuild_index")
+            }
+            HANDLER_SEARCH => {
+                let query = args
+                    .get("query")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| exec_err("search: missing 'query' string".to_string()))?;
+                let limit = args
+                    .get("limit")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|v| usize::try_from(v).ok())
+                    .unwrap_or(50);
+                let results = engine
+                    .search(query, limit)
+                    .map_err(|e| exec_err(format!("search: {e}")))?;
+                to_value(&results, "search")
             }
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }

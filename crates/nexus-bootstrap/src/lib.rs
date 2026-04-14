@@ -162,6 +162,7 @@ fn register_core_plugins(
                     ("query_tasks", nexus_storage::core_plugin::HANDLER_QUERY_TASKS),
                     ("graph_stats", nexus_storage::core_plugin::HANDLER_GRAPH_STATS),
                     ("rebuild_index", nexus_storage::core_plugin::HANDLER_REBUILD_INDEX),
+                    ("search", nexus_storage::core_plugin::HANDLER_SEARCH),
                 ],
             ),
             forge_root,

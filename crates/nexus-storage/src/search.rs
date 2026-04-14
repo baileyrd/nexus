@@ -11,10 +11,12 @@ use tantivy::query::QueryParser;
 use tantivy::collector::TopDocs;
 use tantivy::snippet::SnippetGenerator;
 
+use serde::{Deserialize, Serialize};
+
 use crate::StorageError;
 
 /// A single search result returned by [`SearchIndex::search`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     /// Path to the file containing the matching block.
     pub file_path: String,

@@ -7,11 +7,11 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use nexus_storage::{
-    BacklinkResult, FileFilter, GraphStats, SearchResult, StorageConfig, StorageEngine, TaskFilter,
-    TaskRecord,
-};
+use nexus_bootstrap::{build_tui_runtime, Runtime};
 use ratatui::widgets::ListState;
+use tokio::runtime::Runtime as TokioRuntime;
+
+use crate::ipc::{self, BacklinkResult, SearchResult, TaskFilter, TaskRecord};
 
 // ── Mode / Focus ──────────────────────────────────────────────────────────────
 
@@ -339,9 +339,6 @@ impl Default for BacklinksState {
 /// A single task entry for display in the task list view.
 #[derive(Debug, Clone)]
 pub struct TaskEntry {
-    /// Database primary key (retained for future task-toggle operations).
-    #[allow(dead_code)]
-    pub id: u64,
     /// Whether the task is completed.
     pub completed: bool,
     /// Task text content.
@@ -385,7 +382,6 @@ impl TaskViewState {
         self.entries = records
             .into_iter()
             .map(|r| TaskEntry {
-                id: r.id,
                 completed: r.completed,
                 content: r.content,
                 file_path: r.file_path,
@@ -461,8 +457,13 @@ pub struct TuiApp {
     pub task_view: TaskViewState,
     /// Cached status bar statistics.
     pub status_info: StatusInfo,
-    /// Underlying storage engine.
-    pub storage: StorageEngine,
+    /// Nexus runtime providing the kernel plugin context used for all storage
+    /// operations. Held behind `runtime.context.ipc_call`.
+    pub runtime: Runtime,
+    /// Tokio runtime used to block on async `ipc_call`s from the sync event
+    /// loop. A multi-threaded runtime is required for `spawn_blocking` tasks
+    /// inside the kernel's ipc dispatcher.
+    pub rt: TokioRuntime,
     /// Path to the forge root.
     pub forge_root: PathBuf,
     /// Set to `true` to request a clean exit on the next event loop tick.
@@ -477,8 +478,13 @@ impl TuiApp {
     /// Returns an error if the forge cannot be opened or the initial tree
     /// population fails.
     pub fn new(forge_root: PathBuf) -> Result<Self> {
-        let storage = StorageEngine::open(&forge_root, &StorageConfig::default())
-            .with_context(|| format!("failed to open forge at {}", forge_root.display()))?;
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .context("failed to start tokio runtime")?;
+        let runtime = build_tui_runtime(forge_root.clone())
+            .with_context(|| format!("failed to build runtime at {}", forge_root.display()))?;
 
         let mut app = Self {
             mode: Mode::Normal,
@@ -490,7 +496,8 @@ impl TuiApp {
             backlinks: BacklinksState::new(),
             task_view: TaskViewState::new(),
             status_info: StatusInfo::new(),
-            storage,
+            runtime,
+            rt,
             forge_root,
             should_quit: false,
         };
@@ -509,10 +516,7 @@ impl TuiApp {
     ///
     /// Returns an error if the storage query fails.
     pub fn refresh_tree(&mut self) -> Result<()> {
-        let filter = FileFilter::default();
-        let records = self
-            .storage
-            .query_files(&filter)
+        let records = ipc::query_files(&self.runtime, &self.rt)
             .context("failed to query files for tree")?;
 
         // Collect all directory paths implied by the file paths.
@@ -633,9 +637,7 @@ impl TuiApp {
             return Ok(());
         }
         let path = entry.path.clone();
-        let bytes = self
-            .storage
-            .read_file(&path)
+        let bytes = ipc::read_file(&self.runtime, &self.rt, &path)
             .with_context(|| format!("failed to read file '{path}'"))?;
         let text = String::from_utf8_lossy(&bytes).into_owned();
         self.viewer.load_content(path, text);
@@ -658,7 +660,7 @@ impl TuiApp {
                 return;
             }
         };
-        match self.storage.backlinks(&path) {
+        match ipc::backlinks(&self.runtime, &self.rt, &path) {
             Ok(results) => self.backlinks.load(results),
             Err(_) => self.backlinks.load(Vec::new()),
         }
@@ -666,7 +668,7 @@ impl TuiApp {
 
     /// Load all tasks into the task view state.
     pub fn load_tasks(&mut self) {
-        match self.storage.query_tasks(&TaskFilter::default()) {
+        match ipc::query_tasks(&self.runtime, &self.rt, &TaskFilter::default()) {
             Ok(records) => self.task_view.load(records),
             Err(_) => self.task_view.load(Vec::new()),
         }
@@ -681,20 +683,20 @@ impl TuiApp {
             .filter(|e| !e.is_dir)
             .count();
 
-        let link_count = self
-            .storage
-            .graph_stats()
-            .map(|s: GraphStats| s.edge_count)
+        let link_count = ipc::graph_stats(&self.runtime, &self.rt)
+            .map(|s| s.edge_count)
             .unwrap_or(0);
 
-        let pending_task_count = self
-            .storage
-            .query_tasks(&TaskFilter {
+        let pending_task_count = ipc::query_tasks(
+            &self.runtime,
+            &self.rt,
+            &TaskFilter {
                 completed: Some(false),
                 file_path: None,
-            })
-            .map(|tasks| tasks.len())
-            .unwrap_or(0);
+            },
+        )
+        .map(|tasks| tasks.len())
+        .unwrap_or(0);
 
         let git_branch = nexus_git::GitEngine::open(&self.forge_root)
             .ok()
