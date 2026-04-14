@@ -51,8 +51,17 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
     // ── 1. Scan filesystem ────────────────────────────────────────────────────
     let disk_files = scan_directory(forge_root)?;
 
-    // ── 2. Get all non-deleted index entries ─────────────────────────────────
-    let index_files = query_files(conn, &FileFilter::default())?;
+    // ── 2. Get all index entries including soft-deleted ──────────────────────
+    // Soft-deleted rows still occupy the `files.path` UNIQUE slot, so any
+    // disk file at a previously-deleted path must resurrect the existing row
+    // rather than INSERT a duplicate and blow the UNIQUE constraint.
+    let index_files = query_files(
+        conn,
+        &FileFilter {
+            include_deleted: true,
+            ..FileFilter::default()
+        },
+    )?;
 
     // ── 3. Build lookup maps ──────────────────────────────────────────────────
     let mut index_by_path: HashMap<String, FileRecord> = HashMap::new();
@@ -78,11 +87,19 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
     for (rel_path, hash, size_bytes) in &disk_files {
         if let Some(record) = index_by_path.get(rel_path) {
             if record.content_hash == *hash {
-                // Hash matches → no-op.
+                if record.is_deleted {
+                    // Path resurrected on disk with identical content —
+                    // clear the soft-delete flag; child rows are still valid.
+                    conn.execute(
+                        "UPDATE files SET is_deleted = 0 WHERE id = ?1",
+                        rusqlite::params![record.id.cast_signed()],
+                    )?;
+                    delta.created += 1;
+                }
                 continue;
             }
 
-            // Hash differs → modified.
+            // Hash differs → modified (or resurrected with new content).
             let abs_path = forge_root.join(rel_path);
             let content = std::fs::read_to_string(&abs_path)?;
             let parsed = parse_markdown(&content)?;
@@ -94,7 +111,11 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
             delete_file(conn, record.id)?;
             let file_type = infer_file_type(rel_path);
             insert_file(conn, rel_path, &file_type, *size_bytes, &parsed)?;
-            delta.modified += 1;
+            if record.is_deleted {
+                delta.created += 1;
+            } else {
+                delta.modified += 1;
+            }
         } else {
             // Path not in index — check for rename by hash.
             let renamed = if let Some(candidates) = index_by_hash.get(hash) {
@@ -112,9 +133,11 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
             };
 
             if let Some(old_record) = renamed {
-                // Rename: update path in-place, also update fts_blocks file_path.
+                // Rename: update path in-place (and clear any soft-delete
+                // flag, in case we're reviving a deleted row at a new path),
+                // also update fts_blocks file_path.
                 conn.execute(
-                    "UPDATE files SET path = ?1 WHERE id = ?2",
+                    "UPDATE files SET path = ?1, is_deleted = 0 WHERE id = ?2",
                     rusqlite::params![rel_path, old_record.id.cast_signed()],
                 )?;
                 conn.execute(
@@ -136,7 +159,12 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
     }
 
     // ── 5. Soft-delete index entries that are no longer on disk ──────────────
+    // Already-deleted rows are skipped so `delta.deleted` only counts
+    // transitions from live→deleted on this pass.
     for record in &index_files {
+        if record.is_deleted {
+            continue;
+        }
         if !disk_paths.contains(&record.path) && !renamed_source_ids.contains(&record.id) {
             soft_delete_file(conn, record.id)?;
             delta.deleted += 1;
@@ -388,6 +416,61 @@ mod tests {
 
         let record = crate::index::file_by_path(&conn, "notes/sub/deep/deep.md").unwrap();
         assert!(record.is_some(), "notes/sub/deep/deep.md should be in index");
+    }
+
+    // ── 7b. reconcile_resurrects_soft_deleted_same_hash ───────────────────────
+    #[test]
+    fn reconcile_resurrects_soft_deleted_same_hash() {
+        let dir = TempDir::new().unwrap();
+        let forge_root = dir.path();
+        std::fs::create_dir_all(forge_root.join("notes")).unwrap();
+        write_file(forge_root, "notes/come-back.md", "# Back\n");
+
+        let conn = setup_db();
+        reconcile(&conn, forge_root).unwrap();
+
+        std::fs::remove_file(forge_root.join("notes/come-back.md")).unwrap();
+        let delta_del = reconcile(&conn, forge_root).unwrap();
+        assert_eq!(delta_del.deleted, 1);
+
+        // Re-create with identical content — a soft-deleted row already
+        // owns the path's UNIQUE slot, so a naive INSERT would blow up.
+        write_file(forge_root, "notes/come-back.md", "# Back\n");
+        let delta_res = reconcile(&conn, forge_root).unwrap();
+        assert_eq!(delta_res.created, 1, "resurrection should count as created");
+        assert_eq!(delta_res.modified, 0);
+        assert_eq!(delta_res.deleted, 0);
+
+        let record = crate::index::file_by_path(&conn, "notes/come-back.md")
+            .unwrap()
+            .expect("row should exist");
+        assert!(!record.is_deleted, "is_deleted should be cleared");
+    }
+
+    // ── 7c. reconcile_resurrects_soft_deleted_new_hash ────────────────────────
+    #[test]
+    fn reconcile_resurrects_soft_deleted_new_hash() {
+        let dir = TempDir::new().unwrap();
+        let forge_root = dir.path();
+        std::fs::create_dir_all(forge_root.join("notes")).unwrap();
+        write_file(forge_root, "notes/revived.md", "# Original\n");
+
+        let conn = setup_db();
+        reconcile(&conn, forge_root).unwrap();
+        std::fs::remove_file(forge_root.join("notes/revived.md")).unwrap();
+        reconcile(&conn, forge_root).unwrap();
+
+        // Recreate with different content — same UNIQUE path collision risk.
+        write_file(forge_root, "notes/revived.md", "# Different\n");
+        let delta = reconcile(&conn, forge_root).unwrap();
+        assert_eq!(delta.created, 1);
+        assert_eq!(delta.modified, 0);
+        assert_eq!(delta.deleted, 0);
+
+        let record = crate::index::file_by_path(&conn, "notes/revived.md")
+            .unwrap()
+            .expect("row should exist");
+        assert!(!record.is_deleted);
     }
 
     // ── 8. scan_ignores_git_and_forge_temp ────────────────────────────────────
