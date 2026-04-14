@@ -1,6 +1,7 @@
 use std::io::Read as _;
 
 use anyhow::Result;
+use nexus_bootstrap::storage::{self as ipc, TaskFilter};
 
 use crate::app::App;
 use crate::output::{print_list, print_success, OutputFormat};
@@ -20,12 +21,10 @@ pub fn create(app: &mut App, path: &str, content: Option<&str>, stdin: bool) -> 
         String::new()
     };
 
-    let storage = app.storage_mut()?;
-    let meta = storage
-        .write_file(path, body.as_bytes())
-        .map_err(|e| anyhow::anyhow!("failed to write file '{path}': {e}"))?;
-
     let format = app.format();
+    let (runtime, rt) = app.runtime()?;
+    let meta = ipc::write_file(runtime, rt, path, body.as_bytes())
+        .map_err(|e| anyhow::anyhow!("failed to write file '{path}': {e}"))?;
 
     match format {
         OutputFormat::Json | OutputFormat::Jsonl => {
@@ -52,9 +51,8 @@ pub fn create(app: &mut App, path: &str, content: Option<&str>, stdin: bool) -> 
 
 /// Read the content node at `path`.
 pub fn read(app: &mut App, path: &str, raw: bool) -> Result<()> {
-    let storage = app.storage()?;
-    let bytes = storage
-        .read_file(path)
+    let (runtime, rt) = app.runtime()?;
+    let bytes = ipc::read_file(runtime, rt, path)
         .map_err(|e| anyhow::anyhow!("failed to read file '{path}': {e}"))?;
 
     let text = String::from_utf8_lossy(&bytes);
@@ -86,12 +84,10 @@ pub fn delete(app: &mut App, path: &str, force: bool) -> Result<()> {
         }
     }
 
-    let storage = app.storage_mut()?;
-    storage
-        .delete_file(path)
-        .map_err(|e| anyhow::anyhow!("failed to delete file '{path}': {e}"))?;
-
     let format = app.format();
+    let (runtime, rt) = app.runtime()?;
+    ipc::delete_file(runtime, rt, path)
+        .map_err(|e| anyhow::anyhow!("failed to delete file '{path}': {e}"))?;
 
     print_success(
         format,
@@ -104,17 +100,14 @@ pub fn delete(app: &mut App, path: &str, force: bool) -> Result<()> {
 
 /// Search content nodes with `query`, returning up to `limit` results.
 pub fn search(app: &mut App, query: &str, limit: usize) -> Result<()> {
-    let storage = app.storage_mut()?;
+    let format = app.format();
+    let (runtime, rt) = app.runtime()?;
 
-    storage
-        .rebuild_search_index()
+    ipc::rebuild_search_index(runtime, rt)
         .map_err(|e| anyhow::anyhow!("failed to rebuild search index: {e}"))?;
 
-    let results = storage
-        .search(query, limit)
+    let results = ipc::search(runtime, rt, query, limit)
         .map_err(|e| anyhow::anyhow!("search failed: {e}"))?;
-
-    let format = app.format();
 
     if results.is_empty() {
         println!("No results found.");
@@ -140,9 +133,8 @@ pub fn search(app: &mut App, query: &str, limit: usize) -> Result<()> {
 
 /// List tasks across the forge.
 pub fn tasks(app: &mut App, completed: bool, all: bool, file: Option<&str>) -> Result<()> {
-    let storage = app.storage()?;
-
-    let filter = nexus_storage::TaskFilter {
+    let format = app.format();
+    let filter = TaskFilter {
         completed: if all {
             None
         } else if completed {
@@ -153,11 +145,9 @@ pub fn tasks(app: &mut App, completed: bool, all: bool, file: Option<&str>) -> R
         file_path: file.map(String::from),
     };
 
-    let tasks = storage
-        .query_tasks(&filter)
+    let (runtime, rt) = app.runtime()?;
+    let tasks = ipc::query_tasks(runtime, rt, &filter)
         .map_err(|e| anyhow::anyhow!("failed to query tasks: {e}"))?;
-
-    let format = app.format();
 
     if tasks.is_empty() {
         println!("No tasks found.");
@@ -184,10 +174,8 @@ pub fn tasks(app: &mut App, completed: bool, all: bool, file: Option<&str>) -> R
 
 /// Toggle a task's completion state.
 pub fn task_toggle(app: &mut App, task_id: u64) -> Result<()> {
-    let storage = app.storage_mut()?;
-
-    let record = storage
-        .toggle_task(task_id)
+    let (runtime, rt) = app.runtime()?;
+    let record = ipc::toggle_task(runtime, rt, task_id)
         .map_err(|e| anyhow::anyhow!("failed to toggle task {task_id}: {e}"))?;
 
     let status = if record.completed { "completed" } else { "pending" };
@@ -201,12 +189,10 @@ pub fn task_toggle(app: &mut App, task_id: u64) -> Result<()> {
 
 /// Show outgoing links from a file.
 pub fn links(app: &mut App, path: &str) -> Result<()> {
-    let storage = app.storage()?;
-    let outgoing = storage
-        .outgoing_links(path)
-        .map_err(|e| anyhow::anyhow!("failed to get links: {e}"))?;
-
     let format = app.format();
+    let (runtime, rt) = app.runtime()?;
+    let outgoing = ipc::outgoing_links(runtime, rt, path)
+        .map_err(|e| anyhow::anyhow!("failed to get links: {e}"))?;
 
     if outgoing.is_empty() {
         println!("No outgoing links.");
@@ -234,28 +220,20 @@ pub fn links(app: &mut App, path: &str) -> Result<()> {
 
 /// Show all files that link to the given file.
 pub fn backlinks(app: &mut App, path: &str) -> Result<()> {
-    let storage = app.storage()?;
-    let bl = storage
-        .backlinks(path)
-        .map_err(|e| anyhow::anyhow!("failed to get backlinks: {e}"))?;
-
     let format = app.format();
+    let (runtime, rt) = app.runtime()?;
+    let bl = ipc::backlinks(runtime, rt, path)
+        .map_err(|e| anyhow::anyhow!("failed to get backlinks: {e}"))?;
 
     if bl.is_empty() {
         println!("No backlinks found.");
         return Ok(());
     }
 
-    let headers = &["Source", "Type", "Text"];
+    let headers = &["Source", "Text"];
     let rows: Vec<Vec<String>> = bl
         .iter()
-        .map(|b| {
-            vec![
-                b.source_path.clone(),
-                b.link_type.clone(),
-                b.link_text.clone(),
-            ]
-        })
+        .map(|b| vec![b.source_path.clone(), b.link_text.clone()])
         .collect();
 
     print_list(format, headers, &rows);
@@ -265,13 +243,12 @@ pub fn backlinks(app: &mut App, path: &str) -> Result<()> {
 
 /// Export a note to HTML.
 pub fn export(app: &mut App, path: &str, output: Option<&str>) -> Result<()> {
-    let storage = app.storage()?;
-    let bytes = storage
-        .read_file(path)
+    let (runtime, rt) = app.runtime()?;
+    let bytes = ipc::read_file(runtime, rt, path)
         .map_err(|e| anyhow::anyhow!("failed to read file '{path}': {e}"))?;
     let text = String::from_utf8_lossy(&bytes);
     let title = path.rsplit('/').next().unwrap_or(path).trim_end_matches(".md");
-    let html = nexus_storage::export_to_html(&text, title);
+    let html = nexus_bootstrap::export_to_html(&text, title);
     if let Some(out_path) = output {
         std::fs::write(out_path, &html)
             .map_err(|e| anyhow::anyhow!("failed to write '{out_path}': {e}"))?;
@@ -295,10 +272,10 @@ pub fn daily(app: &mut App, date: Option<&str>) -> Result<()> {
 
     let path = format!("notes/daily/{}.md", date.format("%Y-%m-%d"));
 
-    let storage = app.storage_mut()?;
+    let (runtime, rt) = app.runtime()?;
 
     // Check if already exists
-    if storage.file_exists(&path).unwrap_or(false) {
+    if ipc::file_exists(runtime, rt, &path).unwrap_or(false) {
         println!("Daily note already exists: {path}");
         return Ok(());
     }
@@ -310,8 +287,7 @@ pub fn daily(app: &mut App, date: Option<&str>) -> Result<()> {
         "---\ndate: {date_str}\ntags: [daily]\n---\n# {title}\n\n## Tasks\n\n## Notes\n"
     );
 
-    let meta = storage
-        .write_file(&path, content.as_bytes())
+    let meta = ipc::write_file(runtime, rt, &path, content.as_bytes())
         .map_err(|e| anyhow::anyhow!("failed to create daily note: {e}"))?;
 
     println!("Created: {}", meta.path);

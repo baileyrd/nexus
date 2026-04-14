@@ -34,7 +34,7 @@ pub struct FileRecord {
 }
 
 /// Lightweight metadata used by callers that do not need a full `FileRecord`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMetadata {
     /// Vault-relative path.
     pub path: String,

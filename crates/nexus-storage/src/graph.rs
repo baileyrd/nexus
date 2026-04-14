@@ -40,7 +40,7 @@ pub struct BacklinkResult {
 }
 
 /// A link FROM the queried path to another file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutgoingLink {
     /// Path of the link target.
     pub target_path: String,

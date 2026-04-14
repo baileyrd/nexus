@@ -31,6 +31,12 @@ use nexus_plugins::{
 
 pub mod storage;
 
+/// Render a markdown note to a standalone HTML string.
+///
+/// Re-exported from `nexus-storage` so CLI/TUI don't need a direct dep for
+/// this pure function.
+pub use nexus_storage::export_to_html;
+
 /// Plugin id for the in-tree Nexus CLI invoker.
 pub const CLI_PLUGIN_ID: &str = "com.nexus.cli";
 /// Plugin id for the in-tree Nexus TUI invoker.
@@ -181,6 +187,12 @@ fn register_core_plugins(
                     ("graph_stats", nexus_storage::core_plugin::HANDLER_GRAPH_STATS),
                     ("rebuild_index", nexus_storage::core_plugin::HANDLER_REBUILD_INDEX),
                     ("search", nexus_storage::core_plugin::HANDLER_SEARCH),
+                    ("write_file", nexus_storage::core_plugin::HANDLER_WRITE_FILE),
+                    ("delete_file", nexus_storage::core_plugin::HANDLER_DELETE_FILE),
+                    ("file_exists", nexus_storage::core_plugin::HANDLER_FILE_EXISTS),
+                    ("rebuild_search_index", nexus_storage::core_plugin::HANDLER_REBUILD_SEARCH_INDEX),
+                    ("toggle_task", nexus_storage::core_plugin::HANDLER_TOGGLE_TASK),
+                    ("outgoing_links", nexus_storage::core_plugin::HANDLER_OUTGOING_LINKS),
                 ],
             ),
             forge_root,

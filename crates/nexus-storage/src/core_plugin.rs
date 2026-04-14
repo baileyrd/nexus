@@ -44,6 +44,18 @@ pub const HANDLER_GRAPH_STATS: u32 = 5;
 pub const HANDLER_REBUILD_INDEX: u32 = 6;
 /// Handler id for `search`. Args: `{ "query": String, "limit": usize }`; Returns: `Vec<SearchResult>`.
 pub const HANDLER_SEARCH: u32 = 7;
+/// Handler id for `write_file`. Args: `{ "path": String, "bytes": Vec<u8> }`; Returns: [`crate::FileMetadata`].
+pub const HANDLER_WRITE_FILE: u32 = 8;
+/// Handler id for `delete_file`. Args: `{ "path": String }`; Returns: `{}`.
+pub const HANDLER_DELETE_FILE: u32 = 9;
+/// Handler id for `file_exists`. Args: `{ "path": String }`; Returns: `{ "exists": bool }`.
+pub const HANDLER_FILE_EXISTS: u32 = 10;
+/// Handler id for `rebuild_search_index`. Args: `{}`; Returns: `{}`.
+pub const HANDLER_REBUILD_SEARCH_INDEX: u32 = 11;
+/// Handler id for `toggle_task`. Args: `{ "task_id": u64 }`; Returns: [`crate::TaskRecord`].
+pub const HANDLER_TOGGLE_TASK: u32 = 12;
+/// Handler id for `outgoing_links`. Args: `{ "path": String }`; Returns: `Vec<OutgoingLink>`.
+pub const HANDLER_OUTGOING_LINKS: u32 = 13;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -237,6 +249,57 @@ impl CorePlugin for StorageCorePlugin {
                     .search(query, limit)
                     .map_err(|e| exec_err(format!("search: {e}")))?;
                 to_value(&results, "search")
+            }
+            HANDLER_WRITE_FILE => {
+                let path = path_arg(args, "write_file")?;
+                let bytes: Vec<u8> = args
+                    .get("bytes")
+                    .ok_or_else(|| exec_err("write_file: missing 'bytes'".to_string()))
+                    .and_then(|v| {
+                        serde_json::from_value(v.clone())
+                            .map_err(|e| exec_err(format!("write_file: bytes decode: {e}")))
+                    })?;
+                let meta = engine
+                    .write_file(&path, &bytes)
+                    .map_err(|e| exec_err(format!("write_file: {e}")))?;
+                to_value(&meta, "write_file")
+            }
+            HANDLER_DELETE_FILE => {
+                let path = path_arg(args, "delete_file")?;
+                engine
+                    .delete_file(&path)
+                    .map_err(|e| exec_err(format!("delete_file: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_FILE_EXISTS => {
+                let path = path_arg(args, "file_exists")?;
+                let exists = engine
+                    .file_exists(&path)
+                    .map_err(|e| exec_err(format!("file_exists: {e}")))?;
+                Ok(serde_json::json!({ "exists": exists }))
+            }
+            HANDLER_REBUILD_SEARCH_INDEX => {
+                engine
+                    .rebuild_search_index()
+                    .map_err(|e| exec_err(format!("rebuild_search_index: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_TOGGLE_TASK => {
+                let task_id = args
+                    .get("task_id")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| exec_err("toggle_task: missing 'task_id' (u64)".to_string()))?;
+                let record = engine
+                    .toggle_task(task_id)
+                    .map_err(|e| exec_err(format!("toggle_task: {e}")))?;
+                to_value(&record, "toggle_task")
+            }
+            HANDLER_OUTGOING_LINKS => {
+                let path = path_arg(args, "outgoing_links")?;
+                let links = engine
+                    .outgoing_links(&path)
+                    .map_err(|e| exec_err(format!("outgoing_links: {e}")))?;
+                to_value(&links, "outgoing_links")
             }
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }

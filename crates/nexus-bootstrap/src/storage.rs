@@ -46,6 +46,8 @@ pub struct BacklinkResult {
 /// Mirror of `nexus_storage::TaskRecord`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TaskRecord {
+    /// Primary key in the tasks table.
+    pub id: u64,
     /// Forge-relative path of the file containing the task.
     pub file_path: String,
     /// Task text without the checkbox prefix.
@@ -63,6 +65,38 @@ pub struct SearchResult {
     pub file_path: String,
     /// Excerpt of the matching content.
     pub excerpt: String,
+    /// Kind of the matching block (`"paragraph"`, `"heading"`, …).
+    pub block_type: String,
+    /// BM25 relevance score.
+    pub score: f32,
+}
+
+/// Mirror of `nexus_storage::FileMetadata`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileMetadata {
+    /// Forge-relative path of the file.
+    pub path: String,
+    /// File size in bytes.
+    pub size_bytes: u64,
+    /// Unix timestamp of last modification.
+    pub modified_at: i64,
+    /// SHA-256 hex digest of the file content.
+    pub content_hash: String,
+}
+
+/// Mirror of `nexus_storage::OutgoingLink`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OutgoingLink {
+    /// Path of the link target.
+    pub target_path: String,
+    /// Display text of the link.
+    pub link_text: String,
+    /// Kind of link.
+    pub link_type: String,
+    /// Whether the target file exists in the forge.
+    pub is_resolved: bool,
+    /// Fragment identifier, if any.
+    pub fragment: Option<String>,
 }
 
 /// Mirror of `nexus_storage::GraphStats`.
@@ -170,4 +204,75 @@ pub fn search(
 /// Rebuild the forge index from files on disk.
 pub fn rebuild_index(runtime: &Runtime, rt: &TokioRuntime) -> Result<RebuildStats> {
     call(runtime, rt, "rebuild_index", serde_json::json!({}))
+}
+
+/// Write `bytes` to `path` (forge-relative) atomically and update the index.
+pub fn write_file(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    path: &str,
+    bytes: &[u8],
+) -> Result<FileMetadata> {
+    call(
+        runtime,
+        rt,
+        "write_file",
+        serde_json::json!({ "path": path, "bytes": bytes }),
+    )
+}
+
+/// Delete the file at `path`.
+pub fn delete_file(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<()> {
+    let _: serde_json::Value = call(
+        runtime,
+        rt,
+        "delete_file",
+        serde_json::json!({ "path": path }),
+    )?;
+    Ok(())
+}
+
+/// Check whether a file at `path` exists in the forge.
+pub fn file_exists(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<bool> {
+    #[derive(Deserialize)]
+    struct Resp {
+        exists: bool,
+    }
+    let resp: Resp = call(
+        runtime,
+        rt,
+        "file_exists",
+        serde_json::json!({ "path": path }),
+    )?;
+    Ok(resp.exists)
+}
+
+/// Rebuild the full-text search index from the current file set.
+pub fn rebuild_search_index(runtime: &Runtime, rt: &TokioRuntime) -> Result<()> {
+    let _: serde_json::Value = call(runtime, rt, "rebuild_search_index", serde_json::json!({}))?;
+    Ok(())
+}
+
+/// Toggle a task's completed state, returning the updated record.
+pub fn toggle_task(runtime: &Runtime, rt: &TokioRuntime, task_id: u64) -> Result<TaskRecord> {
+    call(
+        runtime,
+        rt,
+        "toggle_task",
+        serde_json::json!({ "task_id": task_id }),
+    )
+}
+
+/// Return every link FROM `path` to another file.
+pub fn outgoing_links(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    path: &str,
+) -> Result<Vec<OutgoingLink>> {
+    call(
+        runtime,
+        rt,
+        "outgoing_links",
+        serde_json::json!({ "path": path }),
+    )
 }
