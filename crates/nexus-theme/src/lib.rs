@@ -31,6 +31,7 @@
 pub mod api;
 pub mod error;
 pub mod layout;
+pub mod layout_manager;
 pub mod manifest;
 pub mod resolver;
 pub mod snippet;
@@ -47,6 +48,7 @@ pub use manifest::ThemeManifest;
 pub use resolver::{ResolvedTheme, ResolverInput};
 pub use snippet::CssSnippet;
 pub use theme::{Theme, ThemeCategory, ThemeMode};
+pub use layout_manager::{LayoutManager, SavedLayoutInfo};
 pub use variables::VariableMap;
 pub use watcher::{ThemeReloadEvent, ThemeWatcher};
 
