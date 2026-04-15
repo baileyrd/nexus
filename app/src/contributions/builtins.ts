@@ -1,7 +1,6 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FileTree } from "../components/panels/FileTree";
 import { useForgeStore } from "../stores/forge";
-import { useOpenFileStore } from "../stores/openFile";
 import { usePaletteStore } from "../stores/palette";
 import { contributions } from "./registry";
 
@@ -56,8 +55,8 @@ export function registerBuiltins(): void {
       title: "Open forge",
     });
     if (typeof picked !== "string") return;
-    // Close any open file first — it belongs to the previous forge.
-    useOpenFileStore.getState().close();
+    // forge.open() resets the viewer in-memory and the hydrate effect
+    // restores the new forge's last-open file (if any).
     await useForgeStore.getState().open(picked);
   });
   contributions.registerPaletteCommand({

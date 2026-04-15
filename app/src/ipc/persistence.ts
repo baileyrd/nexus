@@ -14,10 +14,21 @@ export interface PersistedLayoutState {
   rightActivePanelId: string | null;
 }
 
+export interface ForgeUiState {
+  expandedPaths: string[];
+  openFile: string | null;
+}
+
 export interface LayoutPersistence {
   version: number;
   lastPresetId: string | null;
+  /** Absolute path of the last opened forge. Written by the backend
+   *  on every successful `open_forge`; the frontend should treat it
+   *  as read-only state. */
+  lastForgePath?: string | null;
   layouts: Record<string, PersistedLayoutState>;
+  /** Per-forge UI state keyed by forge root absolute path. */
+  forgeState?: Record<string, ForgeUiState>;
 }
 
 export function getLayoutPersistence(): Promise<LayoutPersistence> {

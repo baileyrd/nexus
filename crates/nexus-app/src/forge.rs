@@ -81,11 +81,17 @@ const DEFAULT_FORGE_DIRNAME: &str = "default-forge";
 /// Resolve a forge root for this launch and ensure its layout exists.
 ///
 /// Precedence:
-/// 1. `$NEXUS_FORGE_DIR` if set.
-/// 2. `<app_config_dir>/default-forge/` (created if missing).
+/// 1. `$NEXUS_FORGE_DIR` if set (dev override; always wins).
+/// 2. The path the user picked last time, if it still exists as a dir.
+/// 3. `<app_config_dir>/default-forge/` (created if missing).
 pub fn bootstrap(app: &AppHandle) -> Result<ForgeInfo, String> {
     let root = if let Ok(env) = std::env::var(FORGE_ENV) {
         PathBuf::from(env)
+    } else if let Some(saved) = crate::persistence::read_last_forge_path(app)
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+    {
+        saved
     } else {
         app.path()
             .app_config_dir()
@@ -181,6 +187,7 @@ pub fn open_forge(
     }
 
     *state.0.lock().map_err(|_| "forge state poisoned")? = Some(info.clone());
+    crate::persistence::write_last_forge_path(&app, &info.root);
     // Nudge the frontend so any cached listings invalidate immediately
     // even before the new watcher fires its first event.
     let _ = app.emit(FS_CHANGED_EVENT, ());

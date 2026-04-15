@@ -9,6 +9,7 @@ import {
 import {
   getLayoutPersistence,
   saveLayoutPersistence,
+  type ForgeUiState,
   type LayoutPersistence,
   type PersistedLayoutState,
 } from "../ipc/persistence";
@@ -27,6 +28,11 @@ interface LayoutState {
   togglePanelVisibility: (side: "left" | "right", panelId: string) => void;
   toggleSidePanelCollapsed: (side: "left" | "right") => void;
   activatePanel: (side: "left" | "right", panelId: string) => void;
+  /** Read the persisted UI state for a forge, or `null` if none yet. */
+  forgeUiState: (forgePath: string) => ForgeUiState | null;
+  /** Merge `patch` into the persisted UI state for a forge and
+   *  schedule a save. */
+  updateForgeUiState: (forgePath: string, patch: Partial<ForgeUiState>) => void;
 }
 
 /** Merge persisted state over a freshly loaded preset layout. Active-
@@ -209,5 +215,34 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       const persistence = updatePersistence(state.persistence, layout);
       scheduleSave(persistence);
       return { layout, persistence };
+    }),
+
+  forgeUiState: (forgePath) =>
+    get().persistence?.forgeState?.[forgePath] ?? null,
+
+  updateForgeUiState: (forgePath, patch) =>
+    set((state) => {
+      const base: LayoutPersistence = state.persistence ?? {
+        version: 1,
+        lastPresetId: null,
+        layouts: {},
+      };
+      const prevForge = base.forgeState?.[forgePath] ?? {
+        expandedPaths: [],
+        openFile: null,
+      };
+      const nextForge: ForgeUiState = { ...prevForge, ...patch };
+      const persistence: LayoutPersistence = {
+        ...base,
+        forgeState: { ...(base.forgeState ?? {}), [forgePath]: nextForge },
+      };
+      // Forge UI updates fire on discrete user actions (folder toggle,
+      // file open/close) — write immediately so closing the window
+      // right after doesn't lose the change.
+      saveLayoutPersistence(persistence).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn("[layout] failed to persist forge state:", err);
+      });
+      return { persistence };
     }),
 }));

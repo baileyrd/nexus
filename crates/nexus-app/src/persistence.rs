@@ -38,8 +38,19 @@ pub struct LayoutPersistence {
     /// Last preset the user loaded, restored on next boot if still
     /// available. `None` → frontend falls back to the default preset.
     pub last_preset_id: Option<String>,
+    /// Absolute path of the last forge the user opened, restored on
+    /// next boot if the directory still exists. Written by the forge
+    /// module on every successful `open_forge` call. Older files
+    /// without this field deserialize as `None`.
+    #[serde(default)]
+    pub last_forge_path: Option<String>,
     /// Per-preset state keyed by preset id.
     pub layouts: std::collections::BTreeMap<String, PersistedLayoutState>,
+    /// Per-forge UI state (expanded tree paths, last-open file)
+    /// keyed by forge root absolute path. Older files without this
+    /// field deserialize as an empty map.
+    #[serde(default)]
+    pub forge_state: std::collections::BTreeMap<String, ForgeUiState>,
 }
 
 impl Default for LayoutPersistence {
@@ -47,7 +58,9 @@ impl Default for LayoutPersistence {
         Self {
             version: CURRENT_VERSION,
             last_preset_id: None,
+            last_forge_path: None,
             layouts: std::collections::BTreeMap::new(),
+            forge_state: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -68,9 +81,23 @@ pub struct PersistedLayoutState {
     pub right_active_panel_id: Option<String>,
 }
 
+/// UI state remembered per forge: which directories were expanded and
+/// which file was open in the viewer. Restored when that forge is
+/// re-opened.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForgeUiState {
+    /// Relpaths of directories that were expanded in the file tree.
+    #[serde(default)]
+    pub expanded_paths: Vec<String>,
+    /// Relpath of the file open in the viewer, if any.
+    #[serde(default)]
+    pub open_file: Option<String>,
+}
+
 /// Resolve the on-disk file path, creating the parent directory if
 /// needed. Returns the path regardless of whether the file exists.
-fn resolve_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn resolve_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     if !dir.exists() {
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -114,14 +141,43 @@ pub fn get_layout_persistence(app: AppHandle) -> Result<LayoutPersistence, Strin
     Ok(load_from(&path))
 }
 
-/// Overwrite the persisted layout state with the payload.
+/// Overwrite the persisted layout state with the payload, preserving
+/// any backend-managed fields (`last_forge_path`) the frontend doesn't
+/// own. Without this merge, every layout-change save would clobber the
+/// path the user picked in the forge dialog.
 #[tauri::command]
 pub fn save_layout_persistence(
     app: AppHandle,
-    state: LayoutPersistence,
+    mut state: LayoutPersistence,
 ) -> Result<(), String> {
     let path = resolve_path(&app)?;
+    let existing = load_from(&path);
+    state.last_forge_path = existing.last_forge_path;
     save_to(&path, &state)
+}
+
+// ─── Forge-path helpers ───────────────────────────────────────────────────────
+
+/// Read the persisted `last_forge_path`, or `None` if no persistence file
+/// exists or the field is unset.
+pub fn read_last_forge_path(app: &AppHandle) -> Option<String> {
+    let path = resolve_path(app).ok()?;
+    load_from(&path).last_forge_path
+}
+
+/// Write `path` as the new `last_forge_path`, preserving every other
+/// field. Errors are logged and swallowed since persistence drift
+/// shouldn't break a successful forge open.
+pub fn write_last_forge_path(app: &AppHandle, forge_path: &Path) {
+    let Ok(file_path) = resolve_path(app) else {
+        tracing::warn!("could not resolve persistence path; skipping forge save");
+        return;
+    };
+    let mut state = load_from(&file_path);
+    state.last_forge_path = Some(forge_path.to_string_lossy().into_owned());
+    if let Err(err) = save_to(&file_path, &state) {
+        tracing::warn!(%err, "failed to persist last_forge_path");
+    }
 }
 
 #[cfg(test)]
@@ -167,5 +223,45 @@ mod tests {
         fs::write(tmp.path(), b"{ not json").unwrap();
         let loaded = load_from(tmp.path());
         assert!(loaded.layouts.is_empty());
+    }
+
+    #[test]
+    fn last_forge_path_round_trips() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut state = LayoutPersistence::default();
+        state.last_forge_path = Some("/some/forge".into());
+        save_to(tmp.path(), &state).unwrap();
+        let loaded = load_from(tmp.path());
+        assert_eq!(loaded.last_forge_path.as_deref(), Some("/some/forge"));
+    }
+
+    #[test]
+    fn legacy_file_without_forge_path_loads() {
+        // Mimic a v1 file written before the field existed.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let json = r#"{"version":1,"lastPresetId":"vibe","layouts":{}}"#;
+        fs::write(tmp.path(), json).unwrap();
+        let loaded = load_from(tmp.path());
+        assert_eq!(loaded.last_preset_id.as_deref(), Some("vibe"));
+        assert!(loaded.last_forge_path.is_none());
+        assert!(loaded.forge_state.is_empty());
+    }
+
+    #[test]
+    fn forge_state_round_trips() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut state = LayoutPersistence::default();
+        state.forge_state.insert(
+            "/some/forge".into(),
+            ForgeUiState {
+                expanded_paths: vec!["notes".into(), "notes/sub".into()],
+                open_file: Some("notes/hello.md".into()),
+            },
+        );
+        save_to(tmp.path(), &state).unwrap();
+        let loaded = load_from(tmp.path());
+        let entry = &loaded.forge_state["/some/forge"];
+        assert_eq!(entry.expanded_paths, vec!["notes", "notes/sub"]);
+        assert_eq!(entry.open_file.as_deref(), Some("notes/hello.md"));
     }
 }

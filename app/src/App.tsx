@@ -5,6 +5,7 @@ import { CommandPalette } from "./components/palette/CommandPalette";
 import { ThemePicker } from "./components/ThemePicker";
 import { WorkspaceView } from "./components/layout/WorkspaceView";
 import { useForgeStore } from "./stores/forge";
+import { useLayoutStore } from "./stores/layout";
 import { useThemeStore } from "./stores/theme";
 
 export default function App() {
@@ -12,6 +13,9 @@ export default function App() {
   const currentThemeId = useThemeStore((s) => s.currentThemeId);
   const loadForge = useForgeStore((s) => s.load);
   const bumpFsVersion = useForgeStore((s) => s.bumpFsVersion);
+  const hydrateForge = useForgeStore((s) => s.hydrate);
+  const forgeRoot = useForgeStore((s) => s.info?.root);
+  const layoutPersistenceLoaded = useLayoutStore((s) => s.persistence !== null);
 
   // Pick the built-in light theme on first mount so the picker reflects an
   // "active" selection immediately. The user can switch freely from there.
@@ -33,6 +37,15 @@ export default function App() {
       void unlistenPromise.then((unlisten) => unlisten());
     };
   }, [bumpFsVersion]);
+
+  // Restore expanded paths + last-open file when both the forge and the
+  // layout persistence are ready. Re-runs whenever the active forge
+  // changes so switching forges restores that forge's state.
+  useEffect(() => {
+    if (forgeRoot && layoutPersistenceLoaded) {
+      hydrateForge();
+    }
+  }, [forgeRoot, layoutPersistenceLoaded, hydrateForge]);
 
   return (
     <div className="app">

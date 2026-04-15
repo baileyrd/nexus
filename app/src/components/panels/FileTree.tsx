@@ -128,12 +128,13 @@ interface TreeNodeProps {
 }
 
 function TreeNode({ entry, depth }: TreeNodeProps) {
-  const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<ForgeDirEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const openFile = useOpenFileStore((s) => s.open);
   const openRelpath = useOpenFileStore((s) => s.file?.relpath);
   const fsVersion = useForgeStore((s) => s.fsVersion);
+  const expanded = useForgeStore((s) => s.expandedPaths.has(entry.relpath));
+  const setExpanded = useForgeStore((s) => s.setExpanded);
   const requestMenu = useContext(MenuContext);
 
   useEffect(() => {
@@ -154,8 +155,8 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
 
   const onToggle = useCallback(() => {
     if (!entry.isDir) return;
-    setExpanded((v) => !v);
-  }, [entry.isDir]);
+    setExpanded(entry.relpath, !expanded);
+  }, [entry.isDir, entry.relpath, expanded, setExpanded]);
 
   const onContextMenu = useCallback(
     (e: ReactMouseEvent) => {
