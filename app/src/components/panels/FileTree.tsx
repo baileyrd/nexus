@@ -1,14 +1,28 @@
-import { useEffect, useState, useCallback } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { ChevronDown, ChevronRight, File, Folder } from "lucide-react";
-import { listForgeDir, type ForgeDirEntry } from "../../ipc/forge";
+import { ContextMenu, type ContextMenuItem } from "../ContextMenu";
+import {
+  createForgeDir,
+  createForgeFile,
+  deleteForgeEntry,
+  listForgeDir,
+  renameForgeEntry,
+  type ForgeDirEntry,
+} from "../../ipc/forge";
 import { useForgeStore } from "../../stores/forge";
 import { useOpenFileStore } from "../../stores/openFile";
 
 /**
  * File-tree renderer for panels with `contentType = "files"`. Lists the
- * active forge root, lazily loading subdirectories when expanded. No
- * file actions yet — clicking a file is a no-op until an editor exists
- * to open it into.
+ * active forge root, lazily loading subdirectories when expanded.
+ * Right-click rows or the empty area for create / rename / delete.
  */
 export function FileTree() {
   const forge = useForgeStore((s) => s.info);
@@ -24,10 +38,25 @@ export function FileTree() {
   return <FileTreeForForge key={forge.root} />;
 }
 
+type RequestMenuFn = (
+  target: ForgeDirEntry | null,
+  x: number,
+  y: number,
+) => void;
+
+const MenuContext = createContext<RequestMenuFn | null>(null);
+
 function FileTreeForForge() {
   const [rootEntries, setRootEntries] = useState<ForgeDirEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    target: ForgeDirEntry | null;
+  } | null>(null);
   const fsVersion = useForgeStore((s) => s.fsVersion);
+  const openAction = useOpenFileStore((s) => s.open);
+  const closeFile = useOpenFileStore((s) => s.close);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,24 +72,53 @@ function FileTreeForForge() {
     };
   }, [fsVersion]);
 
-  if (error) {
-    return <div className="file-tree-error">Failed to list forge: {error}</div>;
-  }
+  const requestMenu = useCallback<RequestMenuFn>((target, x, y) => {
+    setMenu({ target, x, y });
+  }, []);
 
-  if (!rootEntries) {
-    return <div className="file-tree-loading">loading…</div>;
-  }
+  const onRootContextMenu = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      // Only trigger when the click landed on the container itself, not
+      // a row that already handles its own context menu.
+      if (e.target === e.currentTarget) {
+        e.preventDefault();
+        requestMenu(null, e.clientX, e.clientY);
+      }
+    },
+    [requestMenu],
+  );
 
-  if (rootEntries.length === 0) {
-    return <div className="file-tree-empty">Forge is empty.</div>;
-  }
+  const items = menu ? buildMenuItems(menu.target, openAction, closeFile) : [];
 
   return (
-    <ul className="file-tree" role="tree">
-      {rootEntries.map((entry) => (
-        <TreeNode key={entry.relpath} entry={entry} depth={0} />
-      ))}
-    </ul>
+    <MenuContext.Provider value={requestMenu}>
+      <div className="file-tree-root" onContextMenu={onRootContextMenu}>
+        {error && (
+          <div className="file-tree-error">Failed to list forge: {error}</div>
+        )}
+        {!error && !rootEntries && (
+          <div className="file-tree-loading">loading…</div>
+        )}
+        {rootEntries?.length === 0 && (
+          <div className="file-tree-empty">Forge is empty.</div>
+        )}
+        {rootEntries && rootEntries.length > 0 && (
+          <ul className="file-tree" role="tree">
+            {rootEntries.map((entry) => (
+              <TreeNode key={entry.relpath} entry={entry} depth={0} />
+            ))}
+          </ul>
+        )}
+      </div>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={items}
+          onClose={() => setMenu(null)}
+        />
+      )}
+    </MenuContext.Provider>
   );
 }
 
@@ -76,9 +134,8 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
   const openFile = useOpenFileStore((s) => s.open);
   const openRelpath = useOpenFileStore((s) => s.file?.relpath);
   const fsVersion = useForgeStore((s) => s.fsVersion);
+  const requestMenu = useContext(MenuContext);
 
-  // Fetch children whenever this directory is expanded; re-fetch when
-  // the FS-change signal bumps `fsVersion` so the tree stays live.
   useEffect(() => {
     if (!entry.isDir || !expanded) return;
     let cancelled = false;
@@ -100,17 +157,31 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
     setExpanded((v) => !v);
   }, [entry.isDir]);
 
+  const onContextMenu = useCallback(
+    (e: ReactMouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      requestMenu?.(entry, e.clientX, e.clientY);
+    },
+    [entry, requestMenu],
+  );
+
   const indent = { paddingInlineStart: `${depth * 12 + 4}px` } as const;
 
   if (!entry.isDir) {
     const active = openRelpath === entry.relpath;
     return (
-      <li role="treeitem" aria-selected={active} className="file-tree-row is-file">
+      <li
+        role="treeitem"
+        aria-selected={active}
+        className="file-tree-row is-file"
+      >
         <button
           type="button"
           className={active ? "file-tree-file is-active" : "file-tree-file"}
           style={indent}
           onClick={() => void openFile(entry.relpath)}
+          onContextMenu={onContextMenu}
         >
           <span className="file-tree-twisty" aria-hidden="true" />
           <File size={14} className="file-tree-icon" aria-hidden="true" />
@@ -130,12 +201,21 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
         type="button"
         className="file-tree-toggle"
         onClick={onToggle}
+        onContextMenu={onContextMenu}
         style={indent}
       >
         {expanded ? (
-          <ChevronDown size={12} className="file-tree-twisty" aria-hidden="true" />
+          <ChevronDown
+            size={12}
+            className="file-tree-twisty"
+            aria-hidden="true"
+          />
         ) : (
-          <ChevronRight size={12} className="file-tree-twisty" aria-hidden="true" />
+          <ChevronRight
+            size={12}
+            className="file-tree-twisty"
+            aria-hidden="true"
+          />
         )}
         <Folder size={14} className="file-tree-icon" aria-hidden="true" />
         <span className="file-tree-name">{entry.name}</span>
@@ -144,7 +224,10 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
         <ul role="group" className="file-tree-children">
           {error && <li className="file-tree-error">{error}</li>}
           {children === null && !error && (
-            <li className="file-tree-loading" style={{ paddingInlineStart: `${(depth + 1) * 12 + 4}px` }}>
+            <li
+              className="file-tree-loading"
+              style={{ paddingInlineStart: `${(depth + 1) * 12 + 4}px` }}
+            >
               loading…
             </li>
           )}
@@ -163,4 +246,107 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
       )}
     </li>
   );
+}
+
+// ── Menu actions ──────────────────────────────────────────────────────────
+
+/** Parent directory of `relpath`, or "" for top-level entries. */
+function dirname(relpath: string): string {
+  const i = relpath.lastIndexOf("/");
+  return i === -1 ? "" : relpath.slice(0, i);
+}
+
+/** Join a parent relpath and a filename, skipping the separator at root. */
+function joinRel(parent: string, name: string): string {
+  return parent ? `${parent}/${name}` : name;
+}
+
+function buildMenuItems(
+  target: ForgeDirEntry | null,
+  openFile: (relpath: string) => Promise<void>,
+  closeFile: () => void,
+): ContextMenuItem[] {
+  const openRelpath = useOpenFileStore.getState().file?.relpath ?? null;
+  // The directory new entries should land in: the target itself if a
+  // folder, the target's parent if a file, the root if no target.
+  const parentDir =
+    target === null ? "" : target.isDir ? target.relpath : dirname(target.relpath);
+
+  const items: ContextMenuItem[] = [
+    {
+      id: "new-file",
+      label: "New file",
+      onSelect: async () => {
+        const name = window.prompt("File name:", "untitled.md");
+        if (!name) return;
+        try {
+          const rel = joinRel(parentDir, name);
+          await createForgeFile(rel);
+          await openFile(rel);
+        } catch (e) {
+          window.alert(`Failed to create file: ${e}`);
+        }
+      },
+    },
+    {
+      id: "new-folder",
+      label: "New folder",
+      onSelect: async () => {
+        const name = window.prompt("Folder name:", "");
+        if (!name) return;
+        try {
+          await createForgeDir(joinRel(parentDir, name));
+        } catch (e) {
+          window.alert(`Failed to create folder: ${e}`);
+        }
+      },
+    },
+  ];
+
+  if (target) {
+    items.push({
+      id: "rename",
+      label: "Rename…",
+      separatorBefore: true,
+      onSelect: async () => {
+        const next = window.prompt("Rename to:", target.name);
+        if (!next || next === target.name) return;
+        try {
+          const dst = joinRel(dirname(target.relpath), next);
+          await renameForgeEntry(target.relpath, dst);
+        } catch (e) {
+          window.alert(`Failed to rename: ${e}`);
+        }
+      },
+    });
+    items.push({
+      id: "delete",
+      label: target.isDir ? "Delete folder…" : "Delete file…",
+      onSelect: async () => {
+        const ok = window.confirm(
+          target.isDir
+            ? `Delete folder "${target.name}" and everything inside? This cannot be undone.`
+            : `Delete file "${target.name}"? This cannot be undone.`,
+        );
+        if (!ok) return;
+        try {
+          await deleteForgeEntry(target.relpath);
+          // Close the viewer eagerly only if the deleted entry was (or
+          // contained) the open file; the watcher's refresh handles
+          // any other staleness.
+          if (
+            openRelpath !== null &&
+            (openRelpath === target.relpath ||
+              openRelpath.startsWith(`${target.relpath}/`))
+          ) {
+            closeFile();
+          }
+        } catch (e) {
+          window.alert(`Failed to delete: ${e}`);
+        }
+      },
+    });
+  }
+
+  return items;
 }

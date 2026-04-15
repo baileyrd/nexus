@@ -1029,3 +1029,56 @@ main {
   color: var(--nx-status-error, #c24040);
   font-style: normal;
 }
+
+/* The wrapper exists so right-click on empty area can hit the
+   container instead of bubbling to whatever sits beneath. */
+.file-tree-root {
+  height: 100%;
+  overflow-y: auto;
+}
+
+/* ── Context menu (used by file tree, future panels) ─────────────────────── */
+
+.context-menu {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  min-width: 180px;
+  background: var(--nx-bg-primary, #ffffff);
+  border: 1px solid var(--nx-bg-tertiary, #e8eaef);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+  color: var(--nx-text-primary, #2a2a2a);
+  z-index: 1000;
+}
+
+.context-menu-item {
+  padding: 0;
+}
+
+.context-menu-item.with-separator {
+  border-top: 1px solid var(--nx-bg-tertiary, #e8eaef);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.context-menu-item button {
+  width: 100%;
+  text-align: start;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.context-menu-item button:hover:not(:disabled) {
+  background: var(--nx-bg-hover, rgba(0, 0, 0, 0.06));
+}
+
+.context-menu-item button:disabled {
+  color: var(--nx-text-tertiary, #9a9ca4);
+  cursor: not-allowed;
+}

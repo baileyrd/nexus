@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { X } from "lucide-react";
+import { useForgeStore } from "../../stores/forge";
 import { useOpenFileStore } from "../../stores/openFile";
 
 /**
@@ -11,6 +13,15 @@ export function FileViewer() {
   const loading = useOpenFileStore((s) => s.loading);
   const error = useOpenFileStore((s) => s.error);
   const close = useOpenFileStore((s) => s.close);
+  const refresh = useOpenFileStore((s) => s.refresh);
+  const fsVersion = useForgeStore((s) => s.fsVersion);
+
+  // Re-read the open file whenever the watcher signals a change. If
+  // the file has been deleted or renamed externally, `refresh` closes
+  // cleanly so the viewer doesn't get stuck on stale content.
+  useEffect(() => {
+    void refresh();
+  }, [fsVersion, refresh]);
 
   if (loading) {
     return <div className="file-viewer-status">opening…</div>;

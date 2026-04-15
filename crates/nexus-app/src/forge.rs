@@ -269,6 +269,133 @@ fn resolve_within(root: &Path, relpath: &str) -> Result<PathBuf, String> {
     Ok(canon)
 }
 
+/// Resolve a not-yet-existing target path: validate `relpath` components,
+/// canonicalize the parent directory, and ensure the parent is within
+/// the forge root. The returned path is `<canonical-parent>/<filename>`.
+///
+/// Used by create/rename when the destination doesn't yet exist on disk
+/// so [`resolve_within`] can't canonicalize it directly.
+fn resolve_target(root: &Path, relpath: &str) -> Result<PathBuf, String> {
+    if relpath.is_empty() {
+        return Err("empty relpath".into());
+    }
+    let rel = Path::new(relpath);
+    for c in rel.components() {
+        match c {
+            Component::Normal(_) => {}
+            _ => return Err(format!("invalid relpath: {relpath}")),
+        }
+    }
+    let parent_rel = rel.parent().unwrap_or_else(|| Path::new(""));
+    let file_name = rel
+        .file_name()
+        .ok_or_else(|| format!("missing filename: {relpath}"))?;
+
+    let parent_abs = if parent_rel.as_os_str().is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(parent_rel)
+    };
+    let canon_root = fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let canon_parent = fs::canonicalize(&parent_abs)
+        .map_err(|e| format!("parent dir not found: {e}"))?;
+    if !canon_parent.starts_with(&canon_root) {
+        return Err(format!("path escapes forge root: {relpath}"));
+    }
+    Ok(canon_parent.join(file_name))
+}
+
+/// Create a new empty file at `relpath` within the active forge.
+/// Refuses to overwrite an existing file.
+#[tauri::command]
+pub fn create_forge_file(
+    relpath: String,
+    state: State<'_, ForgeState>,
+) -> Result<(), String> {
+    let forge = state
+        .0
+        .lock()
+        .map_err(|_| "forge state poisoned")?
+        .clone()
+        .ok_or("no forge open")?;
+    let target = resolve_target(&forge.root, &relpath)?;
+    if target.exists() {
+        return Err(format!("already exists: {relpath}"));
+    }
+    fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&target)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Create a new empty directory at `relpath`.
+#[tauri::command]
+pub fn create_forge_dir(
+    relpath: String,
+    state: State<'_, ForgeState>,
+) -> Result<(), String> {
+    let forge = state
+        .0
+        .lock()
+        .map_err(|_| "forge state poisoned")?
+        .clone()
+        .ok_or("no forge open")?;
+    let target = resolve_target(&forge.root, &relpath)?;
+    if target.exists() {
+        return Err(format!("already exists: {relpath}"));
+    }
+    fs::create_dir(&target).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Rename or move an entry within the forge. Both `from` and `to` must
+/// resolve under the forge root; `to` must not already exist.
+#[tauri::command]
+pub fn rename_forge_entry(
+    from: String,
+    to: String,
+    state: State<'_, ForgeState>,
+) -> Result<(), String> {
+    let forge = state
+        .0
+        .lock()
+        .map_err(|_| "forge state poisoned")?
+        .clone()
+        .ok_or("no forge open")?;
+    let src = resolve_within(&forge.root, &from)?;
+    let dst = resolve_target(&forge.root, &to)?;
+    if dst.exists() {
+        return Err(format!("already exists: {to}"));
+    }
+    fs::rename(&src, &dst).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Delete an entry within the forge. Files and directories are both
+/// accepted; directories are removed recursively.
+#[tauri::command]
+pub fn delete_forge_entry(
+    relpath: String,
+    state: State<'_, ForgeState>,
+) -> Result<(), String> {
+    let forge = state
+        .0
+        .lock()
+        .map_err(|_| "forge state poisoned")?
+        .clone()
+        .ok_or("no forge open")?;
+    let target = resolve_within(&forge.root, &relpath)?;
+    let meta = fs::metadata(&target).map_err(|e| e.to_string())?;
+    if meta.is_dir() {
+        fs::remove_dir_all(&target).map_err(|e| e.to_string())?;
+    } else {
+        fs::remove_file(&target).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,5 +452,30 @@ mod tests {
         init_layout(tmp.path()).unwrap();
         let resolved = resolve_within(tmp.path(), "").unwrap();
         assert_eq!(resolved, fs::canonicalize(tmp.path()).unwrap());
+    }
+
+    #[test]
+    fn resolve_target_rejects_parent_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_layout(tmp.path()).unwrap();
+        let err = resolve_target(tmp.path(), "../escapes.md").unwrap_err();
+        assert!(err.contains("invalid relpath"), "got: {err}");
+    }
+
+    #[test]
+    fn resolve_target_requires_existing_parent() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_layout(tmp.path()).unwrap();
+        let err = resolve_target(tmp.path(), "no-such-dir/file.md").unwrap_err();
+        assert!(err.contains("parent dir not found"), "got: {err}");
+    }
+
+    #[test]
+    fn resolve_target_returns_parent_plus_filename() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_layout(tmp.path()).unwrap();
+        let resolved = resolve_target(tmp.path(), "notes/new.md").unwrap();
+        let canon_notes = fs::canonicalize(tmp.path().join("notes")).unwrap();
+        assert_eq!(resolved, canon_notes.join("new.md"));
     }
 }

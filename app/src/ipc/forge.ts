@@ -38,3 +38,19 @@ export function listForgeDir(relpath: string): Promise<ForgeDirEntry[]> {
 export function readForgeFile(relpath: string): Promise<ForgeFile> {
   return invoke("read_forge_file", { relpath });
 }
+
+export function createForgeFile(relpath: string): Promise<void> {
+  return invoke("create_forge_file", { relpath });
+}
+
+export function createForgeDir(relpath: string): Promise<void> {
+  return invoke("create_forge_dir", { relpath });
+}
+
+export function renameForgeEntry(from: string, to: string): Promise<void> {
+  return invoke("rename_forge_entry", { from, to });
+}
+
+export function deleteForgeEntry(relpath: string): Promise<void> {
+  return invoke("delete_forge_entry", { relpath });
+}
