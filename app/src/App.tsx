@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { ModeToggle } from "./components/ModeToggle";
+import { CommandPalette } from "./components/palette/CommandPalette";
 import { ThemePicker } from "./components/ThemePicker";
 import { WorkspaceView } from "./components/layout/WorkspaceView";
 import { useThemeStore } from "./stores/theme";
@@ -29,6 +30,7 @@ export default function App() {
         <WorkspaceView />
         <ThemePicker />
       </main>
+      <CommandPalette />
     </div>
   );
 }

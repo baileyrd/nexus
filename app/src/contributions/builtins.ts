@@ -1,3 +1,4 @@
+import { usePaletteStore } from "../stores/palette";
 import { contributions } from "./registry";
 
 /**
@@ -15,14 +16,27 @@ export function registerBuiltins(): void {
     // eslint-disable-next-line no-alert
     alert("Nexus help — documentation surface coming soon.");
   });
+  contributions.registerPaletteCommand({
+    id: "workspace.help",
+    commandId: "workspace.help",
+    title: "Help: Show documentation",
+    category: "Workspace",
+    icon: "help-circle",
+  });
 
   contributions.registerCommand("workspace.settings", () => {
     // eslint-disable-next-line no-alert
     alert("Settings UI — pending (PRD 07 §20).");
   });
+  contributions.registerPaletteCommand({
+    id: "workspace.settings",
+    commandId: "workspace.settings",
+    title: "Settings: Open",
+    category: "Workspace",
+    icon: "settings",
+  });
 
   contributions.registerCommand("workspace.command-palette", () => {
-    // eslint-disable-next-line no-alert
-    alert("Command palette — pending (PRD 07 §19).");
+    usePaletteStore.getState().openPalette();
   });
 }

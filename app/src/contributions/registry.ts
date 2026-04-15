@@ -24,12 +24,31 @@ export interface ContentComponentProps {
 }
 export type ContentComponent = ComponentType<ContentComponentProps>;
 
+/** Command-palette entry. References an already-registered command by
+ *  `commandId`; the palette dispatches via `contributions.invokeCommand`. */
+export interface PaletteCommand {
+  /** Unique id for the palette entry (usually matches `commandId`). */
+  id: string;
+  /** Command id to dispatch when the user picks this entry. */
+  commandId: string;
+  /** Primary label shown in the palette list. */
+  title: string;
+  /** Optional category badge (e.g. "Workspace", "Editor"). */
+  category?: string;
+  /** Optional Lucide-registry icon name. */
+  icon?: string;
+  /** Optional keybinding hint shown right-aligned (e.g. "⌘K"). */
+  keybinding?: string;
+}
+
 type Disposable = () => void;
 
 const commands = new Map<string, CommandHandler>();
 const views = new Map<string, ViewOpener>();
 const contentTypes = new Map<string, ContentComponent>();
+const paletteCommands = new Map<string, PaletteCommand>();
 const contentTypeListeners = new Set<() => void>();
+const paletteListeners = new Set<() => void>();
 
 function warn(msg: string) {
   // eslint-disable-next-line no-console
@@ -114,6 +133,33 @@ export const contributions = {
       contentTypeListeners.delete(fn);
     };
   },
+
+  registerPaletteCommand(item: PaletteCommand): Disposable {
+    if (paletteCommands.has(item.id)) {
+      warn(`palette command '${item.id}' already registered — replacing`);
+    }
+    paletteCommands.set(item.id, item);
+    paletteSnapshot = null;
+    paletteListeners.forEach((fn) => fn());
+    return () => {
+      if (paletteCommands.get(item.id) === item) {
+        paletteCommands.delete(item.id);
+        paletteSnapshot = null;
+        paletteListeners.forEach((fn) => fn());
+      }
+    };
+  },
+
+  listPaletteCommands(): PaletteCommand[] {
+    return Array.from(paletteCommands.values());
+  },
+
+  subscribePaletteCommands(fn: () => void): Disposable {
+    paletteListeners.add(fn);
+    return () => {
+      paletteListeners.delete(fn);
+    };
+  },
 };
 
 /** Reset all registrations. Test-only. */
@@ -121,7 +167,10 @@ export function __resetContributions() {
   commands.clear();
   views.clear();
   contentTypes.clear();
+  paletteCommands.clear();
   contentTypeListeners.clear();
+  paletteListeners.clear();
+  paletteSnapshot = null;
 }
 
 /**
@@ -134,5 +183,31 @@ export function useContentType(id: string | null | undefined): ContentComponent 
     (notify) => contributions.subscribeContentTypes(notify),
     () => (id ? contentTypes.get(id) : undefined),
     () => (id ? contentTypes.get(id) : undefined),
+  );
+}
+
+/**
+ * Cached snapshot of the palette command list. `useSyncExternalStore`
+ * demands stable identity across reads with no state change;
+ * `registerPaletteCommand` invalidates this synchronously before
+ * firing listeners so React sees a fresh array on the commit-time
+ * snapshot check.
+ */
+let paletteSnapshot: PaletteCommand[] | null = null;
+
+function paletteSnapshotFn(): PaletteCommand[] {
+  if (!paletteSnapshot) {
+    paletteSnapshot = Array.from(paletteCommands.values());
+  }
+  return paletteSnapshot;
+}
+
+/** React hook returning all registered palette commands, reactive to
+ *  registrations/unregistrations. */
+export function usePaletteCommands(): PaletteCommand[] {
+  return useSyncExternalStore(
+    (notify) => contributions.subscribePaletteCommands(notify),
+    paletteSnapshotFn,
+    paletteSnapshotFn,
   );
 }
