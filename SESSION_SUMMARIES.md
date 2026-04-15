@@ -17,3 +17,153 @@
 
 Completed PRD 01 (Kernel & Event System) with full kernel lifecycle implementation, clippy cleanup, and comprehensive smoke tests within Milestone 1. User reviewed brainstorming and planning skill documentation to understand the collaborative design and TDD-based implementation workflow for upcoming work.
 <!-- /session:2a69924f-2a8a-4822-b1dd-dea6adf85394 -->
+
+<!-- session:f9ef6178-c220-4376-b15a-13cb4330fb61 -->
+### M1 Milestone Completion and M2 TUI Architecture
+
+- **Started**: 2026-04-12 13:26
+- **Updated**: 2026-04-13 00:57
+- **Branch**: `main`
+- **Status**: completed
+- **Messages**: 85
+- **Topics**: M1 Foundation completion, Storage engine implementation, Plugin system architecture, WASM sandbox design, CLI command handling, Terminal UI design, Design-first methodology, Bug fixes, Git workflow
+- **Session ID**: `f9ef6178-c220-4376-b15a-13cb4330fb61`
+- **Resume**: `claude --resume f9ef6178-c220-4376-b15a-13cb4330fb61`
+
+Successfully completed the Nexus IDE M1 Foundation milestone by implementing three major PRDs (Storage Engine, Plugin System, CLI) using a design-first approach, achieving 340 passing tests across 6 crates. Designed a comprehensive Terminal UI for M2 with iterative mockups and specifications, then resolved CLI bugs and consolidated all work with an 85-commit push to main.
+<!-- /session:f9ef6178-c220-4376-b15a-13cb4330fb61 -->
+
+<!-- session:1a3f2347-9e63-443c-9f0b-a2774123405c -->
+### Nexus IDE Status Review and PRD-07 Theming Initiation
+
+- **Started**: 2026-04-14 00:52
+- **Updated**: 2026-04-14 01:02
+- **Branch**: `main`
+- **Status**: completed
+- **Messages**: 10
+- **Topics**: project status, completed PRDs, database engine, architectural refactoring, PRD-07 Theming UI, frontend development, scaffolding strategy, superpowers workflow disabled
+- **Session ID**: `1a3f2347-9e63-443c-9f0b-a2774123405c`
+- **Resume**: `claude --resume 1a3f2347-9e63-443c-9f0b-a2774123405c`
+
+User reviewed the Nexus IDE project's completion status, confirming PRDs 10, 06, and 11 were delivered with recent architectural refactoring to tighten kernel boundaries. Work then initiated on PRD-07 (Theming & UI), a substantial 8-week frontend effort, with the assistant seeking clarification on implementation scaffolding approach before proceeding.
+<!-- /session:1a3f2347-9e63-443c-9f0b-a2774123405c -->
+
+<!-- session:2e90187b-4941-4273-b6f3-e525bd73f5a0 -->
+### PRD-07 implementation: Rust backend to Tauri frontend scaffold
+
+- **Started**: 2026-04-14 01:04
+- **Updated**: 2026-04-14 02:10
+- **Branch**: `main`
+- **Status**: completed
+- **Messages**: 11
+- **Topics**: PRD-07, Rust backend, Tauri 2.x scaffold, React frontend, TypeScript bindings (ts-rs), theme system, workspace layout, hot-reload watcher, type safety
+- **Session ID**: `2e90187b-4941-4273-b6f3-e525bd73f5a0`
+- **Resume**: `claude --resume 2e90187b-4941-4273-b6f3-e525bd73f5a0`
+
+Implemented PRD-07 §5 Rust-side workspace layout and theme engine (LayoutNode, WorkspaceLayout, mutation API, hot-reload watcher), then scaffolded Tauri 2.x desktop app with React frontend. Replaced hand-written TypeScript types with ts-rs bindings to eliminate drift bugs and added Light/Dark/System mode toggle end-to-end.
+<!-- /session:2e90187b-4941-4273-b6f3-e525bd73f5a0 -->
+
+<!-- session:416a4b13-9fd5-4ca0-8a9b-8bc7768ad852 -->
+### Phase B Nexus IPC Architecture Decoupling
+
+- **Started**: 2026-04-14 08:44
+- **Updated**: 2026-04-14 14:26
+- **Branch**: `main`
+- **Status**: completed
+- **Messages**: 51
+- **Topics**: Phase A ipc_call dispatcher, Phase B bootstrap crate, TUI IPC migration, CLI subcommand migration, event bus architecture, MCP async handler refactoring, kernel plugin separation, BaseRecord type dependency, workspace test validation
+- **Session ID**: `416a4b13-9fd5-4ca0-8a9b-8bc7768ad852`
+- **Resume**: `claude --resume 416a4b13-9fd5-4ca0-8a9b-8bc7768ad852`
+
+Implemented Phase A (ipc_call dispatcher) and progressed through Phase B of Nexus architecture refactoring, decoupling CLI/TUI/MCP from direct subsystem imports by routing all tool calls through kernel IPC. Completed migrations for TUI, CLI subcommands (forge, content, graph, canvas), watch event bus, and MCP tool handlers with 11 commits pushed to main. Identified BaseRecord type-move as the next blocker for completing Q2 bases refactor.
+<!-- /session:416a4b13-9fd5-4ca0-8a9b-8bc7768ad852 -->
+
+<!-- session:fccdceb2-2eda-4e2b-87da-3d838bf9dda9 -->
+### Nexus type reorganization and AI plugin decoupling
+
+- **Started**: 2026-04-14 14:35
+- **Updated**: 2026-04-14 15:50
+- **Branch**: `main`
+- **Status**: completed
+- **Messages**: 9
+- **Topics**: type-move, dependency-cycles, architecture-audit, AI-plugin-decoupling, vector-store-IPC, async-dispatch, plugin-separation, refactoring
+- **Session ID**: `fccdceb2-2eda-4e2b-87da-3d838bf9dda9`
+- **Resume**: `claude --resume fccdceb2-2eda-4e2b-87da-3d838bf9dda9`
+
+Completed a type-move of BaseRecord from nexus-storage to nexus-types to break dependency cycles, unblocking Q2 bases work. Identified and fixed a critical architectural violation where the AI plugin directly depended on rusqlite, executing a comprehensive refactor to route all vector store operations through async IPC handlers in the storage layer. All changes (4 commits) successfully pushed to origin/main.
+<!-- /session:fccdceb2-2eda-4e2b-87da-3d838bf9dda9 -->
+
+<!-- session:14b628da-4916-4adf-9140-56621b060dbd -->
+### Phase B dependency pruning: IPC handlers and guardrails
+
+- **Started**: 2026-04-14 15:50
+- **Updated**: 2026-04-14 17:21
+- **Branch**: `main`
+- **Status**: completed
+- **Messages**: 12
+- **Topics**: Phase B dependency pruning, IPC handlers, CLI decoupling, nexus-storage dependency removal, bases refactoring, Cargo dependency constraints, guardrail testing, architectural constraints
+- **Session ID**: `14b628da-4916-4adf-9140-56621b060dbd`
+- **Resume**: `claude --resume 14b628da-4916-4adf-9140-56621b060dbd`
+
+Completed Phase B's dependency decoupling work by implementing five new IPC handlers (query_blocks, config, base_index, base_list, base_query) to migrate CLI and database off direct nexus-storage dependencies. Refactored bases FS functions from nexus-storage to nexus-types and added a guardrail test in nexus-bootstrap to enforce and prevent dependency violations across the workspace.
+<!-- /session:14b628da-4916-4adf-9140-56621b060dbd -->
+
+<!-- session:3eb5bf52-ee09-40f8-a69e-472ca93f6613 -->
+### Plugin containment audit and nexus-formats consolidation refactor
+
+- **Started**: 2026-04-14 17:25
+- **Updated**: 2026-04-14 19:48
+- **Branch**: `main`
+- **Status**: completed
+- **Messages**: 36
+- **Topics**: plugin containment, architectural purity, dependency extraction, nexus-kv crate, nexus-formats consolidation, storage reconciliation bugfix, AI dispatcher routing, kernel refactoring, code deduplication, dependency injection
+- **Session ID**: `3eb5bf52-ee09-40f8-a69e-472ca93f6613`
+- **Resume**: `claude --resume 3eb5bf52-ee09-40f8-a69e-472ca93f6613`
+
+Completed a comprehensive Phase-B audit to verify plugin boundaries and kernel containment, identifying and resolving six audit items including removal of unused dependencies, extraction of SqliteKvStore into a dedicated nexus-kv crate, and architectural refactoring of the AI dispatcher. Subsequently discovered nexus-formats as an unused library with parallel implementations in nexus-storage, executed a three-phase consolidation refactor to eliminate duplication and remove 1.3k lines of code while maintaining full test coverage.
+<!-- /session:3eb5bf52-ee09-40f8-a69e-472ca93f6613 -->
+
+<!-- session:0656ea71-2339-4406-9e18-78163838498d -->
+### Nexus IDE layout system overhaul and preset implementation
+
+- **Started**: 2026-04-14 21:15
+- **Updated**: 2026-04-15 01:33
+- **Branch**: `main`
+- **Status**: completed
+- **Messages**: 63
+- **Topics**: Nexus IDE, workspace layout redesign, side panel architecture, layout presets (Obsidian/Vibe/Dev), three-layer panel structure, ribbon/activity rail, TOML configuration, Tauri 2 integration, workspace chrome UI, status bar implementation
+- **Session ID**: `0656ea71-2339-4406-9e18-78163838498d`
+- **Resume**: `claude --resume 0656ea71-2339-4406-9e18-78163838498d`
+
+This session consolidated the nexus-formats refactoring work and implemented a comprehensive redesign of the Nexus IDE's workspace layout system. The team built three-layer side panel structures, created declarative TOML-based layout presets (Obsidian, Vibe, Dev), and implemented workspace chrome components including a left ribbon, collapse/expand toggles, and floating status bar. All features were successfully integrated and deployed to main across 22 commits.
+<!-- /session:0656ea71-2339-4406-9e18-78163838498d -->
+
+<!-- session:57f902ae-3030-4b23-a5aa-52c95d0c5449 -->
+### PRD-07 command palette shipped, planning IPC persistence work
+
+- **Started**: 2026-04-15 01:35
+- **Updated**: 2026-04-15 02:25
+- **Branch**: `main`
+- **Status**: in-progress
+- **Messages**: 16
+- **Topics**: command palette, IPC persistence, workspace state, forge naming, PRD-07 completion, storage architecture
+- **Session ID**: `57f902ae-3030-4b23-a5aa-52c95d0c5449`
+- **Resume**: `claude --resume 57f902ae-3030-4b23-a5aa-52c95d0c5449`
+
+Command palette feature (⌘K toggle with fuzzy search) was completed and pushed to main. The assistant reviewed remaining PRD-07 tasks and recommended bundling layout persistence (#4) and forge naming (#5) into one session. The user approved, and the assistant is investigating forge and storage architecture before proposing a design.
+<!-- /session:57f902ae-3030-4b23-a5aa-52c95d0c5449 -->
+
+<!-- session:2296ffe3-fdbc-4233-8ba3-f08c40bf7a10 -->
+### Project Status Check for Nexus IDE PRD-07
+
+- **Started**: 2026-04-15 10:21
+- **Updated**: 2026-04-15 10:21
+- **Branch**: `main`
+- **Status**: in-progress
+- **Messages**: 1
+- **Topics**: Project Status, PRD-07 Layout Persistence, Side-panel State, Command Palette, Forge Naming, Nexus IDE
+- **Session ID**: `2296ffe3-fdbc-4233-8ba3-f08c40bf7a10`
+- **Resume**: `claude --resume 2296ffe3-fdbc-4233-8ba3-f08c40bf7a10`
+
+The user asked for project status. The assistant reported that main branch is clean with recent commits completing PRD-07 item #4 (layout persistence, side-panel state, and preset saving to disk), with an open thread beginning on PRD-07 #5 (forge naming).
+<!-- /session:2296ffe3-fdbc-4233-8ba3-f08c40bf7a10 -->

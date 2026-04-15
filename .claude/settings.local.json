@@ -75,7 +75,28 @@
       "Bash(pkg-config --exists javascriptcoregtk-4.1)",
       "Bash(pkg-config --exists libsoup-3.0)",
       "Bash(npm install:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(../../app/node_modules/.bin/tauri dev:*)",
+      "Read(//home/baileyrd/**)",
+      "Bash(find / -name \"wsl-screenshot*\")",
+      "Bash(compgen -c)",
+      "Bash(/mnt/c/Users/baile/dev/nexus/)",
+      "Bash(/mnt/c/Users/baile/dev/nexus/target/debug/nexus forge:*)",
+      "Bash(cargo tree:*)",
+      "Bash(tee /tmp/ws-test.log)",
+      "Bash(kill 137031)",
+      "Bash(/mnt/c/Users/baile/dev/nexus/target/debug/nexus graph:*)",
+      "Bash(tee /tmp/ws-test-graph.log)",
+      "Bash(tee /tmp/ws-test-mcp.log)",
+      "Bash(mv nexus-architecture.html docs/nexus-architecture.html)",
+      "Bash(mv nexus-architecture.mermaid docs/nexus-architecture.mermaid)",
+      "Bash(npx tsc *)",
+      "Bash(/mnt/c/Users/baile/dev/nexus/app/node_modules/.bin/tauri info *)",
+      "Bash(pkill -f \"tauri dev\")",
+      "Bash(pkill -f \"vite\")",
+      "Bash(pkill -f \"cargo.*run\")",
+      "Bash(kill -9 58579 58610)",
+      "Bash(npm --prefix /mnt/c/Users/baile/dev/nexus/app run build)"
     ]
   }
 }
