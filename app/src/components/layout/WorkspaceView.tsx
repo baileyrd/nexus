@@ -14,6 +14,7 @@ export function WorkspaceView() {
   const loading = useLayoutStore((s) => s.loading);
   const error = useLayoutStore((s) => s.error);
   const togglePanelVisibility = useLayoutStore((s) => s.togglePanelVisibility);
+  const toggleSidePanelCollapsed = useLayoutStore((s) => s.toggleSidePanelCollapsed);
 
   useEffect(() => {
     if (!layout) load();
@@ -29,40 +30,79 @@ export function WorkspaceView() {
       {error && <p className="error">Failed to load layout: {error}</p>}
 
       {layout ? (
-        <div
-          className="workspace-frame"
-          data-workspace-name={layout.name}
-          style={{ display: "flex" }}
-        >
-          {layout.ribbon.length > 0 && <Ribbon items={layout.ribbon} />}
-          {!layout.leftSidePanel.collapsed && (
-            <SidePanelView
+        <div className="workspace-frame" data-workspace-name={layout.name}>
+          <div className="workspace-chrome">
+            <SidePanelToggle
               side="left"
-              sidePanel={layout.leftSidePanel}
-              onTogglePanel={(id) => togglePanelVisibility("left", id)}
+              collapsed={layout.leftSidePanel.collapsed}
+              onClick={() => toggleSidePanelCollapsed("left")}
             />
-          )}
-          <div className="workspace-center">
-            <SplitPane
-              node={layout.root}
-              focusedPaneId={layout.focusedPaneId}
+            <SidePanelToggle
+              side="right"
+              collapsed={layout.rightSidePanel.collapsed}
+              onClick={() => toggleSidePanelCollapsed("right")}
             />
-            {!layout.bottomPanel.collapsed && (
-              <BottomPreview height={layout.bottomPanel.height} />
+          </div>
+          <div className="workspace-body">
+            {layout.ribbon.length > 0 && <Ribbon items={layout.ribbon} />}
+            {!layout.leftSidePanel.collapsed && (
+              <SidePanelView
+                side="left"
+                sidePanel={layout.leftSidePanel}
+                onTogglePanel={(id) => togglePanelVisibility("left", id)}
+              />
+            )}
+            <div className="workspace-center">
+              <SplitPane
+                node={layout.root}
+                focusedPaneId={layout.focusedPaneId}
+              />
+              {!layout.bottomPanel.collapsed && (
+                <BottomPreview height={layout.bottomPanel.height} />
+              )}
+            </div>
+            {!layout.rightSidePanel.collapsed && (
+              <SidePanelView
+                side="right"
+                sidePanel={layout.rightSidePanel}
+                onTogglePanel={(id) => togglePanelVisibility("right", id)}
+              />
             )}
           </div>
-          {!layout.rightSidePanel.collapsed && (
-            <SidePanelView
-              side="right"
-              sidePanel={layout.rightSidePanel}
-              onTogglePanel={(id) => togglePanelVisibility("right", id)}
-            />
-          )}
         </div>
       ) : loading ? (
         <p className="hint">loading layout…</p>
       ) : null}
     </section>
+  );
+}
+
+interface SidePanelToggleProps {
+  side: "left" | "right";
+  collapsed: boolean;
+  onClick: () => void;
+}
+
+function SidePanelToggle({ side, collapsed, onClick }: SidePanelToggleProps) {
+  const label = `${collapsed ? "Show" : "Hide"} ${side} side panel`;
+  // Glyph mirrors Obsidian's: a small box with a vertical bar on the
+  // matching edge. Filled when expanded, hollow when collapsed.
+  const glyph = side === "left"
+    ? collapsed ? "▢" : "◧"
+    : collapsed ? "▢" : "◨";
+  return (
+    <button
+      type="button"
+      className="side-panel-toggle"
+      data-side={side}
+      data-collapsed={collapsed}
+      title={label}
+      aria-label={label}
+      aria-pressed={!collapsed}
+      onClick={onClick}
+    >
+      <span aria-hidden="true">{glyph}</span>
+    </button>
   );
 }
 

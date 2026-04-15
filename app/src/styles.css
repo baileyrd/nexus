@@ -154,11 +154,58 @@ button {
 }
 
 .workspace-frame {
+  display: flex;
+  flex-direction: column;
   height: 480px;
   border: 1px solid var(--nx-bg-tertiary, #e8eaef);
   border-radius: 8px;
   overflow: hidden;
   background: var(--nx-bg-primary, #ffffff);
+}
+
+.workspace-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  background: var(--nx-bg-secondary, #f8f9fa);
+  border-bottom: 1px solid var(--nx-bg-tertiary, #e8eaef);
+  flex-shrink: 0;
+}
+
+.side-panel-toggle {
+  width: 28px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-secondary, #4a4a4a);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95em;
+  transition: background 120ms, color 120ms;
+}
+
+.side-panel-toggle:hover {
+  background: var(--nx-bg-tertiary, #eef0f4);
+  color: var(--nx-text-primary, #111);
+}
+
+.side-panel-toggle[data-collapsed="false"] {
+  color: var(--nx-text-primary, #111);
+}
+
+.side-panel-toggle:focus-visible {
+  outline: 2px solid var(--nx-accent, #6c8cff);
+  outline-offset: 1px;
+}
+
+.workspace-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .workspace-center {

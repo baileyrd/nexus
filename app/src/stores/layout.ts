@@ -16,6 +16,7 @@ interface LayoutState {
   loadPresetList: () => Promise<void>;
   loadPreset: (id: string) => Promise<void>;
   togglePanelVisibility: (side: "left" | "right", panelId: string) => void;
+  toggleSidePanelCollapsed: (side: "left" | "right") => void;
 }
 
 export const useLayoutStore = create<LayoutState>((set) => ({
@@ -68,6 +69,21 @@ export const useLayoutStore = create<LayoutState>((set) => ({
         layout: {
           ...state.layout,
           [key]: { ...sidePanel, panels },
+        },
+      };
+    }),
+
+  // Local-only: flips the `collapsed` flag on a side panel. Matches the
+  // chrome toggle buttons at the edges of the workspace chrome.
+  toggleSidePanelCollapsed: (side) =>
+    set((state) => {
+      if (!state.layout) return {};
+      const key = side === "left" ? "leftSidePanel" : "rightSidePanel";
+      const sidePanel = state.layout[key];
+      return {
+        layout: {
+          ...state.layout,
+          [key]: { ...sidePanel, collapsed: !sidePanel.collapsed },
         },
       };
     }),
