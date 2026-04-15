@@ -17,6 +17,7 @@ use std::sync::Mutex;
 use nexus_theme::api::ThemeEngine;
 
 pub mod commands;
+pub mod persistence;
 
 /// Entry point for the desktop app. Called from `main.rs` (and from the
 /// mobile entry points on those targets).
@@ -41,6 +42,8 @@ pub fn run() {
             commands::get_default_layout,
             commands::get_layout_preset,
             commands::list_layout_presets,
+            persistence::get_layout_persistence,
+            persistence::save_layout_persistence,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch nexus-app");

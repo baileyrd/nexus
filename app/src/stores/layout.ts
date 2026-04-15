@@ -6,10 +6,19 @@ import {
   type PresetInfo,
   type WorkspaceLayout,
 } from "../ipc/layout";
+import {
+  getLayoutPersistence,
+  saveLayoutPersistence,
+  type LayoutPersistence,
+  type PersistedLayoutState,
+} from "../ipc/persistence";
 
 interface LayoutState {
   layout: WorkspaceLayout | null;
   presets: PresetInfo[];
+  /** Snapshot of persisted state loaded at boot and kept in sync with
+   *  in-memory mutations. Null until `load()` finishes. */
+  persistence: LayoutPersistence | null;
   loading: boolean;
   error: string | null;
   load: () => Promise<void>;
@@ -20,17 +29,109 @@ interface LayoutState {
   activatePanel: (side: "left" | "right", panelId: string) => void;
 }
 
-export const useLayoutStore = create<LayoutState>((set) => ({
+/** Merge persisted state over a freshly loaded preset layout. Active-
+ *  panel ids that no longer exist in the preset (e.g. preset file was
+ *  edited between saves) are silently dropped. */
+function applyOverlay(
+  layout: WorkspaceLayout,
+  state: PersistedLayoutState | undefined,
+): WorkspaceLayout {
+  if (!state) return layout;
+
+  function applySide(
+    side: WorkspaceLayout["leftSidePanel"],
+    collapsed: boolean,
+    activeId: string | null,
+  ): WorkspaceLayout["leftSidePanel"] {
+    const hasActive =
+      activeId !== null && side.panels.some((p) => p.id === activeId);
+    const panels = hasActive
+      ? side.panels.map((p) => ({ ...p, visible: p.id === activeId }))
+      : side.panels;
+    return { ...side, collapsed, panels };
+  }
+
+  return {
+    ...layout,
+    leftSidePanel: applySide(
+      layout.leftSidePanel,
+      state.leftSidePanelCollapsed,
+      state.leftActivePanelId,
+    ),
+    rightSidePanel: applySide(
+      layout.rightSidePanel,
+      state.rightSidePanelCollapsed,
+      state.rightActivePanelId,
+    ),
+  };
+}
+
+/** Extract the persistable subset of a layout — only fields the UI
+ *  mutates today. */
+function extractState(layout: WorkspaceLayout): PersistedLayoutState {
+  const activeId = (side: WorkspaceLayout["leftSidePanel"]) =>
+    side.panels.find((p) => p.visible)?.id ?? null;
+  return {
+    leftSidePanelCollapsed: layout.leftSidePanel.collapsed,
+    rightSidePanelCollapsed: layout.rightSidePanel.collapsed,
+    leftActivePanelId: activeId(layout.leftSidePanel),
+    rightActivePanelId: activeId(layout.rightSidePanel),
+  };
+}
+
+/** Debounce writes so a burst of toggles (arrow-key navigation,
+ *  repeated clicks) collapses to a single IPC round-trip. */
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleSave(persistence: LayoutPersistence) {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    saveLayoutPersistence(persistence).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn("[layout] failed to persist state:", err);
+    });
+  }, 500);
+}
+
+/** Build a new persistence blob with the current layout's state
+ *  written under its preset id. */
+function updatePersistence(
+  previous: LayoutPersistence | null,
+  layout: WorkspaceLayout,
+): LayoutPersistence {
+  const base: LayoutPersistence = previous ?? {
+    version: 1,
+    lastPresetId: layout.id,
+    layouts: {},
+  };
+  return {
+    ...base,
+    lastPresetId: layout.id,
+    layouts: { ...base.layouts, [layout.id]: extractState(layout) },
+  };
+}
+
+export const useLayoutStore = create<LayoutState>((set, get) => ({
   layout: null,
   presets: [],
+  persistence: null,
   loading: false,
   error: null,
 
   load: async () => {
     set({ loading: true, error: null });
     try {
-      const layout = await getDefaultLayout();
-      set({ layout, loading: false });
+      const persistence = await getLayoutPersistence().catch(() => null);
+      const presetId = persistence?.lastPresetId ?? null;
+      const base = presetId
+        ? await getLayoutPreset(presetId).catch(() => getDefaultLayout())
+        : await getDefaultLayout();
+      const layout = applyOverlay(base, persistence?.layouts?.[base.id]);
+      set({
+        layout,
+        persistence: persistence ?? { version: 1, lastPresetId: null, layouts: {} },
+        loading: false,
+      });
     } catch (e) {
       set({ error: String(e), loading: false });
     }
@@ -48,16 +149,17 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   loadPreset: async (id: string) => {
     set({ loading: true, error: null });
     try {
-      const layout = await getLayoutPreset(id);
-      set({ layout, loading: false });
+      const base = await getLayoutPreset(id);
+      const { persistence } = get();
+      const layout = applyOverlay(base, persistence?.layouts?.[base.id]);
+      const nextPersistence = updatePersistence(persistence, layout);
+      scheduleSave(nextPersistence);
+      set({ layout, persistence: nextPersistence, loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
     }
   },
 
-  // Local-only: flips the `visible` flag on a panel so the panel selector's
-  // `togglePanel` action feels alive. Persisting through IPC is a later
-  // piece once the layout-mutation commands land.
   togglePanelVisibility: (side, panelId) =>
     set((state) => {
       if (!state.layout) return {};
@@ -66,33 +168,31 @@ export const useLayoutStore = create<LayoutState>((set) => ({
       const panels = sidePanel.panels.map((p) =>
         p.id === panelId ? { ...p, visible: !p.visible } : p,
       );
-      return {
-        layout: {
-          ...state.layout,
-          [key]: { ...sidePanel, panels },
-        },
+      const layout = {
+        ...state.layout,
+        [key]: { ...sidePanel, panels },
       };
+      const persistence = updatePersistence(state.persistence, layout);
+      scheduleSave(persistence);
+      return { layout, persistence };
     }),
 
-  // Local-only: flips the `collapsed` flag on a side panel. Matches the
-  // chrome toggle buttons at the edges of the workspace chrome.
   toggleSidePanelCollapsed: (side) =>
     set((state) => {
       if (!state.layout) return {};
       const key = side === "left" ? "leftSidePanel" : "rightSidePanel";
       const sidePanel = state.layout[key];
-      return {
-        layout: {
-          ...state.layout,
-          [key]: { ...sidePanel, collapsed: !sidePanel.collapsed },
-        },
+      const layout = {
+        ...state.layout,
+        [key]: { ...sidePanel, collapsed: !sidePanel.collapsed },
       };
+      const persistence = updatePersistence(state.persistence, layout);
+      scheduleSave(persistence);
+      return { layout, persistence };
     }),
 
   // Selector-click semantics: make `panelId` the sole visible panel on
-  // that side and ensure the side panel itself is expanded. Matches
-  // Obsidian — clicking a panel-selector icon in the chrome both opens
-  // the side panel (if collapsed) and switches to that panel.
+  // that side and ensure the side panel itself is expanded.
   activatePanel: (side, panelId) =>
     set((state) => {
       if (!state.layout) return {};
@@ -102,11 +202,12 @@ export const useLayoutStore = create<LayoutState>((set) => ({
         ...p,
         visible: p.id === panelId,
       }));
-      return {
-        layout: {
-          ...state.layout,
-          [key]: { ...sidePanel, collapsed: false, panels },
-        },
+      const layout = {
+        ...state.layout,
+        [key]: { ...sidePanel, collapsed: false, panels },
       };
+      const persistence = updatePersistence(state.persistence, layout);
+      scheduleSave(persistence);
+      return { layout, persistence };
     }),
 }));
