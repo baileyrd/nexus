@@ -17,6 +17,7 @@ interface LayoutState {
   loadPreset: (id: string) => Promise<void>;
   togglePanelVisibility: (side: "left" | "right", panelId: string) => void;
   toggleSidePanelCollapsed: (side: "left" | "right") => void;
+  activatePanel: (side: "left" | "right", panelId: string) => void;
 }
 
 export const useLayoutStore = create<LayoutState>((set) => ({
@@ -84,6 +85,27 @@ export const useLayoutStore = create<LayoutState>((set) => ({
         layout: {
           ...state.layout,
           [key]: { ...sidePanel, collapsed: !sidePanel.collapsed },
+        },
+      };
+    }),
+
+  // Selector-click semantics: make `panelId` the sole visible panel on
+  // that side and ensure the side panel itself is expanded. Matches
+  // Obsidian — clicking a panel-selector icon in the chrome both opens
+  // the side panel (if collapsed) and switches to that panel.
+  activatePanel: (side, panelId) =>
+    set((state) => {
+      if (!state.layout) return {};
+      const key = side === "left" ? "leftSidePanel" : "rightSidePanel";
+      const sidePanel = state.layout[key];
+      const panels = sidePanel.panels.map((p) => ({
+        ...p,
+        visible: p.id === panelId,
+      }));
+      return {
+        layout: {
+          ...state.layout,
+          [key]: { ...sidePanel, collapsed: false, panels },
         },
       };
     }),

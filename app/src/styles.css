@@ -173,6 +173,13 @@ button {
   flex-shrink: 0;
 }
 
+.workspace-chrome-left,
+.workspace-chrome-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .side-panel-toggle {
   width: 28px;
   height: 24px;
@@ -241,14 +248,11 @@ button {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 6px 8px;
-  background: var(--nx-bg-tertiary, #eef0f4);
-  border-bottom: 1px solid var(--nx-bg-tertiary, #e8eaef);
 }
 
 .panel-selector-item {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 24px;
   border: none;
   background: transparent;
   color: var(--nx-text-secondary, #4a4a4a);
@@ -257,7 +261,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.85em;
+  font-size: 0.8em;
   font-weight: 600;
   transition: background 120ms, color 120ms;
 }

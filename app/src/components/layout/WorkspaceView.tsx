@@ -15,6 +15,7 @@ export function WorkspaceView() {
   const error = useLayoutStore((s) => s.error);
   const togglePanelVisibility = useLayoutStore((s) => s.togglePanelVisibility);
   const toggleSidePanelCollapsed = useLayoutStore((s) => s.toggleSidePanelCollapsed);
+  const activatePanel = useLayoutStore((s) => s.activatePanel);
 
   useEffect(() => {
     if (!layout) load();
@@ -32,16 +33,30 @@ export function WorkspaceView() {
       {layout ? (
         <div className="workspace-frame" data-workspace-name={layout.name}>
           <div className="workspace-chrome">
-            <SidePanelToggle
-              side="left"
-              collapsed={layout.leftSidePanel.collapsed}
-              onClick={() => toggleSidePanelCollapsed("left")}
-            />
-            <SidePanelToggle
-              side="right"
-              collapsed={layout.rightSidePanel.collapsed}
-              onClick={() => toggleSidePanelCollapsed("right")}
-            />
+            <div className="workspace-chrome-left">
+              <SidePanelToggle
+                side="left"
+                collapsed={layout.leftSidePanel.collapsed}
+                onClick={() => toggleSidePanelCollapsed("left")}
+              />
+              <PanelSelector
+                panels={layout.leftSidePanel.panels}
+                label="Left side panel"
+                onSelect={(id) => activatePanel("left", id)}
+              />
+            </div>
+            <div className="workspace-chrome-right">
+              <PanelSelector
+                panels={layout.rightSidePanel.panels}
+                label="Right side panel"
+                onSelect={(id) => activatePanel("right", id)}
+              />
+              <SidePanelToggle
+                side="right"
+                collapsed={layout.rightSidePanel.collapsed}
+                onClick={() => toggleSidePanelCollapsed("right")}
+              />
+            </div>
           </div>
           <div className="workspace-body">
             {layout.ribbon.length > 0 && <Ribbon items={layout.ribbon} />}
@@ -127,7 +142,6 @@ function SidePanelView({ side, sidePanel, onTogglePanel }: SidePanelViewProps) {
 
   return (
     <aside className="side-panel-preview" data-side={side}>
-      <PanelSelector panels={sidePanel.panels} onTogglePanel={onTogglePanel} />
       <div className="panel-area">
         {activePanel ? (
           <PanelView panel={activePanel} onTogglePanel={onTogglePanel} />
