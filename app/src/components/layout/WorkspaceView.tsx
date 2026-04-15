@@ -7,6 +7,7 @@ import { PanelToolbar } from "./PanelToolbar";
 import { RibbonItems } from "./Ribbon";
 import { SidePanelFooter } from "./SidePanelFooter";
 import { SplitPane } from "./SplitPane";
+import { StatusBar } from "./StatusBar";
 
 export function WorkspaceView() {
   const layout = useLayoutStore((s) => s.layout);
@@ -80,6 +81,7 @@ export function WorkspaceView() {
               />
             )}
           </div>
+          <StatusBar items={layout.statusBar} />
         </div>
       ) : loading ? (
         <p className="hint">loading layout…</p>

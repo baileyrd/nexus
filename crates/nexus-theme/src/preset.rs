@@ -59,7 +59,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::layout::{
-    BottomPanel, LayoutMetadata, LayoutNode, PaneId, RibbonItem, SidePanel, WorkspaceLayout,
+    BottomPanel, LayoutMetadata, LayoutNode, PaneId, RibbonItem, SidePanel, StatusBarItem,
+    WorkspaceLayout,
 };
 use crate::{Result, ThemeError};
 
@@ -85,6 +86,10 @@ pub struct LayoutPreset {
     /// presets omit the key entirely.
     #[serde(default)]
     pub ribbon: Vec<RibbonItem>,
+    /// Workspace-level status bar (floating, bottom-right). Empty
+    /// presets omit the key entirely.
+    #[serde(default)]
+    pub status_bar: Vec<StatusBarItem>,
     /// Left dock.
     pub left_side_panel: SidePanel,
     /// Right dock.
@@ -108,6 +113,7 @@ impl LayoutPreset {
             version: "1.0".to_string(),
             root: self.root.clone(),
             ribbon: self.ribbon.clone(),
+            status_bar: self.status_bar.clone(),
             left_side_panel: self.left_side_panel.clone(),
             right_side_panel: self.right_side_panel.clone(),
             bottom_panel: self.bottom_panel.clone(),

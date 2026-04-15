@@ -298,6 +298,29 @@ pub struct FooterAction {
     pub plugin: Option<String>,
 }
 
+/// Floating status bar entry rendered at the bottom-right of the
+/// workspace. Mixes counters (`text` only), icon-only actions (`icon` +
+/// `action`), and combined items.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../../app/src/bindings/")]
+pub struct StatusBarItem {
+    /// Stable id (`"editor.word-count"`, `"sync.status"`, …).
+    pub id: String,
+    /// Text shown to the right of the icon, if any (`"2,348 words"`).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub text: Option<String>,
+    /// Icon id, if any.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub icon: Option<String>,
+    /// Click action. `None` makes the item non-interactive (counter).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub action: Option<RibbonAction>,
+    /// Owning plugin id. `None` for core.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub plugin: Option<String>,
+}
+
 /// Footer row pinned to the bottom of a side panel. Typically only the
 /// left side panel carries one (forge switcher + help + settings).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -491,6 +514,10 @@ pub struct WorkspaceLayout {
     /// [`Panel`] list.
     #[serde(default)]
     pub ribbon: Vec<RibbonItem>,
+    /// Floating status-bar items rendered at the bottom-right of the
+    /// workspace. Counters, sync status, plugin-contributed badges, etc.
+    #[serde(default)]
+    pub status_bar: Vec<StatusBarItem>,
     /// Left dock.
     pub left_side_panel: SidePanel,
     /// Right dock.
@@ -520,6 +547,7 @@ impl Default for WorkspaceLayout {
             version: "1.0".to_string(),
             root,
             ribbon: Vec::new(),
+            status_bar: Vec::new(),
             left_side_panel: SidePanel::collapsed(SidePanelSide::Left),
             right_side_panel: SidePanel::collapsed(SidePanelSide::Right),
             bottom_panel: BottomPanel::default(),

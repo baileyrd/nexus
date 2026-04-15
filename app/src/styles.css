@@ -154,6 +154,7 @@ button {
 }
 
 .workspace-frame {
+  position: relative;
   display: flex;
   width: 100%;
   height: 480px;
@@ -705,4 +706,61 @@ main {
   border-radius: 999px;
   background: var(--nx-bg-tertiary, #e8eaef);
   color: var(--nx-text-tertiary, #7a7a7a);
+}
+
+/* ── Status bar (floating, bottom-right of workspace frame) ────────── */
+
+.status-bar {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 14px;
+  background: var(--nx-bg-secondary, #f8f9fa);
+  border: 1px solid var(--nx-bg-tertiary, #e8eaef);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  font-size: 0.8em;
+  color: var(--nx-text-secondary, #4a4a4a);
+  pointer-events: auto;
+}
+
+.status-bar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  font-family: inherit;
+}
+
+.status-bar-item.interactive {
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 120ms, color 120ms;
+}
+
+.status-bar-item.interactive:hover {
+  background: var(--nx-bg-tertiary, #eef0f4);
+  color: var(--nx-text-primary, #111);
+}
+
+.status-bar-item.interactive:focus-visible {
+  outline: 2px solid var(--nx-accent, #6c8cff);
+  outline-offset: 1px;
+}
+
+.status-bar-icon {
+  font-weight: 600;
+}
+
+.status-bar-text {
+  white-space: nowrap;
 }

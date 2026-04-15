@@ -55,6 +55,34 @@ icon = "list-checks"
 tooltip = "Tasks"
 action = { kind = "openView", viewId = "tasks" }
 
+# ── Status bar (floating, bottom-right) ─────────────────────────────────────
+
+[[statusBar]]
+id = "editor.backlinks-count"
+text = "0 backlinks"
+
+[[statusBar]]
+id = "editor.properties-count"
+text = "7 properties"
+
+[[statusBar]]
+id = "editor.mode-toggle"
+icon = "edit"
+action = { kind = "invokeCommand", command = "editor.toggle-mode" }
+
+[[statusBar]]
+id = "editor.word-count"
+text = "2,348 words"
+
+[[statusBar]]
+id = "editor.character-count"
+text = "15,953 characters"
+
+[[statusBar]]
+id = "sync.status"
+icon = "cloud-off"
+action = { kind = "invokeCommand", command = "sync.toggle" }
+
 # ── Left side panel ─────────────────────────────────────────────────────────
 # Panel selector at the top is derived from the panels list. The active
 # panel renders its own toolbar + content below.

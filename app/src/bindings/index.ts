@@ -17,6 +17,7 @@ export type { RibbonItem } from "./RibbonItem";
 export type { SidePanel } from "./SidePanel";
 export type { SidePanelFooter } from "./SidePanelFooter";
 export type { SidePanelSide } from "./SidePanelSide";
+export type { StatusBarItem } from "./StatusBarItem";
 export type { SnippetMetadata } from "./SnippetMetadata";
 export type { SnippetMode } from "./SnippetMode";
 export type { SnippetScope } from "./SnippetScope";

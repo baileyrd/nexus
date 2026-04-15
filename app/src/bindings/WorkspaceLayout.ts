@@ -5,6 +5,7 @@ import type { LayoutNode } from "./LayoutNode";
 import type { PaneId } from "./PaneId";
 import type { RibbonItem } from "./RibbonItem";
 import type { SidePanel } from "./SidePanel";
+import type { StatusBarItem } from "./StatusBarItem";
 
 /**
  * Top-level workspace layout: root tree + side panels + bottom panel + ribbon + metadata.
@@ -33,6 +34,11 @@ root: LayoutNode,
  * [`Panel`] list.
  */
 ribbon: Array<RibbonItem>, 
+/**
+ * Floating status-bar items rendered at the bottom-right of the
+ * workspace. Counters, sync status, plugin-contributed badges, etc.
+ */
+statusBar: Array<StatusBarItem>, 
 /**
  * Left dock.
  */
