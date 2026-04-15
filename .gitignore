@@ -4,5 +4,5 @@ Cargo.lock
 .DS_Store
 *.swp
 .superpowers/
-.claude/scheduled_tasks.lock
+.claude/
 crates/**/SESSION_SUMMARIES.md
