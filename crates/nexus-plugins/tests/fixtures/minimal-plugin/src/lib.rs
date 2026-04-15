@@ -52,6 +52,26 @@ pub extern "C" fn nexus_dispatch(handler_id: u32, args_ptr: u32, args_len: u32) 
             br#"{"message":"Hello!","events":[{"topic":"com.nexus.hello.greeted","payload":{"message":"Hello from the WASM sandbox!"}}]}"#
                 .to_vec()
         }
+        104 => {
+            // host-event observer: wraps whatever JSON arrived on the
+            // subscription into a `com.nexus.hello.observed` plugin
+            // event. The host-side poll_events loop walks our response
+            // for this `events` array and emits each entry back to
+            // the frontend, so host → plugin → frontend round-trips
+            // end-to-end.
+            let args = if args_len == 0 {
+                b"null".to_vec()
+            } else {
+                unsafe {
+                    std::slice::from_raw_parts(args_ptr as *const u8, args_len as usize).to_vec()
+                }
+            };
+            let mut out = Vec::with_capacity(args.len() + 96);
+            out.extend_from_slice(br#"{"events":[{"topic":"com.nexus.hello.observed","payload":"#);
+            out.extend_from_slice(&args);
+            out.extend_from_slice(b"}]}");
+            out
+        }
         _ => b"{\"error\":\"unknown handler\"}".to_vec(),
     };
 

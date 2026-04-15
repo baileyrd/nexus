@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { readForgeFile, type ForgeFile } from "../ipc/forge";
+import { HostTopics, publishHostEvent } from "../plugins/events";
 import { useForgeStore } from "./forge";
 import { useLayoutStore } from "./layout";
 
@@ -42,6 +43,10 @@ export const useOpenFileStore = create<OpenFileState>((set, get) => ({
       const file = await readForgeFile(relpath);
       set({ file, loading: false });
       persist(relpath);
+      void publishHostEvent(HostTopics.fileOpened, {
+        relpath: file.relpath,
+        name: file.name,
+      });
     } catch (e) {
       set({ error: String(e), loading: false, file: null });
     }
@@ -61,8 +66,12 @@ export const useOpenFileStore = create<OpenFileState>((set, get) => ({
   },
 
   close: () => {
+    const previous = get().file?.relpath ?? null;
     set({ file: null, error: null });
     persist(null);
+    if (previous !== null) {
+      void publishHostEvent(HostTopics.fileClosed, { relpath: previous });
+    }
   },
 
   reset: () => set({ file: null, error: null }),

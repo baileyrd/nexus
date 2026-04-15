@@ -47,5 +47,14 @@ text = "Hi!"
 tooltip = "Click to greet"
 command = "hello.sayHi"
 
+# Subscribe to every host-origin lifecycle event — forge switches,
+# file opens, theme changes, etc. Handler 104 receives the event JSON
+# and surfaces a `com.nexus.hello.observed` plugin event back to the
+# frontend so you can see the round-trip in DevTools.
+[[registrations.event_subscriber]]
+id = "hello.onHostEvent"
+filter = "nexus.host.*"
+handler_id = 104
+
 [lifecycle]
 on_init = true

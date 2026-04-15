@@ -12,6 +12,20 @@
 // boot so `[plugin:event]` lines always appear in DevTools.
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+
+/** Reverse-DNS prefix reserved for events published by the host shell. */
+export const HOST_EVENT_SOURCE = "nexus.host";
+
+/** Well-known host-origin topics. Plugins subscribe to these via
+ *  `filter = "nexus.host.*"` or one of these exact strings in the
+ *  manifest's `[[registrations.event_subscriber]]` block. */
+export const HostTopics = {
+  forgeSwitched: `${HOST_EVENT_SOURCE}.forge_switched`,
+  fileOpened: `${HOST_EVENT_SOURCE}.file_opened`,
+  fileClosed: `${HOST_EVENT_SOURCE}.file_closed`,
+  themeChanged: `${HOST_EVENT_SOURCE}.theme_changed`,
+} as const;
 
 /** Envelope delivered on every `plugin:event` Tauri event. */
 export interface PluginEvent<T = unknown> {
@@ -55,5 +69,28 @@ export async function startPluginEventLogger(): Promise<void> {
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn("[plugins] failed to subscribe to plugin:event channel", err);
+  }
+}
+
+/**
+ * Publish a host-origin lifecycle event onto the kernel event bus.
+ * The backend fans it out to every plugin subscribed via
+ * `[[registrations.event_subscriber]]`. Failures are logged and
+ * swallowed — lifecycle events are best-effort from the UI's POV
+ * (e.g. a forge switch still succeeds even if no plugins are
+ * listening).
+ *
+ * `topic` must begin with `"nexus.host."`; prefer the constants
+ * exported as {@link HostTopics}.
+ */
+export async function publishHostEvent(
+  topic: string,
+  payload: unknown = null,
+): Promise<void> {
+  try {
+    await invoke("publish_host_event", { topic, payload });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[plugins] publish_host_event(${topic}) failed`, err);
   }
 }

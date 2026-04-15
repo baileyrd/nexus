@@ -811,10 +811,18 @@ impl PluginLoader {
     /// Call this in your event loop (e.g. every tick). Each call is synchronous
     /// and non-blocking; events that have not yet arrived are silently skipped.
     ///
+    /// Returns a `Vec<(plugin_id, response)>` of every handler response that
+    /// was produced during the drain. Callers (e.g. the Tauri host) can walk
+    /// the responses for `{events: [...]}` side-channel arrays and re-emit
+    /// them to the frontend, keeping host-initiated events symmetric with
+    /// handler-initiated events.
+    ///
     /// # Errors
     /// Returns the first dispatch error encountered; subscriptions that lag or
     /// are closed are silently skipped so they don't block other plugins.
-    pub fn poll_events(&mut self) -> Result<(), PluginError> {
+    pub fn poll_events(
+        &mut self,
+    ) -> Result<Vec<(String, serde_json::Value)>, PluginError> {
         // Collect (plugin_id, handler_id, event_json) tuples to dispatch.
         let mut pending: Vec<(String, u32, serde_json::Value)> = Vec::new();
 
@@ -829,16 +837,18 @@ impl PluginLoader {
             }
         }
 
+        let mut responses = Vec::with_capacity(pending.len());
         for (plugin_id, handler_id, payload) in pending {
             if let Some(lp) = self.loaded.get_mut(&plugin_id) {
-                lp.backend.dispatch(handler_id, &payload).map_err(|e| {
+                let response = lp.backend.dispatch(handler_id, &payload).map_err(|e| {
                     tracing::warn!(plugin_id = %plugin_id, "event dispatch failed: {e}");
                     e
                 })?;
+                responses.push((plugin_id, response));
             }
         }
 
-        Ok(())
+        Ok(responses)
     }
 
     /// Return a reference to the [`SettingsManager`].

@@ -4,14 +4,8 @@
   "version": "0.1.0",
   "identifier": "dev.nexus.ide",
   "build": {
-    "beforeDevCommand": {
-      "script": "npm run dev",
-      "cwd": "../../app"
-    },
-    "beforeBuildCommand": {
-      "script": "npm run build",
-      "cwd": "../../app"
-    },
+    "beforeDevCommand": "npm --prefix ../../app run dev",
+    "beforeBuildCommand": "npm --prefix ../../app run build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../../app/dist"
   },

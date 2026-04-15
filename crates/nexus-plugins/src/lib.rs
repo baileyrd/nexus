@@ -507,10 +507,13 @@ impl PluginManager {
     /// Drain pending kernel events and dispatch them to subscribing plugins.
     ///
     /// Call this in your event loop (e.g. every tick or on each user interaction).
+    /// Returns a `Vec<(plugin_id, response)>` of every handler response produced
+    /// by this drain so the caller can surface any `{events: [...]}` side
+    /// channels back to the frontend.
     ///
     /// # Errors
     /// Returns the first dispatch error encountered.
-    pub fn poll_events(&mut self) -> Result<(), PluginError> {
+    pub fn poll_events(&mut self) -> Result<Vec<(String, serde_json::Value)>, PluginError> {
         self.loader.poll_events()
     }
 

@@ -9,6 +9,7 @@ import {
   type ThemeMetadata,
   type ThemeMode,
 } from "../ipc/theme";
+import { HostTopics, publishHostEvent } from "../plugins/events";
 
 type VariableMap = { [key in string]?: string };
 
@@ -83,6 +84,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
         variables: applied.variables,
         loading: false,
       });
+      void publishHostEvent(HostTopics.themeChanged, { theme_id: applied.id });
     } catch (e) {
       set({ error: String(e), loading: false });
     }

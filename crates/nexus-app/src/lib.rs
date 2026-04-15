@@ -41,6 +41,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             plugins::start_reload_watcher(handle.clone());
+            plugins::start_host_event_watcher(handle.clone());
             match forge::bootstrap(&handle) {
                 Ok(info) => {
                     tracing::info!(root = %info.root.display(), name = %info.name, "opened forge");
@@ -99,6 +100,7 @@ pub fn run() {
             plugins::get_plugin_settings,
             plugins::save_plugin_settings,
             plugins::invoke_plugin_command,
+            plugins::publish_host_event,
             plugins::list_plugins,
             keybindings::get_keybinding_overrides,
             keybindings::set_keybinding_override,

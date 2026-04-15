@@ -4,9 +4,10 @@
 //! plugin-contributed command palette entries and invoke them by id.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use nexus_kernel::{EventBus, NexusEvent};
 use nexus_plugins::{
     PluginManager, PluginManagerConfig, PluginStatus, TrustLevel, UiContribution,
     UiPanelContribution, UiRibbonItemContribution, UiSettingsTabContribution,
@@ -25,13 +26,39 @@ pub const PLUGINS_RELOADED_EVENT: &str = "plugins:reloaded";
 /// of these per entry.
 pub const PLUGIN_EVENT_EVENT: &str = "plugin:event";
 
+/// Reserved source id for events published by the Nexus host shell
+/// (forge switches, file opens, theme changes, etc.). Plugins can
+/// subscribe with `filter = "nexus.host.*"` to receive every host
+/// lifecycle event, or narrow to a specific topic.
+pub const HOST_EVENT_SOURCE: &str = "nexus.host";
+
 /// How often the background watcher thread drains pending hot-reload
 /// events. The underlying `HotReloader` already debounces filesystem
 /// events, so this just needs to be short enough to feel live.
 const RELOAD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
-/// Tauri-managed [`PluginManager`] wrapped in a mutex for interior mutability.
-pub struct PluginState(pub Mutex<PluginManager>);
+/// How often the background watcher thread drains pending host/plugin
+/// events and dispatches them to subscribing plugin handlers.
+const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Broadcast capacity of the shared [`EventBus`]. Subscribers that lag
+/// past this bound will receive a `RecvError::Lagged` from their
+/// subscription; for host events that's acceptable because the host
+/// re-fires the interesting state on user interaction.
+const EVENT_BUS_CAPACITY: usize = 256;
+
+/// Tauri-managed [`PluginManager`] plus the shared kernel [`EventBus`]
+/// it's wired to. The manager lives behind a mutex for interior
+/// mutability; the bus is an `Arc` so host commands can publish
+/// directly without contending on the manager lock.
+pub struct PluginState {
+    /// The plugin manager (holds the registry, sandboxes, etc.).
+    pub manager: Mutex<PluginManager>,
+    /// The shared event bus. Host code publishes via
+    /// [`EventBus::publish_core`]; plugin subscriptions drain on the
+    /// background watcher thread.
+    pub bus: Arc<EventBus>,
+}
 
 /// Frontend-facing projection of [`nexus_kernel::PluginInfo`].
 ///
@@ -96,6 +123,11 @@ fn resolve_plugins_dir() -> PathBuf {
 /// Build the [`PluginManager`], scan the plugins directory, and return the
 /// managed state. Missing plugin directories are created silently so the
 /// hot-reload watcher can attach.
+///
+/// The shared [`EventBus`] is created and injected into the manager
+/// **before** `load_all()` so any plugin that declares
+/// `[[registrations.event_subscriber]]` picks up its subscription at
+/// load time.
 pub fn bootstrap() -> PluginState {
     let dir = resolve_plugins_dir();
     if let Err(err) = std::fs::create_dir_all(&dir) {
@@ -120,6 +152,8 @@ pub fn bootstrap() -> PluginState {
             .expect("scratch plugin manager")
         }
     };
+    let bus = Arc::new(EventBus::new(EVENT_BUS_CAPACITY));
+    manager.set_event_bus(bus.clone());
     match manager.load_all() {
         Ok(infos) => {
             tracing::info!(count = infos.len(), "loaded plugins");
@@ -128,14 +162,17 @@ pub fn bootstrap() -> PluginState {
             tracing::warn!(%err, "plugin scan failed");
         }
     }
-    PluginState(Mutex::new(manager))
+    PluginState {
+        manager: Mutex::new(manager),
+        bus,
+    }
 }
 
 /// List all plugin-contributed palette commands across every loaded plugin.
 #[tauri::command]
 pub fn list_plugin_contributions(state: State<'_, PluginState>) -> Vec<UiContribution> {
     state
-        .0
+        .manager
         .lock()
         .map(|mgr| mgr.ui_contributions())
         .unwrap_or_default()
@@ -147,7 +184,7 @@ pub fn list_plugin_contributions(state: State<'_, PluginState>) -> Vec<UiContrib
 #[tauri::command]
 pub fn list_plugin_panels(state: State<'_, PluginState>) -> Vec<UiPanelContribution> {
     state
-        .0
+        .manager
         .lock()
         .map(|mgr| mgr.ui_panels())
         .unwrap_or_default()
@@ -161,7 +198,7 @@ pub fn list_plugin_settings_tabs(
     state: State<'_, PluginState>,
 ) -> Vec<UiSettingsTabContribution> {
     state
-        .0
+        .manager
         .lock()
         .map(|mgr| mgr.ui_settings_tabs())
         .unwrap_or_default()
@@ -175,7 +212,7 @@ pub fn list_plugin_ribbon_items(
     state: State<'_, PluginState>,
 ) -> Vec<UiRibbonItemContribution> {
     state
-        .0
+        .manager
         .lock()
         .map(|mgr| mgr.ui_ribbon_items())
         .unwrap_or_default()
@@ -188,7 +225,7 @@ pub fn list_plugin_status_items(
     state: State<'_, PluginState>,
 ) -> Vec<UiStatusItemContribution> {
     state
-        .0
+        .manager
         .lock()
         .map(|mgr| mgr.ui_status_items())
         .unwrap_or_default()
@@ -202,7 +239,7 @@ pub fn get_plugin_settings_schema(
     plugin_id: String,
 ) -> Option<serde_json::Value> {
     state
-        .0
+        .manager
         .lock()
         .ok()
         .and_then(|mgr| mgr.get_settings_schema(&plugin_id))
@@ -219,7 +256,7 @@ pub fn get_plugin_settings(
     plugin_id: String,
 ) -> Result<serde_json::Value, String> {
     let mgr = state
-        .0
+        .manager
         .lock()
         .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
     mgr.get_settings(&plugin_id).map_err(|e| e.to_string())
@@ -238,7 +275,7 @@ pub fn save_plugin_settings(
     settings: serde_json::Value,
 ) -> Result<(), String> {
     let mut mgr = state
-        .0
+        .manager
         .lock()
         .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
     mgr.set_settings(&plugin_id, &settings).map_err(|e| e.to_string())
@@ -248,7 +285,7 @@ pub fn save_plugin_settings(
 /// Settings modal's plugins tab.
 #[tauri::command]
 pub fn list_plugins(state: State<'_, PluginState>) -> Vec<PluginSummary> {
-    let Ok(mgr) = state.0.lock() else {
+    let Ok(mgr) = state.manager.lock() else {
         return Vec::new();
     };
     mgr.list()
@@ -285,7 +322,7 @@ pub fn invoke_plugin_command(
 ) -> Result<serde_json::Value, String> {
     let result = {
         let mut mgr = state
-            .0
+            .manager
             .lock()
             .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
         mgr.dispatch_ipc(&plugin_id, &command_id, &args)
@@ -323,6 +360,75 @@ fn emit_plugin_events(app: &AppHandle, plugin_id: &str, result: &serde_json::Val
     }
 }
 
+/// Publish a host-origin lifecycle event onto the shared event bus.
+///
+/// The frontend calls this whenever the UI transitions through a
+/// state that plugins may care about — forge switches, file opens,
+/// theme changes, and so on. `topic` must begin with
+/// [`HOST_EVENT_SOURCE`] (`"nexus.host."`); plugins subscribe with
+/// `filter = "nexus.host.*"` (or a more specific exact topic) in
+/// their manifest's `[[registrations.event_subscriber]]` block.
+///
+/// # Errors
+/// Returns a stringified error when `topic` does not begin with
+/// `"nexus.host."` or when the bus is shut down.
+#[tauri::command]
+pub fn publish_host_event(
+    state: State<'_, PluginState>,
+    topic: String,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    let prefix = format!("{HOST_EVENT_SOURCE}.");
+    if !topic.starts_with(&prefix) {
+        return Err(format!(
+            "host event topic '{topic}' must begin with '{prefix}'"
+        ));
+    }
+    let event = NexusEvent::Custom {
+        type_id: topic,
+        emitting_plugin: HOST_EVENT_SOURCE.to_string(),
+        payload,
+    };
+    state
+        .bus
+        .publish_core(HOST_EVENT_SOURCE, event)
+        .map_err(|e| e.to_string())
+}
+
+/// Spawn a background thread that drains pending event subscriptions
+/// via [`PluginManager::poll_events`]. Every handler response is
+/// inspected for an `events: [{ topic, payload }, …]` array — matches
+/// are re-emitted as [`PLUGIN_EVENT_EVENT`] Tauri events, keeping the
+/// frontend consistent whether a plugin surfaces an event from an
+/// interactive command or from an async subscription callback.
+pub fn start_host_event_watcher(handle: AppHandle) {
+    std::thread::Builder::new()
+        .name("nexus-plugin-event-watcher".to_string())
+        .spawn(move || loop {
+            std::thread::sleep(EVENT_POLL_INTERVAL);
+            let Some(state) = handle.try_state::<PluginState>() else {
+                // Managed state disappeared — app is shutting down.
+                return;
+            };
+            let responses = {
+                let Ok(mut mgr) = state.manager.lock() else {
+                    continue;
+                };
+                match mgr.poll_events() {
+                    Ok(r) => r,
+                    Err(err) => {
+                        tracing::warn!(%err, "poll_events failed");
+                        continue;
+                    }
+                }
+            };
+            for (plugin_id, result) in responses {
+                emit_plugin_events(&handle, &plugin_id, &result);
+            }
+        })
+        .expect("spawn plugin event watcher");
+}
+
 /// Spawn a background thread that drains [`PluginManager::poll_reloads`]
 /// and emits [`PLUGINS_RELOADED_EVENT`] to the frontend whenever one or
 /// more plugins have been hot-reloaded.
@@ -340,7 +446,7 @@ pub fn start_reload_watcher(handle: AppHandle) {
                 return;
             };
             let reloaded = {
-                let Ok(mut mgr) = state.0.lock() else {
+                let Ok(mut mgr) = state.manager.lock() else {
                     continue;
                 };
                 match mgr.poll_reloads() {

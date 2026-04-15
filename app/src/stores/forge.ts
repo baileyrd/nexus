@@ -4,6 +4,7 @@ import {
   openForge,
   type ForgeInfo,
 } from "../ipc/forge";
+import { HostTopics, publishHostEvent } from "../plugins/events";
 import { useLayoutStore } from "./layout";
 import { useOpenFileStore } from "./openFile";
 
@@ -61,6 +62,11 @@ export const useForgeStore = create<ForgeState>((set, get) => ({
       // pull those back into the in-memory mirror so the recent list
       // reflects the new ordering without a restart.
       void useLayoutStore.getState().refreshPersistence();
+      // Announce the forge switch to any subscribed plugin.
+      void publishHostEvent(HostTopics.forgeSwitched, {
+        root: info.root,
+        name: info.name,
+      });
     } catch (e) {
       set({ error: String(e), loading: false });
     }
