@@ -51,6 +51,7 @@ pub fn register_host_fns(linker: &mut Linker<PluginData>) -> Result<(), PluginEr
     register_host_write_file(linker)?;
     register_host_read_file(linker)?;
     register_host_invoke_command(linker)?;
+    register_host_get_settings(linker)?;
     Ok(())
 }
 
@@ -539,6 +540,70 @@ fn register_host_read_file(linker: &mut Linker<PluginData>) -> Result<(), Plugin
         .map_err(|e| PluginError::WasmLoadFailed {
             plugin_id: "<host>".to_string(),
             reason: format!("failed to register host::read_file: {e}"),
+        })?;
+    Ok(())
+}
+
+// ─── host::get_settings ──────────────────────────────────────────────────────
+
+/// `host::get_settings(out_ptr, out_cap) -> i32`
+///
+/// Writes the plugin's current validated settings (pretty-printed JSON
+/// UTF-8) into `[out_ptr, out_ptr+out_cap)`.
+///
+/// Returns the number of bytes written on success, `HOST_BUFFER_OVERFLOW`
+/// when the JSON is larger than `out_cap`, or `HOST_ERROR` on any other
+/// failure. Plugins without a registered schema still get a valid
+/// response — the loader seeds the cache with `"{}"`, so the call
+/// returns `2` and the empty-object bytes.
+///
+/// No capability gate today — a plugin's own settings are considered
+/// first-party. If that becomes a privacy concern (e.g. secrets stored
+/// alongside prefs) a future revision can add a `settings.read`
+/// capability and enforce it here.
+fn register_host_get_settings(linker: &mut Linker<PluginData>) -> Result<(), PluginError> {
+    linker
+        .func_wrap(
+            "host",
+            "get_settings",
+            |mut caller: Caller<'_, PluginData>,
+             out_ptr: i32,
+             out_cap: i32|
+             -> i32 {
+                let plugin_id = caller.data().plugin_id.clone();
+                let cache = caller.data().settings_json.clone();
+                let Some(cache) = cache else {
+                    tracing::warn!(plugin_id = %plugin_id, "host::get_settings: cache not injected");
+                    return HOST_ERROR;
+                };
+
+                let Ok(guard) = cache.read() else {
+                    tracing::warn!(plugin_id = %plugin_id, "host::get_settings: cache poisoned");
+                    return HOST_ERROR;
+                };
+                let bytes = guard.as_bytes().to_vec();
+                drop(guard);
+
+                let Some(wasmtime::Extern::Memory(memory)) = caller.get_export("memory") else {
+                    return HOST_ERROR;
+                };
+                let Ok(o_start) = usize::try_from(out_ptr) else { return HOST_ERROR; };
+                let Ok(o_cap) = usize::try_from(out_cap) else { return HOST_ERROR; };
+                if bytes.len() > o_cap {
+                    return HOST_BUFFER_OVERFLOW;
+                }
+                let end = o_start + bytes.len();
+                let mem_data = memory.data_mut(&mut caller);
+                if end > mem_data.len() {
+                    return HOST_ERROR;
+                }
+                mem_data[o_start..end].copy_from_slice(&bytes);
+                i32::try_from(bytes.len()).unwrap_or(HOST_ERROR)
+            },
+        )
+        .map_err(|e| PluginError::WasmLoadFailed {
+            plugin_id: "<host>".to_string(),
+            reason: format!("failed to register host::get_settings: {e}"),
         })?;
     Ok(())
 }

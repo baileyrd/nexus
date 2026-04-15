@@ -594,6 +594,7 @@ impl PluginManager {
                     .loader
                     .get(plugin_id)
                     .map_or_else(nexus_kernel::CapabilitySet::empty, |i| i.capabilities),
+                settings_json: self.loader.settings_cache(plugin_id),
                 ..Default::default()
             };
             (wasm_config, lifecycle, pd)

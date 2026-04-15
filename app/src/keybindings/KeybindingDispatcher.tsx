@@ -18,10 +18,10 @@ interface CompiledBinding {
  * shortcuts without restart.
  *
  * Mounted once at the app root; renders nothing. Binds a single
- * capture-phase keydown listener — subject to the usual modal-wins
- * semantics: the command palette (Cmd/Ctrl+K) also listens in capture
- * phase and calls `preventDefault`, so if a plugin tries to bind the
- * same chord the palette takes precedence.
+ * capture-phase keydown listener. Precedence on a conflict is "first
+ * registration wins" — since the builtins (`Mod+K` palette toggle,
+ * `Mod+,` Settings) register at app boot before any plugin, a
+ * plugin trying to take the same chord silently loses.
  */
 export function KeybindingDispatcher() {
   const commands = usePaletteCommands();

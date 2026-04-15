@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 
 use std::future::Future;
 use std::pin::Pin;
@@ -258,6 +258,12 @@ struct LoadedPlugin {
     registrations: PluginRegistrations,
     /// Active event subscriptions for this plugin.
     event_subs: Vec<PluginEventSub>,
+    /// Shared live cache of the plugin's validated settings JSON. Mirrored
+    /// into the sandbox's [`PluginData`] so `host::get_settings` can read
+    /// it without acquiring the loader lock. Rewritten in-place by
+    /// [`PluginLoader::update_settings`] (and re-seeded during hot-reload)
+    /// so plugins see user edits on their next handler call.
+    settings_cache: Arc<RwLock<String>>,
 }
 
 // ─── PluginLoader ─────────────────────────────────────────────────────────────
@@ -393,10 +399,17 @@ impl PluginLoader {
         let wasm_bytes = std::fs::read(&wasm_path)?;
 
         let capabilities = build_capabilities(&manifest);
+        // Seed the live settings cache so host::get_settings reads the
+        // validated values right out of the gate. Failures here are
+        // non-fatal: we fall back to `"{}"` rather than refuse to load
+        // the plugin, since the settings surface is an ergonomic
+        // feature rather than a load-blocking invariant.
+        let settings_cache = load_settings_cache(&self.settings, &plugin_id, plugin_dir);
         let plugin_data = PluginData {
             plugin_id: plugin_id.clone(),
             capabilities: capabilities.clone(),
             forge_root: plugin_dir.to_path_buf(),
+            settings_json: Some(settings_cache.clone()),
             ..Default::default()
         };
         let mut backend = PluginBackend::Community(
@@ -414,7 +427,7 @@ impl PluginLoader {
             backend.call_on_start()?;
         }
 
-        self.finish_loading(manifest, backend, capabilities, plugin_dir)
+        self.finish_loading(manifest, backend, capabilities, plugin_dir, settings_cache)
     }
 
     /// Register a **core** plugin backed by a native Rust implementation.
@@ -472,7 +485,8 @@ impl PluginLoader {
 
         let capabilities = build_capabilities(&manifest);
         let backend = PluginBackend::Core(plugin);
-        self.finish_loading(manifest, backend, capabilities, plugin_dir)
+        let settings_cache = load_settings_cache(&self.settings, &plugin_id, plugin_dir);
+        self.finish_loading(manifest, backend, capabilities, plugin_dir, settings_cache)
     }
 
     /// Shared final step: register CLI/IPC, wire event subscriptions, insert.
@@ -482,6 +496,7 @@ impl PluginLoader {
         backend: PluginBackend,
         capabilities: CapabilitySet,
         plugin_dir: &Path,
+        settings_cache: Arc<RwLock<String>>,
     ) -> Result<PluginInfo, PluginError> {
         let plugin_id = manifest.id.clone();
 
@@ -540,6 +555,7 @@ impl PluginLoader {
                     ipc_commands: registered_ipc,
                 },
                 event_subs,
+                settings_cache,
             },
         );
 
@@ -778,6 +794,18 @@ impl PluginLoader {
             .loaded
             .get_mut(plugin_id)
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
+        // Refresh the shared settings cache so the next `host::get_settings`
+        // call from the sandbox reads the new values. Poisoned-lock
+        // failures are logged; the file on disk is already authoritative.
+        let serialized = serde_json::to_string_pretty(settings)
+            .unwrap_or_else(|_| "{}".to_string());
+        match lp.settings_cache.write() {
+            Ok(mut guard) => *guard = serialized,
+            Err(_) => tracing::warn!(
+                plugin_id = %plugin_id,
+                "update_settings: settings cache lock poisoned; skipping in-memory refresh"
+            ),
+        }
         if lp.manifest.lifecycle.on_settings_changed {
             lp.backend.call_on_settings_changed(settings)?;
         }
@@ -884,6 +912,14 @@ impl PluginLoader {
         self.loaded.get(plugin_id).map(|lp| &lp.manifest)
     }
 
+    /// Clone the shared settings cache for `plugin_id`. Used by hot-reload
+    /// to hand the new sandbox the same `Arc` the old one saw, so user
+    /// edits that happened before the reload remain visible afterwards.
+    #[allow(dead_code)]
+    pub(crate) fn settings_cache(&self, plugin_id: &str) -> Option<Arc<RwLock<String>>> {
+        self.loaded.get(plugin_id).map(|lp| lp.settings_cache.clone())
+    }
+
     /// Update the [`PluginStatus`] for `plugin_id`.
     #[allow(dead_code)]
     pub(crate) fn set_status(&mut self, plugin_id: &str, status: PluginStatus) {
@@ -938,6 +974,25 @@ fn parse_event_filter(filter: &str) -> EventFilter {
         }
         f => EventFilter::CustomExact(f.to_string()),
     }
+}
+
+/// Build the shared settings cache for a freshly-loaded plugin. Reads the
+/// current validated settings via [`SettingsManager::load_settings`] and
+/// wraps the pretty-printed JSON in an [`Arc<RwLock<String>>`] so the
+/// loader and its sandbox can share a single mutable view. Any error
+/// (missing schema, invalid file, I/O) degrades to `"{}"` — a usable
+/// default that plugins can parse without special-casing.
+fn load_settings_cache(
+    settings: &SettingsManager,
+    plugin_id: &str,
+    plugin_dir: &Path,
+) -> Arc<RwLock<String>> {
+    let json = settings
+        .load_settings(plugin_id, plugin_dir)
+        .ok()
+        .and_then(|v| serde_json::to_string_pretty(&v).ok())
+        .unwrap_or_else(|| "{}".to_string());
+    Arc::new(RwLock::new(json))
 }
 
 fn build_capabilities(manifest: &PluginManifest) -> CapabilitySet {

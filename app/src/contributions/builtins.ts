@@ -41,10 +41,24 @@ export function registerBuiltins(): void {
     title: "Settings: Open",
     category: "Workspace",
     icon: "settings",
+    keybinding: "Mod+,",
   });
 
   contributions.registerCommand("workspace.command-palette", () => {
-    usePaletteStore.getState().openPalette();
+    usePaletteStore.getState().togglePalette();
+  });
+  // Register the palette's own toggle through the contribution
+  // registry so `KeybindingDispatcher` drives Mod+K like any other
+  // command. Keeps the chord user-rebindable via the Hotkeys tab
+  // and removes the bespoke capture-phase listener that used to
+  // live in `CommandPalette.tsx`.
+  contributions.registerPaletteCommand({
+    id: "workspace.command-palette",
+    commandId: "workspace.command-palette",
+    title: "Command palette: Toggle",
+    category: "Workspace",
+    icon: "command",
+    keybinding: "Mod+K",
   });
 
   contributions.registerCommand("workspace.switch-forge", async () => {

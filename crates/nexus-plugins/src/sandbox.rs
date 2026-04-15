@@ -2,7 +2,7 @@
 //! and provides the `dispatch` call used by all higher-level plugin code.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use wasmtime::{Engine, Instance, Linker, Module, Store, StoreLimitsBuilder, Trap};
 
@@ -29,6 +29,12 @@ pub struct PluginData {
     pub event_bus: Option<Arc<EventBus>>,
     /// Forge root path used to confine file I/O from host functions.
     pub forge_root: PathBuf,
+    /// Live cache of the plugin's settings JSON. The loader initialises
+    /// this with the validated settings at load time (or `"{}"` when no
+    /// schema is declared) and overwrites the contents in-place whenever
+    /// the user saves new values, so `host::get_settings` always reads
+    /// the authoritative view.
+    pub settings_json: Option<Arc<RwLock<String>>>,
     /// wasmtime resource limiter — enforces `memory_mb` cap.
     /// [`WasmSandbox::new`] overwrites this with the config-derived limit;
     /// callers may supply any placeholder (e.g. `StoreLimitsBuilder::new().build()`).
@@ -43,6 +49,7 @@ impl Default for PluginData {
             kv: None,
             event_bus: None,
             forge_root: PathBuf::new(),
+            settings_json: None,
             limits: StoreLimitsBuilder::new().build(),
         }
     }

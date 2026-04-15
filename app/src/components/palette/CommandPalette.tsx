@@ -10,7 +10,6 @@ import {
   usePaletteCommands,
   type PaletteCommand,
 } from "../../contributions";
-import { isCapturing } from "../../keybindings/capture-state";
 import { usePaletteStore } from "../../stores/palette";
 import { Icon } from "../Icon";
 import { fuzzyRank } from "./fuzzy";
@@ -21,36 +20,18 @@ import { fuzzyRank } from "./fuzzy";
  * contribution registry.
  *
  * Mounted once at the app root; renders nothing until
- * `usePaletteStore.open` is true. Binds the global Cmd/Ctrl+K handler
- * at mount.
+ * `usePaletteStore.open` is true. The Mod+K toggle is wired through
+ * the contribution registry — `workspace.command-palette` in
+ * `builtins.ts` carries the default binding and `KeybindingDispatcher`
+ * drives it — so users can rebind it in the Hotkeys tab like any
+ * other command.
  */
 export function CommandPalette() {
   const open = usePaletteStore((s) => s.open);
   const closePalette = usePaletteStore((s) => s.closePalette);
-  const togglePalette = usePaletteStore((s) => s.togglePalette);
-
-  useGlobalToggle(togglePalette);
 
   if (!open) return null;
   return <PaletteDialog onClose={closePalette} />;
-}
-
-function useGlobalToggle(togglePalette: () => void) {
-  useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      // Don't hijack Cmd/Ctrl+K when the Hotkeys tab is recording a
-      // new chord — the user might be trying to rebind the palette.
-      if (isCapturing()) return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        togglePalette();
-      }
-    }
-    // Capture phase so we intercept Cmd/Ctrl+K before any focused
-    // input consumes the keystroke.
-    document.addEventListener("keydown", handler, true);
-    return () => document.removeEventListener("keydown", handler, true);
-  }, [togglePalette]);
 }
 
 interface PaletteDialogProps {
