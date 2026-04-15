@@ -161,6 +161,14 @@ impl SettingsManager {
     pub fn has_schema(&self, plugin_id: &str) -> bool {
         self.schemas.contains_key(plugin_id)
     }
+
+    /// Return the raw JSON Schema registered for `plugin_id`, if any.
+    /// Used by the host to send schemas to the frontend for form
+    /// rendering.
+    #[must_use]
+    pub fn schema(&self, plugin_id: &str) -> Option<&serde_json::Value> {
+        self.schemas.get(plugin_id)
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

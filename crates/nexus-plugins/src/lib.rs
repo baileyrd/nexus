@@ -447,6 +447,14 @@ impl PluginManager {
         self.loader.dispatch_ipc_checked(caller_plugin_id, plugin_id, command_id, args)
     }
 
+    /// Return the raw JSON Schema declared by `plugin_id`, or `None`
+    /// if the plugin either isn't loaded or doesn't declare a
+    /// `[settings]` block. The frontend uses this to render a form.
+    #[must_use]
+    pub fn get_settings_schema(&self, plugin_id: &str) -> Option<serde_json::Value> {
+        self.loader.settings().schema(plugin_id).cloned()
+    }
+
     /// Load the settings for the plugin identified by `plugin_id`.
     ///
     /// # Errors

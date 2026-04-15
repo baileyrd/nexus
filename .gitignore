@@ -6,3 +6,5 @@ Cargo.lock
 .superpowers/
 .claude/
 crates/**/SESSION_SUMMARIES.md
+# Per-install plugin settings written by the Settings modal.
+plugins/*/settings.json

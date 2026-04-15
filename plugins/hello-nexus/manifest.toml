@@ -10,6 +10,9 @@ module = "hello.wasm"
 memory_mb = 8
 fuel = 1_000_000
 
+[settings]
+schema = "settings.schema.json"
+
 [[registrations.ui_command]]
 id = "hello.sayHi"
 handler_id = 103

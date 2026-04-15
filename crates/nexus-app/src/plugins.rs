@@ -194,6 +194,56 @@ pub fn list_plugin_status_items(
         .unwrap_or_default()
 }
 
+/// Return the JSON Schema declared by `plugin_id`, or `null` if the
+/// plugin isn't loaded or didn't declare a `[settings]` block.
+#[tauri::command]
+pub fn get_plugin_settings_schema(
+    state: State<'_, PluginState>,
+    plugin_id: String,
+) -> Option<serde_json::Value> {
+    state
+        .0
+        .lock()
+        .ok()
+        .and_then(|mgr| mgr.get_settings_schema(&plugin_id))
+}
+
+/// Load the currently persisted settings for `plugin_id`. Empty
+/// object when no settings file exists yet.
+///
+/// # Errors
+/// Returns the load error as a string for the frontend.
+#[tauri::command]
+pub fn get_plugin_settings(
+    state: State<'_, PluginState>,
+    plugin_id: String,
+) -> Result<serde_json::Value, String> {
+    let mgr = state
+        .0
+        .lock()
+        .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
+    mgr.get_settings(&plugin_id).map_err(|e| e.to_string())
+}
+
+/// Validate `settings` against the registered schema and, if valid,
+/// persist them to `<plugin_dir>/settings.json`. Fires the plugin's
+/// `on_settings_changed` lifecycle hook if declared.
+///
+/// # Errors
+/// Returns validation / I/O errors as a string for the frontend.
+#[tauri::command]
+pub fn save_plugin_settings(
+    state: State<'_, PluginState>,
+    plugin_id: String,
+    settings: serde_json::Value,
+) -> Result<(), String> {
+    let mut mgr = state
+        .0
+        .lock()
+        .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
+    mgr.set_settings(&plugin_id, &settings).map_err(|e| e.to_string())
+}
+
 /// List every loaded plugin as a serializable summary — used by the
 /// Settings modal's plugins tab.
 #[tauri::command]

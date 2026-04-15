@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hello Nexus settings",
+  "type": "object",
+  "properties": {
+    "greeting": {
+      "type": "string",
+      "title": "Greeting",
+      "description": "Text used in the Hello panel and command output.",
+      "default": "Hello"
+    },
+    "excited": {
+      "type": "boolean",
+      "title": "Excited",
+      "description": "Append an exclamation mark to the greeting.",
+      "default": false
+    },
+    "style": {
+      "type": "string",
+      "title": "Style",
+      "description": "Tone of the greeting.",
+      "enum": ["friendly", "formal", "playful"],
+      "default": "friendly"
+    },
+    "daily_limit": {
+      "type": "integer",
+      "title": "Daily limit",
+      "description": "Maximum number of greetings per day.",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 10
+    }
+  },
+  "required": ["greeting"]
+}
