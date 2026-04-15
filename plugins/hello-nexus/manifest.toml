@@ -12,7 +12,7 @@ fuel = 1_000_000
 
 [[registrations.ui_command]]
 id = "hello.sayHi"
-handler_id = 100
+handler_id = 103
 title = "Hello: Say hi"
 category = "Demo"
 icon = "hand"

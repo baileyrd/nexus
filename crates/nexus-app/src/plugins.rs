@@ -17,6 +17,13 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// hot-reloaded. Payload: `{ "plugin_ids": ["com.nexus.hello", …] }`.
 pub const PLUGINS_RELOADED_EVENT: &str = "plugins:reloaded";
 
+/// Tauri event emitted once per plugin-side event. Payload:
+/// `{ "plugin_id": "...", "topic": "...", "payload": <any> }`. Plugins
+/// surface events by returning an `events` array in their handler
+/// response; `invoke_plugin_command` extracts the array and fires one
+/// of these per entry.
+pub const PLUGIN_EVENT_EVENT: &str = "plugin:event";
+
 /// How often the background watcher thread drains pending hot-reload
 /// events. The underlying `HotReloader` already debounces filesystem
 /// events, so this just needs to be short enough to feel live.
@@ -195,21 +202,61 @@ pub fn list_plugins(state: State<'_, PluginState>) -> Vec<PluginSummary> {
 /// Invoke a plugin command by `plugin_id` and `command_id`, forwarding
 /// arbitrary JSON `args`.
 ///
+/// Side-effect: if the plugin's response is a JSON object containing
+/// an `events: [{ topic, payload }, …]` array, each entry is emitted
+/// as a [`PLUGIN_EVENT_EVENT`] Tauri event with
+/// `{ plugin_id, topic, payload }`. The `events` key is left in the
+/// returned value; the frontend can either ignore it or route it
+/// through the dedicated event bus.
+///
 /// # Errors
 /// Returns the dispatch error as a string for the frontend.
 #[tauri::command]
 pub fn invoke_plugin_command(
+    app: AppHandle,
     state: State<'_, PluginState>,
     plugin_id: String,
     command_id: String,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let mut mgr = state
-        .0
-        .lock()
-        .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
-    mgr.dispatch_ipc(&plugin_id, &command_id, &args)
-        .map_err(|e| e.to_string())
+    let result = {
+        let mut mgr = state
+            .0
+            .lock()
+            .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
+        mgr.dispatch_ipc(&plugin_id, &command_id, &args)
+            .map_err(|e| e.to_string())?
+    };
+    emit_plugin_events(&app, &plugin_id, &result);
+    Ok(result)
+}
+
+/// Pull an optional `events` array off a plugin's response and emit
+/// each entry as a [`PLUGIN_EVENT_EVENT`] Tauri event. Malformed
+/// entries (missing `topic`, non-object, etc.) are logged and skipped
+/// so one bad event can't take out the rest.
+fn emit_plugin_events(app: &AppHandle, plugin_id: &str, result: &serde_json::Value) {
+    let Some(events) = result.get("events").and_then(|v| v.as_array()) else {
+        return;
+    };
+    for event in events {
+        let Some(topic) = event.get("topic").and_then(|v| v.as_str()) else {
+            tracing::warn!(plugin = plugin_id, "plugin event missing 'topic'; skipping");
+            continue;
+        };
+        let payload = event
+            .get("payload")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let envelope = serde_json::json!({
+            "plugin_id": plugin_id,
+            "topic": topic,
+            "payload": payload,
+        });
+        if let Err(err) = app.emit(PLUGIN_EVENT_EVENT, envelope) {
+            tracing::warn!(%err, plugin = plugin_id, topic, "failed to emit plugin event");
+        }
+    }
 }
 
 /// Spawn a background thread that drains [`PluginManager::poll_reloads`]

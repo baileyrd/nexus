@@ -45,6 +45,13 @@ pub extern "C" fn nexus_dispatch(handler_id: u32, args_ptr: u32, args_len: u32) 
             br#"{"content":"This tab is rendered by the hello-nexus plugin.\n\nA real plugin would expose configurable knobs here - schema-driven form controls, toggles, text inputs, and so on. For now, static text."}"#
                 .to_vec()
         }
+        103 => {
+            // say-hi handler with event emission: the host extracts the
+            // `events` array and emits a `plugin:event` Tauri event
+            // for each entry. Proves the plugin -> frontend bus.
+            br#"{"message":"Hello!","events":[{"topic":"com.nexus.hello.greeted","payload":{"message":"Hello from the WASM sandbox!"}}]}"#
+                .to_vec()
+        }
         _ => b"{\"error\":\"unknown handler\"}".to_vec(),
     };
 
