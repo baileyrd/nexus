@@ -1,4 +1,7 @@
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FileTree } from "../components/panels/FileTree";
+import { useForgeStore } from "../stores/forge";
+import { useOpenFileStore } from "../stores/openFile";
 import { usePaletteStore } from "../stores/palette";
 import { contributions } from "./registry";
 
@@ -42,5 +45,26 @@ export function registerBuiltins(): void {
 
   contributions.registerCommand("workspace.command-palette", () => {
     usePaletteStore.getState().openPalette();
+  });
+
+  contributions.registerCommand("workspace.switch-forge", async () => {
+    const current = useForgeStore.getState().info;
+    const picked = await openDialog({
+      directory: true,
+      multiple: false,
+      defaultPath: current?.root,
+      title: "Open forge",
+    });
+    if (typeof picked !== "string") return;
+    // Close any open file first — it belongs to the previous forge.
+    useOpenFileStore.getState().close();
+    await useForgeStore.getState().open(picked);
+  });
+  contributions.registerPaletteCommand({
+    id: "workspace.switch-forge",
+    commandId: "workspace.switch-forge",
+    title: "Forge: Open…",
+    category: "Workspace",
+    icon: "folder",
   });
 }

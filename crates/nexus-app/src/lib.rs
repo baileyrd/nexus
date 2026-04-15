@@ -31,6 +31,7 @@ pub fn run() {
     let engine = ThemeEngine::new();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(commands::EngineState(Mutex::new(engine)))
         .manage(forge::ForgeState(Mutex::new(None)))
         .manage(forge::WatcherHandle(Mutex::new(None)))

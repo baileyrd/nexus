@@ -147,16 +147,43 @@ pub fn current_forge(state: State<'_, ForgeState>) -> Option<ForgeInfo> {
     state.0.lock().ok().and_then(|g| g.clone())
 }
 
-/// Open a forge at `path`, initializing its layout if needed.
+/// Open a forge at `path`, initializing its layout if needed and
+/// restarting the FS watcher to point at the new root.
 #[tauri::command]
-pub fn open_forge(path: String, state: State<'_, ForgeState>) -> Result<ForgeInfo, String> {
+pub fn open_forge(
+    path: String,
+    app: AppHandle,
+    state: State<'_, ForgeState>,
+    watcher: State<'_, WatcherHandle>,
+) -> Result<ForgeInfo, String> {
     let root = PathBuf::from(&path);
     if !root.is_dir() {
         return Err(format!("not a directory: {path}"));
     }
     init_layout(&root)?;
     let info = info_for(&root);
+
+    // Drop the old watcher *before* starting the new one so we never
+    // hold two simultaneous recursive watches on disk.
+    {
+        let mut guard = watcher.0.lock().map_err(|_| "watcher state poisoned")?;
+        *guard = None;
+    }
+    match start_watcher(app.clone(), &info.root) {
+        Ok(debouncer) => {
+            if let Ok(mut guard) = watcher.0.lock() {
+                *guard = Some(debouncer);
+            }
+        }
+        Err(err) => {
+            tracing::warn!(%err, "watcher restart failed; live tree refresh disabled");
+        }
+    }
+
     *state.0.lock().map_err(|_| "forge state poisoned")? = Some(info.clone());
+    // Nudge the frontend so any cached listings invalidate immediately
+    // even before the new watcher fires its first event.
+    let _ = app.emit(FS_CHANGED_EVENT, ());
     Ok(info)
 }
 
