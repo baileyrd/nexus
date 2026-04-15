@@ -91,6 +91,8 @@ pub struct Registrations {
     pub ui_commands: Vec<UiCommandReg>,
     /// UI side-panel registrations.
     pub ui_panels: Vec<UiPanelReg>,
+    /// Per-plugin Settings-modal tab registrations.
+    pub ui_settings_tabs: Vec<UiSettingsTabReg>,
 }
 
 /// Which side of the workspace a plugin-contributed panel docks to.
@@ -180,6 +182,22 @@ pub struct UiPanelReg {
     pub icon: String,
     /// Which side panel to dock into. Defaults to [`PanelSide::Left`].
     pub side: PanelSide,
+}
+
+/// A single per-plugin Settings-modal tab registration. The plugin's
+/// handler is invoked when the tab is shown and must return a JSON
+/// object with a `content` string that the frontend renders below
+/// the tab's auto-generated plugin header.
+#[derive(Debug, Clone)]
+pub struct UiSettingsTabReg {
+    /// Unique tab identifier within the plugin.
+    pub id: String,
+    /// WASM handler index invoked to produce the tab's content.
+    pub handler_id: u32,
+    /// Human-readable tab title shown in the Settings rail.
+    pub title: String,
+    /// Lucide icon name for the rail entry.
+    pub icon: String,
 }
 
 /// Lifecycle hook enablement flags.
@@ -275,6 +293,8 @@ struct TomlRegistrations {
     ui_commands: Vec<TomlUiCommandReg>,
     #[serde(default, rename = "ui_panel")]
     ui_panels: Vec<TomlUiPanelReg>,
+    #[serde(default, rename = "ui_settings_tab")]
+    ui_settings_tabs: Vec<TomlUiSettingsTabReg>,
 }
 
 #[derive(Deserialize)]
@@ -318,6 +338,14 @@ struct TomlUiPanelReg {
     icon: String,
     #[serde(default)]
     side: PanelSide,
+}
+
+#[derive(Deserialize)]
+struct TomlUiSettingsTabReg {
+    id: String,
+    handler_id: u32,
+    title: String,
+    icon: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -421,6 +449,17 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
                     title: r.title,
                     icon: r.icon,
                     side: r.side,
+                })
+                .collect(),
+            ui_settings_tabs: raw
+                .registrations
+                .ui_settings_tabs
+                .into_iter()
+                .map(|r| UiSettingsTabReg {
+                    id: r.id,
+                    handler_id: r.handler_id,
+                    title: r.title,
+                    icon: r.icon,
                 })
                 .collect(),
         },
@@ -539,6 +578,12 @@ title = "Hello Panel"
 icon = "hand"
 side = "right"
 
+[[registrations.ui_settings_tab]]
+id = "test.tab"
+handler_id = 500
+title = "About"
+icon = "info"
+
 [lifecycle]
 on_init = true
 on_start = true
@@ -563,6 +608,7 @@ on_stop = true
         assert!(m.registrations.event_subscribers.is_empty());
         assert!(m.registrations.ui_commands.is_empty());
         assert!(m.registrations.ui_panels.is_empty());
+        assert!(m.registrations.ui_settings_tabs.is_empty());
     }
 
     #[test]
@@ -596,6 +642,12 @@ on_stop = true
         assert_eq!(panel.title, "Hello Panel");
         assert_eq!(panel.icon, "hand");
         assert_eq!(panel.side, PanelSide::Right);
+        assert_eq!(m.registrations.ui_settings_tabs.len(), 1);
+        let tab = &m.registrations.ui_settings_tabs[0];
+        assert_eq!(tab.id, "test.tab");
+        assert_eq!(tab.handler_id, 500);
+        assert_eq!(tab.title, "About");
+        assert_eq!(tab.icon, "info");
         assert!(m.lifecycle.on_init);
         assert!(m.lifecycle.on_start);
         assert!(m.lifecycle.on_stop);
@@ -805,6 +857,13 @@ pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), Plug
             manifest
                 .registrations
                 .ui_panels
+                .iter()
+                .map(|r| r.handler_id),
+        )
+        .chain(
+            manifest
+                .registrations
+                .ui_settings_tabs
                 .iter()
                 .map(|r| r.handler_id),
         )

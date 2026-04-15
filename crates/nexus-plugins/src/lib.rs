@@ -23,7 +23,7 @@ pub use loader::{CorePlugin, CorePluginFuture, PluginLoader, SharedPluginLoader}
 pub use manifest::{
     CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
     PanelSide, PluginManifest, Registrations, SettingsConfig, UiCommandReg, UiPanelReg,
-    WasmConfig,
+    UiSettingsTabReg, WasmConfig,
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
 pub use sandbox::{PluginData, WasmSandbox};
@@ -73,6 +73,30 @@ pub struct UiPanelContribution {
     pub icon: String,
     /// `"left"` or `"right"` — which side panel to dock into.
     pub side: String,
+}
+
+/// A single plugin-contributed Settings-modal tab, materialised for
+/// the frontend.
+///
+/// Aggregated by [`PluginManager::ui_settings_tabs`] across every
+/// loaded plugin's `[[registrations.ui_settings_tab]]` entries. The
+/// frontend renders one entry per row under the Settings modal's
+/// "Plugins" rail group.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UiSettingsTabContribution {
+    /// The plugin that owns this tab.
+    pub plugin_id: String,
+    /// Human-readable plugin name (pulled from the manifest for the
+    /// auto-generated tab header).
+    pub plugin_name: String,
+    /// Plugin version string, used in the auto-generated header.
+    pub plugin_version: String,
+    /// The `id` declared in the manifest's `ui_settings_tab` entry.
+    pub tab_id: String,
+    /// Title shown in the rail entry.
+    pub title: String,
+    /// Lucide icon name.
+    pub icon: String,
 }
 
 // ─── PluginManagerConfig ──────────────────────────────────────────────────────
@@ -251,6 +275,37 @@ impl PluginManager {
                             PanelSide::Left => "left".to_string(),
                             PanelSide::Right => "right".to_string(),
                         },
+                    })
+            })
+            .collect()
+    }
+
+    /// Aggregate Settings-modal tab contributions across all
+    /// currently-loaded plugins. Returns one
+    /// [`UiSettingsTabContribution`] per `[[registrations.ui_settings_tab]]`
+    /// entry; the frontend renders one row per tab in the Settings
+    /// modal's "Plugins" rail group.
+    #[must_use]
+    pub fn ui_settings_tabs(&self) -> Vec<UiSettingsTabContribution> {
+        self.loader
+            .list()
+            .into_iter()
+            .flat_map(|info| {
+                let plugin_id = info.id.clone();
+                let plugin_name = info.name.clone();
+                let plugin_version = info.version.clone();
+                self.loader
+                    .manifest(&info.id)
+                    .map(|m| m.registrations.ui_settings_tabs.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |r| UiSettingsTabContribution {
+                        plugin_id: plugin_id.clone(),
+                        plugin_name: plugin_name.clone(),
+                        plugin_version: plugin_version.clone(),
+                        tab_id: r.id,
+                        title: r.title,
+                        icon: r.icon,
                     })
             })
             .collect()

@@ -29,6 +29,19 @@ export interface PluginUiPanel {
 }
 
 /**
+ * Mirrors `nexus_plugins::UiSettingsTabContribution`. The Settings
+ * modal renders one row per tab under its "Plugins" rail group.
+ */
+export interface PluginUiSettingsTab {
+  plugin_id: string;
+  plugin_name: string;
+  plugin_version: string;
+  tab_id: string;
+  title: string;
+  icon: string;
+}
+
+/**
  * Mirrors `nexus_app::plugins::PluginSummary`. Trust level is `"core"`
  * or `"community"`; status is `"loaded"`, `"initialized"`, `"running"`,
  * `"stopped"`, or `"crashed"`.
@@ -47,6 +60,10 @@ export function listPluginContributions(): Promise<PluginUiContribution[]> {
 
 export function listPluginPanels(): Promise<PluginUiPanel[]> {
   return invoke<PluginUiPanel[]>("list_plugin_panels");
+}
+
+export function listPluginSettingsTabs(): Promise<PluginUiSettingsTab[]> {
+  return invoke<PluginUiSettingsTab[]>("list_plugin_settings_tabs");
 }
 
 export function listPlugins(): Promise<PluginSummary[]> {

@@ -704,6 +704,14 @@ impl PluginLoader {
                     .find(|r| r.id == command_id)
                     .map(|r| r.handler_id)
             })
+            .or_else(|| {
+                lp.manifest
+                    .registrations
+                    .ui_settings_tabs
+                    .iter()
+                    .find(|r| r.id == command_id)
+                    .map(|r| r.handler_id)
+            })
             .ok_or_else(|| PluginError::PluginNotFound(command_id.to_string()))?;
 
         lp.backend.dispatch(handler_id, args)

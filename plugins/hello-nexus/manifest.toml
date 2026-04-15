@@ -25,5 +25,11 @@ title = "Hello Nexus"
 icon = "hand"
 side = "right"
 
+[[registrations.ui_settings_tab]]
+id = "hello.about"
+handler_id = 102
+title = "Hello Nexus"
+icon = "hand"
+
 [lifecycle]
 on_init = true

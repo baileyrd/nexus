@@ -1,12 +1,17 @@
-// Bridges plugin contributions into the UI contribution registry and
-// the layout store. Called once after `registerBuiltins()` at app boot.
+// Bridges plugin contributions into the UI contribution registry, the
+// layout store, and the Settings-modal store. Called once after
+// `registerBuiltins()` at app boot.
 //
 // What each plugin contribution becomes:
-//   * `ui_command`  → a command handler + palette entry keyed by
-//                     `plugin:<plugin_id>:<command_id>`
-//   * `ui_panel`    → a contentType registration keyed the same way, +
-//                     a `Panel` appended to the layout's left/right
-//                     side panel via `useLayoutStore.setPluginPanels`
+//   * `ui_command`       → a command handler + palette entry keyed by
+//                          `plugin:<plugin_id>:<command_id>`
+//   * `ui_panel`         → a contentType registration keyed the same
+//                          way, + a `Panel` appended to the layout's
+//                          left/right side panel via
+//                          `useLayoutStore.setPluginPanels`
+//   * `ui_settings_tab`  → pushed to `useSettingsStore.setPluginTabs`;
+//                          the Settings modal renders them in the
+//                          "Plugins" rail group
 //
 // On boot the bridge also subscribes to the Rust-side `plugins:reloaded`
 // event. When a community plugin's WASM changes on disk, the backend
@@ -20,11 +25,13 @@ import { createElement } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { PluginPanel } from "../components/panels/PluginPanel";
 import { useLayoutStore } from "../stores/layout";
+import { useSettingsStore } from "../stores/settings";
 import { contributions } from "./registry";
 import {
   invokePluginCommand,
   listPluginContributions,
   listPluginPanels,
+  listPluginSettingsTabs,
   type PluginUiPanel,
 } from "../ipc/plugins";
 
@@ -97,13 +104,23 @@ async function syncPanels(): Promise<void> {
   useLayoutStore.getState().setPluginPanels(panels);
 }
 
+async function syncSettingsTabs(): Promise<void> {
+  try {
+    const tabs = await listPluginSettingsTabs();
+    useSettingsStore.getState().setPluginTabs(tabs);
+  } catch (err) {
+    warn("list_plugin_settings_tabs failed — skipping", err);
+    useSettingsStore.getState().setPluginTabs([]);
+  }
+}
+
 async function syncAll(): Promise<void> {
   // Drop the previous snapshot's registrations before re-registering so
   // removed/renamed plugin contributions disappear cleanly.
   for (const dispose of activeDisposables) dispose();
   activeDisposables = [];
 
-  await Promise.all([syncCommands(), syncPanels()]);
+  await Promise.all([syncCommands(), syncPanels(), syncSettingsTabs()]);
 }
 
 export async function registerPluginContributions(): Promise<void> {

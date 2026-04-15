@@ -40,6 +40,11 @@ pub extern "C" fn nexus_dispatch(handler_id: u32, args_ptr: u32, args_len: u32) 
             br#"{"content":"Hello from the hello-nexus plugin panel!\n\nThis text was rendered by a WASM handler running in a sandboxed VM."}"#
                 .to_vec()
         }
+        102 => {
+            // settings-tab render: returns { content: "..." } as JSON
+            br#"{"content":"This tab is rendered by the hello-nexus plugin.\n\nA real plugin would expose configurable knobs here - schema-driven form controls, toggles, text inputs, and so on. For now, static text."}"#
+                .to_vec()
+        }
         _ => b"{\"error\":\"unknown handler\"}".to_vec(),
     };
 

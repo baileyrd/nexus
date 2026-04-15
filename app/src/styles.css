@@ -1484,3 +1484,17 @@ main {
 .plugin-panel.error {
   color: rgb(170, 40, 40);
 }
+
+.plugin-settings-content {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--nx-text-primary, #111);
+  background: var(--nx-bg-secondary, #f6f7f9);
+  border: 1px solid var(--nx-bg-tertiary, #e8eaef);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}

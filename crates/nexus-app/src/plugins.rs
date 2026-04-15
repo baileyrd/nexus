@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use nexus_plugins::{
     PluginManager, PluginManagerConfig, PluginStatus, TrustLevel, UiContribution,
-    UiPanelContribution,
+    UiPanelContribution, UiSettingsTabContribution,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -142,6 +142,20 @@ pub fn list_plugin_panels(state: State<'_, PluginState>) -> Vec<UiPanelContribut
         .0
         .lock()
         .map(|mgr| mgr.ui_panels())
+        .unwrap_or_default()
+}
+
+/// List all plugin-contributed Settings-modal tabs. The frontend
+/// renders one row per tab under the Settings modal's "Plugins" rail
+/// group.
+#[tauri::command]
+pub fn list_plugin_settings_tabs(
+    state: State<'_, PluginState>,
+) -> Vec<UiSettingsTabContribution> {
+    state
+        .0
+        .lock()
+        .map(|mgr| mgr.ui_settings_tabs())
         .unwrap_or_default()
 }
 
