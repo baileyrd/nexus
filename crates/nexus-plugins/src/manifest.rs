@@ -87,6 +87,8 @@ pub struct Registrations {
     pub ipc_commands: Vec<IpcCommandReg>,
     /// Event subscriber registrations.
     pub event_subscribers: Vec<EventSubscriberReg>,
+    /// UI palette command registrations.
+    pub ui_commands: Vec<UiCommandReg>,
 }
 
 /// A single CLI subcommand registration.
@@ -119,6 +121,24 @@ pub struct EventSubscriberReg {
     pub filter: String,
     /// WASM handler function index dispatched to when a matching event fires.
     pub handler_id: u32,
+}
+
+/// A single UI command registration — a plugin-contributed entry that
+/// appears in the command palette and dispatches back to the plugin when
+/// invoked.
+#[derive(Debug, Clone)]
+pub struct UiCommandReg {
+    /// Unique command identifier within the plugin.
+    pub id: String,
+    /// WASM handler function index dispatched to when the user invokes
+    /// this command.
+    pub handler_id: u32,
+    /// Primary label shown in the command palette.
+    pub title: String,
+    /// Optional category badge (e.g. "AI", "Git").
+    pub category: Option<String>,
+    /// Optional Lucide icon name.
+    pub icon: Option<String>,
 }
 
 /// Lifecycle hook enablement flags.
@@ -210,6 +230,8 @@ struct TomlRegistrations {
     ipc_commands: Vec<TomlIpcCommandReg>,
     #[serde(default, rename = "event_subscriber")]
     event_subscribers: Vec<TomlEventSubscriberReg>,
+    #[serde(default, rename = "ui_command")]
+    ui_commands: Vec<TomlUiCommandReg>,
 }
 
 #[derive(Deserialize)]
@@ -230,6 +252,17 @@ struct TomlEventSubscriberReg {
     id: String,
     filter: String,
     handler_id: u32,
+}
+
+#[derive(Deserialize)]
+struct TomlUiCommandReg {
+    id: String,
+    handler_id: u32,
+    title: String,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -308,6 +341,18 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
                     id: r.id,
                     filter: r.filter,
                     handler_id: r.handler_id,
+                })
+                .collect(),
+            ui_commands: raw
+                .registrations
+                .ui_commands
+                .into_iter()
+                .map(|r| UiCommandReg {
+                    id: r.id,
+                    handler_id: r.handler_id,
+                    title: r.title,
+                    category: r.category,
+                    icon: r.icon,
                 })
                 .collect(),
         },
@@ -411,6 +456,13 @@ id = "test.on-file"
 filter = "FileCreated"
 handler_id = 200
 
+[[registrations.ui_command]]
+id = "test.hello"
+handler_id = 300
+title = "Say Hi"
+category = "Demo"
+icon = "hand"
+
 [lifecycle]
 on_init = true
 on_start = true
@@ -433,6 +485,7 @@ on_stop = true
         assert!(m.registrations.cli_subcommands.is_empty());
         assert!(m.registrations.ipc_commands.is_empty());
         assert!(m.registrations.event_subscribers.is_empty());
+        assert!(m.registrations.ui_commands.is_empty());
     }
 
     #[test]
@@ -451,6 +504,13 @@ on_stop = true
         assert_eq!(m.registrations.ipc_commands[0].handler_id, 100);
         assert_eq!(m.registrations.event_subscribers.len(), 1);
         assert_eq!(m.registrations.event_subscribers[0].handler_id, 200);
+        assert_eq!(m.registrations.ui_commands.len(), 1);
+        let ui = &m.registrations.ui_commands[0];
+        assert_eq!(ui.id, "test.hello");
+        assert_eq!(ui.handler_id, 300);
+        assert_eq!(ui.title, "Say Hi");
+        assert_eq!(ui.category.as_deref(), Some("Demo"));
+        assert_eq!(ui.icon.as_deref(), Some("hand"));
         assert!(m.lifecycle.on_init);
         assert!(m.lifecycle.on_start);
         assert!(m.lifecycle.on_stop);
@@ -519,6 +579,31 @@ api_version = "1"
         assert!(m.registrations.cli_subcommands.is_empty());
         assert!(m.registrations.ipc_commands.is_empty());
         assert!(m.registrations.event_subscribers.is_empty());
+        assert!(m.registrations.ui_commands.is_empty());
+    }
+
+    #[test]
+    fn parse_ui_command_optional_fields_default_to_none() {
+        let toml = r#"
+[plugin]
+id = "com.example.test"
+name = "Test"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.ui_command]]
+id = "ui.bare"
+handler_id = 10
+title = "Bare Command"
+"#;
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        let ui = &m.registrations.ui_commands[0];
+        assert!(ui.category.is_none());
+        assert!(ui.icon.is_none());
     }
 
     #[test]
@@ -596,6 +681,13 @@ pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), Plug
             manifest
                 .registrations
                 .event_subscribers
+                .iter()
+                .map(|r| r.handler_id),
+        )
+        .chain(
+            manifest
+                .registrations
+                .ui_commands
                 .iter()
                 .map(|r| r.handler_id),
         )
@@ -806,6 +898,28 @@ on_stop = true
         m.registrations.ipc_commands.push(IpcCommandReg {
             id: "ipc.a".to_string(),
             handler_id: 42,
+        });
+        let err = validate(&m, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("duplicate handler_id")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_handler_id_across_ui_and_ipc() {
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.registrations.ipc_commands.push(IpcCommandReg {
+            id: "ipc.a".to_string(),
+            handler_id: 77,
+        });
+        m.registrations.ui_commands.push(UiCommandReg {
+            id: "ui.a".to_string(),
+            handler_id: 77,
+            title: "A".to_string(),
+            category: None,
+            icon: None,
         });
         let err = validate(&m, dir.path()).unwrap_err();
         assert!(

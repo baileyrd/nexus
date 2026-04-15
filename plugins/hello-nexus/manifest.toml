@@ -1,0 +1,21 @@
+[plugin]
+id = "com.nexus.hello"
+name = "Hello Nexus"
+version = "0.1.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "hello.wasm"
+memory_mb = 8
+fuel = 1_000_000
+
+[[registrations.ui_command]]
+id = "hello.sayHi"
+handler_id = 100
+title = "Hello: Say hi"
+category = "Demo"
+icon = "hand"
+
+[lifecycle]
+on_init = true

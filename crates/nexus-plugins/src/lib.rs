@@ -22,12 +22,34 @@ pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 pub use loader::{CorePlugin, CorePluginFuture, PluginLoader, SharedPluginLoader};
 pub use manifest::{
     CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
-    PluginManifest, Registrations, SettingsConfig, WasmConfig,
+    PluginManifest, Registrations, SettingsConfig, UiCommandReg, WasmConfig,
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
 pub use sandbox::{PluginData, WasmSandbox};
 pub use settings::SettingsManager;
 pub use hot_reload::{HotReloader, ReloadEvent};
+
+// ─── UiContribution ───────────────────────────────────────────────────────────
+
+/// A single plugin-contributed command palette entry, materialised for the
+/// frontend.
+///
+/// Aggregated by [`PluginManager::ui_contributions`] across every loaded
+/// plugin's `[[registrations.ui_command]]` entries.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UiContribution {
+    /// The plugin that owns this contribution. Used for dispatch routing.
+    pub plugin_id: String,
+    /// The `id` declared in the manifest's `ui_command` entry. Passed back to
+    /// [`PluginManager::dispatch_ipc`] when the command is invoked.
+    pub command_id: String,
+    /// Primary label shown in the command palette.
+    pub title: String,
+    /// Optional category badge.
+    pub category: Option<String>,
+    /// Optional Lucide icon name.
+    pub icon: Option<String>,
+}
 
 // ─── PluginManagerConfig ──────────────────────────────────────────────────────
 
@@ -149,6 +171,34 @@ impl PluginManager {
     #[must_use]
     pub fn get(&self, plugin_id: &str) -> Option<nexus_kernel::PluginInfo> {
         self.loader.get(plugin_id)
+    }
+
+    /// Aggregate UI command contributions across all currently-loaded plugins.
+    ///
+    /// Returns one [`UiContribution`] per `[[registrations.ui_command]]` entry
+    /// declared in each plugin's manifest. The frontend consumes this list to
+    /// populate the command palette with plugin-contributed entries.
+    #[must_use]
+    pub fn ui_contributions(&self) -> Vec<UiContribution> {
+        self.loader
+            .list()
+            .into_iter()
+            .flat_map(|info| {
+                let plugin_id = info.id.clone();
+                self.loader
+                    .manifest(&info.id)
+                    .map(|m| m.registrations.ui_commands.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |r| UiContribution {
+                        plugin_id: plugin_id.clone(),
+                        command_id: r.id,
+                        title: r.title,
+                        category: r.category,
+                        icon: r.icon,
+                    })
+            })
+            .collect()
     }
 
     /// Dispatch a CLI subcommand call.

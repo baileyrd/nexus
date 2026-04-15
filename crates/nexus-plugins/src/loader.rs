@@ -688,6 +688,14 @@ impl PluginLoader {
             .iter()
             .find(|r| r.id == command_id)
             .map(|r| r.handler_id)
+            .or_else(|| {
+                lp.manifest
+                    .registrations
+                    .ui_commands
+                    .iter()
+                    .find(|r| r.id == command_id)
+                    .map(|r| r.handler_id)
+            })
             .ok_or_else(|| PluginError::PluginNotFound(command_id.to_string()))?;
 
         lp.backend.dispatch(handler_id, args)
@@ -1258,5 +1266,51 @@ on_stop = true
             matches!(err, PluginError::PluginNotFound(_)),
             "expected PluginNotFound, got {err:?}"
         );
+    }
+
+    /// Writes a plugin dir whose manifest declares a `ui_command` bound to
+    /// the echo handler (id 100) instead of a cli_subcommand.
+    fn setup_ui_plugin_dir(plugin_id: &str) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin_dir = tmp.path().join(plugin_id);
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let wasm_src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/minimal-plugin.wasm");
+        std::fs::copy(&wasm_src, plugin_dir.join("test.wasm")).unwrap();
+
+        let manifest = format!(
+            r#"
+[plugin]
+id = "{plugin_id}"
+name = "Test Plugin"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.ui_command]]
+id = "{plugin_id}.hello"
+handler_id = 100
+title = "Say Hi"
+"#
+        );
+        std::fs::write(plugin_dir.join("manifest.toml"), manifest).unwrap();
+        tmp
+    }
+
+    #[test]
+    fn dispatch_ipc_resolves_ui_command_handler() {
+        let tmp = setup_ui_plugin_dir("com.test.ui");
+        let plugin_dir = tmp.path().join("com.test.ui");
+        let mut loader = PluginLoader::new(tmp.path());
+        loader.load(&plugin_dir).unwrap();
+
+        let args = serde_json::json!({"name": "nexus"});
+        let result = loader
+            .dispatch_ipc("com.test.ui", "com.test.ui.hello", &args)
+            .unwrap();
+        assert_eq!(result, args);
     }
 }

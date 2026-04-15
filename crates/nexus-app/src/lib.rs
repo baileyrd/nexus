@@ -20,6 +20,7 @@ use tauri::Manager;
 pub mod commands;
 pub mod forge;
 pub mod persistence;
+pub mod plugins;
 
 /// Entry point for the desktop app. Called from `main.rs` (and from the
 /// mobile entry points on those targets).
@@ -35,6 +36,7 @@ pub fn run() {
         .manage(commands::EngineState(Mutex::new(engine)))
         .manage(forge::ForgeState(Mutex::new(None)))
         .manage(forge::WatcherHandle(Mutex::new(None)))
+        .manage(plugins::bootstrap())
         .setup(|app| {
             let handle = app.handle().clone();
             match forge::bootstrap(&handle) {
@@ -86,6 +88,8 @@ pub fn run() {
             forge::create_forge_dir,
             forge::rename_forge_entry,
             forge::delete_forge_entry,
+            plugins::list_plugin_contributions,
+            plugins::invoke_plugin_command,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch nexus-app");

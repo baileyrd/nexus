@@ -9,3 +9,4 @@ export {
   type PaletteCommand,
 } from "./registry";
 export { registerBuiltins } from "./builtins";
+export { registerPluginContributions } from "./plugins";
