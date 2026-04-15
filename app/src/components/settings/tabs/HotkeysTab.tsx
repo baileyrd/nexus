@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
-import { usePaletteCommands, type PaletteCommand } from "../../../contributions";
+import { contributions, usePaletteCommands, type PaletteCommand } from "../../../contributions";
+import { KeyCaptureInput } from "../../../keybindings/KeyCaptureInput";
+import { resetOverride, saveOverride } from "../../../keybindings/overrides";
 import { Icon } from "../../Icon";
 
 type Grouped = Array<[string, PaletteCommand[]]>;
@@ -24,9 +26,10 @@ function group(commands: PaletteCommand[], query: string): Grouped {
 }
 
 /**
- * Read-only hotkeys tab. Lists every registered palette command
- * grouped by category; binding UI will layer on top once manifests
- * declare default keybindings.
+ * Hotkeys tab. Lists every registered palette command grouped by
+ * category. Each row shows the effective binding (manifest default
+ * or user override) and lets the user capture a new chord or reset
+ * to default.
  */
 export function HotkeysTab() {
   const commands = usePaletteCommands();
@@ -38,9 +41,8 @@ export function HotkeysTab() {
       <header className="settings-section-header">
         <h2>Hotkeys</h2>
         <p className="settings-section-desc">
-          All registered commands. Keybinding assignment is coming soon —
-          for now, open the command palette with <kbd>Ctrl</kbd>+
-          <kbd>K</kbd>.
+          Click a binding to record a new chord. Your overrides persist
+          across restarts; the × resets to the manifest default.
         </p>
       </header>
 
@@ -67,9 +69,18 @@ export function HotkeysTab() {
                     )}
                     <span className="settings-row-title">{cmd.title}</span>
                   </div>
-                  <span className="settings-row-hint">
-                    {cmd.keybinding ?? "unassigned"}
-                  </span>
+                  <KeyCaptureInput
+                    value={cmd.keybinding}
+                    hasOverride={
+                      contributions.getKeybindingOverride(cmd.commandId) !== undefined
+                    }
+                    onCommit={(binding) => {
+                      void saveOverride(cmd.commandId, binding);
+                    }}
+                    onReset={() => {
+                      void resetOverride(cmd.commandId);
+                    }}
+                  />
                 </li>
               ))}
             </ul>

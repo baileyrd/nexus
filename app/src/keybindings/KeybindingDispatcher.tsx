@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { contributions, usePaletteCommands } from "../contributions";
+import { isCapturing } from "./capture-state";
 import { matchesBinding, parseKeybinding, type ParsedBinding } from "./parse";
 
 interface CompiledBinding {
@@ -46,6 +47,11 @@ export function KeybindingDispatcher() {
     if (compiled.length === 0) return undefined;
 
     function handler(e: KeyboardEvent) {
+      // Silent while the Hotkeys tab is recording a new chord — we
+      // must not fire an existing command when the user is trying to
+      // rebind it.
+      if (isCapturing()) return;
+
       // Skip when typing in an editable surface, unless the chord
       // includes Ctrl/Cmd/Alt — pure letter shortcuts inside an input
       // would swallow the keystroke.

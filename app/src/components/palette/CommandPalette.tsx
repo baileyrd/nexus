@@ -10,6 +10,7 @@ import {
   usePaletteCommands,
   type PaletteCommand,
 } from "../../contributions";
+import { isCapturing } from "../../keybindings/capture-state";
 import { usePaletteStore } from "../../stores/palette";
 import { Icon } from "../Icon";
 import { fuzzyRank } from "./fuzzy";
@@ -37,6 +38,9 @@ export function CommandPalette() {
 function useGlobalToggle(togglePalette: () => void) {
   useEffect(() => {
     function handler(e: KeyboardEvent) {
+      // Don't hijack Cmd/Ctrl+K when the Hotkeys tab is recording a
+      // new chord — the user might be trying to rebind the palette.
+      if (isCapturing()) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         togglePalette();

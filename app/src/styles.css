@@ -1374,3 +1374,88 @@ main {
 .settings-error {
   color: rgb(170, 40, 40);
 }
+
+/* ── Keybinding capture chip ─────────────────────────────────────────────── */
+
+.keybinding-chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.keybinding-chip {
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--nx-text-primary, #111);
+  background: var(--nx-bg-secondary, #f6f7f9);
+  border: 1px solid var(--nx-bg-tertiary, #e8eaef);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.keybinding-chip:hover,
+.keybinding-chip:focus-visible {
+  border-color: var(--nx-accent, #6c8cff);
+  outline: none;
+}
+
+.keybinding-chip.empty {
+  font-style: italic;
+  color: var(--nx-text-tertiary, #9a9ca4);
+}
+
+.keybinding-chip.overridden {
+  border-color: var(--nx-accent, #6c8cff);
+  background: rgba(108, 140, 255, 0.08);
+}
+
+.keybinding-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-tertiary, #9a9ca4);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.keybinding-reset:hover {
+  background: var(--nx-bg-tertiary, #e8eaef);
+  color: var(--nx-text-primary, #111);
+}
+
+.keybinding-capture {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--nx-accent, #6c8cff);
+  padding: 3px 10px;
+  border: 1px dashed var(--nx-accent, #6c8cff);
+  border-radius: 6px;
+  background: rgba(108, 140, 255, 0.08);
+  animation: keybinding-capture-pulse 1.4s ease-in-out infinite;
+}
+
+.keybinding-capture kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--nx-bg-tertiary, #e8eaef);
+  color: var(--nx-text-secondary, #555);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 11px;
+}
+
+@keyframes keybinding-capture-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.7; }
+}

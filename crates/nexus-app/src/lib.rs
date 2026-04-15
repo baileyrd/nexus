@@ -19,6 +19,7 @@ use tauri::Manager;
 
 pub mod commands;
 pub mod forge;
+pub mod keybindings;
 pub mod persistence;
 pub mod plugins;
 
@@ -92,6 +93,9 @@ pub fn run() {
             plugins::list_plugin_contributions,
             plugins::invoke_plugin_command,
             plugins::list_plugins,
+            keybindings::get_keybinding_overrides,
+            keybindings::set_keybinding_override,
+            keybindings::clear_keybinding_override,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch nexus-app");

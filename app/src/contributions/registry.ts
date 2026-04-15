@@ -47,6 +47,13 @@ const commands = new Map<string, CommandHandler>();
 const views = new Map<string, ViewOpener>();
 const contentTypes = new Map<string, ContentComponent>();
 const paletteCommands = new Map<string, PaletteCommand>();
+/**
+ * User keybinding overrides, keyed by `commandId`. When present, the
+ * effective keybinding exposed via `listPaletteCommands` / the React
+ * hook is the override, not the manifest-declared default.
+ * Hydrated from Rust on boot via `hydrateKeybindingOverrides`.
+ */
+const keybindingOverrides = new Map<string, string>();
 const contentTypeListeners = new Set<() => void>();
 const paletteListeners = new Set<() => void>();
 
@@ -151,7 +158,44 @@ export const contributions = {
   },
 
   listPaletteCommands(): PaletteCommand[] {
-    return Array.from(paletteCommands.values());
+    return Array.from(paletteCommands.values()).map(applyOverride);
+  },
+
+  /**
+   * Set the keybinding override for `commandId`. In-memory only — the
+   * caller is responsible for persisting via the `set_keybinding_override`
+   * Tauri command. Fires palette listeners so the dispatcher + Hotkeys
+   * tab re-render immediately.
+   */
+  setKeybindingOverride(commandId: string, binding: string): void {
+    keybindingOverrides.set(commandId, binding);
+    paletteSnapshot = null;
+    paletteListeners.forEach((fn) => fn());
+  },
+
+  /** Remove the override for `commandId`, reverting to the manifest default. */
+  clearKeybindingOverride(commandId: string): void {
+    if (!keybindingOverrides.delete(commandId)) return;
+    paletteSnapshot = null;
+    paletteListeners.forEach((fn) => fn());
+  },
+
+  /** Return the raw override string for `commandId`, or `undefined`. */
+  getKeybindingOverride(commandId: string): string | undefined {
+    return keybindingOverrides.get(commandId);
+  },
+
+  /**
+   * Replace the entire override map. Used once at boot to hydrate from
+   * the persisted file before the dispatcher mounts.
+   */
+  hydrateKeybindingOverrides(overrides: Record<string, string>): void {
+    keybindingOverrides.clear();
+    for (const [id, binding] of Object.entries(overrides)) {
+      if (binding) keybindingOverrides.set(id, binding);
+    }
+    paletteSnapshot = null;
+    paletteListeners.forEach((fn) => fn());
   },
 
   subscribePaletteCommands(fn: () => void): Disposable {
@@ -168,9 +212,22 @@ export function __resetContributions() {
   views.clear();
   contentTypes.clear();
   paletteCommands.clear();
+  keybindingOverrides.clear();
   contentTypeListeners.clear();
   paletteListeners.clear();
   paletteSnapshot = null;
+}
+
+/**
+ * Return `cmd` with its `keybinding` replaced by the user override if
+ * one exists. The stored `PaletteCommand` keeps the manifest-declared
+ * default untouched; this merge is what consumers (palette, Hotkeys
+ * tab, keybinding dispatcher) actually see.
+ */
+function applyOverride(cmd: PaletteCommand): PaletteCommand {
+  const override = keybindingOverrides.get(cmd.commandId);
+  if (override === undefined) return cmd;
+  return { ...cmd, keybinding: override };
 }
 
 /**
@@ -197,7 +254,7 @@ let paletteSnapshot: PaletteCommand[] | null = null;
 
 function paletteSnapshotFn(): PaletteCommand[] {
   if (!paletteSnapshot) {
-    paletteSnapshot = Array.from(paletteCommands.values());
+    paletteSnapshot = Array.from(paletteCommands.values()).map(applyOverride);
   }
   return paletteSnapshot;
 }

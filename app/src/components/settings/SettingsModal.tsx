@@ -1,5 +1,6 @@
 import { useEffect, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useSettingsStore, type SettingsTab } from "../../stores/settings";
+import { isCapturing } from "../../keybindings/capture-state";
 import { Icon } from "../Icon";
 import { GeneralTab } from "./tabs/GeneralTab";
 import { HotkeysTab } from "./tabs/HotkeysTab";
@@ -39,10 +40,12 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   const setActiveTab = useSettingsStore((s) => s.setActiveTab);
 
   // Close on global Escape — listening on the backdrop's keydown misses
-  // Esc because focus lives inside the right-pane content.
+  // Esc because focus lives inside the right-pane content. Suppressed
+  // while a keybinding capture is in flight; Esc there cancels the
+  // recording instead of closing the modal.
   useEffect(() => {
     function handler(e: KeyboardEvent) {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !isCapturing()) {
         e.preventDefault();
         onClose();
       }
