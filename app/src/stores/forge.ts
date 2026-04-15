@@ -57,6 +57,10 @@ export const useForgeStore = create<ForgeState>((set, get) => ({
       // persisting null over the OLD forge's saved state — hydrate
       // will re-open the new forge's last file (or leave it closed).
       useOpenFileStore.getState().reset();
+      // Backend updated last_forge_path + recent_forge_paths on disk;
+      // pull those back into the in-memory mirror so the recent list
+      // reflects the new ordering without a restart.
+      void useLayoutStore.getState().refreshPersistence();
     } catch (e) {
       set({ error: String(e), loading: false });
     }

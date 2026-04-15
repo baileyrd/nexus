@@ -33,6 +33,10 @@ interface LayoutState {
   /** Merge `patch` into the persisted UI state for a forge and
    *  schedule a save. */
   updateForgeUiState: (forgePath: string, patch: Partial<ForgeUiState>) => void;
+  /** Re-read persistence from disk. Called after the backend mutates
+   *  backend-managed fields (e.g. recent-forges list after a picker
+   *  open) so the in-memory mirror catches up. */
+  refreshPersistence: () => Promise<void>;
 }
 
 /** Merge persisted state over a freshly loaded preset layout. Active-
@@ -245,4 +249,14 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       });
       return { persistence };
     }),
+
+  refreshPersistence: async () => {
+    try {
+      const persistence = await getLayoutPersistence();
+      set({ persistence });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[layout] refresh failed:", err);
+    }
+  },
 }));

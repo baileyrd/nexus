@@ -1,29 +1,74 @@
-import type { FooterAction, SidePanelFooter as SidePanelFooterData } from "../../bindings";
+import { useRef, useState } from "react";
+import type {
+  FooterAction,
+  SidePanelFooter as SidePanelFooterData,
+} from "../../bindings";
 import { contributions } from "../../contributions";
+import { useForgeStore } from "../../stores/forge";
+import { useLayoutStore } from "../../stores/layout";
+import { ContextMenu, type ContextMenuItem } from "../ContextMenu";
 import { Icon } from "../Icon";
 
 interface SidePanelFooterProps {
   footer: SidePanelFooterData;
-  /** Forge name to display in the selector. Stub for now — the real value
-   * will come from the active forge once that's wired through IPC. */
+  /** Forge name to display in the selector. */
   forgeName?: string;
 }
 
 /**
  * Footer row pinned at the bottom of a side panel. Forge selector on
- * the left (when enabled), action icons on the right.
+ * the left (when enabled), action icons on the right. Clicking the
+ * selector opens a menu of recent forges plus an "Open folder…" entry
+ * that falls through to the directory picker.
  */
-export function SidePanelFooter({ footer, forgeName = "—" }: SidePanelFooterProps) {
+export function SidePanelFooter({
+  footer,
+  forgeName = "—",
+}: SidePanelFooterProps) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const recent = useLayoutStore((s) => s.persistence?.recentForgePaths ?? []);
+  const currentRoot = useForgeStore((s) => s.info?.root);
+  const openForge = useForgeStore((s) => s.open);
+
+  const visibleRecent = recent.filter((p) => p !== currentRoot);
+  const hasRecent = visibleRecent.length > 0;
+
+  const items: ContextMenuItem[] = [
+    ...visibleRecent.map((path, i) => ({
+      id: `recent-${i}`,
+      label: path,
+      onSelect: () => void openForge(path),
+    })),
+    {
+      id: "open-folder",
+      label: "Open folder…",
+      separatorBefore: hasRecent,
+      onSelect: () => contributions.invokeCommand("workspace.switch-forge"),
+    },
+  ];
+
+  const onSelectorClick = () => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMenu({ x: rect.left, y: rect.top });
+  };
+
   return (
     <div className="side-panel-footer">
       {footer.showForgeSelector && (
         <button
+          ref={buttonRef}
           type="button"
           className="forge-selector"
           title="Switch forge"
-          onClick={() => contributions.invokeCommand("workspace.switch-forge")}
+          onClick={onSelectorClick}
         >
-          <Icon name="chevrons-up-down" size={14} className="forge-selector-chevron" />
+          <Icon
+            name="chevrons-up-down"
+            size={14}
+            className="forge-selector-chevron"
+          />
           <span className="forge-selector-name">{forgeName}</span>
         </button>
       )}
@@ -41,6 +86,15 @@ export function SidePanelFooter({ footer, forgeName = "—" }: SidePanelFooterPr
           </button>
         ))}
       </div>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={items}
+          placement="above"
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   );
 }
@@ -51,7 +105,9 @@ function handleFooterClick(action: FooterAction) {
       // Footer-level togglePanel needs a side resolution (same as ribbon);
       // left as a log until ribbon/footer actions carry a target side.
       // eslint-disable-next-line no-console
-      console.log(`[footer] togglePanel '${action.action.panelId}' (target side panel pending)`);
+      console.log(
+        `[footer] togglePanel '${action.action.panelId}' (target side panel pending)`,
+      );
       return;
     case "invokeCommand":
       contributions.invokeCommand(action.action.command);

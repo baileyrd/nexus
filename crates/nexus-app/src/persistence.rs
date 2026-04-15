@@ -27,6 +27,9 @@ use tauri::{AppHandle, Manager};
 
 const FILE_NAME: &str = "layout-state.json";
 const CURRENT_VERSION: u32 = 1;
+/// Maximum number of recent forge paths retained. Older entries drop
+/// off the end once the list exceeds this size.
+const MAX_RECENT_FORGES: usize = 8;
 
 /// Root of the persisted state. Keyed by preset id so switching between
 /// presets preserves each one's side-panel state independently.
@@ -44,6 +47,10 @@ pub struct LayoutPersistence {
     /// without this field deserialize as `None`.
     #[serde(default)]
     pub last_forge_path: Option<String>,
+    /// Most-recently-used forge roots, newest first. Capped to
+    /// [`MAX_RECENT_FORGES`]. Updated alongside `last_forge_path`.
+    #[serde(default)]
+    pub recent_forge_paths: Vec<String>,
     /// Per-preset state keyed by preset id.
     pub layouts: std::collections::BTreeMap<String, PersistedLayoutState>,
     /// Per-forge UI state (expanded tree paths, last-open file)
@@ -59,6 +66,7 @@ impl Default for LayoutPersistence {
             version: CURRENT_VERSION,
             last_preset_id: None,
             last_forge_path: None,
+            recent_forge_paths: Vec::new(),
             layouts: std::collections::BTreeMap::new(),
             forge_state: std::collections::BTreeMap::new(),
         }
@@ -153,6 +161,7 @@ pub fn save_layout_persistence(
     let path = resolve_path(&app)?;
     let existing = load_from(&path);
     state.last_forge_path = existing.last_forge_path;
+    state.recent_forge_paths = existing.recent_forge_paths;
     save_to(&path, &state)
 }
 
@@ -165,8 +174,9 @@ pub fn read_last_forge_path(app: &AppHandle) -> Option<String> {
     load_from(&path).last_forge_path
 }
 
-/// Write `path` as the new `last_forge_path`, preserving every other
-/// field. Errors are logged and swallowed since persistence drift
+/// Write `path` as the new `last_forge_path` and promote it to the
+/// front of `recent_forge_paths` (dedup + cap). Other fields are
+/// preserved. Errors are logged and swallowed since persistence drift
 /// shouldn't break a successful forge open.
 pub fn write_last_forge_path(app: &AppHandle, forge_path: &Path) {
     let Ok(file_path) = resolve_path(app) else {
@@ -174,7 +184,11 @@ pub fn write_last_forge_path(app: &AppHandle, forge_path: &Path) {
         return;
     };
     let mut state = load_from(&file_path);
-    state.last_forge_path = Some(forge_path.to_string_lossy().into_owned());
+    let path_str = forge_path.to_string_lossy().into_owned();
+    state.last_forge_path = Some(path_str.clone());
+    state.recent_forge_paths.retain(|p| p != &path_str);
+    state.recent_forge_paths.insert(0, path_str);
+    state.recent_forge_paths.truncate(MAX_RECENT_FORGES);
     if let Err(err) = save_to(&file_path, &state) {
         tracing::warn!(%err, "failed to persist last_forge_path");
     }
@@ -245,6 +259,27 @@ mod tests {
         assert_eq!(loaded.last_preset_id.as_deref(), Some("vibe"));
         assert!(loaded.last_forge_path.is_none());
         assert!(loaded.forge_state.is_empty());
+    }
+
+    #[test]
+    fn recent_forge_paths_round_trips() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut state = LayoutPersistence::default();
+        state.recent_forge_paths = vec!["/a".into(), "/b".into()];
+        save_to(tmp.path(), &state).unwrap();
+        let loaded = load_from(tmp.path());
+        assert_eq!(loaded.recent_forge_paths, vec!["/a", "/b"]);
+    }
+
+    #[test]
+    fn legacy_file_without_recent_forges_loads() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let json =
+            r#"{"version":1,"lastPresetId":null,"lastForgePath":"/x","layouts":{}}"#;
+        fs::write(tmp.path(), json).unwrap();
+        let loaded = load_from(tmp.path());
+        assert_eq!(loaded.last_forge_path.as_deref(), Some("/x"));
+        assert!(loaded.recent_forge_paths.is_empty());
     }
 
     #[test]

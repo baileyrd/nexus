@@ -26,6 +26,10 @@ export interface LayoutPersistence {
    *  on every successful `open_forge`; the frontend should treat it
    *  as read-only state. */
   lastForgePath?: string | null;
+  /** Most-recently-used forge roots, newest first, deduped, capped.
+   *  Written by the backend alongside `lastForgePath`. Read-only on
+   *  the frontend. */
+  recentForgePaths?: string[];
   layouts: Record<string, PersistedLayoutState>;
   /** Per-forge UI state keyed by forge root absolute path. */
   forgeState?: Record<string, ForgeUiState>;
