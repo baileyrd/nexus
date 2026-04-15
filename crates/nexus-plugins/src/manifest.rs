@@ -89,6 +89,24 @@ pub struct Registrations {
     pub event_subscribers: Vec<EventSubscriberReg>,
     /// UI palette command registrations.
     pub ui_commands: Vec<UiCommandReg>,
+    /// UI side-panel registrations.
+    pub ui_panels: Vec<UiPanelReg>,
+}
+
+/// Which side of the workspace a plugin-contributed panel docks to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PanelSide {
+    /// Dock on the left side panel (default when `side` is omitted).
+    Left,
+    /// Dock on the right side panel.
+    Right,
+}
+
+impl Default for PanelSide {
+    fn default() -> Self {
+        Self::Left
+    }
 }
 
 /// A single CLI subcommand registration.
@@ -144,6 +162,24 @@ pub struct UiCommandReg {
     /// `"Ctrl+Alt+/"`. `"Mod"` resolves to Ctrl on Linux/Windows and
     /// Cmd on macOS. Users will eventually be able to override this.
     pub keybinding: Option<String>,
+}
+
+/// A single UI side-panel registration — a plugin-contributed panel
+/// that docks into the left or right side panel. The plugin's handler
+/// is invoked when the panel mounts and must return a string; the
+/// frontend renders that string inside the panel's content area.
+#[derive(Debug, Clone)]
+pub struct UiPanelReg {
+    /// Unique panel identifier within the plugin.
+    pub id: String,
+    /// WASM handler index invoked to produce the panel's content.
+    pub handler_id: u32,
+    /// Human-readable panel title shown in the selector tab.
+    pub title: String,
+    /// Lucide icon name for the panel selector.
+    pub icon: String,
+    /// Which side panel to dock into. Defaults to [`PanelSide::Left`].
+    pub side: PanelSide,
 }
 
 /// Lifecycle hook enablement flags.
@@ -237,6 +273,8 @@ struct TomlRegistrations {
     event_subscribers: Vec<TomlEventSubscriberReg>,
     #[serde(default, rename = "ui_command")]
     ui_commands: Vec<TomlUiCommandReg>,
+    #[serde(default, rename = "ui_panel")]
+    ui_panels: Vec<TomlUiPanelReg>,
 }
 
 #[derive(Deserialize)]
@@ -270,6 +308,16 @@ struct TomlUiCommandReg {
     icon: Option<String>,
     #[serde(default)]
     keybinding: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TomlUiPanelReg {
+    id: String,
+    handler_id: u32,
+    title: String,
+    icon: String,
+    #[serde(default)]
+    side: PanelSide,
 }
 
 #[derive(Deserialize, Default)]
@@ -361,6 +409,18 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
                     category: r.category,
                     icon: r.icon,
                     keybinding: r.keybinding,
+                })
+                .collect(),
+            ui_panels: raw
+                .registrations
+                .ui_panels
+                .into_iter()
+                .map(|r| UiPanelReg {
+                    id: r.id,
+                    handler_id: r.handler_id,
+                    title: r.title,
+                    icon: r.icon,
+                    side: r.side,
                 })
                 .collect(),
         },
@@ -472,6 +532,13 @@ category = "Demo"
 icon = "hand"
 keybinding = "Mod+Shift+H"
 
+[[registrations.ui_panel]]
+id = "test.panel"
+handler_id = 400
+title = "Hello Panel"
+icon = "hand"
+side = "right"
+
 [lifecycle]
 on_init = true
 on_start = true
@@ -495,6 +562,7 @@ on_stop = true
         assert!(m.registrations.ipc_commands.is_empty());
         assert!(m.registrations.event_subscribers.is_empty());
         assert!(m.registrations.ui_commands.is_empty());
+        assert!(m.registrations.ui_panels.is_empty());
     }
 
     #[test]
@@ -521,6 +589,13 @@ on_stop = true
         assert_eq!(ui.category.as_deref(), Some("Demo"));
         assert_eq!(ui.icon.as_deref(), Some("hand"));
         assert_eq!(ui.keybinding.as_deref(), Some("Mod+Shift+H"));
+        assert_eq!(m.registrations.ui_panels.len(), 1);
+        let panel = &m.registrations.ui_panels[0];
+        assert_eq!(panel.id, "test.panel");
+        assert_eq!(panel.handler_id, 400);
+        assert_eq!(panel.title, "Hello Panel");
+        assert_eq!(panel.icon, "hand");
+        assert_eq!(panel.side, PanelSide::Right);
         assert!(m.lifecycle.on_init);
         assert!(m.lifecycle.on_start);
         assert!(m.lifecycle.on_stop);
@@ -618,6 +693,30 @@ title = "Bare Command"
     }
 
     #[test]
+    fn parse_ui_panel_side_defaults_to_left() {
+        let toml = r#"
+[plugin]
+id = "com.example.test"
+name = "Test"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.ui_panel]]
+id = "ui.default-side"
+handler_id = 10
+title = "Panel"
+icon = "hand"
+"#;
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        let panel = &m.registrations.ui_panels[0];
+        assert_eq!(panel.side, PanelSide::Left);
+    }
+
+    #[test]
     fn parse_lifecycle_defaults_to_false() {
         let m = parse_manifest(MINIMAL, "manifest.toml").unwrap();
         assert!(!m.lifecycle.on_init);
@@ -699,6 +798,13 @@ pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), Plug
             manifest
                 .registrations
                 .ui_commands
+                .iter()
+                .map(|r| r.handler_id),
+        )
+        .chain(
+            manifest
+                .registrations
+                .ui_panels
                 .iter()
                 .map(|r| r.handler_id),
         )

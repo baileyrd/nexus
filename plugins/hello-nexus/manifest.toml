@@ -18,5 +18,12 @@ category = "Demo"
 icon = "hand"
 keybinding = "Mod+Shift+H"
 
+[[registrations.ui_panel]]
+id = "hello.panel"
+handler_id = 101
+title = "Hello Nexus"
+icon = "hand"
+side = "right"
+
 [lifecycle]
 on_init = true

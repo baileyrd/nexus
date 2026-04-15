@@ -1459,3 +1459,28 @@ main {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.7; }
 }
+
+/* ── Plugin panel ────────────────────────────────────────────────────────── */
+
+.plugin-panel-content {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--nx-text-primary, #111);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-y: auto;
+}
+
+.plugin-panel.loading,
+.plugin-panel.error {
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--nx-text-tertiary, #9a9ca4);
+}
+
+.plugin-panel.error {
+  color: rgb(170, 40, 40);
+}

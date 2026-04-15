@@ -7,7 +7,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use nexus_plugins::{PluginManager, PluginManagerConfig, PluginStatus, TrustLevel, UiContribution};
+use nexus_plugins::{
+    PluginManager, PluginManagerConfig, PluginStatus, TrustLevel, UiContribution,
+    UiPanelContribution,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Tauri event emitted when one or more community plugins have been
@@ -127,6 +130,18 @@ pub fn list_plugin_contributions(state: State<'_, PluginState>) -> Vec<UiContrib
         .0
         .lock()
         .map(|mgr| mgr.ui_contributions())
+        .unwrap_or_default()
+}
+
+/// List all plugin-contributed side panels across every loaded plugin.
+/// The frontend merges these into the active layout's left/right side
+/// panel arrays at render time.
+#[tauri::command]
+pub fn list_plugin_panels(state: State<'_, PluginState>) -> Vec<UiPanelContribution> {
+    state
+        .0
+        .lock()
+        .map(|mgr| mgr.ui_panels())
         .unwrap_or_default()
 }
 

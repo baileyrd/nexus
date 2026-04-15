@@ -22,7 +22,8 @@ pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 pub use loader::{CorePlugin, CorePluginFuture, PluginLoader, SharedPluginLoader};
 pub use manifest::{
     CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
-    PluginManifest, Registrations, SettingsConfig, UiCommandReg, WasmConfig,
+    PanelSide, PluginManifest, Registrations, SettingsConfig, UiCommandReg, UiPanelReg,
+    WasmConfig,
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
 pub use sandbox::{PluginData, WasmSandbox};
@@ -53,6 +54,25 @@ pub struct UiContribution {
     /// Optional default keybinding — a `+`-separated chord parsed and
     /// dispatched on the frontend (e.g. `"Mod+Shift+H"`).
     pub keybinding: Option<String>,
+}
+
+/// A single plugin-contributed side panel, materialised for the frontend.
+///
+/// Aggregated by [`PluginManager::ui_panels`] across every loaded
+/// plugin's `[[registrations.ui_panel]]` entries. The frontend merges
+/// these into the active workspace layout at render time.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UiPanelContribution {
+    /// The plugin that owns this panel.
+    pub plugin_id: String,
+    /// The `id` declared in the manifest's `ui_panel` entry.
+    pub panel_id: String,
+    /// Panel title shown in the side-panel selector.
+    pub title: String,
+    /// Lucide icon name.
+    pub icon: String,
+    /// `"left"` or `"right"` — which side panel to dock into.
+    pub side: String,
 }
 
 // ─── PluginManagerConfig ──────────────────────────────────────────────────────
@@ -201,6 +221,36 @@ impl PluginManager {
                         category: r.category,
                         icon: r.icon,
                         keybinding: r.keybinding,
+                    })
+            })
+            .collect()
+    }
+
+    /// Aggregate UI side-panel contributions across all currently-loaded
+    /// plugins. Returns one [`UiPanelContribution`] per
+    /// `[[registrations.ui_panel]]` entry; the frontend merges these
+    /// into the active workspace layout at render time.
+    #[must_use]
+    pub fn ui_panels(&self) -> Vec<UiPanelContribution> {
+        self.loader
+            .list()
+            .into_iter()
+            .flat_map(|info| {
+                let plugin_id = info.id.clone();
+                self.loader
+                    .manifest(&info.id)
+                    .map(|m| m.registrations.ui_panels.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |r| UiPanelContribution {
+                        plugin_id: plugin_id.clone(),
+                        panel_id: r.id,
+                        title: r.title,
+                        icon: r.icon,
+                        side: match r.side {
+                            PanelSide::Left => "left".to_string(),
+                            PanelSide::Right => "right".to_string(),
+                        },
                     })
             })
             .collect()

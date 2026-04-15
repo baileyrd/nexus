@@ -16,6 +16,19 @@ export interface PluginUiContribution {
 }
 
 /**
+ * Mirrors `nexus_plugins::UiPanelContribution`. `side` is `"left"` or
+ * `"right"`; the frontend merges these into the active layout's side
+ * panels at render time.
+ */
+export interface PluginUiPanel {
+  plugin_id: string;
+  panel_id: string;
+  title: string;
+  icon: string;
+  side: string;
+}
+
+/**
  * Mirrors `nexus_app::plugins::PluginSummary`. Trust level is `"core"`
  * or `"community"`; status is `"loaded"`, `"initialized"`, `"running"`,
  * `"stopped"`, or `"crashed"`.
@@ -30,6 +43,10 @@ export interface PluginSummary {
 
 export function listPluginContributions(): Promise<PluginUiContribution[]> {
   return invoke<PluginUiContribution[]>("list_plugin_contributions");
+}
+
+export function listPluginPanels(): Promise<PluginUiPanel[]> {
+  return invoke<PluginUiPanel[]>("list_plugin_panels");
 }
 
 export function listPlugins(): Promise<PluginSummary[]> {

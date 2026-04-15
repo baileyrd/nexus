@@ -35,6 +35,11 @@ pub extern "C" fn nexus_dispatch(handler_id: u32, args_ptr: u32, args_len: u32) 
                 }
             }
         }
+        101 => {
+            // panel render: returns { content: "..." } as JSON
+            br#"{"content":"Hello from the hello-nexus plugin panel!\n\nThis text was rendered by a WASM handler running in a sandboxed VM."}"#
+                .to_vec()
+        }
         _ => b"{\"error\":\"unknown handler\"}".to_vec(),
     };
 

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { Panel } from "../bindings";
 import {
   getDefaultLayout,
   getLayoutPreset,
@@ -13,6 +14,7 @@ import {
   type LayoutPersistence,
   type PersistedLayoutState,
 } from "../ipc/persistence";
+import type { PluginUiPanel } from "../ipc/plugins";
 
 interface LayoutState {
   layout: WorkspaceLayout | null;
@@ -20,6 +22,10 @@ interface LayoutState {
   /** Snapshot of persisted state loaded at boot and kept in sync with
    *  in-memory mutations. Null until `load()` finishes. */
   persistence: LayoutPersistence | null;
+  /** Latest snapshot of plugin-contributed side panels. Re-applied to
+   *  `layout` whenever the store or plugins reload so the merge
+   *  survives preset switches + hot-reloads. */
+  pluginPanels: PluginUiPanel[];
   loading: boolean;
   error: string | null;
   load: () => Promise<void>;
@@ -28,6 +34,9 @@ interface LayoutState {
   togglePanelVisibility: (side: "left" | "right", panelId: string) => void;
   toggleSidePanelCollapsed: (side: "left" | "right") => void;
   activatePanel: (side: "left" | "right", panelId: string) => void;
+  /** Replace the plugin-panel snapshot and re-merge into the active
+   *  layout. Call after fetching `list_plugin_panels`. */
+  setPluginPanels: (panels: PluginUiPanel[]) => void;
   /** Read the persisted UI state for a forge, or `null` if none yet. */
   forgeUiState: (forgePath: string) => ForgeUiState | null;
   /** Merge `patch` into the persisted UI state for a forge and
@@ -37,6 +46,58 @@ interface LayoutState {
    *  backend-managed fields (e.g. recent-forges list after a picker
    *  open) so the in-memory mirror catches up. */
   refreshPersistence: () => Promise<void>;
+}
+
+/**
+ * Compose a plugin-contributed `Panel` from a `PluginUiPanel`. Each
+ * gets a unique contentType + id namespaced under its owning plugin
+ * so they can't collide with built-in panels or each other.
+ */
+function toPanel(p: PluginUiPanel): Panel {
+  const id = `plugin:${p.plugin_id}:${p.panel_id}`;
+  return {
+    id,
+    title: p.title,
+    icon: p.icon,
+    plugin: p.plugin_id,
+    visible: false,
+    toolbar: [],
+    contentType: id,
+  };
+}
+
+/**
+ * Return `layout` with `pluginPanels` merged into the correct side.
+ * Panels with `plugin != null` are dropped from the base first so
+ * repeated merges (plugin reload) don't leave stale entries.
+ */
+function mergePluginPanels(
+  layout: WorkspaceLayout,
+  pluginPanels: PluginUiPanel[],
+): WorkspaceLayout {
+  function mergeSide(
+    side: WorkspaceLayout["leftSidePanel"],
+    whichSide: "left" | "right",
+  ): WorkspaceLayout["leftSidePanel"] {
+    const builtin = side.panels.filter((p) => !p.plugin);
+    const builtinOrder = side.panelOrder.filter(
+      (id) => builtin.some((p) => p.id === id),
+    );
+    const additions = pluginPanels
+      .filter((p) => p.side === whichSide)
+      .map(toPanel);
+    return {
+      ...side,
+      panels: [...builtin, ...additions],
+      panelOrder: [...builtinOrder, ...additions.map((p) => p.id)],
+    };
+  }
+
+  return {
+    ...layout,
+    leftSidePanel: mergeSide(layout.leftSidePanel, "left"),
+    rightSidePanel: mergeSide(layout.rightSidePanel, "right"),
+  };
 }
 
 /** Merge persisted state over a freshly loaded preset layout. Active-
@@ -125,6 +186,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   layout: null,
   presets: [],
   persistence: null,
+  pluginPanels: [],
   loading: false,
   error: null,
 
@@ -136,7 +198,8 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       const base = presetId
         ? await getLayoutPreset(presetId).catch(() => getDefaultLayout())
         : await getDefaultLayout();
-      const layout = applyOverlay(base, persistence?.layouts?.[base.id]);
+      const overlaid = applyOverlay(base, persistence?.layouts?.[base.id]);
+      const layout = mergePluginPanels(overlaid, get().pluginPanels);
       set({
         layout,
         persistence: persistence ?? { version: 1, lastPresetId: null, layouts: {} },
@@ -160,8 +223,9 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const base = await getLayoutPreset(id);
-      const { persistence } = get();
-      const layout = applyOverlay(base, persistence?.layouts?.[base.id]);
+      const { persistence, pluginPanels } = get();
+      const overlaid = applyOverlay(base, persistence?.layouts?.[base.id]);
+      const layout = mergePluginPanels(overlaid, pluginPanels);
       const nextPersistence = updatePersistence(persistence, layout);
       scheduleSave(nextPersistence);
       set({ layout, persistence: nextPersistence, loading: false });
@@ -219,6 +283,15 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       const persistence = updatePersistence(state.persistence, layout);
       scheduleSave(persistence);
       return { layout, persistence };
+    }),
+
+  setPluginPanels: (panels) =>
+    set((state) => {
+      if (!state.layout) return { pluginPanels: panels };
+      return {
+        pluginPanels: panels,
+        layout: mergePluginPanels(state.layout, panels),
+      };
     }),
 
   forgeUiState: (forgePath) =>

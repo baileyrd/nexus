@@ -91,6 +91,7 @@ pub fn run() {
             forge::rename_forge_entry,
             forge::delete_forge_entry,
             plugins::list_plugin_contributions,
+            plugins::list_plugin_panels,
             plugins::invoke_plugin_command,
             plugins::list_plugins,
             keybindings::get_keybinding_overrides,
