@@ -245,6 +245,8 @@ button {
 .side-panel-body .panel-area {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: var(--nx-bg-primary, #fff);
@@ -298,7 +300,8 @@ button {
 .panel-view {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .panel-header {
@@ -353,6 +356,8 @@ button {
 
 .panel-content {
   flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
   padding: 12px;
   font-size: 0.85em;
   color: var(--nx-text-tertiary, #7a7a7a);
