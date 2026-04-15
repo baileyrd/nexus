@@ -4,7 +4,7 @@ import { useLayoutStore } from "../../stores/layout";
 import { LayoutPresetPicker } from "./LayoutPresetPicker";
 import { PanelSelector } from "./PanelSelector";
 import { PanelToolbar } from "./PanelToolbar";
-import { Ribbon } from "./Ribbon";
+import { RibbonItems } from "./Ribbon";
 import { SidePanelFooter } from "./SidePanelFooter";
 import { SplitPane } from "./SplitPane";
 
@@ -32,52 +32,48 @@ export function WorkspaceView() {
 
       {layout ? (
         <div className="workspace-frame" data-workspace-name={layout.name}>
-          <div className="workspace-chrome">
-            <div className="workspace-chrome-left">
-              <SidePanelToggle
-                side="left"
-                collapsed={layout.leftSidePanel.collapsed}
-                onClick={() => toggleSidePanelCollapsed("left")}
-              />
-              <PanelSelector
-                panels={layout.leftSidePanel.panels}
-                label="Left side panel"
-                onSelect={(id) => activatePanel("left", id)}
-              />
-            </div>
-            <div className="workspace-chrome-right">
-              <PanelSelector
-                panels={layout.rightSidePanel.panels}
-                label="Right side panel"
-                onSelect={(id) => activatePanel("right", id)}
-              />
+          <nav className="ribbon" aria-label="Workspace ribbon">
+            <SidePanelToggle
+              side="left"
+              collapsed={layout.leftSidePanel.collapsed}
+              onClick={() => toggleSidePanelCollapsed("left")}
+            />
+            <RibbonItems items={layout.ribbon} />
+          </nav>
+          {!layout.leftSidePanel.collapsed && (
+            <SidePanelView
+              side="left"
+              sidePanel={layout.leftSidePanel}
+              onActivate={(id) => activatePanel("left", id)}
+              onTogglePanel={(id) => togglePanelVisibility("left", id)}
+            />
+          )}
+          <div className="workspace-center">
+            <SplitPane
+              node={layout.root}
+              focusedPaneId={layout.focusedPaneId}
+            />
+            {!layout.bottomPanel.collapsed && (
+              <BottomPreview height={layout.bottomPanel.height} />
+            )}
+          </div>
+          <div className="right-side-panel-region">
+            <div className="right-side-panel-top">
               <SidePanelToggle
                 side="right"
                 collapsed={layout.rightSidePanel.collapsed}
                 onClick={() => toggleSidePanelCollapsed("right")}
               />
-            </div>
-          </div>
-          <div className="workspace-body">
-            {layout.ribbon.length > 0 && <Ribbon items={layout.ribbon} />}
-            {!layout.leftSidePanel.collapsed && (
-              <SidePanelView
-                side="left"
-                sidePanel={layout.leftSidePanel}
-                onTogglePanel={(id) => togglePanelVisibility("left", id)}
-              />
-            )}
-            <div className="workspace-center">
-              <SplitPane
-                node={layout.root}
-                focusedPaneId={layout.focusedPaneId}
-              />
-              {!layout.bottomPanel.collapsed && (
-                <BottomPreview height={layout.bottomPanel.height} />
+              {!layout.rightSidePanel.collapsed && (
+                <PanelSelector
+                  panels={layout.rightSidePanel.panels}
+                  label="Right side panel"
+                  onSelect={(id) => activatePanel("right", id)}
+                />
               )}
             </div>
             {!layout.rightSidePanel.collapsed && (
-              <SidePanelView
+              <SidePanelBody
                 side="right"
                 sidePanel={layout.rightSidePanel}
                 onTogglePanel={(id) => togglePanelVisibility("right", id)}
@@ -124,24 +120,51 @@ function SidePanelToggle({ side, collapsed, onClick }: SidePanelToggleProps) {
 interface SidePanelViewProps {
   side: "left" | "right";
   sidePanel: SidePanel;
+  onActivate: (panelId: string) => void;
   onTogglePanel: (panelId: string) => void;
 }
 
 /**
- * One docked side panel. Three stacked surfaces:
+ * Left side panel — full height, stacked vertically:
  *
- *   1. Panel-selector toolbar (horizontal, derived from `panels`)
- *   2. Active panel's local toolbar (in the panel header)
- *   3. Active panel's content area
+ *   1. Panel-selector toolbar (toolbar 1) at the top
+ *   2. Active panel: header (title + toolbar 2) + content
+ *   3. Footer (forge selector + actions), if any
  *
- * The workspace activity ribbon is rendered separately by
- * `WorkspaceView` — it isn't part of the side panel.
+ * The left side-panel toggle lives in the workspace ribbon to the
+ * left of this component; when collapsed, this whole component is
+ * unmounted.
  */
-function SidePanelView({ side, sidePanel, onTogglePanel }: SidePanelViewProps) {
+function SidePanelView({ side, sidePanel, onActivate, onTogglePanel }: SidePanelViewProps) {
+  return (
+    <aside className="side-panel-preview" data-side={side}>
+      <PanelSelector
+        panels={sidePanel.panels}
+        label={`${side === "left" ? "Left" : "Right"} side panel`}
+        onSelect={onActivate}
+      />
+      <SidePanelBody side={side} sidePanel={sidePanel} onTogglePanel={onTogglePanel} />
+    </aside>
+  );
+}
+
+interface SidePanelBodyProps {
+  side: "left" | "right";
+  sidePanel: SidePanel;
+  onTogglePanel: (panelId: string) => void;
+}
+
+/**
+ * Body-only rendering: active panel + footer, no panel-selector.
+ * Used by the right side panel where toolbar 1 lives in the
+ * `right-side-panel-top` row (next to the right toggle), not inside
+ * the side-panel container itself.
+ */
+function SidePanelBody({ side, sidePanel, onTogglePanel }: SidePanelBodyProps) {
   const activePanel = sidePanel.panels.find((p) => p.visible) ?? null;
 
   return (
-    <aside className="side-panel-preview" data-side={side}>
+    <div className="side-panel-body" data-side={side}>
       <div className="panel-area">
         {activePanel ? (
           <PanelView panel={activePanel} onTogglePanel={onTogglePanel} />
@@ -152,7 +175,7 @@ function SidePanelView({ side, sidePanel, onTogglePanel }: SidePanelViewProps) {
       {sidePanel.footer && (
         <SidePanelFooter footer={sidePanel.footer} forgeName="lap-working" />
       )}
-    </aside>
+    </div>
   );
 }
 

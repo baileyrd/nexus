@@ -1,22 +1,22 @@
 import type { RibbonItem } from "../../bindings";
 
-interface RibbonProps {
+interface RibbonItemsProps {
   items: RibbonItem[];
 }
 
 /**
- * Workspace activity ribbon — the narrow vertical icon rail docked to
- * the far-left edge of the window, independent of either side panel.
+ * The button list inside the workspace ribbon. Rendered without a
+ * surrounding `<nav>` so the parent (`WorkspaceView`) can place it next
+ * to the left side-panel toggle in the same `<nav className="ribbon">`
+ * column.
  *
  * Items are plugin/view shortcuts (graph view, calendar, terminal, …)
  * resolved through the UI contribution registry (pending §8 / §13).
- * Until that lands, icons render as the first letter of the ribbon
- * item id and `invokeCommand` / `openView` clicks log to the console.
  */
-export function Ribbon({ items }: RibbonProps) {
+export function RibbonItems({ items }: RibbonItemsProps) {
   if (items.length === 0) return null;
   return (
-    <nav className="ribbon" aria-label="Workspace ribbon">
+    <>
       {items.map((item) => (
         <button
           key={item.id}
@@ -31,7 +31,7 @@ export function Ribbon({ items }: RibbonProps) {
           </span>
         </button>
       ))}
-    </nav>
+    </>
   );
 }
 

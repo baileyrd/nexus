@@ -155,7 +155,6 @@ button {
 
 .workspace-frame {
   display: flex;
-  flex-direction: column;
   height: 480px;
   border: 1px solid var(--nx-bg-tertiary, #e8eaef);
   border-radius: 8px;
@@ -163,26 +162,16 @@ button {
   background: var(--nx-bg-primary, #ffffff);
 }
 
-.workspace-chrome {
+.workspace-center {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 6px;
-  background: var(--nx-bg-secondary, #f8f9fa);
-  border-bottom: 1px solid var(--nx-bg-tertiary, #e8eaef);
-  flex-shrink: 0;
-}
-
-.workspace-chrome-left,
-.workspace-chrome-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .side-panel-toggle {
-  width: 28px;
-  height: 24px;
+  width: 32px;
+  height: 28px;
   border: none;
   background: transparent;
   color: var(--nx-text-secondary, #4a4a4a);
@@ -209,17 +198,29 @@ button {
   outline-offset: 1px;
 }
 
-.workspace-body {
-  display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.workspace-center {
+.right-side-panel-region {
   display: flex;
   flex-direction: column;
-  flex: 1 1 0;
-  min-width: 0;
+  flex-shrink: 0;
+  border-left: 1px solid var(--nx-bg-tertiary, #e8eaef);
+  background: var(--nx-bg-secondary, #f8f9fa);
+}
+
+.right-side-panel-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--nx-bg-tertiary, #e8eaef);
+  background: var(--nx-bg-secondary, #f8f9fa);
+}
+
+.side-panel-body {
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .side-panel-preview {
@@ -231,12 +232,13 @@ button {
   border-right: 1px solid var(--nx-bg-tertiary, #e8eaef);
 }
 
-.side-panel-preview[data-side="right"] {
-  border-right: none;
-  border-left: 1px solid var(--nx-bg-tertiary, #e8eaef);
+.side-panel-preview > .panel-selector {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--nx-bg-tertiary, #e8eaef);
 }
 
-.side-panel-preview .panel-area {
+.side-panel-preview .panel-area,
+.side-panel-body .panel-area {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
@@ -281,7 +283,8 @@ button {
   outline-offset: 2px;
 }
 
-.side-panel-preview .panel-empty {
+.side-panel-preview .panel-empty,
+.side-panel-body .panel-empty {
   padding: 16px 12px;
   font-style: italic;
   font-size: 0.85em;
