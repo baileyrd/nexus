@@ -1,4 +1,5 @@
 import type { StatusBarItem } from "../../bindings";
+import { contributions } from "../../contributions";
 import { Icon } from "../Icon";
 
 interface StatusBarProps {
@@ -54,18 +55,18 @@ function handleClick(item: StatusBarItem) {
   if (!item.action) return;
   switch (item.action.kind) {
     case "togglePanel":
+      // Status-bar togglePanel has no target side (same as ribbon/footer);
+      // left as a log until the action carries a side.
       // eslint-disable-next-line no-console
       console.log(
         `[status-bar] togglePanel '${item.action.panelId}' from ${item.id} (target side panel pending)`,
       );
       return;
     case "invokeCommand":
-      // eslint-disable-next-line no-console
-      console.log(`[status-bar] invoke command '${item.action.command}' (registry pending)`);
+      contributions.invokeCommand(item.action.command);
       return;
     case "openView":
-      // eslint-disable-next-line no-console
-      console.log(`[status-bar] open view '${item.action.viewId}' (registry pending)`);
+      contributions.openView(item.action.viewId);
       return;
   }
 }

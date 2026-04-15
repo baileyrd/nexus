@@ -1,4 +1,5 @@
 import type { RibbonItem } from "../../bindings";
+import { contributions } from "../../contributions";
 import { Icon } from "../Icon";
 
 interface RibbonItemsProps {
@@ -37,18 +38,19 @@ export function RibbonItems({ items }: RibbonItemsProps) {
 function handleRibbonClick(item: RibbonItem) {
   switch (item.action.kind) {
     case "togglePanel":
+      // Ribbon-level togglePanel doesn't name a side (the data model
+      // assumes a single side panel at the workspace level); will be
+      // resolved once ribbon items carry a target side.
       // eslint-disable-next-line no-console
       console.log(
         `[ribbon] togglePanel '${item.action.panelId}' from workspace ribbon (target side panel pending)`,
       );
       return;
     case "invokeCommand":
-      // eslint-disable-next-line no-console
-      console.log(`[ribbon] invoke command '${item.action.command}' (registry pending)`);
+      contributions.invokeCommand(item.action.command);
       return;
     case "openView":
-      // eslint-disable-next-line no-console
-      console.log(`[ribbon] open view '${item.action.viewId}' (registry pending)`);
+      contributions.openView(item.action.viewId);
       return;
   }
 }

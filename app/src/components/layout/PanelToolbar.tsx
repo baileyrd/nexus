@@ -1,4 +1,5 @@
 import type { PanelToolbarItem } from "../../bindings";
+import { contributions } from "../../contributions";
 import { Icon } from "../Icon";
 
 interface PanelToolbarProps {
@@ -40,12 +41,10 @@ function handleToolbarClick(
       onTogglePanel(item.action.panelId);
       return;
     case "invokeCommand":
-      // eslint-disable-next-line no-console
-      console.log(`[panel-toolbar] invoke command '${item.action.command}' (registry pending)`);
+      contributions.invokeCommand(item.action.command);
       return;
     case "openView":
-      // eslint-disable-next-line no-console
-      console.log(`[panel-toolbar] open view '${item.action.viewId}' (registry pending)`);
+      contributions.openView(item.action.viewId);
       return;
   }
 }

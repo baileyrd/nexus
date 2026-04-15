@@ -6,6 +6,7 @@ import {
   PanelRightOpen,
 } from "lucide-react";
 import type { Panel, SidePanel } from "../../bindings";
+import { useContentType } from "../../contributions";
 import { useLayoutStore } from "../../stores/layout";
 import { LayoutPresetPicker } from "./LayoutPresetPicker";
 import { PanelSelector } from "./PanelSelector";
@@ -191,6 +192,7 @@ interface PanelViewProps {
 }
 
 function PanelView({ panel, onTogglePanel }: PanelViewProps) {
+  const ContentComponent = useContentType(panel.contentType);
   return (
     <div className="panel-view" data-panel-id={panel.id}>
       <header className="panel-header">
@@ -198,9 +200,11 @@ function PanelView({ panel, onTogglePanel }: PanelViewProps) {
         <PanelToolbar items={panel.toolbar} onTogglePanel={onTogglePanel} />
       </header>
       <div className="panel-content">
-        {panel.contentType ? (
+        {ContentComponent ? (
+          <ContentComponent panel={panel} />
+        ) : panel.contentType ? (
           <span className="panel-content-stub">
-            contentType: <code>{panel.contentType}</code>
+            no renderer for contentType: <code>{panel.contentType}</code>
           </span>
         ) : (
           <span className="panel-content-empty">no content renderer</span>

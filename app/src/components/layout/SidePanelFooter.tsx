@@ -1,4 +1,5 @@
 import type { FooterAction, SidePanelFooter as SidePanelFooterData } from "../../bindings";
+import { contributions } from "../../contributions";
 import { Icon } from "../Icon";
 
 interface SidePanelFooterProps {
@@ -20,10 +21,7 @@ export function SidePanelFooter({ footer, forgeName = "—" }: SidePanelFooterPr
           type="button"
           className="forge-selector"
           title="Switch forge"
-          onClick={() => {
-            // eslint-disable-next-line no-console
-            console.log("[footer] switch forge (registry pending)");
-          }}
+          onClick={() => contributions.invokeCommand("workspace.switch-forge")}
         >
           <Icon name="chevrons-up-down" size={14} className="forge-selector-chevron" />
           <span className="forge-selector-name">{forgeName}</span>
@@ -50,16 +48,16 @@ export function SidePanelFooter({ footer, forgeName = "—" }: SidePanelFooterPr
 function handleFooterClick(action: FooterAction) {
   switch (action.action.kind) {
     case "togglePanel":
+      // Footer-level togglePanel needs a side resolution (same as ribbon);
+      // left as a log until ribbon/footer actions carry a target side.
       // eslint-disable-next-line no-console
       console.log(`[footer] togglePanel '${action.action.panelId}' (target side panel pending)`);
       return;
     case "invokeCommand":
-      // eslint-disable-next-line no-console
-      console.log(`[footer] invoke command '${action.action.command}' (registry pending)`);
+      contributions.invokeCommand(action.action.command);
       return;
     case "openView":
-      // eslint-disable-next-line no-console
-      console.log(`[footer] open view '${action.action.viewId}' (registry pending)`);
+      contributions.openView(action.action.viewId);
       return;
   }
 }

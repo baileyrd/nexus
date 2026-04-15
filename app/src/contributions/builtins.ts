@@ -1,0 +1,28 @@
+import { contributions } from "./registry";
+
+/**
+ * Seeds the contribution registry with commands the workspace frame
+ * itself owns — help, settings, command palette entry point. Real
+ * panel content-types (`bookmarks`, `outline`, `commands`, `processes`)
+ * are left unregistered; they'll be contributed by their owning PRDs
+ * (bookmarks panel, outline panel, etc.) as those land.
+ *
+ * Idempotent — safe to call more than once during dev hot-reloads.
+ */
+export function registerBuiltins(): void {
+  contributions.registerCommand("workspace.help", () => {
+    // Placeholder — real help surface (docs site, in-app help panel) TBD.
+    // eslint-disable-next-line no-alert
+    alert("Nexus help — documentation surface coming soon.");
+  });
+
+  contributions.registerCommand("workspace.settings", () => {
+    // eslint-disable-next-line no-alert
+    alert("Settings UI — pending (PRD 07 §20).");
+  });
+
+  contributions.registerCommand("workspace.command-palette", () => {
+    // eslint-disable-next-line no-alert
+    alert("Command palette — pending (PRD 07 §19).");
+  });
+}
