@@ -198,7 +198,7 @@ button {
   outline-offset: 1px;
 }
 
-.right-side-panel-region {
+.right-side-panel {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -206,7 +206,7 @@ button {
   background: var(--nx-bg-secondary, #f8f9fa);
 }
 
-.right-side-panel-top {
+.right-side-panel-toolbar {
   display: flex;
   align-items: center;
   gap: 4px;

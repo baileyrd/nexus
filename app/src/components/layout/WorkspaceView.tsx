@@ -57,8 +57,8 @@ export function WorkspaceView() {
               <BottomPreview height={layout.bottomPanel.height} />
             )}
           </div>
-          <div className="right-side-panel-region">
-            <div className="right-side-panel-top">
+          <div className="right-side-panel">
+            <div className="right-side-panel-toolbar">
               <SidePanelToggle
                 side="right"
                 collapsed={layout.rightSidePanel.collapsed}
@@ -157,7 +157,7 @@ interface SidePanelBodyProps {
 /**
  * Body-only rendering: active panel + footer, no panel-selector.
  * Used by the right side panel where toolbar 1 lives in the
- * `right-side-panel-top` row (next to the right toggle), not inside
+ * `right-side-panel-toolbar` row (next to the right toggle), not inside
  * the side-panel container itself.
  */
 function SidePanelBody({ side, sidePanel, onTogglePanel }: SidePanelBodyProps) {
