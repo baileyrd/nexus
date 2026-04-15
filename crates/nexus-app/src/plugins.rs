@@ -10,6 +10,7 @@ use std::time::Duration;
 use nexus_plugins::{
     PluginManager, PluginManagerConfig, PluginStatus, TrustLevel, UiContribution,
     UiPanelContribution, UiRibbonItemContribution, UiSettingsTabContribution,
+    UiStatusItemContribution,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -177,6 +178,19 @@ pub fn list_plugin_ribbon_items(
         .0
         .lock()
         .map(|mgr| mgr.ui_ribbon_items())
+        .unwrap_or_default()
+}
+
+/// List all plugin-contributed status-bar entries. The frontend
+/// merges these into the active layout's `statusBar` array.
+#[tauri::command]
+pub fn list_plugin_status_items(
+    state: State<'_, PluginState>,
+) -> Vec<UiStatusItemContribution> {
+    state
+        .0
+        .lock()
+        .map(|mgr| mgr.ui_status_items())
         .unwrap_or_default()
 }
 

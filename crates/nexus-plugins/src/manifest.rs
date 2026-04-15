@@ -95,6 +95,8 @@ pub struct Registrations {
     pub ui_settings_tabs: Vec<UiSettingsTabReg>,
     /// Workspace-ribbon icon registrations.
     pub ui_ribbon_items: Vec<UiRibbonItemReg>,
+    /// Status-bar entry registrations.
+    pub ui_status_items: Vec<UiStatusItemReg>,
 }
 
 /// Which side of the workspace a plugin-contributed panel docks to.
@@ -219,6 +221,24 @@ pub struct UiRibbonItemReg {
     pub command: String,
 }
 
+/// A single status-bar entry registration. Entries render as either a
+/// plain counter (text/icon, no `command`) or a clickable button
+/// (command set). At least one of `text` or `icon` must be present.
+#[derive(Debug, Clone)]
+pub struct UiStatusItemReg {
+    /// Unique status-bar-entry identifier within the plugin.
+    pub id: String,
+    /// Text shown to the right of the icon. `None` for icon-only.
+    pub text: Option<String>,
+    /// Lucide icon name. `None` for text-only.
+    pub icon: Option<String>,
+    /// Hover tooltip; falls back to `text` when not set.
+    pub tooltip: Option<String>,
+    /// Optional `ui_command.id` (same manifest) invoked on click. When
+    /// unset the entry renders as a non-interactive counter.
+    pub command: Option<String>,
+}
+
 /// Lifecycle hook enablement flags.
 #[derive(Debug, Clone, Default)]
 #[allow(clippy::struct_excessive_bools)]
@@ -316,6 +336,8 @@ struct TomlRegistrations {
     ui_settings_tabs: Vec<TomlUiSettingsTabReg>,
     #[serde(default, rename = "ui_ribbon_item")]
     ui_ribbon_items: Vec<TomlUiRibbonItemReg>,
+    #[serde(default, rename = "ui_status_item")]
+    ui_status_items: Vec<TomlUiStatusItemReg>,
 }
 
 #[derive(Deserialize)]
@@ -375,6 +397,19 @@ struct TomlUiRibbonItemReg {
     icon: String,
     tooltip: String,
     command: String,
+}
+
+#[derive(Deserialize)]
+struct TomlUiStatusItemReg {
+    id: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
+    #[serde(default)]
+    tooltip: Option<String>,
+    #[serde(default)]
+    command: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -497,6 +532,18 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
                 .into_iter()
                 .map(|r| UiRibbonItemReg {
                     id: r.id,
+                    icon: r.icon,
+                    tooltip: r.tooltip,
+                    command: r.command,
+                })
+                .collect(),
+            ui_status_items: raw
+                .registrations
+                .ui_status_items
+                .into_iter()
+                .map(|r| UiStatusItemReg {
+                    id: r.id,
+                    text: r.text,
                     icon: r.icon,
                     tooltip: r.tooltip,
                     command: r.command,
@@ -630,6 +677,13 @@ icon = "hand"
 tooltip = "Say hi"
 command = "test.hello"
 
+[[registrations.ui_status_item]]
+id = "test.status"
+text = "42 items"
+icon = "hand"
+tooltip = "Click to refresh"
+command = "test.hello"
+
 [lifecycle]
 on_init = true
 on_start = true
@@ -656,6 +710,7 @@ on_stop = true
         assert!(m.registrations.ui_panels.is_empty());
         assert!(m.registrations.ui_settings_tabs.is_empty());
         assert!(m.registrations.ui_ribbon_items.is_empty());
+        assert!(m.registrations.ui_status_items.is_empty());
     }
 
     #[test]
@@ -701,6 +756,13 @@ on_stop = true
         assert_eq!(ribbon.icon, "hand");
         assert_eq!(ribbon.tooltip, "Say hi");
         assert_eq!(ribbon.command, "test.hello");
+        assert_eq!(m.registrations.ui_status_items.len(), 1);
+        let status = &m.registrations.ui_status_items[0];
+        assert_eq!(status.id, "test.status");
+        assert_eq!(status.text.as_deref(), Some("42 items"));
+        assert_eq!(status.icon.as_deref(), Some("hand"));
+        assert_eq!(status.tooltip.as_deref(), Some("Click to refresh"));
+        assert_eq!(status.command.as_deref(), Some("test.hello"));
         assert!(m.lifecycle.on_init);
         assert!(m.lifecycle.on_start);
         assert!(m.lifecycle.on_stop);

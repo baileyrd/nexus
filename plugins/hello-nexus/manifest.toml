@@ -37,5 +37,12 @@ icon = "hand"
 tooltip = "Hello: Say hi"
 command = "hello.sayHi"
 
+[[registrations.ui_status_item]]
+id = "hello.status"
+icon = "hand"
+text = "Hi!"
+tooltip = "Click to greet"
+command = "hello.sayHi"
+
 [lifecycle]
 on_init = true

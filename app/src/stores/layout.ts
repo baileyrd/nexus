@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Panel, RibbonItem } from "../bindings";
+import type { Panel, RibbonItem, StatusBarItem } from "../bindings";
 import {
   getDefaultLayout,
   getLayoutPreset,
@@ -14,7 +14,11 @@ import {
   type LayoutPersistence,
   type PersistedLayoutState,
 } from "../ipc/persistence";
-import type { PluginUiPanel, PluginUiRibbonItem } from "../ipc/plugins";
+import type {
+  PluginUiPanel,
+  PluginUiRibbonItem,
+  PluginUiStatusItem,
+} from "../ipc/plugins";
 
 interface LayoutState {
   layout: WorkspaceLayout | null;
@@ -29,6 +33,8 @@ interface LayoutState {
   /** Latest snapshot of plugin-contributed ribbon icons. Same
    *  re-application rules as `pluginPanels`. */
   pluginRibbon: PluginUiRibbonItem[];
+  /** Latest snapshot of plugin-contributed status-bar entries. */
+  pluginStatus: PluginUiStatusItem[];
   loading: boolean;
   error: string | null;
   load: () => Promise<void>;
@@ -43,6 +49,9 @@ interface LayoutState {
   /** Replace the plugin-ribbon snapshot and re-merge into the active
    *  layout. Call after fetching `list_plugin_ribbon_items`. */
   setPluginRibbon: (items: PluginUiRibbonItem[]) => void;
+  /** Replace the plugin-status-bar snapshot and re-merge into the
+   *  active layout. Call after fetching `list_plugin_status_items`. */
+  setPluginStatus: (items: PluginUiStatusItem[]) => void;
   /** Read the persisted UI state for a forge, or `null` if none yet. */
   forgeUiState: (forgePath: string) => ForgeUiState | null;
   /** Merge `patch` into the persisted UI state for a forge and
@@ -70,6 +79,38 @@ function toPanel(p: PluginUiPanel): Panel {
     toolbar: [],
     contentType: id,
   };
+}
+
+/**
+ * Compose a `StatusBarItem` from a `PluginUiStatusItem`. Plugin id
+ * namespace keeps ids collision-free; `action` is set only when the
+ * contribution declared a `command`, so items without one render as
+ * plain counters.
+ */
+function toStatusItem(s: PluginUiStatusItem): StatusBarItem {
+  return {
+    id: `plugin:${s.plugin_id}:${s.status_id}`,
+    text: s.text ?? s.tooltip ?? null,
+    icon: s.icon,
+    action: s.command_id
+      ? { kind: "invokeCommand", command: s.command_id }
+      : null,
+    plugin: s.plugin_id,
+  };
+}
+
+/**
+ * Return `layout` with `pluginStatus` merged into its status-bar list.
+ * Entries with `plugin != null` are dropped from the base first so
+ * repeated merges don't leave stale counters behind.
+ */
+function mergePluginStatus(
+  layout: WorkspaceLayout,
+  pluginStatus: PluginUiStatusItem[],
+): WorkspaceLayout {
+  const builtin = layout.statusBar.filter((s) => !s.plugin);
+  const additions = pluginStatus.map(toStatusItem);
+  return { ...layout, statusBar: [...builtin, ...additions] };
 }
 
 /**
@@ -224,6 +265,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   persistence: null,
   pluginPanels: [],
   pluginRibbon: [],
+  pluginStatus: [],
   loading: false,
   error: null,
 
@@ -237,7 +279,8 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
         : await getDefaultLayout();
       const overlaid = applyOverlay(base, persistence?.layouts?.[base.id]);
       const withPanels = mergePluginPanels(overlaid, get().pluginPanels);
-      const layout = mergePluginRibbon(withPanels, get().pluginRibbon);
+      const withRibbon = mergePluginRibbon(withPanels, get().pluginRibbon);
+      const layout = mergePluginStatus(withRibbon, get().pluginStatus);
       set({
         layout,
         persistence: persistence ?? { version: 1, lastPresetId: null, layouts: {} },
@@ -261,10 +304,11 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const base = await getLayoutPreset(id);
-      const { persistence, pluginPanels, pluginRibbon } = get();
+      const { persistence, pluginPanels, pluginRibbon, pluginStatus } = get();
       const overlaid = applyOverlay(base, persistence?.layouts?.[base.id]);
       const withPanels = mergePluginPanels(overlaid, pluginPanels);
-      const layout = mergePluginRibbon(withPanels, pluginRibbon);
+      const withRibbon = mergePluginRibbon(withPanels, pluginRibbon);
+      const layout = mergePluginStatus(withRibbon, pluginStatus);
       const nextPersistence = updatePersistence(persistence, layout);
       scheduleSave(nextPersistence);
       set({ layout, persistence: nextPersistence, loading: false });
@@ -339,6 +383,15 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       return {
         pluginRibbon: items,
         layout: mergePluginRibbon(state.layout, items),
+      };
+    }),
+
+  setPluginStatus: (items) =>
+    set((state) => {
+      if (!state.layout) return { pluginStatus: items };
+      return {
+        pluginStatus: items,
+        layout: mergePluginStatus(state.layout, items),
       };
     }),
 

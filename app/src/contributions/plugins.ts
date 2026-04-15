@@ -12,6 +12,10 @@
 //   * `ui_settings_tab`  → pushed to `useSettingsStore.setPluginTabs`;
 //                          the Settings modal renders them in the
 //                          "Plugins" rail group
+//   * `ui_ribbon_item`   → pushed to the layout store and merged into
+//                          the workspace ribbon
+//   * `ui_status_item`   → pushed to the layout store and merged into
+//                          the floating status bar
 //
 // On boot the bridge also subscribes to the Rust-side `plugins:reloaded`
 // event. When a community plugin's WASM changes on disk, the backend
@@ -33,8 +37,10 @@ import {
   listPluginPanels,
   listPluginRibbonItems,
   listPluginSettingsTabs,
+  listPluginStatusItems,
   type PluginUiPanel,
   type PluginUiRibbonItem,
+  type PluginUiStatusItem,
 } from "../ipc/plugins";
 
 type Disposable = () => void;
@@ -128,6 +134,18 @@ async function syncRibbon(): Promise<void> {
   useLayoutStore.getState().setPluginRibbon(items);
 }
 
+async function syncStatus(): Promise<void> {
+  let items: PluginUiStatusItem[];
+  try {
+    items = await listPluginStatusItems();
+  } catch (err) {
+    warn("list_plugin_status_items failed — skipping", err);
+    useLayoutStore.getState().setPluginStatus([]);
+    return;
+  }
+  useLayoutStore.getState().setPluginStatus(items);
+}
+
 async function syncAll(): Promise<void> {
   // Drop the previous snapshot's registrations before re-registering so
   // removed/renamed plugin contributions disappear cleanly.
@@ -139,6 +157,7 @@ async function syncAll(): Promise<void> {
     syncPanels(),
     syncSettingsTabs(),
     syncRibbon(),
+    syncStatus(),
   ]);
 }
 

@@ -55,6 +55,19 @@ export interface PluginUiRibbonItem {
 }
 
 /**
+ * Mirrors `nexus_plugins::UiStatusItemContribution`. `command_id` is
+ * pre-qualified when set; `null` means the entry is a plain counter.
+ */
+export interface PluginUiStatusItem {
+  plugin_id: string;
+  status_id: string;
+  text: string | null;
+  icon: string | null;
+  tooltip: string | null;
+  command_id: string | null;
+}
+
+/**
  * Mirrors `nexus_app::plugins::PluginSummary`. Trust level is `"core"`
  * or `"community"`; status is `"loaded"`, `"initialized"`, `"running"`,
  * `"stopped"`, or `"crashed"`.
@@ -81,6 +94,10 @@ export function listPluginSettingsTabs(): Promise<PluginUiSettingsTab[]> {
 
 export function listPluginRibbonItems(): Promise<PluginUiRibbonItem[]> {
   return invoke<PluginUiRibbonItem[]>("list_plugin_ribbon_items");
+}
+
+export function listPluginStatusItems(): Promise<PluginUiStatusItem[]> {
+  return invoke<PluginUiStatusItem[]>("list_plugin_status_items");
 }
 
 export function listPlugins(): Promise<PluginSummary[]> {

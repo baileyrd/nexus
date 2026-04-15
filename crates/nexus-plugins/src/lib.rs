@@ -23,7 +23,7 @@ pub use loader::{CorePlugin, CorePluginFuture, PluginLoader, SharedPluginLoader}
 pub use manifest::{
     CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
     PanelSide, PluginManifest, Registrations, SettingsConfig, UiCommandReg, UiPanelReg,
-    UiRibbonItemReg, UiSettingsTabReg, WasmConfig,
+    UiRibbonItemReg, UiSettingsTabReg, UiStatusItemReg, WasmConfig,
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
 pub use sandbox::{PluginData, WasmSandbox};
@@ -121,6 +121,28 @@ pub struct UiRibbonItemContribution {
     /// (`plugin:<plugin_id>:<command_id>`). Pre-resolved server-side
     /// so the frontend doesn't reconstruct it.
     pub command_id: String,
+}
+
+/// A single plugin-contributed status-bar entry, materialised for the
+/// frontend. Aggregated by [`PluginManager::ui_status_items`]; the
+/// frontend merges these into the active layout's status-bar array.
+/// `command_id` is `Some(fully-qualified)` for interactive entries,
+/// `None` for plain counters.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UiStatusItemContribution {
+    /// The plugin that owns this status-bar entry.
+    pub plugin_id: String,
+    /// The `id` declared in the manifest.
+    pub status_id: String,
+    /// Text shown alongside the icon. `None` for icon-only.
+    pub text: Option<String>,
+    /// Lucide icon name. `None` for text-only.
+    pub icon: Option<String>,
+    /// Hover tooltip; falls back to `text` frontend-side if unset.
+    pub tooltip: Option<String>,
+    /// Fully-qualified command id to dispatch on click
+    /// (`plugin:<plugin_id>:<command>`), or `None` for non-interactive.
+    pub command_id: Option<String>,
 }
 
 // ─── PluginManagerConfig ──────────────────────────────────────────────────────
@@ -357,6 +379,36 @@ impl PluginManager {
                         icon: r.icon,
                         tooltip: r.tooltip,
                         command_id: format!("plugin:{plugin_id}:{}", r.command),
+                    })
+            })
+            .collect()
+    }
+
+    /// Aggregate status-bar entry contributions across all
+    /// currently-loaded plugins. `command_id` is pre-qualified
+    /// (`plugin:<plugin_id>:<command>`) when set, `None` for
+    /// non-interactive counters.
+    #[must_use]
+    pub fn ui_status_items(&self) -> Vec<UiStatusItemContribution> {
+        self.loader
+            .list()
+            .into_iter()
+            .flat_map(|info| {
+                let plugin_id = info.id.clone();
+                self.loader
+                    .manifest(&info.id)
+                    .map(|m| m.registrations.ui_status_items.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |r| UiStatusItemContribution {
+                        plugin_id: plugin_id.clone(),
+                        status_id: r.id,
+                        text: r.text,
+                        icon: r.icon,
+                        tooltip: r.tooltip,
+                        command_id: r
+                            .command
+                            .map(|c| format!("plugin:{plugin_id}:{c}")),
                     })
             })
             .collect()
