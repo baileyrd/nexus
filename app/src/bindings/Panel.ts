@@ -2,11 +2,12 @@
 import type { PanelToolbarItem } from "./PanelToolbarItem";
 
 /**
- * One panel within a sidebar (Explorer, Search, Outline, …).
+ * One panel within a side panel (Explorer, Search, Outline, …).
  *
- * A panel has three surfaces (PRD §8, matching the Obsidian reference):
+ * A panel has three surfaces (matching the Obsidian reference):
  *
- * 1. **Selector** in the ribbon — toggles visibility. Owned by the sidebar.
+ * 1. **Selector** in the side panel's panel-selector toolbar — toggles
+ *    visibility. Owned by the side panel.
  * 2. **Toolbar** ([`Self::toolbar`]) — panel-local action icons rendered
  *    above the content. Owned by this panel's contributing plugin.
  * 3. **Content** ([`Self::content_type`]) — the React component registered
@@ -17,7 +18,7 @@ import type { PanelToolbarItem } from "./PanelToolbarItem";
  * (landing with §8 / §13) resolves icons, toolbar actions, and content
  * components at runtime.
  */
-export type SidebarPanel = { 
+export type Panel = { 
 /**
  * Panel id (`"explorer"`, `"search"`, …).
  */

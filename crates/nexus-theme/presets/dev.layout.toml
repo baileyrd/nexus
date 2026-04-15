@@ -1,12 +1,12 @@
 # Dev Development layout: VS-Code-shaped IDE with a full bottom tray.
 #
-# Single editor pane, left activity ribbon covering the common dev surfaces
-# (files/search/SCM/run/extensions), no right sidebar, and a tall bottom
-# panel configured to host terminal/problems/output tabs at runtime.
+# Single editor pane, dev-tool shortcuts on the workspace ribbon, panel
+# selectors at the top of the left side panel, no right side panel, and
+# a tall bottom panel for terminal/problems/output tabs at runtime.
 
 id = "dev"
 name = "Dev Development"
-description = "IDE-shaped: explorer + SCM + run/debug ribbon, tall bottom terminal tray."
+description = "IDE-shaped: dev-tool ribbon, file/SCM/run panels, tall bottom terminal tray."
 focusedPaneId = "pane-dev-editor"
 
 [root]
@@ -15,74 +15,78 @@ id = "pane-dev-editor"
 tabs = []
 collapsed = false
 
-[leftSidebar]
+# ── Workspace ribbon ────────────────────────────────────────────────────────
+# Dev/IDE shortcuts. Most open dedicated views; toggle-terminal flips the
+# bottom tray.
+
+[[ribbon]]
+id = "command-palette"
+icon = "command"
+tooltip = "Command palette"
+action = { kind = "invokeCommand", command = "workspace.command-palette" }
+
+[[ribbon]]
+id = "git"
+icon = "git-branch"
+tooltip = "Git"
+action = { kind = "openView", viewId = "git" }
+
+[[ribbon]]
+id = "run-debug"
+icon = "play"
+tooltip = "Run and Debug"
+action = { kind = "openView", viewId = "run-debug" }
+
+[[ribbon]]
+id = "extensions"
+icon = "puzzle"
+tooltip = "Extensions"
+action = { kind = "openView", viewId = "extensions" }
+
+[[ribbon]]
+id = "terminal"
+icon = "terminal"
+tooltip = "Toggle terminal"
+action = { kind = "invokeCommand", command = "workspace.toggle-terminal" }
+
+[leftSidePanel]
 side = "left"
 width = 260
 collapsed = false
 miniMode = false
 panelOrder = ["explorer", "search", "source-control", "run-debug", "extensions"]
 
-[[leftSidebar.ribbon]]
-id = "explorer"
-icon = "folder"
-tooltip = "Explorer"
-action = { kind = "togglePanel", panelId = "explorer" }
-
-[[leftSidebar.ribbon]]
-id = "search"
-icon = "search"
-tooltip = "Search"
-action = { kind = "togglePanel", panelId = "search" }
-
-[[leftSidebar.ribbon]]
-id = "source-control"
-icon = "git-branch"
-tooltip = "Source Control"
-action = { kind = "togglePanel", panelId = "source-control" }
-
-[[leftSidebar.ribbon]]
-id = "run-debug"
-icon = "play"
-tooltip = "Run and Debug"
-action = { kind = "togglePanel", panelId = "run-debug" }
-
-[[leftSidebar.ribbon]]
-id = "extensions"
-icon = "puzzle"
-tooltip = "Extensions"
-action = { kind = "togglePanel", panelId = "extensions" }
-
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "explorer"
 title = "Explorer"
 icon = "folder"
 visible = true
 
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "search"
 title = "Search"
 icon = "search"
 visible = false
 
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "source-control"
 title = "Source Control"
 icon = "git-branch"
 visible = false
 
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "run-debug"
 title = "Run and Debug"
 icon = "play"
 visible = false
 
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "extensions"
 title = "Extensions"
 icon = "puzzle"
 visible = false
 
-[rightSidebar]
+[rightSidePanel]
 side = "right"
 width = 280
 collapsed = true

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { RibbonItem, SidebarPanel } from "../../bindings";
+import type { Panel, SidePanel } from "../../bindings";
 import { useLayoutStore } from "../../stores/layout";
 import { LayoutPresetPicker } from "./LayoutPresetPicker";
 import { PanelSelector } from "./PanelSelector";
@@ -33,11 +33,11 @@ export function WorkspaceView() {
           data-workspace-name={layout.name}
           style={{ display: "flex" }}
         >
-          {!layout.leftSidebar.collapsed && (
-            <SidebarPreview
+          {layout.ribbon.length > 0 && <Ribbon items={layout.ribbon} />}
+          {!layout.leftSidePanel.collapsed && (
+            <SidePanelView
               side="left"
-              panels={layout.leftSidebar.panels}
-              ribbon={layout.leftSidebar.ribbon}
+              sidePanel={layout.leftSidePanel}
               onTogglePanel={(id) => togglePanelVisibility("left", id)}
             />
           )}
@@ -50,11 +50,10 @@ export function WorkspaceView() {
               <BottomPreview height={layout.bottomPanel.height} />
             )}
           </div>
-          {!layout.rightSidebar.collapsed && (
-            <SidebarPreview
+          {!layout.rightSidePanel.collapsed && (
+            <SidePanelView
               side="right"
-              panels={layout.rightSidebar.panels}
-              ribbon={[]}
+              sidePanel={layout.rightSidePanel}
               onTogglePanel={(id) => togglePanelVisibility("right", id)}
             />
           )}
@@ -66,68 +65,41 @@ export function WorkspaceView() {
   );
 }
 
-interface SidebarPreviewProps {
+interface SidePanelViewProps {
   side: "left" | "right";
-  panels: SidebarPanel[];
-  ribbon: RibbonItem[];
+  sidePanel: SidePanel;
   onTogglePanel: (panelId: string) => void;
 }
 
 /**
- * Side panel with two toolbars and a content area (user's mental model):
+ * One docked side panel. Three stacked surfaces:
  *
- *   Toolbar 1 — panel selector
- *     · left sidebar: vertical ribbon rail on the docked edge
- *     · right sidebar: horizontal strip at the top
+ *   1. Panel-selector toolbar (horizontal, derived from `panels`)
+ *   2. Active panel's local toolbar (in the panel header)
+ *   3. Active panel's content area
  *
- *   Toolbar 2 — panel-local action icons for the active panel
- *     (rendered in the panel header, right-aligned)
- *
- *   Content area — the active panel's body (stubbed pending the UI
- *     contribution registry)
+ * The workspace activity ribbon is rendered separately by
+ * `WorkspaceView` — it isn't part of the side panel.
  */
-function SidebarPreview({ side, panels, ribbon, onTogglePanel }: SidebarPreviewProps) {
-  const activePanelIds = new Set(panels.filter((p) => p.visible).map((p) => p.id));
-  const activePanel = panels.find((p) => p.visible) ?? null;
+function SidePanelView({ side, sidePanel, onTogglePanel }: SidePanelViewProps) {
+  const activePanel = sidePanel.panels.find((p) => p.visible) ?? null;
 
-  const panelArea = (
-    <div className="panel-area">
-      {activePanel ? (
-        <PanelView panel={activePanel} onTogglePanel={onTogglePanel} />
-      ) : (
-        <div className="panel-empty">no panel selected</div>
-      )}
-    </div>
-  );
-
-  if (side === "left") {
-    // Vertical ribbon on the left edge, panel area fills the rest.
-    return (
-      <aside className="sidebar-preview" data-side={side}>
-        {ribbon.length > 0 && (
-          <Ribbon
-            side={side}
-            items={ribbon}
-            activePanelIds={activePanelIds}
-            onTogglePanel={onTogglePanel}
-          />
-        )}
-        {panelArea}
-      </aside>
-    );
-  }
-
-  // Right sidebar: horizontal panel-selector strip above the panel area.
   return (
-    <aside className="sidebar-preview" data-side={side} data-layout="stacked">
-      <PanelSelector panels={panels} onTogglePanel={onTogglePanel} />
-      {panelArea}
+    <aside className="side-panel-preview" data-side={side}>
+      <PanelSelector panels={sidePanel.panels} onTogglePanel={onTogglePanel} />
+      <div className="panel-area">
+        {activePanel ? (
+          <PanelView panel={activePanel} onTogglePanel={onTogglePanel} />
+        ) : (
+          <div className="panel-empty">no panel selected</div>
+        )}
+      </div>
     </aside>
   );
 }
 
 interface PanelViewProps {
-  panel: SidebarPanel;
+  panel: Panel;
   onTogglePanel: (panelId: string) => void;
 }
 

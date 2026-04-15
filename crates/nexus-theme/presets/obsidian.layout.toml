@@ -1,13 +1,12 @@
-# Obsidian-style layout: single editor pane with both sidebars open,
-# each exposing an activity ribbon of panel toggles at the docked edge.
+# Obsidian-style layout: single editor pane with both side panels open.
 #
-# Ribbon + panel ids are references into the UI contribution registry —
-# core ships the ones listed here; plugins register additional ids and any
-# preset can reference them.
+# The workspace ribbon (far-left vertical rail) carries plugin/view
+# shortcuts (graph view, calendar, terminal, canvas, tasks). Each side
+# panel has its own panel-selector toolbar derived from its panels list.
 
 id = "obsidian"
 name = "Obsidian"
-description = "Single editor pane with activity ribbons on both sides and a linked panel tray."
+description = "Single editor pane, ribbon left + selector toolbar on each side panel."
 focusedPaneId = "pane-obsidian-main"
 
 [root]
@@ -16,60 +15,70 @@ id = "pane-obsidian-main"
 tabs = []
 collapsed = false
 
-# ── Left sidebar ─────────────────────────────────────────────────────────────
-# Ribbon (narrow rail): navigation / view toggles.
-# Panels (wider tray): the currently-selected source.
+# ── Workspace ribbon (far-left rail) ────────────────────────────────────────
+# Plugin / view shortcuts. Resolved through the UI contribution registry —
+# core ships these stubs; plugins can append more ids.
 
-[leftSidebar]
+[[ribbon]]
+id = "graph-view"
+icon = "graph"
+tooltip = "Graph view"
+action = { kind = "openView", viewId = "graph" }
+
+[[ribbon]]
+id = "canvas"
+icon = "layout-grid"
+tooltip = "New canvas"
+action = { kind = "invokeCommand", command = "canvas.new" }
+
+[[ribbon]]
+id = "calendar"
+icon = "calendar"
+tooltip = "Daily notes calendar"
+action = { kind = "openView", viewId = "calendar" }
+
+[[ribbon]]
+id = "all-files"
+icon = "files"
+tooltip = "All files"
+action = { kind = "openView", viewId = "all-files" }
+
+[[ribbon]]
+id = "terminal"
+icon = "terminal"
+tooltip = "Toggle terminal"
+action = { kind = "invokeCommand", command = "workspace.toggle-terminal" }
+
+[[ribbon]]
+id = "tasks"
+icon = "list-checks"
+tooltip = "Tasks"
+action = { kind = "openView", viewId = "tasks" }
+
+# ── Left side panel ─────────────────────────────────────────────────────────
+# Panel selector at the top is derived from the panels list. The active
+# panel renders its own toolbar + content below.
+
+[leftSidePanel]
 side = "left"
 width = 280
 collapsed = false
 miniMode = false
 panelOrder = ["explorer", "search", "bookmarks", "tags", "graph"]
 
-[[leftSidebar.ribbon]]
-id = "explorer"
-icon = "folder"
-tooltip = "Files"
-action = { kind = "togglePanel", panelId = "explorer" }
-
-[[leftSidebar.ribbon]]
-id = "search"
-icon = "search"
-tooltip = "Search"
-action = { kind = "togglePanel", panelId = "search" }
-
-[[leftSidebar.ribbon]]
-id = "bookmarks"
-icon = "bookmark"
-tooltip = "Bookmarks"
-action = { kind = "togglePanel", panelId = "bookmarks" }
-
-[[leftSidebar.ribbon]]
-id = "tags"
-icon = "tag"
-tooltip = "Tags"
-action = { kind = "togglePanel", panelId = "tags" }
-
-[[leftSidebar.ribbon]]
-id = "graph"
-icon = "graph"
-tooltip = "Graph view"
-action = { kind = "togglePanel", panelId = "graph" }
-
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "explorer"
 title = "Files"
 icon = "folder"
 visible = false
 
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "search"
 title = "Search"
 icon = "search"
 visible = false
 
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "bookmarks"
 title = "Bookmarks"
 icon = "bookmark"
@@ -81,52 +90,48 @@ toolbar = [
   { id = "bookmarks.collapse-all", icon = "chevrons-up", tooltip = "Collapse all", action = { kind = "invokeCommand", command = "bookmarks.collapse-all" } },
 ]
 
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "tags"
 title = "Tags"
 icon = "tag"
 visible = false
 
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "graph"
 title = "Graph"
 icon = "graph"
 visible = false
 
-# ── Right sidebar ────────────────────────────────────────────────────────────
-# Contextual surfaces for the current note: backlinks, outgoing links, tags,
-# and the active-note outline.
+# ── Right side panel ────────────────────────────────────────────────────────
+# Contextual surfaces for the current note: backlinks, outgoing links,
+# note-tags, and the active-note outline.
 
-[rightSidebar]
+[rightSidePanel]
 side = "right"
 width = 300
 collapsed = false
 miniMode = false
 panelOrder = ["backlinks", "outgoing-links", "tags-note", "outline"]
 
-# No ribbon on the right — the Nexus layout treats the ribbon as a
-# left-only activity rail. Right-sidebar panel switching happens via
-# panel headers / keyboard shortcuts.
-
-[[rightSidebar.panels]]
+[[rightSidePanel.panels]]
 id = "backlinks"
 title = "Backlinks"
 icon = "link-incoming"
 visible = false
 
-[[rightSidebar.panels]]
+[[rightSidePanel.panels]]
 id = "outgoing-links"
 title = "Outgoing links"
 icon = "link-outgoing"
 visible = false
 
-[[rightSidebar.panels]]
+[[rightSidePanel.panels]]
 id = "tags-note"
 title = "Tags"
 icon = "tag"
 visible = false
 
-[[rightSidebar.panels]]
+[[rightSidePanel.panels]]
 id = "outline"
 title = "Outline"
 icon = "list-indent"

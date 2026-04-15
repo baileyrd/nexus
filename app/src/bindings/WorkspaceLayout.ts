@@ -3,10 +3,11 @@ import type { BottomPanel } from "./BottomPanel";
 import type { LayoutMetadata } from "./LayoutMetadata";
 import type { LayoutNode } from "./LayoutNode";
 import type { PaneId } from "./PaneId";
-import type { Sidebar } from "./Sidebar";
+import type { RibbonItem } from "./RibbonItem";
+import type { SidePanel } from "./SidePanel";
 
 /**
- * Top-level workspace layout: root tree + sidebars + bottom panel + metadata.
+ * Top-level workspace layout: root tree + side panels + bottom panel + ribbon + metadata.
  */
 export type WorkspaceLayout = { 
 /**
@@ -26,13 +27,20 @@ version: string,
  */
 root: LayoutNode, 
 /**
+ * Workspace activity ribbon (the far-left vertical rail). Contains
+ * plugin/view shortcuts (graph, calendar, terminal, …), *not* side
+ * panel selectors — those are derived from each side panel's own
+ * [`Panel`] list.
+ */
+ribbon: Array<RibbonItem>, 
+/**
  * Left dock.
  */
-leftSidebar: Sidebar, 
+leftSidePanel: SidePanel, 
 /**
  * Right dock.
  */
-rightSidebar: Sidebar, 
+rightSidePanel: SidePanel, 
 /**
  * Bottom panel.
  */

@@ -30,7 +30,7 @@
 //! tabs = []
 //! collapsed = false
 //!
-//! [leftSidebar]
+//! [leftSidePanel]
 //! side = "left"
 //! width = 280
 //! collapsed = true
@@ -38,7 +38,7 @@
 //! panels = []
 //! panelOrder = []
 //!
-//! [rightSidebar]
+//! [rightSidePanel]
 //! side = "right"
 //! width = 280
 //! collapsed = true
@@ -58,7 +58,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::layout::{BottomPanel, LayoutMetadata, LayoutNode, PaneId, Sidebar, WorkspaceLayout};
+use crate::layout::{
+    BottomPanel, LayoutMetadata, LayoutNode, PaneId, RibbonItem, SidePanel, WorkspaceLayout,
+};
 use crate::{Result, ThemeError};
 
 /// Authored preset schema — the TOML shape users and plugins write.
@@ -79,10 +81,14 @@ pub struct LayoutPreset {
     pub description: Option<String>,
     /// Root pane tree.
     pub root: LayoutNode,
+    /// Workspace-level activity ribbon (far-left vertical rail). Empty
+    /// presets omit the key entirely.
+    #[serde(default)]
+    pub ribbon: Vec<RibbonItem>,
     /// Left dock.
-    pub left_sidebar: Sidebar,
+    pub left_side_panel: SidePanel,
     /// Right dock.
-    pub right_sidebar: Sidebar,
+    pub right_side_panel: SidePanel,
     /// Bottom panel.
     pub bottom_panel: BottomPanel,
     /// Which pane starts focused. Must reference a leaf in `root`.
@@ -101,8 +107,9 @@ impl LayoutPreset {
             name: self.name.clone(),
             version: "1.0".to_string(),
             root: self.root.clone(),
-            left_sidebar: self.left_sidebar.clone(),
-            right_sidebar: self.right_sidebar.clone(),
+            ribbon: self.ribbon.clone(),
+            left_side_panel: self.left_side_panel.clone(),
+            right_side_panel: self.right_side_panel.clone(),
             bottom_panel: self.bottom_panel.clone(),
             focused_pane_id: self.focused_pane_id.clone(),
             metadata: LayoutMetadata::now(1920, 1080),
@@ -418,7 +425,7 @@ id = "main"
 tabs = []
 collapsed = false
 
-[leftSidebar]
+[leftSidePanel]
 side = "left"
 width = 280
 collapsed = true
@@ -426,7 +433,7 @@ miniMode = false
 panels = []
 panelOrder = []
 
-[rightSidebar]
+[rightSidePanel]
 side = "right"
 width = 280
 collapsed = true

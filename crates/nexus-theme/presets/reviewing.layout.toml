@@ -21,7 +21,7 @@ id = "pane-review-right"
 tabs = []
 collapsed = false
 
-[leftSidebar]
+[leftSidePanel]
 side = "left"
 width = 280
 collapsed = true
@@ -29,14 +29,14 @@ miniMode = false
 panels = []
 panelOrder = []
 
-[rightSidebar]
+[rightSidePanel]
 side = "right"
 width = 320
 collapsed = false
 miniMode = false
 panelOrder = ["comments"]
 
-[[rightSidebar.panels]]
+[[rightSidePanel.panels]]
 id = "comments"
 title = "Comments"
 icon = "message"

@@ -1,17 +1,16 @@
-import type { SidebarPanel } from "../../bindings";
+import type { Panel } from "../../bindings";
 
 interface PanelSelectorProps {
-  panels: SidebarPanel[];
+  panels: Panel[];
   onTogglePanel: (panelId: string) => void;
 }
 
 /**
  * Horizontal row of panel-selector buttons rendered at the top of a
- * sidebar that doesn't use a vertical ribbon (the right sidebar in the
- * Obsidian reference). Each button is derived from a [`SidebarPanel`]
- * — icon + title come straight off the panel, click toggles visibility.
+ * side panel. Each button is derived from a [`Panel`] — icon + title
+ * come straight off the panel, click toggles visibility.
  *
- * Toolbar 1 in the user's model.
+ * Toolbar 1 in the user's three-layer side-panel model.
  */
 export function PanelSelector({ panels, onTogglePanel }: PanelSelectorProps) {
   if (panels.length === 0) return null;

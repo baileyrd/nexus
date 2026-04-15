@@ -10,7 +10,7 @@
  */
 export type RibbonAction = { "kind": "togglePanel", 
 /**
- * Target panel id (matches [`SidebarPanel::id`]).
+ * Target panel id (matches [`Panel::id`]).
  */
 panelId: string, } | { "kind": "invokeCommand", 
 /**

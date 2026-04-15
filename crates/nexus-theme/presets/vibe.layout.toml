@@ -1,7 +1,7 @@
 # "Vibe Management" layout: AI-assisted project steering.
 #
 # Row-split centre with note/canvas on the left and AI chat on the right,
-# task/base/project panels in the left sidebar, and a bottom tray for
+# task/base/project panels in the left side panel, and a bottom tray for
 # terminal + agent-log output.
 
 id = "vibe"
@@ -27,74 +27,71 @@ id = "pane-vibe-chat"
 tabs = []
 collapsed = false
 
-[leftSidebar]
+# ── Workspace ribbon ────────────────────────────────────────────────────────
+# AI / orchestration shortcuts.
+
+[[ribbon]]
+id = "ai-chat"
+icon = "sparkles"
+tooltip = "Open AI chat"
+action = { kind = "openView", viewId = "ai-chat" }
+
+[[ribbon]]
+id = "agents"
+icon = "bot"
+tooltip = "Agents"
+action = { kind = "openView", viewId = "agents" }
+
+[[ribbon]]
+id = "workflows"
+icon = "workflow"
+tooltip = "Workflows"
+action = { kind = "openView", viewId = "workflows" }
+
+[[ribbon]]
+id = "terminal"
+icon = "terminal"
+tooltip = "Toggle terminal"
+action = { kind = "invokeCommand", command = "workspace.toggle-terminal" }
+
+[leftSidePanel]
 side = "left"
 width = 260
 collapsed = false
 miniMode = false
 panelOrder = ["tasks", "bases", "projects", "notes", "ai-history"]
 
-[[leftSidebar.ribbon]]
-id = "tasks"
-icon = "check-square"
-tooltip = "Tasks"
-action = { kind = "togglePanel", panelId = "tasks" }
-
-[[leftSidebar.ribbon]]
-id = "bases"
-icon = "database"
-tooltip = "Bases"
-action = { kind = "togglePanel", panelId = "bases" }
-
-[[leftSidebar.ribbon]]
-id = "projects"
-icon = "briefcase"
-tooltip = "Projects"
-action = { kind = "togglePanel", panelId = "projects" }
-
-[[leftSidebar.ribbon]]
-id = "notes"
-icon = "file-text"
-tooltip = "Notes"
-action = { kind = "togglePanel", panelId = "notes" }
-
-[[leftSidebar.ribbon]]
-id = "ai-history"
-icon = "sparkles"
-tooltip = "AI conversation history"
-action = { kind = "togglePanel", panelId = "ai-history" }
-
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "tasks"
 title = "Tasks"
 icon = "check-square"
 visible = true
 
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "bases"
 title = "Bases"
 icon = "database"
 visible = false
 
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "projects"
 title = "Projects"
 icon = "briefcase"
 visible = false
 
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "notes"
 title = "Notes"
 icon = "file-text"
 visible = false
 
-[[leftSidebar.panels]]
+[[leftSidePanel.panels]]
 id = "ai-history"
 title = "AI History"
 icon = "sparkles"
 visible = false
 
-[rightSidebar]
+[rightSidePanel]
 side = "right"
 width = 280
 collapsed = true

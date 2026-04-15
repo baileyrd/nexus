@@ -53,21 +53,21 @@ export const useLayoutStore = create<LayoutState>((set) => ({
     }
   },
 
-  // Local-only: flips the `visible` flag on a panel so the ribbon's
+  // Local-only: flips the `visible` flag on a panel so the panel selector's
   // `togglePanel` action feels alive. Persisting through IPC is a later
   // piece once the layout-mutation commands land.
   togglePanelVisibility: (side, panelId) =>
     set((state) => {
       if (!state.layout) return {};
-      const sidebarKey = side === "left" ? "leftSidebar" : "rightSidebar";
-      const sidebar = state.layout[sidebarKey];
-      const panels = sidebar.panels.map((p) =>
+      const key = side === "left" ? "leftSidePanel" : "rightSidePanel";
+      const sidePanel = state.layout[key];
+      const panels = sidePanel.panels.map((p) =>
         p.id === panelId ? { ...p, visible: !p.visible } : p,
       );
       return {
         layout: {
           ...state.layout,
-          [sidebarKey]: { ...sidebar, panels },
+          [key]: { ...sidePanel, panels },
         },
       };
     }),

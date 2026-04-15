@@ -2,7 +2,9 @@
 import type { RibbonAction } from "./RibbonAction";
 
 /**
- * A single icon on a sidebar's activity ribbon (the narrow icon rail).
+ * A single icon on the workspace's activity ribbon (the narrow icon rail
+ * docked at the far-left edge of the window, independent of either side
+ * panel).
  *
  * Ribbon items are just references — the icon to render, the tooltip to
  * show, and the action to dispatch. The actual implementation lives in the

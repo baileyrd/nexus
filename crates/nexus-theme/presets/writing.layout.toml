@@ -9,7 +9,7 @@ id = "pane-writing"
 tabs = []
 collapsed = false
 
-[leftSidebar]
+[leftSidePanel]
 side = "left"
 width = 280
 collapsed = true
@@ -17,7 +17,7 @@ miniMode = false
 panels = []
 panelOrder = []
 
-[rightSidebar]
+[rightSidePanel]
 side = "right"
 width = 280
 collapsed = true

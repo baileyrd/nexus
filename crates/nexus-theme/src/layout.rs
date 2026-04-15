@@ -204,22 +204,23 @@ pub enum LayoutNode {
 /// integration code still pattern-match in PRD terms.)
 pub type PaneNode = LayoutNode;
 
-/// Which side of the window a sidebar docks to.
+/// Which side of the window a side panel docks to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export, export_to = "../../../app/src/bindings/")]
-pub enum SidebarSide {
+pub enum SidePanelSide {
     /// Left side of the window.
     Left,
     /// Right side of the window.
     Right,
 }
 
-/// One panel within a sidebar (Explorer, Search, Outline, …).
+/// One panel within a side panel (Explorer, Search, Outline, …).
 ///
-/// A panel has three surfaces (PRD §8, matching the Obsidian reference):
+/// A panel has three surfaces (matching the Obsidian reference):
 ///
-/// 1. **Selector** in the ribbon — toggles visibility. Owned by the sidebar.
+/// 1. **Selector** in the side panel's panel-selector toolbar — toggles
+///    visibility. Owned by the side panel.
 /// 2. **Toolbar** ([`Self::toolbar`]) — panel-local action icons rendered
 ///    above the content. Owned by this panel's contributing plugin.
 /// 3. **Content** ([`Self::content_type`]) — the React component registered
@@ -232,7 +233,7 @@ pub enum SidebarSide {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../../app/src/bindings/")]
-pub struct SidebarPanel {
+pub struct Panel {
     /// Panel id (`"explorer"`, `"search"`, …).
     pub id: String,
     /// Human-readable title.
@@ -288,9 +289,10 @@ pub struct PanelToolbarItem {
 #[serde(tag = "kind", rename_all = "camelCase")]
 #[ts(export, export_to = "../../../app/src/bindings/")]
 pub enum RibbonAction {
-    /// Toggle the panel with this id inside the same sidebar.
+    /// Toggle the panel with this id inside the side panel whose
+    /// selector toolbar (or the top-level ribbon) dispatched this action.
     TogglePanel {
-        /// Target panel id (matches [`SidebarPanel::id`]).
+        /// Target panel id (matches [`Panel::id`]).
         #[serde(rename = "panelId")]
         panel_id: String,
     },
@@ -307,7 +309,9 @@ pub enum RibbonAction {
     },
 }
 
-/// A single icon on a sidebar's activity ribbon (the narrow icon rail).
+/// A single icon on the workspace's activity ribbon (the narrow icon rail
+/// docked at the far-left edge of the window, independent of either side
+/// panel).
 ///
 /// Ribbon items are just references — the icon to render, the tooltip to
 /// show, and the action to dispatch. The actual implementation lives in the
@@ -329,46 +333,46 @@ pub struct RibbonItem {
     pub plugin: Option<String>,
 }
 
-/// A docked sidebar (left or right).
+/// A docked side panel (left or right).
 ///
-/// A sidebar has two independent surfaces (per PRD §8 and the Obsidian
-/// reference): the narrow **ribbon** of icons at the docked edge, and the
-/// wider **panel area** that shows the currently-selected panel's content.
-/// Clicking a ribbon item typically toggles a panel, but plugins can also
-/// register ribbon items that invoke commands or open views — see
-/// [`RibbonAction`].
+/// A side panel has three stacked surfaces:
+///
+///   1. **Panel-selector toolbar** — derived from [`Self::panels`]; rendered
+///      horizontally at the top. Clicking a selector toggles that panel's
+///      [`Panel::visible`] flag.
+///   2. **Panel-local toolbar** — [`Panel::toolbar`] of the active panel.
+///   3. **Content** — [`Panel::content_type`] of the active panel.
+///
+/// The activity ribbon is *not* part of the side panel — it lives on
+/// [`WorkspaceLayout::ribbon`] as a workspace-level concern.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../../app/src/bindings/")]
-pub struct Sidebar {
-    /// Which side this sidebar lives on.
-    pub side: SidebarSide,
+pub struct SidePanel {
+    /// Which side this side panel lives on.
+    pub side: SidePanelSide,
     /// Width in pixels when expanded.
     pub width: u32,
-    /// Sidebar is fully hidden.
+    /// Side panel is fully hidden.
     pub collapsed: bool,
     /// Show icons only (no titles).
     pub mini_mode: bool,
-    /// Ribbon items (narrow icon rail at the docked edge). Contributed by
-    /// core or plugins; resolved through the UI contribution registry.
-    #[serde(default)]
-    pub ribbon: Vec<RibbonItem>,
-    /// Registered panels shown in the wide panel area.
-    pub panels: Vec<SidebarPanel>,
+    /// Registered panels. Each contributes one entry to the top selector
+    /// toolbar and, when active, its own [`Panel::toolbar`] + content.
+    pub panels: Vec<Panel>,
     /// Panel ids in display order.
     pub panel_order: Vec<String>,
 }
 
-impl Sidebar {
-    /// Empty sidebar on the given side, default width 280 px, collapsed.
+impl SidePanel {
+    /// Empty side panel on the given side, default width 280 px, collapsed.
     #[must_use]
-    pub fn collapsed(side: SidebarSide) -> Self {
+    pub fn collapsed(side: SidePanelSide) -> Self {
         Self {
             side,
             width: 280,
             collapsed: true,
             mini_mode: false,
-            ribbon: Vec::new(),
             panels: Vec::new(),
             panel_order: Vec::new(),
         }
@@ -427,7 +431,7 @@ impl LayoutMetadata {
     }
 }
 
-/// Top-level workspace layout: root tree + sidebars + bottom panel + metadata.
+/// Top-level workspace layout: root tree + side panels + bottom panel + ribbon + metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../../app/src/bindings/")]
@@ -440,10 +444,16 @@ pub struct WorkspaceLayout {
     pub version: String,
     /// Root of the pane tree.
     pub root: LayoutNode,
+    /// Workspace activity ribbon (the far-left vertical rail). Contains
+    /// plugin/view shortcuts (graph, calendar, terminal, …), *not* side
+    /// panel selectors — those are derived from each side panel's own
+    /// [`Panel`] list.
+    #[serde(default)]
+    pub ribbon: Vec<RibbonItem>,
     /// Left dock.
-    pub left_sidebar: Sidebar,
+    pub left_side_panel: SidePanel,
     /// Right dock.
-    pub right_sidebar: Sidebar,
+    pub right_side_panel: SidePanel,
     /// Bottom panel.
     pub bottom_panel: BottomPanel,
     /// Id of the pane receiving keyboard focus.
@@ -468,8 +478,9 @@ impl Default for WorkspaceLayout {
             name: "Default".to_string(),
             version: "1.0".to_string(),
             root,
-            left_sidebar: Sidebar::collapsed(SidebarSide::Left),
-            right_sidebar: Sidebar::collapsed(SidebarSide::Right),
+            ribbon: Vec::new(),
+            left_side_panel: SidePanel::collapsed(SidePanelSide::Left),
+            right_side_panel: SidePanel::collapsed(SidePanelSide::Right),
             bottom_panel: BottomPanel::default(),
             focused_pane_id: Some(root_id),
             metadata: LayoutMetadata::now(1920, 1080),
@@ -808,15 +819,15 @@ impl WorkspaceLayout {
         Ok(())
     }
 
-    /// Collapse / expand the sidebar on `side`.
-    pub fn collapse_sidebar(&mut self, side: SidebarSide, collapsed: bool) {
-        self.sidebar_mut(side).collapsed = collapsed;
+    /// Collapse / expand the side panel on `side`.
+    pub fn collapse_side_panel(&mut self, side: SidePanelSide, collapsed: bool) {
+        self.side_panel_mut(side).collapsed = collapsed;
         self.touch();
     }
 
-    /// Toggle mini-mode (icon-only) on a sidebar.
-    pub fn set_mini_mode(&mut self, side: SidebarSide, enabled: bool) {
-        self.sidebar_mut(side).mini_mode = enabled;
+    /// Toggle mini-mode (icon-only) on a side panel.
+    pub fn set_mini_mode(&mut self, side: SidePanelSide, enabled: bool) {
+        self.side_panel_mut(side).mini_mode = enabled;
         self.touch();
     }
 
@@ -826,10 +837,10 @@ impl WorkspaceLayout {
         self.touch();
     }
 
-    fn sidebar_mut(&mut self, side: SidebarSide) -> &mut Sidebar {
+    fn side_panel_mut(&mut self, side: SidePanelSide) -> &mut SidePanel {
         match side {
-            SidebarSide::Left => &mut self.left_sidebar,
-            SidebarSide::Right => &mut self.right_sidebar,
+            SidePanelSide::Left => &mut self.left_side_panel,
+            SidePanelSide::Right => &mut self.right_side_panel,
         }
     }
 
@@ -1080,9 +1091,9 @@ mod tests {
         let layout = WorkspaceLayout::default();
         assert!(layout.root.is_leaf());
         assert!(layout.focused_pane_id.is_some());
-        assert_eq!(layout.left_sidebar.side, SidebarSide::Left);
-        assert_eq!(layout.right_sidebar.side, SidebarSide::Right);
-        assert!(layout.left_sidebar.collapsed);
+        assert_eq!(layout.left_side_panel.side, SidePanelSide::Left);
+        assert_eq!(layout.right_side_panel.side, SidePanelSide::Right);
+        assert!(layout.left_side_panel.collapsed);
         assert!(layout.bottom_panel.collapsed);
     }
 
@@ -1104,7 +1115,7 @@ mod tests {
         let layout = WorkspaceLayout::default();
         let json = layout.to_json().unwrap();
         assert!(json.contains("\"type\": \"leaf\""));
-        assert!(json.contains("\"leftSidebar\""));
+        assert!(json.contains("\"leftSidePanel\""));
         assert!(json.contains("\"bottomPanel\""));
     }
 
@@ -1284,13 +1295,13 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_and_bottom_panel_mutations() {
+    fn side_panel_and_bottom_panel_mutations() {
         let mut layout = WorkspaceLayout::default();
-        layout.collapse_sidebar(SidebarSide::Left, false);
-        layout.set_mini_mode(SidebarSide::Left, true);
+        layout.collapse_side_panel(SidePanelSide::Left, false);
+        layout.set_mini_mode(SidePanelSide::Left, true);
         layout.resize_bottom_panel(300);
-        assert!(!layout.left_sidebar.collapsed);
-        assert!(layout.left_sidebar.mini_mode);
+        assert!(!layout.left_side_panel.collapsed);
+        assert!(layout.left_side_panel.mini_mode);
         assert_eq!(layout.bottom_panel.height, 300);
     }
 
