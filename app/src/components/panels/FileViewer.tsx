@@ -1,12 +1,17 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { X } from "lucide-react";
 import { useForgeStore } from "../../stores/forge";
 import { useOpenFileStore } from "../../stores/openFile";
+import {
+  SCROLL_TO_HEADING_EVENT,
+  type ScrollToHeadingDetail,
+} from "./Outline";
 
 /**
  * Read-only file viewer. Renders the currently-open forge file as plain
- * text. A real editor (PRD-08) will replace this — the viewer exists
- * so the file tree has a meaningful target before that lands.
+ * text, tagging each line with `data-line` so the outline panel can
+ * scroll to a heading via a custom event. A real editor (PRD-08) will
+ * replace this.
  */
 export function FileViewer() {
   const file = useOpenFileStore((s) => s.file);
@@ -15,6 +20,7 @@ export function FileViewer() {
   const close = useOpenFileStore((s) => s.close);
   const refresh = useOpenFileStore((s) => s.refresh);
   const fsVersion = useForgeStore((s) => s.fsVersion);
+  const bodyRef = useRef<HTMLPreElement>(null);
 
   // Re-read the open file whenever the watcher signals a change. If
   // the file has been deleted or renamed externally, `refresh` closes
@@ -22,6 +28,22 @@ export function FileViewer() {
   useEffect(() => {
     void refresh();
   }, [fsVersion, refresh]);
+
+  // Scroll to the heading's line when the outline panel requests it.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<ScrollToHeadingDetail>).detail;
+      if (!detail || !bodyRef.current) return;
+      const target = bodyRef.current.querySelector<HTMLElement>(
+        `[data-line="${detail.line}"]`,
+      );
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    window.addEventListener(SCROLL_TO_HEADING_EVENT, handler);
+    return () => window.removeEventListener(SCROLL_TO_HEADING_EVENT, handler);
+  }, []);
+
+  const lines = useMemo(() => file?.content.split("\n") ?? [], [file?.content]);
 
   if (loading) {
     return <div className="file-viewer-status">opening…</div>;
@@ -50,7 +72,14 @@ export function FileViewer() {
           <X size={14} aria-hidden="true" />
         </button>
       </header>
-      <pre className="file-viewer-body">{file.content}</pre>
+      <pre ref={bodyRef} className="file-viewer-body">
+        {lines.map((line, i) => (
+          <span key={i} data-line={i}>
+            {line}
+            {i < lines.length - 1 ? "\n" : ""}
+          </span>
+        ))}
+      </pre>
     </div>
   );
 }

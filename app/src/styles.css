@@ -1087,3 +1087,49 @@ main {
   color: var(--nx-text-tertiary, #9a9ca4);
   cursor: not-allowed;
 }
+
+/* ── Outline panel (contentType=outline) ─────────────────────────────────── */
+
+.outline {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  font-size: 0.85em;
+  color: var(--nx-text-primary, #2a2a2a);
+}
+
+.outline-item {
+  display: block;
+  line-height: 1.6;
+}
+
+.outline-link {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: start;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 2px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outline-link:hover {
+  background: var(--nx-bg-hover, rgba(0, 0, 0, 0.04));
+}
+
+.outline-item.level-1 .outline-link {
+  font-weight: 600;
+}
+
+.outline-empty {
+  padding: 8px 12px;
+  font-style: italic;
+  font-size: 0.85em;
+  color: var(--nx-text-tertiary, #7a7a7a);
+}

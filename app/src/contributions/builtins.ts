@@ -1,5 +1,6 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FileTree } from "../components/panels/FileTree";
+import { Outline } from "../components/panels/Outline";
 import { useForgeStore } from "../stores/forge";
 import { usePaletteStore } from "../stores/palette";
 import { contributions } from "./registry";
@@ -7,15 +8,15 @@ import { contributions } from "./registry";
 /**
  * Seeds the contribution registry with commands the workspace frame
  * itself owns — help, settings, command palette entry point — plus the
- * `files` content-type (forge file tree). Other panel content-types
- * (`bookmarks`, `outline`, `commands`, `processes`) are left
- * unregistered; they'll be contributed by their owning PRDs as those
- * land.
+ * `files` and `outline` content-types. Other panel content-types
+ * (`bookmarks`, `commands`, `processes`) are left unregistered;
+ * they'll be contributed by their owning PRDs as those land.
  *
  * Idempotent — safe to call more than once during dev hot-reloads.
  */
 export function registerBuiltins(): void {
   contributions.registerContentType("files", FileTree);
+  contributions.registerContentType("outline", Outline);
 
   contributions.registerCommand("workspace.help", () => {
     // Placeholder — real help surface (docs site, in-app help panel) TBD.
