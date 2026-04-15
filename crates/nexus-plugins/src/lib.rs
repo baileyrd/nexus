@@ -23,7 +23,7 @@ pub use loader::{CorePlugin, CorePluginFuture, PluginLoader, SharedPluginLoader}
 pub use manifest::{
     CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
     PanelSide, PluginManifest, Registrations, SettingsConfig, UiCommandReg, UiPanelReg,
-    UiSettingsTabReg, WasmConfig,
+    UiRibbonItemReg, UiSettingsTabReg, WasmConfig,
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
 pub use sandbox::{PluginData, WasmSandbox};
@@ -97,6 +97,30 @@ pub struct UiSettingsTabContribution {
     pub title: String,
     /// Lucide icon name.
     pub icon: String,
+}
+
+/// A single plugin-contributed workspace-ribbon icon, materialised
+/// for the frontend.
+///
+/// Aggregated by [`PluginManager::ui_ribbon_items`] across every
+/// loaded plugin's `[[registrations.ui_ribbon_item]]` entries. The
+/// frontend merges these into the active layout's ribbon at render
+/// time; clicking dispatches the referenced plugin command via the
+/// contribution registry.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UiRibbonItemContribution {
+    /// The plugin that owns this ribbon entry.
+    pub plugin_id: String,
+    /// The `id` declared in the manifest.
+    pub ribbon_id: String,
+    /// Lucide icon name for the ribbon button.
+    pub icon: String,
+    /// Hover tooltip and accessible label.
+    pub tooltip: String,
+    /// Fully-qualified command id to dispatch on click
+    /// (`plugin:<plugin_id>:<command_id>`). Pre-resolved server-side
+    /// so the frontend doesn't reconstruct it.
+    pub command_id: String,
 }
 
 // ─── PluginManagerConfig ──────────────────────────────────────────────────────
@@ -306,6 +330,33 @@ impl PluginManager {
                         tab_id: r.id,
                         title: r.title,
                         icon: r.icon,
+                    })
+            })
+            .collect()
+    }
+
+    /// Aggregate workspace-ribbon icon contributions across all
+    /// currently-loaded plugins. `command_id` is pre-qualified with the
+    /// owning plugin so the frontend can pass it straight to
+    /// `contributions.invokeCommand`.
+    #[must_use]
+    pub fn ui_ribbon_items(&self) -> Vec<UiRibbonItemContribution> {
+        self.loader
+            .list()
+            .into_iter()
+            .flat_map(|info| {
+                let plugin_id = info.id.clone();
+                self.loader
+                    .manifest(&info.id)
+                    .map(|m| m.registrations.ui_ribbon_items.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |r| UiRibbonItemContribution {
+                        plugin_id: plugin_id.clone(),
+                        ribbon_id: r.id,
+                        icon: r.icon,
+                        tooltip: r.tooltip,
+                        command_id: format!("plugin:{plugin_id}:{}", r.command),
                     })
             })
             .collect()

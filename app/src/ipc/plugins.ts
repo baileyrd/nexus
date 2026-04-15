@@ -42,6 +42,19 @@ export interface PluginUiSettingsTab {
 }
 
 /**
+ * Mirrors `nexus_plugins::UiRibbonItemContribution`. `command_id` is
+ * pre-qualified (`plugin:<plugin_id>:<command_id>`) so the layout
+ * merge can pass it straight to `contributions.invokeCommand`.
+ */
+export interface PluginUiRibbonItem {
+  plugin_id: string;
+  ribbon_id: string;
+  icon: string;
+  tooltip: string;
+  command_id: string;
+}
+
+/**
  * Mirrors `nexus_app::plugins::PluginSummary`. Trust level is `"core"`
  * or `"community"`; status is `"loaded"`, `"initialized"`, `"running"`,
  * `"stopped"`, or `"crashed"`.
@@ -64,6 +77,10 @@ export function listPluginPanels(): Promise<PluginUiPanel[]> {
 
 export function listPluginSettingsTabs(): Promise<PluginUiSettingsTab[]> {
   return invoke<PluginUiSettingsTab[]>("list_plugin_settings_tabs");
+}
+
+export function listPluginRibbonItems(): Promise<PluginUiRibbonItem[]> {
+  return invoke<PluginUiRibbonItem[]>("list_plugin_ribbon_items");
 }
 
 export function listPlugins(): Promise<PluginSummary[]> {

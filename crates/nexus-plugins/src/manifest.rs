@@ -93,6 +93,8 @@ pub struct Registrations {
     pub ui_panels: Vec<UiPanelReg>,
     /// Per-plugin Settings-modal tab registrations.
     pub ui_settings_tabs: Vec<UiSettingsTabReg>,
+    /// Workspace-ribbon icon registrations.
+    pub ui_ribbon_items: Vec<UiRibbonItemReg>,
 }
 
 /// Which side of the workspace a plugin-contributed panel docks to.
@@ -200,6 +202,23 @@ pub struct UiSettingsTabReg {
     pub icon: String,
 }
 
+/// A single workspace-ribbon icon registration. The item delegates to
+/// one of the plugin's own `ui_command` ids — clicking the ribbon icon
+/// invokes that command through the contribution registry, so ribbon
+/// entries don't need their own handler_id.
+#[derive(Debug, Clone)]
+pub struct UiRibbonItemReg {
+    /// Unique ribbon-entry identifier within the plugin.
+    pub id: String,
+    /// Lucide icon name for the ribbon button.
+    pub icon: String,
+    /// Hover tooltip and accessible label.
+    pub tooltip: String,
+    /// Target `ui_command.id` (same manifest) invoked when the ribbon
+    /// icon is clicked.
+    pub command: String,
+}
+
 /// Lifecycle hook enablement flags.
 #[derive(Debug, Clone, Default)]
 #[allow(clippy::struct_excessive_bools)]
@@ -295,6 +314,8 @@ struct TomlRegistrations {
     ui_panels: Vec<TomlUiPanelReg>,
     #[serde(default, rename = "ui_settings_tab")]
     ui_settings_tabs: Vec<TomlUiSettingsTabReg>,
+    #[serde(default, rename = "ui_ribbon_item")]
+    ui_ribbon_items: Vec<TomlUiRibbonItemReg>,
 }
 
 #[derive(Deserialize)]
@@ -346,6 +367,14 @@ struct TomlUiSettingsTabReg {
     handler_id: u32,
     title: String,
     icon: String,
+}
+
+#[derive(Deserialize)]
+struct TomlUiRibbonItemReg {
+    id: String,
+    icon: String,
+    tooltip: String,
+    command: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -460,6 +489,17 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
                     handler_id: r.handler_id,
                     title: r.title,
                     icon: r.icon,
+                })
+                .collect(),
+            ui_ribbon_items: raw
+                .registrations
+                .ui_ribbon_items
+                .into_iter()
+                .map(|r| UiRibbonItemReg {
+                    id: r.id,
+                    icon: r.icon,
+                    tooltip: r.tooltip,
+                    command: r.command,
                 })
                 .collect(),
         },
@@ -584,6 +624,12 @@ handler_id = 500
 title = "About"
 icon = "info"
 
+[[registrations.ui_ribbon_item]]
+id = "test.ribbon"
+icon = "hand"
+tooltip = "Say hi"
+command = "test.hello"
+
 [lifecycle]
 on_init = true
 on_start = true
@@ -609,6 +655,7 @@ on_stop = true
         assert!(m.registrations.ui_commands.is_empty());
         assert!(m.registrations.ui_panels.is_empty());
         assert!(m.registrations.ui_settings_tabs.is_empty());
+        assert!(m.registrations.ui_ribbon_items.is_empty());
     }
 
     #[test]
@@ -648,6 +695,12 @@ on_stop = true
         assert_eq!(tab.handler_id, 500);
         assert_eq!(tab.title, "About");
         assert_eq!(tab.icon, "info");
+        assert_eq!(m.registrations.ui_ribbon_items.len(), 1);
+        let ribbon = &m.registrations.ui_ribbon_items[0];
+        assert_eq!(ribbon.id, "test.ribbon");
+        assert_eq!(ribbon.icon, "hand");
+        assert_eq!(ribbon.tooltip, "Say hi");
+        assert_eq!(ribbon.command, "test.hello");
         assert!(m.lifecycle.on_init);
         assert!(m.lifecycle.on_start);
         assert!(m.lifecycle.on_stop);

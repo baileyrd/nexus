@@ -93,6 +93,7 @@ pub fn run() {
             plugins::list_plugin_contributions,
             plugins::list_plugin_panels,
             plugins::list_plugin_settings_tabs,
+            plugins::list_plugin_ribbon_items,
             plugins::invoke_plugin_command,
             plugins::list_plugins,
             keybindings::get_keybinding_overrides,

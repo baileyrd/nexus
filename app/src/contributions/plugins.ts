@@ -31,8 +31,10 @@ import {
   invokePluginCommand,
   listPluginContributions,
   listPluginPanels,
+  listPluginRibbonItems,
   listPluginSettingsTabs,
   type PluginUiPanel,
+  type PluginUiRibbonItem,
 } from "../ipc/plugins";
 
 type Disposable = () => void;
@@ -114,13 +116,30 @@ async function syncSettingsTabs(): Promise<void> {
   }
 }
 
+async function syncRibbon(): Promise<void> {
+  let items: PluginUiRibbonItem[];
+  try {
+    items = await listPluginRibbonItems();
+  } catch (err) {
+    warn("list_plugin_ribbon_items failed — skipping", err);
+    useLayoutStore.getState().setPluginRibbon([]);
+    return;
+  }
+  useLayoutStore.getState().setPluginRibbon(items);
+}
+
 async function syncAll(): Promise<void> {
   // Drop the previous snapshot's registrations before re-registering so
   // removed/renamed plugin contributions disappear cleanly.
   for (const dispose of activeDisposables) dispose();
   activeDisposables = [];
 
-  await Promise.all([syncCommands(), syncPanels(), syncSettingsTabs()]);
+  await Promise.all([
+    syncCommands(),
+    syncPanels(),
+    syncSettingsTabs(),
+    syncRibbon(),
+  ]);
 }
 
 export async function registerPluginContributions(): Promise<void> {

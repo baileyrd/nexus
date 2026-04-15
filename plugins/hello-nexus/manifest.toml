@@ -31,5 +31,11 @@ handler_id = 102
 title = "Hello Nexus"
 icon = "hand"
 
+[[registrations.ui_ribbon_item]]
+id = "hello.ribbon"
+icon = "hand"
+tooltip = "Hello: Say hi"
+command = "hello.sayHi"
+
 [lifecycle]
 on_init = true

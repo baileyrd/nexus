@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use nexus_plugins::{
     PluginManager, PluginManagerConfig, PluginStatus, TrustLevel, UiContribution,
-    UiPanelContribution, UiSettingsTabContribution,
+    UiPanelContribution, UiRibbonItemContribution, UiSettingsTabContribution,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -156,6 +156,20 @@ pub fn list_plugin_settings_tabs(
         .0
         .lock()
         .map(|mgr| mgr.ui_settings_tabs())
+        .unwrap_or_default()
+}
+
+/// List all plugin-contributed workspace-ribbon icons. The frontend
+/// merges these into the active layout's `ribbon` array at render
+/// time.
+#[tauri::command]
+pub fn list_plugin_ribbon_items(
+    state: State<'_, PluginState>,
+) -> Vec<UiRibbonItemContribution> {
+    state
+        .0
+        .lock()
+        .map(|mgr| mgr.ui_ribbon_items())
         .unwrap_or_default()
 }
 
