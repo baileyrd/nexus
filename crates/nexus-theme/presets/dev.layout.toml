@@ -61,6 +61,7 @@ id = "explorer"
 title = "Explorer"
 icon = "folder"
 visible = true
+contentType = "files"
 
 [[leftSidePanel.panels]]
 id = "search"

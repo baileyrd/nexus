@@ -21,6 +21,7 @@ id = "explorer"
 title = "Explorer"
 icon = "folder"
 visible = true
+contentType = "files"
 
 [rightSidePanel]
 side = "right"

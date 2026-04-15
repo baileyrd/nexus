@@ -867,3 +867,80 @@ main {
   font-size: 14px;
   text-align: center;
 }
+
+/* ── File-tree panel content (contentType=files) ─────────────────────────── */
+
+.file-tree,
+.file-tree-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.file-tree {
+  padding: 4px 0;
+  overflow-y: auto;
+  font-size: 0.85em;
+  color: var(--nx-text-primary, #2a2a2a);
+}
+
+.file-tree-row {
+  display: block;
+  line-height: 1.6;
+}
+
+.file-tree-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: start;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding-block: 2px;
+}
+
+.file-tree-toggle:hover,
+.file-tree-row.is-file:hover {
+  background: var(--nx-bg-hover, rgba(0, 0, 0, 0.04));
+}
+
+.file-tree-row.is-file {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-block: 2px;
+}
+
+.file-tree-twisty {
+  flex: 0 0 12px;
+  color: var(--nx-text-tertiary, #7a7a7a);
+}
+
+.file-tree-icon {
+  flex: 0 0 14px;
+  color: var(--nx-text-secondary, #4a4a4a);
+}
+
+.file-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-loading,
+.file-tree-empty,
+.file-tree-error {
+  padding: 8px 12px;
+  font-style: italic;
+  font-size: 0.85em;
+  color: var(--nx-text-tertiary, #7a7a7a);
+}
+
+.file-tree-error {
+  color: var(--nx-status-error, #c24040);
+  font-style: normal;
+}

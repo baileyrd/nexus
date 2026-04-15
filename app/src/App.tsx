@@ -3,11 +3,13 @@ import { ModeToggle } from "./components/ModeToggle";
 import { CommandPalette } from "./components/palette/CommandPalette";
 import { ThemePicker } from "./components/ThemePicker";
 import { WorkspaceView } from "./components/layout/WorkspaceView";
+import { useForgeStore } from "./stores/forge";
 import { useThemeStore } from "./stores/theme";
 
 export default function App() {
   const applyTheme = useThemeStore((s) => s.applyTheme);
   const currentThemeId = useThemeStore((s) => s.currentThemeId);
+  const loadForge = useForgeStore((s) => s.load);
 
   // Pick the built-in light theme on first mount so the picker reflects an
   // "active" selection immediately. The user can switch freely from there.
@@ -16,6 +18,10 @@ export default function App() {
       applyTheme("nexus-light");
     }
   }, [applyTheme, currentThemeId]);
+
+  useEffect(() => {
+    loadForge();
+  }, [loadForge]);
 
   return (
     <div className="app">

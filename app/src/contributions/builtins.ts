@@ -1,16 +1,20 @@
+import { FileTree } from "../components/panels/FileTree";
 import { usePaletteStore } from "../stores/palette";
 import { contributions } from "./registry";
 
 /**
  * Seeds the contribution registry with commands the workspace frame
- * itself owns — help, settings, command palette entry point. Real
- * panel content-types (`bookmarks`, `outline`, `commands`, `processes`)
- * are left unregistered; they'll be contributed by their owning PRDs
- * (bookmarks panel, outline panel, etc.) as those land.
+ * itself owns — help, settings, command palette entry point — plus the
+ * `files` content-type (forge file tree). Other panel content-types
+ * (`bookmarks`, `outline`, `commands`, `processes`) are left
+ * unregistered; they'll be contributed by their owning PRDs as those
+ * land.
  *
  * Idempotent — safe to call more than once during dev hot-reloads.
  */
 export function registerBuiltins(): void {
+  contributions.registerContentType("files", FileTree);
+
   contributions.registerCommand("workspace.help", () => {
     // Placeholder — real help surface (docs site, in-app help panel) TBD.
     // eslint-disable-next-line no-alert

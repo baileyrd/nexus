@@ -15,8 +15,10 @@
 use std::sync::Mutex;
 
 use nexus_theme::api::ThemeEngine;
+use tauri::Manager;
 
 pub mod commands;
+pub mod forge;
 pub mod persistence;
 
 /// Entry point for the desktop app. Called from `main.rs` (and from the
@@ -30,6 +32,23 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(commands::EngineState(Mutex::new(engine)))
+        .manage(forge::ForgeState(Mutex::new(None)))
+        .setup(|app| {
+            match forge::bootstrap(&app.handle().clone()) {
+                Ok(info) => {
+                    tracing::info!(root = %info.root.display(), name = %info.name, "opened forge");
+                    if let Some(state) = app.try_state::<forge::ForgeState>() {
+                        if let Ok(mut guard) = state.0.lock() {
+                            *guard = Some(info);
+                        }
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(%err, "forge bootstrap failed; UI will show no forge open");
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_available_themes,
             commands::apply_theme,
@@ -44,6 +63,9 @@ pub fn run() {
             commands::list_layout_presets,
             persistence::get_layout_persistence,
             persistence::save_layout_persistence,
+            forge::current_forge,
+            forge::open_forge,
+            forge::list_forge_dir,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch nexus-app");

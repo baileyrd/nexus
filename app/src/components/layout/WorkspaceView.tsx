@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import type { Panel, SidePanel } from "../../bindings";
 import { useContentType } from "../../contributions";
+import { useForgeStore } from "../../stores/forge";
 import { useLayoutStore } from "../../stores/layout";
 import { LayoutPresetPicker } from "./LayoutPresetPicker";
 import { PanelSelector } from "./PanelSelector";
@@ -169,6 +170,7 @@ interface SidePanelBodyProps {
  */
 function SidePanelBody({ side, sidePanel, onTogglePanel }: SidePanelBodyProps) {
   const activePanel = sidePanel.panels.find((p) => p.visible) ?? null;
+  const forgeName = useForgeStore((s) => s.info?.name);
 
   return (
     <div className="side-panel-body" data-side={side}>
@@ -180,7 +182,7 @@ function SidePanelBody({ side, sidePanel, onTogglePanel }: SidePanelBodyProps) {
         )}
       </div>
       {sidePanel.footer && (
-        <SidePanelFooter footer={sidePanel.footer} forgeName="lap-working" />
+        <SidePanelFooter footer={sidePanel.footer} forgeName={forgeName} />
       )}
     </div>
   );

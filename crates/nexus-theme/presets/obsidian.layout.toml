@@ -114,7 +114,8 @@ action = { kind = "invokeCommand", command = "workspace.settings" }
 id = "explorer"
 title = "Files"
 icon = "folder"
-visible = false
+visible = true
+contentType = "files"
 
 [[leftSidePanel.panels]]
 id = "search"
@@ -126,7 +127,7 @@ visible = false
 id = "bookmarks"
 title = "Bookmarks"
 icon = "bookmark"
-visible = true
+visible = false
 contentType = "bookmarks"
 toolbar = [
   { id = "bookmarks.new", icon = "bookmark-plus", tooltip = "New bookmark", action = { kind = "invokeCommand", command = "bookmarks.new" } },
