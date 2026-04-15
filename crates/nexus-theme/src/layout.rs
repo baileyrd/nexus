@@ -279,6 +279,42 @@ pub struct PanelToolbarItem {
     pub plugin: Option<String>,
 }
 
+/// A single icon button in a side panel's footer (right-aligned area —
+/// help, settings, plugin-contributed actions).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../../app/src/bindings/")]
+pub struct FooterAction {
+    /// Stable id (`"workspace.help"`, `"workspace.settings"`, …).
+    pub id: String,
+    /// Icon id resolved by the UI.
+    pub icon: String,
+    /// Hover tooltip and accessible label.
+    pub tooltip: String,
+    /// What clicking the item does.
+    pub action: RibbonAction,
+    /// Owning plugin id. `None` for core.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub plugin: Option<String>,
+}
+
+/// Footer row pinned to the bottom of a side panel. Typically only the
+/// left side panel carries one (forge switcher + help + settings).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../../app/src/bindings/")]
+pub struct SidePanelFooter {
+    /// Show the forge / workspace switcher on the left of the footer
+    /// row. The active forge name is filled in at runtime — the preset
+    /// just opts in.
+    #[serde(default)]
+    pub show_forge_selector: bool,
+    /// Right-aligned action icons (core ships help + settings; plugins
+    /// can append more).
+    #[serde(default)]
+    pub actions: Vec<FooterAction>,
+}
+
 /// What a ribbon icon does when clicked.
 ///
 /// Ribbon items are references: `command` / `view_id` are resolved at runtime
@@ -362,6 +398,10 @@ pub struct SidePanel {
     pub panels: Vec<Panel>,
     /// Panel ids in display order.
     pub panel_order: Vec<String>,
+    /// Optional footer pinned at the bottom (forge selector + actions).
+    /// Typically only set on the left side panel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub footer: Option<SidePanelFooter>,
 }
 
 impl SidePanel {
@@ -375,6 +415,7 @@ impl SidePanel {
             mini_mode: false,
             panels: Vec::new(),
             panel_order: Vec::new(),
+            footer: None,
         }
     }
 }

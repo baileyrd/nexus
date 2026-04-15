@@ -5,6 +5,7 @@ import { LayoutPresetPicker } from "./LayoutPresetPicker";
 import { PanelSelector } from "./PanelSelector";
 import { PanelToolbar } from "./PanelToolbar";
 import { Ribbon } from "./Ribbon";
+import { SidePanelFooter } from "./SidePanelFooter";
 import { SplitPane } from "./SplitPane";
 
 export function WorkspaceView() {
@@ -94,6 +95,9 @@ function SidePanelView({ side, sidePanel, onTogglePanel }: SidePanelViewProps) {
           <div className="panel-empty">no panel selected</div>
         )}
       </div>
+      {sidePanel.footer && (
+        <SidePanelFooter footer={sidePanel.footer} forgeName="lap-working" />
+      )}
     </aside>
   );
 }

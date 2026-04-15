@@ -66,6 +66,22 @@ collapsed = false
 miniMode = false
 panelOrder = ["explorer", "search", "bookmarks", "tags", "graph"]
 
+# Footer: forge switcher on the left, help + settings on the right.
+[leftSidePanel.footer]
+showForgeSelector = true
+
+[[leftSidePanel.footer.actions]]
+id = "help"
+icon = "help-circle"
+tooltip = "Help"
+action = { kind = "invokeCommand", command = "workspace.help" }
+
+[[leftSidePanel.footer.actions]]
+id = "settings"
+icon = "settings"
+tooltip = "Settings"
+action = { kind = "invokeCommand", command = "workspace.settings" }
+
 [[leftSidePanel.panels]]
 id = "explorer"
 title = "Files"

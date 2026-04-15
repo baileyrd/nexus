@@ -4,6 +4,7 @@
 export type { AppliedTheme } from "./AppliedTheme";
 export type { BottomPanel } from "./BottomPanel";
 export type { Direction } from "./Direction";
+export type { FooterAction } from "./FooterAction";
 export type { LayoutMetadata } from "./LayoutMetadata";
 export type { LayoutNode } from "./LayoutNode";
 export type { PaneId } from "./PaneId";
@@ -14,6 +15,7 @@ export type { PresetSourceKind } from "./PresetSourceKind";
 export type { RibbonAction } from "./RibbonAction";
 export type { RibbonItem } from "./RibbonItem";
 export type { SidePanel } from "./SidePanel";
+export type { SidePanelFooter } from "./SidePanelFooter";
 export type { SidePanelSide } from "./SidePanelSide";
 export type { SnippetMetadata } from "./SnippetMetadata";
 export type { SnippetMode } from "./SnippetMode";

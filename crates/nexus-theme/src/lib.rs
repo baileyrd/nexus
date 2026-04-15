@@ -42,8 +42,9 @@ pub mod watcher;
 
 pub use error::ThemeError;
 pub use layout::{
-    BottomPanel, Direction, LayoutNode, PaneId, PaneNode, Panel, PanelToolbarItem, RibbonAction,
-    RibbonItem, SidePanel, SidePanelSide, Surface, Tab, TabId, WorkspaceLayout,
+    BottomPanel, Direction, FooterAction, LayoutNode, PaneId, PaneNode, Panel, PanelToolbarItem,
+    RibbonAction, RibbonItem, SidePanel, SidePanelFooter, SidePanelSide, Surface, Tab, TabId,
+    WorkspaceLayout,
 };
 pub use manifest::ThemeManifest;
 pub use preset::{LayoutPreset, PresetInfo, PresetRegistry, PresetSourceKind};
