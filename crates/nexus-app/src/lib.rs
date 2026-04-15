@@ -39,6 +39,7 @@ pub fn run() {
         .manage(plugins::bootstrap())
         .setup(|app| {
             let handle = app.handle().clone();
+            plugins::start_reload_watcher(handle.clone());
             match forge::bootstrap(&handle) {
                 Ok(info) => {
                     tracing::info!(root = %info.root.display(), name = %info.name, "opened forge");

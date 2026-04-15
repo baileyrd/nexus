@@ -5,9 +5,19 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use nexus_plugins::{PluginManager, PluginManagerConfig, PluginStatus, TrustLevel, UiContribution};
-use tauri::State;
+use tauri::{AppHandle, Emitter, Manager, State};
+
+/// Tauri event emitted when one or more community plugins have been
+/// hot-reloaded. Payload: `{ "plugin_ids": ["com.nexus.hello", …] }`.
+pub const PLUGINS_RELOADED_EVENT: &str = "plugins:reloaded";
+
+/// How often the background watcher thread drains pending hot-reload
+/// events. The underlying `HotReloader` already debounces filesystem
+/// events, so this just needs to be short enough to feel live.
+const RELOAD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Tauri-managed [`PluginManager`] wrapped in a mutex for interior mutability.
 pub struct PluginState(pub Mutex<PluginManager>);
@@ -157,5 +167,47 @@ pub fn invoke_plugin_command(
         .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
     mgr.dispatch_ipc(&plugin_id, &command_id, &args)
         .map_err(|e| e.to_string())
+}
+
+/// Spawn a background thread that drains [`PluginManager::poll_reloads`]
+/// and emits [`PLUGINS_RELOADED_EVENT`] to the frontend whenever one or
+/// more plugins have been hot-reloaded.
+///
+/// The thread lives for the app process lifetime. It is cheap: it sleeps
+/// between polls and only briefly locks the [`PluginState`] mutex to
+/// drain pending events.
+pub fn start_reload_watcher(handle: AppHandle) {
+    std::thread::Builder::new()
+        .name("nexus-plugin-reload-watcher".to_string())
+        .spawn(move || loop {
+            std::thread::sleep(RELOAD_POLL_INTERVAL);
+            let Some(state) = handle.try_state::<PluginState>() else {
+                // Managed state disappeared — app is shutting down.
+                return;
+            };
+            let reloaded = {
+                let Ok(mut mgr) = state.0.lock() else {
+                    continue;
+                };
+                match mgr.poll_reloads() {
+                    Ok(ids) => ids,
+                    Err(err) => {
+                        tracing::warn!(%err, "poll_reloads failed");
+                        continue;
+                    }
+                }
+            };
+            if reloaded.is_empty() {
+                continue;
+            }
+            tracing::info!(plugins = ?reloaded, "hot-reloaded plugins");
+            if let Err(err) = handle.emit(
+                PLUGINS_RELOADED_EVENT,
+                serde_json::json!({ "plugin_ids": reloaded }),
+            ) {
+                tracing::warn!(%err, "failed to emit plugins:reloaded");
+            }
+        })
+        .expect("spawn plugin reload watcher");
 }
 

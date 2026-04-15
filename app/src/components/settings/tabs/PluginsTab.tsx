@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { listPlugins, type PluginSummary } from "../../../ipc/plugins";
 
 type LoadState =
@@ -17,17 +18,25 @@ export function PluginsTab() {
 
   useEffect(() => {
     let cancelled = false;
+
+    function refresh() {
+      listPlugins().then(
+        (plugins) => {
+          if (!cancelled) setState({ kind: "ready", plugins });
+        },
+        (err) => {
+          if (!cancelled) setState({ kind: "error", message: String(err) });
+        },
+      );
+    }
+
     setState({ kind: "loading" });
-    listPlugins().then(
-      (plugins) => {
-        if (!cancelled) setState({ kind: "ready", plugins });
-      },
-      (err) => {
-        if (!cancelled) setState({ kind: "error", message: String(err) });
-      },
-    );
+    refresh();
+
+    const unlisten = listen("plugins:reloaded", () => refresh());
     return () => {
       cancelled = true;
+      void unlisten.then((fn) => fn());
     };
   }, []);
 
