@@ -64,6 +64,7 @@ async function syncContributions(): Promise<void> {
         title: entry.title,
         category: entry.category ?? undefined,
         icon: entry.icon ?? undefined,
+        keybinding: entry.keybinding ?? undefined,
       }),
     );
   }

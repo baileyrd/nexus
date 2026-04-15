@@ -12,6 +12,7 @@ export interface PluginUiContribution {
   title: string;
   category: string | null;
   icon: string | null;
+  keybinding: string | null;
 }
 
 /**

@@ -4,6 +4,7 @@ import { ModeToggle } from "./components/ModeToggle";
 import { CommandPalette } from "./components/palette/CommandPalette";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { WorkspaceView } from "./components/layout/WorkspaceView";
+import { KeybindingDispatcher } from "./keybindings/KeybindingDispatcher";
 import { useForgeStore } from "./stores/forge";
 import { useLayoutStore } from "./stores/layout";
 import { useThemeStore } from "./stores/theme";
@@ -61,6 +62,7 @@ export default function App() {
       </main>
       <CommandPalette />
       <SettingsModal />
+      <KeybindingDispatcher />
     </div>
   );
 }

@@ -16,6 +16,7 @@ handler_id = 100
 title = "Hello: Say hi"
 category = "Demo"
 icon = "hand"
+keybinding = "Mod+Shift+H"
 
 [lifecycle]
 on_init = true

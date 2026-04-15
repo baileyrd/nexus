@@ -139,6 +139,11 @@ pub struct UiCommandReg {
     pub category: Option<String>,
     /// Optional Lucide icon name.
     pub icon: Option<String>,
+    /// Optional default keybinding. A `+`-separated chord understood by
+    /// the frontend keybinding dispatcher — e.g. `"Mod+Shift+H"`,
+    /// `"Ctrl+Alt+/"`. `"Mod"` resolves to Ctrl on Linux/Windows and
+    /// Cmd on macOS. Users will eventually be able to override this.
+    pub keybinding: Option<String>,
 }
 
 /// Lifecycle hook enablement flags.
@@ -263,6 +268,8 @@ struct TomlUiCommandReg {
     category: Option<String>,
     #[serde(default)]
     icon: Option<String>,
+    #[serde(default)]
+    keybinding: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -353,6 +360,7 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
                     title: r.title,
                     category: r.category,
                     icon: r.icon,
+                    keybinding: r.keybinding,
                 })
                 .collect(),
         },
@@ -462,6 +470,7 @@ handler_id = 300
 title = "Say Hi"
 category = "Demo"
 icon = "hand"
+keybinding = "Mod+Shift+H"
 
 [lifecycle]
 on_init = true
@@ -511,6 +520,7 @@ on_stop = true
         assert_eq!(ui.title, "Say Hi");
         assert_eq!(ui.category.as_deref(), Some("Demo"));
         assert_eq!(ui.icon.as_deref(), Some("hand"));
+        assert_eq!(ui.keybinding.as_deref(), Some("Mod+Shift+H"));
         assert!(m.lifecycle.on_init);
         assert!(m.lifecycle.on_start);
         assert!(m.lifecycle.on_stop);
@@ -604,6 +614,7 @@ title = "Bare Command"
         let ui = &m.registrations.ui_commands[0];
         assert!(ui.category.is_none());
         assert!(ui.icon.is_none());
+        assert!(ui.keybinding.is_none());
     }
 
     #[test]
@@ -920,6 +931,7 @@ on_stop = true
             title: "A".to_string(),
             category: None,
             icon: None,
+            keybinding: None,
         });
         let err = validate(&m, dir.path()).unwrap_err();
         assert!(

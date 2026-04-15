@@ -50,6 +50,9 @@ pub struct UiContribution {
     pub category: Option<String>,
     /// Optional Lucide icon name.
     pub icon: Option<String>,
+    /// Optional default keybinding — a `+`-separated chord parsed and
+    /// dispatched on the frontend (e.g. `"Mod+Shift+H"`).
+    pub keybinding: Option<String>,
 }
 
 // ─── PluginManagerConfig ──────────────────────────────────────────────────────
@@ -197,6 +200,7 @@ impl PluginManager {
                         title: r.title,
                         category: r.category,
                         icon: r.icon,
+                        keybinding: r.keybinding,
                     })
             })
             .collect()
