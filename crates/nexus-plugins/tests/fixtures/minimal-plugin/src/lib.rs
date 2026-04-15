@@ -1,5 +1,10 @@
 use std::alloc::{alloc, Layout};
 
+#[link(wasm_import_module = "host")]
+extern "C" {
+    fn get_settings(out_ptr: i32, out_cap: i32) -> i32;
+}
+
 #[no_mangle]
 pub extern "C" fn nexus_alloc(size: u32) -> u32 {
     if size == 0 {
@@ -69,6 +74,32 @@ pub extern "C" fn nexus_dispatch(handler_id: u32, args_ptr: u32, args_len: u32) 
             let mut out = Vec::with_capacity(args.len() + 96);
             out.extend_from_slice(br#"{"events":[{"topic":"com.nexus.hello.observed","payload":"#);
             out.extend_from_slice(&args);
+            out.extend_from_slice(b"}]}");
+            out
+        }
+        105 => {
+            // echo-settings handler: asks the host for this plugin's
+            // current validated settings JSON via `host::get_settings`
+            // and re-emits it as a `com.nexus.hello.settings` plugin
+            // event, proving the WASM-side settings read path.
+            const CAP: i32 = 4096;
+            let cap_u32 = CAP as u32;
+            let buf_ptr = nexus_alloc(cap_u32);
+            let payload: Vec<u8> = if buf_ptr == 0 {
+                b"null".to_vec()
+            } else {
+                let n = unsafe { get_settings(buf_ptr as i32, CAP) };
+                if n > 0 {
+                    unsafe {
+                        std::slice::from_raw_parts(buf_ptr as *const u8, n as usize).to_vec()
+                    }
+                } else {
+                    b"{}".to_vec()
+                }
+            };
+            let mut out = Vec::with_capacity(payload.len() + 96);
+            out.extend_from_slice(br#"{"events":[{"topic":"com.nexus.hello.settings","payload":"#);
+            out.extend_from_slice(&payload);
             out.extend_from_slice(b"}]}");
             out
         }

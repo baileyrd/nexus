@@ -21,6 +21,13 @@ category = "Demo"
 icon = "hand"
 keybinding = "Mod+Shift+H"
 
+[[registrations.ui_command]]
+id = "hello.echoSettings"
+handler_id = 105
+title = "Hello: Echo settings"
+category = "Demo"
+icon = "sliders-horizontal"
+
 [[registrations.ui_panel]]
 id = "hello.panel"
 handler_id = 101
