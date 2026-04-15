@@ -14,8 +14,25 @@ export interface PluginUiContribution {
   icon: string | null;
 }
 
+/**
+ * Mirrors `nexus_app::plugins::PluginSummary`. Trust level is `"core"`
+ * or `"community"`; status is `"loaded"`, `"initialized"`, `"running"`,
+ * `"stopped"`, or `"crashed"`.
+ */
+export interface PluginSummary {
+  id: string;
+  name: string;
+  version: string;
+  trust_level: string;
+  status: string;
+}
+
 export function listPluginContributions(): Promise<PluginUiContribution[]> {
   return invoke<PluginUiContribution[]>("list_plugin_contributions");
+}
+
+export function listPlugins(): Promise<PluginSummary[]> {
+  return invoke<PluginSummary[]>("list_plugins");
 }
 
 export function invokePluginCommand(

@@ -28,6 +28,7 @@ pub use manifest::{load_manifest, parse_manifest, validate};
 pub use sandbox::{PluginData, WasmSandbox};
 pub use settings::SettingsManager;
 pub use hot_reload::{HotReloader, ReloadEvent};
+pub use nexus_kernel::{PluginInfo, PluginStatus, TrustLevel};
 
 // ─── UiContribution ───────────────────────────────────────────────────────────
 

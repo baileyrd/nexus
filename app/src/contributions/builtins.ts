@@ -3,6 +3,7 @@ import { FileTree } from "../components/panels/FileTree";
 import { Outline } from "../components/panels/Outline";
 import { useForgeStore } from "../stores/forge";
 import { usePaletteStore } from "../stores/palette";
+import { useSettingsStore } from "../stores/settings";
 import { contributions } from "./registry";
 
 /**
@@ -32,8 +33,7 @@ export function registerBuiltins(): void {
   });
 
   contributions.registerCommand("workspace.settings", () => {
-    // eslint-disable-next-line no-alert
-    alert("Settings UI — pending (PRD 07 §20).");
+    useSettingsStore.getState().openSettings();
   });
   contributions.registerPaletteCommand({
     id: "workspace.settings",

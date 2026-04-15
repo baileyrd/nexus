@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { ModeToggle } from "./components/ModeToggle";
 import { CommandPalette } from "./components/palette/CommandPalette";
-import { ThemePicker } from "./components/ThemePicker";
+import { SettingsModal } from "./components/settings/SettingsModal";
 import { WorkspaceView } from "./components/layout/WorkspaceView";
 import { useForgeStore } from "./stores/forge";
 import { useLayoutStore } from "./stores/layout";
@@ -58,9 +58,9 @@ export default function App() {
       </header>
       <main>
         <WorkspaceView />
-        <ThemePicker />
       </main>
       <CommandPalette />
+      <SettingsModal />
     </div>
   );
 }

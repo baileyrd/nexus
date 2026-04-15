@@ -6,11 +6,47 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use nexus_plugins::{PluginManager, PluginManagerConfig, UiContribution};
+use nexus_plugins::{PluginManager, PluginManagerConfig, PluginStatus, TrustLevel, UiContribution};
 use tauri::State;
 
 /// Tauri-managed [`PluginManager`] wrapped in a mutex for interior mutability.
 pub struct PluginState(pub Mutex<PluginManager>);
+
+/// Frontend-facing projection of [`nexus_kernel::PluginInfo`].
+///
+/// Kept separate from `PluginInfo` so we can serialize without forcing
+/// `Serialize` onto kernel types (their `CapabilitySet` in particular).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PluginSummary {
+    /// Plugin identifier (reverse-DNS).
+    pub id: String,
+    /// Human-readable display name.
+    pub name: String,
+    /// Version string from the manifest.
+    pub version: String,
+    /// Trust level — `"core"` or `"community"`.
+    pub trust_level: String,
+    /// Current runtime status — `"loaded"`, `"initialized"`, `"running"`,
+    /// `"stopped"`, or `"crashed"`.
+    pub status: String,
+}
+
+fn trust_level_str(level: TrustLevel) -> &'static str {
+    match level {
+        TrustLevel::Core => "core",
+        TrustLevel::Community => "community",
+    }
+}
+
+fn status_str(status: PluginStatus) -> &'static str {
+    match status {
+        PluginStatus::Loaded => "loaded",
+        PluginStatus::Initialized => "initialized",
+        PluginStatus::Running => "running",
+        PluginStatus::Stopped => "stopped",
+        PluginStatus::Crashed => "crashed",
+    }
+}
 
 /// Resolve the plugins directory.
 ///
@@ -82,6 +118,25 @@ pub fn list_plugin_contributions(state: State<'_, PluginState>) -> Vec<UiContrib
         .lock()
         .map(|mgr| mgr.ui_contributions())
         .unwrap_or_default()
+}
+
+/// List every loaded plugin as a serializable summary — used by the
+/// Settings modal's plugins tab.
+#[tauri::command]
+pub fn list_plugins(state: State<'_, PluginState>) -> Vec<PluginSummary> {
+    let Ok(mgr) = state.0.lock() else {
+        return Vec::new();
+    };
+    mgr.list()
+        .into_iter()
+        .map(|info| PluginSummary {
+            id: info.id,
+            name: info.name,
+            version: info.version,
+            trust_level: trust_level_str(info.trust_level).to_string(),
+            status: status_str(info.status).to_string(),
+        })
+        .collect()
 }
 
 /// Invoke a plugin command by `plugin_id` and `command_id`, forwarding

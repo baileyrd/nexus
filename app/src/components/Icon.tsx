@@ -32,6 +32,7 @@ import {
   Network,
   Play,
   PlayCircle,
+  Plug,
   Plus,
   Puzzle,
   Search,
@@ -42,6 +43,7 @@ import {
   Terminal,
   Upload,
   Workflow,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -84,6 +86,7 @@ const REGISTRY: Record<string, LucideIcon> = {
   "minus": Minus,
   "play": Play,
   "play-circle": PlayCircle,
+  "plug": Plug,
   "plus": Plus,
   "puzzle": Puzzle,
   "search": Search,
@@ -94,6 +97,7 @@ const REGISTRY: Record<string, LucideIcon> = {
   "terminal": Terminal,
   "upload": Upload,
   "workflow": Workflow,
+  "x": X,
 };
 
 interface IconProps {

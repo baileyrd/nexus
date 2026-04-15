@@ -90,6 +90,7 @@ pub fn run() {
             forge::delete_forge_entry,
             plugins::list_plugin_contributions,
             plugins::invoke_plugin_command,
+            plugins::list_plugins,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch nexus-app");
