@@ -18,9 +18,12 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Duration;
 
+use notify::RecursiveMode;
+use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Summary info about the currently-open forge exposed to the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,8 +47,33 @@ pub struct ForgeDirEntry {
     pub is_dir: bool,
 }
 
+/// A file's contents returned by [`read_forge_file`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForgeFile {
+    /// Path relative to the forge root, using forward slashes.
+    pub relpath: String,
+    /// File name (no path).
+    pub name: String,
+    /// UTF-8 file contents.
+    pub content: String,
+}
+
+/// Maximum file size accepted by [`read_forge_file`] (in bytes).
+/// Keeps the read-only viewer from accidentally loading huge files into
+/// the renderer. Lifted once the editor has streaming support.
+const MAX_FILE_BYTES: u64 = 1_000_000;
+
 /// Tauri-managed handle to the currently-open forge.
 pub struct ForgeState(pub Mutex<Option<ForgeInfo>>);
+
+/// Tauri-managed handle that keeps the FS watcher alive for the
+/// duration of the app. Dropped on shutdown.
+pub struct WatcherHandle(pub Mutex<Option<Debouncer<notify::RecommendedWatcher>>>);
+
+/// Tauri event emitted when any file under the active forge root
+/// changes. Frontend listens via `@tauri-apps/api/event`.
+pub const FS_CHANGED_EVENT: &str = "forge:fs-changed";
 
 const FORGE_ENV: &str = "NEXUS_FORGE_DIR";
 const DEFAULT_FORGE_DIRNAME: &str = "default-forge";
@@ -66,6 +94,32 @@ pub fn bootstrap(app: &AppHandle) -> Result<ForgeInfo, String> {
     };
     init_layout(&root)?;
     Ok(info_for(&root))
+}
+
+/// Start a debounced recursive watcher on `root` that emits
+/// [`FS_CHANGED_EVENT`] to the frontend on any change. The returned
+/// debouncer must be kept alive (typically stored in [`WatcherHandle`]).
+pub fn start_watcher(
+    app: AppHandle,
+    root: &Path,
+) -> Result<Debouncer<notify::RecommendedWatcher>, String> {
+    let mut debouncer = new_debouncer(
+        Duration::from_millis(200),
+        move |res: DebounceEventResult| match res {
+            Ok(_events) => {
+                if let Err(e) = app.emit(FS_CHANGED_EVENT, ()) {
+                    tracing::warn!(%e, "failed to emit forge:fs-changed");
+                }
+            }
+            Err(err) => tracing::warn!(?err, "watcher error"),
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    debouncer
+        .watcher()
+        .watch(root, RecursiveMode::Recursive)
+        .map_err(|e| e.to_string())?;
+    Ok(debouncer)
 }
 
 fn init_layout(root: &Path) -> Result<(), String> {
@@ -152,6 +206,44 @@ pub fn list_forge_dir(
         _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
     Ok(entries)
+}
+
+/// Read a single file from the active forge. Refuses non-files,
+/// non-UTF-8 contents, and files larger than [`MAX_FILE_BYTES`].
+#[tauri::command]
+pub fn read_forge_file(
+    relpath: String,
+    state: State<'_, ForgeState>,
+) -> Result<ForgeFile, String> {
+    let forge = state
+        .0
+        .lock()
+        .map_err(|_| "forge state poisoned")?
+        .clone()
+        .ok_or("no forge open")?;
+    let target = resolve_within(&forge.root, &relpath)?;
+    let meta = fs::metadata(&target).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err(format!("not a file: {relpath}"));
+    }
+    if meta.len() > MAX_FILE_BYTES {
+        return Err(format!(
+            "file too large ({} bytes; limit {MAX_FILE_BYTES})",
+            meta.len()
+        ));
+    }
+    let bytes = fs::read(&target).map_err(|e| e.to_string())?;
+    let content = String::from_utf8(bytes).map_err(|_| "file is not UTF-8")?;
+    let name = target
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    Ok(ForgeFile {
+        relpath,
+        name,
+        content,
+    })
 }
 
 /// Resolve `relpath` against `root`, rejecting anything that escapes the

@@ -5,7 +5,7 @@
 # a tall bottom panel for terminal/problems/output tabs at runtime.
 
 id = "dev"
-name = "Dev Development"
+name = "Dev"
 description = "IDE-shaped: dev-tool ribbon, file/SCM/run panels, tall bottom terminal tray."
 focusedPaneId = "pane-dev-editor"
 

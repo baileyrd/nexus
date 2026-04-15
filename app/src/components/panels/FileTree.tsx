@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { ChevronDown, ChevronRight, File, Folder } from "lucide-react";
 import { listForgeDir, type ForgeDirEntry } from "../../ipc/forge";
 import { useForgeStore } from "../../stores/forge";
+import { useOpenFileStore } from "../../stores/openFile";
 
 /**
  * File-tree renderer for panels with `contentType = "files"`. Lists the
@@ -26,6 +27,7 @@ export function FileTree() {
 function FileTreeForForge() {
   const [rootEntries, setRootEntries] = useState<ForgeDirEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fsVersion = useForgeStore((s) => s.fsVersion);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,7 +41,7 @@ function FileTreeForForge() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [fsVersion]);
 
   if (error) {
     return <div className="file-tree-error">Failed to list forge: {error}</div>;
@@ -71,32 +73,49 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<ForgeDirEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const openFile = useOpenFileStore((s) => s.open);
+  const openRelpath = useOpenFileStore((s) => s.file?.relpath);
+  const fsVersion = useForgeStore((s) => s.fsVersion);
 
-  const loadChildren = useCallback(async () => {
-    if (children !== null) return;
-    try {
-      const next = await listForgeDir(entry.relpath);
-      setChildren(next);
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [entry.relpath, children]);
+  // Fetch children whenever this directory is expanded; re-fetch when
+  // the FS-change signal bumps `fsVersion` so the tree stays live.
+  useEffect(() => {
+    if (!entry.isDir || !expanded) return;
+    let cancelled = false;
+    setError(null);
+    listForgeDir(entry.relpath)
+      .then((next) => {
+        if (!cancelled) setChildren(next);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [entry.isDir, entry.relpath, expanded, fsVersion]);
 
   const onToggle = useCallback(() => {
     if (!entry.isDir) return;
-    const next = !expanded;
-    setExpanded(next);
-    if (next) void loadChildren();
-  }, [entry.isDir, expanded, loadChildren]);
+    setExpanded((v) => !v);
+  }, [entry.isDir]);
 
   const indent = { paddingInlineStart: `${depth * 12 + 4}px` } as const;
 
   if (!entry.isDir) {
+    const active = openRelpath === entry.relpath;
     return (
-      <li role="treeitem" className="file-tree-row is-file" style={indent}>
-        <span className="file-tree-twisty" aria-hidden="true" />
-        <File size={14} className="file-tree-icon" aria-hidden="true" />
-        <span className="file-tree-name">{entry.name}</span>
+      <li role="treeitem" aria-selected={active} className="file-tree-row is-file">
+        <button
+          type="button"
+          className={active ? "file-tree-file is-active" : "file-tree-file"}
+          style={indent}
+          onClick={() => void openFile(entry.relpath)}
+        >
+          <span className="file-tree-twisty" aria-hidden="true" />
+          <File size={14} className="file-tree-icon" aria-hidden="true" />
+          <span className="file-tree-name">{entry.name}</span>
+        </button>
       </li>
     );
   }

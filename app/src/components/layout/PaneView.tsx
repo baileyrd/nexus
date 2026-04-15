@@ -1,4 +1,6 @@
 import type { LayoutNode, Tab } from "../../bindings";
+import { FileViewer } from "../panels/FileViewer";
+import { useOpenFileStore } from "../../stores/openFile";
 import { TabStrip } from "./TabStrip";
 
 interface PaneViewProps {
@@ -10,12 +12,18 @@ export function PaneView({ node, focused }: PaneViewProps) {
   const activeTab: Tab | undefined = node.tabs.find(
     (t) => t.id === node.activeTabId,
   );
+  // Single global "open file" for now — the layout has no real tab
+  // system yet, so we render the open file in any pane it's mounted in.
+  // Multi-pane semantics arrive with PRD §7 / PRD-08.
+  const openFile = useOpenFileStore((s) => s.file);
 
   return (
     <div className={focused ? "pane focused" : "pane"}>
       <TabStrip tabs={node.tabs} activeTabId={node.activeTabId} />
       <div className="pane-content">
-        {activeTab ? (
+        {openFile ? (
+          <FileViewer />
+        ) : activeTab ? (
           <PlaceholderSurface tab={activeTab} />
         ) : (
           <div className="pane-empty">

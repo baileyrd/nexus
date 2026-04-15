@@ -7,7 +7,7 @@
 # live process output. Status bar surfaces process counts.
 
 id = "vibe"
-name = "Vibe Management"
+name = "Vibe"
 description = "Saved commands + processes + AI chat + idea capture, Command-Book style."
 focusedPaneId = "pane-vibe-note"
 

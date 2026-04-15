@@ -17,6 +17,12 @@ export interface ForgeDirEntry {
   isDir: boolean;
 }
 
+export interface ForgeFile {
+  relpath: string;
+  name: string;
+  content: string;
+}
+
 export function currentForge(): Promise<ForgeInfo | null> {
   return invoke("current_forge");
 }
@@ -27,4 +33,8 @@ export function openForge(path: string): Promise<ForgeInfo> {
 
 export function listForgeDir(relpath: string): Promise<ForgeDirEntry[]> {
   return invoke("list_forge_dir", { relpath });
+}
+
+export function readForgeFile(relpath: string): Promise<ForgeFile> {
+  return invoke("read_forge_file", { relpath });
 }

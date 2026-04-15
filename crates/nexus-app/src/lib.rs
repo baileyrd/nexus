@@ -33,10 +33,24 @@ pub fn run() {
     tauri::Builder::default()
         .manage(commands::EngineState(Mutex::new(engine)))
         .manage(forge::ForgeState(Mutex::new(None)))
+        .manage(forge::WatcherHandle(Mutex::new(None)))
         .setup(|app| {
-            match forge::bootstrap(&app.handle().clone()) {
+            let handle = app.handle().clone();
+            match forge::bootstrap(&handle) {
                 Ok(info) => {
                     tracing::info!(root = %info.root.display(), name = %info.name, "opened forge");
+                    match forge::start_watcher(handle.clone(), &info.root) {
+                        Ok(debouncer) => {
+                            if let Some(state) = app.try_state::<forge::WatcherHandle>() {
+                                if let Ok(mut guard) = state.0.lock() {
+                                    *guard = Some(debouncer);
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(%err, "forge watcher failed to start; live tree refresh disabled");
+                        }
+                    }
                     if let Some(state) = app.try_state::<forge::ForgeState>() {
                         if let Ok(mut guard) = state.0.lock() {
                             *guard = Some(info);
@@ -66,6 +80,7 @@ pub fn run() {
             forge::current_forge,
             forge::open_forge,
             forge::list_forge_dir,
+            forge::read_forge_file,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch nexus-app");

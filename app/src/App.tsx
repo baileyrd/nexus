@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { ModeToggle } from "./components/ModeToggle";
 import { CommandPalette } from "./components/palette/CommandPalette";
 import { ThemePicker } from "./components/ThemePicker";
@@ -10,6 +11,7 @@ export default function App() {
   const applyTheme = useThemeStore((s) => s.applyTheme);
   const currentThemeId = useThemeStore((s) => s.currentThemeId);
   const loadForge = useForgeStore((s) => s.load);
+  const bumpFsVersion = useForgeStore((s) => s.bumpFsVersion);
 
   // Pick the built-in light theme on first mount so the picker reflects an
   // "active" selection immediately. The user can switch freely from there.
@@ -22,6 +24,15 @@ export default function App() {
   useEffect(() => {
     loadForge();
   }, [loadForge]);
+
+  useEffect(() => {
+    const unlistenPromise = listen("forge:fs-changed", () => {
+      bumpFsVersion();
+    });
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [bumpFsVersion]);
 
   return (
     <div className="app">
