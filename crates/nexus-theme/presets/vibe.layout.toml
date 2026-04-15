@@ -1,12 +1,14 @@
-# "Vibe Management" layout: AI-assisted project steering.
+# "Vibe Management" layout: AI-assisted vibe coding (Command-Book-style
+# process manager + AI chat + idea capture).
 #
-# Row-split centre with note/canvas on the left and AI chat on the right,
-# task/base/project panels in the left side panel, and a bottom tray for
-# terminal + agent-log output.
+# Row-split centre with note/canvas on the left and AI chat on the right.
+# Left side panel hosts saved commands + running processes (Command-Book
+# pattern) plus tasks/bases/notes for project steering. Bottom tray holds
+# live process output. Status bar surfaces process counts.
 
 id = "vibe"
 name = "Vibe Management"
-description = "Note/canvas + AI chat split, task and base panels left, agent log bottom."
+description = "Saved commands + processes + AI chat + idea capture, Command-Book style."
 focusedPaneId = "pane-vibe-note"
 
 [root]
@@ -28,7 +30,7 @@ tabs = []
 collapsed = false
 
 # ── Workspace ribbon ────────────────────────────────────────────────────────
-# AI / orchestration shortcuts.
+# AI / orchestration / process shortcuts.
 
 [[ribbon]]
 id = "ai-chat"
@@ -54,18 +56,69 @@ icon = "terminal"
 tooltip = "Toggle terminal"
 action = { kind = "invokeCommand", command = "workspace.toggle-terminal" }
 
+[[ribbon]]
+id = "open-in-terminal"
+icon = "external-link"
+tooltip = "Open in external terminal"
+action = { kind = "invokeCommand", command = "process.open-in-terminal" }
+
+# ── Status bar (workspace level) ────────────────────────────────────────────
+# Live process counters — populated by the process manager (PRD 09).
+
+[[statusBar]]
+id = "vibe.processes-running"
+icon = "play-circle"
+text = "0 running"
+
+[[statusBar]]
+id = "vibe.processes-crashed"
+icon = "alert-triangle"
+text = "0 crashed"
+
+[[statusBar]]
+id = "vibe.adhoc-history"
+icon = "history"
+text = "0 ad-hoc"
+
+# ── Left side panel ─────────────────────────────────────────────────────────
+# Commands + processes panels mirror Command Book's saved-commands /
+# running-processes split. Tasks / bases / notes serve project steering.
+
 [leftSidePanel]
 side = "left"
 width = 260
 collapsed = false
 miniMode = false
-panelOrder = ["tasks", "bases", "projects", "notes", "ai-history"]
+panelOrder = ["commands", "processes", "tasks", "bases", "notes"]
+
+[[leftSidePanel.panels]]
+id = "commands"
+title = "Commands"
+icon = "command"
+visible = true
+contentType = "commands"
+toolbar = [
+  { id = "commands.new", icon = "plus", tooltip = "New command", action = { kind = "invokeCommand", command = "commands.new" } },
+  { id = "commands.new-separator", icon = "minus", tooltip = "Add category separator", action = { kind = "invokeCommand", command = "commands.new-separator" } },
+  { id = "commands.import", icon = "upload", tooltip = "Import commands", action = { kind = "invokeCommand", command = "commands.import" } },
+]
+
+[[leftSidePanel.panels]]
+id = "processes"
+title = "Processes"
+icon = "play-circle"
+visible = false
+contentType = "processes"
+toolbar = [
+  { id = "processes.start-all", icon = "play", tooltip = "Start all in group", action = { kind = "invokeCommand", command = "processes.start-all" } },
+  { id = "processes.stop-all", icon = "stop", tooltip = "Stop all in group", action = { kind = "invokeCommand", command = "processes.stop-all" } },
+]
 
 [[leftSidePanel.panels]]
 id = "tasks"
 title = "Tasks"
 icon = "check-square"
-visible = true
+visible = false
 
 [[leftSidePanel.panels]]
 id = "bases"
@@ -74,21 +127,9 @@ icon = "database"
 visible = false
 
 [[leftSidePanel.panels]]
-id = "projects"
-title = "Projects"
-icon = "briefcase"
-visible = false
-
-[[leftSidePanel.panels]]
 id = "notes"
 title = "Notes"
 icon = "file-text"
-visible = false
-
-[[leftSidePanel.panels]]
-id = "ai-history"
-title = "AI History"
-icon = "sparkles"
 visible = false
 
 [rightSidePanel]
@@ -99,7 +140,11 @@ miniMode = false
 panels = []
 panelOrder = []
 
+# ── Bottom panel ────────────────────────────────────────────────────────────
+# Process-output tabs are populated at runtime by the process manager —
+# one tab per running process, like Command Book's detail pane.
+
 [bottomPanel]
-height = 200
+height = 240
 collapsed = false
 tabs = []
