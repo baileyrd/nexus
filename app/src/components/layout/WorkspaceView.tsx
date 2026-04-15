@@ -1,4 +1,10 @@
 import { useEffect } from "react";
+import {
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+} from "lucide-react";
 import type { Panel, SidePanel } from "../../bindings";
 import { useLayoutStore } from "../../stores/layout";
 import { LayoutPresetPicker } from "./LayoutPresetPicker";
@@ -98,11 +104,9 @@ interface SidePanelToggleProps {
 
 function SidePanelToggle({ side, collapsed, onClick }: SidePanelToggleProps) {
   const label = `${collapsed ? "Show" : "Hide"} ${side} side panel`;
-  // Glyph mirrors Obsidian's: a small box with a vertical bar on the
-  // matching edge. Filled when expanded, hollow when collapsed.
-  const glyph = side === "left"
-    ? collapsed ? "▢" : "◧"
-    : collapsed ? "▢" : "◨";
+  const Glyph = side === "left"
+    ? collapsed ? PanelLeftOpen : PanelLeftClose
+    : collapsed ? PanelRightOpen : PanelRightClose;
   return (
     <button
       type="button"
@@ -114,7 +118,7 @@ function SidePanelToggle({ side, collapsed, onClick }: SidePanelToggleProps) {
       aria-pressed={!collapsed}
       onClick={onClick}
     >
-      <span aria-hidden="true">{glyph}</span>
+      <Glyph size={16} aria-hidden="true" focusable="false" />
     </button>
   );
 }

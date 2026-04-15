@@ -1,4 +1,5 @@
 import type { RibbonItem } from "../../bindings";
+import { Icon } from "../Icon";
 
 interface RibbonItemsProps {
   items: RibbonItem[];
@@ -11,7 +12,7 @@ interface RibbonItemsProps {
  * column.
  *
  * Items are plugin/view shortcuts (graph view, calendar, terminal, …)
- * resolved through the UI contribution registry (pending §8 / §13).
+ * resolved through the UI contribution registry (pending §8).
  */
 export function RibbonItems({ items }: RibbonItemsProps) {
   if (items.length === 0) return null;
@@ -26,9 +27,7 @@ export function RibbonItems({ items }: RibbonItemsProps) {
           aria-label={item.tooltip}
           onClick={() => handleRibbonClick(item)}
         >
-          <span aria-hidden="true" className="ribbon-icon">
-            {placeholderGlyph(item.icon)}
-          </span>
+          <Icon name={item.icon} size={18} className="ribbon-icon" />
         </button>
       ))}
     </>
@@ -52,10 +51,4 @@ function handleRibbonClick(item: RibbonItem) {
       console.log(`[ribbon] open view '${item.action.viewId}' (registry pending)`);
       return;
   }
-}
-
-function placeholderGlyph(icon: string): string {
-  const trimmed = icon.trim();
-  if (!trimmed) return "◇";
-  return trimmed[0].toUpperCase();
 }

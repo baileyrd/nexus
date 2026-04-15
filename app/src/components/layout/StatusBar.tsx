@@ -1,4 +1,5 @@
 import type { StatusBarItem } from "../../bindings";
+import { Icon } from "../Icon";
 
 interface StatusBarProps {
   items: StatusBarItem[];
@@ -23,9 +24,7 @@ export function StatusBar({ items }: StatusBarProps) {
 
 function StatusBarEntry({ item }: { item: StatusBarItem }) {
   const icon = item.icon ? (
-    <span aria-hidden="true" className="status-bar-icon">
-      {placeholderGlyph(item.icon)}
-    </span>
+    <Icon name={item.icon} size={14} className="status-bar-icon" />
   ) : null;
   const text = item.text ? <span className="status-bar-text">{item.text}</span> : null;
 
@@ -69,10 +68,4 @@ function handleClick(item: StatusBarItem) {
       console.log(`[status-bar] open view '${item.action.viewId}' (registry pending)`);
       return;
   }
-}
-
-function placeholderGlyph(icon: string): string {
-  const trimmed = icon.trim();
-  if (!trimmed) return "◇";
-  return trimmed[0].toUpperCase();
 }

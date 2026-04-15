@@ -1,4 +1,5 @@
 import type { FooterAction, SidePanelFooter as SidePanelFooterData } from "../../bindings";
+import { Icon } from "../Icon";
 
 interface SidePanelFooterProps {
   footer: SidePanelFooterData;
@@ -24,9 +25,7 @@ export function SidePanelFooter({ footer, forgeName = "—" }: SidePanelFooterPr
             console.log("[footer] switch forge (registry pending)");
           }}
         >
-          <span aria-hidden="true" className="forge-selector-chevron">
-            ⇅
-          </span>
+          <Icon name="chevrons-up-down" size={14} className="forge-selector-chevron" />
           <span className="forge-selector-name">{forgeName}</span>
         </button>
       )}
@@ -40,7 +39,7 @@ export function SidePanelFooter({ footer, forgeName = "—" }: SidePanelFooterPr
             aria-label={action.tooltip}
             onClick={() => handleFooterClick(action)}
           >
-            <span aria-hidden="true">{placeholderGlyph(action.icon)}</span>
+            <Icon name={action.icon} size={16} />
           </button>
         ))}
       </div>
@@ -63,10 +62,4 @@ function handleFooterClick(action: FooterAction) {
       console.log(`[footer] open view '${action.action.viewId}' (registry pending)`);
       return;
   }
-}
-
-function placeholderGlyph(icon: string): string {
-  const trimmed = icon.trim();
-  if (!trimmed) return "◇";
-  return trimmed[0].toUpperCase();
 }

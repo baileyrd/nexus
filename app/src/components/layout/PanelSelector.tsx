@@ -1,4 +1,5 @@
 import type { Panel } from "../../bindings";
+import { Icon } from "../Icon";
 
 interface PanelSelectorProps {
   panels: Panel[];
@@ -37,15 +38,9 @@ export function PanelSelector({ panels, onSelect, label }: PanelSelectorProps) {
           aria-label={p.title}
           onClick={() => onSelect(p.id)}
         >
-          <span aria-hidden="true">{placeholderGlyph(p.icon)}</span>
+          <Icon name={p.icon} size={16} />
         </button>
       ))}
     </div>
   );
-}
-
-function placeholderGlyph(icon: string): string {
-  const trimmed = icon.trim();
-  if (!trimmed) return "◇";
-  return trimmed[0].toUpperCase();
 }

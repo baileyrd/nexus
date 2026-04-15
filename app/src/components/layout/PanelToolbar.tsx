@@ -1,4 +1,5 @@
 import type { PanelToolbarItem } from "../../bindings";
+import { Icon } from "../Icon";
 
 interface PanelToolbarProps {
   items: PanelToolbarItem[];
@@ -23,7 +24,7 @@ export function PanelToolbar({ items, onTogglePanel }: PanelToolbarProps) {
           aria-label={item.tooltip}
           onClick={() => handleToolbarClick(item, onTogglePanel)}
         >
-          <span aria-hidden="true">{placeholderGlyph(item.icon)}</span>
+          <Icon name={item.icon} size={16} />
         </button>
       ))}
     </div>
@@ -47,10 +48,4 @@ function handleToolbarClick(
       console.log(`[panel-toolbar] open view '${item.action.viewId}' (registry pending)`);
       return;
   }
-}
-
-function placeholderGlyph(icon: string): string {
-  const trimmed = icon.trim();
-  if (!trimmed) return "◇";
-  return trimmed[0].toUpperCase();
 }
