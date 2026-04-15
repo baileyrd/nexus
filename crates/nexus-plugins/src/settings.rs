@@ -117,9 +117,17 @@ impl SettingsManager {
                     reason: format!("settings.json is not valid JSON: {e}"),
                 })?
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Value::Object(
-                serde_json::Map::new(),
-            ),
+            // When the file doesn't exist yet, seed the object with the
+            // schema's declared defaults. Without this a schema with
+            // required fields would fail validation on first load and
+            // the plugin would appear broken until the user manually
+            // wrote a file.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.schemas
+                    .get(plugin_id)
+                    .map(defaults_from_schema)
+                    .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()))
+            }
             Err(e) => return Err(PluginError::Io(e)),
         };
 
@@ -169,6 +177,22 @@ impl SettingsManager {
     pub fn schema(&self, plugin_id: &str) -> Option<&serde_json::Value> {
         self.schemas.get(plugin_id)
     }
+}
+
+/// Walk a JSON Schema's top-level `properties` and build an object
+/// populated with each field's `default` where declared. Used to
+/// seed `settings.json` on first load so schemas with `required`
+/// fields don't fail validation before the user has saved anything.
+fn defaults_from_schema(schema: &serde_json::Value) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
+        for (key, prop) in props {
+            if let Some(default) = prop.get("default") {
+                out.insert(key.clone(), default.clone());
+            }
+        }
+    }
+    serde_json::Value::Object(out)
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -278,6 +302,25 @@ mod tests {
 
         let loaded = m.load_settings(PLUGIN_ID, dir.path()).unwrap();
         assert_eq!(loaded, json!({}));
+    }
+
+    // 8b. load_missing_seeds_defaults_from_schema
+    #[test]
+    fn load_missing_seeds_defaults_from_schema() {
+        let dir = TempDir::new().unwrap();
+        const SCHEMA_WITH_DEFAULTS: &str = r#"{
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "default": "world" },
+                "count": { "type": "integer", "default": 3 }
+            },
+            "required": ["name"]
+        }"#;
+        let mut m = SettingsManager::new();
+        m.register_schema(PLUGIN_ID, SCHEMA_WITH_DEFAULTS).unwrap();
+
+        let loaded = m.load_settings(PLUGIN_ID, dir.path()).unwrap();
+        assert_eq!(loaded, json!({ "name": "world", "count": 3 }));
     }
 
     // 9. save_and_load_roundtrip
