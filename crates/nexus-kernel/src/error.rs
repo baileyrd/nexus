@@ -160,7 +160,7 @@ pub enum CapabilityError {
 }
 
 /// Errors from IPC calls between plugins.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum IpcError {
     /// The target plugin is not loaded.
     #[error("target plugin '{plugin_id}' not found")]

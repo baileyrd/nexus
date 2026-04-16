@@ -635,6 +635,19 @@ impl PluginLoader {
             .map(|lp| plugin_info_from(&lp.manifest, lp.status, &lp.capabilities))
     }
 
+    /// Return all registered CLI subcommands as `(id, description)` pairs.
+    #[must_use]
+    pub fn list_cli_subcommands(&self) -> Vec<(String, String)> {
+        self.loaded
+            .values()
+            .flat_map(|lp| {
+                lp.manifest.registrations.cli_subcommands.iter().map(|r| {
+                    (r.id.clone(), r.description.clone())
+                })
+            })
+            .collect()
+    }
+
     /// Dispatch a CLI subcommand call.
     ///
     /// Looks up the plugin from the CLI registry by `subcommand`, finds the

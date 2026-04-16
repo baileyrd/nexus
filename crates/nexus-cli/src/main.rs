@@ -3,6 +3,7 @@ mod commands;
 mod output;
 mod stubs;
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
@@ -13,7 +14,7 @@ use clap_complete::{generate, Shell};
 // ---------------------------------------------------------------------------
 
 #[derive(Parser)]
-#[command(name = "nexus", about = "Nexus IDE — headless CLI", version)]
+#[command(name = "nexus", about = "Nexus IDE — headless CLI", version, allow_external_subcommands = true)]
 struct Cli {
     /// Path to the forge directory (overrides NEXUS_FORGE_PATH env var)
     #[arg(long, global = true, env = "NEXUS_FORGE_PATH")]
@@ -94,6 +95,10 @@ enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
+
+    /// Plugin-registered subcommand (`nexus <plugin-id> [args…]`)
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
 }
 
 // ---------------------------------------------------------------------------
@@ -911,6 +916,19 @@ fn main() {
             let mut cmd = Cli::command();
             generate(shell, &mut cmd, "nexus", &mut std::io::stdout());
             Ok(())
+        }
+
+        // Dispatch to a plugin-registered CLI subcommand: `nexus <subcommand> [args…]`
+        Commands::External(raw_args) => {
+            let subcommand = raw_args
+                .first()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let rest: Vec<String> = raw_args[1..]
+                .iter()
+                .map(|s| s.to_string_lossy().into_owned())
+                .collect();
+            commands::plugin::dispatch_external(&mut app, &subcommand, rest)
         }
     };
 

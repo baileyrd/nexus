@@ -493,6 +493,12 @@ impl PluginManager {
             .collect()
     }
 
+    /// Return all plugin-registered CLI subcommands as `(id, description)` pairs.
+    #[must_use]
+    pub fn list_cli_subcommands(&self) -> Vec<(String, String)> {
+        self.loader.list_cli_subcommands()
+    }
+
     /// Dispatch a CLI subcommand call.
     ///
     /// # Errors

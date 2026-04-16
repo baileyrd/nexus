@@ -39,7 +39,7 @@
 
 ### Spec'd in a PRD, not yet implemented
 
-- [ ] **CLI subcommands from plugins (PRD-04 §1.1 `cli_subcommands` + PRD-05 §19.1).** `nexus-cli/src/main.rs` is pure clap-derive; no extension point wires plugin-registered subcommands into the argv parser. Required to match "plugins can add `nexus myplugin <args>`" in PRD-05 §19.1. Blocks the "CLI = headless entry point to every plugin" story in PRD-05 §1.
+- [x] **CLI subcommands from plugins (PRD-04 §1.1 `cli_subcommands` + PRD-05 §19.1).** Added `allow_external_subcommands = true` to `Cli` so clap captures unknown subcommands as `Commands::External(Vec<OsString>)`. `commands::plugin::dispatch_external` loads all community plugins, calls `PluginManager::dispatch_cli(subcommand, json_args)`, and prints results; on `PluginNotFound` it lists all registered plugin subcommands. `PluginLoader::list_cli_subcommands` / `PluginManager::list_cli_subcommands` added. `IpcError` gained `Clone` (needed by composite-dispatcher unit tests).
 
 ### Half-specced: manifest keys exist, but no UI/wiring spec in PRD-07
 

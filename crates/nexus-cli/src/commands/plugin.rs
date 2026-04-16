@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use anyhow::Result;
-use nexus_plugins::{scaffold as nexus_scaffold, PluginTemplate, ScaffoldConfig};
+use anyhow::{Result, anyhow};
+use nexus_plugins::{PluginError, scaffold as nexus_scaffold, PluginTemplate, ScaffoldConfig};
 
 use crate::app::App;
 use crate::output::{print_list, print_success, print_value};
@@ -159,4 +159,46 @@ pub fn scaffold(
     println!("  {}", output_dir.join("src").join("lib.rs").display());
 
     Ok(())
+}
+
+/// Dispatch a plugin-registered CLI subcommand (`nexus <subcommand> [args…]`).
+///
+/// Loads all community plugins, then forwards the call to whichever plugin
+/// registered `subcommand` via `[[registrations.cli_subcommand]]`. The
+/// remaining `args` are passed as a JSON array.
+pub fn dispatch_external(app: &mut App, subcommand: &str, args: Vec<String>) -> Result<()> {
+    let plugins = app.plugins()?;
+    plugins.load_all()?;
+
+    let args_json = serde_json::json!(args);
+
+    match plugins.dispatch_cli(subcommand, &args_json) {
+        Ok(result) => {
+            let text = match &result {
+                serde_json::Value::String(s) => s.clone(),
+                other => serde_json::to_string_pretty(other)
+                    .unwrap_or_else(|_| other.to_string()),
+            };
+            println!("{text}");
+            Ok(())
+        }
+        Err(PluginError::PluginNotFound(_)) => {
+            let available = plugins.list_cli_subcommands();
+            if available.is_empty() {
+                Err(anyhow!(
+                    "unknown subcommand '{subcommand}'; no plugins with CLI subcommands are installed"
+                ))
+            } else {
+                let list = available
+                    .iter()
+                    .map(|(id, desc)| format!("  {id:<20} {desc}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Err(anyhow!(
+                    "unknown subcommand '{subcommand}'\n\nPlugin subcommands:\n{list}"
+                ))
+            }
+        }
+        Err(e) => Err(e.into()),
+    }
 }
