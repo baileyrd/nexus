@@ -10,8 +10,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{DatabaseError, Result};
-use crate::types::PropertyConfig;
+use nexus_database::{DatabaseError, PropertyConfig, Result};
 
 // ── Migration types ─────────────────────────────────────────────────────────
 
@@ -273,8 +272,8 @@ mod tests {
     fn setup_db() -> (tempfile::TempDir, Connection) {
         let dir = tempfile::tempdir().unwrap();
         let conn = Connection::open_in_memory().unwrap();
-        nexus_storage::schema::configure_pragmas(&conn).unwrap();
-        nexus_storage::schema::migrate(&conn).unwrap();
+        crate::schema::configure_pragmas(&conn).unwrap();
+        crate::schema::migrate(&conn).unwrap();
         // Create the schema versions table (migration 007).
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS bases_schema_versions (
@@ -298,7 +297,7 @@ mod tests {
             fields: serde_json::Map::new(),
         };
         let base = nexus_types::bases::init_base(&base_dir, "Test", &schema).unwrap();
-        nexus_storage::bases::insert_base(conn, &base_dir.display().to_string(), &base).unwrap()
+        crate::bases::insert_base(conn, &base_dir.display().to_string(), &base).unwrap()
     }
 
     #[test]

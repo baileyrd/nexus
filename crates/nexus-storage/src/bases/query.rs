@@ -9,7 +9,7 @@ use std::fmt::Write;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{DatabaseError, Result};
+use nexus_database::{DatabaseError, Result};
 
 // ── Query types ─────────────────────────────────────────────────────────────
 
@@ -568,8 +568,8 @@ mod tests {
 
     fn setup_test_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        nexus_storage::schema::configure_pragmas(&conn).unwrap();
-        nexus_storage::schema::migrate(&conn).unwrap();
+        crate::schema::configure_pragmas(&conn).unwrap();
+        crate::schema::migrate(&conn).unwrap();
 
         // Insert a test base.
         conn.execute(

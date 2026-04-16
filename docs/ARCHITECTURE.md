@@ -135,7 +135,7 @@ C4Container
 
         Container(storage, "nexus-storage (core plugin)", "Rust library", "File-as-truth, SQLite index,<br/>Tantivy FTS, graph, watcher")
         Container(ai, "nexus-ai (core plugin)", "Rust library", "AI providers, embeddings,<br/>RAG pipeline")
-        Container(database, "nexus-database (core plugin)", "Rust library", "Bases engine: 20+ property<br/>types, formulas, relations")
+        Container(database, "nexus-database (library)", "Rust library", "Bases support: property types,<br/>validation, formulas,<br/>CSV import/export (no SQL)")
         Container(security, "nexus-security (core plugin)", "Rust library", "Credential vault, audit log,<br/>path validator")
         Container(mcp, "nexus-mcp", "Rust library / rmcp", "13-tool MCP server<br/>over stdio")
 
@@ -167,13 +167,12 @@ C4Container
     Rel(bootstrap, kernel, "Wires")
     Rel(bootstrap, storage, "Registers as core plugin")
     Rel(bootstrap, ai, "Registers as core plugin")
-    Rel(bootstrap, database, "Registers as core plugin")
     Rel(bootstrap, security, "Registers as core plugin")
     Rel(bootstrap, plugins, "Loads WASM plugins")
+    Rel(storage, database, "Links as library", "types, validation, formulas")
 
     Rel(kernel, storage, "IPC dispatch", "ipc_call")
     Rel(kernel, ai, "IPC dispatch", "ipc_call")
-    Rel(kernel, database, "IPC dispatch", "ipc_call")
     Rel(kernel, security, "Capability checks")
     Rel(plugins, kernel, "Host fns → kernel ops")
     Rel(comm_plugin, plugins, "Host fn calls", "nexus_ipc_call,<br/>nexus_fs_*, nexus_kv_*,<br/>nexus_publish, ...")
@@ -202,9 +201,9 @@ C4Container
 | `nexus-app` | Binary | Tauri 2 + Vite + React | Desktop shell; theme + layout |
 | `nexus-bootstrap` | Library | Rust | Runtime assembler |
 | `nexus-kernel` | Library | Rust + tokio | Event bus, IPC, capabilities, lifecycle |
-| `nexus-storage` | Core plugin | rusqlite, tantivy, comrak, notify | File-as-truth, index, graph |
+| `nexus-storage` | Core plugin | rusqlite, tantivy, comrak, notify | File-as-truth, index, graph, **bases engine** (schema/query/relation) |
 | `nexus-ai` | Core plugin | reqwest, async-trait | Providers, embeddings, RAG |
-| `nexus-database` | Core plugin | rusqlite, csv | Bases engine |
+| `nexus-database` | Library | csv, regex-lite | Bases support: property types, validation, formulas, CSV import/export (no SQL) |
 | `nexus-security` | Core plugin | keyring | Vault, audit, path validation |
 | `nexus-plugins` | Library | wasmtime, notify, jsonschema | WASM sandbox + loader + hot-reload |
 | `nexus-mcp` | Library | rmcp, schemars | 13-tool MCP server |
@@ -247,7 +246,7 @@ C4Component
         Component(settings, "SettingsManager", "jsonschema", "Per-plugin settings.json<br/>with JSON Schema")
     }
 
-    Container_Ext(core, "Core Plugins", "storage / ai / database / security")
+    Container_Ext(core, "Core Plugins", "storage / ai / editor / security")
     Container_Ext(comm, "Community WASM Plugins", ".wasm in .forge/plugins/")
     Container_Ext(kv, "SqliteKvStore", "nexus-kv")
 
@@ -297,6 +296,9 @@ C4Component
         Component(vector, "VectorStore", "BLOB in SQLite", "ChunkEmbedding, ChunkMatch,<br/>cosine search")
         Component(canvas, "Canvas", "JSON parser", "CanvasFile with nodes<br/>(text/file/group) + edges")
         Component(bases, "Bases Loader", "JSONL + schema.json", "Reads/writes .bases/ dirs")
+        Component(bschema, "Bases Schema/Migrations", "rusqlite SQL", "bases_schema_versions:<br/>add/remove/rename/<br/>modify property migrations")
+        Component(bquery, "Bases Query Engine", "rusqlite SQL", "Filters + sorts \u2192 SQL SELECT<br/>against bases_records<br/>(json_extract on data_json)")
+        Component(brel, "Bases Relations", "rusqlite SQL", "resolve_relation,<br/>compute_rollup")
     }
 
     ContainerDb_Ext(db, "SQLite", ".forge/index.db")
@@ -322,7 +324,8 @@ C4Component
 
 **Guardrails:**
 
-- Plugins and `nexus-ai` do **not** import `rusqlite`. They reach storage via `ipc_call("com.nexus.storage", ...)`.
+- `nexus-storage` is the **sole owner** of `rusqlite` and the forge's SQLite database (`index.db`). No other plugin or library links `rusqlite` — they reach storage via `ipc_call("com.nexus.storage", ...)`. The guardrail is enforced by `crates/nexus-bootstrap/tests/dep_invariants.rs` (forbidden pairs include `("nexus-ai", "nexus-storage")`, `("nexus-database", "rusqlite")`, `("nexus-kernel", "rusqlite")`, etc.).
+- `nexus-database` is a pure-logic library (no rusqlite): property types, validation, Notion-compatible formulas, CSV import/export. The SQL-backed query/schema/relation engine for bases lives here under `nexus_storage::bases::{schema, query, relation}`.
 - File writes go through `atomic_write` (temp + fsync + rename) to prevent corruption.
 - Index is rebuildable from disk: `reconcile()` compares filesystem vs index and patches.
 
@@ -839,8 +842,6 @@ flowchart LR
     security --> kernel
     security --> plugins
     security --> types
-    database --> kernel
-    database --> plugins
     database --> types
     storage --> kernel
     storage --> plugins
@@ -856,7 +857,6 @@ flowchart LR
     bootstrap --> plugins
     bootstrap --> security
     bootstrap --> storage
-    bootstrap --> database
     bootstrap --> ai
     bootstrap --> types
 
@@ -881,17 +881,18 @@ flowchart LR
     classDef plugin fill:#fef3c7,stroke:#d97706,color:#78350f;
     classDef binary fill:#ede9fe,stroke:#7c3aed,color:#4c1d95;
 
-    class types,formats,git,theme leaf
+    class types,formats,git,theme,database leaf
     class kernel,kv,plugins core
-    class storage,ai,database,security,mcp plugin
+    class storage,ai,security,mcp plugin
     class bootstrap,cli,tui,app binary
 ```
 
-**Architectural guardrail (enforced by a `cargo test` in `nexus-bootstrap`):**
+**Architectural guardrail (enforced by `crates/nexus-bootstrap/tests/dep_invariants.rs`):**
 
-- Plugins (`nexus-ai`, community WASM) cannot import `rusqlite` directly.
-- `nexus-cli` never directly imports `nexus-storage`; it routes through the kernel.
-- `nexus-kernel` depends only on `nexus-types`.
+- **Only `nexus-storage` imports `rusqlite`.** Plugins (`nexus-ai`, community WASM), support libraries (`nexus-database`), and the kernel itself are all forbidden from direct `rusqlite` deps — they go through storage IPC.
+- `nexus-cli`, `nexus-tui`, `nexus-mcp`, `nexus-ai`, and `nexus-database` never directly import `nexus-storage`; they route through the kernel.
+- `nexus-mcp` never directly imports `nexus-ai`; it dispatches `nexus_ask` via `ipc_call(AI_PLUGIN, "ask", ...)`.
+- `nexus-kernel` depends only on `nexus-types`; the SQLite KV impl in `nexus-kv` is injected via `Kernel::new`.
 
 ---
 
@@ -1181,7 +1182,7 @@ sequenceDiagram
 A short list of properties the codebase actively enforces. These are the invariants that make the diagrams above *true*, not just *aspirational*.
 
 1. **Kernel depends only on `nexus-types`.** Any crate adding `nexus-kernel` imports something else from the workspace violates the microkernel boundary.
-2. **Plugins (core or WASM) never import storage backends directly.** `nexus-ai`, `nexus-database`, community WASM — none of them depend on `rusqlite` or `tantivy`. They route through `ipc_call("com.nexus.storage", ...)`. This is checked by a guardrail test in `nexus-bootstrap`.
+2. **`nexus-storage` is the sole `rusqlite` owner.** Plugins (core or WASM) and support libraries (`nexus-database`) never import storage backends directly. `nexus-ai`, community WASM, and `nexus-database` do not depend on `rusqlite` or `tantivy`. SQL-backed bases operations (schema, query, relation) live inside `nexus-storage` under the `bases::` module; everyone else routes through `ipc_call("com.nexus.storage", ...)`. Enforced by `crates/nexus-bootstrap/tests/dep_invariants.rs`.
 3. **Invokers (CLI, TUI) do not reach into subsystems.** They go through `nexus-bootstrap` and then speak to the kernel. `nexus-cli` does not depend on `nexus-storage`.
 4. **File-as-truth.** The SQLite index is strictly derived state. `reconcile()` can rebuild it from the filesystem. No user content lives only in the DB.
 5. **Event type-ID namespacing.** A plugin can only publish `Custom` events whose `type_id` starts with its own plugin ID. The kernel sets `emitting_plugin` — plugins cannot forge it.

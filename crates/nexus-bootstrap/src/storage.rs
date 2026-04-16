@@ -374,8 +374,11 @@ pub fn unresolved_links(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<Unre
 /// need a direct `nexus-types` dep just to consume `base_list` results.
 pub use nexus_types::bases::BaseSummary;
 
-/// Re-export of [`nexus_database::QueryResult`] for `base_query` callers.
-pub use nexus_database::QueryResult as BaseQueryResult;
+/// Re-export of [`nexus_storage::bases::query::QueryResult`] for
+/// `base_query` callers — the SQL query engine lives in the storage
+/// crate (the sole rusqlite owner), so CLI/TUI consumers can reach it
+/// here without depending on `nexus-storage` directly.
+pub use nexus_storage::bases::query::QueryResult as BaseQueryResult;
 
 /// Reindex a `.bases` directory from disk into the `SQLite` index.
 ///
@@ -400,7 +403,8 @@ pub fn base_list(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<BaseSummary
 }
 
 /// Run a structured query against the base at `path`. Filters/sorts are
-/// parsed server-side using `nexus_database::parse_filter`/`parse_sort`.
+/// parsed server-side using `nexus_storage::bases::query::parse_filter` /
+/// `parse_sort`.
 pub fn base_query(
     runtime: &Runtime,
     rt: &TokioRuntime,

@@ -2,9 +2,8 @@
 
 use rusqlite::Connection;
 
-use crate::error::{DatabaseError, Result};
-use crate::formula::eval::FormulaValue;
-use crate::types::RollupAggregation;
+use nexus_database::formula::FormulaValue;
+use nexus_database::{DatabaseError, Result, RollupAggregation};
 
 /// Resolve a relation: load the referenced records from a target base
 /// by their record IDs.
@@ -188,8 +187,8 @@ mod tests {
 
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        nexus_storage::schema::configure_pragmas(&conn).unwrap();
-        nexus_storage::schema::migrate(&conn).unwrap();
+        crate::schema::configure_pragmas(&conn).unwrap();
+        crate::schema::migrate(&conn).unwrap();
 
         // Create target base.
         conn.execute(

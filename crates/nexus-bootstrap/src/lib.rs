@@ -201,7 +201,6 @@ fn register_core_plugins(
     event_bus: &Arc<EventBus>,
 ) -> Result<()> {
     use nexus_ai::AiCorePlugin;
-    use nexus_database::DatabaseCorePlugin;
     use nexus_editor::EditorCorePlugin;
     use nexus_security::SecurityCorePlugin;
     use nexus_storage::{StorageConfig, StorageCorePlugin};
@@ -339,21 +338,11 @@ fn register_core_plugins(
         )
         .context("failed to register com.nexus.storage")?;
 
-    loader
-        .register_core(
-            core_manifest(
-                "com.nexus.database",
-                "Database",
-                LifecycleFlags {
-                    on_init: true,
-                    on_start: true,
-                    on_stop: true,
-                },
-            ),
-            forge_root,
-            Box::new(DatabaseCorePlugin::new(Arc::clone(event_bus))),
-        )
-        .context("failed to register com.nexus.database")?;
+    // `nexus-database` is a pure-logic library (types, validation, formulas,
+    // CSV import/export); it used to wrap a no-op `DatabaseCorePlugin` that
+    // never registered any IPC handlers. Callers that need SQL-backed base
+    // queries now go through `com.nexus.storage` (`base_index` / `base_list`
+    // / `base_query`). See ARCHITECTURE.md §4.2.
 
     loader
         .register_core(

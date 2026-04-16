@@ -20,6 +20,12 @@ const FORBIDDEN: &[(&str, &str)] = &[
     ("nexus-ai", "nexus-storage"),
     ("nexus-mcp", "nexus-storage"),
     ("nexus-database", "nexus-storage"),
+    // `nexus-storage` is the sole owner of the forge's SQLite database:
+    // the SQL-backed query/schema/relation code for bases lives under
+    // `nexus_storage::bases`. `nexus-database` is a pure-logic library
+    // (property types, validation, formulas, CSV) that must not link
+    // rusqlite — everything SQL-shaped goes through storage IPC.
+    ("nexus-database", "rusqlite"),
     // MCP dispatches `nexus_ask` via `ipc_call(AI_PLUGIN, "ask", ...)`; it
     // must not link the AI engine directly.
     ("nexus-mcp", "nexus-ai"),

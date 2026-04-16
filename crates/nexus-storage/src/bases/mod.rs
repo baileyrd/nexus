@@ -1,10 +1,22 @@
-//! `SQLite` persistence for `.bases` databases.
+//! `SQLite` persistence + query/schema/relation engine for `.bases` databases.
 //!
 //! The on-disk `.bases` directory format (parser, serializer, validation) and
 //! the shared type set live in [`nexus_types::bases`]; this module re-exports
 //! them for backwards compatibility and provides the `SQLite` index
 //! operations (`insert_base`, `query_bases`, `delete_base`) that require a
 //! rusqlite connection.
+//!
+//! Submodules [`schema`], [`query`], and [`relation`] host the full query
+//! engine (migrations, SELECT execution, relation resolution, rollup
+//! aggregation). They were previously in `nexus-database`; moving them here
+//! consolidates all `rusqlite` access into this crate — there is one owner
+//! of the forge's SQLite database, and it's `nexus-storage`. Pure-logic
+//! types, validators, formulas, and CSV import/export remain in
+//! `nexus-database` as a no-rusqlite library.
+
+pub mod query;
+pub mod relation;
+pub mod schema;
 
 use rusqlite::Connection;
 

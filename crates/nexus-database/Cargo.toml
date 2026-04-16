@@ -4,11 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Nexus database engine: rich property types, query engine, formula language, relations, import/export"
+description = "Nexus database support library: property types, validation, formula language, CSV import/export. No SQL — SQL-backed query/schema lives in nexus-storage::bases."
 
 [dependencies]
-nexus-kernel = { path = "../nexus-kernel" }
-nexus-plugins = { path = "../nexus-plugins" }
 nexus-types = { path = "../nexus-types" }
 thiserror = { workspace = true }
 serde = { workspace = true }
@@ -16,10 +14,8 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 regex-lite = { workspace = true }
-rusqlite = { workspace = true }
 tracing = { workspace = true }
 csv = { workspace = true }
 
 [dev-dependencies]
-nexus-storage = { path = "../nexus-storage" }
 tempfile = { workspace = true }

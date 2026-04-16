@@ -86,7 +86,7 @@ pub const HANDLER_BASE_INDEX: u32 = 24;
 pub const HANDLER_BASE_LIST: u32 = 25;
 /// Handler id for `base_query`. Args:
 /// `{ "path": String, "filters": [String], "sorts": [String], "limit": Option<u32>, "offset": Option<u32> }`.
-/// Returns: [`nexus_database::QueryResult`].
+/// Returns: [`crate::bases::query::QueryResult`].
 pub const HANDLER_BASE_QUERY: u32 = 26;
 /// Handler id for `list_dir`. Args: `{ "relpath": String }`; Returns: `Vec<TreeEntry>`.
 pub const HANDLER_LIST_DIR: u32 = 27;
@@ -525,19 +525,19 @@ impl CorePlugin for StorageCorePlugin {
                     .find(|b| b.path == path)
                     .ok_or_else(|| exec_err(format!("base_query: base not found: {path}")))?;
 
-                let mut db_query = nexus_database::Query {
+                let mut db_query = crate::bases::query::Query {
                     base_id: base_summary.id,
                     ..Default::default()
                 };
                 for f in &filters {
                     db_query.filters.push(
-                        nexus_database::parse_filter(f)
+                        crate::bases::query::parse_filter(f)
                             .map_err(|e| exec_err(format!("base_query: parse filter '{f}': {e}")))?,
                     );
                 }
                 for s in &sorts {
                     db_query.sorts.push(
-                        nexus_database::parse_sort(s)
+                        crate::bases::query::parse_sort(s)
                             .map_err(|e| exec_err(format!("base_query: parse sort '{s}': {e}")))?,
                     );
                 }
@@ -547,7 +547,7 @@ impl CorePlugin for StorageCorePlugin {
                 let conn = engine
                     .pool_connection()
                     .map_err(|e| exec_err(format!("base_query: pool: {e}")))?;
-                let result = nexus_database::execute_query(&conn, &db_query)
+                let result = crate::bases::query::execute(&conn, &db_query)
                     .map_err(|e| exec_err(format!("base_query: {e}")))?;
                 to_value(&result, "base_query")
             }
