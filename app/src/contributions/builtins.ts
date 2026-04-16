@@ -126,4 +126,44 @@ export function registerBuiltins(): void {
     category: "Workspace",
     icon: "folder",
   });
+
+  // ── Menu-bar items (PRD-07 §7.5) ─────────────────────────────────────────
+  // File menu
+  contributions.registerMenuItem({
+    id: "menu.file.open-forge",
+    label: "Open Forge…",
+    commandId: "workspace.switch-forge",
+    menu: "File",
+    menuOrder: 10,
+    order: 10,
+  });
+  contributions.registerMenuItem({
+    id: "menu.file.settings",
+    label: "Settings",
+    commandId: "workspace.settings",
+    menu: "File",
+    menuOrder: 10,
+    order: 90,
+    separatorBefore: true,
+  });
+
+  // View menu
+  contributions.registerMenuItem({
+    id: "menu.view.command-palette",
+    label: "Command Palette",
+    commandId: "workspace.command-palette",
+    menu: "View",
+    menuOrder: 30,
+    order: 10,
+  });
+
+  // Help menu
+  contributions.registerMenuItem({
+    id: "menu.help.docs",
+    label: "Documentation",
+    commandId: "workspace.help",
+    menu: "Help",
+    menuOrder: 90,
+    order: 10,
+  });
 }

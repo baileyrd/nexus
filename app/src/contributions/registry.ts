@@ -178,6 +178,49 @@ export interface TreeDataProvider {
 }
 
 /**
+ * Plugin- or host-contributed menu-bar item (PRD-07 §7.5).
+ *
+ * The `menu` field names the top-level pull-down: `"File"`, `"Edit"`,
+ * `"View"`, `"Help"`, or any plugin-defined label. Submenu nesting is
+ * reserved for the future via `"File > New"` path syntax; today only the
+ * first path segment is rendered. Actions dispatch via `invokeCommand` so
+ * the command registry is the single authority.
+ */
+export interface MenuItem {
+  /** Stable id. Plugin items namespaced: `"plugin:<pluginId>:<action>"`. */
+  id: string;
+  /** User-visible label for this entry within its pull-down menu. */
+  label: string;
+  /** Command id dispatched via `contributions.invokeCommand` when selected. */
+  commandId: string;
+  /**
+   * Top-level menu label this item belongs to.
+   * e.g. `"File"`, `"Edit"`, `"View"`, `"Help"`.
+   * Submenu paths (`"File > New"`) are reserved — only the first segment
+   * is used today.
+   */
+  menu: string;
+  /** Render a separator above this item within the pull-down. */
+  separatorBefore?: boolean;
+  /** Dim the item (action still dispatches unless the command is a no-op). */
+  disabled?: boolean;
+  /** Optional Lucide icon name. Reserved for future icon support. */
+  icon?: string;
+  /**
+   * Ordering hint within the pull-down (lower first). Default 100.
+   * Top-level menu ordering is alphabetical by label by default; use
+   * `menuOrder` on an item to influence which top-level menus appear first.
+   */
+  order?: number;
+  /**
+   * Ordering hint for the top-level menu label itself (lower appears left).
+   * All items sharing the same `menu` label use the minimum `menuOrder`
+   * found among them. Default 100.
+   */
+  menuOrder?: number;
+}
+
+/**
  * Plugin-contributed context menu item. Action dispatches via the command
  * registry so plugins don't hold raw function references in the registry.
  *
@@ -228,6 +271,12 @@ const snippetListeners = new Set<() => void>();
  */
 const fileHandlers = new Map<string, string>();
 const fileHandlerListeners = new Set<() => void>();
+
+/**
+ * Flat list of all menu-bar items. Grouped and sorted at render time.
+ */
+const menuItems = new Map<string, MenuItem>();
+const menuItemListeners = new Set<() => void>();
 
 /**
  * Scope-keyed list of plugin-contributed context menu items. Stored as a
@@ -622,6 +671,41 @@ export const contributions = {
   },
 
   /**
+   * Register a menu-bar item (PRD-07 §7.5). The item appears under the
+   * pull-down named by `item.menu` and its action dispatches via
+   * `contributions.invokeCommand(item.commandId)` when selected.
+   *
+   * Returns a disposable that removes the item when called — essential
+   * for plugin hot-reload: call this disposable from the plugin's `onStop`.
+   */
+  registerMenuItem(item: MenuItem): Disposable {
+    if (menuItems.has(item.id)) {
+      warn(`menu item '${item.id}' already registered — replacing`);
+    }
+    menuItems.set(item.id, item);
+    menuItemsSnapshot = null;
+    menuItemListeners.forEach((fn) => fn());
+    return () => {
+      if (menuItems.get(item.id) === item) {
+        menuItems.delete(item.id);
+        menuItemsSnapshot = null;
+        menuItemListeners.forEach((fn) => fn());
+      }
+    };
+  },
+
+  listMenuItems(): MenuItem[] {
+    return menuItemsSnapshotFn();
+  },
+
+  subscribeMenuItems(fn: () => void): Disposable {
+    menuItemListeners.add(fn);
+    return () => {
+      menuItemListeners.delete(fn);
+    };
+  },
+
+  /**
    * Register a plugin-contributed context menu item for one or more scopes
    * (e.g. `"file-tree:file"`, `"file-tree:directory"`). The item's action
    * dispatches via `contributions.invokeCommand(item.commandId)` so the
@@ -718,6 +802,8 @@ export function __resetContributions() {
   keybindingOverrides.clear();
   treeDataProviders.clear();
   fileHandlers.clear();
+  menuItems.clear();
+  menuItemListeners.clear();
   contextMenuItems.clear();
   snippets.clear();
   contentTypeListeners.clear();
@@ -736,6 +822,7 @@ export function __resetContributions() {
   editorDecorationSnapshot = null;
   editorKeybindingSnapshot = null;
   snippetSnapshot = null;
+  menuItemsSnapshot = null;
   contextMenuSnapshot.clear();
 }
 
@@ -929,5 +1016,39 @@ export function useSnippets(): Snippet[] {
     (notify) => contributions.subscribeSnippets(notify),
     snippetSnapshotFn,
     snippetSnapshotFn,
+  );
+}
+
+/**
+ * Cached flat snapshot of menu items sorted by menu label order then item order.
+ * Invalidated on any `registerMenuItem` / disposal.
+ */
+let menuItemsSnapshot: MenuItem[] | null = null;
+
+function menuItemsSnapshotFn(): MenuItem[] {
+  if (!menuItemsSnapshot) {
+    const entries = Array.from(menuItems.values());
+    menuItemsSnapshot = entries.sort((a, b) => {
+      const moA = a.menuOrder ?? 100;
+      const moB = b.menuOrder ?? 100;
+      if (moA !== moB) return moA - moB;
+      const labelCmp = a.menu.localeCompare(b.menu);
+      if (labelCmp !== 0) return labelCmp;
+      return (a.order ?? 100) - (b.order ?? 100);
+    });
+  }
+  return menuItemsSnapshot;
+}
+
+/**
+ * React hook returning all registered menu-bar items, sorted by menu order
+ * then item order. Re-renders when items are added or removed (plugin
+ * hot-reload safe).
+ */
+export function useMenuItems(): MenuItem[] {
+  return useSyncExternalStore(
+    (notify) => contributions.subscribeMenuItems(notify),
+    menuItemsSnapshotFn,
+    menuItemsSnapshotFn,
   );
 }

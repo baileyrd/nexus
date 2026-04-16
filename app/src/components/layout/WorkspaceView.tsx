@@ -12,6 +12,7 @@ import { useLayoutStore } from "../../stores/layout";
 import { LayoutPresetPicker } from "./LayoutPresetPicker";
 import { PanelSelector } from "./PanelSelector";
 import { PanelToolbar } from "./PanelToolbar";
+import { MenuBar } from "./MenuBar";
 import { RibbonItems } from "./Ribbon";
 import { SidePanelFooter } from "./SidePanelFooter";
 import { SplitPane } from "./SplitPane";
@@ -41,6 +42,7 @@ export function WorkspaceView() {
 
       {layout ? (
         <div className="workspace-frame" data-workspace-name={layout.name}>
+          <MenuBar />
           <nav className="ribbon" aria-label="Workspace ribbon">
             <SidePanelToggle
               side="left"

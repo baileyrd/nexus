@@ -11,6 +11,7 @@ import {
   type EditorBlockType,
   type EditorDecorationProvider,
   type EditorKeybinding,
+  type MenuItem,
   type Snippet,
   type TreeDataProvider,
 } from "../contributions";
@@ -116,6 +117,25 @@ export interface NexusPluginContext {
      * ```
      */
     registerContextMenuItem(item: ContribContextMenuItem): Disposable;
+
+    /**
+     * Contribute an item to the application menu bar (PRD-07 §7.5).
+     * Specify the top-level pull-down via `item.menu` (e.g. `"File"`,
+     * `"View"`, or a custom plugin-defined label). The action dispatches
+     * `commandId` through the contribution registry.
+     *
+     * Example:
+     * ```ts
+     * ctx.ui.registerMenuItem({
+     *   id: "com.myorg.plugin:export",
+     *   label: "Export…",
+     *   commandId: "com.myorg.plugin:export",
+     *   menu: "File",
+     *   order: 50,
+     * });
+     * ```
+     */
+    registerMenuItem(item: MenuItem): Disposable;
   };
 }
 
@@ -153,6 +173,8 @@ export function createNexusContext(pluginId: string): NexusPluginContext {
         contributions.registerFileHandler(ext, contentTypeId),
       registerContextMenuItem: (item) =>
         contributions.registerContextMenuItem(item),
+      registerMenuItem: (item) =>
+        contributions.registerMenuItem(item),
     },
   };
 }
