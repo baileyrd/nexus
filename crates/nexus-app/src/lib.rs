@@ -100,6 +100,7 @@ pub fn run() {
             plugins::get_plugin_settings,
             plugins::save_plugin_settings,
             plugins::invoke_plugin_command,
+            plugins::invoke_plugin_ipc,
             plugins::publish_host_event,
             plugins::list_plugins,
             keybindings::get_keybinding_overrides,

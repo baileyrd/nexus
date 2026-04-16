@@ -115,3 +115,24 @@ export function invokePluginCommand(
     args,
   });
 }
+
+/**
+ * Dispatch a capability-checked plugin-to-plugin IPC call.
+ *
+ * Verifies that `callerPluginId` holds the `IpcCall` capability before
+ * dispatching to `targetPluginId`. Use this when one plugin's UI needs
+ * to invoke another plugin's command.
+ */
+export function invokePluginIpc(
+  callerPluginId: string,
+  targetPluginId: string,
+  commandId: string,
+  args: unknown = {},
+): Promise<unknown> {
+  return invoke<unknown>("invoke_plugin_ipc", {
+    callerPluginId,
+    targetPluginId,
+    commandId,
+    args,
+  });
+}

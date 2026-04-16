@@ -7,9 +7,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use nexus_kernel::{EventBus, NexusEvent};
+use nexus_kernel::{EventBus, IpcDispatcher, IpcError, NexusEvent};
 use nexus_plugins::{
-    PluginManager, PluginManagerConfig, PluginStatus, TrustLevel, UiContribution,
+    PluginBackend, PluginManager, PluginManagerConfig, PluginStatus, TrustLevel, UiContribution,
     UiPanelContribution, UiRibbonItemContribution, UiSettingsTabContribution,
     UiStatusItemContribution,
 };
@@ -53,11 +53,74 @@ const EVENT_BUS_CAPACITY: usize = 256;
 /// directly without contending on the manager lock.
 pub struct PluginState {
     /// The plugin manager (holds the registry, sandboxes, etc.).
-    pub manager: Mutex<PluginManager>,
+    /// Wrapped in `Arc` so [`TauriIpcDispatcher`] can share it.
+    pub manager: Arc<Mutex<PluginManager>>,
     /// The shared event bus. Host code publishes via
     /// [`EventBus::publish_core`]; plugin subscriptions drain on the
     /// background watcher thread.
     pub bus: Arc<EventBus>,
+}
+
+// ─── TauriIpcDispatcher ──────────────────────────────────────────────────────
+
+/// [`IpcDispatcher`] impl for the Tauri-managed [`PluginManager`].
+///
+/// Resolves the target plugin under the manager lock, releases the lock,
+/// then dispatches via the per-plugin backend lock. This two-phase
+/// approach lets WASM plugins issue nested IPC calls from within
+/// `host::invoke_command` without deadlocking.
+struct TauriIpcDispatcher {
+    manager: Arc<Mutex<PluginManager>>,
+}
+
+impl IpcDispatcher for TauriIpcDispatcher {
+    fn dispatch(
+        &self,
+        target_plugin_id: &str,
+        command_id: &str,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, IpcError> {
+        let (backend, handler_id) = {
+            let mgr = self
+                .manager
+                .lock()
+                .map_err(|_| IpcError::PluginCrashedDuringCall {
+                    plugin_id: target_plugin_id.to_string(),
+                    command: command_id.to_string(),
+                })?;
+            mgr.resolve_ipc(target_plugin_id, command_id).map_err(
+                |e| match e {
+                    nexus_plugins::PluginError::PluginNotFound(id) => {
+                        if id == target_plugin_id {
+                            IpcError::PluginNotFound { plugin_id: id }
+                        } else {
+                            IpcError::CommandNotFound {
+                                plugin_id: target_plugin_id.to_string(),
+                                command: id,
+                            }
+                        }
+                    }
+                    _ => IpcError::PluginCrashedDuringCall {
+                        plugin_id: target_plugin_id.to_string(),
+                        command: command_id.to_string(),
+                    },
+                },
+            )?
+        };
+        // Manager lock released — safe for nested calls.
+        let mut guard = backend
+            .try_lock()
+            .map_err(|_| IpcError::PluginCrashedDuringCall {
+                plugin_id: target_plugin_id.to_string(),
+                command: command_id.to_string(),
+            })?;
+        guard
+            .dispatch(handler_id, args)
+            .map_err(|_| IpcError::PluginCrashedDuringCall {
+                plugin_id: target_plugin_id.to_string(),
+                command: command_id.to_string(),
+            })
+    }
 }
 
 /// Frontend-facing projection of [`nexus_kernel::PluginInfo`].
@@ -162,10 +225,19 @@ pub fn bootstrap() -> PluginState {
             tracing::warn!(%err, "plugin scan failed");
         }
     }
-    PluginState {
-        manager: Mutex::new(manager),
-        bus,
+
+    // Wrap the manager and create a dispatcher for plugin-to-plugin IPC.
+    let manager = Arc::new(Mutex::new(manager));
+    let dispatcher: Arc<dyn IpcDispatcher> = Arc::new(TauriIpcDispatcher {
+        manager: manager.clone(),
+    });
+    // Inject the dispatcher into every community (WASM) plugin so
+    // host::invoke_command can route calls.
+    if let Ok(mut mgr) = manager.lock() {
+        mgr.inject_ipc_dispatcher(dispatcher);
     }
+
+    PluginState { manager, bus }
 }
 
 /// List all plugin-contributed palette commands across every loaded plugin.
@@ -320,15 +392,58 @@ pub fn invoke_plugin_command(
     command_id: String,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let result = {
-        let mut mgr = state
+    // Resolve the backend handle under the manager lock, release the
+    // lock, then dispatch via the per-plugin backend lock. This lets
+    // WASM plugins issue nested IPC calls without deadlocking.
+    let (backend, handler_id) = {
+        let mgr = state
             .manager
             .lock()
             .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
-        mgr.dispatch_ipc(&plugin_id, &command_id, &args)
+        mgr.resolve_ipc(&plugin_id, &command_id)
             .map_err(|e| e.to_string())?
     };
+    let mut guard = backend
+        .try_lock()
+        .map_err(|_| format!("plugin {plugin_id} backend lock contention"))?;
+    let result = guard.dispatch(handler_id, &args).map_err(|e| e.to_string())?;
+    drop(guard);
     emit_plugin_events(&app, &plugin_id, &result);
+    Ok(result)
+}
+
+/// Dispatch a capability-checked plugin-to-plugin IPC call.
+///
+/// Like [`invoke_plugin_command`], but first verifies that
+/// `caller_plugin_id` holds the `IpcCall` capability before dispatching
+/// to `target_plugin_id`. Intended for the frontend to trigger
+/// plugin-to-plugin interactions on behalf of a specific plugin.
+///
+/// # Errors
+/// Returns a string error on capability denial or dispatch failure.
+#[tauri::command]
+pub fn invoke_plugin_ipc(
+    app: AppHandle,
+    state: State<'_, PluginState>,
+    caller_plugin_id: String,
+    target_plugin_id: String,
+    command_id: String,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let result = {
+        let mgr = state
+            .manager
+            .lock()
+            .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
+        mgr.dispatch_ipc_checked(
+            &caller_plugin_id,
+            &target_plugin_id,
+            &command_id,
+            &args,
+        )
+        .map_err(|e| e.to_string())?
+    };
+    emit_plugin_events(&app, &target_plugin_id, &result);
     Ok(result)
 }
 

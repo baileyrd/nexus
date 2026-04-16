@@ -17,9 +17,11 @@ mod settings;
 mod hot_reload;
 mod scaffold;
 
+use std::sync::{Arc, Mutex};
+
 pub use error::PluginError;
 pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
-pub use loader::{CorePlugin, CorePluginFuture, PluginLoader, SharedPluginLoader};
+pub use loader::{CorePlugin, CorePluginFuture, PluginBackend, PluginLoader, SharedPluginLoader};
 pub use manifest::{
     CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
     PanelSide, PluginManifest, Registrations, SettingsConfig, UiCommandReg, UiPanelReg,
@@ -419,7 +421,7 @@ impl PluginManager {
     /// # Errors
     /// Returns [`PluginError::PluginNotFound`] if the subcommand is unknown.
     /// Propagates sandbox dispatch errors.
-    pub fn dispatch_cli(&mut self, subcommand: &str, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
+    pub fn dispatch_cli(&self, subcommand: &str, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
         self.loader.dispatch_cli(subcommand, args)
     }
 
@@ -428,7 +430,7 @@ impl PluginManager {
     /// # Errors
     /// Returns [`PluginError::PluginNotFound`] if the plugin or command is
     /// unknown. Propagates sandbox dispatch errors.
-    pub fn dispatch_ipc(&mut self, plugin_id: &str, command_id: &str, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
+    pub fn dispatch_ipc(&self, plugin_id: &str, command_id: &str, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
         self.loader.dispatch_ipc(plugin_id, command_id, args)
     }
 
@@ -438,13 +440,29 @@ impl PluginManager {
     /// Returns [`PluginError::CapabilityDenied`] if `caller_plugin_id` lacks
     /// `IpcCall`, or [`PluginError::PluginNotFound`] if either plugin is unknown.
     pub fn dispatch_ipc_checked(
-        &mut self,
+        &self,
         caller_plugin_id: &str,
         plugin_id: &str,
         command_id: &str,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         self.loader.dispatch_ipc_checked(caller_plugin_id, plugin_id, command_id, args)
+    }
+
+    /// Resolve a plugin IPC target without dispatching. Returns the
+    /// backend handle and handler_id so callers can release locks before
+    /// executing.
+    pub fn resolve_ipc(
+        &self,
+        plugin_id: &str,
+        command_id: &str,
+    ) -> Result<(Arc<Mutex<loader::PluginBackend>>, u32), PluginError> {
+        self.loader.resolve_ipc(plugin_id, command_id)
+    }
+
+    /// Inject an [`IpcDispatcher`] into all loaded community plugins.
+    pub fn inject_ipc_dispatcher(&mut self, dispatcher: Arc<dyn nexus_kernel::IpcDispatcher>) {
+        self.loader.inject_ipc_dispatcher(dispatcher);
     }
 
     /// Return the raw JSON Schema declared by `plugin_id`, or `None`
@@ -567,8 +585,10 @@ impl PluginManager {
 
     fn reload_plugin(&mut self, plugin_id: &str, wasm_path: &std::path::Path) -> Result<(), PluginError> {
         // Call on_stop on the old sandbox (best-effort).
-        if let Some(sandbox) = self.loader.sandbox_mut(plugin_id) {
-            let _ = sandbox.call_on_stop();
+        if let Some(backend) = self.loader.backend_arc(plugin_id) {
+            if let Ok(mut guard) = backend.lock() {
+                let _ = guard.call_on_stop();
+            }
         }
 
         // Read new WASM bytes.

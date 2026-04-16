@@ -415,36 +415,113 @@ fn register_host_write_file(linker: &mut Linker<PluginData>) -> Result<(), Plugi
 
 /// `host::invoke_command(plugin_id_ptr, plugin_id_len, cmd_ptr, cmd_len, args_ptr, args_len, out_ptr, out_cap) -> i32`
 ///
-/// Stub for plugin-to-plugin IPC. Phase 1: always returns `HOST_ERROR` since
-/// calling into another plugin sandbox from within WASM execution requires
-/// re-entrant access to the `PluginLoader`, which is deferred to Phase 2.
+/// Plugin-to-plugin IPC. Dispatches a command to another loaded plugin
+/// via the [`IpcDispatcher`] injected into [`PluginData`] during
+/// bootstrap.
 ///
-/// Requires `IpcCall` capability (denied early so the plugin gets a clear
-/// signal rather than a generic error).
+/// Requires `IpcCall` capability. Returns bytes written on success,
+/// `HOST_BUFFER_OVERFLOW` when the JSON response exceeds `out_cap`,
+/// `HOST_CAPABILITY_DENIED` when the caller lacks `ipc.call`, or
+/// `HOST_ERROR` on any other failure (target not found, command not
+/// found, dispatch error, dispatcher not injected).
 fn register_host_invoke_command(linker: &mut Linker<PluginData>) -> Result<(), PluginError> {
     linker
         .func_wrap(
             "host",
             "invoke_command",
-            |caller: Caller<'_, PluginData>,
-             _plugin_id_ptr: i32,
-             _plugin_id_len: i32,
-             _cmd_ptr: i32,
-             _cmd_len: i32,
-             _args_ptr: i32,
-             _args_len: i32,
-             _out_ptr: i32,
-             _out_cap: i32|
+            |mut caller: Caller<'_, PluginData>,
+             plugin_id_ptr: i32,
+             plugin_id_len: i32,
+             cmd_ptr: i32,
+             cmd_len: i32,
+             args_ptr: i32,
+             args_len: i32,
+             out_ptr: i32,
+             out_cap: i32|
              -> i32 {
+                let caller_plugin_id = caller.data().plugin_id.clone();
+
                 if !caller.data().capabilities.contains(Capability::IpcCall) {
                     return HOST_CAPABILITY_DENIED;
                 }
-                // IPC calls from within WASM are deferred to Phase 2.
-                tracing::debug!(
-                    plugin_id = %caller.data().plugin_id,
-                    "host::invoke_command: inter-plugin IPC not yet available in WASM"
-                );
-                HOST_ERROR
+
+                // Get WASM memory.
+                let Some(wasmtime::Extern::Memory(memory)) = caller.get_export("memory") else {
+                    return HOST_ERROR;
+                };
+
+                // Read target plugin ID, command ID, and args from WASM memory.
+                let Some(target_plugin_id) = read_wasm_str(&memory, &caller, plugin_id_ptr, plugin_id_len) else {
+                    tracing::warn!(plugin_id = %caller_plugin_id, "host::invoke_command: invalid target_plugin_id");
+                    return HOST_ERROR;
+                };
+                let Some(command_id) = read_wasm_str(&memory, &caller, cmd_ptr, cmd_len) else {
+                    tracing::warn!(plugin_id = %caller_plugin_id, "host::invoke_command: invalid command_id");
+                    return HOST_ERROR;
+                };
+                let args: serde_json::Value = if args_len == 0 {
+                    serde_json::Value::Null
+                } else {
+                    let Some(args_bytes) = read_wasm_bytes(&memory, &caller, args_ptr, args_len) else {
+                        tracing::warn!(plugin_id = %caller_plugin_id, "host::invoke_command: invalid args");
+                        return HOST_ERROR;
+                    };
+                    match serde_json::from_slice(&args_bytes) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::warn!(plugin_id = %caller_plugin_id, "host::invoke_command: invalid args JSON: {e}");
+                            return HOST_ERROR;
+                        }
+                    }
+                };
+
+                // Get the injected IPC dispatcher.
+                let dispatcher = match caller.data().ipc_dispatch.clone() {
+                    Some(d) => d,
+                    None => {
+                        tracing::warn!(
+                            plugin_id = %caller_plugin_id,
+                            "host::invoke_command: IPC dispatcher not injected"
+                        );
+                        return HOST_ERROR;
+                    }
+                };
+
+                // Dispatch to target plugin.
+                let result = match dispatcher.dispatch(&target_plugin_id, &command_id, &args) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!(
+                            caller = %caller_plugin_id,
+                            target = %target_plugin_id,
+                            command = %command_id,
+                            "host::invoke_command: dispatch failed: {e}"
+                        );
+                        return HOST_ERROR;
+                    }
+                };
+
+                // Serialize result and write to output buffer.
+                let result_bytes = match serde_json::to_vec(&result) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::warn!(plugin_id = %caller_plugin_id, "host::invoke_command: result serialization failed: {e}");
+                        return HOST_ERROR;
+                    }
+                };
+
+                let Ok(o_start) = usize::try_from(out_ptr) else { return HOST_ERROR; };
+                let Ok(o_cap) = usize::try_from(out_cap) else { return HOST_ERROR; };
+                if result_bytes.len() > o_cap {
+                    return HOST_BUFFER_OVERFLOW;
+                }
+                let end = o_start + result_bytes.len();
+                let mem_data = memory.data_mut(&mut caller);
+                if end > mem_data.len() {
+                    return HOST_ERROR;
+                }
+                mem_data[o_start..end].copy_from_slice(&result_bytes);
+                i32::try_from(result_bytes.len()).unwrap_or(HOST_ERROR)
             },
         )
         .map_err(|e| PluginError::WasmLoadFailed {

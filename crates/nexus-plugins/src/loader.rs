@@ -119,13 +119,16 @@ pub type CorePluginFuture = Pin<Box<dyn Future<Output = Result<serde_json::Value
 ///
 /// - `Core` — native Rust; no sandbox overhead, unrestricted kernel access.
 /// - `Community` — WASM-sandboxed; capability-gated, fuel-metered.
-enum PluginBackend {
+pub enum PluginBackend {
+    /// Native Rust plugin; no sandbox overhead, unrestricted kernel access.
     Core(Box<dyn CorePlugin>),
+    /// WASM-sandboxed plugin; capability-gated, fuel-metered.
     Community(WasmSandbox),
 }
 
 impl PluginBackend {
-    fn dispatch(
+    /// Dispatch a call to the handler identified by `handler_id`.
+    pub fn dispatch(
         &mut self,
         handler_id: u32,
         args: &serde_json::Value,
@@ -139,7 +142,7 @@ impl PluginBackend {
     /// Async dispatch: delegates to the core plugin's `dispatch_async`. WASM
     /// sandboxes never produce a future today, so community plugins always
     /// return `None` and fall back to sync dispatch.
-    fn dispatch_async(
+    pub(crate) fn dispatch_async(
         &mut self,
         handler_id: u32,
         args: &serde_json::Value,
@@ -150,21 +153,21 @@ impl PluginBackend {
         }
     }
 
-    fn call_on_init(&mut self) -> Result<(), PluginError> {
+    pub(crate) fn call_on_init(&mut self) -> Result<(), PluginError> {
         match self {
             Self::Core(p) => p.on_init(),
             Self::Community(s) => s.call_on_init(),
         }
     }
 
-    fn call_on_start(&mut self) -> Result<(), PluginError> {
+    pub(crate) fn call_on_start(&mut self) -> Result<(), PluginError> {
         match self {
             Self::Core(p) => p.on_start(),
             Self::Community(s) => s.call_on_start(),
         }
     }
 
-    fn call_on_stop(&mut self) -> Result<(), PluginError> {
+    pub(crate) fn call_on_stop(&mut self) -> Result<(), PluginError> {
         match self {
             Self::Core(p) => {
                 p.on_stop();
@@ -174,7 +177,7 @@ impl PluginBackend {
         }
     }
 
-    fn call_on_load(&mut self) -> Result<(), PluginError> {
+    pub(crate) fn call_on_load(&mut self) -> Result<(), PluginError> {
         match self {
             // Core plugins have no separate on_load; on_init serves that role.
             Self::Core(_) => Ok(()),
@@ -182,7 +185,7 @@ impl PluginBackend {
         }
     }
 
-    fn call_on_unload(&mut self) -> Result<(), PluginError> {
+    pub(crate) fn call_on_unload(&mut self) -> Result<(), PluginError> {
         match self {
             Self::Core(_) => Ok(()),
             Self::Community(s) => s.call_on_unload(),
@@ -191,20 +194,20 @@ impl PluginBackend {
 
     /// Hand the plugin its [`KernelPluginContext`]. Core-only; WASM sandboxes
     /// receive their runtime state through a different mechanism.
-    fn call_wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
+    pub(crate) fn call_wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
         if let Self::Core(p) = self {
             p.wire_context(ctx);
         }
     }
 
-    fn call_on_enable(&mut self) -> Result<(), PluginError> {
+    pub(crate) fn call_on_enable(&mut self) -> Result<(), PluginError> {
         match self {
             Self::Core(p) => p.on_enable(),
             Self::Community(s) => s.call_on_enable(),
         }
     }
 
-    fn call_on_disable(&mut self) -> Result<(), PluginError> {
+    pub(crate) fn call_on_disable(&mut self) -> Result<(), PluginError> {
         match self {
             Self::Core(p) => {
                 p.on_disable();
@@ -214,7 +217,7 @@ impl PluginBackend {
         }
     }
 
-    fn call_on_settings_changed(
+    pub(crate) fn call_on_settings_changed(
         &mut self,
         settings: &serde_json::Value,
     ) -> Result<(), PluginError> {
@@ -251,7 +254,11 @@ struct PluginEventSub {
 
 struct LoadedPlugin {
     manifest: PluginManifest,
-    backend: PluginBackend,
+    /// Per-plugin backend lock. Dispatch methods resolve the target
+    /// (read-only) and then lock only the target backend, enabling
+    /// plugin-to-plugin IPC without holding the loader lock during
+    /// WASM execution.
+    backend: Arc<Mutex<PluginBackend>>,
     capabilities: CapabilitySet,
     status: PluginStatus,
     plugin_dir: PathBuf,
@@ -546,7 +553,7 @@ impl PluginLoader {
             plugin_id,
             LoadedPlugin {
                 manifest,
-                backend,
+                backend: Arc::new(Mutex::new(backend)),
                 capabilities,
                 status: PluginStatus::Running,
                 plugin_dir: plugin_dir.to_path_buf(),
@@ -578,10 +585,10 @@ impl PluginLoader {
 
         // Best-effort on_stop then on_unload — plugin is removed regardless of errors.
         if loaded.manifest.lifecycle.on_stop {
-            let _ = loaded.backend.call_on_stop();
+            let _ = loaded.backend.lock().map(|mut b| b.call_on_stop());
         }
         if loaded.manifest.lifecycle.on_unload {
-            let _ = loaded.backend.call_on_unload();
+            let _ = loaded.backend.lock().map(|mut b| b.call_on_unload());
         }
 
         // Deregister CLI subcommands
@@ -618,7 +625,7 @@ impl PluginLoader {
     /// Returns [`PluginError::PluginNotFound`] if the subcommand is unknown.
     /// Propagates sandbox dispatch errors.
     pub fn dispatch_cli(
-        &mut self,
+        &self,
         subcommand: &str,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
@@ -630,7 +637,7 @@ impl PluginLoader {
 
         let lp = self
             .loaded
-            .get_mut(&plugin_id)
+            .get(&plugin_id)
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.clone()))?;
 
         let handler_id = lp
@@ -642,7 +649,11 @@ impl PluginLoader {
             .map(|r| r.handler_id)
             .ok_or_else(|| PluginError::PluginNotFound(subcommand.to_string()))?;
 
-        lp.backend.dispatch(handler_id, args)
+        let backend = lp.backend.clone();
+        let mut guard = backend
+            .lock()
+            .map_err(|_| PluginError::PluginNotFound(plugin_id))?;
+        guard.dispatch(handler_id, args)
     }
 
     /// Dispatch an IPC command call with capability verification.
@@ -655,7 +666,7 @@ impl PluginLoader {
     /// unknown, or [`PluginError::CapabilityDenied`] if the caller lacks
     /// `IpcCall`.
     pub fn dispatch_ipc_checked(
-        &mut self,
+        &self,
         caller_plugin_id: &str,
         target_plugin_id: &str,
         command_id: &str,
@@ -686,15 +697,21 @@ impl PluginLoader {
     /// # Errors
     /// Returns [`PluginError::PluginNotFound`] if the plugin or command is
     /// unknown. Propagates sandbox dispatch errors.
-    pub fn dispatch_ipc(
-        &mut self,
+    /// Resolve a plugin IPC target without dispatching.
+    ///
+    /// Returns the cloned backend handle and the resolved `handler_id`,
+    /// allowing callers to release any outer lock before calling into
+    /// the backend. Used by [`dispatch_ipc`](Self::dispatch_ipc) and by
+    /// [`SharedPluginLoader`] to avoid holding the loader mutex during
+    /// WASM execution.
+    pub fn resolve_ipc(
+        &self,
         plugin_id: &str,
         command_id: &str,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
+    ) -> Result<(Arc<Mutex<PluginBackend>>, u32), PluginError> {
         let lp = self
             .loaded
-            .get_mut(plugin_id)
+            .get(plugin_id)
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
 
         let handler_id = lp
@@ -730,7 +747,33 @@ impl PluginLoader {
             })
             .ok_or_else(|| PluginError::PluginNotFound(command_id.to_string()))?;
 
-        lp.backend.dispatch(handler_id, args)
+        Ok((lp.backend.clone(), handler_id))
+    }
+
+    /// Dispatch an IPC command call.
+    ///
+    /// Resolves the target via [`resolve_ipc`](Self::resolve_ipc), locks the
+    /// per-plugin backend, and dispatches. Uses `try_lock` to detect
+    /// re-entrant / circular calls.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if the plugin or command is
+    /// unknown. Returns [`PluginError::CapabilityDenied`] if a circular
+    /// call is detected. Propagates sandbox dispatch errors.
+    pub fn dispatch_ipc(
+        &self,
+        plugin_id: &str,
+        command_id: &str,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let (backend, handler_id) = self.resolve_ipc(plugin_id, command_id)?;
+        let mut guard = backend
+            .try_lock()
+            .map_err(|_| PluginError::CapabilityDenied {
+                plugin_id: plugin_id.to_string(),
+                capability: "ipc.call (re-entrant / circular call detected)".to_string(),
+            })?;
+        guard.dispatch(handler_id, args)
     }
 
     /// Enable the plugin with `plugin_id`.
@@ -748,7 +791,10 @@ impl PluginLoader {
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
         lp.status = PluginStatus::Running;
         if lp.manifest.lifecycle.on_enable {
-            lp.backend.call_on_enable()?;
+            lp.backend
+                .lock()
+                .map_err(|_| PluginError::PluginNotFound(plugin_id.to_string()))?
+                .call_on_enable()?;
         }
         Ok(())
     }
@@ -768,7 +814,10 @@ impl PluginLoader {
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
         lp.status = PluginStatus::Stopped;
         if lp.manifest.lifecycle.on_disable {
-            lp.backend.call_on_disable()?;
+            lp.backend
+                .lock()
+                .map_err(|_| PluginError::PluginNotFound(plugin_id.to_string()))?
+                .call_on_disable()?;
         }
         Ok(())
     }
@@ -807,7 +856,10 @@ impl PluginLoader {
             ),
         }
         if lp.manifest.lifecycle.on_settings_changed {
-            lp.backend.call_on_settings_changed(settings)?;
+            lp.backend
+                .lock()
+                .map_err(|_| PluginError::PluginNotFound(plugin_id.to_string()))?
+                .call_on_settings_changed(settings)?;
         }
         Ok(())
     }
@@ -829,7 +881,10 @@ impl PluginLoader {
             .loaded
             .get_mut(plugin_id)
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
-        lp.backend.call_wire_context(ctx);
+        lp.backend
+            .lock()
+            .map_err(|_| PluginError::PluginNotFound(plugin_id.to_string()))?
+            .call_wire_context(ctx);
         Ok(())
     }
 
@@ -867,11 +922,16 @@ impl PluginLoader {
 
         let mut responses = Vec::with_capacity(pending.len());
         for (plugin_id, handler_id, payload) in pending {
-            if let Some(lp) = self.loaded.get_mut(&plugin_id) {
-                let response = lp.backend.dispatch(handler_id, &payload).map_err(|e| {
-                    tracing::warn!(plugin_id = %plugin_id, "event dispatch failed: {e}");
-                    e
-                })?;
+            if let Some(lp) = self.loaded.get(&plugin_id) {
+                let backend = lp.backend.clone();
+                let response = backend
+                    .lock()
+                    .map_err(|_| PluginError::PluginNotFound(plugin_id.clone()))?
+                    .dispatch(handler_id, &payload)
+                    .map_err(|e| {
+                        tracing::warn!(plugin_id = %plugin_id, "event dispatch failed: {e}");
+                        e
+                    })?;
                 responses.push((plugin_id, response));
             }
         }
@@ -900,10 +960,8 @@ impl PluginLoader {
     /// Returns `None` if the plugin is not loaded or is a core (native) plugin.
     /// Hot-reload only applies to community WASM plugins.
     #[allow(dead_code)]
-    pub(crate) fn sandbox_mut(&mut self, plugin_id: &str) -> Option<&mut WasmSandbox> {
-        self.loaded
-            .get_mut(plugin_id)
-            .and_then(|lp| lp.backend.as_wasm_sandbox_mut())
+    pub(crate) fn backend_arc(&self, plugin_id: &str) -> Option<Arc<Mutex<PluginBackend>>> {
+        self.loaded.get(plugin_id).map(|lp| lp.backend.clone())
     }
 
     /// Return a reference to the [`PluginManifest`] for `plugin_id`.
@@ -939,10 +997,10 @@ impl PluginLoader {
         sandbox: WasmSandbox,
     ) -> Option<WasmSandbox> {
         self.loaded.get_mut(plugin_id).and_then(|lp| {
-            if let PluginBackend::Community(_) = &lp.backend {
+            let mut backend_guard = lp.backend.lock().ok()?;
+            if let PluginBackend::Community(_) = &*backend_guard {
                 let old_backend =
-                    std::mem::replace(&mut lp.backend, PluginBackend::Community(sandbox));
-                // Extract the old WasmSandbox from the replaced backend.
+                    std::mem::replace(&mut *backend_guard, PluginBackend::Community(sandbox));
                 if let PluginBackend::Community(old) = old_backend {
                     Some(old)
                 } else {
@@ -952,6 +1010,40 @@ impl PluginLoader {
                 None
             }
         })
+    }
+
+    /// Inject an [`IpcDispatcher`] into every loaded community (WASM) plugin's
+    /// [`PluginData`], enabling `host::invoke_command` to dispatch calls to
+    /// other plugins.
+    ///
+    /// Must be called **after** all plugins are loaded and the dispatcher is
+    /// constructed. Newly loaded plugins (e.g. via hot-reload) must be
+    /// injected individually via [`inject_ipc_dispatcher_for`].
+    pub fn inject_ipc_dispatcher(&mut self, dispatcher: Arc<dyn IpcDispatcher>) {
+        for lp in self.loaded.values() {
+            if let Ok(mut backend) = lp.backend.lock() {
+                if let PluginBackend::Community(sandbox) = &mut *backend {
+                    sandbox.set_ipc_dispatcher(dispatcher.clone());
+                }
+            }
+        }
+    }
+
+    /// Inject an [`IpcDispatcher`] into a single community plugin's
+    /// [`PluginData`]. Used after hot-reload to wire up a freshly
+    /// instantiated sandbox.
+    pub fn inject_ipc_dispatcher_for(
+        &mut self,
+        plugin_id: &str,
+        dispatcher: Arc<dyn IpcDispatcher>,
+    ) {
+        if let Some(lp) = self.loaded.get(plugin_id) {
+            if let Ok(mut backend) = lp.backend.lock() {
+                if let PluginBackend::Community(sandbox) = &mut *backend {
+                    sandbox.set_ipc_dispatcher(dispatcher);
+                }
+            }
+        }
     }
 }
 
@@ -1085,34 +1177,46 @@ impl IpcDispatcher for SharedPluginLoader {
         command_id: &str,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, IpcError> {
-        let mut loader = self
-            .0
-            .lock()
+        // Resolve under the loader lock, then release before backend
+        // execution. This lets WASM plugins issue nested IPC calls
+        // (host::invoke_command) without deadlocking.
+        let (backend, handler_id) = {
+            let loader = self
+                .0
+                .lock()
+                .map_err(|_| IpcError::PluginCrashedDuringCall {
+                    plugin_id: target_plugin_id.to_string(),
+                    command: command_id.to_string(),
+                })?;
+
+            loader.resolve_ipc(target_plugin_id, command_id).map_err(
+                |e| match e {
+                    PluginError::PluginNotFound(id) => {
+                        // Could be the plugin ID or the command ID — check.
+                        if id == target_plugin_id {
+                            IpcError::PluginNotFound { plugin_id: id }
+                        } else {
+                            IpcError::CommandNotFound {
+                                plugin_id: target_plugin_id.to_string(),
+                                command: id,
+                            }
+                        }
+                    }
+                    _ => IpcError::PluginCrashedDuringCall {
+                        plugin_id: target_plugin_id.to_string(),
+                        command: command_id.to_string(),
+                    },
+                },
+            )?
+        };
+        // Loader lock released — safe for re-entrant calls.
+        let mut guard = backend
+            .try_lock()
             .map_err(|_| IpcError::PluginCrashedDuringCall {
                 plugin_id: target_plugin_id.to_string(),
                 command: command_id.to_string(),
             })?;
-
-        let lp = loader
-            .loaded
-            .get_mut(target_plugin_id)
-            .ok_or_else(|| IpcError::PluginNotFound {
-                plugin_id: target_plugin_id.to_string(),
-            })?;
-
-        let handler_id = lp
-            .manifest
-            .registrations
-            .ipc_commands
-            .iter()
-            .find(|r| r.id == command_id)
-            .map(|r| r.handler_id)
-            .ok_or_else(|| IpcError::CommandNotFound {
-                plugin_id: target_plugin_id.to_string(),
-                command: command_id.to_string(),
-            })?;
-
-        lp.backend
+        guard
             .dispatch(handler_id, args)
             .map_err(|_| IpcError::PluginCrashedDuringCall {
                 plugin_id: target_plugin_id.to_string(),
@@ -1134,8 +1238,8 @@ impl IpcDispatcher for SharedPluginLoader {
         let command = command_id.to_string();
 
         let inner: CorePluginFuture = {
-            let mut loader = self.0.lock().ok()?;
-            let lp = loader.loaded.get_mut(&target)?;
+            let loader = self.0.lock().ok()?;
+            let lp = loader.loaded.get(&target)?;
             let handler_id = lp
                 .manifest
                 .registrations
@@ -1143,7 +1247,9 @@ impl IpcDispatcher for SharedPluginLoader {
                 .iter()
                 .find(|r| r.id == command)
                 .map(|r| r.handler_id)?;
-            lp.backend.dispatch_async(handler_id, &args)?
+            let backend = lp.backend.clone();
+            let mut guard = backend.lock().ok()?;
+            guard.dispatch_async(handler_id, &args)?
         };
 
         Some(Box::pin(async move {

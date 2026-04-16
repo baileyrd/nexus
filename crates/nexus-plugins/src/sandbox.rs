@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 
 use wasmtime::{Engine, Instance, Linker, Module, Store, StoreLimitsBuilder, Trap};
 
-use nexus_kernel::{CapabilitySet, EventBus, KvStore};
+use nexus_kernel::{CapabilitySet, EventBus, IpcDispatcher, KvStore};
 
 use crate::{PluginError, WasmConfig};
 
@@ -39,6 +39,10 @@ pub struct PluginData {
     /// [`WasmSandbox::new`] overwrites this with the config-derived limit;
     /// callers may supply any placeholder (e.g. `StoreLimitsBuilder::new().build()`).
     pub limits: wasmtime::StoreLimits,
+    /// Dispatcher for plugin-to-plugin IPC. Injected after all plugins are
+    /// loaded so `host::invoke_command` can route calls to other plugins.
+    /// `None` until [`WasmSandbox::set_ipc_dispatcher`] is called.
+    pub ipc_dispatch: Option<Arc<dyn IpcDispatcher>>,
 }
 
 impl Default for PluginData {
@@ -51,6 +55,7 @@ impl Default for PluginData {
             forge_root: PathBuf::new(),
             settings_json: None,
             limits: StoreLimitsBuilder::new().build(),
+            ipc_dispatch: None,
         }
     }
 }
@@ -140,6 +145,13 @@ impl WasmSandbox {
                 })?;
 
         Ok(Self { store, instance })
+    }
+
+    /// Inject an [`IpcDispatcher`] so `host::invoke_command` can route
+    /// calls to other loaded plugins. Called by the loader after all
+    /// plugins are loaded or after a hot-reload.
+    pub fn set_ipc_dispatcher(&mut self, dispatcher: Arc<dyn IpcDispatcher>) {
+        self.store.data_mut().ipc_dispatch = Some(dispatcher);
     }
 
     /// Dispatch a call to handler `handler_id` with JSON `args`.
