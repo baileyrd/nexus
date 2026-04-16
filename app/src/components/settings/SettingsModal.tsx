@@ -1,24 +1,18 @@
 import { useEffect, useMemo, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { settingsTabKey, useSettingsStore } from "../../stores/settings";
 import { isCapturing } from "../../keybindings/capture-state";
+import { useSettingsTabs, type SettingsTab } from "../../contributions";
 import { Icon } from "../Icon";
-import { GeneralTab } from "./tabs/GeneralTab";
-import { HotkeysTab } from "./tabs/HotkeysTab";
 import { PluginSettingsTab } from "./tabs/PluginSettingsTab";
-import { PluginsTab } from "./tabs/PluginsTab";
 
-interface TabDef {
+/** Rail-display shape: a subset of `SettingsTab` plus the synthetic
+ *  entries we generate for plugin-contributed tabs from the backend. */
+interface RailTab {
   id: string;
   title: string;
   icon: string;
   group: "options" | "plugins";
 }
-
-const BUILTIN_TABS: readonly TabDef[] = [
-  { id: "general", title: "General", icon: "settings", group: "options" },
-  { id: "hotkeys", title: "Hotkeys", icon: "command", group: "options" },
-  { id: "plugins", title: "Plugins", icon: "plug", group: "plugins" },
-] as const;
 
 /**
  * Two-pane Settings modal (PRD 07 §20). Mirrors the Obsidian settings
@@ -27,6 +21,12 @@ const BUILTIN_TABS: readonly TabDef[] = [
  *
  * Opens via the `workspace.settings` contribution command. Esc and
  * backdrop click both close.
+ *
+ * Tab content is resolved through the contribution registry
+ * (`useSettingsTabs` → `contributions.registerSettingsTab`). Built-in
+ * tabs register themselves at boot in `contributions/builtins.ts`;
+ * plugin-contributed tabs still come from the backend via
+ * `useSettingsStore.pluginTabs` and render through `PluginSettingsTab`.
  */
 export function SettingsModal() {
   const open = useSettingsStore((s) => s.open);
@@ -40,6 +40,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   const activeTab = useSettingsStore((s) => s.activeTab);
   const setActiveTab = useSettingsStore((s) => s.setActiveTab);
   const pluginTabs = useSettingsStore((s) => s.pluginTabs);
+  const registeredTabs = useSettingsTabs();
 
   // Close on global Escape — listening on the backdrop's keydown misses
   // Esc because focus lives inside the right-pane content. Suppressed
@@ -60,24 +61,34 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
     // Placeholder for future keyboard nav (arrow-key tab cycling).
   }
 
-  const { options, plugins, activePluginTab } = useMemo(() => {
-    const options = BUILTIN_TABS.filter((t) => t.group === "options");
-    const pluginBuiltin = BUILTIN_TABS.filter((t) => t.group === "plugins");
-    const pluginContributed: TabDef[] = pluginTabs.map((t) => ({
+  const { options, plugins, activeRegistered, activePluginTab } = useMemo(() => {
+    const options: RailTab[] = registeredTabs
+      .filter((t) => t.group === "options")
+      .map(toRailTab);
+    const pluginBuiltin: RailTab[] = registeredTabs
+      .filter((t) => t.group === "plugins")
+      .map(toRailTab);
+    const pluginContributed: RailTab[] = pluginTabs.map((t) => ({
       id: settingsTabKey(t),
       title: t.title,
       icon: t.icon,
       group: "plugins",
     }));
+    const activeRegistered: SettingsTab | undefined = registeredTabs.find(
+      (t) => t.id === activeTab,
+    );
     const activePluginTab = pluginTabs.find(
       (t) => settingsTabKey(t) === activeTab,
     );
     return {
       options,
       plugins: [...pluginBuiltin, ...pluginContributed],
+      activeRegistered,
       activePluginTab,
     };
-  }, [activeTab, pluginTabs]);
+  }, [activeTab, registeredTabs, pluginTabs]);
+
+  const ActiveComponent = activeRegistered?.component;
 
   return (
     <div
@@ -107,9 +118,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
           >
             <Icon name="x" size={18} />
           </button>
-          {activeTab === "general" && <GeneralTab />}
-          {activeTab === "hotkeys" && <HotkeysTab />}
-          {activeTab === "plugins" && <PluginsTab />}
+          {ActiveComponent && <ActiveComponent />}
           {activePluginTab && <PluginSettingsTab tab={activePluginTab} />}
         </div>
       </div>
@@ -117,9 +126,13 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+function toRailTab(t: SettingsTab): RailTab {
+  return { id: t.id, title: t.title, icon: t.icon, group: t.group };
+}
+
 interface RailSectionProps {
   title: string;
-  tabs: readonly TabDef[];
+  tabs: readonly RailTab[];
   active: string;
   onSelect: (id: string) => void;
 }

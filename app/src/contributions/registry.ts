@@ -24,6 +24,26 @@ export interface ContentComponentProps {
 }
 export type ContentComponent = ComponentType<ContentComponentProps>;
 
+/**
+ * Settings-modal tab contribution. The modal's left rail is grouped
+ * into "options" (app-wide preferences) and "plugins" (the aggregate
+ * Plugins tab + any plugin-contributed tabs). Built-ins register
+ * through this same API so they're discoverable and orderable
+ * alongside plugin additions — PRD-07 §20.
+ */
+export interface SettingsTab {
+  /** Stable id, also used as the `activeTab` key. */
+  id: string;
+  title: string;
+  /** Lucide-registry icon name shown in the rail. */
+  icon: string;
+  group: "options" | "plugins";
+  /** Content-pane component. Rendered with no props. */
+  component: ComponentType;
+  /** Ordering hint within the group (lower first). Default 100. */
+  order?: number;
+}
+
 /** Command-palette entry. References an already-registered command by
  *  `commandId`; the palette dispatches via `contributions.invokeCommand`. */
 export interface PaletteCommand {
@@ -47,6 +67,7 @@ const commands = new Map<string, CommandHandler>();
 const views = new Map<string, ViewOpener>();
 const contentTypes = new Map<string, ContentComponent>();
 const paletteCommands = new Map<string, PaletteCommand>();
+const settingsTabs = new Map<string, SettingsTab>();
 /**
  * User keybinding overrides, keyed by `commandId`. When present, the
  * effective keybinding exposed via `listPaletteCommands` / the React
@@ -56,6 +77,7 @@ const paletteCommands = new Map<string, PaletteCommand>();
 const keybindingOverrides = new Map<string, string>();
 const contentTypeListeners = new Set<() => void>();
 const paletteListeners = new Set<() => void>();
+const settingsTabListeners = new Set<() => void>();
 
 function warn(msg: string) {
   // eslint-disable-next-line no-console
@@ -204,6 +226,37 @@ export const contributions = {
       paletteListeners.delete(fn);
     };
   },
+
+  registerSettingsTab(tab: SettingsTab): Disposable {
+    if (settingsTabs.has(tab.id)) {
+      warn(`settings tab '${tab.id}' already registered — replacing`);
+    }
+    settingsTabs.set(tab.id, tab);
+    settingsTabsSnapshot = null;
+    settingsTabListeners.forEach((fn) => fn());
+    return () => {
+      if (settingsTabs.get(tab.id) === tab) {
+        settingsTabs.delete(tab.id);
+        settingsTabsSnapshot = null;
+        settingsTabListeners.forEach((fn) => fn());
+      }
+    };
+  },
+
+  resolveSettingsTab(id: string): SettingsTab | undefined {
+    return settingsTabs.get(id);
+  },
+
+  listSettingsTabs(): SettingsTab[] {
+    return settingsTabsSnapshotFn();
+  },
+
+  subscribeSettingsTabs(fn: () => void): Disposable {
+    settingsTabListeners.add(fn);
+    return () => {
+      settingsTabListeners.delete(fn);
+    };
+  },
 };
 
 /** Reset all registrations. Test-only. */
@@ -212,10 +265,13 @@ export function __resetContributions() {
   views.clear();
   contentTypes.clear();
   paletteCommands.clear();
+  settingsTabs.clear();
   keybindingOverrides.clear();
   contentTypeListeners.clear();
   paletteListeners.clear();
+  settingsTabListeners.clear();
   paletteSnapshot = null;
+  settingsTabsSnapshot = null;
 }
 
 /**
@@ -266,5 +322,32 @@ export function usePaletteCommands(): PaletteCommand[] {
     (notify) => contributions.subscribePaletteCommands(notify),
     paletteSnapshotFn,
     paletteSnapshotFn,
+  );
+}
+
+/**
+ * Cached snapshot of the settings-tab list. Sorted by `order` (lower
+ * first; default 100) with registration order as the stable tiebreaker
+ * so the rail layout stays deterministic as plugins come and go.
+ */
+let settingsTabsSnapshot: SettingsTab[] | null = null;
+
+function settingsTabsSnapshotFn(): SettingsTab[] {
+  if (!settingsTabsSnapshot) {
+    const entries = Array.from(settingsTabs.values());
+    settingsTabsSnapshot = entries.sort(
+      (a, b) => (a.order ?? 100) - (b.order ?? 100),
+    );
+  }
+  return settingsTabsSnapshot;
+}
+
+/** React hook returning all registered settings tabs, reactive to
+ *  registrations/unregistrations. */
+export function useSettingsTabs(): SettingsTab[] {
+  return useSyncExternalStore(
+    (notify) => contributions.subscribeSettingsTabs(notify),
+    settingsTabsSnapshotFn,
+    settingsTabsSnapshotFn,
   );
 }

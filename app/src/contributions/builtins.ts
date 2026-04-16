@@ -1,6 +1,9 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FileTree } from "../components/panels/FileTree";
 import { Outline } from "../components/panels/Outline";
+import { GeneralTab } from "../components/settings/tabs/GeneralTab";
+import { HotkeysTab } from "../components/settings/tabs/HotkeysTab";
+import { PluginsTab } from "../components/settings/tabs/PluginsTab";
 import { useForgeStore } from "../stores/forge";
 import { usePaletteStore } from "../stores/palette";
 import { useSettingsStore } from "../stores/settings";
@@ -18,6 +21,31 @@ import { contributions } from "./registry";
 export function registerBuiltins(): void {
   contributions.registerContentType("files", FileTree);
   contributions.registerContentType("outline", Outline);
+
+  contributions.registerSettingsTab({
+    id: "general",
+    title: "General",
+    icon: "settings",
+    group: "options",
+    component: GeneralTab,
+    order: 10,
+  });
+  contributions.registerSettingsTab({
+    id: "hotkeys",
+    title: "Hotkeys",
+    icon: "command",
+    group: "options",
+    component: HotkeysTab,
+    order: 20,
+  });
+  contributions.registerSettingsTab({
+    id: "plugins",
+    title: "Plugins",
+    icon: "plug",
+    group: "plugins",
+    component: PluginsTab,
+    order: 10,
+  });
 
   contributions.registerCommand("workspace.help", () => {
     // Placeholder — real help surface (docs site, in-app help panel) TBD.
