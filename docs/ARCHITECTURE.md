@@ -135,7 +135,7 @@ C4Container
 
         Container(storage, "nexus-storage (core plugin)", "Rust library", "File-as-truth, SQLite index,<br/>Tantivy FTS, graph, watcher")
         Container(ai, "nexus-ai (core plugin)", "Rust library", "AI providers, embeddings,<br/>RAG pipeline")
-        Container(database, "nexus-database (library)", "Rust library", "Bases support: property types,<br/>validation, formulas,<br/>CSV import/export (no SQL)")
+        Container(database, "nexus-database (core plugin)", "Rust library", "Bases support: property types,<br/>validation, formulas,<br/>CSV import/export (no SQL).<br/>IPC: csv_import, csv_export, formula_eval")
         Container(security, "nexus-security (core plugin)", "Rust library", "Credential vault, audit log,<br/>path validator")
         Container(mcp, "nexus-mcp", "Rust library / rmcp", "13-tool MCP server<br/>over stdio")
 
@@ -203,7 +203,7 @@ C4Container
 | `nexus-kernel` | Library | Rust + tokio | Event bus, IPC, capabilities, lifecycle |
 | `nexus-storage` | Core plugin | rusqlite, tantivy, comrak, notify | File-as-truth, index, graph, **bases engine** (schema/query/relation) |
 | `nexus-ai` | Core plugin | reqwest, async-trait | Providers, embeddings, RAG |
-| `nexus-database` | Library | csv, regex-lite | Bases support: property types, validation, formulas, CSV import/export (no SQL) |
+| `nexus-database` | Core plugin | csv, regex-lite | Bases support: property types, validation, formulas, CSV import/export (no SQL). IPC: `csv_import`, `csv_export`, `formula_eval` |
 | `nexus-security` | Core plugin | keyring | Vault, audit, path validation |
 | `nexus-plugins` | Library | wasmtime, notify, jsonschema | WASM sandbox + loader + hot-reload |
 | `nexus-mcp` | Library | rmcp, schemars | 13-tool MCP server |
@@ -325,7 +325,7 @@ C4Component
 **Guardrails:**
 
 - `nexus-storage` is the **sole owner** of `rusqlite` and the forge's SQLite database (`index.db`). No other plugin or library links `rusqlite` — they reach storage via `ipc_call("com.nexus.storage", ...)`. The guardrail is enforced by `crates/nexus-bootstrap/tests/dep_invariants.rs` (forbidden pairs include `("nexus-ai", "nexus-storage")`, `("nexus-database", "rusqlite")`, `("nexus-kernel", "rusqlite")`, etc.).
-- `nexus-database` is a pure-logic library (no rusqlite): property types, validation, Notion-compatible formulas, CSV import/export. The SQL-backed query/schema/relation engine for bases lives here under `nexus_storage::bases::{schema, query, relation}`.
+- `nexus-database` is a pure-logic library (no rusqlite): property types, validation, Notion-compatible formulas, CSV import/export. The SQL-backed query/schema/relation engine for bases lives here under `nexus_storage::bases::{schema, query, relation}`. The library's pure helpers are also exposed over IPC as the `com.nexus.database` core plugin (`csv_import`, `csv_export`, `formula_eval`) so invokers can use them without a direct `nexus-database` dep.
 - File writes go through `atomic_write` (temp + fsync + rename) to prevent corruption.
 - Index is rebuildable from disk: `reconcile()` compares filesystem vs index and patches.
 
@@ -891,6 +891,7 @@ flowchart LR
 
 - **Only `nexus-storage` imports `rusqlite`.** Plugins (`nexus-ai`, community WASM), support libraries (`nexus-database`), and the kernel itself are all forbidden from direct `rusqlite` deps — they go through storage IPC.
 - `nexus-cli`, `nexus-tui`, `nexus-mcp`, `nexus-ai`, and `nexus-database` never directly import `nexus-storage`; they route through the kernel.
+- `nexus-cli` and `nexus-tui` never directly import `nexus-database` either; CSV import/export and formula evaluation go through `ipc_call("com.nexus.database", …)`.
 - `nexus-mcp` never directly imports `nexus-ai`; it dispatches `nexus_ask` via `ipc_call(AI_PLUGIN, "ask", ...)`.
 - `nexus-kernel` depends only on `nexus-types`; the SQLite KV impl in `nexus-kv` is injected via `Kernel::new`.
 

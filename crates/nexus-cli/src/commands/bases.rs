@@ -1,7 +1,7 @@
 //! CLI commands for bases (database) operations.
 
 use anyhow::Result;
-use nexus_bootstrap::storage as storage_ipc;
+use nexus_bootstrap::{database as database_ipc, storage as storage_ipc};
 use nexus_types::bases;
 
 use crate::app::App;
@@ -130,37 +130,30 @@ pub fn import(app: &mut App, path: &str, csv_file: &str, has_header: bool) -> Re
     let abs_dir = app.forge_root().join(path);
     let mut base = bases::load_base(&abs_dir)?;
 
-    let file = std::fs::File::open(csv_file)
-        .map_err(|e| anyhow::anyhow!("Failed to open CSV file: {e}"))?;
-
-    // Build column mapping from header names matching schema fields.
+    let csv_bytes = std::fs::read(csv_file)
+        .map_err(|e| anyhow::anyhow!("Failed to read CSV file: {e}"))?;
     let field_names: Vec<String> = base.schema.fields.keys().cloned().collect();
-    let mapping = if has_header {
-        // Peek at headers to build mapping.
-        let mut peek_reader = csv::ReaderBuilder::new()
-            .has_headers(true)
-            .from_reader(std::io::BufReader::new(std::fs::File::open(csv_file)?));
-        let headers = peek_reader.headers()?.clone();
-        nexus_database::ColumnMapping::from_headers(&headers, &field_names)
-    } else {
-        // Map columns 0..N to fields in order.
-        nexus_database::ColumnMapping {
-            mappings: field_names.iter().enumerate().map(|(i, n)| (i, n.clone())).collect(),
-        }
-    };
-
-    let (records, result) = nexus_database::import_csv(file, &mapping, has_header)?;
-    base.records.extend(records);
-    bases::save_base(&abs_dir, &base)?;
 
     let (runtime, rt) = app.runtime()?;
+    let response = database_ipc::csv_import(
+        runtime,
+        rt,
+        &csv_bytes,
+        &field_names,
+        has_header,
+        None,
+    )?;
+
+    base.records.extend(response.records);
+    bases::save_base(&abs_dir, &base)?;
+
     storage_ipc::base_index(runtime, rt, path)?;
 
     println!(
         "Imported {} records ({} skipped)",
-        result.imported, result.skipped
+        response.imported, response.skipped
     );
-    for (row, err) in &result.errors {
+    for (row, err) in &response.errors {
         println!("  Row {row}: {err}");
     }
     Ok(())
@@ -172,11 +165,14 @@ pub fn export(app: &mut App, path: &str, csv_file: &str) -> Result<()> {
     let base = bases::load_base(&abs_dir)?;
 
     let field_names: Vec<String> = base.schema.fields.keys().cloned().collect();
-    let file = std::fs::File::create(csv_file)
-        .map_err(|e| anyhow::anyhow!("Failed to create CSV file: {e}"))?;
 
-    let count = nexus_database::export_csv(file, &base.records, &field_names)?;
-    println!("Exported {count} records to {csv_file}");
+    let (runtime, rt) = app.runtime()?;
+    let response = database_ipc::csv_export(runtime, rt, &base.records, &field_names)?;
+
+    std::fs::write(csv_file, &response.csv_bytes)
+        .map_err(|e| anyhow::anyhow!("Failed to write CSV file: {e}"))?;
+
+    println!("Exported {} records to {csv_file}", response.count);
     Ok(())
 }
 
@@ -191,7 +187,8 @@ pub fn formula(app: &mut App, path: &str, record_id: &str, expr: &str) -> Result
         .find(|r| r.id == record_id)
         .ok_or_else(|| anyhow::anyhow!("Record not found: {record_id}"))?;
 
-    let result = nexus_database::evaluate_formula(expr, &record.fields)?;
-    println!("{result}");
+    let (runtime, rt) = app.runtime()?;
+    let response = database_ipc::formula_eval(runtime, rt, expr, &record.fields)?;
+    println!("{}", response.display);
     Ok(())
 }

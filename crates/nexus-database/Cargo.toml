@@ -8,6 +8,7 @@ description = "Nexus database support library: property types, validation, formu
 
 [dependencies]
 nexus-types = { path = "../nexus-types" }
+nexus-plugins = { path = "../nexus-plugins" }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

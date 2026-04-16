@@ -29,6 +29,7 @@ use nexus_plugins::{
     parse_manifest, CorePlugin, PluginError, PluginLoader, PluginManifest, SharedPluginLoader,
 };
 
+pub mod database;
 pub mod storage;
 
 /// Render a markdown note to a standalone HTML string.
@@ -339,10 +340,36 @@ fn register_core_plugins(
         .context("failed to register com.nexus.storage")?;
 
     // `nexus-database` is a pure-logic library (types, validation, formulas,
-    // CSV import/export); it used to wrap a no-op `DatabaseCorePlugin` that
-    // never registered any IPC handlers. Callers that need SQL-backed base
-    // queries now go through `com.nexus.storage` (`base_index` / `base_list`
-    // / `base_query`). See ARCHITECTURE.md §4.2.
+    // CSV import/export). Its core plugin surfaces only those pure helpers
+    // over IPC as `com.nexus.database`; SQL-backed base queries go through
+    // `com.nexus.storage` (`base_index` / `base_list` / `base_query`) which
+    // is the sole owner of the forge's SQLite database. See
+    // ARCHITECTURE.md §4.2.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.database",
+                "Database",
+                LifecycleFlags::NONE,
+                &[
+                    (
+                        "csv_import",
+                        nexus_database::core_plugin::HANDLER_CSV_IMPORT,
+                    ),
+                    (
+                        "csv_export",
+                        nexus_database::core_plugin::HANDLER_CSV_EXPORT,
+                    ),
+                    (
+                        "formula_eval",
+                        nexus_database::core_plugin::HANDLER_FORMULA_EVAL,
+                    ),
+                ],
+            ),
+            forge_root,
+            Box::new(nexus_database::DatabaseCorePlugin::new()),
+        )
+        .context("failed to register com.nexus.database")?;
 
     loader
         .register_core(
