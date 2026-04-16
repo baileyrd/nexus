@@ -27,7 +27,9 @@ const nexusEditorTheme = EditorView.theme({
   "&": {
     height: "100%",
     fontSize: "14px",
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontFamily:
+      "ui-monospace, SFMono-Regular, Menlo, monospace, " +
+      "'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Twemoji Mozilla', emoji",
   },
   "&.cm-focused": {
     outline: "none",

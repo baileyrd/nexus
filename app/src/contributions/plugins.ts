@@ -37,12 +37,14 @@ import {
   listPluginPanels,
   listPluginRibbonItems,
   listPluginSettingsTabs,
+  listPluginSlashCommands,
   listPluginStatusItems,
   type PluginUiPanel,
   type PluginUiRibbonItem,
   type PluginUiStatusItem,
 } from "../ipc/plugins";
 import { dispatchToScript, evictScriptPlugin } from "../plugins/scriptRuntime";
+import { setPluginSlashCommands } from "../editor/slashCommands";
 
 type Disposable = () => void;
 
@@ -161,6 +163,26 @@ async function syncStatus(): Promise<void> {
   useLayoutStore.getState().setPluginStatus(items);
 }
 
+async function syncSlashCommands(): Promise<void> {
+  try {
+    const entries = await listPluginSlashCommands();
+    setPluginSlashCommands(
+      entries.map((e) => ({
+        // Namespace plugin IDs so they don't collide with built-in IDs.
+        id: `plugin:${e.plugin_id}:${e.command_id}`,
+        label: e.label,
+        aliases: e.aliases ?? [],
+        description: e.description,
+        template: e.template,
+        badge: e.badge,
+      })),
+    );
+  } catch (err) {
+    warn("list_plugin_slash_commands failed — skipping", err);
+    setPluginSlashCommands([]);
+  }
+}
+
 async function syncAll(): Promise<void> {
   // Drop the previous snapshot's registrations before re-registering so
   // removed/renamed plugin contributions disappear cleanly.
@@ -173,6 +195,7 @@ async function syncAll(): Promise<void> {
     syncSettingsTabs(),
     syncRibbon(),
     syncStatus(),
+    syncSlashCommands(),
   ]);
 }
 

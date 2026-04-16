@@ -6,8 +6,9 @@
  * inserts a markdown template when a command is selected. Cursor
  * placement inside the template is controlled by a `\0` marker.
  *
- * Implements PRD 08 §6 (MVP subset — plugin-contributed commands are
- * a future slice).
+ * Implements PRD 08 §6. Merges built-in commands with
+ * plugin-contributed slash commands from the plugin manifest
+ * registration system (`[[registrations.slash_command]]`).
  */
 
 import {
@@ -21,7 +22,7 @@ import {
 import type { Extension } from "@codemirror/state";
 
 import { fuzzyRank } from "../components/palette/fuzzy";
-import { SLASH_COMMANDS, type SlashCommand } from "./slashCommands";
+import { getAllSlashCommands, type SlashCommand } from "./slashCommands";
 
 /** Cursor-position placeholder used inside command templates. */
 const CURSOR_MARKER = "\0";
@@ -66,7 +67,7 @@ const source: CompletionSource = (context: CompletionContext): CompletionResult 
   const from = match.from + slashIdx;
   const query = match.text.slice(slashIdx + 1); // text after `/`
 
-  const ranked = fuzzyRank(SLASH_COMMANDS, query, (c) =>
+  const ranked = fuzzyRank(getAllSlashCommands(), query, (c) =>
     [c.label, ...(c.aliases ?? [])].join(" "),
   );
   // If the user typed a query that matches nothing, dismiss the popup
@@ -93,7 +94,7 @@ export function slashCommands(): Extension {
     addToOptions: [
       {
         render: (completion) => {
-          const cmd = SLASH_COMMANDS.find((c) => c.id === completion.type);
+          const cmd = getAllSlashCommands().find((c) => c.id === completion.type);
           const span = document.createElement("span");
           span.className = "cm-nx-slash-badge";
           span.textContent = cmd?.badge ?? "";

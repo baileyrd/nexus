@@ -98,6 +98,7 @@ pub fn run() {
             plugins::list_plugin_settings_tabs,
             plugins::list_plugin_ribbon_items,
             plugins::list_plugin_status_items,
+            plugins::list_plugin_slash_commands,
             plugins::get_plugin_settings_schema,
             plugins::get_plugin_settings,
             plugins::save_plugin_settings,

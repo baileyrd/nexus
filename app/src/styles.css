@@ -1067,7 +1067,9 @@ main {
   border-radius: 4px;
   background: var(--nx-bg-secondary, #f8f9fa);
   color: var(--nx-text-secondary, #555);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace,
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji",
+    "Twemoji Mozilla", emoji;
   font-size: 11px;
   font-weight: 600;
 }

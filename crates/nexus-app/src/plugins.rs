@@ -11,7 +11,7 @@ use nexus_kernel::{EventBus, IpcDispatcher, IpcError, NexusEvent};
 use nexus_plugins::{
     PluginBackend, PluginEventForwarder, PluginManager, PluginManagerConfig, PluginStatus,
     TrustLevel, UiContribution, UiPanelContribution, UiRibbonItemContribution,
-    UiSettingsTabContribution, UiStatusItemContribution,
+    UiSettingsTabContribution, UiSlashCommandContribution, UiStatusItemContribution,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -357,6 +357,20 @@ pub fn list_plugin_status_items(
         .manager
         .lock()
         .map(|mgr| mgr.ui_status_items())
+        .unwrap_or_default()
+}
+
+/// List all plugin-contributed editor slash commands. The frontend
+/// merges these with its built-in slash commands in the editor
+/// overlay.
+#[tauri::command]
+pub fn list_plugin_slash_commands(
+    state: State<'_, PluginState>,
+) -> Vec<UiSlashCommandContribution> {
+    state
+        .manager
+        .lock()
+        .map(|mgr| mgr.ui_slash_commands())
         .unwrap_or_default()
 }
 

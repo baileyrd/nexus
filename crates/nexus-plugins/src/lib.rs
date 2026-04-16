@@ -158,6 +158,29 @@ pub struct UiStatusItemContribution {
     pub command_id: Option<String>,
 }
 
+/// A single plugin-contributed editor slash command, materialised for
+/// the frontend. Aggregated by [`PluginManager::ui_slash_commands`];
+/// the frontend merges these with the built-in slash commands in the
+/// `/` trigger overlay.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UiSlashCommandContribution {
+    /// The plugin that owns this slash command.
+    pub plugin_id: String,
+    /// The `id` declared in the manifest.
+    pub command_id: String,
+    /// Primary label shown in the slash menu.
+    pub label: String,
+    /// Short dimmed description.
+    pub description: String,
+    /// Extra keywords for fuzzy matching.
+    pub aliases: Vec<String>,
+    /// Short text badge shown on the left of the row.
+    pub badge: String,
+    /// Markdown template inserted when selected. `\0` marks the
+    /// final cursor position.
+    pub template: String,
+}
+
 // ─── PluginManagerConfig ──────────────────────────────────────────────────────
 
 /// Configuration for [`PluginManager`].
@@ -433,6 +456,36 @@ impl PluginManager {
                         command_id: r
                             .command
                             .map(|c| format!("plugin:{plugin_id}:{c}")),
+                    })
+            })
+            .collect()
+    }
+
+    /// Aggregate editor slash-command contributions across all
+    /// currently-loaded plugins. Returns one
+    /// [`UiSlashCommandContribution`] per `[[registrations.slash_command]]`
+    /// entry; the frontend merges these with the built-in slash
+    /// commands in the editor's `/` trigger overlay.
+    #[must_use]
+    pub fn ui_slash_commands(&self) -> Vec<UiSlashCommandContribution> {
+        self.loader
+            .list()
+            .into_iter()
+            .flat_map(|info| {
+                let plugin_id = info.id.clone();
+                self.loader
+                    .manifest(&info.id)
+                    .map(|m| m.registrations.slash_commands.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |r| UiSlashCommandContribution {
+                        plugin_id: plugin_id.clone(),
+                        command_id: r.id,
+                        label: r.label,
+                        description: r.description,
+                        aliases: r.aliases,
+                        badge: r.badge,
+                        template: r.template,
                     })
             })
             .collect()

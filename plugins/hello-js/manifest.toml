@@ -22,5 +22,13 @@ title = "Hello JS: Greet with settings"
 category = "Demo"
 icon = "message-circle"
 
+[[registrations.slash_command]]
+id = "hello-js.greet-block"
+label = "Hello greeting block"
+description = "Insert a hello-world callout"
+aliases = ["greet", "hi"]
+badge = "👋"
+template = "> 👋 Hello from a JS plugin!\n> \u0000"
+
 [lifecycle]
 on_init = true

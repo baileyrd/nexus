@@ -73,6 +73,20 @@ export interface PluginUiStatusItem {
 }
 
 /**
+ * Mirrors `nexus_plugins::UiSlashCommandContribution`. A plugin-
+ * contributed entry for the editor's `/` trigger overlay.
+ */
+export interface PluginUiSlashCommand {
+  plugin_id: string;
+  command_id: string;
+  label: string;
+  description: string;
+  aliases: string[];
+  badge: string;
+  template: string;
+}
+
+/**
  * Mirrors `nexus_app::plugins::PluginSummary`. Trust level is `"core"`
  * or `"community"`; status is `"loaded"`, `"initialized"`, `"running"`,
  * `"stopped"`, or `"crashed"`.
@@ -111,6 +125,10 @@ export function listPluginRibbonItems(): Promise<PluginUiRibbonItem[]> {
 
 export function listPluginStatusItems(): Promise<PluginUiStatusItem[]> {
   return invoke<PluginUiStatusItem[]>("list_plugin_status_items");
+}
+
+export function listPluginSlashCommands(): Promise<PluginUiSlashCommand[]> {
+  return invoke<PluginUiSlashCommand[]>("list_plugin_slash_commands");
 }
 
 export function listPlugins(): Promise<PluginSummary[]> {

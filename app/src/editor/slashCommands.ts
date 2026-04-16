@@ -109,3 +109,21 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     badge: "⊞",
   },
 ];
+
+/**
+ * Plugin-contributed slash commands, populated by the contribution
+ * bridge at boot and after every plugin hot-reload. Kept in a
+ * module-level variable so the `slashCommandExtension` can read the
+ * latest list on every keystroke without React wiring.
+ */
+let pluginCommands: SlashCommand[] = [];
+
+/** Replace the plugin-contributed slash commands. */
+export function setPluginSlashCommands(cmds: SlashCommand[]): void {
+  pluginCommands = cmds;
+}
+
+/** Return built-in commands followed by plugin-contributed ones. */
+export function getAllSlashCommands(): SlashCommand[] {
+  return [...SLASH_COMMANDS, ...pluginCommands];
+}

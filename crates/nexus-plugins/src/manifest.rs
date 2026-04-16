@@ -114,6 +114,8 @@ pub struct Registrations {
     pub ui_ribbon_items: Vec<UiRibbonItemReg>,
     /// Status-bar entry registrations.
     pub ui_status_items: Vec<UiStatusItemReg>,
+    /// Editor slash-command registrations.
+    pub slash_commands: Vec<UiSlashCommandReg>,
 }
 
 /// Which side of the workspace a plugin-contributed panel docks to.
@@ -256,6 +258,31 @@ pub struct UiStatusItemReg {
     pub command: Option<String>,
 }
 
+/// A single editor slash-command registration — a plugin-contributed
+/// entry that appears in the `/` trigger overlay in the CodeMirror
+/// editor. Selecting the entry inserts [`Self::template`] at the
+/// cursor, with a `\0` byte in the template marking the final cursor
+/// position. Purely declarative (no handler dispatch) in this
+/// revision; dynamic handler-provided templates are a future slice.
+#[derive(Debug, Clone)]
+pub struct UiSlashCommandReg {
+    /// Unique slash-command identifier within the plugin.
+    pub id: String,
+    /// Primary label shown in the slash menu.
+    pub label: String,
+    /// Short dimmed description shown beside the label.
+    pub description: String,
+    /// Extra keywords for fuzzy matching (may be empty).
+    pub aliases: Vec<String>,
+    /// Short text badge shown on the left of the row (e.g. `"AI"`).
+    pub badge: String,
+    /// Markdown template inserted when the command is selected. The
+    /// first `\0` (NUL) in the template marks the final cursor
+    /// position; NUL is used instead of a printable marker so
+    /// templates containing `|`, `#`, etc. are not misinterpreted.
+    pub template: String,
+}
+
 /// Lifecycle hook enablement flags.
 #[derive(Debug, Clone, Default)]
 #[allow(clippy::struct_excessive_bools)]
@@ -362,6 +389,8 @@ struct TomlRegistrations {
     ui_ribbon_items: Vec<TomlUiRibbonItemReg>,
     #[serde(default, rename = "ui_status_item")]
     ui_status_items: Vec<TomlUiStatusItemReg>,
+    #[serde(default, rename = "slash_command")]
+    slash_commands: Vec<TomlUiSlashCommandReg>,
 }
 
 #[derive(Deserialize)]
@@ -434,6 +463,17 @@ struct TomlUiStatusItemReg {
     tooltip: Option<String>,
     #[serde(default)]
     command: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TomlUiSlashCommandReg {
+    id: String,
+    label: String,
+    description: String,
+    #[serde(default)]
+    aliases: Vec<String>,
+    badge: String,
+    template: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -573,6 +613,19 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
                     icon: r.icon,
                     tooltip: r.tooltip,
                     command: r.command,
+                })
+                .collect(),
+            slash_commands: raw
+                .registrations
+                .slash_commands
+                .into_iter()
+                .map(|r| UiSlashCommandReg {
+                    id: r.id,
+                    label: r.label,
+                    description: r.description,
+                    aliases: r.aliases,
+                    badge: r.badge,
+                    template: r.template,
                 })
                 .collect(),
         },
@@ -915,6 +968,62 @@ icon = "hand"
         assert!(!m.lifecycle.on_init);
         assert!(!m.lifecycle.on_start);
         assert!(!m.lifecycle.on_stop);
+    }
+
+    #[test]
+    fn parse_slash_command_registration() {
+        let toml = r##"
+[plugin]
+id = "com.example.test"
+name = "Test"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.slash_command]]
+id = "test.summary"
+label = "Generate summary"
+description = "Insert a summary placeholder"
+aliases = ["sum", "tldr"]
+badge = "AI"
+template = "# Summary\n\u0000"
+"##;
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        assert_eq!(m.registrations.slash_commands.len(), 1);
+        let cmd = &m.registrations.slash_commands[0];
+        assert_eq!(cmd.id, "test.summary");
+        assert_eq!(cmd.label, "Generate summary");
+        assert_eq!(cmd.description, "Insert a summary placeholder");
+        assert_eq!(cmd.aliases, vec!["sum".to_string(), "tldr".to_string()]);
+        assert_eq!(cmd.badge, "AI");
+        assert_eq!(cmd.template, "# Summary\n\u{0}");
+    }
+
+    #[test]
+    fn parse_slash_command_aliases_default_to_empty() {
+        let toml = r##"
+[plugin]
+id = "com.example.test"
+name = "Test"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "test.wasm"
+
+[[registrations.slash_command]]
+id = "test.hr"
+label = "Divider"
+description = "Insert a divider"
+badge = "—"
+template = "---\n\u0000"
+"##;
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        assert_eq!(m.registrations.slash_commands[0].aliases, Vec::<String>::new());
     }
 }
 
