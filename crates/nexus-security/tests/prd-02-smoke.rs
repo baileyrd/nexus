@@ -41,14 +41,7 @@ fn risk_level_high_caps_match_spec() {
 
 #[test]
 fn credential_vault_disabled_mode() {
-    // SAFETY: single-threaded nextest process; no concurrent env reads.
-    unsafe {
-        std::env::set_var("NEXUS_NO_KEYRING", "1");
-    }
-    let vault = CredentialVault::new();
-    unsafe {
-        std::env::remove_var("NEXUS_NO_KEYRING");
-    }
+    let vault = CredentialVault::disabled();
 
     assert!(vault.is_disabled());
     assert!(vault.available().is_ok());
@@ -113,11 +106,9 @@ fn public_type_surface_is_accessible() {
     let _level: RiskLevel = RiskLevel::Medium;
     let _level: RiskLevel = RiskLevel::Low;
 
-    // CredentialVault::new() works
-    unsafe {
-        std::env::remove_var("NEXUS_NO_KEYRING");
-    }
+    // CredentialVault constructors work
     let _vault = CredentialVault::new();
+    let _vault_disabled = CredentialVault::disabled();
 
     // ForgePathValidator requires a real directory
     let dir = tempfile::tempdir().unwrap();
