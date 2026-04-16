@@ -20,6 +20,7 @@ export {
   type EditorKeybinding,
   type MenuItem,
   type PaletteCommand,
+  type UriHandler,
   type SettingsTab,
   type Snippet,
   type TreeNode,

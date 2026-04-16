@@ -14,6 +14,7 @@ import {
   type MenuItem,
   type Snippet,
   type TreeDataProvider,
+  type UriHandler,
 } from "../contributions";
 import { invokePluginCommand } from "../ipc/plugins";
 import { getPluginSettings } from "../ipc/pluginSettings";
@@ -136,6 +137,27 @@ export interface NexusPluginContext {
      * ```
      */
     registerMenuItem(item: MenuItem): Disposable;
+
+    /**
+     * Register a URI handler for an incoming `scheme://…` URL
+     * (PRD-04 §1.1 `protocol_handlers`). When the app receives a URL
+     * whose scheme matches `handler.scheme`, `handler.handle(url)` is
+     * called with the full URL string. Returns a disposable that removes
+     * the handler on plugin stop.
+     *
+     * Example:
+     * ```ts
+     * ctx.ui.registerUriHandler({
+     *   id: "com.myorg.plugin:nexus",
+     *   scheme: "nexus",
+     *   handle(url) {
+     *     const parsed = new URL(url);
+     *     // parsed.pathname → "/analyze", parsed.searchParams → ...
+     *   },
+     * });
+     * ```
+     */
+    registerUriHandler(handler: UriHandler): Disposable;
   };
 }
 
@@ -175,6 +197,8 @@ export function createNexusContext(pluginId: string): NexusPluginContext {
         contributions.registerContextMenuItem(item),
       registerMenuItem: (item) =>
         contributions.registerMenuItem(item),
+      registerUriHandler: (handler) =>
+        contributions.registerUriHandler(handler),
     },
   };
 }

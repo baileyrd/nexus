@@ -43,6 +43,7 @@ pub mod forge;
 pub mod keybindings;
 pub mod persistence;
 pub mod plugins;
+pub mod uri;
 
 /// Entry point for the desktop app. Called from `main.rs` (and from the
 /// mobile entry points on those targets).
@@ -159,6 +160,7 @@ pub fn run() {
             editor::editor_redo,
             editor::editor_list_open,
             editor::editor_sync_content,
+            uri::dispatch_uri,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch nexus-app");

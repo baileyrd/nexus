@@ -178,6 +178,27 @@ export interface TreeDataProvider {
 }
 
 /**
+ * URI handler registered by a plugin or the host to receive incoming
+ * `scheme://…` URLs (PRD-04 §1.1 `protocol_handlers`).
+ *
+ * When the app receives a URL (via the OS deep-link mechanism or via the
+ * `dispatch_uri` Tauri command), the registry finds all handlers whose
+ * `scheme` matches the URL's scheme and calls each `handle` function in
+ * registration order. No-ops on unrecognised schemes.
+ */
+export interface UriHandler {
+  /** Stable id. Plugin handlers: `"plugin:<pluginId>:<scheme>"`. */
+  id: string;
+  /** URI scheme to handle, **without** the trailing colon (e.g. `"nexus"`). */
+  scheme: string;
+  /**
+   * Called with the full URL string when a URL with a matching scheme
+   * arrives. May be async — errors are caught and logged.
+   */
+  handle(url: string): void | Promise<void>;
+}
+
+/**
  * Plugin- or host-contributed menu-bar item (PRD-07 §7.5).
  *
  * The `menu` field names the top-level pull-down: `"File"`, `"Edit"`,
@@ -271,6 +292,13 @@ const snippetListeners = new Set<() => void>();
  */
 const fileHandlers = new Map<string, string>();
 const fileHandlerListeners = new Set<() => void>();
+
+/**
+ * URI handlers, keyed by their stable id. Looked up by scheme at dispatch
+ * time rather than at registration time so the same handler object can
+ * serve multiple schemes if a plugin registers it more than once.
+ */
+const uriHandlers = new Map<string, UriHandler>();
 
 /**
  * Flat list of all menu-bar items. Grouped and sorted at render time.
@@ -671,6 +699,49 @@ export const contributions = {
   },
 
   /**
+   * Register a URI handler for the given scheme (PRD-04 §1.1). When an
+   * incoming URL whose scheme matches `handler.scheme` is dispatched,
+   * `handler.handle(url)` is called. Returns a disposable that removes
+   * the handler — call it from the plugin's `onStop`.
+   */
+  registerUriHandler(handler: UriHandler): Disposable {
+    if (uriHandlers.has(handler.id)) {
+      warn(`URI handler '${handler.id}' already registered — replacing`);
+    }
+    uriHandlers.set(handler.id, handler);
+    return () => {
+      if (uriHandlers.get(handler.id) === handler) {
+        uriHandlers.delete(handler.id);
+      }
+    };
+  },
+
+  /**
+   * Dispatch a URL to all matching registered URI handlers.
+   * The scheme is extracted from the URL (everything before `:`).
+   * Called by the `App` component when it receives a `nexus:url-opened`
+   * Tauri event from the backend deep-link bridge.
+   */
+  dispatchUri(url: string): void {
+    const colonIdx = url.indexOf(":");
+    if (colonIdx === -1) {
+      warn(`dispatchUri: no scheme in URL '${url}'`);
+      return;
+    }
+    const scheme = url.slice(0, colonIdx).toLowerCase();
+    let dispatched = 0;
+    for (const handler of uriHandlers.values()) {
+      if (handler.scheme.toLowerCase() === scheme) {
+        safeInvoke(`URI handler '${handler.id}'`, () => handler.handle(url));
+        dispatched += 1;
+      }
+    }
+    if (dispatched === 0) {
+      warn(`dispatchUri: no handler registered for scheme '${scheme}'`);
+    }
+  },
+
+  /**
    * Register a menu-bar item (PRD-07 §7.5). The item appears under the
    * pull-down named by `item.menu` and its action dispatches via
    * `contributions.invokeCommand(item.commandId)` when selected.
@@ -802,6 +873,7 @@ export function __resetContributions() {
   keybindingOverrides.clear();
   treeDataProviders.clear();
   fileHandlers.clear();
+  uriHandlers.clear();
   menuItems.clear();
   menuItemListeners.clear();
   contextMenuItems.clear();

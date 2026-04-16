@@ -6,6 +6,7 @@ import { SettingsModal } from "./components/settings/SettingsModal";
 import { ToastOverlay } from "./components/ToastOverlay";
 import { WorkspaceView } from "./components/layout/WorkspaceView";
 import { KeybindingDispatcher } from "./keybindings/KeybindingDispatcher";
+import { contributions } from "./contributions";
 import { useForgeStore } from "./stores/forge";
 import { useLayoutStore } from "./stores/layout";
 import { useThemeStore } from "./stores/theme";
@@ -70,6 +71,21 @@ export default function App() {
       hydrateForge();
     }
   }, [forgeRoot, layoutPersistenceLoaded, hydrateForge]);
+
+  // Dispatch incoming deep-link URLs to registered URI handlers.
+  // The Rust backend emits "nexus:url-opened" (via `dispatch_uri` Tauri
+  // command or the tauri-plugin-deep-link bridge) with the full URL string.
+  useEffect(() => {
+    const unlistenPromise = listen<string>(
+      "nexus:url-opened",
+      (event) => {
+        contributions.dispatchUri(event.payload);
+      },
+    );
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
 
   // Surface plugin notifications (topic = "ui.notification") as toasts.
   useEffect(() => {
