@@ -160,6 +160,23 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
         .wire_context("com.nexus.ai", Arc::new(ai_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire AI plugin context: {e}"))?;
 
+    // Same treatment for the editor plugin: its `open`/`save` handlers
+    // route through `com.nexus.storage` so reads/writes honour the
+    // storage plugin's capability checks and atomic-write semantics.
+    let editor_ctx = KernelPluginContext::new(
+        "com.nexus.editor",
+        env!("CARGO_PKG_VERSION"),
+        CapabilitySet::from_iter(Capability::ALL.iter().copied()),
+        Arc::clone(&kv_store),
+        Arc::clone(&event_bus),
+        &forge_root,
+        Some(Arc::clone(&dispatcher)),
+    )
+    .context("failed to build kernel plugin context for com.nexus.editor")?;
+    shared
+        .wire_context("com.nexus.editor", Arc::new(editor_ctx))
+        .map_err(|e| anyhow::anyhow!("failed to wire editor plugin context: {e}"))?;
+
     let context = KernelPluginContext::new(
         invoker_id,
         env!("CARGO_PKG_VERSION"),

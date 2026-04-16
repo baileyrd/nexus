@@ -205,6 +205,134 @@ async fn list_open_tracks_sessions() {
 }
 
 #[tokio::test]
+async fn save_routes_through_storage_and_updates_index() {
+    // Editor `save` must go through `com.nexus.storage.write_file`, not
+    // touch `std::fs` directly. Proof: after save, the storage SQLite
+    // index reports a size matching the *edited* markdown — which is
+    // only possible if save routed through storage's write_file (that
+    // call is what updates the index). A raw `std::fs::write` in the
+    // editor would leave the index stuck at the pre-save size.
+    use nexus_editor::{Operation, Transaction, TransactionMetadata};
+
+    async fn index_size(runtime: &nexus_bootstrap::Runtime, path: &str) -> u64 {
+        let files: serde_json::Value = runtime
+            .context
+            .ipc_call(
+                "com.nexus.storage",
+                "query_files",
+                serde_json::json!({}),
+                CALL_TIMEOUT,
+            )
+            .await
+            .expect("query_files");
+        files
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["path"] == path)
+            .and_then(|f| f["size_bytes"].as_u64())
+            .unwrap_or(0)
+    }
+
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    write_note(&root, "indexed.md", "hello\n");
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    // Storage bootstrap runs a reconcile pass that picks up the fixture
+    // file — so the pre-save size is 6 ("hello\n").
+    let before = index_size(&runtime, "indexed.md").await;
+    assert_eq!(before, 6, "sanity: bootstrap reconcile should index the fixture");
+
+    // Open, mutate, save.
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open",
+            serde_json::json!({ "relpath": "indexed.md" }),
+        )
+        .await
+        .expect("open"),
+    )
+    .unwrap();
+    let para_id = snap.tree.root_blocks[0];
+    let tx = Transaction::new(
+        vec![Operation::InsertText {
+            block_id: para_id,
+            pos: 5,
+            text: " world — now much longer".into(),
+            pre_annotations: Vec::new(),
+        }],
+        TransactionMetadata::default(),
+    );
+    call(
+        &runtime,
+        "apply_transaction",
+        serde_json::json!({
+            "relpath": "indexed.md",
+            "transaction": serde_json::to_value(&tx).unwrap(),
+        }),
+    )
+    .await
+    .expect("apply_transaction");
+    call(
+        &runtime,
+        "save",
+        serde_json::json!({ "relpath": "indexed.md" }),
+    )
+    .await
+    .expect("save");
+
+    // Post-save index size must reflect the edit. Raw-fs save would
+    // update disk but leave the index at `before`.
+    let after = index_size(&runtime, "indexed.md").await;
+    assert!(
+        after > before,
+        "save should have flowed through storage.write_file so the index size updates (before={before}, after={after})",
+    );
+    // And the on-disk bytes match the edit (sanity: both paths write disk).
+    let on_disk = fs::read_to_string(root.join("indexed.md")).unwrap();
+    assert!(on_disk.contains("world — now much longer"));
+}
+
+#[tokio::test]
+async fn open_routes_through_storage_when_file_is_only_in_storage() {
+    // Write a file ONLY through storage IPC, then open via editor. If
+    // the editor still read from `std::fs`, it would succeed because
+    // storage.write_file also writes to disk — so we can't detect the
+    // difference that way. Instead: write a file containing a marker,
+    // open via editor, verify the tree matches. This is a smoke test
+    // for the async path wiring.
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
+
+    runtime
+        .context
+        .ipc_call(
+            "com.nexus.storage",
+            "write_file",
+            serde_json::json!({ "path": "via-storage.md", "bytes": b"# Marker\n\nBody.\n".to_vec() }),
+            CALL_TIMEOUT,
+        )
+        .await
+        .expect("storage write_file");
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open",
+            serde_json::json!({ "relpath": "via-storage.md" }),
+        )
+        .await
+        .expect("editor open"),
+    )
+    .unwrap();
+    assert_eq!(snap.tree.root_blocks.len(), 2);
+    let heading_id = snap.tree.root_blocks[0];
+    assert_eq!(snap.tree.blocks[&heading_id].content, "Marker");
+}
+
+#[tokio::test]
 async fn unknown_editor_command_returns_command_not_found() {
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");

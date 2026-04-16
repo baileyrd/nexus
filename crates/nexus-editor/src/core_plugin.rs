@@ -14,15 +14,25 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use nexus_plugins::{CorePlugin, PluginError};
+use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::markdown::{MarkdownParser, MarkdownSerializer, ParseOptions};
 use crate::tree::BlockTree;
 use crate::undo_tree::UndoTree;
+
+/// Plugin id of the storage core plugin — the target of the editor's
+/// IPC `read_file`/`write_file` calls.
+const STORAGE_PLUGIN_ID: &str = "com.nexus.storage";
+
+/// Per-call timeout for storage IPC. File I/O is local; a generous
+/// bound is safe.
+const STORAGE_IPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Reverse-DNS identifier for this plugin.
 pub const PLUGIN_ID: &str = "com.nexus.editor";
@@ -88,9 +98,20 @@ struct Session {
 /// Mirrors the structure of
 /// [`nexus_storage::StorageCorePlugin`](../../nexus-storage/src/core_plugin.rs):
 /// a single `Mutex`-guarded session map, locked briefly per IPC call.
+///
+/// `open` and `save` route their disk I/O through `com.nexus.storage` via
+/// [`KernelPluginContext::ipc_call`] when a context has been wired in by the
+/// bootstrap. That keeps the editor inside the kernel's capability /
+/// atomic-write envelope rather than touching `std::fs` directly. Sync
+/// dispatch retains a local-filesystem fallback so unit tests can exercise
+/// the plugin without assembling a full runtime.
 pub struct EditorCorePlugin {
     forge_root: PathBuf,
-    sessions: Mutex<HashMap<String, Session>>,
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    /// Plugin-facing kernel context. Installed via
+    /// [`CorePlugin::wire_context`] once the bootstrap has the shared
+    /// dispatcher assembled; `None` for sync-only test drivers.
+    context: Option<Arc<KernelPluginContext>>,
 }
 
 impl EditorCorePlugin {
@@ -99,7 +120,8 @@ impl EditorCorePlugin {
     pub fn new(forge_root: PathBuf) -> Self {
         Self {
             forge_root,
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            context: None,
         }
     }
 }
@@ -123,10 +145,10 @@ impl CorePlugin for EditorCorePlugin {
 
     fn dispatch(&mut self, handler_id: u32, args: &Value) -> Result<Value, PluginError> {
         match handler_id {
-            HANDLER_OPEN => handle_open(&self.forge_root, &self.sessions, args),
+            HANDLER_OPEN => handle_open_sync(&self.forge_root, &self.sessions, args),
             HANDLER_CLOSE => handle_close(&self.sessions, args),
             HANDLER_GET_TREE => handle_get_tree(&self.sessions, args),
-            HANDLER_SAVE => handle_save(&self.forge_root, &self.sessions, args),
+            HANDLER_SAVE => handle_save_sync(&self.forge_root, &self.sessions, args),
             HANDLER_APPLY_TRANSACTION => handle_apply_transaction(&self.sessions, args),
             HANDLER_UNDO => handle_undo(&self.sessions, args),
             HANDLER_REDO => handle_redo(&self.sessions, args),
@@ -134,27 +156,56 @@ impl CorePlugin for EditorCorePlugin {
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
+
+    /// Async path for handlers that route disk I/O through the storage
+    /// plugin. Everything other than `open` / `save` is synchronous and
+    /// short-circuits to the sync path via `dispatch` in the kernel's
+    /// fallback. Returns `None` for those so the kernel's own async shim
+    /// doesn't have to allocate a future.
+    fn dispatch_async(&mut self, handler_id: u32, args: &Value) -> Option<CorePluginFuture> {
+        match handler_id {
+            HANDLER_OPEN | HANDLER_SAVE => {}
+            _ => return None,
+        }
+
+        // Capture everything the future needs by value / Arc so nothing
+        // outlives the `&mut self` borrow.
+        let forge_root = self.forge_root.clone();
+        let sessions = Arc::clone(&self.sessions);
+        let ctx = self.context.clone();
+        let args = args.clone();
+
+        Some(Box::pin(async move {
+            match handler_id {
+                HANDLER_OPEN => handle_open_async(&forge_root, sessions, ctx, &args).await,
+                HANDLER_SAVE => handle_save_async(&forge_root, sessions, ctx, &args).await,
+                _ => Err(exec_err(format!("unknown async handler id {handler_id}"))),
+            }
+        }))
+    }
+
+    /// Capture the plugin-facing kernel context so async `open` / `save`
+    /// handlers can issue nested `ipc_call`s into `com.nexus.storage`.
+    fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
+        self.context = Some(ctx);
+    }
 }
 
 // ── Handler implementations ──────────────────────────────────────────────────
 
-fn handle_open(
-    forge_root: &Path,
+/// Build a new session from already-loaded source text and insert it
+/// into the session map. Shared tail of the sync + async `open` paths.
+fn finish_open(
     sessions: &Mutex<HashMap<String, Session>>,
-    args: &Value,
+    relpath: String,
+    source: &str,
 ) -> Result<Value, PluginError> {
-    let relpath = relpath_arg(args, "open")?;
-    let abs = resolve_within(forge_root, &relpath).map_err(|e| exec_err(format!("open: {e}")))?;
-
-    let source = fs::read_to_string(&abs)
-        .map_err(|e| exec_err(format!("open: read '{}': {e}", abs.display())))?;
-
     let parser = MarkdownParser::new(ParseOptions {
         file_path: relpath.clone(),
         ..ParseOptions::default()
     });
     let tree = parser
-        .parse(&source)
+        .parse(source)
         .map_err(|e| exec_err(format!("open: parse '{relpath}': {e}")))?;
 
     let session = Session {
@@ -166,6 +217,59 @@ fn handle_open(
     guard.insert(relpath.clone(), session);
     let s = guard.get(&relpath).expect("just inserted");
     snapshot_to_value(&snapshot_of(s), "open")
+}
+
+fn handle_open_sync(
+    forge_root: &Path,
+    sessions: &Mutex<HashMap<String, Session>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let relpath = relpath_arg(args, "open")?;
+    let abs = resolve_within(forge_root, &relpath).map_err(|e| exec_err(format!("open: {e}")))?;
+    let source = fs::read_to_string(&abs)
+        .map_err(|e| exec_err(format!("open: read '{}': {e}", abs.display())))?;
+    finish_open(sessions, relpath, &source)
+}
+
+async fn handle_open_async(
+    forge_root: &Path,
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    ctx: Option<Arc<KernelPluginContext>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let relpath = relpath_arg(args, "open")?;
+
+    let source = if let Some(ctx) = ctx.as_deref() {
+        // Preferred path: fetch through `com.nexus.storage` so capability
+        // checks, atomic-write audit, and future observability hooks all
+        // cover editor reads.
+        #[derive(Deserialize)]
+        struct Resp {
+            bytes: Vec<u8>,
+        }
+        let value = ctx
+            .ipc_call(
+                STORAGE_PLUGIN_ID,
+                "read_file",
+                serde_json::json!({ "path": relpath }),
+                STORAGE_IPC_TIMEOUT,
+            )
+            .await
+            .map_err(|e| exec_err(format!("open: storage.read_file: {e}")))?;
+        let resp: Resp = serde_json::from_value(value)
+            .map_err(|e| exec_err(format!("open: storage.read_file decode: {e}")))?;
+        String::from_utf8(resp.bytes)
+            .map_err(|_| exec_err(format!("open: '{relpath}' is not UTF-8")))?
+    } else {
+        // Fallback used only when no context has been wired (unit tests
+        // that drive the plugin directly without a runtime).
+        let abs =
+            resolve_within(forge_root, &relpath).map_err(|e| exec_err(format!("open: {e}")))?;
+        fs::read_to_string(&abs)
+            .map_err(|e| exec_err(format!("open: read '{}': {e}", abs.display())))?
+    };
+
+    finish_open(&sessions, relpath, &source)
 }
 
 fn handle_close(
@@ -190,24 +294,61 @@ fn handle_get_tree(
     snapshot_to_value(&snapshot_of(s), "get_tree")
 }
 
-fn handle_save(
+/// Serialize the session's block tree to markdown under the session lock.
+fn serialize_session(
+    sessions: &Mutex<HashMap<String, Session>>,
+    relpath: &str,
+) -> Result<String, PluginError> {
+    let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+    let s = guard
+        .get(relpath)
+        .ok_or_else(|| exec_err(format!("save: no open session for '{relpath}'")))?;
+    Ok(MarkdownSerializer::serialize(&s.tree))
+}
+
+fn handle_save_sync(
     forge_root: &Path,
     sessions: &Mutex<HashMap<String, Session>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "save")?;
-    let markdown = {
-        let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-        let s = guard
-            .get(&relpath)
-            .ok_or_else(|| exec_err(format!("save: no open session for '{relpath}'")))?;
-        MarkdownSerializer::serialize(&s.tree)
-    };
-
+    let markdown = serialize_session(sessions, &relpath)?;
     let abs = resolve_within(forge_root, &relpath).map_err(|e| exec_err(format!("save: {e}")))?;
     atomic_write(&abs, &markdown)
         .map_err(|e| exec_err(format!("save: write '{}': {e}", abs.display())))?;
     Ok(serde_json::json!({}))
+}
+
+async fn handle_save_async(
+    forge_root: &Path,
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    ctx: Option<Arc<KernelPluginContext>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let relpath = relpath_arg(args, "save")?;
+    let markdown = serialize_session(&sessions, &relpath)?;
+
+    if let Some(ctx) = ctx.as_deref() {
+        // Canonical path: storage's `write_file` does temp + fsync +
+        // rename and updates the SQLite index atomically with the disk
+        // write so a later `open` sees consistent state.
+        ctx.ipc_call(
+            STORAGE_PLUGIN_ID,
+            "write_file",
+            serde_json::json!({ "path": relpath, "bytes": markdown.as_bytes() }),
+            STORAGE_IPC_TIMEOUT,
+        )
+        .await
+        .map_err(|e| exec_err(format!("save: storage.write_file: {e}")))?;
+        Ok(serde_json::json!({}))
+    } else {
+        // Fallback for context-less unit tests.
+        let abs =
+            resolve_within(forge_root, &relpath).map_err(|e| exec_err(format!("save: {e}")))?;
+        atomic_write(&abs, &markdown)
+            .map_err(|e| exec_err(format!("save: write '{}': {e}", abs.display())))?;
+        Ok(serde_json::json!({}))
+    }
 }
 
 fn handle_apply_transaction(
@@ -338,10 +479,20 @@ fn resolve_within(root: &Path, relpath: &str) -> Result<PathBuf, String> {
     Ok(canon)
 }
 
-/// Write `contents` to `path` via a sibling `.tmp` + rename. Same
-/// strategy the storage layer uses; keeps partially-written files off
-/// disk on crash.
+/// Write `contents` to `path` via a sibling `.tmp` + fsync + rename.
+///
+/// Only used when the plugin is driven without a [`KernelPluginContext`]
+/// (unit tests); production saves route through `com.nexus.storage` via
+/// [`handle_save_async`] and get its fuller atomic-write guarantees.
+/// Even here we fsync the temp file (so a crash between write and
+/// rename never leaves a half-flushed file visible via the rename) —
+/// the pre-refactor version skipped the fsync entirely.
+///
+/// Parent-directory fsync is best-effort: `File::sync_all` on a
+/// directory is a no-op on Windows but persists the rename on POSIX.
 fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
+    use std::io::Write as _;
+
     let parent = path
         .parent()
         .ok_or_else(|| format!("no parent dir for '{}'", path.display()))?;
@@ -349,8 +500,30 @@ fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
         .file_name()
         .ok_or_else(|| format!("no filename in '{}'", path.display()))?;
     let tmp = parent.join(format!(".{}.tmp", file_name.to_string_lossy()));
-    fs::write(&tmp, contents).map_err(|e| e.to_string())?;
+
+    // Write + flush + fsync the temp file.
+    {
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&tmp)
+            .map_err(|e| e.to_string())?;
+        f.write_all(contents.as_bytes())
+            .map_err(|e| e.to_string())?;
+        f.sync_all().map_err(|e| e.to_string())?;
+    }
+
+    // Atomic rename into place.
     fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+
+    // Best-effort directory fsync so the rename itself is durable.
+    // Silently ignore failures — Windows returns an error when opening
+    // a directory for writing, and on POSIX the worst case is that the
+    // rename is replayed by the filesystem journal anyway.
+    if let Ok(dir) = fs::File::open(parent) {
+        let _ = dir.sync_all();
+    }
     Ok(())
 }
 
