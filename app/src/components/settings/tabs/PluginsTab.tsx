@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { listPlugins, type PluginSummary } from "../../../ipc/plugins";
+import {
+  listPlugins,
+  togglePluginSubscription,
+  type PluginSummary,
+  type SubscriptionSummary,
+} from "../../../ipc/plugins";
 
 type LoadState =
   | { kind: "idle" }
@@ -58,6 +63,28 @@ export function PluginsTab() {
   const core = state.plugins.filter((p) => p.trust_level === "core");
   const community = state.plugins.filter((p) => p.trust_level === "community");
 
+  function handleToggle(pluginId: string, subId: string, enabled: boolean) {
+    togglePluginSubscription(pluginId, subId, enabled).then(() => {
+      // Optimistically update local state.
+      setState((prev) => {
+        if (prev.kind !== "ready") return prev;
+        return {
+          kind: "ready",
+          plugins: prev.plugins.map((p) =>
+            p.id === pluginId
+              ? {
+                  ...p,
+                  event_subscriptions: p.event_subscriptions.map((s) =>
+                    s.id === subId ? { ...s, enabled } : s,
+                  ),
+                }
+              : p,
+          ),
+        };
+      });
+    });
+  }
+
   return (
     <div className="settings-tab">
       <header className="settings-section-header">
@@ -68,10 +95,10 @@ export function PluginsTab() {
       </header>
 
       {core.length > 0 && (
-        <PluginGroup title="Core plugins" plugins={core} />
+        <PluginGroup title="Core plugins" plugins={core} onToggle={handleToggle} />
       )}
       {community.length > 0 ? (
-        <PluginGroup title="Community plugins" plugins={community} />
+        <PluginGroup title="Community plugins" plugins={community} onToggle={handleToggle} />
       ) : (
         core.length === 0 && (
           <p className="settings-empty">
@@ -84,13 +111,21 @@ export function PluginsTab() {
   );
 }
 
-function PluginGroup({ title, plugins }: { title: string; plugins: PluginSummary[] }) {
+function PluginGroup({
+  title,
+  plugins,
+  onToggle,
+}: {
+  title: string;
+  plugins: PluginSummary[];
+  onToggle: (pluginId: string, subId: string, enabled: boolean) => void;
+}) {
   return (
     <section className="settings-group">
       <h3 className="settings-group-title">{title}</h3>
       <ul className="settings-rows">
         {plugins.map((p) => (
-          <li key={p.id} className="settings-row">
+          <li key={p.id} className="settings-row settings-row--expandable">
             <div className="settings-row-body">
               <span className="settings-row-title">{p.name}</span>
               <span className="settings-row-subtitle">
@@ -103,9 +138,45 @@ function PluginGroup({ title, plugins }: { title: string; plugins: PluginSummary
             >
               {p.status}
             </span>
+            {p.event_subscriptions.length > 0 && (
+              <SubscriptionList
+                pluginId={p.id}
+                subscriptions={p.event_subscriptions}
+                onToggle={onToggle}
+              />
+            )}
           </li>
         ))}
       </ul>
     </section>
+  );
+}
+
+function SubscriptionList({
+  pluginId,
+  subscriptions,
+  onToggle,
+}: {
+  pluginId: string;
+  subscriptions: SubscriptionSummary[];
+  onToggle: (pluginId: string, subId: string, enabled: boolean) => void;
+}) {
+  return (
+    <div className="settings-sub-rows">
+      <span className="settings-sub-rows-label">Event subscriptions</span>
+      {subscriptions.map((sub) => (
+        <label key={sub.id} className="settings-sub-row">
+          <span className="settings-sub-row-filter" title={sub.id}>
+            {sub.filter}
+          </span>
+          <input
+            type="checkbox"
+            className="settings-toggle"
+            checked={sub.enabled}
+            onChange={(e) => onToggle(pluginId, sub.id, e.target.checked)}
+          />
+        </label>
+      ))}
+    </div>
   );
 }

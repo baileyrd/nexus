@@ -17,7 +17,7 @@ use nexus_kernel::{
 };
 
 use crate::manifest::{self, PluginManifest};
-use crate::sandbox::{PluginData, WasmSandbox};
+use crate::sandbox::{PluginData, PluginEventForwarder, WasmSandbox};
 use crate::settings::SettingsManager;
 use crate::PluginError;
 
@@ -246,10 +246,15 @@ struct PluginRegistrations {
 
 /// A live event subscription wired to a plugin handler.
 struct PluginEventSub {
+    /// Subscription identifier from the manifest.
+    id: String,
+    /// Filter expression from the manifest (e.g. `"nexus.host.*"`).
+    filter: String,
     /// Handler invoked when a matching event arrives.
     handler_id: u32,
     /// Live subscription handle (dropped → auto-unsubscribe).
-    subscription: EventSubscription,
+    /// `None` when the subscription has been disabled by the user.
+    subscription: Option<EventSubscription>,
 }
 
 struct LoadedPlugin {
@@ -532,20 +537,30 @@ impl PluginLoader {
             .map(|r| r.id.clone())
             .collect();
 
+        // Load persisted subscription overrides (disabled IDs).
+        let disabled_subs = load_disabled_subscriptions(plugin_dir);
+
         // Wire event subscriptions to the kernel bus (if available).
-        let event_subs: Vec<PluginEventSub> = if let Some(ref bus) = self.event_bus {
-            manifest
-                .registrations
-                .event_subscribers
-                .iter()
-                .map(|reg| PluginEventSub {
+        let event_subs: Vec<PluginEventSub> = manifest
+            .registrations
+            .event_subscribers
+            .iter()
+            .map(|reg| {
+                let enabled = !disabled_subs.contains(&reg.id);
+                PluginEventSub {
+                    id: reg.id.clone(),
+                    filter: reg.filter.clone(),
                     handler_id: reg.handler_id,
-                    subscription: bus.subscribe(parse_event_filter(&reg.filter)),
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+                    subscription: if enabled {
+                        self.event_bus
+                            .as_ref()
+                            .map(|bus| bus.subscribe(parse_event_filter(&reg.filter)))
+                    } else {
+                        None
+                    },
+                }
+            })
+            .collect();
 
         let info = plugin_info_from(&manifest, PluginStatus::Running, &capabilities);
 
@@ -911,8 +926,11 @@ impl PluginLoader {
 
         for (plugin_id, lp) in &mut self.loaded {
             for sub in &mut lp.event_subs {
+                let Some(ref mut subscription) = sub.subscription else {
+                    continue; // disabled subscription
+                };
                 // Drain until no more events or the subscription is lagged/closed.
-                while let Ok(Some(evt)) = sub.subscription.try_recv() {
+                while let Ok(Some(evt)) = subscription.try_recv() {
                     let payload = serde_json::to_value(&*evt)
                         .unwrap_or(serde_json::Value::Null);
                     pending.push((plugin_id.clone(), sub.handler_id, payload));
@@ -1045,6 +1063,89 @@ impl PluginLoader {
             }
         }
     }
+
+    /// Inject a [`PluginEventForwarder`] into every loaded community
+    /// plugin so `host::emit_event` calls are also surfaced to the
+    /// application layer (e.g. Tauri frontend).
+    pub fn inject_event_forwarder(&mut self, forwarder: Arc<dyn PluginEventForwarder>) {
+        for lp in self.loaded.values() {
+            if let Ok(mut backend) = lp.backend.lock() {
+                if let PluginBackend::Community(sandbox) = &mut *backend {
+                    sandbox.set_event_forwarder(forwarder.clone());
+                }
+            }
+        }
+    }
+
+    /// Return the event subscriptions for `plugin_id` as
+    /// `(id, filter, enabled)` tuples.
+    #[must_use]
+    pub fn event_subscriptions(
+        &self,
+        plugin_id: &str,
+    ) -> Vec<(String, String, bool)> {
+        self.loaded
+            .get(plugin_id)
+            .map(|lp| {
+                lp.event_subs
+                    .iter()
+                    .map(|s| (s.id.clone(), s.filter.clone(), s.subscription.is_some()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Enable or disable an event subscription for `plugin_id`.
+    ///
+    /// When disabling, the live [`EventSubscription`] handle is dropped
+    /// (auto-unsubscribes from the bus). When enabling, a new subscription
+    /// is created from the stored filter. The toggle state is persisted to
+    /// `<plugin_dir>/subscriptions.json`.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if the plugin or
+    /// subscription ID is unknown.
+    pub fn toggle_event_subscription(
+        &mut self,
+        plugin_id: &str,
+        subscription_id: &str,
+        enabled: bool,
+    ) -> Result<(), PluginError> {
+        let lp = self
+            .loaded
+            .get_mut(plugin_id)
+            .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
+
+        let sub = lp
+            .event_subs
+            .iter_mut()
+            .find(|s| s.id == subscription_id)
+            .ok_or_else(|| PluginError::PluginNotFound(
+                format!("{plugin_id}:{subscription_id}"),
+            ))?;
+
+        if enabled {
+            if sub.subscription.is_none() {
+                if let Some(ref bus) = self.event_bus {
+                    sub.subscription = Some(bus.subscribe(parse_event_filter(&sub.filter)));
+                }
+            }
+        } else {
+            // Drop the live subscription handle → auto-unsubscribe.
+            sub.subscription = None;
+        }
+
+        // Persist the disabled set.
+        let disabled: Vec<String> = lp
+            .event_subs
+            .iter()
+            .filter(|s| s.subscription.is_none())
+            .map(|s| s.id.clone())
+            .collect();
+        save_disabled_subscriptions(&lp.plugin_dir, &disabled);
+
+        Ok(())
+    }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1100,6 +1201,39 @@ fn build_capabilities(manifest: &PluginManifest) -> CapabilitySet {
                 .collect();
             CapabilitySet::from_iter(caps)
         }
+    }
+}
+
+/// Subscriptions persistence filename.
+const SUBSCRIPTIONS_FILE: &str = "subscriptions.json";
+
+/// Load the set of disabled subscription IDs from disk.
+fn load_disabled_subscriptions(plugin_dir: &Path) -> std::collections::HashSet<String> {
+    let path = plugin_dir.join(SUBSCRIPTIONS_FILE);
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return std::collections::HashSet::new();
+    };
+    #[derive(serde::Deserialize)]
+    struct SubscriptionState {
+        #[serde(default)]
+        disabled: Vec<String>,
+    }
+    serde_json::from_str::<SubscriptionState>(&contents)
+        .map(|s| s.disabled.into_iter().collect())
+        .unwrap_or_default()
+}
+
+/// Persist the set of disabled subscription IDs to disk.
+fn save_disabled_subscriptions(plugin_dir: &Path, disabled: &[String]) {
+    let path = plugin_dir.join(SUBSCRIPTIONS_FILE);
+    if disabled.is_empty() {
+        // Clean up file if everything is enabled.
+        let _ = std::fs::remove_file(&path);
+        return;
+    }
+    let json = serde_json::json!({ "disabled": disabled });
+    if let Err(e) = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap_or_default()) {
+        tracing::warn!("failed to persist subscription state to {}: {e}", path.display());
     }
 }
 

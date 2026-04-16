@@ -10,6 +10,19 @@ use nexus_kernel::{CapabilitySet, EventBus, IpcDispatcher, KvStore};
 
 use crate::{PluginError, WasmConfig};
 
+// ─── PluginEventForwarder ────────────────────────────────────────────────────
+
+/// Callback for forwarding plugin events to the application layer.
+///
+/// When a WASM plugin calls `host::emit_event`, the event is published
+/// to the kernel [`EventBus`] and also forwarded through this trait so
+/// the Tauri frontend receives a `plugin:event` notification in real
+/// time (rather than only via the `events` return-array path).
+pub trait PluginEventForwarder: Send + Sync {
+    /// Forward an event to the application layer.
+    fn forward(&self, plugin_id: &str, type_id: &str, payload: &serde_json::Value);
+}
+
 // ─── PluginData ───────────────────────────────────────────────────────────────
 
 /// Per-plugin data stored inside the wasmtime [`Store`].
@@ -43,6 +56,9 @@ pub struct PluginData {
     /// loaded so `host::invoke_command` can route calls to other plugins.
     /// `None` until [`WasmSandbox::set_ipc_dispatcher`] is called.
     pub ipc_dispatch: Option<Arc<dyn IpcDispatcher>>,
+    /// Forwarder for surfacing `host::emit_event` calls to the Tauri
+    /// frontend as `plugin:event` events. Injected during bootstrap.
+    pub event_forwarder: Option<Arc<dyn PluginEventForwarder>>,
 }
 
 impl Default for PluginData {
@@ -56,6 +72,7 @@ impl Default for PluginData {
             settings_json: None,
             limits: StoreLimitsBuilder::new().build(),
             ipc_dispatch: None,
+            event_forwarder: None,
         }
     }
 }
@@ -152,6 +169,13 @@ impl WasmSandbox {
     /// plugins are loaded or after a hot-reload.
     pub fn set_ipc_dispatcher(&mut self, dispatcher: Arc<dyn IpcDispatcher>) {
         self.store.data_mut().ipc_dispatch = Some(dispatcher);
+    }
+
+    /// Inject a [`PluginEventForwarder`] so `host::emit_event` can
+    /// surface events to the Tauri frontend in addition to the kernel
+    /// bus.
+    pub fn set_event_forwarder(&mut self, forwarder: Arc<dyn PluginEventForwarder>) {
+        self.store.data_mut().event_forwarder = Some(forwarder);
     }
 
     /// Dispatch a call to handler `handler_id` with JSON `args`.

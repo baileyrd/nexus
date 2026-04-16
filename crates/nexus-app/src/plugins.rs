@@ -9,9 +9,9 @@ use std::time::Duration;
 
 use nexus_kernel::{EventBus, IpcDispatcher, IpcError, NexusEvent};
 use nexus_plugins::{
-    PluginBackend, PluginManager, PluginManagerConfig, PluginStatus, TrustLevel, UiContribution,
-    UiPanelContribution, UiRibbonItemContribution, UiSettingsTabContribution,
-    UiStatusItemContribution,
+    PluginBackend, PluginEventForwarder, PluginManager, PluginManagerConfig, PluginStatus,
+    TrustLevel, UiContribution, UiPanelContribution, UiRibbonItemContribution,
+    UiSettingsTabContribution, UiStatusItemContribution,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -123,6 +123,28 @@ impl IpcDispatcher for TauriIpcDispatcher {
     }
 }
 
+// ─── TauriEventForwarder ─────────────────────────────────────────────────────
+
+/// Forwards `host::emit_event` calls from WASM plugins to the Tauri
+/// frontend as [`PLUGIN_EVENT_EVENT`] events, so the UI receives them
+/// in real time.
+struct TauriEventForwarder {
+    app: AppHandle,
+}
+
+impl PluginEventForwarder for TauriEventForwarder {
+    fn forward(&self, plugin_id: &str, type_id: &str, payload: &serde_json::Value) {
+        let envelope = serde_json::json!({
+            "plugin_id": plugin_id,
+            "topic": type_id,
+            "payload": payload,
+        });
+        if let Err(err) = self.app.emit(PLUGIN_EVENT_EVENT, envelope) {
+            tracing::warn!(%err, plugin = plugin_id, topic = type_id, "event forwarder: emit failed");
+        }
+    }
+}
+
 /// Frontend-facing projection of [`nexus_kernel::PluginInfo`].
 ///
 /// Kept separate from `PluginInfo` so we can serialize without forcing
@@ -140,6 +162,19 @@ pub struct PluginSummary {
     /// Current runtime status — `"loaded"`, `"initialized"`, `"running"`,
     /// `"stopped"`, or `"crashed"`.
     pub status: String,
+    /// Event subscriptions declared by this plugin.
+    pub event_subscriptions: Vec<SubscriptionSummary>,
+}
+
+/// A single event subscription declared in a plugin's manifest.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SubscriptionSummary {
+    /// Subscription identifier from the manifest.
+    pub id: String,
+    /// Event filter expression (e.g. `"nexus.host.*"`).
+    pub filter: String,
+    /// Whether the subscription is currently active.
+    pub enabled: bool,
 }
 
 fn trust_level_str(level: TrustLevel) -> &'static str {
@@ -238,6 +273,26 @@ pub fn bootstrap() -> PluginState {
     }
 
     PluginState { manager, bus }
+}
+
+/// Inject a [`TauriEventForwarder`] into all loaded community plugins
+/// so `host::emit_event` calls are surfaced to the frontend as
+/// `plugin:event` Tauri events.
+///
+/// Must be called from the `setup` closure where the [`AppHandle`] is
+/// available — `bootstrap()` runs before the app handle exists.
+pub fn inject_event_forwarder(handle: AppHandle) {
+    let forwarder: Arc<dyn PluginEventForwarder> = Arc::new(TauriEventForwarder {
+        app: handle.clone(),
+    });
+    let manager = {
+        let Some(state) = handle.try_state::<PluginState>() else {
+            return;
+        };
+        state.manager.clone()
+    };
+    let Ok(mut mgr) = manager.lock() else { return };
+    mgr.inject_event_forwarder(forwarder);
 }
 
 /// List all plugin-contributed palette commands across every loaded plugin.
@@ -362,12 +417,20 @@ pub fn list_plugins(state: State<'_, PluginState>) -> Vec<PluginSummary> {
     };
     mgr.list()
         .into_iter()
-        .map(|info| PluginSummary {
-            id: info.id,
-            name: info.name,
-            version: info.version,
-            trust_level: trust_level_str(info.trust_level).to_string(),
-            status: status_str(info.status).to_string(),
+        .map(|info| {
+            let subs = mgr
+                .event_subscriptions(&info.id)
+                .into_iter()
+                .map(|(id, filter, enabled)| SubscriptionSummary { id, filter, enabled })
+                .collect();
+            PluginSummary {
+                id: info.id,
+                name: info.name,
+                version: info.version,
+                trust_level: trust_level_str(info.trust_level).to_string(),
+                status: status_str(info.status).to_string(),
+                event_subscriptions: subs,
+            }
         })
         .collect()
 }
@@ -445,6 +508,25 @@ pub fn invoke_plugin_ipc(
     };
     emit_plugin_events(&app, &target_plugin_id, &result);
     Ok(result)
+}
+
+/// Toggle an event subscription on or off for a specific plugin.
+///
+/// # Errors
+/// Returns a string error if the plugin or subscription is unknown.
+#[tauri::command]
+pub fn toggle_plugin_subscription(
+    state: State<'_, PluginState>,
+    plugin_id: String,
+    subscription_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut mgr = state
+        .manager
+        .lock()
+        .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
+    mgr.toggle_event_subscription(&plugin_id, &subscription_id, enabled)
+        .map_err(|e| e.to_string())
 }
 
 /// Pull an optional `events` array off a plugin's response and emit

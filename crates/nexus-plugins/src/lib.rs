@@ -28,7 +28,7 @@ pub use manifest::{
     UiRibbonItemReg, UiSettingsTabReg, UiStatusItemReg, WasmConfig,
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
-pub use sandbox::{PluginData, WasmSandbox};
+pub use sandbox::{PluginData, PluginEventForwarder, WasmSandbox};
 pub use settings::SettingsManager;
 pub use hot_reload::{HotReloader, ReloadEvent};
 pub use nexus_kernel::{PluginInfo, PluginStatus, TrustLevel};
@@ -463,6 +463,32 @@ impl PluginManager {
     /// Inject an [`IpcDispatcher`] into all loaded community plugins.
     pub fn inject_ipc_dispatcher(&mut self, dispatcher: Arc<dyn nexus_kernel::IpcDispatcher>) {
         self.loader.inject_ipc_dispatcher(dispatcher);
+    }
+
+    /// Inject a [`PluginEventForwarder`] into all loaded community
+    /// plugins so `host::emit_event` calls are surfaced to the
+    /// application layer.
+    pub fn inject_event_forwarder(&mut self, forwarder: Arc<dyn sandbox::PluginEventForwarder>) {
+        self.loader.inject_event_forwarder(forwarder);
+    }
+
+    /// Return the event subscriptions for `plugin_id`.
+    #[must_use]
+    pub fn event_subscriptions(&self, plugin_id: &str) -> Vec<(String, String, bool)> {
+        self.loader.event_subscriptions(plugin_id)
+    }
+
+    /// Enable or disable an event subscription.
+    ///
+    /// # Errors
+    /// See [`PluginLoader::toggle_event_subscription`].
+    pub fn toggle_event_subscription(
+        &mut self,
+        plugin_id: &str,
+        subscription_id: &str,
+        enabled: bool,
+    ) -> Result<(), PluginError> {
+        self.loader.toggle_event_subscription(plugin_id, subscription_id, enabled)
     }
 
     /// Return the raw JSON Schema declared by `plugin_id`, or `None`

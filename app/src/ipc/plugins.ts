@@ -72,12 +72,19 @@ export interface PluginUiStatusItem {
  * or `"community"`; status is `"loaded"`, `"initialized"`, `"running"`,
  * `"stopped"`, or `"crashed"`.
  */
+export interface SubscriptionSummary {
+  id: string;
+  filter: string;
+  enabled: boolean;
+}
+
 export interface PluginSummary {
   id: string;
   name: string;
   version: string;
   trust_level: string;
   status: string;
+  event_subscriptions: SubscriptionSummary[];
 }
 
 export function listPluginContributions(): Promise<PluginUiContribution[]> {
@@ -113,6 +120,21 @@ export function invokePluginCommand(
     pluginId,
     commandId,
     args,
+  });
+}
+
+/**
+ * Toggle an event subscription on or off for a plugin.
+ */
+export function togglePluginSubscription(
+  pluginId: string,
+  subscriptionId: string,
+  enabled: boolean,
+): Promise<void> {
+  return invoke<void>("toggle_plugin_subscription", {
+    pluginId,
+    subscriptionId,
+    enabled,
   });
 }
 

@@ -40,6 +40,7 @@ pub fn run() {
         .manage(plugins::bootstrap())
         .setup(|app| {
             let handle = app.handle().clone();
+            plugins::inject_event_forwarder(handle.clone());
             plugins::start_reload_watcher(handle.clone());
             plugins::start_host_event_watcher(handle.clone());
             match forge::bootstrap(&handle) {
@@ -101,6 +102,7 @@ pub fn run() {
             plugins::save_plugin_settings,
             plugins::invoke_plugin_command,
             plugins::invoke_plugin_ipc,
+            plugins::toggle_plugin_subscription,
             plugins::publish_host_event,
             plugins::list_plugins,
             keybindings::get_keybinding_overrides,

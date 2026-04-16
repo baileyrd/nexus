@@ -306,8 +306,16 @@ fn register_host_emit_event(linker: &mut Linker<PluginData>) -> Result<(), Plugi
                     }
                 };
 
-                match event_bus.publish_plugin(&plugin_id, &type_id, payload) {
-                    Ok(()) => HOST_OK,
+                match event_bus.publish_plugin(&plugin_id, &type_id, payload.clone()) {
+                    Ok(()) => {
+                        // Also forward to the Tauri frontend so the UI sees
+                        // events published mid-handler, not just via the
+                        // `events` return-array path.
+                        if let Some(fwd) = caller.data().event_forwarder.clone() {
+                            fwd.forward(&plugin_id, &type_id, &payload);
+                        }
+                        HOST_OK
+                    }
                     Err(e) => {
                         tracing::warn!(plugin_id = %plugin_id, "host::emit_event error: {e}");
                         HOST_ERROR

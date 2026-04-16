@@ -1364,6 +1364,51 @@ main {
   color: rgb(170, 40, 40);
 }
 
+.settings-row--expandable {
+  flex-wrap: wrap;
+}
+
+.settings-sub-rows {
+  flex-basis: 100%;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 0 4px;
+  border-top: 1px dashed var(--nx-bg-tertiary, #e8eaef);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-sub-rows-label {
+  font-size: 11px;
+  color: var(--nx-text-tertiary, #9a9ca4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+
+.settings-sub-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.settings-sub-row-filter {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--nx-text-secondary, #555);
+}
+
+.settings-toggle {
+  accent-color: var(--nx-accent, #4f8ff7);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
 .settings-empty,
 .settings-error {
   padding: 14px 4px;
