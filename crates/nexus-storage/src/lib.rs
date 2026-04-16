@@ -32,6 +32,20 @@ pub use atomic::atomic_write;
 pub use core_plugin::StorageCorePlugin;
 pub use error::StorageError;
 pub use forge::{Forge, ForgeLock};
+
+use serde::{Deserialize, Serialize};
+
+/// One entry returned by [`StorageEngine::list_dir`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TreeEntry {
+    /// File or directory name (no path separators).
+    pub name: String,
+    /// Path relative to the forge root, using forward slashes.
+    pub relpath: String,
+    /// `true` if this entry is a directory.
+    pub is_dir: bool,
+}
 pub use parser::{parse_markdown, ParsedBlock, ParsedFile, ParsedLink, ParsedTag, Property};
 pub use tasks::{ParsedTask, TaskRecord, TaskFilter, insert_tasks, query_tasks, toggle_task, toggle_task_in_file};
 pub use index::{BlockRecord, FileFilter, FileMetadata, FileRecord, LinkRecord, RebuildStats, TagResult};
@@ -420,6 +434,190 @@ impl StorageEngine {
             rusqlite::Error::InvalidParameterName(e.to_string()),
         ))?;
         Ok(file_by_path(&conn, path)?.is_some())
+    }
+
+    // ── Forge tree operations ────────────────────────────────────────────────
+    //
+    // These operate on the on-disk layout directly rather than the SQLite
+    // index. They are the IPC surface the Tauri shell's forge commands route
+    // through so the shell does not need to import `std::fs` for file-tree
+    // CRUD (see `docs/superpowers/specs/.../PRD-04.md` invariant #3).
+
+    /// List entries under `relpath` within the forge.
+    ///
+    /// Returns both files and directories. Reads from disk, so newly-created
+    /// entries not yet in the SQLite index are included. The `.forge/`
+    /// internal directory is hidden from the root listing.
+    ///
+    /// Path confinement: rejects absolute paths, parent traversal, and any
+    /// non-`Normal` component.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::PermissionDenied`] if `relpath` escapes the
+    /// forge root, or [`StorageError::Io`] on read failure.
+    pub fn list_dir(&self, relpath: &str) -> Result<Vec<TreeEntry>, StorageError> {
+        let target = resolve_within(self.forge.root(), relpath)?;
+        let mut entries: Vec<TreeEntry> = Vec::new();
+        for entry in std::fs::read_dir(&target)? {
+            let Ok(entry) = entry else { continue };
+            let Ok(ft) = entry.file_type() else { continue };
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if relpath.is_empty() && name == ".forge" {
+                continue;
+            }
+            let rel = if relpath.is_empty() {
+                name.clone()
+            } else {
+                format!("{}/{}", relpath.trim_end_matches('/'), name)
+            };
+            entries.push(TreeEntry {
+                name,
+                relpath: rel,
+                is_dir: ft.is_dir(),
+            });
+        }
+        entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        });
+        Ok(entries)
+    }
+
+    /// Create a new empty file at `relpath`. Refuses to overwrite.
+    ///
+    /// Does not update the SQLite index; the storage watcher reconcile pass
+    /// picks up the new empty file on its next sweep.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::PermissionDenied`] if `relpath` escapes the
+    /// forge root, [`StorageError::WriteFailed`] if the file already exists,
+    /// or [`StorageError::Io`] on other I/O failures.
+    pub fn create_file(&self, relpath: &str) -> Result<(), StorageError> {
+        let target = resolve_target(self.forge.root(), relpath)?;
+        if target.exists() {
+            return Err(StorageError::WriteFailed {
+                path: relpath.to_string(),
+                reason: "already exists".to_string(),
+            });
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&target)?;
+        Ok(())
+    }
+
+    /// Create a new empty directory at `relpath`. Refuses if it exists.
+    ///
+    /// # Errors
+    ///
+    /// See [`create_file`](Self::create_file).
+    pub fn create_dir(&self, relpath: &str) -> Result<(), StorageError> {
+        let target = resolve_target(self.forge.root(), relpath)?;
+        if target.exists() {
+            return Err(StorageError::WriteFailed {
+                path: relpath.to_string(),
+                reason: "already exists".to_string(),
+            });
+        }
+        std::fs::create_dir(&target)?;
+        Ok(())
+    }
+
+    /// Rename or move an entry within the forge. Both `from` and `to` must
+    /// resolve under the forge root; `to` must not already exist.
+    ///
+    /// If `from` refers to an indexed file, its index row is updated to the
+    /// new path. Directory renames are left for the watcher to reconcile.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::PermissionDenied`] if either path escapes the
+    /// forge root, [`StorageError::WriteFailed`] if `to` already exists, or
+    /// [`StorageError::Io`] on rename failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn rename_entry(&self, from: &str, to: &str) -> Result<(), StorageError> {
+        let src = resolve_within(self.forge.root(), from)?;
+        let dst = resolve_target(self.forge.root(), to)?;
+        if dst.exists() {
+            return Err(StorageError::WriteFailed {
+                path: to.to_string(),
+                reason: "already exists".to_string(),
+            });
+        }
+        std::fs::rename(&src, &dst)?;
+
+        // If `from` was a regular file and was indexed, point its row at the
+        // new path so searches/backlinks stay consistent without waiting for
+        // a reconcile pass.
+        if src.is_file() || dst.is_file() {
+            let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+            if let Some(record) = file_by_path(&conn, from)? {
+                conn.execute(
+                    "UPDATE files SET path = ?1 WHERE id = ?2;",
+                    rusqlite::params![to, record.id.cast_signed()],
+                )?;
+                conn.execute(
+                    "UPDATE fts_blocks SET file_path = ?1 WHERE file_path = ?2;",
+                    rusqlite::params![to, from],
+                )?;
+                // Graph node path needs to move as well.
+                let mut g = self.graph.write().expect("graph lock poisoned");
+                g.remove_note(from);
+                g.add_note(to);
+            }
+        }
+        Ok(())
+    }
+
+    /// Delete an entry within the forge. Handles both files and directories.
+    ///
+    /// Files are removed via [`delete_file`](Self::delete_file) (which also
+    /// removes index + graph rows). Directories are removed recursively from
+    /// disk; stale index entries under that prefix are soft-deleted so queries
+    /// don't return rows for files the watcher hasn't yet reconciled.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::PermissionDenied`] if `relpath` escapes the
+    /// forge root, or [`StorageError::Io`] on delete failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal write-connection mutex is poisoned.
+    pub fn delete_entry(&self, relpath: &str) -> Result<(), StorageError> {
+        let target = resolve_within(self.forge.root(), relpath)?;
+        let meta = std::fs::metadata(&target)?;
+        if meta.is_dir() {
+            std::fs::remove_dir_all(&target)?;
+            // Best-effort index cleanup for files under this directory.
+            let prefix = format!("{}/", relpath.trim_end_matches('/'));
+            let conn = self.write_conn.lock().expect("write_conn mutex poisoned");
+            conn.execute(
+                "DELETE FROM fts_blocks WHERE file_path LIKE ?1;",
+                rusqlite::params![format!("{prefix}%")],
+            )?;
+            conn.execute(
+                "UPDATE files SET is_deleted = 1 WHERE path LIKE ?1;",
+                rusqlite::params![format!("{prefix}%")],
+            )?;
+            // Graph cleanup is deferred to the watcher reconcile pass — stale
+            // nodes under the prefix only surface as unresolved links until then.
+            Ok(())
+        } else {
+            self.delete_file(relpath)
+        }
     }
 
     // ── Index queries ─────────────────────────────────────────────────────────
@@ -984,6 +1182,50 @@ fn open_internal(
         watcher,
         graph,
     })
+}
+
+/// Resolve `relpath` against `root`, rejecting anything that escapes the root.
+///
+/// Accepts only [`Path::Component::Normal`] components; absolute paths,
+/// `..`, root dirs, and Windows drive prefixes are all rejected. An empty
+/// `relpath` resolves to the root itself.
+///
+/// Unlike `fs::canonicalize`, this does not require the target to exist —
+/// callers that need an existing path should stat the result themselves.
+fn resolve_within(root: &Path, relpath: &str) -> Result<std::path::PathBuf, StorageError> {
+    use std::path::Component;
+    if relpath.is_empty() {
+        return Ok(root.to_path_buf());
+    }
+    let rel = Path::new(relpath);
+    for c in rel.components() {
+        match c {
+            Component::Normal(_) => {}
+            _ => {
+                return Err(StorageError::PermissionDenied(format!(
+                    "invalid relpath: {relpath}"
+                )));
+            }
+        }
+    }
+    Ok(root.join(rel))
+}
+
+/// Resolve a not-yet-existing target path. Same validation as [`resolve_within`]
+/// plus a requirement that `relpath` name a file (non-empty filename).
+fn resolve_target(root: &Path, relpath: &str) -> Result<std::path::PathBuf, StorageError> {
+    if relpath.is_empty() {
+        return Err(StorageError::PermissionDenied(
+            "empty relpath".to_string(),
+        ));
+    }
+    let resolved = resolve_within(root, relpath)?;
+    if resolved.file_name().is_none() {
+        return Err(StorageError::PermissionDenied(format!(
+            "missing filename: {relpath}"
+        )));
+    }
+    Ok(resolved)
 }
 
 /// Infer a file-type string from a vault-relative path.

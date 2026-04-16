@@ -88,8 +88,8 @@ impl IpcDispatcher for TauriIpcDispatcher {
                     plugin_id: target_plugin_id.to_string(),
                     command: command_id.to_string(),
                 })?;
-            mgr.resolve_ipc(target_plugin_id, command_id).map_err(
-                |e| match e {
+            mgr.resolve_ipc(target_plugin_id, command_id)
+                .map_err(|e| match e {
                     nexus_plugins::PluginError::PluginNotFound(id) => {
                         if id == target_plugin_id {
                             IpcError::PluginNotFound { plugin_id: id }
@@ -104,8 +104,7 @@ impl IpcDispatcher for TauriIpcDispatcher {
                         plugin_id: target_plugin_id.to_string(),
                         command: command_id.to_string(),
                     },
-                },
-            )?
+                })?
         };
         // Manager lock released — safe for nested calls.
         let mut guard = backend
@@ -323,9 +322,7 @@ pub fn list_plugin_panels(state: State<'_, PluginState>) -> Vec<UiPanelContribut
 /// renders one row per tab under the Settings modal's "Plugins" rail
 /// group.
 #[tauri::command]
-pub fn list_plugin_settings_tabs(
-    state: State<'_, PluginState>,
-) -> Vec<UiSettingsTabContribution> {
+pub fn list_plugin_settings_tabs(state: State<'_, PluginState>) -> Vec<UiSettingsTabContribution> {
     state
         .manager
         .lock()
@@ -337,9 +334,7 @@ pub fn list_plugin_settings_tabs(
 /// merges these into the active layout's `ribbon` array at render
 /// time.
 #[tauri::command]
-pub fn list_plugin_ribbon_items(
-    state: State<'_, PluginState>,
-) -> Vec<UiRibbonItemContribution> {
+pub fn list_plugin_ribbon_items(state: State<'_, PluginState>) -> Vec<UiRibbonItemContribution> {
     state
         .manager
         .lock()
@@ -350,9 +345,7 @@ pub fn list_plugin_ribbon_items(
 /// List all plugin-contributed status-bar entries. The frontend
 /// merges these into the active layout's `statusBar` array.
 #[tauri::command]
-pub fn list_plugin_status_items(
-    state: State<'_, PluginState>,
-) -> Vec<UiStatusItemContribution> {
+pub fn list_plugin_status_items(state: State<'_, PluginState>) -> Vec<UiStatusItemContribution> {
     state
         .manager
         .lock()
@@ -421,7 +414,8 @@ pub fn save_plugin_settings(
         .manager
         .lock()
         .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
-    mgr.set_settings(&plugin_id, &settings).map_err(|e| e.to_string())
+    mgr.set_settings(&plugin_id, &settings)
+        .map_err(|e| e.to_string())
 }
 
 /// List every loaded plugin as a serializable summary — used by the
@@ -437,10 +431,16 @@ pub fn list_plugins(state: State<'_, PluginState>) -> Vec<PluginSummary> {
             let subs = mgr
                 .event_subscriptions(&info.id)
                 .into_iter()
-                .map(|(id, filter, enabled)| SubscriptionSummary { id, filter, enabled })
+                .map(|(id, filter, enabled)| SubscriptionSummary {
+                    id,
+                    filter,
+                    enabled,
+                })
                 .collect();
-            let runtime = mgr.plugin_runtime(&info.id)
-                .unwrap_or("unknown").to_string();
+            let runtime = mgr
+                .plugin_runtime(&info.id)
+                .unwrap_or("unknown")
+                .to_string();
             PluginSummary {
                 id: info.id,
                 name: info.name,
@@ -488,7 +488,9 @@ pub fn invoke_plugin_command(
     let mut guard = backend
         .try_lock()
         .map_err(|_| format!("plugin {plugin_id} backend lock contention"))?;
-    let result = guard.dispatch(handler_id, &args).map_err(|e| e.to_string())?;
+    let result = guard
+        .dispatch(handler_id, &args)
+        .map_err(|e| e.to_string())?;
     drop(guard);
     emit_plugin_events(&app, &plugin_id, &result);
     Ok(result)
@@ -517,13 +519,8 @@ pub fn invoke_plugin_ipc(
             .manager
             .lock()
             .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
-        mgr.dispatch_ipc_checked(
-            &caller_plugin_id,
-            &target_plugin_id,
-            &command_id,
-            &args,
-        )
-        .map_err(|e| e.to_string())?
+        mgr.dispatch_ipc_checked(&caller_plugin_id, &target_plugin_id, &command_id, &args)
+            .map_err(|e| e.to_string())?
     };
     emit_plugin_events(&app, &target_plugin_id, &result);
     Ok(result)
@@ -546,17 +543,24 @@ pub fn read_plugin_script(
         .manager
         .lock()
         .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
-    let runtime = mgr.plugin_runtime(&plugin_id)
+    let runtime = mgr
+        .plugin_runtime(&plugin_id)
         .ok_or_else(|| format!("plugin not found: {plugin_id}"))?;
     if runtime != "script" {
-        return Err(format!("plugin {plugin_id} is not a script plugin (runtime: {runtime})"));
+        return Err(format!(
+            "plugin {plugin_id} is not a script plugin (runtime: {runtime})"
+        ));
     }
-    let plugin_dir = mgr.plugin_dir(&plugin_id)
+    let plugin_dir = mgr
+        .plugin_dir(&plugin_id)
         .ok_or_else(|| format!("plugin directory not found for {plugin_id}"))?
         .to_path_buf();
-    let manifest = mgr.manifest(&plugin_id)
+    let manifest = mgr
+        .manifest(&plugin_id)
         .ok_or_else(|| format!("manifest not found for {plugin_id}"))?;
-    let script_cfg = manifest.script.as_ref()
+    let script_cfg = manifest
+        .script
+        .as_ref()
         .ok_or_else(|| format!("no [script] section in manifest for {plugin_id}"))?;
     let script_path = plugin_dir.join(&script_cfg.module);
     std::fs::read_to_string(&script_path)
@@ -720,4 +724,3 @@ pub fn start_reload_watcher(handle: AppHandle) {
         })
         .expect("spawn plugin reload watcher");
 }
-

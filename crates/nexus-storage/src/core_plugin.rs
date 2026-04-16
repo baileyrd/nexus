@@ -88,6 +88,17 @@ pub const HANDLER_BASE_LIST: u32 = 25;
 /// `{ "path": String, "filters": [String], "sorts": [String], "limit": Option<u32>, "offset": Option<u32> }`.
 /// Returns: [`nexus_database::QueryResult`].
 pub const HANDLER_BASE_QUERY: u32 = 26;
+/// Handler id for `list_dir`. Args: `{ "relpath": String }`; Returns: `Vec<TreeEntry>`.
+pub const HANDLER_LIST_DIR: u32 = 27;
+/// Handler id for `create_file`. Args: `{ "relpath": String }`; Returns: `{}`.
+pub const HANDLER_CREATE_FILE: u32 = 28;
+/// Handler id for `create_dir`. Args: `{ "relpath": String }`; Returns: `{}`.
+pub const HANDLER_CREATE_DIR: u32 = 29;
+/// Handler id for `rename_entry`. Args: `{ "from": String, "to": String }`; Returns: `{}`.
+pub const HANDLER_RENAME_ENTRY: u32 = 30;
+/// Handler id for `delete_entry`. Args: `{ "relpath": String }`; Returns: `{}`.
+/// Unlike [`HANDLER_DELETE_FILE`], this handles both files and directories.
+pub const HANDLER_DELETE_ENTRY: u32 = 31;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -441,6 +452,52 @@ impl CorePlugin for StorageCorePlugin {
                     .map_err(|e| exec_err(format!("base_list: {e}")))?;
                 to_value(&bases, "base_list")
             }
+            HANDLER_LIST_DIR => {
+                let relpath = args
+                    .get("relpath")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let entries = engine
+                    .list_dir(&relpath)
+                    .map_err(|e| exec_err(format!("list_dir: {e}")))?;
+                to_value(&entries, "list_dir")
+            }
+            HANDLER_CREATE_FILE => {
+                let relpath = relpath_arg(args, "create_file")?;
+                engine
+                    .create_file(&relpath)
+                    .map_err(|e| exec_err(format!("create_file: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_CREATE_DIR => {
+                let relpath = relpath_arg(args, "create_dir")?;
+                engine
+                    .create_dir(&relpath)
+                    .map_err(|e| exec_err(format!("create_dir: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_RENAME_ENTRY => {
+                let from = args
+                    .get("from")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| exec_err("rename_entry: missing 'from' string".to_string()))?;
+                let to = args
+                    .get("to")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| exec_err("rename_entry: missing 'to' string".to_string()))?;
+                engine
+                    .rename_entry(from, to)
+                    .map_err(|e| exec_err(format!("rename_entry: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_DELETE_ENTRY => {
+                let relpath = relpath_arg(args, "delete_entry")?;
+                engine
+                    .delete_entry(&relpath)
+                    .map_err(|e| exec_err(format!("delete_entry: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
             HANDLER_BASE_QUERY => {
                 let path = path_arg(args, "base_query")?;
                 let filters: Vec<String> = args
@@ -527,6 +584,14 @@ fn path_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginEr
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| exec_err(format!("{command}: missing 'path' string argument")))
+}
+
+fn relpath_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
+    value
+        .get("relpath")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| exec_err(format!("{command}: missing 'relpath' string argument")))
 }
 
 fn to_value<T: serde::Serialize>(

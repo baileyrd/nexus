@@ -154,10 +154,7 @@ pub fn get_layout_persistence(app: AppHandle) -> Result<LayoutPersistence, Strin
 /// own. Without this merge, every layout-change save would clobber the
 /// path the user picked in the forge dialog.
 #[tauri::command]
-pub fn save_layout_persistence(
-    app: AppHandle,
-    mut state: LayoutPersistence,
-) -> Result<(), String> {
+pub fn save_layout_persistence(app: AppHandle, mut state: LayoutPersistence) -> Result<(), String> {
     let path = resolve_path(&app)?;
     let existing = load_from(&path);
     state.last_forge_path = existing.last_forge_path;
@@ -274,8 +271,7 @@ mod tests {
     #[test]
     fn legacy_file_without_recent_forges_loads() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        let json =
-            r#"{"version":1,"lastPresetId":null,"lastForgePath":"/x","layouts":{}}"#;
+        let json = r#"{"version":1,"lastPresetId":null,"lastForgePath":"/x","layouts":{}}"#;
         fs::write(tmp.path(), json).unwrap();
         let loaded = load_from(tmp.path());
         assert_eq!(loaded.last_forge_path.as_deref(), Some("/x"));

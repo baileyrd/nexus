@@ -69,11 +69,10 @@ pub fn toggle_snippet(id: String, state: State<'_, EngineState>) -> Result<Vec<S
 
 /// Replace the ordered list of enabled snippet ids.
 #[tauri::command]
-pub fn reorder_snippets(
-    ids: Vec<String>,
-    state: State<'_, EngineState>,
-) -> Result<(), String> {
-    lock(&state).reorder_snippets(ids).map_err(|e| e.to_string())
+pub fn reorder_snippets(ids: Vec<String>, state: State<'_, EngineState>) -> Result<(), String> {
+    lock(&state)
+        .reorder_snippets(ids)
+        .map_err(|e| e.to_string())
 }
 
 /// Current theme selection + mode + snippet order.

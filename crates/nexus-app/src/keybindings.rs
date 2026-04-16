@@ -122,7 +122,9 @@ mod tests {
     fn round_trip_preserves_overrides() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let mut state = KeybindingOverrides::default();
-        state.overrides.insert("workspace.settings".into(), "Mod+,".into());
+        state
+            .overrides
+            .insert("workspace.settings".into(), "Mod+,".into());
         state.overrides.insert("hello.sayHi".into(), "Alt+H".into());
         save_to(tmp.path(), &state).unwrap();
         let loaded = load_from(tmp.path());

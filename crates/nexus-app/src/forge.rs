@@ -5,8 +5,11 @@
 //! to `<app_config_dir>/default-forge/` which is created on first run so
 //! the UI always has something to point at.
 //!
-//! Directory listing is path-safety checked: requested paths are resolved
-//! against the forge root and rejected if they escape it.
+//! File-tree CRUD commands (list/read/write/create/rename/delete) route
+//! through `com.nexus.storage` via [`crate::editor::KernelRuntime`]'s
+//! `ipc_call`. The Tauri shell does not touch `std::fs` for forge tree
+//! operations — all I/O goes through the storage plugin so capability
+//! checks, atomic writes, and audit hooks apply uniformly.
 
 #![allow(
     clippy::needless_pass_by_value,
@@ -16,14 +19,17 @@
 )]
 
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use nexus_kernel::PluginContext;
 use notify::RecursiveMode;
 use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::editor::KernelRuntime;
 
 /// Summary info about the currently-open forge exposed to the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,8 +67,15 @@ pub struct ForgeFile {
 
 /// Maximum file size accepted by [`read_forge_file`] (in bytes).
 /// Keeps the read-only viewer from accidentally loading huge files into
-/// the renderer. Lifted once the editor has streaming support.
-const MAX_FILE_BYTES: u64 = 1_000_000;
+/// the renderer.
+const MAX_FILE_BYTES: usize = 1_000_000;
+
+/// Plugin id that owns the file-tree IPC handlers.
+const STORAGE_PLUGIN_ID: &str = "com.nexus.storage";
+
+/// Per-call timeout for forge IPC. Forge tree ops touch the disk but not
+/// the network, so a generous bound is safe.
+const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Tauri-managed handle to the currently-open forge.
 pub struct ForgeState(pub Mutex<Option<ForgeInfo>>);
@@ -194,81 +207,66 @@ pub fn open_forge(
     Ok(info)
 }
 
+// ── IPC adapters ─────────────────────────────────────────────────────────────
+//
+// Each command is a thin adapter: it serializes its args into JSON and calls
+// `nexus_kernel::PluginContext::ipc_call` on the kernel runtime held in
+// Tauri state. The target plugin is `com.nexus.storage`; handler ids live
+// in `nexus_storage::core_plugin`.
+
+async fn call_storage(
+    runtime: State<'_, KernelRuntime>,
+    command: &str,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let rt = runtime.snapshot()?;
+    rt.context
+        .ipc_call(STORAGE_PLUGIN_ID, command, args, IPC_TIMEOUT)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// List entries under `relpath` within the active forge root.
 ///
 /// `relpath` is relative to the forge root and uses `/` as a separator.
 /// An empty string lists the root itself. The `.forge/` internal
 /// directory is hidden from results.
 #[tauri::command]
-pub fn list_forge_dir(
+pub async fn list_forge_dir(
     relpath: String,
-    state: State<'_, ForgeState>,
+    runtime: State<'_, KernelRuntime>,
 ) -> Result<Vec<ForgeDirEntry>, String> {
-    let forge = state
-        .0
-        .lock()
-        .map_err(|_| "forge state poisoned")?
-        .clone()
-        .ok_or("no forge open")?;
-    let target = resolve_within(&forge.root, &relpath)?;
-
-    let mut entries: Vec<ForgeDirEntry> = Vec::new();
-    for entry in fs::read_dir(&target).map_err(|e| e.to_string())? {
-        let Ok(entry) = entry else { continue };
-        let Ok(ft) = entry.file_type() else { continue };
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        if relpath.is_empty() && name == ".forge" {
-            continue;
-        }
-        let rel = if relpath.is_empty() {
-            name.clone()
-        } else {
-            format!("{}/{}", relpath.trim_end_matches('/'), name)
-        };
-        entries.push(ForgeDirEntry {
-            name,
-            relpath: rel,
-            is_dir: ft.is_dir(),
-        });
-    }
-
-    entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-    });
-    Ok(entries)
+    let value = call_storage(
+        runtime,
+        "list_dir",
+        serde_json::json!({ "relpath": relpath }),
+    )
+    .await?;
+    serde_json::from_value(value).map_err(|e| format!("list_dir: decode failed: {e}"))
 }
 
-/// Read a single file from the active forge. Refuses non-files,
-/// non-UTF-8 contents, and files larger than [`MAX_FILE_BYTES`].
+/// Read a single file from the active forge. Refuses non-UTF-8 contents
+/// and files larger than [`MAX_FILE_BYTES`].
 #[tauri::command]
-pub fn read_forge_file(
+pub async fn read_forge_file(
     relpath: String,
-    state: State<'_, ForgeState>,
+    runtime: State<'_, KernelRuntime>,
 ) -> Result<ForgeFile, String> {
-    let forge = state
-        .0
-        .lock()
-        .map_err(|_| "forge state poisoned")?
-        .clone()
-        .ok_or("no forge open")?;
-    let target = resolve_within(&forge.root, &relpath)?;
-    let meta = fs::metadata(&target).map_err(|e| e.to_string())?;
-    if !meta.is_file() {
-        return Err(format!("not a file: {relpath}"));
+    #[derive(Deserialize)]
+    struct Resp {
+        bytes: Vec<u8>,
     }
-    if meta.len() > MAX_FILE_BYTES {
+    let value = call_storage(runtime, "read_file", serde_json::json!({ "path": relpath })).await?;
+    let resp: Resp =
+        serde_json::from_value(value).map_err(|e| format!("read_file: decode failed: {e}"))?;
+    if resp.bytes.len() > MAX_FILE_BYTES {
         return Err(format!(
             "file too large ({} bytes; limit {MAX_FILE_BYTES})",
-            meta.len()
+            resp.bytes.len()
         ));
     }
-    let bytes = fs::read(&target).map_err(|e| e.to_string())?;
-    let content = String::from_utf8(bytes).map_err(|_| "file is not UTF-8")?;
-    let name = target
+    let content = String::from_utf8(resp.bytes).map_err(|_| "file is not UTF-8")?;
+    let name = Path::new(&relpath)
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("")
@@ -280,174 +278,85 @@ pub fn read_forge_file(
     })
 }
 
-/// Write content to a file within the active forge. Creates parent
-/// directories if needed. Path-safety checked via [`resolve_within`].
+/// Write content to a file within the active forge. Uses the storage
+/// plugin's atomic write (temp file → fsync → rename).
 #[tauri::command]
-pub fn write_forge_file(
+pub async fn write_forge_file(
     relpath: String,
     content: String,
-    state: State<'_, ForgeState>,
+    runtime: State<'_, KernelRuntime>,
 ) -> Result<(), String> {
-    let forge = state
-        .0
-        .lock()
-        .map_err(|_| "forge state poisoned")?
-        .clone()
-        .ok_or("no forge open")?;
-    let target = resolve_within(&forge.root, &relpath)?;
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    fs::write(&target, content.as_bytes()).map_err(|e| e.to_string())
-}
-
-/// Resolve `relpath` against `root`, rejecting anything that escapes the
-/// root (via `..`, absolute paths, or symlink traversal after canonicalize).
-fn resolve_within(root: &Path, relpath: &str) -> Result<PathBuf, String> {
-    let candidate = if relpath.is_empty() {
-        root.to_path_buf()
-    } else {
-        let rel = Path::new(relpath);
-        for c in rel.components() {
-            match c {
-                Component::Normal(_) => {}
-                _ => return Err(format!("invalid relpath: {relpath}")),
-            }
-        }
-        root.join(rel)
-    };
-    let canon_root = fs::canonicalize(root).map_err(|e| e.to_string())?;
-    let canon = fs::canonicalize(&candidate).map_err(|e| e.to_string())?;
-    if !canon.starts_with(&canon_root) {
-        return Err(format!("path escapes forge root: {relpath}"));
-    }
-    Ok(canon)
-}
-
-/// Resolve a not-yet-existing target path: validate `relpath` components,
-/// canonicalize the parent directory, and ensure the parent is within
-/// the forge root. The returned path is `<canonical-parent>/<filename>`.
-///
-/// Used by create/rename when the destination doesn't yet exist on disk
-/// so [`resolve_within`] can't canonicalize it directly.
-fn resolve_target(root: &Path, relpath: &str) -> Result<PathBuf, String> {
-    if relpath.is_empty() {
-        return Err("empty relpath".into());
-    }
-    let rel = Path::new(relpath);
-    for c in rel.components() {
-        match c {
-            Component::Normal(_) => {}
-            _ => return Err(format!("invalid relpath: {relpath}")),
-        }
-    }
-    let parent_rel = rel.parent().unwrap_or_else(|| Path::new(""));
-    let file_name = rel
-        .file_name()
-        .ok_or_else(|| format!("missing filename: {relpath}"))?;
-
-    let parent_abs = if parent_rel.as_os_str().is_empty() {
-        root.to_path_buf()
-    } else {
-        root.join(parent_rel)
-    };
-    let canon_root = fs::canonicalize(root).map_err(|e| e.to_string())?;
-    let canon_parent = fs::canonicalize(&parent_abs)
-        .map_err(|e| format!("parent dir not found: {e}"))?;
-    if !canon_parent.starts_with(&canon_root) {
-        return Err(format!("path escapes forge root: {relpath}"));
-    }
-    Ok(canon_parent.join(file_name))
+    let bytes = content.into_bytes();
+    let _ = call_storage(
+        runtime,
+        "write_file",
+        serde_json::json!({ "path": relpath, "bytes": bytes }),
+    )
+    .await?;
+    Ok(())
 }
 
 /// Create a new empty file at `relpath` within the active forge.
 /// Refuses to overwrite an existing file.
 #[tauri::command]
-pub fn create_forge_file(
+pub async fn create_forge_file(
     relpath: String,
-    state: State<'_, ForgeState>,
+    runtime: State<'_, KernelRuntime>,
 ) -> Result<(), String> {
-    let forge = state
-        .0
-        .lock()
-        .map_err(|_| "forge state poisoned")?
-        .clone()
-        .ok_or("no forge open")?;
-    let target = resolve_target(&forge.root, &relpath)?;
-    if target.exists() {
-        return Err(format!("already exists: {relpath}"));
-    }
-    fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&target)
-        .map_err(|e| e.to_string())?;
+    let _ = call_storage(
+        runtime,
+        "create_file",
+        serde_json::json!({ "relpath": relpath }),
+    )
+    .await?;
     Ok(())
 }
 
 /// Create a new empty directory at `relpath`.
 #[tauri::command]
-pub fn create_forge_dir(
+pub async fn create_forge_dir(
     relpath: String,
-    state: State<'_, ForgeState>,
+    runtime: State<'_, KernelRuntime>,
 ) -> Result<(), String> {
-    let forge = state
-        .0
-        .lock()
-        .map_err(|_| "forge state poisoned")?
-        .clone()
-        .ok_or("no forge open")?;
-    let target = resolve_target(&forge.root, &relpath)?;
-    if target.exists() {
-        return Err(format!("already exists: {relpath}"));
-    }
-    fs::create_dir(&target).map_err(|e| e.to_string())?;
+    let _ = call_storage(
+        runtime,
+        "create_dir",
+        serde_json::json!({ "relpath": relpath }),
+    )
+    .await?;
     Ok(())
 }
 
 /// Rename or move an entry within the forge. Both `from` and `to` must
 /// resolve under the forge root; `to` must not already exist.
 #[tauri::command]
-pub fn rename_forge_entry(
+pub async fn rename_forge_entry(
     from: String,
     to: String,
-    state: State<'_, ForgeState>,
+    runtime: State<'_, KernelRuntime>,
 ) -> Result<(), String> {
-    let forge = state
-        .0
-        .lock()
-        .map_err(|_| "forge state poisoned")?
-        .clone()
-        .ok_or("no forge open")?;
-    let src = resolve_within(&forge.root, &from)?;
-    let dst = resolve_target(&forge.root, &to)?;
-    if dst.exists() {
-        return Err(format!("already exists: {to}"));
-    }
-    fs::rename(&src, &dst).map_err(|e| e.to_string())?;
+    let _ = call_storage(
+        runtime,
+        "rename_entry",
+        serde_json::json!({ "from": from, "to": to }),
+    )
+    .await?;
     Ok(())
 }
 
 /// Delete an entry within the forge. Files and directories are both
 /// accepted; directories are removed recursively.
 #[tauri::command]
-pub fn delete_forge_entry(
+pub async fn delete_forge_entry(
     relpath: String,
-    state: State<'_, ForgeState>,
+    runtime: State<'_, KernelRuntime>,
 ) -> Result<(), String> {
-    let forge = state
-        .0
-        .lock()
-        .map_err(|_| "forge state poisoned")?
-        .clone()
-        .ok_or("no forge open")?;
-    let target = resolve_within(&forge.root, &relpath)?;
-    let meta = fs::metadata(&target).map_err(|e| e.to_string())?;
-    if meta.is_dir() {
-        fs::remove_dir_all(&target).map_err(|e| e.to_string())?;
-    } else {
-        fs::remove_file(&target).map_err(|e| e.to_string())?;
-    }
+    let _ = call_storage(
+        runtime,
+        "delete_entry",
+        serde_json::json!({ "relpath": relpath }),
+    )
+    .await?;
     Ok(())
 }
 
@@ -473,64 +382,5 @@ mod tests {
         let info = info_for(&child);
         assert_eq!(info.name, "my-forge");
         assert_eq!(info.root, child);
-    }
-
-    #[test]
-    fn resolve_within_rejects_parent_traversal() {
-        let tmp = tempfile::tempdir().unwrap();
-        init_layout(tmp.path()).unwrap();
-        let err = resolve_within(tmp.path(), "../outside").unwrap_err();
-        assert!(err.contains("invalid relpath"), "got: {err}");
-    }
-
-    #[test]
-    fn resolve_within_rejects_absolute_path() {
-        let tmp = tempfile::tempdir().unwrap();
-        init_layout(tmp.path()).unwrap();
-        let err = resolve_within(tmp.path(), "/etc/passwd").unwrap_err();
-        assert!(err.contains("invalid relpath"), "got: {err}");
-    }
-
-    #[test]
-    fn resolve_within_accepts_nested_relpath() {
-        let tmp = tempfile::tempdir().unwrap();
-        init_layout(tmp.path()).unwrap();
-        let sub = tmp.path().join("notes/sub");
-        fs::create_dir_all(&sub).unwrap();
-        let resolved = resolve_within(tmp.path(), "notes/sub").unwrap();
-        assert_eq!(resolved, fs::canonicalize(&sub).unwrap());
-    }
-
-    #[test]
-    fn resolve_within_empty_returns_root() {
-        let tmp = tempfile::tempdir().unwrap();
-        init_layout(tmp.path()).unwrap();
-        let resolved = resolve_within(tmp.path(), "").unwrap();
-        assert_eq!(resolved, fs::canonicalize(tmp.path()).unwrap());
-    }
-
-    #[test]
-    fn resolve_target_rejects_parent_traversal() {
-        let tmp = tempfile::tempdir().unwrap();
-        init_layout(tmp.path()).unwrap();
-        let err = resolve_target(tmp.path(), "../escapes.md").unwrap_err();
-        assert!(err.contains("invalid relpath"), "got: {err}");
-    }
-
-    #[test]
-    fn resolve_target_requires_existing_parent() {
-        let tmp = tempfile::tempdir().unwrap();
-        init_layout(tmp.path()).unwrap();
-        let err = resolve_target(tmp.path(), "no-such-dir/file.md").unwrap_err();
-        assert!(err.contains("parent dir not found"), "got: {err}");
-    }
-
-    #[test]
-    fn resolve_target_returns_parent_plus_filename() {
-        let tmp = tempfile::tempdir().unwrap();
-        init_layout(tmp.path()).unwrap();
-        let resolved = resolve_target(tmp.path(), "notes/new.md").unwrap();
-        let canon_notes = fs::canonicalize(tmp.path().join("notes")).unwrap();
-        assert_eq!(resolved, canon_notes.join("new.md"));
     }
 }

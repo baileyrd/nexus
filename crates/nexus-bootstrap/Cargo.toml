@@ -14,6 +14,7 @@ nexus-security = { path = "../nexus-security" }
 nexus-storage = { path = "../nexus-storage" }
 nexus-database = { path = "../nexus-database" }
 nexus-ai = { path = "../nexus-ai" }
+nexus-editor = { path = "../nexus-editor" }
 nexus-types = { path = "../nexus-types" }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

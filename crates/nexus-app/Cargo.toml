@@ -21,6 +21,7 @@ tauri-build = { workspace = true }
 nexus-theme = { path = "../nexus-theme" }
 nexus-plugins = { path = "../nexus-plugins" }
 nexus-kernel = { path = "../nexus-kernel" }
+nexus-bootstrap = { path = "../nexus-bootstrap" }
 tauri = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
 serde = { workspace = true }

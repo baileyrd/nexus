@@ -185,6 +185,7 @@ fn register_core_plugins(
 ) -> Result<()> {
     use nexus_ai::AiCorePlugin;
     use nexus_database::DatabaseCorePlugin;
+    use nexus_editor::EditorCorePlugin;
     use nexus_security::SecurityCorePlugin;
     use nexus_storage::{StorageConfig, StorageCorePlugin};
 
@@ -216,32 +217,100 @@ fn register_core_plugins(
                     on_stop: true,
                 },
                 &[
-                    ("query_files", nexus_storage::core_plugin::HANDLER_QUERY_FILES),
+                    (
+                        "query_files",
+                        nexus_storage::core_plugin::HANDLER_QUERY_FILES,
+                    ),
                     ("read_file", nexus_storage::core_plugin::HANDLER_READ_FILE),
                     ("backlinks", nexus_storage::core_plugin::HANDLER_BACKLINKS),
-                    ("query_tasks", nexus_storage::core_plugin::HANDLER_QUERY_TASKS),
-                    ("graph_stats", nexus_storage::core_plugin::HANDLER_GRAPH_STATS),
-                    ("rebuild_index", nexus_storage::core_plugin::HANDLER_REBUILD_INDEX),
+                    (
+                        "query_tasks",
+                        nexus_storage::core_plugin::HANDLER_QUERY_TASKS,
+                    ),
+                    (
+                        "graph_stats",
+                        nexus_storage::core_plugin::HANDLER_GRAPH_STATS,
+                    ),
+                    (
+                        "rebuild_index",
+                        nexus_storage::core_plugin::HANDLER_REBUILD_INDEX,
+                    ),
                     ("search", nexus_storage::core_plugin::HANDLER_SEARCH),
                     ("write_file", nexus_storage::core_plugin::HANDLER_WRITE_FILE),
-                    ("delete_file", nexus_storage::core_plugin::HANDLER_DELETE_FILE),
-                    ("file_exists", nexus_storage::core_plugin::HANDLER_FILE_EXISTS),
-                    ("rebuild_search_index", nexus_storage::core_plugin::HANDLER_REBUILD_SEARCH_INDEX),
-                    ("toggle_task", nexus_storage::core_plugin::HANDLER_TOGGLE_TASK),
-                    ("outgoing_links", nexus_storage::core_plugin::HANDLER_OUTGOING_LINKS),
-                    ("unresolved_links", nexus_storage::core_plugin::HANDLER_UNRESOLVED_LINKS),
-                    ("graph_neighbors", nexus_storage::core_plugin::HANDLER_GRAPH_NEIGHBORS),
+                    (
+                        "delete_file",
+                        nexus_storage::core_plugin::HANDLER_DELETE_FILE,
+                    ),
+                    (
+                        "file_exists",
+                        nexus_storage::core_plugin::HANDLER_FILE_EXISTS,
+                    ),
+                    (
+                        "rebuild_search_index",
+                        nexus_storage::core_plugin::HANDLER_REBUILD_SEARCH_INDEX,
+                    ),
+                    (
+                        "toggle_task",
+                        nexus_storage::core_plugin::HANDLER_TOGGLE_TASK,
+                    ),
+                    (
+                        "outgoing_links",
+                        nexus_storage::core_plugin::HANDLER_OUTGOING_LINKS,
+                    ),
+                    (
+                        "unresolved_links",
+                        nexus_storage::core_plugin::HANDLER_UNRESOLVED_LINKS,
+                    ),
+                    (
+                        "graph_neighbors",
+                        nexus_storage::core_plugin::HANDLER_GRAPH_NEIGHBORS,
+                    ),
                     ("query_tags", nexus_storage::core_plugin::HANDLER_QUERY_TAGS),
-                    ("vector_insert", nexus_storage::core_plugin::HANDLER_VECTOR_INSERT),
-                    ("vector_query", nexus_storage::core_plugin::HANDLER_VECTOR_QUERY),
-                    ("vector_delete_by_file", nexus_storage::core_plugin::HANDLER_VECTOR_DELETE_BY_FILE),
-                    ("vectorstore_count", nexus_storage::core_plugin::HANDLER_VECTORSTORE_COUNT),
-                    ("query_blocks", nexus_storage::core_plugin::HANDLER_QUERY_BLOCKS),
-                    ("config_read", nexus_storage::core_plugin::HANDLER_CONFIG_READ),
-                    ("config_reset", nexus_storage::core_plugin::HANDLER_CONFIG_RESET),
+                    (
+                        "vector_insert",
+                        nexus_storage::core_plugin::HANDLER_VECTOR_INSERT,
+                    ),
+                    (
+                        "vector_query",
+                        nexus_storage::core_plugin::HANDLER_VECTOR_QUERY,
+                    ),
+                    (
+                        "vector_delete_by_file",
+                        nexus_storage::core_plugin::HANDLER_VECTOR_DELETE_BY_FILE,
+                    ),
+                    (
+                        "vectorstore_count",
+                        nexus_storage::core_plugin::HANDLER_VECTORSTORE_COUNT,
+                    ),
+                    (
+                        "query_blocks",
+                        nexus_storage::core_plugin::HANDLER_QUERY_BLOCKS,
+                    ),
+                    (
+                        "config_read",
+                        nexus_storage::core_plugin::HANDLER_CONFIG_READ,
+                    ),
+                    (
+                        "config_reset",
+                        nexus_storage::core_plugin::HANDLER_CONFIG_RESET,
+                    ),
                     ("base_index", nexus_storage::core_plugin::HANDLER_BASE_INDEX),
                     ("base_list", nexus_storage::core_plugin::HANDLER_BASE_LIST),
                     ("base_query", nexus_storage::core_plugin::HANDLER_BASE_QUERY),
+                    ("list_dir", nexus_storage::core_plugin::HANDLER_LIST_DIR),
+                    (
+                        "create_file",
+                        nexus_storage::core_plugin::HANDLER_CREATE_FILE,
+                    ),
+                    ("create_dir", nexus_storage::core_plugin::HANDLER_CREATE_DIR),
+                    (
+                        "rename_entry",
+                        nexus_storage::core_plugin::HANDLER_RENAME_ENTRY,
+                    ),
+                    (
+                        "delete_entry",
+                        nexus_storage::core_plugin::HANDLER_DELETE_ENTRY,
+                    ),
                 ],
             ),
             forge_root,
@@ -268,6 +337,34 @@ fn register_core_plugins(
             Box::new(DatabaseCorePlugin::new(Arc::clone(event_bus))),
         )
         .context("failed to register com.nexus.database")?;
+
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.editor",
+                "Editor",
+                LifecycleFlags {
+                    on_init: true,
+                    ..LifecycleFlags::NONE
+                },
+                &[
+                    ("open", nexus_editor::core_plugin::HANDLER_OPEN),
+                    ("close", nexus_editor::core_plugin::HANDLER_CLOSE),
+                    ("get_tree", nexus_editor::core_plugin::HANDLER_GET_TREE),
+                    ("save", nexus_editor::core_plugin::HANDLER_SAVE),
+                    (
+                        "apply_transaction",
+                        nexus_editor::core_plugin::HANDLER_APPLY_TRANSACTION,
+                    ),
+                    ("undo", nexus_editor::core_plugin::HANDLER_UNDO),
+                    ("redo", nexus_editor::core_plugin::HANDLER_REDO),
+                    ("list_open", nexus_editor::core_plugin::HANDLER_LIST_OPEN),
+                ],
+            ),
+            forge_root,
+            Box::new(EditorCorePlugin::new(forge_root.to_path_buf())),
+        )
+        .context("failed to register com.nexus.editor")?;
 
     loader
         .register_core(

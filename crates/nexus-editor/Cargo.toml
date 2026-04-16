@@ -1,0 +1,24 @@
+[package]
+name        = "nexus-editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nexus editor engine: block tree, annotations, transactions (PRD 08 §1/§2/§5)"
+
+[dependencies]
+serde         = { workspace = true }
+serde_json    = { workspace = true }
+serde_yaml    = { workspace = true }
+uuid          = { workspace = true }
+thiserror     = { workspace = true }
+chrono        = { workspace = true }
+comrak        = { workspace = true }
+sha2          = { workspace = true }
+tracing       = { workspace = true }
+nexus-formats = { path = "../nexus-formats" }
+nexus-kernel  = { path = "../nexus-kernel" }
+nexus-plugins = { path = "../nexus-plugins" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

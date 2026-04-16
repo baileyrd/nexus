@@ -18,6 +18,7 @@ use nexus_theme::api::ThemeEngine;
 use tauri::Manager;
 
 pub mod commands;
+pub mod editor;
 pub mod forge;
 pub mod keybindings;
 pub mod persistence;
@@ -29,6 +30,7 @@ pub mod plugins;
 /// # Panics
 /// Panics if Tauri itself fails to start (e.g. windowing stack unavailable).
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[allow(clippy::too_many_lines)]
 pub fn run() {
     let engine = ThemeEngine::new();
 
@@ -37,6 +39,7 @@ pub fn run() {
         .manage(commands::EngineState(Mutex::new(engine)))
         .manage(forge::ForgeState(Mutex::new(None)))
         .manage(forge::WatcherHandle(Mutex::new(None)))
+        .manage(editor::KernelRuntime::empty())
         .manage(plugins::bootstrap())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -56,6 +59,17 @@ pub fn run() {
                         }
                         Err(err) => {
                             tracing::warn!(%err, "forge watcher failed to start; live tree refresh disabled");
+                        }
+                    }
+                    match nexus_bootstrap::build_cli_runtime(info.root.clone()) {
+                        Ok(runtime) => {
+                            if let Some(state) = app.try_state::<editor::KernelRuntime>() {
+                                state.set(std::sync::Arc::new(runtime));
+                            }
+                            tracing::info!("kernel runtime built for editor IPC");
+                        }
+                        Err(err) => {
+                            tracing::warn!(%err, "kernel runtime build failed; editor IPC disabled");
                         }
                     }
                     if let Some(state) = app.try_state::<forge::ForgeState>() {
@@ -111,6 +125,14 @@ pub fn run() {
             keybindings::get_keybinding_overrides,
             keybindings::set_keybinding_override,
             keybindings::clear_keybinding_override,
+            editor::editor_open,
+            editor::editor_close,
+            editor::editor_get_tree,
+            editor::editor_save,
+            editor::editor_apply_transaction,
+            editor::editor_undo,
+            editor::editor_redo,
+            editor::editor_list_open,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch nexus-app");

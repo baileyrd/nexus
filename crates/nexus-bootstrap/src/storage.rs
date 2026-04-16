@@ -215,21 +215,23 @@ pub fn query_files_with_prefix(
 
 /// Return every block belonging to the file at `path`. Empty when the path is
 /// unknown to the index.
-pub fn query_blocks(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
-    path: &str,
-) -> Result<Vec<BlockRecord>> {
-    call(runtime, rt, "query_blocks", serde_json::json!({ "path": path }))
+pub fn query_blocks(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<Vec<BlockRecord>> {
+    call(
+        runtime,
+        rt,
+        "query_blocks",
+        serde_json::json!({ "path": path }),
+    )
 }
 
 /// Query all occurrences of the tag named `name` across the forge.
-pub fn query_tags(
-    runtime: &Runtime,
-    rt: &TokioRuntime,
-    name: &str,
-) -> Result<Vec<TagResult>> {
-    call(runtime, rt, "query_tags", serde_json::json!({ "name": name }))
+pub fn query_tags(runtime: &Runtime, rt: &TokioRuntime, name: &str) -> Result<Vec<TagResult>> {
+    call(
+        runtime,
+        rt,
+        "query_tags",
+        serde_json::json!({ "name": name }),
+    )
 }
 
 /// Read a file's bytes by forge-relative path.
@@ -238,13 +240,23 @@ pub fn read_file(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<Vec
     struct Resp {
         bytes: Vec<u8>,
     }
-    let resp: Resp = call(runtime, rt, "read_file", serde_json::json!({ "path": path }))?;
+    let resp: Resp = call(
+        runtime,
+        rt,
+        "read_file",
+        serde_json::json!({ "path": path }),
+    )?;
     Ok(resp.bytes)
 }
 
 /// Return every file that links TO `path`.
 pub fn backlinks(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<Vec<BacklinkResult>> {
-    call(runtime, rt, "backlinks", serde_json::json!({ "path": path }))
+    call(
+        runtime,
+        rt,
+        "backlinks",
+        serde_json::json!({ "path": path }),
+    )
 }
 
 /// Query tasks matching `filter`.
@@ -373,7 +385,12 @@ pub fn base_index(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<i6
     struct Resp {
         base_id: i64,
     }
-    let resp: Resp = call(runtime, rt, "base_index", serde_json::json!({ "path": path }))?;
+    let resp: Resp = call(
+        runtime,
+        rt,
+        "base_index",
+        serde_json::json!({ "path": path }),
+    )?;
     Ok(resp.base_id)
 }
 
@@ -420,7 +437,12 @@ pub struct ConfigPayload {
 ///
 /// `kind` must be `"app"`, `"workspace"`, `"mcp"`, or `"ai"`.
 pub fn config_read(runtime: &Runtime, rt: &TokioRuntime, kind: &str) -> Result<ConfigPayload> {
-    call(runtime, rt, "config_read", serde_json::json!({ "kind": kind }))
+    call(
+        runtime,
+        rt,
+        "config_read",
+        serde_json::json!({ "kind": kind }),
+    )
 }
 
 /// Reset one of the four forge config files to its defaults.
