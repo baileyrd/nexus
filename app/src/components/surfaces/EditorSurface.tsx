@@ -13,6 +13,7 @@ import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { markdown } from "@codemirror/lang-markdown";
 import { bracketMatching, foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
 import { liveMarkdown } from "../../editor/liveMarkdown";
+import { slashCommands } from "../../editor/slashCommandExtension";
 
 export interface EditorSurfaceProps {
   initialContent: string;
@@ -73,7 +74,7 @@ function getExtensions(
     history(),
     highlightSelectionMatches(),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-    ...(isMarkdown ? [markdown(), liveMarkdown()] : []),
+    ...(isMarkdown ? [markdown(), liveMarkdown(), slashCommands()] : []),
     keymap.of([
       ...defaultKeymap,
       ...historyKeymap,
