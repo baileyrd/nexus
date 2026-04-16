@@ -8,6 +8,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+mod composite;
 mod error;
 mod host_fns;
 pub mod manifest;
@@ -19,6 +20,7 @@ mod scaffold;
 
 use std::sync::{Arc, Mutex};
 
+pub use composite::{CompositeIpcDispatcher, FallbackCell};
 pub use error::PluginError;
 pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 pub use loader::{CorePlugin, CorePluginFuture, PluginBackend, PluginLoader, SharedPluginLoader};

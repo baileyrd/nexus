@@ -78,6 +78,16 @@ pub fn run() {
                             // frontend can react to mutations driven by any
                             // plugin, not just user clicks in the shell.
                             start_theme_event_forwarder(handle.clone(), &runtime);
+                            // Make core plugins reachable from community WASM
+                            // plugins: install the bootstrap loader as the
+                            // fallback target for the composite dispatcher
+                            // injected into every community backend.
+                            if let Some(state) = app.try_state::<plugins::PluginState>() {
+                                let loader: std::sync::Arc<dyn nexus_kernel::IpcDispatcher> =
+                                    std::sync::Arc::clone(&runtime.loader)
+                                        as std::sync::Arc<dyn nexus_kernel::IpcDispatcher>;
+                                state.core_loader.set(loader);
+                            }
                             if let Some(state) = app.try_state::<editor::KernelRuntime>() {
                                 state.set(runtime);
                             }

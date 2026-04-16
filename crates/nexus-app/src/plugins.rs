@@ -9,9 +9,10 @@ use std::time::Duration;
 
 use nexus_kernel::{EventBus, IpcDispatcher, IpcError, NexusEvent};
 use nexus_plugins::{
-    PluginBackend, PluginEventForwarder, PluginManager, PluginManagerConfig, PluginStatus,
-    TrustLevel, UiContribution, UiPanelContribution, UiRibbonItemContribution,
-    UiSettingsTabContribution, UiSlashCommandContribution, UiStatusItemContribution,
+    CompositeIpcDispatcher, FallbackCell, PluginBackend, PluginEventForwarder, PluginManager,
+    PluginManagerConfig, PluginStatus, TrustLevel, UiContribution, UiPanelContribution,
+    UiRibbonItemContribution, UiSettingsTabContribution, UiSlashCommandContribution,
+    UiStatusItemContribution,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -59,6 +60,13 @@ pub struct PluginState {
     /// [`EventBus::publish_core`]; plugin subscriptions drain on the
     /// background watcher thread.
     pub bus: Arc<EventBus>,
+    /// Write-once slot for the bootstrap [`SharedPluginLoader`] so the
+    /// dispatcher injected into community plugins can fall through to
+    /// core plugins (`com.nexus.editor`, `com.nexus.storage`, …) on
+    /// `PluginNotFound`. Populated by the Tauri `setup` closure in
+    /// [`crate::run`] once [`nexus_bootstrap::build_cli_runtime`] has
+    /// returned.
+    pub core_loader: FallbackCell,
 }
 
 // ─── TauriIpcDispatcher ──────────────────────────────────────────────────────
@@ -264,16 +272,31 @@ pub fn bootstrap() -> PluginState {
 
     // Wrap the manager and create a dispatcher for plugin-to-plugin IPC.
     let manager = Arc::new(Mutex::new(manager));
-    let dispatcher: Arc<dyn IpcDispatcher> = Arc::new(TauriIpcDispatcher {
+    let primary: Arc<dyn IpcDispatcher> = Arc::new(TauriIpcDispatcher {
         manager: manager.clone(),
     });
-    // Inject the dispatcher into every community (WASM) plugin so
-    // host::invoke_command can route calls.
+    // Wrap the community dispatcher in a composite so that calls to
+    // core plugins (`com.nexus.editor`, `com.nexus.storage`, …) fall
+    // through to the bootstrap `SharedPluginLoader` once it's installed
+    // by `install_core_loader`. Without this, a community WASM plugin's
+    // `host::invoke_command("com.nexus.storage", …)` would hit
+    // `IpcError::PluginNotFound` because core plugins are registered in
+    // a separate loader.
+    let core_loader = FallbackCell::new();
+    let dispatcher: Arc<dyn IpcDispatcher> =
+        Arc::new(CompositeIpcDispatcher::new(primary, core_loader.clone()));
+    // Inject the composite dispatcher into every community (WASM)
+    // plugin so host::invoke_command can route calls to both community
+    // and core targets.
     if let Ok(mut mgr) = manager.lock() {
         mgr.inject_ipc_dispatcher(dispatcher);
     }
 
-    PluginState { manager, bus }
+    PluginState {
+        manager,
+        bus,
+        core_loader,
+    }
 }
 
 /// Inject a [`TauriEventForwarder`] into all loaded community plugins
