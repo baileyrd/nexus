@@ -1186,29 +1186,14 @@ fn open_internal(
 
 /// Resolve `relpath` against `root`, rejecting anything that escapes the root.
 ///
-/// Accepts only [`Path::Component::Normal`] components; absolute paths,
-/// `..`, root dirs, and Windows drive prefixes are all rejected. An empty
-/// `relpath` resolves to the root itself.
+/// Thin wrapper over [`nexus_types::paths::resolve_within`] that maps the
+/// shared `PathError` onto [`StorageError::PermissionDenied`].
 ///
 /// Unlike `fs::canonicalize`, this does not require the target to exist —
 /// callers that need an existing path should stat the result themselves.
 fn resolve_within(root: &Path, relpath: &str) -> Result<std::path::PathBuf, StorageError> {
-    use std::path::Component;
-    if relpath.is_empty() {
-        return Ok(root.to_path_buf());
-    }
-    let rel = Path::new(relpath);
-    for c in rel.components() {
-        match c {
-            Component::Normal(_) => {}
-            _ => {
-                return Err(StorageError::PermissionDenied(format!(
-                    "invalid relpath: {relpath}"
-                )));
-            }
-        }
-    }
-    Ok(root.join(rel))
+    nexus_types::paths::resolve_within(root, relpath)
+        .map_err(|e| StorageError::PermissionDenied(e.to_string()))
 }
 
 /// Resolve a not-yet-existing target path. Same validation as [`resolve_within`]

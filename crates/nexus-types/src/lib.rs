@@ -12,3 +12,4 @@
 #![warn(clippy::pedantic)]
 
 pub mod bases;
+pub mod paths;

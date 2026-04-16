@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -455,22 +455,21 @@ fn sessions_poisoned() -> PluginError {
 }
 
 /// Resolve `relpath` under `forge_root`, rejecting traversal and
-/// absolute paths. Parallels
-/// [`crates/nexus-app/src/forge.rs::resolve_within`](../../nexus-app/src/forge.rs)
-/// — duplicated here because the editor plugin must not depend on
-/// `nexus-app`.
+/// absolute paths, then canonicalize.
+///
+/// Delegates component validation to
+/// [`nexus_types::paths::resolve_within`] so every core plugin shares
+/// the same path-confinement code path. This wrapper adds a
+/// `canonicalize` pass (production file I/O routes through
+/// `com.nexus.storage`; this is only used by the context-less unit-test
+/// fallback in [`handle_open_sync`] / [`handle_save_sync`]). Rejects
+/// empty relpaths — the sync fallback always addresses a specific file.
 fn resolve_within(root: &Path, relpath: &str) -> Result<PathBuf, String> {
     if relpath.is_empty() {
         return Err("empty relpath".into());
     }
-    let rel = Path::new(relpath);
-    for c in rel.components() {
-        match c {
-            Component::Normal(_) => {}
-            _ => return Err(format!("invalid relpath: {relpath}")),
-        }
-    }
-    let candidate = root.join(rel);
+    let candidate = nexus_types::paths::resolve_within(root, relpath)
+        .map_err(|e| e.to_string())?;
     let canon_root = fs::canonicalize(root).map_err(|e| e.to_string())?;
     let canon = fs::canonicalize(&candidate).map_err(|e| e.to_string())?;
     if !canon.starts_with(&canon_root) {

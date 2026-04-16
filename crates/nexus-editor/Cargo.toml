@@ -19,6 +19,7 @@ tracing       = { workspace = true }
 nexus-formats = { path = "../nexus-formats" }
 nexus-kernel  = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
+nexus-types   = { path = "../nexus-types" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
