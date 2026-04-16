@@ -1,6 +1,7 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FileTree } from "../components/panels/FileTree";
 import { Outline } from "../components/panels/Outline";
+import { makeGenericTreePanelFactory } from "../components/panels/GenericTreePanel";
 import { GeneralTab } from "../components/settings/tabs/GeneralTab";
 import { HotkeysTab } from "../components/settings/tabs/HotkeysTab";
 import { PluginsTab } from "../components/settings/tabs/PluginsTab";
@@ -19,6 +20,10 @@ import { contributions } from "./registry";
  * Idempotent — safe to call more than once during dev hot-reloads.
  */
 export function registerBuiltins(): void {
+  // Install the GenericTreePanel factory so contributions.registerTreeDataProvider
+  // can auto-wire the panel component without a circular import in registry.ts.
+  contributions.setTreePanelFactory(makeGenericTreePanelFactory);
+
   contributions.registerContentType("files", FileTree);
   contributions.registerContentType("outline", Outline);
 

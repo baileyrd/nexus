@@ -3,13 +3,16 @@ import { listen } from "@tauri-apps/api/event";
 import { ModeToggle } from "./components/ModeToggle";
 import { CommandPalette } from "./components/palette/CommandPalette";
 import { SettingsModal } from "./components/settings/SettingsModal";
+import { ToastOverlay } from "./components/ToastOverlay";
 import { WorkspaceView } from "./components/layout/WorkspaceView";
 import { KeybindingDispatcher } from "./keybindings/KeybindingDispatcher";
 import { useForgeStore } from "./stores/forge";
 import { useLayoutStore } from "./stores/layout";
 import { useThemeStore } from "./stores/theme";
+import { useToastStore, type ToastLevel } from "./stores/toast";
 import { THEME_CHANGED_EVENT } from "./ipc/theme";
 import type { ThemeConfig } from "./ipc/theme";
+import type { PluginEvent } from "./plugins/events";
 
 export default function App() {
   const applyTheme = useThemeStore((s) => s.applyTheme);
@@ -20,6 +23,7 @@ export default function App() {
   const hydrateForge = useForgeStore((s) => s.hydrate);
   const forgeRoot = useForgeStore((s) => s.info?.root);
   const layoutPersistenceLoaded = useLayoutStore((s) => s.persistence !== null);
+  const addToast = useToastStore((s) => s.add);
 
   // Pick the built-in light theme on first mount so the picker reflects an
   // "active" selection immediately. The user can switch freely from there.
@@ -67,6 +71,25 @@ export default function App() {
     }
   }, [forgeRoot, layoutPersistenceLoaded, hydrateForge]);
 
+  // Surface plugin notifications (topic = "ui.notification") as toasts.
+  useEffect(() => {
+    const unlistenPromise = listen<PluginEvent<{ level?: string; message?: string }>>(
+      "plugin:event",
+      (event) => {
+        const { topic, plugin_id, payload } = event.payload;
+        if (topic !== "ui.notification") return;
+        const level = (["info", "warn", "error"].includes(payload?.level ?? "")
+          ? payload.level
+          : "info") as ToastLevel;
+        const message = typeof payload?.message === "string" ? payload.message : String(payload);
+        addToast({ level, message, source: plugin_id });
+      },
+    );
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [addToast]);
+
   return (
     <div className="app">
       <header className="app-header">
@@ -81,6 +104,7 @@ export default function App() {
       </main>
       <CommandPalette />
       <SettingsModal />
+      <ToastOverlay />
       <KeybindingDispatcher />
     </div>
   );

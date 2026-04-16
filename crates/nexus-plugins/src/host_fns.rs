@@ -39,6 +39,7 @@ pub const HOST_BUFFER_OVERFLOW: i32 = -1002;
 /// - `host::kv_set` — write a value to the plugin's KV namespace.
 /// - `host::emit_event` — publish a custom event to the kernel event bus.
 /// - `host::read_file` — read a file from within the plugin's forge root.
+/// - `host::notify` — show an in-app toast notification in the UI.
 ///
 /// # Errors
 /// Returns [`PluginError::WasmLoadFailed`] (with a synthetic plugin id) if
@@ -52,6 +53,7 @@ pub fn register_host_fns(linker: &mut Linker<PluginData>) -> Result<(), PluginEr
     register_host_read_file(linker)?;
     register_host_invoke_command(linker)?;
     register_host_get_settings(linker)?;
+    register_host_notify(linker)?;
     Ok(())
 }
 
@@ -689,6 +691,64 @@ fn register_host_get_settings(linker: &mut Linker<PluginData>) -> Result<(), Plu
         .map_err(|e| PluginError::WasmLoadFailed {
             plugin_id: "<host>".to_string(),
             reason: format!("failed to register host::get_settings: {e}"),
+        })?;
+    Ok(())
+}
+
+// ─── host::notify ─────────────────────────────────────────────────────────────
+
+/// `host::notify(level: i32, msg_ptr: i32, msg_len: i32) -> i32`
+///
+/// Shows an in-app toast notification in the Nexus UI. The event is
+/// forwarded to the frontend via the [`PluginEventForwarder`] as a
+/// `plugin:event` with topic `"ui.notification"` and payload
+/// `{ "level": "info"|"warn"|"error", "message": "<text>" }`.
+///
+/// `level`: 0 = info, 1 = warn, 2 = error.
+///
+/// No capability gate — a plugin's own notifications are considered
+/// low-risk first-party feedback. Returns `HOST_OK` on success,
+/// `HOST_ERROR` when the forwarder is not injected or the message is
+/// invalid UTF-8.
+fn register_host_notify(linker: &mut Linker<PluginData>) -> Result<(), PluginError> {
+    linker
+        .func_wrap(
+            "host",
+            "notify",
+            |mut caller: Caller<'_, PluginData>, level: i32, msg_ptr: i32, msg_len: i32| -> i32 {
+                let plugin_id = caller.data().plugin_id.clone();
+                let forwarder = caller.data().event_forwarder.clone();
+                let Some(forwarder) = forwarder else {
+                    tracing::warn!(plugin_id = %plugin_id, "host::notify: event forwarder not injected");
+                    return HOST_ERROR;
+                };
+
+                let Some(wasmtime::Extern::Memory(memory)) = caller.get_export("memory") else {
+                    return HOST_ERROR;
+                };
+                let Some(message) = read_wasm_str(&memory, &caller, msg_ptr, msg_len) else {
+                    tracing::warn!(plugin_id = %plugin_id, "host::notify: invalid UTF-8 message");
+                    return HOST_ERROR;
+                };
+
+                let level_str = match level {
+                    1 => "warn",
+                    2 => "error",
+                    _ => "info",
+                };
+
+                let payload = serde_json::json!({
+                    "level": level_str,
+                    "message": message,
+                });
+
+                forwarder.forward(&plugin_id, "ui.notification", &payload);
+                HOST_OK
+            },
+        )
+        .map_err(|e| PluginError::WasmLoadFailed {
+            plugin_id: "<host>".to_string(),
+            reason: format!("failed to register host::notify: {e}"),
         })?;
     Ok(())
 }

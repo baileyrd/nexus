@@ -10,10 +10,12 @@ import {
   type EditorBlockType,
   type EditorDecorationProvider,
   type EditorKeybinding,
+  type TreeDataProvider,
 } from "../contributions";
 import { invokePluginCommand } from "../ipc/plugins";
 import { getPluginSettings } from "../ipc/pluginSettings";
 import { publishHostEvent } from "./events";
+import { useToastStore, type ToastLevel } from "../stores/toast";
 
 /** Minimal disposable contract mirroring the contribution registry. */
 export type Disposable = () => void;
@@ -53,6 +55,27 @@ export interface NexusPluginContext {
     ): Disposable;
     registerKeybinding(binding: EditorKeybinding): Disposable;
   };
+
+  /**
+   * Host UI APIs. Lets plugins surface feedback to the user (toasts,
+   * future: quick-pick dialogs, input prompts) without importing
+   * Tauri directly or writing bespoke React components.
+   */
+  ui: {
+    /**
+     * Show an in-app toast notification. Auto-dismissed after ~5 s.
+     * `level` controls the colour badge: "info" (default), "warn", or "error".
+     */
+    notify(level: ToastLevel, message: string): void;
+
+    /**
+     * Register a tree-data provider and claim the content-type `viewId`.
+     * A generic tree panel is automatically wired up, so the plugin
+     * doesn't need to ship a bespoke React component.
+     * Returns a disposable that un-registers on plugin stop.
+     */
+    registerTreeDataProvider(viewId: string, provider: TreeDataProvider): Disposable;
+  };
 }
 
 export function createNexusContext(pluginId: string): NexusPluginContext {
@@ -76,6 +99,13 @@ export function createNexusContext(pluginId: string): NexusPluginContext {
         contributions.registerEditorDecorationProvider(provider),
       registerKeybinding: (binding) =>
         contributions.registerEditorKeybinding(binding),
+    },
+    ui: {
+      notify: (level, message) => {
+        useToastStore.getState().add({ level, message, source: pluginId });
+      },
+      registerTreeDataProvider: (viewId, provider) =>
+        contributions.registerTreeDataProvider(viewId, provider),
     },
   };
 }

@@ -4,6 +4,8 @@ export {
   useEditorBlockTypes,
   usePaletteCommands,
   useSettingsTabs,
+  useTreeDataProvider,
+  __resetContributions,
   type CommandHandler,
   type ViewOpener,
   type ContentComponent,
@@ -13,6 +15,8 @@ export {
   type EditorKeybinding,
   type PaletteCommand,
   type SettingsTab,
+  type TreeNode,
+  type TreeDataProvider,
 } from "./registry";
 export { registerBuiltins } from "./builtins";
 export { registerPluginContributions } from "./plugins";

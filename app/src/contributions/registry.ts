@@ -115,6 +115,40 @@ export interface EditorKeybinding {
   when?: string;
 }
 
+/**
+ * A single node in a plugin-contributed tree view (PRD-07 §8 tree data provider).
+ * `children` is omitted or undefined for leaf nodes, or null for unexpanded
+ * branch nodes (lazy-load not yet triggered).
+ */
+export interface TreeNode {
+  /** Stable, unique id within this provider's tree. */
+  id: string;
+  /** Display label. */
+  label: string;
+  /** Optional Lucide icon name. */
+  icon?: string;
+  /** Child nodes. `undefined` = leaf. `null` = unexpanded branch (lazy). */
+  children?: TreeNode[] | null;
+}
+
+/**
+ * Plugin tree-data provider. Plugins implement this interface and register
+ * via `contributions.registerTreeDataProvider(viewId, provider)` to get a
+ * free generic tree panel rendered by the host shell. No bespoke React
+ * component required — the host drives rendering via `getChildren`.
+ */
+export interface TreeDataProvider {
+  /** Stable id matching `viewId`. Used for diagnostics. */
+  id: string;
+  /**
+   * Fetch child nodes. Pass `null` to get the root-level items.
+   * May return synchronously or as a Promise (for async data sources).
+   */
+  getChildren(nodeId: string | null): TreeNode[] | Promise<TreeNode[]>;
+  /** Called when the user clicks a node. Optional. */
+  onSelect?(nodeId: string, node: TreeNode): void | Promise<void>;
+}
+
 type Disposable = () => void;
 
 const commands = new Map<string, CommandHandler>();
@@ -125,6 +159,15 @@ const settingsTabs = new Map<string, SettingsTab>();
 const editorBlockTypes = new Map<string, EditorBlockType>();
 const editorDecorationProviders = new Map<string, EditorDecorationProvider>();
 const editorKeybindings = new Map<string, EditorKeybinding>();
+const treeDataProviders = new Map<string, TreeDataProvider>();
+const treeDataProviderListeners = new Set<() => void>();
+
+/**
+ * Factory function injected at boot (by `registerBuiltins`) to create the
+ * GenericTreePanel content component for a given view id. This avoids a
+ * circular ESM import between registry.ts → GenericTreePanel → registry.ts.
+ */
+let _treePanelFactory: ((viewId: string) => ContentComponent) | null = null;
 /**
  * User keybinding overrides, keyed by `commandId`. When present, the
  * effective keybinding exposed via `listPaletteCommands` / the React
@@ -398,6 +441,58 @@ export const contributions = {
       editorKeybindingListeners.delete(fn);
     };
   },
+
+  /**
+   * Inject the GenericTreePanel factory. Called once at app boot from
+   * `registerBuiltins` after `GenericTreePanel` is imported, so this
+   * file stays free of a direct import (circular-dep avoidance).
+   */
+  setTreePanelFactory(factory: (viewId: string) => ContentComponent): void {
+    _treePanelFactory = factory;
+  },
+
+  /**
+   * Register a tree-data provider for `viewId` and auto-wire a
+   * GenericTreePanel content-type component so plugins don't need to
+   * ship bespoke React code for simple tree views.
+   *
+   * Requires `setTreePanelFactory` to have been called at boot.
+   * Returns a disposable that removes both the provider and content-type
+   * registration when the plugin stops.
+   */
+  registerTreeDataProvider(viewId: string, provider: TreeDataProvider): Disposable {
+    if (treeDataProviders.has(viewId)) {
+      warn(`tree data provider '${viewId}' already registered — replacing`);
+    }
+    treeDataProviders.set(viewId, provider);
+    treeDataProviderListeners.forEach((fn) => fn());
+
+    let disposeContent: Disposable | undefined;
+    if (_treePanelFactory) {
+      disposeContent = contributions.registerContentType(viewId, _treePanelFactory(viewId));
+    } else {
+      warn(`registerTreeDataProvider('${viewId}'): tree panel factory not set — call setTreePanelFactory at boot`);
+    }
+
+    return () => {
+      if (treeDataProviders.get(viewId) === provider) {
+        treeDataProviders.delete(viewId);
+        treeDataProviderListeners.forEach((fn) => fn());
+      }
+      disposeContent?.();
+    };
+  },
+
+  resolveTreeDataProvider(viewId: string): TreeDataProvider | undefined {
+    return treeDataProviders.get(viewId);
+  },
+
+  subscribeTreeDataProviders(fn: () => void): Disposable {
+    treeDataProviderListeners.add(fn);
+    return () => {
+      treeDataProviderListeners.delete(fn);
+    };
+  },
 };
 
 /** Reset all registrations. Test-only. */
@@ -411,12 +506,14 @@ export function __resetContributions() {
   editorDecorationProviders.clear();
   editorKeybindings.clear();
   keybindingOverrides.clear();
+  treeDataProviders.clear();
   contentTypeListeners.clear();
   paletteListeners.clear();
   settingsTabListeners.clear();
   editorBlockTypeListeners.clear();
   editorDecorationListeners.clear();
   editorKeybindingListeners.clear();
+  treeDataProviderListeners.clear();
   paletteSnapshot = null;
   settingsTabsSnapshot = null;
   editorBlockTypesSnapshot = null;
@@ -539,4 +636,17 @@ function editorKeybindingSnapshotFn(): EditorKeybinding[] {
     editorKeybindingSnapshot = Array.from(editorKeybindings.values());
   }
   return editorKeybindingSnapshot;
+}
+
+/**
+ * React hook returning the tree-data provider registered for `viewId`, or
+ * `undefined` if none is registered. Re-renders when a provider is
+ * added or removed (e.g. on plugin hot-reload).
+ */
+export function useTreeDataProvider(viewId: string): TreeDataProvider | undefined {
+  return useSyncExternalStore(
+    (notify) => contributions.subscribeTreeDataProviders(notify),
+    () => treeDataProviders.get(viewId),
+    () => treeDataProviders.get(viewId),
+  );
 }
