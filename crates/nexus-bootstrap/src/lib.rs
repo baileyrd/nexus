@@ -121,6 +121,9 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
 
     let plugins_dir = forge_root.join(".forge").join("plugins");
     let mut loader = PluginLoader::new(&plugins_dir);
+    for extra in &kernel.config().plugin_search_paths {
+        loader.add_search_path(extra.clone());
+    }
     loader.set_event_bus(Arc::clone(&event_bus));
 
     // Register every in-tree core plugin. Order matters where lifecycle hooks

@@ -53,7 +53,7 @@ async fn smoke_event_bus_round_trip() {
 
     // Subscribe, publish, receive
     let bus = kernel.event_bus();
-    let mut sub = bus.subscribe(EventFilter::Variant("PluginLoaded"));
+    let mut sub = bus.subscribe(EventFilter::Variant("PluginLoaded".to_string()));
 
     // We can't call publish_kernel directly from outside the crate (it's
     // pub(crate)), so we verify the bus works by subscribing and then letting

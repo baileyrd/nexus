@@ -180,7 +180,7 @@ impl EventSubscription {
 fn matches_filter(event: &NexusEvent, filter: &EventFilter) -> bool {
     match filter {
         EventFilter::All => true,
-        EventFilter::Variant(name) => variant_name(event) == *name,
+        EventFilter::Variant(name) => variant_name(event) == name.as_str(),
         EventFilter::CustomPrefix(prefix) => {
             if let NexusEvent::Custom { type_id, .. } = event {
                 type_id.starts_with(prefix.as_str())
@@ -255,7 +255,7 @@ mod tests {
     #[tokio::test]
     async fn filter_variant_skips_non_matching_events() {
         let bus = EventBus::new(16);
-        let mut sub = bus.subscribe(EventFilter::Variant("PluginStarted"));
+        let mut sub = bus.subscribe(EventFilter::Variant("PluginStarted".to_string()));
 
         // Publish a PluginLoaded event — should be skipped by the filter
         bus.publish_kernel(plugin_loaded_event("com.a")).unwrap();

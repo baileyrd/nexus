@@ -116,6 +116,16 @@ pub enum PluginError {
         reason: String,
     },
 
+    /// A re-entrant or circular IPC call was detected — the plugin's backend
+    /// mutex was already locked by the current call chain.
+    #[error("re-entrant IPC call to '{plugin_id}'.'{command}'")]
+    ReentrantCall {
+        /// The plugin identifier that was re-entered.
+        plugin_id: String,
+        /// The command id that triggered the re-entry.
+        command: String,
+    },
+
     /// The plugin is currently in the middle of a reload and cannot be used.
     #[error("plugin reloading: {0}")]
     PluginReloading(

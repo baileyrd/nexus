@@ -4,12 +4,11 @@ use std::collections::HashMap;
 
 use crate::plugin::{PluginInfo, PluginStatus};
 
-/// Read-only view of plugins loaded in the kernel.
+/// Read-only snapshot view of plugins loaded in the kernel.
 ///
-/// Populated by the kernel during plugin discovery (not implemented in PRD 01
-/// scope — the registry is empty until `nexus-plugins` lands). Exposed through
-/// `Kernel::plugins()` so `nexus-cli` can implement introspection commands
-/// like `nexus plugin list`.
+/// Currently always empty — the live plugin registry is owned by
+/// `nexus-plugins::PluginLoader`. A future refactor will inject a
+/// `PluginRegistryReader` so `Kernel::plugins()` delegates to the real loader.
 #[derive(Debug, Default)]
 pub struct PluginRegistry {
     plugins: HashMap<String, PluginInfo>,
@@ -57,36 +56,11 @@ impl PluginRegistry {
         self.plugins.is_empty()
     }
 
-    /// Insert or update a plugin info entry. Not part of the public contract —
-    /// `nexus-plugins` will call this during load.
-    #[allow(dead_code)] // wired up by nexus-plugins (PRD 04)
-    pub(crate) fn upsert(&mut self, info: PluginInfo) {
-        self.plugins.insert(info.id.clone(), info);
-    }
-
-    /// Remove a plugin from the registry. Not part of the public contract.
-    #[allow(dead_code)] // wired up by nexus-plugins (PRD 04)
-    pub(crate) fn remove(&mut self, plugin_id: &str) -> Option<PluginInfo> {
-        self.plugins.remove(plugin_id)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capability::CapabilitySet;
-    use crate::plugin::{PluginStatus, TrustLevel};
-
-    fn sample_info(id: &str, status: PluginStatus) -> PluginInfo {
-        PluginInfo {
-            id: id.to_string(),
-            name: id.to_string(),
-            version: "0.1.0".to_string(),
-            trust_level: TrustLevel::Core,
-            status,
-            capabilities: CapabilitySet::empty(),
-        }
-    }
 
     #[test]
     fn empty_registry_has_no_plugins() {
@@ -94,34 +68,5 @@ mod tests {
         assert!(reg.is_empty());
         assert_eq!(reg.len(), 0);
         assert!(reg.list().is_empty());
-    }
-
-    #[test]
-    fn upsert_and_get_roundtrip() {
-        let mut reg = PluginRegistry::new();
-        reg.upsert(sample_info("com.test", PluginStatus::Running));
-        let got = reg.get("com.test").unwrap();
-        assert_eq!(got.id, "com.test");
-    }
-
-    #[test]
-    fn count_by_status_groups_correctly() {
-        let mut reg = PluginRegistry::new();
-        reg.upsert(sample_info("a", PluginStatus::Running));
-        reg.upsert(sample_info("b", PluginStatus::Running));
-        reg.upsert(sample_info("c", PluginStatus::Stopped));
-
-        let counts = reg.count_by_status();
-        assert_eq!(counts.get(&PluginStatus::Running), Some(&2));
-        assert_eq!(counts.get(&PluginStatus::Stopped), Some(&1));
-    }
-
-    #[test]
-    fn remove_returns_the_removed_info() {
-        let mut reg = PluginRegistry::new();
-        reg.upsert(sample_info("a", PluginStatus::Running));
-        let removed = reg.remove("a").unwrap();
-        assert_eq!(removed.id, "a");
-        assert!(reg.is_empty());
     }
 }

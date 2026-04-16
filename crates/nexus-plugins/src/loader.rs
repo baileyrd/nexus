@@ -289,7 +289,10 @@ struct LoadedPlugin {
 /// Maintains a registry of loaded plugins keyed by their manifest ID, and a
 /// separate CLI-dispatch table mapping subcommand IDs to plugin IDs.
 pub struct PluginLoader {
-    plugins_dir: PathBuf,
+    /// Directories searched by [`scan`](Self::scan). The first entry is the
+    /// default `.forge/plugins` path; additional entries come from
+    /// `KernelConfig::plugin_search_paths`.
+    search_paths: Vec<PathBuf>,
     loaded: HashMap<String, LoadedPlugin>,
     /// Maps `subcommand_id` → `plugin_id`
     cli_registry: HashMap<String, String>,
@@ -308,12 +311,20 @@ impl PluginLoader {
     #[must_use]
     pub fn new(plugins_dir: &Path) -> Self {
         Self {
-            plugins_dir: plugins_dir.to_path_buf(),
+            search_paths: vec![plugins_dir.to_path_buf()],
             loaded: HashMap::new(),
             cli_registry: HashMap::new(),
             settings: SettingsManager::new(),
             event_bus: None,
         }
+    }
+
+    /// Append an additional directory to the search path list.
+    ///
+    /// [`scan`](Self::scan) will visit all registered paths; plugins found in
+    /// later paths are loaded after earlier ones.
+    pub fn add_search_path(&mut self, path: PathBuf) {
+        self.search_paths.push(path);
     }
 
     /// Inject the kernel event bus.
@@ -325,25 +336,28 @@ impl PluginLoader {
         self.event_bus = Some(bus);
     }
 
-    /// Walk `plugins_dir` and return the paths of subdirectories that contain
+    /// Walk all registered search paths and return subdirectories that contain
     /// a `manifest.toml` file.
     ///
     /// # Errors
-    /// Returns [`PluginError::Io`] if the plugins directory cannot be read.
+    /// Returns [`PluginError::Io`] if any search directory cannot be read
+    /// (directories that simply don't exist are silently skipped).
     pub fn scan(&self) -> Result<Vec<PathBuf>, PluginError> {
         let mut found = Vec::new();
 
-        let read_dir = match std::fs::read_dir(&self.plugins_dir) {
-            Ok(rd) => rd,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(found),
-            Err(e) => return Err(PluginError::Io(e)),
-        };
+        for search_dir in &self.search_paths {
+            let read_dir = match std::fs::read_dir(search_dir) {
+                Ok(rd) => rd,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(PluginError::Io(e)),
+            };
 
-        for entry in read_dir {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() && path.join("manifest.toml").exists() {
-                found.push(path);
+            for entry in read_dir {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_dir() && path.join("manifest.toml").exists() {
+                    found.push(path);
+                }
             }
         }
 
@@ -801,9 +815,9 @@ impl PluginLoader {
         let (backend, handler_id) = self.resolve_ipc(plugin_id, command_id)?;
         let mut guard = backend
             .try_lock()
-            .map_err(|_| PluginError::CapabilityDenied {
+            .map_err(|_| PluginError::ReentrantCall {
                 plugin_id: plugin_id.to_string(),
-                capability: "ipc.call (re-entrant / circular call detected)".to_string(),
+                command: command_id.to_string(),
             })?;
         guard.dispatch(handler_id, args)
     }
@@ -1185,14 +1199,18 @@ impl PluginLoader {
 ///
 /// Rules:
 /// - `"*"` or `""` → [`EventFilter::All`]
+/// - Known kernel event variant names → [`EventFilter::Variant`]
 /// - ends with `".*"` → [`EventFilter::CustomPrefix`] (the prefix before `*`)
 /// - otherwise → [`EventFilter::CustomExact`]
-///
-/// Note: [`EventFilter::Variant`] requires a `&'static str` so it cannot be
-/// used for dynamically-loaded manifest filter strings.
 fn parse_event_filter(filter: &str) -> EventFilter {
     match filter {
         "" | "*" => EventFilter::All,
+        "PluginLoaded"
+        | "PluginStarted"
+        | "PluginStopped"
+        | "PluginCrashed"
+        | "CapabilityGranted"
+        | "CapabilityDenied" => EventFilter::Variant(filter.to_string()),
         f if f.ends_with(".*") => {
             EventFilter::CustomPrefix(f[..f.len() - 1].to_string()) // strip "*", keep "."
         }
@@ -1377,7 +1395,7 @@ impl IpcDispatcher for SharedPluginLoader {
         // Loader lock released — safe for re-entrant calls.
         let mut guard = backend
             .try_lock()
-            .map_err(|_| IpcError::PluginCrashedDuringCall {
+            .map_err(|_| IpcError::ReentrantCall {
                 plugin_id: target_plugin_id.to_string(),
                 command: command_id.to_string(),
             })?;

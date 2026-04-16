@@ -1203,6 +1203,13 @@ pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), Plug
                 .iter()
                 .map(|r| r.handler_id),
         )
+        .chain(
+            manifest
+                .registrations
+                .uri_handlers
+                .iter()
+                .map(|r| r.handler_id),
+        )
     {
         if !seen_handlers.insert(h) {
             return Err(PluginError::ManifestValidation {

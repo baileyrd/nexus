@@ -95,7 +95,7 @@ pub enum EventFilter {
     /// Match every event on the bus. High-traffic; intended for debug/tracing.
     All,
     /// Match a single kernel-event variant by its name (e.g., `"PluginLoaded"`).
-    Variant(&'static str),
+    Variant(String),
     /// Match `NexusEvent::Custom` events whose `type_id` starts with this prefix.
     CustomPrefix(String),
     /// Match exactly one `NexusEvent::Custom` `type_id`.
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn event_filter_is_clone() {
-        let f1 = EventFilter::Variant("PluginLoaded");
+        let f1 = EventFilter::Variant("PluginLoaded".to_string());
         let _f2 = f1.clone();
     }
 

@@ -223,6 +223,16 @@ pub enum IpcError {
     /// cannot be routed. Typical in unit tests or bare kernels.
     #[error("no IPC dispatcher configured on this kernel")]
     DispatcherUnavailable,
+
+    /// A re-entrant or circular IPC call was detected — the target plugin's
+    /// backend mutex was already locked by the current call chain.
+    #[error("re-entrant IPC call to '{plugin_id}'.'{command}'")]
+    ReentrantCall {
+        /// The target plugin id.
+        plugin_id: String,
+        /// The command id.
+        command: String,
+    },
 }
 
 /// Errors from the KV store.
