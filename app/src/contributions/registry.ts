@@ -117,6 +117,33 @@ export interface EditorKeybinding {
 }
 
 /**
+ * Editor text-expansion snippet contributed via the registry (PRD-08 §14
+ * extension). When the user types `trigger` and presses Tab, the editor
+ * replaces the trigger text with `body`. Use `$CURSOR` in the body to
+ * mark the final cursor position (omit for end-of-body placement).
+ *
+ * Plugin snippets are namespaced: id `"plugin:<pluginId>:<name>"`.
+ */
+export interface Snippet {
+  /** Stable id. */
+  id: string;
+  /** Text the user types to activate the snippet (no spaces). */
+  trigger: string;
+  /**
+   * Expansion text. `$CURSOR` is replaced by the final caret position.
+   * If absent, the cursor lands at the end of the expanded body.
+   */
+  body: string;
+  /** Short description shown in autocomplete hints. */
+  description?: string;
+  /**
+   * Restrict the snippet to specific file extensions (lowercase, without dot).
+   * Empty array or omitted = active in all file types.
+   */
+  fileTypes?: string[];
+}
+
+/**
  * A single node in a plugin-contributed tree view (PRD-07 §8 tree data provider).
  * `children` is omitted or undefined for leaf nodes, or null for unexpanded
  * branch nodes (lazy-load not yet triggered).
@@ -190,6 +217,8 @@ const editorDecorationProviders = new Map<string, EditorDecorationProvider>();
 const editorKeybindings = new Map<string, EditorKeybinding>();
 const treeDataProviders = new Map<string, TreeDataProvider>();
 const treeDataProviderListeners = new Set<() => void>();
+const snippets = new Map<string, Snippet>();
+const snippetListeners = new Set<() => void>();
 
 /**
  * File extension → content-type id map. Keys are lowercase extensions
@@ -641,6 +670,39 @@ export const contributions = {
       contextMenuListeners.delete(fn);
     };
   },
+
+  /**
+   * Register a text-expansion snippet. When the user types `trigger` and
+   * presses Tab in the editor, the trigger is replaced with `body`.
+   *
+   * Returns a disposable that removes the snippet when the plugin stops.
+   */
+  registerSnippet(snippet: Snippet): Disposable {
+    if (snippets.has(snippet.id)) {
+      warn(`snippet '${snippet.id}' already registered — replacing`);
+    }
+    snippets.set(snippet.id, snippet);
+    snippetSnapshot = null;
+    snippetListeners.forEach((fn) => fn());
+    return () => {
+      if (snippets.get(snippet.id) === snippet) {
+        snippets.delete(snippet.id);
+        snippetSnapshot = null;
+        snippetListeners.forEach((fn) => fn());
+      }
+    };
+  },
+
+  listSnippets(): Snippet[] {
+    return snippetSnapshotFn();
+  },
+
+  subscribeSnippets(fn: () => void): Disposable {
+    snippetListeners.add(fn);
+    return () => {
+      snippetListeners.delete(fn);
+    };
+  },
 };
 
 /** Reset all registrations. Test-only. */
@@ -657,6 +719,7 @@ export function __resetContributions() {
   treeDataProviders.clear();
   fileHandlers.clear();
   contextMenuItems.clear();
+  snippets.clear();
   contentTypeListeners.clear();
   paletteListeners.clear();
   settingsTabListeners.clear();
@@ -666,11 +729,13 @@ export function __resetContributions() {
   treeDataProviderListeners.clear();
   fileHandlerListeners.clear();
   contextMenuListeners.clear();
+  snippetListeners.clear();
   paletteSnapshot = null;
   settingsTabsSnapshot = null;
   editorBlockTypesSnapshot = null;
   editorDecorationSnapshot = null;
   editorKeybindingSnapshot = null;
+  snippetSnapshot = null;
   contextMenuSnapshot.clear();
 }
 
@@ -841,5 +906,28 @@ export function useFileHandler(ext: string | null | undefined): string | undefin
     (notify) => contributions.subscribeFileHandlers(notify),
     () => (ext ? contributions.resolveFileHandler(ext) : undefined),
     () => (ext ? contributions.resolveFileHandler(ext) : undefined),
+  );
+}
+
+/** Cached snapshot of the snippet list. Insertion order. */
+let snippetSnapshot: Snippet[] | null = null;
+
+function snippetSnapshotFn(): Snippet[] {
+  if (!snippetSnapshot) {
+    snippetSnapshot = Array.from(snippets.values());
+  }
+  return snippetSnapshot;
+}
+
+/**
+ * React hook returning all registered snippets. Re-renders when a snippet
+ * is added or removed. Consumed by the snippet CM6 extension to stay in
+ * sync with plugin hot-reloads.
+ */
+export function useSnippets(): Snippet[] {
+  return useSyncExternalStore(
+    (notify) => contributions.subscribeSnippets(notify),
+    snippetSnapshotFn,
+    snippetSnapshotFn,
   );
 }

@@ -20,6 +20,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { bracketMatching, foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
 import { liveMarkdown } from "../../editor/liveMarkdown";
 import { slashCommands } from "../../editor/slashCommandExtension";
+import { buildSnippetExtension, filterSnippetsForExt } from "../../editor/snippetExtension";
 import { contributions, type EditorKeybinding } from "../../contributions";
 
 export interface EditorSurfaceProps {
@@ -84,12 +85,18 @@ function currentPluginKeymap(): Extension {
   return keymap.of(contributions.listEditorKeybindings().map(toCmKeyBinding));
 }
 
+function currentSnippetExtension(filePath: string) {
+  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+  return buildSnippetExtension(filterSnippetsForExt(contributions.listSnippets(), ext));
+}
+
 function getExtensions(
   filePath: string,
   onChangeRef: React.MutableRefObject<EditorSurfaceProps["onChange"]>,
   onSaveRef: React.MutableRefObject<EditorSurfaceProps["onSave"]>,
   pluginDecorationsCompartment: Compartment,
   pluginKeymapCompartment: Compartment,
+  snippetCompartment: Compartment,
 ) {
   const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
   const isMarkdown = ext === "md" || ext === "mdx" || ext === "markdown";
@@ -106,6 +113,9 @@ function getExtensions(
     highlightSelectionMatches(),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     ...(isMarkdown ? [markdown(), liveMarkdown(), slashCommands()] : []),
+    // Snippet Tab-expansion is listed before the default keymap so it runs
+    // first; it returns false when no trigger matches, deferring to indent.
+    snippetCompartment.of(currentSnippetExtension(filePath)),
     // Plugin-registered keybindings win over the CM6 defaults on exact
     // match because they're listed first in the keymap extension set.
     pluginKeymapCompartment.of(currentPluginKeymap()),
@@ -141,12 +151,15 @@ export function EditorSurface({
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
   const initialContentRef = useRef(initialContent);
+  const filePathRef = useRef(filePath);
   const pluginDecorationsCompartment = useMemo(() => new Compartment(), []);
   const pluginKeymapCompartment = useMemo(() => new Compartment(), []);
+  const snippetCompartment = useMemo(() => new Compartment(), []);
 
   // Keep callback refs current without re-creating the editor.
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
+  filePathRef.current = filePath;
 
   // Mount the editor on first render.
   useEffect(() => {
@@ -160,6 +173,7 @@ export function EditorSurface({
         onSaveRef,
         pluginDecorationsCompartment,
         pluginKeymapCompartment,
+        snippetCompartment,
       ),
     });
     const view = new EditorView({ state, parent: parentRef.current });
@@ -212,13 +226,24 @@ export function EditorSurface({
         effects: pluginKeymapCompartment.reconfigure(currentPluginKeymap()),
       });
     };
+    const resyncSnippets = () => {
+      const view = viewRef.current;
+      if (!view) return;
+      view.dispatch({
+        effects: snippetCompartment.reconfigure(
+          currentSnippetExtension(filePathRef.current),
+        ),
+      });
+    };
     const offDec = contributions.subscribeEditorDecorationProviders(resyncDecorations);
     const offKey = contributions.subscribeEditorKeybindings(resyncKeymap);
+    const offSnip = contributions.subscribeSnippets(resyncSnippets);
     return () => {
       offDec();
       offKey();
+      offSnip();
     };
-  }, [pluginDecorationsCompartment, pluginKeymapCompartment]);
+  }, [pluginDecorationsCompartment, pluginKeymapCompartment, snippetCompartment]);
 
   // Handle outline scroll-to-heading events.
   const handleScrollToHeading = useCallback((e: Event) => {

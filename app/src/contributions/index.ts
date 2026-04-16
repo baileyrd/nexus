@@ -6,6 +6,7 @@ export {
   useFileHandler,
   usePaletteCommands,
   useSettingsTabs,
+  useSnippets,
   useTreeDataProvider,
   __resetContributions,
   type CommandHandler,
@@ -18,6 +19,7 @@ export {
   type EditorKeybinding,
   type PaletteCommand,
   type SettingsTab,
+  type Snippet,
   type TreeNode,
   type TreeDataProvider,
 } from "./registry";

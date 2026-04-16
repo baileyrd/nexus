@@ -11,6 +11,7 @@ import {
   type EditorBlockType,
   type EditorDecorationProvider,
   type EditorKeybinding,
+  type Snippet,
   type TreeDataProvider,
 } from "../contributions";
 import { invokePluginCommand } from "../ipc/plugins";
@@ -55,6 +56,13 @@ export interface NexusPluginContext {
       provider: EditorDecorationProvider,
     ): Disposable;
     registerKeybinding(binding: EditorKeybinding): Disposable;
+    /**
+     * Register a text-expansion snippet. When the user types `trigger`
+     * and presses Tab in the editor, the trigger is replaced with `body`.
+     * Use `$CURSOR` in `body` to control final caret placement.
+     * Returns a disposable that removes the snippet on plugin stop.
+     */
+    registerSnippet(snippet: Snippet): Disposable;
   };
 
   /**
@@ -132,6 +140,8 @@ export function createNexusContext(pluginId: string): NexusPluginContext {
         contributions.registerEditorDecorationProvider(provider),
       registerKeybinding: (binding) =>
         contributions.registerEditorKeybinding(binding),
+      registerSnippet: (snippet) =>
+        contributions.registerSnippet(snippet),
     },
     ui: {
       notify: (level, message) => {
