@@ -27,8 +27,6 @@ tauri-plugin-dialog = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
-notify = { workspace = true }
-notify-debouncer-mini = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

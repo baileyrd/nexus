@@ -13,9 +13,20 @@
 #![allow(clippy::module_name_repetitions)]
 
 use std::sync::Mutex;
+use std::time::Duration;
 
+use nexus_kernel::{EventFilter, RecvError};
 use nexus_theme::api::ThemeEngine;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+
+/// Tauri event emitted when any file under the active forge root changes.
+/// Frontend listens via `@tauri-apps/api/event`.
+///
+/// Previously emitted by a `notify_debouncer_mini` watcher in `forge.rs`;
+/// now forwarded by the storage-plugin kernel-bus subscriber started in
+/// [`run`] so the frontend always sees notifications *after* the storage
+/// index has been updated.
+const FS_CHANGED_EVENT: &str = "forge:fs-changed";
 
 pub mod commands;
 pub mod editor;
@@ -38,7 +49,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(commands::EngineState(Mutex::new(engine)))
         .manage(forge::ForgeState(Mutex::new(None)))
-        .manage(forge::WatcherHandle(Mutex::new(None)))
         .manage(editor::KernelRuntime::empty())
         .manage(plugins::bootstrap())
         .setup(|app| {
@@ -49,22 +59,17 @@ pub fn run() {
             match forge::bootstrap(&handle) {
                 Ok(info) => {
                     tracing::info!(root = %info.root.display(), name = %info.name, "opened forge");
-                    match forge::start_watcher(handle.clone(), &info.root) {
-                        Ok(debouncer) => {
-                            if let Some(state) = app.try_state::<forge::WatcherHandle>() {
-                                if let Ok(mut guard) = state.0.lock() {
-                                    *guard = Some(debouncer);
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            tracing::warn!(%err, "forge watcher failed to start; live tree refresh disabled");
-                        }
-                    }
                     match nexus_bootstrap::build_cli_runtime(info.root.clone()) {
                         Ok(runtime) => {
+                            let runtime = std::sync::Arc::new(runtime);
+                            // Subscribe to storage file-change events on the
+                            // kernel bus and forward them to the frontend as
+                            // `forge:fs-changed`. The storage plugin's watcher
+                            // updates the index before publishing, so the
+                            // frontend always sees notifications in order.
+                            start_storage_event_forwarder(handle.clone(), &runtime);
                             if let Some(state) = app.try_state::<editor::KernelRuntime>() {
-                                state.set(std::sync::Arc::new(runtime));
+                                state.set(runtime);
                             }
                             tracing::info!("kernel runtime built for editor IPC");
                         }
@@ -136,4 +141,49 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch nexus-app");
+}
+
+/// Spawn a background thread that subscribes to `com.nexus.storage.file_*`
+/// events on the kernel bus and forwards each one as a `forge:fs-changed`
+/// Tauri event. This replaces the old `notify_debouncer_mini` watcher that
+/// ran directly in `nexus-app`, which raced against the storage index update.
+///
+/// With this approach the frontend only sees a notification *after*
+/// `StorageCorePlugin`'s bridge thread has already processed the raw OS event
+/// and published the typed kernel event — so the index is always current
+/// when the file tree re-fetches.
+fn start_storage_event_forwarder(
+    handle: tauri::AppHandle,
+    runtime: &nexus_bootstrap::Runtime,
+) {
+    let bus = runtime.kernel.event_bus();
+    let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+        "com.nexus.storage.file_".to_string(),
+    ));
+
+    std::thread::Builder::new()
+        .name("nexus-storage-event-forwarder".to_string())
+        .spawn(move || loop {
+            // Poll at 100 ms intervals — fast enough to feel live, cheap
+            // enough not to busy-spin.
+            std::thread::sleep(Duration::from_millis(100));
+            loop {
+                match sub.try_recv() {
+                    Ok(Some(_)) => {
+                        if let Err(e) = handle.emit(FS_CHANGED_EVENT, ()) {
+                            tracing::warn!(%e, "storage event forwarder: emit failed");
+                        }
+                    }
+                    // No more events buffered — back to sleep.
+                    Ok(None) => break,
+                    // Fell behind; skip lost events and keep going.
+                    Err(RecvError::Lagged(n)) => {
+                        tracing::warn!(n, "storage event forwarder: lagged, {n} events lost");
+                    }
+                    // Bus shut down — exit thread.
+                    Err(RecvError::Closed) => return,
+                }
+            }
+        })
+        .expect("spawn storage event forwarder");
 }

@@ -24,8 +24,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use nexus_kernel::PluginContext;
-use notify::RecursiveMode;
-use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -80,14 +78,6 @@ const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 /// Tauri-managed handle to the currently-open forge.
 pub struct ForgeState(pub Mutex<Option<ForgeInfo>>);
 
-/// Tauri-managed handle that keeps the FS watcher alive for the
-/// duration of the app. Dropped on shutdown.
-pub struct WatcherHandle(pub Mutex<Option<Debouncer<notify::RecommendedWatcher>>>);
-
-/// Tauri event emitted when any file under the active forge root
-/// changes. Frontend listens via `@tauri-apps/api/event`.
-pub const FS_CHANGED_EVENT: &str = "forge:fs-changed";
-
 const FORGE_ENV: &str = "NEXUS_FORGE_DIR";
 const DEFAULT_FORGE_DIRNAME: &str = "default-forge";
 
@@ -115,32 +105,6 @@ pub fn bootstrap(app: &AppHandle) -> Result<ForgeInfo, String> {
     Ok(info_for(&root))
 }
 
-/// Start a debounced recursive watcher on `root` that emits
-/// [`FS_CHANGED_EVENT`] to the frontend on any change. The returned
-/// debouncer must be kept alive (typically stored in [`WatcherHandle`]).
-pub fn start_watcher(
-    app: AppHandle,
-    root: &Path,
-) -> Result<Debouncer<notify::RecommendedWatcher>, String> {
-    let mut debouncer = new_debouncer(
-        Duration::from_millis(200),
-        move |res: DebounceEventResult| match res {
-            Ok(_events) => {
-                if let Err(e) = app.emit(FS_CHANGED_EVENT, ()) {
-                    tracing::warn!(%e, "failed to emit forge:fs-changed");
-                }
-            }
-            Err(err) => tracing::warn!(?err, "watcher error"),
-        },
-    )
-    .map_err(|e| e.to_string())?;
-    debouncer
-        .watcher()
-        .watch(root, RecursiveMode::Recursive)
-        .map_err(|e| e.to_string())?;
-    Ok(debouncer)
-}
-
 fn init_layout(root: &Path) -> Result<(), String> {
     for sub in ["notes", "attachments", ".forge"] {
         fs::create_dir_all(root.join(sub)).map_err(|e| e.to_string())?;
@@ -166,14 +130,16 @@ pub fn current_forge(state: State<'_, ForgeState>) -> Option<ForgeInfo> {
     state.0.lock().ok().and_then(|g| g.clone())
 }
 
-/// Open a forge at `path`, initializing its layout if needed and
-/// restarting the FS watcher to point at the new root.
+/// Open a forge at `path`, initializing its layout if needed.
+///
+/// Emits `forge:fs-changed` immediately so cached file-tree listings
+/// invalidate before the storage plugin's watcher fires its first event
+/// from the new root.
 #[tauri::command]
 pub fn open_forge(
     path: String,
     app: AppHandle,
     state: State<'_, ForgeState>,
-    watcher: State<'_, WatcherHandle>,
 ) -> Result<ForgeInfo, String> {
     let root = PathBuf::from(&path);
     if !root.is_dir() {
@@ -182,28 +148,10 @@ pub fn open_forge(
     init_layout(&root)?;
     let info = info_for(&root);
 
-    // Drop the old watcher *before* starting the new one so we never
-    // hold two simultaneous recursive watches on disk.
-    {
-        let mut guard = watcher.0.lock().map_err(|_| "watcher state poisoned")?;
-        *guard = None;
-    }
-    match start_watcher(app.clone(), &info.root) {
-        Ok(debouncer) => {
-            if let Ok(mut guard) = watcher.0.lock() {
-                *guard = Some(debouncer);
-            }
-        }
-        Err(err) => {
-            tracing::warn!(%err, "watcher restart failed; live tree refresh disabled");
-        }
-    }
-
     *state.0.lock().map_err(|_| "forge state poisoned")? = Some(info.clone());
     crate::persistence::write_last_forge_path(&app, &info.root);
-    // Nudge the frontend so any cached listings invalidate immediately
-    // even before the new watcher fires its first event.
-    let _ = app.emit(FS_CHANGED_EVENT, ());
+    // Nudge the frontend so any cached listings invalidate immediately.
+    let _ = app.emit(crate::FS_CHANGED_EVENT, ());
     Ok(info)
 }
 

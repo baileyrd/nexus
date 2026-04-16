@@ -1,5 +1,6 @@
 import type { RibbonItem } from "../../bindings";
 import { contributions } from "../../contributions";
+import { useLayoutStore } from "../../stores/layout";
 import { Icon } from "../Icon";
 
 interface RibbonItemsProps {
@@ -37,15 +38,17 @@ export function RibbonItems({ items }: RibbonItemsProps) {
 
 function handleRibbonClick(item: RibbonItem) {
   switch (item.action.kind) {
-    case "togglePanel":
-      // Ribbon-level togglePanel doesn't name a side (the data model
-      // assumes a single side panel at the workspace level); will be
-      // resolved once ribbon items carry a target side.
-      // eslint-disable-next-line no-console
-      console.log(
-        `[ribbon] togglePanel '${item.action.panelId}' from workspace ribbon (target side panel pending)`,
+    case "togglePanel": {
+      const { layout, togglePanelVisibility } = useLayoutStore.getState();
+      if (!layout) return;
+      // Determine which side owns this panel by searching both sides.
+      const inLeft = layout.leftSidePanel.panels.some(
+        (p) => p.id === item.action.panelId,
       );
+      const side = inLeft ? "left" : "right";
+      togglePanelVisibility(side, item.action.panelId);
       return;
+    }
     case "invokeCommand":
       contributions.invokeCommand(item.action.command);
       return;
