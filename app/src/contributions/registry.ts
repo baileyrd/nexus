@@ -1,4 +1,4 @@
-import { useSyncExternalStore, type ComponentType } from "react";
+import { createElement, useSyncExternalStore, type ComponentType } from "react";
 import type { Extension } from "@codemirror/state";
 import type { Panel } from "../bindings";
 import type { ContextMenuItem } from "../components/ContextMenu";
@@ -178,6 +178,26 @@ export interface TreeDataProvider {
 }
 
 /**
+ * Configuration for a webview panel — a sandboxed iframe that renders
+ * plugin-supplied HTML. WASM plugins use this because they cannot ship
+ * React components; JS script plugins may prefer `registerContentType`
+ * for richer host integration.
+ *
+ * Security: the iframe gets `sandbox="allow-scripts allow-same-origin"`
+ * by default. Set `allowPopups: true` only when the HTML needs to open
+ * links (rare). The host-supplied `allow-same-origin` token is needed so
+ * Tauri's asset-protocol URLs load correctly; it does **not** grant the
+ * page access to the parent frame's DOM — the cross-origin iframe boundary
+ * still applies when the page is served from a different Tauri origin.
+ */
+export interface WebviewPanelConfig {
+  /** URL to load inside the iframe (`tauri://localhost/…`, `blob:`, etc.). */
+  htmlUrl: string;
+  /** Allow the iframe to open popups or follow links. Default `false`. */
+  allowPopups?: boolean;
+}
+
+/**
  * URI handler registered by a plugin or the host to receive incoming
  * `scheme://…` URLs (PRD-04 §1.1 `protocol_handlers`).
  *
@@ -299,6 +319,9 @@ const fileHandlerListeners = new Set<() => void>();
  * serve multiple schemes if a plugin registers it more than once.
  */
 const uriHandlers = new Map<string, UriHandler>();
+
+/** Webview panel configs keyed by viewId. */
+const webviewPanels = new Map<string, WebviewPanelConfig>();
 
 /**
  * Flat list of all menu-bar items. Grouped and sorted at render time.
@@ -699,6 +722,40 @@ export const contributions = {
   },
 
   /**
+   * Register an iframe-backed webview panel for `viewId` and auto-wire the
+   * matching content-type component. Ideal for WASM plugins that cannot ship
+   * React components: provide an HTML page URL (Tauri asset, `blob:`, or any
+   * URL the webview can load) and the host renders it inside a sandboxed
+   * `<iframe>`.
+   *
+   * Returns a disposable that removes both the webview config and the
+   * content-type registration when the plugin stops.
+   */
+  registerWebviewPanel(viewId: string, config: WebviewPanelConfig): Disposable {
+    if (webviewPanels.has(viewId)) {
+      warn(`webview panel '${viewId}' already registered — replacing`);
+    }
+    webviewPanels.set(viewId, config);
+
+    // Auto-wire a content-type component so PanelView renders the iframe.
+    const disposeContent = contributions.registerContentType(
+      viewId,
+      makeWebviewComponent(viewId),
+    );
+
+    return () => {
+      if (webviewPanels.get(viewId) === config) {
+        webviewPanels.delete(viewId);
+      }
+      disposeContent();
+    };
+  },
+
+  resolveWebviewPanel(viewId: string): WebviewPanelConfig | undefined {
+    return webviewPanels.get(viewId);
+  },
+
+  /**
    * Register a URI handler for the given scheme (PRD-04 §1.1). When an
    * incoming URL whose scheme matches `handler.scheme` is dispatched,
    * `handler.handle(url)` is called. Returns a disposable that removes
@@ -874,6 +931,7 @@ export function __resetContributions() {
   treeDataProviders.clear();
   fileHandlers.clear();
   uriHandlers.clear();
+  webviewPanels.clear();
   menuItems.clear();
   menuItemListeners.clear();
   contextMenuItems.clear();
@@ -1123,4 +1181,34 @@ export function useMenuItems(): MenuItem[] {
     menuItemsSnapshotFn,
     menuItemsSnapshotFn,
   );
+}
+
+/**
+ * Build a minimal React component that renders a sandboxed `<iframe>` for
+ * `viewId`. Called once per `registerWebviewPanel` call so each panel gets
+ * a stable component identity (React doesn't remount on prop changes).
+ *
+ * The component reads the config from `webviewPanels` at render time rather
+ * than closing over the value at creation time, so a hot-replace that
+ * updates the URL is reflected without an app restart.
+ */
+function makeWebviewComponent(viewId: string): ContentComponent {
+  function WebviewPanel() {
+    const config = webviewPanels.get(viewId);
+    if (!config) return null;
+    const sandbox = [
+      "allow-scripts",
+      "allow-same-origin",
+      ...(config.allowPopups ? ["allow-popups"] : []),
+    ].join(" ");
+    return createElement("iframe", {
+      className: "webview-panel",
+      src: config.htmlUrl,
+      sandbox,
+      title: viewId,
+      style: { width: "100%", height: "100%", border: "none" },
+    });
+  }
+  WebviewPanel.displayName = `WebviewPanel(${viewId})`;
+  return WebviewPanel as unknown as ContentComponent;
 }

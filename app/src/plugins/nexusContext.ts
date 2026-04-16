@@ -15,6 +15,7 @@ import {
   type Snippet,
   type TreeDataProvider,
   type UriHandler,
+  type WebviewPanelConfig,
 } from "../contributions";
 import { invokePluginCommand } from "../ipc/plugins";
 import { getPluginSettings } from "../ipc/pluginSettings";
@@ -158,6 +159,25 @@ export interface NexusPluginContext {
      * ```
      */
     registerUriHandler(handler: UriHandler): Disposable;
+
+    /**
+     * Register a webview (iframe) panel for `viewId`. Intended for WASM
+     * plugins that cannot ship React components — provide an HTML URL and
+     * the host renders it in a sandboxed `<iframe>`. JS script plugins that
+     * need full React integration should use `contributions.registerContentType`
+     * instead.
+     *
+     * The panel appears wherever `viewId` is used as a content-type in the
+     * layout (e.g. via a `[[ui_panels]]` manifest entry that sets the same id).
+     *
+     * Example:
+     * ```ts
+     * ctx.ui.registerWebviewPanel("com.myorg.plugin.view", {
+     *   htmlUrl: "https://localhost:1234/panel.html",
+     * });
+     * ```
+     */
+    registerWebviewPanel(viewId: string, config: WebviewPanelConfig): Disposable;
   };
 }
 
@@ -199,6 +219,8 @@ export function createNexusContext(pluginId: string): NexusPluginContext {
         contributions.registerMenuItem(item),
       registerUriHandler: (handler) =>
         contributions.registerUriHandler(handler),
+      registerWebviewPanel: (viewId, config) =>
+        contributions.registerWebviewPanel(viewId, config),
     },
   };
 }

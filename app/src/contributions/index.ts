@@ -21,6 +21,7 @@ export {
   type MenuItem,
   type PaletteCommand,
   type UriHandler,
+  type WebviewPanelConfig,
   type SettingsTab,
   type Snippet,
   type TreeNode,
