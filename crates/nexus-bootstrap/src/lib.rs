@@ -393,6 +393,10 @@ fn register_core_plugins(
                     ("undo", nexus_editor::core_plugin::HANDLER_UNDO),
                     ("redo", nexus_editor::core_plugin::HANDLER_REDO),
                     ("list_open", nexus_editor::core_plugin::HANDLER_LIST_OPEN),
+                    (
+                        "sync_content",
+                        nexus_editor::core_plugin::HANDLER_SYNC_CONTENT,
+                    ),
                 ],
             ),
             forge_root,

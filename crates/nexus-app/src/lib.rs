@@ -158,6 +158,7 @@ pub fn run() {
             editor::editor_undo,
             editor::editor_redo,
             editor::editor_list_open,
+            editor::editor_sync_content,
         ])
         .run(tauri::generate_context!())
         .expect("failed to launch nexus-app");

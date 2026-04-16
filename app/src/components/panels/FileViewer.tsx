@@ -1,8 +1,9 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { useForgeStore } from "../../stores/forge";
 import { useOpenFileStore } from "../../stores/openFile";
 import { EditorSurface } from "../surfaces/EditorSurface";
+import { editorSyncContent } from "../../ipc/editor";
 
 /**
  * File viewer with live CodeMirror 6 editor. Renders the currently-open
@@ -20,13 +21,35 @@ export function FileViewer() {
   const refresh = useOpenFileStore((s) => s.refresh);
   const fsVersion = useForgeStore((s) => s.fsVersion);
 
+  // Debounced sync: after 800 ms of no typing, push the latest content to the
+  // Rust block tree so AI / MCP / outline consumers stay reasonably fresh.
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestContentRef = useRef<string>("");
+
   useEffect(() => {
     void refresh();
   }, [fsVersion, refresh]);
 
-  const handleChange = useCallback(() => {
-    markDirty();
-  }, [markDirty]);
+  const handleChange = useCallback(
+    (content: string) => {
+      markDirty();
+      latestContentRef.current = content;
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      const relpath = file?.relpath;
+      if (!relpath) return;
+      syncTimerRef.current = setTimeout(() => {
+        void editorSyncContent(relpath, latestContentRef.current);
+      }, 800);
+    },
+    [markDirty, file?.relpath],
+  );
+
+  // Cancel any pending sync when the component unmounts or the file changes.
+  useEffect(() => {
+    return () => {
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    };
+  }, [file?.relpath]);
 
   const handleSave = useCallback(
     (content: string) => {

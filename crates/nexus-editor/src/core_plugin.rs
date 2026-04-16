@@ -59,6 +59,13 @@ pub const HANDLER_UNDO: u32 = 6;
 pub const HANDLER_REDO: u32 = 7;
 /// Handler id for `list_open`. Args: `{}`; Returns: `Vec<String>`.
 pub const HANDLER_LIST_OPEN: u32 = 8;
+/// Handler id for `sync_content`. Args: `{ "relpath": String, "content": String }`; Returns: `{}`.
+///
+/// Parses `content` and replaces the in-memory block tree for the session
+/// identified by `relpath`. If no session exists for that path, one is
+/// created. The undo tree is left untouched — this is a background resync
+/// for read-only consumers (AI, MCP, outline), not a user transaction.
+pub const HANDLER_SYNC_CONTENT: u32 = 9;
 
 // ── Wire types ───────────────────────────────────────────────────────────────
 
@@ -153,6 +160,7 @@ impl CorePlugin for EditorCorePlugin {
             HANDLER_UNDO => handle_undo(&self.sessions, args),
             HANDLER_REDO => handle_redo(&self.sessions, args),
             HANDLER_LIST_OPEN => handle_list_open(&self.sessions),
+            HANDLER_SYNC_CONTENT => handle_sync_content(&self.sessions, args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -410,6 +418,38 @@ fn handle_list_open(sessions: &Mutex<HashMap<String, Session>>) -> Result<Value,
     let mut paths: Vec<String> = guard.keys().cloned().collect();
     paths.sort();
     serde_json::to_value(paths).map_err(|e| exec_err(format!("list_open: serialize: {e}")))
+}
+
+/// Re-parse `content` and update (or create) the block tree for `relpath`.
+///
+/// The undo history is left untouched: `sync_content` is a background resync
+/// for read-only consumers (AI, MCP, outline), not a user-visible transaction.
+fn handle_sync_content(
+    sessions: &Mutex<HashMap<String, Session>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let relpath = relpath_arg(args, "sync_content")?;
+    let content = args["content"]
+        .as_str()
+        .ok_or_else(|| exec_err("sync_content: missing 'content'".to_string()))?;
+
+    let parser = MarkdownParser::new(ParseOptions {
+        file_path: relpath.clone(),
+        ..ParseOptions::default()
+    });
+    let tree = parser
+        .parse(content)
+        .map_err(|e| exec_err(format!("sync_content: parse '{relpath}': {e}")))?;
+
+    let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+    let session = guard.entry(relpath.clone()).or_insert_with(|| Session {
+        tree: BlockTree::default(),
+        undo: UndoTree::new(),
+        relpath: relpath.clone(),
+    });
+    session.tree = tree;
+
+    Ok(serde_json::json!({}))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

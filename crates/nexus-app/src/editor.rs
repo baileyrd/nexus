@@ -155,3 +155,23 @@ pub async fn editor_list_open(
 ) -> Result<serde_json::Value, String> {
     call_editor(runtime, "list_open", serde_json::json!({})).await
 }
+
+/// Update the in-memory block tree from raw markdown text without disk I/O.
+///
+/// Called by the frontend after a debounce period following each keystroke so
+/// that consumers (AI, MCP, outline) always read a reasonably fresh block tree
+/// without requiring a per-keystroke IPC round-trip. Creates a session for
+/// `relpath` if none exists; leaves the undo history untouched.
+#[tauri::command]
+pub async fn editor_sync_content(
+    relpath: String,
+    content: String,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_editor(
+        runtime,
+        "sync_content",
+        serde_json::json!({ "relpath": relpath, "content": content }),
+    )
+    .await
+}

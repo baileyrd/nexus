@@ -74,3 +74,17 @@ export function editorRedo(relpath: string): Promise<EditorSnapshot> {
 export function editorListOpen(): Promise<string[]> {
   return invoke<string[]>("editor_list_open");
 }
+
+/**
+ * Push the current CM6 text content into the Rust block tree without disk I/O.
+ *
+ * Call this after a debounce on every editor `onChange` so AI, MCP, and
+ * outline consumers always have a reasonably fresh parsed block tree without
+ * requiring a per-keystroke IPC round-trip. The undo history is not affected.
+ */
+export function editorSyncContent(
+  relpath: string,
+  content: string,
+): Promise<void> {
+  return invoke<void>("editor_sync_content", { relpath, content });
+}

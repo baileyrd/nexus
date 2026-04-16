@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { readForgeFile, writeForgeFile, type ForgeFile } from "../ipc/forge";
+import { editorClose, editorSyncContent } from "../ipc/editor";
 import { HostTopics, publishHostEvent } from "../plugins/events";
 import { useForgeStore } from "./forge";
 import { useLayoutStore } from "./layout";
@@ -50,6 +51,10 @@ export const useOpenFileStore = create<OpenFileState>((set, get) => ({
       const file = await readForgeFile(relpath);
       set({ file, loading: false });
       persist(relpath);
+      // Seed the Rust block tree with the freshly-read content so AI / MCP
+      // consumers get an accurate parse immediately on open (not after the
+      // first 800 ms debounce fires).
+      void editorSyncContent(file.relpath, file.content);
       void publishHostEvent(HostTopics.fileOpened, {
         relpath: file.relpath,
         name: file.name,
@@ -77,6 +82,7 @@ export const useOpenFileStore = create<OpenFileState>((set, get) => ({
     set({ file: null, error: null, isDirty: false });
     persist(null);
     if (previous !== null) {
+      void editorClose(previous);
       void publishHostEvent(HostTopics.fileClosed, { relpath: previous });
     }
   },
