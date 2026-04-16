@@ -1,0 +1,26 @@
+[plugin]
+id = "com.nexus.hello-js"
+name = "Hello JS"
+version = "0.1.0"
+trust_level = "community"
+api_version = "1"
+
+[script]
+module = "plugin.js"
+
+[[registrations.ui_command]]
+id = "hello-js.sayHi"
+handler_id = 1
+title = "Hello JS: Say hi"
+category = "Demo"
+icon = "sparkles"
+
+[[registrations.ui_command]]
+id = "hello-js.greet"
+handler_id = 2
+title = "Hello JS: Greet with settings"
+category = "Demo"
+icon = "message-circle"
+
+[lifecycle]
+on_init = true

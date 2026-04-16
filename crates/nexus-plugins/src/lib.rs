@@ -47,6 +47,11 @@ pub struct UiContribution {
     /// The `id` declared in the manifest's `ui_command` entry. Passed back to
     /// [`PluginManager::dispatch_ipc`] when the command is invoked.
     pub command_id: String,
+    /// The numeric handler ID used by the plugin's dispatch function.
+    /// Script plugins need this for frontend-local dispatch.
+    pub handler_id: u32,
+    /// Plugin runtime: `"core"`, `"wasm"`, or `"script"`.
+    pub runtime: String,
     /// Primary label shown in the command palette.
     pub title: String,
     /// Optional category badge.
@@ -69,6 +74,10 @@ pub struct UiPanelContribution {
     pub plugin_id: String,
     /// The `id` declared in the manifest's `ui_panel` entry.
     pub panel_id: String,
+    /// The numeric handler ID.
+    pub handler_id: u32,
+    /// Plugin runtime: `"core"`, `"wasm"`, or `"script"`.
+    pub runtime: String,
     /// Panel title shown in the side-panel selector.
     pub title: String,
     /// Lucide icon name.
@@ -88,6 +97,8 @@ pub struct UiPanelContribution {
 pub struct UiSettingsTabContribution {
     /// The plugin that owns this tab.
     pub plugin_id: String,
+    /// Plugin runtime: `"core"`, `"wasm"`, or `"script"`.
+    pub runtime: String,
     /// Human-readable plugin name (pulled from the manifest for the
     /// auto-generated tab header).
     pub plugin_name: String,
@@ -281,6 +292,8 @@ impl PluginManager {
             .into_iter()
             .flat_map(|info| {
                 let plugin_id = info.id.clone();
+                let runtime = self.loader.plugin_runtime(&info.id)
+                    .unwrap_or("unknown").to_string();
                 self.loader
                     .manifest(&info.id)
                     .map(|m| m.registrations.ui_commands.clone())
@@ -288,7 +301,9 @@ impl PluginManager {
                     .into_iter()
                     .map(move |r| UiContribution {
                         plugin_id: plugin_id.clone(),
-                        command_id: r.id,
+                        command_id: r.id.clone(),
+                        handler_id: r.handler_id,
+                        runtime: runtime.clone(),
                         title: r.title,
                         category: r.category,
                         icon: r.icon,
@@ -309,6 +324,8 @@ impl PluginManager {
             .into_iter()
             .flat_map(|info| {
                 let plugin_id = info.id.clone();
+                let runtime = self.loader.plugin_runtime(&info.id)
+                    .unwrap_or("unknown").to_string();
                 self.loader
                     .manifest(&info.id)
                     .map(|m| m.registrations.ui_panels.clone())
@@ -316,7 +333,9 @@ impl PluginManager {
                     .into_iter()
                     .map(move |r| UiPanelContribution {
                         plugin_id: plugin_id.clone(),
-                        panel_id: r.id,
+                        panel_id: r.id.clone(),
+                        handler_id: r.handler_id,
+                        runtime: runtime.clone(),
                         title: r.title,
                         icon: r.icon,
                         side: match r.side {
@@ -342,6 +361,8 @@ impl PluginManager {
                 let plugin_id = info.id.clone();
                 let plugin_name = info.name.clone();
                 let plugin_version = info.version.clone();
+                let runtime = self.loader.plugin_runtime(&info.id)
+                    .unwrap_or("unknown").to_string();
                 self.loader
                     .manifest(&info.id)
                     .map(|m| m.registrations.ui_settings_tabs.clone())
@@ -349,6 +370,7 @@ impl PluginManager {
                     .into_iter()
                     .map(move |r| UiSettingsTabContribution {
                         plugin_id: plugin_id.clone(),
+                        runtime: runtime.clone(),
                         plugin_name: plugin_name.clone(),
                         plugin_version: plugin_version.clone(),
                         tab_id: r.id,
@@ -470,6 +492,24 @@ impl PluginManager {
     /// application layer.
     pub fn inject_event_forwarder(&mut self, forwarder: Arc<dyn sandbox::PluginEventForwarder>) {
         self.loader.inject_event_forwarder(forwarder);
+    }
+
+    /// Return the plugin directory for `plugin_id`, if loaded.
+    #[must_use]
+    pub fn plugin_dir(&self, plugin_id: &str) -> Option<&std::path::Path> {
+        self.loader.plugin_dir(plugin_id)
+    }
+
+    /// Return the manifest for `plugin_id`, if loaded.
+    #[must_use]
+    pub fn manifest(&self, plugin_id: &str) -> Option<&manifest::PluginManifest> {
+        self.loader.manifest(plugin_id)
+    }
+
+    /// Return the runtime type for `plugin_id`: `"core"`, `"wasm"`, or `"script"`.
+    #[must_use]
+    pub fn plugin_runtime(&self, plugin_id: &str) -> Option<&'static str> {
+        self.loader.plugin_runtime(plugin_id)
     }
 
     /// Return the event subscriptions for `plugin_id`.

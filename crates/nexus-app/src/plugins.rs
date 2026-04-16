@@ -162,6 +162,8 @@ pub struct PluginSummary {
     /// Current runtime status — `"loaded"`, `"initialized"`, `"running"`,
     /// `"stopped"`, or `"crashed"`.
     pub status: String,
+    /// Plugin runtime: `"core"`, `"wasm"`, or `"script"`.
+    pub runtime: String,
     /// Event subscriptions declared by this plugin.
     pub event_subscriptions: Vec<SubscriptionSummary>,
 }
@@ -423,12 +425,15 @@ pub fn list_plugins(state: State<'_, PluginState>) -> Vec<PluginSummary> {
                 .into_iter()
                 .map(|(id, filter, enabled)| SubscriptionSummary { id, filter, enabled })
                 .collect();
+            let runtime = mgr.plugin_runtime(&info.id)
+                .unwrap_or("unknown").to_string();
             PluginSummary {
                 id: info.id,
                 name: info.name,
                 version: info.version,
                 trust_level: trust_level_str(info.trust_level).to_string(),
                 status: status_str(info.status).to_string(),
+                runtime,
                 event_subscriptions: subs,
             }
         })
@@ -508,6 +513,40 @@ pub fn invoke_plugin_ipc(
     };
     emit_plugin_events(&app, &target_plugin_id, &result);
     Ok(result)
+}
+
+/// Read the JS source code for a script plugin.
+///
+/// Returns the file contents as a UTF-8 string. Used by the frontend
+/// to load script plugins via `new Function` or dynamic `import()`.
+///
+/// # Errors
+/// Returns an error if the plugin is not found, is not a script plugin,
+/// or the file cannot be read.
+#[tauri::command]
+pub fn read_plugin_script(
+    state: State<'_, PluginState>,
+    plugin_id: String,
+) -> Result<String, String> {
+    let mgr = state
+        .manager
+        .lock()
+        .map_err(|e| format!("plugin manager lock poisoned: {e}"))?;
+    let runtime = mgr.plugin_runtime(&plugin_id)
+        .ok_or_else(|| format!("plugin not found: {plugin_id}"))?;
+    if runtime != "script" {
+        return Err(format!("plugin {plugin_id} is not a script plugin (runtime: {runtime})"));
+    }
+    let plugin_dir = mgr.plugin_dir(&plugin_id)
+        .ok_or_else(|| format!("plugin directory not found for {plugin_id}"))?
+        .to_path_buf();
+    let manifest = mgr.manifest(&plugin_id)
+        .ok_or_else(|| format!("manifest not found for {plugin_id}"))?;
+    let script_cfg = manifest.script.as_ref()
+        .ok_or_else(|| format!("no [script] section in manifest for {plugin_id}"))?;
+    let script_path = plugin_dir.join(&script_cfg.module);
+    std::fs::read_to_string(&script_path)
+        .map_err(|e| format!("failed to read {}: {e}", script_path.display()))
 }
 
 /// Toggle an event subscription on or off for a specific plugin.

@@ -9,6 +9,8 @@ import { invoke } from "@tauri-apps/api/core";
 export interface PluginUiContribution {
   plugin_id: string;
   command_id: string;
+  handler_id: number;
+  runtime: string;
   title: string;
   category: string | null;
   icon: string | null;
@@ -23,6 +25,8 @@ export interface PluginUiContribution {
 export interface PluginUiPanel {
   plugin_id: string;
   panel_id: string;
+  handler_id: number;
+  runtime: string;
   title: string;
   icon: string;
   side: string;
@@ -34,6 +38,7 @@ export interface PluginUiPanel {
  */
 export interface PluginUiSettingsTab {
   plugin_id: string;
+  runtime: string;
   plugin_name: string;
   plugin_version: string;
   tab_id: string;
@@ -84,6 +89,7 @@ export interface PluginSummary {
   version: string;
   trust_level: string;
   status: string;
+  runtime: string;
   event_subscriptions: SubscriptionSummary[];
 }
 
@@ -121,6 +127,13 @@ export function invokePluginCommand(
     commandId,
     args,
   });
+}
+
+/**
+ * Read the JS source code for a script plugin.
+ */
+export function readPluginScript(pluginId: string): Promise<string> {
+  return invoke<string>("read_plugin_script", { pluginId });
 }
 
 /**

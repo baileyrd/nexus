@@ -34,9 +34,16 @@ pub struct PluginManifest {
     pub capabilities: ManifestCapabilities,
     /// WASM module configuration.
     ///
-    /// `None` for `trust_level = "core"` plugins — they are native Rust and
-    /// do not run through the WASM sandbox. Required for community plugins.
+    /// `None` for `trust_level = "core"` plugins and script-based community
+    /// plugins. Required for WASM community plugins. Mutually exclusive
+    /// with [`script`](Self::script).
     pub wasm: Option<WasmConfig>,
+    /// Script (JS) module configuration.
+    ///
+    /// `None` for core and WASM community plugins. Mutually exclusive with
+    /// [`wasm`](Self::wasm). When present, the plugin's handlers execute in
+    /// the Tauri WebView rather than a WASM sandbox.
+    pub script: Option<ScriptConfig>,
     /// Optional settings schema reference.
     pub settings: Option<SettingsConfig>,
     /// Extension-point registrations.
@@ -69,6 +76,16 @@ pub struct WasmConfig {
     /// Maximum wall-clock milliseconds a single dispatch call may take.
     /// Default: `5000`. Set to `0` to disable.
     pub max_execution_ms: u64,
+}
+
+/// Script (JS) module configuration declared in the manifest.
+///
+/// Script plugins execute in the Tauri WebView as ES modules, loaded
+/// via the `nexus-plugin://` custom protocol.
+#[derive(Debug, Clone)]
+pub struct ScriptConfig {
+    /// Relative path to the JS entry point inside the plugin directory.
+    pub module: String,
 }
 
 /// Optional settings schema reference.
@@ -268,8 +285,10 @@ struct TomlManifest {
     plugin: TomlPlugin,
     #[serde(default)]
     capabilities: TomlCapabilities,
-    /// Absent for core plugins; required for community plugins (enforced in [`validate`]).
+    /// Absent for core plugins; required for WASM community plugins.
     wasm: Option<TomlWasm>,
+    /// Absent for core and WASM plugins; mutually exclusive with `wasm`.
+    script: Option<TomlScript>,
     settings: Option<TomlSettings>,
     #[serde(default)]
     registrations: TomlRegistrations,
@@ -303,6 +322,11 @@ struct TomlWasm {
     fuel: u64,
     #[serde(default = "default_max_execution_ms")]
     max_execution_ms: u64,
+}
+
+#[derive(Deserialize)]
+struct TomlScript {
+    module: String,
 }
 
 fn default_memory_mb() -> u32 {
@@ -447,6 +471,7 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
         fuel: w.fuel,
         max_execution_ms: w.max_execution_ms,
     });
+    let script = raw.script.map(|s| ScriptConfig { module: s.module });
 
     Ok(PluginManifest {
         id: raw.plugin.id,
@@ -459,6 +484,7 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
             optional: raw.capabilities.optional,
         },
         wasm,
+        script,
         settings: raw.settings.map(|s| SettingsConfig { schema: s.schema }),
         registrations: Registrations {
             cli_subcommands: raw
@@ -991,53 +1017,89 @@ pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), Plug
         }
     }
 
-    // Rules 5–7 only apply to community plugins (which run in the WASM sandbox).
-    // Core plugins are native Rust and have no [wasm] section.
+    // Rules 5–7 apply to community plugins. Core plugins are native Rust.
     match manifest.trust_level {
         TrustLevel::Community => {
-            let wasm = manifest.wasm.as_ref().ok_or_else(|| PluginError::ManifestValidation {
-                plugin_id: id.clone(),
-                reason: "community plugins must declare a [wasm] section".to_string(),
-            })?;
-
-            // Rule 5: memory_mb in [1, 256].
-            if wasm.memory_mb < 1 || wasm.memory_mb > 256 {
-                return Err(PluginError::ManifestValidation {
-                    plugin_id: id.clone(),
-                    reason: format!(
-                        "wasm.memory_mb {} is out of range [1, 256]",
-                        wasm.memory_mb
-                    ),
-                });
+            // Rule 5: must have exactly one of [wasm] or [script].
+            match (&manifest.wasm, &manifest.script) {
+                (Some(_), Some(_)) => {
+                    return Err(PluginError::ManifestValidation {
+                        plugin_id: id.clone(),
+                        reason: "[wasm] and [script] are mutually exclusive".to_string(),
+                    });
+                }
+                (None, None) => {
+                    return Err(PluginError::ManifestValidation {
+                        plugin_id: id.clone(),
+                        reason: "community plugins must declare a [wasm] or [script] section"
+                            .to_string(),
+                    });
+                }
+                _ => {}
             }
 
-            // Rule 6: fuel must be > 0 for community plugins.
-            if wasm.fuel == 0 {
-                return Err(PluginError::ManifestValidation {
-                    plugin_id: id.clone(),
-                    reason: "wasm.fuel must be > 0 for community plugins".to_string(),
-                });
+            if let Some(wasm) = &manifest.wasm {
+                // Rule 5w: memory_mb in [1, 256].
+                if wasm.memory_mb < 1 || wasm.memory_mb > 256 {
+                    return Err(PluginError::ManifestValidation {
+                        plugin_id: id.clone(),
+                        reason: format!(
+                            "wasm.memory_mb {} is out of range [1, 256]",
+                            wasm.memory_mb
+                        ),
+                    });
+                }
+
+                // Rule 6w: fuel must be > 0 for community plugins.
+                if wasm.fuel == 0 {
+                    return Err(PluginError::ManifestValidation {
+                        plugin_id: id.clone(),
+                        reason: "wasm.fuel must be > 0 for community plugins".to_string(),
+                    });
+                }
+
+                // Rule 7w: wasm module file must exist.
+                let wasm_path = plugin_dir.join(&wasm.module);
+                if !wasm_path.exists() {
+                    return Err(PluginError::ManifestValidation {
+                        plugin_id: id.clone(),
+                        reason: format!(
+                            "wasm module '{}' not found in plugin directory",
+                            wasm.module
+                        ),
+                    });
+                }
             }
 
-            // Rule 7: wasm module file must exist.
-            let wasm_path = plugin_dir.join(&wasm.module);
-            if !wasm_path.exists() {
-                return Err(PluginError::ManifestValidation {
-                    plugin_id: id.clone(),
-                    reason: format!(
-                        "wasm module '{}' not found in plugin directory",
-                        wasm.module
-                    ),
-                });
+            if let Some(script) = &manifest.script {
+                // Rule 7s: script module file must exist.
+                let script_path = plugin_dir.join(&script.module);
+                if !script_path.exists() {
+                    return Err(PluginError::ManifestValidation {
+                        plugin_id: id.clone(),
+                        reason: format!(
+                            "script module '{}' not found in plugin directory",
+                            script.module
+                        ),
+                    });
+                }
             }
         }
         TrustLevel::Core => {
-            // Rule 5c: core plugins must NOT have a [wasm] section.
+            // Rule 5c: core plugins must NOT have a [wasm] or [script] section.
             if manifest.wasm.is_some() {
                 return Err(PluginError::ManifestValidation {
                     plugin_id: id.clone(),
                     reason: "core plugins are native Rust and must not declare a [wasm] section; \
                              remove [wasm] or change trust_level to 'community'"
+                        .to_string(),
+                });
+            }
+            if manifest.script.is_some() {
+                return Err(PluginError::ManifestValidation {
+                    plugin_id: id.clone(),
+                    reason: "core plugins are native Rust and must not declare a [script] section; \
+                             remove [script] or change trust_level to 'community'"
                         .to_string(),
                 });
             }
@@ -1221,13 +1283,14 @@ on_stop = true
     }
 
     #[test]
-    fn validate_rejects_community_without_wasm_section() {
+    fn validate_rejects_community_without_wasm_or_script_section() {
         let dir = make_test_plugin_dir("test.wasm");
         let mut m = valid_manifest();
-        m.wasm = None; // community plugin with no wasm section
+        m.wasm = None; // community plugin with neither wasm nor script
+        m.script = None;
         let err = validate(&m, dir.path()).unwrap_err();
         assert!(
-            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("[wasm] section")),
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("[wasm] or [script]")),
             "got {err:?}"
         );
     }

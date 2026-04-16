@@ -102,6 +102,7 @@ pub fn run() {
             plugins::save_plugin_settings,
             plugins::invoke_plugin_command,
             plugins::invoke_plugin_ipc,
+            plugins::read_plugin_script,
             plugins::toggle_plugin_subscription,
             plugins::publish_host_event,
             plugins::list_plugins,

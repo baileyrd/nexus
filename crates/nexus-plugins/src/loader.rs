@@ -124,10 +124,17 @@ pub enum PluginBackend {
     Core(Box<dyn CorePlugin>),
     /// WASM-sandboxed plugin; capability-gated, fuel-metered.
     Community(WasmSandbox),
+    /// JS plugin executed in the Tauri WebView. No backend runtime state —
+    /// dispatch is handled entirely by the frontend. Backend only tracks
+    /// manifest, settings, and event subscriptions.
+    Script,
 }
 
 impl PluginBackend {
     /// Dispatch a call to the handler identified by `handler_id`.
+    ///
+    /// Script plugins return [`PluginError::ScriptDispatchFrontend`] —
+    /// their handlers execute in the Tauri WebView, not on the backend.
     pub fn dispatch(
         &mut self,
         handler_id: u32,
@@ -136,12 +143,12 @@ impl PluginBackend {
         match self {
             Self::Core(p) => p.dispatch(handler_id, args),
             Self::Community(s) => s.dispatch(handler_id, args),
+            Self::Script => Err(PluginError::ScriptDispatchFrontend),
         }
     }
 
     /// Async dispatch: delegates to the core plugin's `dispatch_async`. WASM
-    /// sandboxes never produce a future today, so community plugins always
-    /// return `None` and fall back to sync dispatch.
+    /// sandboxes and script plugins always return `None`.
     pub(crate) fn dispatch_async(
         &mut self,
         handler_id: u32,
@@ -149,7 +156,7 @@ impl PluginBackend {
     ) -> Option<CorePluginFuture> {
         match self {
             Self::Core(p) => p.dispatch_async(handler_id, args),
-            Self::Community(_) => None,
+            Self::Community(_) | Self::Script => None,
         }
     }
 
@@ -157,6 +164,7 @@ impl PluginBackend {
         match self {
             Self::Core(p) => p.on_init(),
             Self::Community(s) => s.call_on_init(),
+            Self::Script => Ok(()), // Lifecycle runs in frontend JS
         }
     }
 
@@ -164,6 +172,7 @@ impl PluginBackend {
         match self {
             Self::Core(p) => p.on_start(),
             Self::Community(s) => s.call_on_start(),
+            Self::Script => Ok(()),
         }
     }
 
@@ -174,26 +183,26 @@ impl PluginBackend {
                 Ok(())
             }
             Self::Community(s) => s.call_on_stop(),
+            Self::Script => Ok(()),
         }
     }
 
     pub(crate) fn call_on_load(&mut self) -> Result<(), PluginError> {
         match self {
-            // Core plugins have no separate on_load; on_init serves that role.
-            Self::Core(_) => Ok(()),
+            Self::Core(_) | Self::Script => Ok(()),
             Self::Community(s) => s.call_on_load(),
         }
     }
 
     pub(crate) fn call_on_unload(&mut self) -> Result<(), PluginError> {
         match self {
-            Self::Core(_) => Ok(()),
+            Self::Core(_) | Self::Script => Ok(()),
             Self::Community(s) => s.call_on_unload(),
         }
     }
 
     /// Hand the plugin its [`KernelPluginContext`]. Core-only; WASM sandboxes
-    /// receive their runtime state through a different mechanism.
+    /// and script plugins receive their runtime state differently.
     pub(crate) fn call_wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
         if let Self::Core(p) = self {
             p.wire_context(ctx);
@@ -204,6 +213,7 @@ impl PluginBackend {
         match self {
             Self::Core(p) => p.on_enable(),
             Self::Community(s) => s.call_on_enable(),
+            Self::Script => Ok(()),
         }
     }
 
@@ -214,6 +224,7 @@ impl PluginBackend {
                 Ok(())
             }
             Self::Community(s) => s.call_on_disable(),
+            Self::Script => Ok(()),
         }
     }
 
@@ -224,14 +235,7 @@ impl PluginBackend {
         match self {
             Self::Core(p) => p.on_settings_changed(settings),
             Self::Community(s) => s.call_on_settings_changed(settings),
-        }
-    }
-
-    /// Returns a mutable reference to the inner `WasmSandbox`, if community.
-    fn as_wasm_sandbox_mut(&mut self) -> Option<&mut WasmSandbox> {
-        match self {
-            Self::Community(s) => Some(s),
-            Self::Core(_) => None,
+            Self::Script => Ok(()), // Frontend JS module handles this
         }
     }
 }
@@ -400,35 +404,35 @@ impl PluginLoader {
             self.settings.register_schema(&plugin_id, &schema_json)?;
         }
 
-        // Step 6: Read WASM bytes and build sandbox.
-        // wasm is guaranteed Some for community plugins (validated in step 2).
-        let wasm_cfg = manifest.wasm.as_ref().ok_or_else(|| PluginError::ManifestInvalid {
-            path: manifest_path.display().to_string(),
-            reason: "internal: community plugin passed validation without a [wasm] section"
-                .to_string(),
-        })?;
-        let wasm_path = plugin_dir.join(&wasm_cfg.module);
-        let wasm_bytes = std::fs::read(&wasm_path)?;
-
         let capabilities = build_capabilities(&manifest);
-        // Seed the live settings cache so host::get_settings reads the
-        // validated values right out of the gate. Failures here are
-        // non-fatal: we fall back to `"{}"` rather than refuse to load
-        // the plugin, since the settings surface is an ergonomic
-        // feature rather than a load-blocking invariant.
         let settings_cache = load_settings_cache(&self.settings, &plugin_id, plugin_dir);
-        let plugin_data = PluginData {
-            plugin_id: plugin_id.clone(),
-            capabilities: capabilities.clone(),
-            forge_root: plugin_dir.to_path_buf(),
-            settings_json: Some(settings_cache.clone()),
-            ..Default::default()
-        };
-        let mut backend = PluginBackend::Community(
-            WasmSandbox::new(&wasm_bytes, wasm_cfg, plugin_data)?,
-        );
 
-        // Step 7: Call lifecycle hooks
+        // Step 6: Create backend — WASM sandbox or Script marker.
+        let mut backend = if manifest.script.is_some() {
+            // Script plugins execute in the frontend; no backend runtime.
+            PluginBackend::Script
+        } else {
+            // WASM community plugin — build sandbox.
+            let wasm_cfg = manifest.wasm.as_ref().ok_or_else(|| PluginError::ManifestInvalid {
+                path: manifest_path.display().to_string(),
+                reason: "internal: community plugin passed validation without a [wasm] or [script] section"
+                    .to_string(),
+            })?;
+            let wasm_path = plugin_dir.join(&wasm_cfg.module);
+            let wasm_bytes = std::fs::read(&wasm_path)?;
+            let plugin_data = PluginData {
+                plugin_id: plugin_id.clone(),
+                capabilities: capabilities.clone(),
+                forge_root: plugin_dir.to_path_buf(),
+                settings_json: Some(settings_cache.clone()),
+                ..Default::default()
+            };
+            PluginBackend::Community(
+                WasmSandbox::new(&wasm_bytes, wasm_cfg, plugin_data)?,
+            )
+        };
+
+        // Step 7: Call lifecycle hooks (no-ops for Script plugins)
         if manifest.lifecycle.on_load {
             backend.call_on_load()?;
         }
@@ -1075,6 +1079,20 @@ impl PluginLoader {
                 }
             }
         }
+    }
+
+    /// Return the runtime type for `plugin_id`: `"core"`, `"wasm"`, or `"script"`.
+    #[must_use]
+    pub fn plugin_runtime(&self, plugin_id: &str) -> Option<&'static str> {
+        self.loaded.get(plugin_id).map(|lp| {
+            let backend = lp.backend.lock().ok();
+            match backend.as_deref() {
+                Some(PluginBackend::Core(_)) => "core",
+                Some(PluginBackend::Community(_)) => "wasm",
+                Some(PluginBackend::Script) => "script",
+                None => "unknown",
+            }
+        })
     }
 
     /// Return the event subscriptions for `plugin_id` as

@@ -42,6 +42,7 @@ import {
   type PluginUiRibbonItem,
   type PluginUiStatusItem,
 } from "../ipc/plugins";
+import { dispatchToScript, evictScriptPlugin } from "../plugins/scriptRuntime";
 
 type Disposable = () => void;
 
@@ -64,17 +65,31 @@ async function syncCommands(): Promise<void> {
 
   for (const entry of entries) {
     const commandId = `plugin:${entry.plugin_id}:${entry.command_id}`;
-    activeDisposables.push(
-      contributions.registerCommand(commandId, async () => {
-        try {
-          const result = await invokePluginCommand(entry.plugin_id, entry.command_id);
-          // eslint-disable-next-line no-console
-          console.log(`[plugin:${entry.plugin_id}] ${entry.command_id} →`, result);
-        } catch (err) {
-          warn(`invoke ${entry.plugin_id}/${entry.command_id} failed`, err);
-        }
-      }),
-    );
+    const handler =
+      entry.runtime === "script"
+        ? async () => {
+            try {
+              const result = await dispatchToScript(
+                entry.plugin_id,
+                entry.handler_id,
+                {},
+              );
+              // eslint-disable-next-line no-console
+              console.log(`[plugin:${entry.plugin_id}] ${entry.command_id} →`, result);
+            } catch (err) {
+              warn(`script dispatch ${entry.plugin_id}/${entry.command_id} failed`, err);
+            }
+          }
+        : async () => {
+            try {
+              const result = await invokePluginCommand(entry.plugin_id, entry.command_id);
+              // eslint-disable-next-line no-console
+              console.log(`[plugin:${entry.plugin_id}] ${entry.command_id} →`, result);
+            } catch (err) {
+              warn(`invoke ${entry.plugin_id}/${entry.command_id} failed`, err);
+            }
+          };
+    activeDisposables.push(contributions.registerCommand(commandId, handler));
     activeDisposables.push(
       contributions.registerPaletteCommand({
         id: commandId,
@@ -169,6 +184,10 @@ export async function registerPluginContributions(): Promise<void> {
     await listen<{ plugin_ids: string[] }>("plugins:reloaded", (event) => {
       // eslint-disable-next-line no-console
       console.log("[plugins] hot-reloaded:", event.payload.plugin_ids);
+      // Evict cached script modules so they're re-loaded on next dispatch.
+      for (const id of event.payload.plugin_ids) {
+        evictScriptPlugin(id);
+      }
       void syncAll();
     });
   } catch (err) {

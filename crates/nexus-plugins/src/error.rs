@@ -123,6 +123,13 @@ pub enum PluginError {
         String,
     ),
 
+    /// The command targets a script (JS) plugin whose dispatch happens in
+    /// the frontend, not the backend. The Tauri command layer should
+    /// never reach this; if it does, the frontend contribution bridge
+    /// failed to intercept the call.
+    #[error("script plugin dispatch must be handled by the frontend")]
+    ScriptDispatchFrontend,
+
     /// An underlying I/O error occurred.
     #[error("I/O error: {0}")]
     Io(
