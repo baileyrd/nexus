@@ -20,13 +20,9 @@ pub const HOST_OK: i32 = 0;
 pub const HOST_ERROR: i32 = -1;
 
 /// Returned when the plugin does not hold the required capability.
-// Will be used when KV / event host functions are added (Tasks 14+).
-#[allow(dead_code)]
 pub const HOST_CAPABILITY_DENIED: i32 = -1001;
 
 /// Returned when the output buffer supplied by the plugin is too small.
-// Will be used when KV / event host functions are added (Tasks 14+).
-#[allow(dead_code)]
 pub const HOST_BUFFER_OVERFLOW: i32 = -1002;
 
 // ─── Registration ─────────────────────────────────────────────────────────────
@@ -271,7 +267,10 @@ fn register_host_kv_set(linker: &mut Linker<PluginData>) -> Result<(), PluginErr
 /// namespaced under the plugin's reverse-DNS ID (e.g. `com.example.plugin.*`).
 /// The `payload` must be valid UTF-8 JSON.
 ///
-/// Returns `HOST_OK` on success or `HOST_ERROR` on failure.
+/// Requires the `events.publish` capability.
+///
+/// Returns `HOST_OK` on success, `HOST_CAPABILITY_DENIED` if the plugin lacks
+/// `events.publish`, or `HOST_ERROR` on any other failure.
 fn register_host_emit_event(linker: &mut Linker<PluginData>) -> Result<(), PluginError> {
     linker
         .func_wrap(
@@ -284,6 +283,11 @@ fn register_host_emit_event(linker: &mut Linker<PluginData>) -> Result<(), Plugi
              payload_len: i32|
              -> i32 {
                 let plugin_id = caller.data().plugin_id.clone();
+
+                if !caller.data().capabilities.contains(Capability::EventsPublish) {
+                    return HOST_CAPABILITY_DENIED;
+                }
+
                 let event_bus = caller.data().event_bus.clone();
                 let Some(event_bus) = event_bus else {
                     tracing::warn!(plugin_id = %plugin_id, "host::emit_event: event bus not injected");
@@ -706,10 +710,11 @@ fn register_host_get_settings(linker: &mut Linker<PluginData>) -> Result<(), Plu
 ///
 /// `level`: 0 = info, 1 = warn, 2 = error.
 ///
-/// No capability gate — a plugin's own notifications are considered
-/// low-risk first-party feedback. Returns `HOST_OK` on success,
-/// `HOST_ERROR` when the forwarder is not injected or the message is
-/// invalid UTF-8.
+/// Requires the `ui.notify` capability.
+///
+/// Returns `HOST_OK` on success, `HOST_CAPABILITY_DENIED` if the plugin lacks
+/// `ui.notify`, or `HOST_ERROR` when the forwarder is not injected or the
+/// message is invalid UTF-8.
 fn register_host_notify(linker: &mut Linker<PluginData>) -> Result<(), PluginError> {
     linker
         .func_wrap(
@@ -717,6 +722,11 @@ fn register_host_notify(linker: &mut Linker<PluginData>) -> Result<(), PluginErr
             "notify",
             |mut caller: Caller<'_, PluginData>, level: i32, msg_ptr: i32, msg_len: i32| -> i32 {
                 let plugin_id = caller.data().plugin_id.clone();
+
+                if !caller.data().capabilities.contains(Capability::UiNotify) {
+                    return HOST_CAPABILITY_DENIED;
+                }
+
                 let forwarder = caller.data().event_forwarder.clone();
                 let Some(forwarder) = forwarder else {
                     tracing::warn!(plugin_id = %plugin_id, "host::notify: event forwarder not injected");

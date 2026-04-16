@@ -116,6 +116,10 @@ pub struct Registrations {
     pub ui_status_items: Vec<UiStatusItemReg>,
     /// Editor slash-command registrations.
     pub slash_commands: Vec<UiSlashCommandReg>,
+    /// Application menu-bar item registrations.
+    pub menu_items: Vec<MenuItemReg>,
+    /// URI / protocol-handler registrations.
+    pub uri_handlers: Vec<UriHandlerReg>,
 }
 
 /// Which side of the workspace a plugin-contributed panel docks to.
@@ -283,6 +287,42 @@ pub struct UiSlashCommandReg {
     pub template: String,
 }
 
+/// A single application menu-bar item registration. The item delegates
+/// to one of the plugin's own `ui_command` ids; no direct handler_id is
+/// needed (same model as ribbon items).
+#[derive(Debug, Clone)]
+pub struct MenuItemReg {
+    /// Unique identifier within the plugin.
+    pub id: String,
+    /// Top-level menu to insert into — e.g. `"File"`, `"Edit"`, `"View"`,
+    /// `"Help"`.
+    pub menu: String,
+    /// Label shown in the menu.
+    pub label: String,
+    /// Target `ui_command.id` (same manifest) invoked when the item is
+    /// selected. Pre-qualified (`plugin:<plugin_id>:<command>`) by the
+    /// aggregator so the frontend can pass it straight to
+    /// `contributions.invokeCommand`.
+    pub command: String,
+    /// Optional display-order hint within the menu. Lower values sort first.
+    pub order: Option<i32>,
+    /// When `true`, a separator is rendered immediately before this item.
+    pub separator_before: bool,
+}
+
+/// A single URI / protocol-handler registration. Incoming URIs whose
+/// scheme matches [`Self::scheme`] are dispatched to the plugin's
+/// WASM handler.
+#[derive(Debug, Clone)]
+pub struct UriHandlerReg {
+    /// Unique identifier within the plugin.
+    pub id: String,
+    /// URI scheme to claim — e.g. `"nexus"`.
+    pub scheme: String,
+    /// WASM handler function index dispatched when a matching URI arrives.
+    pub handler_id: u32,
+}
+
 /// Lifecycle hook enablement flags.
 #[derive(Debug, Clone, Default)]
 #[allow(clippy::struct_excessive_bools)]
@@ -391,6 +431,10 @@ struct TomlRegistrations {
     ui_status_items: Vec<TomlUiStatusItemReg>,
     #[serde(default, rename = "slash_command")]
     slash_commands: Vec<TomlUiSlashCommandReg>,
+    #[serde(default, rename = "menu_item")]
+    menu_items: Vec<TomlMenuItemReg>,
+    #[serde(default, rename = "uri_handler")]
+    uri_handlers: Vec<TomlUriHandlerReg>,
 }
 
 #[derive(Deserialize)]
@@ -474,6 +518,25 @@ struct TomlUiSlashCommandReg {
     aliases: Vec<String>,
     badge: String,
     template: String,
+}
+
+#[derive(Deserialize)]
+struct TomlMenuItemReg {
+    id: String,
+    menu: String,
+    label: String,
+    command: String,
+    #[serde(default)]
+    order: Option<i32>,
+    #[serde(default)]
+    separator_before: bool,
+}
+
+#[derive(Deserialize)]
+struct TomlUriHandlerReg {
+    id: String,
+    scheme: String,
+    handler_id: u32,
 }
 
 #[derive(Deserialize, Default)]
@@ -626,6 +689,29 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
                     aliases: r.aliases,
                     badge: r.badge,
                     template: r.template,
+                })
+                .collect(),
+            menu_items: raw
+                .registrations
+                .menu_items
+                .into_iter()
+                .map(|r| MenuItemReg {
+                    id: r.id,
+                    menu: r.menu,
+                    label: r.label,
+                    command: r.command,
+                    order: r.order,
+                    separator_before: r.separator_before,
+                })
+                .collect(),
+            uri_handlers: raw
+                .registrations
+                .uri_handlers
+                .into_iter()
+                .map(|r| UriHandlerReg {
+                    id: r.id,
+                    scheme: r.scheme,
+                    handler_id: r.handler_id,
                 })
                 .collect(),
         },

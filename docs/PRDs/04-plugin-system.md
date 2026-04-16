@@ -183,6 +183,49 @@ on_settings_changed = true
 - Declares `[capabilities]` required for install approval.
 - All `[registrations]` tied to capabilities.
 
+### 1.4 WASM Manifest Parity — Contribution Registry
+
+The contribution registry supports several extension points that can be registered from JS script plugins via `ctx.ui.*` / `ctx.editor.*`. WASM plugins must declare contributions in their manifest instead; the `PluginManager` aggregates these and exposes them to the frontend via Tauri commands.
+
+**Current parity status (as of 2026-04-16):**
+
+| Contribution | Manifest key | WASM parity | Notes |
+|---|---|---|---|
+| Palette commands | `[[registrations.ui_command]]` | ✅ M1 | `list_plugin_contributions` |
+| Side panels | `[[registrations.ui_panel]]` | ✅ M1 | `list_plugin_panels` |
+| Settings tabs | `[[registrations.ui_settings_tab]]` | ✅ M1 | `list_plugin_settings_tabs` |
+| Ribbon items | `[[registrations.ui_ribbon_item]]` | ✅ M1 | `list_plugin_ribbon_items` |
+| Status-bar items | `[[registrations.ui_status_item]]` | ✅ M1 | `list_plugin_status_items` |
+| Slash commands | `[[registrations.slash_command]]` | ✅ M1 | `list_plugin_slash_commands` |
+| Menu-bar items | `[[registrations.menu_item]]` | ✅ M1 | `list_plugin_menu_items` — delegates to a `ui_command` id |
+| URI handlers | `[[registrations.uri_handler]]` | ✅ M1 | `list_plugin_uri_handlers` — WASM handler dispatched on scheme match |
+| Context-menu items | — | ❌ Script-only M1 | Scope-keyed (`"file-tree:file"` etc.); WASM dispatch requires a handler_id per scope; defer to M2 |
+| Webview panels | — | ❌ Script-only M1 | WASM plugins cannot ship a React component; they register an `htmlUrl` for iframe rendering. A `[[registrations.webview_panel]]` TOML key is reserved for M2 |
+| Snippets | — | ❌ Script-only M1 | Purely declarative, but no manifest key yet; defer to M2 editor extension slice |
+| Tree-data providers | — | ❌ Script-only M1 | Requires a host IPC bridge to fetch tree nodes; defer to M2 |
+| File handlers | — | ❌ Script-only M1 | Extension → content-type mapping; simple to add, reserved for M2 alongside canvas/bases surface work |
+
+**Menu-bar item manifest syntax:**
+
+```toml
+[[registrations.menu_item]]
+id = "file.analyze"
+menu = "File"
+label = "Analyze Document"
+command = "analyze.run"     # references a ui_command.id in the same manifest
+order = 50                  # optional; lower values sort first
+separator_before = false    # optional
+```
+
+**URI handler manifest syntax:**
+
+```toml
+[[registrations.uri_handler]]
+id = "analyze.handler"
+scheme = "nexus"            # URI scheme to claim
+handler_id = 200            # WASM function index dispatched when scheme matches
+```
+
 ---
 
 ## 2. WASM Runtime Decision: Wasmtime vs Wasmer

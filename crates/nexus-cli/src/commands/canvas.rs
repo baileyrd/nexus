@@ -29,10 +29,7 @@ fn save_canvas(app: &mut App, path: &str, canvas: &CanvasFile) -> Result<()> {
 
 /// Create a new empty canvas file.
 pub fn create(app: &mut App, path: &str) -> Result<()> {
-    let canvas = CanvasFile {
-        nodes: vec![],
-        edges: vec![],
-    };
+    let canvas = CanvasFile::default();
     save_canvas(app, path, &canvas)?;
     output::print_success(
         app.format(),

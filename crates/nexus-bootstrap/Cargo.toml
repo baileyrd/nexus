@@ -7,6 +7,7 @@ publish.workspace = true
 description = "Nexus runtime bootstrap: assembles kernel, plugin loader, and core plugins for CLI/TUI invokers"
 
 [dependencies]
+nexus-formats = { path = "../nexus-formats" }
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-kv = { path = "../nexus-kv" }
 nexus-plugins = { path = "../nexus-plugins" }

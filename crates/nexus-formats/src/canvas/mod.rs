@@ -1,7 +1,8 @@
 //! Canvas format parser and serializer.
 //!
 //! The `.canvas` format is a JSON file containing nodes and edges.
-//! The `version` field is required; unknown fields are preserved.
+//! The `version` field defaults to `"1.0"` when absent for
+//! backward-compatibility with legacy and test files.
 
 mod types;
 
@@ -11,26 +12,13 @@ use crate::error::CanvasError;
 
 /// Parse a `.canvas` JSON string into a [`CanvasFile`].
 ///
+/// The `version` field defaults to `"1.0"` when absent.
+///
 /// # Errors
 ///
-/// - [`CanvasError::InvalidJson`] if the JSON is malformed.
-/// - [`CanvasError::MissingVersion`] if the `version` field is absent.
+/// Returns [`CanvasError::InvalidJson`] if the JSON is malformed.
 pub fn parse(json: &str) -> Result<CanvasFile, CanvasError> {
-    // First deserialize to a raw Value so we can check for `version`.
-    let value: serde_json::Value =
-        serde_json::from_str(json).map_err(|e| CanvasError::InvalidJson {
-            path: "<canvas>".to_string(),
-            reason: e.to_string(),
-        })?;
-
-    // Validate `version` presence.
-    if value.get("version").is_none() {
-        return Err(CanvasError::MissingVersion {
-            path: "<canvas>".to_string(),
-        });
-    }
-
-    serde_json::from_value(value).map_err(|e| CanvasError::InvalidJson {
+    serde_json::from_str(json).map_err(|e| CanvasError::InvalidJson {
         path: "<canvas>".to_string(),
         reason: e.to_string(),
     })
@@ -40,19 +28,9 @@ pub fn parse(json: &str) -> Result<CanvasFile, CanvasError> {
 ///
 /// # Errors
 ///
-/// See [`parse`].
+/// Returns [`CanvasError::InvalidJson`] if the JSON is malformed.
 pub fn parse_with_path(json: &str, path: &str) -> Result<CanvasFile, CanvasError> {
-    let value: serde_json::Value =
-        serde_json::from_str(json).map_err(|e| CanvasError::InvalidJson {
-            path: path.to_string(),
-            reason: e.to_string(),
-        })?;
-
-    if value.get("version").is_none() {
-        return Err(CanvasError::MissingVersion { path: path.to_string() });
-    }
-
-    serde_json::from_value(value).map_err(|e| CanvasError::InvalidJson {
+    serde_json::from_str(json).map_err(|e| CanvasError::InvalidJson {
         path: path.to_string(),
         reason: e.to_string(),
     })
@@ -105,10 +83,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_missing_version_errors() {
+    fn parse_missing_version_defaults_to_1_0() {
         let json = r#"{"nodes":[],"edges":[]}"#;
-        let err = parse(json).unwrap_err();
-        assert!(matches!(err, CanvasError::MissingVersion { .. }));
+        let c = parse(json).unwrap();
+        assert_eq!(c.version, "1.0");
     }
 
     #[test]

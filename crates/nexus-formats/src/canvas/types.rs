@@ -5,10 +5,15 @@
 
 use serde::{Deserialize, Serialize};
 
+fn default_canvas_version() -> String {
+    "1.0".to_string()
+}
+
 /// A parsed `.canvas` file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CanvasFile {
-    /// Format version — required, must be `"1.0"` for this reader.
+    /// Format version. Defaults to `"1.0"` when absent (legacy / test files).
+    #[serde(default = "default_canvas_version")]
     pub version: String,
     /// Nodes on the canvas.
     #[serde(default)]
@@ -16,9 +21,21 @@ pub struct CanvasFile {
     /// Edges connecting nodes.
     #[serde(default)]
     pub edges: Vec<CanvasEdge>,
-    /// Unknown top-level fields are preserved for forward-compatibility.
-    #[serde(flatten)]
+    /// Unknown top-level fields preserved for forward-compatibility.
+    /// Skipped during serialization when empty.
+    #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+impl Default for CanvasFile {
+    fn default() -> Self {
+        Self {
+            version: default_canvas_version(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            extra: serde_json::Map::new(),
+        }
+    }
 }
 
 /// A node placed on the canvas.
@@ -144,6 +161,17 @@ impl CanvasEdgeType {
             Self::Solid  => "solid",
             Self::Dashed => "dashed",
             Self::Dotted => "dotted",
+        }
+    }
+
+    /// Parse a string into an edge type, defaulting to [`Solid`](Self::Solid)
+    /// for unrecognised values.
+    #[must_use]
+    pub fn from_str_lossy(s: &str) -> Self {
+        match s {
+            "dashed" => Self::Dashed,
+            "dotted" => Self::Dotted,
+            _ => Self::Solid,
         }
     }
 }

@@ -183,6 +183,44 @@ pub struct UiSlashCommandContribution {
     pub template: String,
 }
 
+/// A single plugin-contributed application menu-bar item, materialised
+/// for the frontend. Aggregated by [`PluginManager::ui_menu_items`];
+/// the frontend merges these into the active layout's menu bar at
+/// render time.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UiMenuItemContribution {
+    /// The plugin that owns this menu item.
+    pub plugin_id: String,
+    /// The `id` declared in the manifest.
+    pub item_id: String,
+    /// Top-level menu to insert into (e.g. `"File"`, `"View"`).
+    pub menu: String,
+    /// Label shown in the menu.
+    pub label: String,
+    /// Fully-qualified command id (`plugin:<plugin_id>:<command>`).
+    pub command_id: String,
+    /// Display-order hint within the menu.
+    pub order: Option<i32>,
+    /// When `true`, render a separator immediately before this item.
+    pub separator_before: bool,
+}
+
+/// A single plugin-contributed URI handler, materialised for the
+/// frontend. Aggregated by [`PluginManager::uri_handlers`]; the
+/// frontend registers these with `contributions.registerUriHandler`
+/// as WASM-backed handlers.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UriHandlerContribution {
+    /// The plugin that owns this URI handler.
+    pub plugin_id: String,
+    /// The `id` declared in the manifest.
+    pub handler_id_str: String,
+    /// URI scheme claimed — e.g. `"nexus"`.
+    pub scheme: String,
+    /// WASM function index dispatched when a matching URI arrives.
+    pub wasm_handler_id: u32,
+}
+
 // ─── PluginManagerConfig ──────────────────────────────────────────────────────
 
 /// Configuration for [`PluginManager`].
@@ -488,6 +526,60 @@ impl PluginManager {
                         aliases: r.aliases,
                         badge: r.badge,
                         template: r.template,
+                    })
+            })
+            .collect()
+    }
+
+    /// Aggregate application menu-bar item contributions across all
+    /// currently-loaded plugins. `command_id` is pre-qualified with the
+    /// owning plugin so the frontend can pass it straight to
+    /// `contributions.invokeCommand`.
+    #[must_use]
+    pub fn ui_menu_items(&self) -> Vec<UiMenuItemContribution> {
+        self.loader
+            .list()
+            .into_iter()
+            .flat_map(|info| {
+                let plugin_id = info.id.clone();
+                self.loader
+                    .manifest(&info.id)
+                    .map(|m| m.registrations.menu_items.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |r| UiMenuItemContribution {
+                        plugin_id: plugin_id.clone(),
+                        item_id: r.id,
+                        menu: r.menu,
+                        label: r.label,
+                        command_id: format!("plugin:{plugin_id}:{}", r.command),
+                        order: r.order,
+                        separator_before: r.separator_before,
+                    })
+            })
+            .collect()
+    }
+
+    /// Aggregate URI / protocol-handler contributions across all
+    /// currently-loaded plugins. The frontend registers each entry with
+    /// `contributions.registerUriHandler` backed by the WASM dispatcher.
+    #[must_use]
+    pub fn uri_handlers(&self) -> Vec<UriHandlerContribution> {
+        self.loader
+            .list()
+            .into_iter()
+            .flat_map(|info| {
+                let plugin_id = info.id.clone();
+                self.loader
+                    .manifest(&info.id)
+                    .map(|m| m.registrations.uri_handlers.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |r| UriHandlerContribution {
+                        plugin_id: plugin_id.clone(),
+                        handler_id_str: r.id,
+                        scheme: r.scheme,
+                        wasm_handler_id: r.handler_id,
                     })
             })
             .collect()

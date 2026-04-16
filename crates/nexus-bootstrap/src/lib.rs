@@ -34,17 +34,17 @@ pub mod storage;
 
 /// Render a markdown note to a standalone HTML string.
 ///
-/// Re-exported from `nexus-storage` so CLI/TUI don't need a direct dep for
-/// this pure function.
-pub use nexus_storage::export_to_html;
+/// Re-exported from `nexus-formats` (pure format library, no SQLite).
+pub use nexus_formats::export_to_html;
 
-/// Canvas data types and pure (de)serialization helpers, re-exported so
-/// CLI/TUI canvas commands can parse and mutate canvas files locally and
-/// round-trip them through the storage plugin via `read_file`/`write_file`.
-pub use nexus_storage::{
-    parse_canvas, serialize_canvas, CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode,
-    CanvasNodeType,
-};
+/// Canvas data types and pure (de)serialization helpers, re-exported from
+/// `nexus-formats` so CLI/TUI canvas commands can parse and mutate canvas
+/// files without pulling in the SQLite-backed `nexus-storage` crate.
+pub use nexus_formats::{CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeType};
+/// Parse a `.canvas` JSON string.
+pub use nexus_formats::canvas::parse as parse_canvas;
+/// Serialize a [`CanvasFile`] to pretty-printed JSON.
+pub use nexus_formats::canvas::serialize as serialize_canvas;
 
 /// Plugin id for the in-tree Nexus CLI invoker.
 pub const CLI_PLUGIN_ID: &str = "com.nexus.cli";

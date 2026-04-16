@@ -5,6 +5,12 @@ version = "0.1.0"
 trust_level = "community"
 api_version = "1"
 
+[capabilities]
+# Handler 104 emits com.nexus.hello.observed back to the frontend.
+required = ["events.publish"]
+# sayHi and other handlers surface toasts via host::notify.
+optional = ["ui.notify"]
+
 [wasm]
 module = "hello.wasm"
 memory_mb = 8

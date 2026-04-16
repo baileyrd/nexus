@@ -33,6 +33,10 @@ pub enum Capability {
     DbQuery,
     /// Write to `SQLite` tables registered by the plugin.
     DbWrite,
+    /// Publish events to the kernel event bus.
+    EventsPublish,
+    /// Show UI notifications (toasts) to the user.
+    UiNotify,
 }
 
 /// Error parsing a capability string.
@@ -60,6 +64,8 @@ impl Capability {
             Capability::IpcCall          => "ipc.call",
             Capability::DbQuery          => "db.query",
             Capability::DbWrite          => "db.write",
+            Capability::EventsPublish    => "events.publish",
+            Capability::UiNotify         => "ui.notify",
         }
     }
 
@@ -83,6 +89,8 @@ impl Capability {
             "ipc.call"           => Ok(Capability::IpcCall),
             "db.query"           => Ok(Capability::DbQuery),
             "db.write"           => Ok(Capability::DbWrite),
+            "events.publish"     => Ok(Capability::EventsPublish),
+            "ui.notify"          => Ok(Capability::UiNotify),
             other                => Err(CapabilityParseError::UnknownString(other.to_string())),
         }
     }
@@ -101,6 +109,8 @@ impl Capability {
         Capability::IpcCall,
         Capability::DbQuery,
         Capability::DbWrite,
+        Capability::EventsPublish,
+        Capability::UiNotify,
     ];
 }
 
@@ -192,8 +202,8 @@ mod tests {
     }
 
     #[test]
-    fn all_has_twelve_variants() {
-        assert_eq!(Capability::ALL.len(), 12);
+    fn all_has_fourteen_variants() {
+        assert_eq!(Capability::ALL.len(), 14);
     }
 
     #[test]

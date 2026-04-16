@@ -1,161 +1,18 @@
 //! Canvas file format parser, serializer, and `SQLite` persistence.
 //!
-//! Implements the `.canvas` JSON format (Obsidian-compatible) with node
-//! types (file, text, link, group, database, terminal) and typed edges.
+//! Format types (`CanvasFile`, `CanvasNode`, etc.) and pure parsing helpers
+//! live in `nexus-formats`; this module re-exports them and adds `SQLite`
+//! persistence on top.
 
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
 
 use crate::StorageError;
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Format types (owned by nexus-formats) ────────────────────────────────────
 
-/// A parsed `.canvas` file containing nodes and edges.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CanvasFile {
-    /// Nodes in the canvas.
-    #[serde(default)]
-    pub nodes: Vec<CanvasNode>,
-    /// Edges connecting nodes.
-    #[serde(default)]
-    pub edges: Vec<CanvasEdge>,
-}
-
-/// A node in a canvas.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CanvasNode {
-    /// Unique node identifier.
-    pub id: String,
-    /// Node type discriminant.
-    #[serde(rename = "type")]
-    pub node_type: CanvasNodeType,
-    /// Horizontal position.
-    pub x: f64,
-    /// Vertical position.
-    pub y: f64,
-    /// Node width.
-    pub width: f64,
-    /// Node height.
-    pub height: f64,
-    /// Optional display color.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub color: Option<String>,
-    /// Optional display label.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    /// Whether the node is collapsed.
-    #[serde(default)]
-    pub collapsed: bool,
-    // ── Type-specific fields (flattened for Obsidian compat) ──
-    /// File path for `file` nodes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub file: Option<String>,
-    /// Text content for `text` nodes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-    /// URL for `link` nodes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    /// Source path for `database` nodes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    /// Command for `terminal` nodes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
-}
-
-/// Discriminant for canvas node types.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CanvasNodeType {
-    /// Embeds a file from the vault.
-    File,
-    /// Free-form text card.
-    Text,
-    /// External link card.
-    Link,
-    /// Container for organizing nodes.
-    Group,
-    /// Reference to a `.bases` file.
-    Database,
-    /// Code execution block.
-    Terminal,
-}
-
-impl CanvasNodeType {
-    /// Returns the string representation.
-    #[must_use] 
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::File => "file",
-            Self::Text => "text",
-            Self::Link => "link",
-            Self::Group => "group",
-            Self::Database => "database",
-            Self::Terminal => "terminal",
-        }
-    }
-}
-
-/// An edge connecting two nodes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CanvasEdge {
-    /// Unique edge identifier.
-    pub id: String,
-    /// Source node ID.
-    #[serde(rename = "from")]
-    pub from_node: String,
-    /// Target node ID.
-    #[serde(rename = "to")]
-    pub to_node: String,
-    /// Edge line style.
-    #[serde(rename = "type", default = "default_edge_type")]
-    pub edge_type: CanvasEdgeType,
-    /// Optional relationship label.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    /// Optional display color.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub color: Option<String>,
-}
-
-fn default_edge_type() -> CanvasEdgeType {
-    CanvasEdgeType::Solid
-}
-
-/// Edge line style.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CanvasEdgeType {
-    /// Solid line.
-    Solid,
-    /// Dashed line.
-    Dashed,
-    /// Dotted line.
-    Dotted,
-}
-
-impl CanvasEdgeType {
-    /// Returns the string representation.
-    #[must_use] 
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Solid => "solid",
-            Self::Dashed => "dashed",
-            Self::Dotted => "dotted",
-        }
-    }
-
-    /// Parse from string.
-    #[must_use] 
-    pub fn from_str_lossy(s: &str) -> Self {
-        match s {
-            "dashed" => Self::Dashed,
-            "dotted" => Self::Dotted,
-            _ => Self::Solid,
-        }
-    }
-}
+pub use nexus_formats::canvas::{
+    CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeType,
+};
 
 /// A canvas node record from the database.
 #[derive(Debug, Clone)]
@@ -211,11 +68,14 @@ pub struct CanvasEdgeRecord {
 
 /// Parse a `.canvas` JSON string into a [`CanvasFile`].
 ///
+/// Delegates to [`nexus_formats::canvas::parse`]; maps
+/// [`nexus_formats::error::CanvasError`] to [`StorageError::CorruptFile`].
+///
 /// # Errors
 ///
 /// Returns [`StorageError::CorruptFile`] if the JSON is invalid.
 pub fn parse_canvas(json: &str) -> Result<CanvasFile, StorageError> {
-    serde_json::from_str(json).map_err(|e| StorageError::CorruptFile {
+    nexus_formats::canvas::parse(json).map_err(|e| StorageError::CorruptFile {
         path: "<canvas>".to_string(),
         reason: e.to_string(),
     })
@@ -223,11 +83,13 @@ pub fn parse_canvas(json: &str) -> Result<CanvasFile, StorageError> {
 
 /// Serialize a [`CanvasFile`] to pretty-printed JSON.
 ///
+/// Delegates to [`nexus_formats::canvas::serialize`].
+///
 /// # Errors
 ///
 /// Returns [`StorageError::CorruptFile`] on serialization failure.
 pub fn serialize_canvas(canvas: &CanvasFile) -> Result<String, StorageError> {
-    serde_json::to_string_pretty(canvas).map_err(|e| StorageError::CorruptFile {
+    nexus_formats::canvas::serialize(canvas).map_err(|e| StorageError::CorruptFile {
         path: "<canvas>".to_string(),
         reason: e.to_string(),
     })
@@ -530,6 +392,7 @@ mod tests {
                 label: Some("links to".to_string()),
                 color: None,
             }],
+            ..CanvasFile::default()
         };
         let json = serialize_canvas(&original).unwrap();
         let parsed = parse_canvas(&json).unwrap();
@@ -584,6 +447,7 @@ mod tests {
                 label: Some("references".to_string()),
                 color: None,
             }],
+            ..CanvasFile::default()
         };
 
         insert_canvas(&conn, file_id, &canvas).unwrap();
@@ -624,7 +488,7 @@ mod tests {
                 color: None, label: None, collapsed: false,
                 file: None, text: Some("hi".to_string()), url: None, source: None, command: None,
             }],
-            edges: vec![],
+            ..CanvasFile::default()
         };
         insert_canvas(&conn, file_id, &canvas).unwrap();
         delete_canvas(&conn, file_id).unwrap();
@@ -652,7 +516,7 @@ mod tests {
                     file: None, text: Some("hi".to_string()), url: None, source: None, command: None,
                 },
             ],
-            edges: vec![],
+            ..CanvasFile::default()
         };
         let links = extract_file_links(&canvas);
         assert_eq!(links, vec!["notes/a.md"]);

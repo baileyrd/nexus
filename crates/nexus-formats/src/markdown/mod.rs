@@ -15,12 +15,14 @@ use crate::util::sha256_hex;
 pub mod embed;
 pub mod extensions;
 pub mod frontmatter;
+pub mod html;
 pub mod wikilinks;
 
 pub use embed::MAX_EMBED_DEPTH;
 pub use extensions::{MathSpan, Tag, TagSource, detect_callout, extract_block_ref,
                      extract_inline_tags, extract_math_spans};
 pub use frontmatter::{Frontmatter, extract as extract_frontmatter_raw};
+pub use html::export_to_html;
 pub use wikilinks::{LinkType, WikiLink, scan as scan_wikilinks};
 
 // ── Public types ──────────────────────────────────────────────────────────────

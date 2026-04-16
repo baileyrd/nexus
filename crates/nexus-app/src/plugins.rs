@@ -10,9 +10,9 @@ use std::time::Duration;
 use nexus_kernel::{EventBus, IpcDispatcher, IpcError, NexusEvent};
 use nexus_plugins::{
     CompositeIpcDispatcher, FallbackCell, PluginBackend, PluginEventForwarder, PluginManager,
-    PluginManagerConfig, PluginStatus, TrustLevel, UiContribution, UiPanelContribution,
-    UiRibbonItemContribution, UiSettingsTabContribution, UiSlashCommandContribution,
-    UiStatusItemContribution,
+    PluginManagerConfig, PluginStatus, TrustLevel, UiContribution, UiMenuItemContribution,
+    UiPanelContribution, UiRibbonItemContribution, UiSettingsTabContribution,
+    UiSlashCommandContribution, UiStatusItemContribution, UriHandlerContribution,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -387,6 +387,29 @@ pub fn list_plugin_slash_commands(
         .manager
         .lock()
         .map(|mgr| mgr.ui_slash_commands())
+        .unwrap_or_default()
+}
+
+/// List all plugin-contributed application menu-bar items. The frontend
+/// merges these into the active layout's menu bar at render time.
+#[tauri::command]
+pub fn list_plugin_menu_items(state: State<'_, PluginState>) -> Vec<UiMenuItemContribution> {
+    state
+        .manager
+        .lock()
+        .map(|mgr| mgr.ui_menu_items())
+        .unwrap_or_default()
+}
+
+/// List all plugin-contributed URI / protocol handlers. The frontend
+/// registers each entry with `contributions.registerUriHandler` backed
+/// by the WASM dispatcher.
+#[tauri::command]
+pub fn list_plugin_uri_handlers(state: State<'_, PluginState>) -> Vec<UriHandlerContribution> {
+    state
+        .manager
+        .lock()
+        .map(|mgr| mgr.uri_handlers())
         .unwrap_or_default()
 }
 

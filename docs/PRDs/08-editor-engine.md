@@ -676,46 +676,27 @@ The parser and serializer ensure:
 
 ### 4.1 Editor Instance Architecture
 
-The editor UI is a CodeMirror 6 instance running in a Tauri WebView. It renders the markdown source text and displays live preview decorations.
+The editor UI is a CodeMirror 6 instance running in a Tauri WebView (`app/src/editor/EditorSurface.tsx`). **CM6 is the canonical owner of character-level text state**; the Rust layer maintains an in-memory block tree updated via debounced IPC rather than per-keystroke round-trips.
 
-```rust
-// Rust side: editor-engine crate
-pub struct EditorSession {
-    /// The block tree in memory
-    tree: RwLock<BlockTree>,
-    
-    /// Transaction log (undo/redo)
-    tx_log: RwLock<TransactionLog>,
-    
-    /// CodeMirror document state (kept in sync with tree)
-    cm_state: RwLock<EditorState>,
-    
-    /// File path being edited
-    file_path: String,
-    
-    /// Listeners for editor changes
-    listeners: Arc<Mutex<Vec<Box<dyn EditorListener>>>>,
-}
+**Document model ownership:**
 
-pub trait EditorListener: Send + Sync {
-    fn on_change(&self, event: EditorChangeEvent);
-    fn on_selection(&self, pos: usize);
-}
+| Layer | Owns |
+|-------|------|
+| CM6 (WebView, TypeScript) | Live document text, cursor, selection, undo/redo history, extension compartments |
+| Rust block tree (`nexus-editor` core plugin) | In-memory parse of the markdown source; used for outline navigation, word count, AI hints, plugin decoration queries |
 
-pub struct EditorChangeEvent {
-    pub kind: ChangeKind,
-    pub affected_blocks: Vec<BlockId>,
-    pub transaction_id: Uuid,
-}
+**Debounced sync flow:**
 
-pub enum ChangeKind {
-    TextInserted { pos: usize, length: usize },
-    TextDeleted { pos: usize, length: usize },
-    BlockInserted { block_id: BlockId },
-    BlockDeleted { block_id: BlockId },
-    BlockMoved { block_id: BlockId, new_parent: BlockId },
-}
-```
+1. CM6 `updateListener` fires on `update.docChanged`.
+2. `EditorSurface.tsx` waits **800 ms** of inactivity (debounced), then calls the `editor_sync_content` Tauri command with the full document string.
+3. The Rust `nexus-editor` core plugin re-parses the markdown and replaces its in-memory `BlockTree`. No disk I/O occurs.
+4. The AI-inline-edit pipeline and outline sidebar subscribe to the block tree and see the updated state within the next debounce window.
+
+**Why 800 ms:** fast enough for outline updates to feel responsive, slow enough to avoid saturating the IPC channel during rapid typing. If a future collaborative-editing or AI-streaming feature requires tighter coupling, the debounce can be shortened or replaced with a structural-change detector that only syncs when paragraph or heading boundaries change.
+
+**Rust session state (actual):** `EditorCorePlugin` in `crates/nexus-editor/src/core_plugin.rs` holds an `Arc<Mutex<Option<BlockTree>>>` per open file, keyed by path. There is no per-session `cm_state` mirror or `EditorListener` trait on the Rust side — CM6 holds all of that locally in the WebView.
+
+> **Implementation divergence from original spec:** The original spec described a mirrored `EditorSession` with `cm_state: RwLock<EditorState>` and an `EditorListener` trait on the Rust side. The actual implementation chose the simpler debounced-push model: CM6 owns the live text; Rust sees snapshots. This was a deliberate tradeoff — per-keystroke IPC latency is unacceptable in a local desktop app, and the block tree does not need sub-second freshness for any current consumer.
 
 ### 4.2 CodeMirror Extensions
 
@@ -791,49 +772,11 @@ const wikiLinkPreview = ViewPlugin.define((view) => {
 
 ### 4.4 Block Boundary Mapping
 
-CodeMirror operates on character positions; the block tree uses block IDs. A mapping layer maintains the correspondence:
+> **`BlockPositionMap` spec retired.** A live `BlockPositionMap` synchronised on every keystroke was not built and is not planned. CM6 natively tracks character positions inside the WebView; the Rust block tree is rebuilt from the full document text on each debounced sync (see §4.1) and does not maintain a persistent position index.
 
-```rust
-pub struct BlockPositionMap {
-    /// Ordered vec of (line_start, block_id)
-    line_to_block: Vec<(usize, BlockId)>,
-}
+Character-to-block resolution for current consumers (outline scroll-to-heading, word-count badge) is performed by a linear scan over the block tree at query time, which is acceptably fast for documents of realistic size.
 
-impl BlockPositionMap {
-    /// Build from block tree and markdown source
-    pub fn from_tree(tree: &BlockTree, source: &str) -> Self {
-        let mut map = Vec::new();
-        let mut line = 0;
-        
-        for root_id in &tree.root_blocks {
-            Self::traverse(tree, *root_id, &mut line, &mut map, source);
-        }
-        
-        BlockPositionMap { line_to_block: map }
-    }
-    
-    /// Get block ID for a character position
-    pub fn block_at(&self, pos: usize) -> Option<BlockId> {
-        // Binary search in line_to_block
-        self.line_to_block
-            .binary_search_by_key(&pos, |&(line, _)| line)
-            .map(|i| self.line_to_block[i].1)
-            .ok()
-    }
-    
-    /// Get character range for a block
-    pub fn range_for_block(&self, block_id: BlockId) -> Option<(usize, usize)> {
-        let start_idx = self.line_to_block.iter().position(|(_, id)| id == &block_id)?;
-        let start = self.line_to_block[start_idx].0;
-        let end = if start_idx + 1 < self.line_to_block.len() {
-            self.line_to_block[start_idx + 1].0
-        } else {
-            usize::MAX
-        };
-        Some((start, end))
-    }
-}
-```
+**Future path:** If AI-inline-edit or an LSP bridge (§14.5) requires stable block IDs that survive partial edits without a full re-parse, the correct approach is a CM6-side `StateField<RangeSet<BlockIdMark>>` — a decoration range set that CM6 keeps consistent across insertions and deletions automatically using its O(log n) range-set update semantics. This keeps position tracking in the layer that owns the text (CM6), rather than building a parallel Rust-side map that would need to stay in sync via IPC.
 
 ### 4.5 Keybinding Configuration
 

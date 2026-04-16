@@ -57,6 +57,14 @@ pub fn risk_level(cap: Capability) -> RiskLevel {
         | Capability::NetHttp
         | Capability::ProcessSpawn
         | Capability::IpcCall => RiskLevel::High,
+
+        // A plugin can publish arbitrary events to the kernel bus, visible
+        // to all subscribers — moderate trust concern.
+        Capability::EventsPublish => RiskLevel::Medium,
+
+        // Showing toasts has no destructive effect but is a user-visible
+        // side effect; low risk, but spam potential warrants a gate.
+        Capability::UiNotify => RiskLevel::Low,
     }
 }
 
