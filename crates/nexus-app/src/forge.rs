@@ -280,6 +280,27 @@ pub fn read_forge_file(
     })
 }
 
+/// Write content to a file within the active forge. Creates parent
+/// directories if needed. Path-safety checked via [`resolve_within`].
+#[tauri::command]
+pub fn write_forge_file(
+    relpath: String,
+    content: String,
+    state: State<'_, ForgeState>,
+) -> Result<(), String> {
+    let forge = state
+        .0
+        .lock()
+        .map_err(|_| "forge state poisoned")?
+        .clone()
+        .ok_or("no forge open")?;
+    let target = resolve_within(&forge.root, &relpath)?;
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&target, content.as_bytes()).map_err(|e| e.to_string())
+}
+
 /// Resolve `relpath` against `root`, rejecting anything that escapes the
 /// root (via `..`, absolute paths, or symlink traversal after canonicalize).
 fn resolve_within(root: &Path, relpath: &str) -> Result<PathBuf, String> {

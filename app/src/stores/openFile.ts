@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { readForgeFile, type ForgeFile } from "../ipc/forge";
+import { readForgeFile, writeForgeFile, type ForgeFile } from "../ipc/forge";
 import { HostTopics, publishHostEvent } from "../plugins/events";
 import { useForgeStore } from "./forge";
 import { useLayoutStore } from "./layout";
@@ -8,6 +8,8 @@ interface OpenFileState {
   file: ForgeFile | null;
   loading: boolean;
   error: string | null;
+  /** Whether the editor content has diverged from the saved file. */
+  isDirty: boolean;
   /** Open a file by relpath. Errors surface via `error`. Use this for
    *  explicit user actions. Persists openFile under the active forge. */
   open: (relpath: string) => Promise<void>;
@@ -22,6 +24,10 @@ interface OpenFileState {
    *  during a forge switch so the OLD forge's last-open isn't
    *  clobbered with null. */
   reset: () => void;
+  /** Mark the file as dirty (editor content changed). */
+  markDirty: () => void;
+  /** Save the current editor content to disk. */
+  save: (content: string) => Promise<void>;
 }
 
 /** Persist the current openFile relpath under the active forge, if any. */
@@ -36,9 +42,10 @@ export const useOpenFileStore = create<OpenFileState>((set, get) => ({
   file: null,
   loading: false,
   error: null,
+  isDirty: false,
 
   open: async (relpath: string) => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, isDirty: false });
     try {
       const file = await readForgeFile(relpath);
       set({ file, loading: false });
@@ -55,24 +62,38 @@ export const useOpenFileStore = create<OpenFileState>((set, get) => ({
   refresh: async () => {
     const current = get().file;
     if (!current) return;
+    // Don't clobber dirty editor content with the disk version.
+    if (get().isDirty) return;
     try {
       const file = await readForgeFile(current.relpath);
       set({ file });
     } catch {
-      // File was deleted/renamed externally — close in memory only;
-      // persistence is updated separately when the user acts.
-      set({ file: null, error: null });
+      set({ file: null, error: null, isDirty: false });
     }
   },
 
   close: () => {
     const previous = get().file?.relpath ?? null;
-    set({ file: null, error: null });
+    set({ file: null, error: null, isDirty: false });
     persist(null);
     if (previous !== null) {
       void publishHostEvent(HostTopics.fileClosed, { relpath: previous });
     }
   },
 
-  reset: () => set({ file: null, error: null }),
+  reset: () => set({ file: null, error: null, isDirty: false }),
+
+  markDirty: () => set({ isDirty: true }),
+
+  save: async (content: string) => {
+    const file = get().file;
+    if (!file) return;
+    try {
+      await writeForgeFile(file.relpath, content);
+      set({ isDirty: false, file: { ...file, content } });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[save] failed for ${file.relpath}:`, e);
+    }
+  },
 }));

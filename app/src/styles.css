@@ -988,6 +988,26 @@ main {
 .file-viewer-name {
   font-weight: 600;
   color: var(--nx-text-primary, #2a2a2a);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.file-viewer-dirty {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--nx-accent, #4f8ff7);
+}
+
+.editor-surface {
+  flex: 1;
+  overflow: hidden;
+}
+
+.editor-surface .cm-editor {
+  height: 100%;
 }
 
 .file-viewer-relpath {

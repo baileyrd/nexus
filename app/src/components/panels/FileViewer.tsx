@@ -1,49 +1,39 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect } from "react";
 import { X } from "lucide-react";
 import { useForgeStore } from "../../stores/forge";
 import { useOpenFileStore } from "../../stores/openFile";
-import {
-  SCROLL_TO_HEADING_EVENT,
-  type ScrollToHeadingDetail,
-} from "./Outline";
+import { EditorSurface } from "../surfaces/EditorSurface";
 
 /**
- * Read-only file viewer. Renders the currently-open forge file as plain
- * text, tagging each line with `data-line` so the outline panel can
- * scroll to a heading via a custom event. A real editor (PRD-08) will
- * replace this.
+ * File viewer with live CodeMirror 6 editor. Renders the currently-open
+ * forge file with syntax-aware editing, dirty-state tracking, and
+ * Mod+S save.
  */
 export function FileViewer() {
   const file = useOpenFileStore((s) => s.file);
   const loading = useOpenFileStore((s) => s.loading);
   const error = useOpenFileStore((s) => s.error);
+  const isDirty = useOpenFileStore((s) => s.isDirty);
   const close = useOpenFileStore((s) => s.close);
+  const markDirty = useOpenFileStore((s) => s.markDirty);
+  const save = useOpenFileStore((s) => s.save);
   const refresh = useOpenFileStore((s) => s.refresh);
   const fsVersion = useForgeStore((s) => s.fsVersion);
-  const bodyRef = useRef<HTMLPreElement>(null);
 
-  // Re-read the open file whenever the watcher signals a change. If
-  // the file has been deleted or renamed externally, `refresh` closes
-  // cleanly so the viewer doesn't get stuck on stale content.
   useEffect(() => {
     void refresh();
   }, [fsVersion, refresh]);
 
-  // Scroll to the heading's line when the outline panel requests it.
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<ScrollToHeadingDetail>).detail;
-      if (!detail || !bodyRef.current) return;
-      const target = bodyRef.current.querySelector<HTMLElement>(
-        `[data-line="${detail.line}"]`,
-      );
-      target?.scrollIntoView({ behavior: "smooth", block: "start" });
-    };
-    window.addEventListener(SCROLL_TO_HEADING_EVENT, handler);
-    return () => window.removeEventListener(SCROLL_TO_HEADING_EVENT, handler);
-  }, []);
+  const handleChange = useCallback(() => {
+    markDirty();
+  }, [markDirty]);
 
-  const lines = useMemo(() => file?.content.split("\n") ?? [], [file?.content]);
+  const handleSave = useCallback(
+    (content: string) => {
+      void save(content);
+    },
+    [save],
+  );
 
   if (loading) {
     return <div className="file-viewer-status">opening…</div>;
@@ -60,7 +50,10 @@ export function FileViewer() {
   return (
     <div className="file-viewer">
       <header className="file-viewer-header">
-        <span className="file-viewer-name">{file.name}</span>
+        <span className="file-viewer-name">
+          {file.name}
+          {isDirty && <span className="file-viewer-dirty" title="Unsaved changes" />}
+        </span>
         <span className="file-viewer-relpath">{file.relpath}</span>
         <button
           type="button"
@@ -72,14 +65,12 @@ export function FileViewer() {
           <X size={14} aria-hidden="true" />
         </button>
       </header>
-      <pre ref={bodyRef} className="file-viewer-body">
-        {lines.map((line, i) => (
-          <span key={i} data-line={i}>
-            {line}
-            {i < lines.length - 1 ? "\n" : ""}
-          </span>
-        ))}
-      </pre>
+      <EditorSurface
+        initialContent={file.content}
+        filePath={file.relpath}
+        onChange={handleChange}
+        onSave={handleSave}
+      />
     </div>
   );
 }

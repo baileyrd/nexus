@@ -88,6 +88,7 @@ pub fn run() {
             forge::open_forge,
             forge::list_forge_dir,
             forge::read_forge_file,
+            forge::write_forge_file,
             forge::create_forge_file,
             forge::create_forge_dir,
             forge::rename_forge_entry,

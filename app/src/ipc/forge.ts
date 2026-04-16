@@ -39,6 +39,10 @@ export function readForgeFile(relpath: string): Promise<ForgeFile> {
   return invoke("read_forge_file", { relpath });
 }
 
+export function writeForgeFile(relpath: string, content: string): Promise<void> {
+  return invoke("write_forge_file", { relpath, content });
+}
+
 export function createForgeFile(relpath: string): Promise<void> {
   return invoke("create_forge_file", { relpath });
 }
