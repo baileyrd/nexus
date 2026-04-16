@@ -5,9 +5,18 @@
  * events, and call other plugins without importing Tauri directly.
  */
 
+import {
+  contributions,
+  type EditorBlockType,
+  type EditorDecorationProvider,
+  type EditorKeybinding,
+} from "../contributions";
 import { invokePluginCommand } from "../ipc/plugins";
 import { getPluginSettings } from "../ipc/pluginSettings";
 import { publishHostEvent } from "./events";
+
+/** Minimal disposable contract mirroring the contribution registry. */
+export type Disposable = () => void;
 
 export interface NexusPluginContext {
   /** The plugin's reverse-DNS identifier. */
@@ -31,6 +40,19 @@ export interface NexusPluginContext {
       args?: unknown,
     ): Promise<unknown>;
   };
+
+  /**
+   * Editor-surface extension points (PRD-08 §14.1–14.3). Plugins hold
+   * onto the returned disposables and call them from `onStop` so their
+   * contributions are removed when the plugin is unloaded.
+   */
+  editor: {
+    registerBlockType(type: EditorBlockType): Disposable;
+    registerDecorationProvider(
+      provider: EditorDecorationProvider,
+    ): Disposable;
+    registerKeybinding(binding: EditorKeybinding): Disposable;
+  };
 }
 
 export function createNexusContext(pluginId: string): NexusPluginContext {
@@ -46,6 +68,14 @@ export function createNexusContext(pluginId: string): NexusPluginContext {
     ipc: {
       call: (target, cmd, args) =>
         invokePluginCommand(target, cmd, args ?? {}),
+    },
+    editor: {
+      registerBlockType: (type) =>
+        contributions.registerEditorBlockType(type),
+      registerDecorationProvider: (provider) =>
+        contributions.registerEditorDecorationProvider(provider),
+      registerKeybinding: (binding) =>
+        contributions.registerEditorKeybinding(binding),
     },
   };
 }

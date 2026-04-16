@@ -1,4 +1,5 @@
 import { useSyncExternalStore, type ComponentType } from "react";
+import type { Extension } from "@codemirror/state";
 import type { Panel } from "../bindings";
 
 /**
@@ -61,6 +62,59 @@ export interface PaletteCommand {
   keybinding?: string;
 }
 
+/**
+ * Editor extension-point contributions (PRD-08 §14.1–14.3). The editor
+ * surface (`EditorSurface.tsx`) subscribes to these lists and reconfigures
+ * its CodeMirror instance whenever a plugin registers or disposes a
+ * contribution, so hot-reloading a plugin picks up block types,
+ * decorations, and editor-scoped keybindings without an app restart.
+ */
+export interface EditorBlockType {
+  /** Stable id. Plugin contributions should be namespaced as `plugin:<id>:<block>`. */
+  id: string;
+  /** Display label for block-conversion menus and inserters. */
+  label: string;
+  /** Lucide-registry icon name. */
+  icon: string;
+  /** Short description shown as secondary text. */
+  description?: string;
+  /**
+   * Serialize a block of this type to markdown. `content` is the
+   * plain-text body; `attrs` is block-type-specific metadata.
+   * Optional — metadata-only registrations are allowed for plugins
+   * that only need the block to appear in menus.
+   */
+  toMarkdown?: (content: string, attrs?: Record<string, unknown>) => string;
+}
+
+export interface EditorDecorationProvider {
+  /** Stable id for dedupe + disposal diagnostics. */
+  id: string;
+  /**
+   * CodeMirror extension(s) the provider installs into the editor.
+   * Providers typically return a `ViewPlugin` or `Decoration` source
+   * but any valid CM6 extension is accepted so plugins can also
+   * contribute gutter markers, tooltip hosts, etc. in the decoration
+   * slot.
+   */
+  extension: Extension;
+}
+
+export interface EditorKeybinding {
+  /** Stable id, namespaced for plugin entries. */
+  id: string;
+  /** CodeMirror keymap-style chord (e.g. "Mod-Shift-P", "Alt-Enter"). */
+  key: string;
+  /** Command id dispatched via `contributions.invokeCommand`. */
+  commandId: string;
+  /**
+   * Reserved for `when` clause evaluation (e.g. "editorFocus",
+   * "selection"). Not yet honored; editor keybindings are currently
+   * always active while the CodeMirror surface has focus.
+   */
+  when?: string;
+}
+
 type Disposable = () => void;
 
 const commands = new Map<string, CommandHandler>();
@@ -68,6 +122,9 @@ const views = new Map<string, ViewOpener>();
 const contentTypes = new Map<string, ContentComponent>();
 const paletteCommands = new Map<string, PaletteCommand>();
 const settingsTabs = new Map<string, SettingsTab>();
+const editorBlockTypes = new Map<string, EditorBlockType>();
+const editorDecorationProviders = new Map<string, EditorDecorationProvider>();
+const editorKeybindings = new Map<string, EditorKeybinding>();
 /**
  * User keybinding overrides, keyed by `commandId`. When present, the
  * effective keybinding exposed via `listPaletteCommands` / the React
@@ -78,6 +135,9 @@ const keybindingOverrides = new Map<string, string>();
 const contentTypeListeners = new Set<() => void>();
 const paletteListeners = new Set<() => void>();
 const settingsTabListeners = new Set<() => void>();
+const editorBlockTypeListeners = new Set<() => void>();
+const editorDecorationListeners = new Set<() => void>();
+const editorKeybindingListeners = new Set<() => void>();
 
 function warn(msg: string) {
   // eslint-disable-next-line no-console
@@ -257,6 +317,87 @@ export const contributions = {
       settingsTabListeners.delete(fn);
     };
   },
+
+  registerEditorBlockType(type: EditorBlockType): Disposable {
+    if (editorBlockTypes.has(type.id)) {
+      warn(`editor block type '${type.id}' already registered — replacing`);
+    }
+    editorBlockTypes.set(type.id, type);
+    editorBlockTypesSnapshot = null;
+    editorBlockTypeListeners.forEach((fn) => fn());
+    return () => {
+      if (editorBlockTypes.get(type.id) === type) {
+        editorBlockTypes.delete(type.id);
+        editorBlockTypesSnapshot = null;
+        editorBlockTypeListeners.forEach((fn) => fn());
+      }
+    };
+  },
+
+  listEditorBlockTypes(): EditorBlockType[] {
+    return editorBlockTypesSnapshotFn();
+  },
+
+  subscribeEditorBlockTypes(fn: () => void): Disposable {
+    editorBlockTypeListeners.add(fn);
+    return () => {
+      editorBlockTypeListeners.delete(fn);
+    };
+  },
+
+  registerEditorDecorationProvider(provider: EditorDecorationProvider): Disposable {
+    if (editorDecorationProviders.has(provider.id)) {
+      warn(`editor decoration provider '${provider.id}' already registered — replacing`);
+    }
+    editorDecorationProviders.set(provider.id, provider);
+    editorDecorationSnapshot = null;
+    editorDecorationListeners.forEach((fn) => fn());
+    return () => {
+      if (editorDecorationProviders.get(provider.id) === provider) {
+        editorDecorationProviders.delete(provider.id);
+        editorDecorationSnapshot = null;
+        editorDecorationListeners.forEach((fn) => fn());
+      }
+    };
+  },
+
+  listEditorDecorationProviders(): EditorDecorationProvider[] {
+    return editorDecorationSnapshotFn();
+  },
+
+  subscribeEditorDecorationProviders(fn: () => void): Disposable {
+    editorDecorationListeners.add(fn);
+    return () => {
+      editorDecorationListeners.delete(fn);
+    };
+  },
+
+  registerEditorKeybinding(binding: EditorKeybinding): Disposable {
+    if (editorKeybindings.has(binding.id)) {
+      warn(`editor keybinding '${binding.id}' already registered — replacing`);
+    }
+    editorKeybindings.set(binding.id, binding);
+    editorKeybindingSnapshot = null;
+    editorKeybindingListeners.forEach((fn) => fn());
+    return () => {
+      if (editorKeybindings.get(binding.id) === binding) {
+        editorKeybindings.delete(binding.id);
+        editorKeybindingSnapshot = null;
+        editorKeybindingListeners.forEach((fn) => fn());
+      }
+    };
+  },
+
+  listEditorKeybindings(): EditorKeybinding[] {
+    return editorKeybindingSnapshotFn();
+  },
+
+  subscribeEditorKeybindings(fn: () => void): Disposable {
+    editorKeybindingListeners.add(fn);
+    return () => {
+      editorKeybindingListeners.delete(fn);
+    };
+  },
 };
 
 /** Reset all registrations. Test-only. */
@@ -266,12 +407,21 @@ export function __resetContributions() {
   contentTypes.clear();
   paletteCommands.clear();
   settingsTabs.clear();
+  editorBlockTypes.clear();
+  editorDecorationProviders.clear();
+  editorKeybindings.clear();
   keybindingOverrides.clear();
   contentTypeListeners.clear();
   paletteListeners.clear();
   settingsTabListeners.clear();
+  editorBlockTypeListeners.clear();
+  editorDecorationListeners.clear();
+  editorKeybindingListeners.clear();
   paletteSnapshot = null;
   settingsTabsSnapshot = null;
+  editorBlockTypesSnapshot = null;
+  editorDecorationSnapshot = null;
+  editorKeybindingSnapshot = null;
 }
 
 /**
@@ -350,4 +500,43 @@ export function useSettingsTabs(): SettingsTab[] {
     settingsTabsSnapshotFn,
     settingsTabsSnapshotFn,
   );
+}
+
+/** Cached snapshot of the editor block-type list. Insertion order. */
+let editorBlockTypesSnapshot: EditorBlockType[] | null = null;
+
+function editorBlockTypesSnapshotFn(): EditorBlockType[] {
+  if (!editorBlockTypesSnapshot) {
+    editorBlockTypesSnapshot = Array.from(editorBlockTypes.values());
+  }
+  return editorBlockTypesSnapshot;
+}
+
+/** React hook returning all registered editor block types. */
+export function useEditorBlockTypes(): EditorBlockType[] {
+  return useSyncExternalStore(
+    (notify) => contributions.subscribeEditorBlockTypes(notify),
+    editorBlockTypesSnapshotFn,
+    editorBlockTypesSnapshotFn,
+  );
+}
+
+/** Cached snapshot of the editor decoration-provider list. */
+let editorDecorationSnapshot: EditorDecorationProvider[] | null = null;
+
+function editorDecorationSnapshotFn(): EditorDecorationProvider[] {
+  if (!editorDecorationSnapshot) {
+    editorDecorationSnapshot = Array.from(editorDecorationProviders.values());
+  }
+  return editorDecorationSnapshot;
+}
+
+/** Cached snapshot of the editor keybinding list. */
+let editorKeybindingSnapshot: EditorKeybinding[] | null = null;
+
+function editorKeybindingSnapshotFn(): EditorKeybinding[] {
+  if (!editorKeybindingSnapshot) {
+    editorKeybindingSnapshot = Array.from(editorKeybindings.values());
+  }
+  return editorKeybindingSnapshot;
 }

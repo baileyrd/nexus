@@ -3,17 +3,24 @@
  *
  * Wraps an EditorView instance with markdown syntax highlighting,
  * Mod+S save, and theme integration via CSS variables.
+ *
+ * Dynamic extension slots (PRD-08 §14.2/§14.3) are held in CM6
+ * `Compartment`s so plugin-contributed decoration providers and
+ * editor-scoped keybindings can be swapped in/out without rebuilding
+ * the editor state. The surface subscribes to the contribution registry
+ * and reconfigures each compartment as registrations change.
  */
 
-import { useEffect, useRef, useCallback } from "react";
-import { EditorState } from "@codemirror/state";
-import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from "@codemirror/view";
+import { useEffect, useRef, useCallback, useMemo } from "react";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, type KeyBinding } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { markdown } from "@codemirror/lang-markdown";
 import { bracketMatching, foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
 import { liveMarkdown } from "../../editor/liveMarkdown";
 import { slashCommands } from "../../editor/slashCommandExtension";
+import { contributions, type EditorKeybinding } from "../../contributions";
 
 export interface EditorSurfaceProps {
   initialContent: string;
@@ -57,10 +64,32 @@ const nexusEditorTheme = EditorView.theme({
   },
 });
 
+/** Convert a registered editor keybinding to a CM6 KeyBinding that
+ *  dispatches through the contribution registry. */
+function toCmKeyBinding(b: EditorKeybinding): KeyBinding {
+  return {
+    key: b.key,
+    run: () => {
+      contributions.invokeCommand(b.commandId);
+      return true;
+    },
+  };
+}
+
+function currentPluginDecorations(): Extension[] {
+  return contributions.listEditorDecorationProviders().map((p) => p.extension);
+}
+
+function currentPluginKeymap(): Extension {
+  return keymap.of(contributions.listEditorKeybindings().map(toCmKeyBinding));
+}
+
 function getExtensions(
   filePath: string,
   onChangeRef: React.MutableRefObject<EditorSurfaceProps["onChange"]>,
   onSaveRef: React.MutableRefObject<EditorSurfaceProps["onSave"]>,
+  pluginDecorationsCompartment: Compartment,
+  pluginKeymapCompartment: Compartment,
 ) {
   const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
   const isMarkdown = ext === "md" || ext === "mdx" || ext === "markdown";
@@ -77,6 +106,9 @@ function getExtensions(
     highlightSelectionMatches(),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     ...(isMarkdown ? [markdown(), liveMarkdown(), slashCommands()] : []),
+    // Plugin-registered keybindings win over the CM6 defaults on exact
+    // match because they're listed first in the keymap extension set.
+    pluginKeymapCompartment.of(currentPluginKeymap()),
     keymap.of([
       ...defaultKeymap,
       ...historyKeymap,
@@ -89,6 +121,7 @@ function getExtensions(
         },
       },
     ]),
+    pluginDecorationsCompartment.of(currentPluginDecorations()),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         onChangeRef.current?.(update.state.doc.toString());
@@ -108,6 +141,8 @@ export function EditorSurface({
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
   const initialContentRef = useRef(initialContent);
+  const pluginDecorationsCompartment = useMemo(() => new Compartment(), []);
+  const pluginKeymapCompartment = useMemo(() => new Compartment(), []);
 
   // Keep callback refs current without re-creating the editor.
   onChangeRef.current = onChange;
@@ -119,7 +154,13 @@ export function EditorSurface({
 
     const state = EditorState.create({
       doc: initialContentRef.current,
-      extensions: getExtensions(filePath, onChangeRef, onSaveRef),
+      extensions: getExtensions(
+        filePath,
+        onChangeRef,
+        onSaveRef,
+        pluginDecorationsCompartment,
+        pluginKeymapCompartment,
+      ),
     });
     const view = new EditorView({ state, parent: parentRef.current });
     viewRef.current = view;
@@ -149,6 +190,35 @@ export function EditorSurface({
       },
     });
   }, [initialContent]);
+
+  // Reconfigure the plugin-contribution compartments whenever the
+  // decoration-provider or editor-keybinding registries change. A
+  // hot-reloaded plugin drops its old entries and re-registers new
+  // ones, and the editor picks that up without a remount.
+  useEffect(() => {
+    const resyncDecorations = () => {
+      const view = viewRef.current;
+      if (!view) return;
+      view.dispatch({
+        effects: pluginDecorationsCompartment.reconfigure(
+          currentPluginDecorations(),
+        ),
+      });
+    };
+    const resyncKeymap = () => {
+      const view = viewRef.current;
+      if (!view) return;
+      view.dispatch({
+        effects: pluginKeymapCompartment.reconfigure(currentPluginKeymap()),
+      });
+    };
+    const offDec = contributions.subscribeEditorDecorationProviders(resyncDecorations);
+    const offKey = contributions.subscribeEditorKeybindings(resyncKeymap);
+    return () => {
+      offDec();
+      offKey();
+    };
+  }, [pluginDecorationsCompartment, pluginKeymapCompartment]);
 
   // Handle outline scroll-to-heading events.
   const handleScrollToHeading = useCallback((e: Event) => {
