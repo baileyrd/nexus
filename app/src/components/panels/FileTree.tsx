@@ -8,6 +8,7 @@ import {
 } from "react";
 import { ChevronDown, ChevronRight, File, Folder } from "lucide-react";
 import { ContextMenu, type ContextMenuItem } from "../ContextMenu";
+import { contributions } from "../../contributions";
 import {
   createForgeDir,
   createForgeFile,
@@ -347,6 +348,22 @@ function buildMenuItems(
         }
       },
     });
+  }
+
+  // Append plugin-contributed context menu items for the appropriate scope.
+  // Scopes: "file-tree:file", "file-tree:directory", "file-tree:root".
+  const scope =
+    target === null
+      ? "file-tree:root"
+      : target.isDir
+        ? "file-tree:directory"
+        : "file-tree:file";
+  const pluginItems = contributions.listContextMenuItems(scope);
+  if (pluginItems.length > 0) {
+    // Mark the first plugin item with separatorBefore if it doesn't already
+    // have one, so there's a visual break between built-in and plugin items.
+    const [first, ...rest] = pluginItems;
+    items.push({ ...first, separatorBefore: first.separatorBefore ?? true }, ...rest);
   }
 
   return items;

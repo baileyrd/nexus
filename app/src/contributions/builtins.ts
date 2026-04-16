@@ -24,6 +24,18 @@ export function registerBuiltins(): void {
   // can auto-wire the panel component without a circular import in registry.ts.
   contributions.setTreePanelFactory(makeGenericTreePanelFactory);
 
+  // Default file extension handlers. Markdown files open in the editor
+  // surface. Canvas and base files have no dedicated surface yet so they
+  // fall through to FileViewer — these registrations act as placeholders
+  // that plugin-contributed surfaces can replace via their own handler.
+  // Extension handlers use the surface content-type id that must be
+  // registered separately by the surface plugin.
+  contributions.registerFileHandler("md", "editor");
+  contributions.registerFileHandler("mdx", "editor");
+  // ".canvas" and ".base" are future surfaces — no content-type registered
+  // yet, so resolveFileHandlerForPath will return the id but PaneView will
+  // fall back to FileViewer until a plugin registers the matching component.
+
   contributions.registerContentType("files", FileTree);
   contributions.registerContentType("outline", Outline);
 

@@ -7,6 +7,7 @@
 
 import {
   contributions,
+  type ContribContextMenuItem,
   type EditorBlockType,
   type EditorDecorationProvider,
   type EditorKeybinding,
@@ -75,6 +76,38 @@ export interface NexusPluginContext {
      * Returns a disposable that un-registers on plugin stop.
      */
     registerTreeDataProvider(viewId: string, provider: TreeDataProvider): Disposable;
+
+    /**
+     * Map a file extension (without leading dot) to a registered content-type
+     * id, so opening that file type in the forge picks the plugin's surface
+     * instead of the generic FileViewer.
+     *
+     * Example: `ctx.ui.registerFileHandler("canvas", "com.myorg.canvas.editor")`
+     *
+     * The `contentType` must be registered separately via
+     * `contributions.registerContentType` (or via a `PanelView` auto-wire).
+     */
+    registerFileHandler(ext: string, contentTypeId: string): Disposable;
+
+    /**
+     * Add a context menu item for one or more surface scopes.
+     * The item's action dispatches `commandId` through the contribution
+     * registry, so the command must be registered separately via
+     * `ctx.commands.register` (or `contributions.registerCommand`).
+     *
+     * Scopes: `"file-tree:file"`, `"file-tree:directory"`, `"file-tree:root"`.
+     *
+     * Example:
+     * ```ts
+     * ctx.ui.registerContextMenuItem({
+     *   id: "com.myorg.plugin:copy-path",
+     *   label: "Copy relative path",
+     *   commandId: "com.myorg.plugin:copy-path",
+     *   scopes: ["file-tree:file"],
+     * });
+     * ```
+     */
+    registerContextMenuItem(item: ContribContextMenuItem): Disposable;
   };
 }
 
@@ -106,6 +139,10 @@ export function createNexusContext(pluginId: string): NexusPluginContext {
       },
       registerTreeDataProvider: (viewId, provider) =>
         contributions.registerTreeDataProvider(viewId, provider),
+      registerFileHandler: (ext, contentTypeId) =>
+        contributions.registerFileHandler(ext, contentTypeId),
+      registerContextMenuItem: (item) =>
+        contributions.registerContextMenuItem(item),
     },
   };
 }

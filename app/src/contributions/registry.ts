@@ -1,6 +1,7 @@
 import { useSyncExternalStore, type ComponentType } from "react";
 import type { Extension } from "@codemirror/state";
 import type { Panel } from "../bindings";
+import type { ContextMenuItem } from "../components/ContextMenu";
 
 /**
  * UI contribution registry (PRD 07 §8 scaffold).
@@ -149,6 +150,34 @@ export interface TreeDataProvider {
   onSelect?(nodeId: string, node: TreeNode): void | Promise<void>;
 }
 
+/**
+ * Plugin-contributed context menu item. Action dispatches via the command
+ * registry so plugins don't hold raw function references in the registry.
+ *
+ * Scope strings follow the convention `"surface:kind"`, e.g.:
+ *   - `"file-tree:file"`      — right-click on a file row
+ *   - `"file-tree:directory"` — right-click on a folder row
+ *   - `"file-tree:root"`      — right-click on the empty area
+ *   - `"tab"`                 — right-click on a tab label (future)
+ *   - `"editor:selection"`    — right-click inside the editor (future)
+ */
+export interface ContribContextMenuItem {
+  /** Stable id. Namespaced for plugin items: `"plugin:<pluginId>:<action>"`. */
+  id: string;
+  /** User-visible label. */
+  label: string;
+  /** Command id dispatched via `contributions.invokeCommand` when selected. */
+  commandId: string;
+  /** Scope(s) this item applies to. A single item can appear in multiple scopes. */
+  scopes: string[];
+  /** Render a separator above this item in the menu. */
+  separatorBefore?: boolean;
+  /** Dim the item (action still dispatches unless the command is a no-op). */
+  disabled?: boolean;
+  /** Optional Lucide icon name. Not rendered yet; reserved for future icon support. */
+  icon?: string;
+}
+
 type Disposable = () => void;
 
 const commands = new Map<string, CommandHandler>();
@@ -161,6 +190,23 @@ const editorDecorationProviders = new Map<string, EditorDecorationProvider>();
 const editorKeybindings = new Map<string, EditorKeybinding>();
 const treeDataProviders = new Map<string, TreeDataProvider>();
 const treeDataProviderListeners = new Set<() => void>();
+
+/**
+ * File extension → content-type id map. Keys are lowercase extensions
+ * without the leading dot (e.g. `"md"`, `"canvas"`). Plugins register
+ * via `contributions.registerFileHandler` so opening a file in the forge
+ * picks the correct tab surface instead of falling through to FileViewer.
+ */
+const fileHandlers = new Map<string, string>();
+const fileHandlerListeners = new Set<() => void>();
+
+/**
+ * Scope-keyed list of plugin-contributed context menu items. Stored as a
+ * flat list and filtered by scope at render time so one item can appear
+ * in multiple scopes without duplication in the data layer.
+ */
+const contextMenuItems = new Map<string, ContribContextMenuItem>();
+const contextMenuListeners = new Set<() => void>();
 
 /**
  * Factory function injected at boot (by `registerBuiltins`) to create the
@@ -181,6 +227,7 @@ const settingsTabListeners = new Set<() => void>();
 const editorBlockTypeListeners = new Set<() => void>();
 const editorDecorationListeners = new Set<() => void>();
 const editorKeybindingListeners = new Set<() => void>();
+// fileHandlerListeners and contextMenuListeners declared above with their Maps
 
 function warn(msg: string) {
   // eslint-disable-next-line no-console
@@ -493,6 +540,107 @@ export const contributions = {
       treeDataProviderListeners.delete(fn);
     };
   },
+
+  /**
+   * Map a file extension (without leading dot, case-insensitive) to a
+   * registered content-type id. When a file is opened the shell looks up
+   * the extension here and, if a match is found, opens a tab with that
+   * `contentType` instead of the generic FileViewer fallback.
+   *
+   * Example: `registerFileHandler("canvas", "com.nexus.canvas.editor")`
+   */
+  registerFileHandler(ext: string, contentTypeId: string): Disposable {
+    const key = ext.toLowerCase().replace(/^\./, "");
+    if (fileHandlers.has(key)) {
+      warn(`file handler for '.${key}' already registered — replacing`);
+    }
+    fileHandlers.set(key, contentTypeId);
+    fileHandlerListeners.forEach((fn) => fn());
+    return () => {
+      if (fileHandlers.get(key) === contentTypeId) {
+        fileHandlers.delete(key);
+        fileHandlerListeners.forEach((fn) => fn());
+      }
+    };
+  },
+
+  /**
+   * Resolve the content-type id for a file extension, or `undefined` if
+   * no handler is registered. `ext` may include or omit the leading dot.
+   */
+  resolveFileHandler(ext: string): string | undefined {
+    const key = ext.toLowerCase().replace(/^\./, "");
+    return fileHandlers.get(key);
+  },
+
+  /**
+   * Resolve the content-type id for an absolute or relative file path by
+   * extracting its extension and forwarding to `resolveFileHandler`.
+   * Returns `undefined` if no handler is registered for the extension.
+   */
+  resolveFileHandlerForPath(filePath: string): string | undefined {
+    const dot = filePath.lastIndexOf(".");
+    const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+    if (dot <= slash || dot === -1) return undefined;
+    return this.resolveFileHandler(filePath.slice(dot + 1));
+  },
+
+  subscribeFileHandlers(fn: () => void): Disposable {
+    fileHandlerListeners.add(fn);
+    return () => {
+      fileHandlerListeners.delete(fn);
+    };
+  },
+
+  /**
+   * Register a plugin-contributed context menu item for one or more scopes
+   * (e.g. `"file-tree:file"`, `"file-tree:directory"`). The item's action
+   * dispatches via `contributions.invokeCommand(item.commandId)` so the
+   * command registry is the single authority over what runs.
+   *
+   * Items registered for the same scope appear after the built-in items in
+   * the menu, separated by the first item's `separatorBefore: true`.
+   */
+  registerContextMenuItem(item: ContribContextMenuItem): Disposable {
+    if (contextMenuItems.has(item.id)) {
+      warn(`context menu item '${item.id}' already registered — replacing`);
+    }
+    contextMenuItems.set(item.id, item);
+    contextMenuSnapshot.clear();
+    contextMenuListeners.forEach((fn) => fn());
+    return () => {
+      if (contextMenuItems.get(item.id) === item) {
+        contextMenuItems.delete(item.id);
+        contextMenuSnapshot.clear();
+        contextMenuListeners.forEach((fn) => fn());
+      }
+    };
+  },
+
+  /**
+   * Return all registered context menu items for the given scope, converted
+   * to `ContextMenuItem` records ready for the `<ContextMenu>` component.
+   * Items are sorted by registration order (stable across re-renders via
+   * Map insertion order).
+   */
+  listContextMenuItems(scope: string): ContextMenuItem[] {
+    return Array.from(contextMenuItems.values())
+      .filter((item) => item.scopes.includes(scope))
+      .map((item) => ({
+        id: item.id,
+        label: item.label,
+        onSelect: () => contributions.invokeCommand(item.commandId),
+        separatorBefore: item.separatorBefore,
+        disabled: item.disabled,
+      }));
+  },
+
+  subscribeContextMenuItems(fn: () => void): Disposable {
+    contextMenuListeners.add(fn);
+    return () => {
+      contextMenuListeners.delete(fn);
+    };
+  },
 };
 
 /** Reset all registrations. Test-only. */
@@ -507,6 +655,8 @@ export function __resetContributions() {
   editorKeybindings.clear();
   keybindingOverrides.clear();
   treeDataProviders.clear();
+  fileHandlers.clear();
+  contextMenuItems.clear();
   contentTypeListeners.clear();
   paletteListeners.clear();
   settingsTabListeners.clear();
@@ -514,11 +664,14 @@ export function __resetContributions() {
   editorDecorationListeners.clear();
   editorKeybindingListeners.clear();
   treeDataProviderListeners.clear();
+  fileHandlerListeners.clear();
+  contextMenuListeners.clear();
   paletteSnapshot = null;
   settingsTabsSnapshot = null;
   editorBlockTypesSnapshot = null;
   editorDecorationSnapshot = null;
   editorKeybindingSnapshot = null;
+  contextMenuSnapshot.clear();
 }
 
 /**
@@ -648,5 +801,45 @@ export function useTreeDataProvider(viewId: string): TreeDataProvider | undefine
     (notify) => contributions.subscribeTreeDataProviders(notify),
     () => treeDataProviders.get(viewId),
     () => treeDataProviders.get(viewId),
+  );
+}
+
+/**
+ * Per-scope snapshot cache for context menu items. Invalidated (cleared) by
+ * `registerContextMenuItem` / disposable so useSyncExternalStore sees a stable
+ * reference between renders and only re-renders when the registry mutates.
+ * Context menus open infrequently, so O(items) filtering on invalidation is fine.
+ */
+const contextMenuSnapshot = new Map<string, ContextMenuItem[]>();
+
+/**
+ * React hook returning plugin-contributed context menu items for `scope`.
+ * Re-renders when contributions change (plugin hot-reload, registration).
+ */
+export function useContextMenuItems(scope: string): ContextMenuItem[] {
+  return useSyncExternalStore(
+    (notify) => contributions.subscribeContextMenuItems(notify),
+    () => {
+      let snap = contextMenuSnapshot.get(scope);
+      if (!snap) {
+        snap = contributions.listContextMenuItems(scope);
+        contextMenuSnapshot.set(scope, snap);
+      }
+      return snap;
+    },
+    () => contributions.listContextMenuItems(scope),
+  );
+}
+
+/**
+ * React hook returning the content-type id for a file extension, or
+ * `undefined` if no handler is registered. Reactive: re-renders when
+ * plugins register or remove file handlers.
+ */
+export function useFileHandler(ext: string | null | undefined): string | undefined {
+  return useSyncExternalStore(
+    (notify) => contributions.subscribeFileHandlers(notify),
+    () => (ext ? contributions.resolveFileHandler(ext) : undefined),
+    () => (ext ? contributions.resolveFileHandler(ext) : undefined),
   );
 }
