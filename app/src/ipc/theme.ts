@@ -61,3 +61,9 @@ export function getThemeConfig(): Promise<ThemeConfig> {
 export function setMode(mode: ThemeMode): Promise<AppliedTheme> {
   return invoke("set_mode", { mode });
 }
+
+/// Tauri event forwarded from the kernel bus when any plugin mutates
+/// the theme engine's state (`com.nexus.theme.changed`). Payload is the
+/// updated [`ThemeConfig`] snapshot. Frontend listens so plugin-driven
+/// changes propagate into the store without the shell polling.
+export const THEME_CHANGED_EVENT = "theme:changed";

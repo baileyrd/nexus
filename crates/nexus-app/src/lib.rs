@@ -12,11 +12,9 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
-use std::sync::Mutex;
 use std::time::Duration;
 
-use nexus_kernel::{EventFilter, RecvError};
-use nexus_theme::api::ThemeEngine;
+use nexus_kernel::{EventFilter, NexusEvent, RecvError};
 use tauri::{Emitter, Manager};
 
 /// Tauri event emitted when any file under the active forge root changes.
@@ -27,6 +25,17 @@ use tauri::{Emitter, Manager};
 /// [`run`] so the frontend always sees notifications *after* the storage
 /// index has been updated.
 const FS_CHANGED_EVENT: &str = "forge:fs-changed";
+
+/// Tauri event emitted when the theme engine's state changes
+/// (theme applied, mode switched, snippet toggled, etc.). Payload is
+/// the [`nexus_theme::api::ThemeConfig`] snapshot after the change.
+///
+/// Forwarded from `com.nexus.theme.changed` events on the kernel bus
+/// by the subscriber started in [`run`]. Lets the frontend re-fetch
+/// variables / re-render chrome in response to changes driven by
+/// plugins or future host automations — not just the user pressing a
+/// button in the shell.
+const THEME_CHANGED_EVENT: &str = "theme:changed";
 
 pub mod commands;
 pub mod editor;
@@ -43,12 +52,9 @@ pub mod plugins;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::too_many_lines)]
 pub fn run() {
-    let engine = ThemeEngine::new();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(commands::EngineState(Mutex::new(engine)))
-        .manage(forge::ForgeState(Mutex::new(None)))
+        .manage(forge::ForgeState(std::sync::Mutex::new(None)))
         .manage(editor::KernelRuntime::empty())
         .manage(plugins::bootstrap())
         .setup(|app| {
@@ -68,6 +74,10 @@ pub fn run() {
                             // updates the index before publishing, so the
                             // frontend always sees notifications in order.
                             start_storage_event_forwarder(handle.clone(), &runtime);
+                            // Same treatment for theme-change events so the
+                            // frontend can react to mutations driven by any
+                            // plugin, not just user clicks in the shell.
+                            start_theme_event_forwarder(handle.clone(), &runtime);
                             if let Some(state) = app.try_state::<editor::KernelRuntime>() {
                                 state.set(runtime);
                             }
@@ -186,4 +196,46 @@ fn start_storage_event_forwarder(
             }
         })
         .expect("spawn storage event forwarder");
+}
+
+/// Spawn a background thread that subscribes to
+/// `com.nexus.theme.changed` events on the kernel bus and forwards each
+/// one as a `theme:changed` Tauri event with the updated
+/// [`ThemeConfig`](nexus_theme::api::ThemeConfig) as payload.
+///
+/// This closes the loop that used to be open in the shell-owned
+/// `ThemeEngine` model: any plugin that mutates the theme through
+/// `ipc_call("com.nexus.theme", …)` now triggers a bus event which the
+/// frontend picks up like any other state change.
+fn start_theme_event_forwarder(
+    handle: tauri::AppHandle,
+    runtime: &nexus_bootstrap::Runtime,
+) {
+    let bus = runtime.kernel.event_bus();
+    let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+        "com.nexus.theme.".to_string(),
+    ));
+
+    std::thread::Builder::new()
+        .name("nexus-theme-event-forwarder".to_string())
+        .spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(100));
+            loop {
+                match sub.try_recv() {
+                    Ok(Some(ev)) => {
+                        if let NexusEvent::Custom { payload, .. } = &ev.event {
+                            if let Err(e) = handle.emit(THEME_CHANGED_EVENT, payload.clone()) {
+                                tracing::warn!(%e, "theme event forwarder: emit failed");
+                            }
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(RecvError::Lagged(n)) => {
+                        tracing::warn!(n, "theme event forwarder: lagged, {n} events lost");
+                    }
+                    Err(RecvError::Closed) => return,
+                }
+            }
+        })
+        .expect("spawn theme event forwarder");
 }

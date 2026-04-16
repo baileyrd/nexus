@@ -1,90 +1,141 @@
-//! Thin `#[tauri::command]` wrappers around the stateful [`ThemeEngine`].
+//! Tauri command bridge into the theme core plugin.
 //!
-//! Each command locks the engine Mutex, forwards to the underlying method,
-//! and maps [`nexus_theme::ThemeError`] to a string so Tauri can send it
-//! over IPC.
+//! Every command here is a thin adapter that serializes its args into
+//! JSON and calls [`nexus_kernel::PluginContext::ipc_call`] on
+//! `com.nexus.theme` via the kernel runtime held in Tauri state.
 //!
-//! Tauri's extractor pattern requires `State<'_, T>` by value and invokes
-//! these functions via the `invoke_handler!` macro rather than direct call
-//! sites, so two pedantic clippy lints are suppressed here.
+//! State ownership lives in
+//! [`nexus_theme::core_plugin::ThemeCorePlugin`] — registered by
+//! [`nexus_bootstrap`] — so other plugins can reach the same engine via
+//! `ipc_call` and subscribe to `com.nexus.theme.changed` events on the
+//! kernel bus. See PRD-07 and `crates/nexus-theme/src/core_plugin.rs`
+//! for the command-id → handler-id mapping.
 
 #![allow(
     clippy::needless_pass_by_value,
     clippy::must_use_candidate,
-    clippy::missing_errors_doc
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc
 )]
 
-use std::sync::Mutex;
+use std::time::Duration;
 
-use nexus_theme::api::{AppliedTheme, SnippetMetadata, ThemeConfig, ThemeEngine};
+use nexus_kernel::PluginContext;
+use nexus_theme::api::{AppliedTheme, SnippetMetadata, ThemeConfig};
 use nexus_theme::theme::ThemeMetadata;
 use nexus_theme::{PresetInfo, PresetRegistry, ThemeMode, VariableMap, WorkspaceLayout};
 use tauri::State;
 
-/// Tauri-managed engine handle shared across commands.
-pub struct EngineState(pub Mutex<ThemeEngine>);
+use crate::editor::KernelRuntime;
 
-fn lock<'a>(state: &'a State<'_, EngineState>) -> std::sync::MutexGuard<'a, ThemeEngine> {
-    // Panics only if a previous invocation panicked while holding the lock —
-    // at which point the app is in a broken state and a crash is honest.
-    state.0.lock().expect("theme engine mutex poisoned")
+/// Reverse-DNS id of the theme core plugin. Duplicated from
+/// `nexus-theme` to avoid pulling the full crate through nexus-app's
+/// public surface.
+const THEME_PLUGIN_ID: &str = "com.nexus.theme";
+
+/// Default per-call timeout. Theme ops are pure in-memory work —
+/// anything longer than a second indicates a lock-contention bug.
+const CALL_TIMEOUT: Duration = Duration::from_secs(5);
+
+async fn call_theme(
+    runtime: State<'_, KernelRuntime>,
+    command: &str,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let rt = runtime.snapshot()?;
+    rt.context
+        .ipc_call(THEME_PLUGIN_ID, command, args, CALL_TIMEOUT)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn call_theme_typed<T: serde::de::DeserializeOwned>(
+    runtime: State<'_, KernelRuntime>,
+    command: &str,
+    args: serde_json::Value,
+) -> Result<T, String> {
+    let value = call_theme(runtime, command, args).await?;
+    serde_json::from_value(value).map_err(|e| e.to_string())
 }
 
 /// List every theme available to the engine (built-ins + discovered).
 #[tauri::command]
-pub fn get_available_themes(state: State<'_, EngineState>) -> Vec<ThemeMetadata> {
-    lock(&state).get_available_themes()
+pub async fn get_available_themes(
+    runtime: State<'_, KernelRuntime>,
+) -> Result<Vec<ThemeMetadata>, String> {
+    call_theme_typed(runtime, "get_available_themes", serde_json::json!({})).await
 }
 
 /// Switch the active theme; returns the resolved variable map.
 #[tauri::command]
-pub fn apply_theme(id: String, state: State<'_, EngineState>) -> Result<AppliedTheme, String> {
-    lock(&state).apply_theme(&id).map_err(|e| e.to_string())
+pub async fn apply_theme(
+    id: String,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<AppliedTheme, String> {
+    call_theme_typed(runtime, "apply_theme", serde_json::json!({ "id": id })).await
 }
 
 /// Stateless cascade: compute the final variable map for the given theme
 /// plus enabled snippets without mutating the engine's current selection.
 #[tauri::command]
-pub fn compute_variables(
+pub async fn compute_variables(
     theme_id: String,
     enabled_snippets: Vec<String>,
-    state: State<'_, EngineState>,
+    runtime: State<'_, KernelRuntime>,
 ) -> Result<VariableMap, String> {
-    lock(&state)
-        .compute_variables(&theme_id, &enabled_snippets)
-        .map_err(|e| e.to_string())
+    call_theme_typed(
+        runtime,
+        "compute_variables",
+        serde_json::json!({
+            "theme_id": theme_id,
+            "enabled_snippets": enabled_snippets,
+        }),
+    )
+    .await
 }
 
 /// List every discovered CSS snippet with its enabled flag.
 #[tauri::command]
-pub fn get_available_snippets(state: State<'_, EngineState>) -> Vec<SnippetMetadata> {
-    lock(&state).get_available_snippets()
+pub async fn get_available_snippets(
+    runtime: State<'_, KernelRuntime>,
+) -> Result<Vec<SnippetMetadata>, String> {
+    call_theme_typed(runtime, "get_available_snippets", serde_json::json!({})).await
 }
 
 /// Toggle a snippet on/off; returns the new enabled list.
 #[tauri::command]
-pub fn toggle_snippet(id: String, state: State<'_, EngineState>) -> Result<Vec<String>, String> {
-    lock(&state).toggle_snippet(&id).map_err(|e| e.to_string())
+pub async fn toggle_snippet(
+    id: String,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<Vec<String>, String> {
+    call_theme_typed(runtime, "toggle_snippet", serde_json::json!({ "id": id })).await
 }
 
 /// Replace the ordered list of enabled snippet ids.
 #[tauri::command]
-pub fn reorder_snippets(ids: Vec<String>, state: State<'_, EngineState>) -> Result<(), String> {
-    lock(&state)
-        .reorder_snippets(ids)
-        .map_err(|e| e.to_string())
+pub async fn reorder_snippets(
+    ids: Vec<String>,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<(), String> {
+    call_theme(runtime, "reorder_snippets", serde_json::json!({ "ids": ids })).await?;
+    Ok(())
 }
 
 /// Current theme selection + mode + snippet order.
 #[tauri::command]
-pub fn get_theme_config(state: State<'_, EngineState>) -> ThemeConfig {
-    lock(&state).config()
+pub async fn get_theme_config(
+    runtime: State<'_, KernelRuntime>,
+) -> Result<ThemeConfig, String> {
+    call_theme_typed(runtime, "get_theme_config", serde_json::json!({})).await
 }
 
 /// Switch the light/dark/system mode; returns the recomputed applied theme.
 #[tauri::command]
-pub fn set_mode(mode: ThemeMode, state: State<'_, EngineState>) -> AppliedTheme {
-    lock(&state).set_mode(mode)
+pub async fn set_mode(
+    mode: ThemeMode,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<AppliedTheme, String> {
+    call_theme_typed(runtime, "set_mode", serde_json::json!({ "mode": mode })).await
 }
 
 /// Return the default workspace layout shown on first launch.

@@ -29,6 +29,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod api;
+pub mod core_plugin;
 pub mod error;
 pub mod layout;
 pub mod layout_manager;
@@ -40,6 +41,7 @@ pub mod theme;
 pub mod variables;
 pub mod watcher;
 
+pub use core_plugin::ThemeCorePlugin;
 pub use error::ThemeError;
 pub use layout::{
     BottomPanel, Direction, FooterAction, LayoutNode, PaneId, PaneNode, Panel, PanelToolbarItem,

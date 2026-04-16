@@ -39,14 +39,12 @@ export function RibbonItems({ items }: RibbonItemsProps) {
 function handleRibbonClick(item: RibbonItem) {
   switch (item.action.kind) {
     case "togglePanel": {
+      const { panelId } = item.action;
       const { layout, togglePanelVisibility } = useLayoutStore.getState();
       if (!layout) return;
-      // Determine which side owns this panel by searching both sides.
-      const inLeft = layout.leftSidePanel.panels.some(
-        (p) => p.id === item.action.panelId,
-      );
+      const inLeft = layout.leftSidePanel.panels.some((p) => p.id === panelId);
       const side = inLeft ? "left" : "right";
-      togglePanelVisibility(side, item.action.panelId);
+      togglePanelVisibility(side, panelId);
       return;
     }
     case "invokeCommand":

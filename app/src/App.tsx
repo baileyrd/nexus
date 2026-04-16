@@ -8,10 +8,13 @@ import { KeybindingDispatcher } from "./keybindings/KeybindingDispatcher";
 import { useForgeStore } from "./stores/forge";
 import { useLayoutStore } from "./stores/layout";
 import { useThemeStore } from "./stores/theme";
+import { THEME_CHANGED_EVENT } from "./ipc/theme";
+import type { ThemeConfig } from "./ipc/theme";
 
 export default function App() {
   const applyTheme = useThemeStore((s) => s.applyTheme);
   const currentThemeId = useThemeStore((s) => s.currentThemeId);
+  const syncFromEngine = useThemeStore((s) => s.syncFromEngine);
   const loadForge = useForgeStore((s) => s.load);
   const bumpFsVersion = useForgeStore((s) => s.bumpFsVersion);
   const hydrateForge = useForgeStore((s) => s.hydrate);
@@ -38,6 +41,22 @@ export default function App() {
       void unlistenPromise.then((unlisten) => unlisten());
     };
   }, [bumpFsVersion]);
+
+  // Listen for plugin-driven theme mutations forwarded from the kernel
+  // event bus (`com.nexus.theme.changed` → `theme:changed`) and mirror
+  // them into the store. Self-driven mutations are elided by
+  // `syncFromEngine`'s equality check, so we don't loop.
+  useEffect(() => {
+    const unlistenPromise = listen<ThemeConfig>(
+      THEME_CHANGED_EVENT,
+      (event) => {
+        void syncFromEngine(event.payload);
+      },
+    );
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [syncFromEngine]);
 
   // Restore expanded paths + last-open file when both the forge and the
   // layout persistence are ready. Re-runs whenever the active forge

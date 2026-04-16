@@ -7,6 +7,8 @@ publish.workspace = true
 description = "Nexus theming engine: CSS variable registry, theme packages, resolution cascade, CSS snippets"
 
 [dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
+nexus-plugins = { path = "../nexus-plugins" }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

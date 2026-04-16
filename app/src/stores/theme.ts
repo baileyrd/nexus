@@ -25,6 +25,15 @@ interface ThemeState {
   applyTheme: (id: string) => Promise<void>;
   setMode: (mode: ThemeMode) => Promise<void>;
   toggleSnippet: (id: string) => Promise<void>;
+  // Re-hydrate from the plugin-owned engine when a kernel-bus
+  // `com.nexus.theme.changed` event is forwarded to the frontend as
+  // `theme:changed`. Cheap to call repeatedly; no-op when the event's
+  // config matches current store state.
+  syncFromEngine: (config: {
+    theme_id: string;
+    mode: ThemeMode;
+    enabled_snippets: string[];
+  }) => Promise<void>;
 }
 
 function prefersDark(): boolean {
@@ -121,5 +130,24 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     } catch (e) {
       set({ error: String(e) });
     }
+  },
+
+  syncFromEngine: async (config) => {
+    const { currentThemeId, mode, snippets } = get();
+    const changed =
+      config.theme_id !== currentThemeId ||
+      config.mode !== mode ||
+      snippets.some(
+        (s) => s.enabled !== config.enabled_snippets.includes(s.id),
+      );
+    if (!changed) return;
+    set({
+      mode: config.mode,
+      snippets: snippets.map((s) => ({
+        ...s,
+        enabled: config.enabled_snippets.includes(s.id),
+      })),
+    });
+    await get().applyTheme(config.theme_id);
   },
 }));

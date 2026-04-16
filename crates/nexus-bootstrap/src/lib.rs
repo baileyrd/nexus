@@ -205,6 +205,7 @@ fn register_core_plugins(
     use nexus_editor::EditorCorePlugin;
     use nexus_security::SecurityCorePlugin;
     use nexus_storage::{StorageConfig, StorageCorePlugin};
+    use nexus_theme::ThemeCorePlugin;
 
     // Security first so audit events are available before other plugins emit.
     loader
@@ -398,6 +399,63 @@ fn register_core_plugins(
             Box::new(EditorCorePlugin::new(forge_root.to_path_buf())),
         )
         .context("failed to register com.nexus.editor")?;
+
+    // Theme engine — registered as a core plugin so (a) other plugins can
+    // call `ipc_call("com.nexus.theme", …)` and subscribe to
+    // `com.nexus.theme.changed` events, and (b) the Tauri shell's theme
+    // commands are thin adapters over kernel IPC rather than owning
+    // engine state directly. See PRD-07.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.theme",
+                "Theme",
+                LifecycleFlags::NONE,
+                &[
+                    (
+                        "get_available_themes",
+                        nexus_theme::core_plugin::HANDLER_GET_AVAILABLE_THEMES,
+                    ),
+                    (
+                        "apply_theme",
+                        nexus_theme::core_plugin::HANDLER_APPLY_THEME,
+                    ),
+                    (
+                        "compute_variables",
+                        nexus_theme::core_plugin::HANDLER_COMPUTE_VARIABLES,
+                    ),
+                    (
+                        "get_available_snippets",
+                        nexus_theme::core_plugin::HANDLER_GET_AVAILABLE_SNIPPETS,
+                    ),
+                    (
+                        "toggle_snippet",
+                        nexus_theme::core_plugin::HANDLER_TOGGLE_SNIPPET,
+                    ),
+                    (
+                        "reorder_snippets",
+                        nexus_theme::core_plugin::HANDLER_REORDER_SNIPPETS,
+                    ),
+                    (
+                        "get_theme_config",
+                        nexus_theme::core_plugin::HANDLER_GET_THEME_CONFIG,
+                    ),
+                    ("set_mode", nexus_theme::core_plugin::HANDLER_SET_MODE),
+                    (
+                        "apply_config",
+                        nexus_theme::core_plugin::HANDLER_APPLY_CONFIG,
+                    ),
+                    (
+                        "set_plugin_overrides",
+                        nexus_theme::core_plugin::HANDLER_SET_PLUGIN_OVERRIDES,
+                    ),
+                    ("reload", nexus_theme::core_plugin::HANDLER_RELOAD),
+                ],
+            ),
+            forge_root,
+            Box::new(ThemeCorePlugin::with_builtins(Some(Arc::clone(event_bus)))),
+        )
+        .context("failed to register com.nexus.theme")?;
 
     loader
         .register_core(
