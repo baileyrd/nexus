@@ -95,6 +95,24 @@ impl Capability {
         }
     }
 
+    /// Whether this capability is classified HIGH-risk. HIGH-risk capabilities
+    /// bypass sandbox boundaries (external filesystem access, arbitrary network
+    /// egress, process spawning, cross-plugin IPC) and are subject to
+    /// install-time user consent (F-5.1.1): `build_capabilities` drops them
+    /// from the granted set unless they appear in the plugin's
+    /// `granted_caps.json`. Kept in lockstep with `nexus-security::risk_level`.
+    #[must_use]
+    pub const fn is_high_risk(self) -> bool {
+        matches!(
+            self,
+            Capability::FsReadExternal
+                | Capability::FsWriteExternal
+                | Capability::NetHttp
+                | Capability::ProcessSpawn
+                | Capability::IpcCall
+        )
+    }
+
     /// All capability variants, for exhaustive iteration.
     pub const ALL: &'static [Capability] = &[
         Capability::FsRead,

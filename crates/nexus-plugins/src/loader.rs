@@ -3,7 +3,7 @@
 //! manages plugin lifecycle, and dispatches kernel events to subscriber plugins.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -579,7 +579,7 @@ impl PluginLoader {
             self.settings.register_schema(&plugin_id, &schema_json)?;
         }
 
-        let capabilities = build_capabilities(&manifest);
+        let capabilities = build_capabilities(&manifest, plugin_dir);
         let settings_cache = load_settings_cache(&self.settings, &plugin_id, plugin_dir);
 
         // Step 6: Create backend — WASM sandbox or Script marker.
@@ -679,7 +679,7 @@ impl PluginLoader {
             plugin.on_start()?;
         }
 
-        let capabilities = build_capabilities(&manifest);
+        let capabilities = build_capabilities(&manifest, plugin_dir);
         let backend = PluginBackend::Core(plugin);
         let settings_cache = load_settings_cache(&self.settings, &plugin_id, plugin_dir);
         self.finish_loading(manifest, backend, capabilities, plugin_dir, settings_cache)
@@ -1210,6 +1210,56 @@ impl PluginLoader {
             .map(|lp| lp.plugin_dir.as_path())
     }
 
+    /// Persist an install-time user consent for a HIGH-risk capability on
+    /// `plugin_id` (F-5.1.1). Writes `<plugin_dir>/granted_caps.json`
+    /// pinned to the plugin's currently-loaded version — a subsequent
+    /// version bump that re-requests the capability will re-prompt.
+    ///
+    /// The grant takes effect on the next plugin load (or hot-reload).
+    /// Non-HIGH-risk capabilities are auto-granted from the manifest and
+    /// calling `grant_capability` on them is a no-op.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if `plugin_id` is not loaded,
+    /// or a generic `io`-backed error if the grants file cannot be written.
+    pub fn grant_capability(
+        &self,
+        plugin_id: &str,
+        cap: Capability,
+    ) -> Result<(), PluginError> {
+        let Some(lp) = self.loaded.get(plugin_id) else {
+            return Err(PluginError::PluginNotFound(plugin_id.to_string()));
+        };
+        if !cap.is_high_risk() {
+            return Ok(());
+        }
+        let plugin_dir = lp.plugin_dir.clone();
+        let version = lp.manifest.version.clone();
+        write_grant(&plugin_dir, &version, cap, true)
+    }
+
+    /// Revoke a previously-persisted capability grant for `plugin_id`
+    /// (F-5.1.1). The revoke takes effect on the next plugin load.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if `plugin_id` is not loaded,
+    /// or an `io`-backed error if the grants file cannot be rewritten.
+    pub fn revoke_capability(
+        &self,
+        plugin_id: &str,
+        cap: Capability,
+    ) -> Result<(), PluginError> {
+        let Some(lp) = self.loaded.get(plugin_id) else {
+            return Err(PluginError::PluginNotFound(plugin_id.to_string()));
+        };
+        if !cap.is_high_risk() {
+            return Ok(());
+        }
+        let plugin_dir = lp.plugin_dir.clone();
+        let version = lp.manifest.version.clone();
+        write_grant(&plugin_dir, &version, cap, false)
+    }
+
     // ─── Internal helpers for hot-reload ──────────────────────────────────────
 
     /// Return a mutable reference to the [`WasmSandbox`] for `plugin_id`.
@@ -1513,17 +1563,138 @@ fn load_settings_cache(
     Arc::new(RwLock::new(json))
 }
 
-fn build_capabilities(manifest: &PluginManifest) -> CapabilitySet {
+/// Filename for the per-plugin persisted install-time capability consent
+/// (F-5.1.1). Lives alongside the plugin's `plugin.toml` and is keyed by
+/// plugin version so a version bump that requests a new HIGH-risk
+/// capability re-prompts the user.
+const GRANTED_CAPS_FILE: &str = "granted_caps.json";
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Default)]
+struct GrantedCapsFile {
+    /// Plugin version the grants are pinned to. A mismatch with
+    /// `manifest.version` resets the grants to empty (re-prompt).
+    #[serde(default)]
+    version: String,
+    /// Capability strings (e.g. `"net.http"`) the user has granted.
+    #[serde(default)]
+    granted: Vec<String>,
+}
+
+/// Load the set of HIGH-risk capabilities the user has consented to for
+/// `plugin_version` at `plugin_dir`. Missing file, parse errors, or a
+/// version mismatch all yield an empty set (= deny-all) — operators
+/// re-grant explicitly for the new version.
+fn load_granted_high_risk_caps(plugin_dir: &Path, plugin_version: &str) -> HashSet<Capability> {
+    let path = plugin_dir.join(GRANTED_CAPS_FILE);
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return HashSet::new();
+    };
+    let parsed: GrantedCapsFile = match serde_json::from_str(&contents) {
+        Ok(f) => f,
+        Err(err) => {
+            tracing::warn!(
+                audit = true,
+                path = %path.display(),
+                error = %err,
+                "granted_caps.json parse failed — treating as deny-all for HIGH-risk caps",
+            );
+            return HashSet::new();
+        }
+    };
+    if parsed.version != plugin_version {
+        tracing::info!(
+            audit = true,
+            path = %path.display(),
+            grants_version = %parsed.version,
+            plugin_version = %plugin_version,
+            "granted_caps.json version mismatch — resetting HIGH-risk grants; user must re-consent",
+        );
+        return HashSet::new();
+    }
+    parsed
+        .granted
+        .iter()
+        .filter_map(|s| Capability::from_str(s).ok())
+        .filter(|c| c.is_high_risk())
+        .collect()
+}
+
+/// Read the current `granted_caps.json`, merge in (or remove) `cap` for the
+/// specified `plugin_version`, and rewrite atomically. Missing / corrupt /
+/// version-mismatched existing files are replaced wholesale — the new grant
+/// pins to the current version.
+fn write_grant(
+    plugin_dir: &Path,
+    plugin_version: &str,
+    cap: Capability,
+    grant: bool,
+) -> Result<(), PluginError> {
+    let path = plugin_dir.join(GRANTED_CAPS_FILE);
+    let mut file: GrantedCapsFile = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .filter(|f: &GrantedCapsFile| f.version == plugin_version)
+        .unwrap_or_default();
+    file.version = plugin_version.to_string();
+    let cap_str = cap.as_str().to_string();
+    file.granted.retain(|s| s != &cap_str);
+    if grant {
+        file.granted.push(cap_str);
+    }
+    file.granted.sort();
+    let json = serde_json::to_string_pretty(&file).map_err(|e| PluginError::ManifestInvalid {
+        path: path.display().to_string(),
+        reason: format!("serialize granted_caps.json: {e}"),
+    })?;
+    std::fs::write(&path, json)?;
+    Ok(())
+}
+
+/// Build the capability set granted to a plugin at load time.
+///
+/// Core plugins receive every declared capability unconditionally — they are
+/// part of the trusted shell.
+///
+/// Community plugins receive the union of their declared `required` +
+/// `optional` caps, **minus** any HIGH-risk capability that is not present
+/// in `<plugin_dir>/granted_caps.json` (F-5.1.1). Denied HIGH-risk caps
+/// are logged at `audit = true` level so operators can see which plugins
+/// are running with partial capability and decide whether to grant.
+///
+/// Kept as a free function (rather than a method) so the test harness can
+/// exercise it with an isolated `tempfile` directory.
+fn build_capabilities(manifest: &PluginManifest, plugin_dir: &Path) -> CapabilitySet {
     match manifest.trust_level {
         TrustLevel::Core => CapabilitySet::from_iter(Capability::ALL.iter().copied()),
         TrustLevel::Community => {
+            let granted = load_granted_high_risk_caps(plugin_dir, &manifest.version);
+            let mut denied: Vec<Capability> = Vec::new();
             let caps: Vec<Capability> = manifest
                 .capabilities
                 .required
                 .iter()
                 .chain(manifest.capabilities.optional.iter())
                 .filter_map(|s| Capability::from_str(s).ok())
+                .filter(|c| {
+                    if c.is_high_risk() && !granted.contains(c) {
+                        denied.push(*c);
+                        false
+                    } else {
+                        true
+                    }
+                })
                 .collect();
+            if !denied.is_empty() {
+                let denied_strs: Vec<&str> = denied.iter().map(|c| c.as_str()).collect();
+                tracing::warn!(
+                    audit = true,
+                    plugin_id = %manifest.id,
+                    plugin_version = %manifest.version,
+                    plugin_dir = %plugin_dir.display(),
+                    denied = ?denied_strs,
+                    "HIGH-risk capabilities default-denied; grant by adding to granted_caps.json",
+                );
+            }
             CapabilitySet::from_iter(caps)
         }
     }
@@ -1841,6 +2012,108 @@ mod unit_tests {
         assert!(matches!(err, PluginError::IncompatibleApiVersion { .. }));
         let err = check_api_version("", "com.example.p").unwrap_err();
         assert!(matches!(err, PluginError::IncompatibleApiVersion { .. }));
+    }
+
+    // ─── F-5.1.1: HIGH-risk capability gating ─────────────────────────────
+
+    fn community_manifest(caps: &[&str]) -> PluginManifest {
+        use crate::manifest::{
+            ActivationConfig, LifecycleConfig, ManifestCapabilities, PluginRuntime, Registrations,
+        };
+        PluginManifest {
+            id: "com.example.hr".to_string(),
+            name: "High-Risk Plugin".to_string(),
+            version: "1.0.0".to_string(),
+            trust_level: TrustLevel::Community,
+            api_version: "1".to_string(),
+            runtime: PluginRuntime::Wasm,
+            capabilities: ManifestCapabilities {
+                required: caps.iter().map(|s| (*s).to_string()).collect(),
+                optional: vec![],
+            },
+            wasm: None,
+            script: None,
+            settings: None,
+            registrations: Registrations::default(),
+            lifecycle: LifecycleConfig::default(),
+            activation: ActivationConfig::default(),
+            dependencies: vec![],
+        }
+    }
+
+    #[test]
+    fn high_risk_caps_default_denied_for_community_plugins() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = community_manifest(&["fs.read", "net.http", "process.spawn"]);
+        let caps = build_capabilities(&manifest, dir.path());
+        assert!(caps.contains(Capability::FsRead), "low-risk cap must be granted");
+        assert!(
+            !caps.contains(Capability::NetHttp),
+            "HIGH-risk net.http must be denied without grants file"
+        );
+        assert!(
+            !caps.contains(Capability::ProcessSpawn),
+            "HIGH-risk process.spawn must be denied without grants file"
+        );
+    }
+
+    #[test]
+    fn granted_caps_file_allows_high_risk_through_for_matching_version() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(GRANTED_CAPS_FILE),
+            r#"{"version":"1.0.0","granted":["net.http"]}"#,
+        )
+        .unwrap();
+        let manifest = community_manifest(&["net.http", "process.spawn"]);
+        let caps = build_capabilities(&manifest, dir.path());
+        assert!(caps.contains(Capability::NetHttp), "granted cap must be present");
+        assert!(
+            !caps.contains(Capability::ProcessSpawn),
+            "non-granted HIGH-risk cap must still be denied"
+        );
+    }
+
+    #[test]
+    fn granted_caps_version_mismatch_resets_grants() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(GRANTED_CAPS_FILE),
+            r#"{"version":"0.9.0","granted":["net.http"]}"#,
+        )
+        .unwrap();
+        let manifest = community_manifest(&["net.http"]);
+        let caps = build_capabilities(&manifest, dir.path());
+        assert!(
+            !caps.contains(Capability::NetHttp),
+            "version mismatch must re-deny previously-granted caps"
+        );
+    }
+
+    #[test]
+    fn core_plugins_get_all_caps_regardless_of_grants_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut manifest = community_manifest(&[]);
+        manifest.trust_level = TrustLevel::Core;
+        let caps = build_capabilities(&manifest, dir.path());
+        assert!(caps.contains(Capability::NetHttp));
+        assert!(caps.contains(Capability::ProcessSpawn));
+        assert!(caps.contains(Capability::FsWriteExternal));
+    }
+
+    #[test]
+    fn write_grant_round_trips_and_sorts() {
+        let dir = tempfile::tempdir().unwrap();
+        write_grant(dir.path(), "1.0.0", Capability::NetHttp, true).unwrap();
+        write_grant(dir.path(), "1.0.0", Capability::ProcessSpawn, true).unwrap();
+        let granted = load_granted_high_risk_caps(dir.path(), "1.0.0");
+        assert!(granted.contains(&Capability::NetHttp));
+        assert!(granted.contains(&Capability::ProcessSpawn));
+
+        write_grant(dir.path(), "1.0.0", Capability::NetHttp, false).unwrap();
+        let granted = load_granted_high_risk_caps(dir.path(), "1.0.0");
+        assert!(!granted.contains(&Capability::NetHttp));
+        assert!(granted.contains(&Capability::ProcessSpawn));
     }
 }
 
