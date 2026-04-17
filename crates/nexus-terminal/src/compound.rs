@@ -215,6 +215,164 @@ fn starts_with_word(command: &str, word: &str) -> bool {
     }
 }
 
+/// Why a step was skipped during chain execution — surfaced in the
+/// per-step outcome record so UI and logs can explain *what* stopped
+/// a step from running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipReason {
+    /// Step carries `&&` but the previous step exited non-zero.
+    AndFailedPredecessor,
+    /// Step carries `||` but the previous step exited zero.
+    OrSucceededPredecessor,
+}
+
+impl SkipReason {
+    /// Human-readable explanation used in tracing + step-UI tooltips.
+    #[must_use]
+    pub const fn description(self) -> &'static str {
+        match self {
+            SkipReason::AndFailedPredecessor => {
+                "previous step failed; && guard skipped this step"
+            }
+            SkipReason::OrSucceededPredecessor => {
+                "previous step succeeded; || guard skipped this step"
+            }
+        }
+    }
+}
+
+/// Per-step outcome after [`execute_chain`] walks a chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepOutcome {
+    /// Step ran; `exit_code` is whatever the caller's runner returned.
+    Ran {
+        /// Exit code the step produced.
+        exit_code: i32,
+    },
+    /// Step was skipped by the gating operator (PRD §9.2
+    /// `ProcessStepSkipped { reason: "operator condition" }`).
+    Skipped {
+        /// Which of the two gating failures skipped this step.
+        reason: SkipReason,
+    },
+    /// The runner closure returned an error while trying to execute
+    /// this step. Subsequent gating treats this as a failed step so
+    /// `&&`-linked successors are skipped and `||`-linked successors
+    /// still get a chance to run, matching the shell semantics where
+    /// any non-zero exit is a failure.
+    Failed {
+        /// Flattened error message from the runner. We don't carry
+        /// the typed `TerminalError` through because the runner
+        /// might return other errors (HTTP, I/O, …) in future callers.
+        error: String,
+    },
+}
+
+/// Outcome of running an entire chain.
+#[derive(Debug, Clone)]
+pub struct ChainOutcome {
+    /// One entry per input step, in order. Steps that were skipped
+    /// still produce an entry so callers can render the full plan
+    /// with status markers.
+    pub steps: Vec<(CommandStep, StepOutcome)>,
+    /// The last-run step's exit code. `0` if no step ran (empty
+    /// chain, or every step skipped by gating). Callers that want a
+    /// process-style exit code for the whole chain use this.
+    pub final_exit_code: i32,
+}
+
+impl ChainOutcome {
+    /// Whether every step in the chain either ran with exit 0 or was
+    /// explicitly skipped by a gating operator (not failed). Useful
+    /// for CI-style "did the whole plan pass?" checks.
+    #[must_use]
+    pub fn all_ok(&self) -> bool {
+        self.steps.iter().all(|(_, o)| match o {
+            StepOutcome::Ran { exit_code } => *exit_code == 0,
+            StepOutcome::Skipped { .. } => true,
+            StepOutcome::Failed { .. } => false,
+        })
+    }
+
+    /// Steps that actually executed (excludes skipped + failed).
+    pub fn ran_steps(&self) -> impl Iterator<Item = (&CommandStep, i32)> {
+        self.steps.iter().filter_map(|(s, o)| match o {
+            StepOutcome::Ran { exit_code } => Some((s, *exit_code)),
+            _ => None,
+        })
+    }
+}
+
+/// Walk `steps` in order, asking `run_step` to execute each one and
+/// threading the previous exit code through the gating predicate on
+/// [`CommandStep::should_run`].
+///
+/// `run_step` is the executor's injection point: tests pass a closure
+/// returning synthetic exit codes, real callers hand in a closure that
+/// spawns a [`crate::Session`] and waits for it. Keeping the executor
+/// runner-agnostic means a future async or single-shell-stdin runner
+/// reuses this logic without changes.
+///
+/// Errors from the runner are captured in the outcome (as
+/// [`StepOutcome::Failed`]) rather than bubbled out: a chain usually
+/// wants to continue to its `||` fallback even if an individual step
+/// failed to spawn.
+pub fn execute_chain<F>(steps: &[CommandStep], mut run_step: F) -> ChainOutcome
+where
+    F: FnMut(&CommandStep) -> Result<i32, crate::TerminalError>,
+{
+    let mut last_exit: i32 = 0;
+    let mut out: Vec<(CommandStep, StepOutcome)> = Vec::with_capacity(steps.len());
+
+    for step in steps {
+        if !step.should_run(last_exit) {
+            let reason = match step.operator {
+                Operator::And => SkipReason::AndFailedPredecessor,
+                Operator::Or => SkipReason::OrSucceededPredecessor,
+                Operator::Seq => {
+                    // `Seq` always runs per `should_run`, so reaching
+                    // this arm would be a logic bug. Panicking during
+                    // executor walk would be user-hostile; treat the
+                    // impossible path as a silent skip with an
+                    // explanation rather than crashing.
+                    tracing::error!(
+                        command = %step.command,
+                        "Seq step reported !should_run — defensive skip",
+                    );
+                    SkipReason::AndFailedPredecessor
+                }
+            };
+            out.push((step.clone(), StepOutcome::Skipped { reason }));
+            continue;
+        }
+
+        match run_step(step) {
+            Ok(code) => {
+                last_exit = code;
+                out.push((step.clone(), StepOutcome::Ran { exit_code: code }));
+            }
+            Err(err) => {
+                // Treat runner errors as "step failed with non-zero"
+                // for gating purposes so `&&` successors are skipped
+                // and `||` successors run — the user's mental model
+                // of shell semantics.
+                last_exit = -1;
+                out.push((
+                    step.clone(),
+                    StepOutcome::Failed {
+                        error: err.to_string(),
+                    },
+                ));
+            }
+        }
+    }
+
+    ChainOutcome {
+        steps: out,
+        final_exit_code: last_exit,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,5 +536,159 @@ mod tests {
         assert_eq!(format!("{}", Operator::And), "&&");
         assert_eq!(format!("{}", Operator::Or), "||");
         assert_eq!(format!("{}", Operator::Seq), ";");
+    }
+
+    // ── execute_chain ─────────────────────────────────────────────────
+
+    #[test]
+    fn empty_chain_produces_empty_outcome() {
+        let out = execute_chain(&[], |_| Ok(0));
+        assert!(out.steps.is_empty());
+        assert_eq!(out.final_exit_code, 0);
+        assert!(out.all_ok());
+    }
+
+    #[test]
+    fn single_step_runs_and_captures_exit_code() {
+        let steps = parse_command_chain("true");
+        let out = execute_chain(&steps, |_| Ok(7));
+        assert_eq!(out.final_exit_code, 7);
+        assert_eq!(
+            out.steps[0].1,
+            StepOutcome::Ran { exit_code: 7 }
+        );
+    }
+
+    #[test]
+    fn and_gate_skips_successor_after_failed_step() {
+        let steps = parse_command_chain("a && b");
+        let out = execute_chain(&steps, |step| {
+            if step.command == "a" {
+                Ok(1) // a failed
+            } else {
+                panic!("b should not have been invoked");
+            }
+        });
+        assert_eq!(out.steps[0].1, StepOutcome::Ran { exit_code: 1 });
+        assert_eq!(
+            out.steps[1].1,
+            StepOutcome::Skipped { reason: SkipReason::AndFailedPredecessor }
+        );
+        assert_eq!(out.final_exit_code, 1);
+    }
+
+    #[test]
+    fn or_gate_skips_successor_after_successful_step() {
+        let steps = parse_command_chain("a || b");
+        let out = execute_chain(&steps, |step| {
+            if step.command == "a" {
+                Ok(0) // a succeeded — b should be skipped
+            } else {
+                panic!("b should not have been invoked");
+            }
+        });
+        assert_eq!(out.steps[0].1, StepOutcome::Ran { exit_code: 0 });
+        assert_eq!(
+            out.steps[1].1,
+            StepOutcome::Skipped { reason: SkipReason::OrSucceededPredecessor }
+        );
+        assert_eq!(out.final_exit_code, 0);
+    }
+
+    #[test]
+    fn seq_always_runs_regardless_of_previous_exit() {
+        let steps = parse_command_chain("a ; b");
+        let out = execute_chain(&steps, |step| {
+            if step.command == "a" {
+                Ok(42) // arbitrary failure
+            } else {
+                Ok(0)
+            }
+        });
+        assert_eq!(out.steps[0].1, StepOutcome::Ran { exit_code: 42 });
+        assert_eq!(out.steps[1].1, StepOutcome::Ran { exit_code: 0 });
+    }
+
+    #[test]
+    fn runner_error_becomes_failed_outcome_and_treated_as_non_zero() {
+        let steps = parse_command_chain("a && b || c");
+        let mut invocations: Vec<String> = Vec::new();
+        let out = execute_chain(&steps, |step| {
+            invocations.push(step.command.clone());
+            if step.command == "a" {
+                Err(crate::TerminalError::NotRunning("synthetic".into()))
+            } else {
+                Ok(0)
+            }
+        });
+        // a failed, so && skips b, but || — with a's non-zero synthetic
+        // exit — admits c.
+        assert!(matches!(out.steps[0].1, StepOutcome::Failed { .. }));
+        assert_eq!(
+            out.steps[1].1,
+            StepOutcome::Skipped { reason: SkipReason::AndFailedPredecessor }
+        );
+        assert_eq!(out.steps[2].1, StepOutcome::Ran { exit_code: 0 });
+        // Runner was called for a and c, not b.
+        assert_eq!(invocations, vec!["a", "c"]);
+    }
+
+    #[test]
+    fn all_ok_reports_true_when_no_failures_and_zero_exits() {
+        let steps = parse_command_chain("a && b");
+        let out = execute_chain(&steps, |_| Ok(0));
+        assert!(out.all_ok());
+    }
+
+    #[test]
+    fn all_ok_reports_false_when_any_step_exited_non_zero() {
+        let steps = parse_command_chain("a ; b");
+        let out = execute_chain(&steps, |step| {
+            if step.command == "a" {
+                Ok(2)
+            } else {
+                Ok(0)
+            }
+        });
+        assert!(!out.all_ok());
+    }
+
+    #[test]
+    fn all_ok_reports_false_when_any_step_failed() {
+        let steps = parse_command_chain("a ; b");
+        let out = execute_chain(&steps, |step| {
+            if step.command == "a" {
+                Err(crate::TerminalError::NotRunning("x".into()))
+            } else {
+                Ok(0)
+            }
+        });
+        assert!(!out.all_ok());
+    }
+
+    #[test]
+    fn skipped_steps_do_not_appear_in_ran_steps_iter() {
+        let steps = parse_command_chain("a && b ; c");
+        let out = execute_chain(&steps, |step| {
+            if step.command == "a" {
+                Ok(1) // fail → b skipped
+            } else {
+                Ok(0)
+            }
+        });
+        let ran: Vec<_> = out.ran_steps().map(|(s, c)| (s.command.clone(), c)).collect();
+        assert_eq!(ran.len(), 2);
+        assert_eq!(ran[0].0, "a");
+        assert_eq!(ran[1].0, "c");
+    }
+
+    #[test]
+    fn skip_reason_descriptions_are_human_readable() {
+        assert!(SkipReason::AndFailedPredecessor
+            .description()
+            .contains("&&"));
+        assert!(SkipReason::OrSucceededPredecessor
+            .description()
+            .contains("||"));
     }
 }

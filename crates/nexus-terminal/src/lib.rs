@@ -66,7 +66,10 @@ mod urls;
 
 pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
-pub use compound::{parse_command_chain, requires_single_shell, CommandStep, Operator};
+pub use compound::{
+    execute_chain, parse_command_chain, requires_single_shell, ChainOutcome, CommandStep,
+    Operator, SkipReason, StepOutcome,
+};
 pub use env::{
     interpolate_env, is_secret_key, mask_secrets, parse_env_file, parse_env_text, resolve_env,
     REDACTED,
