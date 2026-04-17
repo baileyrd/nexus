@@ -110,9 +110,11 @@
 **Evidence:** N/A.
 
 ### PRD-14 — MCP Integration 🟡
-**Shipped:** 807-line `NexusMcpServer::serve_stdio` in [crates/nexus-mcp/src/server.rs](crates/nexus-mcp/src/server.rs); stdio transport functional and exercised by the `nexus mcp` CLI subcommand.
-**Gaps:** Public surface is intentionally narrow (`new` + `serve_stdio`). No WebSocket or HTTP+SSE transport. No MCP Host (client for connecting to external servers). No mcp.toml server-discovery config. No resource enumeration beyond what stdio exposes. No reconnection / pooling for external servers.
-**Evidence:** [crates/nexus-mcp/src/server.rs](crates/nexus-mcp/src/server.rs), [crates/nexus-cli/src/commands/mcp.rs](crates/nexus-cli/src/commands/mcp.rs).
+**Shipped:**
+- Server: 807-line `NexusMcpServer::serve_stdio` exposing Nexus forge ops to external AI clients over stdio.
+- **Host / client (new):** [`McpClient`](crates/nexus-mcp/src/client.rs) spawns external MCP servers (filesystem, github, etc.) as child processes, runs the MCP initialize handshake behind a 15s timeout, and exposes `list_tools` / `list_resources` / `list_prompts` / `call_tool` over rmcp's `TokioChildProcess` transport. [`McpHostConfig`](crates/nexus-mcp/src/config.rs) parses `<forge>/.forge/mcp.toml` (Claude Desktop-style `mcp.json` analogue) into `McpServerSpec { command, args, env, disabled }`.
+**Gaps:** No MCP Host **orchestrator** yet — nothing spawns `McpClient`s from `mcp.toml` at forge boot, keeps them alive, or exposes their tools to callers (AI engine, plugin IPC). No WebSocket / HTTP+SSE transport. No reconnection / pool management. No `nexus mcp connect` / `nexus mcp call` CLI.
+**Evidence:** [crates/nexus-mcp/src/{server,client,config}.rs](crates/nexus-mcp/src/), [crates/nexus-cli/src/commands/mcp.rs](crates/nexus-cli/src/commands/mcp.rs).
 
 ### PRD-15 — Agent System ⚪
 **Shipped:** Spec document only.
@@ -142,7 +144,7 @@
 
 | Risk | Why it matters | Mitigation |
 |------|----------------|------------|
-| MCP Host absence | Positioned as "MCP-integrated" but can't consume external MCP servers | Add minimal MCP client before any marketing claim |
+| MCP Host absence | Positioned as "MCP-integrated" but can't consume external MCP servers | ✅ Addressed: `McpClient` + `McpHostConfig` in `nexus-mcp` spawn external servers from `mcp.toml` and expose `list_tools` / `call_tool` over rmcp's stdio transport. Host orchestrator (lifecycle manager that keeps clients live across the app) is the next follow-up. |
 | Git `!Send` constraint | UI-driven git ops will block the main thread | ✅ Addressed: `GitWorker` + `GitWorkerHandle` in `nexus-git` moves the `git2::Repository` to a dedicated OS thread behind a request/response channel. |
 | F-8.1.1 iframe sandbox deferred | Cannot ship community JS plugin marketplace safely | Policy recorded: script plugins are first-party-only until F-8.1.1 + F-2.2.1 land |
 | Database views absent | `.bases` files load but render nothing useful | Scope views into a Phase-2 PRD-10b rather than shipping 10 half-done |
