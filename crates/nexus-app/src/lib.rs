@@ -38,6 +38,7 @@ const FS_CHANGED_EVENT: &str = "forge:fs-changed";
 const THEME_CHANGED_EVENT: &str = "theme:changed";
 
 pub mod commands;
+pub mod database;
 pub mod editor;
 pub mod forge;
 pub mod keybindings;
@@ -178,6 +179,7 @@ pub fn run() {
             editor::editor_redo,
             editor::editor_list_open,
             editor::editor_sync_content,
+            database::db_apply_view,
             terminal::term_create_session,
             terminal::term_close_session,
             terminal::term_send_input,

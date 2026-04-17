@@ -30,7 +30,7 @@
 | 07 | Theming & UI | ✅ | 497-token CSS registry, theme core plugin, contribution registry |
 | 08 | Editor Engine | 🟡 | 3.7k LoC block/transaction/undo core; PRD §4 `BlockPositionMap` model superseded by CM6-owns-text |
 | 09 | Terminal & Process Manager | 🟢 | Phases A–V shipped; `nexus-terminal` crate has 239 tests, `com.nexus.terminal` core plugin exposes 10 dispatch handlers, **both** editor-shell surfaces (nexus-tui pane + Tauri React panel) render live PTY output through kernel IPC; remaining work is ANSI-colour render (xterm.js), saved-commands sidebar, and FTS5 scrollback index |
-| 10 | Database Engine | 🟡 | `.bases` parse + validate + formula IPC; views (board/list/calendar/gallery) absent |
+| 10 | Database Engine | 🟡 | `.bases` parse + validate + formula IPC + **view application engine** (filter/sort/group → `AppliedView` for all 4 view types over `com.nexus.database::apply_view`); UI renderers for Board/List/Calendar/Gallery in progress |
 | 11 | Git Integration | 🟢 | 1.1k-line `GitEngine` over `git2`; worker-thread wrapper for UI still needed |
 | 12 | AI Engine | 🟡 | Anthropic/OpenAI/Ollama providers + chunker; no chat UI, no streaming, no agents |
 | 13 | Skills | ⚪ | Spec only; no parser, registry, or CLI |
@@ -103,8 +103,9 @@
 
 ### PRD-10 — Database Engine 🟡
 **Shipped:** `.bases` TOML schema + validation (3.4k LoC), property types (Title/Select/Date/Number/MultiSelect/People/timestamps), relations, CSV import/export, formula evaluator behind `com.nexus.database` IPC (`formula_eval` handler).
-**Gaps:** **No views.** Board/Kanban/List/Calendar/Gallery all absent (`grep BoardView|KanbanView|...` returns zero hits). No `nexus db` CLI. No cross-database relation queries. `BL-002` typed property columns not implemented.
-**Evidence:** [crates/nexus-database/src/](crates/nexus-database/src/), [crates/nexus-storage/src/bases/](crates/nexus-storage/src/bases/).
+**Shipped (view engine, commit [a4c1bcb](https://github.com/baileyrd/nexus/commit/a4c1bcb)):** [`views.rs`](crates/nexus-database/src/views.rs) — pure-logic `apply_view(records, schema, view) -> AppliedView` pipeline. Supports 14 filter operators (`eq` / `!=` / `gt` / `gte` / `lt` / `lte` / `contains` / `icontains` / `starts_with` / `ends_with` / `is_empty` / `is_not_empty` / `in`); multi-level sort with null-last semantics in both directions; Kanban grouping by `group_field` with a `(none)` sentinel bucket for missing keys; Calendar grouping by ISO-date prefix of the `date_field`. `AppliedView.layout` is `Flat { records }` for Table/Gallery, `Grouped { groups }` for Kanban/Calendar. Exposed as `com.nexus.database` handler `apply_view` (id 4); registered in bootstrap. 18 view-specific tests (120 total in the crate).
+**Gaps:** UI renderers for Board/Kanban/List/Calendar/Gallery not yet shipped — the engine returns the right shape, the React components to render it are in progress. No `nexus db` CLI. No cross-database relation queries (rollup / lookup resolvers go through `com.nexus.storage`). `BL-002` typed property columns not implemented.
+**Evidence:** [crates/nexus-database/src/{views,core_plugin}.rs](crates/nexus-database/src/), [crates/nexus-storage/src/bases/](crates/nexus-storage/src/bases/).
 
 ### PRD-11 — Git Integration 🟢
 **Shipped:** 1,111-line `GitEngine` over `git2::Repository` (27 public methods covering open/status/diff/stage/commit/log/branch), 243-line `AutoCommitter`, `GitState` / `FileStatus` / `HunkDiff` types.

@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { BaseViewDemo } from "../components/panels/BaseViewDemo";
 import { FileTree } from "../components/panels/FileTree";
 import { FileViewer } from "../components/panels/FileViewer";
 import { Outline } from "../components/panels/Outline";
@@ -57,6 +58,11 @@ export function registerBuiltins(): void {
   // one PaneView hands us).
   const TerminalSurface = () => createElement(TerminalPanel);
   contributions.registerContentType("terminal", TerminalSurface);
+
+  // PRD-10 §4 database view demo — same wrapper trick for a content
+  // type that doesn't need the incoming Panel prop.
+  const BaseViewDemoSurface = () => createElement(BaseViewDemo);
+  contributions.registerContentType("bases-demo", BaseViewDemoSurface);
 
   contributions.registerSettingsTab({
     id: "general",
@@ -145,6 +151,19 @@ export function registerBuiltins(): void {
     category: "Workspace",
     icon: "terminal",
     keybinding: "Mod+Shift+T",
+  });
+
+  contributions.registerCommand("workspace.open-bases-demo", () => {
+    useLayoutStore
+      .getState()
+      .openContentTab("bases-demo", "Bases demo", "database");
+  });
+  contributions.registerPaletteCommand({
+    id: "workspace.open-bases-demo",
+    commandId: "workspace.open-bases-demo",
+    title: "Bases: Open views demo",
+    category: "Workspace",
+    icon: "database",
   });
 
   contributions.registerCommand("workspace.switch-forge", async () => {

@@ -2216,3 +2216,244 @@ select.plugin-settings-input {
   font: inherit;
   outline: none;
 }
+
+/* PRD-10 §4 view renderers — BaseViewPanel + per-type sub-renderers. */
+
+.base-view,
+.base-view-demo {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--nexus-surface-1, #fff);
+  color: var(--nexus-text-primary, #1f232a);
+  font-size: 13px;
+}
+
+.base-view-demo .base-view-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--nexus-border, #e3e6eb);
+  background: var(--nexus-surface-2, #f7f8fa);
+}
+
+.base-view-demo .base-view-tabs .tab {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  text-transform: capitalize;
+  color: var(--nexus-text-muted, #596070);
+}
+
+.base-view-demo .base-view-tabs .tab.active {
+  background: var(--nexus-accent-soft, #e4ecff);
+  border-color: var(--nexus-accent, #3b82f6);
+  color: var(--nexus-accent, #3b82f6);
+}
+
+.base-view-demo .base-view-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 12px;
+}
+
+.base-view.empty,
+.base-view.loading,
+.base-view.error {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  color: var(--nexus-text-muted, #596070);
+}
+
+.base-view.error {
+  color: var(--nexus-color-error, #e06c75);
+}
+
+/* Table */
+.base-view-table {
+  overflow: auto;
+}
+
+.base-view-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.base-view-table th,
+.base-view-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--nexus-border, #e3e6eb);
+  text-align: left;
+  vertical-align: top;
+}
+
+.base-view-table th {
+  font-weight: 600;
+  background: var(--nexus-surface-2, #f7f8fa);
+  position: sticky;
+  top: 0;
+}
+
+/* Gallery */
+.base-view-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 4px;
+  overflow: auto;
+}
+
+.base-card {
+  border: 1px solid var(--nexus-border, #e3e6eb);
+  border-radius: 6px;
+  padding: 12px;
+  background: var(--nexus-surface-2, #f7f8fa);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.base-card-title {
+  font-weight: 600;
+}
+
+.base-card-fields {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  row-gap: 4px;
+  column-gap: 8px;
+  font-size: 12px;
+}
+
+.base-card-field {
+  display: contents;
+}
+
+.base-card-fields dt {
+  color: var(--nexus-text-muted, #596070);
+  font-weight: 500;
+}
+
+.base-card-fields dd {
+  margin: 0;
+}
+
+/* Kanban */
+.base-view-kanban {
+  display: flex;
+  gap: 12px;
+  padding: 4px;
+  overflow-x: auto;
+  flex: 1 1 auto;
+}
+
+.kanban-column {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  background: var(--nexus-surface-2, #f7f8fa);
+  border: 1px solid var(--nexus-border, #e3e6eb);
+  border-radius: 6px;
+  max-height: 100%;
+}
+
+.kanban-column-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--nexus-border, #e3e6eb);
+  font-weight: 600;
+}
+
+.kanban-column-count {
+  background: var(--nexus-accent-soft, #e4ecff);
+  color: var(--nexus-accent, #3b82f6);
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.kanban-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.kanban-card {
+  background: var(--nexus-surface-1, #fff);
+  border: 1px solid var(--nexus-border, #e3e6eb);
+  border-radius: 4px;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  row-gap: 2px;
+  column-gap: 6px;
+  font-size: 12px;
+}
+
+.kanban-card-row {
+  display: contents;
+}
+
+.kanban-card-key {
+  color: var(--nexus-text-muted, #596070);
+}
+
+/* Calendar */
+.base-view-calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px;
+  overflow: auto;
+}
+
+.calendar-day {
+  border: 1px solid var(--nexus-border, #e3e6eb);
+  border-radius: 6px;
+  background: var(--nexus-surface-2, #f7f8fa);
+}
+
+.calendar-day-header {
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  border-bottom: 1px solid var(--nexus-border, #e3e6eb);
+}
+
+.calendar-day-count {
+  background: var(--nexus-accent-soft, #e4ecff);
+  color: var(--nexus-accent, #3b82f6);
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.calendar-events {
+  margin: 0;
+  padding: 6px 12px 10px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.calendar-event {
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--nexus-surface-1, #fff);
+  border: 1px solid var(--nexus-border, #e3e6eb);
+}
