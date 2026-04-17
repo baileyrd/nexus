@@ -22,6 +22,13 @@ import { liveMarkdown } from "../../editor/liveMarkdown";
 import { slashCommands } from "../../editor/slashCommandExtension";
 import { buildSnippetExtension, filterSnippetsForExt } from "../../editor/snippetExtension";
 import { contributions, type EditorKeybinding } from "../../contributions";
+import {
+  useEditorPrefsStore,
+  type KeybindingMode,
+  type ViewMode,
+} from "../../stores/editorPrefs";
+import { vim } from "@replit/codemirror-vim";
+import { emacsStyleKeymap } from "@codemirror/commands";
 
 export interface EditorSurfaceProps {
   initialContent: string;
@@ -90,6 +97,31 @@ function currentSnippetExtension(filePath: string) {
   return buildSnippetExtension(filterSnippetsForExt(contributions.listSnippets(), ext));
 }
 
+/** Extension for the chosen keybinding mode. Vim is a full input-mode
+ *  plugin; Emacs is a keymap overlay on top of the defaults. */
+function keybindingModeExtension(mode: KeybindingMode): Extension {
+  switch (mode) {
+    case "vim":
+      return vim();
+    case "emacs":
+      return keymap.of(emacsStyleKeymap);
+    default:
+      return [];
+  }
+}
+
+/** Markdown decorations for `live` / `reading` modes. `source` shows
+ *  raw markdown with no live decorations. `reading` forces markers
+ *  hidden regardless of cursor overlap (PRD-08 §15.3). */
+function viewModeExtension(
+  viewMode: ViewMode,
+  isMarkdown: boolean,
+): Extension {
+  if (!isMarkdown) return [];
+  if (viewMode === "source") return [];
+  return liveMarkdown({ alwaysHideMarkers: viewMode === "reading" });
+}
+
 function getExtensions(
   filePath: string,
   onChangeRef: React.MutableRefObject<EditorSurfaceProps["onChange"]>,
@@ -97,12 +129,19 @@ function getExtensions(
   pluginDecorationsCompartment: Compartment,
   pluginKeymapCompartment: Compartment,
   snippetCompartment: Compartment,
+  keybindingCompartment: Compartment,
+  viewModeCompartment: Compartment,
+  initialKeybindingMode: KeybindingMode,
+  initialViewMode: ViewMode,
 ) {
   const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
   const isMarkdown = ext === "md" || ext === "mdx" || ext === "markdown";
 
   return [
     nexusEditorTheme,
+    // Vim ships its own cursor / status; kept lean and listed first so
+    // its key handling runs before plugin/default keymaps.
+    keybindingCompartment.of(keybindingModeExtension(initialKeybindingMode)),
     lineNumbers(),
     highlightActiveLine(),
     drawSelection(),
@@ -112,12 +151,9 @@ function getExtensions(
     history(),
     highlightSelectionMatches(),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-    ...(isMarkdown ? [markdown(), liveMarkdown(), slashCommands()] : []),
-    // Snippet Tab-expansion is listed before the default keymap so it runs
-    // first; it returns false when no trigger matches, deferring to indent.
+    ...(isMarkdown ? [markdown(), slashCommands()] : []),
+    viewModeCompartment.of(viewModeExtension(initialViewMode, isMarkdown)),
     snippetCompartment.of(currentSnippetExtension(filePath)),
-    // Plugin-registered keybindings win over the CM6 defaults on exact
-    // match because they're listed first in the keymap extension set.
     pluginKeymapCompartment.of(currentPluginKeymap()),
     keymap.of([
       ...defaultKeymap,
@@ -155,6 +191,11 @@ export function EditorSurface({
   const pluginDecorationsCompartment = useMemo(() => new Compartment(), []);
   const pluginKeymapCompartment = useMemo(() => new Compartment(), []);
   const snippetCompartment = useMemo(() => new Compartment(), []);
+  const keybindingCompartment = useMemo(() => new Compartment(), []);
+  const viewModeCompartment = useMemo(() => new Compartment(), []);
+
+  const keybindingMode = useEditorPrefsStore((s) => s.keybindingMode);
+  const viewMode = useEditorPrefsStore((s) => s.viewMode);
 
   // Keep callback refs current without re-creating the editor.
   onChangeRef.current = onChange;
@@ -174,6 +215,10 @@ export function EditorSurface({
         pluginDecorationsCompartment,
         pluginKeymapCompartment,
         snippetCompartment,
+        keybindingCompartment,
+        viewModeCompartment,
+        keybindingMode,
+        viewMode,
       ),
     });
     const view = new EditorView({ state, parent: parentRef.current });
@@ -245,6 +290,30 @@ export function EditorSurface({
     };
   }, [pluginDecorationsCompartment, pluginKeymapCompartment, snippetCompartment]);
 
+  // Reconfigure keybinding / view-mode compartments when the user flips
+  // the corresponding setting. Both ride on the editorPrefs store.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: keybindingCompartment.reconfigure(
+        keybindingModeExtension(keybindingMode),
+      ),
+    });
+  }, [keybindingCompartment, keybindingMode]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const ext = filePathRef.current.split(".").pop()?.toLowerCase() ?? "";
+    const isMarkdown = ext === "md" || ext === "mdx" || ext === "markdown";
+    view.dispatch({
+      effects: viewModeCompartment.reconfigure(
+        viewModeExtension(viewMode, isMarkdown),
+      ),
+    });
+  }, [viewModeCompartment, viewMode, filePath]);
+
   // Handle outline scroll-to-heading events.
   const handleScrollToHeading = useCallback((e: Event) => {
     const view = viewRef.current;
@@ -264,5 +333,12 @@ export function EditorSurface({
       window.removeEventListener("nx:scroll-to-heading", handleScrollToHeading);
   }, [handleScrollToHeading]);
 
-  return <div ref={parentRef} className="editor-surface" />;
+  return (
+    <div
+      ref={parentRef}
+      className="editor-surface"
+      data-view-mode={viewMode}
+      data-keybinding-mode={keybindingMode}
+    />
+  );
 }

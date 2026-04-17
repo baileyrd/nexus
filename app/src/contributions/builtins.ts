@@ -11,6 +11,7 @@ import { RunningExtensionsTab } from "../components/settings/tabs/RunningExtensi
 import { useForgeStore } from "../stores/forge";
 import { usePaletteStore } from "../stores/palette";
 import { useSettingsStore } from "../stores/settings";
+import { useEditorPrefsStore, type KeybindingMode, type ViewMode } from "../stores/editorPrefs";
 import { contributions } from "./registry";
 
 /**
@@ -174,6 +175,47 @@ export function registerBuiltins(): void {
     menuOrder: 30,
     order: 10,
   });
+
+  // ── Editor mode commands (PRD-08 §15, §9) ────────────────────────────────
+  contributions.registerCommand("editor.toggle-mode", () => {
+    useEditorPrefsStore.getState().cycleViewMode();
+  });
+  contributions.registerPaletteCommand({
+    id: "editor.toggle-mode",
+    commandId: "editor.toggle-mode",
+    title: "Editor: Cycle view mode (live → source → reading)",
+    category: "Editor",
+    icon: "eye",
+    keybinding: "Mod+Shift+E",
+  });
+
+  for (const mode of ["live", "source", "reading"] as ViewMode[]) {
+    const id = `editor.view-mode.${mode}`;
+    contributions.registerCommand(id, () => {
+      useEditorPrefsStore.getState().setViewMode(mode);
+    });
+    contributions.registerPaletteCommand({
+      id,
+      commandId: id,
+      title: `Editor: Switch to ${mode} mode`,
+      category: "Editor",
+      icon: "eye",
+    });
+  }
+
+  for (const mode of ["default", "vim", "emacs"] as KeybindingMode[]) {
+    const id = `editor.keybinding-mode.${mode}`;
+    contributions.registerCommand(id, () => {
+      useEditorPrefsStore.getState().setKeybindingMode(mode);
+    });
+    contributions.registerPaletteCommand({
+      id,
+      commandId: id,
+      title: `Editor: Use ${mode} keybindings`,
+      category: "Editor",
+      icon: "keyboard",
+    });
+  }
 
   // Help menu
   contributions.registerMenuItem({

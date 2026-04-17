@@ -38,6 +38,13 @@ function cursorOverlaps(sel: EditorSelection, from: number, to: number): boolean
   return sel.ranges.some((r) => r.from <= to && r.to >= from);
 }
 
+/** Live-preview options. `alwaysHideMarkers` corresponds to Reading
+ *  mode (PRD-08 §15.3): syntax tokens are hidden even when the cursor
+ *  overlaps, giving the user a fully rendered view. */
+export interface LiveMarkdownOptions {
+  alwaysHideMarkers?: boolean;
+}
+
 /** Push a `Decoration.replace` range covering every child of `node` whose
  *  name is in `names`. Used to hide marker children like `HeaderMark` and
  *  `EmphasisMark`. */
@@ -58,10 +65,11 @@ const EMPHASIS_MARK = new Set(["EmphasisMark"]);
 const CODE_MARK = new Set(["CodeMark"]);
 const LINK_MARK_AND_URL = new Set(["LinkMark", "URL"]);
 
-function build(view: EditorView): DecorationSet {
+function build(view: EditorView, opts: LiveMarkdownOptions): DecorationSet {
   const decos: Array<Range<Decoration>> = [];
   const sel = view.state.selection;
   const doc = view.state.doc;
+  const alwaysHide = opts.alwaysHideMarkers === true;
 
   for (const { from, to } of view.visibleRanges) {
     syntaxTree(view.state).iterate({
@@ -72,7 +80,7 @@ function build(view: EditorView): DecorationSet {
         const node = nodeRef.node;
         const nFrom = nodeRef.from;
         const nTo = nodeRef.to;
-        const reveal = cursorOverlaps(sel, nFrom, nTo);
+        const reveal = !alwaysHide && cursorOverlaps(sel, nFrom, nTo);
 
         if (HEADING_LEVELS.has(name)) {
           const level = Number(name.slice(-1));
@@ -158,16 +166,16 @@ function build(view: EditorView): DecorationSet {
 }
 
 /** CodeMirror extension factory: live-preview markdown decorations. */
-export function liveMarkdown(): Extension {
+export function liveMarkdown(opts: LiveMarkdownOptions = {}): Extension {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
       constructor(view: EditorView) {
-        this.decorations = build(view);
+        this.decorations = build(view, opts);
       }
       update(update: ViewUpdate) {
         if (update.docChanged || update.selectionSet || update.viewportChanged) {
-          this.decorations = build(update.view);
+          this.decorations = build(update.view, opts);
         }
       }
     },
