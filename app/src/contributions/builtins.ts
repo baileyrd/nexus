@@ -3,6 +3,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FileTree } from "../components/panels/FileTree";
 import { FileViewer } from "../components/panels/FileViewer";
 import { Outline } from "../components/panels/Outline";
+import { TerminalPanel } from "../components/panels/TerminalPanel";
 import { makeGenericTreePanelFactory } from "../components/panels/GenericTreePanel";
 import { GeneralTab } from "../components/settings/tabs/GeneralTab";
 import { HotkeysTab } from "../components/settings/tabs/HotkeysTab";
@@ -50,6 +51,12 @@ export function registerBuiltins(): void {
 
   contributions.registerContentType("files", FileTree);
   contributions.registerContentType("outline", Outline);
+
+  // PRD-09 §14 terminal surface — thin ContentComponent wrapper around
+  // TerminalPanel (which takes no Panel prop of its own, so drop the
+  // one PaneView hands us).
+  const TerminalSurface = () => createElement(TerminalPanel);
+  contributions.registerContentType("terminal", TerminalSurface);
 
   contributions.registerSettingsTab({
     id: "general",
@@ -124,6 +131,20 @@ export function registerBuiltins(): void {
     category: "Workspace",
     icon: "command",
     keybinding: "Mod+K",
+  });
+
+  contributions.registerCommand("workspace.open-terminal", () => {
+    useLayoutStore
+      .getState()
+      .openContentTab("terminal", "Terminal", "terminal");
+  });
+  contributions.registerPaletteCommand({
+    id: "workspace.open-terminal",
+    commandId: "workspace.open-terminal",
+    title: "Terminal: Open",
+    category: "Workspace",
+    icon: "terminal",
+    keybinding: "Mod+Shift+T",
   });
 
   contributions.registerCommand("workspace.switch-forge", async () => {

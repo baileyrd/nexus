@@ -2144,3 +2144,75 @@ select.plugin-settings-input {
     scroll-behavior: auto !important;
   }
 }
+
+/* PRD-09 §14 terminal panel — line-buffered shell view backed by
+   `com.nexus.terminal` core-plugin dispatch. */
+
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family: var(--nexus-mono-font, "SFMono-Regular", Menlo, Monaco, Consolas, monospace);
+  font-size: 13px;
+  background: var(--nexus-surface-2, #1a1d24);
+  color: var(--nexus-text-primary, #d8dce3);
+}
+
+.terminal-panel.starting,
+.terminal-panel.closed,
+.terminal-panel.error {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+}
+
+.terminal-panel.error {
+  color: var(--nexus-color-error, #e06c75);
+}
+
+.terminal-panel .label {
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.terminal-panel .hint,
+.terminal-panel .message {
+  margin: 0;
+  color: var(--nexus-text-muted, #7d828b);
+}
+
+.terminal-output {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.terminal-line {
+  line-height: 1.4;
+}
+
+.terminal-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--nexus-border, #2d313a);
+  background: var(--nexus-surface-3, #141820);
+}
+
+.terminal-prompt {
+  color: var(--nexus-color-success, #98c379);
+  font-weight: 700;
+}
+
+.terminal-input {
+  flex: 1 1 auto;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}

@@ -79,6 +79,14 @@ interface LayoutState {
    *  can dispatch to the editor surface without a separate field on
    *  `Tab` (which is a generated binding). */
   openTabForFile: (relpath: string, label: string) => void;
+  /** Open a non-file tab keyed by `contentType` (e.g. `"terminal"`,
+   *  `"settings"`). The component registered via
+   *  `contributions.registerContentType(contentType, …)` renders the
+   *  body. Reuses an existing matching tab if one already lives in
+   *  the target leaf (by `contentType`), otherwise pushes a new tab
+   *  and activates it. These tabs are NOT persisted — on reopen the
+   *  layout resurrects only file-backed tabs. */
+  openContentTab: (contentType: string, label: string, icon?: string) => void;
   /** Close the tab with id `tabId` from whichever leaf owns it. If it
    *  was active, activates its neighbour. If the tab's contentType
    *  is `file:<relpath>`, releases the matching openFiles entry. */
@@ -664,6 +672,48 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       if (!findLeaf(state.layout.root, paneId)) return {};
       return { layout: { ...state.layout, focusedPaneId: paneId } };
     }),
+
+  openContentTab: (contentType, label, icon) => {
+    set((state) => {
+      if (!state.layout) return {};
+      const focusedId = state.layout.focusedPaneId ?? null;
+      const focused = focusedId ? findLeaf(state.layout.root, focusedId) : null;
+      const target = focused ?? firstLeaf(state.layout.root);
+      if (!target) return {};
+
+      const existing = target.tabs.find((t) => t.contentType === contentType);
+      if (existing) {
+        if (target.activeTabId === existing.id) return {};
+        const nextRoot = replaceLeaf(state.layout.root, target.id, (leaf) => ({
+          ...leaf,
+          activeTabId: existing.id,
+        }));
+        return { layout: { ...state.layout, root: nextRoot } };
+      }
+
+      const newTab: Tab = {
+        id: `tab:${contentType}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
+        label,
+        icon: icon ?? "square",
+        surface: "terminal",
+        pinned: false,
+        contentType,
+        isDirty: false,
+      };
+      const nextRoot = replaceLeaf(state.layout.root, target.id, (leaf) => ({
+        ...leaf,
+        tabs: [...leaf.tabs, newTab],
+        activeTabId: newTab.id,
+      }));
+      return {
+        layout: {
+          ...state.layout,
+          focusedPaneId: target.id,
+          root: nextRoot,
+        },
+      };
+    });
+  },
 
   openTabForFile: (relpath, label) => {
     set((state) => {

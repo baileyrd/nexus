@@ -43,6 +43,7 @@ pub mod forge;
 pub mod keybindings;
 pub mod persistence;
 pub mod plugins;
+pub mod terminal;
 pub mod uri;
 
 /// Entry point for the desktop app. Called from `main.rs` (and from the
@@ -177,6 +178,15 @@ pub fn run() {
             editor::editor_redo,
             editor::editor_list_open,
             editor::editor_sync_content,
+            terminal::term_create_session,
+            terminal::term_close_session,
+            terminal::term_send_input,
+            terminal::term_send_raw_input,
+            terminal::term_pump,
+            terminal::term_read_output,
+            terminal::term_search_output,
+            terminal::term_get_session_info,
+            terminal::term_list_sessions,
             uri::dispatch_uri,
         ])
         .run(tauri::generate_context!())
