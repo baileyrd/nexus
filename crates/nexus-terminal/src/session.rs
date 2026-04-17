@@ -38,6 +38,69 @@ pub enum Signal {
     Kill,
 }
 
+/// Lifecycle state of a PTY-backed session (PRD-09 §4.1 / §4.2).
+///
+/// This enum represents the **Session-level** states — the minimum every
+/// consumer of [`Session`] needs to know. The richer states from the
+/// PRD's state diagram (`PreCommand`, `Starting`, `Restarting`) describe
+/// the **process manager** abstraction layered on top: those states
+/// wrap sequences of sessions plus config (pre-commands, auto-restart,
+/// backoff policy) and belong to a future `nexus-process` layer, not
+/// to this PTY primitive.
+///
+/// Every `Session` starts in [`ProcessState::Running`] — spawn is
+/// synchronous and portable-pty returns the child in a started state,
+/// so we don't observe a separate `Starting` transition here. If a
+/// caller needs the "alive but hasn't produced output yet" distinction
+/// they can layer it on top of `state()` + a first-read observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessState {
+    /// Child is alive — spawn succeeded and no exit has been observed.
+    Running,
+    /// Child exited on its own (without Session sending a kill signal).
+    /// `code` is the platform-reported exit code (0 on clean success).
+    Exited {
+        /// Platform-reported exit status of the child.
+        code: u32,
+    },
+    /// Child was signalled via [`Session::send_signal`] or
+    /// [`Session::kill`] and subsequently exited. `signal` is the
+    /// last signal we sent before the exit was observed.
+    Killed {
+        /// The last signal we asked the child to receive before it
+        /// exited (not necessarily the signal the kernel actually
+        /// delivered if races happened).
+        signal: Signal,
+        /// Platform-reported exit status after the signal landed.
+        code: u32,
+    },
+}
+
+impl ProcessState {
+    /// Whether the child is still alive (same predicate callers would
+    /// write with `matches!(state, ProcessState::Running)`, exposed for
+    /// clarity in call sites).
+    #[must_use]
+    pub const fn is_running(self) -> bool {
+        matches!(self, ProcessState::Running)
+    }
+
+    /// Whether the child has exited — any terminal state.
+    #[must_use]
+    pub const fn is_terminated(self) -> bool {
+        !self.is_running()
+    }
+
+    /// If terminated, the exit code. `None` while running.
+    #[must_use]
+    pub const fn exit_code(self) -> Option<u32> {
+        match self {
+            ProcessState::Running => None,
+            ProcessState::Exited { code } | ProcessState::Killed { code, .. } => Some(code),
+        }
+    }
+}
+
 impl Signal {
     /// Human-readable name used in tracing + error messages.
     #[must_use]
@@ -109,6 +172,15 @@ pub struct Session {
     writer: Box<dyn Write + Send>,
     /// Cached shell command for error messages.
     shell_display: String,
+    /// Latched lifecycle state (PRD-09 §4). Updated on `send_signal`,
+    /// `kill`, and on the first `try_wait_exit` / `wait_for_exit` that
+    /// observes termination. `state()` reads this without mutating the
+    /// child handle, so it's cheap to poll.
+    state: ProcessState,
+    /// Most recent signal we delivered via [`Self::send_signal`] /
+    /// [`Self::kill`] — used to disambiguate `Exited` vs `Killed` when
+    /// the child is reaped. `None` means the child exited naturally.
+    last_signal: Option<Signal>,
 }
 
 impl Session {
@@ -174,7 +246,17 @@ impl Session {
             reader: Arc::new(Mutex::new(reader)),
             writer,
             shell_display,
+            state: ProcessState::Running,
+            last_signal: None,
         })
+    }
+
+    /// Current lifecycle state (PRD-09 §4). Cheap — reads the latched
+    /// value and does not poll the child. Call after [`Self::try_wait_exit`]
+    /// or [`Self::kill`] for up-to-date terminal states.
+    #[must_use]
+    pub fn state(&self) -> ProcessState {
+        self.state
     }
 
     /// Identifier for this session. Stable for the session's lifetime.
@@ -293,6 +375,15 @@ impl Session {
                     .ok_or_else(|| TerminalError::NotRunning(self.id.0.clone()))
             })?;
 
+        // Record the signal we're about to deliver. When the child is
+        // subsequently reaped (via try_wait_exit) the latched state
+        // becomes `Killed { signal }` instead of `Exited`. Writing
+        // before the syscall is safe because a failed signal delivery
+        // still leaves us in Running — the next wait will see the
+        // child either alive (last_signal stale but harmless) or
+        // exited via our signal (last_signal correct).
+        self.last_signal = Some(signal);
+
         #[cfg(unix)]
         {
             // SAFETY: `libc::kill` is safe to call with any integer. The
@@ -408,11 +499,22 @@ impl Session {
     /// no longer have the rights to signal).
     pub fn kill(&mut self) -> Result<(), TerminalError> {
         if let Some(mut child) = self.child.take() {
+            // Even if the child has already exited naturally between
+            // our last check and now, we record `Kill` as the signal
+            // for lifecycle purposes — the caller asked for a kill.
+            self.last_signal = Some(Signal::Kill);
             child
                 .kill()
                 .map_err(|e| TerminalError::Io(std::io::Error::other(e.to_string())))?;
             // Best-effort wait so the zombie is reaped before we return.
-            let _ = child.wait();
+            let code = child
+                .wait()
+                .map(|s| s.exit_code())
+                .unwrap_or(0);
+            self.state = ProcessState::Killed {
+                signal: Signal::Kill,
+                code,
+            };
         }
         Ok(())
     }
@@ -426,10 +528,18 @@ impl Session {
         let child = self.child.as_mut()?;
         match child.try_wait() {
             Ok(Some(status)) => {
+                let code = status.exit_code();
                 // Reap and drop the child so subsequent operations see
                 // `NotRunning` instead of continuing to probe a corpse.
                 self.child = None;
-                Some(status.exit_code())
+                // Latch lifecycle state. If we sent a signal before the
+                // child exited, attribute the exit to the kill; otherwise
+                // it's a natural exit.
+                self.state = match self.last_signal {
+                    Some(signal) => ProcessState::Killed { signal, code },
+                    None => ProcessState::Exited { code },
+                };
+                Some(code)
             }
             _ => None,
         }
@@ -888,6 +998,106 @@ while True:
             matches!(err, TerminalError::NotRunning(_)),
             "expected NotRunning, got {err:?}",
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_starts_running_and_reports_exited_on_natural_exit() {
+        if !unix_only("state_starts_running_and_reports_exited_on_natural_exit") {
+            return;
+        }
+        let mut session = Session::spawn(SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), "true".into()],
+            }),
+            ..SessionConfig::default()
+        })
+        .expect("spawn");
+        // Immediately after spawn, the child is Running (no exit yet).
+        assert_eq!(session.state(), ProcessState::Running);
+        assert!(session.state().is_running());
+        assert!(!session.state().is_terminated());
+        assert_eq!(session.state().exit_code(), None);
+
+        // Give `true` time to finish; poll up to 2s.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if session.try_wait_exit().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        match session.state() {
+            ProcessState::Exited { code } => assert_eq!(code, 0),
+            other => panic!("expected Exited{{0}}, got {other:?}"),
+        }
+        assert!(!session.state().is_running());
+        assert!(session.state().is_terminated());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_reports_killed_after_kill() {
+        if !unix_only("state_reports_killed_after_kill") {
+            return;
+        }
+        let mut session = Session::spawn(SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), "sleep 10".into()],
+            }),
+            ..SessionConfig::default()
+        })
+        .expect("spawn");
+        assert_eq!(session.state(), ProcessState::Running);
+        session.kill().expect("kill");
+        match session.state() {
+            ProcessState::Killed { signal: Signal::Kill, .. } => {}
+            other => panic!("expected Killed(Kill), got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_reports_killed_with_last_signal_after_shutdown_ladder() {
+        if !unix_only("state_reports_killed_with_last_signal_after_shutdown_ladder") {
+            return;
+        }
+        let mut session = Session::spawn(SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), "sleep 10".into()],
+            }),
+            ..SessionConfig::default()
+        })
+        .expect("spawn");
+        let finisher = session
+            .request_shutdown(Duration::from_millis(500))
+            .expect("shutdown");
+        // A responsive `sleep` dies on the first step — SIGINT.
+        assert_eq!(finisher, Signal::Int);
+        match session.state() {
+            ProcessState::Killed { signal: Signal::Int, .. } => {}
+            other => panic!("expected Killed(Int), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_state_helpers_return_expected_values() {
+        assert!(ProcessState::Running.is_running());
+        assert!(!ProcessState::Running.is_terminated());
+        assert_eq!(ProcessState::Running.exit_code(), None);
+
+        let exited = ProcessState::Exited { code: 0 };
+        assert!(!exited.is_running());
+        assert!(exited.is_terminated());
+        assert_eq!(exited.exit_code(), Some(0));
+
+        let killed = ProcessState::Killed { signal: Signal::Term, code: 143 };
+        assert!(!killed.is_running());
+        assert!(killed.is_terminated());
+        assert_eq!(killed.exit_code(), Some(143));
     }
 
     #[test]

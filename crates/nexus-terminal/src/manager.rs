@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 
 use crate::buffer::OutputBuffer;
 use crate::error::TerminalError;
-use crate::session::{Session, SessionConfig, SessionId, Signal};
+use crate::session::{ProcessState, Session, SessionConfig, SessionId, Signal};
 
 /// PRD-09 §2.3 hard cap on simultaneously-active sessions per workspace.
 pub const DEFAULT_MAX_SESSIONS: usize = 50;
@@ -228,6 +228,16 @@ impl SessionManager {
         self.sessions.get(id).map(|e| e.buffer.len())
     }
 
+    /// Current lifecycle state of the session (PRD-09 §4). `None` if
+    /// the id is not tracked. Reads the latched state on the underlying
+    /// `Session` — cheap and does not poll the child. Callers that need
+    /// up-to-date terminal states should call [`Self::reap_exited`]
+    /// first.
+    #[must_use]
+    pub fn state(&self, id: &SessionId) -> Option<ProcessState> {
+        self.sessions.get(id).map(|e| e.session.state())
+    }
+
     /// Timestamp of the last read/write/resize/kill for `id`, or `None`
     /// if the session is unknown. Used by the future LRU eviction pass.
     #[must_use]
@@ -388,6 +398,33 @@ mod tests {
         );
         assert!(m.is_empty());
         assert!(m.buffer_snapshot(&id).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_passthrough_reflects_session_lifecycle() {
+        if !unix_only("state_passthrough_reflects_session_lifecycle") {
+            return;
+        }
+        let mut m = SessionManager::with_limits(2, 1024);
+        let id = m
+            .spawn(SessionConfig {
+                shell: Some(ShellSpec {
+                    program: "/bin/sh".into(),
+                    args: vec!["-c".into(), "sleep 5".into()],
+                }),
+                ..SessionConfig::default()
+            })
+            .expect("spawn");
+        assert_eq!(m.state(&id), Some(ProcessState::Running));
+        m.kill(&id).expect("kill");
+        match m.state(&id) {
+            Some(ProcessState::Killed { signal: Signal::Kill, .. }) => {}
+            other => panic!("expected Killed(Kill), got {other:?}"),
+        }
+        // Unknown id returns None.
+        let ghost = SessionId::from_string("nope");
+        assert_eq!(m.state(&ghost), None);
     }
 
     #[cfg(unix)]
