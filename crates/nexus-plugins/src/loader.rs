@@ -384,6 +384,13 @@ impl PluginLoader {
         }
     }
 
+    /// Primary search path (the one passed to `PluginLoader::new`). Used
+    /// for crash-counter bookkeeping that needs `<plugins_dir>/<plugin_id>/…`.
+    #[must_use]
+    pub fn plugins_dir(&self) -> &Path {
+        &self.search_paths[0]
+    }
+
     /// Append an additional directory to the search path list.
     ///
     /// [`scan`](Self::scan) will visit all registered paths; plugins found in

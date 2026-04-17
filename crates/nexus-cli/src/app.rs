@@ -13,6 +13,8 @@ use crate::output::OutputFormat;
 pub struct App {
     forge_root: PathBuf,
     format: OutputFormat,
+    /// Safe mode — skip every community plugin at load (F-8.2.2).
+    safe_mode: bool,
     /// Kernel event bus handle retained for the community plugin manager.
     event_bus: Arc<EventBus>,
     /// Community-plugin manager (lazy).
@@ -31,11 +33,18 @@ impl App {
         Self {
             forge_root,
             format,
+            safe_mode: false,
             event_bus: Arc::new(EventBus::new(256)),
             plugins: None,
             runtime: None,
             rt: None,
         }
+    }
+
+    /// Enable safe mode so the plugin manager skips community plugins
+    /// at load time (F-8.2.2). Must be set before `plugins()` is called.
+    pub fn set_safe_mode(&mut self, enabled: bool) {
+        self.safe_mode = enabled;
     }
 
     /// Lazily build the Nexus runtime (kernel + all core plugins + CLI as a
@@ -90,6 +99,7 @@ impl App {
             let plugins_dir = self.forge_root.join(".forge").join("plugins");
             let config = PluginManagerConfig {
                 hot_reload: false,
+                safe_mode: self.safe_mode,
                 ..Default::default()
             };
             let mut manager =

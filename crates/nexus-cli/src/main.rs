@@ -40,6 +40,12 @@ struct Cli {
     #[arg(long, global = true)]
     no_color: bool,
 
+    /// Safe mode: skip every community (non-core) plugin at load time.
+    /// Equivalent to setting `NEXUS_SAFE_MODE=1`. Useful for recovering
+    /// from a misbehaving community plugin without hand-editing manifests.
+    #[arg(long, global = true, env = "NEXUS_SAFE_MODE")]
+    safe_mode: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -328,6 +334,12 @@ enum PluginCommand {
     },
     /// Disable a plugin
     Disable {
+        /// Plugin identifier
+        plugin_id: String,
+    },
+    /// Reset a plugin's crash counter (F-8.2.1). Quarantined plugins
+    /// (crashed ≥ `max_crashes` times) skip load until this is called.
+    Reset {
         /// Plugin identifier
         plugin_id: String,
     },
@@ -745,6 +757,10 @@ fn main() {
 
     let forge_root = default_forge_path(cli.forge_path);
     let mut app = app::App::new(forge_root, format);
+    app.set_safe_mode(cli.safe_mode);
+    if cli.safe_mode {
+        tracing::warn!(audit = true, "safe mode: community plugins will be skipped");
+    }
 
     let result = match cli.command {
         Commands::Forge(args) => match args.command {
@@ -804,6 +820,9 @@ fn main() {
             }
             PluginCommand::Disable { plugin_id } => {
                 commands::plugin::disable(&mut app, &plugin_id)
+            }
+            PluginCommand::Reset { plugin_id } => {
+                commands::plugin::reset_crash(&mut app, &plugin_id)
             }
             PluginCommand::Settings { plugin_id, set } => {
                 commands::plugin::settings(&mut app, &plugin_id, set.as_deref())

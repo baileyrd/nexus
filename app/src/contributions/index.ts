@@ -20,6 +20,8 @@ export {
   type EditorKeybinding,
   type MenuItem,
   type PaletteCommand,
+  type PanelNode,
+  type PanelRenderFn,
   type UriHandler,
   type WebviewPanelConfig,
   type SettingsTab,

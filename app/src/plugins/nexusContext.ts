@@ -12,6 +12,7 @@ import {
   type EditorDecorationProvider,
   type EditorKeybinding,
   type MenuItem,
+  type PanelRenderFn,
   type Snippet,
   type TreeDataProvider,
   type UriHandler,
@@ -219,6 +220,19 @@ export interface NexusPluginContext {
      * ```
      */
     registerWebviewPanel(viewId: string, config: WebviewPanelConfig): Disposable;
+
+    /**
+     * Register a declarative panel view (UI F-5.2.1). The `render`
+     * callback returns a tree of approved `PanelNode` primitives
+     * (`vstack` / `hstack` / `text` / `heading` / `button` / `spacer`)
+     * and the host-owned dispatcher walks the tree — no plugin-shipped
+     * React, no HTML escape hatch.
+     *
+     * Pattern used by Raycast and Sketch. Ideal for simple status /
+     * diagnostic panels where `registerContentType` is overkill. Use
+     * `registerWebviewPanel` when full HTML is genuinely required.
+     */
+    registerPanelView(viewId: string, render: PanelRenderFn): Disposable;
   };
 
   /**
@@ -348,6 +362,8 @@ export function createNexusContext(
         contributions.registerUriHandler(handler),
       registerWebviewPanel: (viewId, config) =>
         contributions.registerWebviewPanel(viewId, config),
+      registerPanelView: (viewId, render) =>
+        contributions.registerPanelView(viewId, render),
     },
   };
 }

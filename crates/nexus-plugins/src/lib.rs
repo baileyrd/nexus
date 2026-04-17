@@ -245,6 +245,15 @@ pub struct PluginManagerConfig {
     /// Debounce delay in milliseconds used by the file watcher.
     /// Default: `500`.
     pub debounce_ms: u64,
+    /// Safe mode (F-8.2.2). When `true`, [`PluginManager::load_all`]
+    /// skips every plugin whose trust_level is `Community`. Core plugins
+    /// still load so the shell remains functional. Default: `false`.
+    pub safe_mode: bool,
+    /// Auto-quarantine threshold (F-8.2.1). A plugin that crashes this
+    /// many times in a rolling window is disabled until the user runs
+    /// `nexus plugin reset <id>`. `0` disables the counter.
+    /// Default: `3`.
+    pub max_crashes: u32,
 }
 
 impl Default for PluginManagerConfig {
@@ -252,8 +261,61 @@ impl Default for PluginManagerConfig {
         Self {
             hot_reload: true,
             debounce_ms: 500,
+            safe_mode: false,
+            max_crashes: 3,
         }
     }
+}
+
+// ─── Crash-counter helpers (F-8.2.1) ──────────────────────────────────────────
+//
+// Persisted next to the plugin so quarantine state survives restarts.
+// File format: a single u32 in text form — cheap to read, cheap to
+// bump, survives partial writes (a truncated file parses as zero).
+
+const CRASH_FILE: &str = ".nexus-crashes";
+
+fn load_crash_count(plugin_dir: &std::path::Path) -> u32 {
+    let p = plugin_dir.join(CRASH_FILE);
+    std::fs::read_to_string(&p)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+fn bump_crash_count(plugin_dir: &std::path::Path) -> std::io::Result<u32> {
+    let current = load_crash_count(plugin_dir);
+    let next = current.saturating_add(1);
+    let p = plugin_dir.join(CRASH_FILE);
+    std::fs::write(&p, next.to_string())?;
+    Ok(next)
+}
+
+fn reset_crash_count_at(
+    plugins_dir: &std::path::Path,
+    plugin_id: &str,
+) -> std::io::Result<()> {
+    let p = plugins_dir.join(plugin_id).join(CRASH_FILE);
+    if p.exists() {
+        std::fs::remove_file(&p)?;
+    }
+    Ok(())
+}
+
+/// Read the `id` field out of a plugin's `manifest.toml` without a full
+/// parse. Returns `None` if the manifest is missing or malformed.
+fn peek_manifest_id(plugin_dir: &std::path::Path) -> Option<String> {
+    let path = plugin_dir.join("manifest.toml");
+    let contents = std::fs::read_to_string(path).ok()?;
+    #[derive(serde::Deserialize)]
+    struct Shell {
+        plugin: ShellPlugin,
+    }
+    #[derive(serde::Deserialize)]
+    struct ShellPlugin {
+        id: String,
+    }
+    toml::from_str::<Shell>(&contents).ok().map(|s| s.plugin.id)
 }
 
 // ─── PluginManager ────────────────────────────────────────────────────────────
@@ -267,6 +329,8 @@ impl Default for PluginManagerConfig {
 pub struct PluginManager {
     loader: loader::PluginLoader,
     reloader: Option<hot_reload::HotReloader>,
+    safe_mode: bool,
+    max_crashes: u32,
 }
 
 impl PluginManager {
@@ -284,7 +348,18 @@ impl PluginManager {
         } else {
             None
         };
-        Ok(Self { loader, reloader })
+        Ok(Self {
+            loader,
+            reloader,
+            safe_mode: config.safe_mode,
+            max_crashes: config.max_crashes,
+        })
+    }
+
+    /// `true` when the manager was started in safe mode (F-8.2.2).
+    #[must_use]
+    pub fn is_safe_mode(&self) -> bool {
+        self.safe_mode
     }
 
     /// Register a native Rust **core** plugin.
@@ -318,14 +393,52 @@ impl PluginManager {
         let dirs = self.loader.scan()?;
         let mut infos = Vec::new();
         for dir in dirs {
+            // F-8.2.2: in safe mode, peek at the manifest without loading
+            // the WASM/script backend so we can skip every community
+            // plugin. Core plugins are registered through `register_core`
+            // rather than discovered here, so `load_all` is a pure
+            // community-plugin path — safe mode skips it wholesale.
+            if self.safe_mode {
+                tracing::info!(
+                    audit = true,
+                    dir = %dir.display(),
+                    "safe mode: skipping community plugin",
+                );
+                continue;
+            }
+            // F-8.2.1: skip plugins that have exceeded the crash threshold.
+            if self.max_crashes > 0 {
+                if let Some(id) = peek_manifest_id(&dir) {
+                    let crashes = load_crash_count(&dir);
+                    if crashes >= self.max_crashes {
+                        tracing::warn!(
+                            audit = true,
+                            plugin_id = %id,
+                            crashes,
+                            "plugin quarantined (crash count exceeded) — skipping load; run `nexus plugin reset <id>` to reactivate",
+                        );
+                        continue;
+                    }
+                }
+            }
             match self.loader.load(&dir) {
                 Ok(info) => infos.push(info),
                 Err(e) => {
+                    let _ = bump_crash_count(&dir);
                     tracing::warn!("failed to load plugin at {}: {e}", dir.display());
                 }
             }
         }
         Ok(infos)
+    }
+
+    /// Reset the crash counter for `plugin_id` (F-8.2.1). Called by
+    /// `nexus plugin reset <id>` after the user has investigated.
+    ///
+    /// # Errors
+    /// Returns the I/O error if the counter file cannot be removed.
+    pub fn reset_crash_count(&self, plugin_id: &str) -> std::io::Result<()> {
+        reset_crash_count_at(self.loader.plugins_dir(), plugin_id)
     }
 
     /// Load a single plugin from `plugin_dir`.

@@ -100,6 +100,19 @@ pub fn disable(app: &mut App, plugin_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Reset the crash counter for `plugin_id` (F-8.2.1). Quarantined
+/// plugins skip load until this runs. A missing counter file is a no-op.
+pub fn reset_crash(app: &mut App, plugin_id: &str) -> Result<()> {
+    app.plugins()?.reset_crash_count(plugin_id)?;
+    let format = app.format();
+    print_success(
+        format,
+        &format!("Plugin '{plugin_id}' crash counter reset."),
+        &serde_json::json!({ "id": plugin_id, "status": "reset" }),
+    );
+    Ok(())
+}
+
 /// View or update settings for the plugin identified by `plugin_id`.
 ///
 /// If `set_json` is `None`, the current settings are printed.

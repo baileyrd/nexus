@@ -1,4 +1,9 @@
-import { createElement, useSyncExternalStore, type ComponentType } from "react";
+import {
+  createElement,
+  useSyncExternalStore,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import type { Extension } from "@codemirror/state";
 import type { Panel } from "../bindings";
 import type { ContextMenuItem } from "../components/ContextMenu";
@@ -266,6 +271,30 @@ export interface MenuItem {
  *   - `"tab"`                 — right-click on a tab label (future)
  *   - `"editor:selection"`    — right-click inside the editor (future)
  */
+/**
+ * Declarative panel primitives (UI F-5.2.1). Plugins return a tree of
+ * approved node shapes and the host renders them through a fixed
+ * dispatcher — no React, no HTML escape hatch. Trades flexibility for
+ * safety: every node kind is host-reviewed, so a plugin cannot inject
+ * arbitrary markup into the shell.
+ *
+ * The node list is intentionally small; extend it as plugins demand it.
+ */
+export type PanelNode =
+  | { type: "vstack"; gap?: number; children: PanelNode[] }
+  | { type: "hstack"; gap?: number; children: PanelNode[] }
+  | { type: "text"; value: string; muted?: boolean; strong?: boolean }
+  | { type: "heading"; value: string; level?: 1 | 2 | 3 }
+  | { type: "button"; label: string; commandId: string; disabled?: boolean }
+  | { type: "spacer"; size?: number };
+
+/**
+ * Function provided by a plugin to build a panel view. Called by the
+ * host each render — plugins that need reactivity should emit a new
+ * tree when their state changes (combine with `ctx.events` / signalling).
+ */
+export type PanelRenderFn = () => PanelNode;
+
 export interface ContribContextMenuItem {
   /** Stable id. Namespaced for plugin items: `"plugin:<pluginId>:<action>"`. */
   id: string;
@@ -316,6 +345,14 @@ const uriHandlers = new Map<string, UriHandler>();
 
 /** Webview panel configs keyed by viewId. */
 const webviewPanels = new Map<string, WebviewPanelConfig>();
+
+/**
+ * Declarative panel render functions keyed by viewId (UI F-5.2.1).
+ * Rendered by the host-owned `<DeclarativePanel>` component, not by
+ * plugin-shipped React — the dispatcher knows every supported node type.
+ */
+const panelViews = new Map<string, PanelRenderFn>();
+const panelViewListeners = new Set<() => void>();
 
 /**
  * Flat list of all menu-bar items. Grouped and sorted at render time.
@@ -750,6 +787,45 @@ export const contributions = {
   },
 
   /**
+   * Register a declarative panel view (UI F-5.2.1). The `render` function
+   * is called each time the host needs to paint the panel and must
+   * return a tree of `PanelNode`s built from the approved primitives.
+   * Auto-wires a content-type component keyed by `viewId`.
+   *
+   * Returns a disposable that un-registers both the render function and
+   * the content-type entry when called.
+   */
+  registerPanelView(viewId: string, render: PanelRenderFn): Disposable {
+    if (panelViews.has(viewId)) {
+      warn(`panel view '${viewId}' already registered — replacing`);
+    }
+    panelViews.set(viewId, render);
+    panelViewListeners.forEach((fn) => fn());
+    const disposeContent = contributions.registerContentType(
+      viewId,
+      makeDeclarativePanelComponent(viewId),
+    );
+    return () => {
+      if (panelViews.get(viewId) === render) {
+        panelViews.delete(viewId);
+        panelViewListeners.forEach((fn) => fn());
+      }
+      disposeContent();
+    };
+  },
+
+  resolvePanelView(viewId: string): PanelRenderFn | undefined {
+    return panelViews.get(viewId);
+  },
+
+  subscribePanelViews(fn: () => void): Disposable {
+    panelViewListeners.add(fn);
+    return () => {
+      panelViewListeners.delete(fn);
+    };
+  },
+
+  /**
    * Register a URI handler for the given scheme (PRD-04 §1.1).
    *
    * First-match-wins semantics (SI-2): only one handler may claim a
@@ -964,6 +1040,8 @@ export function __resetContributions() {
   fileHandlers.clear();
   uriHandlers.clear();
   webviewPanels.clear();
+  panelViews.clear();
+  panelViewListeners.clear();
   menuItems.clear();
   menuItemListeners.clear();
   contextMenuItems.clear();
@@ -1293,6 +1371,122 @@ const ALLOWED_WEBVIEW_SCHEMES = new Set([
   "blob:",
   "file:",
 ]);
+
+/**
+ * Host-owned dispatcher for declarative panel primitives (UI F-5.2.1).
+ * Resolves the render function registered for `viewId` and walks its
+ * returned `PanelNode` tree, emitting only approved primitives. Unknown
+ * node types render as a visible error so plugin authors get immediate
+ * feedback.
+ */
+function makeDeclarativePanelComponent(viewId: string): ContentComponent {
+  function DeclarativePanel() {
+    // Subscribe so re-registrations (e.g. hot-reload) re-render.
+    useSyncExternalStore(
+      (notify) => contributions.subscribePanelViews(notify),
+      () => panelViews.get(viewId),
+      () => panelViews.get(viewId),
+    );
+    const render = panelViews.get(viewId);
+    if (!render) {
+      return createElement(
+        "div",
+        { className: "declarative-panel-empty", role: "status" },
+        `No panel view registered for '${viewId}'.`,
+      );
+    }
+    let tree: PanelNode;
+    try {
+      tree = render();
+    } catch (err) {
+      return createElement(
+        "div",
+        { className: "declarative-panel-error", role: "alert" },
+        `Panel '${viewId}' render threw: ${String(err)}`,
+      );
+    }
+    return createElement(
+      "div",
+      { className: "declarative-panel", style: { padding: 12 } },
+      renderPanelNode(tree, 0),
+    );
+  }
+  DeclarativePanel.displayName = `DeclarativePanel(${viewId})`;
+  return DeclarativePanel as unknown as ContentComponent;
+}
+
+function renderPanelNode(node: PanelNode, key: number): ReactNode {
+  switch (node.type) {
+    case "vstack":
+      return createElement(
+        "div",
+        {
+          key,
+          className: "panel-vstack",
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: node.gap ?? 8,
+          },
+        },
+        node.children.map((c, i) => renderPanelNode(c, i)),
+      );
+    case "hstack":
+      return createElement(
+        "div",
+        {
+          key,
+          className: "panel-hstack",
+          style: {
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: node.gap ?? 8,
+          },
+        },
+        node.children.map((c, i) => renderPanelNode(c, i)),
+      );
+    case "text":
+      return createElement(
+        "span",
+        {
+          key,
+          className: "panel-text",
+          style: {
+            opacity: node.muted ? 0.7 : 1,
+            fontWeight: node.strong ? 600 : 400,
+          },
+        },
+        node.value,
+      );
+    case "heading": {
+      const tag = `h${node.level ?? 3}`;
+      return createElement(tag, { key, className: "panel-heading" }, node.value);
+    }
+    case "button":
+      return createElement(
+        "button",
+        {
+          key,
+          type: "button",
+          disabled: node.disabled,
+          onClick: () => contributions.invokeCommand(node.commandId),
+        },
+        node.label,
+      );
+    case "spacer":
+      return createElement("div", {
+        key,
+        style: { height: node.size ?? 8 },
+      });
+    default:
+      return createElement(
+        "div",
+        { key, className: "panel-unknown", role: "alert" },
+        `unknown panel node: ${JSON.stringify(node)}`,
+      );
+  }
+}
 
 function makeWebviewComponent(viewId: string): ContentComponent {
   function WebviewPanel() {

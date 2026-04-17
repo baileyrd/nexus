@@ -240,7 +240,20 @@ pub fn bootstrap() -> PluginState {
     if let Err(err) = std::fs::create_dir_all(&dir) {
         tracing::warn!(%err, path = %dir.display(), "failed to ensure plugins dir");
     }
-    let config = PluginManagerConfig::default();
+    // F-8.2.2: `NEXUS_SAFE_MODE=1` (or launching with the `--safe-mode`
+    // Tauri arg, if ever plumbed) makes the plugin manager skip every
+    // community plugin at load. Core plugins stay online so the shell
+    // remains usable while the offending community plugin is debugged.
+    let safe_mode = std::env::var("NEXUS_SAFE_MODE")
+        .ok()
+        .is_some_and(|v| matches!(v.as_str(), "1" | "true" | "yes"));
+    if safe_mode {
+        tracing::warn!(audit = true, "safe mode: community plugins will be skipped");
+    }
+    let config = PluginManagerConfig {
+        safe_mode,
+        ..PluginManagerConfig::default()
+    };
     let mut manager = match PluginManager::new(&dir, &config) {
         Ok(m) => m,
         Err(err) => {
