@@ -53,17 +53,23 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+mod adhoc;
 mod ansi;
 mod buffer;
 mod compound;
 mod env;
 mod error;
+mod job_object;
 mod lines;
 mod manager;
+mod persist;
+mod procmgr;
+mod profile;
 mod session;
 mod shell;
 mod urls;
 
+pub use adhoc::{AdHocRecord, AdHocStatus, SqliteAdHocStore};
 pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
 pub use compound::{
@@ -75,8 +81,18 @@ pub use env::{
     REDACTED,
 };
 pub use error::TerminalError;
+pub use job_object::JobObject;
 pub use lines::{Line, LineBuffer};
 pub use manager::{SessionManager, DEFAULT_MAX_SESSIONS};
+pub use persist::{SessionMetadata, SqliteSessionStore};
+pub use procmgr::{
+    ManagedConfig, ManagedProcess, ManagedState, TransitionError,
+    DEFAULT_AUTO_RESTART_BACKOFF_MS, DEFAULT_PRE_COMMAND_TIMEOUT,
+};
+pub use profile::{
+    profile_path_for_shell, profile_source_command, profile_source_command_for_path,
+    supports_profile_sourcing,
+};
 pub use session::{ProcessState, Session, SessionConfig, SessionId, Signal};
 pub use shell::{detect_default_shell, ShellSpec};
 pub use urls::{detect_urls, resolve_url, UrlKind, UrlMatch};

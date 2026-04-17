@@ -13,6 +13,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }
+# SQLite persistence for sessions + ad-hoc command history (PRD-09 §2.2, §10.1).
+rusqlite = { workspace = true }
 
 # libc is used only on Unix for signal(2) delivery. portable-pty's Child
 # trait only exposes a force-kill (TerminateProcess / SIGKILL); the PRD-09
@@ -21,6 +23,15 @@ uuid = { workspace = true }
 # collapses to the force-kill fallback — see `session::Signal::send`.
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+
+# Windows Job Objects (PRD-09 §5.3) — atomically terminate a process tree
+# when the session is killed, since Windows has no POSIX process groups.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

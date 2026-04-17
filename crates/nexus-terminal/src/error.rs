@@ -34,6 +34,10 @@ pub enum TerminalError {
         /// Why detection failed.
         reason: String,
     },
+
+    /// Persistence (SQLite, scrollback file) failed (PRD-09 §2.2).
+    #[error("persist: {0}")]
+    Persist(String),
 }
 
 #[cfg(test)]

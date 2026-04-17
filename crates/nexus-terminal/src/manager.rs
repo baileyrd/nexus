@@ -129,6 +129,48 @@ impl SessionManager {
         Ok(id)
     }
 
+    /// PRD-09 §2.3 LRU eviction. Closes the least-recently-accessed
+    /// session, returning its id + final scrollback snapshot. The caller
+    /// is expected to persist that snapshot (via
+    /// [`crate::persist::SqliteSessionStore::save_scrollback`] or
+    /// equivalent) before dropping it.
+    ///
+    /// Returns `None` if the manager is empty.
+    #[must_use]
+    pub fn evict_lru(&mut self) -> Option<(SessionId, Vec<u8>)> {
+        let victim = self
+            .sessions
+            .iter()
+            .min_by_key(|(_, entry)| entry.last_accessed)
+            .map(|(id, _)| id.clone())?;
+        let snapshot = self.remove(&victim)?;
+        tracing::debug!(
+            session_id = victim.as_str(),
+            "evicted LRU session to make room",
+        );
+        Some((victim, snapshot))
+    }
+
+    /// Same as [`Self::spawn`], but when the manager is at its cap this
+    /// evicts the LRU session first (rather than returning an error).
+    /// Returns the fresh id plus, if eviction occurred, the evicted id +
+    /// its final scrollback snapshot so the caller can persist it.
+    ///
+    /// # Errors
+    /// Propagates any error from [`Session::spawn`].
+    pub fn spawn_or_evict(
+        &mut self,
+        config: SessionConfig,
+    ) -> Result<(SessionId, Option<(SessionId, Vec<u8>)>), TerminalError> {
+        let evicted = if self.sessions.len() >= self.max_sessions {
+            self.evict_lru()
+        } else {
+            None
+        };
+        let id = self.spawn(config)?;
+        Ok((id, evicted))
+    }
+
     /// Write `bytes` to the session's child stdin.
     ///
     /// # Errors
@@ -398,6 +440,67 @@ mod tests {
         );
         assert!(m.is_empty());
         assert!(m.buffer_snapshot(&id).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn evict_lru_returns_oldest_session_with_snapshot() {
+        if !unix_only("evict_lru_returns_oldest_session_with_snapshot") {
+            return;
+        }
+        let mut m = SessionManager::with_limits(4, 1024);
+        let a = m.spawn(sh_printf("alpha-mark")).expect("spawn a");
+        // Advance the monotonic clock so `b.last_accessed > a.last_accessed`
+        // without depending on insertion order.
+        std::thread::sleep(Duration::from_millis(10));
+        let b = m.spawn(sh_printf("beta-mark")).expect("spawn b");
+
+        // Touch `a` so `b` becomes the LRU.
+        std::thread::sleep(Duration::from_millis(10));
+        let _ = m.drain(&a, Duration::from_millis(50));
+
+        let (victim_id, _snap) = m.evict_lru().expect("evict");
+        assert_eq!(victim_id, b);
+        // `a` survives; `b` is gone.
+        assert!(m.ids().contains(&a));
+        assert!(!m.ids().contains(&b));
+    }
+
+    #[test]
+    fn evict_lru_on_empty_manager_returns_none() {
+        let mut m = SessionManager::new();
+        assert!(m.evict_lru().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_or_evict_returns_no_eviction_when_under_cap() {
+        if !unix_only("spawn_or_evict_returns_no_eviction_when_under_cap") {
+            return;
+        }
+        let mut m = SessionManager::with_limits(4, 1024);
+        let (_id, evicted) = m.spawn_or_evict(sh_printf("a")).expect("spawn");
+        assert!(evicted.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_or_evict_evicts_lru_when_at_cap() {
+        if !unix_only("spawn_or_evict_evicts_lru_when_at_cap") {
+            return;
+        }
+        let mut m = SessionManager::with_limits(2, 1024);
+        let first = m.spawn(sh_printf("first")).expect("spawn first");
+        std::thread::sleep(Duration::from_millis(10));
+        let _second = m.spawn(sh_printf("second")).expect("spawn second");
+        std::thread::sleep(Duration::from_millis(10));
+        let (new_id, evicted) = m
+            .spawn_or_evict(sh_printf("third"))
+            .expect("spawn with eviction");
+        let (ev_id, _snap) = evicted.expect("should have evicted");
+        assert_eq!(ev_id, first, "oldest session should be the eviction victim");
+        assert!(m.ids().contains(&new_id));
+        assert_eq!(m.len(), 2);
     }
 
     #[cfg(unix)]
