@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import type { Panel, RibbonItem, StatusBarItem } from "../bindings";
+import type {
+  LayoutNode,
+  PaneId,
+  Panel,
+  RibbonItem,
+  StatusBarItem,
+  Tab,
+} from "../bindings";
 import {
   getDefaultLayout,
   getLayoutPreset,
@@ -43,6 +50,28 @@ interface LayoutState {
   togglePanelVisibility: (side: "left" | "right", panelId: string) => void;
   toggleSidePanelCollapsed: (side: "left" | "right") => void;
   activatePanel: (side: "left" | "right", panelId: string) => void;
+  /** Update proportional sizes on a split node in the pane tree.
+   *  Sizes are held in-memory only for now — cross-session persistence
+   *  of split sizes is a separate binding-schema change. */
+  setSplitSizes: (paneId: PaneId, sizes: number[]) => void;
+  /** Make `tabId` the active tab within the leaf pane that owns it. No-op
+   *  if the leaf/tab isn't found. */
+  setActiveTab: (paneId: PaneId, tabId: string) => void;
+  /** Make `paneId` the focused leaf. Drives the focus ring and
+   *  determines where new tabs land by default. */
+  focusPane: (paneId: PaneId) => void;
+  /** Open (or re-activate) a tab backed by a forge file in the focused
+   *  leaf. Content-type is encoded as `file:<relpath>` so `PaneView`
+   *  can dispatch to the editor surface without a separate field on
+   *  `Tab` (which is a generated binding). */
+  openTabForFile: (relpath: string, label: string) => void;
+  /** Close the tab with id `tabId` from whichever leaf owns it. If it
+   *  was active, activates its neighbour. If the tab's contentType
+   *  is `file:<relpath>`, releases the matching openFiles entry. */
+  closeTab: (tabId: string) => void;
+  /** Flip a tab's dirty flag so the tab-strip indicator tracks editor
+   *  state. No-op if the tab isn't found. */
+  setTabDirty: (tabId: string, isDirty: boolean) => void;
   /** Replace the plugin-panel snapshot and re-merge into the active
    *  layout. Call after fetching `list_plugin_panels`. */
   setPluginPanels: (panels: PluginUiPanel[]) => void;
@@ -175,6 +204,105 @@ function mergePluginPanels(
     leftSidePanel: mergeSide(layout.leftSidePanel, "left"),
     rightSidePanel: mergeSide(layout.rightSidePanel, "right"),
   };
+}
+
+/** Return a new subtree with the split node matching `paneId` updated
+ *  to `sizes`. Returns `node` unchanged (same identity) if the id
+ *  isn't found anywhere in the subtree, so callers can detect no-ops. */
+function updateSplitSizes(
+  node: LayoutNode,
+  paneId: PaneId,
+  sizes: number[],
+): LayoutNode {
+  if (node.type === "leaf") return node;
+  if (node.id === paneId) {
+    if (sizes.length !== node.children.length) return node;
+    return { ...node, sizes };
+  }
+  let changed = false;
+  const nextChildren = node.children.map((c) => {
+    const updated = updateSplitSizes(c, paneId, sizes);
+    if (updated !== c) changed = true;
+    return updated;
+  });
+  return changed ? { ...node, children: nextChildren } : node;
+}
+
+type LeafNode = Extract<LayoutNode, { type: "leaf" }>;
+
+/** First leaf encountered in document order. */
+function firstLeaf(node: LayoutNode): LeafNode | null {
+  if (node.type === "leaf") return node;
+  for (const c of node.children) {
+    const f = firstLeaf(c);
+    if (f) return f;
+  }
+  return null;
+}
+
+/** Return the leaf with `paneId`, or null. */
+function findLeaf(node: LayoutNode, paneId: PaneId): LeafNode | null {
+  if (node.type === "leaf") return node.id === paneId ? node : null;
+  for (const c of node.children) {
+    const f = findLeaf(c, paneId);
+    if (f) return f;
+  }
+  return null;
+}
+
+/** Return the leaf containing `tabId`, or null. */
+function findLeafWithTab(node: LayoutNode, tabId: string): LeafNode | null {
+  if (node.type === "leaf") {
+    return node.tabs.some((t) => t.id === tabId) ? node : null;
+  }
+  for (const c of node.children) {
+    const f = findLeafWithTab(c, tabId);
+    if (f) return f;
+  }
+  return null;
+}
+
+/** Rewrite the subtree, replacing the leaf with matching id. Returns the
+ *  input unchanged (same identity) if not found. */
+function replaceLeaf(
+  node: LayoutNode,
+  paneId: PaneId,
+  update: (leaf: LeafNode) => LeafNode,
+): LayoutNode {
+  if (node.type === "leaf") {
+    if (node.id !== paneId) return node;
+    const next = update(node);
+    return next === node ? node : next;
+  }
+  let changed = false;
+  const nextChildren = node.children.map((c) => {
+    const updated = replaceLeaf(c, paneId, update);
+    if (updated !== c) changed = true;
+    return updated;
+  });
+  return changed ? { ...node, children: nextChildren } : node;
+}
+
+/** Return a new subtree with the leaf matching `paneId` activating
+ *  `tabId`. Identity-preserving if not found or already active. */
+function updateActiveTab(
+  node: LayoutNode,
+  paneId: PaneId,
+  tabId: string,
+): LayoutNode {
+  if (node.type === "leaf") {
+    if (node.id !== paneId) return node;
+    if (node.activeTabId === tabId) return node;
+    if (!node.tabs.some((t) => t.id === tabId)) return node;
+    return { ...node, activeTabId: tabId };
+  }
+  let changed = false;
+  const nextChildren = node.children.map((c) => {
+    const updated = updateActiveTab(c, paneId, tabId);
+    if (updated !== c) changed = true;
+    return updated;
+  });
+  return changed ? { ...node, children: nextChildren } : node;
 }
 
 /** Merge persisted state over a freshly loaded preset layout. Active-
@@ -350,6 +478,138 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
 
   // Selector-click semantics: make `panelId` the sole visible panel on
   // that side and ensure the side panel itself is expanded.
+  setSplitSizes: (paneId, sizes) =>
+    set((state) => {
+      if (!state.layout) return {};
+      const nextRoot = updateSplitSizes(state.layout.root, paneId, sizes);
+      if (nextRoot === state.layout.root) return {};
+      return { layout: { ...state.layout, root: nextRoot } };
+    }),
+
+  setActiveTab: (paneId, tabId) =>
+    set((state) => {
+      if (!state.layout) return {};
+      const nextRoot = updateActiveTab(state.layout.root, paneId, tabId);
+      if (nextRoot === state.layout.root) return {};
+      return { layout: { ...state.layout, root: nextRoot } };
+    }),
+
+  focusPane: (paneId) =>
+    set((state) => {
+      if (!state.layout) return {};
+      if (state.layout.focusedPaneId === paneId) return {};
+      // Guard against focusing a paneId that isn't in the tree (stale
+      // focus from an earlier preset, say).
+      if (!findLeaf(state.layout.root, paneId)) return {};
+      return { layout: { ...state.layout, focusedPaneId: paneId } };
+    }),
+
+  openTabForFile: (relpath, label) =>
+    set((state) => {
+      if (!state.layout) return {};
+      const contentType = `file:${relpath}`;
+      // Target: focused leaf if still present, else first leaf.
+      const focusedId = state.layout.focusedPaneId ?? null;
+      const focused = focusedId ? findLeaf(state.layout.root, focusedId) : null;
+      const target = focused ?? firstLeaf(state.layout.root);
+      if (!target) return {};
+
+      // Already open in that leaf? Just activate.
+      const existing = target.tabs.find((t) => t.contentType === contentType);
+      if (existing) {
+        if (target.activeTabId === existing.id) return {};
+        const nextRoot = replaceLeaf(state.layout.root, target.id, (leaf) => ({
+          ...leaf,
+          activeTabId: existing.id,
+        }));
+        return { layout: { ...state.layout, root: nextRoot } };
+      }
+
+      // Otherwise push a new tab and activate it.
+      const tabId = `tab:${relpath}:${Date.now()}:${Math.random()
+        .toString(36)
+        .slice(2, 6)}`;
+      const newTab: Tab = {
+        id: tabId,
+        label,
+        icon: "file",
+        surface: "editor",
+        pinned: false,
+        contentType,
+        isDirty: false,
+      };
+      const nextRoot = replaceLeaf(state.layout.root, target.id, (leaf) => ({
+        ...leaf,
+        tabs: [...leaf.tabs, newTab],
+        activeTabId: tabId,
+      }));
+      return {
+        layout: {
+          ...state.layout,
+          focusedPaneId: target.id,
+          root: nextRoot,
+        },
+      };
+    }),
+
+  closeTab: (tabId) =>
+    set((state) => {
+      if (!state.layout) return {};
+      const leaf = findLeafWithTab(state.layout.root, tabId);
+      if (!leaf) return {};
+      const closing = leaf.tabs.find((t) => t.id === tabId);
+      if (closing?.pinned) return {};
+
+      const idx = leaf.tabs.findIndex((t) => t.id === tabId);
+      const nextTabs = leaf.tabs.filter((t) => t.id !== tabId);
+      let nextActive = leaf.activeTabId ?? null;
+      if (nextActive === tabId) {
+        const neighbour = nextTabs[idx] ?? nextTabs[idx - 1] ?? null;
+        nextActive = neighbour?.id ?? null;
+      }
+
+      const nextRoot = replaceLeaf(state.layout.root, leaf.id, (l) => ({
+        ...l,
+        tabs: nextTabs,
+        activeTabId: nextActive,
+      }));
+
+      // Free the backing file entry if this tab was the last one pointing
+      // at it. Import lazily to avoid a circular module dep with openFiles.
+      if (closing?.contentType.startsWith("file:")) {
+        const relpath = closing.contentType.slice("file:".length);
+        const stillOpenElsewhere = (function check(node: LayoutNode): boolean {
+          if (node.type === "leaf") {
+            return node.tabs.some(
+              (t) => t.id !== tabId && t.contentType === closing.contentType,
+            );
+          }
+          return node.children.some(check);
+        })(nextRoot);
+        if (!stillOpenElsewhere) {
+          void import("./openFiles").then((m) =>
+            m.useOpenFilesStore.getState().close(relpath),
+          );
+        }
+      }
+
+      return { layout: { ...state.layout, root: nextRoot } };
+    }),
+
+  setTabDirty: (tabId, isDirty) =>
+    set((state) => {
+      if (!state.layout) return {};
+      const leaf = findLeafWithTab(state.layout.root, tabId);
+      if (!leaf) return {};
+      const existing = leaf.tabs.find((t) => t.id === tabId);
+      if (!existing || existing.isDirty === isDirty) return {};
+      const nextRoot = replaceLeaf(state.layout.root, leaf.id, (l) => ({
+        ...l,
+        tabs: l.tabs.map((t) => (t.id === tabId ? { ...t, isDirty } : t)),
+      }));
+      return { layout: { ...state.layout, root: nextRoot } };
+    }),
+
   activatePanel: (side, panelId) =>
     set((state) => {
       if (!state.layout) return {};

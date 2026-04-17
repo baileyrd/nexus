@@ -504,6 +504,13 @@ button {
 .split-divider {
   background: var(--nx-bg-tertiary, #e8eaef);
   flex-shrink: 0;
+  touch-action: none;
+  transition: background-color 120ms ease;
+}
+
+.split-divider:hover,
+.split-divider:active {
+  background: var(--nx-color-primary, #4a90e2);
 }
 
 .split-divider[data-axis="row"] {
@@ -575,10 +582,78 @@ button {
 
 .tab-strip {
   display: flex;
+  align-items: stretch;
   border-bottom: 1px solid var(--nx-bg-tertiary, #e8eaef);
   background: var(--nx-bg-secondary, #f8f9fa);
   min-height: 32px;
+  overflow: hidden;
+  position: relative;
+}
+
+.tab-strip-scroller {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
+  scrollbar-width: none;
+}
+.tab-strip-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-overflow {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  border-left: 1px solid var(--nx-bg-tertiary, #e8eaef);
+}
+
+.tab-overflow-button {
+  padding: 0 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--nx-text-secondary, #4a4a4a);
+  font-size: 0.9em;
+}
+.tab-overflow-button:hover {
+  background: var(--nx-bg-tertiary, #e8eaef);
+}
+
+.tab-overflow-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 50;
+  min-width: 200px;
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--nx-bg-primary, #ffffff);
+  border: 1px solid var(--nx-bg-tertiary, #e8eaef);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+.tab-overflow-menu li {
+  padding: 6px 12px;
+  font-size: 0.875em;
+  color: var(--nx-text-primary, #1a1a1a);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tab-overflow-menu li:hover {
+  background: var(--nx-bg-secondary, #f8f9fa);
+}
+.tab-overflow-menu li.active {
+  background: var(--nx-accent-muted, rgba(74, 144, 226, 0.12));
+}
+.tab-overflow-menu .dirty {
+  color: var(--nx-color-warning, #f39c12);
 }
 
 .tab-strip.empty {
@@ -607,6 +682,24 @@ button {
 
 .tab-strip .dirty {
   color: var(--nx-color-warning, #f39c12);
+}
+
+.tab-close {
+  background: transparent;
+  border: none;
+  padding: 0 4px;
+  margin-left: 4px;
+  color: var(--nx-text-tertiary, #7a7a7a);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+  opacity: 0.7;
+}
+.tab-close:hover {
+  background: var(--nx-bg-tertiary, #e8eaef);
+  color: var(--nx-text-primary, #1a1a1a);
+  opacity: 1;
 }
 
 main {
@@ -1443,6 +1536,7 @@ main {
   margin: 0;
   padding: 0;
 }
+
 
 .settings-row {
   display: flex;

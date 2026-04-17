@@ -19,6 +19,8 @@ import {
 } from "../../ipc/forge";
 import { useForgeStore } from "../../stores/forge";
 import { useOpenFileStore } from "../../stores/openFile";
+import { useOpenFilesStore } from "../../stores/openFiles";
+import { useLayoutStore } from "../../stores/layout";
 
 /**
  * File-tree renderer for panels with `contentType = "files"`. Lists the
@@ -56,7 +58,12 @@ function FileTreeForForge() {
     target: ForgeDirEntry | null;
   } | null>(null);
   const fsVersion = useForgeStore((s) => s.fsVersion);
-  const openAction = useOpenFileStore((s) => s.open);
+  const openAction = useCallback(async (relpath: string) => {
+    // Name = last path segment; used as the tab label.
+    const name = relpath.slice(relpath.lastIndexOf("/") + 1) || relpath;
+    await useOpenFilesStore.getState().open(relpath);
+    useLayoutStore.getState().openTabForFile(relpath, name);
+  }, []);
   const closeFile = useOpenFileStore((s) => s.close);
 
   useEffect(() => {
@@ -131,7 +138,11 @@ interface TreeNodeProps {
 function TreeNode({ entry, depth }: TreeNodeProps) {
   const [children, setChildren] = useState<ForgeDirEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const openFile = useOpenFileStore((s) => s.open);
+  const openFile = useCallback(async (relpath: string) => {
+    const name = relpath.slice(relpath.lastIndexOf("/") + 1) || relpath;
+    await useOpenFilesStore.getState().open(relpath);
+    useLayoutStore.getState().openTabForFile(relpath, name);
+  }, []);
   const openRelpath = useOpenFileStore((s) => s.file?.relpath);
   const fsVersion = useForgeStore((s) => s.fsVersion);
   const expanded = useForgeStore((s) => s.expandedPaths.has(entry.relpath));

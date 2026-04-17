@@ -11,6 +11,11 @@ interface OpenFileState {
   error: string | null;
   /** Whether the editor content has diverged from the saved file. */
   isDirty: boolean;
+  /** Mirror state from the keyed openFiles store without touching disk.
+   *  Called by `PaneView` when the active file tab changes so legacy
+   *  single-file consumers (Outline, plugin bridge) see the newly
+   *  focused file. Does not affect persistence. */
+  mirror: (file: ForgeFile | null, isDirty: boolean) => void;
   /** Open a file by relpath. Errors surface via `error`. Use this for
    *  explicit user actions. Persists openFile under the active forge. */
   open: (relpath: string) => Promise<void>;
@@ -88,6 +93,9 @@ export const useOpenFileStore = create<OpenFileState>((set, get) => ({
   },
 
   reset: () => set({ file: null, error: null, isDirty: false }),
+
+  mirror: (file, isDirty) =>
+    set({ file, isDirty, loading: false, error: null }),
 
   markDirty: () => set({ isDirty: true }),
 

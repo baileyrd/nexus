@@ -1,3 +1,4 @@
+import { createElement } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FileTree } from "../components/panels/FileTree";
 import { FileViewer } from "../components/panels/FileViewer";
@@ -32,8 +33,13 @@ export function registerBuiltins(): void {
   // content-type id and a legacy `"editor"` alias for pre-F-1.1.1 code paths.
   // Markdown / MDX file extensions resolve through the same file-handler
   // registry any community plugin can contribute to.
-  contributions.registerContentType("com.nexus.editor.markdown", FileViewer);
-  contributions.registerContentType("editor", FileViewer); // legacy alias
+  // Thin wrapper so FileViewer satisfies the `ContentComponent` signature
+  // (which passes a Panel prop). The no-arg `FileViewer()` call picks up
+  // the legacy single-file path from useOpenFileStore; PaneView handles
+  // `file:<relpath>` tabs directly and never reaches this registration.
+  const LegacyFileViewer = () => createElement(FileViewer);
+  contributions.registerContentType("com.nexus.editor.markdown", LegacyFileViewer);
+  contributions.registerContentType("editor", LegacyFileViewer);
   contributions.registerFileHandler("md", "com.nexus.editor.markdown");
   contributions.registerFileHandler("mdx", "com.nexus.editor.markdown");
   // ".canvas" and ".base" are future surfaces — no content-type registered
