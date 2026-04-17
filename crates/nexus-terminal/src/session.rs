@@ -267,6 +267,29 @@ impl Session {
     pub fn shell_display(&self) -> &str {
         &self.shell_display
     }
+
+    /// Drain whatever is available from the PTY into `out` (PRD-09 §3),
+    /// returning the number of bytes appended. Internally reuses an
+    /// 8 KiB scratch buffer per call.
+    ///
+    /// Runs exactly one read cycle: if the PTY has no pending output,
+    /// blocks up to `timeout` and then returns `Ok(0)`. Callers that
+    /// want to fully drain should loop until they see `Ok(0)`.
+    ///
+    /// # Errors
+    /// Propagates [`TerminalError::Io`] on raw read failures.
+    pub fn read_into_buffer(
+        &mut self,
+        out: &mut crate::OutputBuffer,
+        timeout: Duration,
+    ) -> Result<usize, TerminalError> {
+        let mut scratch = [0u8; 8192];
+        let n = self.read(&mut scratch, timeout)?;
+        if n > 0 {
+            out.push(&scratch[..n]);
+        }
+        Ok(n)
+    }
 }
 
 impl std::fmt::Debug for Session {
@@ -444,6 +467,47 @@ mod tests {
             matches!(err, TerminalError::NotRunning(_)),
             "expected NotRunning, got {err:?}",
         );
+    }
+
+    #[test]
+    fn read_into_buffer_captures_printf_output() {
+        if !unix_only("read_into_buffer_captures_printf_output") {
+            return;
+        }
+        let mut session = Session::spawn(SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), "printf 'ring-buffer-ok'".into()],
+            }),
+            ..SessionConfig::default()
+        })
+        .expect("spawn");
+
+        let mut buf = crate::OutputBuffer::with_capacity(64);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        // Drain until we see EOF (n == 0 after child exit) or we've
+        // already captured the expected marker.
+        while Instant::now() < deadline {
+            let n = session
+                .read_into_buffer(&mut buf, Duration::from_millis(200))
+                .expect("read_into_buffer");
+            if buf.contains(b"ring-buffer-ok") {
+                break;
+            }
+            if n == 0 && session.try_wait_exit().is_some() {
+                // Final drain after exit so any buffered bytes land.
+                session
+                    .read_into_buffer(&mut buf, Duration::from_millis(100))
+                    .expect("drain");
+                break;
+            }
+        }
+        assert!(
+            buf.contains(b"ring-buffer-ok"),
+            "expected marker in buffer, got {:?}",
+            String::from_utf8_lossy(&buf.snapshot()),
+        );
+        assert_eq!(buf.dropped(), 0);
     }
 
     #[test]

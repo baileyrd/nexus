@@ -53,10 +53,12 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+mod buffer;
 mod error;
 mod session;
 mod shell;
 
+pub use buffer::OutputBuffer;
 pub use error::TerminalError;
 pub use session::{Session, SessionConfig, SessionId};
 pub use shell::{detect_default_shell, ShellSpec};
