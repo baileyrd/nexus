@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "fields": {
+    "id": { "type": "uuid", "primary": true },
+    "name": { "type": "text", "required": true },
+    "company": { "type": "text" },
+    "role": { "type": "text" },
+    "email": { "type": "email" },
+    "relationship": { "type": "select", "options": ["personal", "professional", "collaborator", "lead", "dormant"] },
+    "tags": { "type": "multi-select", "options": ["rust", "design", "research", "investor", "ex-colleague", "open-source"] },
+    "last_contact": { "type": "date" },
+    "notes": { "type": "long-text" }
+  }
+}

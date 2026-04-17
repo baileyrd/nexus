@@ -1,0 +1,112 @@
+[
+  {
+    "id": "c-001",
+    "name": "Maya Patel",
+    "company": "Stripe",
+    "role": "Staff Engineer",
+    "email": "maya@example.com",
+    "relationship": "professional",
+    "tags": ["rust", "ex-colleague"],
+    "last_contact": "2026-03-28",
+    "notes": "Intro'd me to the PRD-driven planning style I'm using here."
+  },
+  {
+    "id": "c-002",
+    "name": "Jordan Rivers",
+    "company": "Research Collective",
+    "role": "Researcher",
+    "email": "jordan@research.example",
+    "relationship": "collaborator",
+    "tags": ["research", "design"],
+    "last_contact": "2026-04-02",
+    "notes": "Wants to try Nexus for their interview coding archive."
+  },
+  {
+    "id": "c-003",
+    "name": "Sam Kirkland",
+    "company": null,
+    "role": "Independent",
+    "email": "sam@example.com",
+    "relationship": "personal",
+    "tags": [],
+    "last_contact": "2026-02-11",
+    "notes": "Coffee next time we're both in the same city."
+  },
+  {
+    "id": "c-004",
+    "name": "Riya Desai",
+    "company": "TerraCap",
+    "role": "Principal",
+    "email": "riya@terracap.example",
+    "relationship": "lead",
+    "tags": ["investor"],
+    "last_contact": "2026-04-10",
+    "notes": "Saw the demo; said ping when v0.1 ships."
+  },
+  {
+    "id": "c-005",
+    "name": "Leon Abramov",
+    "company": "Red Hat",
+    "role": "Maintainer",
+    "email": "leon@example.com",
+    "relationship": "collaborator",
+    "tags": ["rust", "open-source"],
+    "last_contact": "2026-03-12",
+    "notes": "Wants to review the plugin manifest spec."
+  },
+  {
+    "id": "c-006",
+    "name": "Bea Montgomery",
+    "company": "Frame Studio",
+    "role": "Design Lead",
+    "email": "bea@frame.example",
+    "relationship": "professional",
+    "tags": ["design"],
+    "last_contact": "2025-12-04",
+    "notes": "Gave great feedback on the empty-state copy."
+  },
+  {
+    "id": "c-007",
+    "name": "Kenji Ito",
+    "company": null,
+    "role": "Retired",
+    "email": null,
+    "relationship": "dormant",
+    "tags": ["ex-colleague"],
+    "last_contact": "2024-08-22",
+    "notes": "Lost touch after the Tokyo office closed. Worth a note."
+  },
+  {
+    "id": "c-008",
+    "name": "Priya Varma",
+    "company": "Linear",
+    "role": "PM",
+    "email": "priya@example.com",
+    "relationship": "professional",
+    "tags": ["design"],
+    "last_contact": "2026-04-08",
+    "notes": "Wants an early build once the command palette supports actions."
+  },
+  {
+    "id": "c-009",
+    "name": "Marcus Allen",
+    "company": "Basis Fund",
+    "role": "Partner",
+    "email": "marcus@basis.example",
+    "relationship": "lead",
+    "tags": ["investor"],
+    "last_contact": "2026-03-30",
+    "notes": "Focused on dev tools; understood the microkernel pitch."
+  },
+  {
+    "id": "c-010",
+    "name": "Aarti Shah",
+    "company": null,
+    "role": "Founder",
+    "email": "aarti@example.com",
+    "relationship": "collaborator",
+    "tags": ["rust", "open-source"],
+    "last_contact": "2026-04-14",
+    "notes": "Discussed co-authoring a post on microkernel TUIs."
+  }
+]

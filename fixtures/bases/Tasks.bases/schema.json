@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "fields": {
+    "id": { "type": "uuid", "primary": true },
+    "title": { "type": "text", "required": true },
+    "status": { "type": "select", "options": ["todo", "in-progress", "blocked", "done"] },
+    "priority": { "type": "number", "min": 1, "max": 5 },
+    "due": { "type": "date" },
+    "assignee": { "type": "text" },
+    "tags": { "type": "multi-select", "options": ["backend", "frontend", "infra", "docs", "ai"] },
+    "notes": { "type": "long-text" }
+  }
+}

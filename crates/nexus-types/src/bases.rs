@@ -789,4 +789,51 @@ targetField = "id"
         assert!(base_dir.join("records.json").exists());
         assert!(base_dir.join("metadata.json").exists());
     }
+
+    /// Load each committed fixture (`fixtures/bases/*.bases`) to guard
+    /// against schema / serialization drift — if someone renames a
+    /// `ViewType` variant or tightens `FieldDefinition` without
+    /// updating the fixtures, this test fails before the regression
+    /// ships to users.
+    #[test]
+    fn committed_fixtures_round_trip_through_load_base() {
+        // Walk up from CARGO_MANIFEST_DIR (= crates/nexus-types) to the
+        // repo root so this works regardless of the cwd the test is
+        // launched from.
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("repo root");
+        let fixtures = repo_root.join("fixtures").join("bases");
+        if !fixtures.exists() {
+            // Shallow clones might skip the fixtures directory — treat
+            // as a benign skip instead of a hard failure.
+            eprintln!("skipping: fixtures directory absent at {}", fixtures.display());
+            return;
+        }
+        let expected = ["Tasks.bases", "Books.bases", "Contacts.bases"];
+        for name in expected {
+            let dir = fixtures.join(name);
+            assert!(
+                dir.exists(),
+                "committed fixture missing: {}",
+                dir.display(),
+            );
+            let base = load_base(&dir).unwrap_or_else(|e| {
+                panic!("fixture '{name}' failed to load: {e}")
+            });
+            assert!(!base.records.is_empty(), "{name}: records empty");
+            assert!(!base.views.is_empty(), "{name}: no views configured");
+            // Every record must validate against the fixture's schema.
+            for record in &base.records {
+                validate_record(&base.schema, record).unwrap_or_else(|e| {
+                    panic!(
+                        "fixture '{name}' record '{}' failed validation: {e}",
+                        record.id,
+                    )
+                });
+            }
+        }
+    }
 }

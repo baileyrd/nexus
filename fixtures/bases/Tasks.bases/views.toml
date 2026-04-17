@@ -1,0 +1,40 @@
+# PRD-10 §4 view definitions. Each [views.<slug>] table becomes one
+# entry in the tab strip above the editable record grid. The slug is
+# cosmetic; BaseView::name is what the UI renders.
+
+[views.all-tasks]
+name = "All tasks"
+type = "table"
+fields = ["title", "status", "priority", "due", "assignee", "tags"]
+sort = [
+    { field = "priority", direction = "desc" },
+    { field = "due", direction = "asc" },
+]
+
+[views.open-only]
+name = "Open"
+type = "table"
+fields = ["title", "status", "priority", "due", "tags"]
+sort = [{ field = "priority", direction = "desc" }]
+filter = [{ field = "status", operator = "neq", value = "done" }]
+
+[views.by-status]
+name = "By status"
+type = "kanban"
+fields = ["title", "priority", "due", "assignee"]
+sort = [{ field = "priority", direction = "desc" }]
+groupField = "status"
+
+[views.by-due]
+name = "By due date"
+type = "calendar"
+fields = ["title", "priority", "status"]
+sort = [{ field = "priority", direction = "desc" }]
+dateField = "due"
+filter = [{ field = "status", operator = "neq", value = "done" }]
+
+[views.cards]
+name = "Cards"
+type = "gallery"
+fields = ["title", "status", "priority", "due", "tags"]
+sort = [{ field = "priority", direction = "desc" }]

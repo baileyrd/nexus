@@ -1,0 +1,142 @@
+[
+  {
+    "id": "t-001",
+    "title": "Wire terminal panel into Tauri",
+    "status": "done",
+    "priority": 5,
+    "due": "2026-04-17",
+    "assignee": "bailey",
+    "tags": ["frontend"],
+    "notes": "Live PTY → kernel IPC → React panel end-to-end."
+  },
+  {
+    "id": "t-002",
+    "title": "Ship view application engine",
+    "status": "done",
+    "priority": 4,
+    "due": "2026-04-17",
+    "assignee": "bailey",
+    "tags": ["backend"],
+    "notes": "Filter + sort + group pipeline in nexus-database::views."
+  },
+  {
+    "id": "t-003",
+    "title": "Build React renderers for all four view types",
+    "status": "done",
+    "priority": 4,
+    "due": "2026-04-17",
+    "assignee": "bailey",
+    "tags": ["frontend"],
+    "notes": "Table / Kanban / Calendar / Gallery."
+  },
+  {
+    "id": "t-004",
+    "title": "Editable base records with autosave",
+    "status": "in-progress",
+    "priority": 5,
+    "due": "2026-04-18",
+    "assignee": "bailey",
+    "tags": ["frontend", "backend"],
+    "notes": "Inline cell editor + debounced save_forge_base."
+  },
+  {
+    "id": "t-005",
+    "title": "Ship `.bases` file handler so click-to-open works",
+    "status": "done",
+    "priority": 3,
+    "due": "2026-04-18",
+    "assignee": "bailey",
+    "tags": ["frontend"],
+    "notes": "`.bases` directories open in BaseFileView instead of expanding."
+  },
+  {
+    "id": "t-006",
+    "title": "Add ANSI colour rendering to the terminal panel",
+    "status": "todo",
+    "priority": 3,
+    "due": "2026-04-21",
+    "assignee": null,
+    "tags": ["frontend"],
+    "notes": "Either xterm.js or a custom CSI→span parser."
+  },
+  {
+    "id": "t-007",
+    "title": "FTS5 scrollback index",
+    "status": "todo",
+    "priority": 2,
+    "due": null,
+    "assignee": null,
+    "tags": ["backend"],
+    "notes": "PRD-09 §19.3 — search across historical PTY output."
+  },
+  {
+    "id": "t-008",
+    "title": "Saved-commands sidebar for the process manager",
+    "status": "todo",
+    "priority": 3,
+    "due": "2026-04-25",
+    "assignee": null,
+    "tags": ["frontend"],
+    "notes": "Library already has CRUD + reorder; need the UI."
+  },
+  {
+    "id": "t-009",
+    "title": "Typed property-column editors (select, date pickers)",
+    "status": "blocked",
+    "priority": 4,
+    "due": "2026-04-20",
+    "assignee": "bailey",
+    "tags": ["frontend"],
+    "notes": "Blocked on `BL-002` typed columns in PRD-10."
+  },
+  {
+    "id": "t-010",
+    "title": "MCP Host lifecycle orchestrator",
+    "status": "todo",
+    "priority": 4,
+    "due": "2026-04-22",
+    "assignee": null,
+    "tags": ["backend", "ai"],
+    "notes": "Keeps external MCP servers alive across the app lifetime."
+  },
+  {
+    "id": "t-011",
+    "title": "AI chat UI with streaming",
+    "status": "todo",
+    "priority": 5,
+    "due": null,
+    "assignee": null,
+    "tags": ["ai", "frontend"],
+    "notes": "PRD-12 — last 40% of the AI-native story."
+  },
+  {
+    "id": "t-012",
+    "title": "Document new base fixtures in a README",
+    "status": "in-progress",
+    "priority": 1,
+    "due": "2026-04-18",
+    "assignee": "bailey",
+    "tags": ["docs"],
+    "notes": "For people picking up the repo fresh."
+  },
+  {
+    "id": "t-013",
+    "title": "Cross-database relations (rollup / lookup)",
+    "status": "todo",
+    "priority": 2,
+    "due": null,
+    "assignee": null,
+    "tags": ["backend"],
+    "notes": "Resolver goes through com.nexus.storage."
+  },
+  {
+    "id": "t-014",
+    "title": "Skills parser + registry",
+    "status": "todo",
+    "priority": 2,
+    "due": null,
+    "assignee": null,
+    "tags": ["backend"],
+    "notes": "PRD-13 — currently spec-only."
+  }
+]

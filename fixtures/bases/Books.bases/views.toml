@@ -1,0 +1,34 @@
+[views.shelf]
+name = "Shelf"
+type = "gallery"
+fields = ["title", "author", "year", "status", "rating", "topics"]
+sort = [
+    { field = "rating", direction = "desc" },
+    { field = "finished_on", direction = "desc" },
+]
+
+[views.all-books]
+name = "All books"
+type = "table"
+fields = ["title", "author", "year", "status", "rating", "finished_on", "topics"]
+sort = [{ field = "finished_on", direction = "desc" }]
+
+[views.by-status]
+name = "By status"
+type = "kanban"
+fields = ["title", "author", "rating"]
+sort = [{ field = "rating", direction = "desc" }]
+groupField = "status"
+
+[views.top-rated]
+name = "Top rated"
+type = "table"
+fields = ["title", "author", "rating", "topics"]
+sort = [{ field = "rating", direction = "desc" }]
+filter = [{ field = "rating", operator = "gte", value = 4 }]
+
+[views.reading-now]
+name = "Reading now"
+type = "gallery"
+fields = ["title", "author", "topics", "notes"]
+filter = [{ field = "status", operator = "eq", value = "reading" }]

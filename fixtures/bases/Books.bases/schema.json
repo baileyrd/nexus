@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "fields": {
+    "id": { "type": "uuid", "primary": true },
+    "title": { "type": "text", "required": true },
+    "author": { "type": "text", "required": true },
+    "year": { "type": "number" },
+    "status": { "type": "select", "options": ["wishlist", "reading", "finished", "abandoned"] },
+    "rating": { "type": "number", "min": 1, "max": 5 },
+    "finished_on": { "type": "date" },
+    "topics": { "type": "multi-select", "options": ["fiction", "history", "tech", "philosophy", "science", "biography"] },
+    "notes": { "type": "long-text" }
+  }
+}

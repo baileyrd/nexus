@@ -1,0 +1,39 @@
+[views.everyone]
+name = "Everyone"
+type = "table"
+fields = ["name", "company", "role", "relationship", "last_contact", "tags"]
+sort = [{ field = "last_contact", direction = "desc" }]
+
+[views.recent]
+name = "Recent"
+type = "table"
+fields = ["name", "company", "relationship", "last_contact", "tags"]
+sort = [{ field = "last_contact", direction = "desc" }]
+filter = [{ field = "last_contact", operator = "gte", value = "2026-03-01" }]
+
+[views.investors]
+name = "Investors"
+type = "gallery"
+fields = ["name", "company", "role", "last_contact", "notes"]
+filter = [{ field = "relationship", operator = "eq", value = "lead" }]
+
+[views.by-relationship]
+name = "By relationship"
+type = "kanban"
+fields = ["name", "company", "last_contact"]
+sort = [{ field = "last_contact", direction = "desc" }]
+groupField = "relationship"
+
+[views.reach-out]
+name = "Reach out"
+type = "calendar"
+fields = ["name", "company", "notes"]
+dateField = "last_contact"
+filter = [{ field = "relationship", operator = "in", value = ["lead", "collaborator"] }]
+
+[views.dormant]
+name = "Dormant"
+type = "table"
+fields = ["name", "company", "last_contact", "notes"]
+sort = [{ field = "last_contact", direction = "asc" }]
+filter = [{ field = "relationship", operator = "eq", value = "dormant" }]

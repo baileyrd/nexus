@@ -1,0 +1,112 @@
+[
+  {
+    "id": "b-001",
+    "title": "The Design of Everyday Things",
+    "author": "Don Norman",
+    "year": 1988,
+    "status": "finished",
+    "rating": 5,
+    "finished_on": "2024-11-03",
+    "topics": ["tech", "philosophy"],
+    "notes": "Mental models, affordances, and the gulfs of execution / evaluation."
+  },
+  {
+    "id": "b-002",
+    "title": "Project Hail Mary",
+    "author": "Andy Weir",
+    "year": 2021,
+    "status": "finished",
+    "rating": 5,
+    "finished_on": "2025-01-18",
+    "topics": ["fiction", "science"],
+    "notes": "Science-focused sci-fi. Ryland Grace is a great narrator."
+  },
+  {
+    "id": "b-003",
+    "title": "The Making of the Atomic Bomb",
+    "author": "Richard Rhodes",
+    "year": 1986,
+    "status": "reading",
+    "rating": null,
+    "finished_on": null,
+    "topics": ["history", "science"],
+    "notes": "Long, dense, excellent. Chapter on Bohr is the best I've read on him."
+  },
+  {
+    "id": "b-004",
+    "title": "Domain-Driven Design",
+    "author": "Eric Evans",
+    "year": 2003,
+    "status": "finished",
+    "rating": 4,
+    "finished_on": "2024-06-30",
+    "topics": ["tech"],
+    "notes": "Aggregates and bounded contexts still age well. Chapters 1-5 do most of the work."
+  },
+  {
+    "id": "b-005",
+    "title": "Thinking, Fast and Slow",
+    "author": "Daniel Kahneman",
+    "year": 2011,
+    "status": "finished",
+    "rating": 4,
+    "finished_on": "2025-02-12",
+    "topics": ["science", "philosophy"],
+    "notes": "System 1 vs 2 is the core; the second half on happiness is weaker."
+  },
+  {
+    "id": "b-006",
+    "title": "The Pragmatic Programmer",
+    "author": "Andy Hunt, Dave Thomas",
+    "year": 1999,
+    "status": "finished",
+    "rating": 4,
+    "finished_on": "2023-09-14",
+    "topics": ["tech"],
+    "notes": "Still the best single book to put in a junior dev's hands."
+  },
+  {
+    "id": "b-007",
+    "title": "Chip War",
+    "author": "Chris Miller",
+    "year": 2022,
+    "status": "wishlist",
+    "rating": null,
+    "finished_on": null,
+    "topics": ["history", "tech"],
+    "notes": "Everyone I trust has recommended this."
+  },
+  {
+    "id": "b-008",
+    "title": "Seeing Like a State",
+    "author": "James C. Scott",
+    "year": 1998,
+    "status": "reading",
+    "rating": null,
+    "finished_on": null,
+    "topics": ["history", "philosophy"],
+    "notes": "Legibility, high-modernist schemes, and why top-down simplifications fail."
+  },
+  {
+    "id": "b-009",
+    "title": "A Fire Upon the Deep",
+    "author": "Vernor Vinge",
+    "year": 1992,
+    "status": "abandoned",
+    "rating": 2,
+    "finished_on": null,
+    "topics": ["fiction"],
+    "notes": "Couldn't stay engaged with the Zones premise. Might retry."
+  },
+  {
+    "id": "b-010",
+    "title": "Surely You're Joking, Mr. Feynman!",
+    "author": "Richard Feynman",
+    "year": 1985,
+    "status": "finished",
+    "rating": 5,
+    "finished_on": "2024-03-20",
+    "topics": ["biography", "science"],
+    "notes": "The curiosity is infectious. Best chapter: the safe-cracking at Los Alamos."
+  }
+]
