@@ -29,7 +29,7 @@
 | 06 | File Formats | ✅ | Markdown/MDX/Canvas/Bases/forge config all parse + serialize |
 | 07 | Theming & UI | ✅ | 497-token CSS registry, theme core plugin, contribution registry |
 | 08 | Editor Engine | 🟡 | 3.7k LoC block/transaction/undo core; PRD §4 `BlockPositionMap` model superseded by CM6-owns-text |
-| 09 | Terminal & Process Manager | 🔴 | No PTY integration; zero process-manager code |
+| 09 | Terminal & Process Manager | 🟠 | Phase A PTY primitive shipped (new `nexus-terminal` crate); session manager / ring buffer / signals / env / AI / CLI still pending |
 | 10 | Database Engine | 🟡 | `.bases` parse + validate + formula IPC; views (board/list/calendar/gallery) absent |
 | 11 | Git Integration | 🟢 | 1.1k-line `GitEngine` over `git2`; worker-thread wrapper for UI still needed |
 | 12 | AI Engine | 🟡 | Anthropic/OpenAI/Ollama providers + chunker; no chat UI, no streaming, no agents |
@@ -84,10 +84,11 @@
 - Inline AI edit suggestions — tool hooks exist, no UI.
 **Evidence:** [crates/nexus-editor/src/](crates/nexus-editor/src/), [app/src/components/surfaces/EditorSurface.tsx](app/src/components/surfaces/EditorSurface.tsx), [app/src/editor/mdxComponentExtension.ts](app/src/editor/mdxComponentExtension.ts), [app/src/contributions/builtins.ts](app/src/contributions/builtins.ts), [docs/PRDs/08-editor-engine.md §4.1/§4.4/§7](docs/PRDs/08-editor-engine.md).
 
-### PRD-09 — Terminal & Process Manager 🔴
-**Shipped:** Nothing. `nexus-tui` crate exists but is an alternate CLI frontend, not a PTY host.
-**Gaps:** No `portable-pty` integration, no process spawn/attach, no ANSI parser, no signal handling, no `nexus proc` / `nexus term` CLI implementations, no MCP process tools, no process lifecycle events.
-**Evidence:** `grep portable_pty crates/` returns zero hits.
+### PRD-09 — Terminal & Process Manager 🟠
+**Shipped (Phase A — PTY primitive):** New [`nexus-terminal`](crates/nexus-terminal/) crate adds `Session::spawn` over `portable-pty` (native PTY alloc, shell detection, child spawn, blocking read/write with wall-clock timeout, resize, kill, `try_wait_exit`, Drop-safe cleanup). `detect_default_shell` honours `$SHELL` then platform fallbacks (`/bin/bash` → `/bin/zsh` → `/bin/sh` on Unix; `%ComSpec%` → `cmd.exe` on Windows). 12 unit tests including a real PTY spawn that round-trips bytes through `/bin/cat`, a resize smoke test, and a write-after-kill error path. Clippy `-D warnings` clean.
+**Gaps (Phase B+):** No session manager / registry / SQLite persistence (§2.2, §13). No output ring buffer or ANSI parser (§3). No process lifecycle state machine (§4). No signal escalation, child-tree kill, or Windows Job Objects (§5). No URL detection (§6). No memory monitoring (§7). No env-var resolution / `.env` parsing (§8). No compound command splitting (§9). No ad-hoc command system (§10). No programmable terminal API (§11). No AI integration (§12). No terminal UI components (§14). No `nexus proc` / `nexus term` CLI.
+**Architecture posture:** Phase A is an invoker-local library (same pattern as `nexus-git` and the MCP Host client). A future `com.nexus.terminal` core plugin can wrap `Session` in dispatch handlers for `com.nexus.terminal.spawn` / `write` / `read` / `kill` when the kernel gets a consumer; no redesign needed.
+**Evidence:** [crates/nexus-terminal/src/{lib,session,shell,error}.rs](crates/nexus-terminal/src/), 12 passing tests including `spawn_read_echo_output_and_exit_cleanly` and `write_then_read_round_trip_through_cat`.
 
 ### PRD-10 — Database Engine 🟡
 **Shipped:** `.bases` TOML schema + validation (3.4k LoC), property types (Title/Select/Date/Number/MultiSelect/People/timestamps), relations, CSV import/export, formula evaluator behind `com.nexus.database` IPC (`formula_eval` handler).

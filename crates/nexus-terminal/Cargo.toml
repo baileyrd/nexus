@@ -1,0 +1,17 @@
+[package]
+name = "nexus-terminal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Nexus terminal & process manager: PTY sessions, shell detection, output capture (PRD-09)"
+
+[dependencies]
+portable-pty = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
