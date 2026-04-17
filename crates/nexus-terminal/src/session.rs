@@ -254,11 +254,21 @@ impl Session {
         Ok(())
     }
 
-    /// Send `signal` to the child process (PRD-09 §5.1).
+    /// Send `signal` to the child's **process group** (PRD-09 §5.1 / §5.2).
+    ///
+    /// `portable-pty` spawns the child as a session leader (`setsid()`
+    /// before `exec`), so the child's PID equals its process-group id.
+    /// Signalling the negative PID delivers to every process in that
+    /// group — the shell *and* any commands it spawned — so killing a
+    /// session no longer leaves orphaned subprocesses running when a
+    /// long-running command is in the foreground. This matches real
+    /// terminal Ctrl-C semantics.
     ///
     /// `Signal::Kill` always routes through [`Session::kill`] (the
-    /// cross-platform path). On Unix, `Signal::Int` and `Signal::Term`
-    /// issue `libc::kill(pid, SIG…)`. On Windows, where `portable-pty`'s
+    /// cross-platform force-kill path — `TerminateProcess` on Windows,
+    /// SIGKILL to the process group on Unix via the same negative-PID
+    /// rule). On Unix, `Signal::Int` and `Signal::Term` issue
+    /// `libc::kill(-pid, SIG…)`. On Windows, where `portable-pty`'s
     /// `Child` trait doesn't expose softer shutdowns, `Int` and `Term`
     /// degrade to the same force-kill path as `Kill` — so Windows
     /// callers that want graceful cleanup must do it themselves by
@@ -295,18 +305,26 @@ impl Session {
                 Signal::Term => libc::SIGTERM,
                 Signal::Kill => unreachable!("handled above"),
             };
-            let rc = unsafe { libc::kill(pid.cast_signed() as libc::pid_t, sig) };
+            // Negate the pid to target the whole process group (PRD §5.2).
+            // portable-pty calls `setsid()` in the child before exec, so
+            // the child is its own session leader and pgid == pid.
+            let target = -pid.cast_signed();
+            let rc = unsafe { libc::kill(target as libc::pid_t, sig) };
             if rc != 0 {
                 let err = std::io::Error::last_os_error();
                 tracing::warn!(
-                    pid,
+                    pgid = pid,
                     signal = signal.name(),
                     error = %err,
-                    "libc::kill returned non-zero",
+                    "libc::kill(-pgid) returned non-zero",
                 );
                 return Err(TerminalError::Io(err));
             }
-            tracing::debug!(pid, signal = signal.name(), "delivered unix signal");
+            tracing::debug!(
+                pgid = pid,
+                signal = signal.name(),
+                "delivered unix signal to process group",
+            );
             Ok(())
         }
 
@@ -315,6 +333,7 @@ impl Session {
             // Windows has no portable equivalent to SIGINT/SIGTERM that
             // portable-pty exposes. Collapse the ladder to a hard kill
             // so callers still get termination — documented above.
+            let _ = pid; // suppress unused warning on Windows
             tracing::warn!(
                 signal = signal.name(),
                 "non-unix platform: degrading signal to force-kill",
@@ -781,6 +800,71 @@ while True:
             finisher,
             Signal::Kill,
             "expected ladder to reach SIGKILL when INT/TERM are SIG_IGN",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawned_child_is_its_own_process_group_leader() {
+        if !unix_only("spawned_child_is_its_own_process_group_leader") {
+            return;
+        }
+        // Portable-pty calls `setsid()` in the child before exec, so the
+        // child becomes the session leader for a new session and its
+        // PGID equals its PID. That equality is the invariant our
+        // process-group kill (PRD §5.2 — `kill(-pid, SIG)`) depends on:
+        // if the kernel set up a different pgid we'd be signalling the
+        // wrong group and either miss the subprocess tree or hit an
+        // unrelated one. Verify it directly.
+        let session = Session::spawn(SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), "sleep 5".into()],
+            }),
+            ..SessionConfig::default()
+        })
+        .expect("spawn");
+        let child_pid = session
+            .child
+            .as_ref()
+            .and_then(|c| c.process_id())
+            .expect("child has a pid")
+            .cast_signed();
+        // SAFETY: `getpgid` is always safe; it only reads.
+        let group_id = unsafe { libc::getpgid(child_pid) };
+        assert_eq!(
+            group_id, child_pid,
+            "expected pgid ({group_id}) == pid ({child_pid}) so kill(-pid) reaches the whole tree",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn send_signal_terminates_session_with_backgrounded_subprocess() {
+        if !unix_only("send_signal_terminates_session_with_backgrounded_subprocess") {
+            return;
+        }
+        // Smoke test for the group-signal path end-to-end: spawn a
+        // shell that backgrounds a sleep and waits on it. SIGINT via
+        // `kill(-pid, …)` reaches both processes in the group; the
+        // sleep dies, sh's wait returns, sh exits. The earlier
+        // single-PID behaviour could also terminate this (sh's default
+        // SIGINT action is to die) so this doesn't differentiate the
+        // two — it's a regression gate on "we didn't break the normal
+        // case when we moved to -pid targeting".
+        let mut session = Session::spawn(SessionConfig {
+            shell: Some(ShellSpec {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), "sleep 30 & wait".into()],
+            }),
+            ..SessionConfig::default()
+        })
+        .expect("spawn");
+        std::thread::sleep(Duration::from_millis(100));
+        session.send_signal(Signal::Int).expect("send_signal");
+        assert!(
+            session.wait_for_exit(Duration::from_millis(2000)).is_some(),
+            "session with backgrounded sleep should exit after group SIGINT",
         );
     }
 
