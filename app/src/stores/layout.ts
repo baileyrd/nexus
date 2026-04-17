@@ -65,6 +65,12 @@ interface LayoutState {
   /** Make `tabId` the active tab within the leaf pane that owns it. No-op
    *  if the leaf/tab isn't found. */
   setActiveTab: (paneId: PaneId, tabId: string) => void;
+  /** Reorder the tabs in `paneId` to match `newTabIds`. Ids not present in
+   *  the leaf are ignored; missing ids (tabs not listed) stay in their
+   *  previous relative order after the supplied ids. Pinned and unpinned
+   *  tabs are partitioned — pinned tabs always render first regardless of
+   *  caller order. PRD-07 §7.2. */
+  reorderTabs: (paneId: PaneId, newTabIds: string[]) => void;
   /** Make `paneId` the focused leaf. Drives the focus ring and
    *  determines where new tabs land by default. */
   focusPane: (paneId: PaneId) => void;
@@ -602,6 +608,45 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       if (!state.layout) return {};
       const nextRoot = updateActiveTab(state.layout.root, paneId, tabId);
       if (nextRoot === state.layout.root) return {};
+      const layout = { ...state.layout, root: nextRoot };
+      const root = currentForgeRoot();
+      if (!root) return { layout };
+      const persistence = persistencePatchForPanes(state.persistence, root, layout);
+      scheduleSave(persistence);
+      return { layout, persistence };
+    }),
+
+  reorderTabs: (paneId, newTabIds) =>
+    set((state) => {
+      if (!state.layout) return {};
+      const leaf = findLeaf(state.layout.root, paneId);
+      if (!leaf) return {};
+      const byId = new Map(leaf.tabs.map((t) => [t.id, t] as const));
+      // Respect the caller's order for known ids, then append any tabs
+      // that weren't mentioned (preserves newly-opened-while-dragging tabs).
+      const seen = new Set<string>();
+      const resolved: typeof leaf.tabs = [];
+      for (const id of newTabIds) {
+        const t = byId.get(id);
+        if (t && !seen.has(id)) {
+          resolved.push(t);
+          seen.add(id);
+        }
+      }
+      for (const t of leaf.tabs) {
+        if (!seen.has(t.id)) resolved.push(t);
+      }
+      // Pinned tabs always render first (PRD-07 §7.2). Partition while
+      // preserving the resolved order within each group.
+      const pinned = resolved.filter((t) => t.pinned);
+      const unpinned = resolved.filter((t) => !t.pinned);
+      const nextTabs = [...pinned, ...unpinned];
+      // No-op if order is identical.
+      if (nextTabs.every((t, i) => t.id === leaf.tabs[i]?.id)) return {};
+      const nextRoot = replaceLeaf(state.layout.root, leaf.id, (l) => ({
+        ...l,
+        tabs: nextTabs,
+      }));
       const layout = { ...state.layout, root: nextRoot };
       const root = currentForgeRoot();
       if (!root) return { layout };
