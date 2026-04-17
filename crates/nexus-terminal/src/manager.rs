@@ -29,21 +29,32 @@
 //! or capability system; those boundaries live at the core-plugin layer.
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::buffer::OutputBuffer;
 use crate::error::TerminalError;
+use crate::lines::{Line, LineBuffer};
 use crate::session::{ProcessState, Session, SessionConfig, SessionId, Signal};
 
 /// PRD-09 §2.3 hard cap on simultaneously-active sessions per workspace.
 pub const DEFAULT_MAX_SESSIONS: usize = 50;
 
-/// One session plus its captured-output ring. The manager owns the pair
-/// so consumers never see a live `Session` without its matching buffer.
+/// One session plus its captured-output rings. The manager owns all
+/// three so consumers never see a live `Session` without the buffers it
+/// feeds: [`OutputBuffer`] holds raw bytes (PRD-09 §3.1), [`LineBuffer`]
+/// holds the ANSI-stripped line view the server API exposes (§3.2).
 struct Entry {
     session: Session,
     buffer: OutputBuffer,
+    lines: LineBuffer,
     last_accessed: Instant,
+    /// Optional human-readable label for the programmable API's
+    /// `SessionInfo` surface (PRD-09 §11). `None` falls back to the
+    /// session id for display.
+    name: Option<String>,
+    /// Unix-seconds creation timestamp. Stable across the session's
+    /// lifetime — `last_accessed` moves independently.
+    created_at: u64,
 }
 
 /// In-memory registry of live PTY sessions. Not `Sync`; wrap in a mutex
@@ -118,15 +129,120 @@ impl SessionManager {
         }
         let session = Session::spawn(config)?;
         let id = session.id().clone();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         self.sessions.insert(
             id.clone(),
             Entry {
                 session,
                 buffer: OutputBuffer::with_capacity(self.default_buffer_capacity),
+                lines: LineBuffer::new(),
                 last_accessed: Instant::now(),
+                name: None,
+                created_at: now,
             },
         );
         Ok(id)
+    }
+
+    /// Attach a human-readable label to a session. Used by the
+    /// programmable API's `SessionInfo` surface (PRD-09 §11) so callers
+    /// can identify sessions by name rather than by UUID.
+    ///
+    /// # Errors
+    /// [`TerminalError::NotRunning`] if `id` is not tracked.
+    pub fn set_name(
+        &mut self,
+        id: &SessionId,
+        name: impl Into<String>,
+    ) -> Result<(), TerminalError> {
+        let entry = self.entry_mut(id)?;
+        entry.name = Some(name.into());
+        Ok(())
+    }
+
+    /// Read the label previously set via [`Self::set_name`], or `None`
+    /// if none was set (or the session is unknown).
+    #[must_use]
+    pub fn name(&self, id: &SessionId) -> Option<&str> {
+        self.sessions.get(id).and_then(|e| e.name.as_deref())
+    }
+
+    /// Unix-seconds timestamp the session was spawned at, or `None` if
+    /// the id is unknown. Feeds the `SessionInfo.created_at` field.
+    #[must_use]
+    pub fn created_at(&self, id: &SessionId) -> Option<u64> {
+        self.sessions.get(id).map(|e| e.created_at)
+    }
+
+    /// Number of structured lines currently held for `id`.
+    #[must_use]
+    pub fn line_count(&self, id: &SessionId) -> Option<usize> {
+        self.sessions.get(id).map(|e| e.lines.len())
+    }
+
+    /// Snapshot of the session's structured line view — the ANSI-
+    /// stripped, ring-bounded form the server API reads from. Returns
+    /// a range `[start, start + count)`, clamped to the available lines.
+    /// Omitting `start` reads from the front; omitting `count` reads to
+    /// the end.
+    ///
+    /// Cloning `Line` records is cheap by design (plain `String` +
+    /// `Vec<u8>`) — the caller can filter/search them freely without
+    /// holding any lock on the manager.
+    #[must_use]
+    pub fn lines_snapshot(
+        &self,
+        id: &SessionId,
+        start: Option<usize>,
+        count: Option<usize>,
+    ) -> Option<Vec<Line>> {
+        let entry = self.sessions.get(id)?;
+        let total = entry.lines.len();
+        let start = start.unwrap_or(0).min(total);
+        let end = match count {
+            Some(c) => start.saturating_add(c).min(total),
+            None => total,
+        };
+        Some(entry.lines.iter().skip(start).take(end - start).cloned().collect())
+    }
+
+    /// Search the session's line buffer for `query`. Returns the indices
+    /// of matching lines (into the line buffer as it is *now* — indices
+    /// are not stable across eviction). `is_regex = true` interprets the
+    /// query as a regular expression; an invalid regex returns `None`.
+    #[must_use]
+    pub fn lines_search(
+        &self,
+        id: &SessionId,
+        query: &str,
+        is_regex: bool,
+    ) -> Option<Vec<usize>> {
+        let entry = self.sessions.get(id)?;
+        if is_regex {
+            let re = regex_lite::Regex::new(query).ok()?;
+            Some(
+                entry
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, l)| re.is_match(&l.text_only))
+                    .map(|(i, _)| i)
+                    .collect(),
+            )
+        } else {
+            Some(
+                entry
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, l)| l.text_only.contains(query))
+                    .map(|(i, _)| i)
+                    .collect(),
+            )
+        }
     }
 
     /// PRD-09 §2.3 LRU eviction. Closes the least-recently-accessed
@@ -196,8 +312,8 @@ impl SessionManager {
     ) -> Result<usize, TerminalError> {
         let entry = self.entry_mut(id)?;
         entry.last_accessed = Instant::now();
-        let Entry { session, buffer, .. } = entry;
-        session.read_into_buffer(buffer, timeout)
+        let Entry { session, buffer, lines, .. } = entry;
+        session.read_into(Some(buffer), Some(lines), timeout)
     }
 
     /// Update the PTY's reported window size (PRD-09 §1.1).

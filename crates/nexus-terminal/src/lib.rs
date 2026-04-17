@@ -65,6 +65,7 @@ mod manager;
 mod persist;
 mod procmgr;
 mod profile;
+mod server;
 mod session;
 mod shell;
 mod urls;
@@ -92,6 +93,10 @@ pub use procmgr::{
 pub use profile::{
     profile_path_for_shell, profile_source_command, profile_source_command_for_path,
     supports_profile_sourcing,
+};
+pub use server::{
+    InMemoryTerminalServer, OutputLine, ServerSpawnConfig, SessionInfo, TerminalEvent,
+    TerminalServer,
 };
 pub use session::{ProcessState, Session, SessionConfig, SessionId, Signal};
 pub use shell::{detect_default_shell, ShellSpec};
