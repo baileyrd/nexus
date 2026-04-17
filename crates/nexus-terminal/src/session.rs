@@ -422,6 +422,34 @@ impl Session {
         &self.shell_display
     }
 
+    /// Drain whatever is available from the PTY into both a raw byte
+    /// ring and a structured line view in one pass (PRD-09 §3). Saves
+    /// callers from double-reading when they need both. Either
+    /// argument may be `None` to skip that side.
+    ///
+    /// Returns the number of bytes that came off the wire.
+    ///
+    /// # Errors
+    /// Propagates [`TerminalError::Io`] on raw read failures.
+    pub fn read_into(
+        &mut self,
+        bytes: Option<&mut crate::OutputBuffer>,
+        lines: Option<&mut crate::LineBuffer>,
+        timeout: Duration,
+    ) -> Result<usize, TerminalError> {
+        let mut scratch = [0u8; 8192];
+        let n = self.read(&mut scratch, timeout)?;
+        if n > 0 {
+            if let Some(b) = bytes {
+                b.push(&scratch[..n]);
+            }
+            if let Some(l) = lines {
+                l.push(&scratch[..n]);
+            }
+        }
+        Ok(n)
+    }
+
     /// Drain whatever is available from the PTY into `out` (PRD-09 §3),
     /// returning the number of bytes appended. Internally reuses an
     /// 8 KiB scratch buffer per call.

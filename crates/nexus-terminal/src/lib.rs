@@ -53,14 +53,18 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+mod ansi;
 mod buffer;
 mod error;
+mod lines;
 mod manager;
 mod session;
 mod shell;
 
+pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
 pub use error::TerminalError;
+pub use lines::{Line, LineBuffer};
 pub use manager::{SessionManager, DEFAULT_MAX_SESSIONS};
 pub use session::{Session, SessionConfig, SessionId, Signal};
 pub use shell::{detect_default_shell, ShellSpec};

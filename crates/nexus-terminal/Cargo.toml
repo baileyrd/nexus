@@ -8,6 +8,7 @@ description = "Nexus terminal & process manager: PTY sessions, shell detection, 
 
 [dependencies]
 portable-pty = { workspace = true }
+regex-lite = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
