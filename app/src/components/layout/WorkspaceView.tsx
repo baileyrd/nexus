@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -9,6 +9,7 @@ import type { Panel, SidePanel } from "../../bindings";
 import { useContentType } from "../../contributions";
 import { useForgeStore } from "../../stores/forge";
 import { useLayoutStore } from "../../stores/layout";
+import { useBreakpoint, useBreakpointDownCross } from "../../util/breakpoints";
 import { LayoutPresetPicker } from "./LayoutPresetPicker";
 import { PanelSelector } from "./PanelSelector";
 import { PanelToolbar } from "./PanelToolbar";
@@ -31,8 +32,22 @@ export function WorkspaceView() {
     if (!layout) load();
   }, [layout, load]);
 
+  // Responsive auto-collapse (PRD-07 §12.2). Fires only on downward
+  // threshold crossings so manual expansions aren't undone on widen.
+  const { name: breakpoint } = useBreakpoint();
+  const leftCollapsed = layout?.leftSidePanel.collapsed ?? true;
+  const rightCollapsed = layout?.rightSidePanel.collapsed ?? true;
+  const collapseRightIfOpen = useCallback(() => {
+    if (!rightCollapsed) toggleSidePanelCollapsed("right");
+  }, [rightCollapsed, toggleSidePanelCollapsed]);
+  const collapseLeftIfOpen = useCallback(() => {
+    if (!leftCollapsed) toggleSidePanelCollapsed("left");
+  }, [leftCollapsed, toggleSidePanelCollapsed]);
+  useBreakpointDownCross(breakpoint, "md", collapseRightIfOpen);
+  useBreakpointDownCross(breakpoint, "sm", collapseLeftIfOpen);
+
   return (
-    <section className="workspace-view">
+    <section className="workspace-view" data-breakpoint={breakpoint}>
       <header>
         <h2>Workspace</h2>
         <LayoutPresetPicker />
@@ -41,7 +56,11 @@ export function WorkspaceView() {
       {error && <p className="error">Failed to load layout: {error}</p>}
 
       {layout ? (
-        <div className="workspace-frame" data-workspace-name={layout.name}>
+        <div
+          className="workspace-frame"
+          data-workspace-name={layout.name}
+          data-breakpoint={breakpoint}
+        >
           <MenuBar />
           <nav className="ribbon" aria-label="Workspace ribbon">
             <SidePanelToggle
