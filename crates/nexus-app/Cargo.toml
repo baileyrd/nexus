@@ -22,6 +22,7 @@ nexus-theme = { path = "../nexus-theme" }
 nexus-plugins = { path = "../nexus-plugins" }
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-bootstrap = { path = "../nexus-bootstrap" }
+nexus-types = { path = "../nexus-types" }
 tauri = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
 serde = { workspace = true }

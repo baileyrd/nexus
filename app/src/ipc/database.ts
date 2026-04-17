@@ -113,3 +113,9 @@ export interface LoadedBase {
 export function loadBase(relpath: string): Promise<LoadedBase> {
   return invoke<LoadedBase>("load_forge_base", { relpath });
 }
+
+/** Persist a [`LoadedBase`] to `relpath` (forge-relative). Overwrites
+ *  schema / records / views / metadata files. */
+export function saveBase(relpath: string, base: LoadedBase): Promise<void> {
+  return invoke<void>("save_forge_base", { relpath, base });
+}

@@ -182,17 +182,15 @@ async fn call_storage(
 
 /// Load a `.bases` directory into a full [`nexus_types::bases::Base`]
 /// — schema + records + views + relations + metadata — for the
-/// view renderers to consume.
+/// view renderers to consume. Read-only; see
+/// [`save_forge_base`] for the write path.
 ///
-/// Forwards to `com.nexus.storage::base_load`. Read-only; does not
-/// touch the SQLite index.
-#[tauri::command]
-pub async fn load_forge_base(
-    relpath: String,
-    runtime: State<'_, KernelRuntime>,
-) -> Result<serde_json::Value, String> {
-    call_storage(runtime, "base_load", serde_json::json!({ "path": relpath })).await
-}
+/// Definition lives below (next to `save_forge_base`) so both commands
+/// share the `resolve_in_forge` traversal guard. The function reads
+/// `schema.json` / `records.json` / `views.toml` directly from disk
+/// via [`nexus_types::bases::load_base`] rather than round-tripping
+/// through the storage plugin — the SQLite index only tracks
+/// `.bases` directory presence, not per-record contents.
 
 /// List entries under `relpath` within the active forge root.
 ///
@@ -244,6 +242,55 @@ pub async fn read_forge_file(
         name,
         content,
     })
+}
+
+/// Load a `.bases` directory at `relpath` (forge-relative) into a
+/// full [`nexus_types::bases::Base`]. Read-only — does not touch the
+/// storage engine's SQLite index. Path traversal is blocked by the
+/// [`resolve_in_forge`] helper: absolute paths and `..` components
+/// are rejected before hitting disk.
+#[tauri::command]
+pub fn load_forge_base(
+    relpath: String,
+    state: State<'_, ForgeState>,
+) -> Result<nexus_types::bases::Base, String> {
+    let abs = resolve_in_forge(&state, &relpath)?;
+    nexus_types::bases::load_base(&abs).map_err(|e| e.to_string())
+}
+
+/// Persist a [`nexus_types::bases::Base`] to the `.bases` directory
+/// at `relpath`. Overwrites schema / records / views / relations /
+/// metadata files atomically-ish (each file writes independently;
+/// use the storage layer's atomic writer in a follow-up).
+#[tauri::command]
+pub fn save_forge_base(
+    relpath: String,
+    base: nexus_types::bases::Base,
+    state: State<'_, ForgeState>,
+) -> Result<(), String> {
+    let abs = resolve_in_forge(&state, &relpath)?;
+    nexus_types::bases::save_base(&abs, &base).map_err(|e| e.to_string())
+}
+
+/// Resolve a forge-relative path to an absolute path, rejecting
+/// traversal attempts. Shared by [`load_forge_base`] /
+/// [`save_forge_base`] so both commands have identical sandbox
+/// semantics.
+fn resolve_in_forge(state: &State<'_, ForgeState>, relpath: &str) -> Result<PathBuf, String> {
+    let guard = state
+        .0
+        .lock()
+        .map_err(|_| "forge state lock poisoned".to_string())?;
+    let root = guard
+        .as_ref()
+        .map(|info| info.root.clone())
+        .ok_or_else(|| "no forge open".to_string())?;
+    drop(guard);
+    let rel = Path::new(relpath);
+    if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(format!("refusing path traversal in relpath '{relpath}'"));
+    }
+    Ok(root.join(rel))
 }
 
 /// Write content to a file within the active forge. Uses the storage

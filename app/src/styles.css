@@ -2458,6 +2458,226 @@ select.plugin-settings-input {
   border: 1px solid var(--nexus-border, #e3e6eb);
 }
 
+/* Editable .bases directory surface */
+
+.base-file-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--nexus-surface-1, #fff);
+  color: var(--nexus-text-primary, #1f232a);
+  font-size: 13px;
+}
+
+.base-file-view.loading,
+.base-file-view.error {
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.base-file-view.error {
+  color: var(--nexus-color-error, #e06c75);
+}
+
+.base-file-view-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--nexus-border, #e3e6eb);
+  background: var(--nexus-surface-2, #f7f8fa);
+}
+
+.base-file-identity {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.base-file-identity strong {
+  font-size: 14px;
+}
+
+.base-file-identity .relpath {
+  font-size: 11px;
+  color: var(--nexus-text-muted, #596070);
+  font-family: var(--nexus-mono-font, monospace);
+}
+
+.base-file-view-toolbar .base-file-view-tabs {
+  display: flex;
+  gap: 4px;
+  flex: 1 1 auto;
+  overflow-x: auto;
+}
+
+.base-file-view-toolbar .tab {
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--nexus-text-muted, #596070);
+  font-size: 12px;
+}
+
+.base-file-view-toolbar .tab.active {
+  background: var(--nexus-accent-soft, #e4ecff);
+  border-color: var(--nexus-accent, #3b82f6);
+  color: var(--nexus-accent, #3b82f6);
+}
+
+.base-file-view-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.save-indicator {
+  font-size: 11px;
+  color: var(--nexus-text-muted, #596070);
+  min-width: 56px;
+  text-align: right;
+}
+
+.save-indicator.saving {
+  color: var(--nexus-accent, #3b82f6);
+}
+
+.save-indicator.error {
+  color: var(--nexus-color-error, #e06c75);
+}
+
+.add-record {
+  padding: 3px 10px;
+  border: 1px solid var(--nexus-border, #e3e6eb);
+  border-radius: 4px;
+  background: var(--nexus-surface-1, #fff);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.add-record:hover {
+  background: var(--nexus-accent-soft, #e4ecff);
+}
+
+.base-file-records {
+  overflow: auto;
+  max-height: 45%;
+  border-bottom: 1px solid var(--nexus-border, #e3e6eb);
+}
+
+.base-file-records table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.base-file-records th,
+.base-file-records td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--nexus-border, #e3e6eb);
+  text-align: left;
+  vertical-align: top;
+  font-size: 12px;
+}
+
+.base-file-records th {
+  position: sticky;
+  top: 0;
+  background: var(--nexus-surface-2, #f7f8fa);
+  font-weight: 600;
+  z-index: 1;
+}
+
+.base-file-records .col-id {
+  width: 88px;
+  color: var(--nexus-text-muted, #596070);
+  font-family: var(--nexus-mono-font, monospace);
+}
+
+.base-file-records .col-actions {
+  width: 36px;
+  text-align: center;
+}
+
+.base-file-records .cell {
+  cursor: text;
+}
+
+.base-file-records .cell:hover {
+  background: var(--nexus-surface-2, #f7f8fa);
+}
+
+.base-file-records .cell-input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--nexus-accent, #3b82f6);
+  border-radius: 3px;
+  background: var(--nexus-surface-1, #fff);
+  font: inherit;
+  color: inherit;
+  outline: none;
+}
+
+.base-file-records .cell-null {
+  color: var(--nexus-text-muted, #596070);
+}
+
+.base-file-records .cell-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.base-file-records .cell-tag {
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--nexus-accent-soft, #e4ecff);
+  color: var(--nexus-accent, #3b82f6);
+  font-size: 11px;
+}
+
+.base-file-records .empty-row {
+  text-align: center;
+  color: var(--nexus-text-muted, #596070);
+  font-style: italic;
+  padding: 24px;
+}
+
+.base-file-records .row-delete {
+  background: transparent;
+  border: none;
+  color: var(--nexus-text-muted, #596070);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  line-height: 1;
+}
+
+.base-file-records .row-delete:hover {
+  color: var(--nexus-color-error, #e06c75);
+}
+
+.base-file-section-divider {
+  padding: 6px 12px;
+  background: var(--nexus-surface-3, #edeef3);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--nexus-text-muted, #596070);
+  font-weight: 600;
+}
+
+.base-file-view-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
 /* BaseFileView — `.bases` directory tab with a header + view switcher. */
 
 .base-view-file {
