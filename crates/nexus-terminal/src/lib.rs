@@ -60,6 +60,7 @@ mod lines;
 mod manager;
 mod session;
 mod shell;
+mod urls;
 
 pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
@@ -68,3 +69,4 @@ pub use lines::{Line, LineBuffer};
 pub use manager::{SessionManager, DEFAULT_MAX_SESSIONS};
 pub use session::{Session, SessionConfig, SessionId, Signal};
 pub use shell::{detect_default_shell, ShellSpec};
+pub use urls::{detect_urls, resolve_url, UrlKind, UrlMatch};

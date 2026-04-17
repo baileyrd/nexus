@@ -68,6 +68,15 @@ impl Line {
             repeats: 1,
         }
     }
+
+    /// Detect every URL in this line's `text_only` view (PRD-09 §6).
+    /// Convenience over [`crate::detect_urls`] with the ANSI-stripped
+    /// text. Offsets in the returned matches index into `text_only`,
+    /// not `raw`.
+    #[must_use]
+    pub fn urls(&self) -> Vec<crate::UrlMatch> {
+        crate::detect_urls(&self.text_only)
+    }
 }
 
 /// Ring buffer of structured [`Line`]s capped at `max_lines`. Oldest
