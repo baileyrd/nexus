@@ -13,6 +13,7 @@ import { useThemeStore } from "./stores/theme";
 import { useToastStore, type ToastLevel } from "./stores/toast";
 import { THEME_CHANGED_EVENT } from "./ipc/theme";
 import type { ThemeConfig } from "./ipc/theme";
+import { getPlatformInfo } from "./ipc/platform";
 import type { PluginEvent } from "./plugins/events";
 import {
   activateByUriScheme,
@@ -42,6 +43,30 @@ export default function App() {
   useEffect(() => {
     loadForge();
   }, [loadForge]);
+
+  // Publish the platform descriptor as a data attribute on <html> so
+  // platform-scoped CSS (§11: vibrancy/Mica-friendly backgrounds, CSD
+  // titlebar spacing) can take effect without shipping separate
+  // stylesheets. Chrome-effect plugins read the attribute to decide
+  // whether to request a native vibrancy layer.
+  useEffect(() => {
+    let cancelled = false;
+    getPlatformInfo()
+      .then((info) => {
+        if (cancelled) return;
+        const root = document.documentElement;
+        root.dataset.platform = info.os;
+        root.dataset.arch = info.arch;
+        if (info.supportsVibrancy) root.dataset.supportsVibrancy = "true";
+      })
+      .catch(() => {
+        // Tauri bridge unavailable (e.g. vite preview outside the app);
+        // leave attributes unset so CSS falls back to the cross-platform rules.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const unlistenPromise = listen("forge:fs-changed", () => {

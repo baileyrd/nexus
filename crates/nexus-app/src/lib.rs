@@ -134,6 +134,7 @@ pub fn run() {
             commands::get_default_layout,
             commands::get_layout_preset,
             commands::list_layout_presets,
+            commands::get_platform_info,
             persistence::get_layout_persistence,
             persistence::save_layout_persistence,
             forge::current_forge,

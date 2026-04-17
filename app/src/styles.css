@@ -2094,6 +2094,39 @@ select.plugin-settings-input {
 }
 
 /*
+ * Platform chrome hooks (PRD-07 §11). The `data-platform` attribute is
+ * set on <html> at boot from the `get_platform_info` command. CSS here
+ * only handles layout / background concerns; real native effects
+ * (macOS vibrancy, Windows Mica) are applied by a chrome-effect plugin
+ * that reads `data-supports-vibrancy` and talks to the windowing APIs.
+ */
+:root[data-platform="macos"] .menu-bar {
+  /* Leave room for the traffic-light controls when the titlebar is
+     hidden so menu entries don't slide under them. */
+  padding-left: 72px;
+}
+
+:root[data-platform="macos"][data-supports-vibrancy="true"] {
+  /* Vibrancy-friendly surface: the effect plugin paints the blurred
+     backdrop behind a transparent root, so surface backgrounds need to
+     be translucent rather than opaque for it to show through. */
+  --nx-bg-primary: rgba(255, 255, 255, 0.72);
+}
+
+:root[data-platform="windows"][data-supports-vibrancy="true"] {
+  /* Mica-friendly translucency. Same pattern as macOS — the native
+     effect paints behind; CSS leaves the seam see-through. */
+  --nx-bg-secondary: rgba(243, 243, 243, 0.5);
+}
+
+:root[data-platform="linux"] {
+  /* CSD spacing hint — concrete titlebar rendering is deferred to a
+     future platform plugin; exposing the variable now lets themes and
+     plugins target it. */
+  --nx-titlebar-height: 40px;
+}
+
+/*
  * Reduced-motion baseline (PRD-07 §14.5, WCAG 2.1 2.3.3).
  *
  * Collapses shell-chrome transitions and animations to a single tick

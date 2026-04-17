@@ -167,3 +167,42 @@ pub fn get_layout_preset(name: String) -> Result<WorkspaceLayout, String> {
 pub fn list_layout_presets() -> Vec<PresetInfo> {
     PresetRegistry::with_core_presets().list()
 }
+
+/// Platform descriptor consumed by the frontend shell to drive the
+/// `data-platform` attribute and platform-scoped CSS (PRD-07 §11).
+///
+/// The actual native window effects — macOS vibrancy, Windows Mica/Acrylic,
+/// Linux CSD — are expected to be applied by a dedicated plugin that calls
+/// into the windowing APIs; the core shell only publishes enough metadata
+/// for CSS and plugins to adapt.
+#[derive(serde::Serialize, Debug, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformInfo {
+    /// Canonical OS id. One of `"macos"`, `"windows"`, `"linux"`, or
+    /// `"unknown"` for anything else.
+    pub os: &'static str,
+    /// CPU architecture as reported by `std::env::consts::ARCH`.
+    pub arch: &'static str,
+    /// True when the current build knows how to host a native vibrancy /
+    /// Mica / blur effect on this platform. Today this is a compile-time
+    /// capability hint — a chrome-effect plugin reads it to decide whether
+    /// to request the effect; shell CSS reads it to adjust backgrounds.
+    pub supports_vibrancy: bool,
+}
+
+/// Return the platform descriptor for the running process. Cheap — fields
+/// are compile-time constants.
+#[tauri::command]
+pub fn get_platform_info() -> PlatformInfo {
+    let os = match std::env::consts::OS {
+        "macos" => "macos",
+        "windows" => "windows",
+        "linux" => "linux",
+        _ => "unknown",
+    };
+    PlatformInfo {
+        os,
+        arch: std::env::consts::ARCH,
+        supports_vibrancy: matches!(os, "macos" | "windows"),
+    }
+}
