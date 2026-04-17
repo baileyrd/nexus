@@ -14,6 +14,7 @@ import { useToastStore, type ToastLevel } from "./stores/toast";
 import { THEME_CHANGED_EVENT } from "./ipc/theme";
 import type { ThemeConfig } from "./ipc/theme";
 import type { PluginEvent } from "./plugins/events";
+import { stopAllScriptPlugins } from "./plugins/scriptRuntime";
 
 export default function App() {
   const applyTheme = useThemeStore((s) => s.applyTheme);
@@ -85,6 +86,18 @@ export default function App() {
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
+  }, []);
+
+  // On window close / WebView teardown give every loaded script plugin a
+  // chance to run `onStop` and flush its disposable store. The `beforeunload`
+  // handler fires synchronously, so we kick off the stop and let it settle
+  // on a best-effort basis (per-plugin budget enforced in stopAllScriptPlugins).
+  useEffect(() => {
+    function onBeforeUnload() {
+      void stopAllScriptPlugins();
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, []);
 
   // Surface plugin notifications (topic = "ui.notification") as toasts.

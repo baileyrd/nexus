@@ -108,12 +108,6 @@ export interface EditorKeybinding {
   key: string;
   /** Command id dispatched via `contributions.invokeCommand`. */
   commandId: string;
-  /**
-   * Reserved for `when` clause evaluation (e.g. "editorFocus",
-   * "selection"). Not yet honored; editor keybindings are currently
-   * always active while the CodeMirror surface has focus.
-   */
-  when?: string;
 }
 
 /**
@@ -756,14 +750,29 @@ export const contributions = {
   },
 
   /**
-   * Register a URI handler for the given scheme (PRD-04 §1.1). When an
-   * incoming URL whose scheme matches `handler.scheme` is dispatched,
-   * `handler.handle(url)` is called. Returns a disposable that removes
-   * the handler — call it from the plugin's `onStop`.
+   * Register a URI handler for the given scheme (PRD-04 §1.1).
+   *
+   * First-match-wins semantics (SI-2): only one handler may claim a
+   * given scheme at a time. A second registration for an already-claimed
+   * scheme is rejected with a warning and returns a no-op disposable, so
+   * plugins cannot silently shadow each other's deep-link handlers.
    */
   registerUriHandler(handler: UriHandler): Disposable {
     if (uriHandlers.has(handler.id)) {
       warn(`URI handler '${handler.id}' already registered — replacing`);
+    }
+    const scheme = handler.scheme.toLowerCase();
+    for (const existing of uriHandlers.values()) {
+      if (
+        existing.id !== handler.id &&
+        existing.scheme.toLowerCase() === scheme
+      ) {
+        warn(
+          `URI scheme '${handler.scheme}' already owned by '${existing.id}' ` +
+            `— ignoring duplicate registration from '${handler.id}'`,
+        );
+        return () => {};
+      }
     }
     uriHandlers.set(handler.id, handler);
     return () => {
@@ -786,16 +795,16 @@ export const contributions = {
       return;
     }
     const scheme = url.slice(0, colonIdx).toLowerCase();
-    let dispatched = 0;
     for (const handler of uriHandlers.values()) {
       if (handler.scheme.toLowerCase() === scheme) {
+        // First-match-wins (SI-2): registration already guarantees at
+        // most one handler per scheme, so breaking after the first match
+        // makes that invariant explicit at dispatch time as well.
         safeInvoke(`URI handler '${handler.id}'`, () => handler.handle(url));
-        dispatched += 1;
+        return;
       }
     }
-    if (dispatched === 0) {
-      warn(`dispatchUri: no handler registered for scheme '${scheme}'`);
-    }
+    warn(`dispatchUri: no handler registered for scheme '${scheme}'`);
   },
 
   /**
@@ -809,6 +818,16 @@ export const contributions = {
   registerMenuItem(item: MenuItem): Disposable {
     if (menuItems.has(item.id)) {
       warn(`menu item '${item.id}' already registered — replacing`);
+    }
+    // F-4.3.1: `order < 0` is reserved for built-ins. Plugin items
+    // (id prefixed with `plugin:…`) that try to claim a negative order
+    // get clamped to 0 so they cannot sort above the built-in row.
+    const isPlugin = item.id.startsWith("plugin:");
+    if (isPlugin && (item.order ?? 0) < 0) {
+      warn(
+        `menu item '${item.id}' uses reserved order < 0 — clamped to 0`,
+      );
+      item = { ...item, order: 0 };
     }
     menuItems.set(item.id, item);
     menuItemsSnapshot = null;
@@ -1168,17 +1187,74 @@ export function useSnippets(): Snippet[] {
  */
 let menuItemsSnapshot: MenuItem[] | null = null;
 
+/**
+ * Extract the plugin id from an item id. Returns `""` for built-ins.
+ * Used as a tiebreaker so plugin items with the same `order` sort
+ * deterministically.
+ */
+function pluginIdOf(item: MenuItem): string {
+  if (!item.id.startsWith("plugin:")) return "";
+  const rest = item.id.slice("plugin:".length);
+  const colon = rest.indexOf(":");
+  return colon === -1 ? rest : rest.slice(0, colon);
+}
+
 function menuItemsSnapshotFn(): MenuItem[] {
   if (!menuItemsSnapshot) {
     const entries = Array.from(menuItems.values());
-    menuItemsSnapshot = entries.sort((a, b) => {
-      const moA = a.menuOrder ?? 100;
-      const moB = b.menuOrder ?? 100;
+    // Group by top-level menu label, then within each menu sort built-ins
+    // first (by order) followed by plugin items (by order, pluginId tiebreaker).
+    // The first plugin item per menu is forced `separatorBefore: true` so
+    // built-ins and plugin contributions are always visually divided.
+    const byMenu = new Map<string, MenuItem[]>();
+    for (const item of entries) {
+      const list = byMenu.get(item.menu);
+      if (list) list.push(item);
+      else byMenu.set(item.menu, [item]);
+    }
+    const menuOrderFor = (label: string): number => {
+      let lo = 100;
+      for (const it of byMenu.get(label) ?? []) {
+        lo = Math.min(lo, it.menuOrder ?? 100);
+      }
+      return lo;
+    };
+    const menuLabels = Array.from(byMenu.keys()).sort((a, b) => {
+      const moA = menuOrderFor(a);
+      const moB = menuOrderFor(b);
       if (moA !== moB) return moA - moB;
-      const labelCmp = a.menu.localeCompare(b.menu);
-      if (labelCmp !== 0) return labelCmp;
-      return (a.order ?? 100) - (b.order ?? 100);
+      return a.localeCompare(b);
     });
+    const flat: MenuItem[] = [];
+    for (const label of menuLabels) {
+      const items = byMenu.get(label)!;
+      const builtins = items
+        .filter((it) => !it.id.startsWith("plugin:"))
+        .sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+      const plugins = items
+        .filter((it) => it.id.startsWith("plugin:"))
+        .sort((a, b) => {
+          const oa = a.order ?? 100;
+          const ob = b.order ?? 100;
+          if (oa !== ob) return oa - ob;
+          const pa = pluginIdOf(a);
+          const pb = pluginIdOf(b);
+          if (pa !== pb) return pa.localeCompare(pb);
+          return a.id.localeCompare(b.id);
+        });
+      flat.push(...builtins);
+      for (let i = 0; i < plugins.length; i++) {
+        const it = plugins[i]!;
+        // Force separatorBefore on the first plugin item in each menu so
+        // the built-in / plugin boundary is always visually distinct.
+        if (i === 0 && builtins.length > 0 && !it.separatorBefore) {
+          flat.push({ ...it, separatorBefore: true });
+        } else {
+          flat.push(it);
+        }
+      }
+    }
+    menuItemsSnapshot = flat;
   }
   return menuItemsSnapshot;
 }

@@ -65,9 +65,13 @@ function PaletteDialog({ onClose }: PaletteDialogProps) {
 
   function commit(item: PaletteCommand) {
     onClose();
-    // Defer dispatch until after the modal unmounts so stack traces are
-    // rooted at the palette action, not inside the unmount commit.
-    queueMicrotask(() => contributions.invokeCommand(item.commandId));
+    // Defer dispatch with a setTimeout(0) task instead of a microtask so
+    // React has fully committed the palette-close render before the
+    // dispatched command runs. If that command opens another modal
+    // (e.g. `workspace.settings`), a microtask could splice the new
+    // modal in before the palette's unmount commit and cause a one-frame
+    // overlap. A macrotask guarantees ordering: unmount → dispatch → open.
+    setTimeout(() => contributions.invokeCommand(item.commandId), 0);
   }
 
   function handleKeyDown(e: ReactKeyboardEvent) {

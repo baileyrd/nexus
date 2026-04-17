@@ -25,6 +25,45 @@ import { useToastStore, type ToastLevel } from "../stores/toast";
 /** Minimal disposable contract mirroring the contribution registry. */
 export type Disposable = () => void;
 
+/**
+ * Collects disposables and flushes them in LIFO order. Plugins push every
+ * `ctx.*.register*` return value in here and the host calls `dispose()`
+ * on plugin stop, so individual plugins don't have to maintain their own
+ * disposal array.
+ */
+export interface DisposableStore {
+  /** Track `d` for later disposal. Returns `d` unchanged for chaining. */
+  add(d: Disposable): Disposable;
+  /** Invoke every tracked disposable (LIFO) and clear the list. */
+  dispose(): void;
+  /** Number of disposables currently tracked. */
+  readonly size: number;
+}
+
+function createDisposableStore(): DisposableStore {
+  const list: Disposable[] = [];
+  return {
+    add(d) {
+      list.push(d);
+      return d;
+    },
+    dispose() {
+      while (list.length > 0) {
+        const d = list.pop()!;
+        try {
+          d();
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(`[nexusContext] disposable threw: ${String(err)}`);
+        }
+      }
+    },
+    get size() {
+      return list.length;
+    },
+  };
+}
+
 export interface NexusPluginContext {
   /** The plugin's reverse-DNS identifier. */
   pluginId: string;
@@ -179,11 +218,23 @@ export interface NexusPluginContext {
      */
     registerWebviewPanel(viewId: string, config: WebviewPanelConfig): Disposable;
   };
+
+  /**
+   * Disposable store auto-flushed when the plugin stops. Plugins that
+   * don't want to hand-roll a disposal array can push every `register*`
+   * return value here via `ctx.disposables.add(...)` and the host will
+   * call each on `onStop` (or window close).
+   */
+  disposables: DisposableStore;
 }
 
-export function createNexusContext(pluginId: string): NexusPluginContext {
+export function createNexusContext(
+  pluginId: string,
+  store: DisposableStore = createDisposableStore(),
+): NexusPluginContext {
   return {
     pluginId,
+    disposables: store,
     settings: {
       get: () => getPluginSettings(pluginId),
     },

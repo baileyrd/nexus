@@ -7,6 +7,7 @@ import {
   type TreeDataProvider,
   type TreeNode,
 } from "../../contributions";
+import { useForgeStore } from "../../stores/forge";
 
 /**
  * Generic tree panel rendered by the host shell for plugin-contributed
@@ -19,6 +20,11 @@ import {
  */
 export function GenericTreePanel({ panel }: ContentComponentProps) {
   const provider = useTreeDataProvider(panel.contentType ?? "");
+  // SI-4: re-fetch on forge switch. The provider object identity doesn't
+  // change across forge switches, but the data it returns almost certainly
+  // does (most providers key off forge root). Including the root in the
+  // dep array resets the tree state when the user opens a different forge.
+  const forgeRoot = useForgeStore((s) => s.info?.root ?? null);
   const [roots, setRoots] = useState<TreeNode[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,7 +35,7 @@ export function GenericTreePanel({ panel }: ContentComponentProps) {
     void Promise.resolve(provider.getChildren(null))
       .then(setRoots)
       .catch((err) => setError(String(err)));
-  }, [provider]);
+  }, [provider, forgeRoot]);
 
   if (!provider) {
     return (
