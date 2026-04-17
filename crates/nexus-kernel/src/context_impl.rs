@@ -76,8 +76,10 @@ impl KernelPluginContext {
             return Ok(());
         }
         tracing::warn!(
+            audit = true,
             plugin_id = %self.plugin_id,
             capability = %cap,
+            result = "denied",
             "capability denied"
         );
         Err(CapabilityError::Denied {
@@ -107,6 +109,13 @@ impl KernelPluginContext {
         })?;
 
         if !canonical.starts_with(&self.forge_root_canonical) {
+            tracing::warn!(
+                audit = true,
+                plugin_id = %self.plugin_id,
+                requested_path = %canonical.display(),
+                forge_root = %self.forge_root_canonical.display(),
+                "path traversal denied"
+            );
             return Err(Error::Io(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 format!(
@@ -173,6 +182,13 @@ impl PluginContext for KernelPluginContext {
             if parent.exists() {
                 let canon_parent = parent.canonicalize()?;
                 if !canon_parent.starts_with(&self.forge_root_canonical) {
+                    tracing::warn!(
+                        audit = true,
+                        plugin_id = %self.plugin_id,
+                        requested_path = %absolute.display(),
+                        forge_root = %self.forge_root_canonical.display(),
+                        "path traversal denied"
+                    );
                     return Err(Error::Io(std::io::Error::new(
                         std::io::ErrorKind::PermissionDenied,
                         format!(

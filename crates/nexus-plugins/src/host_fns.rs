@@ -25,6 +25,30 @@ pub const HOST_CAPABILITY_DENIED: i32 = -1001;
 /// Returned when the output buffer supplied by the plugin is too small.
 pub const HOST_BUFFER_OVERFLOW: i32 = -1002;
 
+// ─── Audit helpers ────────────────────────────────────────────────────────────
+
+fn deny_capability(plugin_id: &str, capability: &str) -> i32 {
+    tracing::warn!(
+        audit = true,
+        plugin_id,
+        capability,
+        result = "denied",
+        "capability denied"
+    );
+    HOST_CAPABILITY_DENIED
+}
+
+fn deny_path_traversal(plugin_id: &str, requested_path: &Path, forge_root: &Path) -> i32 {
+    tracing::warn!(
+        audit = true,
+        plugin_id,
+        requested_path = %requested_path.display(),
+        forge_root = %forge_root.display(),
+        "path traversal denied"
+    );
+    HOST_CAPABILITY_DENIED
+}
+
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 /// Register all host functions on `linker`.
@@ -163,7 +187,7 @@ fn register_host_kv_get(linker: &mut Linker<PluginData>) -> Result<(), PluginErr
                     return HOST_ERROR;
                 };
                 if !caller.data().capabilities.contains(Capability::KvRead) {
-                    return HOST_CAPABILITY_DENIED;
+                    return deny_capability(&plugin_id, "kv.read");
                 }
 
                 let Some(wasmtime::Extern::Memory(memory)) = caller.get_export("memory") else {
@@ -230,7 +254,7 @@ fn register_host_kv_set(linker: &mut Linker<PluginData>) -> Result<(), PluginErr
                     return HOST_ERROR;
                 };
                 if !caller.data().capabilities.contains(Capability::KvWrite) {
-                    return HOST_CAPABILITY_DENIED;
+                    return deny_capability(&plugin_id, "kv.write");
                 }
 
                 let Some(wasmtime::Extern::Memory(memory)) = caller.get_export("memory") else {
@@ -285,7 +309,7 @@ fn register_host_emit_event(linker: &mut Linker<PluginData>) -> Result<(), Plugi
                 let plugin_id = caller.data().plugin_id.clone();
 
                 if !caller.data().capabilities.contains(Capability::EventsPublish) {
-                    return HOST_CAPABILITY_DENIED;
+                    return deny_capability(&plugin_id, "events.publish");
                 }
 
                 let event_bus = caller.data().event_bus.clone();
@@ -360,7 +384,7 @@ fn register_host_write_file(linker: &mut Linker<PluginData>) -> Result<(), Plugi
                 let forge_root = caller.data().forge_root.clone();
 
                 if !caller.data().capabilities.contains(Capability::FsWrite) {
-                    return HOST_CAPABILITY_DENIED;
+                    return deny_capability(&plugin_id, "fs.write");
                 }
 
                 let Some(wasmtime::Extern::Memory(memory)) = caller.get_export("memory") else {
@@ -400,12 +424,7 @@ fn register_host_write_file(linker: &mut Linker<PluginData>) -> Result<(), Plugi
                         }
                     };
                     if !canon_parent.starts_with(&forge_root) {
-                        tracing::warn!(
-                            plugin_id = %plugin_id,
-                            "host::write_file: path traversal denied: {}",
-                            absolute.display()
-                        );
-                        return HOST_CAPABILITY_DENIED;
+                        return deny_path_traversal(&plugin_id, &absolute, &forge_root);
                     }
                 }
 
@@ -456,7 +475,7 @@ fn register_host_invoke_command(linker: &mut Linker<PluginData>) -> Result<(), P
                 let caller_plugin_id = caller.data().plugin_id.clone();
 
                 if !caller.data().capabilities.contains(Capability::IpcCall) {
-                    return HOST_CAPABILITY_DENIED;
+                    return deny_capability(&caller_plugin_id, "ipc.call");
                 }
 
                 // Get WASM memory.
@@ -570,7 +589,7 @@ fn register_host_read_file(linker: &mut Linker<PluginData>) -> Result<(), Plugin
                 let forge_root = caller.data().forge_root.clone();
 
                 if !caller.data().capabilities.contains(Capability::FsRead) {
-                    return HOST_CAPABILITY_DENIED;
+                    return deny_capability(&plugin_id, "fs.read");
                 }
 
                 let Some(wasmtime::Extern::Memory(memory)) = caller.get_export("memory") else {
@@ -597,12 +616,7 @@ fn register_host_read_file(linker: &mut Linker<PluginData>) -> Result<(), Plugin
                 // Forge root confinement: forge_root may be empty (test/stub mode),
                 // so only enforce the check when forge_root is non-empty.
                 if !forge_root.as_os_str().is_empty() && !canonical.starts_with(&forge_root) {
-                    tracing::warn!(
-                        plugin_id = %plugin_id,
-                        "host::read_file: path traversal denied: {}",
-                        canonical.display()
-                    );
-                    return HOST_CAPABILITY_DENIED;
+                    return deny_path_traversal(&plugin_id, &canonical, &forge_root);
                 }
 
                 let contents = match std::fs::read(&canonical) {
@@ -724,7 +738,7 @@ fn register_host_notify(linker: &mut Linker<PluginData>) -> Result<(), PluginErr
                 let plugin_id = caller.data().plugin_id.clone();
 
                 if !caller.data().capabilities.contains(Capability::UiNotify) {
-                    return HOST_CAPABILITY_DENIED;
+                    return deny_capability(&plugin_id, "ui.notify");
                 }
 
                 let forwarder = caller.data().event_forwarder.clone();
