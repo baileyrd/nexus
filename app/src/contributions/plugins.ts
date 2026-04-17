@@ -44,6 +44,10 @@ import {
   type PluginUiStatusItem,
 } from "../ipc/plugins";
 import { dispatchToScript, evictScriptPlugin } from "../plugins/scriptRuntime";
+import {
+  SLOW_COMMAND_CANCEL_MS,
+  usePluginStatusStore,
+} from "../plugins/status";
 import { setPluginSlashCommands } from "../editor/slashCommands";
 
 type Disposable = () => void;
@@ -51,6 +55,48 @@ type Disposable = () => void;
 function warn(msg: string, err?: unknown) {
   // eslint-disable-next-line no-console
   console.warn(`[plugins] ${msg}`, err ?? "");
+}
+
+/**
+ * Wrap a plugin command invocation with the F-8.2.1 time budget + the
+ * F-7.2.1 per-plugin error boundary: exceptions never escape past this
+ * function, but they are recorded on the plugin-status store so the
+ * Settings → Plugins panel (F-10.1.1) can surface them and offer the
+ * user a disable/uninstall action. Timings are recorded on every call;
+ * dispatches that cross `SLOW_COMMAND_CANCEL_MS` are also reported.
+ */
+async function runWithTelemetry(
+  pluginId: string,
+  commandId: string,
+  run: () => unknown | Promise<unknown>,
+): Promise<unknown> {
+  const status = usePluginStatusStore.getState();
+  const start = performance.now();
+  try {
+    const pending = Promise.resolve(run());
+    const timer = new Promise<"__timeout__">((resolve) =>
+      setTimeout(() => resolve("__timeout__"), SLOW_COMMAND_CANCEL_MS),
+    );
+    const result = await Promise.race([pending, timer]);
+    const elapsed = performance.now() - start;
+    status.noteCommandTiming(pluginId, commandId, elapsed);
+    if (result === "__timeout__") {
+      const msg = `plugin command exceeded ${SLOW_COMMAND_CANCEL_MS}ms budget`;
+      status.noteError(pluginId, `${commandId}: ${msg}`);
+      warn(`${pluginId}/${commandId} ${msg} — continuing in background`);
+      // Let the in-flight promise settle in the background so it does
+      // not leak — its eventual resolution/rejection is recorded too.
+      void pending.catch((err) => status.noteError(pluginId, String(err)));
+      return undefined;
+    }
+    return result;
+  } catch (err) {
+    const elapsed = performance.now() - start;
+    status.noteCommandTiming(pluginId, commandId, elapsed);
+    status.noteError(pluginId, `${commandId}: ${String(err)}`);
+    warn(`invoke ${pluginId}/${commandId} failed`, err);
+    return undefined;
+  }
 }
 
 /** Disposables from the current snapshot — cleared before each resync. */
@@ -66,42 +112,34 @@ async function syncCommands(): Promise<void> {
   }
 
   for (const entry of entries) {
-    const commandId = `plugin:${entry.plugin_id}:${entry.command_id}`;
-    const handler =
-      entry.runtime === "script"
-        ? async () => {
-            try {
-              const result = await dispatchToScript(
-                entry.plugin_id,
-                entry.handler_id,
-                {},
-              );
-              // eslint-disable-next-line no-console
-              console.log(`[plugin:${entry.plugin_id}] ${entry.command_id} →`, result);
-            } catch (err) {
-              warn(`script dispatch ${entry.plugin_id}/${entry.command_id} failed`, err);
-            }
-          }
-        : async () => {
-            try {
-              const result = await invokePluginCommand(entry.plugin_id, entry.command_id);
-              // eslint-disable-next-line no-console
-              console.log(`[plugin:${entry.plugin_id}] ${entry.command_id} →`, result);
-            } catch (err) {
-              warn(`invoke ${entry.plugin_id}/${entry.command_id} failed`, err);
-            }
-          };
-    activeDisposables.push(contributions.registerCommand(commandId, handler));
-    activeDisposables.push(
-      contributions.registerPaletteCommand({
-        id: commandId,
-        commandId,
-        title: entry.title,
-        category: entry.category ?? undefined,
-        icon: entry.icon ?? undefined,
-        keybinding: entry.keybinding ?? undefined,
-      }),
-    );
+    // Per-plugin error boundary (UI F-7.2.1): a single broken contribution
+    // must not abort registration for every plugin loaded after it.
+    try {
+      const commandId = `plugin:${entry.plugin_id}:${entry.command_id}`;
+      const run =
+        entry.runtime === "script"
+          ? () => dispatchToScript(entry.plugin_id, entry.handler_id, {})
+          : () => invokePluginCommand(entry.plugin_id, entry.command_id);
+      const handler = async () => {
+        await runWithTelemetry(entry.plugin_id, commandId, run);
+      };
+      activeDisposables.push(contributions.registerCommand(commandId, handler));
+      activeDisposables.push(
+        contributions.registerPaletteCommand({
+          id: commandId,
+          commandId,
+          title: entry.title,
+          category: entry.category ?? undefined,
+          icon: entry.icon ?? undefined,
+          keybinding: entry.keybinding ?? undefined,
+        }),
+      );
+    } catch (err) {
+      usePluginStatusStore
+        .getState()
+        .noteError(entry.plugin_id, `register ${entry.command_id}: ${String(err)}`);
+      warn(`register ${entry.plugin_id}/${entry.command_id} failed`, err);
+    }
   }
 }
 
@@ -116,14 +154,21 @@ async function syncPanels(): Promise<void> {
   }
 
   for (const panel of panels) {
-    const contentType = `plugin:${panel.plugin_id}:${panel.panel_id}`;
-    const pluginId = panel.plugin_id;
-    const panelId = panel.panel_id;
-    activeDisposables.push(
-      contributions.registerContentType(contentType, () =>
-        createElement(PluginPanel, { pluginId, panelId }),
-      ),
-    );
+    try {
+      const contentType = `plugin:${panel.plugin_id}:${panel.panel_id}`;
+      const pluginId = panel.plugin_id;
+      const panelId = panel.panel_id;
+      activeDisposables.push(
+        contributions.registerContentType(contentType, () =>
+          createElement(PluginPanel, { pluginId, panelId }),
+        ),
+      );
+    } catch (err) {
+      usePluginStatusStore
+        .getState()
+        .noteError(panel.plugin_id, `register panel ${panel.panel_id}: ${String(err)}`);
+      warn(`register panel ${panel.plugin_id}/${panel.panel_id} failed`, err);
+    }
   }
 
   useLayoutStore.getState().setPluginPanels(panels);
@@ -183,11 +228,17 @@ async function syncSlashCommands(): Promise<void> {
   }
 }
 
-async function syncAll(): Promise<void> {
+async function syncAll(resetPluginIds: string[] = []): Promise<void> {
   // Drop the previous snapshot's registrations before re-registering so
   // removed/renamed plugin contributions disappear cleanly.
   for (const dispose of activeDisposables) dispose();
   activeDisposables = [];
+
+  // Clear status entries for plugins that just hot-reloaded so their
+  // "failed" / "slow" badges don't linger after a successful re-sync.
+  for (const id of resetPluginIds) {
+    usePluginStatusStore.getState().clearPlugin(id);
+  }
 
   await Promise.all([
     syncCommands(),
@@ -211,7 +262,7 @@ export async function registerPluginContributions(): Promise<void> {
       for (const id of event.payload.plugin_ids) {
         evictScriptPlugin(id);
       }
-      void syncAll();
+      void syncAll(event.payload.plugin_ids);
     });
   } catch (err) {
     warn("failed to subscribe to plugins:reloaded — hot-reload→UI disabled", err);

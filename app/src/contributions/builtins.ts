@@ -5,6 +5,7 @@ import { makeGenericTreePanelFactory } from "../components/panels/GenericTreePan
 import { GeneralTab } from "../components/settings/tabs/GeneralTab";
 import { HotkeysTab } from "../components/settings/tabs/HotkeysTab";
 import { PluginsTab } from "../components/settings/tabs/PluginsTab";
+import { RunningExtensionsTab } from "../components/settings/tabs/RunningExtensionsTab";
 import { useForgeStore } from "../stores/forge";
 import { usePaletteStore } from "../stores/palette";
 import { useSettingsStore } from "../stores/settings";
@@ -62,6 +63,14 @@ export function registerBuiltins(): void {
     group: "plugins",
     component: PluginsTab,
     order: 10,
+  });
+  contributions.registerSettingsTab({
+    id: "running-extensions",
+    title: "Running extensions",
+    icon: "activity",
+    group: "plugins",
+    component: RunningExtensionsTab,
+    order: 20,
   });
 
   contributions.registerCommand("workspace.help", () => {

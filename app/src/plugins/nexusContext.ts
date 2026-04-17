@@ -21,6 +21,8 @@ import { invokePluginCommand } from "../ipc/plugins";
 import { getPluginSettings } from "../ipc/pluginSettings";
 import { publishHostEvent } from "./events";
 import { useToastStore, type ToastLevel } from "../stores/toast";
+import { useForgeStore } from "../stores/forge";
+import { useOpenFileStore } from "../stores/openFile";
 
 /** Minimal disposable contract mirroring the contribution registry. */
 export type Disposable = () => void;
@@ -220,6 +222,39 @@ export interface NexusPluginContext {
   };
 
   /**
+   * Workspace APIs (UI F-6.1.1). Read-only today — plugins that need to
+   * mutate forge contents use `ctx.ipc.call("com.nexus.storage", …)`.
+   */
+  workspace: {
+    /** Absolute filesystem path of the currently-open forge, or `null`. */
+    root(): string | null;
+    /** Human-readable forge name, or `null`. */
+    name(): string | null;
+  };
+
+  /**
+   * Active-editor APIs (UI F-6.1.1). Exposes read-only access to whatever
+   * file is open in the editor surface today. Write operations route
+   * through `ctx.ipc.call("com.nexus.storage", "write_file", …)` — a
+   * future capability-gated `editor.applyTransaction` lives behind the
+   * iframe-sandbox work (UI F-8.1.1).
+   */
+  editorActive: {
+    /** Relpath of the open file, or `null` if no file is open. */
+    relpath(): string | null;
+    /** Current in-memory content (may differ from disk if dirty). */
+    content(): string | null;
+    /** Whether the editor has unsaved changes. */
+    isDirty(): boolean;
+    /**
+     * Open a file in the editor by relpath. Convenience around the
+     * existing `useOpenFileStore.open` command that plugins previously
+     * had to reach via raw `invoke`.
+     */
+    open(relpath: string): Promise<void>;
+  };
+
+  /**
    * Disposable store auto-flushed when the plugin stops. Plugins that
    * don't want to hand-roll a disposal array can push every `register*`
    * return value here via `ctx.disposables.add(...)` and the host will
@@ -235,6 +270,16 @@ export function createNexusContext(
   return {
     pluginId,
     disposables: store,
+    workspace: {
+      root: () => useForgeStore.getState().info?.root ?? null,
+      name: () => useForgeStore.getState().info?.name ?? null,
+    },
+    editorActive: {
+      relpath: () => useOpenFileStore.getState().file?.relpath ?? null,
+      content: () => useOpenFileStore.getState().file?.content ?? null,
+      isDirty: () => useOpenFileStore.getState().isDirty,
+      open: (relpath) => useOpenFileStore.getState().open(relpath),
+    },
     settings: {
       get: () => getPluginSettings(pluginId),
     },

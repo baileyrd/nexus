@@ -9,6 +9,7 @@ import {
   type DisposableStore,
   type NexusPluginContext,
 } from "./nexusContext";
+import { usePluginStatusStore } from "./status";
 
 /** The contract a JS plugin module must satisfy. */
 export interface ScriptPlugin {
@@ -51,9 +52,12 @@ export async function loadScriptPlugin(
     const ctx = createNexusContext(pluginId);
     loaded.set(pluginId, { module: mod, ctx, store: ctx.disposables });
 
-    // Call lifecycle hooks if declared.
-    if (mod.onInit) await mod.onInit(ctx);
-    if (mod.onStart) await mod.onStart(ctx);
+    // Call lifecycle hooks with a per-plugin error boundary (UI F-7.2.1)
+    // and performance.measure instrumentation (UI F-10.3.1). A failing
+    // hook marks the plugin "failed" on the status store but never
+    // bubbles — registration for subsequent plugins must proceed.
+    await runLifecycle(pluginId, "onInit", () => mod.onInit?.(ctx));
+    await runLifecycle(pluginId, "onStart", () => mod.onStart?.(ctx));
 
     return mod;
   } finally {
@@ -78,6 +82,42 @@ export async function dispatchToScript(
 }
 
 /**
+ * Shared lifecycle-hook runner. Wraps `onInit` / `onStart` / `onStop`
+ * in a try/catch that records failures on the plugin-status store
+ * (UI F-7.2.1) and brackets the call with `performance.mark` /
+ * `performance.measure` so the cold-start cost of each plugin is visible
+ * in DevTools and in the future "Show Running Extensions" panel
+ * (UI F-10.3.1).
+ */
+async function runLifecycle(
+  pluginId: string,
+  hook: "onInit" | "onStart" | "onStop",
+  fn: () => void | Promise<void> | undefined,
+): Promise<void> {
+  const mark = `plugin:${pluginId}:${hook}`;
+  const start = performance.now();
+  try {
+    performance.mark(`${mark}:start`);
+    await fn();
+  } catch (err) {
+    usePluginStatusStore.getState().noteError(pluginId, `${hook}: ${String(err)}`);
+    // eslint-disable-next-line no-console
+    console.warn(`[scriptRuntime] ${pluginId} ${hook} threw: ${String(err)}`);
+  } finally {
+    try {
+      performance.mark(`${mark}:end`);
+      performance.measure(mark, `${mark}:start`, `${mark}:end`);
+    } catch {
+      // Some browsers throw if the start mark is missing — ignore.
+    }
+    const duration = performance.now() - start;
+    if (hook !== "onStop") {
+      usePluginStatusStore.getState().noteLifecycle(pluginId, hook, duration);
+    }
+  }
+}
+
+/**
  * Stop a single loaded plugin — run `onStop` (best-effort) and flush its
  * disposable store. Used by the shell on window close and by hot-reload
  * before it re-imports the module.
@@ -85,16 +125,8 @@ export async function dispatchToScript(
 export async function stopScriptPlugin(pluginId: string): Promise<void> {
   const entry = loaded.get(pluginId);
   if (!entry) return;
-  try {
-    if (entry.module.onStop) {
-      await entry.module.onStop(entry.ctx);
-    }
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn(`[scriptRuntime] ${pluginId} onStop threw: ${String(err)}`);
-  } finally {
-    entry.store.dispose();
-  }
+  await runLifecycle(pluginId, "onStop", () => entry.module.onStop?.(entry.ctx));
+  entry.store.dispose();
 }
 
 /**

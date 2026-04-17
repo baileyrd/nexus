@@ -1379,6 +1379,14 @@ fn build_capabilities(manifest: &PluginManifest) -> CapabilitySet {
 const SUBSCRIPTIONS_FILE: &str = "subscriptions.json";
 
 /// Load the set of disabled subscription IDs from disk.
+///
+/// A missing file is normal (first run, or all subscriptions enabled) and
+/// yields an empty set. A present-but-corrupt file **fails loud**: the
+/// corrupt contents are preserved by renaming the file to
+/// `subscriptions.json.corrupt-<unix>` and an `audit = true` warning is
+/// emitted so operators can notice that every subscription just silently
+/// re-enabled. The empty-set return keeps the plugin loadable rather than
+/// bricking it on a disk hiccup.
 fn load_disabled_subscriptions(plugin_dir: &Path) -> std::collections::HashSet<String> {
     let path = plugin_dir.join(SUBSCRIPTIONS_FILE);
     let Ok(contents) = std::fs::read_to_string(&path) else {
@@ -1389,9 +1397,26 @@ fn load_disabled_subscriptions(plugin_dir: &Path) -> std::collections::HashSet<S
         #[serde(default)]
         disabled: Vec<String>,
     }
-    serde_json::from_str::<SubscriptionState>(&contents)
-        .map(|s| s.disabled.into_iter().collect())
-        .unwrap_or_default()
+    match serde_json::from_str::<SubscriptionState>(&contents) {
+        Ok(s) => s.disabled.into_iter().collect(),
+        Err(err) => {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let backup = plugin_dir.join(format!("{SUBSCRIPTIONS_FILE}.corrupt-{ts}"));
+            let rename_result = std::fs::rename(&path, &backup);
+            tracing::warn!(
+                audit = true,
+                plugin_dir = %plugin_dir.display(),
+                error = %err,
+                backup = %backup.display(),
+                renamed = rename_result.is_ok(),
+                "corrupt subscriptions.json — falling back to all-enabled and preserving the corrupt file",
+            );
+            std::collections::HashSet::new()
+        }
+    }
 }
 
 /// Persist the set of disabled subscription IDs to disk.
