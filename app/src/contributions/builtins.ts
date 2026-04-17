@@ -274,4 +274,83 @@ export function registerBuiltins(): void {
     menuOrder: 90,
     order: 10,
   });
+
+  // ── MDX components (PRD-08 §7) ───────────────────────────────────────────
+  // Built-in components render through the same declarative PanelNode
+  // dispatcher that ships plugin webview / panel primitives, so no
+  // runtime JSX evaluation happens — preserving the strict CSP
+  // (UI F-5.1.2, no `'unsafe-eval'`). Plugins can override any of these
+  // by registering the same `name` earlier, or add new names through
+  // `ctx.editor.registerMdxComponent`.
+
+  // <Card title="..." accent="...">...</Card>
+  // Self-closing form today (`<Card title="Hi" />`) — nested children
+  // land with the CM6 block-tag scanner follow-up.
+  contributions.registerMdxComponent({
+    id: "builtin:Card",
+    name: "Card",
+    description: "Boxed container with an optional title, used for call-outs and summaries.",
+    render: (props) => {
+      const title = typeof props.title === "string" ? props.title : undefined;
+      const body = typeof props.body === "string" ? props.body : undefined;
+      return {
+        type: "vstack",
+        gap: 6,
+        children: [
+          ...(title ? [{ type: "heading" as const, value: title, level: 3 as const }] : []),
+          ...(body ? [{ type: "text" as const, value: body }] : []),
+        ],
+      };
+    },
+  });
+
+  // <Callout type="info|warn|error|note">body</Callout>
+  contributions.registerMdxComponent({
+    id: "builtin:Callout",
+    name: "Callout",
+    description: "Highlighted inline note with a severity label.",
+    render: (props) => {
+      const kind = typeof props.type === "string" ? props.type : "note";
+      const body = typeof props.body === "string" ? props.body : "";
+      return {
+        type: "hstack",
+        gap: 8,
+        children: [
+          { type: "text", value: `[${kind.toUpperCase()}]`, strong: true },
+          { type: "text", value: body },
+        ],
+      };
+    },
+  });
+
+  // <Alert level="info|warning|danger">message</Alert>
+  contributions.registerMdxComponent({
+    id: "builtin:Alert",
+    name: "Alert",
+    description: "Heavyweight notice block — renders as a heading-level banner.",
+    render: (props) => {
+      const level = typeof props.level === "string" ? props.level : "info";
+      const message = typeof props.message === "string" ? props.message : "";
+      return {
+        type: "vstack",
+        gap: 4,
+        children: [
+          { type: "heading", value: `${level.toUpperCase()} ALERT`, level: 3 },
+          { type: "text", value: message },
+        ],
+      };
+    },
+  });
+
+  // <Badge label="..." /> — tiny status chip.
+  contributions.registerMdxComponent({
+    id: "builtin:Badge",
+    name: "Badge",
+    description: "Inline status chip.",
+    render: (props) => ({
+      type: "text",
+      value: typeof props.label === "string" ? `[${props.label}]` : "[badge]",
+      strong: true,
+    }),
+  });
 }

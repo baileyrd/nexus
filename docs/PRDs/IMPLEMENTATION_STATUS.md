@@ -77,12 +77,12 @@
 **Evidence:** [crates/nexus-theme/src/core_plugin.rs](crates/nexus-theme/src/core_plugin.rs), [app/src/contributions/registry.ts](app/src/contributions/registry.ts).
 
 ### PRD-08 — Editor Engine 🟡
-**Shipped:** 3,718 LoC block-tree core — `Block`, `BlockType`, transactions (insert/delete/merge/split), undo tree, annotations, `EditorCorePlugin`; CodeMirror 6 surface with syntax highlighting, keybindings, decoration compartments, snippet compartment, 800 ms debounced `editor_sync_content` IPC. **PRD-08 §4 has been amended** (commit 6f3b36d) to document CM6-owns-text + debounced-sync as canonical and retire the original `BlockPositionMap` spec — plugin authors reading §4.1/§4.4 now see the actual architecture.
+**Shipped:** 3,718 LoC block-tree core — `Block`, `BlockType`, transactions (insert/delete/merge/split), undo tree, annotations, `EditorCorePlugin`; CodeMirror 6 surface with syntax highlighting, keybindings, decoration compartments, snippet compartment, 800 ms debounced `editor_sync_content` IPC. **PRD-08 §4 has been amended** (commit 6f3b36d) to document CM6-owns-text + debounced-sync as canonical and retire the original `BlockPositionMap` spec — plugin authors reading §4.1/§4.4 now see the actual architecture. **PRD-08 §7 MDX Component Runtime now shipping** — `contributions.registerMdxComponent`, `ctx.editor.registerMdxComponent`, a CM6 `ViewPlugin` that scans visible text for `<Name prop="val" />` tags and renders each as a declarative-`PanelNode` widget via a host-owned DOM dispatcher (no `@mdx-js/mdx`, no `'unsafe-eval'`, CSP-safe). Built-in components `Card`, `Callout`, `Alert`, `Badge` registered in `builtins.ts`; hot-reload re-configures the compartment on any register/dispose.
 **Gaps:**
-- MDX component rendering (JSX component registry in editor) absent.
+- MDX block-form components (`<Card>…</Card>` with nested markdown children) — v1 supports self-closing only.
 - Database view blocks (`[[{db:query}]]`) — no query executor or grid renderer.
 - Inline AI edit suggestions — tool hooks exist, no UI.
-**Evidence:** [crates/nexus-editor/src/](crates/nexus-editor/src/) (block, transaction, undo_tree, tree, annotation, core_plugin), [app/src/components/surfaces/EditorSurface.tsx](app/src/components/surfaces/EditorSurface.tsx), [docs/PRDs/08-editor-engine.md §4.1/§4.4](docs/PRDs/08-editor-engine.md).
+**Evidence:** [crates/nexus-editor/src/](crates/nexus-editor/src/), [app/src/components/surfaces/EditorSurface.tsx](app/src/components/surfaces/EditorSurface.tsx), [app/src/editor/mdxComponentExtension.ts](app/src/editor/mdxComponentExtension.ts), [app/src/contributions/builtins.ts](app/src/contributions/builtins.ts), [docs/PRDs/08-editor-engine.md §4.1/§4.4/§7](docs/PRDs/08-editor-engine.md).
 
 ### PRD-09 — Terminal & Process Manager 🔴
 **Shipped:** Nothing. `nexus-tui` crate exists but is an alternate CLI frontend, not a PTY host.

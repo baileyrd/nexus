@@ -143,6 +143,49 @@ export interface Snippet {
 }
 
 /**
+ * An MDX component contributed via the registry (PRD-08 §7 MDX Component
+ * Runtime). The editor scans markdown / MDX text for `<ComponentName ... />`
+ * self-closing tags, looks the name up in this registry, calls `render`
+ * with the parsed attribute map, and draws the returned [`PanelNode`] tree
+ * as a CM6 widget at the tag's source range.
+ *
+ * Security (the reason we do not use `@mdx-js/mdx`'s `evaluate()`):
+ *   The canonical MDX runtime compiles JSX to JS and runs it via
+ *   `new Function`, which requires a CSP `'unsafe-eval'` directive. We
+ *   shipped a strict CSP (UI F-5.1.2) that forbids `'unsafe-eval'` in
+ *   production, so plugin-evaluated JSX is off the table. Instead, MDX
+ *   components are declarative: each component's `render` returns a
+ *   primitive [`PanelNode`] tree the host already knows how to draw
+ *   (same dispatcher as [`registerPanelView`]). No plugin-evaluated
+ *   code ever reaches the shell origin.
+ *
+ * Plugin components are namespaced: id `"plugin:<pluginId>:<Name>"`;
+ * `name` remains the unprefixed tag plugin authors write (`<Card>`).
+ */
+export interface MdxComponent {
+  /** Stable id; namespaced for plugin entries. */
+  id: string;
+  /**
+   * JSX tag name, case-sensitive. Must match `/^[A-Z][A-Za-z0-9]*$/` —
+   * JSX treats lowercase tags as intrinsic HTML elements, so component
+   * names must start uppercase to be distinguishable from plain markdown.
+   */
+  name: string;
+  /**
+   * Short description shown in `nexus plugin list` / autocomplete (future).
+   * Not rendered in the editor itself.
+   */
+  description?: string;
+  /**
+   * Render the component. Receives the attribute map parsed from the JSX
+   * tag (`<Card title="Hi" count={3} />` → `{ title: "Hi", count: 3 }`;
+   * unquoted numbers and booleans are coerced). Returns a primitive
+   * [`PanelNode`] tree that the host's declarative dispatcher walks.
+   */
+  render(props: Record<string, unknown>): PanelNode;
+}
+
+/**
  * A single node in a plugin-contributed tree view (PRD-07 §8 tree data provider).
  * `children` is omitted or undefined for leaf nodes, or null for unexpanded
  * branch nodes (lazy-load not yet triggered).
@@ -330,6 +373,10 @@ const treeDataProviders = new Map<string, TreeDataProvider>();
 const treeDataProviderListeners = new Set<() => void>();
 const snippets = new Map<string, Snippet>();
 const snippetListeners = new Set<() => void>();
+const mdxComponents = new Map<string, MdxComponent>();
+const mdxComponentListeners = new Set<() => void>();
+/** Secondary index from JSX tag name → component id. Name→id is 1:1 (first-wins). */
+const mdxComponentByName = new Map<string, string>();
 
 /**
  * File extension → content-type id map. Keys are lowercase extensions
@@ -1027,6 +1074,81 @@ export const contributions = {
       snippetListeners.delete(fn);
     };
   },
+
+  /**
+   * Register an MDX component contribution (PRD-08 §7). The editor scans
+   * text for `<Name prop="value" />` patterns and renders each match as a
+   * CM6 widget using this component's declarative `render` function.
+   *
+   * Name collisions follow first-wins (same policy as keybindings and
+   * snippets): if two plugins register `<Card>`, the first wins and the
+   * second is rejected with a console warning.
+   *
+   * Component names must match `/^[A-Z][A-Za-z0-9]*$/` — JSX reserves
+   * lowercase tags for intrinsic HTML elements, and allowing them here
+   * would let a plugin shadow (e.g.) `<div>` in the scanner's view.
+   */
+  registerMdxComponent(component: MdxComponent): Disposable {
+    if (!/^[A-Z][A-Za-z0-9]*$/.test(component.name)) {
+      warn(
+        `MDX component name '${component.name}' must start with an ` +
+          "uppercase letter and contain only alphanumerics — rejecting",
+      );
+      return () => {};
+    }
+    if (mdxComponents.has(component.id)) {
+      warn(`MDX component '${component.id}' already registered — replacing`);
+      // On replace, clear the old name→id mapping too.
+      const prev = mdxComponents.get(component.id)!;
+      if (mdxComponentByName.get(prev.name) === prev.id) {
+        mdxComponentByName.delete(prev.name);
+      }
+    }
+    // First-wins on name collisions across different ids.
+    const ownerId = mdxComponentByName.get(component.name);
+    if (ownerId && ownerId !== component.id) {
+      warn(
+        `MDX component name '${component.name}' already owned by '${ownerId}' ` +
+          `— ignoring duplicate registration from '${component.id}'`,
+      );
+      return () => {};
+    }
+    mdxComponents.set(component.id, component);
+    mdxComponentByName.set(component.name, component.id);
+    mdxComponentsSnapshot = null;
+    mdxComponentListeners.forEach((fn) => fn());
+    return () => {
+      if (mdxComponents.get(component.id) === component) {
+        mdxComponents.delete(component.id);
+        if (mdxComponentByName.get(component.name) === component.id) {
+          mdxComponentByName.delete(component.name);
+        }
+        mdxComponentsSnapshot = null;
+        mdxComponentListeners.forEach((fn) => fn());
+      }
+    };
+  },
+
+  /**
+   * Look up an MDX component by its JSX tag name (case-sensitive).
+   * Returns `undefined` if no component is registered for that name.
+   */
+  resolveMdxComponent(name: string): MdxComponent | undefined {
+    const id = mdxComponentByName.get(name);
+    return id ? mdxComponents.get(id) : undefined;
+  },
+
+  /** Return every registered MDX component, in registration order. */
+  listMdxComponents(): MdxComponent[] {
+    return mdxComponentsSnapshotFn();
+  },
+
+  subscribeMdxComponents(fn: () => void): Disposable {
+    mdxComponentListeners.add(fn);
+    return () => {
+      mdxComponentListeners.delete(fn);
+    };
+  },
 };
 
 /** Reset all registrations. Test-only. */
@@ -1050,6 +1172,8 @@ export function __resetContributions() {
   menuItemListeners.clear();
   contextMenuItems.clear();
   snippets.clear();
+  mdxComponents.clear();
+  mdxComponentByName.clear();
   contentTypeListeners.clear();
   paletteListeners.clear();
   settingsTabListeners.clear();
@@ -1060,6 +1184,8 @@ export function __resetContributions() {
   fileHandlerListeners.clear();
   contextMenuListeners.clear();
   snippetListeners.clear();
+  mdxComponentListeners.clear();
+  mdxComponentsSnapshot = null;
   paletteSnapshot = null;
   settingsTabsSnapshot = null;
   editorBlockTypesSnapshot = null;
@@ -1260,6 +1386,29 @@ export function useSnippets(): Snippet[] {
     (notify) => contributions.subscribeSnippets(notify),
     snippetSnapshotFn,
     snippetSnapshotFn,
+  );
+}
+
+/** Cached snapshot of the MDX component list. Insertion order. */
+let mdxComponentsSnapshot: MdxComponent[] | null = null;
+
+function mdxComponentsSnapshotFn(): MdxComponent[] {
+  if (!mdxComponentsSnapshot) {
+    mdxComponentsSnapshot = Array.from(mdxComponents.values());
+  }
+  return mdxComponentsSnapshot;
+}
+
+/**
+ * React hook returning every registered MDX component. Consumed by the
+ * CM6 `mdxComponentExtension` so widget decorations re-render when a
+ * plugin hot-reloads its component set.
+ */
+export function useMdxComponents(): MdxComponent[] {
+  return useSyncExternalStore(
+    (notify) => contributions.subscribeMdxComponents(notify),
+    mdxComponentsSnapshotFn,
+    mdxComponentsSnapshotFn,
   );
 }
 

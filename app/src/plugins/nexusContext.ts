@@ -11,6 +11,7 @@ import {
   type EditorBlockType,
   type EditorDecorationProvider,
   type EditorKeybinding,
+  type MdxComponent,
   type MenuItem,
   type PanelRenderFn,
   type Snippet,
@@ -108,6 +109,14 @@ export interface NexusPluginContext {
      * Returns a disposable that removes the snippet on plugin stop.
      */
     registerSnippet(snippet: Snippet): Disposable;
+    /**
+     * Register an MDX component (PRD-08 §7). The editor scans markdown /
+     * MDX text for `<Name prop="value" />` patterns and renders each
+     * match as a widget by calling `render(props)` and drawing the
+     * returned `PanelNode` tree. Declarative-only — the host never
+     * evaluates plugin-supplied JSX (strict CSP, no `'unsafe-eval'`).
+     */
+    registerMdxComponent(component: MdxComponent): Disposable;
   };
 
   /**
@@ -349,6 +358,8 @@ export function createNexusContext(
         contributions.registerEditorKeybinding(binding),
       registerSnippet: (snippet) =>
         contributions.registerSnippet(snippet),
+      registerMdxComponent: (component) =>
+        contributions.registerMdxComponent(component),
     },
     ui: {
       notify: (level, message) => {

@@ -21,6 +21,7 @@ import { bracketMatching, foldGutter, indentOnInput, syntaxHighlighting, default
 import { liveMarkdown } from "../../editor/liveMarkdown";
 import { slashCommands } from "../../editor/slashCommandExtension";
 import { buildSnippetExtension, filterSnippetsForExt } from "../../editor/snippetExtension";
+import { buildMdxComponentExtension } from "../../editor/mdxComponentExtension";
 import { contributions, type EditorKeybinding } from "../../contributions";
 import {
   useEditorPrefsStore,
@@ -97,6 +98,18 @@ function currentSnippetExtension(filePath: string) {
   return buildSnippetExtension(filterSnippetsForExt(contributions.listSnippets(), ext));
 }
 
+/**
+ * Build the MDX-component widget extension from the current registry
+ * snapshot (PRD-08 §7). Hot-reload safe: the EditorSurface subscribes
+ * to `subscribeMdxComponents` and reconfigures the compartment when a
+ * plugin adds or removes a component.
+ */
+function currentMdxComponentExtension(): Extension {
+  return buildMdxComponentExtension(contributions.listMdxComponents(), (commandId) =>
+    contributions.invokeCommand(commandId),
+  );
+}
+
 /** Extension for the chosen keybinding mode. Vim is a full input-mode
  *  plugin; Emacs is a keymap overlay on top of the defaults. */
 function keybindingModeExtension(mode: KeybindingMode): Extension {
@@ -129,6 +142,7 @@ function getExtensions(
   pluginDecorationsCompartment: Compartment,
   pluginKeymapCompartment: Compartment,
   snippetCompartment: Compartment,
+  mdxComponentCompartment: Compartment,
   keybindingCompartment: Compartment,
   viewModeCompartment: Compartment,
   initialKeybindingMode: KeybindingMode,
@@ -154,6 +168,7 @@ function getExtensions(
     ...(isMarkdown ? [markdown(), slashCommands()] : []),
     viewModeCompartment.of(viewModeExtension(initialViewMode, isMarkdown)),
     snippetCompartment.of(currentSnippetExtension(filePath)),
+    mdxComponentCompartment.of(currentMdxComponentExtension()),
     pluginKeymapCompartment.of(currentPluginKeymap()),
     keymap.of([
       ...defaultKeymap,
@@ -191,6 +206,7 @@ export function EditorSurface({
   const pluginDecorationsCompartment = useMemo(() => new Compartment(), []);
   const pluginKeymapCompartment = useMemo(() => new Compartment(), []);
   const snippetCompartment = useMemo(() => new Compartment(), []);
+  const mdxComponentCompartment = useMemo(() => new Compartment(), []);
   const keybindingCompartment = useMemo(() => new Compartment(), []);
   const viewModeCompartment = useMemo(() => new Compartment(), []);
 
@@ -215,6 +231,7 @@ export function EditorSurface({
         pluginDecorationsCompartment,
         pluginKeymapCompartment,
         snippetCompartment,
+        mdxComponentCompartment,
         keybindingCompartment,
         viewModeCompartment,
         keybindingMode,
@@ -280,15 +297,29 @@ export function EditorSurface({
         ),
       });
     };
+    const resyncMdxComponents = () => {
+      const view = viewRef.current;
+      if (!view) return;
+      view.dispatch({
+        effects: mdxComponentCompartment.reconfigure(currentMdxComponentExtension()),
+      });
+    };
     const offDec = contributions.subscribeEditorDecorationProviders(resyncDecorations);
     const offKey = contributions.subscribeEditorKeybindings(resyncKeymap);
     const offSnip = contributions.subscribeSnippets(resyncSnippets);
+    const offMdx = contributions.subscribeMdxComponents(resyncMdxComponents);
     return () => {
       offDec();
       offKey();
       offSnip();
+      offMdx();
     };
-  }, [pluginDecorationsCompartment, pluginKeymapCompartment, snippetCompartment]);
+  }, [
+    pluginDecorationsCompartment,
+    pluginKeymapCompartment,
+    snippetCompartment,
+    mdxComponentCompartment,
+  ]);
 
   // Reconfigure keybinding / view-mode compartments when the user flips
   // the corresponding setting. Both ride on the editorPrefs store.

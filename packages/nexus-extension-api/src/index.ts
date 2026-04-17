@@ -152,6 +152,28 @@ export type PanelNode =
 
 export type PanelRenderFn = () => PanelNode;
 
+// ─── MDX component runtime (PRD-08 §7) ───────────────────────────────────────
+
+/**
+ * An MDX component that the editor renders inline when it sees a
+ * matching self-closing JSX tag in markdown / MDX files.
+ *
+ * The host never evaluates plugin-supplied JSX: the attribute list is
+ * parsed to a plain object, passed to `render`, and the returned
+ * `PanelNode` tree is walked by a host-owned declarative dispatcher.
+ * Same trade-off as `registerPanelView` — approved primitives only,
+ * no HTML escape hatch.
+ *
+ * Component names must start with an uppercase letter (JSX tag rule)
+ * and match `/^[A-Z][A-Za-z0-9]*$/`.
+ */
+export interface MdxComponent {
+  id: string;
+  name: string;
+  description?: string;
+  render(props: Record<string, unknown>): PanelNode;
+}
+
 // ─── Host-provided context ───────────────────────────────────────────────────
 
 export interface NexusPluginContext {
@@ -178,6 +200,11 @@ export interface NexusPluginContext {
     registerDecorationProvider(provider: EditorDecorationProvider): Disposable;
     registerKeybinding(binding: EditorKeybinding): Disposable;
     registerSnippet(snippet: Snippet): Disposable;
+    /**
+     * Register an MDX component — the editor scans for matching
+     * self-closing JSX tags and renders each as a widget. PRD-08 §7.
+     */
+    registerMdxComponent(component: MdxComponent): Disposable;
   };
 
   ui: {
