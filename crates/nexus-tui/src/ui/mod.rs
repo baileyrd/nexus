@@ -12,6 +12,7 @@ mod backlinks;
 mod file_tree;
 mod status_bar;
 mod tasks;
+mod terminal;
 mod viewer;
 
 /// Render the full TUI layout.
@@ -30,8 +31,10 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
 
     file_tree::render(frame, app, tree_area);
 
-    // Right pane: task view replaces the viewer when active.
-    if app.task_view.active {
+    // Right pane: terminal panel wins over task view wins over viewer.
+    if app.terminal.active {
+        terminal::render(frame, app, right_area);
+    } else if app.task_view.active {
         tasks::render(frame, app, right_area);
     } else {
         // Split right pane for backlinks when visible.

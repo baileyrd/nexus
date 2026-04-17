@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use nexus_bootstrap::storage as ipc;
 use nexus_bootstrap::storage::{BacklinkResult, SearchResult, TaskFilter, TaskRecord};
+use nexus_bootstrap::terminal as term_ipc;
+use nexus_bootstrap::terminal::OutputLine;
 use nexus_bootstrap::{build_tui_runtime, Runtime};
 use ratatui::widgets::ListState;
 use tokio::runtime::Runtime as TokioRuntime;
@@ -24,6 +26,8 @@ pub enum Mode {
     Search,
     /// In-file find bar.
     Find,
+    /// Terminal input mode — keystrokes go to the PTY.
+    Terminal,
 }
 
 /// Which pane has keyboard focus.
@@ -435,6 +439,50 @@ impl Default for StatusInfo {
     }
 }
 
+// ── TerminalPanelState ───────────────────────────────────────────────────────
+
+/// State for the in-TUI terminal panel (PRD-09 §14.1, backed by
+/// `com.nexus.terminal` core-plugin dispatch via
+/// [`nexus_bootstrap::terminal`]). The panel replaces the viewer when
+/// active, mirroring the existing `TaskViewState` pattern.
+pub struct TerminalPanelState {
+    /// Whether the panel currently replaces the viewer.
+    pub active: bool,
+    /// Opaque session id issued by the terminal core plugin. `None`
+    /// until the user first opens the panel — we spawn on demand so
+    /// sessions don't leak when the panel is never used.
+    pub session_id: Option<String>,
+    /// Cached snapshot of the session's line buffer. Refreshed on
+    /// every pump tick while the panel is visible.
+    pub lines: Vec<OutputLine>,
+    /// User input buffer for the current prompt. Flushed to the PTY
+    /// on Enter.
+    pub input: String,
+    /// Last observed line count so the next refresh can detect whether
+    /// new output arrived. Avoids re-cloning the whole `lines` vec
+    /// when nothing changed.
+    pub last_line_count: usize,
+}
+
+impl TerminalPanelState {
+    /// Create a fresh, inactive panel with no session.
+    pub fn new() -> Self {
+        Self {
+            active: false,
+            session_id: None,
+            lines: Vec::new(),
+            input: String::new(),
+            last_line_count: 0,
+        }
+    }
+}
+
+impl Default for TerminalPanelState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── TuiApp ────────────────────────────────────────────────────────────────────
 
 /// Top-level application state.
@@ -455,6 +503,8 @@ pub struct TuiApp {
     pub backlinks: BacklinksState,
     /// Task list view state.
     pub task_view: TaskViewState,
+    /// Terminal panel state.
+    pub terminal: TerminalPanelState,
     /// Cached status bar statistics.
     pub status_info: StatusInfo,
     /// Nexus runtime providing the kernel plugin context used for all storage
@@ -495,6 +545,7 @@ impl TuiApp {
             find: FindState::new(),
             backlinks: BacklinksState::new(),
             task_view: TaskViewState::new(),
+            terminal: TerminalPanelState::new(),
             status_info: StatusInfo::new(),
             runtime,
             rt,
@@ -671,6 +722,103 @@ impl TuiApp {
         match ipc::query_tasks(&self.runtime, &self.rt, &TaskFilter::default()) {
             Ok(records) => self.task_view.load(records),
             Err(_) => self.task_view.load(Vec::new()),
+        }
+    }
+
+    // ── Terminal panel ────────────────────────────────────────────────────────
+
+    /// Open the terminal panel, spawning a PTY session on first open.
+    /// Subsequent opens reuse the existing session so scrollback
+    /// survives a hide/show toggle.
+    pub fn open_terminal(&mut self) {
+        self.terminal.active = true;
+        if self.terminal.session_id.is_none() {
+            let args = term_ipc::CreateSessionArgs {
+                name: Some("tui-terminal".into()),
+                working_dir: Some(self.forge_root.display().to_string()),
+                ..Default::default()
+            };
+            match term_ipc::create_session(&self.runtime, &self.rt, args) {
+                Ok(id) => {
+                    self.terminal.session_id = Some(id);
+                    self.terminal.lines.clear();
+                    self.terminal.last_line_count = 0;
+                    self.terminal.input.clear();
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to open terminal session");
+                    self.terminal.active = false;
+                }
+            }
+        }
+    }
+
+    /// Hide the terminal panel without closing the underlying session
+    /// — scrollback survives and the next open restores it. Users
+    /// explicitly close via [`Self::kill_terminal`].
+    pub fn hide_terminal(&mut self) {
+        self.terminal.active = false;
+    }
+
+    /// Close the terminal session outright. Called when the user hits
+    /// Ctrl+D in the terminal panel or quits the app.
+    pub fn kill_terminal(&mut self) {
+        if let Some(id) = self.terminal.session_id.take() {
+            if let Err(e) = term_ipc::close_session(&self.runtime, &self.rt, &id) {
+                tracing::debug!(error = %e, "terminal close_session returned error (child may already be gone)");
+            }
+        }
+        self.terminal.active = false;
+        self.terminal.lines.clear();
+        self.terminal.input.clear();
+        self.terminal.last_line_count = 0;
+    }
+
+    /// Pump the PTY once (short timeout) and refresh the cached line
+    /// snapshot. Called from the TUI event loop every few frames so
+    /// long-running commands surface output without blocking input.
+    pub fn pump_terminal(&mut self) {
+        let Some(id) = self.terminal.session_id.clone() else {
+            return;
+        };
+        // Short timeout: we want to return to input handling quickly.
+        if let Err(e) = term_ipc::pump(&self.runtime, &self.rt, &id, 50) {
+            tracing::debug!(error = %e, "terminal pump failed");
+            return;
+        }
+        match term_ipc::read_output(&self.runtime, &self.rt, &id, None, None) {
+            Ok(lines) => {
+                if lines.len() != self.terminal.last_line_count {
+                    self.terminal.last_line_count = lines.len();
+                    self.terminal.lines = lines;
+                }
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "terminal read_output failed");
+            }
+        }
+    }
+
+    /// Flush the user's current input buffer as a complete command
+    /// (appending a newline) to the PTY. Clears the buffer on success.
+    pub fn submit_terminal_input(&mut self) {
+        let Some(id) = self.terminal.session_id.clone() else {
+            return;
+        };
+        let line = std::mem::take(&mut self.terminal.input);
+        if let Err(e) = term_ipc::send_input(&self.runtime, &self.rt, &id, &line) {
+            tracing::warn!(error = %e, "terminal send_input failed");
+        }
+    }
+
+    /// Write raw bytes to the PTY — used for control sequences like
+    /// Ctrl+C (`\x03`), Ctrl+D (`\x04`), arrow keys, …
+    pub fn send_terminal_raw(&mut self, data: &[u8]) {
+        let Some(id) = self.terminal.session_id.clone() else {
+            return;
+        };
+        if let Err(e) = term_ipc::send_raw_input(&self.runtime, &self.rt, &id, data) {
+            tracing::warn!(error = %e, "terminal send_raw_input failed");
         }
     }
 

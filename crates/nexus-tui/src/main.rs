@@ -63,6 +63,15 @@ fn run(terminal: &mut DefaultTerminal, app: &mut TuiApp) -> Result<()> {
             input::handle_event(app, evt)?;
         }
 
+        // Pump the PTY whenever the terminal panel is visible so
+        // long-running commands surface new output between keystrokes.
+        // The call uses a 50 ms internal timeout and returns
+        // immediately when there's nothing to read, so an idle
+        // session doesn't slow the render loop.
+        if app.terminal.active {
+            app.pump_terminal();
+        }
+
         if app.should_quit {
             return Ok(());
         }

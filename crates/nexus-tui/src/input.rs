@@ -28,6 +28,7 @@ pub fn handle_event(app: &mut TuiApp, event: Event) -> Result<()> {
             Mode::Normal => handle_normal_key(app, key)?,
             Mode::Search => handle_search_key(app, key)?,
             Mode::Find => handle_find_key(app, key)?,
+            Mode::Terminal => handle_terminal_key(app, key)?,
         },
         Event::Mouse(mouse) => handle_mouse(app, mouse)?,
         _ => {}
@@ -78,6 +79,16 @@ fn handle_normal_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             app.task_view.toggle();
             if app.task_view.active {
                 app.load_tasks();
+            }
+            return Ok(());
+        }
+        // Open terminal panel + switch to Terminal mode so keystrokes
+        // start flowing into the PTY. Bound on a capital `T` so it
+        // doesn't collide with the task-view toggle.
+        (KeyModifiers::SHIFT, KeyCode::Char('T')) | (_, KeyCode::Char('T')) => {
+            app.open_terminal();
+            if app.terminal.active {
+                app.mode = Mode::Terminal;
             }
             return Ok(());
         }
@@ -257,6 +268,50 @@ fn scroll_to_match(app: &mut TuiApp) {
     if let Some(&(line_idx, _col)) = app.find.matches.get(app.find.current_match) {
         app.viewer.scroll_offset = line_idx;
     }
+}
+
+// ── Terminal mode ─────────────────────────────────────────────────────────────
+
+fn handle_terminal_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
+    match (key.modifiers, key.code) {
+        // Exit Terminal mode back to Normal. Leaves the session alive
+        // so users can come back to it. Use `Ctrl+D` to actually kill.
+        (KeyModifiers::NONE, KeyCode::Esc) => {
+            app.mode = Mode::Normal;
+            app.hide_terminal();
+        }
+        // Send Ctrl+C as SIGINT to the child process group. We do this
+        // via raw input (0x03) rather than the IDE quit path because
+        // Ctrl+C in a terminal panel must target the running command,
+        // not the TUI itself.
+        (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+            app.send_terminal_raw(&[0x03]);
+        }
+        // Ctrl+D — EOF / session close. Kills the session and drops
+        // back to Normal mode.
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+            app.kill_terminal();
+            app.mode = Mode::Normal;
+        }
+        // Enter flushes the input buffer as one command.
+        (KeyModifiers::NONE, KeyCode::Enter) => {
+            app.submit_terminal_input();
+        }
+        // Backspace edits the input buffer.
+        (KeyModifiers::NONE, KeyCode::Backspace) => {
+            app.terminal.input.pop();
+        }
+        // Any other printable character: append to the buffer. We do
+        // NOT forward keystrokes live to the PTY — we line-buffer on
+        // the TUI side so the panel is a shell-prompt shape, not a
+        // raw xterm. Full PTY pass-through is a future slice once
+        // we've solved in-app terminfo rendering.
+        (_, KeyCode::Char(c)) => {
+            app.terminal.input.push(c);
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 // ── Mouse handling ────────────────────────────────────────────────────────────

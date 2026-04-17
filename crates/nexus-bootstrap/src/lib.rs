@@ -31,6 +31,7 @@ use nexus_plugins::{
 
 pub mod database;
 pub mod storage;
+pub mod terminal;
 
 /// Render a markdown note to a standalone HTML string.
 ///
@@ -208,6 +209,7 @@ fn register_core_plugins(
     use nexus_editor::EditorCorePlugin;
     use nexus_security::SecurityCorePlugin;
     use nexus_storage::{StorageConfig, StorageCorePlugin};
+    use nexus_terminal::TerminalCorePlugin;
     use nexus_theme::ThemeCorePlugin;
 
     // Security first so audit events are available before other plugins emit.
@@ -488,6 +490,54 @@ fn register_core_plugins(
             Box::new(AiCorePlugin::new()),
         )
         .context("failed to register com.nexus.ai")?;
+
+    // Terminal & process manager — PRD-09. Pure-library crate wrapped
+    // behind `com.nexus.terminal` so UI / script plugins reach it over
+    // dispatch rather than linking it directly (ARCHITECTURE §7 invariant #3).
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.terminal",
+                "Terminal",
+                LifecycleFlags::NONE,
+                &[
+                    (
+                        "create_session",
+                        nexus_terminal::HANDLER_CREATE_SESSION,
+                    ),
+                    (
+                        "close_session",
+                        nexus_terminal::HANDLER_CLOSE_SESSION,
+                    ),
+                    ("send_input", nexus_terminal::HANDLER_SEND_INPUT),
+                    (
+                        "send_raw_input",
+                        nexus_terminal::HANDLER_SEND_RAW_INPUT,
+                    ),
+                    ("pump", nexus_terminal::HANDLER_PUMP),
+                    ("read_output", nexus_terminal::HANDLER_READ_OUTPUT),
+                    (
+                        "search_output",
+                        nexus_terminal::HANDLER_SEARCH_OUTPUT,
+                    ),
+                    (
+                        "wait_for_pattern",
+                        nexus_terminal::HANDLER_WAIT_FOR_PATTERN,
+                    ),
+                    (
+                        "get_session_info",
+                        nexus_terminal::HANDLER_GET_SESSION_INFO,
+                    ),
+                    (
+                        "list_sessions",
+                        nexus_terminal::HANDLER_LIST_SESSIONS,
+                    ),
+                ],
+            ),
+            forge_root,
+            Box::new(TerminalCorePlugin::new()),
+        )
+        .context("failed to register com.nexus.terminal")?;
 
     Ok(())
 }

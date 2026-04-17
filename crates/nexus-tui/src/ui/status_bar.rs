@@ -20,6 +20,7 @@ pub fn render(frame: &mut Frame, app: &TuiApp, area: Rect) {
         Mode::Normal => (" NORMAL ", Color::Green),
         Mode::Search => (" SEARCH ", Color::Yellow),
         Mode::Find => (" FIND ", Color::Cyan),
+        Mode::Terminal => (" TERM ", Color::Magenta),
     };
     let mode_span = Span::styled(
         mode_label,
