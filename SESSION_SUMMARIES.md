@@ -167,3 +167,18 @@ Command palette feature (⌘K toggle with fuzzy search) was completed and pushed
 
 The user asked for project status. The assistant reported that main branch is clean with recent commits completing PRD-07 item #4 (layout persistence, side-panel state, and preset saving to disk), with an open thread beginning on PRD-07 #5 (forge naming).
 <!-- /session:2296ffe3-fdbc-4233-8ba3-f08c40bf7a10 -->
+
+<!-- session:02593422-979d-4074-bf63-aa762c3de195 -->
+### Fix Nexus forge directory and IPC reentrancy
+
+- **Started**: 2026-04-17 01:00
+- **Updated**: 2026-04-17 01:55
+- **Branch**: `main`
+- **Status**: completed
+- **Messages**: 25
+- **Topics**: Forge directory, IPC reentrancy, environment variables, Tauri development, persistence layer, thread-local guards
+- **Session ID**: `02593422-979d-4074-bf63-aa762c3de195`
+- **Resume**: `claude --resume 02593422-979d-4074-bf63-aa762c3de195`
+
+Debugged an issue where the Nexus forge application was opening the wrong directory due to persistence layer retaining a previous path. Provided an environment variable override solution (NEXUS_FORGE_DIR) to specify the correct directory and confirmed the fix worked end-to-end. Resolved the underlying re-entrant IPC bug by replacing try_lock with a thread-local DispatchGuard in the plugin loader.
+<!-- /session:02593422-979d-4074-bf63-aa762c3de195 -->
