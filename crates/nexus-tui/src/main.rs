@@ -18,6 +18,12 @@ use app::TuiApp;
 fn main() -> Result<()> {
     let forge_path = resolve_forge_path()?;
 
+    // Write tracing output to a file so we can inspect what events
+    // crossterm delivers without polluting the TUI alternate screen.
+    // Path is controlled by NEXUS_TUI_LOG; defaults to
+    // `/tmp/nexus-tui.log` on Unix, `%TEMP%/nexus-tui.log` on Windows.
+    init_file_tracing();
+
     crossterm::terminal::enable_raw_mode().context("failed to enable raw mode")?;
     execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
     let mut terminal = ratatui::init();
@@ -52,6 +58,36 @@ fn resolve_forge_path() -> Result<PathBuf> {
         .or_else(|_| std::env::var("USERPROFILE"))
         .context("could not determine home directory")?;
     Ok(PathBuf::from(home).join(".nexus").join("default"))
+}
+
+fn init_file_tracing() {
+    use tracing_subscriber::EnvFilter;
+
+    let path = std::env::var("NEXUS_TUI_LOG").unwrap_or_else(|_| {
+        if cfg!(windows) {
+            std::env::var("TEMP")
+                .ok()
+                .map(|t| format!("{t}\\nexus-tui.log"))
+                .unwrap_or_else(|| "nexus-tui.log".into())
+        } else {
+            "/tmp/nexus-tui.log".into()
+        }
+    });
+    let Ok(file) = std::fs::File::create(&path) else {
+        // Log init failures are silent by design — we don't want to
+        // break the TUI because a temp-file write wasn't possible.
+        return;
+    };
+    // Default to `nexus_tui=debug` so every input-handler breadcrumb
+    // lands without the user having to set RUST_LOG manually. Any
+    // existing RUST_LOG value still takes precedence.
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("nexus_tui=debug"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::sync::Mutex::new(file))
+        .with_ansi(false)
+        .try_init();
 }
 
 fn run(terminal: &mut DefaultTerminal, app: &mut TuiApp) -> Result<()> {

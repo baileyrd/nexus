@@ -23,6 +23,20 @@ use crate::app::{Focus, Mode, TuiApp};
 /// Only handles `Event::Key` with `kind == Press` and `Event::Mouse`.
 /// All other event variants (resize, focus, paste …) are silently ignored.
 pub fn handle_event(app: &mut TuiApp, event: Event) -> Result<()> {
+    // Log every event we receive before any mode filter, so the file
+    // log captures cases where we're dropping events (e.g. because
+    // `kind != Press` or `app.mode` flipped unexpectedly). Does not
+    // fire for `_ => {}` branches below, but the breadcrumb for
+    // `Event::Key` above catches the case we actually care about.
+    if let Event::Key(key) = &event {
+        tracing::debug!(
+            kind = ?key.kind,
+            modifiers = ?key.modifiers,
+            code = ?key.code,
+            mode = ?app.mode,
+            "raw key event",
+        );
+    }
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => match app.mode {
             Mode::Normal => handle_normal_key(app, key)?,
@@ -273,6 +287,20 @@ fn scroll_to_match(app: &mut TuiApp) {
 // ── Terminal mode ─────────────────────────────────────────────────────────────
 
 fn handle_terminal_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
+    // Diagnostic: every key event the Terminal-mode handler sees is
+    // logged to a small ring shown in the panel title. If typed
+    // characters don't reach the buffer, this tells us whether the
+    // keystrokes arrived here at all and what crossterm labelled
+    // them. The ring is capped at 5 entries so the title stays tidy.
+    app.terminal
+        .log_key(format!("{:?}+{:?}", key.modifiers, key.code));
+    tracing::debug!(
+        modifiers = ?key.modifiers,
+        code = ?key.code,
+        kind = ?key.kind,
+        "terminal key",
+    );
+
     match (key.modifiers, key.code) {
         // Exit Terminal mode back to Normal. Leaves the session alive
         // so users can come back to it. Use `Ctrl+D` to actually kill.
@@ -294,18 +322,25 @@ fn handle_terminal_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             app.mode = Mode::Normal;
         }
         // Enter flushes the input buffer as one command.
-        (KeyModifiers::NONE, KeyCode::Enter) => {
+        (_, KeyCode::Enter) => {
             app.submit_terminal_input();
         }
         // Backspace edits the input buffer.
-        (KeyModifiers::NONE, KeyCode::Backspace) => {
+        (_, KeyCode::Backspace) => {
             app.terminal.input.pop();
         }
-        // Any other printable character: append to the buffer. We do
-        // NOT forward keystrokes live to the PTY — we line-buffer on
-        // the TUI side so the panel is a shell-prompt shape, not a
-        // raw xterm. Full PTY pass-through is a future slice once
-        // we've solved in-app terminfo rendering.
+        // Any printable character: append to the buffer. We do NOT
+        // forward keystrokes live to the PTY — we line-buffer on the
+        // TUI side so the panel is a shell-prompt shape, not a raw
+        // xterm. Full PTY pass-through is a future slice once we've
+        // solved in-app terminfo rendering.
+        //
+        // The broad `(_, KeyCode::Char(c))` matches *every* modifier
+        // combination that still produces a printable char —
+        // including `SHIFT+a` → `Char('A')` with `modifiers = SHIFT`.
+        // On terminals that set modifier flags (CapsLock, some kitty
+        // keyboard protocols) plain letters would otherwise slip
+        // past a `(NONE, Char(_))` arm.
         (_, KeyCode::Char(c)) => {
             app.terminal.input.push(c);
         }

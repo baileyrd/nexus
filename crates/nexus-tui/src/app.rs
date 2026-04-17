@@ -462,6 +462,10 @@ pub struct TerminalPanelState {
     /// new output arrived. Avoids re-cloning the whole `lines` vec
     /// when nothing changed.
     pub last_line_count: usize,
+    /// Diagnostic ring of the last N key events the terminal-mode
+    /// handler observed. Shown in the panel title while debugging
+    /// input routing — empty on shell builds that don't care.
+    pub key_log: Vec<String>,
 }
 
 impl TerminalPanelState {
@@ -473,6 +477,17 @@ impl TerminalPanelState {
             lines: Vec::new(),
             input: String::new(),
             last_line_count: 0,
+            key_log: Vec::new(),
+        }
+    }
+
+    /// Record a diagnostic entry for the most recent key event
+    /// observed by the terminal-mode input handler. Kept at 5 entries
+    /// max so the title bar stays readable.
+    pub fn log_key(&mut self, entry: String) {
+        self.key_log.push(entry);
+        if self.key_log.len() > 5 {
+            self.key_log.remove(0);
         }
     }
 }

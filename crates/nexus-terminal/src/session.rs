@@ -10,9 +10,10 @@
 //! does for `git2`. Keeping the library runtime-agnostic means the core
 //! plugin that wraps it can choose its own concurrency shape.
 
-use std::io::{ErrorKind, Read, Write};
+use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use portable_pty::{Child, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
@@ -165,9 +166,21 @@ pub struct Session {
     master: Box<dyn MasterPty + Send>,
     /// The spawned child — `None` after [`Self::kill`] returns.
     child: Option<Box<dyn Child + Send + Sync>>,
-    /// Persistent reader over the PTY's stdout-side. Keep it around so
-    /// short successive reads don't pay a clone cost.
-    reader: Arc<Mutex<Box<dyn Read + Send>>>,
+    /// Bytes streamed out of the PTY by a dedicated reader thread.
+    /// `portable-pty`'s reader is blocking on every platform we care
+    /// about, so a timeout-polling loop on the main thread can hang
+    /// indefinitely waiting for data that never arrives (an idle
+    /// shell). Moving the blocking `read` onto its own thread and
+    /// forwarding chunks through an mpsc channel lets callers honour
+    /// their `Duration` budget via `recv_timeout`. See commit log
+    /// for the TUI freeze that motivated this.
+    output_rx: Receiver<std::io::Result<Vec<u8>>>,
+    /// Reader thread handle. Kept around so `Drop` can join on
+    /// teardown — child kill → EOF on reader → thread exits.
+    reader_thread: Option<JoinHandle<()>>,
+    /// Leftover bytes when a prior `read` got a larger chunk than
+    /// the caller's buffer could hold. Drained on the next call.
+    pending: Vec<u8>,
     /// Persistent writer into the PTY's stdin-side.
     writer: Box<dyn Write + Send>,
     /// Cached shell command for error messages.
@@ -230,7 +243,7 @@ impl Session {
         // reader when the child exits.
         drop(pair.slave);
 
-        let reader = pair
+        let mut reader = pair
             .master
             .try_clone_reader()
             .map_err(|e| TerminalError::PtyAlloc(e.to_string()))?;
@@ -239,11 +252,42 @@ impl Session {
             .take_writer()
             .map_err(|e| TerminalError::PtyAlloc(e.to_string()))?;
 
+        // Background reader: blocking `reader.read` stays off the hot
+        // path. Thread exits on EOF / error / channel disconnect.
+        let (tx, output_rx) = mpsc::channel::<std::io::Result<Vec<u8>>>();
+        let reader_thread = thread::Builder::new()
+            .name(format!("nexus-terminal-reader/{}", shell_display))
+            .spawn(move || {
+                let mut scratch = [0u8; 8192];
+                loop {
+                    match reader.read(&mut scratch) {
+                        Ok(0) => {
+                            // EOF — tell the main side and exit.
+                            let _ = tx.send(Ok(Vec::new()));
+                            break;
+                        }
+                        Ok(n) => {
+                            if tx.send(Ok(scratch[..n].to_vec())).is_err() {
+                                // Receiver dropped; nothing more to do.
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(Err(e));
+                            break;
+                        }
+                    }
+                }
+            })
+            .map_err(|e| TerminalError::PtyAlloc(format!("reader thread: {e}")))?;
+
         Ok(Self {
             id: SessionId::new_random(),
             master: pair.master,
             child: Some(child),
-            reader: Arc::new(Mutex::new(reader)),
+            output_rx,
+            reader_thread: Some(reader_thread),
+            pending: Vec::new(),
             writer,
             shell_display,
             state: ProcessState::Running,
@@ -279,43 +323,38 @@ impl Session {
         Ok(())
     }
 
-    /// Read up to `buf.len()` bytes from the PTY, blocking up to `timeout`
-    /// for the first byte. Returns the number of bytes actually read — 0
-    /// means the child has closed its side (EOF).
-    ///
-    /// `portable-pty` readers are blocking; to honour the timeout we poll
-    /// with a short sleep and a wall-clock budget. It's coarse (tens of
-    /// milliseconds), which is fine for this phase — structured streaming
-    /// lands in the future output-ring-buffer pass (PRD-09 §3).
-    ///
-    /// # Panics
-    /// Panics if the internal reader mutex is poisoned — which only
-    /// happens if another thread holding the lock panicked mid-read. A
-    /// poisoned mutex indicates a prior unrecoverable I/O failure, so
-    /// continuing with a stale reader would hide the bug.
+    /// Read up to `buf.len()` bytes of PTY output, blocking up to
+    /// `timeout` for the first chunk. Returns the byte count written
+    /// into `buf`; 0 means either `timeout` elapsed with no data or
+    /// the child closed its side (EOF).
     ///
     /// # Errors
-    /// Returns [`TerminalError::Io`] on non-WouldBlock read failures.
+    /// Returns [`TerminalError::Io`] if the reader thread surfaced an
+    /// I/O error for this session.
     pub fn read(&mut self, buf: &mut [u8], timeout: Duration) -> Result<usize, TerminalError> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            // Hold the reader mutex only for the poll; release between
-            // retries so Drop / kill paths can interrupt.
-            let mut guard = self
-                .reader
-                .lock()
-                .expect("reader mutex poisoned — another thread panicked mid-read");
-            match guard.read(buf) {
-                Ok(n) => return Ok(n),
-                Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                    drop(guard);
-                    if Instant::now() >= deadline {
-                        return Ok(0);
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
+        // Drain any carry-over bytes from a prior call first — a read
+        // where the reader thread delivered more bytes than the
+        // caller's `buf` could hold.
+        if !self.pending.is_empty() {
+            let n = std::cmp::min(buf.len(), self.pending.len());
+            buf[..n].copy_from_slice(&self.pending[..n]);
+            self.pending.drain(..n);
+            return Ok(n);
+        }
+        match self.output_rx.recv_timeout(timeout) {
+            Ok(Ok(data)) if data.is_empty() => Ok(0),
+            Ok(Ok(data)) => {
+                let n = std::cmp::min(buf.len(), data.len());
+                buf[..n].copy_from_slice(&data[..n]);
+                if data.len() > n {
+                    self.pending.extend_from_slice(&data[n..]);
                 }
-                Err(e) => return Err(e.into()),
+                Ok(n)
             }
+            Ok(Err(e)) => Err(TerminalError::Io(e)),
+            Err(RecvTimeoutError::Timeout) => Ok(0),
+            // Reader thread exited — treat as EOF.
+            Err(RecvTimeoutError::Disconnected) => Ok(0),
         }
     }
 
@@ -626,6 +665,11 @@ impl Drop for Session {
             let _ = child.kill();
             let _ = child.wait();
         }
+        // Reader thread exits naturally once the PTY closes (child
+        // killed above → EOF on reader). We don't join because if the
+        // child is unresponsive the thread might linger forever; the
+        // OS will clean up the fd when the process exits.
+        drop(self.reader_thread.take());
     }
 }
 

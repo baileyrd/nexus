@@ -36,7 +36,18 @@ fn render_output(frame: &mut Frame, app: &TuiApp, area: Rect) {
     let title = match &app.terminal.session_id {
         Some(id) => {
             let short = id.get(..8).unwrap_or(id);
-            format!(" Terminal [{short}]  {} lines ", app.terminal.lines.len())
+            // While debugging input routing, show the last few key
+            // events the handler saw so we can tell at a glance
+            // whether crossterm is delivering them to us.
+            let keys = if app.terminal.key_log.is_empty() {
+                String::new()
+            } else {
+                format!("  keys: [{}]", app.terminal.key_log.join(" → "))
+            };
+            format!(
+                " Terminal [{short}]  {} lines{keys} ",
+                app.terminal.lines.len(),
+            )
         }
         None => " Terminal (starting…) ".into(),
     };
