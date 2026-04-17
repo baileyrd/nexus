@@ -791,10 +791,18 @@ impl PluginManager {
     /// # Errors
     /// Returns the first error encountered, if any.
     pub fn shutdown(&mut self) -> Result<(), PluginError> {
-        let ids: Vec<String> = self.loader.list().into_iter().map(|i| i.id).collect();
+        // Stop plugins in reverse registration order: a plugin that subscribes
+        // to another plugin's events is always stopped before its event
+        // source, avoiding silent event loss during the shutdown window.
+        let mut ids = self.loader.registration_order();
+        ids.reverse();
         for id in ids {
             if let Err(e) = self.loader.unload(&id) {
-                tracing::warn!("shutdown: failed to unload {id}: {e}");
+                tracing::warn!(
+                    audit = true,
+                    plugin_id = %id,
+                    "shutdown: unload failed: {e}"
+                );
             }
         }
         Ok(())
@@ -803,20 +811,36 @@ impl PluginManager {
     // ─── Private helpers ──────────────────────────────────────────────────────
 
     fn reload_plugin(&mut self, plugin_id: &str, wasm_path: &std::path::Path) -> Result<(), PluginError> {
-        // Call on_stop on the old sandbox (best-effort).
-        if let Some(backend) = self.loader.backend_arc(plugin_id) {
-            if let Ok(mut guard) = backend.lock() {
-                let _ = guard.call_on_stop();
-            }
+        use std::sync::atomic::Ordering;
+
+        // Set the reloading flag so concurrent IPC calls return
+        // `PluginReloading` instead of racing the backend mutex.
+        let reloading_flag = self.loader.reloading_flag(plugin_id);
+        if let Some(ref flag) = reloading_flag {
+            flag.store(true, Ordering::Release);
         }
 
-        // Read new WASM bytes.
+        // RAII guard so the flag is always cleared, even on early return.
+        struct ReloadGuard(Option<std::sync::Arc<std::sync::atomic::AtomicBool>>);
+        impl Drop for ReloadGuard {
+            fn drop(&mut self) {
+                if let Some(flag) = &self.0 {
+                    flag.store(false, Ordering::Release);
+                }
+            }
+        }
+        let _guard = ReloadGuard(reloading_flag);
+
+        // Read new WASM bytes. If the editor is mid-write we may see a
+        // truncated file; this is distinct from the WASM-validation
+        // failures retried below, so we propagate without retry (the
+        // debouncer will fire another event once the write settles).
         let wasm_bytes = std::fs::read(wasm_path)?;
 
         // Retrieve the manifest and plugin_dir from the loader.
         // Hot-reload is only triggered for community (WASM) plugins; core plugins
         // are never reloaded this way.
-        let (wasm_config, lifecycle, plugin_data) = {
+        let (wasm_config, lifecycle, capabilities, settings_cache) = {
             let m = self
                 .loader
                 .manifest(plugin_id)
@@ -827,40 +851,76 @@ impl PluginManager {
                     .to_string(),
             })?;
             let lifecycle = m.lifecycle.clone();
-            let pd = PluginData {
-                plugin_id: plugin_id.to_string(),
-                capabilities: self
-                    .loader
-                    .get(plugin_id)
-                    .map_or_else(nexus_kernel::CapabilitySet::empty, |i| i.capabilities),
-                settings_json: self.loader.settings_cache(plugin_id),
-                ..Default::default()
-            };
-            (wasm_config, lifecycle, pd)
+            let caps = self
+                .loader
+                .get(plugin_id)
+                .map_or_else(nexus_kernel::CapabilitySet::empty, |i| i.capabilities);
+            let settings = self.loader.settings_cache(plugin_id);
+            (wasm_config, lifecycle, caps, settings)
         };
 
-        // Create new sandbox.
-        let mut new_sandbox = WasmSandbox::new(&wasm_bytes, &wasm_config, plugin_data)
-            .map_err(|e| PluginError::ReloadFailed {
+        let build_sandbox = || -> Result<WasmSandbox, PluginError> {
+            let pd = PluginData {
                 plugin_id: plugin_id.to_string(),
-                reason: e.to_string(),
+                capabilities: capabilities.clone(),
+                settings_json: settings_cache.clone(),
+                ..Default::default()
+            };
+            let mut sandbox = WasmSandbox::new(&wasm_bytes, &wasm_config, pd).map_err(|e| {
+                PluginError::ReloadFailed {
+                    plugin_id: plugin_id.to_string(),
+                    reason: e.to_string(),
+                }
             })?;
+            if lifecycle.on_init {
+                sandbox.call_on_init().map_err(|e| PluginError::ReloadFailed {
+                    plugin_id: plugin_id.to_string(),
+                    reason: e.to_string(),
+                })?;
+            }
+            if lifecycle.on_start {
+                sandbox.call_on_start().map_err(|e| PluginError::ReloadFailed {
+                    plugin_id: plugin_id.to_string(),
+                    reason: e.to_string(),
+                })?;
+            }
+            Ok(sandbox)
+        };
 
-        // Call lifecycle hooks on new sandbox.
-        if lifecycle.on_init {
-            new_sandbox.call_on_init().map_err(|e| PluginError::ReloadFailed {
-                plugin_id: plugin_id.to_string(),
-                reason: e.to_string(),
-            })?;
-        }
-        if lifecycle.on_start {
-            new_sandbox.call_on_start().map_err(|e| PluginError::ReloadFailed {
-                plugin_id: plugin_id.to_string(),
-                reason: e.to_string(),
-            })?;
-        }
+        // Build the new sandbox BEFORE stopping the old one so a failed
+        // build leaves the plugin running on its previous backend.
+        // Retry once after 100ms for transient errors (e.g. editor saved
+        // a partially-flushed file and the next OS tick has the full
+        // bytes). On second failure, keep the old sandbox and return.
+        let new_sandbox = match build_sandbox() {
+            Ok(s) => s,
+            Err(first) => {
+                tracing::warn!(
+                    audit = true,
+                    plugin_id = %plugin_id,
+                    "hot-reload first attempt failed: {first}; retrying in 100ms"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                match build_sandbox() {
+                    Ok(s) => s,
+                    Err(second) => {
+                        tracing::warn!(
+                            audit = true,
+                            plugin_id = %plugin_id,
+                            "hot-reload retry failed: {second}; keeping previous sandbox"
+                        );
+                        return Err(second);
+                    }
+                }
+            }
+        };
 
-        // Replace sandbox and reset status.
+        // Now stop the old sandbox (best-effort) and swap in the new one.
+        if let Some(backend) = self.loader.backend_arc(plugin_id) {
+            if let Ok(mut guard) = backend.lock() {
+                let _ = guard.call_on_stop();
+            }
+        }
         self.loader.replace_sandbox(plugin_id, new_sandbox);
         self.loader.set_status(plugin_id, nexus_kernel::PluginStatus::Running);
 

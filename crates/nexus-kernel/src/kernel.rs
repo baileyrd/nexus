@@ -86,61 +86,46 @@ impl Kernel {
         &self.config
     }
 
-    /// Start the kernel. Discovers plugins from `config.plugin_search_paths`,
-    /// loads them in topological order, and calls their lifecycle hooks.
+    /// Emit the "kernel online" trace marker and return.
     ///
-    /// In PRD 01 scope, plugin discovery is a no-op (plugins are the
-    /// `nexus-plugins` crate's concern). The kernel starts with an empty
-    /// plugin set and is ready to accept event bus subscribers.
+    /// The kernel deliberately does **not** own plugin lifecycle — that
+    /// lives in `PluginManager::load_all` (the canonical entry point for
+    /// discovering and starting plugins). This method is a logging hook
+    /// retained for PRD-01 compatibility; callers should continue to
+    /// drive plugin lifecycle through `PluginManager`.
     ///
     /// # Errors
-    /// Returns `Error::Plugin` if any plugin fails to load or initialize.
-    /// In PRD 01 scope, this cannot happen (no plugins are loaded).
-    #[allow(clippy::unused_async)] // will await plugin discovery when nexus-plugins lands
+    /// Infallible today. The `Result` return is preserved for forward
+    /// compatibility.
+    #[allow(clippy::unused_async)]
     pub async fn start(&self) -> Result<()> {
         tracing::info!(
             forge_root = ?self.config.forge_root,
             event_bus_capacity = self.config.event_bus_capacity,
-            "nexus kernel starting"
+            "nexus kernel online (plugin lifecycle owned by PluginManager)"
         );
-
-        // Plugin discovery is a no-op in PRD 01 scope.
-        // nexus-plugins will fill this in when it lands.
-        tracing::debug!("plugin discovery not yet implemented; starting with empty plugin set");
-
-        tracing::info!("nexus kernel started");
         Ok(())
     }
 
-    /// Graceful shutdown. Stops all plugins in reverse topological order,
-    /// drains the event bus, flushes the audit log, closes DB connections.
-    /// Idempotent — safe to call twice.
+    /// Flip the kernel shutdown flag. Idempotent.
     ///
-    /// In PRD 01 scope, shutdown flips a flag and returns. Real drain
-    /// behavior fills in when `nexus-plugins` and `nexus-storage` land.
+    /// Plugins are stopped by `PluginManager::shutdown` (which drains them
+    /// in reverse-registration order). This method only toggles the
+    /// internal shutdown sentinel used by long-running tasks that hold an
+    /// `Arc<AtomicBool>` reference to it.
     ///
     /// # Errors
-    /// Returns `Error::Plugin` if any plugin fails to stop. In PRD 01
-    /// scope, this cannot happen (no plugins are loaded).
-    #[allow(clippy::unused_async)] // will await plugin stop + bus drain when nexus-plugins lands
+    /// Infallible today. The `Result` return is preserved for forward
+    /// compatibility.
+    #[allow(clippy::unused_async)]
     pub async fn shutdown(&self) -> Result<()> {
-        // Flip the shutdown flag. Idempotent: subsequent calls see the flag
-        // already set and short-circuit.
         let was_already_shutdown =
             self.shutdown_flag.swap(true, std::sync::atomic::Ordering::SeqCst);
-
         if was_already_shutdown {
-            tracing::debug!("nexus kernel shutdown called on already-shutdown kernel; no-op");
+            tracing::debug!("nexus kernel shutdown already signalled; no-op");
             return Ok(());
         }
-
-        tracing::info!("nexus kernel shutting down");
-
-        // In PRD 01 scope, nothing to drain. nexus-plugins and nexus-storage
-        // will fill in real drain logic when they land.
-        tracing::debug!("no plugins to stop; no storage to flush");
-
-        tracing::info!("nexus kernel shutdown complete");
+        tracing::info!("nexus kernel shutdown signalled");
         Ok(())
     }
 

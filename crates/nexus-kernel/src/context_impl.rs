@@ -149,57 +149,67 @@ impl PluginContext for KernelPluginContext {
     // ---- File system -----------------------------------------------------
 
     async fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
-        // External paths require the stronger capability.
-        let needed = if path.is_absolute()
-            && !path.starts_with(&self.forge_root_canonical)
-        {
-            Capability::FsReadExternal
-        } else {
-            Capability::FsRead
-        };
-        self.require_capability(needed)?;
+        // Unified rule: read_file is confined to forge_root. Plugins that
+        // need to reach outside must request the explicit external
+        // capability and call a dedicated external-read surface (not yet
+        // exposed). Silent auto-promotion from FsRead → FsReadExternal
+        // based on an absolute path was removed; paths outside forge_root
+        // are now rejected by `confine_path`.
+        self.require_capability(Capability::FsRead)?;
         let confined = self.confine_path(path)?;
         tokio::fs::read(&confined).await.map_err(Error::Io)
     }
 
     async fn write_file(&self, path: &Path, contents: &[u8]) -> Result<()> {
-        let needed = if path.is_absolute()
-            && !path.starts_with(&self.forge_root_canonical)
-        {
-            Capability::FsWriteExternal
-        } else {
-            Capability::FsWrite
-        };
-        self.require_capability(needed)?;
-        // For writes the path may not exist yet — confine against parent dir.
+        self.require_capability(Capability::FsWrite)?;
+
+        // TOCTOU-safe write: canonicalize the parent dir (resolving any
+        // symlinks), verify it is inside forge_root, then write to the
+        // path formed by `canon_parent.join(filename)` — never the
+        // original non-canonical `absolute` path. Writing via the
+        // canonical parent closes the symlink-swap race between parent
+        // canonicalize and open.
         let absolute = if path.is_absolute() {
             path.to_path_buf()
         } else {
             self.forge_root_canonical.join(path)
         };
-        // Ensure the target is inside forge_root by checking the parent.
-        if let Some(parent) = absolute.parent() {
-            if parent.exists() {
-                let canon_parent = parent.canonicalize()?;
-                if !canon_parent.starts_with(&self.forge_root_canonical) {
-                    tracing::warn!(
-                        audit = true,
-                        plugin_id = %self.plugin_id,
-                        requested_path = %absolute.display(),
-                        forge_root = %self.forge_root_canonical.display(),
-                        "path traversal denied"
-                    );
-                    return Err(Error::Io(std::io::Error::new(
-                        std::io::ErrorKind::PermissionDenied,
-                        format!(
-                            "path traversal denied: '{}' is outside forge root",
-                            absolute.display()
-                        ),
-                    )));
-                }
-            }
+        let parent = absolute.parent().ok_or_else(|| {
+            Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("path '{}' has no parent", absolute.display()),
+            ))
+        })?;
+        let file_name = absolute.file_name().ok_or_else(|| {
+            Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("path '{}' has no file name", absolute.display()),
+            ))
+        })?;
+        let canon_parent = parent.canonicalize().map_err(|e| {
+            Error::Io(std::io::Error::new(
+                e.kind(),
+                format!("parent '{}': {e}", parent.display()),
+            ))
+        })?;
+        if !canon_parent.starts_with(&self.forge_root_canonical) {
+            tracing::warn!(
+                audit = true,
+                plugin_id = %self.plugin_id,
+                requested_path = %absolute.display(),
+                forge_root = %self.forge_root_canonical.display(),
+                "path traversal denied"
+            );
+            return Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "path traversal denied: '{}' is outside forge root",
+                    absolute.display()
+                ),
+            )));
         }
-        tokio::fs::write(&absolute, contents).await.map_err(Error::Io)
+        let target = canon_parent.join(file_name);
+        tokio::fs::write(&target, contents).await.map_err(Error::Io)
     }
 
     async fn delete_file(&self, path: &Path) -> Result<()> {

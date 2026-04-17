@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, RwLock};
 
 use std::future::Future;
@@ -334,6 +335,10 @@ struct LoadedPlugin {
     /// [`PluginLoader::update_settings`] (and re-seeded during hot-reload)
     /// so plugins see user edits on their next handler call.
     settings_cache: Arc<RwLock<String>>,
+    /// True while the plugin is in the middle of a hot-reload. Dispatch
+    /// methods check this and return [`PluginError::PluginReloading`]
+    /// instead of racing the per-plugin backend mutex.
+    reloading: Arc<AtomicBool>,
 }
 
 // ─── PluginLoader ─────────────────────────────────────────────────────────────
@@ -348,6 +353,11 @@ pub struct PluginLoader {
     /// `KernelConfig::plugin_search_paths`.
     search_paths: Vec<PathBuf>,
     loaded: HashMap<String, LoadedPlugin>,
+    /// Plugin IDs in registration order. Used by
+    /// [`PluginManager::shutdown`] to stop plugins in reverse-registration
+    /// order so a plugin that subscribes to another plugin's events is
+    /// never stopped before its source.
+    registration_order: Vec<String>,
     /// Maps `subcommand_id` → `plugin_id`
     cli_registry: HashMap<String, String>,
     settings: SettingsManager,
@@ -367,6 +377,7 @@ impl PluginLoader {
         Self {
             search_paths: vec![plugins_dir.to_path_buf()],
             loaded: HashMap::new(),
+            registration_order: Vec::new(),
             cli_registry: HashMap::new(),
             settings: SettingsManager::new(),
             event_bus: None,
@@ -636,6 +647,7 @@ impl PluginLoader {
 
         let info = plugin_info_from(&manifest, PluginStatus::Running, &capabilities);
 
+        self.registration_order.push(plugin_id.clone());
         self.loaded.insert(
             plugin_id,
             LoadedPlugin {
@@ -650,6 +662,7 @@ impl PluginLoader {
                 },
                 event_subs,
                 settings_cache,
+                reloading: Arc::new(AtomicBool::new(false)),
             },
         );
 
@@ -665,7 +678,7 @@ impl PluginLoader {
     /// Returns [`PluginError::PluginNotFound`] if no plugin with `plugin_id`
     /// is loaded.
     pub fn unload(&mut self, plugin_id: &str) -> Result<(), PluginError> {
-        let mut loaded = self
+        let loaded = self
             .loaded
             .remove(plugin_id)
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
@@ -683,7 +696,20 @@ impl PluginLoader {
             self.cli_registry.remove(sub_id);
         }
 
+        // Drop from the registration-order tracker so shutdown won't revisit.
+        self.registration_order.retain(|id| id != plugin_id);
+
         Ok(())
+    }
+
+    /// Return all loaded plugin IDs in registration order (earliest first).
+    ///
+    /// [`PluginManager::shutdown`] iterates this in reverse to stop plugins
+    /// in LIFO order, guaranteeing an event source is still alive when its
+    /// subscribers run their `on_stop`.
+    #[must_use]
+    pub fn registration_order(&self) -> Vec<String> {
+        self.registration_order.clone()
     }
 
     /// Return a snapshot of all currently-loaded plugins.
@@ -869,6 +895,11 @@ impl PluginLoader {
         command_id: &str,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
+        if let Some(lp) = self.loaded.get(plugin_id) {
+            if lp.reloading.load(Ordering::Acquire) {
+                return Err(PluginError::PluginReloading(plugin_id.to_string()));
+            }
+        }
         let (backend, handler_id) = self.resolve_ipc(plugin_id, command_id)?;
         let _dispatch_guard =
             DispatchGuard::enter(plugin_id).ok_or_else(|| PluginError::ReentrantCall {
@@ -879,6 +910,12 @@ impl PluginLoader {
             .lock()
             .map_err(|_| PluginError::PluginNotFound(plugin_id.to_string()))?;
         guard.dispatch(handler_id, args)
+    }
+
+    /// Return the hot-reload flag for `plugin_id`, or `None` if not loaded.
+    #[allow(dead_code)]
+    pub(crate) fn reloading_flag(&self, plugin_id: &str) -> Option<Arc<AtomicBool>> {
+        self.loaded.get(plugin_id).map(|lp| lp.reloading.clone())
     }
 
     /// Enable the plugin with `plugin_id`.

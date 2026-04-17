@@ -106,6 +106,28 @@ fn register_host_log(linker: &mut Linker<PluginData>) -> Result<(), PluginError>
             |mut caller: Caller<'_, PluginData>, level: i32, msg_ptr: i32, msg_len: i32| -> i32 {
                 let plugin_id = caller.data().plugin_id.clone();
 
+                // Rate-limit: drop log lines once the plugin exceeds its
+                // token bucket (default 1000 lines/sec sustained, 2000 burst).
+                // Dropped lines are counted and reported once on the next
+                // successful emission so operators can see suppression
+                // without paying the per-line cost of the dropped work.
+                let mut suppressed: u64 = 0;
+                let rate = caller.data().log_rate.clone();
+                if let Ok(mut bucket) = rate.lock() {
+                    if !bucket.try_consume() {
+                        return HOST_OK;
+                    }
+                    suppressed = std::mem::take(&mut bucket.denied_since_last);
+                }
+                if suppressed > 0 {
+                    tracing::warn!(
+                        audit = true,
+                        plugin_id = %plugin_id,
+                        suppressed,
+                        "host::log rate limit dropped messages"
+                    );
+                }
+
                 // Resolve the WASM linear memory export.
                 let Some(wasmtime::Extern::Memory(memory)) = caller.get_export("memory") else {
                     tracing::error!(
@@ -397,38 +419,56 @@ fn register_host_write_file(linker: &mut Linker<PluginData>) -> Result<(), Plugi
                     return HOST_ERROR;
                 };
 
-                // Confine path to forge root (same rules as read_file).
+                // Confine path to forge root. The TOCTOU-safe pattern:
+                // canonicalize the parent (resolving any symlinks), verify
+                // it is inside forge_root, then write to
+                // `canon_parent.join(filename)` — NOT to the original
+                // non-canonical `absolute` path. Writing to the canonical
+                // target closes the symlink-swap race between canonicalize
+                // and open.
                 let requested = Path::new(&path_str);
                 let absolute = if requested.is_absolute() {
                     requested.to_path_buf()
                 } else {
                     forge_root.join(requested)
                 };
-                // For writes, the file may not exist yet; check parent directory.
-                let parent = absolute.parent().unwrap_or(&absolute);
-                if !forge_root.as_os_str().is_empty() {
-                    let canon_parent = if let Ok(p) = parent.canonicalize() {
-                        p
-                    } else {
-                        // Parent doesn't exist yet — create it and re-check.
+
+                let target = if forge_root.as_os_str().is_empty() {
+                    absolute
+                } else {
+                    let Some(parent) = absolute.parent() else {
+                        tracing::warn!(plugin_id = %plugin_id, "host::write_file: path has no parent");
+                        return HOST_ERROR;
+                    };
+                    let Some(file_name) = absolute.file_name() else {
+                        tracing::warn!(plugin_id = %plugin_id, "host::write_file: path has no file name");
+                        return HOST_ERROR;
+                    };
+
+                    // Create parent chain only if it's (by prefix) within
+                    // forge_root, so a malicious `..`-laced path can't
+                    // mkdir outside the sandbox.
+                    if !parent.exists() && parent.starts_with(&forge_root) {
                         if let Err(e) = std::fs::create_dir_all(parent) {
                             tracing::warn!(plugin_id = %plugin_id, "host::write_file: mkdir failed: {e}");
                             return HOST_ERROR;
                         }
-                        match parent.canonicalize() {
-                            Ok(p) => p,
-                            Err(e) => {
-                                tracing::warn!(plugin_id = %plugin_id, "host::write_file: canonicalize failed: {e}");
-                                return HOST_ERROR;
-                            }
+                    }
+
+                    let canon_parent = match parent.canonicalize() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            tracing::warn!(plugin_id = %plugin_id, "host::write_file: canonicalize parent failed: {e}");
+                            return HOST_ERROR;
                         }
                     };
                     if !canon_parent.starts_with(&forge_root) {
                         return deny_path_traversal(&plugin_id, &absolute, &forge_root);
                     }
-                }
+                    canon_parent.join(file_name)
+                };
 
-                match std::fs::write(&absolute, &data) {
+                match std::fs::write(&target, &data) {
                     Ok(()) => HOST_OK,
                     Err(e) => {
                         tracing::warn!(plugin_id = %plugin_id, "host::write_file: write error: {e}");

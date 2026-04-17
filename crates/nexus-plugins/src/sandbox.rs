@@ -3,7 +3,8 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
 
 use wasmtime::{Engine, Instance, Linker, Module, Store, StoreLimitsBuilder, Trap};
 
@@ -60,6 +61,58 @@ pub struct PluginData {
     /// Forwarder for surfacing `host::emit_event` calls to the Tauri
     /// frontend as `plugin:event` events. Injected during bootstrap.
     pub event_forwarder: Option<Arc<dyn PluginEventForwarder>>,
+    /// Token bucket that caps `host::log` emission at a few thousand
+    /// lines per second per plugin. Prevents a runaway plugin from
+    /// flooding the host logger and consuming disk/CPU.
+    pub log_rate: Arc<Mutex<TokenBucket>>,
+}
+
+/// Token bucket limiter: refills `refill_per_sec` tokens per second up to
+/// `capacity`. Each successful call to [`try_consume`](Self::try_consume)
+/// subtracts one token. Cheap and allocation-free at steady state.
+#[derive(Debug)]
+pub struct TokenBucket {
+    /// Maximum tokens the bucket can hold.
+    capacity: f64,
+    /// Tokens added per second.
+    refill_per_sec: f64,
+    /// Current token count.
+    tokens: f64,
+    /// Instant of the last refill computation.
+    last_refill: Instant,
+    /// Count of consume attempts that were denied since the last successful
+    /// one; lets callers emit a single suppressed-count log line when the
+    /// bucket refills.
+    pub denied_since_last: u64,
+}
+
+impl TokenBucket {
+    /// Create a new bucket filled to capacity.
+    #[must_use]
+    pub fn new(capacity: f64, refill_per_sec: f64) -> Self {
+        Self {
+            capacity,
+            refill_per_sec,
+            tokens: capacity,
+            last_refill: Instant::now(),
+            denied_since_last: 0,
+        }
+    }
+
+    /// Attempt to consume one token. Returns `true` on success.
+    pub fn try_consume(&mut self) -> bool {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_refill).as_secs_f64();
+        self.tokens = (self.tokens + elapsed * self.refill_per_sec).min(self.capacity);
+        self.last_refill = now;
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            true
+        } else {
+            self.denied_since_last = self.denied_since_last.saturating_add(1);
+            false
+        }
+    }
 }
 
 impl Default for PluginData {
@@ -74,6 +127,10 @@ impl Default for PluginData {
             limits: StoreLimitsBuilder::new().build(),
             ipc_dispatch: None,
             event_forwarder: None,
+            // Capacity 2000 / 1000-per-sec: ~2s of log burst absorbed,
+            // 1k lines/sec sustained. Matches the "1000 lines/second"
+            // target from F-6.2.2.
+            log_rate: Arc::new(Mutex::new(TokenBucket::new(2000.0, 1000.0))),
         }
     }
 }

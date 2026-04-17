@@ -86,6 +86,77 @@ impl ForgePathValidator {
         Ok(canonical)
     }
 
+    /// Validate a requested path for a **write** operation. Returns a
+    /// canonical target path whose parent is guaranteed to be inside the
+    /// forge root.
+    ///
+    /// Unlike [`validate`](Self::validate), the target file does not have
+    /// to exist; only the deepest existing ancestor is canonicalized, then
+    /// the canonical ancestor is rebuilt with the remaining normalized
+    /// components. This closes the TOCTOU race where canonicalizing the
+    /// parent and then writing to the non-canonical path could be steered
+    /// through a symlink swap between the two operations.
+    ///
+    /// # Behavior
+    /// 1. Rejects paths containing null bytes.
+    /// 2. Normalizes `.` and `..`, rejecting `..` past the root.
+    /// 3. Walks up the joined path to the deepest existing ancestor.
+    /// 4. Canonicalizes that ancestor (follows symlinks) and verifies it
+    ///    starts with the canonical forge root.
+    /// 5. Rejoins the remaining non-existing tail onto the canonical
+    ///    ancestor and returns the result.
+    ///
+    /// # Errors
+    /// - `SecurityError::InvalidPath` for null bytes or when no existing
+    ///   ancestor can be canonicalized.
+    /// - `SecurityError::PathTraversal` if the canonical ancestor escapes
+    ///   the forge root.
+    pub fn validate_for_write(&self, requested: &Path) -> Result<PathBuf, SecurityError> {
+        let requested_str = requested.to_string_lossy();
+        if requested_str.contains('\0') {
+            return Err(SecurityError::InvalidPath(
+                "path contains null byte".to_string(),
+            ));
+        }
+
+        let normalized = Self::normalize(requested)?;
+        let joined = self.forge_root.join(&normalized);
+
+        // Walk up until we find an existing ancestor.
+        let mut ancestor = joined.as_path();
+        let tail = loop {
+            if ancestor.exists() {
+                let tail = joined
+                    .strip_prefix(ancestor)
+                    .map_err(|e| SecurityError::InvalidPath(e.to_string()))?
+                    .to_path_buf();
+                break tail;
+            }
+            match ancestor.parent() {
+                Some(p) => ancestor = p,
+                None => {
+                    return Err(SecurityError::InvalidPath(format!(
+                        "no existing ancestor for '{}'",
+                        requested.display()
+                    )));
+                }
+            }
+        };
+
+        let canonical_ancestor = ancestor.canonicalize().map_err(|e| {
+            SecurityError::InvalidPath(format!(
+                "ancestor '{}' cannot be resolved: {e}",
+                ancestor.display()
+            ))
+        })?;
+
+        if !canonical_ancestor.starts_with(&self.forge_root) {
+            return Err(SecurityError::PathTraversal(canonical_ancestor));
+        }
+
+        Ok(canonical_ancestor.join(tail))
+    }
+
     /// Normalize path components: collapse `.`, reject `..` that escapes root.
     /// Strips leading `/` so absolute paths are treated as relative.
     fn normalize(path: &Path) -> Result<PathBuf, SecurityError> {
@@ -260,6 +331,47 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, SecurityError::PathTraversal(_)));
+    }
+
+    #[test]
+    fn validate_for_write_accepts_new_file_in_existing_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let validator = ForgePathValidator::new(dir.path()).unwrap();
+        let result = validator.validate_for_write(Path::new("new.txt"));
+        assert!(result.is_ok());
+        assert!(result.unwrap().starts_with(validator.forge_root()));
+    }
+
+    #[test]
+    fn validate_for_write_accepts_nested_new_file_under_existing_ancestor() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("sub")).unwrap();
+        let validator = ForgePathValidator::new(dir.path()).unwrap();
+        let result = validator.validate_for_write(Path::new("sub/does/not/exist.txt"));
+        assert!(result.is_ok());
+        let canon = result.unwrap();
+        assert!(canon.starts_with(validator.forge_root()));
+        assert!(canon.ends_with("sub/does/not/exist.txt"));
+    }
+
+    #[test]
+    fn validate_for_write_rejects_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let validator = ForgePathValidator::new(dir.path()).unwrap();
+        let result = validator.validate_for_write(Path::new("../escape.txt"));
+        assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_for_write_rejects_symlinked_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("escape")).unwrap();
+        let validator = ForgePathValidator::new(dir.path()).unwrap();
+        let result = validator.validate_for_write(Path::new("escape/victim.txt"));
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SecurityError::PathTraversal(_)));
     }
 
     #[test]

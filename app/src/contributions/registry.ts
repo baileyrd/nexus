@@ -893,6 +893,19 @@ export const contributions = {
     if (snippets.has(snippet.id)) {
       warn(`snippet '${snippet.id}' already registered — replacing`);
     }
+    // First-wins on trigger collisions: two plugins claiming the same
+    // trigger (e.g. both `todo`) would silently overwrite each other.
+    // Keep the existing registration and warn so the conflict is visible
+    // in the console. Mirrors the keybinding policy.
+    for (const existing of snippets.values()) {
+      if (existing.id !== snippet.id && existing.trigger === snippet.trigger) {
+        warn(
+          `snippet trigger '${snippet.trigger}' already owned by '${existing.id}' ` +
+            `— ignoring duplicate registration from '${snippet.id}'`,
+        );
+        return () => {};
+      }
+    }
     snippets.set(snippet.id, snippet);
     snippetSnapshot = null;
     snippetListeners.forEach((fn) => fn());
