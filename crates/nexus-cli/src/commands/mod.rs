@@ -9,4 +9,5 @@ pub mod graph;
 pub mod logs;
 pub mod mcp;
 pub mod plugin;
+pub mod term;
 pub mod watch;

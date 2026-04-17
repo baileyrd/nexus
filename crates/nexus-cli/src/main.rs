@@ -85,8 +85,8 @@ enum Commands {
     Ai(AiArgs),
     /// Process management (coming soon)
     Proc(StubArgs),
-    /// Terminal management (coming soon)
-    Term(StubArgs),
+    /// Terminal / PTY session operations (PRD-09)
+    Term(TermArgs),
     /// Start MCP server (stdio mode)
     Mcp,
     /// Sync operations (coming soon)
@@ -713,6 +713,39 @@ struct StubArgs {
 }
 
 // ---------------------------------------------------------------------------
+// Term (PRD-09 §3.7)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct TermArgs {
+    #[command(subcommand)]
+    command: TermCommand,
+}
+
+#[derive(Subcommand)]
+enum TermCommand {
+    /// Print the default shell nexus-terminal would pick on this host.
+    Env,
+    /// Run a command in a PTY shell, stream ANSI-stripped output to
+    /// stdout, and exit with the child's status code.
+    Run {
+        /// The command string passed to `sh -c`. Wrap multi-word
+        /// commands in shell quoting as usual.
+        cmd: String,
+        /// Wall-clock budget in seconds. On overshoot the session is
+        /// shut down and the CLI exits 124 (GNU `timeout` convention).
+        #[arg(long, default_value_t = 30)]
+        timeout: u64,
+    },
+    /// Attach the current terminal to a fresh PTY shell. Output is
+    /// ANSI-stripped and printed line-by-line; stdin forwarding lands
+    /// in the future daemon-backed terminal surface. Useful as a
+    /// manual verification path — run it, watch the shell banner
+    /// appear, Ctrl-C to exit.
+    Shell,
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -906,7 +939,17 @@ fn main() {
 
         // Stub commands — implemented in later milestones.
         Commands::Proc(_) => stubs::not_implemented("proc"),
-        Commands::Term(_) => stubs::not_implemented("term"),
+        Commands::Term(args) => match args.command {
+            TermCommand::Env => commands::term::env(),
+            TermCommand::Run { cmd, timeout } => match commands::term::run(&cmd, timeout) {
+                Ok(code) => std::process::exit(code),
+                Err(e) => Err(e),
+            },
+            TermCommand::Shell => match commands::term::shell() {
+                Ok(code) => std::process::exit(code),
+                Err(e) => Err(e),
+            },
+        },
         Commands::Mcp => commands::mcp::serve(&app),
         Commands::Sync(_) => stubs::not_implemented("sync"),
         Commands::Git(args) => match args.command {
