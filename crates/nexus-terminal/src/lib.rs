@@ -64,6 +64,7 @@ mod job_object;
 mod lines;
 mod manager;
 mod persist;
+mod precmd;
 mod procmgr;
 mod profile;
 mod saved;
@@ -96,6 +97,9 @@ pub use job_object::JobObject;
 pub use lines::{Line, LineBuffer};
 pub use manager::{SessionManager, DEFAULT_MAX_SESSIONS};
 pub use persist::{SessionMetadata, SqliteSessionStore};
+pub use precmd::{
+    run_pre_commands, PreCommandOptions, PreCommandOutcome, DEFAULT_STEP_TIMEOUT,
+};
 pub use procmgr::{
     ManagedConfig, ManagedProcess, ManagedState, TransitionError,
     DEFAULT_AUTO_RESTART_BACKOFF_MS, DEFAULT_PRE_COMMAND_TIMEOUT,
