@@ -55,6 +55,7 @@
 
 mod ansi;
 mod buffer;
+mod env;
 mod error;
 mod lines;
 mod manager;
@@ -64,6 +65,10 @@ mod urls;
 
 pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
+pub use env::{
+    interpolate_env, is_secret_key, mask_secrets, parse_env_file, parse_env_text, resolve_env,
+    REDACTED,
+};
 pub use error::TerminalError;
 pub use lines::{Line, LineBuffer};
 pub use manager::{SessionManager, DEFAULT_MAX_SESSIONS};
