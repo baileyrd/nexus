@@ -57,6 +57,7 @@ mod adhoc;
 mod ansi;
 mod buffer;
 mod compound;
+mod core_plugin;
 mod env;
 mod error;
 mod job_object;
@@ -74,6 +75,14 @@ mod urls;
 pub use adhoc::{AdHocRecord, AdHocStatus, SqliteAdHocStore};
 pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
+pub use core_plugin::{
+    CreateSessionArgs, CreateSessionResponse, PumpArgs, PumpResponse, ReadOutputArgs,
+    SearchOutputArgs, SendInputArgs, SendRawInputArgs, SessionIdArgs, TerminalCorePlugin,
+    WaitForPatternArgs, WaitForPatternResponse, HANDLER_CLOSE_SESSION, HANDLER_CREATE_SESSION,
+    HANDLER_GET_SESSION_INFO, HANDLER_LIST_SESSIONS, HANDLER_PUMP, HANDLER_READ_OUTPUT,
+    HANDLER_SEARCH_OUTPUT, HANDLER_SEND_INPUT, HANDLER_SEND_RAW_INPUT, HANDLER_WAIT_FOR_PATTERN,
+    PLUGIN_ID,
+};
 pub use compound::{
     execute_chain, parse_command_chain, requires_single_shell, ChainOutcome, CommandStep,
     Operator, SkipReason, StepOutcome,
