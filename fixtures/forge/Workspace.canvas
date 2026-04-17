@@ -1,0 +1,201 @@
+{
+  "version": "1.0",
+  "nodes": [
+    {
+      "id": "group-overview",
+      "type": "group",
+      "x": -60,
+      "y": -120,
+      "width": 880,
+      "height": 260,
+      "label": "Project core",
+      "color": "#3b82f6"
+    },
+    {
+      "id": "overview",
+      "type": "file",
+      "x": 40,
+      "y": -60,
+      "width": 260,
+      "height": 120,
+      "file": "projects/Nexus/Overview.md",
+      "label": "Nexus — Overview"
+    },
+    {
+      "id": "prd-tracker",
+      "type": "file",
+      "x": 340,
+      "y": -60,
+      "width": 260,
+      "height": 120,
+      "file": "projects/Nexus/PRD Tracker.md",
+      "label": "PRD tracker"
+    },
+    {
+      "id": "tasks-db",
+      "type": "database",
+      "x": 680,
+      "y": -60,
+      "width": 260,
+      "height": 120,
+      "source": "fixtures/bases/Tasks.bases",
+      "label": "Tasks.bases",
+      "color": "#f59e0b"
+    },
+    {
+      "id": "group-architecture",
+      "type": "group",
+      "x": -60,
+      "y": 220,
+      "width": 600,
+      "height": 240,
+      "label": "Evergreen architecture notes",
+      "color": "#a855f7"
+    },
+    {
+      "id": "microkernel",
+      "type": "file",
+      "x": 40,
+      "y": 280,
+      "width": 260,
+      "height": 120,
+      "file": "areas/Microkernel Patterns.md",
+      "label": "Microkernel patterns"
+    },
+    {
+      "id": "editor-shell",
+      "type": "file",
+      "x": 340,
+      "y": 280,
+      "width": 260,
+      "height": 120,
+      "file": "areas/Editor Shell Architecture.md",
+      "label": "Editor shell architecture"
+    },
+    {
+      "id": "arch-notes",
+      "type": "file",
+      "x": 680,
+      "y": 280,
+      "width": 260,
+      "height": 120,
+      "file": "projects/Nexus/Architecture Notes.md",
+      "label": "Architecture notes"
+    },
+    {
+      "id": "daily-today",
+      "type": "file",
+      "x": -380,
+      "y": -60,
+      "width": 260,
+      "height": 120,
+      "file": "notes/2026-04-17 Daily.md",
+      "label": "Today's daily"
+    },
+    {
+      "id": "readme",
+      "type": "file",
+      "x": -380,
+      "y": 280,
+      "width": 260,
+      "height": 120,
+      "file": "Getting Started.md",
+      "label": "Getting started"
+    },
+    {
+      "id": "text-pillar",
+      "type": "text",
+      "x": -380,
+      "y": 520,
+      "width": 340,
+      "height": 140,
+      "text": "### Three pillars\n\n1. Microkernel\n2. Editor shell\n3. Forge on disk"
+    },
+    {
+      "id": "link-repo",
+      "type": "link",
+      "x": 40,
+      "y": 520,
+      "width": 260,
+      "height": 100,
+      "url": "https://github.com/baileyrd/nexus",
+      "label": "Repo"
+    },
+    {
+      "id": "terminal-demo",
+      "type": "terminal",
+      "x": 340,
+      "y": 520,
+      "width": 400,
+      "height": 140,
+      "command": "cargo test -p nexus-terminal --lib",
+      "label": "Run terminal tests"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "fromNode": "overview",
+      "toNode": "prd-tracker",
+      "label": "tracks"
+    },
+    {
+      "id": "e2",
+      "fromNode": "prd-tracker",
+      "toNode": "tasks-db",
+      "label": "source of truth"
+    },
+    {
+      "id": "e3",
+      "fromNode": "overview",
+      "toNode": "microkernel",
+      "label": "pillar"
+    },
+    {
+      "id": "e4",
+      "fromNode": "overview",
+      "toNode": "editor-shell",
+      "label": "pillar"
+    },
+    {
+      "id": "e5",
+      "fromNode": "microkernel",
+      "toNode": "arch-notes",
+      "label": "deepens"
+    },
+    {
+      "id": "e6",
+      "fromNode": "editor-shell",
+      "toNode": "arch-notes",
+      "label": "deepens"
+    },
+    {
+      "id": "e7",
+      "fromNode": "readme",
+      "toNode": "overview",
+      "label": "start here"
+    },
+    {
+      "id": "e8",
+      "fromNode": "daily-today",
+      "toNode": "prd-tracker",
+      "label": "updates"
+    },
+    {
+      "id": "e9",
+      "fromNode": "daily-today",
+      "toNode": "tasks-db",
+      "label": "closes"
+    },
+    {
+      "id": "e10",
+      "fromNode": "text-pillar",
+      "toNode": "microkernel"
+    },
+    {
+      "id": "e11",
+      "fromNode": "text-pillar",
+      "toNode": "editor-shell"
+    }
+  ]
+}
