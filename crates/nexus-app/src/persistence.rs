@@ -98,9 +98,41 @@ pub struct ForgeUiState {
     /// Relpaths of directories that were expanded in the file tree.
     #[serde(default)]
     pub expanded_paths: Vec<String>,
-    /// Relpath of the file open in the viewer, if any.
+    /// Relpath of the file open in the viewer, if any. Legacy single-
+    /// file field retained for older files that predate `panes`.
     #[serde(default)]
     pub open_file: Option<String>,
+    /// Open tabs keyed by leaf pane id. Restored on forge re-open when
+    /// the loaded preset contains a matching leaf. Unknown pane ids
+    /// are dropped silently (e.g. the preset was edited between saves).
+    #[serde(default)]
+    pub panes: std::collections::BTreeMap<String, PersistedPaneState>,
+}
+
+/// Open-tab snapshot for a single leaf pane.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedPaneState {
+    /// Ordered list of open tabs (file-backed only today).
+    #[serde(default)]
+    pub tabs: Vec<PersistedTab>,
+    /// Relpath of the active tab, or `None` to fall back to the first
+    /// tab on restore.
+    #[serde(default)]
+    pub active_relpath: Option<String>,
+}
+
+/// One persisted tab. Label is re-derived from the relpath basename on
+/// restore so renames in the tree stay in sync.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedTab {
+    /// Forge-relative path of the file this tab was backing.
+    pub relpath: String,
+    /// `true` if the user had pinned this tab (non-closable, fixed at
+    /// the left of the strip).
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 /// Resolve the on-disk file path, creating the parent directory if
@@ -287,6 +319,7 @@ mod tests {
             ForgeUiState {
                 expanded_paths: vec!["notes".into(), "notes/sub".into()],
                 open_file: Some("notes/hello.md".into()),
+                panes: std::collections::BTreeMap::new(),
             },
         );
         save_to(tmp.path(), &state).unwrap();
@@ -294,5 +327,54 @@ mod tests {
         let entry = &loaded.forge_state["/some/forge"];
         assert_eq!(entry.expanded_paths, vec!["notes", "notes/sub"]);
         assert_eq!(entry.open_file.as_deref(), Some("notes/hello.md"));
+    }
+
+    #[test]
+    fn forge_panes_round_trip() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut state = LayoutPersistence::default();
+        let mut panes = std::collections::BTreeMap::new();
+        panes.insert(
+            "pane-main".into(),
+            PersistedPaneState {
+                tabs: vec![
+                    PersistedTab { relpath: "a.md".into(), pinned: false },
+                    PersistedTab { relpath: "b.md".into(), pinned: true },
+                ],
+                active_relpath: Some("b.md".into()),
+            },
+        );
+        state.forge_state.insert(
+            "/some/forge".into(),
+            ForgeUiState {
+                expanded_paths: vec![],
+                open_file: None,
+                panes,
+            },
+        );
+        save_to(tmp.path(), &state).unwrap();
+        let loaded = load_from(tmp.path());
+        let pane = &loaded.forge_state["/some/forge"].panes["pane-main"];
+        assert_eq!(pane.tabs.len(), 2);
+        assert_eq!(pane.tabs[0].relpath, "a.md");
+        assert!(pane.tabs[1].pinned);
+        assert_eq!(pane.active_relpath.as_deref(), Some("b.md"));
+    }
+
+    #[test]
+    fn legacy_forge_state_without_panes_loads() {
+        // File written before `panes` existed deserializes cleanly.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let json = r#"{
+          "version":1,
+          "lastPresetId":null,
+          "layouts":{},
+          "forgeState":{"/x":{"expandedPaths":["a"],"openFile":"a/b.md"}}
+        }"#;
+        fs::write(tmp.path(), json).unwrap();
+        let loaded = load_from(tmp.path());
+        let entry = &loaded.forge_state["/x"];
+        assert_eq!(entry.open_file.as_deref(), Some("a/b.md"));
+        assert!(entry.panes.is_empty());
     }
 }

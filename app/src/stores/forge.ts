@@ -95,7 +95,14 @@ export const useForgeStore = create<ForgeState>((set, get) => ({
     const ui = useLayoutStore.getState().forgeUiState(info.root);
     if (!ui) return;
     set({ expandedPaths: new Set(ui.expandedPaths) });
-    if (ui.openFile) {
+    // Prefer the new per-pane tab list over the legacy single-file
+    // field. If the forge has persisted pane state, restore those tabs;
+    // otherwise fall back to openFile for forward compat with older
+    // persistence files.
+    const hasPanes = ui.panes && Object.keys(ui.panes).length > 0;
+    if (hasPanes) {
+      useLayoutStore.getState().hydrateTabsForForge(info.root);
+    } else if (ui.openFile) {
       void useOpenFileStore.getState().open(ui.openFile);
     }
   },

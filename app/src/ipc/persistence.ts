@@ -14,9 +14,23 @@ export interface PersistedLayoutState {
   rightActivePanelId: string | null;
 }
 
+export interface PersistedTab {
+  relpath: string;
+  pinned?: boolean;
+}
+
+export interface PersistedPaneState {
+  tabs: PersistedTab[];
+  activeRelpath: string | null;
+}
+
 export interface ForgeUiState {
   expandedPaths: string[];
+  /** Legacy single-file field, kept for forward-compat with older
+   *  persistence files. New code reads/writes `panes`. */
   openFile: string | null;
+  /** Open tabs keyed by leaf pane id. Optional for backward compat. */
+  panes?: Record<string, PersistedPaneState>;
 }
 
 export interface LayoutPersistence {

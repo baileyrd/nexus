@@ -7,6 +7,9 @@ import type {
   StatusBarItem,
   Tab,
 } from "../bindings";
+// Deferred access to avoid a top-level circular import (forge → layout → forge).
+// ES module live-bindings make this safe to read at call time.
+import { useForgeStore } from "./forge";
 import {
   getDefaultLayout,
   getLayoutPreset,
@@ -20,6 +23,7 @@ import {
   type ForgeUiState,
   type LayoutPersistence,
   type PersistedLayoutState,
+  type PersistedPaneState,
 } from "../ipc/persistence";
 import type {
   PluginUiPanel,
@@ -72,6 +76,11 @@ interface LayoutState {
   /** Flip a tab's dirty flag so the tab-strip indicator tracks editor
    *  state. No-op if the tab isn't found. */
   setTabDirty: (tabId: string, isDirty: boolean) => void;
+  /** Rebuild file-backed tab lists in the active layout from the forge's
+   *  persisted state. Called by `forge.hydrate` after the layout preset
+   *  loads. Unknown pane ids in the persisted map are dropped; empty
+   *  panes are left untouched. */
+  hydrateTabsForForge: (forgeRoot: string) => void;
   /** Replace the plugin-panel snapshot and re-merge into the active
    *  layout. Call after fetching `list_plugin_panels`. */
   setPluginPanels: (panels: PluginUiPanel[]) => void;
@@ -230,6 +239,62 @@ function updateSplitSizes(
 
 type LeafNode = Extract<LayoutNode, { type: "leaf" }>;
 
+/** Basename helper for deriving tab labels from relpaths. */
+function basename(relpath: string): string {
+  const i = relpath.lastIndexOf("/");
+  return i === -1 ? relpath : relpath.slice(i + 1);
+}
+
+/** Construct a file-backed tab. `id` is randomised so each session's
+ *  ids are unique; `contentType = file:<relpath>` drives PaneView's
+ *  dispatch to the editor surface. */
+function makeFileTab(relpath: string, pinned: boolean): Tab {
+  return {
+    id: `tab:${relpath}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
+    label: basename(relpath) || relpath,
+    icon: "file",
+    surface: "editor",
+    pinned,
+    contentType: `file:${relpath}`,
+    isDirty: false,
+  };
+}
+
+/** Current forge root, or null if no forge is open. Safe to call from
+ *  inside layout-store actions despite the circular import: the read
+ *  happens at action time, not module init. */
+function currentForgeRoot(): string | null {
+  return useForgeStore.getState().info?.root ?? null;
+}
+
+/** Walk the layout tree and project every leaf's file-backed tabs into
+ *  the persistence shape. Non-file tabs are ignored. */
+function extractPanesFromLayout(node: LayoutNode): Record<string, PersistedPaneState> {
+  const out: Record<string, PersistedPaneState> = {};
+  function walk(n: LayoutNode) {
+    if (n.type === "leaf") {
+      const fileTabs = n.tabs.filter((t) => t.contentType.startsWith("file:"));
+      if (fileTabs.length === 0) return;
+      const activeTab = n.tabs.find((t) => t.id === n.activeTabId);
+      const activeRelpath =
+        activeTab && activeTab.contentType.startsWith("file:")
+          ? activeTab.contentType.slice("file:".length)
+          : null;
+      out[n.id] = {
+        tabs: fileTabs.map((t) => ({
+          relpath: t.contentType.slice("file:".length),
+          pinned: t.pinned,
+        })),
+        activeRelpath,
+      };
+      return;
+    }
+    for (const c of n.children) walk(c);
+  }
+  walk(node);
+  return out;
+}
+
 /** First leaf encountered in document order. */
 function firstLeaf(node: LayoutNode): LeafNode | null {
   if (node.type === "leaf") return node;
@@ -369,6 +434,34 @@ function scheduleSave(persistence: LayoutPersistence) {
   }, 500);
 }
 
+/** Return a new persistence blob with the given layout's tab state
+ *  merged into the forge-scoped panes map. Preserves `expandedPaths`
+ *  and legacy `openFile`. Returns `null` if no forge is open (nothing
+ *  to persist against). */
+function persistencePatchForPanes(
+  previous: LayoutPersistence | null,
+  forgeRoot: string,
+  layout: WorkspaceLayout,
+): LayoutPersistence {
+  const base: LayoutPersistence = previous ?? {
+    version: 1,
+    lastPresetId: null,
+    layouts: {},
+  };
+  const prevForge: ForgeUiState = base.forgeState?.[forgeRoot] ?? {
+    expandedPaths: [],
+    openFile: null,
+  };
+  const nextForge: ForgeUiState = {
+    ...prevForge,
+    panes: extractPanesFromLayout(layout.root),
+  };
+  return {
+    ...base,
+    forgeState: { ...(base.forgeState ?? {}), [forgeRoot]: nextForge },
+  };
+}
+
 /** Build a new persistence blob with the current layout's state
  *  written under its preset id. */
 function updatePersistence(
@@ -491,7 +584,12 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       if (!state.layout) return {};
       const nextRoot = updateActiveTab(state.layout.root, paneId, tabId);
       if (nextRoot === state.layout.root) return {};
-      return { layout: { ...state.layout, root: nextRoot } };
+      const layout = { ...state.layout, root: nextRoot };
+      const root = currentForgeRoot();
+      if (!root) return { layout };
+      const persistence = persistencePatchForPanes(state.persistence, root, layout);
+      scheduleSave(persistence);
+      return { layout, persistence };
     }),
 
   focusPane: (paneId) =>
@@ -504,7 +602,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       return { layout: { ...state.layout, focusedPaneId: paneId } };
     }),
 
-  openTabForFile: (relpath, label) =>
+  openTabForFile: (relpath, label) => {
     set((state) => {
       if (!state.layout) return {};
       const contentType = `file:${relpath}`;
@@ -526,31 +624,28 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       }
 
       // Otherwise push a new tab and activate it.
-      const tabId = `tab:${relpath}:${Date.now()}:${Math.random()
-        .toString(36)
-        .slice(2, 6)}`;
-      const newTab: Tab = {
-        id: tabId,
-        label,
-        icon: "file",
-        surface: "editor",
-        pinned: false,
-        contentType,
-        isDirty: false,
-      };
+      const newTab = makeFileTab(relpath, false);
+      // `label` is accepted for compatibility with callers that know the
+      // intended display name before the file is loaded; we derive from
+      // the relpath to keep restore behavior consistent.
+      newTab.label = label || newTab.label;
       const nextRoot = replaceLeaf(state.layout.root, target.id, (leaf) => ({
         ...leaf,
         tabs: [...leaf.tabs, newTab],
-        activeTabId: tabId,
+        activeTabId: newTab.id,
       }));
-      return {
-        layout: {
-          ...state.layout,
-          focusedPaneId: target.id,
-          root: nextRoot,
-        },
+      const layout = {
+        ...state.layout,
+        focusedPaneId: target.id,
+        root: nextRoot,
       };
-    }),
+      const root = currentForgeRoot();
+      if (!root) return { layout };
+      const persistence = persistencePatchForPanes(state.persistence, root, layout);
+      scheduleSave(persistence);
+      return { layout, persistence };
+    });
+  },
 
   closeTab: (tabId) =>
     set((state) => {
@@ -593,7 +688,12 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
         }
       }
 
-      return { layout: { ...state.layout, root: nextRoot } };
+      const layout = { ...state.layout, root: nextRoot };
+      const root = currentForgeRoot();
+      if (!root) return { layout };
+      const persistence = persistencePatchForPanes(state.persistence, root, layout);
+      scheduleSave(persistence);
+      return { layout, persistence };
     }),
 
   setTabDirty: (tabId, isDirty) =>
@@ -608,6 +708,39 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
         tabs: l.tabs.map((t) => (t.id === tabId ? { ...t, isDirty } : t)),
       }));
       return { layout: { ...state.layout, root: nextRoot } };
+    }),
+
+  hydrateTabsForForge: (forgeRoot) =>
+    set((state) => {
+      if (!state.layout) return {};
+      const panes = state.persistence?.forgeState?.[forgeRoot]?.panes;
+      if (!panes || Object.keys(panes).length === 0) return {};
+      let root = state.layout.root;
+      let changed = false;
+      for (const [paneId, pane] of Object.entries(panes)) {
+        if (!findLeaf(root, paneId as PaneId)) continue;
+        if (pane.tabs.length === 0) continue;
+        const restored = pane.tabs.map((pt) => makeFileTab(pt.relpath, pt.pinned === true));
+        const activeTab = pane.activeRelpath
+          ? restored.find((t) => t.contentType === `file:${pane.activeRelpath}`)
+          : undefined;
+        const activeTabId = activeTab?.id ?? restored[0]?.id ?? null;
+        root = replaceLeaf(root, paneId as PaneId, (leaf) => ({
+          ...leaf,
+          tabs: restored,
+          activeTabId,
+        }));
+        changed = true;
+        // Prime the keyed openFiles store so the editor has content the
+        // moment the leaf renders.
+        for (const pt of pane.tabs) {
+          void import("./openFiles").then((m) =>
+            m.useOpenFilesStore.getState().open(pt.relpath),
+          );
+        }
+      }
+      if (!changed) return {};
+      return { layout: { ...state.layout, root } };
     }),
 
   activatePanel: (side, panelId) =>
