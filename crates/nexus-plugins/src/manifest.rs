@@ -83,6 +83,22 @@ pub struct PluginManifest {
     /// Lazy-activation triggers for script plugins (UI F-3.2.1). Empty
     /// means eager activation at shell start.
     pub activation: ActivationConfig,
+    /// Declared dependencies on other plugins (PRD-04 §12). Each entry
+    /// names a plugin ID and a semver [`VersionReq`](semver::VersionReq)
+    /// string. The loader rejects a plugin whose dependencies are missing
+    /// or whose installed version does not satisfy the requirement.
+    pub dependencies: Vec<PluginDependency>,
+}
+
+/// A single `[dependencies]` entry: another plugin this plugin requires
+/// in order to load, together with a semver range the installed version
+/// must satisfy. Parsed from a TOML map of `plugin_id = "version_req"`.
+#[derive(Debug, Clone)]
+pub struct PluginDependency {
+    /// The dependent plugin's reverse-DNS id.
+    pub plugin_id: String,
+    /// A semver range — e.g. `"^1.0.0"`, `"~2.1"`, `">=1.0,<2.0"`.
+    pub version_req: String,
 }
 
 /// Capability strings declared in the manifest.
@@ -429,6 +445,8 @@ struct TomlManifest {
     lifecycle: TomlLifecycle,
     #[serde(default)]
     activation: TomlActivation,
+    #[serde(default)]
+    dependencies: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -846,6 +864,14 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
             on_content_type: raw.activation.on_content_type,
             on_uri_scheme: raw.activation.on_uri_scheme,
         },
+        dependencies: raw
+            .dependencies
+            .into_iter()
+            .map(|(plugin_id, version_req)| PluginDependency {
+                plugin_id,
+                version_req,
+            })
+            .collect(),
     })
 }
 
@@ -997,6 +1023,35 @@ on_stop = true
         assert!(m.registrations.ui_settings_tabs.is_empty());
         assert!(m.registrations.ui_ribbon_items.is_empty());
         assert!(m.registrations.ui_status_items.is_empty());
+        assert!(m.dependencies.is_empty());
+    }
+
+    #[test]
+    fn parse_dependencies_block() {
+        let toml = r#"
+[plugin]
+id = "com.example.dependent"
+name = "Dependent"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "plugin.wasm"
+
+[dependencies]
+"com.nexus.storage" = "^1.0.0"
+"com.example.markdown" = "~2.1"
+"#;
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        assert_eq!(m.dependencies.len(), 2);
+        let by_id: std::collections::HashMap<_, _> = m
+            .dependencies
+            .iter()
+            .map(|d| (d.plugin_id.as_str(), d.version_req.as_str()))
+            .collect();
+        assert_eq!(by_id.get("com.nexus.storage"), Some(&"^1.0.0"));
+        assert_eq!(by_id.get("com.example.markdown"), Some(&"~2.1"));
     }
 
     #[test]
@@ -1347,6 +1402,36 @@ pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), Plug
         reason: format!("version '{}' is not valid semver: {e}", manifest.version),
     })?;
 
+    // Rule 2b (PRD-04 §12): every dependency's version_req must be a
+    // valid semver range, the dep id must satisfy the same reverse-DNS
+    // pattern as the plugin id, and a plugin cannot depend on itself.
+    for dep in &manifest.dependencies {
+        if !id_re.is_match(&dep.plugin_id) {
+            return Err(PluginError::ManifestValidation {
+                plugin_id: id.clone(),
+                reason: format!(
+                    "dependency id '{}' does not match the required reverse-DNS pattern",
+                    dep.plugin_id
+                ),
+            });
+        }
+        if dep.plugin_id == *id {
+            return Err(PluginError::ManifestValidation {
+                plugin_id: id.clone(),
+                reason: "plugin cannot declare itself as a dependency".to_string(),
+            });
+        }
+        semver::VersionReq::parse(&dep.version_req).map_err(|e| {
+            PluginError::ManifestValidation {
+                plugin_id: id.clone(),
+                reason: format!(
+                    "dependency '{}' version requirement '{}' is not a valid semver range: {e}",
+                    dep.plugin_id, dep.version_req
+                ),
+            }
+        })?;
+    }
+
     // Rule 3: all capability strings must be known.
     for cap_str in manifest
         .capabilities
@@ -1602,6 +1687,51 @@ on_stop = true
     fn validate_accepts_valid_manifest() {
         let dir = make_test_plugin_dir("test.wasm");
         validate(&valid_manifest(), dir.path()).unwrap();
+    }
+
+    #[test]
+    fn validate_rejects_invalid_dependency_range() {
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.dependencies.push(PluginDependency {
+            plugin_id: "com.nexus.storage".to_string(),
+            version_req: "not-a-range".to_string(),
+        });
+        let err = validate(&m, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("semver range")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_self_dependency() {
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.dependencies.push(PluginDependency {
+            plugin_id: m.id.clone(),
+            version_req: "^1.0.0".to_string(),
+        });
+        let err = validate(&m, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("itself")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_malformed_dependency_id() {
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.dependencies.push(PluginDependency {
+            plugin_id: "NOT_REVERSE_DNS".to_string(),
+            version_req: "^1".to_string(),
+        });
+        let err = validate(&m, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("reverse-DNS")),
+            "got {err:?}"
+        );
     }
 
     #[test]

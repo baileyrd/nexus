@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, RwLock};
 
 use std::future::Future;
@@ -339,6 +339,16 @@ struct LoadedPlugin {
     /// methods check this and return [`PluginError::PluginReloading`]
     /// instead of racing the per-plugin backend mutex.
     reloading: Arc<AtomicBool>,
+    /// Number of consecutive [`PluginError::ExecutionTimeout`] results
+    /// since the last successful dispatch (PRD-04 §13). When it reaches
+    /// [`PluginLoader::max_timeout_streak`], the plugin is quarantined
+    /// and further dispatches return [`PluginError::Quarantined`].
+    timeout_streak: Arc<AtomicU32>,
+    /// Set once the plugin has tripped the consecutive-timeout threshold.
+    /// Dispatch methods short-circuit with [`PluginError::Quarantined`]
+    /// until the user runs `nexus plugin reset <id>` (or the plugin is
+    /// reloaded).
+    quarantined: Arc<AtomicBool>,
 }
 
 // ─── PluginLoader ─────────────────────────────────────────────────────────────
@@ -352,6 +362,10 @@ pub struct PluginLoader {
     /// default `.forge/plugins` path; additional entries come from
     /// `KernelConfig::plugin_search_paths`.
     search_paths: Vec<PathBuf>,
+    /// Consecutive-timeout threshold. When a plugin hits this many
+    /// [`PluginError::ExecutionTimeout`] results in a row the loader
+    /// auto-quarantines it (PRD-04 §13). `0` disables the watchdog.
+    max_timeout_streak: u32,
     loaded: HashMap<String, LoadedPlugin>,
     /// Plugin IDs in registration order. Used by
     /// [`PluginManager::shutdown`] to stop plugins in reverse-registration
@@ -376,12 +390,78 @@ impl PluginLoader {
     pub fn new(plugins_dir: &Path) -> Self {
         Self {
             search_paths: vec![plugins_dir.to_path_buf()],
+            max_timeout_streak: 3,
             loaded: HashMap::new(),
             registration_order: Vec::new(),
             cli_registry: HashMap::new(),
             settings: SettingsManager::new(),
             event_bus: None,
         }
+    }
+
+    /// Override the consecutive-timeout watchdog threshold (PRD-04 §13).
+    /// `0` disables auto-quarantine. The default is 3.
+    pub fn set_max_timeout_streak(&mut self, max: u32) {
+        self.max_timeout_streak = max;
+    }
+
+    /// Inspect a dispatch result and update the per-plugin timeout
+    /// streak. On [`PluginError::ExecutionTimeout`] the counter is
+    /// incremented; any other result (success *or* failure) resets it.
+    /// When the streak reaches `max_timeout_streak` the plugin is
+    /// quarantined and its persistent crash counter is bumped so the
+    /// quarantine survives restart.
+    fn record_dispatch_result<T>(
+        &self,
+        plugin_id: &str,
+        result: &Result<T, PluginError>,
+    ) {
+        let Some(lp) = self.loaded.get(plugin_id) else { return };
+        match result {
+            Err(PluginError::ExecutionTimeout { .. }) => {
+                let next = lp.timeout_streak.fetch_add(1, Ordering::AcqRel) + 1;
+                if self.max_timeout_streak > 0 && next >= self.max_timeout_streak {
+                    lp.quarantined.store(true, Ordering::Release);
+                    let plugin_dir = lp.plugin_dir.clone();
+                    let _ = crate::bump_crash_count(&plugin_dir);
+                    tracing::warn!(
+                        audit = true,
+                        plugin_id = %plugin_id,
+                        consecutive_timeouts = next,
+                        "plugin quarantined after consecutive timeouts; \
+                         run `nexus plugin reset <id>` to reactivate"
+                    );
+                }
+            }
+            _ => {
+                lp.timeout_streak.store(0, Ordering::Release);
+            }
+        }
+    }
+
+    /// Clear any in-memory quarantine state for `plugin_id` and reset the
+    /// consecutive-timeout counter. Called by
+    /// [`PluginManager::reset_crash_count`] after the user investigates.
+    pub(crate) fn clear_quarantine(&self, plugin_id: &str) {
+        if let Some(lp) = self.loaded.get(plugin_id) {
+            lp.quarantined.store(false, Ordering::Release);
+            lp.timeout_streak.store(0, Ordering::Release);
+        }
+    }
+
+    /// Quarantine check invoked at the top of every dispatch path. Returns
+    /// [`PluginError::Quarantined`] when the plugin has tripped the
+    /// consecutive-timeout watchdog.
+    fn check_quarantine(&self, plugin_id: &str) -> Result<(), PluginError> {
+        if let Some(lp) = self.loaded.get(plugin_id) {
+            if lp.quarantined.load(Ordering::Acquire) {
+                return Err(PluginError::Quarantined {
+                    plugin_id: plugin_id.to_string(),
+                    consecutive_timeouts: lp.timeout_streak.load(Ordering::Acquire),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Primary search path (the one passed to `PluginLoader::new`). Used
@@ -469,6 +549,12 @@ impl PluginLoader {
 
         // Step 2a (F-9.2.1): enforce api_version major compatibility.
         check_api_version(&manifest.api_version, &manifest.id)?;
+
+        // Step 2b (PRD-04 §12): ensure every declared dependency is
+        // present and its installed version satisfies the requested
+        // semver range. Dependencies must be registered before their
+        // dependents — bootstrap orders core plugins accordingly.
+        self.check_dependencies(&manifest)?;
 
         // Step 3: Reject core plugins — they must use register_core()
         if manifest.trust_level == TrustLevel::Core {
@@ -678,6 +764,8 @@ impl PluginLoader {
                 event_subs,
                 settings_cache,
                 reloading: Arc::new(AtomicBool::new(false)),
+                timeout_streak: Arc::new(AtomicU32::new(0)),
+                quarantined: Arc::new(AtomicBool::new(false)),
             },
         );
 
@@ -790,11 +878,16 @@ impl PluginLoader {
             .map(|r| r.handler_id)
             .ok_or_else(|| PluginError::PluginNotFound(subcommand.to_string()))?;
 
+        self.check_quarantine(&plugin_id)?;
+
         let backend = lp.backend.clone();
         let mut guard = backend
             .lock()
-            .map_err(|_| PluginError::PluginNotFound(plugin_id))?;
-        guard.dispatch(handler_id, args)
+            .map_err(|_| PluginError::PluginNotFound(plugin_id.clone()))?;
+        let result = guard.dispatch(handler_id, args);
+        drop(guard);
+        self.record_dispatch_result(&plugin_id, &result);
+        result
     }
 
     /// Dispatch an IPC command call with capability verification.
@@ -915,6 +1008,7 @@ impl PluginLoader {
                 return Err(PluginError::PluginReloading(plugin_id.to_string()));
             }
         }
+        self.check_quarantine(plugin_id)?;
         let (backend, handler_id) = self.resolve_ipc(plugin_id, command_id)?;
         let _dispatch_guard =
             DispatchGuard::enter(plugin_id).ok_or_else(|| PluginError::ReentrantCall {
@@ -924,7 +1018,10 @@ impl PluginLoader {
         let mut guard = backend
             .lock()
             .map_err(|_| PluginError::PluginNotFound(plugin_id.to_string()))?;
-        guard.dispatch(handler_id, args)
+        let result = guard.dispatch(handler_id, args);
+        drop(guard);
+        self.record_dispatch_result(plugin_id, &result);
+        result
     }
 
     /// Return the hot-reload flag for `plugin_id`, or `None` if not loaded.
@@ -1128,6 +1225,56 @@ impl PluginLoader {
     #[allow(dead_code)]
     pub(crate) fn manifest(&self, plugin_id: &str) -> Option<&PluginManifest> {
         self.loaded.get(plugin_id).map(|lp| &lp.manifest)
+    }
+
+    /// Verify every `[dependencies]` entry in `manifest` is satisfied by
+    /// an already-loaded plugin whose installed version matches the
+    /// declared semver range (PRD-04 §12). A missing or version-conflict
+    /// dependency returns [`PluginError::DependencyUnsatisfied`].
+    ///
+    /// The manifest's individual `version_req` strings are already
+    /// validated by [`manifest::validate`], so `VersionReq::parse` here
+    /// cannot fail for reasons other than a parser regression.
+    fn check_dependencies(&self, manifest: &PluginManifest) -> Result<(), PluginError> {
+        for dep in &manifest.dependencies {
+            let Some(loaded) = self.loaded.get(&dep.plugin_id) else {
+                return Err(PluginError::DependencyUnsatisfied {
+                    plugin_id: manifest.id.clone(),
+                    reason: format!(
+                        "required plugin '{}' ({}) is not loaded",
+                        dep.plugin_id, dep.version_req
+                    ),
+                });
+            };
+            let req = semver::VersionReq::parse(&dep.version_req).map_err(|e| {
+                PluginError::DependencyUnsatisfied {
+                    plugin_id: manifest.id.clone(),
+                    reason: format!(
+                        "invalid semver range '{}' for dependency '{}': {e}",
+                        dep.version_req, dep.plugin_id
+                    ),
+                }
+            })?;
+            let installed = semver::Version::parse(&loaded.manifest.version).map_err(|e| {
+                PluginError::DependencyUnsatisfied {
+                    plugin_id: manifest.id.clone(),
+                    reason: format!(
+                        "dependency '{}' has invalid installed version '{}': {e}",
+                        dep.plugin_id, loaded.manifest.version
+                    ),
+                }
+            })?;
+            if !req.matches(&installed) {
+                return Err(PluginError::DependencyUnsatisfied {
+                    plugin_id: manifest.id.clone(),
+                    reason: format!(
+                        "dependency '{}' version {} does not satisfy '{}'",
+                        dep.plugin_id, installed, dep.version_req
+                    ),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Clone the shared settings cache for `plugin_id`. Used by hot-reload
@@ -1749,6 +1896,188 @@ on_stop = true
         let info = loader.load(&plugin_dir).unwrap();
         assert_eq!(info.id, "com.test.load");
         assert_eq!(info.status, PluginStatus::Running);
+    }
+
+    fn setup_plugin_dir_with_dep(
+        plugin_id: &str,
+        dep_id: &str,
+        version_req: &str,
+    ) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin_dir = tmp.path().join(plugin_id);
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+
+        let wasm_src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/minimal-plugin.wasm");
+        std::fs::copy(&wasm_src, plugin_dir.join("test.wasm")).unwrap();
+
+        let manifest = format!(
+            r#"
+[plugin]
+id = "{plugin_id}"
+name = "Dependent"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[capabilities]
+required = ["kv.read"]
+
+[wasm]
+module = "test.wasm"
+
+[dependencies]
+"{dep_id}" = "{version_req}"
+"#
+        );
+        std::fs::write(plugin_dir.join("manifest.toml"), manifest).unwrap();
+        tmp
+    }
+
+    #[test]
+    fn load_rejects_missing_dependency() {
+        let tmp = setup_plugin_dir_with_dep(
+            "com.test.needs-dep",
+            "com.test.provider",
+            "^1.0.0",
+        );
+        let plugin_dir = tmp.path().join("com.test.needs-dep");
+        let mut loader = PluginLoader::new(tmp.path());
+        let err = loader.load(&plugin_dir).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                PluginError::DependencyUnsatisfied { ref reason, .. }
+                    if reason.contains("com.test.provider")
+                        && reason.contains("not loaded")
+            ),
+            "expected DependencyUnsatisfied(not loaded), got {err:?}"
+        );
+    }
+
+    #[test]
+    fn load_rejects_dependency_version_mismatch() {
+        // Provider installed at 1.0.0; dependent requires ^2.0 → reject.
+        let provider_tmp = setup_plugin_dir("com.test.provider.v1");
+        let provider_dir = provider_tmp.path().join("com.test.provider.v1");
+
+        let dependent_tmp = setup_plugin_dir_with_dep(
+            "com.test.needs-v2",
+            "com.test.provider.v1",
+            "^2.0.0",
+        );
+        let dependent_dir = dependent_tmp.path().join("com.test.needs-v2");
+
+        let mut loader = PluginLoader::new(provider_tmp.path());
+        loader.load(&provider_dir).unwrap();
+        let err = loader.load(&dependent_dir).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                PluginError::DependencyUnsatisfied { ref reason, .. }
+                    if reason.contains("does not satisfy")
+            ),
+            "expected DependencyUnsatisfied(version mismatch), got {err:?}"
+        );
+    }
+
+    #[test]
+    fn consecutive_timeouts_quarantine_plugin() {
+        let tmp = setup_plugin_dir("com.test.watchdog");
+        let plugin_dir = tmp.path().join("com.test.watchdog");
+        let mut loader = PluginLoader::new(tmp.path());
+        loader.set_max_timeout_streak(3);
+        loader.load(&plugin_dir).unwrap();
+
+        let plugin_id = "com.test.watchdog";
+        let synth_timeout = || -> Result<(), PluginError> {
+            Err(PluginError::ExecutionTimeout {
+                plugin_id: plugin_id.to_string(),
+            })
+        };
+
+        // First two timeouts leave the plugin operational.
+        loader.record_dispatch_result(plugin_id, &synth_timeout());
+        assert!(loader.check_quarantine(plugin_id).is_ok());
+        loader.record_dispatch_result(plugin_id, &synth_timeout());
+        assert!(loader.check_quarantine(plugin_id).is_ok());
+
+        // Third timeout crosses the threshold → quarantined.
+        loader.record_dispatch_result(plugin_id, &synth_timeout());
+        let err = loader.check_quarantine(plugin_id).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                PluginError::Quarantined { ref plugin_id, consecutive_timeouts }
+                    if plugin_id == "com.test.watchdog" && consecutive_timeouts == 3
+            ),
+            "expected Quarantined, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn success_resets_timeout_streak() {
+        let tmp = setup_plugin_dir("com.test.reset-streak");
+        let plugin_dir = tmp.path().join("com.test.reset-streak");
+        let mut loader = PluginLoader::new(tmp.path());
+        loader.set_max_timeout_streak(3);
+        loader.load(&plugin_dir).unwrap();
+
+        let plugin_id = "com.test.reset-streak";
+        let timeout = Err::<(), _>(PluginError::ExecutionTimeout {
+            plugin_id: plugin_id.to_string(),
+        });
+        let success = Ok::<(), PluginError>(());
+
+        // Two timeouts, then a success resets the counter so the next
+        // timeout doesn't trip the watchdog.
+        loader.record_dispatch_result(plugin_id, &timeout);
+        loader.record_dispatch_result(plugin_id, &timeout);
+        loader.record_dispatch_result(plugin_id, &success);
+        loader.record_dispatch_result(plugin_id, &timeout);
+
+        assert!(
+            loader.check_quarantine(plugin_id).is_ok(),
+            "single post-success timeout should not quarantine"
+        );
+    }
+
+    #[test]
+    fn clear_quarantine_reactivates_plugin() {
+        let tmp = setup_plugin_dir("com.test.clear-q");
+        let plugin_dir = tmp.path().join("com.test.clear-q");
+        let mut loader = PluginLoader::new(tmp.path());
+        loader.set_max_timeout_streak(1);
+        loader.load(&plugin_dir).unwrap();
+
+        let plugin_id = "com.test.clear-q";
+        let timeout = Err::<(), _>(PluginError::ExecutionTimeout {
+            plugin_id: plugin_id.to_string(),
+        });
+
+        loader.record_dispatch_result(plugin_id, &timeout);
+        assert!(loader.check_quarantine(plugin_id).is_err());
+
+        loader.clear_quarantine(plugin_id);
+        assert!(loader.check_quarantine(plugin_id).is_ok());
+    }
+
+    #[test]
+    fn load_succeeds_when_dependency_satisfied() {
+        let provider_tmp = setup_plugin_dir("com.test.dep.provider");
+        let provider_dir = provider_tmp.path().join("com.test.dep.provider");
+
+        let dependent_tmp = setup_plugin_dir_with_dep(
+            "com.test.dep.dependent",
+            "com.test.dep.provider",
+            "^1.0.0",
+        );
+        let dependent_dir = dependent_tmp.path().join("com.test.dep.dependent");
+
+        let mut loader = PluginLoader::new(provider_tmp.path());
+        loader.load(&provider_dir).unwrap();
+        let info = loader.load(&dependent_dir).unwrap();
+        assert_eq!(info.id, "com.test.dep.dependent");
     }
 
     #[test]

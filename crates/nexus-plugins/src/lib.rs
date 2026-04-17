@@ -26,8 +26,9 @@ pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 pub use loader::{CorePlugin, CorePluginFuture, PluginBackend, PluginLoader, SharedPluginLoader};
 pub use manifest::{
     ActivationConfig, CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig,
-    ManifestCapabilities, PanelSide, PluginManifest, PluginRuntime, Registrations, SettingsConfig,
-    UiCommandReg, UiPanelReg, UiRibbonItemReg, UiSettingsTabReg, UiStatusItemReg, WasmConfig,
+    ManifestCapabilities, PanelSide, PluginDependency, PluginManifest, PluginRuntime,
+    Registrations, SettingsConfig, UiCommandReg, UiPanelReg, UiRibbonItemReg, UiSettingsTabReg,
+    UiStatusItemReg, WasmConfig,
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
 pub use sandbox::{PluginData, PluginEventForwarder, WasmSandbox};
@@ -254,6 +255,11 @@ pub struct PluginManagerConfig {
     /// `nexus plugin reset <id>`. `0` disables the counter.
     /// Default: `3`.
     pub max_crashes: u32,
+    /// Consecutive-timeout watchdog threshold (PRD-04 §13). A plugin
+    /// whose dispatches return [`PluginError::ExecutionTimeout`] this
+    /// many times in a row is quarantined until reloaded or reset. `0`
+    /// disables the runtime watchdog. Default: `3`.
+    pub max_timeout_streak: u32,
 }
 
 impl Default for PluginManagerConfig {
@@ -263,6 +269,7 @@ impl Default for PluginManagerConfig {
             debounce_ms: 500,
             safe_mode: false,
             max_crashes: 3,
+            max_timeout_streak: 3,
         }
     }
 }
@@ -283,7 +290,7 @@ fn load_crash_count(plugin_dir: &std::path::Path) -> u32 {
         .unwrap_or(0)
 }
 
-fn bump_crash_count(plugin_dir: &std::path::Path) -> std::io::Result<u32> {
+pub(crate) fn bump_crash_count(plugin_dir: &std::path::Path) -> std::io::Result<u32> {
     let current = load_crash_count(plugin_dir);
     let next = current.saturating_add(1);
     let p = plugin_dir.join(CRASH_FILE);
@@ -342,7 +349,8 @@ impl PluginManager {
     /// # Errors
     /// Returns [`PluginError`] if the hot-reload watcher cannot be started.
     pub fn new(plugins_dir: &std::path::Path, config: &PluginManagerConfig) -> Result<Self, PluginError> {
-        let loader = loader::PluginLoader::new(plugins_dir);
+        let mut loader = loader::PluginLoader::new(plugins_dir);
+        loader.set_max_timeout_streak(config.max_timeout_streak);
         let reloader = if config.hot_reload {
             Some(hot_reload::HotReloader::start(plugins_dir, config.debounce_ms)?)
         } else {
@@ -438,7 +446,9 @@ impl PluginManager {
     /// # Errors
     /// Returns the I/O error if the counter file cannot be removed.
     pub fn reset_crash_count(&self, plugin_id: &str) -> std::io::Result<()> {
-        reset_crash_count_at(self.loader.plugins_dir(), plugin_id)
+        reset_crash_count_at(self.loader.plugins_dir(), plugin_id)?;
+        self.loader.clear_quarantine(plugin_id);
+        Ok(())
     }
 
     /// Load a single plugin from `plugin_dir`.
@@ -1070,6 +1080,10 @@ impl PluginManager {
         }
         self.loader.replace_sandbox(plugin_id, new_sandbox);
         self.loader.set_status(plugin_id, nexus_kernel::PluginStatus::Running);
+        // A successful reload presumes the fresh sandbox is healthy;
+        // clear any in-memory quarantine state so the user doesn't have
+        // to manually reset after a hot-reload fix.
+        self.loader.clear_quarantine(plugin_id);
 
         Ok(())
     }

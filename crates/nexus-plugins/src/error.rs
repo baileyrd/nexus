@@ -153,6 +153,28 @@ pub enum PluginError {
     #[error("script plugin dispatch must be handled by the frontend")]
     ScriptDispatchFrontend,
 
+    /// A declared plugin dependency is missing from the registry or
+    /// its installed version does not satisfy the declared semver range.
+    #[error("dependency unsatisfied for {plugin_id}: {reason}")]
+    DependencyUnsatisfied {
+        /// The depending plugin whose load was rejected.
+        plugin_id: String,
+        /// A human-readable description of the unsatisfied dependency.
+        reason: String,
+    },
+
+    /// The plugin has been auto-quarantined after exceeding the
+    /// consecutive-timeout threshold (PRD-04 §13). Further dispatches
+    /// are rejected until the plugin is reloaded or the user resets its
+    /// crash counter with `nexus plugin reset <id>`.
+    #[error("plugin {plugin_id} is quarantined ({consecutive_timeouts} consecutive timeouts)")]
+    Quarantined {
+        /// The quarantined plugin's id.
+        plugin_id: String,
+        /// How many consecutive timeouts triggered quarantine.
+        consecutive_timeouts: u32,
+    },
+
     /// An underlying I/O error occurred.
     #[error("I/O error: {0}")]
     Io(
