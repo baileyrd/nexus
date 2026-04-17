@@ -6,6 +6,8 @@ This directory contains standalone, implementation-ready PRDs for every Nexus su
 
 **Files are numbered in build order** — the sequence you should implement them.
 
+> **Where are we right now?** See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for a per-PRD status table, gaps, and evidence. Pending work lives in [BACKLOG.md](BACKLOG.md); delivered items are archived in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
+
 ---
 
 ## Phase 1 — Foundation
