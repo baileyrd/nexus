@@ -3,13 +3,45 @@
  * handler calls locally in the WebView (no IPC round-trip to the backend).
  */
 
-import { readPluginScript } from "../ipc/plugins";
+import {
+  listPluginActivations,
+  listPluginCapabilities,
+  readPluginScript,
+  type PluginActivation,
+} from "../ipc/plugins";
 import {
   createNexusContext,
+  type DeclaredCapabilities,
   type DisposableStore,
   type NexusPluginContext,
 } from "./nexusContext";
 import { usePluginStatusStore } from "./status";
+
+/**
+ * Cached per-plugin declared capability set. Populated lazily on the
+ * first load of each plugin and refreshed alongside the activation
+ * table. Used by `createNexusContext` to gate `events.emit` / `ipc.call`
+ * / `ui.notify` surfaces (UI F-2.2.1).
+ */
+const declaredCapabilities = new Map<string, ReadonlySet<string>>();
+
+async function loadDeclaredCapabilities(pluginId: string): Promise<DeclaredCapabilities> {
+  const cached = declaredCapabilities.get(pluginId);
+  if (cached) return cached;
+  try {
+    const list = await listPluginCapabilities();
+    for (const entry of list) {
+      declaredCapabilities.set(
+        entry.plugin_id,
+        new Set([...entry.required, ...entry.optional]),
+      );
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[scriptRuntime] list_plugin_capabilities failed: ${String(err)}`);
+  }
+  return declaredCapabilities.get(pluginId);
+}
 
 /** The contract a JS plugin module must satisfy. */
 export interface ScriptPlugin {
@@ -49,7 +81,8 @@ export async function loadScriptPlugin(
   const url = URL.createObjectURL(blob);
   try {
     const mod = (await import(/* @vite-ignore */ url)) as ScriptPlugin;
-    const ctx = createNexusContext(pluginId);
+    const declared = await loadDeclaredCapabilities(pluginId);
+    const ctx = createNexusContext(pluginId, undefined, declared);
     loaded.set(pluginId, { module: mod, ctx, store: ctx.disposables });
 
     // Call lifecycle hooks with a per-plugin error boundary (UI F-7.2.1)
@@ -166,4 +199,73 @@ export async function stopAllScriptPlugins(
       ]),
     ),
   );
+}
+
+// ─── Activation events (UI F-3.2.1) ───────────────────────────────────────────
+//
+// Script plugins with a `[activation]` block stay dormant at shell boot;
+// their module is only imported (and `onInit` / `onStart` fired) when one
+// of the declared triggers matches. `on_command` is already implicitly
+// lazy because `dispatchToScript` calls `loadScriptPlugin` on first use;
+// `on_content_type` and `on_uri_scheme` need explicit plumbing from the
+// content-type mount and URI dispatch sites, respectively.
+//
+// Call `refreshActivationTable()` on boot and after every hot-reload to
+// rebuild the triggers. `activateByContentType` / `activateByUriScheme`
+// are fire-and-forget helpers called from the shell.
+
+let activationTable: PluginActivation[] = [];
+const contentTypeIndex = new Map<string, string[]>();
+const uriSchemeIndex = new Map<string, string[]>();
+
+export async function refreshActivationTable(): Promise<void> {
+  try {
+    activationTable = await listPluginActivations();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[scriptRuntime] failed to load activation table: ${String(err)}`,
+    );
+    activationTable = [];
+  }
+  contentTypeIndex.clear();
+  uriSchemeIndex.clear();
+  for (const entry of activationTable) {
+    for (const ct of entry.on_content_type) {
+      const list = contentTypeIndex.get(ct) ?? [];
+      list.push(entry.plugin_id);
+      contentTypeIndex.set(ct, list);
+    }
+    for (const scheme of entry.on_uri_scheme) {
+      const key = scheme.toLowerCase();
+      const list = uriSchemeIndex.get(key) ?? [];
+      list.push(entry.plugin_id);
+      uriSchemeIndex.set(key, list);
+    }
+  }
+}
+
+export function activateByContentType(contentTypeId: string): void {
+  const targets = contentTypeIndex.get(contentTypeId);
+  if (!targets) return;
+  for (const id of targets) {
+    void loadScriptPlugin(id).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn(`[scriptRuntime] activate(${id}) failed: ${String(err)}`);
+    });
+  }
+}
+
+export function activateByUriScheme(url: string): void {
+  const colon = url.indexOf(":");
+  if (colon === -1) return;
+  const scheme = url.slice(0, colon).toLowerCase();
+  const targets = uriSchemeIndex.get(scheme);
+  if (!targets) return;
+  for (const id of targets) {
+    void loadScriptPlugin(id).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn(`[scriptRuntime] activate(${id}) failed: ${String(err)}`);
+    });
+  }
 }

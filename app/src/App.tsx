@@ -14,7 +14,11 @@ import { useToastStore, type ToastLevel } from "./stores/toast";
 import { THEME_CHANGED_EVENT } from "./ipc/theme";
 import type { ThemeConfig } from "./ipc/theme";
 import type { PluginEvent } from "./plugins/events";
-import { stopAllScriptPlugins } from "./plugins/scriptRuntime";
+import {
+  activateByUriScheme,
+  refreshActivationTable,
+  stopAllScriptPlugins,
+} from "./plugins/scriptRuntime";
 
 export default function App() {
   const applyTheme = useThemeStore((s) => s.applyTheme);
@@ -76,16 +80,26 @@ export default function App() {
   // Dispatch incoming deep-link URLs to registered URI handlers.
   // The Rust backend emits "nexus:url-opened" (via `dispatch_uri` Tauri
   // command or the tauri-plugin-deep-link bridge) with the full URL string.
+  // Before dispatch, activate any script plugin whose manifest declared
+  // `on_uri_scheme` for the incoming scheme (UI F-3.2.1).
   useEffect(() => {
     const unlistenPromise = listen<string>(
       "nexus:url-opened",
       (event) => {
+        activateByUriScheme(event.payload);
         contributions.dispatchUri(event.payload);
       },
     );
     return () => {
       void unlistenPromise.then((unlisten) => unlisten());
     };
+  }, []);
+
+  // Pull the activation table once at boot so content-type / URI-scheme
+  // triggers know which plugins to lazy-load (UI F-3.2.1). Refreshed by
+  // the contribution bridge after every hot-reload.
+  useEffect(() => {
+    void refreshActivationTable();
   }, []);
 
   // On window close / WebView teardown give every loaded script plugin a

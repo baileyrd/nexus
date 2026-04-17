@@ -135,6 +135,38 @@ export function listPlugins(): Promise<PluginSummary[]> {
   return invoke<PluginSummary[]>("list_plugins");
 }
 
+/**
+ * Per-plugin activation triggers (UI F-3.2.1). Each entry applies to a
+ * script plugin that declared `[activation]` in its manifest. WASM and
+ * eager plugins are omitted from the response.
+ */
+export interface PluginActivation {
+  plugin_id: string;
+  on_command: string[];
+  on_content_type: string[];
+  on_uri_scheme: string[];
+}
+
+export function listPluginActivations(): Promise<PluginActivation[]> {
+  return invoke<PluginActivation[]>("list_plugin_activations");
+}
+
+/**
+ * Declared capability strings for a plugin (UI F-2.2.1). `required` +
+ * `optional` together form the set of caps the plugin may use. Surfaces
+ * on `NexusPluginContext` cross-check their backing capability against
+ * this set before each call and warn when an undeclared cap is used.
+ */
+export interface PluginCapabilities {
+  plugin_id: string;
+  required: string[];
+  optional: string[];
+}
+
+export function listPluginCapabilities(): Promise<PluginCapabilities[]> {
+  return invoke<PluginCapabilities[]>("list_plugin_capabilities");
+}
+
 export function invokePluginCommand(
   pluginId: string,
   commandId: string,

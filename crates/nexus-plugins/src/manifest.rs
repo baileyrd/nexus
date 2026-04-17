@@ -80,6 +80,9 @@ pub struct PluginManifest {
     pub registrations: Registrations,
     /// Lifecycle hook enablement.
     pub lifecycle: LifecycleConfig,
+    /// Lazy-activation triggers for script plugins (UI F-3.2.1). Empty
+    /// means eager activation at shell start.
+    pub activation: ActivationConfig,
 }
 
 /// Capability strings declared in the manifest.
@@ -353,6 +356,39 @@ pub struct UriHandlerReg {
     pub handler_id: u32,
 }
 
+/// Activation triggers declared in `[activation]` (UI F-3.2.1).
+///
+/// Controls when a script plugin's module is first read into memory. An
+/// empty `ActivationConfig` means "activate at shell start" for backwards
+/// compatibility with pre-F-3.2.1 manifests. When any field is populated,
+/// the plugin stays dormant until one of the triggers fires:
+/// - `on_command` — the user invokes any command id in the list.
+/// - `on_content_type` — a tab opens with a matching content-type id.
+/// - `on_uri_scheme` — the app dispatches a URL with a matching scheme.
+///
+/// WASM plugins ignore this section — the sandbox is too cheap to build
+/// lazily. This is a script-plugin optimization.
+#[derive(Debug, Clone, Default)]
+pub struct ActivationConfig {
+    /// Command ids whose invocation should activate the plugin.
+    pub on_command: Vec<String>,
+    /// Content-type ids whose mount should activate the plugin.
+    pub on_content_type: Vec<String>,
+    /// URI schemes whose dispatch should activate the plugin.
+    pub on_uri_scheme: Vec<String>,
+}
+
+impl ActivationConfig {
+    /// `true` when no activation trigger is specified, meaning the
+    /// plugin activates eagerly at shell start (pre-F-3.2.1 semantics).
+    #[must_use]
+    pub fn is_eager(&self) -> bool {
+        self.on_command.is_empty()
+            && self.on_content_type.is_empty()
+            && self.on_uri_scheme.is_empty()
+    }
+}
+
 /// Lifecycle hook enablement flags.
 #[derive(Debug, Clone, Default)]
 #[allow(clippy::struct_excessive_bools)]
@@ -391,6 +427,18 @@ struct TomlManifest {
     registrations: TomlRegistrations,
     #[serde(default)]
     lifecycle: TomlLifecycle,
+    #[serde(default)]
+    activation: TomlActivation,
+}
+
+#[derive(Deserialize, Default)]
+struct TomlActivation {
+    #[serde(default)]
+    on_command: Vec<String>,
+    #[serde(default)]
+    on_content_type: Vec<String>,
+    #[serde(default)]
+    on_uri_scheme: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -792,6 +840,11 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
             on_enable: raw.lifecycle.on_enable,
             on_disable: raw.lifecycle.on_disable,
             on_settings_changed: raw.lifecycle.on_settings_changed,
+        },
+        activation: ActivationConfig {
+            on_command: raw.activation.on_command,
+            on_content_type: raw.activation.on_content_type,
+            on_uri_scheme: raw.activation.on_uri_scheme,
         },
     })
 }

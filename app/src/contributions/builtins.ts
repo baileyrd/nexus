@@ -1,5 +1,6 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FileTree } from "../components/panels/FileTree";
+import { FileViewer } from "../components/panels/FileViewer";
 import { Outline } from "../components/panels/Outline";
 import { makeGenericTreePanelFactory } from "../components/panels/GenericTreePanel";
 import { GeneralTab } from "../components/settings/tabs/GeneralTab";
@@ -25,14 +26,16 @@ export function registerBuiltins(): void {
   // can auto-wire the panel component without a circular import in registry.ts.
   contributions.setTreePanelFactory(makeGenericTreePanelFactory);
 
-  // Default file extension handlers. Markdown files open in the editor
-  // surface. Canvas and base files have no dedicated surface yet so they
-  // fall through to FileViewer — these registrations act as placeholders
-  // that plugin-contributed surfaces can replace via their own handler.
-  // Extension handlers use the surface content-type id that must be
-  // registered separately by the surface plugin.
-  contributions.registerFileHandler("md", "editor");
-  contributions.registerFileHandler("mdx", "editor");
+  // UI F-1.1.1: dogfood the markdown editor as a content-type contribution
+  // rather than a hard-coded fallback in PaneView. `FileViewer` mounts the
+  // CM6 editor and is registered under both the canonical `"com.nexus.editor.markdown"`
+  // content-type id and a legacy `"editor"` alias for pre-F-1.1.1 code paths.
+  // Markdown / MDX file extensions resolve through the same file-handler
+  // registry any community plugin can contribute to.
+  contributions.registerContentType("com.nexus.editor.markdown", FileViewer);
+  contributions.registerContentType("editor", FileViewer); // legacy alias
+  contributions.registerFileHandler("md", "com.nexus.editor.markdown");
+  contributions.registerFileHandler("mdx", "com.nexus.editor.markdown");
   // ".canvas" and ".base" are future surfaces — no content-type registered
   // yet, so resolveFileHandlerForPath will return the id but PaneView will
   // fall back to FileViewer until a plugin registers the matching component.

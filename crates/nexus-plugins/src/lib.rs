@@ -25,9 +25,9 @@ pub use error::PluginError;
 pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 pub use loader::{CorePlugin, CorePluginFuture, PluginBackend, PluginLoader, SharedPluginLoader};
 pub use manifest::{
-    CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
-    PanelSide, PluginManifest, PluginRuntime, Registrations, SettingsConfig, UiCommandReg,
-    UiPanelReg, UiRibbonItemReg, UiSettingsTabReg, UiStatusItemReg, WasmConfig,
+    ActivationConfig, CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig,
+    ManifestCapabilities, PanelSide, PluginManifest, PluginRuntime, Registrations, SettingsConfig,
+    UiCommandReg, UiPanelReg, UiRibbonItemReg, UiSettingsTabReg, UiStatusItemReg, WasmConfig,
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
 pub use sandbox::{PluginData, PluginEventForwarder, WasmSandbox};
@@ -682,6 +682,27 @@ impl PluginManager {
     #[must_use]
     pub fn event_subscriptions(&self, plugin_id: &str) -> Vec<(String, String, bool)> {
         self.loader.event_subscriptions(plugin_id)
+    }
+
+    /// Per-plugin activation triggers (UI F-3.2.1). Returns empty
+    /// `(on_command, on_content_type, on_uri_scheme)` vectors when a
+    /// plugin declares eager activation, and a non-empty triple when
+    /// the manifest declares lazy activation. WASM plugins are always
+    /// eager and return `None`.
+    #[must_use]
+    pub fn activation_triggers(
+        &self,
+        plugin_id: &str,
+    ) -> Option<(Vec<String>, Vec<String>, Vec<String>)> {
+        let m = self.loader.manifest(plugin_id)?;
+        if m.script.is_none() {
+            return None;
+        }
+        Some((
+            m.activation.on_command.clone(),
+            m.activation.on_content_type.clone(),
+            m.activation.on_uri_scheme.clone(),
+        ))
     }
 
     /// Enable or disable an event subscription.

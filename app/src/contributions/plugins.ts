@@ -43,7 +43,11 @@ import {
   type PluginUiRibbonItem,
   type PluginUiStatusItem,
 } from "../ipc/plugins";
-import { dispatchToScript, evictScriptPlugin } from "../plugins/scriptRuntime";
+import {
+  dispatchToScript,
+  evictScriptPlugin,
+  refreshActivationTable,
+} from "../plugins/scriptRuntime";
 import {
   SLOW_COMMAND_CANCEL_MS,
   usePluginStatusStore,
@@ -262,6 +266,9 @@ export async function registerPluginContributions(): Promise<void> {
       for (const id of event.payload.plugin_ids) {
         evictScriptPlugin(id);
       }
+      // Rebuild the activation table in case any reloaded plugin changed
+      // its `[activation]` block (UI F-3.2.1).
+      void refreshActivationTable();
       void syncAll(event.payload.plugin_ids);
     });
   } catch (err) {

@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import type { LayoutNode, Panel, Tab } from "../../bindings";
 import { FileViewer } from "../panels/FileViewer";
 import { useOpenFileStore } from "../../stores/openFile";
 import { useContentType } from "../../contributions/registry";
+import { activateByContentType } from "../../plugins/scriptRuntime";
 import { TabStrip } from "./TabStrip";
 
 interface PaneViewProps {
@@ -33,6 +35,14 @@ export function PaneView({ node, focused }: PaneViewProps) {
   // plugins can contribute tab surfaces (graph view, canvas editor, …)
   // through the same contribution registry used by side panels.
   const ContentComponent = useContentType(activeTab?.contentType ?? null);
+
+  // UI F-3.2.1: activate any script plugin whose manifest declared
+  // `on_content_type` for the active tab's content-type id. `loadScriptPlugin`
+  // is idempotent, so repeated mounts of the same content-type are cheap.
+  useEffect(() => {
+    const ct = activeTab?.contentType;
+    if (ct) activateByContentType(ct);
+  }, [activeTab?.contentType]);
 
   return (
     <div className={focused ? "pane focused" : "pane"}>

@@ -464,6 +464,84 @@ pub fn save_plugin_settings(
         .map_err(|e| e.to_string())
 }
 
+/// Per-plugin activation triggers (UI F-3.2.1). Consumed by the frontend
+/// contribution bridge to lazily `loadScriptPlugin` when a content-type
+/// mounts or a URI fires, without running every script plugin's `onInit`
+/// at shell start.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PluginActivation {
+    /// Reverse-DNS plugin id.
+    pub plugin_id: String,
+    /// Namespaced command ids (`plugin:<id>:<cmd>`) whose invocation
+    /// activates the plugin. Already implicitly handled by lazy script
+    /// dispatch — returned here for completeness / diagnostics.
+    pub on_command: Vec<String>,
+    /// Content-type ids whose mount activates the plugin.
+    pub on_content_type: Vec<String>,
+    /// URI schemes whose dispatch activates the plugin.
+    pub on_uri_scheme: Vec<String>,
+}
+
+/// List activation triggers for every script plugin that declares them.
+/// WASM and eager plugins are omitted.
+#[tauri::command]
+pub fn list_plugin_activations(state: State<'_, PluginState>) -> Vec<PluginActivation> {
+    let Ok(mgr) = state.manager.lock() else {
+        return Vec::new();
+    };
+    mgr.list()
+        .into_iter()
+        .filter_map(|info| {
+            let (cmd, ct, scheme) = mgr.activation_triggers(&info.id)?;
+            if cmd.is_empty() && ct.is_empty() && scheme.is_empty() {
+                return None;
+            }
+            Some(PluginActivation {
+                plugin_id: info.id,
+                on_command: cmd,
+                on_content_type: ct,
+                on_uri_scheme: scheme,
+            })
+        })
+        .collect()
+}
+
+/// Declared capability strings for a single plugin. Mirrors the
+/// `[capabilities]` manifest block. Used by the frontend contribution
+/// bridge to honour UI F-2.2.1 — the `NexusPluginContext` passed to a
+/// script plugin only exposes surfaces whose backing capability appears
+/// here.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PluginCapabilities {
+    /// Reverse-DNS plugin id.
+    pub plugin_id: String,
+    /// Capabilities marked `required` in the manifest.
+    pub required: Vec<String>,
+    /// Capabilities marked `optional` in the manifest.
+    pub optional: Vec<String>,
+}
+
+/// List declared capabilities per plugin. Consumed by the frontend
+/// `createNexusContext` wrapper (UI F-2.2.1) to decide which `ctx.*`
+/// surfaces to expose to each plugin.
+#[tauri::command]
+pub fn list_plugin_capabilities(state: State<'_, PluginState>) -> Vec<PluginCapabilities> {
+    let Ok(mgr) = state.manager.lock() else {
+        return Vec::new();
+    };
+    mgr.list()
+        .into_iter()
+        .filter_map(|info| {
+            let m = mgr.manifest(&info.id)?;
+            Some(PluginCapabilities {
+                plugin_id: info.id,
+                required: m.capabilities.required.clone(),
+                optional: m.capabilities.optional.clone(),
+            })
+        })
+        .collect()
+}
+
 /// List every loaded plugin as a serializable summary — used by the
 /// Settings modal's plugins tab.
 #[tauri::command]

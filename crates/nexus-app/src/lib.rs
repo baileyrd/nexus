@@ -162,6 +162,8 @@ pub fn run() {
             plugins::toggle_plugin_subscription,
             plugins::publish_host_event,
             plugins::list_plugins,
+            plugins::list_plugin_activations,
+            plugins::list_plugin_capabilities,
             keybindings::get_keybinding_overrides,
             keybindings::set_keybinding_override,
             keybindings::clear_keybinding_override,

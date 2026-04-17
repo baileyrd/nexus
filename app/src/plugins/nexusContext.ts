@@ -263,9 +263,35 @@ export interface NexusPluginContext {
   disposables: DisposableStore;
 }
 
+/**
+ * Set of capability strings the plugin declared in its manifest
+ * `[capabilities]` block. `undefined` disables the check entirely —
+ * used by internal callers that shouldn't be filtered (e.g. test
+ * fixtures). Surfaces whose backing capability is absent log a
+ * `console.warn` with `[nexusContext]` plus the plugin id.
+ */
+export type DeclaredCapabilities = ReadonlySet<string> | undefined;
+
+function requireCapability(
+  pluginId: string,
+  declared: DeclaredCapabilities,
+  capability: string,
+  surface: string,
+): boolean {
+  if (!declared || declared.has(capability)) return true;
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[nexusContext] plugin '${pluginId}' used '${surface}' without declaring ` +
+      `capability '${capability}' in its manifest — today this is a warning; ` +
+      `future releases will block the call`,
+  );
+  return false;
+}
+
 export function createNexusContext(
   pluginId: string,
   store: DisposableStore = createDisposableStore(),
+  declared: DeclaredCapabilities = undefined,
 ): NexusPluginContext {
   return {
     pluginId,
@@ -284,12 +310,16 @@ export function createNexusContext(
       get: () => getPluginSettings(pluginId),
     },
     events: {
-      emit: (typeId, payload) =>
-        publishHostEvent(typeId, payload as Record<string, unknown>),
+      emit: (typeId, payload) => {
+        requireCapability(pluginId, declared, "events.publish", "events.emit");
+        return publishHostEvent(typeId, payload as Record<string, unknown>);
+      },
     },
     ipc: {
-      call: (target, cmd, args) =>
-        invokePluginCommand(target, cmd, args ?? {}),
+      call: (target, cmd, args) => {
+        requireCapability(pluginId, declared, "ipc.call", "ipc.call");
+        return invokePluginCommand(target, cmd, args ?? {});
+      },
     },
     editor: {
       registerBlockType: (type) =>
@@ -303,6 +333,7 @@ export function createNexusContext(
     },
     ui: {
       notify: (level, message) => {
+        requireCapability(pluginId, declared, "ui.notify", "ui.notify");
         useToastStore.getState().add({ level, message, source: pluginId });
       },
       registerTreeDataProvider: (viewId, provider) =>

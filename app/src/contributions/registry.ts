@@ -1281,10 +1281,42 @@ export function useMenuItems(): MenuItem[] {
  * than closing over the value at creation time, so a hot-replace that
  * updates the URL is reflected without an app restart.
  */
+/**
+ * URL schemes safe to load inside a webview-panel iframe. Blocking
+ * `javascript:` / `data:` / `vbscript:` prevents a malicious manifest
+ * from turning `htmlUrl` into an XSS vector inside the shell origin.
+ */
+const ALLOWED_WEBVIEW_SCHEMES = new Set([
+  "http:",
+  "https:",
+  "tauri:",
+  "blob:",
+  "file:",
+]);
+
 function makeWebviewComponent(viewId: string): ContentComponent {
   function WebviewPanel() {
     const config = webviewPanels.get(viewId);
     if (!config) return null;
+    // Reject dangerous schemes at render time so a bad-faith plugin can't
+    // ship `javascript:alert(1)` and execute in the shell origin.
+    const url = config.htmlUrl;
+    const colonIdx = url.indexOf(":");
+    if (colonIdx === -1) {
+      return createElement(
+        "div",
+        { className: "webview-panel-error", role: "alert" },
+        `webview panel '${viewId}': relative URLs not allowed — use a full URL with scheme`,
+      );
+    }
+    const scheme = url.slice(0, colonIdx + 1).toLowerCase();
+    if (!ALLOWED_WEBVIEW_SCHEMES.has(scheme)) {
+      return createElement(
+        "div",
+        { className: "webview-panel-error", role: "alert" },
+        `webview panel '${viewId}': scheme '${scheme}' not allowed`,
+      );
+    }
     const sandbox = [
       "allow-scripts",
       "allow-same-origin",
@@ -1292,7 +1324,7 @@ function makeWebviewComponent(viewId: string): ContentComponent {
     ].join(" ");
     return createElement("iframe", {
       className: "webview-panel",
-      src: config.htmlUrl,
+      src: url,
       sandbox,
       title: viewId,
       style: { width: "100%", height: "100%", border: "none" },

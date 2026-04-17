@@ -154,6 +154,10 @@ pub struct WasmSandbox {
     engine: Engine,
     /// Wall-clock dispatch deadline from the manifest; 0 means no limit.
     max_execution_ms: u64,
+    /// Per-call fuel budget from the manifest; 0 means metering disabled.
+    /// Reset at the top of every `dispatch` so a long-lived plugin does
+    /// not accumulate instruction usage across handler invocations.
+    fuel_per_call: u64,
 }
 
 impl std::fmt::Debug for WasmSandbox {
@@ -231,6 +235,7 @@ impl WasmSandbox {
             instance,
             engine,
             max_execution_ms: config.max_execution_ms,
+            fuel_per_call: config.fuel,
         })
     }
 
@@ -270,6 +275,18 @@ impl WasmSandbox {
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         let plugin_id = self.store.data().plugin_id.clone();
+
+        // Reset the fuel budget for this call. Without this a long-lived
+        // plugin that accumulates instruction usage across dispatches
+        // eventually returns `OutOfFuel` on every call.
+        if self.fuel_per_call > 0 {
+            self.store
+                .set_fuel(self.fuel_per_call)
+                .map_err(|e| PluginError::ExecutionFailed {
+                    plugin_id: plugin_id.clone(),
+                    reason: format!("set_fuel failed: {e}"),
+                })?;
+        }
 
         // Arm the wall-clock deadline watcher. The spawned thread sleeps for
         // max_execution_ms then increments the epoch once, which wasmtime
