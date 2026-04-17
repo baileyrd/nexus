@@ -1,0 +1,14 @@
+# Force LF on shell scripts regardless of `core.autocrlf`.
+# CRLF line endings make bash treat `\r` as part of variables in
+# command substitution, which breaks `cd "$(pwd)"` etc. with errors
+# like `cd: $'/path\n/path/..': No such file or directory`.
+*.sh text eol=lf
+
+# Same story for files bash or other Unix tooling parses directly.
+*.toml text eol=lf
+Cargo.lock text eol=lf
+rust-toolchain.toml text eol=lf
+
+# Leave markdown / JSON / TypeScript alone — they work in either form.
+# If you hit an end-of-line issue in a specific source file, add it
+# here rather than flipping `core.autocrlf` globally.

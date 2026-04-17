@@ -50,8 +50,17 @@ done
 
 # Anchor on this script's location so the command works from any
 # cwd. `scripts/seed_fixtures.sh` → parent is the repo root.
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+#
+# The `tr -d '\r'` guard handles the Git-for-Windows case where the
+# script was checked out with CRLF line endings under
+# `core.autocrlf=true`. Without it, `${BASH_SOURCE[0]}` can end with
+# a stray `\r` that bash embeds into the variable, turning the next
+# `cd` into "no such file or directory". The `.gitattributes` in
+# this repo pins `*.sh` to `eol=lf` — this is belt-and-braces for
+# older clones.
+SOURCE_PATH=$(printf '%s' "${BASH_SOURCE[0]}" | tr -d '\r')
+SCRIPT_DIR=$(cd "$(dirname "$SOURCE_PATH")" && pwd | tr -d '\r')
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd | tr -d '\r')
 FORGE_FIXTURES="$REPO_ROOT/fixtures/forge"
 BASES_FIXTURES="$REPO_ROOT/fixtures/bases"
 
