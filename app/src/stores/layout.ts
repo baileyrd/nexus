@@ -53,6 +53,10 @@ interface LayoutState {
   loadPreset: (id: string) => Promise<void>;
   togglePanelVisibility: (side: "left" | "right", panelId: string) => void;
   toggleSidePanelCollapsed: (side: "left" | "right") => void;
+  /** Flip the mini-mode (icons-only) rail flag on a side panel. Orthogonal
+   *  to `collapsed`: when mini-mode is on the panel shows only its
+   *  selector icons, no panel body. PRD-07 §5.1 / §8. */
+  toggleSidePanelMiniMode: (side: "left" | "right") => void;
   activatePanel: (side: "left" | "right", panelId: string) => void;
   /** Update proportional sizes on a split node in the pane tree.
    *  Sizes are held in-memory only for now — cross-session persistence
@@ -563,6 +567,20 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       const layout = {
         ...state.layout,
         [key]: { ...sidePanel, collapsed: !sidePanel.collapsed },
+      };
+      const persistence = updatePersistence(state.persistence, layout);
+      scheduleSave(persistence);
+      return { layout, persistence };
+    }),
+
+  toggleSidePanelMiniMode: (side) =>
+    set((state) => {
+      if (!state.layout) return {};
+      const key = side === "left" ? "leftSidePanel" : "rightSidePanel";
+      const sidePanel = state.layout[key];
+      const layout = {
+        ...state.layout,
+        [key]: { ...sidePanel, miniMode: !sidePanel.miniMode },
       };
       const persistence = updatePersistence(state.persistence, layout);
       scheduleSave(persistence);

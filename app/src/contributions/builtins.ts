@@ -12,6 +12,7 @@ import { useForgeStore } from "../stores/forge";
 import { usePaletteStore } from "../stores/palette";
 import { useSettingsStore } from "../stores/settings";
 import { useEditorPrefsStore, type KeybindingMode, type ViewMode } from "../stores/editorPrefs";
+import { useLayoutStore } from "../stores/layout";
 import { contributions } from "./registry";
 
 /**
@@ -214,6 +215,53 @@ export function registerBuiltins(): void {
       title: `Editor: Use ${mode} keybindings`,
       category: "Editor",
       icon: "keyboard",
+    });
+  }
+
+  // ── Side-panel commands (PRD-07 §5.1, §8) ────────────────────────────────
+  // Toggle collapsed (fully hidden) vs. toggle mini-mode (icons-only rail).
+  // Exposed as palette commands so users can rebind them and so plugins
+  // can invoke them via the same `contributions.invokeCommand` path.
+  for (const side of ["left", "right"] as const) {
+    const collapseId = `workspace.toggle-${side}-sidebar`;
+    contributions.registerCommand(collapseId, () => {
+      useLayoutStore.getState().toggleSidePanelCollapsed(side);
+    });
+    contributions.registerPaletteCommand({
+      id: collapseId,
+      commandId: collapseId,
+      title: `View: Toggle ${side} side panel`,
+      category: "View",
+      icon: side === "left" ? "panel-left" : "panel-right",
+    });
+
+    const miniId = `workspace.toggle-${side}-mini-mode`;
+    contributions.registerCommand(miniId, () => {
+      useLayoutStore.getState().toggleSidePanelMiniMode(side);
+    });
+    contributions.registerPaletteCommand({
+      id: miniId,
+      commandId: miniId,
+      title: `View: Toggle ${side} side panel mini-mode`,
+      category: "View",
+      icon: "minimize-2",
+    });
+
+    contributions.registerMenuItem({
+      id: `menu.view.toggle-${side}-sidebar`,
+      label: `Toggle ${side[0]!.toUpperCase()}${side.slice(1)} Side Panel`,
+      commandId: collapseId,
+      menu: "View",
+      menuOrder: 30,
+      order: side === "left" ? 20 : 21,
+    });
+    contributions.registerMenuItem({
+      id: `menu.view.toggle-${side}-mini`,
+      label: `Toggle ${side[0]!.toUpperCase()}${side.slice(1)} Mini-Mode`,
+      commandId: miniId,
+      menu: "View",
+      menuOrder: 30,
+      order: side === "left" ? 30 : 31,
     });
   }
 

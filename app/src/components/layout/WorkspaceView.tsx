@@ -76,6 +76,7 @@ export function WorkspaceView() {
               sidePanel={layout.leftSidePanel}
               onActivate={(id) => activatePanel("left", id)}
               onTogglePanel={(id) => togglePanelVisibility("left", id)}
+              miniMode={layout.leftSidePanel.miniMode}
             />
           )}
           <div className="workspace-center">
@@ -87,7 +88,14 @@ export function WorkspaceView() {
               <BottomPreview height={layout.bottomPanel.height} />
             )}
           </div>
-          <div className="right-side-panel">
+          <div
+            className="right-side-panel"
+            data-mini-mode={
+              !layout.rightSidePanel.collapsed && layout.rightSidePanel.miniMode
+                ? "true"
+                : undefined
+            }
+          >
             <div className="right-side-panel-toolbar">
               <SidePanelToggle
                 side="right"
@@ -102,7 +110,7 @@ export function WorkspaceView() {
                 />
               )}
             </div>
-            {!layout.rightSidePanel.collapsed && (
+            {!layout.rightSidePanel.collapsed && !layout.rightSidePanel.miniMode && (
               <SidePanelBody
                 side="right"
                 sidePanel={layout.rightSidePanel}
@@ -151,28 +159,37 @@ interface SidePanelViewProps {
   sidePanel: SidePanel;
   onActivate: (panelId: string) => void;
   onTogglePanel: (panelId: string) => void;
+  /** Icons-only rail (PRD-07 §5.1 / §8). When true, the panel body is
+   *  omitted and only the selector row is rendered. */
+  miniMode?: boolean;
 }
 
 /**
  * Left side panel — full height, stacked vertically:
  *
  *   1. Panel-selector toolbar (toolbar 1) at the top
- *   2. Active panel: header (title + toolbar 2) + content
- *   3. Footer (forge selector + actions), if any
+ *   2. Active panel: header (title + toolbar 2) + content — omitted in mini-mode
+ *   3. Footer (forge selector + actions), if any — omitted in mini-mode
  *
  * The left side-panel toggle lives in the workspace ribbon to the
  * left of this component; when collapsed, this whole component is
  * unmounted.
  */
-function SidePanelView({ side, sidePanel, onActivate, onTogglePanel }: SidePanelViewProps) {
+function SidePanelView({ side, sidePanel, onActivate, onTogglePanel, miniMode }: SidePanelViewProps) {
   return (
-    <aside className="side-panel-preview" data-side={side}>
+    <aside
+      className="side-panel-preview"
+      data-side={side}
+      data-mini-mode={miniMode ? "true" : undefined}
+    >
       <PanelSelector
         panels={sidePanel.panels}
         label={`${side === "left" ? "Left" : "Right"} side panel`}
         onSelect={onActivate}
       />
-      <SidePanelBody side={side} sidePanel={sidePanel} onTogglePanel={onTogglePanel} />
+      {!miniMode && (
+        <SidePanelBody side={side} sidePanel={sidePanel} onTogglePanel={onTogglePanel} />
+      )}
     </aside>
   );
 }

@@ -227,6 +227,20 @@ button {
   min-height: 0;
 }
 
+/* Mini-mode (PRD-07 §5.1 / §8): icons-only rail with the panel body
+ * omitted. The selector row becomes a vertical strip so the remaining
+ * workspace width goes to panes rather than the side panel. */
+.side-panel-preview[data-mini-mode="true"] {
+  width: 44px;
+}
+
+.side-panel-preview[data-mini-mode="true"] > .panel-selector {
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 4px;
+  border-bottom: none;
+}
+
 .side-panel-preview {
   display: flex;
   flex-direction: column;
