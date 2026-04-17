@@ -180,6 +180,20 @@ async fn call_storage(
         .map_err(|e| e.to_string())
 }
 
+/// Load a `.bases` directory into a full [`nexus_types::bases::Base`]
+/// — schema + records + views + relations + metadata — for the
+/// view renderers to consume.
+///
+/// Forwards to `com.nexus.storage::base_load`. Read-only; does not
+/// touch the SQLite index.
+#[tauri::command]
+pub async fn load_forge_base(
+    relpath: String,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_storage(runtime, "base_load", serde_json::json!({ "path": relpath })).await
+}
+
 /// List entries under `relpath` within the active forge root.
 ///
 /// `relpath` is relative to the forge root and uses `/` as a separator.

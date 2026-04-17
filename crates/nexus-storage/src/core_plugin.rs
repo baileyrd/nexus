@@ -99,6 +99,14 @@ pub const HANDLER_RENAME_ENTRY: u32 = 30;
 /// Handler id for `delete_entry`. Args: `{ "relpath": String }`; Returns: `{}`.
 /// Unlike [`HANDLER_DELETE_FILE`], this handles both files and directories.
 pub const HANDLER_DELETE_ENTRY: u32 = 31;
+/// Handler id for `base_load`. Args: `{ "path": String }` — forge-relative
+/// path to a `.bases` directory. Returns the full
+/// [`nexus_types::bases::Base`] (schema + records + views + relations +
+/// metadata) parsed straight from disk. Unlike [`HANDLER_BASE_INDEX`]
+/// this is read-only and doesn't touch the SQLite index — a UI that
+/// just wants to render a base in a view panel can skip the index
+/// roundtrip.
+pub const HANDLER_BASE_LOAD: u32 = 32;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -445,6 +453,13 @@ impl CorePlugin for StorageCorePlugin {
                     .index_base(&path, &base)
                     .map_err(|e| exec_err(format!("base_index: {e}")))?;
                 Ok(serde_json::json!({ "base_id": base_id }))
+            }
+            HANDLER_BASE_LOAD => {
+                let path = path_arg(args, "base_load")?;
+                let abs_dir = self.forge_root.join(&path);
+                let base = nexus_types::bases::load_base(&abs_dir)
+                    .map_err(|e| exec_err(format!("base_load: {e}")))?;
+                to_value(&base, "base_load")
             }
             HANDLER_BASE_LIST => {
                 let bases = engine

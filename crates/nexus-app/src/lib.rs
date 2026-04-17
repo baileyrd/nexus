@@ -142,6 +142,7 @@ pub fn run() {
             forge::current_forge,
             forge::open_forge,
             forge::list_forge_dir,
+            forge::load_forge_base,
             forge::read_forge_file,
             forge::write_forge_file,
             forge::create_forge_file,

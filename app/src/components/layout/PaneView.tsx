@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { LayoutNode, Panel, Tab } from "../../bindings";
+import { BaseFileView } from "../panels/BaseFileView";
 import { FileViewer } from "../panels/FileViewer";
 import { useOpenFileStore } from "../../stores/openFile";
 import { useOpenFile } from "../../stores/openFiles";
@@ -17,6 +18,14 @@ interface PaneViewProps {
 function fileRelpathFromContentType(ct: string | undefined): string | null {
   if (!ct || !ct.startsWith("file:")) return null;
   return ct.slice("file:".length);
+}
+
+/** Parse `base-file:<relpath>` content-type for PRD-10 base-directory
+ *  tabs. Same pattern as `file:<relpath>` so a base tab slots into the
+ *  existing layout machinery without a second dispatch arm. */
+function baseRelpathFromContentType(ct: string | undefined): string | null {
+  if (!ct || !ct.startsWith("base-file:")) return null;
+  return ct.slice("base-file:".length);
 }
 
 /** Adapt a Tab's fields to the Panel shape expected by ContentComponent. */
@@ -38,6 +47,7 @@ export function PaneView({ node, focused }: PaneViewProps) {
   const focusPane = useLayoutStore((s) => s.focusPane);
 
   const activeRelpath = fileRelpathFromContentType(activeTab?.contentType);
+  const activeBaseRelpath = baseRelpathFromContentType(activeTab?.contentType);
   // Legacy single-file consumers (Outline, plugin bridge) read from
   // useOpenFileStore. Keep that store in sync with the active file tab
   // without re-fetching from disk. Re-runs when the entry loads async.
@@ -83,6 +93,8 @@ export function PaneView({ node, focused }: PaneViewProps) {
       <div className="pane-content">
         {activeRelpath && activeTab ? (
           <FileViewer relpath={activeRelpath} tabId={activeTab.id} />
+        ) : activeBaseRelpath ? (
+          <BaseFileView relpath={activeBaseRelpath} />
         ) : ContentComponent && activeTab ? (
           <ContentComponent panel={tabAsPanel(activeTab)} />
         ) : legacyOpenFile ? (

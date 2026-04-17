@@ -167,8 +167,18 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
 
   const onToggle = useCallback(() => {
     if (!entry.isDir) return;
+    // `.bases` directories are databases, not folders — open them in
+    // a base-view tab instead of expanding the tree. The renderer
+    // reads schema.json / records.json / views.toml through the
+    // `load_forge_base` Tauri command.
+    if (entry.name.endsWith(".bases")) {
+      useLayoutStore
+        .getState()
+        .openContentTab(`base-file:${entry.relpath}`, entry.name, "database");
+      return;
+    }
     setExpanded(entry.relpath, !expanded);
-  }, [entry.isDir, entry.relpath, expanded, setExpanded]);
+  }, [entry.isDir, entry.name, entry.relpath, expanded, setExpanded]);
 
   const onContextMenu = useCallback(
     (e: ReactMouseEvent) => {

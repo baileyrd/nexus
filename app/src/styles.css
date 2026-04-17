@@ -2457,3 +2457,62 @@ select.plugin-settings-input {
   background: var(--nexus-surface-1, #fff);
   border: 1px solid var(--nexus-border, #e3e6eb);
 }
+
+/* BaseFileView — `.bases` directory tab with a header + view switcher. */
+
+.base-view-file {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.base-view-file-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--nexus-border, #e3e6eb);
+  background: var(--nexus-surface-2, #f7f8fa);
+}
+
+.base-view-file-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.base-view-file-title strong {
+  font-size: 14px;
+}
+
+.base-view-file-path {
+  color: var(--nexus-text-muted, #596070);
+  font-size: 12px;
+}
+
+.base-view-file .base-view-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.base-view-file .base-view-tabs .tab {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--nexus-text-muted, #596070);
+}
+
+.base-view-file .base-view-tabs .tab.active {
+  background: var(--nexus-accent-soft, #e4ecff);
+  border-color: var(--nexus-accent, #3b82f6);
+  color: var(--nexus-accent, #3b82f6);
+}
+
+.base-view-file-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 12px;
+}

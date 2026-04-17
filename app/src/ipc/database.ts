@@ -95,3 +95,21 @@ export function applyView(
 ): Promise<AppliedView> {
   return invoke<AppliedView>("db_apply_view", { records, schema, view });
 }
+
+/** A full base loaded from a `.bases` directory on disk. Mirrors
+ *  `nexus_types::bases::Base` — only the fields the UI currently
+ *  reads are typed; the rest pass through as opaque JSON. */
+export interface LoadedBase {
+  name: string;
+  schema: BaseSchema;
+  records: BaseRecord[];
+  views: BaseView[];
+  relations?: unknown[];
+  metadata?: unknown;
+}
+
+/** Load a `.bases` directory at `relpath` (forge-relative) into a
+ *  full [`LoadedBase`]. Read-only — does not touch the SQLite index. */
+export function loadBase(relpath: string): Promise<LoadedBase> {
+  return invoke<LoadedBase>("load_forge_base", { relpath });
+}

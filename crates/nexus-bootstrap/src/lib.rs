@@ -320,6 +320,7 @@ fn register_core_plugins(
                     ("base_index", nexus_storage::core_plugin::HANDLER_BASE_INDEX),
                     ("base_list", nexus_storage::core_plugin::HANDLER_BASE_LIST),
                     ("base_query", nexus_storage::core_plugin::HANDLER_BASE_QUERY),
+                    ("base_load", nexus_storage::core_plugin::HANDLER_BASE_LOAD),
                     ("list_dir", nexus_storage::core_plugin::HANDLER_LIST_DIR),
                     (
                         "create_file",
