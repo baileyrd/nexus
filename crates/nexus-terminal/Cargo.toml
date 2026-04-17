@@ -12,6 +12,7 @@ regex-lite = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 uuid = { workspace = true }
 # SQLite persistence for sessions + ad-hoc command history (PRD-09 §2.2, §10.1).
 rusqlite = { workspace = true }

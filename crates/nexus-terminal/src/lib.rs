@@ -65,6 +65,7 @@ mod manager;
 mod persist;
 mod procmgr;
 mod profile;
+mod saved;
 mod server;
 mod session;
 mod shell;
@@ -93,6 +94,10 @@ pub use procmgr::{
 pub use profile::{
     profile_path_for_shell, profile_source_command, profile_source_command_for_path,
     supports_profile_sourcing,
+};
+pub use saved::{
+    promote_adhoc_to_saved, slugify, PromoteOptions, SavedCommand, SqliteSavedCommandStore,
+    DEFAULT_AUTO_RESTART_DELAY_MS, DEFAULT_ICON,
 };
 pub use server::{
     InMemoryTerminalServer, OutputLine, ServerSpawnConfig, SessionInfo, TerminalEvent,
