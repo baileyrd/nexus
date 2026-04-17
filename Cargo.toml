@@ -115,8 +115,9 @@ petgraph = "0.7"
 # HTTP client (AI provider calls)
 reqwest = { version = "0.12", features = ["json"] }
 
-# MCP server
-rmcp = { version = "1.3", features = ["server", "transport-io"] }
+# MCP server + client (client is used by the Host-side integration that lets
+# Nexus connect to external MCP servers listed in `mcp.toml`)
+rmcp = { version = "1.3", features = ["server", "client", "transport-io", "transport-child-process", "macros"] }
 schemars = "1"
 
 # Tauri desktop shell
