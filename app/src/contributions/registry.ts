@@ -182,12 +182,16 @@ export interface TreeDataProvider {
  * React components; JS script plugins may prefer `registerContentType`
  * for richer host integration.
  *
- * Security: the iframe gets `sandbox="allow-scripts allow-same-origin"`
- * by default. Set `allowPopups: true` only when the HTML needs to open
- * links (rare). The host-supplied `allow-same-origin` token is needed so
- * Tauri's asset-protocol URLs load correctly; it does **not** grant the
- * page access to the parent frame's DOM — the cross-origin iframe boundary
- * still applies when the page is served from a different Tauri origin.
+ * Security (UI F-5.1.1): the iframe gets `sandbox="allow-scripts"` only.
+ * The `allow-same-origin` token is **not** granted — a webview panel served
+ * from the shell's own origin (e.g. `tauri://localhost/...`, `blob:` URLs
+ * constructed by the plugin, same-origin dev servers) would otherwise
+ * share `document.cookie`, `localStorage`, and `window.top` with the shell.
+ * Dropping the token forces every panel into a null origin so plugin HTML
+ * cannot escalate into the shell DOM. Set `allowPopups: true` only when
+ * the HTML needs to open links (rare). Panels that require persistent
+ * storage must round-trip through the host via the plugin IPC surface —
+ * the iframe cannot read `localStorage` / `indexedDB` on its own.
  */
 export interface WebviewPanelConfig {
   /** URL to load inside the iframe (`tauri://localhost/…`, `blob:`, etc.). */
@@ -1511,9 +1515,12 @@ function makeWebviewComponent(viewId: string): ContentComponent {
         `webview panel '${viewId}': scheme '${scheme}' not allowed`,
       );
     }
+    // UI F-5.1.1: deliberately omit `allow-same-origin`. A panel loaded
+    // from the shell origin (tauri://localhost, blob:, dev server) would
+    // otherwise have full access to the shell's DOM + storage. Forcing
+    // a null origin isolates plugin-supplied HTML from the shell.
     const sandbox = [
       "allow-scripts",
-      "allow-same-origin",
       ...(config.allowPopups ? ["allow-popups"] : []),
     ].join(" ");
     return createElement("iframe", {

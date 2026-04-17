@@ -209,6 +209,11 @@ export interface NexusPluginContext {
      * need full React integration should use `contributions.registerContentType`
      * instead.
      *
+     * Security: the iframe sandbox drops `allow-same-origin` (UI F-5.1.1),
+     * so plugin HTML runs in a null origin and cannot read shell cookies,
+     * `localStorage`, or DOM. Panels that need persistent storage must
+     * message the host via the plugin IPC surface.
+     *
      * The panel appears wherever `viewId` is used as a content-type in the
      * layout (e.g. via a `[[ui_panels]]` manifest entry that sets the same id).
      *
