@@ -77,13 +77,12 @@
 **Evidence:** [crates/nexus-theme/src/core_plugin.rs](crates/nexus-theme/src/core_plugin.rs), [app/src/contributions/registry.ts](app/src/contributions/registry.ts).
 
 ### PRD-08 — Editor Engine 🟡
-**Shipped:** 3,718 LoC block-tree core — `Block`, `BlockType`, transactions (insert/delete/merge/split), undo tree, annotations, `EditorCorePlugin`; CodeMirror 6 surface with syntax highlighting, keybindings, decoration compartments, snippet compartment, 800 ms debounced `editor_sync_content` IPC.
+**Shipped:** 3,718 LoC block-tree core — `Block`, `BlockType`, transactions (insert/delete/merge/split), undo tree, annotations, `EditorCorePlugin`; CodeMirror 6 surface with syntax highlighting, keybindings, decoration compartments, snippet compartment, 800 ms debounced `editor_sync_content` IPC. **PRD-08 §4 has been amended** (commit 6f3b36d) to document CM6-owns-text + debounced-sync as canonical and retire the original `BlockPositionMap` spec — plugin authors reading §4.1/§4.4 now see the actual architecture.
 **Gaps:**
-- PRD §4 specifies `BlockPositionMap` + per-keystroke decoration pipeline; actual architecture is CM6-owns-text + debounced sync. **PRD never formally amended** — plugin authors reading §4 will be misled.
 - MDX component rendering (JSX component registry in editor) absent.
 - Database view blocks (`[[{db:query}]]`) — no query executor or grid renderer.
 - Inline AI edit suggestions — tool hooks exist, no UI.
-**Evidence:** [crates/nexus-editor/src/](crates/nexus-editor/src/) (block, transaction, undo_tree, tree, annotation, core_plugin), [app/src/components/surfaces/EditorSurface.tsx](app/src/components/surfaces/EditorSurface.tsx).
+**Evidence:** [crates/nexus-editor/src/](crates/nexus-editor/src/) (block, transaction, undo_tree, tree, annotation, core_plugin), [app/src/components/surfaces/EditorSurface.tsx](app/src/components/surfaces/EditorSurface.tsx), [docs/PRDs/08-editor-engine.md §4.1/§4.4](docs/PRDs/08-editor-engine.md).
 
 ### PRD-09 — Terminal & Process Manager 🔴
 **Shipped:** Nothing. `nexus-tui` crate exists but is an alternate CLI frontend, not a PTY host.
@@ -143,9 +142,8 @@
 
 | Risk | Why it matters | Mitigation |
 |------|----------------|------------|
-| PRD-08 §4 doc drift | Plugin authors mislead by stale PRD | Amend §4 before 1.0 GA |
 | MCP Host absence | Positioned as "MCP-integrated" but can't consume external MCP servers | Add minimal MCP client before any marketing claim |
-| Git `!Send` constraint | UI-driven git ops will block the main thread | Wrap `GitEngine` in worker-thread; spec the pattern once, reuse |
+| Git `!Send` constraint | UI-driven git ops will block the main thread | ✅ Addressed: `GitWorker` + `GitWorkerHandle` in `nexus-git` moves the `git2::Repository` to a dedicated OS thread behind a request/response channel. |
 | F-8.1.1 iframe sandbox deferred | Cannot ship community JS plugin marketplace safely | Policy recorded: script plugins are first-party-only until F-8.1.1 + F-2.2.1 land |
 | Database views absent | `.bases` files load but render nothing useful | Scope views into a Phase-2 PRD-10b rather than shipping 10 half-done |
 

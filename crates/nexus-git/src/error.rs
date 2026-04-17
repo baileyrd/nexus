@@ -22,6 +22,12 @@ pub enum GitError {
     /// Merge produced conflicts.
     #[error("merge conflicts in {0} file(s)")]
     MergeConflict(usize),
+
+    /// The background git worker thread is no longer running — either it
+    /// panicked or was shut down. Callers should drop their handles and
+    /// re-spawn a fresh [`crate::GitWorker`] if they still need git access.
+    #[error("git worker thread is not running: {0}")]
+    WorkerGone(String),
 }
 
 #[cfg(test)]

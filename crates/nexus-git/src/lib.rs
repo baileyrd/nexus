@@ -13,8 +13,10 @@ mod error;
 mod engine;
 mod types;
 mod auto_commit;
+mod worker;
 
 pub use error::GitError;
 pub use engine::GitEngine;
 pub use types::*;
 pub use auto_commit::{AutoCommitter, AutoCommitResult};
+pub use worker::{GitWorker, GitWorkerHandle};
