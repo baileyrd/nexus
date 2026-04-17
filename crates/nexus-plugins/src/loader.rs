@@ -2,6 +2,7 @@
 //! community plugins, registers native Rust handlers for core plugins,
 //! manages plugin lifecycle, and dispatches kernel events to subscriber plugins.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,6 +11,59 @@ use std::sync::{Mutex, RwLock};
 
 use std::future::Future;
 use std::pin::Pin;
+
+// ─── Reentrancy detection ─────────────────────────────────────────────────────
+//
+// Sync IPC dispatch holds `Arc<Mutex<PluginBackend>>` across the handler call
+// (handlers take `&mut self`). Using `Mutex::lock()` is correct for concurrent
+// dispatches — they queue naturally — but a *true* reentrant call from within
+// a handler on the same thread would deadlock.
+//
+// We track the set of plugin ids currently being dispatched on *this thread*
+// in a thread-local. Entering dispatch for a plugin already in the set returns
+// `ReentrantCall` instead of deadlocking. This preserves the reentrancy
+// guarantee without conflating it with ordinary contention.
+//
+// Only the sync path (`spawn_blocking` body / direct `dispatch_ipc` callers)
+// needs this guard: async handlers never hold the backend mutex across
+// awaits, so nested async ipc_calls are safe by construction.
+
+thread_local! {
+    static ACTIVE_DISPATCHES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// RAII guard that registers `plugin_id` as being dispatched on the current
+/// thread. Returns `None` if the plugin is already on the stack for this
+/// thread — the caller must treat that as a reentrant call.
+struct DispatchGuard {
+    plugin_id: String,
+}
+
+impl DispatchGuard {
+    fn enter(plugin_id: &str) -> Option<Self> {
+        ACTIVE_DISPATCHES.with(|s| {
+            let mut stack = s.borrow_mut();
+            if stack.iter().any(|id| id == plugin_id) {
+                return None;
+            }
+            stack.push(plugin_id.to_string());
+            Some(Self {
+                plugin_id: plugin_id.to_string(),
+            })
+        })
+    }
+}
+
+impl Drop for DispatchGuard {
+    fn drop(&mut self) {
+        ACTIVE_DISPATCHES.with(|s| {
+            let mut stack = s.borrow_mut();
+            if let Some(pos) = stack.iter().rposition(|id| id == &self.plugin_id) {
+                stack.remove(pos);
+            }
+        });
+    }
+}
 
 use nexus_kernel::{
     Capability, CapabilitySet, EventBus, EventFilter, EventSubscription, IpcDispatcher, IpcError,
@@ -799,13 +853,16 @@ impl PluginLoader {
     /// Dispatch an IPC command call.
     ///
     /// Resolves the target via [`resolve_ipc`](Self::resolve_ipc), locks the
-    /// per-plugin backend, and dispatches. Uses `try_lock` to detect
-    /// re-entrant / circular calls.
+    /// per-plugin backend, and dispatches. A thread-local guard rejects true
+    /// reentrant calls (same thread already dispatching the same plugin);
+    /// ordinary cross-thread contention queues on the mutex instead of
+    /// erroring.
     ///
     /// # Errors
     /// Returns [`PluginError::PluginNotFound`] if the plugin or command is
-    /// unknown. Returns [`PluginError::CapabilityDenied`] if a circular
-    /// call is detected. Propagates sandbox dispatch errors.
+    /// unknown. Returns [`PluginError::ReentrantCall`] if a recursive call
+    /// would deadlock on the per-plugin mutex. Propagates sandbox dispatch
+    /// errors.
     pub fn dispatch_ipc(
         &self,
         plugin_id: &str,
@@ -813,12 +870,14 @@ impl PluginLoader {
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         let (backend, handler_id) = self.resolve_ipc(plugin_id, command_id)?;
-        let mut guard = backend
-            .try_lock()
-            .map_err(|_| PluginError::ReentrantCall {
+        let _dispatch_guard =
+            DispatchGuard::enter(plugin_id).ok_or_else(|| PluginError::ReentrantCall {
                 plugin_id: plugin_id.to_string(),
                 command: command_id.to_string(),
             })?;
+        let mut guard = backend
+            .lock()
+            .map_err(|_| PluginError::PluginNotFound(plugin_id.to_string()))?;
         guard.dispatch(handler_id, args)
     }
 
@@ -1392,10 +1451,19 @@ impl IpcDispatcher for SharedPluginLoader {
                 },
             )?
         };
-        // Loader lock released — safe for re-entrant calls.
+        // Loader lock released. Detect genuine reentrancy (same thread
+        // already dispatching this plugin — would deadlock on `lock()`)
+        // via a thread-local guard, then take the backend mutex with a
+        // blocking `lock()` so unrelated concurrent calls queue rather
+        // than erroring.
+        let _dispatch_guard =
+            DispatchGuard::enter(target_plugin_id).ok_or_else(|| IpcError::ReentrantCall {
+                plugin_id: target_plugin_id.to_string(),
+                command: command_id.to_string(),
+            })?;
         let mut guard = backend
-            .try_lock()
-            .map_err(|_| IpcError::ReentrantCall {
+            .lock()
+            .map_err(|_| IpcError::PluginCrashedDuringCall {
                 plugin_id: target_plugin_id.to_string(),
                 command: command_id.to_string(),
             })?;
