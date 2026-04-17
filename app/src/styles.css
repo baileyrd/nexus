@@ -2069,3 +2069,22 @@ select.plugin-settings-input {
   font-size: 12px;
   color: rgb(34, 130, 60);
 }
+
+/*
+ * Reduced-motion baseline (PRD-07 §14.5, WCAG 2.1 2.3.3).
+ *
+ * Collapses shell-chrome transitions and animations to a single tick
+ * when the user has asked the OS for reduced motion. Plugins that
+ * ship their own keyframe animations are expected to honour the same
+ * media query in their own stylesheets.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
