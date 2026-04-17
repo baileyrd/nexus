@@ -54,6 +54,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 mod adhoc;
+mod ai;
 mod ansi;
 mod buffer;
 mod compound;
@@ -75,6 +76,11 @@ mod shell;
 mod urls;
 
 pub use adhoc::{AdHocRecord, AdHocStatus, SqliteAdHocStore};
+pub use ai::{
+    default_suggestion_rules, AddressInUseRule, AiSuggestionEngine, CargoCompileFailureRule,
+    CommandNotFoundRule, GitPublicKeyRule, NpmPackageNotFoundRule, SuggestedCommand,
+    SuggestionRule, SuggestionSeverity,
+};
 pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
 pub use core_plugin::{
