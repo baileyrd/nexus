@@ -2,6 +2,7 @@
 //! and provides the `dispatch` call used by all higher-level plugin code.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use wasmtime::{Engine, Instance, Linker, Module, Store, StoreLimitsBuilder, Trap};
@@ -92,6 +93,10 @@ impl Default for PluginData {
 pub struct WasmSandbox {
     store: Store<PluginData>,
     instance: Instance,
+    /// Cloned handle used to increment the epoch from the timeout watcher thread.
+    engine: Engine,
+    /// Wall-clock dispatch deadline from the manifest; 0 means no limit.
+    max_execution_ms: u64,
 }
 
 impl std::fmt::Debug for WasmSandbox {
@@ -120,6 +125,9 @@ impl WasmSandbox {
         wt_config.wasm_bulk_memory(true);
         if config.fuel > 0 {
             wt_config.consume_fuel(true);
+        }
+        if config.max_execution_ms > 0 {
+            wt_config.epoch_interruption(true);
         }
 
         let engine = Engine::new(&wt_config).map_err(|e| PluginError::WasmLoadFailed {
@@ -161,7 +169,12 @@ impl WasmSandbox {
                     reason: format!("instantiation failed: {e}"),
                 })?;
 
-        Ok(Self { store, instance })
+        Ok(Self {
+            store,
+            instance,
+            engine,
+            max_execution_ms: config.max_execution_ms,
+        })
     }
 
     /// Inject an [`IpcDispatcher`] so `host::invoke_command` can route
@@ -200,6 +213,27 @@ impl WasmSandbox {
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         let plugin_id = self.store.data().plugin_id.clone();
+
+        // Arm the wall-clock deadline watcher. The spawned thread sleeps for
+        // max_execution_ms then increments the epoch once, which wasmtime
+        // converts to Trap::Interrupt inside the dispatch call. An AtomicBool
+        // cancels the increment if dispatch returns before the deadline.
+        let watcher_guard = if self.max_execution_ms > 0 {
+            self.store.set_epoch_deadline(1);
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let cancelled_clone = Arc::clone(&cancelled);
+            let engine_clone = self.engine.clone();
+            let timeout_ms = self.max_execution_ms;
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(timeout_ms));
+                if !cancelled_clone.load(Ordering::Relaxed) {
+                    engine_clone.increment_epoch();
+                }
+            });
+            Some(cancelled)
+        } else {
+            None
+        };
 
         // Locate exports.
         let nexus_dispatch = self
@@ -250,9 +284,17 @@ impl WasmSandbox {
             })?;
 
         // Call dispatch.
-        let ret = nexus_dispatch
+        let dispatch_result = nexus_dispatch
             .call(&mut self.store, (handler_id, args_ptr, args_len))
-            .map_err(|e| map_trap_error(&e, &plugin_id))?;
+            .map_err(|e| map_trap_error(&e, &plugin_id));
+
+        // Cancel the epoch watcher so a late increment_epoch doesn't trip
+        // the next dispatch call.
+        if let Some(cancelled) = watcher_guard {
+            cancelled.store(true, Ordering::Relaxed);
+        }
+
+        let ret = dispatch_result?;
 
         // Unpack packed pointer+length.
         let result_ptr = (ret >> 32) as u32;
@@ -374,13 +416,14 @@ impl WasmSandbox {
 
 /// Map a wasmtime call error to the appropriate [`PluginError`] variant.
 ///
-/// Fuel-exhaustion traps become [`PluginError::ExecutionTimeout`]; everything
-/// else becomes [`PluginError::ExecutionFailed`].
+/// Fuel-exhaustion (`OutOfFuel`) and epoch-deadline (`Interrupt`) traps both
+/// map to [`PluginError::ExecutionTimeout`]; everything else becomes
+/// [`PluginError::ExecutionFailed`].
 fn map_trap_error(err: &wasmtime::Error, plugin_id: &str) -> PluginError {
-    if err
-        .downcast_ref::<Trap>()
-        .is_some_and(|t| *t == Trap::OutOfFuel)
-    {
+    let is_timeout = err.downcast_ref::<Trap>().is_some_and(|t| {
+        *t == Trap::OutOfFuel || *t == Trap::Interrupt
+    });
+    if is_timeout {
         PluginError::ExecutionTimeout {
             plugin_id: plugin_id.to_string(),
         }
