@@ -63,6 +63,7 @@ mod error;
 mod job_object;
 mod lines;
 mod manager;
+mod memory;
 mod persist;
 mod precmd;
 mod procmgr;
@@ -96,6 +97,10 @@ pub use error::TerminalError;
 pub use job_object::JobObject;
 pub use lines::{Line, LineBuffer};
 pub use manager::{SessionManager, DEFAULT_MAX_SESSIONS};
+pub use memory::{
+    read_process_rss, MemoryLimitAction, MemoryLimits, MemoryMonitor, MemorySample,
+    DEFAULT_HISTORY_SAMPLES, RECOMMENDED_POLL_INTERVAL,
+};
 pub use persist::{SessionMetadata, SqliteSessionStore};
 pub use precmd::{
     run_pre_commands, PreCommandOptions, PreCommandOutcome, DEFAULT_STEP_TIMEOUT,
