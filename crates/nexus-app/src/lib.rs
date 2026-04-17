@@ -53,6 +53,15 @@ pub mod uri;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::too_many_lines)]
 pub fn run() {
+    // Install a tracing subscriber so startup warnings (forge bootstrap,
+    // kernel runtime build) surface in the dev console. Honors `RUST_LOG`;
+    // defaults to `warn` so the output stays quiet in release runs.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .try_init();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(forge::ForgeState(std::sync::Mutex::new(None)))
@@ -95,7 +104,10 @@ pub fn run() {
                             tracing::info!("kernel runtime built for editor IPC");
                         }
                         Err(err) => {
-                            tracing::warn!(%err, "kernel runtime build failed; editor IPC disabled");
+                            tracing::warn!(
+                                err = format!("{err:#}"),
+                                "kernel runtime build failed; editor IPC disabled"
+                            );
                         }
                     }
                     if let Some(state) = app.try_state::<forge::ForgeState>() {

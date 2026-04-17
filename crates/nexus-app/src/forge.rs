@@ -105,10 +105,16 @@ pub fn bootstrap(app: &AppHandle) -> Result<ForgeInfo, String> {
     Ok(info_for(&root))
 }
 
+/// Create the forge's directory skeleton and run `StorageEngine::init`
+/// (idempotent — creates the SQLite schema, search index, etc. on first
+/// run; just verifies presence on subsequent runs). Without this the
+/// storage plugin's `on_init` fails because `StorageEngine::open` refuses
+/// to open an uninitialized forge.
 fn init_layout(root: &Path) -> Result<(), String> {
     for sub in ["notes", "attachments", ".forge"] {
         fs::create_dir_all(root.join(sub)).map_err(|e| e.to_string())?;
     }
+    nexus_bootstrap::init_forge(root).map_err(|e| format!("{e:#}"))?;
     Ok(())
 }
 
