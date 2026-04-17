@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use nexus_kernel::{EventBus, IpcDispatcher, IpcError, NexusEvent};
 use nexus_plugins::{
-    CompositeIpcDispatcher, FallbackCell, PluginBackend, PluginEventForwarder, PluginManager,
+    CompositeIpcDispatcher, FallbackCell, PluginEventForwarder, PluginManager,
     PluginManagerConfig, PluginStatus, TrustLevel, UiContribution, UiMenuItemContribution,
     UiPanelContribution, UiRibbonItemContribution, UiSettingsTabContribution,
     UiSlashCommandContribution, UiStatusItemContribution, UriHandlerContribution,

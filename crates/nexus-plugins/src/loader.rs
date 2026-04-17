@@ -460,6 +460,9 @@ impl PluginLoader {
         // Step 2: Validate
         manifest::validate(&manifest, plugin_dir)?;
 
+        // Step 2a (F-9.2.1): enforce api_version major compatibility.
+        check_api_version(&manifest.api_version, &manifest.id)?;
+
         // Step 3: Reject core plugins — they must use register_core()
         if manifest.trust_level == TrustLevel::Core {
             return Err(PluginError::ManifestInvalid {
@@ -550,6 +553,11 @@ impl PluginLoader {
     ) -> Result<PluginInfo, PluginError> {
         // Validate the manifest (ensures trust_level=core, no [wasm] section, etc.).
         manifest::validate(&manifest, plugin_dir)?;
+
+        // F-9.2.1: enforce api_version even for core plugins so an out-of-date
+        // bundled manifest fails loud rather than silently running against a
+        // mismatched host.
+        check_api_version(&manifest.api_version, &manifest.id)?;
 
         if manifest.trust_level != TrustLevel::Core {
             return Err(PluginError::ManifestInvalid {
@@ -1314,6 +1322,24 @@ fn parse_event_filter(filter: &str) -> EventFilter {
     }
 }
 
+/// Enforce `api_version` major-version compatibility (F-9.2.1).
+///
+/// Accepts `"<major>"` (e.g. `"1"`) or `"<major>.<minor>"` (e.g. `"1.2"`).
+/// Rejects anything else as `IncompatibleApiVersion`. The host's supported
+/// major version is the crate-level constant `PLUGIN_API_VERSION_MAJOR`.
+fn check_api_version(requested: &str, plugin_id: &str) -> Result<(), PluginError> {
+    let major_part = requested.split('.').next().unwrap_or("");
+    let parsed: Option<u32> = major_part.parse().ok();
+    match parsed {
+        Some(n) if n == crate::PLUGIN_API_VERSION_MAJOR => Ok(()),
+        _ => Err(PluginError::IncompatibleApiVersion {
+            plugin_id: plugin_id.to_string(),
+            requested: requested.to_string(),
+            supported: crate::PLUGIN_API_VERSION_MAJOR.to_string(),
+        }),
+    }
+}
+
 /// Build the shared settings cache for a freshly-loaded plugin. Reads the
 /// current validated settings via [`SettingsManager::load_settings`] and
 /// wraps the pretty-printed JSON in an [`Arc<RwLock<String>>`] so the
@@ -1614,6 +1640,28 @@ mod unit_tests {
             matches!(err, PluginError::PluginNotFound(_)),
             "expected PluginNotFound, got {err:?}"
         );
+    }
+
+    #[test]
+    fn api_version_accepts_matching_major() {
+        check_api_version("1", "com.example.p").unwrap();
+        check_api_version("1.2", "com.example.p").unwrap();
+    }
+
+    #[test]
+    fn api_version_rejects_mismatched_major() {
+        let err = check_api_version("2", "com.example.p").unwrap_err();
+        assert!(matches!(err, PluginError::IncompatibleApiVersion { .. }));
+        let err = check_api_version("0", "com.example.p").unwrap_err();
+        assert!(matches!(err, PluginError::IncompatibleApiVersion { .. }));
+    }
+
+    #[test]
+    fn api_version_rejects_garbage() {
+        let err = check_api_version("abc", "com.example.p").unwrap_err();
+        assert!(matches!(err, PluginError::IncompatibleApiVersion { .. }));
+        let err = check_api_version("", "com.example.p").unwrap_err();
+        assert!(matches!(err, PluginError::IncompatibleApiVersion { .. }));
     }
 }
 

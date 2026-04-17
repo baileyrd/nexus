@@ -25,6 +25,24 @@ the warning at author time.
 _(none — this file is seeded alongside the DEPRECATED policy. Entries will
 be added here as the API evolves.)_
 
+## Trust policy — Script (JS) plugins
+
+Script plugins execute in the Tauri WebView as ES modules loaded via a Blob
+URL `import()`. Today they bypass the WASM capability sandbox entirely and
+have access to whatever the Tauri allowlist exposes.
+
+Until **UI F-8.1.1** (iframe-sandbox for JS plugin execution) and
+**UI F-2.2.1** (capability-gated `NexusPluginContext`) both land, script
+plugins are **first-party / core only**:
+
+- Community `[script]` plugins remain loadable in development builds for
+  dogfooding, but must not be shipped through a public marketplace.
+- Nexus-authored plugins (`plugins/hello-js`, future core-owned script
+  extensions) are the only script plugins approved for general release.
+
+The sandbox + capability work reopens the door for community script
+plugins under the same capability model WASM plugins already honour.
+
 ## Historical — removed
 
 ### `EditorKeybinding.when` — removed in pre-1.0

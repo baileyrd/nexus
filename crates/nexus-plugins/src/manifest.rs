@@ -14,6 +14,31 @@ use crate::PluginError;
 
 // ─── Public data types ────────────────────────────────────────────────────────
 
+/// Declared plugin runtime tier. Populated either from the explicit
+/// `runtime` field in `[plugin]` (UI F-3.3.1) or inferred from the
+/// presence of the `[wasm]` / `[script]` sections for backwards
+/// compatibility with older manifests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginRuntime {
+    /// Native Rust core plugin (no `[wasm]` / `[script]` section).
+    Native,
+    /// WASM community plugin (requires `[wasm]`).
+    Wasm,
+    /// JS script plugin (requires `[script]`).
+    Script,
+}
+
+impl PluginRuntime {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "native" => Some(Self::Native),
+            "wasm" => Some(Self::Wasm),
+            "script" => Some(Self::Script),
+            _ => None,
+        }
+    }
+}
+
 /// A fully-parsed plugin manifest.
 ///
 /// Produced by [`parse_manifest`] / [`load_manifest`]; validated by
@@ -30,6 +55,11 @@ pub struct PluginManifest {
     pub trust_level: TrustLevel,
     /// Minimum Nexus API version required (e.g. `"1"`).
     pub api_version: String,
+    /// Runtime tier declared in `[plugin]` (UI F-3.3.1). Inferred from
+    /// the presence of `[wasm]` / `[script]` sections when absent so
+    /// pre-F-3.3.1 manifests keep loading. [`validate`] rejects any
+    /// explicit declaration that disagrees with the section present.
+    pub runtime: PluginRuntime,
     /// Capability declarations.
     pub capabilities: ManifestCapabilities,
     /// WASM module configuration.
@@ -370,6 +400,11 @@ struct TomlPlugin {
     version: String,
     trust_level: String,
     api_version: String,
+    /// Optional for backwards compatibility (UI F-3.3.1). When present it
+    /// must be one of `"native"`, `"wasm"`, `"script"` and must agree with
+    /// the declared sections; when absent the loader infers from sections.
+    #[serde(default)]
+    runtime: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -568,6 +603,38 @@ fn parse_trust_level(s: &str, path: &str) -> Result<TrustLevel, PluginError> {
 fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError> {
     let trust_level = parse_trust_level(&raw.plugin.trust_level, path)?;
 
+    // Derive the runtime tier. An explicit `runtime` field wins if it
+    // parses; otherwise infer from the declared sections so pre-F-3.3.1
+    // manifests keep loading. When a user sets `runtime` explicitly, it
+    // must agree with the section that accompanies it — the conflict is
+    // caught here at parse time because `validate` only sees the resolved
+    // enum variant.
+    let inferred = match (raw.wasm.is_some(), raw.script.is_some()) {
+        (true, false) => PluginRuntime::Wasm,
+        (false, true) => PluginRuntime::Script,
+        (false, false) => PluginRuntime::Native,
+        (true, true) => PluginRuntime::Wasm, // rule 5 rejects this in validate
+    };
+    let runtime = if let Some(ref r) = raw.plugin.runtime {
+        let explicit = PluginRuntime::parse(r).ok_or_else(|| PluginError::ManifestInvalid {
+            path: path.to_string(),
+            reason: format!(
+                "unknown runtime '{r}'; expected 'native', 'wasm', or 'script'"
+            ),
+        })?;
+        if explicit != inferred {
+            return Err(PluginError::ManifestInvalid {
+                path: path.to_string(),
+                reason: format!(
+                    "plugin.runtime = {r:?} disagrees with the declared sections"
+                ),
+            });
+        }
+        explicit
+    } else {
+        inferred
+    };
+
     let wasm = raw.wasm.map(|w| WasmConfig {
         module: w.module,
         memory_mb: w.memory_mb,
@@ -582,6 +649,7 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
         version: raw.plugin.version,
         trust_level,
         api_version: raw.plugin.api_version,
+        runtime,
         capabilities: ManifestCapabilities {
             required: raw.capabilities.required,
             optional: raw.capabilities.optional,
@@ -981,6 +1049,84 @@ api_version = "1"
         let m = parse_manifest(toml, "plugin.toml").unwrap();
         assert!(matches!(m.trust_level, TrustLevel::Core));
         assert!(m.wasm.is_none());
+        assert_eq!(m.runtime, PluginRuntime::Native);
+    }
+
+    #[test]
+    fn runtime_inferred_from_wasm_section() {
+        let m = parse_manifest(MINIMAL, "manifest.toml").unwrap();
+        assert_eq!(m.runtime, PluginRuntime::Wasm);
+    }
+
+    #[test]
+    fn runtime_inferred_from_script_section() {
+        let toml = r#"
+[plugin]
+id = "com.example.script"
+name = "Script"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[script]
+module = "plugin.js"
+"#;
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        assert_eq!(m.runtime, PluginRuntime::Script);
+    }
+
+    #[test]
+    fn explicit_runtime_field_parses() {
+        let toml = r#"
+[plugin]
+id = "com.example.script"
+name = "Script"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+runtime = "script"
+
+[script]
+module = "plugin.js"
+"#;
+        let m = parse_manifest(toml, "manifest.toml").unwrap();
+        assert_eq!(m.runtime, PluginRuntime::Script);
+    }
+
+    #[test]
+    fn explicit_runtime_must_match_section() {
+        let toml = r#"
+[plugin]
+id = "com.example.bad"
+name = "Bad"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+runtime = "wasm"
+
+[script]
+module = "plugin.js"
+"#;
+        let err = parse_manifest(toml, "manifest.toml").unwrap_err();
+        assert!(matches!(err, PluginError::ManifestInvalid { .. }));
+    }
+
+    #[test]
+    fn unknown_runtime_value_rejected() {
+        let toml = r#"
+[plugin]
+id = "com.example.bad"
+name = "Bad"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+runtime = "jvm"
+
+[wasm]
+module = "x.wasm"
+"#;
+        let err = parse_manifest(toml, "manifest.toml").unwrap_err();
+        assert!(matches!(err, PluginError::ManifestInvalid { .. }));
     }
 
     #[test]

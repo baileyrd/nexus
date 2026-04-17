@@ -133,6 +133,19 @@ pub enum PluginError {
         String,
     ),
 
+    /// The plugin's manifest declares an `api_version` the host does not
+    /// support. Major-version mismatches block load; minor-version mismatches
+    /// are tolerated with a runtime warning but may surface behavioural gaps.
+    #[error("incompatible api_version for {plugin_id}: requested {requested}, host supports {supported}")]
+    IncompatibleApiVersion {
+        /// The plugin identifier whose api_version was rejected.
+        plugin_id: String,
+        /// The `api_version` string from the plugin's manifest.
+        requested: String,
+        /// The host's currently-supported major version.
+        supported: String,
+    },
+
     /// The command targets a script (JS) plugin whose dispatch happens in
     /// the frontend, not the backend. The Tauri command layer should
     /// never reach this; if it does, the frontend contribution bridge

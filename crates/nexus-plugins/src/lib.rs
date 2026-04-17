@@ -26,14 +26,27 @@ pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
 pub use loader::{CorePlugin, CorePluginFuture, PluginBackend, PluginLoader, SharedPluginLoader};
 pub use manifest::{
     CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig, ManifestCapabilities,
-    PanelSide, PluginManifest, Registrations, SettingsConfig, UiCommandReg, UiPanelReg,
-    UiRibbonItemReg, UiSettingsTabReg, UiStatusItemReg, WasmConfig,
+    PanelSide, PluginManifest, PluginRuntime, Registrations, SettingsConfig, UiCommandReg,
+    UiPanelReg, UiRibbonItemReg, UiSettingsTabReg, UiStatusItemReg, WasmConfig,
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
 pub use sandbox::{PluginData, PluginEventForwarder, WasmSandbox};
 pub use settings::SettingsManager;
 pub use hot_reload::{HotReloader, ReloadEvent};
 pub use nexus_kernel::{PluginInfo, PluginStatus, TrustLevel};
+
+/// The host's currently-supported major plugin API version (F-9.2.1).
+///
+/// Manifests declare `api_version = "<major>"` (or `"<major>.<minor>"`). The
+/// loader rejects any plugin whose major version does not equal this constant
+/// with [`PluginError::IncompatibleApiVersion`]. Minor-version mismatches are
+/// tolerated — future ABI extensions should remain backwards-compatible within
+/// a major version.
+///
+/// Pre-`nexus-plugin-api` (F-2.1.1) this constant lives here; once the public
+/// plugin-api crate is extracted the constant moves there and this becomes a
+/// re-export.
+pub const PLUGIN_API_VERSION_MAJOR: u32 = 1;
 
 // ─── UiContribution ───────────────────────────────────────────────────────────
 
