@@ -370,6 +370,10 @@ fn register_core_plugins(
                         "formula_eval",
                         nexus_database::core_plugin::HANDLER_FORMULA_EVAL,
                     ),
+                    (
+                        "apply_view",
+                        nexus_database::core_plugin::HANDLER_APPLY_VIEW,
+                    ),
                 ],
             ),
             forge_root,

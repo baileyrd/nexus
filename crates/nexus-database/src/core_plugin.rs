@@ -33,6 +33,9 @@ pub const HANDLER_CSV_IMPORT: u32 = 1;
 pub const HANDLER_CSV_EXPORT: u32 = 2;
 /// Handler id for `formula_eval`. See [`FormulaEvalArgs`] / [`FormulaEvalResponse`].
 pub const HANDLER_FORMULA_EVAL: u32 = 3;
+/// Handler id for `apply_view`. See [`ApplyViewArgs`] and
+/// [`crate::views::AppliedView`] for the response shape.
+pub const HANDLER_APPLY_VIEW: u32 = 4;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -101,6 +104,21 @@ pub struct FormulaEvalResponse {
     pub display: String,
 }
 
+/// Arguments for `apply_view` — runs the full filter / sort / group
+/// pipeline from [`crate::views::apply_view`] and returns an
+/// [`crate::views::AppliedView`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApplyViewArgs {
+    /// Records to apply the view against.
+    pub records: Vec<nexus_types::bases::BaseRecord>,
+    /// Schema describing the fields. Currently unused by the view
+    /// engine but accepted on the wire so future type-aware filters
+    /// don't break the handler shape.
+    pub schema: nexus_types::bases::BaseSchema,
+    /// View definition — name, type, fields, sort, filter, grouping.
+    pub view: nexus_types::bases::BaseView,
+}
+
 /// Core plugin exposing pure-logic database helpers over IPC.
 ///
 /// Holds no state — every handler is a pure function over its args.
@@ -125,6 +143,7 @@ impl CorePlugin for DatabaseCorePlugin {
             HANDLER_CSV_IMPORT => dispatch_csv_import(args),
             HANDLER_CSV_EXPORT => dispatch_csv_export(args),
             HANDLER_FORMULA_EVAL => dispatch_formula_eval(args),
+            HANDLER_APPLY_VIEW => dispatch_apply_view(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -219,6 +238,12 @@ fn dispatch_formula_eval(args: &serde_json::Value) -> Result<serde_json::Value, 
     )
 }
 
+fn dispatch_apply_view(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
+    let a: ApplyViewArgs = parse_args(args, "apply_view")?;
+    let applied = crate::views::apply_view(&a.records, &a.schema, &a.view);
+    to_value(&applied, "apply_view")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +299,39 @@ mod tests {
         let value = plugin.dispatch(HANDLER_FORMULA_EVAL, &args).unwrap();
         let resp: FormulaEvalResponse = serde_json::from_value(value).unwrap();
         assert_eq!(resp.display, "15");
+    }
+
+    #[test]
+    fn apply_view_dispatches_kanban_grouped_response() {
+        let mut plugin = DatabaseCorePlugin::new();
+        let args = serde_json::json!({
+            "records": [
+                { "id": "a", "status": "todo", "priority": 1 },
+                { "id": "b", "status": "done", "priority": 2 },
+                { "id": "c", "status": "todo", "priority": 3 },
+            ],
+            "schema": { "version": "1.0", "fields": {} },
+            "view": {
+                "name": "Board",
+                "type": "kanban",
+                "fields": ["title"],
+                "sort": [{ "field": "priority", "direction": "asc" }],
+                "filter": [],
+                "groupField": "status",
+            },
+        });
+        let value = plugin.dispatch(HANDLER_APPLY_VIEW, &args).unwrap();
+        // Response shape is a full AppliedView with a Grouped layout.
+        let layout = value
+            .get("layout")
+            .expect("layout")
+            .clone();
+        assert_eq!(layout["kind"], "grouped");
+        let groups = layout["groups"].as_array().expect("groups");
+        assert_eq!(groups.len(), 2);
+        // BTreeMap ordering: done < todo.
+        assert_eq!(groups[0]["key"], "done");
+        assert_eq!(groups[1]["key"], "todo");
     }
 
     #[test]

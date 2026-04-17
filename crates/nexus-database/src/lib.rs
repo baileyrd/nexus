@@ -26,6 +26,7 @@ pub mod formula;
 pub mod import_export;
 pub mod types;
 pub mod validate;
+pub mod views;
 
 pub use core_plugin::DatabaseCorePlugin;
 pub use error::{DatabaseError, Result};
@@ -36,4 +37,7 @@ pub use types::{
 };
 pub use validate::{
     BuiltinValidator, PropertyValidator, Severity, ValidationIssue, validate_record_full,
+};
+pub use views::{
+    apply_view, validate_filter_operator, AppliedView, ViewGroup, ViewLayout, MISSING_GROUP_KEY,
 };
