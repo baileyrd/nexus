@@ -62,5 +62,5 @@ mod shell;
 pub use buffer::OutputBuffer;
 pub use error::TerminalError;
 pub use manager::{SessionManager, DEFAULT_MAX_SESSIONS};
-pub use session::{Session, SessionConfig, SessionId};
+pub use session::{Session, SessionConfig, SessionId, Signal};
 pub use shell::{detect_default_shell, ShellSpec};

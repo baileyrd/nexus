@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 
 use crate::buffer::OutputBuffer;
 use crate::error::TerminalError;
-use crate::session::{Session, SessionConfig, SessionId};
+use crate::session::{Session, SessionConfig, SessionId, Signal};
 
 /// PRD-09 §2.3 hard cap on simultaneously-active sessions per workspace.
 pub const DEFAULT_MAX_SESSIONS: usize = 50;
@@ -172,6 +172,25 @@ impl SessionManager {
         let entry = self.entry_mut(id)?;
         entry.last_accessed = Instant::now();
         entry.session.resize(cols, rows)
+    }
+
+    /// Graceful-shutdown ladder (PRD-09 §5.1) on the named session:
+    /// SIGINT → wait → SIGTERM → wait → SIGKILL, with `step_timeout`
+    /// between each escalation. Returns the signal that actually
+    /// terminated the child. See [`Session::request_shutdown`] for
+    /// platform caveats (Windows collapses to force-kill).
+    ///
+    /// # Errors
+    /// - [`TerminalError::NotRunning`] if `id` is not tracked.
+    /// - Any I/O error from [`Session::request_shutdown`].
+    pub fn request_shutdown(
+        &mut self,
+        id: &SessionId,
+        step_timeout: Duration,
+    ) -> Result<Signal, TerminalError> {
+        let entry = self.entry_mut(id)?;
+        entry.last_accessed = Instant::now();
+        entry.session.request_shutdown(step_timeout)
     }
 
     /// Force-kill the session's child. The entry stays in the manager so
@@ -369,6 +388,28 @@ mod tests {
         );
         assert!(m.is_empty());
         assert!(m.buffer_snapshot(&id).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn request_shutdown_returns_signal_used() {
+        if !unix_only("request_shutdown_returns_signal_used") {
+            return;
+        }
+        let mut m = SessionManager::with_limits(2, 1024);
+        let id = m
+            .spawn(SessionConfig {
+                shell: Some(ShellSpec {
+                    program: "/bin/sh".into(),
+                    args: vec!["-c".into(), "sleep 5".into()],
+                }),
+                ..SessionConfig::default()
+            })
+            .expect("spawn");
+        let finisher = m
+            .request_shutdown(&id, Duration::from_millis(500))
+            .expect("shutdown");
+        assert_eq!(finisher, Signal::Int);
     }
 
     #[test]

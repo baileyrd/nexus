@@ -13,5 +13,13 @@ tracing = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }
 
+# libc is used only on Unix for signal(2) delivery. portable-pty's Child
+# trait only exposes a force-kill (TerminateProcess / SIGKILL); the PRD-09
+# §5 escalation ladder needs SIGINT and SIGTERM which we deliver via
+# `libc::kill`. On Windows this crate is absent and the escalation path
+# collapses to the force-kill fallback — see `session::Signal::send`.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
