@@ -4089,3 +4089,11 @@ select.plugin-settings-input {
 :root[data-theme-id="nexus-forge"] .right-side-panel-toolbar .panel-selector::-webkit-scrollbar {
   display: none;
 }
+
+/* Status-bar spacer — honored by all themes so preset clustering
+ * works outside Forge too. The sentinel item is id="status.spacer"
+ * in the preset TOML; StatusBar.tsx renders it as this span. */
+.status-bar-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}

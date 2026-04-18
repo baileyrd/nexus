@@ -12,13 +12,26 @@ interface StatusBarProps {
  * (`action` set). Click handling routes through the same UI
  * contribution registry as ribbon / panel-toolbar dispatch.
  */
+/** Sentinel item id: rendered as a flex:1 spacer so preset authors can
+ *  split the status bar into left / right clusters without a schema
+ *  change. Keeps the StatusBarItem Rust type contribution-compatible. */
+const STATUS_SPACER_ID = "status.spacer";
+
 export function StatusBar({ items }: StatusBarProps) {
   if (items.length === 0) return null;
   return (
     <div className="status-bar" role="status" aria-label="Workspace status">
-      {items.map((item) => (
-        <StatusBarEntry key={item.id} item={item} />
-      ))}
+      {items.map((item) =>
+        item.id === STATUS_SPACER_ID ? (
+          <span
+            key={item.id}
+            className="status-bar-spacer"
+            aria-hidden="true"
+          />
+        ) : (
+          <StatusBarEntry key={item.id} item={item} />
+        ),
+      )}
     </div>
   );
 }

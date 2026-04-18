@@ -57,19 +57,20 @@ action = { kind = "openView", viewId = "tasks" }
 
 # ── Status bar (floating, bottom-right) ─────────────────────────────────────
 
+# Left cluster — sync / index / plugin health. Order is render order.
 [[statusBar]]
-id = "editor.backlinks-count"
-text = "0 backlinks"
+id = "sync.status"
+icon = "cloud-off"
+action = { kind = "invokeCommand", command = "sync.toggle" }
 
+# Sentinel spacer — the frontend StatusBar component recognizes
+# id = "status.spacer" and renders it as a flex:1 gap, splitting the
+# bar into left / right clusters. Items before the spacer live on the
+# left; items after live on the right.
 [[statusBar]]
-id = "editor.properties-count"
-text = "7 properties"
+id = "status.spacer"
 
-[[statusBar]]
-id = "editor.mode-toggle"
-icon = "edit"
-action = { kind = "invokeCommand", command = "editor.toggle-mode" }
-
+# Right cluster — per-document stats.
 [[statusBar]]
 id = "editor.word-count"
 text = "2,348 words"
@@ -79,9 +80,17 @@ id = "editor.character-count"
 text = "15,953 characters"
 
 [[statusBar]]
-id = "sync.status"
-icon = "cloud-off"
-action = { kind = "invokeCommand", command = "sync.toggle" }
+id = "editor.mode-toggle"
+icon = "edit"
+action = { kind = "invokeCommand", command = "editor.toggle-mode" }
+
+[[statusBar]]
+id = "editor.backlinks-count"
+text = "0 backlinks"
+
+[[statusBar]]
+id = "editor.properties-count"
+text = "7 properties"
 
 # ── Left side panel ─────────────────────────────────────────────────────────
 # Panel selector at the top is derived from the panels list. The active
