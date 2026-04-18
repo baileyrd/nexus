@@ -1,6 +1,6 @@
 # Nexus PRD Implementation Status
 
-> **Snapshot date:** 2026-04-17 (post-session — RAG citations, markdown-inside-MDX, plugin-backed saved-commands, Kanban drag, nexus-agent scaffold + LlmAgent all landed)
+> **Snapshot date:** 2026-04-17 (post-session — com.nexus.agent core plugin + `nexus agent` CLI + Chat Agent-mode shipped; `nexus-skills` crate scaffolded with `.skill.md` parser and registry)
 > **Scope:** PRDs 01–17 in this directory, audited against `crates/**` and `app/src/**`.
 > **Update cadence:** refresh when a PRD's status tier changes, or at minimum at every minor release.
 >
@@ -33,9 +33,9 @@
 | 10 | Database Engine | 🟢 | View engine + Table/Kanban/Calendar-month-grid/Gallery renderers; Kanban cards drag between columns to mutate the group-field value |
 | 11 | Git Integration | 🟢 | 1.1k-line `GitEngine` over `git2`; worker-thread wrapper for UI still needed |
 | 12 | AI Engine | 🟢 | Streaming chat + RAG (`stream_chat` / `stream_ask`) with citation chips; Chat panel with system prompt + persisted history; inline editor completion |
-| 13 | Skills | ⚪ | Spec only; no parser, registry, or CLI |
+| 13 | Skills | 🟠 | `nexus-skills` crate: `.skill.md` parser, `Skill`/`SkillMeta`, `SkillRegistry` with context + trigger filters; no core plugin, composition, or activation wiring |
 | 14 | MCP Integration | 🟡 | 807-line `serve_stdio`; no WebSocket/HTTP transports, no Host (client) |
-| 15 | Agent System | 🟠 | `nexus-agent` crate: `Agent` trait, `Plan`/`Step`/`ToolCall`, `PlanExecutor`, `StepPolicy`, `LlmAgent<D: ChatDriver>`; `KernelToolDispatcher` + `AiChatDriver` in bootstrap; no core plugin / UI yet |
+| 15 | Agent System | 🟠 | Full library + `com.nexus.agent` core plugin (`plan` / `run` / `run_plan`); `nexus agent` CLI + Chat panel "Agent" chip drive end-to-end; no archetype impls, memory persistence, or per-step approval UI yet |
 | 16 | Workflow System | ⚪ | Spec only; no `.workflow.toml` parser or triggers |
 | 17 | Cross-Platform Strategy | 🟢 | Tauri desktop shipping; web OPFS + mobile UniFFI deferred |
 
@@ -126,10 +126,10 @@
 **Gaps:** No embedding backend beyond remote providers (local embeddings deferred). No tool registration for agents. No token budgeting. No PII/secret filters before egress. No plugin-backed session storage (Chat history lives in localStorage). No citation-rendering UI for `stream_ask` sources (engine returns them; panel doesn't display them yet).
 **Evidence:** [crates/nexus-ai/src/{provider,anthropic,openai,ollama,chunker,rag,core_plugin}.rs](crates/nexus-ai/src/), [crates/nexus-app/src/{ai,lib}.rs](crates/nexus-app/src/), [app/src/{ipc/ai.ts,components/panels/ChatPanel.tsx,editor/inlineAi.ts}](app/src/).
 
-### PRD-13 — Skills ⚪
-**Shipped:** Spec document only.
-**Gaps:** No `.skill.md` parser, no registry, no activation, no composition, no CLI, no built-in skill library.
-**Evidence:** N/A.
+### PRD-13 — Skills 🟠
+**Shipped (scaffold, commit [a919d26](https://github.com/baileyrd/nexus/commit/a919d26)):** New [`nexus-skills`](crates/nexus-skills/) library crate — kernel-free, matching the `nexus-agent` posture. `Skill` / `SkillMeta` / `SkillParameter` / `SkillRestrictions` project the PRD-13 §2.3 frontmatter schema; unknown keys round-trip through `SkillMeta::extra` for forward compatibility. `parse_skill_file` / `parse_skill_text` split the `---` frontmatter block, decode YAML, preserve the markdown body verbatim (tolerant of BOM, CRLF, leading whitespace). `SkillRegistry::load(root)` walks the forge's `skills/` tree (subdirs recursed, strict `.skill.md` filter), indexes by id, exposes `by_context(ctx)` and `triggered_by(text)` filters, and surfaces partial parse failures via `SkillRegistryError::PartialParseFailure` without dropping successfully-loaded entries.
+**Gaps:** No `com.nexus.skills` core plugin — the registry has no IPC surface yet. No skill composition / dependency resolution (`depends_on` stored verbatim). No activation wiring — nothing consumes skills during a chat turn or agent run. No built-in skill library shipped. No CLI (`nexus skill list|apply`). No `REGISTRY.json` persistence.
+**Evidence:** [crates/nexus-skills/src/{lib,parse,registry}.rs](crates/nexus-skills/src/). 11 unit tests.
 
 ### PRD-14 — MCP Integration 🟡
 **Shipped:**
@@ -141,8 +141,11 @@
 ### PRD-15 — Agent System 🟠
 **Shipped (scaffold, commit [b62f611](https://github.com/baileyrd/nexus/commit/b62f611)):** New [`nexus-agent`](crates/nexus-agent/) crate — library-first, zero kernel deps. Core types: `Agent` trait (async `plan(goal) -> Plan`), `Plan` / `Step` / `ToolCall` (shapes mirror `ipc_call`'s args so forwarding needs no reshaping), `PlanExecutor<D: ToolDispatcher>` walking a plan and recording per-step outcomes into an `Observation`, `StepPolicy` + `AutoApprove` reserving the per-step approval hook PRD-15 §3.4 calls for. `EchoAgent` provides a smoke-test single-step agent.
 **Shipped (LLM planner + kernel bridges, commit [219c9b4](https://github.com/baileyrd/nexus/commit/219c9b4)):** `LlmAgent<D: ChatDriver>` asks an injected chat driver for a JSON plan, tolerates prose / code-fence wrappers via a brace-aware `extract_json_object`, generates stable step ids, rejects empty / malformed responses with a truncated diagnostic. Default system prompt pins the schema and lists the core plugins the agent can call. `nexus-bootstrap::agent` supplies the production bridges: `KernelToolDispatcher` forwards any `ToolCall` through `PluginContext::ipc_call`; `AiChatDriver` wraps `com.nexus.ai::stream_chat` so the planner works against whatever provider the forge is configured with.
-**Gaps:** No `com.nexus.agent` core plugin yet — still library-first. No archetype impls beyond `Echo` + `Llm` (Writer / Coder / Researcher TBD). No memory persistence (plans + observations aren't stored). No user-approval UI. No CLI. No UI surface (Chat panel doesn't route through the agent loop yet).
-**Evidence:** [crates/nexus-agent/src/{lib,agents,executor,llm}.rs](crates/nexus-agent/src/), [crates/nexus-bootstrap/src/agent.rs](crates/nexus-bootstrap/src/agent.rs). 12 unit tests.
+**Shipped (core plugin, commit [fa879c0](https://github.com/baileyrd/nexus/commit/fa879c0)):** `com.nexus.agent` core plugin — three append-only handlers: `plan` (id 1, goal → Plan, no side effects), `run` (id 2, goal → Observation: plan + execute), `run_plan` (id 3, preset Plan → Observation). Captures its `KernelPluginContext` via `wire_context` (same pattern as `com.nexus.ai` / `com.nexus.editor`). Local `AiChatBridge` + `KernelToolBridge` adapters live inside the plugin module so the library core stays kernel-free; they're behaviourally identical to the `nexus-bootstrap::agent` bridges but scoped to avoid a circular `bootstrap → agent` dep. Bootstrap registers + wires the plugin's context alongside AI / editor.
+**Shipped (CLI, commit [495a3b0](https://github.com/baileyrd/nexus/commit/495a3b0)):** `nexus agent plan|run|run-plan` — thin CLI wrapper over the three plugin handlers. Plan output annotates steps with `→ target.command` so users see intent before approving `run`; run output renders `[status] sid — response-preview` per step. 10-minute IPC timeout for multi-step chains.
+**Shipped (Chat panel Agent mode, commit [6e30563](https://github.com/baileyrd/nexus/commit/6e30563)):** Three Tauri commands (`agent_plan` / `agent_run` / `agent_run_plan`) in [`nexus-app/src/agent.rs`](crates/nexus-app/src/agent.rs); typed TS wrappers in [`app/src/ipc/agent.ts`](app/src/ipc/agent.ts). New "Agent" chip on the Chat panel — when on, each message dispatches to `agent_run` and the Observation renders as a single assistant turn with badge + status + response preview per step. RAG chip disables while Agent is on to make the mutual exclusivity obvious.
+**Gaps:** No archetype impls beyond `Echo` + `Llm` (Writer / Coder / Researcher TBD). No memory persistence — plans + observations aren't stored between runs. No per-step user-approval UI (`StepPolicy` hook in the library, but Chat Agent mode auto-approves). No streaming observation events — the UI blocks until the whole plan completes.
+**Evidence:** [crates/nexus-agent/src/{lib,agents,executor,llm,core_plugin}.rs](crates/nexus-agent/src/), [crates/nexus-bootstrap/src/{agent,lib}.rs](crates/nexus-bootstrap/src/), [crates/nexus-app/src/agent.rs](crates/nexus-app/src/agent.rs), [crates/nexus-cli/src/commands/agent.rs](crates/nexus-cli/src/commands/agent.rs), [app/src/{ipc/agent.ts,components/panels/ChatPanel.tsx}](app/src/). 12 unit tests.
 
 ### PRD-16 — Workflow System ⚪
 **Shipped:** Spec document only.
@@ -162,8 +165,9 @@
 4. **AI (12) 🟢 end-to-end.** Streaming chat, streaming RAG with source-chip citations, and inline editor completion all share the `com.nexus.ai.stream_*` event plumbing. Microkernel boundary held — provider dispatch, retrieval, and prompt assembly all stay inside `com.nexus.ai`; shell contributes only Tauri bridges and UI.
 5. **Bases (10) 🟢 with meaningful interactivity.** Four renderers ship, Calendar is a proper month grid, and Kanban cards drag between columns to mutate group-field values. Edits round-trip through the same debounced `save_forge_base` pipeline as inline-cell edits.
 6. **Terminal (09) saved-commands now plugin-backed.** `TerminalCorePlugin` grew five append-only handlers (11–15) over `SqliteSavedCommandStore` at `<forge>/.forge/procmgr.sqlite`; the UI moved from localStorage to the plugin API with no UX change. PRD §10.1 ad-hoc CRUD remains library-only; the pattern for promoting it is now established.
-7. **Agents (15) moved ⚪→🟠 with a real planner.** `nexus-agent` ships `Agent` / `Plan` / `PlanExecutor` / `StepPolicy` + `LlmAgent<D: ChatDriver>`; `nexus-bootstrap::agent` bridges the library-free traits to the kernel via `KernelToolDispatcher` and `AiChatDriver`. Next beat is either a `com.nexus.agent` core plugin or a UI surface that runs plans interactively.
-8. **Skills + Workflows (13/16) remain aspirational.** Treat as Phase 2/3, not 1.0 scope.
+7. **Agents (15) 🟠 end-to-end.** Library + `com.nexus.agent` core plugin + `nexus agent` CLI + Chat panel "Agent" chip all ship; the same `plan` / `run` / `run_plan` handlers drive terminal and GUI equally. Next beat is archetype impls (Writer / Coder / Researcher specialising the system prompt) and per-step approval UI.
+8. **Skills (13) moved ⚪→🟠.** `nexus-skills` crate parses `.skill.md` files (frontmatter + body), indexes by id, filters by context + trigger phrases. No core plugin yet; the first consumer will likely be a `SkillSelector` that layers skills into the agent's planner prompt.
+9. **Workflows (16) remain aspirational.** Treat as Phase 2/3, not 1.0 scope.
 
 ## Risk hotspots
 
