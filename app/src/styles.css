@@ -3824,3 +3824,79 @@ select.plugin-settings-input {
   padding: 10px 8px 20px;
   overflow-y: auto;
 }
+
+/* ── Stage 5: Forge status bar ──────────────────────────────────
+ * Full-width 24px bar at the bottom of the workspace. Status items
+ * are contributions (layout preset + plugins); this is styling only.
+ * Left vs right clustering will land when StatusBarItem gets a
+ * `position` field — see FORGE-UI-PLAN.md out-of-scope notes. */
+
+:root[data-theme-id="nexus-forge"] .workspace-frame {
+  display: grid;
+  grid-template-rows: auto 1fr 24px;
+}
+
+:root[data-theme-id="nexus-forge"] .status-bar {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 12px;
+  border-top: 1px solid var(--nx-bg-tertiary, #2C2E36);
+  background: var(--nx-bg-secondary, #222329);
+  font-family: var(--nx-type-sans, 'Inter', sans-serif);
+  font-size: 11px;
+  color: var(--nx-text-muted, #7F7A70);
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+
+:root[data-theme-id="nexus-forge"] .status-bar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--nx-text-muted, #7F7A70);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: default;
+  font-size: 11px;
+  font-family: inherit;
+  line-height: 1;
+}
+
+:root[data-theme-id="nexus-forge"] .status-bar-item.interactive {
+  cursor: pointer;
+}
+
+:root[data-theme-id="nexus-forge"] .status-bar-item.interactive:hover {
+  color: var(--nx-text-primary, #EFEBE4);
+}
+
+:root[data-theme-id="nexus-forge"] .status-bar-icon {
+  width: 12px;
+  height: 12px;
+  color: var(--nx-text-muted, #7F7A70);
+}
+
+:root[data-theme-id="nexus-forge"] .status-bar-text {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Ember pip for sync-status and any future "online" indicators. */
+:root[data-theme-id="nexus-forge"] .status-bar-item[title*="sync" i]::before,
+:root[data-theme-id="nexus-forge"] .status-bar-item#status-bar-sync.status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--nx-status-ok, #7FCFA3);
+  box-shadow: 0 0 6px var(--nx-status-ok, #7FCFA3);
+  flex: 0 0 6px;
+}
+
+/* Left/right clustering requires a StatusBarItem.position field so
+ * plugins can declare which side they live on. Deferred — tracked in
+ * FORGE-UI-PLAN.md Stage 5 follow-ups. Items render flush-left until
+ * then, matching the current layout preset authoring order. */

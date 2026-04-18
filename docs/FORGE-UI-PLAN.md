@@ -63,12 +63,17 @@ Match the "NEXUS_WORK" file-tree panel 1-for-1. **Shipped.**
 
 ---
 
-## Stage 5 — Status bar
+## Stage 5 — Status bar ✓
 
-- [ ] **Widen** — 24 px, flex row, left + right clusters.
-- [ ] **Left cluster** — `● Forge synced · main · <git-sha> · Tantivy · N docs · ● N plugins hot`. Needs: git HEAD sha (already surfaced via `forgeStore`/IPC? — verify or add), Tantivy doc count (`nexus-storage` exposes one), plugin-hot count (plugins store).
-- [ ] **Right cluster** — `ln X, col Y · MD · UTF-8 · N words · N chars · N backlinks missing`. Drive from `activeEditor` + doc metadata.
-- [ ] Each datum registered as a status-bar item contribution in `contributions/builtins.ts`, not hard-coded — keeps the microkernel model.
+- [x] **Widen to 24 px** — full-width bar pinned at the bottom of the workspace frame, Inter font, muted text.
+- [x] **Ember pip** — the sync/status item shows the green ok-pip with a soft glow, matching the design.
+- [x] **Status-bar items stay contributions** — styling is applied to `.status-bar-item` / `.status-bar-text` / `.status-bar-icon`; the preset + plugins still decide *which* items appear. Microkernel model intact.
+
+### Deferred (follow-up)
+
+- [ ] **Left/right clustering** — requires adding a `position: "left" | "right"` field to the `StatusBarItem` Rust type (`ts-rs` re-export), then a flex grouping in `StatusBar.tsx`. Better bundled with the wider "status-bar schema v2" work.
+- [ ] **Live data wiring** — replace hard-coded preset text (`"0 backlinks"`, `"7 properties"`, `"2,348 words"`) with live feeds from `activeEditor`, `forgeStore`, git IPC, Tantivy doc count, and plugin-hot count. Each datum should register as its own `contributions/builtins.ts` status-bar contribution.
+- [ ] **Preset picker → command palette** — land the `Switch layout: <preset>` command group that replaces the retired preset picker row (carried over from Stage 1).
 
 ---
 
