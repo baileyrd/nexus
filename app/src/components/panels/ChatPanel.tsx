@@ -13,6 +13,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   aiConfig,
+  aiSessionLoad,
+  aiSessionSave,
   aiStreamAsk,
   aiStreamChat,
   onAiStreamChunk,
@@ -31,29 +33,22 @@ type Turn = {
   sources?: RagSource[];
 };
 
-const STORAGE_KEY = "nexus.chat.v1";
-
 interface Persisted {
   turns: Turn[];
   systemPrompt: string;
 }
 
-function loadPersisted(): Persisted {
-  if (typeof window === "undefined") return { turns: [], systemPrompt: "" };
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { turns: [], systemPrompt: "" };
-    const parsed = JSON.parse(raw) as Partial<Persisted>;
-    const turns = Array.isArray(parsed.turns)
-      ? parsed.turns.filter(isTurn).map((t) => ({ ...t, pending: false }))
-      : [];
-    const systemPrompt = typeof parsed.systemPrompt === "string"
-      ? parsed.systemPrompt
-      : "";
-    return { turns, systemPrompt };
-  } catch {
+function decodePersisted(value: unknown): Persisted {
+  if (typeof value !== "object" || value === null) {
     return { turns: [], systemPrompt: "" };
   }
+  const obj = value as Partial<Persisted>;
+  const turns = Array.isArray(obj.turns)
+    ? obj.turns.filter(isTurn).map((t) => ({ ...t, pending: false }))
+    : [];
+  const systemPrompt =
+    typeof obj.systemPrompt === "string" ? obj.systemPrompt : "";
+  return { turns, systemPrompt };
 }
 
 function isTurn(v: unknown): v is Turn {
@@ -77,12 +72,14 @@ function isRagSource(v: unknown): v is RagSource {
 }
 
 function persist(state: Persisted): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    /* quota or privacy mode — ignore */
-  }
+  // Fire-and-forget — persistence is best-effort. Any failure is
+  // logged but never blocks the UI. Sessions survive app restarts
+  // via com.nexus.ai::session_save; a fresh forge sees an empty
+  // session on first load.
+  aiSessionSave(state).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn("[chat] session_save failed", err);
+  });
 }
 
 function makeSessionId(): string {
@@ -124,9 +121,9 @@ const chipButtonStyle: CSSProperties = {
 };
 
 export function ChatPanel(): JSX.Element {
-  const initial = loadPersisted();
-  const [turns, setTurns] = useState<Turn[]>(initial.turns);
-  const [systemPrompt, setSystemPrompt] = useState(initial.systemPrompt);
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [hydrated, setHydrated] = useState(false);
   const [showSystem, setShowSystem] = useState(false);
   const [useRag, setUseRag] = useState(false);
   const [useAgent, setUseAgent] = useState(false);
@@ -146,6 +143,33 @@ export function ChatPanel(): JSX.Element {
       })
       .catch((err) => {
         if (!cancelled) setError(String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Hydrate the transcript from com.nexus.ai::session_load. Flips
+  // `hydrated` on completion (even on failure) so the persistence
+  // effect below can start writing — otherwise the first keystroke
+  // would overwrite the on-disk session with the empty initial
+  // state before we had a chance to read it.
+  useEffect(() => {
+    let cancelled = false;
+    aiSessionLoad()
+      .then((value) => {
+        if (cancelled) return;
+        const { turns: loadedTurns, systemPrompt: loadedPrompt } =
+          decodePersisted(value);
+        setTurns(loadedTurns);
+        setSystemPrompt(loadedPrompt);
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn("[chat] session_load failed", err);
+      })
+      .finally(() => {
+        if (!cancelled) setHydrated(true);
       });
     return () => {
       cancelled = true;
@@ -224,10 +248,10 @@ export function ChatPanel(): JSX.Element {
   // disk — they'd replay as `pending: true` markers the next session,
   // which looks broken without a live stream underneath.
   useEffect(() => {
-    if (sending) return;
+    if (sending || !hydrated) return;
     const cleanTurns = turns.map((t) => ({ ...t, pending: false }));
     persist({ turns: cleanTurns, systemPrompt });
-  }, [turns, systemPrompt, sending]);
+  }, [turns, systemPrompt, sending, hydrated]);
 
   const send = useCallback(async () => {
     const trimmed = input.trim();

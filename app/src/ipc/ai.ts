@@ -92,6 +92,18 @@ export function aiStreamAsk(
   });
 }
 
+/** Load the persisted Chat panel session. Returns `null` on fresh
+ *  forges where no session has been saved yet. */
+export function aiSessionLoad(): Promise<unknown> {
+  return invoke<unknown>("ai_session_load");
+}
+
+/** Overwrite the persisted Chat panel session with an opaque JSON
+ *  document. Callers decide the shape; the plugin stores it verbatim. */
+export function aiSessionSave(session: unknown): Promise<void> {
+  return invoke<void>("ai_session_save", { session });
+}
+
 export function onAiStreamStart(
   handler: (ev: StreamStart) => void,
 ): Promise<UnlistenFn> {

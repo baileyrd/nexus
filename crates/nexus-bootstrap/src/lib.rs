@@ -520,6 +520,14 @@ fn register_core_plugins(
                         "stream_ask",
                         nexus_ai::core_plugin::HANDLER_STREAM_ASK,
                     ),
+                    (
+                        "session_load",
+                        nexus_ai::core_plugin::HANDLER_SESSION_LOAD,
+                    ),
+                    (
+                        "session_save",
+                        nexus_ai::core_plugin::HANDLER_SESSION_SAVE,
+                    ),
                 ],
             ),
             forge_root,

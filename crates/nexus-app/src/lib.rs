@@ -203,6 +203,8 @@ pub fn run() {
             ai::ai_config,
             ai::ai_stream_chat,
             ai::ai_stream_ask,
+            ai::ai_session_load,
+            ai::ai_session_save,
             agent::agent_plan,
             agent::agent_run,
             agent::agent_run_plan,

@@ -47,6 +47,14 @@ pub const HANDLER_CONFIG: u32 = 5;
 pub const HANDLER_STREAM_CHAT: u32 = 6;
 /// Handler id for `stream_ask` (RAG retrieve + streaming chat).
 pub const HANDLER_STREAM_ASK: u32 = 7;
+/// Handler id for `session_load` — read the persisted chat session
+/// JSON from `<forge>/.forge/chat_session.json`. Returns `null` if
+/// the file doesn't exist yet.
+pub const HANDLER_SESSION_LOAD: u32 = 8;
+/// Handler id for `session_save` — overwrite the persisted chat
+/// session JSON. Args are an opaque JSON object; the plugin doesn't
+/// inspect the shape.
+pub const HANDLER_SESSION_SAVE: u32 = 9;
 
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
@@ -147,6 +155,8 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_STREAM_ASK => {
                     handle_stream_ask(ctx, ai_cfg, embed_cfg, &args).await
                 }
+                HANDLER_SESSION_LOAD => handle_session_load(&ctx).await,
+                HANDLER_SESSION_SAVE => handle_session_save(&ctx, &args).await,
                 _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
             }
         }))
@@ -416,6 +426,41 @@ async fn handle_stream_ask(
         "text": text,
         "sources": sources,
     }))
+}
+
+/// Relative path (under the forge root) where the Chat panel's
+/// persisted session lives. Single-session today — a future slice
+/// will promote this to a `chat/sessions/<id>.json` tree.
+const SESSION_RELPATH: &str = ".forge/chat_session.json";
+
+async fn handle_session_load(
+    ctx: &KernelPluginContext,
+) -> Result<serde_json::Value, PluginError> {
+    let path = std::path::Path::new(SESSION_RELPATH);
+    match ctx.read_file(path).await {
+        Ok(bytes) => {
+            let parsed: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
+                exec_err(format!("session_load: invalid JSON on disk: {e}"))
+            })?;
+            Ok(parsed)
+        }
+        // No session saved yet — return null rather than erroring so
+        // fresh forges don't spam the UI with warnings.
+        Err(_) => Ok(serde_json::Value::Null),
+    }
+}
+
+async fn handle_session_save(
+    ctx: &KernelPluginContext,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let encoded = serde_json::to_vec_pretty(args)
+        .map_err(|e| exec_err(format!("session_save: encode: {e}")))?;
+    let path = std::path::Path::new(SESSION_RELPATH);
+    ctx.write_file(path, &encoded)
+        .await
+        .map_err(|e| exec_err(format!("session_save: write: {e}")))?;
+    Ok(serde_json::json!({ "bytes": encoded.len() }))
 }
 
 // ─── Provider factories ─────────────────────────────────────────────────────

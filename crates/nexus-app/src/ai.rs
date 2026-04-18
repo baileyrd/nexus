@@ -86,3 +86,23 @@ pub async fn ai_stream_ask(
     }
     call_ai(runtime, "stream_ask", args).await
 }
+
+/// Load the persisted Chat panel session from
+/// `<forge>/.forge/chat_session.json`. Returns `null` when the file
+/// doesn't exist (fresh forge).
+#[tauri::command]
+pub async fn ai_session_load(
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_ai(runtime, "session_load", serde_json::json!({})).await
+}
+
+/// Overwrite the persisted Chat panel session. `session` is an opaque
+/// JSON object; the plugin doesn't inspect its shape.
+#[tauri::command]
+pub async fn ai_session_save(
+    session: serde_json::Value,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_ai(runtime, "session_save", session).await
+}
