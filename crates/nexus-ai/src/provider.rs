@@ -42,6 +42,25 @@ pub trait AiProvider: Send + Sync {
         system: Option<&str>,
     ) -> Result<String, AiError>;
 
+    /// Stream a chat response, calling `on_chunk` with each token as it arrives.
+    ///
+    /// Returns the complete concatenated response when the stream ends.
+    /// The default implementation collects the full response with [`chat`]
+    /// and emits a single callback call. Providers that support true streaming
+    /// override this to deliver incremental tokens.
+    ///
+    /// [`chat`]: AiProvider::chat
+    async fn chat_stream_with(
+        &self,
+        messages: &[ChatMessage],
+        system: Option<&str>,
+        on_chunk: &(dyn Fn(String) + Send + Sync),
+    ) -> Result<String, AiError> {
+        let text = self.chat(messages, system).await?;
+        on_chunk(text.clone());
+        Ok(text)
+    }
+
     /// Return the name of the model being used.
     fn model_name(&self) -> &str;
 }

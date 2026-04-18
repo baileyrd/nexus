@@ -118,7 +118,7 @@ crossterm = "0.29"
 petgraph = "0.7"
 
 # HTTP client (AI provider calls)
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
 
 # MCP server + client (client is used by the Host-side integration that lets
 # Nexus connect to external MCP servers listed in `mcp.toml`)

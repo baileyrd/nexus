@@ -15,9 +15,10 @@
 //! All five are async handlers — they issue `com.nexus.storage` IPC calls
 //! for vector ops and HTTP requests to the provider APIs.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use nexus_kernel::KernelPluginContext;
+use nexus_kernel::{KernelPluginContext, PluginContext};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Serialize;
 
@@ -42,6 +43,8 @@ pub const HANDLER_VECTORSTORE_COUNT: u32 = 3;
 pub const HANDLER_STATUS: u32 = 4;
 /// Handler id for `config` (detected provider snapshot — sync).
 pub const HANDLER_CONFIG: u32 = 5;
+/// Handler id for `stream_chat` (direct chat with per-token bus events).
+pub const HANDLER_STREAM_CHAT: u32 = 6;
 
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
@@ -138,6 +141,7 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_INDEX_FILE => handle_index_file(&ctx, embed_cfg, &args).await,
                 HANDLER_VECTORSTORE_COUNT => handle_vectorstore_count(&ctx).await,
                 HANDLER_STATUS => handle_status(&ctx, ai_cfg, embed_cfg).await,
+                HANDLER_STREAM_CHAT => handle_stream_chat(ctx, ai_cfg, &args).await,
                 _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
             }
         }))
@@ -257,6 +261,68 @@ fn config_snapshot(
         "ai": ai_cfg.map(view),
         "embedding": embed_cfg.map(view),
     })
+}
+
+async fn handle_stream_chat(
+    ctx: Arc<KernelPluginContext>,
+    ai_cfg: Option<AiConfig>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let messages: Vec<crate::provider::ChatMessage> = args
+        .get("messages")
+        .ok_or_else(|| exec_err("stream_chat: missing 'messages'"))
+        .and_then(|v| {
+            serde_json::from_value(v.clone())
+                .map_err(|e| exec_err(format!("stream_chat: messages decode: {e}")))
+        })?;
+    let system = args
+        .get("system")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let session_id = args
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    let ai_cfg = ai_cfg.ok_or_else(|| exec_err("stream_chat: no AI chat provider configured"))?;
+    let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
+
+    let _ = ctx.publish(
+        "com.nexus.ai.stream_start",
+        serde_json::json!({"session_id": &session_id}),
+    );
+
+    let ctx_chunk = Arc::clone(&ctx);
+    let sid_chunk = session_id.clone();
+    let chunk_idx = Arc::new(AtomicUsize::new(0));
+
+    let on_chunk = {
+        let chunk_idx = Arc::clone(&chunk_idx);
+        move |chunk: String| {
+            let idx = chunk_idx.fetch_add(1, Ordering::Relaxed);
+            let _ = ctx_chunk.publish(
+                "com.nexus.ai.stream_chunk",
+                serde_json::json!({
+                    "session_id": &sid_chunk,
+                    "chunk": chunk,
+                    "index": idx,
+                }),
+            );
+        }
+    };
+
+    let text = ai
+        .chat_stream_with(&messages, system.as_deref(), &on_chunk)
+        .await
+        .map_err(|e| exec_err(format!("stream_chat: {e}")))?;
+
+    let _ = ctx.publish(
+        "com.nexus.ai.stream_done",
+        serde_json::json!({"session_id": &session_id, "text": &text}),
+    );
+
+    Ok(serde_json::json!({"session_id": session_id, "text": text}))
 }
 
 // ─── Provider factories ─────────────────────────────────────────────────────

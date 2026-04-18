@@ -1,6 +1,7 @@
 //! Ollama (local) AI and embedding provider implementation.
 
 use async_trait::async_trait;
+use futures::StreamExt as _;
 use serde::{Deserialize, Serialize};
 
 use crate::embedding::EmbeddingProvider;
@@ -61,10 +62,25 @@ struct OllamaChatMessage<'a> {
     content: &'a str,
 }
 
-/// Response from the Ollama chat API.
+/// Response from the Ollama chat API (non-streaming).
 #[derive(Deserialize)]
 struct OllamaChatResponse {
     message: OllamaResponseMessage,
+}
+
+/// A single NDJSON line from a streaming Ollama chat response.
+#[derive(Deserialize)]
+struct OllamaStreamChunk {
+    message: OllamaStreamMessage,
+    #[serde(default)]
+    done: bool,
+}
+
+/// The message payload in an Ollama stream chunk.
+#[derive(Deserialize)]
+struct OllamaStreamMessage {
+    #[serde(default)]
+    content: String,
 }
 
 /// The message payload in an Ollama chat response.
@@ -148,6 +164,75 @@ impl AiProvider for OllamaProvider {
             .map_err(|e| AiError::Serialization(e.to_string()))?;
 
         Ok(parsed.message.content)
+    }
+
+    async fn chat_stream_with(
+        &self,
+        messages: &[ChatMessage],
+        system: Option<&str>,
+        on_chunk: &(dyn Fn(String) + Send + Sync),
+    ) -> Result<String, AiError> {
+        let mut api_messages: Vec<OllamaChatMessage<'_>> = Vec::new();
+        if let Some(sys) = system {
+            api_messages.push(OllamaChatMessage { role: "system", content: sys });
+        }
+        for msg in messages {
+            let role = match msg.role {
+                Role::System => "system",
+                Role::User => "user",
+                Role::Assistant => "assistant",
+            };
+            api_messages.push(OllamaChatMessage { role, content: &msg.content });
+        }
+
+        let url = format!("{}/api/chat", self.base_url);
+        let body = OllamaChatRequest {
+            model: &self.chat_model,
+            messages: api_messages,
+            stream: true,
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(AiError::Provider(format!("{status}: {text}")));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut full_text = String::new();
+        let mut buf: Vec<u8> = Vec::new();
+
+        while let Some(chunk) = stream.next().await {
+            let bytes = chunk.map_err(|e| AiError::Provider(e.to_string()))?;
+            buf.extend_from_slice(&bytes);
+
+            while let Some(newline_pos) = buf.iter().position(|&b| b == b'\n') {
+                let line_bytes: Vec<u8> = buf.drain(..=newline_pos).collect();
+                let line = std::str::from_utf8(&line_bytes).unwrap_or("").trim();
+                if line.is_empty() {
+                    continue;
+                }
+                if let Ok(chunk) = serde_json::from_str::<OllamaStreamChunk>(line) {
+                    if !chunk.message.content.is_empty() {
+                        full_text.push_str(&chunk.message.content);
+                        on_chunk(chunk.message.content);
+                    }
+                    if chunk.done {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(full_text)
     }
 
     fn model_name(&self) -> &str {

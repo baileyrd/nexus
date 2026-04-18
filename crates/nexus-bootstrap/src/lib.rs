@@ -491,6 +491,10 @@ fn register_core_plugins(
                     ),
                     ("status", nexus_ai::core_plugin::HANDLER_STATUS),
                     ("config", nexus_ai::core_plugin::HANDLER_CONFIG),
+                    (
+                        "stream_chat",
+                        nexus_ai::core_plugin::HANDLER_STREAM_CHAT,
+                    ),
                 ],
             ),
             forge_root,
