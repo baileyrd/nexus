@@ -1,11 +1,14 @@
 import { useMemo } from "react";
 import {
+  Folder,
   Link2,
   Minus,
   PanelRight,
+  Search,
   Settings,
   SlidersHorizontal,
   Square,
+  Star,
   X,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -13,6 +16,7 @@ import { useForgeStore } from "../../stores/forge";
 import { useOpenFileStore } from "../../stores/openFile";
 import { useLayoutStore } from "../../stores/layout";
 import { useSettingsStore } from "../../stores/settings";
+import { usePaletteStore } from "../../stores/palette";
 import { ModeToggle } from "../ModeToggle";
 
 /**
@@ -30,8 +34,9 @@ import { ModeToggle } from "../ModeToggle";
 export function ForgeTopBar() {
   const forgeName = useForgeStore((s) => s.info?.name);
   const activeFile = useOpenFileStore((s) => s.file);
-  const toggleRight = useLayoutStore((s) => s.toggleSidePanelCollapsed);
+  const toggleSide = useLayoutStore((s) => s.toggleSidePanelCollapsed);
   const openSettings = useSettingsStore((s) => s.openSettings);
+  const openPalette = usePaletteStore((s) => s.openPalette);
 
   const breadcrumb = useMemo(() => {
     if (!activeFile) {
@@ -58,8 +63,37 @@ export function ForgeTopBar() {
       role="banner"
       data-tauri-drag-region
     >
-      <div className="forge-brand" aria-label="Nexus Forge">
-        <span className="forge-mark" aria-hidden="true" />
+      <div
+        className="forge-topbar-left"
+        role="toolbar"
+        aria-label="Quick views"
+      >
+        <button
+          type="button"
+          className="forge-icon-btn"
+          title="Toggle file tree"
+          aria-label="Toggle file tree"
+          onClick={() => toggleSide("left")}
+        >
+          <Folder size={15} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="forge-icon-btn"
+          title="Search (⌘P)"
+          aria-label="Search"
+          onClick={() => openPalette()}
+        >
+          <Search size={15} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="forge-icon-btn"
+          title="Favorites"
+          aria-label="Favorites"
+        >
+          <Star size={15} aria-hidden="true" />
+        </button>
       </div>
       <div
         className="forge-breadcrumb"
@@ -97,7 +131,7 @@ export function ForgeTopBar() {
           className="forge-icon-btn"
           aria-label="Toggle inspector"
           title="Toggle inspector"
-          onClick={() => toggleRight("right")}
+          onClick={() => toggleSide("right")}
         >
           <PanelRight size={15} aria-hidden="true" />
         </button>

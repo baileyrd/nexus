@@ -4396,3 +4396,21 @@ select.plugin-settings-input {
 :root[data-theme-id="nexus-forge"] .tab-strip.empty {
   color: transparent;
 }
+
+/* ── Topbar left cluster (utility icons) ────────────────────────
+ * Folder / Search / Star replace the Forge brand mark so the
+ * topbar matches the target's quick-view toggles. The rail still
+ * owns the primary panel-swap UX — these three give a faster
+ * path to "toggle sidebar / open palette / favorites". */
+
+:root[data-theme-id="nexus-forge"] .forge-topbar {
+  grid-template-columns: auto 1fr auto;
+  gap: 0;
+}
+
+.forge-topbar-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+}
