@@ -39,6 +39,7 @@ export function PanelSelector({ panels, onSelect, label }: PanelSelectorProps) {
           onClick={() => onSelect(p.id)}
         >
           <Icon name={p.icon} size={16} />
+          <span className="panel-selector-label">{p.title}</span>
         </button>
       ))}
     </div>

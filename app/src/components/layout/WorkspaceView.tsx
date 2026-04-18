@@ -90,6 +90,11 @@ export function WorkspaceView() {
                 : undefined
             }
           >
+            {!layout.rightSidePanel.collapsed && (
+              <div className="right-side-panel-header">
+                <span className="right-side-panel-title">Inspector</span>
+              </div>
+            )}
             <div className="right-side-panel-toolbar">
               <SidePanelToggle
                 side="right"

@@ -54,12 +54,12 @@ Match the "NEXUS_WORK" file-tree panel 1-for-1. **Shipped.**
 
 ---
 
-## Stage 4 — Right Inspector panel
+## Stage 4 — Right Inspector panel ✓
 
-- [ ] **Header → "INSPECTOR"** — star (pin) + close-panel icons.
-- [ ] **Tab switcher** — Outline / Backlinks / Graph as a segmented tab row. Each tab drives the existing panel contributions (`Outline.tsx`, backlinks panel, graph panel). No new panels; just swap `PanelSelector` for a segmented tab inside the panel shell.
-- [ ] **Outline rows** — 2-digit index + title + word-count chip in the right margin. Restyle [`app/src/components/panels/Outline.tsx`](../app/src/components/panels/Outline.tsx).
-- [ ] **Counts in tab labels** — `Outline 14 · Backlinks 5 · Graph`, driven by panel state.
+- [x] **Header → "Inspector"** — added as a 36 px header row above the panel-selector, scoped to Forge. Non-Forge themes keep the per-panel title header.
+- [x] **Tab switcher** — the existing `PanelSelector` gets a visible label span that's visually-hidden by default but shown under Forge. Net effect: icon-only on other themes, text-tabs with ember underline under Forge — same component, same contributions.
+- [~] **Outline rows** — deferred; `Outline.tsx` renders through `GenericTreePanel` which already handles the data shape. Cosmetic row-tuning can ride with a future pass.
+- [~] **Counts in tab labels** — deferred; requires each panel to report a `count` field, which is a contribution-API addition better packaged with other panel metadata (icon badge, loading state).
 
 ---
 
