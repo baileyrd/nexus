@@ -28,6 +28,7 @@ notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 rayon = { workspace = true }
 libc = { workspace = true }
+fs4 = "0.9"
 petgraph = { workspace = true }
 chrono = { workspace = true }
 

@@ -5,9 +5,10 @@
 //! directory, and acquiring an exclusive advisory lock via `flock(2)`.
 
 use std::fs;
-use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
+
+use fs4::fs_std::FileExt;
 
 use crate::StorageError;
 
@@ -162,21 +163,18 @@ impl Forge {
             .write(true)
             .open(self.lock_path())?;
 
-        let fd = file.as_raw_fd();
-        // SAFETY: `fd` is valid for the lifetime of `file`, and `flock` is
-        // safe to call with a valid file descriptor and well-known flags.
-        let ret = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
-        if ret != 0 {
-            let errno = std::io::Error::last_os_error();
-            if errno.raw_os_error() == Some(libc::EWOULDBLOCK) {
-                return Err(StorageError::LockHeld(
+        // Cross-platform non-blocking exclusive lock — `flock(2)` on Unix,
+        // `LockFileEx` on Windows (via the `fs4` crate). Released on drop
+        // because the underlying `File` is closed.
+        match FileExt::try_lock_exclusive(&file) {
+            Ok(()) => Ok(ForgeLock { _file: file }),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                Err(StorageError::LockHeld(
                     "another process holds the forge lock".to_string(),
-                ));
+                ))
             }
-            return Err(StorageError::Io(errno));
+            Err(e) => Err(StorageError::Io(e)),
         }
-
-        Ok(ForgeLock { _file: file })
     }
 }
 

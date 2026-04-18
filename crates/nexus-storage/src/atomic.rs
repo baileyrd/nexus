@@ -7,7 +7,6 @@
 
 use std::fs;
 use std::io::Write as _;
-use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
@@ -93,16 +92,13 @@ fn try_write(
         reason: e.to_string(),
     })?;
 
-    // SAFETY: `fd` is valid for the lifetime of `file`. `fsync` is async-
-    // signal-safe and the only side effect is flushing kernel buffers for
-    // this file descriptor.
-    let ret = unsafe { libc::fsync(file.as_raw_fd()) };
-    if ret != 0 {
-        return Err(StorageError::WriteFailed {
-            path: target.display().to_string(),
-            reason: std::io::Error::last_os_error().to_string(),
-        });
-    }
+    // Cross-platform durable flush — `fsync(2)` on Unix, `FlushFileBuffers`
+    // on Windows. Replaces the prior unsafe `libc::fsync` call which wasn't
+    // portable to MSVC targets.
+    file.sync_all().map_err(|e| StorageError::WriteFailed {
+        path: target.display().to_string(),
+        reason: e.to_string(),
+    })?;
 
     fs::rename(tmp_path, target).map_err(|e| StorageError::WriteFailed {
         path: target.display().to_string(),
