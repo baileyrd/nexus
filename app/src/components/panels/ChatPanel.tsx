@@ -318,8 +318,14 @@ export function ChatPanel(): JSX.Element {
       sources?: RagSource[],
     ) => {
       if (sessionRef.current !== sessionId) return;
+      // Capture the pending-turn index before clearing the ref:
+      // reducer closures run at commit time, after this function's
+      // sync tail, so reading the ref from inside the updater would
+      // see the post-`= null` value.
+      const idx = assistantIndexRef.current;
+      assistantIndexRef.current = null;
+      sessionRef.current = null;
       setTurns((prev) => {
-        const idx = assistantIndexRef.current;
         if (idx === null) return prev;
         const next = prev.slice();
         const current = next[idx];
@@ -332,8 +338,6 @@ export function ChatPanel(): JSX.Element {
         };
         return next;
       });
-      assistantIndexRef.current = null;
-      sessionRef.current = null;
       setSending(false);
     };
 
@@ -491,13 +495,19 @@ export function ChatPanel(): JSX.Element {
         // pending turn as `pendingPlan`, and wait for the user to
         // click Approve / Cancel. No tool calls yet.
         const plan = await agentPlan(trimmed, archetype);
+        // Capture the pending-turn index before clearing the ref —
+        // reducer closures run during React's render phase, after the
+        // synchronous tail of this function, so reading the ref from
+        // inside the updater would see the post-`= null` value.
+        const pendingIdx = assistantIndexRef.current;
+        assistantIndexRef.current = null;
+        sessionRef.current = null;
         setTurns((prev) => {
-          const idx = assistantIndexRef.current;
-          if (idx === null) return prev;
+          if (pendingIdx === null) return prev;
           const next = prev.slice();
-          const current = next[idx];
+          const current = next[pendingIdx];
           if (!current) return prev;
-          next[idx] = {
+          next[pendingIdx] = {
             ...current,
             content: "",
             pending: false,
@@ -505,27 +515,25 @@ export function ChatPanel(): JSX.Element {
           };
           return next;
         });
-        assistantIndexRef.current = null;
-        sessionRef.current = null;
         setSending(false);
       } else if (useAgent) {
         // Agent mode without preview: dispatch to com.nexus.agent::run
         // which plans + executes tool calls in one pass.
         const observation = await agentRun(trimmed, archetype);
         const content = formatObservation(observation);
+        const pendingIdx = assistantIndexRef.current;
+        assistantIndexRef.current = null;
+        sessionRef.current = null;
         // Close out the pending turn manually since there's no
         // stream_done event on the agent path.
         setTurns((prev) => {
-          const idx = assistantIndexRef.current;
-          if (idx === null) return prev;
+          if (pendingIdx === null) return prev;
           const next = prev.slice();
-          const current = next[idx];
+          const current = next[pendingIdx];
           if (!current) return prev;
-          next[idx] = { ...current, content, pending: false };
+          next[pendingIdx] = { ...current, content, pending: false };
           return next;
         });
-        assistantIndexRef.current = null;
-        sessionRef.current = null;
         setSending(false);
       } else if (useRag) {
         // RAG mode: stream_ask injects retrieved chunks as the system
