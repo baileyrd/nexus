@@ -6,6 +6,14 @@
 
 ## Partially New Features (concept exists in PRDs but design is unspecified)
 
+### BL-005: In-Memory Knowledge Graph (petgraph) ✅ (2026-04-18)
+
+**Delivered:** [`crates/nexus-storage/src/graph.rs`](../../crates/nexus-storage/src/graph.rs) ships a live `petgraph::StableGraph<NodeData, EdgeData, Directed>` rebuilt from the SQLite `links` table at startup and updated incrementally on writes/deletes. Backlink + outgoing-link queries, BFS traversal, and unresolved-link detection are all wired; the storage plugin publishes `storage.graph.*` events to the kernel bus. `nexus graph` CLI + TUI backlinks panel exist. Closed by the petgraph-integration work that landed earlier in the cycle.
+
+### BL-006: Block-Level Content Chunking for RAG ✅ (2026-04-18)
+
+**Delivered:** [`crates/nexus-ai/src/chunker.rs`](../../crates/nexus-ai/src/chunker.rs) consumes the block-tree parser output, prepends the nearest heading as context, splits oversized blocks on sentence boundaries, and emits `ChunkEmbedding` with `file_path` / `block_id` / `content` / `heading_context`. 4 unit tests including `heading_context_prepended`.
+
 ### BL-007: CRDT-over-Git Transport
 
 - [x] **Frontend → plugin event delivery — bidirectional bus.** Host pushes lifecycle events (file opened, forge switched, theme changed) to plugin subscribers. Medium. Completes the event-bus story.

@@ -57,36 +57,6 @@ Define a concrete resolution cascade for wikilinks:
 
 Resolution must run bidirectionally: when a new file is created, check all unresolved links for matches; when a file is deleted, mark links pointing to it as unresolved. Integrates with reconcile pass.
 
-### BL-005: In-Memory Knowledge Graph (petgraph)
-
-**Source**: Growth Plan Phase 1, Tasks 1.1–1.6
-**Effort**: Large (5–7 days)
-**Crate**: `nexus-storage`
-**Related PRD**: PRD 10 (mentions knowledge graphs as future concept — no implementation design)
-
-Build a live `petgraph::StableGraph<NodeData, EdgeData, Directed>` that:
-- Rebuilds from SQLite links table on startup
-- Updates incrementally on file write/delete
-- Supports backlink queries, outgoing link queries, unresolved link detection
-- Provides BFS neighbor traversal up to N hops
-- Tracks "phantom" nodes (link targets that don't exist as files)
-- Publishes `GraphRebuilt` and `BacklinksChanged` events via the kernel EventBus
-
-Includes CLI commands (`nexus graph status`, `nexus content backlinks <path>`) and a TUI backlinks panel.
-
-### BL-006: Block-Level Content Chunking for RAG
-
-**Source**: Growth Plan Phase 3, Task 3.4
-**Effort**: Small (0.5 day)
-**Crate**: `nexus-ai`
-**Related PRD**: PRD 12 (one line: "split into chunks respecting provider limits" — no design)
-
-Use the parser's existing block-level output as natural chunk boundaries:
-- Each parsed block (heading, paragraph, code block) becomes one chunk
-- Oversized blocks (>2000 chars) split on sentence boundaries
-- Each chunk includes the nearest parent heading as context prefix: `"## Section Name\n\n{block content}"`
-- Chunk struct carries `file_path`, `block_id`, `block_type`, `content`, `heading_context`
-
 ### BL-007: CRDT-over-Git Transport
 
 **Source**: PRD 11, Section 4.4 (Level 3)
