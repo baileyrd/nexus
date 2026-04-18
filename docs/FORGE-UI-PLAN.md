@@ -46,11 +46,11 @@ Match the "NEXUS_WORK" file-tree panel 1-for-1. **Shipped.**
 
 ---
 
-## Stage 3 — Center: tabstrip + welcome doc
+## Stage 3 — Center: tabstrip + welcome doc ✓
 
-- [ ] **[app/src/components/layout/TabStrip.tsx](../app/src/components/layout/TabStrip.tsx)** — restyle: 34 px bar, ember top-bar on active tab, dirty dot, × on hover, overflow-x scroll, trailing `+` new-tab button.
-- [ ] **Welcome doc** — new content type `nexus.welcome` registered in [`app/src/contributions/builtins.ts`](../app/src/contributions/builtins.ts). Renders a serif "Welcome to Forge" document (matches the HTML prototype's hero card) when no file is open. Replaces today's `Empty pane / id · pane-obsidian-main` placeholder.
-- [ ] **Editor surface styling** — scoped to `[data-theme-id="nexus-forge"]`: serif body, tables with rounded borders, wikilinks ember + dashed underline, `<blockquote>` with ember left-rail, `<code>` chips, callout blocks.
+- [x] **[app/src/components/layout/TabStrip.tsx](../app/src/components/layout/TabStrip.tsx)** — TSX left as-is; Forge-scoped CSS gives it a 34 px bar, ember top-bar on the active tab, dirty dot, × on hover.
+- [x] **Welcome doc** — `WelcomeSurface` component in `PaneView.tsx` replaces the `Empty pane / id ·` placeholder. Serif title + metaline chips + blockquote + sectioned ul, all classed as `.doc` so open files inherit the same rules.
+- [x] **Editor surface styling** — serif body, ember-accent blockquote / wikilinks, code chips, uppercase section headings. All scoped to `[data-theme-id="nexus-forge"]` so other themes are unaffected.
 
 ---
 
