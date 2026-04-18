@@ -37,6 +37,19 @@ const FS_CHANGED_EVENT: &str = "forge:fs-changed";
 /// button in the shell.
 const THEME_CHANGED_EVENT: &str = "theme:changed";
 
+/// Tauri event emitted when the AI plugin begins streaming a chat
+/// completion. Payload: `{ session_id }`. Forwarded from
+/// `com.nexus.ai.stream_start` on the kernel bus.
+const AI_STREAM_START_EVENT: &str = "ai:stream_start";
+/// Tauri event emitted for each chunk in a streaming chat completion.
+/// Payload: `{ session_id, chunk, index }`. Forwarded from
+/// `com.nexus.ai.stream_chunk`.
+const AI_STREAM_CHUNK_EVENT: &str = "ai:stream_chunk";
+/// Tauri event emitted when a streaming chat completion ends. Payload:
+/// `{ session_id, text }`. Forwarded from `com.nexus.ai.stream_done`.
+const AI_STREAM_DONE_EVENT: &str = "ai:stream_done";
+
+pub mod ai;
 pub mod commands;
 pub mod database;
 pub mod editor;
@@ -90,6 +103,11 @@ pub fn run() {
                             // frontend can react to mutations driven by any
                             // plugin, not just user clicks in the shell.
                             start_theme_event_forwarder(handle.clone(), &runtime);
+                            // Same for AI streaming events — three
+                            // topics under `com.nexus.ai.stream_*`
+                            // are forwarded to the frontend so the
+                            // Chat panel can render tokens live.
+                            start_ai_event_forwarder(handle.clone(), &runtime);
                             // Make core plugins reachable from community WASM
                             // plugins: install the bootstrap loader as the
                             // fallback target for the composite dispatcher
@@ -181,6 +199,8 @@ pub fn run() {
             editor::editor_redo,
             editor::editor_list_open,
             editor::editor_sync_content,
+            ai::ai_config,
+            ai::ai_stream_chat,
             database::db_apply_view,
             terminal::term_create_session,
             terminal::term_close_session,
@@ -282,4 +302,54 @@ fn start_theme_event_forwarder(
             }
         })
         .expect("spawn theme event forwarder");
+}
+
+/// Spawn a background thread that subscribes to `com.nexus.ai.stream_*`
+/// events on the kernel bus and forwards each as a typed Tauri event
+/// so the Chat panel can render streaming tokens live.
+///
+/// Three topics are mapped:
+/// - `com.nexus.ai.stream_start` → `ai:stream_start`
+/// - `com.nexus.ai.stream_chunk` → `ai:stream_chunk`
+/// - `com.nexus.ai.stream_done`  → `ai:stream_done`
+///
+/// Payload is whatever the AI plugin published (a `serde_json::Value`
+/// carrying at minimum a `session_id`).
+fn start_ai_event_forwarder(
+    handle: tauri::AppHandle,
+    runtime: &nexus_bootstrap::Runtime,
+) {
+    let bus = runtime.kernel.event_bus();
+    let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+        "com.nexus.ai.stream_".to_string(),
+    ));
+
+    std::thread::Builder::new()
+        .name("nexus-ai-event-forwarder".to_string())
+        .spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(50));
+            loop {
+                match sub.try_recv() {
+                    Ok(Some(ev)) => {
+                        if let NexusEvent::Custom { type_id, payload, .. } = &ev.event {
+                            let target = match type_id.as_str() {
+                                "com.nexus.ai.stream_start" => AI_STREAM_START_EVENT,
+                                "com.nexus.ai.stream_chunk" => AI_STREAM_CHUNK_EVENT,
+                                "com.nexus.ai.stream_done" => AI_STREAM_DONE_EVENT,
+                                _ => continue,
+                            };
+                            if let Err(e) = handle.emit(target, payload.clone()) {
+                                tracing::warn!(%e, "ai event forwarder: emit failed");
+                            }
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(RecvError::Lagged(n)) => {
+                        tracing::warn!(n, "ai event forwarder: lagged, {n} events lost");
+                    }
+                    Err(RecvError::Closed) => return,
+                }
+            }
+        })
+        .expect("spawn ai event forwarder");
 }

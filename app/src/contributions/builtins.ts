@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { BaseViewDemo } from "../components/panels/BaseViewDemo";
+import { ChatPanel } from "../components/panels/ChatPanel";
 import { FileTree } from "../components/panels/FileTree";
 import { FileViewer } from "../components/panels/FileViewer";
 import { Outline } from "../components/panels/Outline";
@@ -63,6 +64,12 @@ export function registerBuiltins(): void {
   // type that doesn't need the incoming Panel prop.
   const BaseViewDemoSurface = () => createElement(BaseViewDemo);
   contributions.registerContentType("bases-demo", BaseViewDemoSurface);
+
+  // PRD-12 §6 AI chat surface — thin wrapper, same as Terminal/Bases.
+  // The real streaming + provider dispatch live in the `com.nexus.ai`
+  // core plugin; the shell just hosts the content-type contribution.
+  const ChatSurface = () => createElement(ChatPanel);
+  contributions.registerContentType("com.nexus.ai.chat", ChatSurface);
 
   contributions.registerSettingsTab({
     id: "general",
@@ -151,6 +158,20 @@ export function registerBuiltins(): void {
     category: "Workspace",
     icon: "terminal",
     keybinding: "Mod+Shift+T",
+  });
+
+  contributions.registerCommand("workspace.open-chat", () => {
+    useLayoutStore
+      .getState()
+      .openContentTab("com.nexus.ai.chat", "AI Chat", "message-square");
+  });
+  contributions.registerPaletteCommand({
+    id: "workspace.open-chat",
+    commandId: "workspace.open-chat",
+    title: "AI: Open chat",
+    category: "AI",
+    icon: "message-square",
+    keybinding: "Mod+Shift+A",
   });
 
   contributions.registerCommand("workspace.open-bases-demo", () => {
