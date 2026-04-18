@@ -36,7 +36,7 @@ export default function App() {
   // "active" selection immediately. The user can switch freely from there.
   useEffect(() => {
     if (!currentThemeId) {
-      applyTheme("nexus-light");
+      applyTheme("nexus-forge");
     }
   }, [applyTheme, currentThemeId]);
 
@@ -160,10 +160,18 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
-        <div className="app-title">
-          <h1>Nexus</h1>
-          <p className="tagline">theming preview · PRD 07 scaffold</p>
+      <header className="app-header forge-topbar">
+        <div className="forge-brand">
+          <span className="forge-mark" aria-hidden="true" />
+          <span className="forge-brand-name">Nexus</span>
+          <span className="forge-brand-sep">·</span>
+          <span className="forge-brand-sub">Forge</span>
+        </div>
+        <div className="forge-breadcrumb" aria-label="Active forge">
+          <span className="forge-sync-pip" aria-hidden="true" />
+          <b>{useForgeStore.getState().info?.name ?? "Workspace"}</b>
+          <span className="forge-breadcrumb-sep">/</span>
+          <span>editor</span>
         </div>
         <ModeToggle />
       </header>

@@ -88,6 +88,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     try {
       const applied = await ipcApply(id);
       writeVariables(applied.variables);
+      document.documentElement.dataset.themeId = applied.id;
       set({
         currentThemeId: applied.id,
         variables: applied.variables,

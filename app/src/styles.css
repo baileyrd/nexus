@@ -3037,3 +3037,110 @@ select.plugin-settings-input {
   overflow: auto;
   padding: 12px;
 }
+
+/* ── Nexus Forge theme polish ───────────────────────────────────
+ * Ember chrome — brand, breadcrumb, topbar. Scoped to
+ * [data-theme-id="nexus-forge"] so other themes stay untouched.
+ * Variables come from crates/nexus-theme/themes/nexus-forge/NEXUS.toml
+ * (registered as a builtin theme contribution).
+ * Fonts are loaded via <link> in app/index.html. */
+
+.forge-topbar {
+  display: grid;
+  grid-template-columns: 260px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: linear-gradient(
+    to bottom,
+    var(--nx-bg-secondary, #222329),
+    var(--nx-bg-primary, #1B1C22)
+  );
+  border-bottom: 1px solid var(--nx-bg-tertiary, #2C2E36);
+}
+
+.forge-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--nx-text-primary, #EFEBE4);
+}
+
+.forge-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background:
+    radial-gradient(
+      circle at 30% 30%,
+      #F4C878,
+      var(--nx-accent-ember, #E6A24A) 60%,
+      #8A4E1E
+    );
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.25),
+    0 0 12px var(--nx-accent-ember-soft, rgba(230, 162, 74, 0.45));
+}
+
+.forge-brand-name { color: var(--nx-text-primary, #EFEBE4); }
+.forge-brand-sep  { color: var(--nx-text-muted, #7F7A70); font-weight: 400; }
+.forge-brand-sub  { color: var(--nx-text-tertiary, #ACA69A); font-weight: 500; }
+
+.forge-breadcrumb {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 60%;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: var(--nx-text-tertiary, #ACA69A);
+  background: var(--nx-bg-secondary, #222329);
+  border: 1px solid var(--nx-bg-tertiary, #2C2E36);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forge-breadcrumb b {
+  color: var(--nx-text-primary, #EFEBE4);
+  font-weight: 500;
+}
+
+.forge-breadcrumb-sep {
+  color: var(--nx-text-muted, #7F7A70);
+}
+
+.forge-sync-pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--nx-status-ok, #7FCFA3);
+  box-shadow: 0 0 0 2px rgba(127, 207, 163, 0.15);
+}
+
+/* When the Forge theme is active, route the body (editor surfaces)
+ * through the serif font and tighten the editor line-height so
+ * long-form docs read more like a paper note (PRD-07 §8). */
+:root[data-theme-id="nexus-forge"] {
+  --nx-type-serif: 'IBM Plex Serif', Georgia, serif;
+  --nx-type-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --nx-type-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--nx-type-sans);
+}
+
+:root[data-theme-id="nexus-forge"] .editor-surface,
+:root[data-theme-id="nexus-forge"] .cm-content,
+:root[data-theme-id="nexus-forge"] .doc {
+  font-family: var(--nx-type-serif);
+  line-height: 1.68;
+}
+
+:root[data-theme-id="nexus-forge"] code,
+:root[data-theme-id="nexus-forge"] .cm-content .cm-line code {
+  font-family: var(--nx-type-mono);
+}

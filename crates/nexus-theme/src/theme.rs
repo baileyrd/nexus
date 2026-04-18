@@ -19,11 +19,17 @@ pub const BUILTIN_LIGHT_TOML: &str = include_str!("../themes/nexus-light/NEXUS.t
 /// Bundled dark theme manifest — see `themes/nexus-dark/NEXUS.toml`.
 pub const BUILTIN_DARK_TOML: &str = include_str!("../themes/nexus-dark/NEXUS.toml");
 
+/// Bundled Forge (ember) theme manifest — see `themes/nexus-forge/NEXUS.toml`.
+pub const BUILTIN_FORGE_TOML: &str = include_str!("../themes/nexus-forge/NEXUS.toml");
+
 /// Identifier for the bundled light theme.
 pub const BUILTIN_LIGHT_ID: &str = "nexus-light";
 
 /// Identifier for the bundled dark theme.
 pub const BUILTIN_DARK_ID: &str = "nexus-dark";
+
+/// Identifier for the bundled Forge ember theme.
+pub const BUILTIN_FORGE_ID: &str = "nexus-forge";
 
 /// A loaded theme package — identifier + parsed manifest + source path if any.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +135,7 @@ impl Theme {
         vec![
             Self::builtin(BUILTIN_LIGHT_ID, BUILTIN_LIGHT_TOML),
             Self::builtin(BUILTIN_DARK_ID, BUILTIN_DARK_TOML),
+            Self::builtin(BUILTIN_FORGE_ID, BUILTIN_FORGE_TOML),
         ]
     }
 
@@ -186,12 +193,15 @@ mod tests {
     #[test]
     fn builtins_parse() {
         let themes = Theme::builtins();
-        assert_eq!(themes.len(), 2);
+        assert_eq!(themes.len(), 3);
         assert_eq!(themes[0].id, "nexus-light");
         assert_eq!(themes[1].id, "nexus-dark");
+        assert_eq!(themes[2].id, "nexus-forge");
         assert!(themes[0].builtin);
+        assert!(themes[2].builtin);
         assert_eq!(themes[0].manifest.theme.category, ThemeCategory::Light);
         assert_eq!(themes[1].manifest.theme.category, ThemeCategory::Dark);
+        assert_eq!(themes[2].manifest.theme.category, ThemeCategory::Dark);
         assert!(
             themes[0]
                 .manifest
