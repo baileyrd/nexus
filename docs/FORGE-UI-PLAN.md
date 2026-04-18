@@ -35,14 +35,14 @@ Collapse the 80 px header stack into a single 36 px Forge topbar. **Shipped.**
 
 ---
 
-## Stage 2 — Left side panel polish
+## Stage 2 — Left side panel polish ✓ (`<pending-hash>`)
 
-Match the "NEXUS_WORK" file-tree panel 1-for-1.
+Match the "NEXUS_WORK" file-tree panel 1-for-1. **Shipped.**
 
-- [ ] **Panel header** — 36 px, 11 px letter-spaced uppercase label, tiny icon buttons (`+` new · folder · collapse). Style via `.panel-head` scoped to Forge.
-- [ ] **Filter pill** — 24 px inline input `Filter files...` with a trailing `⌘P` kbd chip, matching `.filter` in the design HTML.
-- [ ] **Tree rows** — 26 px, caret + icon + name + optional count / activity dot. Already have `FileTree.tsx`; restyle, don't rewrite.
-- [ ] **Footer** — avatar chip + forge name (`LW  lap-working`) + help + settings icons. Reuse `SidePanelFooter.tsx`.
+- [x] **Panel header** — 36 px, 11 px letter-spaced uppercase label; panel-toolbar buttons restyled to 22×22 frameless icons.
+- [x] **Filter pill** — 24 px button that opens the command palette (the real Nexus file-finder), with trailing `⌘P` kbd chip matching the design.
+- [x] **Tree rows** — 26 px, ember active-bar for the open file, ember-soft background highlight.
+- [x] **Footer** — forge-selector restyled as an avatar chip (gradient circle + name); compact icon actions on the right.
 
 ---
 

@@ -21,6 +21,7 @@ import { useForgeStore } from "../../stores/forge";
 import { useOpenFileStore } from "../../stores/openFile";
 import { useOpenFilesStore } from "../../stores/openFiles";
 import { useLayoutStore } from "../../stores/layout";
+import { usePaletteStore } from "../../stores/palette";
 
 /**
  * File-tree renderer for panels with `contentType = "files"`. Lists the
@@ -39,6 +40,27 @@ export function FileTree() {
   }
 
   return <FileTreeForForge key={forge.root} />;
+}
+
+/**
+ * Filter pill for the Forge file panel. The palette is Nexus's real
+ * file-finder (fuzzy, cross-forge, command-aware), so this button
+ * opens the palette rather than maintaining a separate local filter —
+ * keeps the UI aligned with the `⌘P` hint in the design.
+ */
+function FileTreeFilter() {
+  const openPalette = usePaletteStore((s) => s.openPalette);
+  return (
+    <button
+      type="button"
+      className="file-tree-filter"
+      onClick={() => openPalette()}
+      aria-label="Filter files (opens command palette)"
+    >
+      <span className="file-tree-filter-label">Filter files…</span>
+      <span className="file-tree-filter-kbd" aria-hidden="true">⌘P</span>
+    </button>
+  );
 }
 
 type RequestMenuFn = (
@@ -101,6 +123,7 @@ function FileTreeForForge() {
   return (
     <MenuContext.Provider value={requestMenu}>
       <div className="file-tree-root" onContextMenu={onRootContextMenu}>
+        <FileTreeFilter />
         {error && (
           <div className="file-tree-error">Failed to list forge: {error}</div>
         )}

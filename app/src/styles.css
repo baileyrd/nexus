@@ -3233,3 +3233,218 @@ select.plugin-settings-input {
   padding-left: 8px;
   border-left: 1px solid var(--nx-bg-tertiary, #2C2E36);
 }
+
+/* ── Stage 2: Forge left-panel polish ───────────────────────────
+ * Compact panel header, ⌘P filter pill, 26px tree rows with ember
+ * active bar, compact side-panel footer with avatar chip.
+ * All scoped to [data-theme-id="nexus-forge"]. */
+
+:root[data-theme-id="nexus-forge"] .side-panel-preview,
+:root[data-theme-id="nexus-forge"] .right-side-panel {
+  background: var(--nx-bg-primary, #1B1C22);
+  border-color: var(--nx-bg-tertiary, #2C2E36);
+}
+
+:root[data-theme-id="nexus-forge"] .panel-header {
+  height: 36px;
+  padding: 0 10px 0 14px;
+  border-bottom: 1px solid var(--nx-bg-tertiary, #2C2E36);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+:root[data-theme-id="nexus-forge"] .panel-title {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nx-text-tertiary, #ACA69A);
+  font-weight: 600;
+}
+
+:root[data-theme-id="nexus-forge"] .panel-toolbar button,
+:root[data-theme-id="nexus-forge"] .panel-toolbar .toolbar-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-tertiary, #ACA69A);
+  border-radius: 4px;
+}
+
+:root[data-theme-id="nexus-forge"] .panel-toolbar button:hover {
+  background: var(--nx-bg-tertiary, #2C2E36);
+  color: var(--nx-text-primary, #EFEBE4);
+}
+
+/* Filter pill — matches the .filter styling in the design HTML */
+.file-tree-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 8px;
+  padding: 0 8px;
+  height: 24px;
+  width: calc(100% - 16px);
+  background: var(--nx-bg-secondary, #222329);
+  border: 1px solid var(--nx-bg-tertiary, #2C2E36);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--nx-text-tertiary, #ACA69A);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+}
+
+.file-tree-filter:hover {
+  color: var(--nx-text-primary, #EFEBE4);
+  border-color: var(--nx-text-muted, #7F7A70);
+}
+
+.file-tree-filter-label { flex: 1; }
+
+.file-tree-filter-kbd {
+  font-family: var(--nx-type-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  color: var(--nx-text-muted, #7F7A70);
+  padding: 1px 5px;
+  border: 1px solid var(--nx-bg-tertiary, #2C2E36);
+  border-radius: 4px;
+  background: var(--nx-bg-primary, #1B1C22);
+}
+
+/* File-tree rows — 26px tall with ember active bar */
+:root[data-theme-id="nexus-forge"] .file-tree {
+  padding: 4px 6px 12px;
+  font-size: 12.5px;
+  list-style: none;
+  margin: 0;
+}
+
+:root[data-theme-id="nexus-forge"] .file-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+:root[data-theme-id="nexus-forge"] .file-tree-file,
+:root[data-theme-id="nexus-forge"] .file-tree-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 5px;
+  color: var(--nx-text-tertiary, #ACA69A);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  width: 100%;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+}
+
+:root[data-theme-id="nexus-forge"] .file-tree-file:hover,
+:root[data-theme-id="nexus-forge"] .file-tree-toggle:hover {
+  background: var(--nx-bg-tertiary, #2C2E36);
+  color: var(--nx-text-primary, #EFEBE4);
+}
+
+:root[data-theme-id="nexus-forge"] .file-tree-file.is-active {
+  background: var(--nx-interactive-active, rgba(230, 162, 74, 0.24));
+  color: var(--nx-text-primary, #EFEBE4);
+}
+
+:root[data-theme-id="nexus-forge"] .file-tree-file.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--nx-accent-ember, #E6A24A);
+  border-radius: 2px;
+}
+
+:root[data-theme-id="nexus-forge"] .file-tree-icon {
+  color: var(--nx-text-muted, #7F7A70);
+  flex: 0 0 auto;
+}
+
+:root[data-theme-id="nexus-forge"] .file-tree-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root[data-theme-id="nexus-forge"] .file-tree-twisty {
+  width: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--nx-text-muted, #7F7A70);
+  flex: 0 0 14px;
+}
+
+/* Side-panel footer — avatar chip + actions */
+:root[data-theme-id="nexus-forge"] .side-panel-footer {
+  border-top: 1px solid var(--nx-bg-tertiary, #2C2E36);
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--nx-bg-primary, #1B1C22);
+  color: var(--nx-text-muted, #7F7A70);
+  font-size: 11px;
+}
+
+:root[data-theme-id="nexus-forge"] .forge-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--nx-text-tertiary, #ACA69A);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+:root[data-theme-id="nexus-forge"] .forge-selector::before {
+  content: '';
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--nx-accent-ember, #E6A24A), var(--nx-accent-cool, #7FB4E6));
+  flex: 0 0 16px;
+}
+
+:root[data-theme-id="nexus-forge"] .forge-selector:hover {
+  background: var(--nx-bg-tertiary, #2C2E36);
+  color: var(--nx-text-primary, #EFEBE4);
+}
+
+:root[data-theme-id="nexus-forge"] .side-panel-footer-action {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-muted, #7F7A70);
+  border-radius: 4px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+:root[data-theme-id="nexus-forge"] .side-panel-footer-action:hover {
+  background: var(--nx-bg-tertiary, #2C2E36);
+  color: var(--nx-text-primary, #EFEBE4);
+}
