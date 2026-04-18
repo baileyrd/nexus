@@ -35,6 +35,7 @@ use serde::Deserialize;
 
 use crate::{
     Agent, AgentError, ChatDriver, LlmAgent, Plan, PlanExecutor, ToolCall, ToolDispatcher,
+    DEFAULT_SYSTEM_PROMPT,
 };
 
 /// Reverse-DNS identifier.
@@ -131,7 +132,8 @@ async fn handle_plan(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let a: GoalArgs = parse(args, "plan")?;
-    let agent = build_llm_agent(Arc::clone(&ctx));
+    let prompt = system_prompt_with_skills(&ctx, &a.goal).await;
+    let agent = build_llm_agent(Arc::clone(&ctx)).with_system_prompt(prompt);
     let plan = agent.plan(&a.goal).await.map_err(agent_err)?;
     to_value(&plan, "plan")
 }
@@ -141,7 +143,8 @@ async fn handle_run(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let a: GoalArgs = parse(args, "run")?;
-    let agent = build_llm_agent(Arc::clone(&ctx));
+    let prompt = system_prompt_with_skills(&ctx, &a.goal).await;
+    let agent = build_llm_agent(Arc::clone(&ctx)).with_system_prompt(prompt);
     let plan = agent.plan(&a.goal).await.map_err(agent_err)?;
     run_plan_internal(ctx, plan).await
 }
@@ -164,6 +167,59 @@ async fn run_plan_internal(
     });
     let observation = executor.run(&plan).await.map_err(agent_err)?;
     to_value(&observation, "run")
+}
+
+// ── Skill-aware system prompt assembly ─────────────────────────────────────
+
+/// Build a planner system prompt that layers in any skill whose
+/// triggers match the goal text. Calls `com.nexus.skills::triggered_by`
+/// best-effort — failures (plugin not registered, disk errors) fall
+/// back silently to [`DEFAULT_SYSTEM_PROMPT`] so the agent still
+/// works in forges without a skills directory.
+async fn system_prompt_with_skills(
+    ctx: &KernelPluginContext,
+    goal: &str,
+) -> String {
+    let response = ctx
+        .ipc_call(
+            "com.nexus.skills",
+            "triggered_by",
+            serde_json::json!({ "text": goal }),
+            Duration::from_secs(5),
+        )
+        .await;
+    let Ok(value) = response else {
+        return DEFAULT_SYSTEM_PROMPT.to_string();
+    };
+    let skills: Vec<serde_json::Value> = match serde_json::from_value(value) {
+        Ok(v) => v,
+        Err(_) => return DEFAULT_SYSTEM_PROMPT.to_string(),
+    };
+    if skills.is_empty() {
+        return DEFAULT_SYSTEM_PROMPT.to_string();
+    }
+
+    let mut prompt = String::from(DEFAULT_SYSTEM_PROMPT);
+    prompt.push_str(
+        "\n\nThe following skills match this goal — apply their guidance \
+         when producing the plan. Each skill is delimited by a heading.\n",
+    );
+    for skill in &skills {
+        let name = skill
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("(unnamed)");
+        let id = skill
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("?");
+        let body = skill
+            .get("body")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        prompt.push_str(&format!("\n## Skill: {name} [{id}]\n{body}\n"));
+    }
+    prompt
 }
 
 // ── Local adapters mirroring nexus-bootstrap::agent ────────────────────────
