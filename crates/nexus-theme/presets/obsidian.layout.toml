@@ -19,38 +19,53 @@ collapsed = false
 # Plugin / view shortcuts. Resolved through the UI contribution registry —
 # core ships these stubs; plugins can append more ids.
 
+# Activity rail — VS Code-style primary side-panel swapper.
+# Each item targets a leftSidePanel.panels entry by id; clicking the
+# icon activates that panel exclusively (and uncollapses the panel if
+# hidden). Clicking the active panel's icon collapses the side panel.
+# Panel-swap items come first, then utility commands at the bottom.
+
 [[ribbon]]
-id = "graph-view"
+id = "rail.explorer"
+icon = "folder"
+tooltip = "Files"
+action = { kind = "togglePanel", panelId = "explorer" }
+
+[[ribbon]]
+id = "rail.search"
+icon = "search"
+tooltip = "Search"
+action = { kind = "togglePanel", panelId = "search" }
+
+[[ribbon]]
+id = "rail.bookmarks"
+icon = "bookmark"
+tooltip = "Bookmarks"
+action = { kind = "togglePanel", panelId = "bookmarks" }
+
+[[ribbon]]
+id = "rail.tags"
+icon = "tag"
+tooltip = "Tags"
+action = { kind = "togglePanel", panelId = "tags" }
+
+[[ribbon]]
+id = "rail.graph"
 icon = "graph"
-tooltip = "Graph view"
-action = { kind = "openView", viewId = "graph" }
+tooltip = "Graph"
+action = { kind = "togglePanel", panelId = "graph" }
+
+# Utility commands that are not panel swaps — kept in the rail's
+# bottom cluster in the original Forge design.
 
 [[ribbon]]
-id = "canvas"
-icon = "layout-grid"
-tooltip = "New canvas"
-action = { kind = "invokeCommand", command = "canvas.new" }
-
-[[ribbon]]
-id = "calendar"
-icon = "calendar"
-tooltip = "Daily notes calendar"
-action = { kind = "openView", viewId = "calendar" }
-
-[[ribbon]]
-id = "all-files"
-icon = "files"
-tooltip = "All files"
-action = { kind = "openView", viewId = "all-files" }
-
-[[ribbon]]
-id = "terminal"
+id = "rail.terminal"
 icon = "terminal"
 tooltip = "Toggle terminal"
 action = { kind = "invokeCommand", command = "workspace.toggle-terminal" }
 
 [[ribbon]]
-id = "tasks"
+id = "rail.tasks"
 icon = "list-checks"
 tooltip = "Tasks"
 action = { kind = "openView", viewId = "tasks" }

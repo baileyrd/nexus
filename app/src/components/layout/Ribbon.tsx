@@ -40,11 +40,35 @@ function handleRibbonClick(item: RibbonItem) {
   switch (item.action.kind) {
     case "togglePanel": {
       const { panelId } = item.action;
-      const { layout, togglePanelVisibility } = useLayoutStore.getState();
+      const {
+        layout,
+        activatePanel,
+        togglePanelVisibility,
+        toggleSidePanelCollapsed,
+      } = useLayoutStore.getState();
       if (!layout) return;
       const inLeft = layout.leftSidePanel.panels.some((p) => p.id === panelId);
       const side = inLeft ? "left" : "right";
-      togglePanelVisibility(side, panelId);
+      const sidePanel = inLeft ? layout.leftSidePanel : layout.rightSidePanel;
+      const activePanel = sidePanel.panels.find((p) => p.visible);
+      // Rail single-select semantics: clicking the already-active panel's
+      // rail icon collapses the side panel; clicking any other makes it
+      // the sole visible panel and uncollapses. Matches VS Code's
+      // activity-bar behavior.
+      if (activePanel?.id === panelId && !sidePanel.collapsed) {
+        toggleSidePanelCollapsed(side);
+        return;
+      }
+      if (sidePanel.collapsed) toggleSidePanelCollapsed(side);
+      if (activePanel?.id !== panelId) {
+        activatePanel(side, panelId);
+        // `activatePanel` only swaps the active panel among already-visible
+        // ones; if the target was hidden (common when togglePanel is used
+        // from the rail), also flip its visibility on.
+        if (!sidePanel.panels.find((p) => p.id === panelId)?.visible) {
+          togglePanelVisibility(side, panelId);
+        }
+      }
       return;
     }
     case "invokeCommand":

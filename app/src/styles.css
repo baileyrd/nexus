@@ -4301,3 +4301,16 @@ select.plugin-settings-input {
 :root[data-theme-id="nexus-forge"] .workspace-frame {
   height: auto;
 }
+
+/* ── VS Code-style rail vs. Obsidian-style tabs ─────────────────
+ * The activity rail already swaps between left panels, so the
+ * per-panel icon selector inside the left side-panel is a
+ * second row of the same control. The target design (and VS Code)
+ * removes it; the panel body starts with its own header.
+ *
+ * Keep it for non-Forge themes — they were authored against the
+ * Obsidian-style double selector. */
+
+:root[data-theme-id="nexus-forge"] .side-panel-preview > .panel-selector {
+  display: none;
+}
