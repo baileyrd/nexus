@@ -77,11 +77,25 @@ Match the "NEXUS_WORK" file-tree panel 1-for-1. **Shipped.**
 
 ---
 
-## Stage 6 — Verification
+## Stage 6 — Verification ✓
 
-- [ ] Vitest: `cd app && npm test` — existing panel tests must still pass.
-- [ ] Cargo: `cargo test -p nexus-theme --lib` + `cargo test -p nexus-storage --lib`.
-- [ ] Visual diff: launch Tauri dev (`npm run tauri:dev`), take a screenshot, compare side-by-side to `.design-bundle/project/Nexus Forge.html` rendered. Update this plan's checkboxes.
+- [x] Vitest: `cd app && npm test` — 18 tests pass.
+- [x] Cargo: `cargo test -p nexus-theme --lib` — 114 pass; `cargo test -p nexus-storage --lib` — 261 pass; `cargo test -p nexus-bootstrap --test theme_ipc` — 4 pass.
+- [x] Vite build clean, no CSS warnings.
+- [~] Visual diff: pending user relaunch of `npm run tauri:dev` on Windows to compare against `.design-bundle/project/Nexus Forge.html`. Remaining gaps are the three deferred items in Stage 5 (left/right status clustering, live status data, switch-layout palette commands).
+
+## Shipped commits
+
+| Stage | Commit   | Summary |
+| ----- | -------- | ------- |
+| 0a    | `bd788b3` | Forge theme registered as a builtin; default first-mount theme. |
+| 0b    | `bac47fc` | Cross-platform `nexus-storage` (unblocks the Windows Tauri build). |
+| plan  | `1afe8ab` | This document. |
+| 1     | `d78eb7d` | 36 px Forge topbar + chrome cleanup (MenuBar / workspace heading / preset picker row retired). |
+| 2     | `5fd586b` | Left panel polish — compact header, ⌘P filter pill, 26 px tree rows, avatar-chip footer. |
+| 3     | `2392abc` | Tabstrip + Welcome doc + `.doc` typography (IBM Plex Serif body, ember wikilinks/blockquote). |
+| 4     | `a5cc7f3` | Right Inspector panel — "Inspector" header + text-tab selector with ember underline. |
+| 5     | `89bf52d` | 24 px Forge status bar (structural clustering + live data deferred). |
 
 ---
 
