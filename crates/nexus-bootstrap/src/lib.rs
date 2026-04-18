@@ -166,6 +166,24 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
         .wire_context("com.nexus.ai", Arc::new(ai_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire AI plugin context: {e}"))?;
 
+    // Agent plugin needs its own context for two reasons: driving
+    // `com.nexus.ai::stream_chat` for planning, and dispatching every
+    // `ToolCall` the resulting plan emits to whatever target plugin
+    // the agent picked.
+    let agent_ctx = KernelPluginContext::new(
+        "com.nexus.agent",
+        env!("CARGO_PKG_VERSION"),
+        CapabilitySet::from_iter(Capability::ALL.iter().copied()),
+        Arc::clone(&kv_store),
+        Arc::clone(&event_bus),
+        &forge_root,
+        Some(Arc::clone(&dispatcher)),
+    )
+    .context("failed to build kernel plugin context for com.nexus.agent")?;
+    shared
+        .wire_context("com.nexus.agent", Arc::new(agent_ctx))
+        .map_err(|e| anyhow::anyhow!("failed to wire agent plugin context: {e}"))?;
+
     // Same treatment for the editor plugin: its `open`/`save` handlers
     // route through `com.nexus.storage` so reads/writes honour the
     // storage plugin's capability checks and atomic-write semantics.
@@ -206,6 +224,7 @@ fn register_core_plugins(
     forge_root: &std::path::Path,
     event_bus: &Arc<EventBus>,
 ) -> Result<()> {
+    use nexus_agent::AgentCorePlugin;
     use nexus_ai::AiCorePlugin;
     use nexus_editor::EditorCorePlugin;
     use nexus_git::GitCorePlugin;
@@ -506,6 +525,27 @@ fn register_core_plugins(
             Box::new(AiCorePlugin::new()),
         )
         .context("failed to register com.nexus.ai")?;
+
+    // Agent system — PRD-15 scaffold. Thin dispatch surface over
+    // `nexus-agent::{LlmAgent, PlanExecutor}`; bridges to `com.nexus.ai`
+    // for planning and to arbitrary plugins for tool calls via the
+    // `KernelPluginContext` wired below.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.agent",
+                "Agent",
+                LifecycleFlags::NONE,
+                &[
+                    ("plan", nexus_agent::HANDLER_PLAN),
+                    ("run", nexus_agent::HANDLER_RUN),
+                    ("run_plan", nexus_agent::HANDLER_RUN_PLAN),
+                ],
+            ),
+            forge_root,
+            Box::new(AgentCorePlugin::new()),
+        )
+        .context("failed to register com.nexus.agent")?;
 
     // MCP Host orchestrator — loads mcp.toml, lazily connects to external MCP
     // servers, exposes list_tools / call_tool / list_resources / list_prompts

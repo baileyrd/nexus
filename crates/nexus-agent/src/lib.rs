@@ -38,10 +38,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod agents;
+pub mod core_plugin;
 mod executor;
 mod llm;
 
 pub use agents::EchoAgent;
+pub use core_plugin::{
+    AgentCorePlugin, HANDLER_PLAN, HANDLER_RUN, HANDLER_RUN_PLAN, PLUGIN_ID,
+};
 pub use executor::{PlanExecutor, StepResult, StepStatus};
 pub use llm::{ChatDriver, LlmAgent, DEFAULT_SYSTEM_PROMPT};
 
