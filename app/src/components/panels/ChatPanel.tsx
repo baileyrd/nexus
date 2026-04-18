@@ -24,13 +24,23 @@ import {
   type ChatMessage,
   type RagSource,
 } from "../../ipc/ai";
-import { agentRun, type Observation } from "../../ipc/agent";
+import {
+  agentPlan,
+  agentRun,
+  agentRunPlan,
+  type AgentPlan,
+  type Observation,
+} from "../../ipc/agent";
 
 type Turn = {
   role: "user" | "assistant";
   content: string;
   pending?: boolean;
   sources?: RagSource[];
+  /** When set, the turn is an agent plan awaiting user approval —
+   *  the UI renders an Approve / Cancel pair instead of a normal
+   *  assistant bubble. Cleared once the plan runs or is dismissed. */
+  pendingPlan?: AgentPlan;
 };
 
 interface Persisted {
@@ -127,6 +137,7 @@ export function ChatPanel(): JSX.Element {
   const [showSystem, setShowSystem] = useState(false);
   const [useRag, setUseRag] = useState(false);
   const [useAgent, setUseAgent] = useState(false);
+  const [previewAgentPlans, setPreviewAgentPlans] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -249,7 +260,12 @@ export function ChatPanel(): JSX.Element {
   // which looks broken without a live stream underneath.
   useEffect(() => {
     if (sending || !hydrated) return;
-    const cleanTurns = turns.map((t) => ({ ...t, pending: false }));
+    // Drop transient UI state before writing to disk: pending
+    // streaming markers + pendingPlan approval dialogs shouldn't
+    // replay on the next load.
+    const cleanTurns = turns
+      .filter((t) => !t.pendingPlan)
+      .map((t) => ({ ...t, pending: false }));
     persist({ turns: cleanTurns, systemPrompt });
   }, [turns, systemPrompt, sending, hydrated]);
 
@@ -284,11 +300,31 @@ export function ChatPanel(): JSX.Element {
 
     try {
       const trimmedSystem = systemPrompt.trim();
-      if (useAgent) {
-        // Agent mode: dispatch to com.nexus.agent::run which plans +
-        // executes tool calls. No token streaming today — the panel
-        // shows a pending turn and replaces it with a rendered
-        // observation when the plugin returns.
+      if (useAgent && previewAgentPlans) {
+        // Preview mode: ask the planner for a plan, park it in the
+        // pending turn as `pendingPlan`, and wait for the user to
+        // click Approve / Cancel. No tool calls yet.
+        const plan = await agentPlan(trimmed);
+        setTurns((prev) => {
+          const idx = assistantIndexRef.current;
+          if (idx === null) return prev;
+          const next = prev.slice();
+          const current = next[idx];
+          if (!current) return prev;
+          next[idx] = {
+            ...current,
+            content: "",
+            pending: false,
+            pendingPlan: plan,
+          };
+          return next;
+        });
+        assistantIndexRef.current = null;
+        sessionRef.current = null;
+        setSending(false);
+      } else if (useAgent) {
+        // Agent mode without preview: dispatch to com.nexus.agent::run
+        // which plans + executes tool calls in one pass.
         const observation = await agentRun(trimmed);
         const content = formatObservation(observation);
         // Close out the pending turn manually since there's no
@@ -329,13 +365,83 @@ export function ChatPanel(): JSX.Element {
         ),
       );
     }
-  }, [config, input, sending, turns, systemPrompt, useRag, useAgent]);
+  }, [config, input, sending, turns, systemPrompt, useRag, useAgent, previewAgentPlans]);
 
   const clearConversation = useCallback(() => {
     if (sending) return;
     setTurns([]);
     setError(null);
   }, [sending]);
+
+  const cancelPendingPlan = useCallback((turnIndex: number) => {
+    setTurns((prev) => {
+      const next = prev.slice();
+      const current = next[turnIndex];
+      if (!current || !current.pendingPlan) return prev;
+      next[turnIndex] = {
+        ...current,
+        content: "Plan cancelled.",
+        pendingPlan: undefined,
+      };
+      return next;
+    });
+  }, []);
+
+  const approvePendingPlan = useCallback(
+    async (turnIndex: number) => {
+      if (sending) return;
+      const target = turns[turnIndex];
+      if (!target?.pendingPlan) return;
+      const plan = target.pendingPlan;
+
+      setSending(true);
+      setError(null);
+      setTurns((prev) => {
+        const next = prev.slice();
+        const current = next[turnIndex];
+        if (!current) return prev;
+        next[turnIndex] = {
+          ...current,
+          pending: true,
+          pendingPlan: undefined,
+          content: "Executing…",
+        };
+        return next;
+      });
+
+      try {
+        const observation = await agentRunPlan(plan);
+        const content = formatObservation(observation);
+        setTurns((prev) => {
+          const next = prev.slice();
+          const current = next[turnIndex];
+          if (!current) return prev;
+          next[turnIndex] = {
+            ...current,
+            content,
+            pending: false,
+          };
+          return next;
+        });
+      } catch (err) {
+        setError(String(err));
+        setTurns((prev) => {
+          const next = prev.slice();
+          const current = next[turnIndex];
+          if (!current) return prev;
+          next[turnIndex] = {
+            ...current,
+            content: `[error] ${String(err)}`,
+            pending: false,
+          };
+          return next;
+        });
+      } finally {
+        setSending(false);
+      }
+    },
+    [sending, turns],
+  );
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -379,6 +485,16 @@ export function ChatPanel(): JSX.Element {
           title="When on, each message is sent to com.nexus.agent.run — the planner produces a plan and the executor runs every tool call. Blocks until the full plan completes."
         >
           {useAgent ? "Agent ●" : "Agent"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setPreviewAgentPlans((v) => !v)}
+          style={chipButtonStyle}
+          aria-pressed={previewAgentPlans}
+          disabled={!useAgent}
+          title="When on, agent plans are shown for approval before any tool calls run. Click Approve to execute or Cancel to discard."
+        >
+          {previewAgentPlans ? "Preview ●" : "Preview"}
         </button>
         <button
           type="button"
@@ -478,22 +594,31 @@ export function ChatPanel(): JSX.Element {
               {turn.role === "user" ? "You" : "Assistant"}
               {turn.pending ? " · streaming…" : ""}
             </div>
-            <div
-              style={{
-                whiteSpace: "pre-wrap",
-                padding: "6px 10px",
-                borderRadius: 6,
-                background:
-                  turn.role === "user"
-                    ? "var(--color-bg-alt, rgba(127,127,127,0.12))"
-                    : "transparent",
-                border: "1px solid var(--color-border)",
-                fontSize: 14,
-                lineHeight: 1.4,
-              }}
-            >
-              {turn.content || (turn.pending ? "…" : "")}
-            </div>
+            {turn.pendingPlan ? (
+              <PendingPlanCard
+                plan={turn.pendingPlan}
+                onApprove={() => void approvePendingPlan(i)}
+                onCancel={() => cancelPendingPlan(i)}
+                running={sending}
+              />
+            ) : (
+              <div
+                style={{
+                  whiteSpace: "pre-wrap",
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  background:
+                    turn.role === "user"
+                      ? "var(--color-bg-alt, rgba(127,127,127,0.12))"
+                      : "transparent",
+                  border: "1px solid var(--color-border)",
+                  fontSize: 14,
+                  lineHeight: 1.4,
+                }}
+              >
+                {turn.content || (turn.pending ? "…" : "")}
+              </div>
+            )}
             {turn.role === "assistant" &&
               turn.sources &&
               turn.sources.length > 0 && (
@@ -588,6 +713,88 @@ export function ChatPanel(): JSX.Element {
           }}
         >
           {sending ? "…" : "Send"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PendingPlanCard({
+  plan,
+  onApprove,
+  onCancel,
+  running,
+}: {
+  plan: AgentPlan;
+  onApprove: () => void;
+  onCancel: () => void;
+  running: boolean;
+}): JSX.Element {
+  return (
+    <div
+      style={{
+        padding: "8px 10px",
+        borderRadius: 6,
+        border: "1px solid var(--color-border)",
+        background: "var(--color-bg-alt, rgba(127,127,127,0.06))",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div style={{ fontSize: 11, opacity: 0.75 }}>
+        Plan awaiting approval · {plan.steps.length} step
+        {plan.steps.length === 1 ? "" : "s"}
+      </div>
+      <ol
+        style={{
+          margin: 0,
+          paddingInlineStart: 20,
+          fontSize: 13,
+          lineHeight: 1.35,
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+        }}
+      >
+        {plan.steps.map((step) => (
+          <li key={step.id}>
+            <div>{step.description}</div>
+            {step.tool_call && (
+              <div
+                style={{
+                  fontFamily: "var(--font-mono, monospace)",
+                  fontSize: 11,
+                  opacity: 0.7,
+                }}
+              >
+                → {step.tool_call.target_plugin_id}.{step.tool_call.command_id}
+              </div>
+            )}
+          </li>
+        ))}
+      </ol>
+      <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+        <button
+          type="button"
+          onClick={onApprove}
+          disabled={running}
+          style={{
+            ...chipButtonStyle,
+            background: "var(--color-accent, #3b82f6)",
+            color: "var(--color-bg, #fff)",
+            borderColor: "transparent",
+          }}
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={running}
+          style={chipButtonStyle}
+        >
+          Cancel
         </button>
       </div>
     </div>
