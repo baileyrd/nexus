@@ -386,6 +386,9 @@ async fn system_prompt_with_skills(
     ctx: &KernelPluginContext,
     goal: &str,
 ) -> String {
+    let mut prompt = String::from(DEFAULT_SYSTEM_PROMPT);
+    append_mcp_hint(ctx, &mut prompt).await;
+
     let response = ctx
         .ipc_call(
             "com.nexus.skills",
@@ -395,17 +398,16 @@ async fn system_prompt_with_skills(
         )
         .await;
     let Ok(value) = response else {
-        return DEFAULT_SYSTEM_PROMPT.to_string();
+        return prompt;
     };
     let skills: Vec<serde_json::Value> = match serde_json::from_value(value) {
         Ok(v) => v,
-        Err(_) => return DEFAULT_SYSTEM_PROMPT.to_string(),
+        Err(_) => return prompt,
     };
     if skills.is_empty() {
-        return DEFAULT_SYSTEM_PROMPT.to_string();
+        return prompt;
     }
 
-    let mut prompt = String::from(DEFAULT_SYSTEM_PROMPT);
     prompt.push_str(
         "\n\nThe following skills match this goal — apply their guidance \
          when producing the plan. Each skill is delimited by a heading.\n",
@@ -429,6 +431,87 @@ async fn system_prompt_with_skills(
         prompt.push_str(&format!("\n## Skill: {name} [{id}]\n{body}\n"));
     }
     prompt
+}
+
+/// Query `com.nexus.mcp.host::list_servers` and, for each enabled
+/// server, `list_tools`. Append a compact advertisement to the
+/// planner prompt so the LLM knows what external MCP tools are
+/// reachable and how to call them (`target_plugin_id:
+/// "com.nexus.mcp.host"`, `command_id: "call_tool"`, args shape).
+///
+/// Best-effort: any failure (plugin not registered, server crashed,
+/// timeout) logs at debug and the prompt is left unchanged.
+async fn append_mcp_hint(ctx: &KernelPluginContext, prompt: &mut String) {
+    let Ok(servers_value) = ctx
+        .ipc_call(
+            "com.nexus.mcp.host",
+            "list_servers",
+            serde_json::json!({}),
+            Duration::from_secs(3),
+        )
+        .await
+    else {
+        return;
+    };
+    let Some(servers) = servers_value.as_array() else {
+        return;
+    };
+    let active: Vec<(&str, &[serde_json::Value])> = servers
+        .iter()
+        .filter_map(|s| {
+            let name = s.get("name").and_then(|v| v.as_str())?;
+            let disabled = s
+                .get("disabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if disabled {
+                return None;
+            }
+            let args = s
+                .get("args")
+                .and_then(|v| v.as_array())
+                .map_or(&[][..], Vec::as_slice);
+            Some((name, args))
+        })
+        .collect();
+    if active.is_empty() {
+        return;
+    }
+
+    prompt.push_str(
+        "\n\nExternal MCP servers are available via \
+         `com.nexus.mcp.host::call_tool` with args \
+         `{ server, tool, arguments }`. Servers:\n",
+    );
+    for (name, _args) in &active {
+        prompt.push_str(&format!("- {name}"));
+        // Optional: fetch tool names when the server responds quickly.
+        // Keep this light — a slow server shouldn't hold up planning.
+        let tools_value = ctx
+            .ipc_call(
+                "com.nexus.mcp.host",
+                "list_tools",
+                serde_json::json!({ "server": name }),
+                Duration::from_secs(3),
+            )
+            .await;
+        if let Ok(v) = tools_value {
+            if let Some(arr) = v.as_array() {
+                let names: Vec<_> = arr
+                    .iter()
+                    .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+                    .take(8)
+                    .collect();
+                if !names.is_empty() {
+                    prompt.push_str(&format!(" — tools: {}", names.join(", ")));
+                    if arr.len() > names.len() {
+                        prompt.push_str(&format!(" (+{} more)", arr.len() - names.len()));
+                    }
+                }
+            }
+        }
+        prompt.push('\n');
+    }
 }
 
 /// Best-effort call to `com.nexus.skills::render` with no override

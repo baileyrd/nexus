@@ -3,19 +3,19 @@ export PATH=/home/baileyrd/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 cd /mnt/c/Users/baile/dev/Nexus || exit 1
 
 git add -A
-git commit -m "feat(cli): nexus mcp servers|tools|call over com.nexus.mcp.host (PRD-14)
+git commit -m "feat(agent): MCP tool auto-discovery in planner prompt (PRD-14 x PRD-15)
 
-Refactors the single-verb 'nexus mcp' command into a subcommand
-family: 'serve' (existing stdio server), 'servers' (list configured
-external MCP servers), 'tools <server>' (enumerate tools exposed by
-one server), 'call <server> <tool> --arguments '{...}'' (invoke a
-tool). All three host commands route through com.nexus.mcp.host via
-ipc_call — no direct nexus-mcp linkage from the CLI crate.
+system_prompt_with_skills now queries com.nexus.mcp.host at plan
+time and appends a compact advertisement of enabled servers and
+their top-8 tool names to the planner system prompt, alongside
+instructions for invoking them as com.nexus.mcp.host::call_tool
+steps. 3s timeout per call; any host failure leaves the prompt
+untouched so forges without MCP keep working.
 
-Updates PRD-14 from partial (yellow) to substantially complete
-(green): server + host + host-orchestrator plugin + host CLI all
-ship. Gaps remaining: no WebSocket/HTTP transport, no auto-
-discovery by the AI plugin.
+Closes the remaining gap between PRD-14 host orchestrator and the
+PRD-15 agent — the planner can now route goals like 'fetch the
+latest issues' to a github MCP server without the user having to
+hard-code the tool id.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
