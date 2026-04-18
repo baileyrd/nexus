@@ -95,6 +95,14 @@ id = "status.spacer"
 
 # Right cluster — per-document stats.
 [[statusBar]]
+id = "editor.cursor-position"
+text = "ln —, col —"
+
+[[statusBar]]
+id = "editor.file-type"
+text = "MD · UTF-8"
+
+[[statusBar]]
 id = "editor.word-count"
 text = "2,348 words"
 

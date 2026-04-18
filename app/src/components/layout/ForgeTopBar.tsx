@@ -50,11 +50,8 @@ export function ForgeTopBar() {
 
   return (
     <header className="forge-topbar" role="banner">
-      <div className="forge-brand">
+      <div className="forge-brand" aria-label="Nexus Forge">
         <span className="forge-mark" aria-hidden="true" />
-        <span className="forge-brand-name">Nexus</span>
-        <span className="forge-brand-sep">·</span>
-        <span className="forge-brand-sub">Forge</span>
       </div>
       <div
         className="forge-breadcrumb"

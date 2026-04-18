@@ -1,4 +1,5 @@
 import type { Panel } from "../../bindings";
+import { usePanelCount } from "../../stores/panelCounts";
 import { Icon } from "../Icon";
 
 interface PanelSelectorProps {
@@ -28,20 +29,40 @@ export function PanelSelector({ panels, onSelect, label }: PanelSelectorProps) {
       aria-label={label ?? "Panel selector"}
     >
       {panels.map((p) => (
-        <button
-          key={p.id}
-          type="button"
-          role="tab"
-          aria-selected={p.visible}
-          className={p.visible ? "panel-selector-item active" : "panel-selector-item"}
-          title={p.title}
-          aria-label={p.title}
-          onClick={() => onSelect(p.id)}
-        >
-          <Icon name={p.icon} size={16} />
-          <span className="panel-selector-label">{p.title}</span>
-        </button>
+        <PanelSelectorItem key={p.id} panel={p} onSelect={onSelect} />
       ))}
     </div>
+  );
+}
+
+interface PanelSelectorItemProps {
+  panel: Panel;
+  onSelect: (panelId: string) => void;
+}
+
+function PanelSelectorItem({ panel, onSelect }: PanelSelectorItemProps) {
+  const count = usePanelCount(panel.id);
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={panel.visible}
+      className={
+        panel.visible ? "panel-selector-item active" : "panel-selector-item"
+      }
+      title={panel.title}
+      aria-label={
+        count !== undefined ? `${panel.title} (${count})` : panel.title
+      }
+      onClick={() => onSelect(panel.id)}
+    >
+      <Icon name={panel.icon} size={16} />
+      <span className="panel-selector-label">{panel.title}</span>
+      {count !== undefined && (
+        <span className="panel-selector-count" aria-hidden="true">
+          {count}
+        </span>
+      )}
+    </button>
   );
 }

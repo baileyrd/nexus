@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useOpenFileStore } from "../../stores/openFile";
+import { usePanelCountsStore } from "../../stores/panelCounts";
 import { parseHeadings } from "../../util/markdown";
 
 /** Custom DOM event the FileViewer listens for to scroll to a heading. */
@@ -21,6 +22,14 @@ export function Outline() {
     () => (file ? parseHeadings(file.content) : []),
     [file?.content],
   );
+
+  // Publish the heading count so the Inspector tab can render
+  // "Outline 14" next to the label. Cleared on unmount.
+  const setPanelCount = usePanelCountsStore((s) => s.setPanelCount);
+  useEffect(() => {
+    setPanelCount("outline", headings.length);
+    return () => setPanelCount("outline", null);
+  }, [headings.length, setPanelCount]);
 
   // Per-section word count — the chip at the right of each row in the
   // Forge design. Derived by slicing the file content between each

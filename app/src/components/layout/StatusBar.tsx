@@ -3,6 +3,7 @@ import type { StatusBarItem } from "../../bindings";
 import { contributions } from "../../contributions";
 import { useOpenFileStore } from "../../stores/openFile";
 import { onPluginEvent } from "../../plugins/events";
+import { getActiveEditor } from "../../editor/activeEditor";
 import { Icon } from "../Icon";
 
 interface StatusBarProps {
@@ -93,9 +94,51 @@ function useGitState(): GitSnapshot {
   return state;
 }
 
+/**
+ * Polling hook that mirrors the active editor's cursor line/column
+ * into React state. The active editor is a module singleton in
+ * `editor/activeEditor.ts`; CodeMirror doesn't fire React events on
+ * selection change, so we rAF-poll at ~10Hz while the bar is mounted.
+ * Cost: one getActiveEditor() + state read per frame, no tree walks.
+ */
+function useCursorPosition(): { line: number; col: number } | null {
+  const [pos, setPos] = useState<{ line: number; col: number } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let lastLine = -1;
+    let lastCol = -1;
+    const tick = () => {
+      if (cancelled) return;
+      const view = getActiveEditor();
+      if (view) {
+        const head = view.state.selection.main.head;
+        const lineObj = view.state.doc.lineAt(head);
+        const line = lineObj.number;
+        const col = head - lineObj.from + 1;
+        if (line !== lastLine || col !== lastCol) {
+          lastLine = line;
+          lastCol = col;
+          setPos({ line, col });
+        }
+      } else if (lastLine !== -1) {
+        lastLine = -1;
+        lastCol = -1;
+        setPos(null);
+      }
+    };
+    const interval = window.setInterval(tick, 100);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+  return pos;
+}
+
 function useLiveStatusText(): Record<string, string> {
   const file = useOpenFileStore((s) => s.file);
   const git = useGitState();
+  const cursor = useCursorPosition();
   return useMemo(() => {
     const content = file?.content ?? "";
     const words = countWords(content);
@@ -106,6 +149,10 @@ function useLiveStatusText(): Record<string, string> {
       liveGit["git.branch"] = git.isDirty ? `${git.branch} *` : git.branch;
     }
     if (git.head) liveGit["git.sha"] = git.head;
+    const liveCursor: Record<string, string> = {};
+    if (cursor) {
+      liveCursor["editor.cursor-position"] = `ln ${cursor.line}, col ${cursor.col}`;
+    }
     return {
       "editor.word-count": `${words.toLocaleString()} words`,
       "editor.character-count": `${chars.toLocaleString()} characters`,
@@ -113,8 +160,9 @@ function useLiveStatusText(): Record<string, string> {
       // outgoing-link count here as a live proxy until the IPC lands.
       "editor.backlinks-count": `${outLinks} outgoing`,
       ...liveGit,
+      ...liveCursor,
     };
-  }, [file?.relpath, file?.content, git.branch, git.head, git.isDirty]);
+  }, [file?.relpath, file?.content, git.branch, git.head, git.isDirty, cursor?.line, cursor?.col]);
 }
 
 function countWords(text: string): number {
