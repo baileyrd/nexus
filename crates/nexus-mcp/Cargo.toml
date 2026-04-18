@@ -8,6 +8,7 @@ description = "Nexus MCP server (forge ops → AI clients) + Host client (extern
 
 [dependencies]
 nexus-kernel = { path = "../nexus-kernel" }
+nexus-plugins = { path = "../nexus-plugins" }
 rmcp = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }

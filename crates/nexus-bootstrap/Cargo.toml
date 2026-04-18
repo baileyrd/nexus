@@ -19,6 +19,7 @@ nexus-editor = { path = "../nexus-editor" }
 nexus-terminal = { path = "../nexus-terminal" }
 nexus-theme = { path = "../nexus-theme" }
 nexus-git = { path = "../nexus-git" }
+nexus-mcp = { path = "../nexus-mcp" }
 nexus-types = { path = "../nexus-types" }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

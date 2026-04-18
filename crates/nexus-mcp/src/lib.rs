@@ -22,7 +22,9 @@
 mod client;
 mod config;
 mod server;
+pub mod core_plugin;
 
 pub use client::{McpClient, McpClientError};
 pub use config::{McpConfigError, McpHostConfig, McpServerSpec};
 pub use server::NexusMcpServer;
+pub use core_plugin::McpHostPlugin;

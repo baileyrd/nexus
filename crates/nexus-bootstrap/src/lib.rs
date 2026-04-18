@@ -208,6 +208,7 @@ fn register_core_plugins(
     use nexus_ai::AiCorePlugin;
     use nexus_editor::EditorCorePlugin;
     use nexus_git::GitCorePlugin;
+    use nexus_mcp::McpHostPlugin;
     use nexus_security::SecurityCorePlugin;
     use nexus_storage::{StorageConfig, StorageCorePlugin};
     use nexus_terminal::TerminalCorePlugin;
@@ -496,6 +497,47 @@ fn register_core_plugins(
             Box::new(AiCorePlugin::new()),
         )
         .context("failed to register com.nexus.ai")?;
+
+    // MCP Host orchestrator — loads mcp.toml, lazily connects to external MCP
+    // servers, exposes list_tools / call_tool / list_resources / list_prompts
+    // over IPC so any plugin or invoker can reach external tools without
+    // linking the rmcp crate directly.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.mcp.host",
+                "MCP Host",
+                LifecycleFlags {
+                    on_init: true,
+                    on_start: true,
+                    on_stop: true,
+                },
+                &[
+                    (
+                        "list_servers",
+                        nexus_mcp::core_plugin::HANDLER_LIST_SERVERS,
+                    ),
+                    ("list_tools", nexus_mcp::core_plugin::HANDLER_LIST_TOOLS),
+                    ("call_tool", nexus_mcp::core_plugin::HANDLER_CALL_TOOL),
+                    (
+                        "list_resources",
+                        nexus_mcp::core_plugin::HANDLER_LIST_RESOURCES,
+                    ),
+                    (
+                        "list_prompts",
+                        nexus_mcp::core_plugin::HANDLER_LIST_PROMPTS,
+                    ),
+                    ("connect", nexus_mcp::core_plugin::HANDLER_CONNECT),
+                    ("disconnect", nexus_mcp::core_plugin::HANDLER_DISCONNECT),
+                ],
+            ),
+            forge_root,
+            Box::new(McpHostPlugin::new(
+                forge_root.to_path_buf(),
+                Some(Arc::clone(event_bus)),
+            )),
+        )
+        .context("failed to register com.nexus.mcp.host")?;
 
     // Git integration — wraps GitWorker behind IPC and publishes bus events
     // (branch_changed, commit, dirty_changed) for any plugin or UI that
