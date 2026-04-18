@@ -16,6 +16,7 @@ import { useForgeStore } from "../stores/forge";
 import { usePaletteStore } from "../stores/palette";
 import { useSettingsStore } from "../stores/settings";
 import { useEditorPrefsStore, type KeybindingMode, type ViewMode } from "../stores/editorPrefs";
+import { runInlineAi } from "../editor/inlineAi";
 import { useLayoutStore } from "../stores/layout";
 import { contributions } from "./registry";
 
@@ -185,6 +186,26 @@ export function registerBuiltins(): void {
     title: "Terminal: Saved commands",
     category: "Terminal",
     icon: "bookmark",
+  });
+
+  // PRD-08 §9 inline AI — streams a continuation from the AI plugin
+  // into the currently-focused CodeMirror view. Context is either the
+  // active selection or the preceding ~2 KB of the document.
+  contributions.registerCommand("editor.ai-complete", async () => {
+    try {
+      await runInlineAi();
+    } catch (err) {
+      // eslint-disable-next-line no-alert
+      alert(`Inline AI failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
+  contributions.registerPaletteCommand({
+    id: "editor.ai-complete",
+    commandId: "editor.ai-complete",
+    title: "AI: Complete at cursor",
+    category: "AI",
+    icon: "sparkles",
+    keybinding: "Mod+Shift+Space",
   });
 
   contributions.registerCommand("workspace.open-chat", () => {

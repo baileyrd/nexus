@@ -24,6 +24,10 @@ import { buildSnippetExtension, filterSnippetsForExt } from "../../editor/snippe
 import { buildMdxComponentExtension } from "../../editor/mdxComponentExtension";
 import { contributions, type EditorKeybinding } from "../../contributions";
 import {
+  clearActiveEditor,
+  setActiveEditor,
+} from "../../editor/activeEditor";
+import {
   useEditorPrefsStore,
   type KeybindingMode,
   type ViewMode,
@@ -240,8 +244,13 @@ export function EditorSurface({
     });
     const view = new EditorView({ state, parent: parentRef.current });
     viewRef.current = view;
+    // Publish as the active editor immediately — the surface is the
+    // one visible in its pane and typically the one the user just
+    // clicked. Focus listeners below keep this current on switches.
+    setActiveEditor(view);
 
     return () => {
+      clearActiveEditor(view);
       view.destroy();
       viewRef.current = null;
     };
@@ -370,6 +379,9 @@ export function EditorSurface({
       className="editor-surface"
       data-view-mode={viewMode}
       data-keybinding-mode={keybindingMode}
+      onFocusCapture={() => {
+        if (viewRef.current) setActiveEditor(viewRef.current);
+      }}
     />
   );
 }
