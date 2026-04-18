@@ -58,6 +58,29 @@ action = { kind = "openView", viewId = "tasks" }
 # ── Status bar (floating, bottom-right) ─────────────────────────────────────
 
 # Left cluster — sync / index / plugin health. Order is render order.
+# Static `text` values act as placeholders until the status-snapshot
+# IPC lands; the frontend hook in StatusBar.tsx overrides a handful
+# of ids with live values keyed by stable id.
+[[statusBar]]
+id = "forge.synced"
+text = "Forge synced"
+
+[[statusBar]]
+id = "git.branch"
+text = "main"
+
+[[statusBar]]
+id = "git.sha"
+text = "(dev)"
+
+[[statusBar]]
+id = "index.docs"
+text = "Tantivy · indexing"
+
+[[statusBar]]
+id = "plugins.hot"
+text = "0 plugins hot"
+
 [[statusBar]]
 id = "sync.status"
 icon = "cloud-off"

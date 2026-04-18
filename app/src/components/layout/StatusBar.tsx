@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { StatusBarItem } from "../../bindings";
 import { contributions } from "../../contributions";
 import { useOpenFileStore } from "../../stores/openFile";
+import { onPluginEvent } from "../../plugins/events";
 import { Icon } from "../Icon";
 
 interface StatusBarProps {
@@ -26,21 +27,94 @@ const STATUS_SPACER_ID = "status.spacer";
  * whatever the editor / forge currently knows. Keyed by id so new
  * feeds drop in without changing the component shape.
  */
+interface GitSnapshot {
+  branch: string | null;
+  head: string | null;
+  isDirty: boolean;
+}
+
+/**
+ * Subscribe to git state events from `com.nexus.git`. The git core
+ * plugin emits an initial `com.nexus.git.state` snapshot on its first
+ * poll and then delta events on branch / commit / dirty changes. We
+ * keep the latest snapshot in component state and let the caller
+ * format it. Short-circuit if the forge isn't a git repo — events
+ * just never arrive and we fall back to the preset text.
+ */
+function useGitState(): GitSnapshot {
+  const [state, setState] = useState<GitSnapshot>({
+    branch: null,
+    head: null,
+    isDirty: false,
+  });
+  useEffect(() => {
+    const handle = (payload: {
+      branch?: string | null;
+      head?: string | null;
+      is_dirty?: boolean;
+    }) =>
+      setState({
+        branch: payload.branch ?? null,
+        head: payload.head ?? null,
+        isDirty: Boolean(payload.is_dirty),
+      });
+    const unlistens: Array<Promise<() => void>> = [
+      onPluginEvent<{ branch?: string; head?: string; is_dirty?: boolean }>(
+        "com.nexus.git.state",
+        (ev) => handle(ev.payload),
+      ),
+      onPluginEvent<{ to?: string; head?: string }>(
+        "com.nexus.git.branch_changed",
+        (ev) =>
+          setState((s) => ({
+            ...s,
+            branch: ev.payload.to ?? s.branch,
+            head: ev.payload.head ?? s.head,
+          })),
+      ),
+      onPluginEvent<{ branch?: string; head?: string }>(
+        "com.nexus.git.commit",
+        (ev) =>
+          setState((s) => ({
+            ...s,
+            head: ev.payload.head ?? s.head,
+          })),
+      ),
+      onPluginEvent<{ is_dirty?: boolean }>(
+        "com.nexus.git.dirty_changed",
+        (ev) =>
+          setState((s) => ({ ...s, isDirty: Boolean(ev.payload.is_dirty) })),
+      ),
+    ];
+    return () => {
+      for (const p of unlistens) void p.then((u) => u());
+    };
+  }, []);
+  return state;
+}
+
 function useLiveStatusText(): Record<string, string> {
   const file = useOpenFileStore((s) => s.file);
+  const git = useGitState();
   return useMemo(() => {
     const content = file?.content ?? "";
     const words = countWords(content);
     const chars = content.length;
     const outLinks = countOutgoingLinks(content);
+    const liveGit: Record<string, string> = {};
+    if (git.branch) {
+      liveGit["git.branch"] = git.isDirty ? `${git.branch} *` : git.branch;
+    }
+    if (git.head) liveGit["git.sha"] = git.head;
     return {
       "editor.word-count": `${words.toLocaleString()} words`,
       "editor.character-count": `${chars.toLocaleString()} characters`,
       // `editor.backlinks-count` would need an index query; surface the
       // outgoing-link count here as a live proxy until the IPC lands.
       "editor.backlinks-count": `${outLinks} outgoing`,
+      ...liveGit,
     };
-  }, [file?.relpath, file?.content]);
+  }, [file?.relpath, file?.content, git.branch, git.head, git.isDirty]);
 }
 
 function countWords(text: string): number {
