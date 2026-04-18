@@ -29,6 +29,7 @@
 pub mod core_plugin;
 pub mod cron;
 mod executor;
+mod interpolate;
 mod parse;
 mod registry;
 
@@ -38,9 +39,10 @@ pub use core_plugin::{
 };
 pub use cron::{next_fire_after, CronParseError, CronSchedule};
 pub use executor::{
-    run_workflow, ActionDispatcher, StepOutcome, StepOutcomeStatus, WorkflowExecutionError,
-    WorkflowRun,
+    run_workflow, run_workflow_with_variables, ActionDispatcher, StepOutcome, StepOutcomeStatus,
+    WorkflowExecutionError, WorkflowRun,
 };
+pub use interpolate::{interpolate_step, substitute, substitute_string, VariableMap};
 pub use parse::{parse_workflow_file, parse_workflow_text, WorkflowParseError};
 pub use registry::{WorkflowRegistry, WorkflowRegistryError};
 

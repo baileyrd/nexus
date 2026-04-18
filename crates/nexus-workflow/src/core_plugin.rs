@@ -13,7 +13,7 @@
 //! | 2  | `get`      | `{ name }`       | One workflow by name (404 if missing) |
 //! | 3  | `reload`   | `{}`             | Re-scan `<forge>/.workflows`          |
 //! | 4  | `validate` | `{ text }`       | Parse a TOML string; return validated JSON |
-//! | 5  | `run`      | `{ name }`       | Execute a loaded workflow end-to-end       |
+//! | 5  | `run`      | `{ name, variables? }` | Execute a loaded workflow; `variables` is an optional nested object flattened to dotted keys (`{"trigger": {"path": "a.md"}}` → `trigger.path`) for `${…}` interpolation in step fields. |
 //!
 //! Ids are append-only.
 
@@ -27,8 +27,8 @@ use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Deserialize;
 
 use crate::{
-    cron::CronSchedule, parse_workflow_text, run_workflow, ActionDispatcher, Step, Workflow,
-    WorkflowRegistry, WorkflowRegistryError,
+    cron::CronSchedule, parse_workflow_text, run_workflow_with_variables, ActionDispatcher, Step,
+    VariableMap, Workflow, WorkflowRegistry, WorkflowRegistryError,
 };
 
 /// Reverse-DNS identifier.
@@ -238,6 +238,10 @@ impl CorePlugin for WorkflowCorePlugin {
             Ok(wf) => wf,
             Err(err) => return Some(Box::pin(async move { Err(err) })),
         };
+        let variables = match extract_variables(&args) {
+            Ok(v) => v,
+            Err(err) => return Some(Box::pin(async move { Err(err) })),
+        };
         Some(Box::pin(async move {
             let ctx = ctx.ok_or_else(|| {
                 exec_err(
@@ -245,7 +249,7 @@ impl CorePlugin for WorkflowCorePlugin {
                 )
             })?;
             let dispatcher = KernelActionDispatcher { ctx };
-            let run = run_workflow(&workflow, &dispatcher)
+            let run = run_workflow_with_variables(&workflow, &dispatcher, &variables)
                 .await
                 .map_err(|e| exec_err(format!("run: {e}")))?;
             to_value(&run, "run")
@@ -271,6 +275,70 @@ fn lookup_by_args(
     reg.get(&a.name)
         .cloned()
         .ok_or_else(|| exec_err(format!("no workflow named '{}'", a.name)))
+}
+
+/// Pull the optional `variables` object out of the run args and
+/// flatten it to the dotted-path map the executor consumes.
+///
+/// The caller sends `variables` as a nested JSON object, typically
+/// `{ "trigger": { "path": "…" }, "inputs": { "dir": "…" } }`. We
+/// flatten nested objects into dotted keys (`trigger.path`,
+/// `inputs.dir`) and convert scalar JSON values to TOML values so
+/// [`crate::interpolate::substitute_string`] can stringify them.
+/// Array values are preserved as TOML arrays and render via their
+/// TOML string form.
+///
+/// Missing `variables` → empty map (no interpolation).
+fn extract_variables(args: &serde_json::Value) -> Result<VariableMap, PluginError> {
+    let Some(raw) = args.get("variables") else {
+        return Ok(VariableMap::new());
+    };
+    let Some(obj) = raw.as_object() else {
+        return Err(exec_err("run: `variables` must be an object".into()));
+    };
+    let mut out = VariableMap::new();
+    for (k, v) in obj {
+        flatten_into(k, v, &mut out);
+    }
+    Ok(out)
+}
+
+fn flatten_into(prefix: &str, value: &serde_json::Value, out: &mut VariableMap) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                flatten_into(&format!("{prefix}.{k}"), v, out);
+            }
+        }
+        other => {
+            if let Some(tv) = json_to_toml(other) {
+                out.insert(prefix.to_string(), tv);
+            }
+        }
+    }
+}
+
+fn json_to_toml(v: &serde_json::Value) -> Option<toml::Value> {
+    match v {
+        serde_json::Value::Null => None,
+        serde_json::Value::Bool(b) => Some(toml::Value::Boolean(*b)),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Some(toml::Value::Integer(i))
+            } else {
+                n.as_f64().map(toml::Value::Float)
+            }
+        }
+        serde_json::Value::String(s) => Some(toml::Value::String(s.clone())),
+        serde_json::Value::Array(items) => Some(toml::Value::Array(
+            items.iter().filter_map(json_to_toml).collect(),
+        )),
+        serde_json::Value::Object(_) => {
+            // Flattened above; a nested object reaching here would be
+            // a leaf in an array, which we don't currently support.
+            None
+        }
+    }
 }
 
 /// Dispatches `step.step_type` by routing known action types through
@@ -474,6 +542,49 @@ path = "journal/today.md"
             .dispatch(HANDLER_VALIDATE, &serde_json::json!({ "text": WF }))
             .unwrap();
         assert_eq!(v["workflow"]["name"], "Daily");
+    }
+
+    #[test]
+    fn extract_variables_flattens_nested_objects() {
+        let args = serde_json::json!({
+            "name": "Foo",
+            "variables": {
+                "trigger": { "path": "a.md", "lines": 42 },
+                "inputs": { "enabled": true }
+            }
+        });
+        let vars = extract_variables(&args).unwrap();
+        assert_eq!(
+            vars.get("trigger.path").and_then(|v| v.as_str()),
+            Some("a.md")
+        );
+        assert_eq!(
+            vars.get("trigger.lines").and_then(|v| v.as_integer()),
+            Some(42)
+        );
+        assert_eq!(
+            vars.get("inputs.enabled").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn extract_variables_missing_returns_empty() {
+        let args = serde_json::json!({ "name": "Foo" });
+        let vars = extract_variables(&args).unwrap();
+        assert!(vars.is_empty());
+    }
+
+    #[test]
+    fn extract_variables_rejects_non_object() {
+        let args = serde_json::json!({ "name": "Foo", "variables": "nope" });
+        let err = extract_variables(&args).unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("must be an object"));
+            }
+            _ => panic!("unexpected"),
+        }
     }
 
     #[test]

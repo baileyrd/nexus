@@ -161,6 +161,86 @@ async fn run_executes_steps_and_returns_outcome() {
 }
 
 #[tokio::test]
+async fn run_interpolates_variables_into_ipc_step_args() {
+    // End-to-end proof that `variables.trigger.*` reaches the step
+    // dispatcher through JSON flattening + TOML substitution.
+    const WF_READ: &str = r#"
+[workflow]
+name = "ReadIt"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "read"
+type = "ipc"
+target = "com.nexus.storage"
+command = "read_file"
+[steps.args]
+path = "${trigger.path}"
+"#;
+    let forge = scratch_forge();
+    write_workflow(forge.path(), "readit.workflow.toml", WF_READ);
+    // Seed a real file at notes/hello.md that the interpolated step
+    // should read. Using com.nexus.storage::write_file keeps the write
+    // on the same code path the reader will hit.
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+    runtime
+        .context
+        .ipc_call(
+            "com.nexus.storage",
+            "write_file",
+            serde_json::json!({
+                "path": "notes/hello.md",
+                "bytes": b"HELLO".to_vec(),
+            }),
+            CALL_TIMEOUT,
+        )
+        .await
+        .expect("seed write");
+
+    let v = call(
+        &runtime,
+        "run",
+        serde_json::json!({
+            "name": "ReadIt",
+            "variables": { "trigger": { "path": "notes/hello.md" } }
+        }),
+    )
+    .await
+    .expect("run ok");
+
+    assert_eq!(v["success"], true, "got {v:?}");
+    let bytes = v["steps"][0]["response"]["bytes"]
+        .as_array()
+        .expect("read_file returns {bytes: [...]}");
+    let content: Vec<u8> = bytes
+        .iter()
+        .map(|n| u8::try_from(n.as_u64().unwrap()).unwrap())
+        .collect();
+    assert_eq!(std::str::from_utf8(&content).unwrap(), "HELLO");
+}
+
+#[tokio::test]
+async fn run_rejects_non_object_variables() {
+    let forge = scratch_forge();
+    write_workflow(forge.path(), "greet.workflow.toml", WF_NOOP);
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    let err = call(
+        &runtime,
+        "run",
+        serde_json::json!({ "name": "Greet", "variables": "nope" }),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, IpcError::PluginCrashedDuringCall { .. }),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
 async fn run_errors_for_unknown_workflow_name() {
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");

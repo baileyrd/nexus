@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::interpolate::{interpolate_step, VariableMap};
 use crate::{Step, Workflow};
 
 /// Dispatcher trait — the executor calls one of these per step to
@@ -100,6 +101,29 @@ pub async fn run_workflow<D: ActionDispatcher>(
     workflow: &Workflow,
     dispatcher: &D,
 ) -> Result<WorkflowRun, WorkflowExecutionError> {
+    run_workflow_with_variables(workflow, dispatcher, &VariableMap::new()).await
+}
+
+/// Execute a workflow's steps with a pre-built variable map.
+///
+/// Each step's `extra` fields are passed through
+/// [`interpolate_step`](crate::interpolate::interpolate_step) before
+/// the dispatcher sees them, so `${trigger.path}` / `${inputs.dir}` /
+/// etc. placeholders resolve against `variables`. Unknown placeholders
+/// pass through verbatim (see the module docs on
+/// [`crate::interpolate`]).
+///
+/// Callers that don't need variable interpolation should use
+/// [`run_workflow`].
+///
+/// # Errors
+/// Same as [`run_workflow`] — [`WorkflowExecutionError::EmptyPlan`]
+/// when the workflow has zero steps.
+pub async fn run_workflow_with_variables<D: ActionDispatcher>(
+    workflow: &Workflow,
+    dispatcher: &D,
+    variables: &VariableMap,
+) -> Result<WorkflowRun, WorkflowExecutionError> {
     if workflow.steps.is_empty() {
         return Err(WorkflowExecutionError::EmptyPlan(
             workflow.workflow.name.clone(),
@@ -122,6 +146,11 @@ pub async fn run_workflow<D: ActionDispatcher>(
             });
             continue;
         }
+        let mut resolved = step.clone();
+        if !variables.is_empty() {
+            interpolate_step(&mut resolved, variables);
+        }
+        let step = &resolved;
         match dispatcher.run(step).await {
             Ok(response) => outcomes.push(StepOutcome {
                 step_id,
@@ -269,6 +298,75 @@ type = "manual"
         };
         let err = run_workflow(&wf, &d).await.unwrap_err();
         assert!(matches!(err, WorkflowExecutionError::EmptyPlan(_)));
+    }
+
+    #[tokio::test]
+    async fn variables_are_interpolated_into_step_extras() {
+        use crate::Step;
+        use std::sync::Mutex;
+
+        struct CapturingDispatcher {
+            seen: Mutex<Vec<Step>>,
+        }
+        #[async_trait]
+        impl ActionDispatcher for CapturingDispatcher {
+            async fn run(&self, step: &Step) -> Result<serde_json::Value, String> {
+                self.seen.lock().unwrap().push(step.clone());
+                Ok(serde_json::json!({}))
+            }
+        }
+
+        const WF: &str = r#"
+[workflow]
+name = "V"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "ipc"
+target = "com.nexus.storage"
+command = "read_file"
+[steps.args]
+path = "${trigger.path}"
+"#;
+        let wf = parse_workflow_text(WF).unwrap();
+        let d = CapturingDispatcher {
+            seen: Mutex::new(Vec::new()),
+        };
+        let mut vars = VariableMap::new();
+        vars.insert(
+            "trigger.path".into(),
+            toml::Value::String("notes/a.md".into()),
+        );
+        run_workflow_with_variables(&wf, &d, &vars).await.unwrap();
+
+        let seen = d.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        let path = seen[0]
+            .extra
+            .get("args")
+            .and_then(|v| v.as_table())
+            .and_then(|t| t.get("path"))
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert_eq!(path, "notes/a.md");
+    }
+
+    #[tokio::test]
+    async fn empty_variables_does_not_touch_steps() {
+        // Regression: if vars is empty we skip the clone+walk entirely.
+        // Dispatcher sees the step unchanged.
+        let wf = parse_workflow_text(THREE_STEPS).unwrap();
+        let d = RecordingDispatcher {
+            calls: Arc::new(AtomicUsize::new(0)),
+            fail_at: None,
+        };
+        let run = run_workflow_with_variables(&wf, &d, &VariableMap::new())
+            .await
+            .unwrap();
+        assert!(run.success);
+        assert_eq!(run.steps.len(), 3);
     }
 
     #[tokio::test]
