@@ -3,6 +3,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { BaseViewDemo } from "../components/panels/BaseViewDemo";
 import { ChatPanel } from "../components/panels/ChatPanel";
 import { FileTree } from "../components/panels/FileTree";
+import AgentHistoryPanel from "../components/panels/AgentHistoryPanel";
 import { SavedCommandsPanel } from "../components/panels/SavedCommandsPanel";
 import { FileViewer } from "../components/panels/FileViewer";
 import { Outline } from "../components/panels/Outline";
@@ -94,6 +95,13 @@ export function registerBuiltins(): void {
   contributions.registerContentType(
     "com.nexus.workflow.browser",
     WorkflowsSurface,
+  );
+
+  // PRD-15 Agent history browser — view + delete persisted plans.
+  const AgentHistorySurface = () => createElement(AgentHistoryPanel);
+  contributions.registerContentType(
+    "com.nexus.agent.history",
+    AgentHistorySurface,
   );
 
   contributions.registerSettingsTab({
@@ -230,6 +238,23 @@ export function registerBuiltins(): void {
     title: "Workflows: Browse",
     category: "Workspace",
     icon: "workflow",
+  });
+
+  contributions.registerCommand("workspace.open-agent-history", () => {
+    useLayoutStore
+      .getState()
+      .openContentTab(
+        "com.nexus.agent.history",
+        "Agent history",
+        "history",
+      );
+  });
+  contributions.registerPaletteCommand({
+    id: "workspace.open-agent-history",
+    commandId: "workspace.open-agent-history",
+    title: "Agent: History",
+    category: "Workspace",
+    icon: "history",
   });
 
   // PRD-08 §9 inline AI — streams a continuation from the AI plugin

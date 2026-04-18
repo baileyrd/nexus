@@ -3,23 +3,19 @@ export PATH=/home/baileyrd/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 cd /mnt/c/Users/baile/dev/Nexus || exit 1
 
 git add -A
-git commit -m "feat(agent): plan history persistence (PRD-15 memory gap)
+git commit -m "feat(ui): agent history browser panel (PRD-15)
 
-Every run / run_plan completion now writes
-{ plan_id, goal?, plan, observation, created_at } to
-<forge>/.forge/agent/history/<plan_id>.json via a best-effort
-save_history helper (failures logged, never fail the caller).
+AgentHistoryPanel renders a two-pane view over the history_list /
+history_get handlers shipped last commit: left column lists every
+persisted run (newest first, success/failure badges); right column
+renders plan + per-step results with status chips and truncated
+JSON response previews. Delete removes entries via history_delete.
+Registered as content-type com.nexus.agent.history with palette
+command 'Agent: History'.
 
-Three append-only handlers on com.nexus.agent:
-  - history_list (5): enumerate archive entries
-  - history_get (6): load one record by plan_id
-  - history_delete (7): remove one entry
-
-Plan ids are validated against [A-Za-z0-9_-]{1,96} before path
-composition to block traversal via model-generated ids. Tauri
-bridges + TS helpers (agentHistoryList / Get / Delete) wire
-through to the UI. A history browser panel on top of these
-handlers is the follow-up.
+Editor-shell pattern preserved: no direct nexus-agent linkage from
+the panel — the TS wrappers in ipc/agent.ts speak only to the
+plugin via ipc_call.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
