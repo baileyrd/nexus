@@ -87,8 +87,8 @@ enum Commands {
     Agent(AgentArgs),
     /// Skill operations (PRD-13): list and inspect `.skill.md` files
     Skill(SkillArgs),
-    /// Process management (coming soon)
-    Proc(StubArgs),
+    /// Process / saved-command management (PRD-09 §14.1)
+    Proc(ProcArgs),
     /// Terminal / PTY session operations (PRD-09)
     Term(TermArgs),
     /// Start MCP server (stdio mode)
@@ -305,6 +305,53 @@ enum AgentCommand {
     RunPlan {
         /// Path to the plan JSON file
         file: PathBuf,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Proc (PRD-09 §14.1)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct ProcArgs {
+    #[command(subcommand)]
+    command: ProcCommand,
+}
+
+#[derive(Subcommand)]
+enum ProcCommand {
+    /// List every saved command (sidebar order, nulls last)
+    List,
+    /// Show full record for one saved command
+    Show {
+        /// Slug
+        slug: String,
+    },
+    /// Create a new saved command
+    Add {
+        /// Human-readable label (also used to derive the slug)
+        name: String,
+        /// Full shell command to run
+        command: String,
+        /// Shell binary; defaults to /bin/sh
+        #[arg(long)]
+        shell: Option<String>,
+        /// Working directory
+        #[arg(long, value_name = "DIR")]
+        cwd: Option<String>,
+    },
+    /// Delete a saved command
+    Delete {
+        /// Slug
+        slug: String,
+    },
+    /// Set `sidebar_order` for a saved command (omit `--order` to clear)
+    Reorder {
+        /// Slug
+        slug: String,
+        /// New sidebar_order; omit to clear the override
+        #[arg(long)]
+        order: Option<i32>,
     },
 }
 
@@ -1019,8 +1066,22 @@ fn main() {
             SkillCommand::Reload => commands::skill::reload(&mut app),
         },
 
+        Commands::Proc(args) => match args.command {
+            ProcCommand::List => commands::proc::list(&mut app),
+            ProcCommand::Show { slug } => commands::proc::show(&mut app, &slug),
+            ProcCommand::Add {
+                name,
+                command,
+                shell,
+                cwd,
+            } => commands::proc::add(&mut app, &name, &command, shell.as_deref(), cwd.as_deref()),
+            ProcCommand::Delete { slug } => commands::proc::delete(&mut app, &slug),
+            ProcCommand::Reorder { slug, order } => {
+                commands::proc::reorder(&mut app, &slug, order)
+            }
+        },
+
         // Stub commands — implemented in later milestones.
-        Commands::Proc(_) => stubs::not_implemented("proc"),
         Commands::Term(args) => match args.command {
             TermCommand::Env => commands::term::env(),
             TermCommand::Run { cmd, timeout } => match commands::term::run(&cmd, timeout) {
