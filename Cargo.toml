@@ -20,6 +20,7 @@ members = [
     "crates/nexus-bootstrap",
     "crates/nexus-editor",
     "crates/nexus-terminal",
+    "crates/nexus-agent",
 ]
 
 [workspace.package]
