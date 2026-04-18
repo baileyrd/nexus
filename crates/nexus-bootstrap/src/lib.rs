@@ -29,6 +29,7 @@ use nexus_plugins::{
     parse_manifest, CorePlugin, PluginError, PluginLoader, PluginManifest, SharedPluginLoader,
 };
 
+pub mod agent;
 pub mod database;
 pub mod storage;
 pub mod terminal;

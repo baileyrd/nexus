@@ -39,9 +39,11 @@ use thiserror::Error;
 
 mod agents;
 mod executor;
+mod llm;
 
 pub use agents::EchoAgent;
-pub use executor::{PlanExecutor, StepResult};
+pub use executor::{PlanExecutor, StepResult, StepStatus};
+pub use llm::{ChatDriver, LlmAgent, DEFAULT_SYSTEM_PROMPT};
 
 /// A unit of work produced by an [`Agent`] and consumed by a
 /// [`PlanExecutor`]. Steps are deliberately simple — agents that
