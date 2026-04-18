@@ -22,6 +22,7 @@ nexus-git = { path = "../nexus-git" }
 nexus-mcp = { path = "../nexus-mcp" }
 nexus-types = { path = "../nexus-types" }
 nexus-agent = { path = "../nexus-agent" }
+nexus-skills = { path = "../nexus-skills" }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

@@ -226,6 +226,7 @@ fn register_core_plugins(
 ) -> Result<()> {
     use nexus_agent::AgentCorePlugin;
     use nexus_ai::AiCorePlugin;
+    use nexus_skills::SkillsCorePlugin;
     use nexus_editor::EditorCorePlugin;
     use nexus_git::GitCorePlugin;
     use nexus_mcp::McpHostPlugin;
@@ -525,6 +526,35 @@ fn register_core_plugins(
             Box::new(AiCorePlugin::new()),
         )
         .context("failed to register com.nexus.ai")?;
+
+    // Skills — PRD-13 scaffold. Read-mostly surface over
+    // `.forge/skills/`. Agents + UI consult it over IPC so no
+    // consumer links `nexus-skills` directly.
+    let skills_dir = forge_root.join(".forge").join("skills");
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.skills",
+                "Skills",
+                LifecycleFlags::NONE,
+                &[
+                    ("list", nexus_skills::HANDLER_LIST),
+                    ("get", nexus_skills::HANDLER_GET),
+                    (
+                        "list_by_context",
+                        nexus_skills::HANDLER_LIST_BY_CONTEXT,
+                    ),
+                    (
+                        "triggered_by",
+                        nexus_skills::HANDLER_TRIGGERED_BY,
+                    ),
+                    ("reload", nexus_skills::HANDLER_RELOAD),
+                ],
+            ),
+            forge_root,
+            Box::new(SkillsCorePlugin::open(skills_dir)),
+        )
+        .context("failed to register com.nexus.skills")?;
 
     // Agent system — PRD-15 scaffold. Thin dispatch surface over
     // `nexus-agent::{LlmAgent, PlanExecutor}`; bridges to `com.nexus.ai`

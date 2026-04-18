@@ -29,9 +29,14 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod core_plugin;
 mod parse;
 mod registry;
 
+pub use core_plugin::{
+    SkillsCorePlugin, HANDLER_GET, HANDLER_LIST, HANDLER_LIST_BY_CONTEXT, HANDLER_RELOAD,
+    HANDLER_TRIGGERED_BY, PLUGIN_ID,
+};
 pub use parse::{parse_skill_file, parse_skill_text, SkillParseError};
 pub use registry::{SkillRegistry, SkillRegistryError};
 
