@@ -9,12 +9,15 @@
 // without changing the UX.
 
 import type { CSSProperties, KeyboardEvent } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   aiConfig,
+  aiSessionDelete,
+  aiSessionList,
   aiSessionLoad,
   aiSessionSave,
+  type ChatSessionSummary,
   aiStreamAsk,
   aiStreamChat,
   onAiStreamChunk,
@@ -45,8 +48,46 @@ type Turn = {
 };
 
 interface Persisted {
+  /// Session id — when present, routes save to
+  /// `chat/sessions/<id>.json` instead of the legacy single-session
+  /// file. Optional so legacy payloads still decode.
+  id?: string;
+  /// Caller-assigned title, surfaced in the session picker. Defaults
+  /// to the first user turn truncated to 48 chars on save.
+  title?: string;
+  updated_at?: string;
   turns: Turn[];
   systemPrompt: string;
+}
+
+const ACTIVE_SESSION_KEY = "nexus.chat.active-session-id";
+const DEFAULT_SESSION_ID = "default";
+
+function readActiveSessionId(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeActiveSessionId(id: string): void {
+  try {
+    localStorage.setItem(ACTIVE_SESSION_KEY, id);
+  } catch {
+    // ignore — non-essential cross-run memory
+  }
+}
+
+function newChatSessionId(): string {
+  return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function deriveTitle(turns: Turn[]): string | undefined {
+  const first = turns.find((t) => t.role === "user");
+  if (!first) return undefined;
+  const trimmed = first.content.trim().replace(/\s+/g, " ");
+  return trimmed.length > 48 ? `${trimmed.slice(0, 48)}…` : trimmed;
 }
 
 function decodePersisted(value: unknown): Persisted {
@@ -59,7 +100,9 @@ function decodePersisted(value: unknown): Persisted {
     : [];
   const systemPrompt =
     typeof obj.systemPrompt === "string" ? obj.systemPrompt : "";
-  return { turns, systemPrompt };
+  const id = typeof obj.id === "string" ? obj.id : undefined;
+  const title = typeof obj.title === "string" ? obj.title : undefined;
+  return { id, title, turns, systemPrompt };
 }
 
 function isTurn(v: unknown): v is Turn {
@@ -87,7 +130,11 @@ function persist(state: Persisted): void {
   // logged but never blocks the UI. Sessions survive app restarts
   // via com.nexus.ai::session_save; a fresh forge sees an empty
   // session on first load.
-  aiSessionSave(state).catch((err) => {
+  aiSessionSave({
+    ...state,
+    title: state.title ?? deriveTitle(state.turns),
+    updated_at: new Date().toISOString(),
+  }).catch((err) => {
     // eslint-disable-next-line no-console
     console.warn("[chat] session_save failed", err);
   });
@@ -135,6 +182,12 @@ export function ChatPanel(): JSX.Element {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [hydrated, setHydrated] = useState(false);
+  const [chatSessionId, setChatSessionId] = useState<string>(
+    () => readActiveSessionId() ?? DEFAULT_SESSION_ID,
+  );
+  const [sessionSummaries, setSessionSummaries] = useState<ChatSessionSummary[]>(
+    [],
+  );
   const [showSystem, setShowSystem] = useState(false);
   const [useRag, setUseRag] = useState(false);
   const [useAgent, setUseAgent] = useState(false);
@@ -162,20 +215,42 @@ export function ChatPanel(): JSX.Element {
     };
   }, []);
 
-  // Hydrate the transcript from com.nexus.ai::session_load. Flips
-  // `hydrated` on completion (even on failure) so the persistence
-  // effect below can start writing — otherwise the first keystroke
-  // would overwrite the on-disk session with the empty initial
-  // state before we had a chance to read it.
+  // Hydrate the transcript from com.nexus.ai::session_load for the
+  // currently-selected chat session. Flips `hydrated` on completion
+  // (even on failure) so the persistence effect below can start
+  // writing. Re-runs when the user picks a different session in the
+  // picker — the effect below flushes the outgoing session before
+  // this fires.
   useEffect(() => {
     let cancelled = false;
-    aiSessionLoad()
+    setHydrated(false);
+    // On very first boot try multi-session `chatSessionId`; if that
+    // returns null and id == DEFAULT_SESSION_ID, fall back to the
+    // legacy single-session path so existing users don't lose their
+    // transcript. The first save will then migrate the content into
+    // the new tree because persist() writes with `id`.
+    aiSessionLoad(chatSessionId)
       .then((value) => {
         if (cancelled) return;
-        const { turns: loadedTurns, systemPrompt: loadedPrompt } =
-          decodePersisted(value);
-        setTurns(loadedTurns);
-        setSystemPrompt(loadedPrompt);
+        if (value !== null) {
+          const { turns: loadedTurns, systemPrompt: loadedPrompt } =
+            decodePersisted(value);
+          setTurns(loadedTurns);
+          setSystemPrompt(loadedPrompt);
+          return;
+        }
+        if (chatSessionId !== DEFAULT_SESSION_ID) {
+          setTurns([]);
+          setSystemPrompt("");
+          return;
+        }
+        return aiSessionLoad().then((legacy) => {
+          if (cancelled) return;
+          const { turns: loadedTurns, systemPrompt: loadedPrompt } =
+            decodePersisted(legacy);
+          setTurns(loadedTurns);
+          setSystemPrompt(loadedPrompt);
+        });
       })
       .catch((err) => {
         // eslint-disable-next-line no-console
@@ -187,7 +262,24 @@ export function ChatPanel(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [chatSessionId]);
+
+  // Keep the list of sessions fresh. Runs once on mount + any time
+  // the active session changes (so a newly-created one appears in
+  // the picker immediately after first save).
+  useEffect(() => {
+    let cancelled = false;
+    aiSessionList()
+      .then((list) => {
+        if (!cancelled) setSessionSummaries(list);
+      })
+      .catch(() => {
+        // Plugin may not be available (e.g. still booting). Non-fatal.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [chatSessionId, turns.length]);
 
   useEffect(() => {
     const unlisteners: Array<() => void> = [];
@@ -268,8 +360,12 @@ export function ChatPanel(): JSX.Element {
     const cleanTurns = turns
       .filter((t) => !t.pendingPlan)
       .map((t) => ({ ...t, pending: false }));
-    persist({ turns: cleanTurns, systemPrompt });
-  }, [turns, systemPrompt, sending, hydrated]);
+    persist({
+      id: chatSessionId,
+      turns: cleanTurns,
+      systemPrompt,
+    });
+  }, [turns, systemPrompt, sending, hydrated, chatSessionId]);
 
   const send = useCallback(async () => {
     const trimmed = input.trim();
@@ -466,6 +562,56 @@ export function ChatPanel(): JSX.Element {
     ? `${config.ai.provider}${config.ai.model ? ` (${config.ai.model})` : ""}`
     : "not configured";
 
+  const switchSession = useCallback(
+    (nextId: string) => {
+      if (nextId === chatSessionId || sending) return;
+      writeActiveSessionId(nextId);
+      setChatSessionId(nextId);
+    },
+    [chatSessionId, sending],
+  );
+
+  const newSession = useCallback(() => {
+    if (sending) return;
+    const id = newChatSessionId();
+    writeActiveSessionId(id);
+    setTurns([]);
+    setSystemPrompt("");
+    setChatSessionId(id);
+  }, [sending]);
+
+  const deleteCurrentSession = useCallback(async () => {
+    if (sending) return;
+    // Legacy / default session is the only fallback — never delete it
+    // via this path so there's always somewhere to land after delete.
+    if (chatSessionId === DEFAULT_SESSION_ID) return;
+    try {
+      await aiSessionDelete(chatSessionId);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[chat] session_delete failed", err);
+    }
+    writeActiveSessionId(DEFAULT_SESSION_ID);
+    setChatSessionId(DEFAULT_SESSION_ID);
+  }, [chatSessionId, sending]);
+
+  // Build the picker options: every known session + the active one
+  // even if session_list hasn't returned yet (avoids a flash-to-default
+  // on first mount).
+  const sessionOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const s of sessionSummaries) {
+      seen.set(s.id, s.title || s.id);
+    }
+    if (!seen.has(chatSessionId)) {
+      seen.set(chatSessionId, chatSessionId);
+    }
+    if (!seen.has(DEFAULT_SESSION_ID)) {
+      seen.set(DEFAULT_SESSION_ID, "default");
+    }
+    return Array.from(seen.entries());
+  }, [sessionSummaries, chatSessionId]);
+
   return (
     <div
       style={{
@@ -542,6 +688,43 @@ export function ChatPanel(): JSX.Element {
           aria-pressed={showSystem}
         >
           {systemPrompt.trim() ? "System ●" : "System"}
+        </button>
+        <select
+          value={chatSessionId}
+          onChange={(e) => switchSession(e.target.value)}
+          disabled={sending}
+          aria-label="Chat session"
+          title="Active chat session. Each session persists to its own file under `.forge/chat/sessions/`."
+          style={{
+            ...chipButtonStyle,
+            padding: "2px 6px",
+            cursor: sending ? "not-allowed" : "pointer",
+            maxWidth: 180,
+          }}
+        >
+          {sessionOptions.map(([id, label]) => (
+            <option key={id} value={id}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={newSession}
+          disabled={sending}
+          style={chipButtonStyle}
+          title="Start a fresh chat session — current conversation is preserved on disk."
+        >
+          New
+        </button>
+        <button
+          type="button"
+          onClick={deleteCurrentSession}
+          disabled={sending || chatSessionId === DEFAULT_SESSION_ID}
+          style={chipButtonStyle}
+          title="Delete the active session. The default session can't be deleted."
+        >
+          Delete
         </button>
         <button
           type="button"
