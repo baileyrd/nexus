@@ -4097,3 +4097,79 @@ select.plugin-settings-input {
   flex: 1 1 auto;
   min-width: 0;
 }
+
+/* ── Outline row tuning under Forge ─────────────────────────────
+ * 2-digit index column on h1/h2 rows, word-count chip flush right.
+ * The index/chip spans are aria-hidden — screen readers get just
+ * the heading text. */
+
+:root[data-theme-id="nexus-forge"] .outline {
+  list-style: none;
+  margin: 0;
+  padding: 0 4px;
+}
+
+:root[data-theme-id="nexus-forge"] .outline-item {
+  margin: 0;
+  padding: 0;
+}
+
+:root[data-theme-id="nexus-forge"] .outline-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--nx-text-tertiary, #ACA69A);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  position: relative;
+}
+
+:root[data-theme-id="nexus-forge"] .outline-link:hover {
+  background: var(--nx-bg-tertiary, #2C2E36);
+  color: var(--nx-text-primary, #EFEBE4);
+}
+
+:root[data-theme-id="nexus-forge"] .outline-item.level-3 .outline-link,
+:root[data-theme-id="nexus-forge"] .outline-item.level-4 .outline-link,
+:root[data-theme-id="nexus-forge"] .outline-item.level-5 .outline-link,
+:root[data-theme-id="nexus-forge"] .outline-item.level-6 .outline-link {
+  font-size: 11.5px;
+}
+
+:root[data-theme-id="nexus-forge"] .outline-index {
+  font-family: var(--nx-type-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  color: var(--nx-text-muted, #7F7A70);
+  width: 22px;
+  flex: 0 0 22px;
+  text-align: left;
+}
+
+:root[data-theme-id="nexus-forge"] .outline-text {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root[data-theme-id="nexus-forge"] .outline-words {
+  font-family: var(--nx-type-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  color: var(--nx-text-muted, #7F7A70);
+  flex: 0 0 auto;
+}
+
+:root[data-theme-id="nexus-forge"] .outline-empty {
+  padding: 12px;
+  color: var(--nx-text-muted, #7F7A70);
+  font-size: 12px;
+  font-style: italic;
+}

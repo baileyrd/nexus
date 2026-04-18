@@ -58,8 +58,8 @@ Match the "NEXUS_WORK" file-tree panel 1-for-1. **Shipped.**
 
 - [x] **Header → "Inspector"** — added as a 36 px header row above the panel-selector, scoped to Forge. Non-Forge themes keep the per-panel title header.
 - [x] **Tab switcher** — the existing `PanelSelector` gets a visible label span that's visually-hidden by default but shown under Forge. Net effect: icon-only on other themes, text-tabs with ember underline under Forge — same component, same contributions.
-- [~] **Outline rows** — deferred; `Outline.tsx` renders through `GenericTreePanel` which already handles the data shape. Cosmetic row-tuning can ride with a future pass.
-- [~] **Counts in tab labels** — deferred; requires each panel to report a `count` field, which is a contribution-API addition better packaged with other panel metadata (icon badge, loading state).
+- [x] **Outline rows** — `Outline.tsx` now emits a 2-digit index (h1/h2 only) + title + word-count chip per heading; word counts derived by slicing file content between heading lines. Styled under `[data-theme-id="nexus-forge"]`.
+- [~] **Counts in tab labels** — still deferred; requires each panel to report a `count` field via a contribution-API addition. Outline count is derivable from `openFileStore` content but wiring it into the Inspector's panel-selector text-tabs is a separate schema change.
 
 ---
 
