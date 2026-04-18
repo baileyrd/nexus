@@ -4,7 +4,19 @@
 
 ---
 
+## New Features (not addressed in any PRD)
+
+### BL-001: Daily Notes ✅ (2026-04-18)
+
+**Delivered:** [`crates/nexus-cli/src/commands/content.rs`](../../crates/nexus-cli/src/commands/content.rs) `daily()` (wired at [`main.rs:1019`](../../crates/nexus-cli/src/main.rs)) — `nexus content daily [--date YYYY-MM-DD]` creates `notes/daily/YYYY-MM-DD.md` with YAML frontmatter (`date`, `tags: [daily]`), H1 title, and `## Tasks` / `## Notes` section stubs. Existing notes short-circuit with a path echo.
+
+---
+
 ## Partially New Features (concept exists in PRDs but design is unspecified)
+
+### BL-004: Obsidian-Style 3-Tier Link Resolution ✅ (2026-04-18)
+
+**Delivered:** [`crates/nexus-storage/src/index.rs`](../../crates/nexus-storage/src/index.rs) `resolve_link` now cascades tier 1 (exact path) → tier 2 (filename-stem match, case-sensitive) → tier 3 (case-insensitive against full path + stem). A fourth alias-lookup tier is kept as a non-spec extension. Bidirectional resolution wired via two helpers: `reresolve_unresolved_links` runs at the end of `insert_file` so a newly-landed file upgrades every phantom link that now matches; `invalidate_links_to` runs inside `soft_delete_file` so a deletion flips backlinks to phantom (`is_resolved = 0`, `target_file_id = NULL`). Coverage: 4 new unit tests in `index.rs` (`resolve_link_exact_path_wins`, `resolve_link_case_insensitive_fallback`, `insert_upgrades_phantom_links_pointing_to_new_file`, `soft_delete_invalidates_incoming_links`).
 
 ### BL-005: In-Memory Knowledge Graph (petgraph) ✅ (2026-04-18)
 

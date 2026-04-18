@@ -8,14 +8,6 @@
 
 ## New Features (not addressed in any PRD)
 
-### BL-001: Daily Notes
-
-**Source**: Growth Plan Phase 5, Task 5.1
-**Effort**: Small (0.5 day)
-**Crate**: `nexus-cli`
-
-Template-based daily note creation via `nexus content daily [--date YYYY-MM-DD]`. Creates `notes/daily/YYYY-MM-DD.md` with YAML frontmatter (date, tags) and section stubs (Tasks, Notes). Opens existing note if already present.
-
 ### BL-002: Typed Property Index
 
 **Source**: Growth Plan Phase 0, Task 0.1
@@ -42,20 +34,6 @@ Implement query-time scope prefixes for Tantivy search:
 - `type:heading` — Tantivy field filter on block type
 
 Approach: parse scope prefixes from query string, run plain-text portion through Tantivy, post-filter results with SQLite, merge scores.
-
-### BL-004: Obsidian-Style 3-Tier Link Resolution
-
-**Source**: Growth Plan Phase 1, Task 1.3
-**Effort**: Medium (1 day)
-**Crate**: `nexus-storage`
-**Related PRDs**: PRD 03 (link resolution cache), PRD 06 (wikilink resolution — no specifics)
-
-Define a concrete resolution cascade for wikilinks:
-1. Exact path match: `[[folder/note]]` resolves to `folder/note.md`
-2. Filename-only match: `[[note]]` resolves to the first file whose stem is `note`
-3. Case-insensitive fallback
-
-Resolution must run bidirectionally: when a new file is created, check all unresolved links for matches; when a file is deleted, mark links pointing to it as unresolved. Integrates with reconcile pass.
 
 ### BL-007: CRDT-over-Git Transport
 
