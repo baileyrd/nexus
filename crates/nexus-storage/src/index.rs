@@ -224,6 +224,13 @@ pub fn insert_file(
     // ── 6. Tasks ────────────────────────────────────────────────────────────
     crate::tasks::insert_tasks(conn, file_id, &parsed.tasks)?;
 
+    // ── 7. Bidirectional wikilink resolution (BL-004) ────────────────────────
+    // A newly-landed file may satisfy wikilinks from other notes that
+    // were previously phantom. Retry every unresolved link and upgrade
+    // any that now resolve. `resolve_link` covers the case where the
+    // newly-inserted file matches via tier 1/2/3; others stay phantom.
+    reresolve_unresolved_links(conn)?;
+
     Ok(file_id)
 }
 
@@ -394,6 +401,10 @@ pub fn soft_delete_file(conn: &Connection, file_id: u64) -> Result<(), StorageEr
         "UPDATE files SET is_deleted = 1 WHERE id = ?1;",
         params![file_id.cast_signed()],
     )?;
+    // BL-004: any link that pointed to this file is now phantom —
+    // clear its `target_file_id` + `is_resolved` so the graph + UI
+    // reflect the deletion.
+    invalidate_links_to(conn, file_id)?;
     Ok(())
 }
 
@@ -505,8 +516,13 @@ pub fn query_jsx_components(
 
 /// Attempt to resolve a link target to an existing file ID.
 ///
-/// First tries an exact path match; then falls back to a basename match for
-/// `.md` files (handles bare wikilink targets like `"My Note"`).
+/// Cascade (BL-004):
+/// 1. Exact path match — `[[folder/note]]` → `folder/note.md`.
+/// 2. Filename-stem match — `[[note]]` → any file whose stem is `note`.
+/// 3. Case-insensitive filename-stem / path match — `[[Note]]` → `note.md`.
+///
+/// A fourth, non-standard tier matches the target against frontmatter
+/// `aliases` arrays. It's tried last so explicit wikilinks always win.
 ///
 /// Returns `(Option<file_id>, is_resolved)`.
 fn resolve_link(conn: &Connection, target: Option<&str>) -> (Option<u64>, bool) {
@@ -514,7 +530,7 @@ fn resolve_link(conn: &Connection, target: Option<&str>) -> (Option<u64>, bool) 
         return (None, false);
     };
 
-    // Exact path match.
+    // Tier 1: exact path match.
     if let Ok(id) = conn.query_row(
         "SELECT id FROM files WHERE path = ?1 AND is_deleted = 0;",
         params![target],
@@ -523,20 +539,38 @@ fn resolve_link(conn: &Connection, target: Option<&str>) -> (Option<u64>, bool) 
         return (Some(u64::try_from(id).unwrap_or(0)), true);
     }
 
-    // Basename match: target treated as stem, look for `{target}.md` anywhere.
+    // Tier 2: filename-stem match (case-sensitive).
     let pattern_slash = format!("%/{target}.md");
     let bare = format!("{target}.md");
-    let id_result = conn.query_row(
+    if let Ok(id) = conn.query_row(
         "SELECT id FROM files WHERE (path LIKE ?1 OR path = ?2) AND is_deleted = 0;",
         params![pattern_slash, bare],
         |row| row.get::<_, i64>(0),
-    );
-
-    if let Ok(id) = id_result {
+    ) {
         return (Some(u64::try_from(id).unwrap_or(0)), true);
     }
 
-    // Alias match: check if any file has this as an alias in frontmatter properties.
+    // Tier 3: case-insensitive fallback. Matches both the full path and
+    // the bare `.md` stem so `[[Note]]` resolves to `notes/note.md` just
+    // as `[[note]]` would.
+    if let Ok(id) = conn.query_row(
+        "SELECT id FROM files
+         WHERE is_deleted = 0
+           AND (
+             LOWER(path) = LOWER(?1)
+             OR LOWER(path) LIKE LOWER(?2)
+             OR LOWER(path) = LOWER(?3)
+           )
+         LIMIT 1;",
+        params![target, pattern_slash, bare],
+        |row| row.get::<_, i64>(0),
+    ) {
+        return (Some(u64::try_from(id).unwrap_or(0)), true);
+    }
+
+    // Alias match: check if any file has this as an alias in frontmatter
+    // properties. Not part of the BL-004 spec but kept for backward
+    // compatibility with notes that declare `aliases: [...]`.
     let alias_result = conn.query_row(
         "SELECT file_id, value FROM properties WHERE key = 'aliases' AND value LIKE ?1;",
         params![format!("%\"{target}\"%")],
@@ -552,6 +586,62 @@ fn resolve_link(conn: &Connection, target: Option<&str>) -> (Option<u64>, bool) 
     }
 
     (None, false)
+}
+
+/// Walk every unresolved link and retry resolution. Any link whose
+/// target now resolves to a live file gets its `target_file_id` +
+/// `is_resolved` columns updated.
+///
+/// Called from `insert_file` after a new file lands so pre-existing
+/// phantom links pointing at this file upgrade automatically. Scoped by
+/// cost, not correctness — running it any time the file set changes
+/// would be equivalent.
+///
+/// # Errors
+///
+/// Returns [`StorageError::Database`] on any `SQLite` failure.
+pub fn reresolve_unresolved_links(conn: &Connection) -> Result<usize, StorageError> {
+    let mut stmt =
+        conn.prepare("SELECT id, target_path, link_text FROM links WHERE is_resolved = 0;")?;
+    let rows: Vec<(i64, Option<String>, String)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<_, _>>()?;
+
+    let mut upgraded = 0usize;
+    for (link_id, target_path, link_text) in rows {
+        let target = target_path.as_deref().or(Some(link_text.as_str()));
+        let (new_file_id, is_resolved) = resolve_link(conn, target);
+        if is_resolved {
+            conn.execute(
+                "UPDATE links SET target_file_id = ?1, is_resolved = 1 WHERE id = ?2;",
+                params![new_file_id.map(|id: u64| id.cast_signed()), link_id],
+            )?;
+            upgraded += 1;
+        }
+    }
+    Ok(upgraded)
+}
+
+/// Mark every link that pointed to `file_id` as unresolved. Called
+/// from `soft_delete_file` so a deletion flips the affected links
+/// back to phantom status instead of leaving stale `target_file_id`
+/// references.
+///
+/// # Errors
+///
+/// Returns [`StorageError::Database`] on any `SQLite` failure.
+pub fn invalidate_links_to(conn: &Connection, file_id: u64) -> Result<usize, StorageError> {
+    let affected = conn.execute(
+        "UPDATE links SET is_resolved = 0, target_file_id = NULL WHERE target_file_id = ?1;",
+        params![file_id.cast_signed()],
+    )?;
+    Ok(affected)
 }
 
 /// Insert a single property row, ignoring duplicate `(file_id, key)` pairs.
@@ -1024,5 +1114,133 @@ mod tests {
             )
             .unwrap();
         assert_eq!(bool_val, Some(true));
+    }
+
+    // ── BL-004: 3-tier wikilink resolution ───────────────────────────────────
+
+    /// Build a `ParsedFile` with one outgoing wikilink to `target`.
+    fn parsed_with_link(target: &str) -> ParsedFile {
+        ParsedFile {
+            content_hash: format!("hash-for-{target}"),
+            frontmatter: vec![],
+            blocks: vec![],
+            links: vec![ParsedLink {
+                link_text: target.to_string(),
+                target_path: Some(target.to_string()),
+                link_type: "wikilink".to_string(),
+                fragment: None,
+            }],
+            tags: vec![],
+            tasks: vec![],
+        }
+    }
+
+    fn parsed_empty() -> ParsedFile {
+        ParsedFile {
+            content_hash: "empty".to_string(),
+            frontmatter: vec![],
+            blocks: vec![],
+            links: vec![],
+            tags: vec![],
+            tasks: vec![],
+        }
+    }
+
+    #[test]
+    fn resolve_link_exact_path_wins() {
+        let conn = setup_db();
+        let target_id =
+            insert_file(&conn, "notes/target.md", "markdown", 10, &parsed_empty()).unwrap();
+        let src_id = insert_file(
+            &conn,
+            "notes/src.md",
+            "markdown",
+            10,
+            &parsed_with_link("notes/target.md"),
+        )
+        .unwrap();
+        let links = query_links(&conn, src_id).unwrap();
+        assert_eq!(links.len(), 1);
+        assert!(links[0].is_resolved);
+        assert_eq!(links[0].target_file_id, Some(target_id));
+    }
+
+    #[test]
+    fn resolve_link_case_insensitive_fallback() {
+        // Tier 3: [[Target]] resolves to `notes/target.md` even with
+        // different case.
+        let conn = setup_db();
+        let target_id =
+            insert_file(&conn, "notes/target.md", "markdown", 10, &parsed_empty()).unwrap();
+        let src_id = insert_file(
+            &conn,
+            "notes/src.md",
+            "markdown",
+            10,
+            &parsed_with_link("Target"),
+        )
+        .unwrap();
+        let links = query_links(&conn, src_id).unwrap();
+        assert!(links[0].is_resolved, "[[Target]] should resolve to target.md");
+        assert_eq!(links[0].target_file_id, Some(target_id));
+    }
+
+    #[test]
+    fn insert_upgrades_phantom_links_pointing_to_new_file() {
+        // Bidirectional resolution: a note with a phantom `[[target]]`
+        // link should have that link upgraded when `target.md` later
+        // lands.
+        let conn = setup_db();
+        let src_id = insert_file(
+            &conn,
+            "notes/src.md",
+            "markdown",
+            10,
+            &parsed_with_link("target"),
+        )
+        .unwrap();
+        let links_before = query_links(&conn, src_id).unwrap();
+        assert!(
+            !links_before[0].is_resolved,
+            "precondition: link starts unresolved"
+        );
+
+        let target_id =
+            insert_file(&conn, "notes/target.md", "markdown", 10, &parsed_empty()).unwrap();
+
+        let links_after = query_links(&conn, src_id).unwrap();
+        assert!(
+            links_after[0].is_resolved,
+            "link should have been upgraded after target landed"
+        );
+        assert_eq!(links_after[0].target_file_id, Some(target_id));
+    }
+
+    #[test]
+    fn soft_delete_invalidates_incoming_links() {
+        // Deleting `target.md` should flip links pointing to it back to
+        // phantom (is_resolved = 0, target_file_id = NULL).
+        let conn = setup_db();
+        let target_id =
+            insert_file(&conn, "notes/target.md", "markdown", 10, &parsed_empty()).unwrap();
+        let src_id = insert_file(
+            &conn,
+            "notes/src.md",
+            "markdown",
+            10,
+            &parsed_with_link("notes/target.md"),
+        )
+        .unwrap();
+        let links_before = query_links(&conn, src_id).unwrap();
+        assert!(links_before[0].is_resolved);
+
+        soft_delete_file(&conn, target_id).unwrap();
+
+        let links_after = query_links(&conn, src_id).unwrap();
+        assert!(
+            !links_after[0].is_resolved,
+            "link should be phantom after target was deleted"
+        );
+        assert_eq!(links_after[0].target_file_id, None);
     }
 }
