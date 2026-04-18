@@ -3,6 +3,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { BaseViewDemo } from "../components/panels/BaseViewDemo";
 import { ChatPanel } from "../components/panels/ChatPanel";
 import { FileTree } from "../components/panels/FileTree";
+import { SavedCommandsPanel } from "../components/panels/SavedCommandsPanel";
 import { FileViewer } from "../components/panels/FileViewer";
 import { Outline } from "../components/panels/Outline";
 import { TerminalPanel } from "../components/panels/TerminalPanel";
@@ -70,6 +71,15 @@ export function registerBuiltins(): void {
   // core plugin; the shell just hosts the content-type contribution.
   const ChatSurface = () => createElement(ChatPanel);
   contributions.registerContentType("com.nexus.ai.chat", ChatSurface);
+
+  // PRD-09 §14.1 saved-commands sidebar. Persisted client-side today;
+  // the `com.nexus.terminal` plugin will take ownership of the
+  // procmgr_commands table in a follow-up slice.
+  const SavedCommandsSurface = () => createElement(SavedCommandsPanel);
+  contributions.registerContentType(
+    "com.nexus.terminal.saved-commands",
+    SavedCommandsSurface,
+  );
 
   contributions.registerSettingsTab({
     id: "general",
@@ -158,6 +168,23 @@ export function registerBuiltins(): void {
     category: "Workspace",
     icon: "terminal",
     keybinding: "Mod+Shift+T",
+  });
+
+  contributions.registerCommand("workspace.open-saved-commands", () => {
+    useLayoutStore
+      .getState()
+      .openContentTab(
+        "com.nexus.terminal.saved-commands",
+        "Saved commands",
+        "bookmark",
+      );
+  });
+  contributions.registerPaletteCommand({
+    id: "workspace.open-saved-commands",
+    commandId: "workspace.open-saved-commands",
+    title: "Terminal: Saved commands",
+    category: "Terminal",
+    icon: "bookmark",
   });
 
   contributions.registerCommand("workspace.open-chat", () => {
