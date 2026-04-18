@@ -223,10 +223,111 @@ async fn run_plan_internal(
         ctx: Arc::clone(&ctx),
         timeout: DEFAULT_TOOL_TIMEOUT,
     });
-    let observation = executor.run(&plan).await.map_err(agent_err)?;
+
+    // Drive the plan step-by-step so we can publish kernel-bus events
+    // around each dispatch. The UI subscribes via the Tauri forwarder
+    // in `nexus-app` and updates the pending-plan card live instead of
+    // blocking until the whole plan completes.
+    let _ = ctx.publish(
+        EVENT_RUN_START,
+        serde_json::json!({
+            "plan_id": plan.id,
+            "steps": plan.steps.len(),
+            "goal": goal,
+        }),
+    );
+
+    let mut results: Vec<crate::StepResult> = Vec::with_capacity(plan.steps.len());
+    let mut abort: Option<AgentError> = None;
+
+    for (idx, step) in plan.steps.iter().enumerate() {
+        if abort.is_some() {
+            results.push(crate::StepResult {
+                step_id: step.id.clone(),
+                response: None,
+                status: crate::StepStatus::Skipped,
+            });
+            let _ = ctx.publish(
+                EVENT_STEP_DONE,
+                serde_json::json!({
+                    "plan_id": plan.id,
+                    "step_id": step.id,
+                    "index": idx,
+                    "status": "skipped",
+                }),
+            );
+            continue;
+        }
+        let _ = ctx.publish(
+            EVENT_STEP_START,
+            serde_json::json!({
+                "plan_id": plan.id,
+                "step_id": step.id,
+                "index": idx,
+                "description": step.description,
+            }),
+        );
+        match executor.execute_step_at(&plan, idx).await {
+            Ok(result) => {
+                let _ = ctx.publish(
+                    EVENT_STEP_DONE,
+                    serde_json::json!({
+                        "plan_id": plan.id,
+                        "step_id": step.id,
+                        "index": idx,
+                        "status": "ok",
+                    }),
+                );
+                results.push(result);
+            }
+            Err(err) => {
+                results.push(crate::StepResult {
+                    step_id: step.id.clone(),
+                    response: None,
+                    status: crate::StepStatus::Failed,
+                });
+                let _ = ctx.publish(
+                    EVENT_STEP_DONE,
+                    serde_json::json!({
+                        "plan_id": plan.id,
+                        "step_id": step.id,
+                        "index": idx,
+                        "status": "failed",
+                        "error": err.to_string(),
+                    }),
+                );
+                abort = Some(err);
+            }
+        }
+    }
+
+    let success = abort.is_none();
+    let observation = crate::Observation {
+        plan_id: plan.id.clone(),
+        steps: results,
+        success,
+    };
+    let _ = ctx.publish(
+        EVENT_RUN_DONE,
+        serde_json::json!({
+            "plan_id": plan.id,
+            "success": success,
+        }),
+    );
     save_history(&ctx, &plan, &observation, goal.as_deref()).await;
     to_value(&observation, "run")
 }
+
+/// Kernel-bus topics emitted while a plan runs. Mirrored by the
+/// Tauri event forwarder in `nexus-app` as `agent:run_start` /
+/// `agent:step_start` / `agent:step_done` / `agent:run_done`.
+pub const EVENT_RUN_START: &str = "com.nexus.agent.run_start";
+/// See [`EVENT_RUN_START`].
+pub const EVENT_STEP_START: &str = "com.nexus.agent.step_start";
+/// See [`EVENT_RUN_START`].
+pub const EVENT_STEP_DONE: &str = "com.nexus.agent.step_done";
+/// See [`EVENT_RUN_START`].
+pub const EVENT_RUN_DONE: &str = "com.nexus.agent.run_done";
 
 // ── History persistence ─────────────────────────────────────────────────────
 

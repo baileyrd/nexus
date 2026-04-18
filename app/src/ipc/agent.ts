@@ -4,6 +4,7 @@
 // to `ipc_call("com.nexus.agent", …)` with a 10-minute timeout.
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export interface ToolCall {
   target_plugin_id: string;
@@ -97,4 +98,60 @@ export function agentHistoryGet(planId: string): Promise<AgentHistoryRecord> {
 
 export function agentHistoryDelete(planId: string): Promise<void> {
   return invoke<void>("agent_history_delete", { planId });
+}
+
+// ── Streaming plan-execution events ──────────────────────────────────────
+//
+// Emitted while `agent_run` / `agent_run_plan` are in flight. Mirror of the
+// `com.nexus.agent.{run_start,step_start,step_done,run_done}` kernel-bus
+// topics forwarded by `nexus-app::start_agent_event_forwarder`.
+
+export interface AgentRunStart {
+  plan_id: string;
+  steps: number;
+  goal?: string | null;
+}
+
+export interface AgentStepStart {
+  plan_id: string;
+  step_id: string;
+  index: number;
+  description: string;
+}
+
+export interface AgentStepDone {
+  plan_id: string;
+  step_id: string;
+  index: number;
+  status: "ok" | "failed" | "skipped";
+  error?: string;
+}
+
+export interface AgentRunDone {
+  plan_id: string;
+  success: boolean;
+}
+
+export function onAgentRunStart(
+  handler: (ev: AgentRunStart) => void,
+): Promise<UnlistenFn> {
+  return listen<AgentRunStart>("agent:run_start", (e) => handler(e.payload));
+}
+
+export function onAgentStepStart(
+  handler: (ev: AgentStepStart) => void,
+): Promise<UnlistenFn> {
+  return listen<AgentStepStart>("agent:step_start", (e) => handler(e.payload));
+}
+
+export function onAgentStepDone(
+  handler: (ev: AgentStepDone) => void,
+): Promise<UnlistenFn> {
+  return listen<AgentStepDone>("agent:step_done", (e) => handler(e.payload));
+}
+
+export function onAgentRunDone(
+  handler: (ev: AgentRunDone) => void,
+): Promise<UnlistenFn> {
+  return listen<AgentRunDone>("agent:run_done", (e) => handler(e.payload));
 }

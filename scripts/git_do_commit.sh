@@ -3,27 +3,23 @@ export PATH=/home/baileyrd/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 cd /mnt/c/Users/baile/dev/Nexus || exit 1
 
 git add -A
-git commit -m "feat(workflow): manual execution engine + run handler + CLI (PRD-16)
+git commit -m "feat(agent): streaming plan-execution events (PRD-15)
 
-nexus-workflow::executor::run_workflow iterates [[steps]] in order,
-dispatching each through an injected ActionDispatcher and recording
-per-step outcomes (ok / failed / skipped). Default on_error = stop
-halts the loop; on_error = 'continue' / 'log_warn' keeps going.
-StepOutcomeStatus mirrors nexus-agent's StepStatus so UI code can
-render both shapes the same way.
+run_plan_internal now drives steps one-at-a-time via execute_step_at
+and publishes four kernel-bus topics around each dispatch:
+com.nexus.agent.{run_start,step_start,step_done,run_done}. The UI
+no longer has to wait for the whole observation to land before
+showing progress.
 
-com.nexus.workflow gains handler run (id 5). Its async dispatch
-resolves the workflow by name, builds a KernelActionDispatcher
-that routes step_type='ipc'/'ipc_call' through PluginContext::
-ipc_call (60s per step), and returns a WorkflowRun. Unknown step
-types degrade to logged no-ops so authors can iterate without
-executor churn.
+nexus-app::start_agent_event_forwarder mirrors the AI forwarder:
+subscribes to the CustomPrefix com.nexus.agent., translates each
+event into a Tauri event (agent:run_start / step_start / step_done /
+run_done), and emits the plugin's JSON payload verbatim. TS helpers
+onAgentStepStart / onAgentStepDone / onAgentRunStart / onAgentRunDone
+let panels subscribe without touching the raw listen() API.
 
-Bootstrap wires the plugin's kernel context and registers the
-handler. 'nexus workflow run <name>' drives it from the CLI with
-a 600s timeout for multi-step chains. 5 new executor unit tests
-cover success / default-stop / continue / empty-plan / named-step
-semantics.
+Library unchanged — all orchestration stays in the plugin, so the
+microkernel boundary is preserved.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 

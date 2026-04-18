@@ -49,6 +49,13 @@ const AI_STREAM_CHUNK_EVENT: &str = "ai:stream_chunk";
 /// `{ session_id, text }`. Forwarded from `com.nexus.ai.stream_done`.
 const AI_STREAM_DONE_EVENT: &str = "ai:stream_done";
 
+/// Tauri events emitted while an agent plan runs. Forwarded from
+/// `com.nexus.agent.{run_start,step_start,step_done,run_done}`.
+const AGENT_RUN_START_EVENT: &str = "agent:run_start";
+const AGENT_STEP_START_EVENT: &str = "agent:step_start";
+const AGENT_STEP_DONE_EVENT: &str = "agent:step_done";
+const AGENT_RUN_DONE_EVENT: &str = "agent:run_done";
+
 pub mod agent;
 pub mod ai;
 pub mod commands;
@@ -111,6 +118,7 @@ pub fn run() {
                             // are forwarded to the frontend so the
                             // Chat panel can render tokens live.
                             start_ai_event_forwarder(handle.clone(), &runtime);
+                            start_agent_event_forwarder(handle.clone(), &runtime);
                             // Make core plugins reachable from community WASM
                             // plugins: install the bootstrap loader as the
                             // fallback target for the composite dispatcher
@@ -380,4 +388,48 @@ fn start_ai_event_forwarder(
             }
         })
         .expect("spawn ai event forwarder");
+}
+
+/// Mirror of [`start_ai_event_forwarder`] for agent plan execution.
+/// Forwards `com.nexus.agent.{run_start,step_start,step_done,run_done}`
+/// to `agent:run_start` / `agent:step_start` / `agent:step_done` /
+/// `agent:run_done`. Payload is the plugin's JSON verbatim.
+fn start_agent_event_forwarder(
+    handle: tauri::AppHandle,
+    runtime: &nexus_bootstrap::Runtime,
+) {
+    let bus = runtime.kernel.event_bus();
+    let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+        "com.nexus.agent.".to_string(),
+    ));
+
+    std::thread::Builder::new()
+        .name("nexus-agent-event-forwarder".to_string())
+        .spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(50));
+            loop {
+                match sub.try_recv() {
+                    Ok(Some(ev)) => {
+                        if let NexusEvent::Custom { type_id, payload, .. } = &ev.event {
+                            let target = match type_id.as_str() {
+                                "com.nexus.agent.run_start" => AGENT_RUN_START_EVENT,
+                                "com.nexus.agent.step_start" => AGENT_STEP_START_EVENT,
+                                "com.nexus.agent.step_done" => AGENT_STEP_DONE_EVENT,
+                                "com.nexus.agent.run_done" => AGENT_RUN_DONE_EVENT,
+                                _ => continue,
+                            };
+                            if let Err(e) = handle.emit(target, payload.clone()) {
+                                tracing::warn!(%e, "agent event forwarder: emit failed");
+                            }
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(RecvError::Lagged(n)) => {
+                        tracing::warn!(n, "agent event forwarder: lagged, {n} events lost");
+                    }
+                    Err(RecvError::Closed) => return,
+                }
+            }
+        })
+        .expect("spawn agent event forwarder");
 }
