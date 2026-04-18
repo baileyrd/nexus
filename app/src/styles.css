@@ -3161,6 +3161,8 @@ select.plugin-settings-input {
   min-height: 0;
   overflow: hidden;
   display: flex;
+  padding: 0;
+  margin: 0;
 }
 
 :root[data-theme-id="nexus-forge"] .workspace-view {
@@ -4278,4 +4280,24 @@ select.plugin-settings-input {
   overflow: visible;
   clip: auto;
   white-space: normal;
+}
+
+/* ── Panel flush fix (user report: "space going around the panels") ─
+ * Three sources of extra vertical space had leaked from the base
+ * styles into the Forge shell:
+ *   1. `main { padding: 32px }` — fixed above.
+ *   2. `.app` grid placing null-returning modals in auto-tracks after
+ *      row 2; force explicit `grid-area` so they don't create tracks.
+ *   3. `.workspace-frame { height: 480px }` base (for the demo card)
+ *      wasn't fully overridden on narrow viewports. */
+
+:root[data-theme-id="nexus-forge"] .app > :not(.forge-topbar):not(main) {
+  grid-row: 2;
+  grid-column: 1;
+  /* Modal overlays are position:fixed — pinning them all to row 2
+   * keeps the grid from growing to accommodate them. */
+}
+
+:root[data-theme-id="nexus-forge"] .workspace-frame {
+  height: auto;
 }
