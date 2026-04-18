@@ -7,6 +7,7 @@ publish.workspace = true
 description = "Nexus plugin system: manifest parsing, WASM sandbox, host functions, plugin loader, settings, hot-reload"
 
 [dependencies]
+nexus-plugin-api = { workspace = true }
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-types = { path = "../nexus-types" }
 thiserror = { workspace = true }

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/nexus-types",
+    "crates/nexus-plugin-api",
     "crates/nexus-kernel",
     "crates/nexus-kv",
     "crates/nexus-security",
@@ -28,6 +29,9 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+# Internal crates
+nexus-plugin-api = { path = "crates/nexus-plugin-api" }
+
 # Async runtime
 tokio = { version = "1.51", features = ["full"] }
 

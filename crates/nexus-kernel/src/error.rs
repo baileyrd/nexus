@@ -1,15 +1,18 @@
 //! Error types for the kernel crate.
 //!
-//! Organization: top-level `Error` enum with `#[from]` wrapping of
-//! per-subsystem sub-enums. Narrow APIs can return narrow types directly.
+//! `IpcError`, `BusError`, and `CapabilityError` moved to `nexus-plugin-api`
+//! (F-2.1.1). They are imported here so the top-level `Error` enum can still
+//! wrap them and `crate::IpcError` / `crate::BusError` continue to resolve.
 
 use std::path::PathBuf;
+
+// Re-import stable error types from nexus-plugin-api.
+pub use nexus_plugin_api::error::{BusError, CapabilityError, IpcError};
 
 /// Top-level result type for `nexus-kernel`.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Top-level error type for `nexus-kernel`. Wraps per-subsystem errors
-/// plus `std::io::Error` for convenience.
+/// Top-level error type for `nexus-kernel`.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Plugin lifecycle error.
@@ -142,99 +145,6 @@ pub enum PluginError {
     },
 }
 
-/// Errors related to the capability system.
-#[derive(Debug, thiserror::Error)]
-pub enum CapabilityError {
-    /// A plugin requested a capability it was not granted.
-    #[error("capability '{cap:?}' denied to plugin '{plugin_id}'")]
-    Denied {
-        /// Plugin id.
-        plugin_id: String,
-        /// The denied capability.
-        cap: crate::capability::Capability,
-    },
-
-    /// A manifest contained an unrecognized capability string.
-    #[error("unknown capability string '{0}'")]
-    UnknownString(String),
-}
-
-/// Errors from IPC calls between plugins.
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum IpcError {
-    /// The target plugin is not loaded.
-    #[error("target plugin '{plugin_id}' not found")]
-    PluginNotFound {
-        /// The target plugin id.
-        plugin_id: String,
-    },
-
-    /// The target plugin doesn't register that command.
-    #[error("command '{command}' not found on plugin '{plugin_id}'")]
-    CommandNotFound {
-        /// The target plugin id.
-        plugin_id: String,
-        /// The requested command id.
-        command: String,
-    },
-
-    /// The IPC call timed out.
-    #[error("IPC call to '{plugin_id}'.'{command}' timed out after {timeout_ms}ms")]
-    Timeout {
-        /// The target plugin id.
-        plugin_id: String,
-        /// The command id.
-        command: String,
-        /// Timeout that was exceeded.
-        timeout_ms: u64,
-    },
-
-    /// The target plugin crashed during the IPC call.
-    #[error("plugin '{plugin_id}' crashed during IPC call to '{command}'")]
-    PluginCrashedDuringCall {
-        /// The target plugin id.
-        plugin_id: String,
-        /// The command id.
-        command: String,
-    },
-
-    /// Failed to serialize the argument payload.
-    #[error("IPC argument serialization failed: {reason}")]
-    SerializationFailed {
-        /// Reason from the serializer.
-        reason: String,
-    },
-
-    /// Failed to deserialize the return value.
-    #[error("IPC return value deserialization failed: {reason}")]
-    DeserializationFailed {
-        /// Reason from the deserializer.
-        reason: String,
-    },
-
-    /// The caller lacks the `ipc.call` capability.
-    #[error("capability denied for {plugin_id}: ipc.call")]
-    CapabilityDenied {
-        /// The caller plugin id.
-        plugin_id: String,
-    },
-
-    /// The kernel was built without an [`crate::IpcDispatcher`], so IPC calls
-    /// cannot be routed. Typical in unit tests or bare kernels.
-    #[error("no IPC dispatcher configured on this kernel")]
-    DispatcherUnavailable,
-
-    /// A re-entrant or circular IPC call was detected — the target plugin's
-    /// backend mutex was already locked by the current call chain.
-    #[error("re-entrant IPC call to '{plugin_id}'.'{command}'")]
-    ReentrantCall {
-        /// The target plugin id.
-        plugin_id: String,
-        /// The command id.
-        command: String,
-    },
-}
-
 /// Errors from the KV store.
 #[derive(Debug, thiserror::Error)]
 pub enum KvError {
@@ -253,34 +163,10 @@ pub enum KvError {
     },
 }
 
-/// Event bus errors.
-#[derive(Debug, thiserror::Error)]
-pub enum BusError {
-    /// The event bus has been shut down; publishing or subscribing fails.
-    #[error("event bus is closed")]
-    Closed,
-
-    /// A plugin tried to publish a `Custom` event whose `type_id` does not
-    /// start with the plugin's own id.
-    #[error("custom event rejected: type_id '{type_id}' does not start with emitting plugin id '{plugin_id}'")]
-    TypeIdNamespaceMismatch {
-        /// Plugin that attempted to publish.
-        plugin_id: String,
-        /// The rejected `type_id`.
-        type_id: String,
-    },
-
-    /// A plugin tried to publish a kernel-owned event variant
-    /// (plugins can only publish `NexusEvent::Custom`).
-    #[error("plugins cannot publish kernel events; only NexusEvent::Custom is allowed from plugins")]
-    PluginPublishingKernelEvent,
-}
-
 /// Errors from receiving events on a subscription.
 #[derive(Debug, thiserror::Error)]
 pub enum RecvError {
     /// The subscriber fell behind by `n` events; those events are lost.
-    /// The subscription is still alive; call `recv` again to keep going.
     #[error("subscriber lagged by {0} events (events lost)")]
     Lagged(u64),
 

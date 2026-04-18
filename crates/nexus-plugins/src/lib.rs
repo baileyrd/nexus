@@ -38,16 +38,10 @@ pub use nexus_kernel::{PluginInfo, PluginStatus, TrustLevel};
 
 /// The host's currently-supported major plugin API version (F-9.2.1).
 ///
-/// Manifests declare `api_version = "<major>"` (or `"<major>.<minor>"`). The
-/// loader rejects any plugin whose major version does not equal this constant
-/// with [`PluginError::IncompatibleApiVersion`]. Minor-version mismatches are
-/// tolerated — future ABI extensions should remain backwards-compatible within
-/// a major version.
-///
-/// Pre-`nexus-plugin-api` (F-2.1.1) this constant lives here; once the public
-/// plugin-api crate is extracted the constant moves there and this becomes a
-/// re-export.
-pub const PLUGIN_API_VERSION_MAJOR: u32 = 1;
+/// Now lives in `nexus-plugin-api` (F-2.1.1); this is the re-export so
+/// existing callers that reference `nexus_plugins::PLUGIN_API_VERSION_MAJOR`
+/// continue to compile.
+pub use nexus_plugin_api::PLUGIN_API_VERSION as PLUGIN_API_VERSION_MAJOR;
 
 // ─── UiContribution ───────────────────────────────────────────────────────────
 

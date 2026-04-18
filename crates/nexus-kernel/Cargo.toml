@@ -7,6 +7,7 @@ publish.workspace = true
 description = "Nexus kernel: event bus, plugin lifecycle, capability system"
 
 [dependencies]
+nexus-plugin-api = { workspace = true }
 nexus-types = { path = "../nexus-types" }
 tokio = { workspace = true }
 tracing = { workspace = true }
