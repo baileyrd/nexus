@@ -27,8 +27,8 @@ use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Deserialize;
 
 use crate::{
-    parse_workflow_text, run_workflow, ActionDispatcher, Step, Workflow, WorkflowRegistry,
-    WorkflowRegistryError,
+    cron::CronSchedule, parse_workflow_text, run_workflow, ActionDispatcher, Step, Workflow,
+    WorkflowRegistry, WorkflowRegistryError,
 };
 
 /// Reverse-DNS identifier.
@@ -55,6 +55,10 @@ pub struct WorkflowCorePlugin {
     root: PathBuf,
     registry: Mutex<WorkflowRegistry>,
     context: Option<Arc<KernelPluginContext>>,
+    /// Spawned cron-trigger tasks, one per cron-scheduled workflow.
+    /// Cancelled on plugin drop so the scheduler doesn't outlive the
+    /// process.
+    scheduler_handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
 impl WorkflowCorePlugin {
@@ -91,6 +95,111 @@ impl WorkflowCorePlugin {
             root: workflows_dir,
             registry: Mutex::new(registry),
             context: None,
+            scheduler_handles: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Spawn one tokio task per cron-triggered workflow. Each task
+    /// parses the `[trigger].schedule` expression, sleeps until the
+    /// next fire time, dispatches `run_workflow`, and loops. Parse
+    /// failures log-and-skip; executor failures log-and-continue so
+    /// one broken workflow doesn't stall the rest.
+    ///
+    /// Called from `wire_context` once the kernel context is
+    /// available. Handles are retained so the plugin can cancel them
+    /// on drop.
+    fn spawn_cron_schedulers(&self, ctx: Arc<KernelPluginContext>) {
+        let runtime = match tokio::runtime::Handle::try_current() {
+            Ok(h) => h,
+            Err(_) => {
+                tracing::warn!(
+                    "workflow scheduler: no tokio runtime available; cron triggers disabled"
+                );
+                return;
+            }
+        };
+        let workflows: Vec<(String, String)> = match self.registry.lock() {
+            Ok(reg) => reg
+                .iter()
+                .filter_map(|(name, wf)| {
+                    if wf.trigger.trigger_type != "cron" {
+                        return None;
+                    }
+                    let schedule = wf
+                        .trigger
+                        .extra
+                        .get("schedule")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string)?;
+                    Some((name.to_string(), schedule))
+                })
+                .collect(),
+            Err(_) => return,
+        };
+        let mut handles = match self.scheduler_handles.lock() {
+            Ok(h) => h,
+            Err(_) => return,
+        };
+        for (name, expr) in workflows {
+            let schedule = match CronSchedule::parse(&expr) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(workflow = %name, expr = %expr, error = %e, "cron parse failed; scheduler skipping this workflow");
+                    continue;
+                }
+            };
+            let ctx = Arc::clone(&ctx);
+            let wf_name = name.clone();
+            tracing::info!(workflow = %wf_name, expr = %expr, "cron scheduler armed");
+            let handle = runtime.spawn(async move {
+                scheduler_loop(ctx, wf_name, schedule).await;
+            });
+            handles.push(handle);
+        }
+    }
+}
+
+impl Drop for WorkflowCorePlugin {
+    fn drop(&mut self) {
+        if let Ok(handles) = self.scheduler_handles.lock() {
+            for h in handles.iter() {
+                h.abort();
+            }
+        }
+    }
+}
+
+async fn scheduler_loop(
+    ctx: Arc<KernelPluginContext>,
+    workflow_name: String,
+    schedule: CronSchedule,
+) {
+    loop {
+        let now = chrono::Utc::now();
+        let Some(next) = schedule.next_after(now) else {
+            tracing::warn!(workflow = %workflow_name, "cron schedule has no future fire time; parking forever");
+            // Park on a very long sleep — the task stays alive so
+            // drop-abort works, but does nothing.
+            tokio::time::sleep(std::time::Duration::from_secs(86_400 * 365)).await;
+            continue;
+        };
+        let wait = (next - now).to_std().unwrap_or(std::time::Duration::ZERO);
+        tracing::debug!(workflow = %workflow_name, next = %next, "cron sleep");
+        tokio::time::sleep(wait).await;
+        // Dispatch through the plugin's own run handler so semantics
+        // match the CLI / UI code paths (history persistence,
+        // streaming events, etc. all flow through one spot).
+        let call = ctx
+            .ipc_call(
+                PLUGIN_ID,
+                "run",
+                serde_json::json!({ "name": workflow_name }),
+                std::time::Duration::from_secs(600),
+            )
+            .await;
+        match call {
+            Ok(_) => tracing::info!(workflow = %workflow_name, "cron fired"),
+            Err(err) => tracing::warn!(workflow = %workflow_name, %err, "cron run failed; scheduler continues"),
         }
     }
 }
@@ -144,7 +253,8 @@ impl CorePlugin for WorkflowCorePlugin {
     }
 
     fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
-        self.context = Some(ctx);
+        self.context = Some(Arc::clone(&ctx));
+        self.spawn_cron_schedulers(ctx);
     }
 }
 

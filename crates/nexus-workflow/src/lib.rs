@@ -27,6 +27,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod core_plugin;
+pub mod cron;
 mod executor;
 mod parse;
 mod registry;
@@ -35,6 +36,7 @@ pub use core_plugin::{
     WorkflowCorePlugin, HANDLER_GET, HANDLER_LIST, HANDLER_RELOAD, HANDLER_RUN, HANDLER_VALIDATE,
     PLUGIN_ID,
 };
+pub use cron::{next_fire_after, CronParseError, CronSchedule};
 pub use executor::{
     run_workflow, ActionDispatcher, StepOutcome, StepOutcomeStatus, WorkflowExecutionError,
     WorkflowRun,
