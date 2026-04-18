@@ -7,6 +7,11 @@ import {
 import type { Extension } from "@codemirror/state";
 import type { Panel } from "../bindings";
 import type { ContextMenuItem } from "../components/ContextMenu";
+import {
+  parseInlineMarkdown,
+  type MdBlock,
+  type MdInline,
+} from "../util/inlineMarkdown";
 
 /**
  * UI contribution registry (PRD 07 §8 scaffold).
@@ -333,7 +338,16 @@ export type PanelNode =
   | { type: "text"; value: string; muted?: boolean; strong?: boolean }
   | { type: "heading"; value: string; level?: 1 | 2 | 3 }
   | { type: "button"; label: string; commandId: string; disabled?: boolean }
-  | { type: "spacer"; size?: number };
+  | { type: "spacer"; size?: number }
+  | {
+      /** Block of markdown rendered through the host-reviewed inline
+       *  markdown pipeline in `util/inlineMarkdown`. Scope is a
+       *  subset (headings, paragraphs, lists, bold/italic/code,
+       *  wikilinks, links) — unknown syntax falls through as literal
+       *  text so no plugin-supplied source is ever silently eaten. */
+      type: "markdown";
+      value: string;
+    };
 
 /**
  * Function provided by a plugin to build a panel view. Called by the
@@ -1632,11 +1646,83 @@ function renderPanelNode(node: PanelNode, key: number): ReactNode {
         key,
         style: { height: node.size ?? 8 },
       });
+    case "markdown":
+      return renderMarkdownBlocksReact(parseInlineMarkdown(node.value), key);
     default:
       return createElement(
         "div",
         { key, className: "panel-unknown", role: "alert" },
         `unknown panel node: ${JSON.stringify(node)}`,
+      );
+  }
+}
+
+function renderMarkdownBlocksReact(blocks: MdBlock[], key: number): ReactNode {
+  return createElement(
+    "div",
+    { key, className: "panel-markdown" },
+    blocks.map((b, i) => renderMarkdownBlockReact(b, i)),
+  );
+}
+
+function renderMarkdownBlockReact(block: MdBlock, key: number): ReactNode {
+  switch (block.type) {
+    case "heading":
+      return createElement(
+        `h${block.level}`,
+        { key, className: "panel-markdown-heading" },
+        block.children.map((c, i) => renderMarkdownInlineReact(c, i)),
+      );
+    case "paragraph":
+      return createElement(
+        "p",
+        { key, className: "panel-markdown-paragraph" },
+        block.children.map((c, i) => renderMarkdownInlineReact(c, i)),
+      );
+    case "list":
+      return createElement(
+        "ul",
+        { key, className: "panel-markdown-list" },
+        block.items.map((item, i) =>
+          createElement(
+            "li",
+            { key: i },
+            item.map((c, j) => renderMarkdownInlineReact(c, j)),
+          ),
+        ),
+      );
+  }
+}
+
+function renderMarkdownInlineReact(node: MdInline, key: number): ReactNode {
+  switch (node.type) {
+    case "text":
+      return node.value;
+    case "bold":
+      return createElement(
+        "strong",
+        { key },
+        node.children.map((c, i) => renderMarkdownInlineReact(c, i)),
+      );
+    case "italic":
+      return createElement(
+        "em",
+        { key },
+        node.children.map((c, i) => renderMarkdownInlineReact(c, i)),
+      );
+    case "code":
+      return createElement("code", { key }, node.value);
+    case "link":
+      return createElement(
+        "a",
+        { key, href: node.href, target: "_blank", rel: "noopener noreferrer" },
+        node.children.map((c, i) => renderMarkdownInlineReact(c, i)),
+      );
+    case "wikilink":
+      return createElement(
+        "span",
+        { key, className: "panel-markdown-wikilink" },
+        `[[${node.target}]]`,
       );
   }
 }

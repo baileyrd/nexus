@@ -408,7 +408,7 @@ export function registerBuiltins(): void {
         gap: 6,
         children: [
           ...(title ? [{ type: "heading" as const, value: title, level: 3 as const }] : []),
-          ...(body ? [{ type: "text" as const, value: body }] : []),
+          ...(body ? [{ type: "markdown" as const, value: body }] : []),
         ],
       };
     },
@@ -427,7 +427,7 @@ export function registerBuiltins(): void {
         gap: 8,
         children: [
           { type: "text", value: `[${kind.toUpperCase()}]`, strong: true },
-          { type: "text", value: body },
+          { type: "markdown", value: body },
         ],
       };
     },
@@ -440,13 +440,18 @@ export function registerBuiltins(): void {
     description: "Heavyweight notice block — renders as a heading-level banner.",
     render: (props) => {
       const level = typeof props.level === "string" ? props.level : "info";
-      const message = typeof props.message === "string" ? props.message : "";
+      const message =
+        typeof props.message === "string"
+          ? props.message
+          : typeof props.body === "string"
+            ? props.body
+            : "";
       return {
         type: "vstack",
         gap: 4,
         children: [
           { type: "heading", value: `${level.toUpperCase()} ALERT`, level: 3 },
-          { type: "text", value: message },
+          { type: "markdown", value: message },
         ],
       };
     },

@@ -48,6 +48,11 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 import type { MdxComponent, PanelNode } from "../contributions";
+import {
+  parseInlineMarkdown,
+  type MdBlock,
+  type MdInline,
+} from "../util/inlineMarkdown";
 
 /**
  * Regex matching a self-closing JSX tag whose name begins with an
@@ -177,11 +182,92 @@ function panelNodeToDom(node: PanelNode): HTMLElement {
       el.style.height = `${node.size ?? 8}px`;
       return el;
     }
+    case "markdown": {
+      return markdownBlocksToDom(parseInlineMarkdown(node.value));
+    }
     default: {
       const el = document.createElement("div");
       el.className = "mdx-panel-unknown";
       el.setAttribute("role", "alert");
       el.textContent = `unknown panel node: ${JSON.stringify(node)}`;
+      return el;
+    }
+  }
+}
+
+function markdownBlocksToDom(blocks: MdBlock[]): HTMLElement {
+  const container = document.createElement("div");
+  container.className = "mdx-panel-markdown";
+  for (const block of blocks) {
+    container.appendChild(markdownBlockToDom(block));
+  }
+  return container;
+}
+
+function markdownBlockToDom(block: MdBlock): HTMLElement {
+  switch (block.type) {
+    case "heading": {
+      const el = document.createElement(`h${block.level}`);
+      el.className = "mdx-panel-markdown-heading";
+      for (const c of block.children) el.appendChild(markdownInlineToDom(c));
+      return el;
+    }
+    case "paragraph": {
+      const el = document.createElement("p");
+      el.className = "mdx-panel-markdown-paragraph";
+      for (const c of block.children) el.appendChild(markdownInlineToDom(c));
+      return el;
+    }
+    case "list": {
+      const el = document.createElement("ul");
+      el.className = "mdx-panel-markdown-list";
+      for (const item of block.items) {
+        const li = document.createElement("li");
+        for (const c of item) li.appendChild(markdownInlineToDom(c));
+        el.appendChild(li);
+      }
+      return el;
+    }
+  }
+}
+
+function markdownInlineToDom(node: MdInline): Node {
+  switch (node.type) {
+    case "text":
+      return document.createTextNode(node.value);
+    case "bold": {
+      const el = document.createElement("strong");
+      for (const c of node.children) el.appendChild(markdownInlineToDom(c));
+      return el;
+    }
+    case "italic": {
+      const el = document.createElement("em");
+      for (const c of node.children) el.appendChild(markdownInlineToDom(c));
+      return el;
+    }
+    case "code": {
+      const el = document.createElement("code");
+      el.textContent = node.value;
+      return el;
+    }
+    case "link": {
+      const el = document.createElement("a");
+      // Only http(s) and mailto are safe targets from plugin-supplied
+      // source; anything else renders as plain text so a bad-faith
+      // author can't ship `javascript:…`.
+      const href = node.href;
+      if (/^(https?:|mailto:)/i.test(href)) {
+        el.href = href;
+        el.target = "_blank";
+        el.rel = "noopener noreferrer";
+      }
+      for (const c of node.children) el.appendChild(markdownInlineToDom(c));
+      return el;
+    }
+    case "wikilink": {
+      const el = document.createElement("span");
+      el.className = "mdx-panel-markdown-wikilink";
+      el.textContent = `[[${node.target}]]`;
       return el;
     }
   }
