@@ -4414,3 +4414,32 @@ select.plugin-settings-input {
   gap: 2px;
   padding: 0 8px;
 }
+
+/* ── Tighter file-tree rows under Forge ─────────────────────────
+ * User report: "padding around the files and folders". Sources
+ * tracked down:
+ *   - base `.file-tree-row { line-height: 1.6 }` inflates the row
+ *     line-box even when the inner button is flex-centered.
+ *   - base `.file-tree-toggle { padding-block: 2px }` was already
+ *     overridden by our `padding: 0 6px`, but keeping belt-and-
+ *     braces via an explicit longhand reset.
+ *   - `.file-tree { padding: 4px 0 }` on the outer ul adds an extra
+ *     line of air above the first row. */
+
+:root[data-theme-id="nexus-forge"] .file-tree-row {
+  line-height: 1.2;
+}
+
+:root[data-theme-id="nexus-forge"] .file-tree-file,
+:root[data-theme-id="nexus-forge"] .file-tree-toggle {
+  padding-block: 0;
+  line-height: 1.2;
+}
+
+:root[data-theme-id="nexus-forge"] .file-tree {
+  padding: 2px 6px 10px;
+}
+
+/* Row height comes from the flex button's explicit height: 26px
+ * declared in Stage 2. No change there — matches the design's
+ * 26px tree-row spec in Nexus Forge.html. */
