@@ -610,6 +610,7 @@ fn register_core_plugins(
                     ("plan", nexus_agent::HANDLER_PLAN),
                     ("run", nexus_agent::HANDLER_RUN),
                     ("run_plan", nexus_agent::HANDLER_RUN_PLAN),
+                    ("execute_step", nexus_agent::HANDLER_EXECUTE_STEP),
                 ],
             ),
             forge_root,

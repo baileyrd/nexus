@@ -56,3 +56,13 @@ export function agentRun(
 export function agentRunPlan(plan: AgentPlan): Promise<Observation> {
   return invoke<Observation>("agent_run_plan", { plan });
 }
+
+/** Execute a single step of a plan. Callers drive the per-step
+ *  approval loop themselves — pass the same `plan` each call and
+ *  increment `index` after each successful step. */
+export function agentExecuteStep(
+  plan: AgentPlan,
+  index: number,
+): Promise<StepResult> {
+  return invoke<StepResult>("agent_execute_step", { plan, index });
+}

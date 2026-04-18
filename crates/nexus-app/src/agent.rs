@@ -78,3 +78,20 @@ pub async fn agent_run_plan(
 ) -> Result<serde_json::Value, String> {
     call_agent(runtime, "run_plan", serde_json::json!({ "plan": plan })).await
 }
+
+/// Execute a single step of a preset plan. Lets UIs drive a per-step
+/// approval loop: show the plan, approve step 0, run it, show the
+/// response, approve step 1, etc.
+#[tauri::command]
+pub async fn agent_execute_step(
+    plan: serde_json::Value,
+    index: usize,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_agent(
+        runtime,
+        "execute_step",
+        serde_json::json!({ "plan": plan, "index": index }),
+    )
+    .await
+}

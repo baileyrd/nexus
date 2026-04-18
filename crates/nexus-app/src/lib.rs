@@ -212,6 +212,7 @@ pub fn run() {
             agent::agent_plan,
             agent::agent_run,
             agent::agent_run_plan,
+            agent::agent_execute_step,
             skills::skills_list,
             skills::skills_get,
             skills::skills_render,

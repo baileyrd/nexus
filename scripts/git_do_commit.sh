@@ -3,23 +3,21 @@ export PATH=/home/baileyrd/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 cd /mnt/c/Users/baile/dev/Nexus || exit 1
 
 git add -A
-git commit -m "feat(chat): session picker UI (PRD-12 §8)
+git commit -m "feat(agent): per-step execution API (PRD-15 §3.4)
 
-Chat panel gains a <select> + 'New' / 'Delete' controls wired to
-the com.nexus.ai::session_list / session_delete handlers added in
-the previous commit. Active session id persists to localStorage so
-the previous conversation re-opens on launch. First load falls back
-to the legacy single-session file when multi-session is empty, then
-migrates into chat/sessions/default.json on first save — existing
-users don't lose their transcript during the rollout.
+PlanExecutor gains execute_step_at(plan, index) -> StepResult for
+single-step execution outside the policy loop. Exposed as
+com.nexus.agent::execute_step (handler id 4) + agent_execute_step
+Tauri command + agentExecuteStep TS helper, so UIs can drive a
+per-step approval flow without wiring a custom StepPolicy through
+Tauri events: iterate the plan, pause for approval between steps,
+call execute_step when the user clicks Approve.
 
-Titles are auto-derived from the first user turn (truncated to 48
-chars) so the picker surfaces something useful without asking users
-to name each session.
+Library stays kernel-free; the new handler reuses the same
+KernelToolBridge as run_plan. 2 new unit tests cover the happy path
+and out-of-bounds index reporting.
 
-Microkernel invariant held: all state lives in com.nexus.ai over
-ipc_call; ChatPanel only touches plugin APIs + localStorage for the
-currently-active id.
+Stepwise UI in ChatPanel on top of this primitive is the follow-up.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 

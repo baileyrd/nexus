@@ -155,6 +155,38 @@ impl<D: ToolDispatcher> PlanExecutor<D> {
         }
     }
 
+    /// Execute a single step at `index` in the plan without touching
+    /// any surrounding state. Unlike [`Self::run`] this doesn't run
+    /// the policy — the caller has already decided the step is OK —
+    /// and returns a single [`StepResult`]. Enables per-step approval
+    /// flows where the UI drives the loop.
+    ///
+    /// # Errors
+    /// - [`AgentError::PlanningFailed`] when `index` is out of bounds.
+    /// - [`AgentError::ToolFailed`] when the dispatched tool call
+    ///   errors. The error carries the step id so the UI can still
+    ///   render the partial result.
+    pub async fn execute_step_at(
+        &self,
+        plan: &Plan,
+        index: usize,
+    ) -> Result<StepResult, AgentError> {
+        let step = plan.steps.get(index).ok_or_else(|| {
+            AgentError::PlanningFailed(format!(
+                "step index {index} out of bounds (len={})",
+                plan.steps.len()
+            ))
+        })?;
+        match self.run_step(step).await {
+            Ok(resp) => Ok(StepResult {
+                step_id: step.id.clone(),
+                response: resp,
+                status: StepStatus::Ok,
+            }),
+            Err(err) => Err(err),
+        }
+    }
+
     async fn dispatch_tool(
         &self,
         step: &Step,
@@ -283,6 +315,40 @@ mod tests {
         let obs = executor.run(&plan).await.unwrap();
         assert!(obs.success);
         assert_eq!(obs.steps.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn execute_step_at_runs_a_single_tool_call() {
+        let dispatcher = RecordingDispatcher {
+            calls: Arc::new(AtomicUsize::new(0)),
+            reply: serde_json::json!({"hit": 1}),
+            fail_on: None,
+        };
+        let calls = Arc::clone(&dispatcher.calls);
+        let executor = PlanExecutor::new(dispatcher);
+        let plan = make_plan_with_tools(3);
+        let result = executor.execute_step_at(&plan, 1).await.unwrap();
+        assert_eq!(result.step_id, "s1");
+        assert_eq!(result.status, StepStatus::Ok);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn execute_step_at_reports_out_of_bounds() {
+        struct NeverDispatch;
+        #[async_trait]
+        impl ToolDispatcher for NeverDispatch {
+            async fn dispatch(
+                &self,
+                _call: &ToolCall,
+            ) -> Result<serde_json::Value, String> {
+                panic!("unused");
+            }
+        }
+        let executor = PlanExecutor::new(NeverDispatch);
+        let plan = make_plan_with_tools(1);
+        let err = executor.execute_step_at(&plan, 5).await.unwrap_err();
+        assert!(matches!(err, AgentError::PlanningFailed(_)));
     }
 
     #[tokio::test]

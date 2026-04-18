@@ -47,6 +47,9 @@ pub const HANDLER_PLAN: u32 = 1;
 pub const HANDLER_RUN: u32 = 2;
 /// `run_plan` handler id — execute a preset plan.
 pub const HANDLER_RUN_PLAN: u32 = 3;
+/// `execute_step` handler id — execute a single step of a preset
+/// plan. Enables per-step approval flows driven by the UI.
+pub const HANDLER_EXECUTE_STEP: u32 = 4;
 
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
@@ -105,6 +108,7 @@ impl CorePlugin for AgentCorePlugin {
                 HANDLER_PLAN => handle_plan(ctx, &args).await,
                 HANDLER_RUN => handle_run(ctx, &args).await,
                 HANDLER_RUN_PLAN => handle_run_plan(ctx, &args).await,
+                HANDLER_EXECUTE_STEP => handle_execute_step(ctx, &args).await,
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
         }))
@@ -175,6 +179,28 @@ async fn handle_run_plan(
 ) -> Result<serde_json::Value, PluginError> {
     let a: PlanArgs = parse(args, "run_plan")?;
     run_plan_internal(ctx, a.plan).await
+}
+
+#[derive(Deserialize)]
+struct ExecuteStepArgs {
+    plan: Plan,
+    index: usize,
+}
+
+async fn handle_execute_step(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: ExecuteStepArgs = parse(args, "execute_step")?;
+    let executor = PlanExecutor::new(KernelToolBridge {
+        ctx,
+        timeout: DEFAULT_TOOL_TIMEOUT,
+    });
+    let result = executor
+        .execute_step_at(&a.plan, a.index)
+        .await
+        .map_err(agent_err)?;
+    to_value(&result, "execute_step")
 }
 
 async fn run_plan_internal(

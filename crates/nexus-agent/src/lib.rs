@@ -49,7 +49,7 @@ pub use archetypes::{
     WRITER_ID, WRITER_SYSTEM_PROMPT,
 };
 pub use core_plugin::{
-    AgentCorePlugin, HANDLER_PLAN, HANDLER_RUN, HANDLER_RUN_PLAN, PLUGIN_ID,
+    AgentCorePlugin, HANDLER_EXECUTE_STEP, HANDLER_PLAN, HANDLER_RUN, HANDLER_RUN_PLAN, PLUGIN_ID,
 };
 pub use executor::{PlanExecutor, StepResult, StepStatus};
 pub use llm::{ChatDriver, LlmAgent, DEFAULT_SYSTEM_PROMPT};
