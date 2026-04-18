@@ -83,6 +83,8 @@ enum Commands {
 
     /// AI assistant operations
     Ai(AiArgs),
+    /// Agent operations (PRD-15): plan + execute tool-calling loops
+    Agent(AgentArgs),
     /// Process management (coming soon)
     Proc(StubArgs),
     /// Terminal / PTY session operations (PRD-09)
@@ -273,6 +275,35 @@ enum AiCommand {
     Status,
     /// Show AI configuration
     Config,
+}
+
+// ---------------------------------------------------------------------------
+// Agent (PRD-15)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct AgentArgs {
+    #[command(subcommand)]
+    command: AgentCommand,
+}
+
+#[derive(Subcommand)]
+enum AgentCommand {
+    /// Produce a plan for a goal without executing it
+    Plan {
+        /// Natural-language goal
+        goal: String,
+    },
+    /// Plan + execute a goal end-to-end
+    Run {
+        /// Natural-language goal
+        goal: String,
+    },
+    /// Execute a preset plan from a JSON file produced by `plan`
+    RunPlan {
+        /// Path to the plan JSON file
+        file: PathBuf,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -935,6 +966,14 @@ fn main() {
             AiCommand::Embed { file } => commands::ai::embed(&mut app, file.as_deref()),
             AiCommand::Status => commands::ai::status(&mut app),
             AiCommand::Config => commands::ai::config(&mut app),
+        },
+
+        Commands::Agent(args) => match args.command {
+            AgentCommand::Plan { goal } => commands::agent::plan(&mut app, &goal),
+            AgentCommand::Run { goal } => commands::agent::run(&mut app, &goal),
+            AgentCommand::RunPlan { file } => {
+                commands::agent::run_plan(&mut app, &file.to_string_lossy())
+            }
         },
 
         // Stub commands — implemented in later milestones.
