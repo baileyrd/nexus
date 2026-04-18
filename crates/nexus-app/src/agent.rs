@@ -95,3 +95,40 @@ pub async fn agent_execute_step(
     )
     .await
 }
+
+/// List persisted plan histories saved after every `agent_run` /
+/// `agent_run_plan` completion.
+#[tauri::command]
+pub async fn agent_history_list(
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_agent(runtime, "history_list", serde_json::json!({})).await
+}
+
+/// Load one persisted plan history entry by plan id.
+#[tauri::command]
+pub async fn agent_history_get(
+    plan_id: String,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_agent(
+        runtime,
+        "history_get",
+        serde_json::json!({ "plan_id": plan_id }),
+    )
+    .await
+}
+
+/// Remove one persisted plan history entry.
+#[tauri::command]
+pub async fn agent_history_delete(
+    plan_id: String,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_agent(
+        runtime,
+        "history_delete",
+        serde_json::json!({ "plan_id": plan_id }),
+    )
+    .await
+}

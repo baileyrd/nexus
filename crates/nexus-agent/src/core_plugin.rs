@@ -50,6 +50,14 @@ pub const HANDLER_RUN_PLAN: u32 = 3;
 /// `execute_step` handler id — execute a single step of a preset
 /// plan. Enables per-step approval flows driven by the UI.
 pub const HANDLER_EXECUTE_STEP: u32 = 4;
+/// `history_list` handler id — enumerate persisted plan histories
+/// under `<forge>/.forge/agent/history/`.
+pub const HANDLER_HISTORY_LIST: u32 = 5;
+/// `history_get` handler id — load one persisted history entry by
+/// plan id.
+pub const HANDLER_HISTORY_GET: u32 = 6;
+/// `history_delete` handler id — remove one persisted history entry.
+pub const HANDLER_HISTORY_DELETE: u32 = 7;
 
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
@@ -109,6 +117,9 @@ impl CorePlugin for AgentCorePlugin {
                 HANDLER_RUN => handle_run(ctx, &args).await,
                 HANDLER_RUN_PLAN => handle_run_plan(ctx, &args).await,
                 HANDLER_EXECUTE_STEP => handle_execute_step(ctx, &args).await,
+                HANDLER_HISTORY_LIST => handle_history_list(ctx).await,
+                HANDLER_HISTORY_GET => handle_history_get(ctx, &args).await,
+                HANDLER_HISTORY_DELETE => handle_history_delete(ctx, &args).await,
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
         }))
@@ -150,7 +161,7 @@ async fn handle_run(
     let a: GoalArgs = parse(args, "run")?;
     let agent = build_planner(Arc::clone(&ctx), &a).await;
     let plan = agent.plan(&a.goal).await.map_err(agent_err)?;
-    run_plan_internal(ctx, plan).await
+    run_plan_internal(ctx, plan, Some(a.goal)).await
 }
 
 async fn build_planner(
@@ -178,7 +189,7 @@ async fn handle_run_plan(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let a: PlanArgs = parse(args, "run_plan")?;
-    run_plan_internal(ctx, a.plan).await
+    run_plan_internal(ctx, a.plan, None).await
 }
 
 #[derive(Deserialize)]
@@ -206,13 +217,162 @@ async fn handle_execute_step(
 async fn run_plan_internal(
     ctx: Arc<KernelPluginContext>,
     plan: Plan,
+    goal: Option<String>,
 ) -> Result<serde_json::Value, PluginError> {
     let executor = PlanExecutor::new(KernelToolBridge {
-        ctx,
+        ctx: Arc::clone(&ctx),
         timeout: DEFAULT_TOOL_TIMEOUT,
     });
     let observation = executor.run(&plan).await.map_err(agent_err)?;
+    save_history(&ctx, &plan, &observation, goal.as_deref()).await;
     to_value(&observation, "run")
+}
+
+// ── History persistence ─────────────────────────────────────────────────────
+
+const HISTORY_DIR: &str = ".forge/agent/history";
+
+fn history_path(plan_id: &str) -> Option<std::path::PathBuf> {
+    // Same alphabet as com.nexus.ai session ids — belt-and-braces
+    // path-traversal guard since plan ids are model-derived.
+    if plan_id.is_empty() || plan_id.len() > 96 {
+        return None;
+    }
+    let safe = plan_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !safe {
+        return None;
+    }
+    Some(std::path::PathBuf::from(HISTORY_DIR).join(format!("{plan_id}.json")))
+}
+
+/// Best-effort — history failures are logged but never bubble up as
+/// plugin errors. The caller has a good run; persistence is
+/// secondary.
+async fn save_history(
+    ctx: &KernelPluginContext,
+    plan: &Plan,
+    observation: &crate::Observation,
+    goal: Option<&str>,
+) {
+    let Some(path) = history_path(&plan.id) else {
+        tracing::warn!(plan_id = %plan.id, "skipping history save — unsafe plan id");
+        return;
+    };
+    let record = serde_json::json!({
+        "plan_id": plan.id,
+        "goal": goal,
+        "plan": plan,
+        "observation": observation,
+        "created_at": timestamp(),
+    });
+    match serde_json::to_vec_pretty(&record) {
+        Ok(bytes) => {
+            if let Err(err) = ctx.write_file(&path, &bytes).await {
+                tracing::warn!(plan_id = %plan.id, %err, "history write failed");
+            }
+        }
+        Err(err) => tracing::warn!(plan_id = %plan.id, %err, "history encode failed"),
+    }
+}
+
+fn timestamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format!("ts-{secs}")
+}
+
+async fn handle_history_list(
+    ctx: Arc<KernelPluginContext>,
+) -> Result<serde_json::Value, PluginError> {
+    let dir = std::path::Path::new(HISTORY_DIR);
+    let entries = match ctx.list_files(dir).await {
+        Ok(v) => v,
+        Err(_) => return Ok(serde_json::Value::Array(Vec::new())),
+    };
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for path in entries {
+        let Some(plan_id) = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| history_path(s).is_some())
+            .map(ToString::to_string)
+        else {
+            continue;
+        };
+        let bytes = match ctx.read_file(&path).await {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let record: serde_json::Value = match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let goal = record
+            .get("goal")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string);
+        let created_at = record
+            .get("created_at")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string);
+        let success = record
+            .get("observation")
+            .and_then(|o| o.get("success"))
+            .and_then(|v| v.as_bool());
+        let step_count = record
+            .get("observation")
+            .and_then(|o| o.get("steps"))
+            .and_then(|v| v.as_array())
+            .map_or(0, Vec::len);
+        out.push(serde_json::json!({
+            "plan_id": plan_id,
+            "goal": goal,
+            "created_at": created_at,
+            "success": success,
+            "steps": step_count,
+            "bytes": bytes.len(),
+        }));
+    }
+    Ok(serde_json::Value::Array(out))
+}
+
+#[derive(Deserialize)]
+struct PlanIdArgs {
+    plan_id: String,
+}
+
+async fn handle_history_get(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: PlanIdArgs = parse(args, "history_get")?;
+    let path = history_path(&a.plan_id)
+        .ok_or_else(|| exec_err(format!("history_get: invalid plan_id '{}'", a.plan_id)))?;
+    let bytes = ctx
+        .read_file(&path)
+        .await
+        .map_err(|e| exec_err(format!("history_get: {e}")))?;
+    serde_json::from_slice::<serde_json::Value>(&bytes)
+        .map_err(|e| exec_err(format!("history_get: invalid JSON on disk: {e}")))
+}
+
+async fn handle_history_delete(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: PlanIdArgs = parse(args, "history_delete")?;
+    let path = history_path(&a.plan_id).ok_or_else(|| {
+        exec_err(format!("history_delete: invalid plan_id '{}'", a.plan_id))
+    })?;
+    ctx.delete_file(&path)
+        .await
+        .map_err(|e| exec_err(format!("history_delete: {e}")))?;
+    Ok(serde_json::json!({ "deleted": true, "plan_id": a.plan_id }))
 }
 
 // ── Skill-aware system prompt assembly ─────────────────────────────────────

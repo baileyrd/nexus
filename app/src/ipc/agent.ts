@@ -66,3 +66,35 @@ export function agentExecuteStep(
 ): Promise<StepResult> {
   return invoke<StepResult>("agent_execute_step", { plan, index });
 }
+
+export interface AgentHistoryEntry {
+  plan_id: string;
+  goal?: string | null;
+  created_at?: string | null;
+  success?: boolean | null;
+  steps: number;
+  bytes: number;
+}
+
+export interface AgentHistoryRecord {
+  plan_id: string;
+  goal?: string | null;
+  plan: AgentPlan;
+  observation: Observation;
+  created_at?: string | null;
+}
+
+/** Every persisted plan history saved under
+ *  `.forge/agent/history/*.json` — populated automatically on each
+ *  `agent_run` / `agent_run_plan` completion. */
+export function agentHistoryList(): Promise<AgentHistoryEntry[]> {
+  return invoke<AgentHistoryEntry[]>("agent_history_list");
+}
+
+export function agentHistoryGet(planId: string): Promise<AgentHistoryRecord> {
+  return invoke<AgentHistoryRecord>("agent_history_get", { planId });
+}
+
+export function agentHistoryDelete(planId: string): Promise<void> {
+  return invoke<void>("agent_history_delete", { planId });
+}
