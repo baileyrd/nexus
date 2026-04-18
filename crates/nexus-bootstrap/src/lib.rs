@@ -557,6 +557,7 @@ fn register_core_plugins(
                         nexus_skills::HANDLER_TRIGGERED_BY,
                     ),
                     ("reload", nexus_skills::HANDLER_RELOAD),
+                    ("render", nexus_skills::HANDLER_RENDER),
                 ],
             ),
             forge_root,

@@ -42,6 +42,29 @@ pub fn triggered(app: &mut App, text: &str) -> Result<()> {
     Ok(())
 }
 
+/// `nexus skill render <id> [--param k=v ...]` — render the skill
+/// body with parameter substitution applied.
+pub fn render(app: &mut App, id: &str, params: &[String]) -> Result<()> {
+    let mut values = serde_json::Map::new();
+    for raw in params {
+        let (k, v) = raw
+            .split_once('=')
+            .with_context(|| format!("invalid --param '{raw}': expected KEY=VALUE"))?;
+        values.insert(k.trim().to_string(), Value::String(v.to_string()));
+    }
+    let response = call(
+        app,
+        "render",
+        serde_json::json!({ "id": id, "values": values }),
+    )?;
+    if let Some(body) = response.get("body").and_then(Value::as_str) {
+        print!("{body}");
+    } else {
+        eprintln!("unexpected response shape: {response}");
+    }
+    Ok(())
+}
+
 /// `nexus skill reload` — re-scan the skills directory.
 pub fn reload(app: &mut App) -> Result<()> {
     let response = call(app, "reload", serde_json::json!({}))?;

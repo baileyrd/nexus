@@ -386,6 +386,14 @@ enum SkillCommand {
     },
     /// Re-scan the `.forge/skills/` directory
     Reload,
+    /// Render a skill's body with parameter substitution
+    Render {
+        /// Skill id
+        id: String,
+        /// Parameter override(s) in `key=value` form (repeatable)
+        #[arg(long = "param", short = 'p', value_name = "KEY=VALUE")]
+        params: Vec<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1064,6 +1072,9 @@ fn main() {
             SkillCommand::Context { context } => commands::skill::context(&mut app, &context),
             SkillCommand::Triggered { text } => commands::skill::triggered(&mut app, &text),
             SkillCommand::Reload => commands::skill::reload(&mut app),
+            SkillCommand::Render { id, params } => {
+                commands::skill::render(&mut app, &id, &params)
+            }
         },
 
         Commands::Proc(args) => match args.command {

@@ -15,6 +15,7 @@
 //! | 3  | `list_by_context`  | `{ context }`      | Skills whose `applicable_contexts` match |
 //! | 4  | `triggered_by`     | `{ text }`         | Skills whose trigger matches `text`      |
 //! | 5  | `reload`           | `{}`               | Re-scan the `<forge>/.forge/skills` dir  |
+//! | 6  | `render`           | `{ id, values? }`  | Render a skill's body with parameter substitution |
 //!
 //! Ids are append-only.
 
@@ -39,6 +40,8 @@ pub const HANDLER_LIST_BY_CONTEXT: u32 = 3;
 pub const HANDLER_TRIGGERED_BY: u32 = 4;
 /// `reload` handler id.
 pub const HANDLER_RELOAD: u32 = 5;
+/// `render` handler id.
+pub const HANDLER_RENDER: u32 = 6;
 
 /// Core plugin — holds the skills root path + an in-memory registry
 /// behind a mutex so dispatches stay `Send + Sync`.
@@ -94,6 +97,7 @@ impl CorePlugin for SkillsCorePlugin {
             HANDLER_LIST_BY_CONTEXT => self.dispatch_list_by_context(args),
             HANDLER_TRIGGERED_BY => self.dispatch_triggered_by(args),
             HANDLER_RELOAD => self.dispatch_reload(),
+            HANDLER_RENDER => self.dispatch_render(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -145,6 +149,40 @@ impl SkillsCorePlugin {
         let reg = self.registry.lock().map_err(poisoned)?;
         let skills: Vec<_> = reg.triggered_by(&a.text).cloned().collect();
         to_value(&skills, "triggered_by")
+    }
+
+    fn dispatch_render(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        #[derive(Deserialize)]
+        struct Args {
+            id: String,
+            #[serde(default)]
+            values: std::collections::HashMap<String, serde_json::Value>,
+        }
+        let a: Args = parse(args, "render")?;
+        let reg = self.registry.lock().map_err(poisoned)?;
+        let skill = reg
+            .get(&a.id)
+            .ok_or_else(|| exec_err(format!("no skill with id '{}'", a.id)))?;
+        let values: std::collections::HashMap<String, serde_yaml::Value> = a
+            .values
+            .into_iter()
+            .map(|(k, v)| {
+                // Round-trip JSON → YAML so enum comparisons match the
+                // skill's declared `values:` list shape.
+                let y = serde_yaml::to_value(&v).unwrap_or(serde_yaml::Value::Null);
+                (k, y)
+            })
+            .collect();
+        let rendered = crate::render(skill, &values)
+            .map_err(|e| exec_err(format!("render: {e}")))?;
+        Ok(serde_json::json!({
+            "id": skill.meta.id,
+            "name": skill.meta.name,
+            "body": rendered,
+        }))
     }
 
     fn dispatch_reload(&self) -> Result<serde_json::Value, PluginError> {
@@ -284,6 +322,54 @@ body A
             )
             .unwrap();
         assert_eq!(v.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn render_substitutes_declared_parameters() {
+        const SKILL_WITH_PARAM: &str = r#"---
+name: P
+id: skill-p
+description: d
+version: 1.0.0
+author: me
+created: 2026-04-18
+parameters:
+  - name: tone
+    type: string
+    default: friendly
+---
+Write in a {{ tone }} style.
+"#;
+        let tmp = TempDir::new().unwrap();
+        write_skill(tmp.path(), "p.skill.md", SKILL_WITH_PARAM);
+        let mut plugin = SkillsCorePlugin::open(tmp.path().to_path_buf());
+        let v = plugin
+            .dispatch(
+                HANDLER_RENDER,
+                &serde_json::json!({ "id": "skill-p", "values": { "tone": "formal" } }),
+            )
+            .unwrap();
+        assert_eq!(v["body"], "Write in a formal style.\n");
+
+        let v = plugin
+            .dispatch(HANDLER_RENDER, &serde_json::json!({ "id": "skill-p" }))
+            .unwrap();
+        assert_eq!(v["body"], "Write in a friendly style.\n");
+    }
+
+    #[test]
+    fn render_errors_on_unknown_skill() {
+        let tmp = TempDir::new().unwrap();
+        let mut plugin = SkillsCorePlugin::open(tmp.path().to_path_buf());
+        let err = plugin
+            .dispatch(HANDLER_RENDER, &serde_json::json!({ "id": "missing" }))
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("no skill"));
+            }
+            _ => panic!("unexpected error"),
+        }
     }
 
     #[test]

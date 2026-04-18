@@ -32,13 +32,15 @@
 pub mod core_plugin;
 mod parse;
 mod registry;
+mod substitute;
 
 pub use core_plugin::{
     SkillsCorePlugin, HANDLER_GET, HANDLER_LIST, HANDLER_LIST_BY_CONTEXT, HANDLER_RELOAD,
-    HANDLER_TRIGGERED_BY, PLUGIN_ID,
+    HANDLER_RENDER, HANDLER_TRIGGERED_BY, PLUGIN_ID,
 };
 pub use parse::{parse_skill_file, parse_skill_text, SkillParseError};
 pub use registry::{SkillRegistry, SkillRegistryError};
+pub use substitute::{render, SubstitutionError};
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
