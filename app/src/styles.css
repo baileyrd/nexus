@@ -4314,3 +4314,42 @@ select.plugin-settings-input {
 :root[data-theme-id="nexus-forge"] .side-panel-preview > .panel-selector {
   display: none;
 }
+
+/* ── Aggressive flush-to-topbar under Forge ─────────────────────
+ * Hunts down whatever wrapper is still injecting ~40px between the
+ * 36px topbar and the panel headers. Likely sources: inherited
+ * browser margins on <section>, lingering .workspace-view padding,
+ * or a flex/grid cell not actually filling its parent. */
+
+:root[data-theme-id="nexus-forge"] .app {
+  height: 100vh;
+  max-height: 100vh;
+}
+
+:root[data-theme-id="nexus-forge"] main,
+:root[data-theme-id="nexus-forge"] .workspace-view,
+:root[data-theme-id="nexus-forge"] .workspace-frame {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+:root[data-theme-id="nexus-forge"] main {
+  height: 100%;
+}
+
+:root[data-theme-id="nexus-forge"] .workspace-view {
+  height: 100%;
+  min-height: 0;
+}
+
+:root[data-theme-id="nexus-forge"] .workspace-frame {
+  height: 100%;
+  min-height: 0;
+}
+
+/* Belt-and-braces: the .workspace-view section used to show a
+ * header + preset-picker (both removed); any residual gap from
+ * its `> *:first-child` margin is killed here. */
+:root[data-theme-id="nexus-forge"] .workspace-view > * {
+  margin-top: 0;
+}
