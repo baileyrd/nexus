@@ -207,6 +207,7 @@ fn register_core_plugins(
 ) -> Result<()> {
     use nexus_ai::AiCorePlugin;
     use nexus_editor::EditorCorePlugin;
+    use nexus_git::GitCorePlugin;
     use nexus_security::SecurityCorePlugin;
     use nexus_storage::{StorageConfig, StorageCorePlugin};
     use nexus_terminal::TerminalCorePlugin;
@@ -495,6 +496,40 @@ fn register_core_plugins(
             Box::new(AiCorePlugin::new()),
         )
         .context("failed to register com.nexus.ai")?;
+
+    // Git integration — wraps GitWorker behind IPC and publishes bus events
+    // (branch_changed, commit, dirty_changed) for any plugin or UI that
+    // subscribes to `com.nexus.git.*`.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.git",
+                "Git",
+                LifecycleFlags {
+                    on_init: true,
+                    on_start: true,
+                    on_stop: true,
+                },
+                &[
+                    ("status", nexus_git::core_plugin::HANDLER_STATUS),
+                    ("log", nexus_git::core_plugin::HANDLER_LOG),
+                    ("branches", nexus_git::core_plugin::HANDLER_BRANCHES),
+                    ("file_status", nexus_git::core_plugin::HANDLER_FILE_STATUS),
+                    ("diff_file", nexus_git::core_plugin::HANDLER_DIFF_FILE),
+                    ("stage_file", nexus_git::core_plugin::HANDLER_STAGE_FILE),
+                    ("unstage_file", nexus_git::core_plugin::HANDLER_UNSTAGE_FILE),
+                    ("commit", nexus_git::core_plugin::HANDLER_COMMIT),
+                    ("stage_all", nexus_git::core_plugin::HANDLER_STAGE_ALL),
+                    ("unstage_all", nexus_git::core_plugin::HANDLER_UNSTAGE_ALL),
+                ],
+            ),
+            forge_root,
+            Box::new(GitCorePlugin::new(
+                forge_root.to_path_buf(),
+                Some(Arc::clone(event_bus)),
+            )),
+        )
+        .context("failed to register com.nexus.git")?;
 
     // Terminal & process manager — PRD-09. Pure-library crate wrapped
     // behind `com.nexus.terminal` so UI / script plugins reach it over
