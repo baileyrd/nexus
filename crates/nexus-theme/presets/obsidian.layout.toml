@@ -188,25 +188,14 @@ side = "right"
 width = 300
 collapsed = false
 miniMode = false
-panelOrder = ["backlinks", "outgoing-links", "tags-note", "outline"]
+panelOrder = ["outline", "backlinks"]
 
-[[rightSidePanel.panels]]
-id = "backlinks"
-title = "Backlinks"
-icon = "link-incoming"
-visible = false
-
-[[rightSidePanel.panels]]
-id = "outgoing-links"
-title = "Outgoing links"
-icon = "link-outgoing"
-visible = false
-
-[[rightSidePanel.panels]]
-id = "tags-note"
-title = "Tags"
-icon = "tag"
-visible = false
+# Inspector tabs, in the order they appear in the tab row.
+# The Forge design exposes Outline / Backlinks / Graph; Graph isn't
+# implemented yet, so the live set is Outline + Backlinks. Tags and
+# Outgoing-links remain available as contributions — they can be
+# re-added to this preset or surfaced in a custom layout when the
+# user wants them.
 
 [[rightSidePanel.panels]]
 id = "outline"
@@ -220,6 +209,12 @@ toolbar = [
   { id = "outline.sort-field", icon = "chevrons-up-down", tooltip = "Sort field", action = { kind = "invokeCommand", command = "outline.sort-field" } },
   { id = "outline.search", icon = "search", tooltip = "Search headings", action = { kind = "invokeCommand", command = "outline.search" } },
 ]
+
+[[rightSidePanel.panels]]
+id = "backlinks"
+title = "Backlinks"
+icon = "link-incoming"
+visible = false
 
 [bottomPanel]
 height = 200

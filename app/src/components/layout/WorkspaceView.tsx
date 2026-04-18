@@ -4,6 +4,8 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  Star,
+  X,
 } from "lucide-react";
 import type { Panel, SidePanel } from "../../bindings";
 import { useContentType } from "../../contributions";
@@ -93,6 +95,25 @@ export function WorkspaceView() {
             {!layout.rightSidePanel.collapsed && (
               <div className="right-side-panel-header">
                 <span className="right-side-panel-title">Inspector</span>
+                <div className="right-side-panel-header-actions">
+                  <button
+                    type="button"
+                    className="forge-icon-btn"
+                    title="Pin inspector"
+                    aria-label="Pin inspector"
+                  >
+                    <Star size={14} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="forge-icon-btn"
+                    title="Hide inspector"
+                    aria-label="Hide inspector"
+                    onClick={() => toggleSidePanelCollapsed("right")}
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </div>
               </div>
             )}
             <div className="right-side-panel-toolbar">

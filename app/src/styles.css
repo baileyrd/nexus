@@ -4173,3 +4173,34 @@ select.plugin-settings-input {
   font-size: 12px;
   font-style: italic;
 }
+
+/* ── Outline section sub-header + Inspector header actions ──────
+ * "DOCUMENT OUTLINE · N HDRS" sub-row inside the Outline panel, plus
+ * the right-cluster (star/×) inside the Inspector header. Scoped to
+ * Forge so other themes keep their minimal panel chrome. */
+
+:root[data-theme-id="nexus-forge"] .outline-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 4px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nx-text-muted, #7F7A70);
+}
+
+:root[data-theme-id="nexus-forge"] .outline-section-count {
+  font-family: var(--nx-type-mono, 'JetBrains Mono', monospace);
+  color: var(--nx-text-muted, #7F7A70);
+}
+
+:root[data-theme-id="nexus-forge"] .right-side-panel-header {
+  justify-content: space-between;
+}
+
+.right-side-panel-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}

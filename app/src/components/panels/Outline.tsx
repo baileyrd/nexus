@@ -56,7 +56,12 @@ export function Outline() {
   // readable; nested h3/h4 keep the indent but drop the index slot.
   let indexCounter = 0;
   return (
-    <ul className="outline" role="tree">
+    <>
+      <div className="outline-section">
+        <span className="outline-section-label">Document outline</span>
+        <span className="outline-section-count">{headings.length} hdrs</span>
+      </div>
+      <ul className="outline" role="tree">
       {headings.map((h, i) => {
         const index = h.level <= 2 ? ++indexCounter : null;
         const words = sectionWords[i] ?? 0;
@@ -86,7 +91,8 @@ export function Outline() {
           </li>
         );
       })}
-    </ul>
+      </ul>
+    </>
   );
 }
 
