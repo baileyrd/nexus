@@ -325,6 +325,35 @@ export function registerBuiltins(): void {
     icon: "folder",
   });
 
+  // ── Layout presets (PRD-07 §6) ───────────────────────────────────────────
+  // The retired pre-Forge chrome had a visible preset-picker row; that
+  // space is reclaimed, and presets now live in the palette instead.
+  // Core presets are compiled into nexus-theme's preset registry
+  // (`crates/nexus-theme/src/preset.rs`). Adding a new core preset
+  // means adding an entry here too — plugin-contributed presets
+  // should self-register via their manifest.
+  const CORE_PRESETS: { id: string; title: string }[] = [
+    { id: "obsidian", title: "Obsidian" },
+    { id: "writing", title: "Writing" },
+    { id: "reviewing", title: "Reviewing" },
+    { id: "coding", title: "Coding" },
+    { id: "vibe", title: "Vibe coding" },
+    { id: "dev", title: "Dev" },
+  ];
+  for (const preset of CORE_PRESETS) {
+    const commandId = `workspace.switch-layout.${preset.id}`;
+    contributions.registerCommand(commandId, async () => {
+      await useLayoutStore.getState().loadPreset(preset.id);
+    });
+    contributions.registerPaletteCommand({
+      id: commandId,
+      commandId,
+      title: `Switch layout: ${preset.title}`,
+      category: "Workspace",
+      icon: "layout-dashboard",
+    });
+  }
+
   // ── Menu-bar items (PRD-07 §7.5) ─────────────────────────────────────────
   // File menu
   contributions.registerMenuItem({
