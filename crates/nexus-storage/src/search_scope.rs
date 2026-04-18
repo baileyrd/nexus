@@ -1,7 +1,9 @@
 //! Scoped search query parsing and post-filtering.
 //!
-//! Extracts `tag:`, `path:`, and `prop:` prefixes from search queries
-//! and filters Tantivy results using `SQLite` lookups.
+//! Extracts `tag:`, `path:`, `prop:`, and `type:` prefixes from search
+//! queries. `tag:` / `path:` / `prop:` post-filter Tantivy hits via
+//! `SQLite` lookups; `type:` filters directly on the `block_type`
+//! stored on each search result.
 
 use rusqlite::Connection;
 
@@ -22,6 +24,10 @@ pub enum ScopeFilter {
         /// The value substring to match.
         value: String,
     },
+    /// Filter to search hits whose block has the given block_type
+    /// (`heading`, `paragraph`, `list_item`, etc.). Matched directly
+    /// against the result's `block_type` — no DB lookup needed.
+    Type(String),
 }
 
 /// Parse a query string, extracting scope prefixes and returning the
@@ -31,10 +37,11 @@ pub enum ScopeFilter {
 /// - `tag:NAME` → `ScopeFilter::Tag("NAME")`
 /// - `path:PREFIX` → `ScopeFilter::Path("PREFIX")`
 /// - `prop:KEY:VALUE` → `ScopeFilter::Property { key, value }`
+/// - `type:BLOCK_TYPE` → `ScopeFilter::Type("BLOCK_TYPE")`
 ///
 /// Tokens that don't match a prefix (or malformed `prop:` without a value)
 /// are kept as plain-text query terms.
-#[must_use] 
+#[must_use]
 pub fn parse_scoped_query(input: &str) -> (String, Vec<ScopeFilter>) {
     let mut filters = Vec::new();
     let mut text_parts = Vec::new();
@@ -66,6 +73,12 @@ pub fn parse_scoped_query(input: &str) -> (String, Vec<ScopeFilter>) {
             }
             // Malformed prop: — treat as plain text
         }
+        if let Some(ty) = token.strip_prefix("type:") {
+            if !ty.is_empty() {
+                filters.push(ScopeFilter::Type(ty.to_string()));
+                continue;
+            }
+        }
         text_parts.push(token);
     }
 
@@ -91,21 +104,27 @@ pub fn filter_results(
 
     let mut filtered = Vec::new();
     for result in results {
-        if passes_all_filters(conn, &result.file_path, filters) {
+        if passes_all_filters(conn, &result, filters) {
             filtered.push(result);
         }
     }
     Ok(filtered)
 }
 
-/// Check if a file path passes all scope filters.
+/// Check if a search result passes all scope filters.
 fn passes_all_filters(
     conn: &Connection,
-    file_path: &str,
+    result: &SearchResult,
     filters: &[ScopeFilter],
 ) -> bool {
+    let file_path = result.file_path.as_str();
     for filter in filters {
         match filter {
+            ScopeFilter::Type(block_type) => {
+                if result.block_type != *block_type {
+                    return false;
+                }
+            }
             ScopeFilter::Tag(name) => {
                 let found: bool = conn
                     .query_row(
@@ -275,5 +294,34 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         let filtered = filter_results(&conn, results, &[]).unwrap();
         assert_eq!(filtered.len(), 1);
+    }
+
+    // ── type: scope ──────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_type_scope() {
+        let (text, filters) = parse_scoped_query("type:heading intro");
+        assert_eq!(text, "intro");
+        assert_eq!(filters, vec![ScopeFilter::Type("heading".to_string())]);
+    }
+
+    #[test]
+    fn parse_empty_type_prefix_treated_as_text() {
+        let (text, filters) = parse_scoped_query("type: hello");
+        assert_eq!(text, "type: hello");
+        assert!(filters.is_empty());
+    }
+
+    #[test]
+    fn filter_results_with_type() {
+        let results = vec![
+            SearchResult { file_path: "notes/a.md".to_string(), block_id: 1, block_type: "heading".to_string(), excerpt: String::new(), score: 1.0 },
+            SearchResult { file_path: "notes/b.md".to_string(), block_id: 2, block_type: "paragraph".to_string(), excerpt: String::new(), score: 0.5 },
+        ];
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let filtered = filter_results(&conn, results, &[ScopeFilter::Type("heading".to_string())]).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].block_type, "heading");
     }
 }
