@@ -4389,3 +4389,10 @@ select.plugin-settings-input {
   background: #e81123; /* Windows close-button red */
   color: #ffffff;
 }
+
+/* Hide the empty-tab-strip middle-dot indicator under Forge — it
+ * just looks like noise when no file is open. The div still renders
+ * (preserves the tab strip height reservation), it's just invisible. */
+:root[data-theme-id="nexus-forge"] .tab-strip.empty {
+  color: transparent;
+}

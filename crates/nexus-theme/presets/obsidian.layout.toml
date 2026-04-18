@@ -171,6 +171,11 @@ title = "Files"
 icon = "folder"
 visible = true
 contentType = "files"
+toolbar = [
+  { id = "explorer.new-file", icon = "file-plus", tooltip = "New note", action = { kind = "invokeCommand", command = "workspace.new-note" } },
+  { id = "explorer.new-folder", icon = "folder-plus", tooltip = "New folder", action = { kind = "invokeCommand", command = "workspace.new-folder" } },
+  { id = "explorer.collapse-all", icon = "chevrons-up", tooltip = "Collapse all", action = { kind = "invokeCommand", command = "explorer.collapse-all" } },
+]
 
 [[leftSidePanel.panels]]
 id = "search"

@@ -39,7 +39,10 @@ id = "hello.panel"
 handler_id = 101
 title = "Hello Nexus"
 icon = "hand"
-side = "right"
+# The right panel is the document Inspector (outline / backlinks /
+# graph). Demo panels live on the left so they're reachable via the
+# rail without crowding the Inspector tab row.
+side = "left"
 
 [[registrations.ui_settings_tab]]
 id = "hello.about"
