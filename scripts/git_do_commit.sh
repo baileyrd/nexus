@@ -3,21 +3,19 @@ export PATH=/home/baileyrd/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 cd /mnt/c/Users/baile/dev/Nexus || exit 1
 
 git add -A
-git commit -m "feat(workflow): com.nexus.workflow plugin + nexus workflow CLI (PRD-16)
+git commit -m "feat(ui): SkillsPanel + WorkflowsPanel (PRD-13 / PRD-16)
 
-WorkflowCorePlugin wraps WorkflowRegistry behind 4 append-only
-handlers (list/get/reload/validate). validate takes raw TOML text so
-UIs can smoke-test edits without touching disk. Bootstrap opens the
-registry at <forge>/.workflows.
+Two new two-pane browser panels: list on the left, metadata + body
+on the right. Registered as content-types com.nexus.skills.browser
+and com.nexus.workflow.browser with palette commands 'Skills: Browse'
+and 'Workflows: Browse'. Each panel consumes its plugin only via
+ipc_call through new Tauri bridges (nexus-app/src/skills.rs and
+workflow.rs) + typed TS wrappers (app/src/ipc/skills.ts, workflow.ts).
 
-nexus workflow list|show|reload|validate provides the CLI surface
-over ipc_call — no direct nexus-workflow linkage. validate reads a
-file, pipes it through the plugin, and exits non-zero on parse
-failure so it doubles as a CI check.
-
-Same microkernel posture as nexus-skills / nexus-agent: kernel-free
-library, single plugin integration point, thin editor-shell
-consumers.
+Editor-shell pattern preserved: the Tauri command layer is a thin
+adapter over KernelPluginContext::ipc_call with a 30s timeout; no
+direct nexus-skills / nexus-workflow linkage from the desktop crate.
+Panels are plain React components consuming the typed TS surface.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 

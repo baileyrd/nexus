@@ -58,8 +58,10 @@ pub mod forge;
 pub mod keybindings;
 pub mod persistence;
 pub mod plugins;
+pub mod skills;
 pub mod terminal;
 pub mod uri;
+pub mod workflow;
 
 /// Entry point for the desktop app. Called from `main.rs` (and from the
 /// mobile entry points on those targets).
@@ -208,6 +210,14 @@ pub fn run() {
             agent::agent_plan,
             agent::agent_run,
             agent::agent_run_plan,
+            skills::skills_list,
+            skills::skills_get,
+            skills::skills_render,
+            skills::skills_reload,
+            workflow::workflow_list,
+            workflow::workflow_get,
+            workflow::workflow_reload,
+            workflow::workflow_validate,
             database::db_apply_view,
             terminal::term_create_session,
             terminal::term_close_session,

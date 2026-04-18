@@ -6,7 +6,9 @@ import { FileTree } from "../components/panels/FileTree";
 import { SavedCommandsPanel } from "../components/panels/SavedCommandsPanel";
 import { FileViewer } from "../components/panels/FileViewer";
 import { Outline } from "../components/panels/Outline";
+import SkillsPanel from "../components/panels/SkillsPanel";
 import { TerminalPanel } from "../components/panels/TerminalPanel";
+import WorkflowsPanel from "../components/panels/WorkflowsPanel";
 import { makeGenericTreePanelFactory } from "../components/panels/GenericTreePanel";
 import { GeneralTab } from "../components/settings/tabs/GeneralTab";
 import { HotkeysTab } from "../components/settings/tabs/HotkeysTab";
@@ -80,6 +82,18 @@ export function registerBuiltins(): void {
   contributions.registerContentType(
     "com.nexus.terminal.saved-commands",
     SavedCommandsSurface,
+  );
+
+  // PRD-13 Skills browser — two-pane read-only view over
+  // `com.nexus.skills`. List on the left, body + metadata on the right.
+  const SkillsSurface = () => createElement(SkillsPanel);
+  contributions.registerContentType("com.nexus.skills.browser", SkillsSurface);
+
+  // PRD-16 Workflows browser — same shape as Skills, different source.
+  const WorkflowsSurface = () => createElement(WorkflowsPanel);
+  contributions.registerContentType(
+    "com.nexus.workflow.browser",
+    WorkflowsSurface,
   );
 
   contributions.registerSettingsTab({
@@ -186,6 +200,36 @@ export function registerBuiltins(): void {
     title: "Terminal: Saved commands",
     category: "Terminal",
     icon: "bookmark",
+  });
+
+  contributions.registerCommand("workspace.open-skills", () => {
+    useLayoutStore
+      .getState()
+      .openContentTab("com.nexus.skills.browser", "Skills", "sparkles");
+  });
+  contributions.registerPaletteCommand({
+    id: "workspace.open-skills",
+    commandId: "workspace.open-skills",
+    title: "Skills: Browse",
+    category: "Workspace",
+    icon: "sparkles",
+  });
+
+  contributions.registerCommand("workspace.open-workflows", () => {
+    useLayoutStore
+      .getState()
+      .openContentTab(
+        "com.nexus.workflow.browser",
+        "Workflows",
+        "workflow",
+      );
+  });
+  contributions.registerPaletteCommand({
+    id: "workspace.open-workflows",
+    commandId: "workspace.open-workflows",
+    title: "Workflows: Browse",
+    category: "Workspace",
+    icon: "workflow",
   });
 
   // PRD-08 §9 inline AI — streams a continuation from the AI plugin
