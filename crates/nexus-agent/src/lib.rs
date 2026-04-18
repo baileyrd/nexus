@@ -38,11 +38,16 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod agents;
+mod archetypes;
 pub mod core_plugin;
 mod executor;
 mod llm;
 
 pub use agents::EchoAgent;
+pub use archetypes::{
+    build_archetype, CODER_ID, CODER_SYSTEM_PROMPT, RESEARCHER_ID, RESEARCHER_SYSTEM_PROMPT,
+    WRITER_ID, WRITER_SYSTEM_PROMPT,
+};
 pub use core_plugin::{
     AgentCorePlugin, HANDLER_PLAN, HANDLER_RUN, HANDLER_RUN_PLAN, PLUGIN_ID,
 };

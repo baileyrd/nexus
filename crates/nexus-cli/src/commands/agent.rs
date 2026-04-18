@@ -19,18 +19,27 @@ const AGENT_PLUGIN: &str = "com.nexus.agent";
 /// two share the generous upper bound the AI CLI already uses.
 const IPC_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// `nexus agent plan <goal>` — produce a plan without executing it.
-pub fn plan(app: &mut App, goal: &str) -> Result<()> {
-    let response = call(app, "plan", serde_json::json!({ "goal": goal }))?;
+/// `nexus agent plan <goal> [--archetype ..]` — produce a plan without executing.
+pub fn plan(app: &mut App, goal: &str, archetype: Option<&str>) -> Result<()> {
+    let response = call(app, "plan", goal_args(goal, archetype))?;
     print_plan(&response);
     Ok(())
 }
 
-/// `nexus agent run <goal>` — plan + execute, print per-step outcomes.
-pub fn run(app: &mut App, goal: &str) -> Result<()> {
-    let response = call(app, "run", serde_json::json!({ "goal": goal }))?;
+/// `nexus agent run <goal> [--archetype ..]` — plan + execute.
+pub fn run(app: &mut App, goal: &str, archetype: Option<&str>) -> Result<()> {
+    let response = call(app, "run", goal_args(goal, archetype))?;
     print_observation(&response);
     Ok(())
+}
+
+fn goal_args(goal: &str, archetype: Option<&str>) -> Value {
+    let mut map = serde_json::Map::new();
+    map.insert("goal".into(), Value::String(goal.into()));
+    if let Some(a) = archetype {
+        map.insert("archetype".into(), Value::String(a.into()));
+    }
+    Value::Object(map)
 }
 
 /// `nexus agent run-plan <file.json>` — execute a preset plan loaded

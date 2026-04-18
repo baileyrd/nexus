@@ -34,8 +34,8 @@ use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Deserialize;
 
 use crate::{
-    Agent, AgentError, ChatDriver, LlmAgent, Plan, PlanExecutor, ToolCall, ToolDispatcher,
-    DEFAULT_SYSTEM_PROMPT,
+    build_archetype, Agent, AgentError, ChatDriver, LlmAgent, Plan, PlanExecutor, ToolCall,
+    ToolDispatcher, DEFAULT_SYSTEM_PROMPT,
 };
 
 /// Reverse-DNS identifier.
@@ -120,6 +120,8 @@ impl CorePlugin for AgentCorePlugin {
 #[derive(Deserialize)]
 struct GoalArgs {
     goal: String,
+    #[serde(default)]
+    archetype: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -132,8 +134,7 @@ async fn handle_plan(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let a: GoalArgs = parse(args, "plan")?;
-    let prompt = system_prompt_with_skills(&ctx, &a.goal).await;
-    let agent = build_llm_agent(Arc::clone(&ctx)).with_system_prompt(prompt);
+    let agent = build_planner(Arc::clone(&ctx), &a).await;
     let plan = agent.plan(&a.goal).await.map_err(agent_err)?;
     to_value(&plan, "plan")
 }
@@ -143,10 +144,29 @@ async fn handle_run(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let a: GoalArgs = parse(args, "run")?;
-    let prompt = system_prompt_with_skills(&ctx, &a.goal).await;
-    let agent = build_llm_agent(Arc::clone(&ctx)).with_system_prompt(prompt);
+    let agent = build_planner(Arc::clone(&ctx), &a).await;
     let plan = agent.plan(&a.goal).await.map_err(agent_err)?;
     run_plan_internal(ctx, plan).await
+}
+
+async fn build_planner(
+    ctx: Arc<KernelPluginContext>,
+    args: &GoalArgs,
+) -> LlmAgent<AiChatBridge> {
+    let skills_prompt = system_prompt_with_skills(&ctx, &args.goal).await;
+    // `system_prompt_with_skills` returns DEFAULT_SYSTEM_PROMPT as its
+    // baseline when no skills match; strip that prefix so we can layer
+    // the archetype's prompt as the new baseline without duplicating
+    // the schema block.
+    let extra = skills_prompt
+        .strip_prefix(DEFAULT_SYSTEM_PROMPT)
+        .map(str::trim_start)
+        .filter(|s| !s.is_empty());
+    let driver = AiChatBridge {
+        ctx,
+        timeout: DEFAULT_CHAT_TIMEOUT,
+    };
+    build_archetype(args.archetype.as_deref(), driver, extra)
 }
 
 async fn handle_run_plan(
@@ -246,13 +266,6 @@ async fn render_skill_body(ctx: &KernelPluginContext, id: &str) -> Option<String
 }
 
 // ── Local adapters mirroring nexus-bootstrap::agent ────────────────────────
-
-fn build_llm_agent(ctx: Arc<KernelPluginContext>) -> LlmAgent<AiChatBridge> {
-    LlmAgent::new(AiChatBridge {
-        ctx,
-        timeout: DEFAULT_CHAT_TIMEOUT,
-    })
-}
 
 struct AiChatBridge {
     ctx: Arc<KernelPluginContext>,

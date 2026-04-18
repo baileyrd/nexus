@@ -295,11 +295,17 @@ enum AgentCommand {
     Plan {
         /// Natural-language goal
         goal: String,
+        /// Archetype — writer / coder / researcher / general (default)
+        #[arg(long)]
+        archetype: Option<String>,
     },
     /// Plan + execute a goal end-to-end
     Run {
         /// Natural-language goal
         goal: String,
+        /// Archetype — writer / coder / researcher / general (default)
+        #[arg(long)]
+        archetype: Option<String>,
     },
     /// Execute a preset plan from a JSON file produced by `plan`
     RunPlan {
@@ -1059,8 +1065,12 @@ fn main() {
         },
 
         Commands::Agent(args) => match args.command {
-            AgentCommand::Plan { goal } => commands::agent::plan(&mut app, &goal),
-            AgentCommand::Run { goal } => commands::agent::run(&mut app, &goal),
+            AgentCommand::Plan { goal, archetype } => {
+                commands::agent::plan(&mut app, &goal, archetype.as_deref())
+            }
+            AgentCommand::Run { goal, archetype } => {
+                commands::agent::run(&mut app, &goal, archetype.as_deref())
+            }
             AgentCommand::RunPlan { file } => {
                 commands::agent::run_plan(&mut app, &file.to_string_lossy())
             }
