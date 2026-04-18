@@ -3900,3 +3900,156 @@ select.plugin-settings-input {
  * plugins can declare which side they live on. Deferred — tracked in
  * FORGE-UI-PLAN.md Stage 5 follow-ups. Items render flush-left until
  * then, matching the current layout preset authoring order. */
+
+/* ── Stage 5b: Forge layout fix ─────────────────────────────────
+ * The base styles.css shaped .workspace-frame as a 480px demo card
+ * with a floating absolute status-bar — Forge needs the frame to
+ * fill the viewport and the status-bar to sit as a 24px bottom row.
+ * This block overrides those demo rules with higher specificity. */
+
+:root[data-theme-id="nexus-forge"] .workspace-frame {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px var(--nx-left-w, 260px) 1fr var(--nx-right-w, 300px);
+  grid-template-rows: 1fr 24px;
+  grid-template-areas:
+    "rail  left  center right"
+    "status status status status";
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  background: var(--nx-bg-primary, #1B1C22);
+  overflow: hidden;
+}
+
+:root[data-theme-id="nexus-forge"] .workspace-frame > .ribbon {
+  grid-area: rail;
+  width: 44px;
+  flex-direction: column;
+  align-items: center;
+  border-right: 1px solid var(--nx-bg-tertiary, #2C2E36);
+  padding: 6px 0;
+  gap: 2px;
+}
+
+:root[data-theme-id="nexus-forge"] .workspace-frame > .side-panel-preview[data-side="left"],
+:root[data-theme-id="nexus-forge"] .workspace-frame > .side-panel-preview {
+  grid-area: left;
+  width: auto;
+  min-width: 0;
+  border-right: 1px solid var(--nx-bg-tertiary, #2C2E36);
+}
+
+:root[data-theme-id="nexus-forge"] .workspace-frame > .workspace-center {
+  grid-area: center;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+:root[data-theme-id="nexus-forge"] .workspace-frame > .right-side-panel {
+  grid-area: right;
+  min-width: 0;
+  border-left: 1px solid var(--nx-bg-tertiary, #2C2E36);
+}
+
+:root[data-theme-id="nexus-forge"] .workspace-frame > .status-bar {
+  position: static;
+  grid-area: status;
+  width: 100%;
+  bottom: auto;
+  right: auto;
+  border-radius: 0;
+  box-shadow: none;
+  border: none;
+  border-top: 1px solid var(--nx-bg-tertiary, #2C2E36);
+}
+
+/* Ribbon button polish for the Forge rail */
+:root[data-theme-id="nexus-forge"] .ribbon-item {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: var(--nx-text-muted, #7F7A70);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  flex: 0 0 auto;
+}
+
+:root[data-theme-id="nexus-forge"] .ribbon-item:hover {
+  color: var(--nx-text-primary, #EFEBE4);
+  background: var(--nx-bg-tertiary, #2C2E36);
+}
+
+:root[data-theme-id="nexus-forge"] .ribbon-item.active {
+  color: var(--nx-accent-ember, #E6A24A);
+  background: var(--nx-interactive-active, rgba(230, 162, 74, 0.24));
+}
+
+:root[data-theme-id="nexus-forge"] .ribbon-item.active::before {
+  content: '';
+  position: absolute;
+  left: -7px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--nx-accent-ember, #E6A24A);
+  border-radius: 2px;
+}
+
+/* Left side panel — fix the PanelSelector row so it doesn't stack,
+ * and unset the fixed 26px button width for the right-panel text
+ * tabs (was clipping "Outline"/"Backlinks" labels). */
+:root[data-theme-id="nexus-forge"] .side-panel-preview {
+  display: grid;
+  grid-template-rows: 36px 34px 1fr auto;
+  min-height: 0;
+  background: var(--nx-bg-primary, #1B1C22);
+}
+
+:root[data-theme-id="nexus-forge"] .side-panel-preview > .panel-selector {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 8px;
+  gap: 2px;
+  height: 36px;
+  border-bottom: 1px solid var(--nx-bg-tertiary, #2C2E36);
+}
+
+:root[data-theme-id="nexus-forge"] .side-panel-preview .panel-selector-item {
+  width: 28px;
+  height: 24px;
+  border-radius: 5px;
+}
+
+:root[data-theme-id="nexus-forge"] .side-panel-preview .panel-selector-item.active {
+  background: var(--nx-interactive-active, rgba(230, 162, 74, 0.24));
+  color: var(--nx-accent-ember, #E6A24A);
+}
+
+/* Right panel: unset the fixed-width so text tabs can size to content. */
+:root[data-theme-id="nexus-forge"] .right-side-panel .panel-selector-item {
+  width: auto;
+  height: 28px;
+}
+
+:root[data-theme-id="nexus-forge"] .panel-area {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+:root[data-theme-id="nexus-forge"] .panel-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
