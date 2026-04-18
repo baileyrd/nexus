@@ -1,7 +1,7 @@
 # PRD-17: Workflow System Subsystem
 
 **Version:** 1.0  
-**Status:** Implementation Ready  
+**Status:** 🟢 Shipped — Substantially Complete (see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), 2026-04-18)  
 **Target Release:** April 2026  
 **Scope:** 500–700 lines of specification  
 

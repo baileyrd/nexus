@@ -2,6 +2,8 @@
 **Nexus v1.0 — April 2026**  
 *Notion-level structured data with local-first, file-based architecture*
 
+**Status:** 🟢 Shipped — Substantially Complete (see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), 2026-04-18)
+
 ---
 
 ## Executive Summary

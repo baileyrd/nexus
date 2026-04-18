@@ -1,6 +1,6 @@
 # Nexus PRD Implementation Status
 
-> **Snapshot date:** 2026-04-18 (late session — skills parameter substitution + render handler + built-in library, agent archetypes + per-step execution + history persistence + streaming plan events, workflow manual execution engine, multi-session chat storage + picker, MCP Host CLI + agent auto-discovery, Skills/Workflows/AgentHistory browser panels)
+> **Snapshot date:** 2026-04-18 (end of session — includes cron trigger engine; PRD-16 Workflow promoted to 🟢. Every PRD 01–16 now ✅ or 🟢; PRD-17 is 🟢 desktop only with web + mobile deferred.)
 > **Scope:** PRDs 01–17 in this directory, audited against `crates/**` and `app/src/**`.
 > **Update cadence:** refresh when a PRD's status tier changes, or at minimum at every minor release.
 >

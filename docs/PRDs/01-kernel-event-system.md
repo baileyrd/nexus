@@ -2,7 +2,7 @@
 
 **Version:** 1.0  
 **Date:** April 2026  
-**Status:** Implementation-Ready  
+**Status:** ✅ Shipped — Complete (see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), 2026-04-18)  
 **Subsystem:** Core Kernel & Event Bus
 
 ---

@@ -2,7 +2,7 @@
 
 **Version:** 1.0  
 **Target Release:** April 2026  
-**Status:** Implementation-Ready  
+**Status:** 🟢 Shipped — Substantially Complete (see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), 2026-04-18)  
 **Owner:** Core Platform Team  
 **Dependencies:** Kernel Event System (01), Storage Engine (02), Editor Engine (03), Plugin System (05), AI Engine (07)
 

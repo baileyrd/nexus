@@ -1,7 +1,7 @@
 # PRD: Terminal & Process Manager Subsystem
 
 **Nexus: Rust-based, AI-native Developer Knowledge Environment**  
-Version 1.0 | April 2026 | Status: Implementation-Ready
+Version 1.0 | April 2026 | Status: 🟢 Shipped — Substantially Complete (see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), 2026-04-18)
 
 ---
 

@@ -1,7 +1,7 @@
 # Nexus CLI Subsystem PRD
 
 **Version:** 1.0  
-**Status:** Implementation-Ready  
+**Status:** 🟢 Shipped — Substantially Complete (see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), 2026-04-18)  
 **Target Release:** April 2026  
 **Crate:** `nexus-cli` (binary: `nexus-cli`)  
 **Build Tool:** Clap 4.x (command parsing), Tokio (async runtime)

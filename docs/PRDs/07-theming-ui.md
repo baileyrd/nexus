@@ -1,6 +1,6 @@
 # Nexus Theming & UI Subsystem — PRD v1.0
 
-**Status:** Implementation-Ready | **Target Release:** April 2026 | **Document Version:** 1.0
+**Status:** ✅ Shipped — Complete (see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), 2026-04-18) | **Target Release:** April 2026 | **Document Version:** 1.0
 
 ---
 

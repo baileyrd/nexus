@@ -2,7 +2,7 @@
 **Nexus** — Rust-based AI-native Developer Knowledge Environment
 
 **Version:** 1.0  
-**Status:** Ready for Implementation  
+**Status:** 🟢 Shipped — Substantially Complete (see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), 2026-04-18)  
 **Date:** April 2026  
 **Author:** Product Team  
 

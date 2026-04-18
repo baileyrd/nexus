@@ -1,6 +1,6 @@
 # Cross-Platform Strategy — Nexus v1.0 PRD
 
-**Status:** Implementation-Ready  
+**Status:** 🟢 Shipped (desktop only) — web + mobile deferred (see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), 2026-04-18)  
 **Version:** 1.0  
 **Owner:** Architecture  
 **Date:** April 2026  

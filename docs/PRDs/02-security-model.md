@@ -1,7 +1,7 @@
 # PRD: Security Model for Nexus
 
 **Version:** 1.0  
-**Status:** Implementation-Ready  
+**Status:** ✅ Shipped — Complete (see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), 2026-04-18)  
 **Last Updated:** April 2026  
 **Owner:** Security & Platform Team  
 
