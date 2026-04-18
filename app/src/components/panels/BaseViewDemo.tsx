@@ -10,7 +10,7 @@
 // Replaced by real `.bases` tab integration once a file handler for
 // `.bases` directories lands.
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { BaseViewPanel } from "./BaseView";
 import type { BaseRecord, BaseSchema, BaseView, ViewType } from "../../ipc/database";
 
@@ -115,7 +115,18 @@ const ORDER: ViewType[] = ["table", "kanban", "calendar", "gallery"];
 
 export function BaseViewDemo() {
   const [active, setActive] = useState<ViewType>("table");
+  const [records, setRecords] = useState<BaseRecord[]>(RECORDS);
   const view = VIEWS[active];
+
+  const onRecordChange = useCallback(
+    (id: string, patch: Record<string, unknown>) => {
+      setRecords((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+      );
+    },
+    [],
+  );
+
   return (
     <div className="base-view-demo">
       <nav className="base-view-tabs">
@@ -131,7 +142,12 @@ export function BaseViewDemo() {
         ))}
       </nav>
       <div className="base-view-body">
-        <BaseViewPanel records={RECORDS} schema={SCHEMA} view={view} />
+        <BaseViewPanel
+          records={records}
+          schema={SCHEMA}
+          view={view}
+          onRecordChange={onRecordChange}
+        />
       </div>
     </div>
   );

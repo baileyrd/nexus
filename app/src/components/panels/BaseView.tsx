@@ -29,13 +29,20 @@ import {
  * any of the props change) and renders the resulting shape. Works
  * for any of the four view types — the dispatcher at the bottom
  * picks the right sub-renderer.
+ *
+ * Optional `onRecordChange` receives `(id, patch)` when the user
+ * interacts with a view in a way that implies a record mutation —
+ * today that's dragging a Kanban card between columns. The parent
+ * is responsible for merging the patch into its record state and
+ * persisting it; the renderer never touches disk directly.
  */
 export function BaseViewPanel(props: {
   records: BaseRecord[];
   schema: BaseSchema;
   view: BaseView;
+  onRecordChange?: (id: string, patch: Record<string, unknown>) => void;
 }) {
-  const { records, schema, view } = props;
+  const { records, schema, view, onRecordChange } = props;
   const [applied, setApplied] = useState<AppliedView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,16 +77,36 @@ export function BaseViewPanel(props: {
       </div>
     );
   }
-  return <AppliedViewRenderer applied={applied} />;
+  return (
+    <AppliedViewRenderer
+      applied={applied}
+      view={view}
+      onRecordChange={onRecordChange}
+    />
+  );
 }
 
 /** Renders an already-applied view without re-running the engine.
  *  Useful when a caller (e.g. a plugin) has pre-computed the layout
  *  and wants to swap in a different renderer. */
-export function AppliedViewRenderer({ applied }: { applied: AppliedView }) {
+export function AppliedViewRenderer({
+  applied,
+  view,
+  onRecordChange,
+}: {
+  applied: AppliedView;
+  view?: BaseView;
+  onRecordChange?: (id: string, patch: Record<string, unknown>) => void;
+}) {
   switch (applied.view_type) {
     case "kanban":
-      return <KanbanView applied={applied} />;
+      return (
+        <KanbanView
+          applied={applied}
+          groupField={view?.groupField}
+          onRecordChange={onRecordChange}
+        />
+      );
     case "calendar":
       return <CalendarView applied={applied} />;
     case "gallery":
@@ -189,7 +216,17 @@ function GalleryView({ applied }: { applied: AppliedView }) {
   );
 }
 
-function KanbanView({ applied }: { applied: AppliedView }) {
+const KANBAN_DRAG_MIME = "application/x-nexus-record-id";
+
+function KanbanView({
+  applied,
+  groupField,
+  onRecordChange,
+}: {
+  applied: AppliedView;
+  groupField?: string;
+  onRecordChange?: (id: string, patch: Record<string, unknown>) => void;
+}) {
   if (applied.layout.kind !== "grouped") {
     // Kanban configured without a `groupField` — the engine returned
     // a flat layout. Fall through to TableView rather than pretending
@@ -200,23 +237,79 @@ function KanbanView({ applied }: { applied: AppliedView }) {
   if (groups.every((g) => g.records.length === 0)) {
     return <EmptyView name={applied.view_name} />;
   }
+  const dragEnabled = Boolean(groupField && onRecordChange);
   return (
     <div className="base-view base-view-kanban">
       {groups.map((g) => (
-        <KanbanColumn key={g.key} group={g} fields={applied.fields} />
+        <KanbanColumn
+          key={g.key}
+          group={g}
+          fields={applied.fields}
+          groupField={groupField}
+          onDropCard={
+            dragEnabled
+              ? (recordId) => {
+                  const next = g.key === MISSING_GROUP_KEY ? null : g.key;
+                  onRecordChange!(recordId, { [groupField!]: next });
+                }
+              : undefined
+          }
+        />
       ))}
     </div>
   );
 }
 
-function KanbanColumn({ group, fields }: { group: ViewGroup; fields: string[] }) {
+function KanbanColumn({
+  group,
+  fields,
+  groupField,
+  onDropCard,
+}: {
+  group: ViewGroup;
+  fields: string[];
+  groupField?: string;
+  onDropCard?: (recordId: string) => void;
+}) {
   const title = group.key === MISSING_GROUP_KEY ? "Uncategorised" : group.key;
   const cols = useMemo(
     () => (fields.length > 0 ? fields : inferColumns(group.records)),
     [fields, group.records],
   );
+  const [dropActive, setDropActive] = useState(false);
+  const dragEnabled = Boolean(groupField && onDropCard);
+
   return (
-    <div className="kanban-column">
+    <div
+      className={
+        "kanban-column" + (dropActive ? " kanban-column-drop-target" : "")
+      }
+      onDragOver={
+        dragEnabled
+          ? (e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (!dropActive) setDropActive(true);
+            }
+          : undefined
+      }
+      onDragLeave={dragEnabled ? () => setDropActive(false) : undefined}
+      onDrop={
+        dragEnabled
+          ? (e) => {
+              e.preventDefault();
+              setDropActive(false);
+              const id = e.dataTransfer.getData(KANBAN_DRAG_MIME);
+              if (!id) return;
+              // Skip no-op drops within the same column so the parent's
+              // save debounce doesn't thrash.
+              const inColumn = group.records.some((r) => r.id === id);
+              if (inColumn) return;
+              onDropCard!(id);
+            }
+          : undefined
+      }
+    >
       <header className="kanban-column-header">
         <span className="kanban-column-title">{title}</span>
         <span className="kanban-column-count">{group.records.length}</span>
@@ -225,7 +318,19 @@ function KanbanColumn({ group, fields }: { group: ViewGroup; fields: string[] })
         {group.records.map((r) => {
           const [titleCol, ...rest] = cols;
           return (
-            <div className="kanban-card" key={r.id}>
+            <div
+              className="kanban-card"
+              key={r.id}
+              draggable={dragEnabled}
+              onDragStart={
+                dragEnabled
+                  ? (e) => {
+                      e.dataTransfer.setData(KANBAN_DRAG_MIME, r.id);
+                      e.dataTransfer.effectAllowed = "move";
+                    }
+                  : undefined
+              }
+            >
               {titleCol && (
                 <div className="kanban-card-title">{cellValue(r[titleCol])}</div>
               )}

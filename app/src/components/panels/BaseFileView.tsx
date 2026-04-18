@@ -166,6 +166,13 @@ export function BaseFileView({ relpath }: BaseFileViewProps) {
           records={base.records}
           schema={base.schema}
           view={activeView}
+          onRecordChange={(id, patch) => {
+            applyRecordUpdate((records) =>
+              records.map((rec) =>
+                rec.id === id ? { ...rec, ...patch } : rec,
+              ),
+            );
+          }}
         />
       </div>
     </div>

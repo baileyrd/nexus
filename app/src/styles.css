@@ -2361,6 +2361,20 @@ select.plugin-settings-input {
   border: 1px solid var(--nexus-border, #e3e6eb);
   border-radius: 6px;
   max-height: 100%;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.kanban-column-drop-target {
+  border-color: var(--nexus-accent, #3b82f6);
+  background: var(--nexus-accent-soft, rgba(59, 130, 246, 0.08));
+}
+
+.kanban-card[draggable="true"] {
+  cursor: grab;
+}
+
+.kanban-card[draggable="true"]:active {
+  cursor: grabbing;
 }
 
 .kanban-column-header {
