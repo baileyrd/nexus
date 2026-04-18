@@ -222,16 +222,22 @@ function KanbanColumn({ group, fields }: { group: ViewGroup; fields: string[] })
         <span className="kanban-column-count">{group.records.length}</span>
       </header>
       <div className="kanban-cards">
-        {group.records.map((r) => (
-          <div className="kanban-card" key={r.id}>
-            {cols.map((c) => (
-              <div key={c} className="kanban-card-row">
-                <span className="kanban-card-key">{c}</span>
-                <span className="kanban-card-value">{cellValue(r[c])}</span>
-              </div>
-            ))}
-          </div>
-        ))}
+        {group.records.map((r) => {
+          const [titleCol, ...rest] = cols;
+          return (
+            <div className="kanban-card" key={r.id}>
+              {titleCol && (
+                <div className="kanban-card-title">{cellValue(r[titleCol])}</div>
+              )}
+              {rest.map((c) => (
+                <div key={c} className="kanban-card-row">
+                  <span className="kanban-card-key">{c}</span>
+                  <span className="kanban-card-value">{cellValue(r[c])}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -242,31 +248,159 @@ function CalendarView({ applied }: { applied: AppliedView }) {
     return <TableView applied={applied} />;
   }
   const groups = applied.layout.groups;
+
+  // Pick the first group with a valid ISO date as the initial month
+  // anchor. Falls back to today if nothing matches (e.g. every record
+  // landed in MISSING_GROUP_KEY).
+  const firstDated = groups.find(
+    (g) => g.key !== MISSING_GROUP_KEY && /^\d{4}-\d{2}-\d{2}/.test(g.key),
+  );
+  const anchor = firstDated
+    ? parseIsoDay(firstDated.key) ?? startOfToday()
+    : startOfToday();
+
+  const [month, setMonth] = useState<{ year: number; month: number }>({
+    year: anchor.getFullYear(),
+    month: anchor.getMonth(),
+  });
+
+  const byDay = useMemo(() => {
+    const map = new Map<string, ViewGroup["records"]>();
+    for (const g of groups) {
+      if (g.key === MISSING_GROUP_KEY) continue;
+      // Accept full ISO timestamps too — bucket by the YYYY-MM-DD prefix.
+      const key = g.key.slice(0, 10);
+      const existing = map.get(key) ?? [];
+      map.set(key, existing.concat(g.records));
+    }
+    return map;
+  }, [groups]);
+
+  const undated = useMemo(
+    () => groups.find((g) => g.key === MISSING_GROUP_KEY)?.records ?? [],
+    [groups],
+  );
+
   if (groups.every((g) => g.records.length === 0)) {
     return <EmptyView name={applied.view_name} />;
   }
-  // Calendar layout is a vertical day-by-day list. A proper month
-  // grid with week rows is a richer component and can layer on top;
-  // this is the minimum useful shape.
+
+  const cells = monthCells(month.year, month.month);
+  const titleField = applied.fields[0] ?? "id";
+  const monthLabel = new Date(month.year, month.month, 1).toLocaleString(
+    undefined,
+    { month: "long", year: "numeric" },
+  );
+  const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  const shift = (delta: number) =>
+    setMonth((m) => {
+      const next = new Date(m.year, m.month + delta, 1);
+      return { year: next.getFullYear(), month: next.getMonth() };
+    });
+
   return (
-    <div className="base-view base-view-calendar">
-      {groups.map((g) => (
-        <section key={g.key} className="calendar-day">
+    <div className="base-view base-view-calendar-month">
+      <header className="calendar-month-header">
+        <button
+          type="button"
+          className="calendar-month-nav"
+          onClick={() => shift(-1)}
+          aria-label="Previous month"
+        >
+          ‹
+        </button>
+        <span className="calendar-month-title">{monthLabel}</span>
+        <button
+          type="button"
+          className="calendar-month-nav"
+          onClick={() => shift(1)}
+          aria-label="Next month"
+        >
+          ›
+        </button>
+      </header>
+      <div className="calendar-month-weekdays">
+        {weekdayLabels.map((w) => (
+          <div key={w} className="calendar-month-weekday">
+            {w}
+          </div>
+        ))}
+      </div>
+      <div className="calendar-month-grid">
+        {cells.map((cell) => {
+          const key = isoDay(cell.date);
+          const records = byDay.get(key) ?? [];
+          const inMonth = cell.date.getMonth() === month.month;
+          return (
+            <div
+              key={key}
+              className={
+                "calendar-month-cell" + (inMonth ? "" : " out-of-month")
+              }
+            >
+              <div className="calendar-month-daynum">{cell.date.getDate()}</div>
+              <ul className="calendar-month-events">
+                {records.map((r) => (
+                  <li key={r.id} className="calendar-event" title={String(r.id)}>
+                    {cellValue(r[titleField])}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+      {undated.length > 0 && (
+        <section className="calendar-month-undated">
           <header className="calendar-day-header">
-            {g.key === MISSING_GROUP_KEY ? "No date" : g.key}
-            <span className="calendar-day-count">{g.records.length}</span>
+            No date
+            <span className="calendar-day-count">{undated.length}</span>
           </header>
           <ul className="calendar-events">
-            {g.records.map((r) => (
+            {undated.map((r) => (
               <li key={r.id} className="calendar-event">
-                {cellValue(r[applied.fields[0] ?? "id"])}
+                {cellValue(r[titleField])}
               </li>
             ))}
           </ul>
         </section>
-      ))}
+      )}
     </div>
   );
+}
+
+function parseIsoDay(key: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(key);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function isoDay(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Six-row Sun-anchored grid covering the given month. */
+function monthCells(year: number, month: number): { date: Date }[] {
+  const first = new Date(year, month, 1);
+  const start = new Date(first);
+  start.setDate(first.getDate() - first.getDay());
+  const cells: { date: Date }[] = [];
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    cells.push({ date: d });
+  }
+  return cells;
 }
 
 function EmptyView({ name }: { name: string }) {
