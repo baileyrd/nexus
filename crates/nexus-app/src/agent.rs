@@ -36,23 +36,37 @@ async fn call_agent(
         .map_err(|e| e.to_string())
 }
 
+fn goal_args(goal: &str, archetype: Option<&str>) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    map.insert("goal".into(), serde_json::Value::String(goal.into()));
+    if let Some(a) = archetype.filter(|s| !s.is_empty()) {
+        map.insert(
+            "archetype".into(),
+            serde_json::Value::String(a.into()),
+        );
+    }
+    serde_json::Value::Object(map)
+}
+
 /// Produce a plan for a goal without executing it. Returns the Plan
 /// JSON as-is.
 #[tauri::command]
 pub async fn agent_plan(
     goal: String,
+    archetype: Option<String>,
     runtime: State<'_, KernelRuntime>,
 ) -> Result<serde_json::Value, String> {
-    call_agent(runtime, "plan", serde_json::json!({ "goal": goal })).await
+    call_agent(runtime, "plan", goal_args(&goal, archetype.as_deref())).await
 }
 
 /// Plan + execute a goal end-to-end. Returns the Observation.
 #[tauri::command]
 pub async fn agent_run(
     goal: String,
+    archetype: Option<String>,
     runtime: State<'_, KernelRuntime>,
 ) -> Result<serde_json::Value, String> {
-    call_agent(runtime, "run", serde_json::json!({ "goal": goal })).await
+    call_agent(runtime, "run", goal_args(&goal, archetype.as_deref())).await
 }
 
 /// Execute a preset plan (produced by [`agent_plan`]) and return its

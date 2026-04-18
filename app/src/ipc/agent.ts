@@ -37,12 +37,20 @@ export interface Observation {
   success: boolean;
 }
 
-export function agentPlan(goal: string): Promise<AgentPlan> {
-  return invoke<AgentPlan>("agent_plan", { goal });
+export type AgentArchetype = "general" | "writer" | "coder" | "researcher";
+
+export function agentPlan(
+  goal: string,
+  archetype?: AgentArchetype,
+): Promise<AgentPlan> {
+  return invoke<AgentPlan>("agent_plan", { goal, archetype });
 }
 
-export function agentRun(goal: string): Promise<Observation> {
-  return invoke<Observation>("agent_run", { goal });
+export function agentRun(
+  goal: string,
+  archetype?: AgentArchetype,
+): Promise<Observation> {
+  return invoke<Observation>("agent_run", { goal, archetype });
 }
 
 export function agentRunPlan(plan: AgentPlan): Promise<Observation> {

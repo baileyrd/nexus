@@ -3,20 +3,15 @@ export PATH=/home/baileyrd/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 cd /mnt/c/Users/baile/dev/Nexus || exit 1
 
 git add -A
-git commit -m "feat(agent): Writer/Coder/Researcher archetypes (PRD-15 §3.3)
+git commit -m "feat(chat): archetype selector in Chat panel (PRD-15 §3.3)
 
-New nexus-agent::archetypes module ships three pre-baked LlmAgent
-configurations with domain-tuned planner system prompts. Each is a
-thin constant + constructor — driver, plan schema, and executor loop
-are unchanged — so archetypes compose with skill-matched prompts
-through build_archetype(name, driver, extra_prompt).
+Chat panel now surfaces the writer/coder/researcher/general archetype
+as a dropdown in the toolbar, enabled only while the Agent chip is on.
+Selection threads through agent_plan / agent_run (now carrying an
+optional archetype arg) and the Tauri bridge in nexus-app/src/agent.rs.
 
-com.nexus.agent::plan and ::run accept an optional 'archetype' arg
-(writer|coder|researcher|general, case-insensitive, unknown falls
-back to default). Skills layer on top as the 'extra_prompt' so both
-selectors compose.
-
-nexus agent plan|run --archetype <name> exposes it from the CLI.
+Editor-shell architecture preserved: the React panel only talks to
+com.nexus.agent via ipc_call; all archetype logic lives in the plugin.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 

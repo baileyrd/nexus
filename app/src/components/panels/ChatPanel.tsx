@@ -28,6 +28,7 @@ import {
   agentPlan,
   agentRun,
   agentRunPlan,
+  type AgentArchetype,
   type AgentPlan,
   type Observation,
 } from "../../ipc/agent";
@@ -138,6 +139,7 @@ export function ChatPanel(): JSX.Element {
   const [useRag, setUseRag] = useState(false);
   const [useAgent, setUseAgent] = useState(false);
   const [previewAgentPlans, setPreviewAgentPlans] = useState(false);
+  const [archetype, setArchetype] = useState<AgentArchetype>("general");
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -304,7 +306,7 @@ export function ChatPanel(): JSX.Element {
         // Preview mode: ask the planner for a plan, park it in the
         // pending turn as `pendingPlan`, and wait for the user to
         // click Approve / Cancel. No tool calls yet.
-        const plan = await agentPlan(trimmed);
+        const plan = await agentPlan(trimmed, archetype);
         setTurns((prev) => {
           const idx = assistantIndexRef.current;
           if (idx === null) return prev;
@@ -325,7 +327,7 @@ export function ChatPanel(): JSX.Element {
       } else if (useAgent) {
         // Agent mode without preview: dispatch to com.nexus.agent::run
         // which plans + executes tool calls in one pass.
-        const observation = await agentRun(trimmed);
+        const observation = await agentRun(trimmed, archetype);
         const content = formatObservation(observation);
         // Close out the pending turn manually since there's no
         // stream_done event on the agent path.
@@ -365,7 +367,17 @@ export function ChatPanel(): JSX.Element {
         ),
       );
     }
-  }, [config, input, sending, turns, systemPrompt, useRag, useAgent, previewAgentPlans]);
+  }, [
+    config,
+    input,
+    sending,
+    turns,
+    systemPrompt,
+    useRag,
+    useAgent,
+    previewAgentPlans,
+    archetype,
+  ]);
 
   const clearConversation = useCallback(() => {
     if (sending) return;
@@ -496,6 +508,23 @@ export function ChatPanel(): JSX.Element {
         >
           {previewAgentPlans ? "Preview ●" : "Preview"}
         </button>
+        <select
+          value={archetype}
+          onChange={(e) => setArchetype(e.target.value as AgentArchetype)}
+          disabled={!useAgent}
+          style={{
+            ...chipButtonStyle,
+            padding: "2px 6px",
+            cursor: useAgent ? "pointer" : "not-allowed",
+          }}
+          aria-label="Agent archetype"
+          title="Planner archetype. Writer biases toward markdown authoring; Coder toward code + git + build; Researcher toward search + RAG."
+        >
+          <option value="general">general</option>
+          <option value="writer">writer</option>
+          <option value="coder">coder</option>
+          <option value="researcher">researcher</option>
+        </select>
         <button
           type="button"
           onClick={() => setUseRag((v) => !v)}
