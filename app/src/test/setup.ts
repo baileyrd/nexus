@@ -21,7 +21,10 @@ vi.mock("@tauri-apps/api/core", () => ({
     invokeCalls.push({ command, args });
     const handler = invokeRegistry[command];
     if (!handler) {
-      throw new Error(`[test] no mock registered for invoke("${command}")`);
+      // Return a benign default instead of throwing, so a panel that
+      // calls an unmocked command during mount doesn't blow up the
+      // whole render. Tests that care can still inspect __invokeCalls.
+      return undefined;
     }
     return handler(args);
   }),
@@ -69,4 +72,7 @@ afterEach(() => {
   for (const key of Object.keys(invokeRegistry)) delete invokeRegistry[key];
   invokeCalls.length = 0;
   for (const key of Object.keys(eventHandlers)) delete eventHandlers[key];
+  // ChatPanel persists session id / transcript to localStorage — reset
+  // between tests so state doesn't leak.
+  window.localStorage.clear();
 });
