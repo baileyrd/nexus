@@ -222,6 +222,118 @@ path = "${trigger.path}"
 }
 
 #[tokio::test]
+async fn run_short_circuits_when_condition_false() {
+    // Condition evaluates false (regex mismatch) → executor never
+    // dispatches the step, the run reports `condition_skipped: true`
+    // and `success: true`.
+    const WF_GATED: &str = r#"
+[workflow]
+name = "Gated"
+
+[trigger]
+type = "manual"
+
+[condition]
+type = "regex_match"
+source = "${trigger.path}"
+pattern = "^notes/.*\\.md$"
+
+[[steps]]
+name = "read"
+type = "ipc"
+target = "com.nexus.storage"
+command = "read_file"
+[steps.args]
+path = "ghost.md"
+"#;
+    let forge = scratch_forge();
+    write_workflow(forge.path(), "gated.workflow.toml", WF_GATED);
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    // trigger.path = other/x.txt → pattern fails → gate closed.
+    let v = call(
+        &runtime,
+        "run",
+        serde_json::json!({
+            "name": "Gated",
+            "variables": { "trigger": { "path": "other/x.txt" } }
+        }),
+    )
+    .await
+    .expect("run ok");
+
+    assert_eq!(v["success"], true);
+    assert_eq!(v["condition_skipped"], true);
+    assert_eq!(
+        v["steps"].as_array().map(Vec::len).unwrap_or(usize::MAX),
+        0,
+        "condition-skipped run must emit zero step outcomes"
+    );
+}
+
+#[tokio::test]
+async fn run_dispatches_when_condition_true() {
+    // Same workflow as the gated test, trigger.path matches the
+    // pattern → executor runs the step as usual (fails read_file on
+    // a non-existent file, but that's an ordinary step failure, not
+    // a gate close).
+    const WF_GATED: &str = r#"
+[workflow]
+name = "OpenGate"
+
+[trigger]
+type = "manual"
+
+[condition]
+type = "regex_match"
+source = "${trigger.path}"
+pattern = "^notes/.*\\.md$"
+
+[[steps]]
+name = "read"
+type = "ipc"
+target = "com.nexus.storage"
+command = "read_file"
+[steps.args]
+path = "${trigger.path}"
+"#;
+    let forge = scratch_forge();
+    write_workflow(forge.path(), "opengate.workflow.toml", WF_GATED);
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+    runtime
+        .context
+        .ipc_call(
+            "com.nexus.storage",
+            "write_file",
+            serde_json::json!({
+                "path": "notes/cond.md",
+                "bytes": b"OK".to_vec(),
+            }),
+            CALL_TIMEOUT,
+        )
+        .await
+        .expect("seed write");
+
+    let v = call(
+        &runtime,
+        "run",
+        serde_json::json!({
+            "name": "OpenGate",
+            "variables": { "trigger": { "path": "notes/cond.md" } }
+        }),
+    )
+    .await
+    .expect("run ok");
+
+    assert_eq!(v["success"], true);
+    assert!(
+        !v["condition_skipped"].as_bool().unwrap_or(false),
+        "open gate must not flag condition_skipped"
+    );
+    assert_eq!(v["steps"][0]["status"], "ok");
+}
+
+#[tokio::test]
 async fn run_rejects_non_object_variables() {
     let forge = scratch_forge();
     write_workflow(forge.path(), "greet.workflow.toml", WF_NOOP);

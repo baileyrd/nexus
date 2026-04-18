@@ -68,8 +68,14 @@ pub struct WorkflowRun {
     pub steps: Vec<StepOutcome>,
     /// `true` when no step failed. A run with `on_error = "continue"`
     /// failures still reports `false` here — the boolean tracks
-    /// correctness, not completion.
+    /// correctness, not completion. A condition-skipped run also
+    /// reports `true` — the gate closed cleanly, which is a success.
     pub success: bool,
+    /// `true` when the workflow's `[condition]` evaluated to false
+    /// and the executor short-circuited before running any step.
+    /// `steps` is empty in that case.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub condition_skipped: bool,
 }
 
 /// Errors from [`run_workflow`].
@@ -182,7 +188,21 @@ pub async fn run_workflow_with_variables<D: ActionDispatcher>(
         workflow_name: workflow.workflow.name.clone(),
         steps: outcomes,
         success,
+        condition_skipped: false,
     })
+}
+
+/// Build an empty run representing a workflow whose `[condition]`
+/// evaluated to `false`. Used by the core plugin when it gates a run
+/// before dispatching.
+#[must_use]
+pub fn condition_skipped_run(workflow: &Workflow) -> WorkflowRun {
+    WorkflowRun {
+        workflow_name: workflow.workflow.name.clone(),
+        steps: Vec::new(),
+        success: true,
+        condition_skipped: true,
+    }
 }
 
 #[cfg(test)]

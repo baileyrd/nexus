@@ -27,8 +27,9 @@ use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Deserialize;
 
 use crate::{
-    cron::CronSchedule, parse_workflow_text, run_workflow_with_variables, ActionDispatcher, Step,
-    VariableMap, Workflow, WorkflowRegistry, WorkflowRegistryError,
+    condition_skipped_run, cron::CronSchedule, evaluate_condition, parse_workflow_text,
+    run_workflow_with_variables, ActionDispatcher, EvaluationContext, Step, VariableMap, Workflow,
+    WorkflowRegistry, WorkflowRegistryError,
 };
 
 /// Reverse-DNS identifier.
@@ -242,6 +243,30 @@ impl CorePlugin for WorkflowCorePlugin {
             Ok(v) => v,
             Err(err) => return Some(Box::pin(async move { Err(err) })),
         };
+        let forge_root = self.root.parent().map(std::path::Path::to_path_buf);
+
+        // Evaluate [condition] up front — gate closed means no step
+        // dispatches. Errors propagate as plugin failures (if we
+        // can't evaluate the gate, we can't safely open it).
+        if let Some(cond) = &workflow.condition {
+            let eval_ctx = EvaluationContext {
+                forge_root: forge_root.clone(),
+                variables: variables.clone(),
+            };
+            match evaluate_condition(cond, &eval_ctx) {
+                Ok(false) => {
+                    let run = condition_skipped_run(&workflow);
+                    let value = to_value(&run, "run");
+                    return Some(Box::pin(async move { value }));
+                }
+                Ok(true) => {}
+                Err(e) => {
+                    let err = exec_err(format!("run: condition: {e}"));
+                    return Some(Box::pin(async move { Err(err) }));
+                }
+            }
+        }
+
         Some(Box::pin(async move {
             let ctx = ctx.ok_or_else(|| {
                 exec_err(
