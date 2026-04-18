@@ -14,7 +14,7 @@
 // is the right default for a shell-style prompt view. Full terminfo
 // pass-through can layer on via `xterm.js` in a later slice.
 
-import type { KeyboardEvent } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -26,6 +26,7 @@ import {
   termSendRawInput,
   type OutputLine,
 } from "../../ipc/terminal";
+import { parseAnsiLine, type AnsiSpan, type AnsiStyle } from "../../util/ansi";
 
 /** Cadence at which we pump the PTY while the panel is visible. */
 const PUMP_INTERVAL_MS = 120;
@@ -40,6 +41,42 @@ type State =
   | { kind: "ready"; sessionId: string }
   | { kind: "error"; message: string }
   | { kind: "closed" };
+
+function styleToCss(style: AnsiStyle): CSSProperties {
+  const effectiveFg = style.inverse ? style.bg : style.fg;
+  const effectiveBg = style.inverse ? style.fg : style.bg;
+  const css: CSSProperties = {};
+  if (effectiveFg) css.color = effectiveFg;
+  if (effectiveBg) css.backgroundColor = effectiveBg;
+  if (style.bold) css.fontWeight = 700;
+  if (style.italic) css.fontStyle = "italic";
+  if (style.dim) css.opacity = 0.7;
+  const decorations: string[] = [];
+  if (style.underline) decorations.push("underline");
+  if (style.strike) decorations.push("line-through");
+  if (decorations.length > 0) css.textDecoration = decorations.join(" ");
+  return css;
+}
+
+function AnsiLine({ line }: { line: OutputLine }) {
+  // Fast path: no ESC in the raw bytes means plain text — avoid the
+  // parser overhead and render straight from the stripped content the
+  // backend already computed.
+  const hasEscape = line.raw.some((b) => b === 0x1b);
+  if (!hasEscape) {
+    return <div className="terminal-line">{line.content}</div>;
+  }
+  const spans: AnsiSpan[] = parseAnsiLine(line.raw);
+  return (
+    <div className="terminal-line">
+      {spans.map((span, i) => (
+        <span key={i} style={styleToCss(span.style)}>
+          {span.text}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export function TerminalPanel() {
   const [state, setState] = useState<State>({ kind: "idle" });
@@ -185,9 +222,7 @@ export function TerminalPanel() {
     <div className="terminal-panel ready" onClick={() => inputRef.current?.focus()}>
       <div className="terminal-output" ref={outputRef}>
         {lines.map((line, idx) => (
-          <div className="terminal-line" key={idx}>
-            {line.content}
-          </div>
+          <AnsiLine key={idx} line={line} />
         ))}
       </div>
       <div className="terminal-input-row">
