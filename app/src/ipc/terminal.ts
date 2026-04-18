@@ -126,3 +126,54 @@ export function termGetSessionInfo(id: string): Promise<SessionInfo> {
 export function termListSessions(): Promise<SessionInfo[]> {
   return invoke<SessionInfo[]>("term_list_sessions");
 }
+
+// ─── Saved commands (PRD-09 §14.1) ─────────────────────────────────────────
+//
+// JSON-compatible view of `nexus_terminal::SavedCommand`. Field names use
+// snake_case to match the Rust struct's default serde layout — the
+// frontend store converts to/from camelCase at the boundary.
+
+export interface SavedCommandDto {
+  slug: string;
+  name: string;
+  shell: string;
+  shell_cmd: string;
+  working_dir: string | null;
+  env_vars: Record<string, string>;
+  env_file: string | null;
+  icon: string;
+  auto_restart: boolean;
+  auto_restart_delay_ms: number;
+  memory_limit_mb: number | null;
+  sidebar_order: number | null;
+  pre_commands: string[];
+  created_at: number;
+  updated_at: number;
+}
+
+export function termSavedList(): Promise<SavedCommandDto[]> {
+  return invoke<SavedCommandDto[]>("term_saved_list");
+}
+
+export function termSavedCreate(
+  command: SavedCommandDto,
+): Promise<SavedCommandDto> {
+  return invoke<SavedCommandDto>("term_saved_create", { command });
+}
+
+export function termSavedUpdate(
+  command: SavedCommandDto,
+): Promise<SavedCommandDto> {
+  return invoke<SavedCommandDto>("term_saved_update", { command });
+}
+
+export function termSavedDelete(slug: string): Promise<void> {
+  return invoke<void>("term_saved_delete", { slug });
+}
+
+export function termSavedReorder(
+  slug: string,
+  sidebarOrder: number | null,
+): Promise<void> {
+  return invoke<void>("term_saved_reorder", { slug, sidebarOrder });
+}

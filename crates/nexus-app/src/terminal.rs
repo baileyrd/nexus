@@ -200,3 +200,55 @@ pub async fn term_list_sessions(
 ) -> Result<serde_json::Value, String> {
     call_terminal(runtime, "list_sessions", serde_json::json!({})).await
 }
+
+/// List every saved command (`procmgr_commands` rows) ordered as the
+/// sidebar renders them.
+#[tauri::command]
+pub async fn term_saved_list(
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_terminal(runtime, "saved_list", serde_json::json!({})).await
+}
+
+/// Create a new saved command. Accepts the full `SavedCommand` JSON
+/// document (frontend fills in defaults + current timestamps).
+#[tauri::command]
+pub async fn term_saved_create(
+    command: serde_json::Value,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_terminal(runtime, "saved_create", command).await
+}
+
+/// Update an existing saved command in place. `slug` is the key.
+#[tauri::command]
+pub async fn term_saved_update(
+    command: serde_json::Value,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_terminal(runtime, "saved_update", command).await
+}
+
+/// Delete a saved command by slug. Idempotent.
+#[tauri::command]
+pub async fn term_saved_delete(
+    slug: String,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_terminal(runtime, "saved_delete", serde_json::json!({ "slug": slug })).await
+}
+
+/// Update only the `sidebar_order` column for one saved command.
+#[tauri::command]
+pub async fn term_saved_reorder(
+    slug: String,
+    sidebar_order: Option<i32>,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_terminal(
+        runtime,
+        "saved_reorder",
+        serde_json::json!({ "slug": slug, "sidebar_order": sidebar_order }),
+    )
+    .await
+}

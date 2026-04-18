@@ -61,6 +61,9 @@ async function runCommand(cmd: SavedCommand): Promise<string> {
 
 export function SavedCommandsPanel(): JSX.Element {
   const commands = useSavedCommandsStore((s) => s.commands);
+  const loaded = useSavedCommandsStore((s) => s.loaded);
+  const loadError = useSavedCommandsStore((s) => s.loadError);
+  const load = useSavedCommandsStore((s) => s.load);
   const add = useSavedCommandsStore((s) => s.add);
   const update = useSavedCommandsStore((s) => s.update);
   const remove = useSavedCommandsStore((s) => s.remove);
@@ -69,6 +72,14 @@ export function SavedCommandsPanel(): JSX.Element {
   const [editor, setEditor] = useState<EditorState>({ mode: "closed" });
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!loaded) void load();
+  }, [loaded, load]);
+
+  useEffect(() => {
+    if (loadError) setError(loadError);
+  }, [loadError]);
 
   useEffect(() => {
     if (!status) return;
@@ -97,20 +108,24 @@ export function SavedCommandsPanel(): JSX.Element {
 
   const sorted = useMemo(() => commands, [commands]);
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if (editor.mode === "closed") return;
     const { draft } = editor;
     if (!draft.name.trim() || !draft.shellCmd.trim()) {
       setError("Name and command are required.");
       return;
     }
-    if (editor.mode === "add") {
-      add(draft);
-    } else {
-      update(editor.slug, draft);
+    try {
+      if (editor.mode === "add") {
+        await add(draft);
+      } else {
+        await update(editor.slug, draft);
+      }
+      setEditor({ mode: "closed" });
+      setError(null);
+    } catch (err) {
+      setError(String(err));
     }
-    setEditor({ mode: "closed" });
-    setError(null);
   }, [editor, add, update]);
 
   return (
@@ -192,13 +207,22 @@ export function SavedCommandsPanel(): JSX.Element {
                 >
                   Edit
                 </button>
-                <button type="button" onClick={() => remove(cmd.slug)}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    remove(cmd.slug).catch((err) => setError(String(err)));
+                  }}
+                >
                   Delete
                 </button>
                 <button
                   type="button"
                   disabled={idx === 0}
-                  onClick={() => reorder(cmd.slug, "up")}
+                  onClick={() => {
+                    reorder(cmd.slug, "up").catch((err) =>
+                      setError(String(err)),
+                    );
+                  }}
                   aria-label="Move up"
                 >
                   ↑
@@ -206,7 +230,11 @@ export function SavedCommandsPanel(): JSX.Element {
                 <button
                   type="button"
                   disabled={idx === sorted.length - 1}
-                  onClick={() => reorder(cmd.slug, "down")}
+                  onClick={() => {
+                    reorder(cmd.slug, "down").catch((err) =>
+                      setError(String(err)),
+                    );
+                  }}
                   aria-label="Move down"
                 >
                   ↓
@@ -223,7 +251,7 @@ export function SavedCommandsPanel(): JSX.Element {
 function CommandForm(props: {
   draft: Omit<SavedCommand, "slug">;
   onChange: (patch: Partial<Omit<SavedCommand, "slug">>) => void;
-  onSubmit: () => void;
+  onSubmit: () => void | Promise<void>;
   onCancel: () => void;
   submitLabel: string;
 }) {

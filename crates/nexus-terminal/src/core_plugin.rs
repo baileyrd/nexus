@@ -54,6 +54,7 @@ use std::time::Duration;
 use nexus_plugins::{CorePlugin, PluginError};
 use serde::{Deserialize, Serialize};
 
+use crate::saved::{SavedCommand, SqliteSavedCommandStore};
 use crate::server::{InMemoryTerminalServer, ServerSpawnConfig, TerminalServer};
 use crate::session::SessionId;
 use crate::shell::ShellSpec;
@@ -81,6 +82,17 @@ pub const HANDLER_WAIT_FOR_PATTERN: u32 = 8;
 pub const HANDLER_GET_SESSION_INFO: u32 = 9;
 /// `list_sessions` handler id.
 pub const HANDLER_LIST_SESSIONS: u32 = 10;
+/// `saved_list` handler id. Returns every row in `procmgr_commands`
+/// ordered by `sidebar_order` (nulls last) then by `name`.
+pub const HANDLER_SAVED_LIST: u32 = 11;
+/// `saved_create` handler id. Accepts a `SavedCommand` JSON document.
+pub const HANDLER_SAVED_CREATE: u32 = 12;
+/// `saved_update` handler id. Accepts the full row; `slug` is the key.
+pub const HANDLER_SAVED_UPDATE: u32 = 13;
+/// `saved_delete` handler id. Args: `{ slug: string }`.
+pub const HANDLER_SAVED_DELETE: u32 = 14;
+/// `saved_reorder` handler id. Args: `{ slug: string, sidebar_order?: i32 }`.
+pub const HANDLER_SAVED_REORDER: u32 = 15;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -213,14 +225,22 @@ pub struct WaitForPatternResponse {
 /// — `Mutex` keeps the bound honest without adding latency.
 pub struct TerminalCorePlugin {
     server: Mutex<InMemoryTerminalServer>,
+    /// SQLite-backed saved-commands store. `None` when the plugin is
+    /// instantiated without a forge path (tests, embedded runtimes) —
+    /// the saved-command handlers return a clear error in that case.
+    saved: Option<Mutex<SqliteSavedCommandStore>>,
 }
 
 impl TerminalCorePlugin {
-    /// Build a plugin wrapping a fresh default server.
+    /// Build a plugin wrapping a fresh default server and no saved-
+    /// commands store. The `saved_*` handlers will return an error
+    /// when called; suitable for integration tests that don't touch
+    /// the procmgr surface.
     #[must_use]
     pub fn new() -> Self {
         Self {
             server: Mutex::new(InMemoryTerminalServer::new()),
+            saved: None,
         }
     }
 
@@ -230,7 +250,17 @@ impl TerminalCorePlugin {
     pub fn with_server(server: InMemoryTerminalServer) -> Self {
         Self {
             server: Mutex::new(server),
+            saved: None,
         }
+    }
+
+    /// Attach a saved-command store so the `saved_*` handlers become
+    /// live. Takes ownership — the plugin holds the store for its
+    /// entire lifetime behind a `Mutex`.
+    #[must_use]
+    pub fn with_saved_store(mut self, store: SqliteSavedCommandStore) -> Self {
+        self.saved = Some(Mutex::new(store));
+        self
     }
 }
 
@@ -257,6 +287,11 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_WAIT_FOR_PATTERN => self.dispatch_wait_for_pattern(args),
             HANDLER_GET_SESSION_INFO => self.dispatch_get_session_info(args),
             HANDLER_LIST_SESSIONS => self.dispatch_list_sessions(args),
+            HANDLER_SAVED_LIST => self.dispatch_saved_list(),
+            HANDLER_SAVED_CREATE => self.dispatch_saved_create(args),
+            HANDLER_SAVED_UPDATE => self.dispatch_saved_update(args),
+            HANDLER_SAVED_DELETE => self.dispatch_saved_delete(args),
+            HANDLER_SAVED_REORDER => self.dispatch_saved_reorder(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -419,6 +454,72 @@ impl TerminalCorePlugin {
     ) -> Result<serde_json::Value, PluginError> {
         let list = self.server.lock().map_err(poisoned)?.list_sessions();
         to_value(&list, "list_sessions")
+    }
+
+    fn saved_store(&self) -> Result<&Mutex<SqliteSavedCommandStore>, PluginError> {
+        self.saved.as_ref().ok_or_else(|| {
+            exec_err("saved-command store not attached (runtime built without a forge path)".into())
+        })
+    }
+
+    fn dispatch_saved_list(&self) -> Result<serde_json::Value, PluginError> {
+        let store = self.saved_store()?.lock().map_err(poisoned)?;
+        let rows = store.list().map_err(crate_err)?;
+        to_value(&rows, "saved_list")
+    }
+
+    fn dispatch_saved_create(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let cmd: SavedCommand = parse_args(args, "saved_create")?;
+        let store = self.saved_store()?.lock().map_err(poisoned)?;
+        store.create(&cmd).map_err(crate_err)?;
+        to_value(&cmd, "saved_create")
+    }
+
+    fn dispatch_saved_update(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let cmd: SavedCommand = parse_args(args, "saved_update")?;
+        let store = self.saved_store()?.lock().map_err(poisoned)?;
+        store.update(&cmd).map_err(crate_err)?;
+        let fresh = store
+            .get(&cmd.slug)
+            .map_err(crate_err)?
+            .ok_or_else(|| exec_err(format!("saved_update: slug '{}' vanished", cmd.slug)))?;
+        to_value(&fresh, "saved_update")
+    }
+
+    fn dispatch_saved_delete(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        #[derive(serde::Deserialize)]
+        struct DeleteArgs {
+            slug: String,
+        }
+        let a: DeleteArgs = parse_args(args, "saved_delete")?;
+        let store = self.saved_store()?.lock().map_err(poisoned)?;
+        store.delete(&a.slug).map_err(crate_err)?;
+        Ok(serde_json::json!({ "slug": a.slug }))
+    }
+
+    fn dispatch_saved_reorder(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        #[derive(serde::Deserialize)]
+        struct ReorderArgs {
+            slug: String,
+            #[serde(default)]
+            sidebar_order: Option<i32>,
+        }
+        let a: ReorderArgs = parse_args(args, "saved_reorder")?;
+        let store = self.saved_store()?.lock().map_err(poisoned)?;
+        store.reorder(&a.slug, a.sidebar_order).map_err(crate_err)?;
+        Ok(serde_json::json!({ "slug": a.slug, "sidebar_order": a.sidebar_order }))
     }
 }
 

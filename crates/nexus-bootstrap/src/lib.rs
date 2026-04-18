@@ -584,6 +584,22 @@ fn register_core_plugins(
     // Terminal & process manager — PRD-09. Pure-library crate wrapped
     // behind `com.nexus.terminal` so UI / script plugins reach it over
     // dispatch rather than linking it directly (ARCHITECTURE §7 invariant #3).
+    // Saved-commands (§14.1) are persisted via `SqliteSavedCommandStore`
+    // at `<forge>/.forge/procmgr.sqlite`; failure to open the store is
+    // logged and the plugin loads without saved-command handlers
+    // (session IPC stays usable even when SQLite misbehaves).
+    let saved_db = forge_root.join(".forge").join("procmgr.sqlite");
+    let terminal_plugin = match nexus_terminal::SqliteSavedCommandStore::open(&saved_db) {
+        Ok(store) => TerminalCorePlugin::new().with_saved_store(store),
+        Err(err) => {
+            tracing::warn!(
+                path = %saved_db.display(),
+                err = %err,
+                "com.nexus.terminal: saved-commands store unavailable; handlers will return errors"
+            );
+            TerminalCorePlugin::new()
+        }
+    };
     loader
         .register_core(
             core_manifest_with_ipc(
@@ -622,10 +638,30 @@ fn register_core_plugins(
                         "list_sessions",
                         nexus_terminal::HANDLER_LIST_SESSIONS,
                     ),
+                    (
+                        "saved_list",
+                        nexus_terminal::HANDLER_SAVED_LIST,
+                    ),
+                    (
+                        "saved_create",
+                        nexus_terminal::HANDLER_SAVED_CREATE,
+                    ),
+                    (
+                        "saved_update",
+                        nexus_terminal::HANDLER_SAVED_UPDATE,
+                    ),
+                    (
+                        "saved_delete",
+                        nexus_terminal::HANDLER_SAVED_DELETE,
+                    ),
+                    (
+                        "saved_reorder",
+                        nexus_terminal::HANDLER_SAVED_REORDER,
+                    ),
                 ],
             ),
             forge_root,
-            Box::new(TerminalCorePlugin::new()),
+            Box::new(terminal_plugin),
         )
         .context("failed to register com.nexus.terminal")?;
 

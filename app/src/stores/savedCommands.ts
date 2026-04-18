@@ -1,13 +1,26 @@
 // Saved commands store (PRD-09 §14.1).
 //
-// Frontend-only snapshot of the procmgr_commands table that the Rust
-// `SqliteSavedCommandStore` owns. Persisted to localStorage so users
-// don't lose their list between sessions; a follow-up PRD-09 slice
-// will wire this up to the `com.nexus.terminal` plugin once that
-// crate exposes list/create/update/delete handlers.
+// Thin IPC-backed cache over `com.nexus.terminal`'s `saved_*` handlers,
+// which persist to `{forge}/.forge/procmgr.sqlite` via
+// `nexus_terminal::SqliteSavedCommandStore`. This file maps the plugin's
+// snake_case DTO to the camelCase shape the UI uses.
+//
+// The panel calls `load()` on mount; every CRUD action writes through to
+// the plugin and then refreshes the cached list from the response so the
+// UI never drifts from the backing DB.
 
 import { create } from "zustand";
 
+import {
+  termSavedList,
+  termSavedCreate,
+  termSavedUpdate,
+  termSavedDelete,
+  termSavedReorder,
+  type SavedCommandDto,
+} from "../ipc/terminal";
+
+/** Canonical frontend shape — camelCase view of `SavedCommandDto`. */
 export interface SavedCommand {
   slug: string;
   name: string;
@@ -19,70 +32,93 @@ export interface SavedCommand {
 
 interface SavedCommandsState {
   commands: SavedCommand[];
-  add: (cmd: Omit<SavedCommand, "slug"> & { slug?: string }) => SavedCommand;
-  update: (slug: string, patch: Partial<SavedCommand>) => void;
-  remove: (slug: string) => void;
-  reorder: (slug: string, direction: "up" | "down") => void;
+  loaded: boolean;
+  loadError: string | null;
+  load: () => Promise<void>;
+  add: (
+    cmd: Omit<SavedCommand, "slug"> & { slug?: string },
+  ) => Promise<SavedCommand>;
+  update: (slug: string, patch: Partial<SavedCommand>) => Promise<void>;
+  remove: (slug: string) => Promise<void>;
+  reorder: (slug: string, direction: "up" | "down") => Promise<void>;
 }
 
-const STORAGE_KEY = "nexus.saved-commands.v1";
-
-function loadInitial(): SavedCommand[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isSavedCommand);
-  } catch {
-    return [];
-  }
+function fromDto(d: SavedCommandDto): SavedCommand {
+  return {
+    slug: d.slug,
+    name: d.name,
+    shell: d.shell,
+    shellCmd: d.shell_cmd,
+    workingDir: d.working_dir,
+    icon: d.icon,
+  };
 }
 
-function isSavedCommand(v: unknown): v is SavedCommand {
-  if (typeof v !== "object" || v === null) return false;
-  const r = v as Record<string, unknown>;
-  return (
-    typeof r.slug === "string" &&
-    typeof r.name === "string" &&
-    typeof r.shell === "string" &&
-    typeof r.shellCmd === "string" &&
-    (r.workingDir === null || typeof r.workingDir === "string") &&
-    typeof r.icon === "string"
-  );
-}
-
-function persist(commands: SavedCommand[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(commands));
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn("[saved-commands] persist failed", err);
-  }
+function toDto(c: SavedCommand, existing?: SavedCommandDto): SavedCommandDto {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    slug: c.slug,
+    name: c.name,
+    shell: c.shell,
+    shell_cmd: c.shellCmd,
+    working_dir: c.workingDir,
+    env_vars: existing?.env_vars ?? {},
+    env_file: existing?.env_file ?? null,
+    icon: c.icon || "terminal",
+    auto_restart: existing?.auto_restart ?? false,
+    auto_restart_delay_ms: existing?.auto_restart_delay_ms ?? 2000,
+    memory_limit_mb: existing?.memory_limit_mb ?? null,
+    sidebar_order: existing?.sidebar_order ?? null,
+    pre_commands: existing?.pre_commands ?? [],
+    created_at: existing?.created_at ?? now,
+    updated_at: now,
+  };
 }
 
 function makeSlug(name: string, existing: string[]): string {
-  const base = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    .slice(0, 48) || "cmd";
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 48) || "cmd";
   if (!existing.includes(base)) return base;
   let n = 2;
   while (existing.includes(`${base}-${n}`)) n++;
   return `${base}-${n}`;
 }
 
+/** Remember the last-seen DTO per slug so updates preserve fields the UI
+ *  doesn't surface (env_vars, pre_commands, timestamps). */
+const dtoCache = new Map<string, SavedCommandDto>();
+
 export const useSavedCommandsStore = create<SavedCommandsState>((set, get) => ({
-  commands: loadInitial(),
-  add: (cmd) => {
-    const existing = get().commands.map((c) => c.slug);
-    const slug = cmd.slug && !existing.includes(cmd.slug)
-      ? cmd.slug
-      : makeSlug(cmd.name, existing);
-    const created: SavedCommand = {
+  commands: [],
+  loaded: false,
+  loadError: null,
+
+  load: async () => {
+    try {
+      const rows = await termSavedList();
+      dtoCache.clear();
+      for (const r of rows) dtoCache.set(r.slug, r);
+      set({
+        commands: rows.map(fromDto),
+        loaded: true,
+        loadError: null,
+      });
+    } catch (err) {
+      set({ loaded: true, loadError: String(err) });
+    }
+  },
+
+  add: async (cmd) => {
+    const existing = Array.from(dtoCache.keys());
+    const slug =
+      cmd.slug && !existing.includes(cmd.slug)
+        ? cmd.slug
+        : makeSlug(cmd.name, existing);
+    const candidate: SavedCommand = {
       slug,
       name: cmd.name,
       shell: cmd.shell,
@@ -90,32 +126,52 @@ export const useSavedCommandsStore = create<SavedCommandsState>((set, get) => ({
       workingDir: cmd.workingDir ?? null,
       icon: cmd.icon || "terminal",
     };
-    const next = [...get().commands, created];
-    persist(next);
-    set({ commands: next });
-    return created;
+    const created = await termSavedCreate(toDto(candidate));
+    dtoCache.set(created.slug, created);
+    set({ commands: [...get().commands, fromDto(created)] });
+    return fromDto(created);
   },
-  update: (slug, patch) => {
-    const next = get().commands.map((c) =>
-      c.slug === slug ? { ...c, ...patch, slug: c.slug } : c,
-    );
-    persist(next);
-    set({ commands: next });
+
+  update: async (slug, patch) => {
+    const current = get().commands.find((c) => c.slug === slug);
+    if (!current) return;
+    const merged: SavedCommand = {
+      ...current,
+      ...patch,
+      slug: current.slug,
+    };
+    const fresh = await termSavedUpdate(toDto(merged, dtoCache.get(slug)));
+    dtoCache.set(fresh.slug, fresh);
+    set({
+      commands: get().commands.map((c) =>
+        c.slug === slug ? fromDto(fresh) : c,
+      ),
+    });
   },
-  remove: (slug) => {
-    const next = get().commands.filter((c) => c.slug !== slug);
-    persist(next);
-    set({ commands: next });
+
+  remove: async (slug) => {
+    await termSavedDelete(slug);
+    dtoCache.delete(slug);
+    set({ commands: get().commands.filter((c) => c.slug !== slug) });
   },
-  reorder: (slug, direction) => {
+
+  reorder: async (slug, direction) => {
     const list = get().commands;
     const idx = list.findIndex((c) => c.slug === slug);
     if (idx < 0) return;
-    const swap = direction === "up" ? idx - 1 : idx + 1;
-    if (swap < 0 || swap >= list.length) return;
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= list.length) return;
+    // Persist via sidebar_order: assign fresh ordinals based on the new
+    // positions. Keeps gaps shallow so later inserts don't need to
+    // compact the whole column.
     const next = list.slice();
-    [next[idx], next[swap]] = [next[swap]!, next[idx]!];
-    persist(next);
+    [next[idx], next[swapIdx]] = [next[swapIdx]!, next[idx]!];
+    for (let i = 0; i < next.length; i++) {
+      const c = next[i]!;
+      await termSavedReorder(c.slug, i);
+      const cached = dtoCache.get(c.slug);
+      if (cached) cached.sidebar_order = i;
+    }
     set({ commands: next });
   },
 }));

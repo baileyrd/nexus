@@ -212,6 +212,11 @@ pub fn run() {
             terminal::term_search_output,
             terminal::term_get_session_info,
             terminal::term_list_sessions,
+            terminal::term_saved_list,
+            terminal::term_saved_create,
+            terminal::term_saved_update,
+            terminal::term_saved_delete,
+            terminal::term_saved_reorder,
             uri::dispatch_uri,
         ])
         .run(tauri::generate_context!())
