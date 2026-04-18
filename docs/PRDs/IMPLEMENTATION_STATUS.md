@@ -36,7 +36,7 @@
 | 13 | Skills | 🟠 | `nexus-skills` library + `com.nexus.skills` core plugin (6 handlers incl. `render` with parameter substitution) + `nexus skill` CLI; skill-aware agent planning layers matching skills into the planner system prompt |
 | 14 | MCP Integration | 🟡 | 807-line `serve_stdio`; no WebSocket/HTTP transports, no Host (client) |
 | 15 | Agent System | 🟠 | Library + `com.nexus.agent` plugin (`plan` / `run` / `run_plan`) + `nexus agent` CLI + Chat "Agent" + "Preview" chips (plan approval) + skill-aware prompt layering + Writer/Coder/Researcher archetypes; no memory persistence, no per-step approval yet |
-| 16 | Workflow System | 🟠 | `nexus-workflow` library: typed `.workflow.toml` model + parser + directory registry; no trigger engine / executor / plugin yet |
+| 16 | Workflow System | 🟠 | `nexus-workflow` library + `com.nexus.workflow` core plugin (4 handlers) + `nexus workflow` CLI; no trigger engine / executor yet |
 | 17 | Cross-Platform Strategy | 🟢 | Tauri desktop shipping; web OPFS + mobile UniFFI deferred |
 
 ## Per-PRD detail
@@ -158,8 +158,9 @@
 
 ### PRD-16 — Workflow System 🟠
 **Shipped (scaffold, this session):** New [`nexus-workflow`](crates/nexus-workflow/) library crate — kernel-free, matching the `nexus-skills` / `nexus-agent` posture. Typed model for `.workflow.toml` per §4: `Workflow` + `WorkflowMeta` + `Input` + `Trigger` + `Condition` + `Step` + `ErrorHandling`, each with a `#[serde(flatten)] extra` map so type-dispatched fields (`schedule`, `watch_dir`, `path`, `query`, condition combinators) round-trip without forcing a monolithic enum. [`parse_workflow_text`](crates/nexus-workflow/src/parse.rs) / `parse_workflow_file` validate required fields (non-empty name, trigger type, step types) after decode. [`WorkflowRegistry`](crates/nexus-workflow/src/registry.rs) walks `<forge>/.workflows/` (recursive, strict `.workflow.toml` filter), keyed by `workflow.name`; missing root is empty, parse failures surface as `PartialParseFailure` *after* the successfully-parsed subset is inserted so callers can log + continue. 12 unit tests.
-**Gaps:** No trigger engine (cron / fs-watcher / db / git / webhook / mcp). No condition evaluator. No action executor. No `com.nexus.workflow` core plugin. No `nexus workflow` CLI. No template library.
-**Evidence:** [crates/nexus-workflow/src/{lib,parse,registry}.rs](crates/nexus-workflow/src/).
+**Shipped (core plugin + CLI, this session):** [`WorkflowCorePlugin`](crates/nexus-workflow/src/core_plugin.rs) exposes 4 append-only handlers — `list` (1), `get` (2), `reload` (3), `validate` (4) — behind `com.nexus.workflow`. `validate` accepts raw TOML text so UIs can smoke-test edits before saving. Bootstrap opens the dir at `<forge>/.workflows`. `nexus workflow list|show|reload|validate` wraps the handlers from the CLI with 30s timeout; no direct `nexus-workflow` linkage. 5 plugin tests on top of the 12 library tests (17 total).
+**Gaps:** No trigger engine (cron / fs-watcher / db / git / webhook / mcp). No condition evaluator. No action executor. No template library. No UI surface.
+**Evidence:** [crates/nexus-workflow/src/](crates/nexus-workflow/src/), [crates/nexus-cli/src/commands/workflow.rs](crates/nexus-cli/src/commands/workflow.rs), [crates/nexus-bootstrap/src/lib.rs](crates/nexus-bootstrap/src/lib.rs).
 
 ### PRD-17 — Cross-Platform Strategy 🟢
 **Shipped:** Tauri 2.x desktop shell with React/Zustand frontend, strict CSP, sandboxed webview panels, Rust core platform-agnostic, deep-link scheme dispatch plumbing.

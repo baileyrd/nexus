@@ -87,6 +87,8 @@ enum Commands {
     Agent(AgentArgs),
     /// Skill operations (PRD-13): list and inspect `.skill.md` files
     Skill(SkillArgs),
+    /// Workflow operations (PRD-16): list/show/validate `.workflow.toml` files
+    Workflow(WorkflowArgs),
     /// Process / saved-command management (PRD-09 §14.1)
     Proc(ProcArgs),
     /// Terminal / PTY session operations (PRD-09)
@@ -399,6 +401,34 @@ enum SkillCommand {
         /// Parameter override(s) in `key=value` form (repeatable)
         #[arg(long = "param", short = 'p', value_name = "KEY=VALUE")]
         params: Vec<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Workflow (PRD-16)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct WorkflowArgs {
+    #[command(subcommand)]
+    command: WorkflowCommand,
+}
+
+#[derive(Subcommand)]
+enum WorkflowCommand {
+    /// List every loaded workflow
+    List,
+    /// Show full metadata for one workflow
+    Show {
+        /// Workflow name (as declared in `[workflow].name`)
+        name: String,
+    },
+    /// Re-scan the `.workflows/` directory
+    Reload,
+    /// Validate a `.workflow.toml` file without loading it into the registry
+    Validate {
+        /// Path to the workflow file
+        file: PathBuf,
     },
 }
 
@@ -1084,6 +1114,15 @@ fn main() {
             SkillCommand::Reload => commands::skill::reload(&mut app),
             SkillCommand::Render { id, params } => {
                 commands::skill::render(&mut app, &id, &params)
+            }
+        },
+
+        Commands::Workflow(args) => match args.command {
+            WorkflowCommand::List => commands::workflow::list(&mut app),
+            WorkflowCommand::Show { name } => commands::workflow::show(&mut app, &name),
+            WorkflowCommand::Reload => commands::workflow::reload(&mut app),
+            WorkflowCommand::Validate { file } => {
+                commands::workflow::validate(&mut app, &file.to_string_lossy())
             }
         },
 

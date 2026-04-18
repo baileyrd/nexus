@@ -227,6 +227,7 @@ fn register_core_plugins(
     use nexus_agent::AgentCorePlugin;
     use nexus_ai::AiCorePlugin;
     use nexus_skills::SkillsCorePlugin;
+    use nexus_workflow::WorkflowCorePlugin;
     use nexus_editor::EditorCorePlugin;
     use nexus_git::GitCorePlugin;
     use nexus_mcp::McpHostPlugin;
@@ -564,6 +565,28 @@ fn register_core_plugins(
             Box::new(SkillsCorePlugin::open(skills_dir)),
         )
         .context("failed to register com.nexus.skills")?;
+
+    // Workflow — PRD-16 scaffold. Read-mostly surface over
+    // `.workflows/` TOML files. Library stays kernel-free; this
+    // plugin is the only integration point.
+    let workflows_dir = forge_root.join(".workflows");
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.workflow",
+                "Workflow",
+                LifecycleFlags::NONE,
+                &[
+                    ("list", nexus_workflow::HANDLER_LIST),
+                    ("get", nexus_workflow::HANDLER_GET),
+                    ("reload", nexus_workflow::HANDLER_RELOAD),
+                    ("validate", nexus_workflow::HANDLER_VALIDATE),
+                ],
+            ),
+            forge_root,
+            Box::new(WorkflowCorePlugin::open(workflows_dir)),
+        )
+        .context("failed to register com.nexus.workflow")?;
 
     // Agent system — PRD-15 scaffold. Thin dispatch surface over
     // `nexus-agent::{LlmAgent, PlanExecutor}`; bridges to `com.nexus.ai`

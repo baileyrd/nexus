@@ -26,9 +26,13 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod core_plugin;
 mod parse;
 mod registry;
 
+pub use core_plugin::{
+    WorkflowCorePlugin, HANDLER_GET, HANDLER_LIST, HANDLER_RELOAD, HANDLER_VALIDATE, PLUGIN_ID,
+};
 pub use parse::{parse_workflow_file, parse_workflow_text, WorkflowParseError};
 pub use registry::{WorkflowRegistry, WorkflowRegistryError};
 

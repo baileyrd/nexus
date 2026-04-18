@@ -14,3 +14,4 @@ pub mod proc;
 pub mod skill;
 pub mod term;
 pub mod watch;
+pub mod workflow;
