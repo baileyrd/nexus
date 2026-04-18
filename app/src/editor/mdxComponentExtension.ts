@@ -58,6 +58,22 @@ import type { MdxComponent, PanelNode } from "../contributions";
 const SELF_CLOSING_RE = /<([A-Z][A-Za-z0-9]*)\b([^>]*?)\/>/g;
 
 /**
+ * Regex matching a block-form JSX tag: `<Name attrs>children</Name>`.
+ * Captures:
+ *   1 — component name
+ *   2 — attribute list
+ *   3 — inner text between the opening and closing tag
+ *
+ * Non-greedy inner match stops at the first matching `</Name>` so two
+ * adjacent blocks don't accidentally bridge. Children are passed to
+ * the render function as an implicit `body` / `children` prop; a
+ * future slice will feed the inner range back through the markdown
+ * parser so nested syntax works.
+ */
+const BLOCK_RE =
+  /<([A-Z][A-Za-z0-9]*)\b([^>]*?)>([\s\S]*?)<\/\1>/g;
+
+/**
  * Regex matching a single `name="value"` or `name={value}` or `name`
  * attribute within the captured attribute group. The `s` flag allows
  * values to span lines (rare but legal).
@@ -258,10 +274,63 @@ export function buildMdxComponentExtension(
       build(view: EditorView): DecorationSet {
         const builder = new RangeSetBuilder<Decoration>();
         const hits: Range<Decoration>[] = [];
+        // Ranges already claimed by a block-form tag so the self-
+        // closing scanner doesn't double-match the inner content.
+        const consumed: Array<[number, number]> = [];
+        const isConsumed = (pos: number) =>
+          consumed.some(([a, b]) => pos >= a && pos < b);
 
         // Only scan visible ranges so huge documents stay responsive.
         for (const { from, to } of view.visibleRanges) {
           const text = view.state.doc.sliceString(from, to);
+
+          // Block-form tags (<Card>…</Card>) first, so the self-closing
+          // pass can skip anything they claim.
+          BLOCK_RE.lastIndex = 0;
+          let bm: RegExpExecArray | null;
+          // eslint-disable-next-line no-cond-assign
+          while ((bm = BLOCK_RE.exec(text))) {
+            const [full, name, attrs, inner] = bm;
+            const component = byName.get(name);
+            if (!component) continue;
+
+            const matchStart = from + bm.index;
+            const matchEnd = matchStart + full.length;
+            if (isInsideCode(view, matchStart)) continue;
+
+            const props = parseAttributes(attrs);
+            // Pass children as both `body` (used by the built-in
+            // Card/Callout/Alert renderers) and `children` (common
+            // React convention) without overwriting an explicit attr.
+            const inner_trimmed = inner.trim();
+            if (!("body" in props) && inner_trimmed.length > 0) {
+              props.body = inner_trimmed;
+            }
+            if (!("children" in props) && inner_trimmed.length > 0) {
+              props.children = inner_trimmed;
+            }
+
+            let tree: PanelNode;
+            try {
+              tree = component.render(props);
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.error(
+                `[mdx] component '${name}' render threw:`,
+                err,
+              );
+              continue;
+            }
+            const dom = panelNodeToDom(tree);
+            hits.push(
+              Decoration.replace({
+                widget: new MdxComponentWidget(full, dom, onCommand),
+                inclusive: false,
+              }).range(matchStart, matchEnd),
+            );
+            consumed.push([matchStart, matchEnd]);
+          }
+
           SELF_CLOSING_RE.lastIndex = 0;
           let m: RegExpExecArray | null;
           // eslint-disable-next-line no-cond-assign
@@ -276,6 +345,7 @@ export function buildMdxComponentExtension(
             const matchStart = from + m.index;
             const matchEnd = matchStart + full.length;
             if (isInsideCode(view, matchStart)) continue;
+            if (isConsumed(matchStart)) continue;
 
             let tree: PanelNode;
             try {

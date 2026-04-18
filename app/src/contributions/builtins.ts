@@ -393,8 +393,9 @@ export function registerBuiltins(): void {
   // `ctx.editor.registerMdxComponent`.
 
   // <Card title="..." accent="...">...</Card>
-  // Self-closing form today (`<Card title="Hi" />`) — nested children
-  // land with the CM6 block-tag scanner follow-up.
+  // Both self-closing (`<Card title="Hi" />`) and block-form with
+  // nested text children are supported — the CM6 scanner passes the
+  // inner text as `body` when the tag wraps content.
   contributions.registerMdxComponent({
     id: "builtin:Card",
     name: "Card",
