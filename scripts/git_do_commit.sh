@@ -3,19 +3,20 @@ export PATH=/home/baileyrd/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 cd /mnt/c/Users/baile/dev/Nexus || exit 1
 
 git add -A
-git commit -m "feat(chat): live agent plan progress in ChatPanel (PRD-15)
+git commit -m "docs: refresh IMPLEMENTATION_STATUS for 2026-04-18 late-session cycle
 
-ChatPanel subscribes to onAgentRunStart / StepStart / StepDone /
-RunDone and writes a running checklist into the pending turn's
-content field as each step lands. Steps render as '▶ [n] desc'
-while executing and flip to '✓' / '✗' / '·' badges when done.
-The awaited agent_run / agent_run_plan resolution overwrites
-content with the full formatted observation when the plan ends,
-so the handoff is seamless.
+Promotes PRD-13 Skills from scaffolded to substantially complete
+(built-in library + render handler + browser panel). Rewrites the
+one-liners for PRDs 05/11/12/13/15/16 to match the current shape.
 
-Transient agentProgress field on Turn is dropped from persistence
-alongside the existing stepCursor / stepResults hygiene — restarts
-see only the final summary, never a stale in-flight checklist.
+Cross-cutting observations bumped from 9 points to 11 — new entries
+for the agents x skills x MCP composition, workflow library/plugin/
+CLI, built-in skill seeding, and multi-session chat storage.
+
+Risk hotspots grew with two new items — agent memory persistence
+and long-running plans — both marked addressed in this cycle. MCP
+Host entry updated to reflect the shipped orchestrator + CLI +
+agent auto-discovery.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 

@@ -1,6 +1,6 @@
 # Nexus PRD Implementation Status
 
-> **Snapshot date:** 2026-04-17 (post-session — com.nexus.skills core plugin + skill-aware agent planning + `nexus skill` / `nexus proc` CLIs + plugin-backed chat session store + agent plan-preview approval flow all landed)
+> **Snapshot date:** 2026-04-18 (late session — skills parameter substitution + render handler + built-in library, agent archetypes + per-step execution + history persistence + streaming plan events, workflow manual execution engine, multi-session chat storage + picker, MCP Host CLI + agent auto-discovery, Skills/Workflows/AgentHistory browser panels)
 > **Scope:** PRDs 01–17 in this directory, audited against `crates/**` and `app/src/**`.
 > **Update cadence:** refresh when a PRD's status tier changes, or at minimum at every minor release.
 >
@@ -25,18 +25,18 @@
 | 02 | Security Model | ✅ | WASM sandbox, capability gating, audit logging, install-time consent shipped |
 | 03 | Storage Engine | ✅ | Forge layout + SQLite + Tantivy + graph + watcher + CRDT hooks |
 | 04 | Plugin System | ✅ | Manifest, WASM, hot-reload, activation events, community/core tiers |
-| 05 | CLI | 🟢 | 12 subcommand groups live; agent/workflow CLIs blocked on their subsystems |
+| 05 | CLI | 🟢 | 14+ subcommand groups live (forge, content, plugin, ai, agent, skill, workflow, proc, term, mcp, bases, canvas, config, git, graph, logs, watch) |
 | 06 | File Formats | ✅ | Markdown/MDX/Canvas/Bases/forge config all parse + serialize |
 | 07 | Theming & UI | ✅ | 497-token CSS registry, theme core plugin, contribution registry |
 | 08 | Editor Engine | 🟢 | CM6 surface, block-form + self-closing MDX components, inline AI complete-at-cursor wired to `com.nexus.ai` streaming |
 | 09 | Terminal & Process Manager | 🟢 | `com.nexus.terminal` exposes 15 handlers (sessions + SQLite-backed saved commands); Tauri panel renders ANSI colour; saved-commands sidebar + `nexus proc` CLI ride the same IPC surface |
 | 10 | Database Engine | 🟢 | View engine + Table/Kanban/Calendar-month-grid/Gallery renderers; Kanban cards drag between columns to mutate the group-field value |
-| 11 | Git Integration | 🟢 | 1.1k-line `GitEngine` over `git2`; worker-thread wrapper for UI still needed |
-| 12 | AI Engine | 🟢 | Streaming chat + RAG with citation chips; Chat panel (system prompt, persistence via plugin-backed `session_load` / `session_save`); inline editor completion |
-| 13 | Skills | 🟠 | `nexus-skills` library + `com.nexus.skills` core plugin (6 handlers incl. `render` with parameter substitution) + `nexus skill` CLI; skill-aware agent planning layers matching skills into the planner system prompt |
+| 11 | Git Integration | 🟢 | 1.1k-line `GitEngine` over `git2`; `GitWorker` thread wrapper for UI-driven async ops; `nexus git` CLI |
+| 12 | AI Engine | 🟢 | Streaming chat + RAG citations; multi-session storage (`chat/sessions/<id>.json`) + Chat panel session picker; inline editor completion |
+| 13 | Skills | 🟢 | Library + `com.nexus.skills` plugin (6 handlers incl. `render`) + `nexus skill` CLI + SkillsPanel UI + built-in library seeded at bootstrap (code-reviewer, daily-journal, meeting-notes, commit-message) |
 | 14 | MCP Integration | 🟢 | Server + Host both live: `serve_stdio`, `McpClient`, and `com.nexus.mcp.host` core plugin with 7 IPC handlers; `nexus mcp serve|servers|tools|call` CLI wraps the host |
-| 15 | Agent System | 🟠 | Library + `com.nexus.agent` plugin (`plan` / `run` / `run_plan`) + `nexus agent` CLI + Chat "Agent" + "Preview" chips (plan approval) + skill-aware prompt layering + Writer/Coder/Researcher archetypes; no memory persistence, no per-step approval yet |
-| 16 | Workflow System | 🟠 | `nexus-workflow` library + `com.nexus.workflow` core plugin (5 handlers incl. manual `run`) + `nexus workflow run` CLI + IPC-dispatch action executor; no cron / file / webhook triggers yet |
+| 15 | Agent System | 🟢 | Library + `com.nexus.agent` plugin (7 handlers: plan/run/run_plan/execute_step/history_list/get/delete) + Writer/Coder/Researcher archetypes + MCP tool auto-discovery + plan history persistence + streaming step events + Chat stepwise approval + AgentHistoryPanel |
+| 16 | Workflow System | 🟠 | Library + `com.nexus.workflow` plugin (5 handlers incl. manual `run`) + `nexus workflow run` CLI + IPC-dispatch action executor + WorkflowsPanel UI; no cron / file / webhook triggers yet |
 | 17 | Cross-Platform Strategy | 🟢 | Tauri desktop shipping; web OPFS + mobile UniFFI deferred |
 
 ## Per-PRD detail
@@ -186,19 +186,23 @@
 4. **AI (12) 🟢 end-to-end.** Streaming chat, streaming RAG with source-chip citations, and inline editor completion all share the `com.nexus.ai.stream_*` event plumbing. Microkernel boundary held — provider dispatch, retrieval, and prompt assembly all stay inside `com.nexus.ai`; shell contributes only Tauri bridges and UI.
 5. **Bases (10) 🟢 with meaningful interactivity.** Four renderers ship, Calendar is a proper month grid, and Kanban cards drag between columns to mutate group-field values. Edits round-trip through the same debounced `save_forge_base` pipeline as inline-cell edits.
 6. **Terminal (09) covers CLI + UI + plugin end-to-end.** Saved-commands persist through `TerminalCorePlugin` handlers 11–15 over `SqliteSavedCommandStore`; the sidebar and the new `nexus proc` CLI both ride the same IPC surface. PRD §10.1 ad-hoc CRUD remains library-only; the pattern for promoting it is now established.
-7. **Agents + Skills (15 × 13) now composed.** The agent planner consults `com.nexus.skills::triggered_by` before asking the LLM, layering matching skill bodies onto the planner system prompt. Both subsystems speak only through `ipc_call` — neither crate links the other directly. Chat panel's "Preview" chip gates tool execution behind explicit approval, closing the gap between "generate a plan" and "do things I didn't agree to".
-8. **All UI state now plugin-backed.** Chat transcripts and saved commands both migrated off localStorage this cycle — the only client-side state left is transient UI concerns (panel layout, editor prefs) that don't need to survive a fresh install.
-9. **Workflows (16) remain aspirational.** Treat as Phase 2/3, not 1.0 scope.
+7. **Agents × Skills × MCP (15 × 13 × 14) fully composed.** Planner pulls matching skills via `com.nexus.skills::triggered_by` + `render` (parameter defaults applied), advertises reachable MCP tools via `com.nexus.mcp.host::list_tools`, and emits its plan with `com.nexus.mcp.host::call_tool` as a first-class step target. Per-step execution (`execute_step`) + streaming events (`com.nexus.agent.step_*`) + plan history (`.forge/agent/history/*.json`) close the UI loop. Chat panel supports Preview approval, stepwise execution, and live progress checklists.
+8. **Workflows (16) moved off the shelf.** Library + plugin + CLI + executor + browser panel all ship. Manual-trigger runs route `ipc` step_types through `PluginContext::ipc_call`. Cron / file_event / webhook triggers are the remaining gap — Phase 2 work.
+9. **Built-in skill library shipped in-tree.** Bootstrap seeds four canonical skills into `<forge>/.forge/skills/` on first launch via `include_str!`-backed `seed_builtins`; user edits are never overwritten.
+10. **Multi-session chat storage + picker.** `com.nexus.ai` supports `session_list` / `session_delete` and optional `id` on load/save, routing to `chat/sessions/<id>.json`. Chat panel session picker + localStorage-backed active-id remember-me across launches.
+11. **All UI state now plugin-backed.** Chat transcripts, saved commands, skills, workflows, and agent history all live behind `ipc_call`. The only client-side state left is transient UI concerns (panel layout, active-session pointer) that don't need to survive a fresh install.
 
 ## Risk hotspots
 
 | Risk | Why it matters | Mitigation |
 |------|----------------|------------|
-| MCP Host absence | Positioned as "MCP-integrated" but can't consume external MCP servers | ✅ Addressed: `McpClient` + `McpHostConfig` in `nexus-mcp` spawn external servers from `mcp.toml` and expose `list_tools` / `call_tool` over rmcp's stdio transport. Host orchestrator (lifecycle manager that keeps clients live across the app) is the next follow-up. |
+| MCP Host absence | Positioned as "MCP-integrated" but can't consume external MCP servers | ✅ Addressed: `com.nexus.mcp.host` core plugin (7 handlers) plus `nexus mcp servers/tools/call` CLI. Agent planner auto-discovers tools at plan time and emits them as `call_tool` steps. |
 | Git `!Send` constraint | UI-driven git ops will block the main thread | ✅ Addressed: `GitWorker` + `GitWorkerHandle` in `nexus-git` moves the `git2::Repository` to a dedicated OS thread behind a request/response channel. |
 | F-8.1.1 iframe sandbox deferred | Cannot ship community JS plugin marketplace safely | Policy recorded: script plugins are first-party-only until F-8.1.1 + F-2.2.1 land |
 | Database views absent | `.bases` files load but render nothing useful | ✅ Addressed: Table/Kanban/Calendar-month-grid/Gallery renderers all live in [BaseView.tsx](app/src/components/panels/BaseView.tsx); engine returns the right shape and the UI consumes it end-to-end. |
-| Agent plans auto-approve by default | Any agent-mode chat in the GUI will run tool calls without explicit opt-in | ✅ Addressed: "Preview" chip on the Chat panel (commit 1b202f3) routes through `agent_plan` + `agent_run_plan` with an Approve / Cancel card before any tool dispatch. Auto-run is the off-default — users opt into it by leaving Preview off. |
+| Agent plans auto-approve by default | Any agent-mode chat in the GUI will run tool calls without explicit opt-in | ✅ Addressed: "Preview" chip routes through `agent_plan` + `agent_run_plan` with an Approve / Cancel card; the **Step →** button on the PendingPlanCard runs one step at a time via `agent_execute_step`, closing the loop on per-step gating. |
+| Agent memory absent | Plans + observations vanish when the run returns, so the user can't audit what happened | ✅ Addressed: every `run` / `run_plan` writes `{ goal, plan, observation, created_at }` to `<forge>/.forge/agent/history/*.json`; `AgentHistoryPanel` browses + deletes entries via `com.nexus.agent::history_*` handlers. |
+| Long-running plans feel frozen | The Chat panel blocked until the whole observation returned, even for 5-minute plans | ✅ Addressed: `com.nexus.agent.{run_start,step_start,step_done,run_done}` kernel events forwarded as Tauri events; ChatPanel subscribes and writes a live `▶ → ✓/✗/·` checklist into the pending turn. |
 
 ## How to keep this doc honest
 
