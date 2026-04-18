@@ -1,0 +1,177 @@
+//! Skill command handlers — `nexus skill list|show|context|triggered|reload`.
+//!
+//! All five dispatch through `com.nexus.skills` via `ipc_call`; no
+//! direct `nexus-skills` linkage.
+
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use nexus_kernel::PluginContext;
+use serde_json::Value;
+
+use crate::app::App;
+
+const SKILLS_PLUGIN: &str = "com.nexus.skills";
+const IPC_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// `nexus skill list` — every loaded skill.
+pub fn list(app: &mut App) -> Result<()> {
+    let response = call(app, "list", serde_json::json!({}))?;
+    print_summary_table(&response);
+    Ok(())
+}
+
+/// `nexus skill show <id>` — full frontmatter + body for one skill.
+pub fn show(app: &mut App, id: &str) -> Result<()> {
+    let response = call(app, "get", serde_json::json!({ "id": id }))?;
+    print_full(&response);
+    Ok(())
+}
+
+/// `nexus skill context <ctx>` — skills auto-activating in `ctx`.
+pub fn context(app: &mut App, ctx: &str) -> Result<()> {
+    let response = call(app, "list_by_context", serde_json::json!({ "context": ctx }))?;
+    print_summary_table(&response);
+    Ok(())
+}
+
+/// `nexus skill triggered <text>` — skills whose triggers match.
+pub fn triggered(app: &mut App, text: &str) -> Result<()> {
+    let response = call(app, "triggered_by", serde_json::json!({ "text": text }))?;
+    print_summary_table(&response);
+    Ok(())
+}
+
+/// `nexus skill reload` — re-scan the skills directory.
+pub fn reload(app: &mut App) -> Result<()> {
+    let response = call(app, "reload", serde_json::json!({}))?;
+    let n = response
+        .get("loaded")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    println!("Reloaded {n} skill(s).");
+    Ok(())
+}
+
+// ── Printers ────────────────────────────────────────────────────────────────
+
+fn print_summary_table(response: &Value) {
+    let skills = match response.as_array() {
+        Some(arr) => arr,
+        None => {
+            eprintln!("unexpected response shape: {response}");
+            return;
+        }
+    };
+    if skills.is_empty() {
+        println!("(no skills)");
+        return;
+    }
+    let id_w = skills
+        .iter()
+        .filter_map(|s| s.get("id").and_then(Value::as_str))
+        .map(str::len)
+        .max()
+        .unwrap_or(2)
+        .max(2);
+    let name_w = skills
+        .iter()
+        .filter_map(|s| s.get("name").and_then(Value::as_str))
+        .map(str::len)
+        .max()
+        .unwrap_or(4)
+        .max(4);
+    println!(
+        "{:<id_w$}  {:<name_w$}  {}",
+        "ID",
+        "NAME",
+        "TAGS",
+        id_w = id_w,
+        name_w = name_w,
+    );
+    for s in skills {
+        let id = s.get("id").and_then(Value::as_str).unwrap_or("?");
+        let name = s.get("name").and_then(Value::as_str).unwrap_or("?");
+        let tags = s
+            .get("tags")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+        println!(
+            "{:<id_w$}  {:<name_w$}  {}",
+            id,
+            name,
+            tags,
+            id_w = id_w,
+            name_w = name_w,
+        );
+    }
+}
+
+fn print_full(skill: &Value) {
+    let id = skill.get("id").and_then(Value::as_str).unwrap_or("?");
+    let name = skill.get("name").and_then(Value::as_str).unwrap_or("?");
+    let version = skill
+        .get("version")
+        .and_then(Value::as_str)
+        .unwrap_or("?");
+    let author = skill.get("author").and_then(Value::as_str).unwrap_or("?");
+    let description = skill
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    println!("{name} ({id}) v{version}");
+    println!("by {author}");
+    if !description.is_empty() {
+        println!();
+        println!("{description}");
+    }
+    if let Some(tags) = skill.get("tags").and_then(Value::as_array) {
+        let joined = tags
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        if !joined.is_empty() {
+            println!();
+            println!("Tags : {joined}");
+        }
+    }
+    if let Some(contexts) = skill
+        .get("applicable_contexts")
+        .and_then(Value::as_array)
+    {
+        let joined = contexts
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        if !joined.is_empty() {
+            println!("Contexts : {joined}");
+        }
+    }
+    if let Some(body) = skill.get("body").and_then(Value::as_str) {
+        if !body.is_empty() {
+            println!();
+            println!("--- Body ---");
+            println!("{body}");
+        }
+    }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+fn call(app: &mut App, command: &str, args: Value) -> Result<Value> {
+    let (runtime, rt) = app.runtime()?;
+    rt.block_on(
+        runtime
+            .context
+            .ipc_call(SKILLS_PLUGIN, command, args, IPC_TIMEOUT),
+    )
+    .with_context(|| format!("skills ipc call '{command}' failed"))
+}

@@ -85,6 +85,8 @@ enum Commands {
     Ai(AiArgs),
     /// Agent operations (PRD-15): plan + execute tool-calling loops
     Agent(AgentArgs),
+    /// Skill operations (PRD-13): list and inspect `.skill.md` files
+    Skill(SkillArgs),
     /// Process management (coming soon)
     Proc(StubArgs),
     /// Terminal / PTY session operations (PRD-09)
@@ -304,6 +306,39 @@ enum AgentCommand {
         /// Path to the plan JSON file
         file: PathBuf,
     },
+}
+
+// ---------------------------------------------------------------------------
+// Skill (PRD-13)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct SkillArgs {
+    #[command(subcommand)]
+    command: SkillCommand,
+}
+
+#[derive(Subcommand)]
+enum SkillCommand {
+    /// List every loaded skill
+    List,
+    /// Show full frontmatter + body for one skill
+    Show {
+        /// Skill id
+        id: String,
+    },
+    /// List skills whose applicable_contexts match
+    Context {
+        /// Context id (e.g. ai-chat, editor, pull-request)
+        context: String,
+    },
+    /// List skills whose triggers substring-match the given text
+    Triggered {
+        /// Free-form text to match against each skill's trigger phrases
+        text: String,
+    },
+    /// Re-scan the `.forge/skills/` directory
+    Reload,
 }
 
 // ---------------------------------------------------------------------------
@@ -974,6 +1009,14 @@ fn main() {
             AgentCommand::RunPlan { file } => {
                 commands::agent::run_plan(&mut app, &file.to_string_lossy())
             }
+        },
+
+        Commands::Skill(args) => match args.command {
+            SkillCommand::List => commands::skill::list(&mut app),
+            SkillCommand::Show { id } => commands::skill::show(&mut app, &id),
+            SkillCommand::Context { context } => commands::skill::context(&mut app, &context),
+            SkillCommand::Triggered { text } => commands::skill::triggered(&mut app, &text),
+            SkillCommand::Reload => commands::skill::reload(&mut app),
         },
 
         // Stub commands — implemented in later milestones.
