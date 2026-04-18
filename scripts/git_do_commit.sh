@@ -3,23 +3,19 @@ export PATH=/home/baileyrd/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 cd /mnt/c/Users/baile/dev/Nexus || exit 1
 
 git add -A
-git commit -m "feat(agent): streaming plan-execution events (PRD-15)
+git commit -m "feat(chat): live agent plan progress in ChatPanel (PRD-15)
 
-run_plan_internal now drives steps one-at-a-time via execute_step_at
-and publishes four kernel-bus topics around each dispatch:
-com.nexus.agent.{run_start,step_start,step_done,run_done}. The UI
-no longer has to wait for the whole observation to land before
-showing progress.
+ChatPanel subscribes to onAgentRunStart / StepStart / StepDone /
+RunDone and writes a running checklist into the pending turn's
+content field as each step lands. Steps render as '▶ [n] desc'
+while executing and flip to '✓' / '✗' / '·' badges when done.
+The awaited agent_run / agent_run_plan resolution overwrites
+content with the full formatted observation when the plan ends,
+so the handoff is seamless.
 
-nexus-app::start_agent_event_forwarder mirrors the AI forwarder:
-subscribes to the CustomPrefix com.nexus.agent., translates each
-event into a Tauri event (agent:run_start / step_start / step_done /
-run_done), and emits the plugin's JSON payload verbatim. TS helpers
-onAgentStepStart / onAgentStepDone / onAgentRunStart / onAgentRunDone
-let panels subscribe without touching the raw listen() API.
-
-Library unchanged — all orchestration stays in the plugin, so the
-microkernel boundary is preserved.
+Transient agentProgress field on Turn is dropped from persistence
+alongside the existing stepCursor / stepResults hygiene — restarts
+see only the final summary, never a stale in-flight checklist.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 

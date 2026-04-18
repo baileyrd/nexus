@@ -32,6 +32,10 @@ import {
   agentPlan,
   agentRun,
   agentRunPlan,
+  onAgentRunDone,
+  onAgentRunStart,
+  onAgentStepDone,
+  onAgentStepStart,
   type AgentArchetype,
   type AgentPlan,
   type StepResult,
@@ -52,6 +56,10 @@ type Turn = {
    *  `pendingPlan.steps[i]`. Step i is the "next" step to run. */
   stepCursor?: number;
   stepResults?: StepResult[];
+  /** Transient checklist populated from the `agent:step_start` /
+   *  `agent:step_done` Tauri events while an agent plan is in flight.
+   *  Dropped from persistence. */
+  agentProgress?: string[];
 };
 
 interface Persisted {
@@ -345,6 +353,73 @@ export function ChatPanel(): JSX.Element {
       finalizeTurn(ev.session_id, ev.text, sources);
     }).then((fn) => unlisteners.push(fn));
 
+    // Agent plan-execution progress: writes an ASCII checklist into
+    // the pending turn's content while the plan runs. The final
+    // `agentRun` / `agentRunPlan` resolution overwrites this with
+    // the formatted observation, so we don't need to clear it here.
+    const updatePendingAgentTurn = (
+      mutate: (current: Turn) => Turn,
+    ) => {
+      setTurns((prev) => {
+        const idx = assistantIndexRef.current;
+        if (idx === null) return prev;
+        const next = prev.slice();
+        const current = next[idx];
+        if (!current || !current.pending) return prev;
+        next[idx] = mutate(current);
+        return next;
+      });
+    };
+
+    onAgentRunStart((ev) => {
+      updatePendingAgentTurn((current) => ({
+        ...current,
+        content: `Running plan · ${ev.steps} step${ev.steps === 1 ? "" : "s"}…`,
+        agentProgress: [],
+      }));
+    }).then((fn) => unlisteners.push(fn));
+
+    onAgentStepStart((ev) => {
+      updatePendingAgentTurn((current) => {
+        const lines = (current.agentProgress ?? []).slice();
+        lines[ev.index] = `▶ [${ev.index + 1}] ${ev.description}`;
+        return {
+          ...current,
+          content: lines.join("\n"),
+          agentProgress: lines,
+        };
+      });
+    }).then((fn) => unlisteners.push(fn));
+
+    onAgentStepDone((ev) => {
+      const badge =
+        ev.status === "ok"
+          ? "✓"
+          : ev.status === "failed"
+            ? "✗"
+            : ev.status === "skipped"
+              ? "·"
+              : "?";
+      updatePendingAgentTurn((current) => {
+        const lines = (current.agentProgress ?? []).slice();
+        const prior = lines[ev.index] ?? `[${ev.index + 1}] step`;
+        const stripped = prior.replace(/^▶\s/, "");
+        lines[ev.index] = `${badge} ${stripped}${
+          ev.error ? ` — ${ev.error}` : ""
+        }`;
+        return {
+          ...current,
+          content: lines.join("\n"),
+          agentProgress: lines,
+        };
+      });
+    }).then((fn) => unlisteners.push(fn));
+
+    onAgentRunDone(() => {
+      // No-op — the awaited agentRun / agentRunPlan resolution
+      // overwrites `content` with the full formatted observation.
+    }).then((fn) => unlisteners.push(fn));
+
     return () => {
       for (const fn of unlisteners) fn();
     };
@@ -371,6 +446,7 @@ export function ChatPanel(): JSX.Element {
         pending: false,
         stepCursor: undefined,
         stepResults: undefined,
+        agentProgress: undefined,
       }));
     persist({
       id: chatSessionId,
