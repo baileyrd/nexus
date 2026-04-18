@@ -11,29 +11,20 @@
 ### BL-002: Typed Property Index
 
 **Source**: Growth Plan Phase 0, Task 0.1
-**Effort**: Small (schema migration)
+**Effort**: Medium (1 day — schema is done, query consumers aren't)
 **Crate**: `nexus-storage`
 
-Add `value_num REAL`, `value_date INTEGER`, `value_bool BOOLEAN` columns to the `properties` table alongside the existing `value TEXT`. Enables type-aware property queries (numeric ranges, date filtering, boolean checks) without JSON parsing at query time. Requires a schema migration (v2) and updates to property insert/query logic.
+**Status (2026-04-18):** schema half **done**, consumer half **open**.
+
+- ✅ [`schema.rs:230`](../../crates/nexus-storage/src/schema.rs) migration adds `value_num REAL`, `value_date INTEGER`, `value_bool BOOLEAN` to `properties`.
+- ✅ [`index.rs:655`](../../crates/nexus-storage/src/index.rs) `insert_property` populates them via `extract_typed_values`.
+- ❌ **Nothing reads the typed columns.** [`search_scope.rs:131-141`](../../crates/nexus-storage/src/search_scope.rs) still does `p.value LIKE '%...%'` for the `prop:` scope; [`bases/query.rs`](../../crates/nexus-storage/src/bases/query.rs) operates on `data_json` (the bases records table) via `json_extract` + `CAST(... AS REAL)`, not `properties`.
+
+**To close:** wire a typed-value consumer. Natural fit is extending the `prop:` search-scope parser to accept numeric/date comparison operators (`prop:priority>3`, `prop:date<2026-01-01`, `prop:draft:true`) and dispatch each to the right typed column. Tantivy post-filter stays; the SQL branch changes from `value LIKE` to `value_num > ?` / `value_date < ?` / `value_bool = ?`. Tests in `search_scope.rs` mod tests.
 
 ---
 
 ## Partially New Features (concept exists in PRDs but design is unspecified)
-
-### BL-003: Search Scoping Operators
-
-**Source**: Growth Plan Phase 2, Task 2.5
-**Effort**: Medium (1 day)
-**Crate**: `nexus-storage`
-**Related PRD**: PRD 03 (mentions faceted search, shows `path:notes/*` example — but no other operators or implementation strategy)
-
-Implement query-time scope prefixes for Tantivy search:
-- `tag:rust` — post-filter via SQLite tags table
-- `path:notes/` — post-filter on file path prefix
-- `prop:status:done` — post-filter via SQLite properties table
-- `type:heading` — Tantivy field filter on block type
-
-Approach: parse scope prefixes from query string, run plain-text portion through Tantivy, post-filter results with SQLite, merge scores.
 
 ### BL-007: CRDT-over-Git Transport
 

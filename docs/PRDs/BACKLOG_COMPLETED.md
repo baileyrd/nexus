@@ -14,6 +14,17 @@
 
 ## Partially New Features (concept exists in PRDs but design is unspecified)
 
+### BL-003: Search Scoping Operators ✅ (2026-04-18)
+
+**Delivered:** [`crates/nexus-storage/src/search_scope.rs`](../../crates/nexus-storage/src/search_scope.rs) parses four scope prefixes and post-filters Tantivy hits:
+
+- `tag:NAME` — post-filter via SQLite `tags` table.
+- `path:PREFIX` — post-filter on file-path prefix.
+- `prop:KEY:VALUE` — post-filter via SQLite `properties` table (`value LIKE %VALUE%`).
+- `type:BLOCK_TYPE` — post-filter on the `block_type` column stored on each `SearchResult` (no DB roundtrip).
+
+Wired into `search()` in [`lib.rs:903`](../../crates/nexus-storage/src/lib.rs): `parse_scoped_query` splits the query into plain text + filters, Tantivy runs on the plain text, `filter_results` post-filters by SQLite lookups + block_type comparison. Coverage: 14 unit tests in `search_scope.rs` covering every prefix + malformed inputs + multi-prefix combinations, plus 4 end-to-end assertions in [`tests/prd-03-smoke.rs`](../../crates/nexus-storage/tests/prd-03-smoke.rs).
+
 ### BL-004: Obsidian-Style 3-Tier Link Resolution ✅ (2026-04-18)
 
 **Delivered:** [`crates/nexus-storage/src/index.rs`](../../crates/nexus-storage/src/index.rs) `resolve_link` now cascades tier 1 (exact path) → tier 2 (filename-stem match, case-sensitive) → tier 3 (case-insensitive against full path + stem). A fourth alias-lookup tier is kept as a non-spec extension. Bidirectional resolution wired via two helpers: `reresolve_unresolved_links` runs at the end of `insert_file` so a newly-landed file upgrades every phantom link that now matches; `invalidate_links_to` runs inside `soft_delete_file` so a deletion flips backlinks to phantom (`is_resolved = 0`, `target_file_id = NULL`). Coverage: 4 new unit tests in `index.rs` (`resolve_link_exact_path_wins`, `resolve_link_case_insensitive_fallback`, `insert_upgrades_phantom_links_pointing_to_new_file`, `soft_delete_invalidates_incoming_links`).
