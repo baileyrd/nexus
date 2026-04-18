@@ -370,7 +370,23 @@ async fn save_history(
     });
     match serde_json::to_vec_pretty(&record) {
         Ok(bytes) => {
-            if let Err(err) = ctx.write_file(&path, &bytes).await {
+            // Route through storage `write_file` so the atomic-write
+            // helper's mkdir -p runs. `ctx.write_file` is plain
+            // `tokio::fs::write` and would silently fail on a fresh
+            // forge where `.forge/agent/history/` doesn't yet exist.
+            let Some(path_str) = path.to_str() else {
+                tracing::warn!(plan_id = %plan.id, "history path not UTF-8");
+                return;
+            };
+            let call = ctx
+                .ipc_call(
+                    "com.nexus.storage",
+                    "write_file",
+                    serde_json::json!({ "path": path_str, "bytes": bytes }),
+                    Duration::from_secs(10),
+                )
+                .await;
+            if let Err(err) = call {
                 tracing::warn!(plan_id = %plan.id, %err, "history write failed");
             }
         }
