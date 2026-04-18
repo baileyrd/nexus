@@ -213,13 +213,36 @@ async fn system_prompt_with_skills(
             .get("id")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("?");
-        let body = skill
+        let fallback_body = skill
             .get("body")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("");
+        let body = render_skill_body(ctx, id)
+            .await
+            .unwrap_or_else(|| fallback_body.to_string());
         prompt.push_str(&format!("\n## Skill: {name} [{id}]\n{body}\n"));
     }
     prompt
+}
+
+/// Best-effort call to `com.nexus.skills::render` with no override
+/// values — lets frontmatter `default`s substitute into the body.
+/// Returns `None` when the handler errors (e.g. required parameter
+/// with no default); caller falls back to the raw body.
+async fn render_skill_body(ctx: &KernelPluginContext, id: &str) -> Option<String> {
+    let response = ctx
+        .ipc_call(
+            "com.nexus.skills",
+            "render",
+            serde_json::json!({ "id": id, "values": {} }),
+            Duration::from_secs(5),
+        )
+        .await
+        .ok()?;
+    response
+        .get("body")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string)
 }
 
 // ── Local adapters mirroring nexus-bootstrap::agent ────────────────────────
