@@ -4353,3 +4353,39 @@ select.plugin-settings-input {
 :root[data-theme-id="nexus-forge"] .workspace-view > * {
   margin-top: 0;
 }
+
+/* ── Client-side window decorations ─────────────────────────────
+ * tauri.conf.json has decorations: false so the OS titlebar (and
+ * its duplicate icon) is gone. The topbar becomes the drag region;
+ * buttons inside need explicit no-drag + click rescue. */
+
+:root[data-theme-id="nexus-forge"] .forge-topbar {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+:root[data-theme-id="nexus-forge"] .forge-topbar button,
+:root[data-theme-id="nexus-forge"] .forge-topbar .forge-breadcrumb,
+:root[data-theme-id="nexus-forge"] .forge-topbar .forge-topbar-cluster,
+:root[data-theme-id="nexus-forge"] .forge-topbar .mode-toggle {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.forge-window-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-left: 6px;
+}
+
+.forge-window-controls .forge-icon-btn {
+  width: 32px;
+  height: 24px;
+  border-radius: 3px;
+}
+
+.forge-window-controls .forge-icon-btn--close:hover {
+  background: #e81123; /* Windows close-button red */
+  color: #ffffff;
+}

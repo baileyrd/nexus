@@ -1,10 +1,14 @@
 import { useMemo } from "react";
 import {
   Link2,
+  Minus,
   PanelRight,
   Settings,
   SlidersHorizontal,
+  Square,
+  X,
 } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useForgeStore } from "../../stores/forge";
 import { useOpenFileStore } from "../../stores/openFile";
 import { useLayoutStore } from "../../stores/layout";
@@ -49,7 +53,11 @@ export function ForgeTopBar() {
   }, [forgeName, activeFile]);
 
   return (
-    <header className="forge-topbar" role="banner">
+    <header
+      className="forge-topbar"
+      role="banner"
+      data-tauri-drag-region
+    >
       <div className="forge-brand" aria-label="Nexus Forge">
         <span className="forge-mark" aria-hidden="true" />
       </div>
@@ -103,8 +111,56 @@ export function ForgeTopBar() {
           <Settings size={15} aria-hidden="true" />
         </button>
         <ModeToggle />
+        <WindowControls />
       </div>
     </header>
+  );
+}
+
+/**
+ * Custom client-side min / maximize / close buttons. Wired to the
+ * active Tauri window via `@tauri-apps/api/window`. Rendered only
+ * under Forge (the decorations: false config removes the OS
+ * chrome); other themes / the web preview fall through harmlessly
+ * because the calls fail with a warning instead of crashing.
+ */
+function WindowControls() {
+  return (
+    <div className="forge-window-controls" aria-label="Window controls">
+      <button
+        type="button"
+        className="forge-icon-btn"
+        title="Minimize"
+        aria-label="Minimize"
+        onClick={() => {
+          void getCurrentWindow().minimize();
+        }}
+      >
+        <Minus size={14} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className="forge-icon-btn"
+        title="Maximize"
+        aria-label="Maximize"
+        onClick={() => {
+          void getCurrentWindow().toggleMaximize();
+        }}
+      >
+        <Square size={12} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className="forge-icon-btn forge-icon-btn--close"
+        title="Close"
+        aria-label="Close"
+        onClick={() => {
+          void getCurrentWindow().close();
+        }}
+      >
+        <X size={14} aria-hidden="true" />
+      </button>
+    </div>
   );
 }
 
