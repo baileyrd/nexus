@@ -49,6 +49,7 @@ const AI_STREAM_CHUNK_EVENT: &str = "ai:stream_chunk";
 /// `{ session_id, text }`. Forwarded from `com.nexus.ai.stream_done`.
 const AI_STREAM_DONE_EVENT: &str = "ai:stream_done";
 
+pub mod agent;
 pub mod ai;
 pub mod commands;
 pub mod database;
@@ -202,6 +203,9 @@ pub fn run() {
             ai::ai_config,
             ai::ai_stream_chat,
             ai::ai_stream_ask,
+            agent::agent_plan,
+            agent::agent_run,
+            agent::agent_run_plan,
             database::db_apply_view,
             terminal::term_create_session,
             terminal::term_close_session,

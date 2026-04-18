@@ -22,6 +22,7 @@ import {
   type ChatMessage,
   type RagSource,
 } from "../../ipc/ai";
+import { agentRun, type Observation } from "../../ipc/agent";
 
 type Turn = {
   role: "user" | "assistant";
@@ -88,6 +89,30 @@ function makeSessionId(): string {
   return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function formatObservation(obs: Observation): string {
+  const header = obs.success
+    ? "Plan completed."
+    : "Plan ended with failures.";
+  const lines: string[] = [header, ""];
+  for (const step of obs.steps) {
+    const badge =
+      step.status === "ok"
+        ? "✓"
+        : step.status === "denied"
+          ? "⊘"
+          : step.status === "failed"
+            ? "✗"
+            : "·";
+    let line = `${badge} [${step.status}] ${step.step_id}`;
+    if (step.response !== null && step.response !== undefined) {
+      const preview = JSON.stringify(step.response);
+      line += ` — ${preview.length > 200 ? `${preview.slice(0, 200)}…` : preview}`;
+    }
+    lines.push(line);
+  }
+  return lines.join("\n");
+}
+
 const chipButtonStyle: CSSProperties = {
   padding: "2px 10px",
   fontSize: 11,
@@ -104,6 +129,7 @@ export function ChatPanel(): JSX.Element {
   const [systemPrompt, setSystemPrompt] = useState(initial.systemPrompt);
   const [showSystem, setShowSystem] = useState(false);
   const [useRag, setUseRag] = useState(false);
+  const [useAgent, setUseAgent] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -234,7 +260,28 @@ export function ChatPanel(): JSX.Element {
 
     try {
       const trimmedSystem = systemPrompt.trim();
-      if (useRag) {
+      if (useAgent) {
+        // Agent mode: dispatch to com.nexus.agent::run which plans +
+        // executes tool calls. No token streaming today — the panel
+        // shows a pending turn and replaces it with a rendered
+        // observation when the plugin returns.
+        const observation = await agentRun(trimmed);
+        const content = formatObservation(observation);
+        // Close out the pending turn manually since there's no
+        // stream_done event on the agent path.
+        setTurns((prev) => {
+          const idx = assistantIndexRef.current;
+          if (idx === null) return prev;
+          const next = prev.slice();
+          const current = next[idx];
+          if (!current) return prev;
+          next[idx] = { ...current, content, pending: false };
+          return next;
+        });
+        assistantIndexRef.current = null;
+        sessionRef.current = null;
+        setSending(false);
+      } else if (useRag) {
         // RAG mode: stream_ask injects retrieved chunks as the system
         // prompt inside the plugin, so the user-configured prompt is
         // ignored for this turn. The retrieval happens server-side.
@@ -258,7 +305,7 @@ export function ChatPanel(): JSX.Element {
         ),
       );
     }
-  }, [config, input, sending, turns, systemPrompt, useRag]);
+  }, [config, input, sending, turns, systemPrompt, useRag, useAgent]);
 
   const clearConversation = useCallback(() => {
     if (sending) return;
@@ -302,10 +349,20 @@ export function ChatPanel(): JSX.Element {
         <span style={{ opacity: 0.75, flex: 1 }}>AI · {provider}</span>
         <button
           type="button"
+          onClick={() => setUseAgent((v) => !v)}
+          style={chipButtonStyle}
+          aria-pressed={useAgent}
+          title="When on, each message is sent to com.nexus.agent.run — the planner produces a plan and the executor runs every tool call. Blocks until the full plan completes."
+        >
+          {useAgent ? "Agent ●" : "Agent"}
+        </button>
+        <button
+          type="button"
           onClick={() => setUseRag((v) => !v)}
           style={chipButtonStyle}
           aria-pressed={useRag}
           title="When on, each turn retrieves matching chunks from indexed docs and prepends them as context."
+          disabled={useAgent}
         >
           {useRag ? "RAG ●" : "RAG"}
         </button>
