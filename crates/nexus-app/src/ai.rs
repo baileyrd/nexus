@@ -87,22 +87,49 @@ pub async fn ai_stream_ask(
     call_ai(runtime, "stream_ask", args).await
 }
 
-/// Load the persisted Chat panel session from
-/// `<forge>/.forge/chat_session.json`. Returns `null` when the file
-/// doesn't exist (fresh forge).
+/// Load a persisted Chat panel session. When `id` is `None` the
+/// plugin reads the legacy single-session path; when `Some` it reads
+/// `<forge>/.forge/chat/sessions/<id>.json`. Returns `null` when the
+/// file doesn't exist.
 #[tauri::command]
 pub async fn ai_session_load(
+    id: Option<String>,
     runtime: State<'_, KernelRuntime>,
 ) -> Result<serde_json::Value, String> {
-    call_ai(runtime, "session_load", serde_json::json!({})).await
+    let args = match id {
+        Some(s) => serde_json::json!({ "id": s }),
+        None => serde_json::json!({}),
+    };
+    call_ai(runtime, "session_load", args).await
 }
 
-/// Overwrite the persisted Chat panel session. `session` is an opaque
-/// JSON object; the plugin doesn't inspect its shape.
+/// Overwrite a persisted Chat panel session. `session` is an opaque
+/// JSON object; when it carries an `id` field the plugin routes the
+/// write to `chat/sessions/<id>.json` (multi-session mode), otherwise
+/// to the legacy single-session path.
 #[tauri::command]
 pub async fn ai_session_save(
     session: serde_json::Value,
     runtime: State<'_, KernelRuntime>,
 ) -> Result<serde_json::Value, String> {
     call_ai(runtime, "session_save", session).await
+}
+
+/// List multi-session files under `<forge>/.forge/chat/sessions/`.
+/// Returns `[{ id, title?, updated_at?, bytes }]`.
+#[tauri::command]
+pub async fn ai_session_list(
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_ai(runtime, "session_list", serde_json::json!({})).await
+}
+
+/// Delete one multi-session file by id. Legacy single-session is not
+/// affected.
+#[tauri::command]
+pub async fn ai_session_delete(
+    id: String,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    call_ai(runtime, "session_delete", serde_json::json!({ "id": id })).await
 }

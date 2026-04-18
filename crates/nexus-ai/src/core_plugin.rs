@@ -55,6 +55,14 @@ pub const HANDLER_SESSION_LOAD: u32 = 8;
 /// session JSON. Args are an opaque JSON object; the plugin doesn't
 /// inspect the shape.
 pub const HANDLER_SESSION_SAVE: u32 = 9;
+/// Handler id for `session_list` — enumerate multi-session files
+/// under `<forge>/.forge/chat/sessions/`. Returns `[{ id, title?,
+/// updated_at, bytes }]`.
+pub const HANDLER_SESSION_LIST: u32 = 10;
+/// Handler id for `session_delete` — remove a multi-session file by
+/// id. Legacy single-session lives outside this tree and isn't
+/// affected.
+pub const HANDLER_SESSION_DELETE: u32 = 11;
 
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
@@ -155,8 +163,10 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_STREAM_ASK => {
                     handle_stream_ask(ctx, ai_cfg, embed_cfg, &args).await
                 }
-                HANDLER_SESSION_LOAD => handle_session_load(&ctx).await,
+                HANDLER_SESSION_LOAD => handle_session_load(&ctx, &args).await,
                 HANDLER_SESSION_SAVE => handle_session_save(&ctx, &args).await,
+                HANDLER_SESSION_LIST => handle_session_list(&ctx).await,
+                HANDLER_SESSION_DELETE => handle_session_delete(&ctx, &args).await,
                 _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
             }
         }))
@@ -428,16 +438,57 @@ async fn handle_stream_ask(
     }))
 }
 
-/// Relative path (under the forge root) where the Chat panel's
-/// persisted session lives. Single-session today — a future slice
-/// will promote this to a `chat/sessions/<id>.json` tree.
-const SESSION_RELPATH: &str = ".forge/chat_session.json";
+/// Relative path for the legacy single-session file. Kept for
+/// backwards compatibility — callers that omit `id` on
+/// `session_load` / `session_save` keep reading/writing this path.
+const LEGACY_SESSION_RELPATH: &str = ".forge/chat_session.json";
+
+/// Directory holding multi-session files. Each session lives at
+/// `<SESSIONS_DIR>/<id>.json`.
+const SESSIONS_DIR: &str = ".forge/chat/sessions";
+
+/// Validate a caller-supplied session id. Keeps the filename safe
+/// for disk + prevents path traversal.
+fn validate_session_id(id: &str) -> Result<(), PluginError> {
+    if id.is_empty() || id.len() > 64 {
+        return Err(exec_err(
+            "session id must be 1..=64 chars".to_string(),
+        ));
+    }
+    let ok = id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !ok {
+        return Err(exec_err(
+            "session id must match [A-Za-z0-9_-]+".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn session_path(id: Option<&str>) -> Result<std::path::PathBuf, PluginError> {
+    match id {
+        None => Ok(std::path::PathBuf::from(LEGACY_SESSION_RELPATH)),
+        Some(s) => {
+            validate_session_id(s)?;
+            Ok(std::path::PathBuf::from(SESSIONS_DIR).join(format!("{s}.json")))
+        }
+    }
+}
+
+#[derive(serde::Deserialize, Default)]
+struct SessionArgs {
+    #[serde(default)]
+    id: Option<String>,
+}
 
 async fn handle_session_load(
     ctx: &KernelPluginContext,
+    args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let path = std::path::Path::new(SESSION_RELPATH);
-    match ctx.read_file(path).await {
+    let parsed: SessionArgs = serde_json::from_value(args.clone()).unwrap_or_default();
+    let path = session_path(parsed.id.as_deref())?;
+    match ctx.read_file(&path).await {
         Ok(bytes) => {
             let parsed: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
                 exec_err(format!("session_load: invalid JSON on disk: {e}"))
@@ -454,13 +505,84 @@ async fn handle_session_save(
     ctx: &KernelPluginContext,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
+    // Caller may pass `{ id, ... }` or a bare session object. Pull
+    // `id` out (if present) and persist the whole payload untouched.
+    let id = args
+        .as_object()
+        .and_then(|o| o.get("id"))
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string);
+    if let Some(ref s) = id {
+        validate_session_id(s)?;
+    }
+    let path = session_path(id.as_deref())?;
     let encoded = serde_json::to_vec_pretty(args)
         .map_err(|e| exec_err(format!("session_save: encode: {e}")))?;
-    let path = std::path::Path::new(SESSION_RELPATH);
-    ctx.write_file(path, &encoded)
+    ctx.write_file(&path, &encoded)
         .await
         .map_err(|e| exec_err(format!("session_save: write: {e}")))?;
-    Ok(serde_json::json!({ "bytes": encoded.len() }))
+    Ok(serde_json::json!({ "bytes": encoded.len(), "id": id }))
+}
+
+async fn handle_session_list(
+    ctx: &KernelPluginContext,
+) -> Result<serde_json::Value, PluginError> {
+    let dir = std::path::Path::new(SESSIONS_DIR);
+    let entries = match ctx.list_files(dir).await {
+        Ok(v) => v,
+        Err(_) => return Ok(serde_json::Value::Array(Vec::new())),
+    };
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for path in entries {
+        let Some(stem) = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| validate_session_id(s).is_ok())
+        else {
+            continue;
+        };
+        let bytes = match ctx.read_file(&path).await {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let parsed: serde_json::Value = match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let title = parsed
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string);
+        let updated_at = parsed
+            .get("updated_at")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string);
+        out.push(serde_json::json!({
+            "id": stem,
+            "title": title,
+            "updated_at": updated_at,
+            "bytes": bytes.len(),
+        }));
+    }
+    Ok(serde_json::Value::Array(out))
+}
+
+async fn handle_session_delete(
+    ctx: &KernelPluginContext,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        id: String,
+    }
+    let a: Args = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("session_delete: invalid args: {e}")))?;
+    validate_session_id(&a.id)?;
+    let path = session_path(Some(&a.id))?;
+    match ctx.delete_file(&path).await {
+        Ok(()) => Ok(serde_json::json!({ "deleted": true, "id": a.id })),
+        Err(e) => Err(exec_err(format!("session_delete: {e}"))),
+    }
 }
 
 // ─── Provider factories ─────────────────────────────────────────────────────
@@ -504,5 +626,53 @@ fn exec_err<S: Into<String>>(reason: S) -> PluginError {
     PluginError::ExecutionFailed {
         plugin_id: PLUGIN_ID.to_string(),
         reason: reason.into(),
+    }
+}
+
+#[cfg(test)]
+mod session_id_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_alnum_dash_underscore() {
+        assert!(validate_session_id("abc_123-xyz").is_ok());
+        assert!(validate_session_id("A").is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_and_too_long() {
+        assert!(validate_session_id("").is_err());
+        assert!(validate_session_id(&"a".repeat(65)).is_err());
+        assert!(validate_session_id(&"a".repeat(64)).is_ok());
+    }
+
+    #[test]
+    fn rejects_path_traversal() {
+        assert!(validate_session_id("../etc").is_err());
+        assert!(validate_session_id("a/b").is_err());
+        assert!(validate_session_id("..").is_err());
+        assert!(validate_session_id(".hidden").is_err());
+    }
+
+    #[test]
+    fn rejects_whitespace_and_unicode() {
+        assert!(validate_session_id("has space").is_err());
+        assert!(validate_session_id("café").is_err());
+    }
+
+    #[test]
+    fn session_path_routes_on_id_presence() {
+        let legacy = session_path(None).unwrap();
+        assert!(legacy.ends_with("chat_session.json"));
+        let multi = session_path(Some("project-x")).unwrap();
+        assert!(multi
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("chat/sessions/project-x.json"));
+    }
+
+    #[test]
+    fn session_path_rejects_bad_id() {
+        assert!(session_path(Some("../boom")).is_err());
     }
 }

@@ -529,6 +529,14 @@ fn register_core_plugins(
                         "session_save",
                         nexus_ai::core_plugin::HANDLER_SESSION_SAVE,
                     ),
+                    (
+                        "session_list",
+                        nexus_ai::core_plugin::HANDLER_SESSION_LIST,
+                    ),
+                    (
+                        "session_delete",
+                        nexus_ai::core_plugin::HANDLER_SESSION_DELETE,
+                    ),
                 ],
             ),
             forge_root,

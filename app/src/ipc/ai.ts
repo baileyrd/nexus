@@ -92,16 +92,37 @@ export function aiStreamAsk(
   });
 }
 
-/** Load the persisted Chat panel session. Returns `null` on fresh
- *  forges where no session has been saved yet. */
-export function aiSessionLoad(): Promise<unknown> {
-  return invoke<unknown>("ai_session_load");
+/** Load a persisted Chat panel session. Pass `id` to read a specific
+ *  entry under `.forge/chat/sessions/<id>.json`; omit to read the
+ *  legacy single-session path. Returns `null` when the file doesn't
+ *  exist (fresh forge / unknown id). */
+export function aiSessionLoad(id?: string): Promise<unknown> {
+  return invoke<unknown>("ai_session_load", { id });
 }
 
-/** Overwrite the persisted Chat panel session with an opaque JSON
- *  document. Callers decide the shape; the plugin stores it verbatim. */
+/** Overwrite a persisted Chat panel session with an opaque JSON
+ *  document. When `session` carries an `id: string` field the plugin
+ *  routes the write to `chat/sessions/<id>.json`; otherwise to the
+ *  legacy single-session path. */
 export function aiSessionSave(session: unknown): Promise<void> {
   return invoke<void>("ai_session_save", { session });
+}
+
+export interface ChatSessionSummary {
+  id: string;
+  title?: string | null;
+  updated_at?: string | null;
+  bytes: number;
+}
+
+/** List multi-session files under `.forge/chat/sessions/`. */
+export function aiSessionList(): Promise<ChatSessionSummary[]> {
+  return invoke<ChatSessionSummary[]>("ai_session_list");
+}
+
+/** Delete one multi-session file by id. */
+export function aiSessionDelete(id: string): Promise<void> {
+  return invoke<void>("ai_session_delete", { id });
 }
 
 export function onAiStreamStart(

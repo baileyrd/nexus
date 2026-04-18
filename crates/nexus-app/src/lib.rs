@@ -207,6 +207,8 @@ pub fn run() {
             ai::ai_stream_ask,
             ai::ai_session_load,
             ai::ai_session_save,
+            ai::ai_session_list,
+            ai::ai_session_delete,
             agent::agent_plan,
             agent::agent_run,
             agent::agent_run_plan,
