@@ -10,7 +10,6 @@ import { useContentType } from "../../contributions";
 import { useForgeStore } from "../../stores/forge";
 import { useLayoutStore } from "../../stores/layout";
 import { useBreakpoint, useBreakpointDownCross } from "../../util/breakpoints";
-import { LayoutPresetPicker } from "./LayoutPresetPicker";
 import { PanelSelector } from "./PanelSelector";
 import { PanelToolbar } from "./PanelToolbar";
 import { MenuBar } from "./MenuBar";
@@ -48,11 +47,6 @@ export function WorkspaceView() {
 
   return (
     <section className="workspace-view" data-breakpoint={breakpoint}>
-      <header>
-        <h2>Workspace</h2>
-        <LayoutPresetPicker />
-      </header>
-
       {error && <p className="error">Failed to load layout: {error}</p>}
 
       {layout ? (

@@ -3144,3 +3144,92 @@ select.plugin-settings-input {
 :root[data-theme-id="nexus-forge"] .cm-content .cm-line code {
   font-family: var(--nx-type-mono);
 }
+
+/* ── Stage 1: Forge topbar + chrome cleanup ─────────────────────
+ * Forge ships a 36px custom topbar (ForgeTopBar.tsx). When it's on,
+ * suppress the legacy app-header spacing and the File/View/Help
+ * MenuBar column — command palette covers the same surface. */
+
+:root[data-theme-id="nexus-forge"] .app {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: 36px 1fr;
+  overflow: hidden;
+}
+
+:root[data-theme-id="nexus-forge"] main {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+:root[data-theme-id="nexus-forge"] .workspace-view {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+:root[data-theme-id="nexus-forge"] .workspace-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Forge uses the activity rail (ribbon) + command palette; the File /
+ * View / Help MenuBar column is redundant and eats 60 px. */
+:root[data-theme-id="nexus-forge"] .menu-bar {
+  display: none;
+}
+
+/* Keep the topbar compact regardless of the parent app-header rules
+ * (Stage 0 applied 6px padding; here we lock the exact height). */
+:root[data-theme-id="nexus-forge"] .forge-topbar {
+  height: 36px;
+  padding: 0 10px;
+  grid-template-columns: 260px 1fr auto;
+}
+
+.forge-topbar-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  justify-self: end;
+}
+
+.forge-icon-btn {
+  width: 28px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--nx-text-tertiary, #ACA69A);
+  cursor: pointer;
+}
+
+.forge-icon-btn:hover {
+  background: var(--nx-bg-tertiary, #2C2E36);
+  color: var(--nx-text-primary, #EFEBE4);
+}
+
+.forge-icon-btn[aria-pressed="true"],
+.forge-icon-btn.active {
+  background: var(--nx-interactive-active, rgba(230, 162, 74, 0.24));
+  color: var(--nx-text-primary, #EFEBE4);
+}
+
+.forge-breadcrumb-tail {
+  color: var(--nx-text-primary, #EFEBE4);
+  font-weight: 500;
+}
+
+.forge-breadcrumb-meta {
+  color: var(--nx-text-muted, #7F7A70);
+  font-family: var(--nx-type-mono, 'JetBrains Mono', monospace);
+  font-size: 10.5px;
+  margin-left: 6px;
+  padding-left: 8px;
+  border-left: 1px solid var(--nx-bg-tertiary, #2C2E36);
+}

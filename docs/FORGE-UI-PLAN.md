@@ -23,17 +23,15 @@ of this plan.
 
 ---
 
-## Stage 1 — Topbar + structural cleanup
+## Stage 1 — Topbar + structural cleanup ✓
 
-Collapse the 80 px header stack into a single 36 px Forge topbar.
+Collapse the 80 px header stack into a single 36 px Forge topbar. **Shipped.**
 
-- [ ] **[app/src/App.tsx](../app/src/App.tsx)** — drop the `<header class="app-header">` block; mount `<ForgeTopBar />` instead. Brand (left) + breadcrumb pill (center) + icon cluster (right). Keep `ModeToggle` as one of the cluster buttons.
-- [ ] **[app/src/components/layout/WorkspaceView.tsx](../app/src/components/layout/WorkspaceView.tsx)** — remove the `<header><h2>Workspace</h2><LayoutPresetPicker /></header>` render. `WorkspaceView` becomes frame-only.
-- [ ] **Preset picker** — retire from the chrome; re-expose via command palette entries (`Switch layout: Coding`, etc.). Keeps the contribution alive without stealing 40 px.
-- [ ] **MenuBar** — don't render under `[data-theme-id="nexus-forge"]`. The File/View/Help vertical column disappears; command palette covers the same commands.
-- [ ] **Breadcrumb data source** — compose from `forgeStore.info.name` + `activeEditor` (file path) + doc stats; falls back to "Workspace" when no file is open.
-
-Deliverable: topbar collapses to 36 px. Center column gets back vertical real estate for tabs + doc.
+- [x] **[app/src/App.tsx](../app/src/App.tsx)** — dropped the `<header class="app-header">` block; mounts `<ForgeTopBar />`. Brand (left) + breadcrumb pill (center) + icon cluster (right, includes `ModeToggle`).
+- [x] **[app/src/components/layout/WorkspaceView.tsx](../app/src/components/layout/WorkspaceView.tsx)** — removed the `<header><h2>Workspace</h2><LayoutPresetPicker /></header>` render. Frame-only now.
+- [x] **[app/src/components/layout/ForgeTopBar.tsx](../app/src/components/layout/ForgeTopBar.tsx)** (new) — composes breadcrumb from `forgeStore.info.name` + `openFileStore.file` + live word-count; falls back to "Workspace / no file open" when no file is open.
+- [x] **MenuBar** — hidden under `[data-theme-id="nexus-forge"]` via CSS. Command palette covers the same surface.
+- [~] **Preset picker** — no longer rendered in chrome but left in the codebase; command-palette entries for `Switch layout: <preset>` will land with Stage 5 (status bar feeds a new command group anyway).
 
 ---
 
