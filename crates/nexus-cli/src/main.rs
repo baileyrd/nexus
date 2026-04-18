@@ -93,8 +93,8 @@ enum Commands {
     Proc(ProcArgs),
     /// Terminal / PTY session operations (PRD-09)
     Term(TermArgs),
-    /// Start MCP server (stdio mode)
-    Mcp,
+    /// MCP (Model Context Protocol): run server or operate as host
+    Mcp(McpArgs),
     /// Sync operations (coming soon)
     Sync(StubArgs),
     /// Git operations (read-only)
@@ -401,6 +401,39 @@ enum SkillCommand {
         /// Parameter override(s) in `key=value` form (repeatable)
         #[arg(long = "param", short = 'p', value_name = "KEY=VALUE")]
         params: Vec<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// MCP (PRD-14)
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct McpArgs {
+    #[command(subcommand)]
+    command: McpCommand,
+}
+
+#[derive(Subcommand)]
+enum McpCommand {
+    /// Start Nexus MCP server on stdio (exposes forge ops to external MCP clients)
+    Serve,
+    /// List external MCP servers configured in `.forge/mcp.toml`
+    Servers,
+    /// List tools exposed by one external MCP server
+    Tools {
+        /// Server name as declared in `.forge/mcp.toml`
+        server: String,
+    },
+    /// Invoke a tool on an external MCP server
+    Call {
+        /// Server name as declared in `.forge/mcp.toml`
+        server: String,
+        /// Tool name
+        tool: String,
+        /// JSON object of tool arguments (defaults to `{}`)
+        #[arg(long, default_value = "{}")]
+        arguments: String,
     },
 }
 
@@ -1153,7 +1186,16 @@ fn main() {
                 Err(e) => Err(e),
             },
         },
-        Commands::Mcp => commands::mcp::serve(&app),
+        Commands::Mcp(args) => match args.command {
+            McpCommand::Serve => commands::mcp::serve(&app),
+            McpCommand::Servers => commands::mcp::host_servers(&mut app),
+            McpCommand::Tools { server } => commands::mcp::host_tools(&mut app, &server),
+            McpCommand::Call {
+                server,
+                tool,
+                arguments,
+            } => commands::mcp::host_call(&mut app, &server, &tool, &arguments),
+        },
         Commands::Sync(_) => stubs::not_implemented("sync"),
         Commands::Git(args) => match args.command {
             GitCommand::Info => commands::git::info(&app),

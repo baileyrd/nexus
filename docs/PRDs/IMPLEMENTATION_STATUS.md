@@ -34,7 +34,7 @@
 | 11 | Git Integration | 🟢 | 1.1k-line `GitEngine` over `git2`; worker-thread wrapper for UI still needed |
 | 12 | AI Engine | 🟢 | Streaming chat + RAG with citation chips; Chat panel (system prompt, persistence via plugin-backed `session_load` / `session_save`); inline editor completion |
 | 13 | Skills | 🟠 | `nexus-skills` library + `com.nexus.skills` core plugin (6 handlers incl. `render` with parameter substitution) + `nexus skill` CLI; skill-aware agent planning layers matching skills into the planner system prompt |
-| 14 | MCP Integration | 🟡 | 807-line `serve_stdio`; no WebSocket/HTTP transports, no Host (client) |
+| 14 | MCP Integration | 🟢 | Server + Host both live: `serve_stdio`, `McpClient`, and `com.nexus.mcp.host` core plugin with 7 IPC handlers; `nexus mcp serve|servers|tools|call` CLI wraps the host |
 | 15 | Agent System | 🟠 | Library + `com.nexus.agent` plugin (`plan` / `run` / `run_plan`) + `nexus agent` CLI + Chat "Agent" + "Preview" chips (plan approval) + skill-aware prompt layering + Writer/Coder/Researcher archetypes; no memory persistence, no per-step approval yet |
 | 16 | Workflow System | 🟠 | `nexus-workflow` library + `com.nexus.workflow` core plugin (4 handlers) + `nexus workflow` CLI; no trigger engine / executor yet |
 | 17 | Cross-Platform Strategy | 🟢 | Tauri desktop shipping; web OPFS + mobile UniFFI deferred |
@@ -139,12 +139,14 @@
 **Gaps:** No skill composition / dependency resolution (`depends_on` stored verbatim). No built-in skill library shipped. No `REGISTRY.json` persistence (in-memory only today). No UI surface for browsing / invoking skills outside the CLI.
 **Evidence:** [crates/nexus-skills/src/{lib,parse,registry,core_plugin}.rs](crates/nexus-skills/src/), [crates/nexus-cli/src/commands/skill.rs](crates/nexus-cli/src/commands/skill.rs), [crates/nexus-agent/src/core_plugin.rs](crates/nexus-agent/src/core_plugin.rs). 16 unit tests.
 
-### PRD-14 — MCP Integration 🟡
+### PRD-14 — MCP Integration 🟢
 **Shipped:**
 - Server: 807-line `NexusMcpServer::serve_stdio` exposing Nexus forge ops to external AI clients over stdio.
-- **Host / client (new):** [`McpClient`](crates/nexus-mcp/src/client.rs) spawns external MCP servers (filesystem, github, etc.) as child processes, runs the MCP initialize handshake behind a 15s timeout, and exposes `list_tools` / `list_resources` / `list_prompts` / `call_tool` over rmcp's `TokioChildProcess` transport. [`McpHostConfig`](crates/nexus-mcp/src/config.rs) parses `<forge>/.forge/mcp.toml` (Claude Desktop-style `mcp.json` analogue) into `McpServerSpec { command, args, env, disabled }`.
-**Gaps:** No MCP Host **orchestrator** yet — nothing spawns `McpClient`s from `mcp.toml` at forge boot, keeps them alive, or exposes their tools to callers (AI engine, plugin IPC). No WebSocket / HTTP+SSE transport. No reconnection / pool management. No `nexus mcp connect` / `nexus mcp call` CLI.
-**Evidence:** [crates/nexus-mcp/src/{server,client,config}.rs](crates/nexus-mcp/src/), [crates/nexus-cli/src/commands/mcp.rs](crates/nexus-cli/src/commands/mcp.rs).
+- Host / client: [`McpClient`](crates/nexus-mcp/src/client.rs) spawns external MCP servers as child processes, runs the initialize handshake behind a 15s timeout, and exposes `list_tools` / `list_resources` / `list_prompts` / `call_tool` over rmcp's `TokioChildProcess` transport. [`McpHostConfig`](crates/nexus-mcp/src/config.rs) parses `<forge>/.forge/mcp.toml` into `McpServerSpec { command, args, env, disabled }`.
+- **Host orchestrator:** [`com.nexus.mcp.host`](crates/nexus-mcp/src/core_plugin.rs) core plugin registered at bootstrap; loads `mcp.toml` at `on_init`, connects lazily on first use, and exposes 7 append-only handlers: `list_servers` (1), `list_tools` (2), `call_tool` (3), `list_resources` (4), `list_prompts` (5), `connect` (6), `disconnect` (7). Clients are mutex-wrapped under an `RwLock` map keyed by server name; `on_stop` drops the map to trigger graceful close.
+**Shipped (CLI, this session):** `nexus mcp` gained subcommands — `serve` (existing, stdio server), `servers`, `tools <server>`, `call <server> <tool> --arguments '{...}'` — all routed through `com.nexus.mcp.host` via `ipc_call` (no direct `nexus-mcp` linkage). 60s timeout since tool calls can be slow.
+**Gaps:** No WebSocket / HTTP+SSE transport. No reconnection / pool management (clients stay alive until disconnect or shutdown). No direct consumer in `com.nexus.ai` yet — agent planner doesn't auto-discover MCP tools.
+**Evidence:** [crates/nexus-mcp/src/](crates/nexus-mcp/src/), [crates/nexus-cli/src/commands/mcp.rs](crates/nexus-cli/src/commands/mcp.rs), [crates/nexus-bootstrap/src/lib.rs](crates/nexus-bootstrap/src/lib.rs).
 
 ### PRD-15 — Agent System 🟠
 **Shipped (scaffold, commit [b62f611](https://github.com/baileyrd/nexus/commit/b62f611)):** New [`nexus-agent`](crates/nexus-agent/) crate — library-first, zero kernel deps. Core types: `Agent` trait (async `plan(goal) -> Plan`), `Plan` / `Step` / `ToolCall` (shapes mirror `ipc_call`'s args so forwarding needs no reshaping), `PlanExecutor<D: ToolDispatcher>` walking a plan and recording per-step outcomes into an `Observation`, `StepPolicy` + `AutoApprove` reserving the per-step approval hook PRD-15 §3.4 calls for. `EchoAgent` provides a smoke-test single-step agent.
