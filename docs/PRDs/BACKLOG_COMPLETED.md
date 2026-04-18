@@ -6,6 +6,17 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-002: Typed Property Index ✅ (2026-04-18)
+
+**Delivered:** [`crates/nexus-storage/src/search_scope.rs`](../../crates/nexus-storage/src/search_scope.rs) `prop:` scope now consumes the typed columns (`value_num`, `value_date`, `value_bool`) populated by migration 003. `ScopeFilter::Property` gained a `PropertyOp` discriminator (`Contains` / `NumCmp(CmpOp, f64)` / `DateCmp(CmpOp, i64)` / `BoolEq(bool)`) with operator parsing inside `parse_prop_body`. Supported surface:
+
+- `prop:priority>3`, `prop:score<=7.5`, `prop:priority=3` — numeric comparison against `value_num`.
+- `prop:due<2026-01-01`, `prop:due>=2026-03-01` — YYYY-MM-DD dates parsed to unix seconds and compared against `value_date`.
+- `prop:draft=true` / `prop:draft=FALSE` — boolean equality against `value_bool`.
+- `prop:status:done` — legacy substring match against the raw JSON `value` column (unchanged).
+
+Typed operators dispatch to typed columns only (`… IS NOT NULL AND value_num > ?`), so a non-numeric property never accidentally matches a numeric query. Malformed tokens (unparseable numbers/dates on `>`/`<` operators, empty keys/values) fall through to plain text. Coverage: 11 new unit tests in `search_scope.rs` — 6 parser cases (num_gt, num_lte, date_lt, bool_eq, eq_numeric, contains, unparseable-fallback) + 5 filter cases (num_gt match/exclude, date_lt match, bool_eq match/exclude, contains legacy). No PRD surface changed; strictly a `nexus-storage` library improvement consumed through the existing `com.nexus.storage::search` IPC handler.
+
 ### BL-001: Daily Notes ✅ (2026-04-18)
 
 **Delivered:** [`crates/nexus-cli/src/commands/content.rs`](../../crates/nexus-cli/src/commands/content.rs) `daily()` (wired at [`main.rs:1019`](../../crates/nexus-cli/src/main.rs)) — `nexus content daily [--date YYYY-MM-DD]` creates `notes/daily/YYYY-MM-DD.md` with YAML frontmatter (`date`, `tags: [daily]`), H1 title, and `## Tasks` / `## Notes` section stubs. Existing notes short-circuit with a path echo.

@@ -8,22 +8,6 @@
 
 ## New Features (not addressed in any PRD)
 
-### BL-002: Typed Property Index
-
-**Source**: Growth Plan Phase 0, Task 0.1
-**Effort**: Medium (1 day — schema is done, query consumers aren't)
-**Crate**: `nexus-storage`
-
-**Status (2026-04-18):** schema half **done**, consumer half **open**.
-
-- ✅ [`schema.rs:230`](../../crates/nexus-storage/src/schema.rs) migration adds `value_num REAL`, `value_date INTEGER`, `value_bool BOOLEAN` to `properties`.
-- ✅ [`index.rs:655`](../../crates/nexus-storage/src/index.rs) `insert_property` populates them via `extract_typed_values`.
-- ❌ **Nothing reads the typed columns.** [`search_scope.rs:131-141`](../../crates/nexus-storage/src/search_scope.rs) still does `p.value LIKE '%...%'` for the `prop:` scope; [`bases/query.rs`](../../crates/nexus-storage/src/bases/query.rs) operates on `data_json` (the bases records table) via `json_extract` + `CAST(... AS REAL)`, not `properties`.
-
-**To close:** wire a typed-value consumer. Natural fit is extending the `prop:` search-scope parser to accept numeric/date comparison operators (`prop:priority>3`, `prop:date<2026-01-01`, `prop:draft:true`) and dispatch each to the right typed column. Tantivy post-filter stays; the SQL branch changes from `value LIKE` to `value_num > ?` / `value_date < ?` / `value_bool = ?`. Tests in `search_scope.rs` mod tests.
-
----
-
 ## Partially New Features (concept exists in PRDs but design is unspecified)
 
 ### BL-007: CRDT-over-Git Transport
