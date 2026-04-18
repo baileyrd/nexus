@@ -548,6 +548,20 @@ fn register_core_plugins(
     // `.forge/skills/`. Agents + UI consult it over IPC so no
     // consumer links `nexus-skills` directly.
     let skills_dir = forge_root.join(".forge").join("skills");
+    match nexus_skills::seed_builtins(&skills_dir) {
+        Ok(report) if !report.created.is_empty() => tracing::info!(
+            path = %skills_dir.display(),
+            created = ?report.created,
+            skipped = report.skipped.len(),
+            "seeded built-in skills"
+        ),
+        Ok(_) => {}
+        Err(err) => tracing::warn!(
+            path = %skills_dir.display(),
+            %err,
+            "failed to seed built-in skills — continuing with whatever is already on disk"
+        ),
+    }
     loader
         .register_core(
             core_manifest_with_ipc(

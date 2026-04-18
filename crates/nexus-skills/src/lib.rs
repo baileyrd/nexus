@@ -29,11 +29,13 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod builtins;
 pub mod core_plugin;
 mod parse;
 mod registry;
 mod substitute;
 
+pub use builtins::{builtin_filenames, seed_builtins, SeedReport};
 pub use core_plugin::{
     SkillsCorePlugin, HANDLER_GET, HANDLER_LIST, HANDLER_LIST_BY_CONTEXT, HANDLER_RELOAD,
     HANDLER_RENDER, HANDLER_TRIGGERED_BY, PLUGIN_ID,
