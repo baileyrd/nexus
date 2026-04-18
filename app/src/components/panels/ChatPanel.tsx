@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   aiConfig,
+  aiStreamAsk,
   aiStreamChat,
   onAiStreamChunk,
   onAiStreamDone,
@@ -85,6 +86,7 @@ export function ChatPanel(): JSX.Element {
   const [turns, setTurns] = useState<Turn[]>(initial.turns);
   const [systemPrompt, setSystemPrompt] = useState(initial.systemPrompt);
   const [showSystem, setShowSystem] = useState(false);
+  const [useRag, setUseRag] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -207,10 +209,17 @@ export function ChatPanel(): JSX.Element {
 
     try {
       const trimmedSystem = systemPrompt.trim();
-      await aiStreamChat(history, {
-        sessionId,
-        system: trimmedSystem ? trimmedSystem : undefined,
-      });
+      if (useRag) {
+        // RAG mode: stream_ask injects retrieved chunks as the system
+        // prompt inside the plugin, so the user-configured prompt is
+        // ignored for this turn. The retrieval happens server-side.
+        await aiStreamAsk(history, { sessionId });
+      } else {
+        await aiStreamChat(history, {
+          sessionId,
+          system: trimmedSystem ? trimmedSystem : undefined,
+        });
+      }
     } catch (err) {
       sessionRef.current = null;
       assistantIndexRef.current = null;
@@ -224,7 +233,7 @@ export function ChatPanel(): JSX.Element {
         ),
       );
     }
-  }, [config, input, sending, turns, systemPrompt]);
+  }, [config, input, sending, turns, systemPrompt, useRag]);
 
   const clearConversation = useCallback(() => {
     if (sending) return;
@@ -266,6 +275,15 @@ export function ChatPanel(): JSX.Element {
         }}
       >
         <span style={{ opacity: 0.75, flex: 1 }}>AI · {provider}</span>
+        <button
+          type="button"
+          onClick={() => setUseRag((v) => !v)}
+          style={chipButtonStyle}
+          aria-pressed={useRag}
+          title="When on, each turn retrieves matching chunks from indexed docs and prepends them as context."
+        >
+          {useRag ? "RAG ●" : "RAG"}
+        </button>
         <button
           type="button"
           onClick={() => setShowSystem((v) => !v)}

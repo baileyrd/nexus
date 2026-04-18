@@ -45,6 +45,8 @@ pub const HANDLER_STATUS: u32 = 4;
 pub const HANDLER_CONFIG: u32 = 5;
 /// Handler id for `stream_chat` (direct chat with per-token bus events).
 pub const HANDLER_STREAM_CHAT: u32 = 6;
+/// Handler id for `stream_ask` (RAG retrieve + streaming chat).
+pub const HANDLER_STREAM_ASK: u32 = 7;
 
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
@@ -142,6 +144,9 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_VECTORSTORE_COUNT => handle_vectorstore_count(&ctx).await,
                 HANDLER_STATUS => handle_status(&ctx, ai_cfg, embed_cfg).await,
                 HANDLER_STREAM_CHAT => handle_stream_chat(ctx, ai_cfg, &args).await,
+                HANDLER_STREAM_ASK => {
+                    handle_stream_ask(ctx, ai_cfg, embed_cfg, &args).await
+                }
                 _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
             }
         }))
@@ -323,6 +328,94 @@ async fn handle_stream_chat(
     );
 
     Ok(serde_json::json!({"session_id": session_id, "text": text}))
+}
+
+async fn handle_stream_ask(
+    ctx: Arc<KernelPluginContext>,
+    ai_cfg: Option<AiConfig>,
+    embed_cfg: Option<AiConfig>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let messages: Vec<crate::provider::ChatMessage> = args
+        .get("messages")
+        .ok_or_else(|| exec_err("stream_ask: missing 'messages'"))
+        .and_then(|v| {
+            serde_json::from_value(v.clone())
+                .map_err(|e| exec_err(format!("stream_ask: messages decode: {e}")))
+        })?;
+    let session_id = args
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let limit = args
+        .get("limit")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| usize::try_from(v).ok())
+        .unwrap_or(5);
+    let question = messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, crate::provider::Role::User))
+        .map(|m| m.content.clone())
+        .ok_or_else(|| exec_err("stream_ask: no user message in 'messages'"))?;
+
+    let ai_cfg = ai_cfg.ok_or_else(|| exec_err("stream_ask: no AI chat provider configured"))?;
+    let embed_cfg = embed_cfg
+        .ok_or_else(|| exec_err("stream_ask: no embedding provider configured"))?;
+    let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
+    let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
+
+    let sources = crate::rag::retrieve(&ctx, embedder.as_ref(), &question, limit)
+        .await
+        .map_err(|e| exec_err(format!("stream_ask: retrieve: {e}")))?;
+    let system = crate::rag::build_rag_prompt(&sources);
+
+    let _ = ctx.publish(
+        "com.nexus.ai.stream_start",
+        serde_json::json!({
+            "session_id": &session_id,
+            "sources": &sources,
+        }),
+    );
+
+    let ctx_chunk = Arc::clone(&ctx);
+    let sid_chunk = session_id.clone();
+    let chunk_idx = Arc::new(AtomicUsize::new(0));
+    let on_chunk = {
+        let chunk_idx = Arc::clone(&chunk_idx);
+        move |chunk: String| {
+            let idx = chunk_idx.fetch_add(1, Ordering::Relaxed);
+            let _ = ctx_chunk.publish(
+                "com.nexus.ai.stream_chunk",
+                serde_json::json!({
+                    "session_id": &sid_chunk,
+                    "chunk": chunk,
+                    "index": idx,
+                }),
+            );
+        }
+    };
+
+    let text = ai
+        .chat_stream_with(&messages, Some(&system), &on_chunk)
+        .await
+        .map_err(|e| exec_err(format!("stream_ask: {e}")))?;
+
+    let _ = ctx.publish(
+        "com.nexus.ai.stream_done",
+        serde_json::json!({
+            "session_id": &session_id,
+            "text": &text,
+            "sources": &sources,
+        }),
+    );
+
+    Ok(serde_json::json!({
+        "session_id": session_id,
+        "text": text,
+        "sources": sources,
+    }))
 }
 
 // ─── Provider factories ─────────────────────────────────────────────────────

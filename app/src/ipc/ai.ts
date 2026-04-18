@@ -50,6 +50,19 @@ export interface StreamChatResult {
   text: string;
 }
 
+export interface RagSource {
+  file_path: string;
+  block_id: number;
+  chunk_text: string;
+  score: number;
+}
+
+export interface StreamAskResult {
+  session_id: string;
+  text: string;
+  sources: RagSource[];
+}
+
 export function aiConfig(): Promise<AiConfigSnapshot> {
   return invoke<AiConfigSnapshot>("ai_config");
 }
@@ -62,6 +75,17 @@ export function aiStreamChat(
     messages,
     system: options.system ?? null,
     sessionId: options.sessionId ?? null,
+  });
+}
+
+export function aiStreamAsk(
+  messages: ChatMessage[],
+  options: { sessionId?: string; limit?: number } = {},
+): Promise<StreamAskResult> {
+  return invoke<StreamAskResult>("ai_stream_ask", {
+    messages,
+    sessionId: options.sessionId ?? null,
+    limit: options.limit ?? null,
   });
 }
 

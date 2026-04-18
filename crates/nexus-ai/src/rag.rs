@@ -103,8 +103,30 @@ pub async fn index_file(
     Ok(n)
 }
 
+/// Embed the question and retrieve the top-`limit` chunks from the
+/// vector store. Callers that want to reuse the prompt-assembly half
+/// of [`query`] without the blocking chat step — e.g. a streaming
+/// RAG handler — combine this with [`build_rag_prompt`] and drive
+/// their own provider.
+///
+/// # Errors
+/// Returns [`AiError`] if embedding or vector search fails.
+pub async fn retrieve(
+    ctx: &KernelPluginContext,
+    embedder: &dyn EmbeddingProvider,
+    question: &str,
+    limit: usize,
+) -> Result<Vec<ChunkMatch>, AiError> {
+    let q_embeddings = embedder.embed(&[question.to_string()]).await?;
+    let q_embedding = q_embeddings
+        .into_iter()
+        .next()
+        .ok_or_else(|| AiError::Provider("embedding returned no vectors".into()))?;
+    vectorstore::search(ctx, &q_embedding, limit).await
+}
+
 /// Build the system prompt for the RAG conversation.
-fn build_rag_prompt(sources: &[ChunkMatch]) -> String {
+pub fn build_rag_prompt(sources: &[ChunkMatch]) -> String {
     if sources.is_empty() {
         return "You are a helpful assistant. Answer the user's question to the best of your ability.".to_string();
     }

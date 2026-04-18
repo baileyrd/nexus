@@ -201,6 +201,7 @@ pub fn run() {
             editor::editor_sync_content,
             ai::ai_config,
             ai::ai_stream_chat,
+            ai::ai_stream_ask,
             database::db_apply_view,
             terminal::term_create_session,
             terminal::term_close_session,

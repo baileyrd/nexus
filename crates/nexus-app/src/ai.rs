@@ -64,3 +64,25 @@ pub async fn ai_stream_chat(
     }
     call_ai(runtime, "stream_chat", args).await
 }
+
+/// Streaming RAG completion — retrieves top-`limit` chunks from the
+/// indexed vector store, prepends them as a system prompt, and streams
+/// the chat response through the same `ai:stream_*` event channel as
+/// [`ai_stream_chat`]. Returns the final text plus the list of sources
+/// used so the UI can surface citations.
+#[tauri::command]
+pub async fn ai_stream_ask(
+    messages: serde_json::Value,
+    limit: Option<u64>,
+    session_id: Option<String>,
+    runtime: State<'_, KernelRuntime>,
+) -> Result<serde_json::Value, String> {
+    let mut args = serde_json::json!({ "messages": messages });
+    if let Some(n) = limit {
+        args["limit"] = serde_json::Value::from(n);
+    }
+    if let Some(sid) = session_id {
+        args["session_id"] = serde_json::Value::String(sid);
+    }
+    call_ai(runtime, "stream_ask", args).await
+}
