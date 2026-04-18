@@ -72,7 +72,7 @@ Match the "NEXUS_WORK" file-tree panel 1-for-1. **Shipped.**
 ### Deferred (follow-up)
 
 - [x] **Left/right clustering** — shipped via a sentinel `id = "status.spacer"` item instead of a schema change. `StatusBar.tsx` renders the sentinel as a flex:1 span; preset authors place it anywhere they want the left/right boundary. Zero Rust-type churn. Obsidian preset reordered: sync on the left; word/char/mode/backlinks/properties on the right.
-- [ ] **Live data wiring** — replace hard-coded preset text (`"0 backlinks"`, `"7 properties"`, `"2,348 words"`) with live feeds from `activeEditor`, `forgeStore`, git IPC, Tantivy doc count, and plugin-hot count. Each datum should register as its own `contributions/builtins.ts` status-bar contribution.
+- [~] **Live data wiring** — word-count, character-count, and outgoing-link count are now driven by `openFileStore` via a `useLiveStatusText()` hook in `StatusBar.tsx`. Remaining static items (git branch/sha, Tantivy doc count, plugins-hot, properties) still need IPC hooks — blocked on having a single `get_status_snapshot` command rather than six round-trips per keystroke.
 - [ ] **Preset picker → command palette** — land the `Switch layout: <preset>` command group that replaces the retired preset picker row (carried over from Stage 1).
 
 ---
