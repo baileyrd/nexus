@@ -20,9 +20,15 @@ import {
   onAiStreamStart,
   type AiConfigSnapshot,
   type ChatMessage,
+  type RagSource,
 } from "../../ipc/ai";
 
-type Turn = { role: "user" | "assistant"; content: string; pending?: boolean };
+type Turn = {
+  role: "user" | "assistant";
+  content: string;
+  pending?: boolean;
+  sources?: RagSource[];
+};
 
 const STORAGE_KEY = "nexus.chat.v1";
 
@@ -55,6 +61,17 @@ function isTurn(v: unknown): v is Turn {
   return (
     (r.role === "user" || r.role === "assistant") &&
     typeof r.content === "string"
+  );
+}
+
+function isRagSource(v: unknown): v is RagSource {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.file_path === "string" &&
+    typeof r.chunk_text === "string" &&
+    typeof r.block_id === "number" &&
+    typeof r.score === "number"
   );
 }
 
@@ -125,7 +142,11 @@ export function ChatPanel(): JSX.Element {
       });
     };
 
-    const finalizeTurn = (sessionId: string, finalText?: string) => {
+    const finalizeTurn = (
+      sessionId: string,
+      finalText?: string,
+      sources?: RagSource[],
+    ) => {
       if (sessionRef.current !== sessionId) return;
       setTurns((prev) => {
         const idx = assistantIndexRef.current;
@@ -137,6 +158,7 @@ export function ChatPanel(): JSX.Element {
           ...current,
           content: finalText ?? current.content,
           pending: false,
+          sources: sources && sources.length > 0 ? sources : current.sources,
         };
         return next;
       });
@@ -154,9 +176,12 @@ export function ChatPanel(): JSX.Element {
       unlisteners.push(fn),
     );
 
-    onAiStreamDone((ev) => finalizeTurn(ev.session_id, ev.text)).then((fn) =>
-      unlisteners.push(fn),
-    );
+    onAiStreamDone((ev) => {
+      const sources = Array.isArray(ev.sources)
+        ? ev.sources.filter(isRagSource)
+        : undefined;
+      finalizeTurn(ev.session_id, ev.text, sources);
+    }).then((fn) => unlisteners.push(fn));
 
     return () => {
       for (const fn of unlisteners) fn();
@@ -388,6 +413,41 @@ export function ChatPanel(): JSX.Element {
             >
               {turn.content || (turn.pending ? "…" : "")}
             </div>
+            {turn.role === "assistant" &&
+              turn.sources &&
+              turn.sources.length > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 4,
+                    marginTop: 4,
+                  }}
+                >
+                  {turn.sources.map((src, i) => (
+                    <span
+                      key={`${src.file_path}-${src.block_id}-${i}`}
+                      title={`${src.chunk_text.slice(0, 240)}${
+                        src.chunk_text.length > 240 ? "…" : ""
+                      }\n\nscore: ${src.score.toFixed(3)}`}
+                      style={{
+                        fontSize: 10,
+                        fontFamily: "var(--font-mono, monospace)",
+                        padding: "1px 6px",
+                        border: "1px solid var(--color-border)",
+                        borderRadius: 10,
+                        opacity: 0.85,
+                        maxWidth: "100%",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {src.file_path}
+                    </span>
+                  ))}
+                </div>
+              )}
           </div>
         ))}
       </div>

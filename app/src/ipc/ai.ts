@@ -43,6 +43,9 @@ export interface StreamChunk {
 export interface StreamDone {
   session_id: string;
   text: string;
+  /** Retrieval sources when the stream came from `stream_ask`; omitted
+   *  for `stream_chat`. Same shape as [`StreamAskResult.sources`]. */
+  sources?: RagSource[];
 }
 
 export interface StreamChatResult {
