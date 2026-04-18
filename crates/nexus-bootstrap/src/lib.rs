@@ -201,6 +201,22 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
         .wire_context("com.nexus.editor", Arc::new(editor_ctx))
         .map_err(|e| anyhow::anyhow!("failed to wire editor plugin context: {e}"))?;
 
+    // Workflow plugin needs the kernel context so its `run` handler
+    // can drive arbitrary plugins via ipc_call.
+    let workflow_ctx = KernelPluginContext::new(
+        "com.nexus.workflow",
+        env!("CARGO_PKG_VERSION"),
+        CapabilitySet::from_iter(Capability::ALL.iter().copied()),
+        Arc::clone(&kv_store),
+        Arc::clone(&event_bus),
+        &forge_root,
+        Some(Arc::clone(&dispatcher)),
+    )
+    .context("failed to build kernel plugin context for com.nexus.workflow")?;
+    shared
+        .wire_context("com.nexus.workflow", Arc::new(workflow_ctx))
+        .map_err(|e| anyhow::anyhow!("failed to wire workflow plugin context: {e}"))?;
+
     let context = KernelPluginContext::new(
         invoker_id,
         env!("CARGO_PKG_VERSION"),
@@ -603,6 +619,7 @@ fn register_core_plugins(
                     ("get", nexus_workflow::HANDLER_GET),
                     ("reload", nexus_workflow::HANDLER_RELOAD),
                     ("validate", nexus_workflow::HANDLER_VALIDATE),
+                    ("run", nexus_workflow::HANDLER_RUN),
                 ],
             ),
             forge_root,

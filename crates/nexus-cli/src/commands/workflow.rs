@@ -13,6 +13,8 @@ use crate::app::App;
 
 const WORKFLOW_PLUGIN: &str = "com.nexus.workflow";
 const IPC_TIMEOUT: Duration = Duration::from_secs(30);
+/// Run timeout — workflows chain many plugin calls so give them more headroom.
+const RUN_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// `nexus workflow list` — every loaded workflow.
 pub fn list(app: &mut App) -> Result<()> {
@@ -26,6 +28,67 @@ pub fn show(app: &mut App, name: &str) -> Result<()> {
     let response = call(app, "get", serde_json::json!({ "name": name }))?;
     print_full(&response);
     Ok(())
+}
+
+/// `nexus workflow run <name>` — execute a loaded workflow end-to-end.
+pub fn run(app: &mut App, name: &str) -> Result<()> {
+    let (runtime, rt) = app.runtime()?;
+    let response = rt
+        .block_on(
+            runtime
+                .context
+                .ipc_call(
+                    WORKFLOW_PLUGIN,
+                    "run",
+                    serde_json::json!({ "name": name }),
+                    RUN_TIMEOUT,
+                ),
+        )
+        .with_context(|| format!("workflow run '{name}' failed"))?;
+    print_run(&response);
+    Ok(())
+}
+
+fn print_run(run: &Value) {
+    let name = run
+        .get("workflow_name")
+        .and_then(Value::as_str)
+        .unwrap_or("?");
+    let success = run
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let steps = run
+        .get("steps")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    println!("Workflow : {name}");
+    println!(
+        "State    : {}",
+        if success {
+            "success"
+        } else {
+            "partial / failed"
+        }
+    );
+    for step in &steps {
+        let sid = step.get("step_id").and_then(Value::as_str).unwrap_or("?");
+        let stype = step.get("step_type").and_then(Value::as_str).unwrap_or("?");
+        let status = step.get("status").and_then(Value::as_str).unwrap_or("?");
+        let badge = match status {
+            "ok" => "✓",
+            "failed" => "✗",
+            "skipped" => "·",
+            _ => "?",
+        };
+        let err = step.get("error").and_then(Value::as_str).unwrap_or("");
+        if err.is_empty() {
+            println!("  {badge} [{status}] {sid} ({stype})");
+        } else {
+            println!("  {badge} [{status}] {sid} ({stype}) — {err}");
+        }
+    }
 }
 
 /// `nexus workflow reload` — re-scan the `.workflows/` directory.

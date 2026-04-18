@@ -3,19 +3,27 @@ export PATH=/home/baileyrd/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 cd /mnt/c/Users/baile/dev/Nexus || exit 1
 
 git add -A
-git commit -m "feat(skills): built-in skill library (PRD-13)
+git commit -m "feat(workflow): manual execution engine + run handler + CLI (PRD-16)
 
-Four canonical .skill.md files (code-reviewer, daily-journal,
-meeting-notes, commit-message) ship compiled into nexus-skills
-via include_str!. New seed_builtins(dir) helper writes each file
-that doesn't already exist at the target path; bootstrap calls it
-against <forge>/.forge/skills/ before opening the registry so
-fresh forges start with a useful default set while user edits are
-never overwritten (uses create_new so a shadowing file wins).
+nexus-workflow::executor::run_workflow iterates [[steps]] in order,
+dispatching each through an injected ActionDispatcher and recording
+per-step outcomes (ok / failed / skipped). Default on_error = stop
+halts the loop; on_error = 'continue' / 'log_warn' keeps going.
+StepOutcomeStatus mirrors nexus-agent's StepStatus so UI code can
+render both shapes the same way.
 
-Every built-in is parse-tested at build time via a unit test so
-the shipped library stays well-formed. Seeding is idempotent —
-the second run creates nothing and skips all four.
+com.nexus.workflow gains handler run (id 5). Its async dispatch
+resolves the workflow by name, builds a KernelActionDispatcher
+that routes step_type='ipc'/'ipc_call' through PluginContext::
+ipc_call (60s per step), and returns a WorkflowRun. Unknown step
+types degrade to logged no-ops so authors can iterate without
+executor churn.
+
+Bootstrap wires the plugin's kernel context and registers the
+handler. 'nexus workflow run <name>' drives it from the CLI with
+a 600s timeout for multi-step chains. 5 new executor unit tests
+cover success / default-stop / continue / empty-plan / named-step
+semantics.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 

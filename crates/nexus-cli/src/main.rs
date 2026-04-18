@@ -456,6 +456,11 @@ enum WorkflowCommand {
         /// Workflow name (as declared in `[workflow].name`)
         name: String,
     },
+    /// Execute a workflow end-to-end
+    Run {
+        /// Workflow name (as declared in `[workflow].name`)
+        name: String,
+    },
     /// Re-scan the `.workflows/` directory
     Reload,
     /// Validate a `.workflow.toml` file without loading it into the registry
@@ -1153,6 +1158,7 @@ fn main() {
         Commands::Workflow(args) => match args.command {
             WorkflowCommand::List => commands::workflow::list(&mut app),
             WorkflowCommand::Show { name } => commands::workflow::show(&mut app, &name),
+            WorkflowCommand::Run { name } => commands::workflow::run(&mut app, &name),
             WorkflowCommand::Reload => commands::workflow::reload(&mut app),
             WorkflowCommand::Validate { file } => {
                 commands::workflow::validate(&mut app, &file.to_string_lossy())

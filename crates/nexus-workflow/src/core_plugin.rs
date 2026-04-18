@@ -13,16 +13,23 @@
 //! | 2  | `get`      | `{ name }`       | One workflow by name (404 if missing) |
 //! | 3  | `reload`   | `{}`             | Re-scan `<forge>/.workflows`          |
 //! | 4  | `validate` | `{ text }`       | Parse a TOML string; return validated JSON |
+//! | 5  | `run`      | `{ name }`       | Execute a loaded workflow end-to-end       |
 //!
 //! Ids are append-only.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use nexus_plugins::{CorePlugin, PluginError};
+use async_trait::async_trait;
+use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Deserialize;
 
-use crate::{parse_workflow_text, WorkflowRegistry, WorkflowRegistryError};
+use crate::{
+    parse_workflow_text, run_workflow, ActionDispatcher, Step, Workflow, WorkflowRegistry,
+    WorkflowRegistryError,
+};
 
 /// Reverse-DNS identifier.
 pub const PLUGIN_ID: &str = "com.nexus.workflow";
@@ -35,12 +42,19 @@ pub const HANDLER_GET: u32 = 2;
 pub const HANDLER_RELOAD: u32 = 3;
 /// `validate` handler id.
 pub const HANDLER_VALIDATE: u32 = 4;
+/// `run` handler id.
+pub const HANDLER_RUN: u32 = 5;
+
+/// Default per-step tool-call timeout. Workflow steps often span
+/// multiple plugins; give them enough headroom.
+const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Core plugin — holds the workflow root path + an in-memory registry
 /// behind a mutex so dispatches stay `Send + Sync`.
 pub struct WorkflowCorePlugin {
     root: PathBuf,
     registry: Mutex<WorkflowRegistry>,
+    context: Option<Arc<KernelPluginContext>>,
 }
 
 impl WorkflowCorePlugin {
@@ -76,6 +90,7 @@ impl WorkflowCorePlugin {
         Self {
             root: workflows_dir,
             registry: Mutex::new(registry),
+            context: None,
         }
     }
 }
@@ -91,7 +106,110 @@ impl CorePlugin for WorkflowCorePlugin {
             HANDLER_GET => self.dispatch_get(args),
             HANDLER_RELOAD => self.dispatch_reload(),
             HANDLER_VALIDATE => Self::dispatch_validate(args),
+            HANDLER_RUN => Err(exec_err(
+                format!(
+                    "handler {HANDLER_RUN}: run is async; caller should use dispatch_async"
+                ),
+            )),
             other => Err(exec_err(format!("unknown handler id {other}"))),
+        }
+    }
+
+    fn dispatch_async(
+        &mut self,
+        handler_id: u32,
+        args: &serde_json::Value,
+    ) -> Option<CorePluginFuture> {
+        if handler_id != HANDLER_RUN {
+            return None;
+        }
+        let ctx = self.context.clone();
+        let args = args.clone();
+        let workflow = match lookup_by_args(&self.registry, &args) {
+            Ok(wf) => wf,
+            Err(err) => return Some(Box::pin(async move { Err(err) })),
+        };
+        Some(Box::pin(async move {
+            let ctx = ctx.ok_or_else(|| {
+                exec_err(
+                    "workflow plugin context not wired (bootstrap incomplete)".into(),
+                )
+            })?;
+            let dispatcher = KernelActionDispatcher { ctx };
+            let run = run_workflow(&workflow, &dispatcher)
+                .await
+                .map_err(|e| exec_err(format!("run: {e}")))?;
+            to_value(&run, "run")
+        }))
+    }
+
+    fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
+        self.context = Some(ctx);
+    }
+}
+
+fn lookup_by_args(
+    registry: &Mutex<WorkflowRegistry>,
+    args: &serde_json::Value,
+) -> Result<Workflow, PluginError> {
+    #[derive(Deserialize)]
+    struct Args {
+        name: String,
+    }
+    let a: Args = parse(args, "run")?;
+    let reg = registry.lock().map_err(poisoned)?;
+    reg.get(&a.name)
+        .cloned()
+        .ok_or_else(|| exec_err(format!("no workflow named '{}'", a.name)))
+}
+
+/// Dispatches `step.step_type` by routing known action types through
+/// kernel IPC. Unknown types fall through as informational no-ops so
+/// the executor still produces a stable outcome shape.
+struct KernelActionDispatcher {
+    ctx: Arc<KernelPluginContext>,
+}
+
+#[async_trait]
+impl ActionDispatcher for KernelActionDispatcher {
+    async fn run(&self, step: &Step) -> Result<serde_json::Value, String> {
+        match step.step_type.as_str() {
+            // Direct IPC dispatch: requires `target` + `command`; optional `args` object.
+            "ipc" | "ipc_call" => {
+                let target = step
+                    .extra
+                    .get("target")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "ipc step missing `target`".to_string())?;
+                let command = step
+                    .extra
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "ipc step missing `command`".to_string())?;
+                let call_args = step
+                    .extra
+                    .get("args")
+                    .cloned()
+                    .and_then(|v| serde_json::to_value(v).ok())
+                    .unwrap_or(serde_json::Value::Object(Default::default()));
+                self.ctx
+                    .ipc_call(target, command, call_args, DEFAULT_STEP_TIMEOUT)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+            "noop" => Ok(serde_json::json!({ "noop": true })),
+            other => {
+                // Unknown action types still get a stable success so
+                // workflow authors can iterate without executor churn.
+                tracing::warn!(
+                    step_type = other,
+                    "unknown workflow action type; treating as noop"
+                );
+                Ok(serde_json::json!({
+                    "unsupported": true,
+                    "step_type": other,
+                }))
+            }
         }
     }
 }
