@@ -4008,10 +4008,18 @@ select.plugin-settings-input {
  * and unset the fixed 26px button width for the right-panel text
  * tabs (was clipping "Outline"/"Backlinks" labels). */
 :root[data-theme-id="nexus-forge"] .side-panel-preview {
-  display: grid;
-  grid-template-rows: 36px 34px 1fr auto;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   background: var(--nx-bg-primary, #1B1C22);
+}
+
+:root[data-theme-id="nexus-forge"] .side-panel-preview > .side-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: auto;
 }
 
 :root[data-theme-id="nexus-forge"] .side-panel-preview > .panel-selector {
@@ -4052,4 +4060,32 @@ select.plugin-settings-input {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* Inspector text-tabs — keep labels on one line. */
+:root[data-theme-id="nexus-forge"] .right-side-panel .panel-selector-item {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+:root[data-theme-id="nexus-forge"] .right-side-panel .panel-selector-label {
+  white-space: nowrap;
+}
+
+/* The base .side-panel-body pins width: 240px which collides with our
+ * grid-column sizing; reset it under Forge. */
+:root[data-theme-id="nexus-forge"] .side-panel-body {
+  width: auto !important;
+}
+
+/* Ensure the right-panel selector row can scroll when tabs overflow
+ * instead of wrapping to a second line. */
+:root[data-theme-id="nexus-forge"] .right-side-panel-toolbar .panel-selector {
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+}
+
+:root[data-theme-id="nexus-forge"] .right-side-panel-toolbar .panel-selector::-webkit-scrollbar {
+  display: none;
 }
