@@ -1,0 +1,175 @@
+//! End-to-end tests for the workflow core plugin
+//! (`com.nexus.workflow`) driven through the kernel IPC surface.
+//!
+//! Pins the contract the WorkflowsPanel + CLI `nexus workflow …`
+//! command depend on: `list`, `get`, `reload`, `validate`, `run`.
+
+use std::fs;
+use std::time::Duration;
+
+use nexus_bootstrap::build_cli_runtime;
+use nexus_kernel::{IpcError, PluginContext};
+use nexus_workflow::PLUGIN_ID;
+
+const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+
+// Manual trigger so the plugin's cron scheduler doesn't spawn a
+// background task during tests.
+const WF_NOOP: &str = r#"
+[workflow]
+name = "Greet"
+description = "noop smoke"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "hello"
+type = "noop"
+"#;
+
+const WF_BAD: &str = "not valid toml {{";
+
+fn scratch_forge() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    nexus_storage::StorageEngine::init(dir.path()).expect("init scratch forge");
+    dir
+}
+
+fn write_workflow(root: &std::path::Path, relpath: &str, body: &str) {
+    let abs = root.join(".workflows").join(relpath);
+    if let Some(parent) = abs.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(abs, body).unwrap();
+}
+
+async fn call(
+    runtime: &nexus_bootstrap::Runtime,
+    command: &str,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, IpcError> {
+    runtime
+        .context
+        .ipc_call(PLUGIN_ID, command, args, CALL_TIMEOUT)
+        .await
+}
+
+#[tokio::test]
+async fn list_returns_workflows_on_disk() {
+    let forge = scratch_forge();
+    write_workflow(forge.path(), "greet.workflow.toml", WF_NOOP);
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    let v = call(&runtime, "list", serde_json::json!({})).await.unwrap();
+    let arr = v.as_array().expect("list returns array");
+    assert!(
+        arr.iter().any(|w| w["workflow"]["name"] == "Greet"),
+        "expected `Greet`; got {arr:?}"
+    );
+}
+
+#[tokio::test]
+async fn get_returns_workflow_and_errors_for_missing() {
+    let forge = scratch_forge();
+    write_workflow(forge.path(), "greet.workflow.toml", WF_NOOP);
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    let v = call(&runtime, "get", serde_json::json!({ "name": "Greet" }))
+        .await
+        .unwrap();
+    assert_eq!(v["workflow"]["name"], "Greet");
+    assert_eq!(v["trigger"]["type"], "manual");
+
+    let err = call(&runtime, "get", serde_json::json!({ "name": "Nope" }))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, IpcError::PluginCrashedDuringCall { .. }),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn reload_picks_up_new_files() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    let before: Vec<serde_json::Value> = serde_json::from_value(
+        call(&runtime, "list", serde_json::json!({})).await.unwrap(),
+    )
+    .unwrap();
+    let before_count = before.len();
+
+    write_workflow(forge.path(), "greet.workflow.toml", WF_NOOP);
+    let v = call(&runtime, "reload", serde_json::json!({}))
+        .await
+        .unwrap();
+    let loaded = v["loaded"].as_u64().expect("loaded is a u64");
+    assert_eq!(loaded, (before_count + 1) as u64);
+
+    let after: Vec<serde_json::Value> = serde_json::from_value(
+        call(&runtime, "list", serde_json::json!({})).await.unwrap(),
+    )
+    .unwrap();
+    assert!(after.iter().any(|w| w["workflow"]["name"] == "Greet"));
+}
+
+#[tokio::test]
+async fn validate_accepts_good_toml_and_rejects_bad() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    let v = call(
+        &runtime,
+        "validate",
+        serde_json::json!({ "text": WF_NOOP }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(v["workflow"]["name"], "Greet");
+
+    let err = call(
+        &runtime,
+        "validate",
+        serde_json::json!({ "text": WF_BAD }),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, IpcError::PluginCrashedDuringCall { .. }),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn run_executes_steps_and_returns_outcome() {
+    let forge = scratch_forge();
+    write_workflow(forge.path(), "greet.workflow.toml", WF_NOOP);
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    let v = call(&runtime, "run", serde_json::json!({ "name": "Greet" }))
+        .await
+        .expect("run ok");
+
+    assert_eq!(v["workflow_name"], "Greet");
+    assert_eq!(v["success"], true);
+    let steps = v["steps"].as_array().expect("steps array");
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0]["step_id"], "hello");
+    assert_eq!(steps[0]["status"], "ok");
+}
+
+#[tokio::test]
+async fn run_errors_for_unknown_workflow_name() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    let err = call(&runtime, "run", serde_json::json!({ "name": "ghost" }))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, IpcError::PluginCrashedDuringCall { .. }),
+        "got {err:?}"
+    );
+}
