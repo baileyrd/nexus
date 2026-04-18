@@ -334,6 +334,69 @@ path = "${trigger.path}"
 }
 
 #[tokio::test]
+async fn file_event_trigger_fires_workflow_when_watched_path_changes() {
+    // End-to-end: the storage plugin's OS watcher sees a new file at
+    // notes/observed.md, emits com.nexus.storage.file_created on the
+    // kernel bus, the workflow plugin's file_event listener picks it
+    // up, matches watch_dir/pattern, and dispatches
+    // com.nexus.workflow::run. The step writes a marker file whose
+    // appearance proves the whole loop closed.
+    //
+    // The marker path lives outside watch_dir and doesn't match the
+    // `.md$` pattern, so the workflow doesn't retrigger itself.
+    const WF: &str = r#"
+[workflow]
+name = "OnFileCreate"
+
+[trigger]
+type = "file_event"
+watch_dir = "notes/"
+pattern = "\\.md$"
+events = ["created", "modified"]
+
+[[steps]]
+name = "mark"
+type = "ipc"
+target = "com.nexus.storage"
+command = "write_file"
+[steps.args]
+path = "fired.marker"
+bytes = [70, 73, 82, 69, 68]  # "FIRED" as bytes
+"#;
+    let forge = scratch_forge();
+    write_workflow(forge.path(), "onfile.workflow.toml", WF);
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+
+    // Give the storage watcher and the workflow's file_event task a
+    // tick to arm before we drop the triggering file.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let notes_dir = forge.path().join("notes");
+    std::fs::create_dir_all(&notes_dir).unwrap();
+    std::fs::write(notes_dir.join("observed.md"), b"hello").unwrap();
+
+    // Poll for the marker. Storage watcher → bus → workflow trigger →
+    // ipc_call → write_file can take a couple of debounce cycles on
+    // slow CI.
+    let marker = forge.path().join("fired.marker");
+    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    while std::time::Instant::now() < deadline {
+        if marker.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        marker.exists(),
+        "file_event trigger never fired — marker `{}` was not written",
+        marker.display()
+    );
+    let contents = std::fs::read(&marker).unwrap();
+    assert_eq!(&contents, b"FIRED");
+    let _ = runtime; // keep runtime alive until assertion passes
+}
+
+#[tokio::test]
 async fn run_rejects_non_object_variables() {
     let forge = scratch_forge();
     write_workflow(forge.path(), "greet.workflow.toml", WF_NOOP);

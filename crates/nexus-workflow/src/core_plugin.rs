@@ -16,13 +16,27 @@
 //! | 5  | `run`      | `{ name, variables? }` | Execute a loaded workflow; `variables` is an optional nested object flattened to dotted keys (`{"trigger": {"path": "a.md"}}` → `trigger.path`) for `${…}` interpolation in step fields. |
 //!
 //! Ids are append-only.
+//!
+//! # Trigger engines
+//!
+//! The plugin drives workflow triggers from `wire_context`:
+//! - **cron** — `spawn_cron_schedulers` ([`cron.rs`](crate::cron))
+//!   parses each `trigger.schedule` and fires via `run`.
+//! - **file_event** — `spawn_file_event_triggers` subscribes to
+//!   `com.nexus.storage.file_*` on the kernel bus, filters against
+//!   the trigger's `watch_dir` / `pattern` / `events`, and fires
+//!   `run` with `trigger.{path,event_type,content_hash}` variables.
+//! - **manual** — no background engine; callers drive `run`
+//!   directly (CLI, UI, scheduled task, nested workflow).
+//!
+//! `webhook` / `git_event` / `mcp_event` are not yet wired.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{EventFilter, KernelPluginContext, NexusEvent, PluginContext, RecvError};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Deserialize;
 
@@ -158,6 +172,244 @@ impl WorkflowCorePlugin {
             handles.push(handle);
         }
     }
+
+    /// Spawn one tokio task per `file_event`-triggered workflow.
+    /// Each task subscribes to `com.nexus.storage.file_*` on the
+    /// kernel bus, filters events against the trigger's optional
+    /// `watch_dir` / `pattern` / `events` fields, and dispatches
+    /// `com.nexus.workflow::run` with `trigger.{path,event_type}`
+    /// variables when an event matches.
+    ///
+    /// Parse failures (e.g. invalid regex) log-and-skip that one
+    /// workflow; other workflows keep their subscriptions. Handles
+    /// are retained so the plugin can cancel them on drop (alongside
+    /// cron-scheduler handles).
+    fn spawn_file_event_triggers(&self, ctx: Arc<KernelPluginContext>) {
+        let runtime = match tokio::runtime::Handle::try_current() {
+            Ok(h) => h,
+            Err(_) => {
+                tracing::warn!(
+                    "workflow scheduler: no tokio runtime available; file_event triggers disabled"
+                );
+                return;
+            }
+        };
+        let specs: Vec<FileEventSpec> = match self.registry.lock() {
+            Ok(reg) => reg
+                .iter()
+                .filter(|(_, wf)| wf.trigger.trigger_type == "file_event")
+                .filter_map(|(name, wf)| match FileEventSpec::from_trigger(name, wf) {
+                    Ok(spec) => Some(spec),
+                    Err(e) => {
+                        tracing::warn!(workflow = %name, error = %e, "file_event trigger: spec parse failed; skipping");
+                        None
+                    }
+                })
+                .collect(),
+            Err(_) => return,
+        };
+        let mut handles = match self.scheduler_handles.lock() {
+            Ok(h) => h,
+            Err(_) => return,
+        };
+        for spec in specs {
+            let ctx = Arc::clone(&ctx);
+            tracing::info!(
+                workflow = %spec.workflow_name,
+                watch_dir = ?spec.watch_dir,
+                has_pattern = spec.pattern.is_some(),
+                events = ?spec.events,
+                "file_event trigger armed"
+            );
+            let handle = runtime.spawn(async move {
+                file_event_loop(ctx, spec).await;
+            });
+            handles.push(handle);
+        }
+    }
+}
+
+/// Parsed `trigger.type = "file_event"` spec.
+struct FileEventSpec {
+    workflow_name: String,
+    watch_dir: Option<String>,
+    pattern: Option<regex_lite::Regex>,
+    events: FileEventSet,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FileEventSet {
+    created: bool,
+    modified: bool,
+    deleted: bool,
+}
+
+impl FileEventSet {
+    fn all() -> Self {
+        Self {
+            created: true,
+            modified: true,
+            deleted: true,
+        }
+    }
+
+    fn matches(self, event_type: &str) -> bool {
+        match event_type {
+            "created" => self.created,
+            "modified" => self.modified,
+            "deleted" => self.deleted,
+            _ => false,
+        }
+    }
+}
+
+impl FileEventSpec {
+    fn from_trigger(name: &str, wf: &Workflow) -> Result<Self, String> {
+        let watch_dir = wf
+            .trigger
+            .extra
+            .get("watch_dir")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string);
+
+        let pattern = match wf.trigger.extra.get("pattern").and_then(|v| v.as_str()) {
+            Some(p) => Some(
+                regex_lite::Regex::new(p)
+                    .map_err(|e| format!("invalid pattern regex `{p}`: {e}"))?,
+            ),
+            None => None,
+        };
+
+        let events = match wf.trigger.extra.get("events") {
+            None => FileEventSet::all(),
+            Some(toml::Value::Array(items)) => {
+                let mut set = FileEventSet {
+                    created: false,
+                    modified: false,
+                    deleted: false,
+                };
+                for item in items {
+                    match item.as_str() {
+                        Some("created") => set.created = true,
+                        Some("modified") => set.modified = true,
+                        Some("deleted") => set.deleted = true,
+                        Some(other) => {
+                            return Err(format!(
+                                "unknown event type `{other}` (expected created|modified|deleted)"
+                            ));
+                        }
+                        None => {
+                            return Err("events array must contain strings".into());
+                        }
+                    }
+                }
+                set
+            }
+            Some(_) => return Err("events must be an array of strings".into()),
+        };
+
+        Ok(Self {
+            workflow_name: name.to_string(),
+            watch_dir,
+            pattern,
+            events,
+        })
+    }
+
+    fn matches_path(&self, path: &str) -> bool {
+        if let Some(dir) = &self.watch_dir {
+            if !path.starts_with(dir.as_str()) {
+                return false;
+            }
+        }
+        if let Some(re) = &self.pattern {
+            if !re.is_match(path) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn event_type_for_type_id(type_id: &str) -> Option<&'static str> {
+    match type_id {
+        "com.nexus.storage.file_created" => Some("created"),
+        "com.nexus.storage.file_modified" => Some("modified"),
+        "com.nexus.storage.file_deleted" => Some("deleted"),
+        _ => None,
+    }
+}
+
+async fn file_event_loop(ctx: Arc<KernelPluginContext>, spec: FileEventSpec) {
+    let mut sub = ctx.subscribe(EventFilter::CustomPrefix(
+        "com.nexus.storage.file_".to_string(),
+    ));
+    loop {
+        let published = match sub.recv().await {
+            Ok(e) => e,
+            Err(RecvError::Lagged(n)) => {
+                tracing::warn!(workflow = %spec.workflow_name, n, "file_event trigger lagged; events lost");
+                continue;
+            }
+            Err(RecvError::Closed) => {
+                tracing::debug!(workflow = %spec.workflow_name, "file_event trigger: bus closed");
+                return;
+            }
+        };
+        let NexusEvent::Custom { type_id, payload, .. } = &published.event else {
+            continue;
+        };
+        let Some(event_type) = event_type_for_type_id(type_id) else {
+            continue;
+        };
+        if !spec.events.matches(event_type) {
+            continue;
+        }
+        let path = payload
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        if path.is_empty() || !spec.matches_path(path) {
+            continue;
+        }
+        let mut trigger_vars = serde_json::Map::new();
+        trigger_vars.insert("path".into(), serde_json::Value::String(path.into()));
+        trigger_vars.insert(
+            "event_type".into(),
+            serde_json::Value::String(event_type.into()),
+        );
+        if let Some(hash) = payload.get("content_hash").cloned() {
+            trigger_vars.insert("content_hash".into(), hash);
+        }
+        let variables = serde_json::json!({ "trigger": trigger_vars });
+        let args = serde_json::json!({
+            "name": spec.workflow_name,
+            "variables": variables,
+        });
+        match ctx
+            .ipc_call(
+                PLUGIN_ID,
+                "run",
+                args,
+                std::time::Duration::from_secs(600),
+            )
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(
+                    workflow = %spec.workflow_name,
+                    event_type, path, "file_event trigger fired"
+                );
+            }
+            Err(err) => {
+                tracing::warn!(
+                    workflow = %spec.workflow_name,
+                    event_type, path, %err,
+                    "file_event trigger: run failed; continuing"
+                );
+            }
+        }
+    }
 }
 
 impl Drop for WorkflowCorePlugin {
@@ -283,7 +535,8 @@ impl CorePlugin for WorkflowCorePlugin {
 
     fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
         self.context = Some(Arc::clone(&ctx));
-        self.spawn_cron_schedulers(ctx);
+        self.spawn_cron_schedulers(Arc::clone(&ctx));
+        self.spawn_file_event_triggers(ctx);
     }
 }
 
@@ -567,6 +820,105 @@ path = "journal/today.md"
             .dispatch(HANDLER_VALIDATE, &serde_json::json!({ "text": WF }))
             .unwrap();
         assert_eq!(v["workflow"]["name"], "Daily");
+    }
+
+    #[test]
+    fn file_event_spec_parses_all_fields() {
+        let src = r#"
+[workflow]
+name = "FE"
+
+[trigger]
+type = "file_event"
+watch_dir = "notes/"
+pattern = "\\.md$"
+events = ["created", "modified"]
+"#;
+        let wf = parse_workflow_text(src).unwrap();
+        let spec = FileEventSpec::from_trigger("FE", &wf).unwrap();
+        assert_eq!(spec.watch_dir.as_deref(), Some("notes/"));
+        assert!(spec.pattern.is_some());
+        assert!(spec.events.created);
+        assert!(spec.events.modified);
+        assert!(!spec.events.deleted);
+    }
+
+    #[test]
+    fn file_event_spec_defaults_to_all_events_when_omitted() {
+        let src = r#"
+[workflow]
+name = "FE"
+
+[trigger]
+type = "file_event"
+"#;
+        let wf = parse_workflow_text(src).unwrap();
+        let spec = FileEventSpec::from_trigger("FE", &wf).unwrap();
+        assert!(spec.watch_dir.is_none());
+        assert!(spec.pattern.is_none());
+        assert!(spec.events.created);
+        assert!(spec.events.modified);
+        assert!(spec.events.deleted);
+    }
+
+    #[test]
+    fn file_event_spec_rejects_invalid_regex_and_unknown_event() {
+        let bad_pat = r#"
+[workflow]
+name = "FE"
+
+[trigger]
+type = "file_event"
+pattern = "[unterminated"
+"#;
+        let wf = parse_workflow_text(bad_pat).unwrap();
+        assert!(FileEventSpec::from_trigger("FE", &wf).is_err());
+
+        let bad_event = r#"
+[workflow]
+name = "FE"
+
+[trigger]
+type = "file_event"
+events = ["resurrected"]
+"#;
+        let wf = parse_workflow_text(bad_event).unwrap();
+        assert!(FileEventSpec::from_trigger("FE", &wf).is_err());
+    }
+
+    #[test]
+    fn file_event_spec_matches_path_combines_dir_and_pattern() {
+        let src = r#"
+[workflow]
+name = "FE"
+
+[trigger]
+type = "file_event"
+watch_dir = "notes/"
+pattern = "\\.md$"
+"#;
+        let wf = parse_workflow_text(src).unwrap();
+        let spec = FileEventSpec::from_trigger("FE", &wf).unwrap();
+        assert!(spec.matches_path("notes/a.md"));
+        assert!(!spec.matches_path("notes/a.txt")); // extension mismatch
+        assert!(!spec.matches_path("other/a.md")); // dir mismatch
+    }
+
+    #[test]
+    fn event_type_mapping_covers_all_storage_file_events() {
+        assert_eq!(
+            event_type_for_type_id("com.nexus.storage.file_created"),
+            Some("created")
+        );
+        assert_eq!(
+            event_type_for_type_id("com.nexus.storage.file_modified"),
+            Some("modified")
+        );
+        assert_eq!(
+            event_type_for_type_id("com.nexus.storage.file_deleted"),
+            Some("deleted")
+        );
+        assert!(event_type_for_type_id("com.nexus.other.ping").is_none());
     }
 
     #[test]
