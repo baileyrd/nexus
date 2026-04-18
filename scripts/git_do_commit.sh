@@ -3,21 +3,24 @@ export PATH=/home/baileyrd/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 cd /mnt/c/Users/baile/dev/Nexus || exit 1
 
 git add -A
-git commit -m "feat(agent): per-step execution API (PRD-15 §3.4)
+git commit -m "feat(chat): stepwise approval UI in ChatPanel (PRD-15 §3.4)
 
-PlanExecutor gains execute_step_at(plan, index) -> StepResult for
-single-step execution outside the policy loop. Exposed as
-com.nexus.agent::execute_step (handler id 4) + agent_execute_step
-Tauri command + agentExecuteStep TS helper, so UIs can drive a
-per-step approval flow without wiring a custom StepPolicy through
-Tauri events: iterate the plan, pause for approval between steps,
-call execute_step when the user clicks Approve.
+PendingPlanCard grows a 'Step ->' button alongside 'Approve all'.
+Each click invokes com.nexus.agent::execute_step (shipped previous
+commit) for the next step only, then re-renders the card with the
+cursor advanced and per-step badges (checkmark / denied / failed)
+inline with the plan. 'Approve rest' after partial stepping loops
+agentExecuteStep from the current cursor instead of re-running the
+plan from step 0.
 
-Library stays kernel-free; the new handler reuses the same
-KernelToolBridge as run_plan. 2 new unit tests cover the happy path
-and out-of-bounds index reporting.
+Cancel preserves any partial observation in the turn summary so
+users see what ran before bailing out. Persisted turns strip the
+transient stepCursor / stepResults before writing — the next launch
+sees a clean cancellation summary, not a half-hydrated approval
+dialog.
 
-Stepwise UI in ChatPanel on top of this primitive is the follow-up.
+Microkernel + editor-shell invariants held: all execution stays in
+com.nexus.agent; the panel just drives the loop via ipc_call.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 

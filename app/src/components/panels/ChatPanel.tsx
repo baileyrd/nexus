@@ -28,11 +28,13 @@ import {
   type RagSource,
 } from "../../ipc/ai";
 import {
+  agentExecuteStep,
   agentPlan,
   agentRun,
   agentRunPlan,
   type AgentArchetype,
   type AgentPlan,
+  type StepResult,
   type Observation,
 } from "../../ipc/agent";
 
@@ -45,6 +47,11 @@ type Turn = {
    *  the UI renders an Approve / Cancel pair instead of a normal
    *  assistant bubble. Cleared once the plan runs or is dismissed. */
   pendingPlan?: AgentPlan;
+  /** Progress cursor for stepwise execution. Only meaningful while
+   *  `pendingPlan` is set. `stepResults[i]` is the StepResult from
+   *  `pendingPlan.steps[i]`. Step i is the "next" step to run. */
+  stepCursor?: number;
+  stepResults?: StepResult[];
 };
 
 interface Persisted {
@@ -359,7 +366,12 @@ export function ChatPanel(): JSX.Element {
     // replay on the next load.
     const cleanTurns = turns
       .filter((t) => !t.pendingPlan)
-      .map((t) => ({ ...t, pending: false }));
+      .map((t) => ({
+        ...t,
+        pending: false,
+        stepCursor: undefined,
+        stepResults: undefined,
+      }));
     persist({
       id: chatSessionId,
       turns: cleanTurns,
@@ -486,14 +498,106 @@ export function ChatPanel(): JSX.Element {
       const next = prev.slice();
       const current = next[turnIndex];
       if (!current || !current.pendingPlan) return prev;
+      // Preserve any partial step results in the cancellation summary
+      // so users can see what ran before they bailed out.
+      const results = current.stepResults ?? [];
+      const summary =
+        results.length > 0
+          ? formatObservation({
+              plan_id: current.pendingPlan?.id ?? "",
+              steps: results,
+              success: false,
+            }) + "\n\n[cancelled before completing plan]"
+          : "Plan cancelled.";
       next[turnIndex] = {
         ...current,
-        content: "Plan cancelled.",
+        content: summary,
         pendingPlan: undefined,
+        stepCursor: undefined,
+        stepResults: undefined,
       };
       return next;
     });
   }, []);
+
+  const stepPendingPlan = useCallback(
+    async (turnIndex: number) => {
+      if (sending) return;
+      const target = turns[turnIndex];
+      if (!target?.pendingPlan) return;
+      const plan = target.pendingPlan;
+      const cursor = target.stepCursor ?? 0;
+      if (cursor >= plan.steps.length) return;
+
+      setSending(true);
+      setError(null);
+      let result: StepResult;
+      try {
+        result = await agentExecuteStep(plan, cursor);
+      } catch (err) {
+        setError(String(err));
+        setSending(false);
+        // Record the failure as a step entry so the UI still renders
+        // partial progress.
+        setTurns((prev) => {
+          const next = prev.slice();
+          const current = next[turnIndex];
+          if (!current) return prev;
+          const prior = current.stepResults ?? [];
+          next[turnIndex] = {
+            ...current,
+            stepResults: [
+              ...prior,
+              {
+                step_id: plan.steps[cursor]?.id ?? `step-${cursor}`,
+                response: null,
+                status: "failed",
+              },
+            ],
+            stepCursor: cursor + 1,
+          };
+          return next;
+        });
+        return;
+      }
+
+      const nextCursor = cursor + 1;
+      const done = nextCursor >= plan.steps.length;
+      setTurns((prev) => {
+        const next = prev.slice();
+        const current = next[turnIndex];
+        if (!current) return prev;
+        const prior = current.stepResults ?? [];
+        const updatedResults = [...prior, result];
+        if (done) {
+          // Synthesize an Observation-shaped content so persistence
+          // looks identical to the approve-all path.
+          const observation: Observation = {
+            plan_id: plan.id,
+            steps: updatedResults,
+            success: updatedResults.every((r) => r.status === "ok"),
+          };
+          next[turnIndex] = {
+            ...current,
+            pending: false,
+            pendingPlan: undefined,
+            stepCursor: undefined,
+            stepResults: undefined,
+            content: formatObservation(observation),
+          };
+        } else {
+          next[turnIndex] = {
+            ...current,
+            stepCursor: nextCursor,
+            stepResults: updatedResults,
+          };
+        }
+        return next;
+      });
+      setSending(false);
+    },
+    [sending, turns],
+  );
 
   const approvePendingPlan = useCallback(
     async (turnIndex: number) => {
@@ -501,6 +605,8 @@ export function ChatPanel(): JSX.Element {
       const target = turns[turnIndex];
       if (!target?.pendingPlan) return;
       const plan = target.pendingPlan;
+      const cursor = target.stepCursor ?? 0;
+      const priorResults = target.stepResults ?? [];
 
       setSending(true);
       setError(null);
@@ -512,13 +618,32 @@ export function ChatPanel(): JSX.Element {
           ...current,
           pending: true,
           pendingPlan: undefined,
-          content: "Executing…",
+          stepCursor: undefined,
+          stepResults: undefined,
+          content: cursor > 0 ? "Executing remaining steps…" : "Executing…",
         };
         return next;
       });
 
       try {
-        const observation = await agentRunPlan(plan);
+        let observation: Observation;
+        if (cursor > 0) {
+          // Stepwise partial — run the remainder via execute_step so
+          // we don't re-execute completed steps.
+          const results = priorResults.slice();
+          for (let i = cursor; i < plan.steps.length; i += 1) {
+            // eslint-disable-next-line no-await-in-loop
+            const r = await agentExecuteStep(plan, i);
+            results.push(r);
+          }
+          observation = {
+            plan_id: plan.id,
+            steps: results,
+            success: results.every((r) => r.status === "ok"),
+          };
+        } else {
+          observation = await agentRunPlan(plan);
+        }
         const content = formatObservation(observation);
         setTurns((prev) => {
           const next = prev.slice();
@@ -809,7 +934,10 @@ export function ChatPanel(): JSX.Element {
             {turn.pendingPlan ? (
               <PendingPlanCard
                 plan={turn.pendingPlan}
+                stepCursor={turn.stepCursor}
+                stepResults={turn.stepResults}
                 onApprove={() => void approvePendingPlan(i)}
+                onStep={() => void stepPendingPlan(i)}
                 onCancel={() => cancelPendingPlan(i)}
                 running={sending}
               />
@@ -933,15 +1061,25 @@ export function ChatPanel(): JSX.Element {
 
 function PendingPlanCard({
   plan,
+  stepCursor,
+  stepResults,
   onApprove,
+  onStep,
   onCancel,
   running,
 }: {
   plan: AgentPlan;
+  stepCursor?: number;
+  stepResults?: StepResult[];
   onApprove: () => void;
+  onStep: () => void;
   onCancel: () => void;
   running: boolean;
 }): JSX.Element {
+  const cursor = stepCursor ?? 0;
+  const results = stepResults ?? [];
+  const started = results.length > 0;
+  const remaining = plan.steps.length - cursor;
   return (
     <div
       style={{
@@ -955,8 +1093,9 @@ function PendingPlanCard({
       }}
     >
       <div style={{ fontSize: 11, opacity: 0.75 }}>
-        Plan awaiting approval · {plan.steps.length} step
-        {plan.steps.length === 1 ? "" : "s"}
+        {started
+          ? `Plan step ${cursor + 1} of ${plan.steps.length}`
+          : `Plan awaiting approval · ${plan.steps.length} step${plan.steps.length === 1 ? "" : "s"}`}
       </div>
       <ol
         style={{
@@ -969,36 +1108,59 @@ function PendingPlanCard({
           gap: 4,
         }}
       >
-        {plan.steps.map((step) => (
-          <li key={step.id}>
-            <div>{step.description}</div>
-            {step.tool_call && (
-              <div
-                style={{
-                  fontFamily: "var(--font-mono, monospace)",
-                  fontSize: 11,
-                  opacity: 0.7,
-                }}
-              >
-                → {step.tool_call.target_plugin_id}.{step.tool_call.command_id}
+        {plan.steps.map((step, i) => {
+          const result = results[i];
+          const isNext = i === cursor && results.length === i;
+          return (
+            <li
+              key={step.id}
+              style={{
+                opacity: result ? 0.75 : 1,
+                fontWeight: isNext ? 500 : undefined,
+              }}
+            >
+              <div>
+                {result ? stepBadge(result.status) : isNext ? "▶ " : ""}
+                {step.description}
               </div>
-            )}
-          </li>
-        ))}
+              {step.tool_call && (
+                <div
+                  style={{
+                    fontFamily: "var(--font-mono, monospace)",
+                    fontSize: 11,
+                    opacity: 0.7,
+                  }}
+                >
+                  → {step.tool_call.target_plugin_id}.{step.tool_call.command_id}
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ol>
       <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
         <button
           type="button"
+          onClick={onStep}
+          disabled={running || remaining <= 0}
+          style={chipButtonStyle}
+          title="Run the next step only, then pause for approval again."
+        >
+          {started ? "Step →" : "Step (one)"}
+        </button>
+        <button
+          type="button"
           onClick={onApprove}
-          disabled={running}
+          disabled={running || remaining <= 0}
           style={{
             ...chipButtonStyle,
             background: "var(--color-accent, #3b82f6)",
             color: "var(--color-bg, #fff)",
             borderColor: "transparent",
           }}
+          title="Run all remaining steps without stopping."
         >
-          Approve
+          {started ? "Approve rest" : "Approve all"}
         </button>
         <button
           type="button"
@@ -1011,4 +1173,19 @@ function PendingPlanCard({
       </div>
     </div>
   );
+}
+
+function stepBadge(status: StepResult["status"]): string {
+  switch (status) {
+    case "ok":
+      return "✓ ";
+    case "denied":
+      return "⊘ ";
+    case "failed":
+      return "✗ ";
+    case "skipped":
+      return "· ";
+    default:
+      return "";
+  }
 }
