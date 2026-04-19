@@ -14,6 +14,7 @@ function Row({ heading }: RowProps) {
         eventBus.emit(EVENT_SCROLL_TO, {
           headingId: heading.id,
           line: heading.line,
+          index: heading.index,
         })
       }
       style={{

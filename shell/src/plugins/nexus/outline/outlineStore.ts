@@ -11,6 +11,11 @@ export interface OutlineHeading {
   text: string
   level: number
   line: number
+  /** Sequential 0-based index among all headings in the document.
+   *  Used by the editor to find the matching DOM element (the Nth
+   *  h1..h6 in the rendered markdown body) without needing ids to
+   *  match between our slugs and marked's auto-generated ones. */
+  index: number
 }
 
 interface OutlineState {

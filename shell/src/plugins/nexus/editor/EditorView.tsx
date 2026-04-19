@@ -1,7 +1,21 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useEditorStore, isDirty, type EditorTab, type EditorTabMode } from './editorStore'
 import { renderMarkdown } from './markdownRender'
+import { eventBus } from '../../../host/EventBus'
 import './markdown.css'
+
+/**
+ * Outline → editor scroll contract. The outline plugin emits
+ * `editor:scrollToHeading` with the 0-based heading index (among all
+ * headings in the active doc) and the 1-based source line number.
+ * Preview mode scrolls the Nth heading element into view; source mode
+ * scrolls the textarea to the matching line.
+ */
+interface ScrollToHeadingPayload {
+  headingId?: string
+  line: number
+  index: number
+}
 
 interface EditorViewProps {
   onRetry: (relpath: string) => void
@@ -36,6 +50,49 @@ export function EditorView({ onRetry, onRequestClose }: EditorViewProps) {
     () => tabs.find((t) => t.relpath === activeRelpath) ?? null,
     [tabs, activeRelpath],
   )
+
+  // Refs into the rendered body so an outline click can actually scroll
+  // the right element. Preview uses the markdown body div; source uses
+  // the textarea. Only one is mounted at a time.
+  const markdownBodyRef = useRef<HTMLDivElement | null>(null)
+  const sourceRef = useRef<HTMLTextAreaElement | null>(null)
+
+  useEffect(() => {
+    const unsub = eventBus.on<ScrollToHeadingPayload>('editor:scrollToHeading', (payload) => {
+      if (!payload) return
+      const tab = useEditorStore.getState().tabs.find(
+        (t) => t.relpath === useEditorStore.getState().activeRelpath,
+      )
+      if (!tab) return
+      if (tab.mode === 'preview') {
+        // Preview: find the Nth heading in the rendered body. marked +
+        // our parser agree on which lines are headings (both skip fenced
+        // code), so `index` maps 1:1 to the Nth <h1..h6> in DOM order.
+        const body = markdownBodyRef.current
+        if (!body) return
+        const headings = body.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')
+        const target = headings[payload.index]
+        if (!target) return
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      } else if (tab.mode === 'source') {
+        // Source: best-effort line scroll. Put the caret at the start of
+        // the target line so native textarea behaviour lands it in view.
+        const textarea = sourceRef.current
+        if (!textarea) return
+        const lines = tab.content.split(/\r?\n/)
+        const lineIndex = Math.max(0, Math.min(payload.line - 1, lines.length - 1))
+        let offset = 0
+        for (let i = 0; i < lineIndex; i++) offset += lines[i].length + 1
+        textarea.focus()
+        textarea.setSelectionRange(offset, offset)
+        // Nudge scroll: compute approximate pixel offset via line-height.
+        const cs = window.getComputedStyle(textarea)
+        const lh = parseFloat(cs.lineHeight)
+        if (!Number.isNaN(lh) && lh > 0) textarea.scrollTop = lh * lineIndex
+      }
+    })
+    return unsub
+  }, [])
 
   // Parse markdown once per content change — re-running marked + DOMPurify
   // on every unrelated parent re-render would be needlessly expensive.
@@ -100,7 +157,13 @@ export function EditorView({ onRetry, onRequestClose }: EditorViewProps) {
       />
       <div style={{ flex: '1 1 auto', overflow: 'auto' }}>
         {activeTab ? (
-          <TabBody tab={activeTab} markdownHtml={markdownHtml} onRetry={onRetry} />
+          <TabBody
+            tab={activeTab}
+            markdownHtml={markdownHtml}
+            onRetry={onRetry}
+            markdownBodyRef={markdownBodyRef}
+            sourceRef={sourceRef}
+          />
         ) : (
           <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>
             Select a tab
@@ -366,9 +429,11 @@ interface TabBodyProps {
   tab: EditorTab
   markdownHtml: string
   onRetry: (relpath: string) => void
+  markdownBodyRef: React.MutableRefObject<HTMLDivElement | null>
+  sourceRef: React.MutableRefObject<HTMLTextAreaElement | null>
 }
 
-function TabBody({ tab, markdownHtml, onRetry }: TabBodyProps) {
+function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, sourceRef }: TabBodyProps) {
   const centredStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -411,6 +476,7 @@ function TabBody({ tab, markdownHtml, onRetry }: TabBodyProps) {
   if (tab.mode === 'source') {
     return (
       <textarea
+        ref={sourceRef}
         className="nexus-editor-source"
         value={tab.content}
         onChange={(e) =>
@@ -425,6 +491,7 @@ function TabBody({ tab, markdownHtml, onRetry }: TabBodyProps) {
   if (isMarkdown(tab.name)) {
     return (
       <div
+        ref={markdownBodyRef}
         className="nexus-markdown-body"
         dangerouslySetInnerHTML={{ __html: markdownHtml }}
       />

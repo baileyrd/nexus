@@ -61,6 +61,7 @@ export function parseHeadings(markdown: string): OutlineHeading[] {
       text,
       level,
       line: i + 1,
+      index,
     })
     index++
   }
