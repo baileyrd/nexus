@@ -10,6 +10,7 @@ import './shell/shell.css'
 // Importing the store triggers persist rehydration, which sets
 // data-theme/data-density on <html> before the first paint.
 import './stores/themeStore'
+import { useLayoutStore } from './stores/layoutStore'
 import type { Plugin } from './types/plugin'
 import {
   scanCommunityPlugins,
@@ -21,7 +22,10 @@ import {
 import { configurationServicePlugin } from './plugins/core/configurationService'
 import { notificationServicePlugin }  from './plugins/core/notificationService'
 import { fileSystemServicePlugin }    from './plugins/core/fileSystemService'
-import { themeServicePlugin }         from './plugins/core/themeService'
+// themeServicePlugin is intentionally not loaded — it carries Nexus-branded
+// theme names ("Forge Ember", "Forge Paper") and auto-flips to the light
+// theme based on OS preference, which leaves empty slots looking white.
+// Dark comes for free from shell.css :root when no data-theme is set.
 
 // ── UI & feature plugins (DISABLED) ───────────────────────────────────────────
 // The template's plugins/core/* UI files ship with hardcoded Nexus product
@@ -55,11 +59,19 @@ async function boot() {
   // Expose via singleton — no circular import
   setRegistry(reg)
 
+  // No plugin currently contributes to rightPanel or panelArea. Their
+  // layoutStore defaults (rightPanel.visible: true) leave a wide empty
+  // strip in the window. Force hidden until a host plugin lands —
+  // nexus.sidebar handles its own visibility the same way.
+  useLayoutStore.setState((s) => ({
+    rightPanel: { ...s.rightPanel, visible: false },
+    panelArea:  { ...s.panelArea,  visible: false },
+  }))
+
   const plugins: Plugin[] = [
     configurationServicePlugin,
     notificationServicePlugin,
     fileSystemServicePlugin,
-    themeServicePlugin,
     workspacePlugin,
     gitStatusPlugin,
     titleBarPlugin,
