@@ -1,5 +1,6 @@
 // src-tauri/src/lib.rs
 
+mod bridge;
 mod persistence;
 
 use std::fs;
@@ -274,6 +275,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(bridge::KernelRuntime::new())
         .invoke_handler(tauri::generate_handler![
             scan_plugin_directory,
             scan_plugin_directory_at,
