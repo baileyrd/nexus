@@ -2,11 +2,13 @@
 // Constructs the PluginAPI object handed to each plugin's activate() function.
 // Core plugins get api.internal; community plugins do not.
 
-import type { PluginAPI, ConfigSection } from '../types/plugin'
+import type { PluginAPI, ConfigSection, KernelEventEnvelope } from '../types/plugin'
 import type { PluginRegistry } from './PluginRegistry'
 import { useSlotStore, type SlotId } from '../registry/SlotRegistry'
 import { contextKeyService } from './ContextKeyService'
 import { eventBus } from './EventBus'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type { ComponentType } from 'react'
 
 interface BuildOptions {
@@ -179,6 +181,49 @@ export function buildPluginAPI(
       async rename(from, to) {
         const svc = registry.getService<{ rename: (f: string, t: string) => Promise<void> }>('fsService')
         return svc.rename(from, to)
+      },
+    },
+
+    // ─── Kernel bridge ─────────────────────────────────────────────────────
+    // Wraps the Tauri commands registered in `src-tauri/src/bridge.rs`. Every
+    // call errors with `"kernel not booted"` until `boot_kernel` succeeds on
+    // workspace pick.
+    kernel: {
+      async invoke<T = unknown>(
+        pluginId: string,
+        commandId: string,
+        args: unknown = {},
+        timeoutMs?: number,
+      ): Promise<T> {
+        return invoke<T>('kernel_invoke', {
+          pluginId,
+          commandId,
+          args,
+          timeoutMs: timeoutMs ?? null,
+        })
+      },
+      async on<T = unknown>(
+        topicPrefix: string,
+        handler: (topic: string, payload: T) => void,
+      ): Promise<() => void> {
+        const subscriptionId = await invoke<string>('kernel_subscribe', { topicPrefix })
+        const unlisten = await listen<KernelEventEnvelope>('kernel:event', (ev) => {
+          if (ev.payload.subscriptionId === subscriptionId) {
+            handler(ev.payload.topic, ev.payload.payload as T)
+          }
+        })
+        return () => {
+          // Fire-and-forget: Tauri listener is dropped synchronously; the
+          // Rust-side `kernel_unsubscribe` is best-effort (idempotent + logs
+          // on failure) and doesn't need to block the caller's teardown.
+          unlisten()
+          invoke('kernel_unsubscribe', { subscriptionId }).catch((e) =>
+            console.warn('[api.kernel.on] unsubscribe failed', e),
+          )
+        }
+      },
+      async available(): Promise<boolean> {
+        return invoke<boolean>('kernel_is_booted')
       },
     },
 

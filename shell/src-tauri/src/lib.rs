@@ -308,6 +308,10 @@ pub fn run() {
             bridge::init_forge,
             bridge::boot_kernel,
             bridge::shutdown_kernel,
+            bridge::kernel_invoke,
+            bridge::kernel_subscribe,
+            bridge::kernel_unsubscribe,
+            bridge::kernel_is_booted,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

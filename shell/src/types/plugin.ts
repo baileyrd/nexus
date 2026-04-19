@@ -107,6 +107,7 @@ export interface PluginAPI {
   configuration: ConfigurationAPI
   notifications: NotificationsAPI
   fs: FilesystemAPI
+  kernel: KernelAPI
   activityBar: ActivityBarAPI
   input: InputAPI
   /** Only available to core plugins (core: true) */
@@ -214,6 +215,43 @@ export interface FilesystemAPI {
   mkdir(path: string): Promise<void>
   delete(path: string): Promise<void>
   rename(from: string, to: string): Promise<void>
+}
+
+// ─── Kernel bridge ────────────────────────────────────────────────────────────
+
+export interface KernelEventEnvelope {
+  subscriptionId: string
+  topic: string
+  payload: unknown
+}
+
+export interface KernelAPI {
+  /**
+   * Invoke a kernel plugin handler via `context.ipc_call`. Rejects with a
+   * string of the form `"<Variant>: <message>"` mapped from `IpcError`.
+   *
+   * `timeoutMs` defaults to 30 seconds when omitted.
+   */
+  invoke<T = unknown>(
+    pluginId: string,
+    commandId: string,
+    args?: unknown,
+    timeoutMs?: number,
+  ): Promise<T>
+  /**
+   * Subscribe to kernel custom events whose `type_id` starts with
+   * `topicPrefix`. The handler receives the full `type_id` alongside the
+   * raw JSON payload so the caller can route across a shared prefix.
+   *
+   * Returns an unsubscribe function that tears down both the Tauri event
+   * listener and the Rust-side forwarder task.
+   */
+  on<T = unknown>(
+    topicPrefix: string,
+    handler: (topic: string, payload: T) => void,
+  ): Promise<() => void>
+  /** True once `boot_kernel` has succeeded and no shutdown has happened since. */
+  available(): Promise<boolean>
 }
 
 export interface ActivityBarAPI {
