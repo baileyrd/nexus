@@ -8,7 +8,7 @@ function basename(path: string): string {
   return parts[parts.length - 1] || trimmed
 }
 
-const buttonStyle: React.CSSProperties = {
+const baseButtonStyle: React.CSSProperties = {
   width: 40,
   height: 36,
   background: 'transparent',
@@ -19,10 +19,43 @@ const buttonStyle: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   padding: 0,
+  transition: 'background 0.08s, color 0.08s',
 }
 
-const closeButtonStyle: React.CSSProperties = {
-  ...buttonStyle,
+function ControlButton({
+  onClick,
+  label,
+  closeAccent,
+  children,
+}: {
+  onClick: () => void
+  label: string
+  closeAccent?: boolean
+  children: React.ReactNode
+}) {
+  const [hover, setHover] = useState(false)
+  const style: React.CSSProperties = {
+    ...baseButtonStyle,
+    background: hover
+      ? closeAccent
+        ? 'var(--risk)'
+        : 'var(--bg-hover)'
+      : 'transparent',
+    color: hover && closeAccent ? 'var(--bg)' : 'var(--fg-muted)',
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      aria-label={label}
+      title={label}
+      style={style}
+    >
+      {children}
+    </button>
+  )
 }
 
 function MinimizeIcon() {
@@ -92,7 +125,6 @@ export function TitleBar() {
 
   return (
     <div
-      data-tauri-drag-region
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -120,43 +152,22 @@ export function TitleBar() {
         {rootPath ? basename(rootPath) : 'No workspace'}
       </button>
 
+      {/* Drag region: middle spacer only. Keeping interactive buttons out of
+          the drag region avoids eaten pointer events on Windows/Tauri 2. */}
       <div data-tauri-drag-region style={{ flex: 1, height: '100%' }} />
 
-      <button
-        type="button"
-        onClick={minimize}
-        aria-label="Minimize"
-        title="Minimize"
-        style={buttonStyle}
-      >
+      <ControlButton onClick={minimize} label="Minimize">
         <MinimizeIcon />
-      </button>
-      <button
-        type="button"
+      </ControlButton>
+      <ControlButton
         onClick={toggleMaximize}
-        aria-label={maximized ? 'Restore' : 'Maximize'}
-        title={maximized ? 'Restore' : 'Maximize'}
-        style={buttonStyle}
+        label={maximized ? 'Restore' : 'Maximize'}
       >
         {maximized ? <RestoreIcon /> : <MaximizeIcon />}
-      </button>
-      <button
-        type="button"
-        onClick={close}
-        aria-label="Close"
-        title="Close"
-        style={closeButtonStyle}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'var(--risk)'
-          e.currentTarget.style.color = 'var(--bg)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'transparent'
-          e.currentTarget.style.color = 'var(--fg-muted)'
-        }}
-      >
+      </ControlButton>
+      <ControlButton onClick={close} label="Close" closeAccent>
         <CloseIcon />
-      </button>
+      </ControlButton>
     </div>
   )
 }
