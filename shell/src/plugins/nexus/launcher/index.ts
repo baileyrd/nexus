@@ -47,20 +47,48 @@ export const launcherPlugin: Plugin = {
       void useLauncherStore.getState().load()
     })
 
+    const reportBootFailure = (path: string | null, err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err)
+      console.warn('[nexus.launcher] workspace command failed', path, err)
+      // api.notifications.show is always defined (PluginAPI contract); if
+      // the notification service hasn't loaded yet it silently falls back
+      // to a console line, which is fine.
+      try {
+        api.notifications.show({
+          type: 'warning',
+          message: path
+            ? `Could not open workspace at ${path}: ${message}`
+            : `Could not open workspace: ${message}`,
+        })
+      } catch (notifyErr) {
+        console.warn('[nexus.launcher] notifications.show failed:', notifyErr)
+      }
+    }
+
     const onOpenFolder = async () => {
-      const picked = await api.commands.execute(COMMAND_OPEN)
-      if (typeof picked === 'string' && picked.length > 0) {
-        // nexus.workspace set the root + emitted workspace:opened; we
-        // just need to persist to recents.
-        await useLauncherStore.getState().openPath(picked)
+      try {
+        const picked = await api.commands.execute(COMMAND_OPEN)
+        if (typeof picked === 'string' && picked.length > 0) {
+          // nexus.workspace only resolves the command after boot_kernel
+          // succeeded — so recording to recents here is safe. On failure
+          // the command throws and we land in the catch below instead.
+          await useLauncherStore.getState().openPath(picked)
+        }
+      } catch (err) {
+        reportBootFailure(null, err)
       }
     }
 
     const onActivatePath = async (path: string) => {
-      // Promote to recents first so the persisted "last" is correct,
-      // then let nexus.workspace set the root + emit the event.
-      await useLauncherStore.getState().openPath(path)
-      await api.commands.execute(COMMAND_SET_ROOT, path)
+      try {
+        await api.commands.execute(COMMAND_SET_ROOT, path)
+        // Only promote to recents after the kernel has booted cleanly —
+        // otherwise a broken path would get promoted to the top of the
+        // list and the user would hit the same failure next launch.
+        await useLauncherStore.getState().openPath(path)
+      } catch (err) {
+        reportBootFailure(path, err)
+      }
     }
 
     // Wrap the view so it can close over the callbacks without other

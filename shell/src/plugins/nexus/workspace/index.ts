@@ -11,6 +11,7 @@ const EVENT_OPENED = 'workspace:opened'
 const EVENT_CLOSED = 'workspace:closed'
 const COMMAND_OPEN = 'nexus.workspace.open'
 const COMMAND_SET_ROOT = 'nexus.workspace.setRoot'
+const COMMAND_CLOSE = 'nexus.workspace.close'
 
 export const workspacePlugin: Plugin = {
   manifest: {
@@ -29,6 +30,11 @@ export const workspacePlugin: Plugin = {
         {
           id: COMMAND_SET_ROOT,
           title: 'Set Workspace Root',
+          category: 'Workspace',
+        },
+        {
+          id: COMMAND_CLOSE,
+          title: 'Close Workspace',
           category: 'Workspace',
         },
       ],
@@ -57,7 +63,65 @@ export const workspacePlugin: Plugin = {
   async activate(api: PluginAPI) {
     const store = useWorkspaceStore.getState()
 
-    const setRoot = (path: string | null) => {
+    // Single source of truth for every workspace state transition. Each
+    // transition pairs store/context/storage/event updates with the matching
+    // kernel lifecycle step:
+    //   null  → path  : init_forge → boot_kernel → store update → event
+    //   path  → other : shutdown_kernel → init_forge → boot_kernel → event
+    //   path  → null  : shutdown_kernel → store null → event
+    //   null  → null  : no-op on kernel; just sync context/storage
+    //
+    // Ordering contract (downstream plugin authors): `workspace:opened`
+    // is emitted AFTER boot_kernel resolves, so any handler may assume
+    // `api.kernel.available()` is true and issue `api.kernel.invoke` calls
+    // immediately. Between a `workspace:closed` and the subsequent
+    // `workspace:opened` the kernel is NOT booted.
+    //
+    // On boot failure the store is force-cleared to null and the original
+    // error is re-thrown so callers (e.g. nexus.launcher) can decide not to
+    // record the path into their recents list.
+    const setRoot = async (path: string | null): Promise<void> => {
+      const prev = useWorkspaceStore.getState().rootPath
+
+      // No-op fast path for null → null; still make sure the UI surfaces
+      // reflect "no workspace" on a fresh boot.
+      if (prev === null && path === null) {
+        useWorkspaceStore.getState().setRootPath(null)
+        api.context.set(CONTEXT_KEY_ROOT, '')
+        api.context.set(CONTEXT_KEY_HAS_ROOT, false)
+        api.storage.delete(STORAGE_KEY)
+        api.events.emit(EVENT_CLOSED, {})
+        return
+      }
+
+      // Shut down the previous kernel first if one is booted — covers both
+      // the switch (path → other) and close (path → null) cases.
+      if (prev !== null) {
+        try {
+          await invoke('shutdown_kernel')
+        } catch (err) {
+          console.warn('[nexus.workspace] shutdown_kernel failed (continuing):', err)
+        }
+      }
+
+      if (path !== null) {
+        try {
+          await invoke('init_forge', { path })
+          await invoke('boot_kernel', { path })
+        } catch (err) {
+          console.error('[nexus.workspace] kernel boot failed for', path, err)
+          // Force-clear so the UI reflects "no workspace" rather than
+          // stalling on a half-booted state.
+          useWorkspaceStore.getState().setRootPath(null)
+          api.context.set(CONTEXT_KEY_ROOT, '')
+          api.context.set(CONTEXT_KEY_HAS_ROOT, false)
+          api.storage.delete(STORAGE_KEY)
+          api.events.emit(EVENT_CLOSED, {})
+          throw err
+        }
+      }
+
+      // Kernel is now in the desired state. Sync the UI surfaces.
       useWorkspaceStore.getState().setRootPath(path)
       api.context.set(CONTEXT_KEY_ROOT, path ?? '')
       api.context.set(CONTEXT_KEY_HAS_ROOT, path !== null)
@@ -78,18 +142,29 @@ export const workspacePlugin: Plugin = {
         const stillExists = await invoke<boolean>('path_exists', { path: persisted })
         if (stillExists) {
           console.info('[nexus.workspace] restoring', persisted)
-          setRoot(persisted)
+          try {
+            await setRoot(persisted)
+          } catch (err) {
+            // boot_kernel failed against the persisted path (corrupt forge,
+            // migration needed, etc.). setRoot already cleared storage +
+            // emitted workspace:closed, so the launcher will appear. Just
+            // log and move on rather than propagating out of activate().
+            console.warn(
+              '[nexus.workspace] kernel boot failed for persisted path, falling back to launcher:',
+              err,
+            )
+          }
         } else {
           console.info('[nexus.workspace] persisted path no longer exists, clearing')
           api.storage.delete(STORAGE_KEY)
-          setRoot(null)
+          await setRoot(null)
         }
       } catch (err) {
         console.warn('[nexus.workspace] failed to verify persisted path:', err)
-        setRoot(null)
+        await setRoot(null)
       }
     } else {
-      setRoot(null)
+      await setRoot(null)
     }
 
     api.commands.register(COMMAND_OPEN, async () => {
@@ -99,22 +174,32 @@ export const workspacePlugin: Plugin = {
         title: 'Open Workspace Folder',
       })
       if (typeof picked === 'string') {
-        setRoot(picked)
+        // Let boot errors propagate so the launcher can skip recents.
+        await setRoot(picked)
+        return picked
       }
-      return picked ?? null
+      return null
     })
 
     // Direct path activation — the launcher's recents row bypasses the
     // folder-picker and hands us a path we already trust. Centralises
-    // the full setRoot dance (store + context + storage + event) so
-    // the launcher doesn't duplicate any of it.
+    // the full setRoot dance (kernel + store + context + storage + event)
+    // so the launcher doesn't duplicate any of it. Errors propagate so
+    // the caller can decide how to react (e.g. not persist to recents).
     api.commands.register(COMMAND_SET_ROOT, async (...args: unknown[]) => {
       const path = args[0]
       if (typeof path !== 'string' || path.length === 0) {
         return null
       }
-      setRoot(path)
+      await setRoot(path)
       return path
+    })
+
+    // Close the current workspace. Drains the kernel and clears UI state.
+    // No keybinding — future "Close Workspace" menu item will hang off this.
+    api.commands.register(COMMAND_CLOSE, async () => {
+      await setRoot(null)
+      return null
     })
 
     store.setOpenHandler(() => {
