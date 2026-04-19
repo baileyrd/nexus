@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { McpView } from './McpView'
+import { ToolCallModal } from './ToolCallModal'
 import {
   useMcpStore,
   type McpPromptRow,
@@ -10,6 +11,7 @@ import {
 } from './mcpStore'
 
 const VIEW_ID = 'nexus.mcp.view'
+const TOOL_MODAL_VIEW_ID = 'nexus.mcp.toolCallModal'
 
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
@@ -20,18 +22,20 @@ const COMMAND_SHOW = 'nexus.mcp.show'
 
 const MCP_PLUGIN_ID = 'com.nexus.mcp.host'
 // Verified against crates/nexus-mcp/src/core_plugin.rs::dispatch + dispatch_async:
-//   `list_servers`   args `{}`              → `[{ name, command, args[], disabled }]`
-//   `connect`        args `{ server }`      → `{ ok, server }`
-//   `disconnect`     args `{ server }`      → `{ ok, server, reason? }`
-//   `list_tools`     args `{ server }`      → `[{ name, description }]`
-//   `list_resources` args `{ server }`      → `[{ uri, name, description, mime_type }]`
-//   `list_prompts`   args `{ server }`      → `[{ name, description }]`
+//   `list_servers`   args `{}`                                → `[{ name, command, args[], disabled }]`
+//   `connect`        args `{ server }`                        → `{ ok, server }`
+//   `disconnect`     args `{ server }`                        → `{ ok, server, reason? }`
+//   `list_tools`     args `{ server }`                        → `[{ name, description }]`
+//   `list_resources` args `{ server }`                        → `[{ uri, name, description, mime_type }]`
+//   `list_prompts`   args `{ server }`                        → `[{ name, description }]`
+//   `call_tool`      args `{ server, tool, arguments? }`      → `{ content[], is_error }`
 const LIST_SERVERS = 'list_servers'
 const CONNECT = 'connect'
 const DISCONNECT = 'disconnect'
 const LIST_TOOLS = 'list_tools'
 const LIST_RESOURCES = 'list_resources'
 const LIST_PROMPTS = 'list_prompts'
+const CALL_TOOL = 'call_tool'
 
 // MCP servers spawn a subprocess on connect — pick a generous ceiling
 // over the 30s default timeout. Capability listing is auto-connected
@@ -87,6 +91,19 @@ function decodeResources(raw: unknown): McpResourceRow[] {
       }
     })
     .filter((x): x is McpResourceRow => x !== null)
+}
+
+function decodeCallToolResult(raw: unknown): { content: unknown[]; isError: boolean } {
+  // Defensive: the kernel returns `{ content: [...], is_error: bool }`
+  // verbatim from the rmcp client. Treat any non-object response or
+  // missing fields as an empty success — the kernel won't normally
+  // emit that shape, but it keeps the modal rendering predictable.
+  if (!raw || typeof raw !== 'object') return { content: [], isError: false }
+  const r = raw as Record<string, unknown>
+  return {
+    content: Array.isArray(r.content) ? r.content : [],
+    isError: r.is_error === true,
+  }
 }
 
 function decodePrompts(raw: unknown): McpPromptRow[] {
@@ -206,6 +223,36 @@ export const mcpPlugin: Plugin = {
       }
     }
 
+    const handleCallTool = (server: string, tool: string) => {
+      // Reading mid-edit args text from a previous open isn't useful —
+      // openToolCall resets the modal to `{}` for a fresh start.
+      useMcpStore.getState().openToolCall(server, tool)
+    }
+
+    const runToolCall = async (server: string, tool: string, args: Record<string, unknown>) => {
+      const store = useMcpStore.getState()
+      store.setToolCallStatus('running', { error: null, result: null })
+      try {
+        const raw = await api.kernel.invoke<unknown>(
+          MCP_PLUGIN_ID,
+          CALL_TOOL,
+          // The kernel handler reads `arguments` (mcp protocol naming),
+          // not `args` — see crates/nexus-mcp/src/core_plugin.rs:282.
+          { server, tool, arguments: args },
+          CONNECT_TIMEOUT_MS,
+        )
+        const result = decodeCallToolResult(raw)
+        useMcpStore.getState().setToolCallStatus('done', { error: null, result })
+        // Successful tool call also implies the server is up — sync
+        // the row pill so a manual disconnect / reconnect dance isn't
+        // needed to see "up".
+        useMcpStore.getState().setStatus(server, 'connected')
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        useMcpStore.getState().setToolCallStatus('error', { error: message })
+      }
+    }
+
     const handleDisconnect = async (name: string) => {
       const store = useMcpStore.getState()
       store.setStatus(name, 'disconnecting')
@@ -230,8 +277,18 @@ export const mcpPlugin: Plugin = {
           onConnect: (name) => void handleConnect(name),
           onDisconnect: (name) => void handleDisconnect(name),
           onExpand: handleExpand,
+          onCallTool: handleCallTool,
         }),
       priority: 50,
+    })
+
+    api.views.register(TOOL_MODAL_VIEW_ID, {
+      slot: 'overlay',
+      component: () =>
+        createElement(ToolCallModal, {
+          onRun: runToolCall,
+        }),
+      priority: 30,
     })
 
     api.activityBar.addItem({

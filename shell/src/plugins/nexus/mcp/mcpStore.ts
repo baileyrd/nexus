@@ -51,6 +51,27 @@ export interface ServerState {
   loadingDetails: boolean
 }
 
+/**
+ * Per-tool-call modal state. `null` when the modal is closed; the
+ * shape carries enough context for the modal to render its title +
+ * dispatch the call without re-reading the store.
+ *
+ * `argsText` is the user-edited JSON string. We keep the textual
+ * form (rather than a parsed object) so an in-progress edit doesn't
+ * round-trip through JSON.parse / JSON.stringify and lose the
+ * user's whitespace.
+ */
+export interface ToolCallState {
+  serverName: string
+  toolName: string
+  argsText: string
+  status: 'idle' | 'running' | 'done' | 'error'
+  /** Last error from call_tool, including JSON.parse errors. */
+  error: string | null
+  /** `{ content, is_error }` from `com.nexus.mcp.host::call_tool`. */
+  result: { content: unknown[]; isError: boolean } | null
+}
+
 interface McpStoreState {
   loading: boolean
   loadError: string | null
@@ -58,6 +79,7 @@ interface McpStoreState {
   /** Per-server runtime state, keyed by server name. */
   state: Record<string, ServerState>
   expandedName: string | null
+  toolCall: ToolCallState | null
 
   setLoading(b: boolean): void
   setLoadError(e: string | null): void
@@ -73,6 +95,15 @@ interface McpStoreState {
   ): void
   setLoadingDetails(name: string, b: boolean): void
   toggleExpanded(name: string): void
+
+  openToolCall(serverName: string, toolName: string): void
+  closeToolCall(): void
+  setToolCallArgsText(text: string): void
+  setToolCallStatus(
+    status: ToolCallState['status'],
+    extras?: { error?: string | null; result?: ToolCallState['result'] },
+  ): void
+
   reset(): void
 }
 
@@ -102,6 +133,7 @@ export const useMcpStore = create<McpStoreState>((set) => ({
   servers: [],
   state: {},
   expandedName: null,
+  toolCall: null,
 
   setLoading: (b) => set({ loading: b }),
   setLoadError: (e) => set({ loadError: e }),
@@ -129,6 +161,36 @@ export const useMcpStore = create<McpStoreState>((set) => ({
     set((s) => ({ state: patchState(s, name, { loadingDetails: b }) })),
   toggleExpanded: (name) =>
     set((s) => ({ expandedName: s.expandedName === name ? null : name })),
+
+  openToolCall: (serverName, toolName) =>
+    set({
+      toolCall: {
+        serverName,
+        toolName,
+        argsText: '{}',
+        status: 'idle',
+        error: null,
+        result: null,
+      },
+    }),
+  closeToolCall: () => set({ toolCall: null }),
+  setToolCallArgsText: (text) =>
+    set((s) =>
+      s.toolCall ? { toolCall: { ...s.toolCall, argsText: text } } : {},
+    ),
+  setToolCallStatus: (status, extras = {}) =>
+    set((s) => {
+      if (!s.toolCall) return {}
+      return {
+        toolCall: {
+          ...s.toolCall,
+          status,
+          error: 'error' in extras ? extras.error ?? null : s.toolCall.error,
+          result: 'result' in extras ? extras.result ?? null : s.toolCall.result,
+        },
+      }
+    }),
+
   reset: () =>
     set({
       loading: false,
@@ -136,6 +198,7 @@ export const useMcpStore = create<McpStoreState>((set) => ({
       servers: [],
       state: {},
       expandedName: null,
+      toolCall: null,
     }),
 }))
 

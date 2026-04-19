@@ -6,6 +6,7 @@ interface McpViewProps {
   onConnect: (name: string) => void
   onDisconnect: (name: string) => void
   onExpand: (name: string) => void
+  onCallTool: (server: string, tool: string) => void
 }
 
 /**
@@ -19,7 +20,7 @@ interface McpViewProps {
  * The kernel doesn't emit topic events for MCP state, so the shell
  * tracks status locally based on the outcome of its own invokes.
  */
-export function McpView({ onRefresh, onConnect, onDisconnect, onExpand }: McpViewProps) {
+export function McpView({ onRefresh, onConnect, onDisconnect, onExpand, onCallTool }: McpViewProps) {
   const loading = useMcpStore((s) => s.loading)
   const loadError = useMcpStore((s) => s.loadError)
   const servers = useMcpStore((s) => s.servers)
@@ -58,6 +59,7 @@ export function McpView({ onRefresh, onConnect, onDisconnect, onExpand }: McpVie
               onToggle={() => onExpand(srv.name)}
               onConnect={() => onConnect(srv.name)}
               onDisconnect={() => onDisconnect(srv.name)}
+              onCallTool={(tool) => onCallTool(srv.name, tool)}
             />
           ))
         )}
@@ -136,9 +138,10 @@ interface ServerRowProps {
   onToggle: () => void
   onConnect: () => void
   onDisconnect: () => void
+  onCallTool: (tool: string) => void
 }
 
-function ServerRow({ server, state, expanded, onToggle, onConnect, onDisconnect }: ServerRowProps) {
+function ServerRow({ server, state, expanded, onToggle, onConnect, onDisconnect, onCallTool }: ServerRowProps) {
   const status: ServerStatus = server.disabled ? 'idle' : state?.status ?? 'idle'
   const busy = status === 'connecting' || status === 'disconnecting'
   return (
@@ -218,7 +221,7 @@ function ServerRow({ server, state, expanded, onToggle, onConnect, onDisconnect 
           {server.args.length > 0 ? ' ' + server.args.join(' ') : ''}
         </div>
       </div>
-      {expanded ? <ExpandedPanel state={state} /> : null}
+      {expanded ? <ExpandedPanel state={state} onCallTool={onCallTool} /> : null}
     </div>
   )
 }
@@ -303,7 +306,7 @@ function Pill({ bg, label, title, border }: { bg: string; label: string; title: 
   )
 }
 
-function ExpandedPanel({ state }: { state: ServerState | undefined }) {
+function ExpandedPanel({ state, onCallTool }: { state: ServerState | undefined; onCallTool: (tool: string) => void }) {
   if (!state) {
     return (
       <div style={{ padding: '8px 28px 12px', color: 'var(--fg-dim)', fontSize: 11 }}>
@@ -345,7 +348,13 @@ function ExpandedPanel({ state }: { state: ServerState | undefined }) {
     >
       <Section title="Tools" count={state.tools?.length ?? 0}>
         {(state.tools ?? []).map((t) => (
-          <CapabilityRow key={t.name} name={t.name} description={t.description} />
+          <CapabilityRow
+            key={t.name}
+            name={t.name}
+            description={t.description}
+            onAction={() => onCallTool(t.name)}
+            actionLabel="Call"
+          />
         ))}
       </Section>
       <Section title="Resources" count={state.resources?.length ?? 0}>
@@ -385,36 +394,72 @@ function Section({ title, count, children }: { title: string; count: number; chi
   )
 }
 
-function CapabilityRow({ name, description }: { name: string; description: string }) {
+function CapabilityRow({
+  name,
+  description,
+  onAction,
+  actionLabel,
+}: {
+  name: string
+  description: string
+  onAction?: () => void
+  actionLabel?: string
+}) {
   return (
     <div
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 1,
+        display: 'grid',
+        gridTemplateColumns: onAction ? '1fr auto' : '1fr',
+        gap: 6,
+        alignItems: 'start',
         padding: '4px 8px',
         background: 'var(--bg)',
         border: '1px solid var(--line-soft)',
         borderRadius: 'var(--r)',
       }}
     >
-      <span
-        style={{
-          fontFamily: 'var(--f-mono, monospace)',
-          fontSize: 11,
-          color: 'var(--fg)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-        title={name}
-      >
-        {name}
-      </span>
-      {description ? (
-        <span style={{ fontSize: 11, color: 'var(--fg-dim)', lineHeight: 1.35 }}>
-          {description}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+        <span
+          style={{
+            fontFamily: 'var(--f-mono, monospace)',
+            fontSize: 11,
+            color: 'var(--fg)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={name}
+        >
+          {name}
         </span>
+        {description ? (
+          <span style={{ fontSize: 11, color: 'var(--fg-dim)', lineHeight: 1.35 }}>
+            {description}
+          </span>
+        ) : null}
+      </div>
+      {onAction ? (
+        <button
+          type="button"
+          onClick={onAction}
+          title={actionLabel}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '0 6px',
+            height: 20,
+            background: 'var(--bg-raised)',
+            color: 'var(--fg-muted)',
+            border: '1px solid var(--line-soft)',
+            borderRadius: 'var(--r)',
+            fontSize: 10,
+            cursor: 'pointer',
+            flex: '0 0 auto',
+            alignSelf: 'flex-start',
+          }}
+        >
+          {actionLabel}
+        </button>
       ) : null}
     </div>
   )
