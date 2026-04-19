@@ -34,14 +34,15 @@ function ControlButton({
   children: React.ReactNode
 }) {
   const [hover, setHover] = useState(false)
+  // Windows convention: close button hovers to red (literal so it lands
+  // unambiguously regardless of theme-token availability); other controls
+  // use a subtle raised background from the token palette.
+  const hoverBg = closeAccent ? '#e81123' : 'var(--bg-hover)'
+  const hoverFg = closeAccent ? '#ffffff' : 'var(--fg)'
   const style: React.CSSProperties = {
     ...baseButtonStyle,
-    background: hover
-      ? closeAccent
-        ? 'var(--risk)'
-        : 'var(--bg-hover)'
-      : 'transparent',
-    color: hover && closeAccent ? 'var(--bg)' : 'var(--fg-muted)',
+    background: hover ? hoverBg : 'transparent',
+    color: hover ? hoverFg : 'var(--fg-muted)',
   }
   return (
     <button
