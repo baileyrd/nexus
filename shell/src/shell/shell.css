@@ -1,107 +1,12 @@
 /* src/shell/shell.css
    Shell layout — pure structural CSS.
-   Colors come from CSS custom properties (themed by core.theme-service).
-   The shell has no hardcoded colors.
 
-   Token system is Forge-aligned:
-     --bg / --bg-raised / --bg-soft / --bg-hover / --bg-active
-     --line / --line-soft
-     --fg / --fg-muted / --fg-dim
-     --accent / --accent-soft / --accent-ink
-     --ok / --warn / --risk / --cool
-     --f-ui / --f-body / --f-mono
-     --r / --r-lg / --shadow
-     --ui-size / --row-h / --body-size   (via [data-density])
-
-   Legacy --shell-*/--titlebar-bg/--border/etc. tokens are kept as a
-   compat shim below, resolving to the Forge tokens.  They will be
-   removed after all plugins are migrated. */
-
-/* ─── Forge token foundation — dark default ─────────────────────────────── */
-:root {
-  --bg:          oklch(0.185 0.008 260);
-  --bg-raised:   oklch(0.215 0.008 260);
-  --bg-soft:     oklch(0.235 0.009 60);
-  --bg-hover:    oklch(0.27  0.01  260);
-  --bg-active:   oklch(0.32  0.012 260);
-  --line:        oklch(0.30  0.008 260);
-  --line-soft:   oklch(0.26  0.008 260);
-  --fg:          oklch(0.94  0.005 80);
-  --fg-muted:    oklch(0.72  0.008 80);
-  --fg-dim:      oklch(0.55  0.008 80);
-  --accent:      oklch(0.78  0.14  70);
-  --accent-soft: oklch(0.78  0.14  70 / 0.16);
-  --accent-ink:  oklch(0.22  0.05  70);
-  --ok:          oklch(0.78  0.12  165);
-  --warn:        oklch(0.82  0.14  85);
-  --risk:        oklch(0.72  0.17  25);
-  --cool:        oklch(0.76  0.09  230);
-
-  --f-ui:   'Inter', system-ui, -apple-system, sans-serif;
-  --f-body: 'IBM Plex Serif', Georgia, serif;
-  --f-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
-
-  --r:    6px;
-  --r-lg: 10px;
-  --shadow: 0 1px 0 oklch(1 0 0 / 0.03) inset, 0 10px 30px oklch(0 0 0 / 0.35);
-}
-
-[data-theme="light"] {
-  --bg:          oklch(0.985 0.004 80);
-  --bg-raised:   oklch(0.965 0.004 80);
-  --bg-soft:     oklch(0.975 0.008 80);
-  --bg-hover:    oklch(0.945 0.004 80);
-  --bg-active:   oklch(0.92  0.006 80);
-  --line:        oklch(0.88  0.005 80);
-  --line-soft:   oklch(0.92  0.005 80);
-  --fg:          oklch(0.22  0.012 260);
-  --fg-muted:    oklch(0.42  0.012 260);
-  --fg-dim:      oklch(0.58  0.012 260);
-  --accent:      oklch(0.62  0.15  45);
-  --accent-soft: oklch(0.62  0.15  45 / 0.14);
-  --accent-ink:  oklch(0.98  0.01  60);
-  --shadow: 0 1px 0 oklch(0 0 0 / 0.03) inset, 0 10px 30px oklch(0 0 0 / 0.06);
-}
-
-/* Density presets — drive row heights / font sizes for lists + body copy */
-:root,
-[data-density="cozy"] {
-  --ui-size:   13px;
-  --row-h:     26px;
-  --body-size: 16px;
-}
-[data-density="compact"] {
-  --ui-size:   12px;
-  --row-h:     22px;
-  --body-size: 15px;
-}
-[data-density="spacious"] {
-  --ui-size:   14px;
-  --row-h:     30px;
-  --body-size: 17px;
-}
-
-/* ─── Legacy token compat shim ──────────────────────────────────────────── */
-/* Resolve the old --shell-* names to their Forge equivalents so plugins
-   that still reference them pick up the new palette automatically.
-   Remove this block after all plugins are ported. */
-:root {
-  --shell-bg:       var(--bg);
-  --shell-fg:       var(--fg);
-  --titlebar-bg:    var(--bg-raised);
-  --activitybar-bg: var(--bg-raised);
-  --sidebar-bg:     var(--bg-raised);
-  --editor-bg:      var(--bg);
-  --panel-bg:       var(--bg-raised);
-  --statusbar-bg:   var(--bg-raised);
-  --statusbar-fg:   var(--fg-muted);
-  --border:         var(--line);
-  --list-hover:     var(--bg-hover);
-  --list-active:    var(--bg-active);
-  --input-bg:       var(--bg);
-  --font-ui:        var(--f-ui);
-  --font-mono:      var(--f-mono);
-}
+   The design-token :root + [data-theme="light"] + [data-density="…"]
+   blocks have been hoisted into shell/index.html's inline <style> so
+   they are guaranteed to register on documentElement before the React
+   tree mounts. That file is the source of truth for every --bg,
+   --fg, --accent, --line, --f-ui, --r, --shadow, --ui-size, etc.
+   token the shell uses. Do not redeclare them here. */
 
 /* ─── Reset ─────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
