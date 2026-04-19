@@ -33,7 +33,20 @@ export function buildPluginAPI(
         return registry.commands.execute(id, ...args)
       },
       all() {
-        return registry.commands.all()
+        // Back-fill `keybinding` from the KeybindingRegistry so callers
+        // like the command palette can render a keybinding pill without
+        // needing two API calls. CommandRegistry + KeybindingRegistry
+        // live separately; the join happens here so neither has to
+        // know about the other.
+        const bindings = registry.keybindings.all()
+        const byCommand = new Map<string, string>()
+        for (const b of bindings) {
+          if (!byCommand.has(b.commandId)) byCommand.set(b.commandId, b.chord)
+        }
+        return registry.commands.all().map((cmd) => ({
+          ...cmd,
+          keybinding: byCommand.get(cmd.id) ?? cmd.keybinding,
+        }))
       },
     },
 
