@@ -59,6 +59,7 @@ import { graphPlugin } from './plugins/nexus/graph'
 import { searchPlugin } from './plugins/nexus/search'
 import { workflowPlugin } from './plugins/nexus/workflow'
 import { skillsPlugin } from './plugins/nexus/skills'
+import { mcpPlugin } from './plugins/nexus/mcp'
 import { commandPalettePlugin } from './plugins/nexus/commandPalette'
 import { paneModePlugin } from './plugins/nexus/paneMode'
 import { terminalPlugin } from './plugins/nexus/terminal'
@@ -119,6 +120,7 @@ async function boot() {
     searchPlugin,
     workflowPlugin,
     skillsPlugin,
+    mcpPlugin,
     commandPalettePlugin,
     paneModePlugin,
     terminalPlugin,
