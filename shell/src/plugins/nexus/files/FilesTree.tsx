@@ -87,7 +87,7 @@ function TreeNode({
   const setSelected = useFilesStore((s) => s.setSelected)
 
   const handleClick = () => {
-    if (entry.isDirectory) {
+    if (entry.isDir) {
       toggleExpanded(entry.relpath)
       if (!children) {
         loadChildren(entry.relpath).then((entries) =>
@@ -115,7 +115,7 @@ function TreeNode({
         tooltip={tooltip}
         onClick={handleClick}
       />
-      {entry.isDirectory && expanded && children && (
+      {entry.isDir && expanded && children && (
         <div>
           {children.map((child) => (
             <TreeNode
@@ -185,13 +185,13 @@ function Row({
           color: 'var(--fg-dim)',
         }}
       >
-        {entry.isDirectory ? (expanded ? <ChevronDown /> : <ChevronRight />) : null}
+        {entry.isDir ? (expanded ? <ChevronDown /> : <ChevronRight />) : null}
       </span>
       <span
         aria-hidden
         style={{ display: 'inline-flex', alignItems: 'center' }}
       >
-        {entry.isDirectory ? (
+        {entry.isDir ? (
           expanded ? <FolderOpenIcon /> : <FolderIcon />
         ) : (
           <FileIcon />

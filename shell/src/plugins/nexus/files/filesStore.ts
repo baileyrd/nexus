@@ -11,7 +11,10 @@ import { create } from 'zustand'
 export interface FilesDirEntry {
   name: string
   relpath: string
-  isDirectory: boolean
+  /** Matches the Rust `TreeEntry.is_dir` field serialized with
+   *  `#[serde(rename_all = "camelCase")]`, which produces `isDir` on
+   *  the wire. */
+  isDir: boolean
 }
 
 interface FilesState {
