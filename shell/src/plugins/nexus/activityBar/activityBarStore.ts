@@ -1,11 +1,24 @@
 import { create } from 'zustand'
+import type { IconName } from '../../../icons'
 
 export interface ActivityBarItem {
   id: string
   pluginId: string
   icon: string
-  /** Optional SVG path `d` (viewBox 0 0 24 24, stroke-only). When set, renders as an SVG instead of `icon` text. */
+  /**
+   * Optional SVG path `d` (viewBox 0 0 24 24, stroke-only). When set,
+   * renders as an SVG instead of `icon` text. Single-path only —
+   * multi-element icons (search, graph, sparkle, …) need `iconName`.
+   * Kept for back-compat with items that hand-rolled a glyph before
+   * the icon module landed.
+   */
   iconPath?: string
+  /**
+   * Preferred for new items. Names a glyph in `shell/src/icons/` and
+   * lets the activity bar render multi-element icons via the shared
+   * `<Icon>` component. Wins over `iconPath` / `icon` when set.
+   */
+  iconName?: IconName
   title: string
   viewId: string
   priority: number

@@ -260,6 +260,15 @@ export interface ActivityBarAPI {
     icon: string
     /** Optional SVG path `d` for a stroke-only icon (viewBox 0 0 24 24). When present, wins over `icon`. */
     iconPath?: string
+    /**
+     * Preferred for new items. Names a glyph from `shell/src/icons/`
+     * — supports multi-element shapes (search, graph, sparkle, …)
+     * that the legacy `iconPath` (single `<path d>`) can't represent.
+     * Wins over `iconPath` and `icon` when set. Untyped here to keep
+     * `types/plugin.ts` free of an `icons/` import; the activity-bar
+     * store narrows to `IconName` at the point of consumption.
+     */
+    iconName?: string
     title: string
     viewId: string
     priority: number

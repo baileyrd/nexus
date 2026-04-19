@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useActivityBarStore, type ActivityBarItem } from './activityBarStore'
+import { Icon } from '../../../icons'
 
 interface ActivityBarProps {
   onItemClick: (item: ActivityBarItem) => void
@@ -80,7 +81,9 @@ function ActivityBarButton({
           }}
         />
       )}
-      {item.iconPath ? (
+      {item.iconName ? (
+        <Icon name={item.iconName} size={18} />
+      ) : item.iconPath ? (
         <svg
           width="18"
           height="18"

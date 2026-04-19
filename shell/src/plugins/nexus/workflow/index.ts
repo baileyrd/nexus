@@ -24,10 +24,6 @@ const RUN_COMMAND = 'run'
 // runs, terminal commands, AI calls.
 const RUN_TIMEOUT_MS = 5 * 60_000
 
-// Lucide-style "zap" — universal automation glyph, mirrors the
-// trigger/runner mental model. 24×24 stroke-only viewbox.
-const WORKFLOW_ICON_PATH = 'M13 2L3 14h9l-1 8 10-12h-9z'
-
 /**
  * Decode `Workflow[]` from the kernel into the sidebar's `WorkflowEntry`
  * projection. Tolerant of missing fields — older `.workflow.toml`
@@ -139,7 +135,7 @@ export const workflowPlugin: Plugin = {
     api.activityBar.addItem({
       id: 'nexus.workflow.activityItem',
       icon: '',
-      iconPath: WORKFLOW_ICON_PATH,
+      iconName: 'bolt',
       title: 'Workflows',
       viewId: VIEW_ID,
       priority: 30,

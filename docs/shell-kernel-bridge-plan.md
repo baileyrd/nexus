@@ -147,7 +147,7 @@ Pane-mode plugins (terminal/processes, ai/agent, templates) mirror the design's 
 Already done: `shell.css :root` carries the exact oklch palette from the design bundle. Memory `feedback_design_bundle_source_of_truth.md` enforces token-only usage.
 
 Remaining:
-- **Icon module** `shell/src/icons/` — port SVG path constants from [forge_icons.jsx](../.design-bundle/project/forge_icons.jsx) into a typed TS map. Replace ad-hoc `<svg>` definitions scattered across plugins.
+- **Icon module** `shell/src/icons/` — landed in _(pending commit)_: all 27 glyphs from [forge_icons.jsx](../.design-bundle/project/forge_icons.jsx) plus `refresh` + `play`. Typed `IconName` union and a single `<Icon name="…" size={16} />` component (handles single- and multi-element shapes via per-entry stroke-width / fill overrides). Activity-bar contract extended with `iconName?: IconName` (wins over the legacy `iconPath` single-path string). Migrated `nexus.workflow` end-to-end as the proof; remaining plugins port lazily as they're touched.
 - **Layout widths** — done in _(pending commit)_: sidebar default 220, rightPanel default 240 (BUILTIN_LAYOUTS.default + initial state in [layoutStore](../shell/src/stores/layoutStore.ts)), `.shell-statusbar` 24px → 32px in [shell.css](../shell/src/shell/shell.css). Persist version not bumped — existing user layouts keep their resized widths via shallow merge; new users land on the design bundle defaults.
 - **Titlebar cluster** — left-side icon cluster (folder / search / star) + breadcrumb with workspace · file · type badge, as Phase 2 plugins progressively contribute.
 
