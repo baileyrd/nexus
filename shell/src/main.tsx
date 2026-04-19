@@ -33,6 +33,7 @@ import { themeServicePlugin }         from './plugins/core/themeService'
 // ── Nexus plugins ─────────────────────────────────────────────────────────────
 import { workspacePlugin } from './plugins/nexus/workspace'
 import { gitStatusPlugin } from './plugins/nexus/gitStatus'
+import { titleBarPlugin } from './plugins/nexus/titleBar'
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -59,6 +60,7 @@ async function boot() {
     themeServicePlugin,
     workspacePlugin,
     gitStatusPlugin,
+    titleBarPlugin,
   ]
 
   // Validate that all imports resolved to real plugins
