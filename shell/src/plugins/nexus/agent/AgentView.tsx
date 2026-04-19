@@ -1,4 +1,11 @@
-import { useAgentStore, type HistoryRow, type Plan, type PlanStep, type StepStatus } from './agentStore'
+import {
+  useAgentStore,
+  type HistoryRow,
+  type Plan,
+  type PlanStep,
+  type RunMode,
+  type StepStatus,
+} from './agentStore'
 import { Icon } from '../../../icons'
 
 interface AgentViewProps {
@@ -7,6 +14,12 @@ interface AgentViewProps {
   onLoadHistory: (planId: string) => void
   onRefreshHistory: () => void
   onDeleteHistory: (planId: string) => void
+  /** Approve the step currently awaiting decision (step-by-step mode). */
+  onApproveStep: () => void
+  /** Skip the step currently awaiting decision. */
+  onSkipStep: () => void
+  /** Stop the stepped run; remaining steps marked skipped. */
+  onStopRun: () => void
 }
 
 /**
@@ -23,7 +36,16 @@ interface AgentViewProps {
  * intentionally out of v1 — the kernel surface is ready when the UI
  * lands.
  */
-export function AgentView({ onPlan, onRun, onLoadHistory, onRefreshHistory, onDeleteHistory }: AgentViewProps) {
+export function AgentView({
+  onPlan,
+  onRun,
+  onLoadHistory,
+  onRefreshHistory,
+  onDeleteHistory,
+  onApproveStep,
+  onSkipStep,
+  onStopRun,
+}: AgentViewProps) {
   return (
     <div
       style={{
@@ -37,7 +59,13 @@ export function AgentView({ onPlan, onRun, onLoadHistory, onRefreshHistory, onDe
       }}
     >
       <HistoryColumn onSelect={onLoadHistory} onRefresh={onRefreshHistory} onDelete={onDeleteHistory} />
-      <RunColumn onPlan={onPlan} onRun={onRun} />
+      <RunColumn
+        onPlan={onPlan}
+        onRun={onRun}
+        onApproveStep={onApproveStep}
+        onSkipStep={onSkipStep}
+        onStopRun={onStopRun}
+      />
     </div>
   )
 }
@@ -229,9 +257,23 @@ function shortDate(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-function RunColumn({ onPlan, onRun }: { onPlan: () => void; onRun: () => void }) {
+function RunColumn({
+  onPlan,
+  onRun,
+  onApproveStep,
+  onSkipStep,
+  onStopRun,
+}: {
+  onPlan: () => void
+  onRun: () => void
+  onApproveStep: () => void
+  onSkipStep: () => void
+  onStopRun: () => void
+}) {
   const goal = useAgentStore((s) => s.goal)
   const setGoal = useAgentStore((s) => s.setGoal)
+  const runMode = useAgentStore((s) => s.runMode)
+  const setRunMode = useAgentStore((s) => s.setRunMode)
   const phase = useAgentStore((s) => s.phase)
   const plan = useAgentStore((s) => s.plan)
   const observation = useAgentStore((s) => s.observation)
@@ -239,7 +281,11 @@ function RunColumn({ onPlan, onRun }: { onPlan: () => void; onRun: () => void })
 
   const planning = phase === 'planning'
   const running = phase === 'running'
-  const busy = planning || running
+  // `awaiting` is the step-mode equivalent of running — the current
+  // step is in flight or waiting for user approval. Composer stays
+  // disabled either way.
+  const awaiting = phase === 'awaiting'
+  const busy = planning || running || awaiting
 
   return (
     <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -282,11 +328,12 @@ function RunColumn({ onPlan, onRun }: { onPlan: () => void; onRun: () => void })
             primary={false}
           />
           <ActionButton
-            label={running ? 'Running…' : 'Run'}
+            label={running || awaiting ? (runMode === 'step' ? 'Running…' : 'Running…') : 'Run'}
             onClick={onRun}
             disabled={busy || goal.trim() === ''}
             primary
           />
+          <ModeToggle value={runMode} onChange={setRunMode} disabled={busy} />
           {phase === 'done' && observation ? (
             <span
               style={{
@@ -305,7 +352,12 @@ function RunColumn({ onPlan, onRun }: { onPlan: () => void; onRun: () => void })
         {runError ? (
           <div style={{ color: 'var(--risk)', whiteSpace: 'pre-wrap' }}>{runError}</div>
         ) : plan ? (
-          <PlanView plan={plan} />
+          <PlanView
+            plan={plan}
+            onApproveStep={onApproveStep}
+            onSkipStep={onSkipStep}
+            onStopRun={onStopRun}
+          />
         ) : (
           <div style={{ color: 'var(--fg-dim)', textAlign: 'center', marginTop: 32 }}>
             Enter a goal and press Plan to generate steps, or Run to plan + execute in one go.
@@ -316,9 +368,67 @@ function RunColumn({ onPlan, onRun }: { onPlan: () => void; onRun: () => void })
   )
 }
 
-function PlanView({ plan }: { plan: Plan }) {
+function ModeToggle({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: RunMode
+  onChange: (m: RunMode) => void
+  disabled: boolean
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Run mode"
+      title="Auto = run all steps. Step-by-step = approve each step (no history persistence)."
+      style={{
+        display: 'inline-flex',
+        background: 'var(--bg-raised)',
+        border: '1px solid var(--line-soft)',
+        borderRadius: 'var(--r)',
+        overflow: 'hidden',
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      {(['auto', 'step'] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          disabled={disabled}
+          style={{
+            padding: '4px 8px',
+            background: value === m ? 'var(--accent)' : 'transparent',
+            color: value === m ? 'var(--bg)' : 'var(--fg-muted)',
+            border: 0,
+            font: 'inherit',
+            fontSize: 11,
+            cursor: disabled ? 'default' : 'pointer',
+          }}
+        >
+          {m === 'auto' ? 'Auto' : 'Step'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function PlanView({
+  plan,
+  onApproveStep,
+  onSkipStep,
+  onStopRun,
+}: {
+  plan: Plan
+  onApproveStep: () => void
+  onSkipStep: () => void
+  onStopRun: () => void
+}) {
   const stepRuntime = useAgentStore((s) => s.stepRuntime)
   const observation = useAgentStore((s) => s.observation)
+  const pendingApprovalIndex = useAgentStore((s) => s.pendingApprovalIndex)
+  const phase = useAgentStore((s) => s.phase)
 
   // Build a per-step view-model: prefer the live runtime status, but
   // fall back to the observation's per-step status when a run has
@@ -342,6 +452,9 @@ function PlanView({ plan }: { plan: Plan }) {
         <span style={{ color: 'var(--fg-dim)', fontSize: 11, fontFamily: 'var(--f-mono, monospace)' }}>
           {plan.id}
         </span>
+        {phase === 'awaiting' ? (
+          <span style={{ color: 'var(--accent)', fontSize: 11 }}>Awaiting approval…</span>
+        ) : null}
       </div>
       <div style={{ color: 'var(--fg)', fontSize: 13, lineHeight: 1.45 }}>{plan.goal}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
@@ -350,7 +463,20 @@ function PlanView({ plan }: { plan: Plan }) {
           const finalStatus = observationByStep.get(step.id)?.status
           const status: StepStatus = finalStatus ?? runtime.status
           const error = runtime.error
-          return <StepRow key={step.id} step={step} index={idx} status={status} error={error} />
+          const awaitingThis = phase === 'awaiting' && pendingApprovalIndex === idx
+          return (
+            <StepRow
+              key={step.id}
+              step={step}
+              index={idx}
+              status={status}
+              error={error}
+              awaitingApproval={awaitingThis}
+              onApprove={awaitingThis ? onApproveStep : undefined}
+              onSkip={awaitingThis ? onSkipStep : undefined}
+              onStop={awaitingThis ? onStopRun : undefined}
+            />
+          )
         })}
       </div>
     </div>
@@ -362,11 +488,19 @@ function StepRow({
   index,
   status,
   error,
+  awaitingApproval,
+  onApprove,
+  onSkip,
+  onStop,
 }: {
   step: PlanStep
   index: number
   status: StepStatus
   error: string | null
+  awaitingApproval: boolean
+  onApprove?: () => void
+  onSkip?: () => void
+  onStop?: () => void
 }) {
   const palette = STATUS_PALETTE[status]
   return (
@@ -376,8 +510,8 @@ function StepRow({
         gridTemplateColumns: '24px 1fr auto',
         gap: 8,
         padding: '8px 10px',
-        background: 'var(--bg-raised)',
-        border: '1px solid var(--line-soft)',
+        background: awaitingApproval ? 'var(--bg)' : 'var(--bg-raised)',
+        border: `1px solid ${awaitingApproval ? 'var(--accent)' : 'var(--line-soft)'}`,
         borderRadius: 'var(--r)',
       }}
     >
@@ -422,24 +556,89 @@ function StepRow({
           <div style={{ fontSize: 11, color: 'var(--risk)', lineHeight: 1.35 }}>{error}</div>
         ) : null}
       </div>
-      <span
-        title={palette.label}
+      <div
         style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          padding: '1px 6px',
-          borderRadius: 999,
-          fontSize: 10,
-          background: palette.bg,
-          color: palette.fg,
-          border: palette.border ? '1px solid var(--line-soft)' : 'none',
-          flex: '0 0 auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          alignItems: 'flex-end',
           alignSelf: 'flex-start',
         }}
       >
-        {palette.label}
-      </span>
+        <span
+          title={palette.label}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '1px 6px',
+            borderRadius: 999,
+            fontSize: 10,
+            background: palette.bg,
+            color: palette.fg,
+            border: palette.border ? '1px solid var(--line-soft)' : 'none',
+            flex: '0 0 auto',
+          }}
+        >
+          {palette.label}
+        </span>
+        {awaitingApproval && onApprove && onSkip && onStop ? (
+          <ApprovalCluster onApprove={onApprove} onSkip={onSkip} onStop={onStop} />
+        ) : null}
+      </div>
     </div>
+  )
+}
+
+function ApprovalCluster({
+  onApprove,
+  onSkip,
+  onStop,
+}: {
+  onApprove: () => void
+  onSkip: () => void
+  onStop: () => void
+}) {
+  return (
+    <div style={{ display: 'flex', gap: 4 }}>
+      <SmallButton label="Approve" tone="primary" onClick={onApprove} />
+      <SmallButton label="Skip" tone="neutral" onClick={onSkip} />
+      <SmallButton label="Stop" tone="danger" onClick={onStop} />
+    </div>
+  )
+}
+
+function SmallButton({
+  label,
+  tone,
+  onClick,
+}: {
+  label: string
+  tone: 'primary' | 'neutral' | 'danger'
+  onClick: () => void
+}) {
+  const styles =
+    tone === 'primary'
+      ? { bg: 'var(--accent)', fg: 'var(--bg)', border: 'none' }
+      : tone === 'danger'
+        ? { bg: 'var(--bg-raised)', fg: 'var(--risk)', border: '1px solid var(--risk)' }
+        : { bg: 'var(--bg-raised)', fg: 'var(--fg-muted)', border: '1px solid var(--line-soft)' }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: '2px 8px',
+        background: styles.bg,
+        color: styles.fg,
+        border: styles.border,
+        borderRadius: 'var(--r)',
+        font: 'inherit',
+        fontSize: 10,
+        cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
   )
 }
 

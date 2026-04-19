@@ -65,11 +65,22 @@ export interface HistoryRow {
   bytes: number
 }
 
-export type RunPhase = 'idle' | 'planning' | 'planned' | 'running' | 'done' | 'error'
+export type RunPhase = 'idle' | 'planning' | 'planned' | 'running' | 'awaiting' | 'done' | 'error'
+
+/**
+ * `auto` — call `com.nexus.agent::run` and let the kernel execute
+ * every step server-side. Persists to history. The default.
+ *
+ * `step` — call `plan` first, then iterate `execute_step` per step
+ * with explicit user Approve/Skip/Stop. Does NOT persist to history
+ * (the kernel's `execute_step` handler doesn't save records).
+ */
+export type RunMode = 'auto' | 'step'
 
 interface AgentStoreState {
   // ── Composer ──
   goal: string
+  runMode: RunMode
 
   // ── Current plan + run ──
   phase: RunPhase
@@ -79,6 +90,12 @@ interface AgentStoreState {
   observation: Observation | null
   /** Top-level error from plan/run that prevented an Observation. */
   runError: string | null
+  /**
+   * In step-by-step mode: the index of the next step awaiting the
+   * user's Approve/Skip decision. Null in auto mode and at the end
+   * of a stepped run.
+   */
+  pendingApprovalIndex: number | null
 
   // ── History ──
   historyLoading: boolean
@@ -86,11 +103,13 @@ interface AgentStoreState {
   history: HistoryRow[]
 
   setGoal(g: string): void
+  setRunMode(m: RunMode): void
 
   setPhase(p: RunPhase): void
   setPlan(p: Plan | null): void
   setRunError(e: string | null): void
   setObservation(o: Observation | null): void
+  setPendingApprovalIndex(i: number | null): void
 
   /** Mark every step queued; used right before a run starts. */
   resetRuntime(): void
@@ -107,18 +126,21 @@ const INITIAL_STEP_RUNTIME: StepRuntime = { status: 'queued', error: null }
 
 export const useAgentStore = create<AgentStoreState>((set) => ({
   goal: '',
+  runMode: 'auto',
 
   phase: 'idle',
   plan: null,
   stepRuntime: {},
   observation: null,
   runError: null,
+  pendingApprovalIndex: null,
 
   historyLoading: false,
   historyError: null,
   history: [],
 
   setGoal: (goal) => set({ goal }),
+  setRunMode: (runMode) => set({ runMode }),
 
   setPhase: (phase) => set({ phase }),
   setPlan: (plan) =>
@@ -129,9 +151,11 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
         : {},
       observation: null,
       runError: null,
+      pendingApprovalIndex: null,
     }),
   setRunError: (runError) => set({ runError }),
   setObservation: (observation) => set({ observation }),
+  setPendingApprovalIndex: (pendingApprovalIndex) => set({ pendingApprovalIndex }),
 
   resetRuntime: () =>
     set((s) => ({
@@ -159,11 +183,13 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   reset: () =>
     set({
       goal: '',
+      runMode: 'auto',
       phase: 'idle',
       plan: null,
       stepRuntime: {},
       observation: null,
       runError: null,
+      pendingApprovalIndex: null,
       historyLoading: false,
       historyError: null,
       history: [],

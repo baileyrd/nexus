@@ -30,11 +30,13 @@ const AGENT_PLUGIN_ID = 'com.nexus.agent'
 //   `history_list`   args `{}`                            → `[{ plan_id, goal, created_at, success, steps, bytes }]`
 //   `history_get`    args `{ plan_id }`                   → full `{ plan, observation, goal, created_at }`
 //   `history_delete` args `{ plan_id }`                   → `{ ok: true }` (or error)
+//   `execute_step`   args `{ plan, index }`               → one `StepResult { step_id, response, status }`. Does NOT persist history.
 const PLAN_COMMAND = 'plan'
 const RUN_COMMAND = 'run'
 const HISTORY_LIST_COMMAND = 'history_list'
 const HISTORY_GET_COMMAND = 'history_get'
 const HISTORY_DELETE_COMMAND = 'history_delete'
+const EXECUTE_STEP_COMMAND = 'execute_step'
 
 // Topic prefix covers run_start / step_start / step_done / run_done.
 // Matches crates/nexus-agent/src/core_plugin.rs::EVENT_RUN_START etc.
@@ -199,6 +201,14 @@ export const agentPlugin: Plugin = {
       const store = useAgentStore.getState()
       const goal = store.goal.trim()
       if (!goal) return
+      // Step-by-step mode peels apart plan + execute so the user can
+      // approve each step. The kernel's `execute_step` doesn't persist
+      // history, so this mode trades supervisability for an audit
+      // trail — flagged in the agentStore type comment.
+      if (store.runMode === 'step') {
+        await planThenAwaitApproval(goal)
+        return
+      }
       store.setPhase('planning')
       store.setPlan(null)
       store.setRunError(null)
@@ -233,6 +243,150 @@ export const agentPlugin: Plugin = {
         useAgentStore.getState().setRunError(message)
         useAgentStore.getState().setPhase('error')
       }
+    }
+
+    // ── Step-by-step state machine ──────────────────────────────────────
+    //
+    // The shell drives the loop instead of the kernel:
+    //   1. plan(goal) → store.setPlan(plan), phase='awaiting',
+    //                   pendingApprovalIndex=0 (or skip-ahead to first
+    //                   informational step's first non-tool? nope —
+    //                   user always approves, even informational ones)
+    //   2. user clicks Approve → execute_step(plan, idx) → store the
+    //                   per-step status, advance the index
+    //   3. user clicks Skip → mark skipped locally, advance the index
+    //   4. user clicks Stop → mark all remaining as skipped, finish
+    //   5. when index == steps.length → build observation locally,
+    //                   phase='done'. No history persist (limitation).
+    const planThenAwaitApproval = async (goal: string) => {
+      const store = useAgentStore.getState()
+      store.setPhase('planning')
+      store.setPlan(null)
+      store.setRunError(null)
+      try {
+        const raw = await api.kernel.invoke<unknown>(
+          AGENT_PLUGIN_ID,
+          PLAN_COMMAND,
+          { goal },
+          RUN_TIMEOUT_MS,
+        )
+        const plan = decodePlan(raw)
+        if (!plan) throw new Error('Agent returned an unparseable plan.')
+        useAgentStore.getState().setPlan(plan)
+        if (plan.steps.length === 0) {
+          finishStepRun()
+          return
+        }
+        useAgentStore.getState().setPhase('awaiting')
+        useAgentStore.getState().setPendingApprovalIndex(0)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        useAgentStore.getState().setRunError(message)
+        useAgentStore.getState().setPhase('error')
+      }
+    }
+
+    const finishStepRun = () => {
+      // Build a local Observation from the current per-step runtime so
+      // the right column can render the success summary. This stays
+      // shell-only — `execute_step` never persists, so this Observation
+      // doesn't appear in history_list.
+      const s = useAgentStore.getState()
+      if (!s.plan) {
+        s.setPhase('done')
+        return
+      }
+      const steps = s.plan.steps.map((step) => {
+        const rt = s.stepRuntime[step.id]
+        const status: 'ok' | 'failed' | 'skipped' =
+          rt?.status === 'ok' ? 'ok' : rt?.status === 'failed' ? 'failed' : 'skipped'
+        return { step_id: step.id, response: undefined, status }
+      })
+      const success = steps.every((r) => r.status === 'ok')
+      useAgentStore.getState().setObservation({
+        plan_id: s.plan.id,
+        steps,
+        success,
+      })
+      useAgentStore.getState().setPendingApprovalIndex(null)
+      useAgentStore.getState().setPhase('done')
+    }
+
+    const advanceStep = () => {
+      const s = useAgentStore.getState()
+      const next = (s.pendingApprovalIndex ?? -1) + 1
+      if (!s.plan || next >= s.plan.steps.length) {
+        finishStepRun()
+      } else {
+        useAgentStore.getState().setPendingApprovalIndex(next)
+      }
+    }
+
+    const handleApproveStep = async () => {
+      const s = useAgentStore.getState()
+      const idx = s.pendingApprovalIndex
+      if (idx === null || !s.plan) return
+      const step = s.plan.steps[idx]
+      if (!step) return
+      // Block re-entrancy: flip the step to running so a double-click
+      // doesn't fire two execute_step calls.
+      useAgentStore.getState().setStepStatus(step.id, 'running')
+      try {
+        const raw = await api.kernel.invoke<unknown>(
+          AGENT_PLUGIN_ID,
+          EXECUTE_STEP_COMMAND,
+          { plan: s.plan, index: idx },
+          RUN_TIMEOUT_MS,
+        )
+        // Decode just enough to learn whether it succeeded — the full
+        // response shape (response field) isn't surfaced in v1.
+        const result = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
+        const status = result?.status === 'ok' || result?.status === 'failed' || result?.status === 'skipped'
+          ? result.status
+          : 'failed'
+        useAgentStore.getState().setStepStatus(
+          step.id,
+          status === 'ok' ? 'ok' : status === 'skipped' ? 'skipped' : 'failed',
+        )
+        if (status === 'failed') {
+          // Match `run`'s behaviour: a failed step aborts the rest.
+          handleStopRun()
+        } else {
+          advanceStep()
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        useAgentStore.getState().setStepStatus(step.id, 'failed', message)
+        handleStopRun()
+      }
+    }
+
+    const handleSkipStep = () => {
+      const s = useAgentStore.getState()
+      const idx = s.pendingApprovalIndex
+      if (idx === null || !s.plan) return
+      const step = s.plan.steps[idx]
+      if (!step) return
+      useAgentStore.getState().setStepStatus(step.id, 'skipped')
+      advanceStep()
+    }
+
+    const handleStopRun = () => {
+      const s = useAgentStore.getState()
+      if (!s.plan) {
+        useAgentStore.getState().setPendingApprovalIndex(null)
+        useAgentStore.getState().setPhase('done')
+        return
+      }
+      // Mark every still-queued step as skipped so the observation
+      // summary is accurate.
+      for (const step of s.plan.steps) {
+        const rt = s.stepRuntime[step.id]
+        if (!rt || rt.status === 'queued' || rt.status === 'running') {
+          useAgentStore.getState().setStepStatus(step.id, 'skipped')
+        }
+      }
+      finishStepRun()
     }
 
     const loadPlanIntoState = async (planId: string) => {
@@ -363,6 +517,9 @@ export const agentPlugin: Plugin = {
           onLoadHistory: handleLoadHistory,
           onRefreshHistory: () => void refreshHistory(),
           onDeleteHistory: (planId) => void handleDeleteHistory(planId),
+          onApproveStep: () => void handleApproveStep(),
+          onSkipStep: handleSkipStep,
+          onStopRun: handleStopRun,
         }),
       priority: 20,
     })
