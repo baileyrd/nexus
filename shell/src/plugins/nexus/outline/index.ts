@@ -1,0 +1,69 @@
+import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { OutlineView } from './OutlineView'
+import { useOutlineStore } from './outlineStore'
+import { parseHeadings } from './parse'
+import { useEditorStore } from '../editor/editorStore'
+
+const VIEW_ID = 'nexus.outline.view'
+const EVENT_REGISTER_TAB = 'rightPanel:registerTab'
+const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
+
+export const outlinePlugin: Plugin = {
+  manifest: {
+    id: 'nexus.outline',
+    name: 'Outline',
+    version: '0.1.0',
+    core: false,
+    activationEvents: ['onStartup'],
+    dependsOn: ['nexus.rightPanel'],
+    contributes: {},
+  },
+
+  activate(api: PluginAPI) {
+    // Contribute the outline body into the rightPanelContent slot.
+    api.views.register(VIEW_ID, {
+      slot: 'rightPanelContent',
+      component: OutlineView,
+      priority: 10,
+    })
+
+    // And advertise its tab label to the rightPanel host. The host
+    // auto-activates the first-registered tab, so outline — being
+    // the only contributor right now — becomes the default.
+    api.events.emit(EVENT_REGISTER_TAB, {
+      viewId: VIEW_ID,
+      title: 'Outline',
+      priority: 10,
+    })
+
+    // Cross-plugin store import: read editor tabs directly. This is
+    // the accepted shell pattern — titleBar / gitStatus similarly
+    // read workspaceStore without going through the event bus.
+    const recompute = () => {
+      const s = useEditorStore.getState()
+      const tab = s.tabs.find((t) => t.relpath === s.activeRelpath)
+      if (!tab) {
+        useOutlineStore.getState().clear()
+        return
+      }
+      useOutlineStore.getState().setHeadings(parseHeadings(tab.content))
+    }
+
+    useEditorStore.subscribe((state, prev) => {
+      if (state.activeRelpath !== prev.activeRelpath) {
+        recompute()
+        return
+      }
+      const a = state.tabs.find((t) => t.relpath === state.activeRelpath)
+      const b = prev.tabs.find((t) => t.relpath === prev.activeRelpath)
+      if (a?.content !== b?.content) recompute()
+    })
+
+    // Seed with whatever is active right now.
+    recompute()
+
+    api.events.on(EVENT_WORKSPACE_CLOSED, () => {
+      useOutlineStore.getState().clear()
+    })
+  },
+}

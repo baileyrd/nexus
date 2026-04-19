@@ -49,9 +49,11 @@ import { gitStatusPlugin } from './plugins/nexus/gitStatus'
 import { titleBarPlugin } from './plugins/nexus/titleBar'
 import { activityBarPlugin } from './plugins/nexus/activityBar'
 import { sidebarPlugin } from './plugins/nexus/sidebar'
+import { rightPanelPlugin } from './plugins/nexus/rightPanel'
 import { launcherPlugin } from './plugins/nexus/launcher'
 import { filesPlugin } from './plugins/nexus/files'
 import { editorPlugin } from './plugins/nexus/editor'
+import { outlinePlugin } from './plugins/nexus/outline'
 import { commandPalettePlugin } from './plugins/nexus/commandPalette'
 
 function showFatal(message: string) {
@@ -78,12 +80,11 @@ async function boot() {
   // Applies data-theme="dark" to <html> so shell.css :root tokens win.
   useThemeStore.getState().setTheme('dark')
 
-  // No plugin currently contributes to rightPanel or panelArea. Their
-  // layoutStore defaults (rightPanel.visible: true) leave a wide empty
-  // strip in the window. Force hidden until a host plugin lands —
-  // nexus.sidebar handles its own visibility the same way.
+  // No plugin currently contributes to panelArea. Its layoutStore
+  // default leaves a wide empty strip in the window. Force hidden
+  // until a host plugin lands. rightPanel is owned by
+  // nexus.rightPanel — it flips visibility on activate.
   useLayoutStore.setState((s) => ({
-    rightPanel: { ...s.rightPanel, visible: false },
     panelArea:  { ...s.panelArea,  visible: false },
   }))
 
@@ -96,9 +97,11 @@ async function boot() {
     titleBarPlugin,
     activityBarPlugin,
     sidebarPlugin,
+    rightPanelPlugin,
     launcherPlugin,
     filesPlugin,
     editorPlugin,
+    outlinePlugin,
     commandPalettePlugin,
   ]
 
