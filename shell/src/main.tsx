@@ -51,6 +51,7 @@ import { activityBarPlugin } from './plugins/nexus/activityBar'
 import { sidebarPlugin } from './plugins/nexus/sidebar'
 import { launcherPlugin } from './plugins/nexus/launcher'
 import { filesPlugin } from './plugins/nexus/files'
+import { editorPlugin } from './plugins/nexus/editor'
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -96,6 +97,7 @@ async function boot() {
     sidebarPlugin,
     launcherPlugin,
     filesPlugin,
+    editorPlugin,
   ]
 
   // Validate that all imports resolved to real plugins
