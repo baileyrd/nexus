@@ -1,33 +1,29 @@
 import { useEffect } from 'react'
-import { invoke } from '@tauri-apps/api/core'
 import { useFilesStore, type FilesDirEntry } from './filesStore'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
+import { loadChildren } from './kernelClient'
 
 interface FilesTreeProps {
   onFileActivate: (entry: FilesDirEntry) => void
 }
 
 const INDENT_PX = 14
-
-async function loadChildren(path: string): Promise<FilesDirEntry[]> {
-  try {
-    return await invoke<FilesDirEntry[]>('read_dir', { path })
-  } catch (err) {
-    console.warn('[nexus.files] read_dir failed for', path, err)
-    return []
-  }
-}
+/** Empty string is the forge-root sentinel — that's the relpath the
+ * storage plugin's `list_dir` accepts for "list the forge root itself". */
+const ROOT_RELPATH = ''
 
 export function FilesTree({ onFileActivate }: FilesTreeProps) {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
-  const children = useFilesStore((s) => s.children)
+  const rootEntries = useFilesStore((s) => s.children[ROOT_RELPATH])
   const setChildren = useFilesStore((s) => s.setChildren)
 
   useEffect(() => {
     if (!rootPath) return
-    if (children[rootPath]) return
-    loadChildren(rootPath).then((entries) => setChildren(rootPath, entries))
-  }, [rootPath, children, setChildren])
+    if (rootEntries) return
+    loadChildren(ROOT_RELPATH).then((entries) =>
+      setChildren(ROOT_RELPATH, entries),
+    )
+  }, [rootPath, rootEntries, setChildren])
 
   if (!rootPath) {
     return (
@@ -42,8 +38,6 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
       </div>
     )
   }
-
-  const rootEntries = children[rootPath]
 
   if (!rootEntries) {
     return (
@@ -63,9 +57,10 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
     <div style={{ padding: '4px 0', fontSize: 'var(--ui-size, 13px)' }}>
       {rootEntries.map((entry) => (
         <TreeNode
-          key={entry.path}
+          key={entry.relpath}
           entry={entry}
           depth={0}
+          rootPath={rootPath}
           onFileActivate={onFileActivate}
         />
       ))}
@@ -76,30 +71,39 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
 function TreeNode({
   entry,
   depth,
+  rootPath,
   onFileActivate,
 }: {
   entry: FilesDirEntry
   depth: number
+  rootPath: string
   onFileActivate: (entry: FilesDirEntry) => void
 }) {
-  const expanded = useFilesStore((s) => s.expanded.has(entry.path))
-  const children = useFilesStore((s) => s.children[entry.path])
+  const expanded = useFilesStore((s) => s.expanded.has(entry.relpath))
+  const children = useFilesStore((s) => s.children[entry.relpath])
   const toggleExpanded = useFilesStore((s) => s.toggleExpanded)
   const setChildren = useFilesStore((s) => s.setChildren)
-  const selected = useFilesStore((s) => s.selected === entry.path)
+  const selected = useFilesStore((s) => s.selected === entry.relpath)
   const setSelected = useFilesStore((s) => s.setSelected)
 
   const handleClick = () => {
     if (entry.isDirectory) {
-      toggleExpanded(entry.path)
+      toggleExpanded(entry.relpath)
       if (!children) {
-        loadChildren(entry.path).then((entries) => setChildren(entry.path, entries))
+        loadChildren(entry.relpath).then((entries) =>
+          setChildren(entry.relpath, entries),
+        )
       }
     } else {
-      setSelected(entry.path)
+      setSelected(entry.relpath)
       onFileActivate(entry)
     }
   }
+
+  // Display-only: user-facing tooltip still shows absolute path. The
+  // workspace root is the ONLY absolute path we touch — kernel calls
+  // always use forge-relative paths.
+  const tooltip = entry.relpath ? `${rootPath}/${entry.relpath}` : rootPath
 
   return (
     <div>
@@ -108,15 +112,17 @@ function TreeNode({
         depth={depth}
         expanded={expanded}
         selected={selected}
+        tooltip={tooltip}
         onClick={handleClick}
       />
       {entry.isDirectory && expanded && children && (
         <div>
           {children.map((child) => (
             <TreeNode
-              key={child.path}
+              key={child.relpath}
               entry={child}
               depth={depth + 1}
+              rootPath={rootPath}
               onFileActivate={onFileActivate}
             />
           ))}
@@ -131,12 +137,14 @@ function Row({
   depth,
   expanded,
   selected,
+  tooltip,
   onClick,
 }: {
   entry: FilesDirEntry
   depth: number
   expanded: boolean
   selected: boolean
+  tooltip: string
   onClick: () => void
 }) {
   return (
@@ -144,7 +152,7 @@ function Row({
       type="button"
       onClick={onClick}
       onDoubleClick={onClick}
-      title={entry.path}
+      title={tooltip}
       style={{
         display: 'flex',
         alignItems: 'center',

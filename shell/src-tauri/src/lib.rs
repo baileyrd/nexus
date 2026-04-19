@@ -228,46 +228,10 @@ fn get_git_status(path: String) -> Result<Option<GitStatus>, String> {
     Ok(Some(GitStatus { branch, short_sha, dirty }))
 }
 
-// ── Directory listing ─────────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DirEntry {
-    pub name: String,
-    pub path: String,
-    pub is_directory: bool,
-}
-
-/// Unscoped single-level directory listing. Like `path_exists`, this uses
-/// std::fs directly so arbitrary user-picked workspace roots work without
-/// preconfiguring tauri-plugin-fs scopes. Entries come back sorted with
-/// directories first, then alphabetically (case-insensitive). Hidden
-/// entries (leading '.') are included — the frontend filters if it wants.
-#[tauri::command]
-fn read_dir(path: String) -> Result<Vec<DirEntry>, String> {
-    let p = std::path::Path::new(&path);
-    let rd = std::fs::read_dir(p).map_err(|e| format!("read_dir({path}) failed: {e}"))?;
-    let mut entries: Vec<DirEntry> = rd
-        .filter_map(|e| e.ok())
-        .map(|e| {
-            let is_directory = e
-                .file_type()
-                .map(|t| t.is_dir())
-                .unwrap_or(false);
-            DirEntry {
-                name: e.file_name().to_string_lossy().into_owned(),
-                path: e.path().to_string_lossy().into_owned(),
-                is_directory,
-            }
-        })
-        .collect();
-    entries.sort_by(|a, b| match (a.is_directory, b.is_directory) {
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-    });
-    Ok(entries)
-}
+// Directory listing now routes through the kernel's storage plugin via
+// `api.kernel.invoke('com.nexus.storage', 'list_dir', { relpath })`. The
+// standalone `read_dir` Tauri command was retired in Phase 1 of the
+// shell ↔ kernel bridge migration (see docs/shell-kernel-bridge-plan.md).
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -300,7 +264,6 @@ pub fn run() {
             set_plugin_enabled,
             path_exists,
             get_git_status,
-            read_dir,
             persistence::get_shell_state,
             persistence::save_shell_state,
             persistence::write_last_forge_path,
