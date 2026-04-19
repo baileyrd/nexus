@@ -416,10 +416,10 @@ export const agentPlugin: Plugin = {
     }
 
     const handleDeleteHistory = async (planId: string) => {
-      // Delete is destructive — confirm before firing. The native
-      // confirm() is a stop-gap; a bespoke modal lives behind the
-      // same TODO as the editor's close-while-dirty prompt.
-      const ok = window.confirm('Delete this run from agent history? This cannot be undone.')
+      // Delete is destructive — route through the shared confirm
+      // modal so users get a styled dialog instead of the platform
+      // popup.
+      const ok = await api.input.confirm('Delete this run from agent history? This cannot be undone.')
       if (!ok) return
       try {
         await api.kernel.invoke<unknown>(

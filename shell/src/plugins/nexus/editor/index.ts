@@ -141,14 +141,16 @@ export const editorPlugin: Plugin = {
     /**
      * Shared close-tab entry point used by both the ×-click handler
      * and the `nexus.editor.closeTab` command. If the tab is dirty,
-     * shows a browser confirm() — cancelling aborts. `window.confirm`
-     * keeps this lean; a bespoke modal is a follow-up (see plan).
+     * shows the shared confirm modal (api.input.confirm) — cancelling
+     * aborts. The async path means the close happens one tick later
+     * than before, which is fine since both call sites are
+     * fire-and-forget.
      */
-    const confirmAndClose = (relpath: string) => {
+    const confirmAndClose = async (relpath: string) => {
       const tab = useEditorStore.getState().tabs.find((t) => t.relpath === relpath)
       if (!tab) return
       if (isDirty(tab)) {
-        const ok = window.confirm(`${tab.name} has unsaved changes. Close anyway?`)
+        const ok = await api.input.confirm(`${tab.name} has unsaved changes. Close anyway?`)
         if (!ok) return
       }
       useEditorStore.getState().closeTab(relpath)

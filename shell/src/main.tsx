@@ -61,6 +61,7 @@ import { workflowPlugin } from './plugins/nexus/workflow'
 import { skillsPlugin } from './plugins/nexus/skills'
 import { mcpPlugin } from './plugins/nexus/mcp'
 import { agentPlugin } from './plugins/nexus/agent'
+import { confirmPlugin } from './plugins/nexus/confirm'
 import { commandPalettePlugin } from './plugins/nexus/commandPalette'
 import { paneModePlugin } from './plugins/nexus/paneMode'
 import { terminalPlugin } from './plugins/nexus/terminal'
@@ -123,6 +124,7 @@ async function boot() {
     skillsPlugin,
     mcpPlugin,
     agentPlugin,
+    confirmPlugin,
     commandPalettePlugin,
     paneModePlugin,
     terminalPlugin,

@@ -258,7 +258,14 @@ export function buildPluginAPI(
         return result
       },
       async confirm(message) {
-        return window.confirm(message)
+        // Routes into nexus.confirm's overlay modal so users get a
+        // styled dialog instead of the platform popup. Lazy import
+        // breaks the circular host → plugin dep that a top-level
+        // import would create (PluginAPI is built before plugins
+        // load, but `requestConfirm` only touches a Zustand store
+        // that has no init-time work).
+        const { requestConfirm } = await import('../plugins/nexus/confirm/confirmStore')
+        return requestConfirm(message)
       },
     },
   }
