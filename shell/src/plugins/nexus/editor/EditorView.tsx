@@ -1,7 +1,23 @@
+import { useMemo } from 'react'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { useEditorStore } from './editorStore'
+import './markdown.css'
 
 interface EditorViewProps {
   onRetry: () => void
+}
+
+function isMarkdown(name: string): boolean {
+  return /\.(md|markdown|mdx)$/i.test(name)
+}
+
+// marked.parse returns string when `async: false`. Sanitize before
+// we hand the HTML to React's dangerouslySetInnerHTML — user notes
+// aren't hostile, but DOMPurify is cheap insurance.
+function renderMarkdown(content: string): string {
+  const raw = marked.parse(content, { async: false }) as string
+  return DOMPurify.sanitize(raw)
 }
 
 /**
@@ -9,14 +25,26 @@ interface EditorViewProps {
  * `editorArea` slot.
  *
  * Layout: a ~36px top strip (file name + forge-relative path) above a
- * scrollable `<pre>` body. Empty, loading, and error states take the
- * full area with centred messaging. Tabs land in a follow-up commit —
- * the top strip is the proto-tab that will expand into a tab bar.
+ * scrollable body. For `.md` / `.markdown` / `.mdx` files we render
+ * sanitized HTML via marked+DOMPurify inside `.nexus-markdown-body`;
+ * everything else keeps the monospaced `<pre>` fallback.
+ *
+ * Empty, loading, and error states take the full area with centred
+ * messaging. Tabs land in a follow-up commit — the top strip is the
+ * proto-tab that will expand into a tab bar.
  */
 export function EditorView({ onRetry }: EditorViewProps) {
   const openFile = useEditorStore((s) => s.openFile)
   const loading = useEditorStore((s) => s.loading)
   const error = useEditorStore((s) => s.error)
+
+  // Parse markdown once per content change — re-running marked + DOMPurify
+  // on every unrelated parent re-render would be needlessly expensive.
+  const markdownHtml = useMemo(() => {
+    if (!openFile) return ''
+    if (!isMarkdown(openFile.name)) return ''
+    return renderMarkdown(openFile.content)
+  }, [openFile?.content, openFile?.name])
 
   const rootStyle: React.CSSProperties = {
     display: 'flex',
@@ -85,6 +113,8 @@ export function EditorView({ onRetry }: EditorViewProps) {
     )
   }
 
+  const markdown = isMarkdown(openFile.name)
+
   return (
     <div style={rootStyle}>
       <div
@@ -128,19 +158,14 @@ export function EditorView({ onRetry }: EditorViewProps) {
         </span>
       </div>
       <div style={{ flex: '1 1 auto', overflow: 'auto' }}>
-        <pre
-          style={{
-            margin: 0,
-            padding: '16px 20px',
-            fontFamily: 'var(--f-mono)',
-            fontSize: 'var(--ui-size, 13px)',
-            color: 'var(--fg)',
-            whiteSpace: 'pre-wrap',
-            wordWrap: 'break-word',
-          }}
-        >
-          {openFile.content}
-        </pre>
+        {markdown ? (
+          <div
+            className="nexus-markdown-body"
+            dangerouslySetInnerHTML={{ __html: markdownHtml }}
+          />
+        ) : (
+          <pre className="nexus-editor-raw">{openFile.content}</pre>
+        )}
       </div>
     </div>
   )
