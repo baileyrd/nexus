@@ -16,10 +16,6 @@ const TOPIC_FILE_MODIFIED = 'com.nexus.storage.file_modified'
 const TOPIC_FILE_DELETED = 'com.nexus.storage.file_deleted'
 const TOPIC_FILE_RENAMED = 'com.nexus.storage.file_renamed'
 
-// Lucide-style folder path. Stroke-only, 24×24 viewbox.
-const FOLDER_ICON_PATH =
-  'M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z'
-
 /**
  * Compute the parent directory relpath for `p`. Uses forward-slash
  * semantics — the storage plugin always emits forge-relative paths
@@ -86,7 +82,7 @@ export const filesPlugin: Plugin = {
     api.activityBar.addItem({
       id: 'nexus.files.activityItem',
       icon: '',
-      iconPath: FOLDER_ICON_PATH,
+      iconName: 'folder',
       title: 'Files',
       viewId: VIEW_ID,
       priority: 10,

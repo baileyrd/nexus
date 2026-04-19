@@ -197,6 +197,18 @@ const RENDERERS = {
   // Right-pointing play triangle for "run" actions. Filled glyph,
   // no stroke — design vocabulary for terminal/agent run buttons.
   play: { body: <path d="M5 4l14 8-14 8z" />, filled: true },
+  // 2×2 grid — four small squares. Used by nexus.processes for the
+  // "many things" / observability mental model. Stroke-only.
+  grid: {
+    body: (
+      <>
+        <rect x="3" y="3" width="7" height="7" rx="0.5" />
+        <rect x="14" y="3" width="7" height="7" rx="0.5" />
+        <rect x="3" y="14" width="7" height="7" rx="0.5" />
+        <rect x="14" y="14" width="7" height="7" rx="0.5" />
+      </>
+    ),
+  },
   // Lucide-style trash for delete actions.
   trash: {
     body: (

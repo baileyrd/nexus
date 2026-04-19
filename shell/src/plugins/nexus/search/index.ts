@@ -15,11 +15,6 @@ const EVENT_FILE_OPEN = 'files:open'
 const EVENT_SIDEBAR_SHOW_VIEW = 'sidebar:showView'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
-// Lucide-style search glyph (magnifier). Stroke-only, 24×24 viewbox —
-// matches the iconPath contract used by nexus.files.
-const SEARCH_ICON_PATH =
-  'M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16zM21 21l-4.35-4.35'
-
 /** Basename of a forge-relative path. Forward-slash only. */
 function basename(relpath: string): string {
   const i = relpath.lastIndexOf('/')
@@ -70,7 +65,7 @@ export const searchPlugin: Plugin = {
     api.activityBar.addItem({
       id: 'nexus.search.activityItem',
       icon: '',
-      iconPath: SEARCH_ICON_PATH,
+      iconName: 'search',
       title: 'Search',
       viewId: VIEW_ID,
       priority: 20,

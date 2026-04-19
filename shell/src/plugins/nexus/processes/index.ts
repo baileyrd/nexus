@@ -26,11 +26,6 @@ const SERVICE_COMMUNITY_MANIFESTS = 'communityPluginManifests'
 const TERMINAL_PLUGIN_ID = 'com.nexus.terminal'
 const MCP_HOST_PLUGIN_ID = 'com.nexus.mcp.host'
 
-// 2×2 grid glyph — four small squares. Stroke-only, 24×24 viewbox,
-// matches the iconPath contract used by the other activity-bar items.
-const GRID_ICON_PATH =
-  'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z'
-
 /**
  * Topic prefixes this pane subscribes to. Each prefix ends in a dot so
  * `CustomPrefix` on the kernel side matches every sub-topic — e.g.
@@ -227,7 +222,7 @@ export const processesPlugin: Plugin = {
     api.activityBar.addItem({
       id: ACTIVITY_ITEM_ID,
       icon: '',
-      iconPath: GRID_ICON_PATH,
+      iconName: 'grid',
       title: 'Processes',
       viewId: VIEW_ID,
       priority: 60,
