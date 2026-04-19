@@ -54,6 +54,7 @@ import { launcherPlugin } from './plugins/nexus/launcher'
 import { filesPlugin } from './plugins/nexus/files'
 import { editorPlugin } from './plugins/nexus/editor'
 import { outlinePlugin } from './plugins/nexus/outline'
+import { searchPlugin } from './plugins/nexus/search'
 import { commandPalettePlugin } from './plugins/nexus/commandPalette'
 
 function showFatal(message: string) {
@@ -102,6 +103,7 @@ async function boot() {
     filesPlugin,
     editorPlugin,
     outlinePlugin,
+    searchPlugin,
     commandPalettePlugin,
   ]
 
