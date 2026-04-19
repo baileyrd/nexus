@@ -15,6 +15,9 @@ const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 //   in nexus-bootstrap/src/lib.rs.
 const READ_FILE_COMMAND = 'read_file'
 
+const COMMAND_CLOSE_TAB = 'nexus.editor.closeTab'
+const CONTEXT_KEY_HAS_ACTIVE_TAB = 'nexus.editor.hasActiveTab'
+
 interface FileOpenPayload {
   relpath: string
   name: string
@@ -50,20 +53,35 @@ export const editorPlugin: Plugin = {
     // without it. The dependency on workspace/sidebar keeps plugin
     // load order sensible (workspace → sidebar → files → editor).
     dependsOn: ['nexus.workspace', 'nexus.sidebar'],
-    contributes: {},
+    contributes: {
+      commands: [
+        { id: COMMAND_CLOSE_TAB, title: 'Close Tab', category: 'Editor' },
+      ],
+      keybindings: [
+        {
+          command: COMMAND_CLOSE_TAB,
+          key: 'ctrl+w',
+          mac: 'cmd+w',
+          when: CONTEXT_KEY_HAS_ACTIVE_TAB,
+        },
+      ],
+      contextKeys: [
+        {
+          key: CONTEXT_KEY_HAS_ACTIVE_TAB,
+          description: 'True when the editor has at least one open tab.',
+          type: 'boolean',
+        },
+      ],
+    },
   },
 
   async activate(api: PluginAPI) {
-    // Remember the last file-open request so the Retry button can
-    // re-invoke the same load without round-tripping through the
-    // file tree again.
-    let lastPayload: FileOpenPayload | null = null
-
     const loadFile = async (payload: FileOpenPayload) => {
-      lastPayload = payload
       const store = useEditorStore.getState()
-      store.setLoading(true)
-      store.setError(null)
+      const isNew = store.openTab(payload.relpath, payload.name)
+      // Already-open file: openTab raised it active; no refetch.
+      if (!isNew) return
+
       try {
         const resp = await api.kernel.invoke<ReadFileResponse>(
           STORAGE_PLUGIN_ID,
@@ -71,21 +89,36 @@ export const editorPlugin: Plugin = {
           { path: payload.relpath },
         )
         const content = decodeUtf8(resp.bytes ?? [])
-        useEditorStore.getState().setFile({
-          relpath: payload.relpath,
-          name: payload.name,
-          content,
-        })
+        useEditorStore.getState().setTabContent(payload.relpath, content)
       } catch (err) {
-        useEditorStore.getState().setError(String(err))
-        useEditorStore.getState().setFile(null)
-      } finally {
-        useEditorStore.getState().setLoading(false)
+        useEditorStore.getState().setTabError(payload.relpath, String(err))
       }
     }
 
-    const handleRetry = () => {
-      if (lastPayload) void loadFile(lastPayload)
+    const handleRetry = (relpath: string) => {
+      const tab = useEditorStore.getState().tabs.find((t) => t.relpath === relpath)
+      if (!tab) return
+      // Reset to a loading state and re-invoke. We bypass `openTab`
+      // here because the tab already exists — just flip it back to
+      // loading and re-read from the kernel.
+      useEditorStore.setState((s) => ({
+        tabs: s.tabs.map((t) =>
+          t.relpath === relpath ? { ...t, loading: true, error: null } : t,
+        ),
+      }))
+      void (async () => {
+        try {
+          const resp = await api.kernel.invoke<ReadFileResponse>(
+            STORAGE_PLUGIN_ID,
+            READ_FILE_COMMAND,
+            { path: relpath },
+          )
+          const content = decodeUtf8(resp.bytes ?? [])
+          useEditorStore.getState().setTabContent(relpath, content)
+        } catch (err) {
+          useEditorStore.getState().setTabError(relpath, String(err))
+        }
+      })()
     }
 
     api.views.register(VIEW_ID, {
@@ -100,10 +133,28 @@ export const editorPlugin: Plugin = {
     })
 
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
-      lastPayload = null
-      useEditorStore.getState().setFile(null)
-      useEditorStore.getState().setError(null)
-      useEditorStore.getState().setLoading(false)
+      useEditorStore.getState().clear()
+    })
+
+    api.commands.register(COMMAND_CLOSE_TAB, async () => {
+      const s = useEditorStore.getState()
+      if (s.activeRelpath) s.closeTab(s.activeRelpath)
+    })
+
+    // Seed + sync the context key to the store's `activeRelpath`.
+    // Fire-and-forget reactive side effect — `subscribe` gets the
+    // next state and the previous state so we only re-set the
+    // context key on an actual transition.
+    api.context.set(
+      CONTEXT_KEY_HAS_ACTIVE_TAB,
+      useEditorStore.getState().activeRelpath !== null,
+    )
+    useEditorStore.subscribe((state, prev) => {
+      const has = state.activeRelpath !== null
+      const hadBefore = prev.activeRelpath !== null
+      if (has !== hadBefore) {
+        api.context.set(CONTEXT_KEY_HAS_ACTIVE_TAB, has)
+      }
     })
   },
 }

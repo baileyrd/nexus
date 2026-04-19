@@ -1,11 +1,11 @@
 import { useMemo } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { useEditorStore } from './editorStore'
+import { useEditorStore, type EditorTab } from './editorStore'
 import './markdown.css'
 
 interface EditorViewProps {
-  onRetry: () => void
+  onRetry: (relpath: string) => void
 }
 
 function isMarkdown(name: string): boolean {
@@ -24,27 +24,34 @@ function renderMarkdown(content: string): string {
  * Read-only viewer for the currently-open file. Renders into the
  * `editorArea` slot.
  *
- * Layout: a ~36px top strip (file name + forge-relative path) above a
- * scrollable body. For `.md` / `.markdown` / `.mdx` files we render
- * sanitized HTML via marked+DOMPurify inside `.nexus-markdown-body`;
- * everything else keeps the monospaced `<pre>` fallback.
+ * Layout: a 36px horizontal tab row above a scrollable body. Each
+ * tab reports its own filename, is click-to-activate, and carries a
+ * small × close button. The body area reads the active tab and
+ * renders its `content` — markdown-vs-pre branch is keyed on the
+ * active tab's name / content.
  *
- * Empty, loading, and error states take the full area with centred
- * messaging. Tabs land in a follow-up commit — the top strip is the
- * proto-tab that will expand into a tab bar.
+ * Empty, loading, and error states are computed per-tab so a failed
+ * load on one tab doesn't bleed into any neighbour.
  */
 export function EditorView({ onRetry }: EditorViewProps) {
-  const openFile = useEditorStore((s) => s.openFile)
-  const loading = useEditorStore((s) => s.loading)
-  const error = useEditorStore((s) => s.error)
+  const tabs = useEditorStore((s) => s.tabs)
+  const activeRelpath = useEditorStore((s) => s.activeRelpath)
+  const setActive = useEditorStore((s) => s.setActive)
+  const closeTab = useEditorStore((s) => s.closeTab)
+
+  const activeTab = useMemo<EditorTab | null>(
+    () => tabs.find((t) => t.relpath === activeRelpath) ?? null,
+    [tabs, activeRelpath],
+  )
 
   // Parse markdown once per content change — re-running marked + DOMPurify
   // on every unrelated parent re-render would be needlessly expensive.
   const markdownHtml = useMemo(() => {
-    if (!openFile) return ''
-    if (!isMarkdown(openFile.name)) return ''
-    return renderMarkdown(openFile.content)
-  }, [openFile?.content, openFile?.name])
+    if (!activeTab) return ''
+    if (activeTab.loading || activeTab.error) return ''
+    if (!isMarkdown(activeTab.name)) return ''
+    return renderMarkdown(activeTab.content)
+  }, [activeTab?.relpath, activeTab?.content, activeTab?.name, activeTab?.loading, activeTab?.error])
 
   const rootStyle: React.CSSProperties = {
     display: 'flex',
@@ -66,44 +73,7 @@ export function EditorView({ onRetry }: EditorViewProps) {
     height: '100%',
   }
 
-  if (error) {
-    return (
-      <div style={rootStyle}>
-        <div style={centredStyle}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-            <div style={{ color: 'var(--risk)', maxWidth: 480, textAlign: 'center' }}>
-              {error}
-            </div>
-            <button
-              onClick={onRetry}
-              style={{
-                background: 'var(--bg-raised)',
-                color: 'var(--fg)',
-                border: '1px solid var(--line-soft)',
-                borderRadius: 'var(--r, 6px)',
-                padding: '6px 14px',
-                fontFamily: 'var(--f-ui)',
-                fontSize: 'var(--ui-size, 13px)',
-                cursor: 'pointer',
-              }}
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (loading) {
-    return (
-      <div style={rootStyle}>
-        <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>Loading…</div>
-      </div>
-    )
-  }
-
-  if (!openFile) {
+  if (tabs.length === 0) {
     return (
       <div style={rootStyle}>
         <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>
@@ -113,60 +83,224 @@ export function EditorView({ onRetry }: EditorViewProps) {
     )
   }
 
-  const markdown = isMarkdown(openFile.name)
-
   return (
     <div style={rootStyle}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          height: 36,
-          flex: '0 0 36px',
-          padding: '0 16px',
-          borderBottom: '1px solid var(--line-soft)',
-          background: 'var(--bg-raised)',
-          gap: 12,
-        }}
-      >
-        <span
-          style={{
-            color: 'var(--fg)',
-            fontWeight: 500,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {openFile.name}
-        </span>
-        <span
-          style={{
-            color: 'var(--fg-muted)',
-            fontSize: 'calc(var(--ui-size, 13px) - 1px)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            direction: 'rtl',
-            textAlign: 'right',
-            minWidth: 0,
-          }}
-          title={openFile.relpath}
-        >
-          {openFile.relpath}
-        </span>
-      </div>
+      <TabBar
+        tabs={tabs}
+        activeRelpath={activeRelpath}
+        onSelect={setActive}
+        onClose={closeTab}
+      />
       <div style={{ flex: '1 1 auto', overflow: 'auto' }}>
-        {markdown ? (
-          <div
-            className="nexus-markdown-body"
-            dangerouslySetInnerHTML={{ __html: markdownHtml }}
-          />
+        {activeTab ? (
+          <TabBody tab={activeTab} markdownHtml={markdownHtml} onRetry={onRetry} />
         ) : (
-          <pre className="nexus-editor-raw">{openFile.content}</pre>
+          <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>
+            Select a tab
+          </div>
         )}
       </div>
     </div>
   )
+}
+
+interface TabBarProps {
+  tabs: EditorTab[]
+  activeRelpath: string | null
+  onSelect: (relpath: string) => void
+  onClose: (relpath: string) => void
+}
+
+function TabBar({ tabs, activeRelpath, onSelect, onClose }: TabBarProps) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'stretch',
+        height: 36,
+        flex: '0 0 36px',
+        background: 'var(--bg-raised)',
+        borderBottom: '1px solid var(--line-soft)',
+        overflowX: 'auto',
+        overflowY: 'hidden',
+      }}
+    >
+      {tabs.map((tab) => (
+        <TabItem
+          key={tab.relpath}
+          tab={tab}
+          active={tab.relpath === activeRelpath}
+          onSelect={onSelect}
+          onClose={onClose}
+        />
+      ))}
+    </div>
+  )
+}
+
+interface TabItemProps {
+  tab: EditorTab
+  active: boolean
+  onSelect: (relpath: string) => void
+  onClose: (relpath: string) => void
+}
+
+function TabItem({ tab, active, onSelect, onClose }: TabItemProps) {
+  const style: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '0 10px',
+    height: '100%',
+    borderRight: '1px solid var(--line-soft)',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+    maxWidth: 220,
+    minWidth: 80,
+    background: active ? 'var(--bg)' : 'transparent',
+    color: active ? 'var(--fg)' : 'var(--fg-muted)',
+  }
+
+  return (
+    <div
+      role="tab"
+      aria-selected={active}
+      title={tab.relpath}
+      style={style}
+      onClick={() => onSelect(tab.relpath)}
+      onMouseEnter={(e) => {
+        if (!active) {
+          (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-hover)'
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!active) {
+          (e.currentTarget as HTMLDivElement).style.background = 'transparent'
+        }
+      }}
+    >
+      <span
+        style={{
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          fontWeight: active ? 500 : 400,
+        }}
+      >
+        {tab.name}
+      </span>
+      <CloseButton
+        onClick={(e) => {
+          e.stopPropagation()
+          onClose(tab.relpath)
+        }}
+      />
+    </div>
+  )
+}
+
+interface CloseButtonProps {
+  onClick: (e: React.MouseEvent) => void
+}
+
+function CloseButton({ onClick }: CloseButtonProps) {
+  return (
+    <button
+      type="button"
+      aria-label="Close"
+      onClick={onClick}
+      onMouseDown={(e) => e.stopPropagation()}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+      }}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 16,
+        height: 16,
+        padding: 0,
+        border: 0,
+        background: 'transparent',
+        color: 'inherit',
+        cursor: 'pointer',
+        borderRadius: 'var(--r)',
+      }}
+    >
+      <svg
+        width={12}
+        height={12}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.75}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M18 6 6 18" />
+        <path d="m6 6 12 12" />
+      </svg>
+    </button>
+  )
+}
+
+interface TabBodyProps {
+  tab: EditorTab
+  markdownHtml: string
+  onRetry: (relpath: string) => void
+}
+
+function TabBody({ tab, markdownHtml, onRetry }: TabBodyProps) {
+  const centredStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+  }
+
+  if (tab.error) {
+    return (
+      <div style={centredStyle}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <div style={{ color: 'var(--risk)', maxWidth: 480, textAlign: 'center' }}>
+            {tab.error}
+          </div>
+          <button
+            onClick={() => onRetry(tab.relpath)}
+            style={{
+              background: 'var(--bg-raised)',
+              color: 'var(--fg)',
+              border: '1px solid var(--line-soft)',
+              borderRadius: 'var(--r, 6px)',
+              padding: '6px 14px',
+              fontFamily: 'var(--f-ui)',
+              fontSize: 'var(--ui-size, 13px)',
+              cursor: 'pointer',
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (tab.loading) {
+    return <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>Loading…</div>
+  }
+
+  if (isMarkdown(tab.name)) {
+    return (
+      <div
+        className="nexus-markdown-body"
+        dangerouslySetInnerHTML={{ __html: markdownHtml }}
+      />
+    )
+  }
+
+  return <pre className="nexus-editor-raw">{tab.content}</pre>
 }
