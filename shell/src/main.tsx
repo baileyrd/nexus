@@ -35,6 +35,7 @@ import { workspacePlugin } from './plugins/nexus/workspace'
 import { gitStatusPlugin } from './plugins/nexus/gitStatus'
 import { titleBarPlugin } from './plugins/nexus/titleBar'
 import { activityBarPlugin } from './plugins/nexus/activityBar'
+import { sidebarPlugin } from './plugins/nexus/sidebar'
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -63,6 +64,7 @@ async function boot() {
     gitStatusPlugin,
     titleBarPlugin,
     activityBarPlugin,
+    sidebarPlugin,
   ]
 
   // Validate that all imports resolved to real plugins
