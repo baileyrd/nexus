@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
+import { useEditorStore } from '../editor/editorStore'
+import { useLayoutStore } from '../../../stores/layoutStore'
+import { Icon } from '../../../icons'
+import { getApi } from './runtime'
+
+const SEARCH_FOCUS_COMMAND = 'nexus.search.focus'
 
 function basename(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, '')
@@ -8,7 +14,24 @@ function basename(path: string): string {
   return parts[parts.length - 1] || trimmed
 }
 
-const baseButtonStyle: React.CSSProperties = {
+function fileExt(name: string): string | null {
+  const i = name.lastIndexOf('.')
+  if (i <= 0 || i === name.length - 1) return null
+  return name.slice(i + 1).toLowerCase()
+}
+
+/** Approximate word count for the breadcrumb badge. Splits on
+ *  whitespace which matches how the design bundle renders the figure
+ *  (rough; not character-accurate). Returns null for non-textual or
+ *  empty content so the badge stays out of the DOM. */
+function wordCount(content: string | null | undefined): number | null {
+  if (!content) return null
+  const trimmed = content.trim()
+  if (!trimmed) return null
+  return trimmed.split(/\s+/).length
+}
+
+const baseControlStyle: React.CSSProperties = {
   width: 40,
   height: 36,
   background: 'transparent',
@@ -40,7 +63,7 @@ function ControlButton({
   const hoverBg = closeAccent ? '#e81123' : 'var(--bg-hover)'
   const hoverFg = closeAccent ? '#ffffff' : 'var(--fg)'
   const style: React.CSSProperties = {
-    ...baseButtonStyle,
+    ...baseControlStyle,
     background: hover ? hoverBg : 'transparent',
     color: hover ? hoverFg : 'var(--fg-muted)',
   }
@@ -93,9 +116,59 @@ function CloseIcon() {
   )
 }
 
+/**
+ * Square icon button used by the left cluster + right cluster.
+ * Visually distinct from the Windows controls (smaller width, hover
+ * uses raised bg rather than the platform highlight).
+ */
+function ClusterButton({
+  onClick,
+  label,
+  active,
+  children,
+}: {
+  onClick: () => void
+  label: string
+  active?: boolean
+  children: React.ReactNode
+}) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      style={{
+        width: 28,
+        height: 26,
+        padding: 0,
+        background: active ? 'var(--bg)' : hover ? 'var(--bg-hover)' : 'transparent',
+        border: 0,
+        color: active ? 'var(--fg)' : hover ? 'var(--fg)' : 'var(--fg-muted)',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 'var(--r)',
+        transition: 'background 0.08s, color 0.08s',
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
 export function TitleBar() {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const openWorkspace = useWorkspaceStore((s) => s.open)
+  const tabs = useEditorStore((s) => s.tabs)
+  const activeRelpath = useEditorStore((s) => s.activeRelpath)
+  const rightPanelVisible = useLayoutStore((s) => s.rightPanel.visible)
+  const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel)
   const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {
@@ -124,6 +197,17 @@ export function TitleBar() {
   const toggleMaximize = () => getCurrentWindow().toggleMaximize()
   const close = () => getCurrentWindow().close()
 
+  const focusSearch = () => {
+    // Same dispatcher path the command palette uses internally. The
+    // search plugin's command both raises the sidebar view and
+    // focuses the input.
+    const api = getApi()
+    if (!api) return
+    void api.commands.execute(SEARCH_FOCUS_COMMAND)
+  }
+
+  const activeTab = tabs.find((t) => t.relpath === activeRelpath) ?? null
+
   return (
     <div
       style={{
@@ -134,28 +218,26 @@ export function TitleBar() {
         userSelect: 'none',
         color: 'var(--fg-muted)',
         fontSize: 'var(--ui-size, 12px)',
+        gap: 4,
+        paddingLeft: 6,
       }}
     >
-      <button
-        type="button"
-        onClick={() => openWorkspace()}
-        title={rootPath ?? 'No workspace open — click to choose a folder'}
-        style={{
-          background: 'transparent',
-          border: 'none',
-          color: 'inherit',
-          font: 'inherit',
-          padding: '0 12px',
-          cursor: 'pointer',
-          height: '100%',
-        }}
-      >
-        {rootPath ? basename(rootPath) : 'No workspace'}
-      </button>
+      <LeftCluster
+        rootPath={rootPath}
+        onOpen={() => openWorkspace()}
+        onSearch={focusSearch}
+      />
+
+      <Breadcrumb rootPath={rootPath} activeRelpath={activeRelpath} activeContent={activeTab?.content ?? null} />
 
       {/* Drag region: middle spacer only. Keeping interactive buttons out of
           the drag region avoids eaten pointer events on Windows/Tauri 2. */}
       <div data-tauri-drag-region style={{ flex: 1, height: '100%' }} />
+
+      <RightCluster
+        rightPanelVisible={rightPanelVisible}
+        onToggleRightPanel={toggleRightPanel}
+      />
 
       <ControlButton onClick={minimize} label="Minimize">
         <MinimizeIcon />
@@ -169,6 +251,160 @@ export function TitleBar() {
       <ControlButton onClick={close} label="Close" closeAccent>
         <CloseIcon />
       </ControlButton>
+    </div>
+  )
+}
+
+function LeftCluster({
+  rootPath,
+  onOpen,
+  onSearch,
+}: {
+  rootPath: string | null
+  onOpen: () => void
+  onSearch: () => void
+}) {
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 2,
+        padding: '0 4px',
+        background: 'var(--bg-raised)',
+        border: '1px solid var(--line-soft)',
+        borderRadius: 'var(--r)',
+        height: 28,
+      }}
+    >
+      <ClusterButton
+        onClick={onOpen}
+        label={rootPath ? `Workspace · ${rootPath}` : 'Open workspace'}
+      >
+        <Icon name="folder" size={14} />
+      </ClusterButton>
+      <ClusterButton onClick={onSearch} label="Focus search">
+        <Icon name="search" size={14} />
+      </ClusterButton>
+    </div>
+  )
+}
+
+function Breadcrumb({
+  rootPath,
+  activeRelpath,
+  activeContent,
+}: {
+  rootPath: string | null
+  activeRelpath: string | null
+  activeContent: string | null
+}) {
+  const workspaceName = rootPath ? basename(rootPath) : null
+  const fileName = activeRelpath ? basename(activeRelpath) : null
+  const ext = fileName ? fileExt(fileName) : null
+  const words = activeContent ? wordCount(activeContent) : null
+
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        marginLeft: 8,
+        minWidth: 0,
+        overflow: 'hidden',
+      }}
+    >
+      <span
+        title={rootPath ? 'Forge synced' : 'No workspace open'}
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: rootPath ? 'var(--ok)' : 'var(--fg-dim)',
+          flex: '0 0 auto',
+          boxShadow: rootPath ? '0 0 4px var(--ok)' : 'none',
+        }}
+      />
+      {workspaceName ? (
+        <span
+          title={rootPath ?? undefined}
+          style={{
+            color: 'var(--fg-muted)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            flex: '0 1 auto',
+          }}
+        >
+          {workspaceName}
+        </span>
+      ) : (
+        <span style={{ color: 'var(--fg-dim)', fontStyle: 'italic' }}>No workspace</span>
+      )}
+      {fileName ? (
+        <>
+          <span style={{ color: 'var(--fg-dim)', flex: '0 0 auto' }}>/</span>
+          <span
+            title={activeRelpath ?? undefined}
+            style={{
+              color: 'var(--fg)',
+              fontWeight: 500,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              minWidth: 0,
+            }}
+          >
+            {fileName}
+          </span>
+          {ext || words !== null ? (
+            <span
+              style={{
+                marginLeft: 4,
+                color: 'var(--fg-dim)',
+                fontFamily: 'var(--f-mono, monospace)',
+                fontSize: 10,
+                flex: '0 0 auto',
+              }}
+            >
+              {[ext, words !== null ? `${words.toLocaleString()}w` : null]
+                .filter(Boolean)
+                .join(' · ')}
+            </span>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+function RightCluster({
+  rightPanelVisible,
+  onToggleRightPanel,
+}: {
+  rightPanelVisible: boolean
+  onToggleRightPanel: () => void
+}) {
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 2,
+        padding: '0 4px',
+        height: 28,
+        marginRight: 6,
+      }}
+    >
+      <ClusterButton
+        onClick={onToggleRightPanel}
+        label={rightPanelVisible ? 'Hide right panel' : 'Show right panel'}
+        active={rightPanelVisible}
+      >
+        <Icon name="panel" size={14} />
+      </ClusterButton>
     </div>
   )
 }
