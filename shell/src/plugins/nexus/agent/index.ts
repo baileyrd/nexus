@@ -27,12 +27,14 @@ const AGENT_PLUGIN_ID = 'com.nexus.agent'
 //   `plan`         args `{ goal, archetype? }`            → `Plan`
 //   `run`          args `{ goal, archetype? }`            → `Observation` (plans + executes)
 //   `run_plan`     args `{ plan }`                        → `Observation` (executes a known plan)
-//   `history_list` args `{}`                              → `[{ plan_id, goal, created_at, success, steps, bytes }]`
-//   `history_get`  args `{ plan_id }`                     → full `{ plan, observation, goal, created_at }`
+//   `history_list`   args `{}`                            → `[{ plan_id, goal, created_at, success, steps, bytes }]`
+//   `history_get`    args `{ plan_id }`                   → full `{ plan, observation, goal, created_at }`
+//   `history_delete` args `{ plan_id }`                   → `{ ok: true }` (or error)
 const PLAN_COMMAND = 'plan'
 const RUN_COMMAND = 'run'
 const HISTORY_LIST_COMMAND = 'history_list'
 const HISTORY_GET_COMMAND = 'history_get'
+const HISTORY_DELETE_COMMAND = 'history_delete'
 
 // Topic prefix covers run_start / step_start / step_done / run_done.
 // Matches crates/nexus-agent/src/core_plugin.rs::EVENT_RUN_START etc.
@@ -259,6 +261,35 @@ export const agentPlugin: Plugin = {
       void loadPlanIntoState(planId)
     }
 
+    const handleDeleteHistory = async (planId: string) => {
+      // Delete is destructive — confirm before firing. The native
+      // confirm() is a stop-gap; a bespoke modal lives behind the
+      // same TODO as the editor's close-while-dirty prompt.
+      const ok = window.confirm('Delete this run from agent history? This cannot be undone.')
+      if (!ok) return
+      try {
+        await api.kernel.invoke<unknown>(
+          AGENT_PLUGIN_ID,
+          HISTORY_DELETE_COMMAND,
+          { plan_id: planId },
+        )
+        // If the deleted run was loaded into the right column, clear
+        // it so we're not pointing at a now-vanished plan.
+        if (useAgentStore.getState().plan?.id === planId) {
+          useAgentStore.getState().setPlan(null)
+          useAgentStore.getState().setObservation(null)
+          useAgentStore.getState().setPhase('idle')
+        }
+        await refreshHistory()
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        api.notifications.show({
+          type: 'error',
+          message: `Delete failed: ${message}`,
+        })
+      }
+    }
+
     // ── Kernel topic subscriptions ──────────────────────────────────────
     //
     // Live per-step status during a run. The kernel publishes four
@@ -331,6 +362,7 @@ export const agentPlugin: Plugin = {
           onRun: () => void planAndRun(),
           onLoadHistory: handleLoadHistory,
           onRefreshHistory: () => void refreshHistory(),
+          onDeleteHistory: (planId) => void handleDeleteHistory(planId),
         }),
       priority: 20,
     })

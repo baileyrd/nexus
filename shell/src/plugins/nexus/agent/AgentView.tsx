@@ -6,6 +6,7 @@ interface AgentViewProps {
   onRun: () => void
   onLoadHistory: (planId: string) => void
   onRefreshHistory: () => void
+  onDeleteHistory: (planId: string) => void
 }
 
 /**
@@ -22,7 +23,7 @@ interface AgentViewProps {
  * intentionally out of v1 — the kernel surface is ready when the UI
  * lands.
  */
-export function AgentView({ onPlan, onRun, onLoadHistory, onRefreshHistory }: AgentViewProps) {
+export function AgentView({ onPlan, onRun, onLoadHistory, onRefreshHistory, onDeleteHistory }: AgentViewProps) {
   return (
     <div
       style={{
@@ -35,7 +36,7 @@ export function AgentView({ onPlan, onRun, onLoadHistory, onRefreshHistory }: Ag
         fontSize: 'var(--ui-size, 13px)',
       }}
     >
-      <HistoryColumn onSelect={onLoadHistory} onRefresh={onRefreshHistory} />
+      <HistoryColumn onSelect={onLoadHistory} onRefresh={onRefreshHistory} onDelete={onDeleteHistory} />
       <RunColumn onPlan={onPlan} onRun={onRun} />
     </div>
   )
@@ -44,9 +45,11 @@ export function AgentView({ onPlan, onRun, onLoadHistory, onRefreshHistory }: Ag
 function HistoryColumn({
   onSelect,
   onRefresh,
+  onDelete,
 }: {
   onSelect: (planId: string) => void
   onRefresh: () => void
+  onDelete: (planId: string) => void
 }) {
   const loading = useAgentStore((s) => s.historyLoading)
   const error = useAgentStore((s) => s.historyError)
@@ -100,6 +103,7 @@ function HistoryColumn({
               row={h}
               active={h.plan_id === currentPlanId}
               onClick={() => onSelect(h.plan_id)}
+              onDelete={() => onDelete(h.plan_id)}
             />
           ))
         )}
@@ -108,7 +112,17 @@ function HistoryColumn({
   )
 }
 
-function HistoryItem({ row, active, onClick }: { row: HistoryRow; active: boolean; onClick: () => void }) {
+function HistoryItem({
+  row,
+  active,
+  onClick,
+  onDelete,
+}: {
+  row: HistoryRow
+  active: boolean
+  onClick: () => void
+  onDelete: () => void
+}) {
   const success = row.success === true ? 'ok' : row.success === false ? 'failed' : 'unknown'
   const colour =
     success === 'ok' ? 'var(--ok)' : success === 'failed' ? 'var(--risk)' : 'var(--fg-dim)'
@@ -116,10 +130,15 @@ function HistoryItem({ row, active, onClick }: { row: HistoryRow; active: boolea
     <div
       onClick={onClick}
       role="button"
+      // The trash button is reveal-on-hover. CSS-only via the
+      // group-hover pattern would need a class; here we just render
+      // the button at full opacity and let the row's bg-hover do
+      // most of the affordance work.
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 3,
+        display: 'grid',
+        gridTemplateColumns: '1fr auto',
+        alignItems: 'center',
+        columnGap: 6,
         padding: '6px 10px',
         cursor: 'pointer',
         borderBottom: '1px solid var(--line-soft)',
@@ -133,33 +152,70 @@ function HistoryItem({ row, active, onClick }: { row: HistoryRow; active: boolea
         if (!active) (e.currentTarget as HTMLDivElement).style.background = 'transparent'
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: colour, flex: '0 0 auto' }} />
-        <span
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: colour, flex: '0 0 auto' }} />
+          <span
+            style={{
+              flex: '1 1 auto',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              fontSize: 12,
+            }}
+            title={row.goal ?? row.plan_id}
+          >
+            {row.goal ?? <em style={{ color: 'var(--fg-dim)' }}>(no goal)</em>}
+          </span>
+        </div>
+        <div
           style={{
-            flex: '1 1 auto',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            fontSize: 12,
+            display: 'flex',
+            gap: 8,
+            fontSize: 10,
+            color: 'var(--fg-dim)',
+            fontFamily: 'var(--f-mono, monospace)',
           }}
-          title={row.goal ?? row.plan_id}
         >
-          {row.goal ?? <em style={{ color: 'var(--fg-dim)' }}>(no goal)</em>}
-        </span>
+          <span>{row.steps} step{row.steps === 1 ? '' : 's'}</span>
+          {row.created_at ? <span>{shortDate(row.created_at)}</span> : null}
+        </div>
       </div>
-      <div
+      <button
+        type="button"
+        aria-label="Delete history entry"
+        title="Delete this run from history"
+        onClick={(e) => {
+          // Stop the row click from firing — we don't want a delete
+          // press to also load the (about-to-be-deleted) plan.
+          e.stopPropagation()
+          onDelete()
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--risk)'
+          ;(e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)'
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--fg-dim)'
+          ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+        }}
         style={{
-          display: 'flex',
-          gap: 8,
-          fontSize: 10,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 22,
+          height: 22,
+          padding: 0,
+          border: 0,
+          background: 'transparent',
           color: 'var(--fg-dim)',
-          fontFamily: 'var(--f-mono, monospace)',
+          cursor: 'pointer',
+          borderRadius: 'var(--r)',
+          flex: '0 0 auto',
         }}
       >
-        <span>{row.steps} step{row.steps === 1 ? '' : 's'}</span>
-        {row.created_at ? <span>{shortDate(row.created_at)}</span> : null}
-      </div>
+        <Icon name="trash" size={12} />
+      </button>
     </div>
   )
 }

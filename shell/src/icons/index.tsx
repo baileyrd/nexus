@@ -197,6 +197,17 @@ const RENDERERS = {
   // Right-pointing play triangle for "run" actions. Filled glyph,
   // no stroke — design vocabulary for terminal/agent run buttons.
   play: { body: <path d="M5 4l14 8-14 8z" />, filled: true },
+  // Lucide-style trash for delete actions.
+  trash: {
+    body: (
+      <>
+        <path d="M3 6h18" />
+        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+        <path d="M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14" />
+        <path d="M10 11v6M14 11v6" />
+      </>
+    ),
+  },
 } satisfies Record<string, IconEntry>
 
 export type IconName = keyof typeof RENDERERS
