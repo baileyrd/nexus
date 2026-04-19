@@ -1,4 +1,13 @@
 // src/main.tsx
+
+// Wipe any persisted themeStore state before the store imports itself
+// and rehydrates. Earlier runs with core.theme-service loaded flipped
+// data-theme='light' via the DOM and, on some paths, seeded this key
+// with 'light'. Until we ship a theme-switcher UI, force dark on every
+// boot. Runs before any module import so nothing reads stale values.
+try { localStorage.removeItem('shell-theme') } catch {}
+document.documentElement.dataset.theme = 'dark'
+
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { PluginRegistry } from './host/PluginRegistry'
