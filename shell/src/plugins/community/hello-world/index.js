@@ -1,6 +1,6 @@
 // community-plugins/hello-world/index.js
 // Self-contained ES module — no relative imports.
-// Drop this folder into ~/.tauri-shell/plugins/ to install.
+// Drop this folder into ~/.nexus-shell/plugins/ to install.
 
 const plugin = {
   manifest: {

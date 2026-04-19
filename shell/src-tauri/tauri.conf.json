@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
-  "productName": "tauri-shell",
+  "productName": "nexus-shell",
   "version": "0.1.0",
-  "identifier": "dev.shell.app",
+  "identifier": "dev.nexus.shell",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "beforeBuildCommand": "pnpm build",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Shell",
+        "title": "Nexus",
         "width": 1280,
         "height": 800,
         "minWidth": 600,

@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react()],
 
   // Expose the project-local community-plugins path so the loader can
-  // scan it in dev mode without hard-coding or copying to ~/.tauri-shell/plugins/.
+  // scan it in dev mode without hard-coding or copying to ~/.nexus-shell/plugins/.
   define: {
     __DEV_COMMUNITY_PLUGINS_DIR__: JSON.stringify(
       path.join(__dirname, 'src', 'plugins', 'community')

@@ -1,5 +1,5 @@
 // src/host/communityPluginLoader.ts
-// Discovers and loads community plugins from ~/.tauri-shell/plugins/.
+// Discovers and loads community plugins from ~/.nexus-shell/plugins/.
 //
 // Boot flow:
 //   1. scanCommunityPlugins() — calls Rust to enumerate plugin directories
@@ -35,7 +35,7 @@ declare const __DEV_COMMUNITY_PLUGINS_DIR__: string
 
 /**
  * Scan for community plugins from two sources:
- *   1. ~/.tauri-shell/plugins/          — user-installed plugins (all modes)
+ *   1. ~/.nexus-shell/plugins/          — user-installed plugins (all modes)
  *   2. src/plugins/community/ in repo   — dev-mode only, loaded from the project
  *      directly so you never need to copy files while iterating.
  *

@@ -27,14 +27,14 @@ fn default_true() -> bool { true }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
-/// Scan ~/.tauri-shell/plugins/ for community plugin bundles.
+/// Scan ~/.nexus-shell/plugins/ for community plugin bundles.
 /// Each bundle is a sub-directory containing plugin.json + a JS entry point.
 /// Creates the directory on first run so users know where to drop plugins.
 /// Returns both enabled and disabled manifests — the frontend filters.
 #[tauri::command]
 fn scan_plugin_directory() -> Vec<CommunityPluginManifest> {
     let plugins_dir = match dirs::home_dir() {
-        Some(h) => h.join(".tauri-shell").join("plugins"),
+        Some(h) => h.join(".nexus-shell").join("plugins"),
         None    => {
             eprintln!("[scan_plugin_directory] Cannot resolve home dir");
             return vec![];
@@ -143,7 +143,7 @@ fn scan_plugin_directory_at(dir: String) -> Vec<CommunityPluginManifest> {
 fn set_plugin_enabled(plugin_id: String, enabled: bool) -> Result<(), String> {
     let plugins_dir = dirs::home_dir()
         .ok_or_else(|| "Cannot resolve home dir".to_string())?
-        .join(".tauri-shell")
+        .join(".nexus-shell")
         .join("plugins");
 
     let entries = fs::read_dir(&plugins_dir)

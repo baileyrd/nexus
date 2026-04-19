@@ -7,5 +7,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    tauri_shell_lib::run()
+    nexus_shell_lib::run()
 }

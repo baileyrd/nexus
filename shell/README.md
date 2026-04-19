@@ -1,4 +1,4 @@
-# tauri-shell
+# nexus-shell
 
 A generic, plugin-first editor shell built with Tauri 2.0, React, TypeScript, and Zustand.
 

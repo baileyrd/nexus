@@ -1,5 +1,5 @@
 [package]
-name    = "tauri-shell"
+name    = "nexus-shell"
 version = "0.1.0"
 edition = "2021"
 build   = "build.rs"
@@ -7,7 +7,7 @@ build   = "build.rs"
 [package.metadata.tauri]
 
 [lib]
-name       = "tauri_shell_lib"
+name       = "nexus_shell_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

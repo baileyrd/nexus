@@ -264,7 +264,7 @@ function PluginsTab({
             <p>No community plugins found.</p>
             <p className="plugins-tab__empty-hint">
               Drop a plugin folder into{' '}
-              <code>~/.tauri-shell/plugins/</code> then restart.
+              <code>~/.nexus-shell/plugins/</code> then restart.
               Each folder needs a <code>plugin.json</code> and a bundled{' '}
               <code>index.js</code>.
             </p>
