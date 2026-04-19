@@ -4,7 +4,24 @@ Living document. Each phase commit updates the relevant section in-place; finish
 
 ## Status
 
-Branch: `feat/ui-shell-rebuild`. Shell plugin system is in place and rendering real data for workspace / gitStatus / titleBar / activityBar / sidebar / files via standalone Tauri commands (std::fs + git2). Kernel is NOT yet wired in. This document covers the plan to bridge the shell to the existing Nexus kernel (`crates/nexus-*`) while preserving the React plugin architecture.
+Branch: `feat/ui-shell-rebuild`. Pushed through `1ef3d81`. Phase 0 (bridge infra) and Phase 1 (retire standalone commands) shipped. Phase 2 is 11 plugins deep — editor (read-only → markdown → tabs → edit/save), command palette, search, outline, backlinks, graph, terminal, AI chat, pane-mode infra, plugins-mgmt, processes. Tree is clean; the React plugin layer now talks to the kernel via `api.kernel.invoke` / `api.kernel.on` for every backend call except the pre-kernel `path_exists` (workspace verification during launcher restore).
+
+See the **Delivered** section at the bottom for the full commit list. Queued items for the next session:
+
+- **Pane-mode plugins** (infra landed in `4504667`): `nexus.agent` (orchestrate), `nexus.templates` (gallery).
+- **Sidebar plugins**: `nexus.tasks` (`com.nexus.storage::task_query`), `nexus.workflow` (`com.nexus.workflow::list/run`).
+- **Overlays**: `nexus.settings`, per-plugin settings schemas.
+- **Specialty**: `nexus.skills`, `nexus.mcp` client UI.
+- **Editor polish**: `editor:scrollToHeading` works (outline → editor scroll, `7715730`) — next, scroll-spy highlighting in the outline as the editor scrolls.
+- **Visual polish** (Phase 3): port `forge_icons.jsx` into a typed icon module; nudge layout widths to design defaults; flesh out the titlebar cluster.
+
+Upstream dependencies (not blocking shell work):
+
+- `build_shell_runtime` in `nexus-bootstrap` so the kernel stops booting under `com.nexus.cli` invoker identity.
+- `list_plugins` IPC in `nexus-plugin-api` so the processes pane can see kernel-side plugin state.
+- `com.nexus.terminal.*` topic events so terminal output stops being poll-driven.
+- PTY resize handler in `nexus-terminal` so xterm resize propagates to the shell process.
+- `com.nexus.ai.*` streaming events so `nexus.ai` can switch from one-shot `ask` to token-by-token render.
 
 ## Decisions
 
@@ -45,9 +62,11 @@ Nexus kernel (nexus-bootstrap::build)
 
 ---
 
-## Phase 0 — Bridge infrastructure
+## Phase 0 — Bridge infrastructure · **Delivered**
 
 Foundations before any kernel-backed feature can land.
+
+Landed across `21509d0` (launcher + persistence) → `2581e8e` (path deps + empty `KernelRuntime`) → `36d7672` (`init_forge` / `boot_kernel` / `shutdown_kernel` + window-close hook) → `3ee56c5` (`kernel_invoke` / `kernel_subscribe` / `kernel_unsubscribe` + `api.kernel` frontend) → `9323cd5` (workspace wires kernel lifecycle into every state transition). Adjustments: `5e354b1` hoisted the design tokens into `index.html` because Vite's JS-injected `shell.css` was dropping the `:root` block on documentElement.
 
 **Steps:**
 
@@ -78,9 +97,11 @@ Foundations before any kernel-backed feature can land.
 
 ---
 
-## Phase 1 — Retire standalone commands, route through kernel
+## Phase 1 — Retire standalone commands, route through kernel · **Delivered**
 
 Mechanical replacement. Each plugin flips one `invoke('…')` to `api.kernel.invoke('com.nexus.*', '…')`.
+
+`0fee389` + `ccc99c6` moved `nexus.files` to `com.nexus.storage::list_dir` and wired the `file_*` event subscriptions. `186a6b0` moved `nexus.gitStatus` to `com.nexus.git::status` with the four `com.nexus.git.*` topics covered by a single prefix listener; `git2` dropped from `shell/src-tauri/Cargo.toml`. `path_exists` stayed as planned.
 
 - `read_dir` → `com.nexus.storage::list_dir`. Delete `read_dir` from [shell/src-tauri/src/lib.rs](../shell/src-tauri/src/lib.rs).
 - `get_git_status` → `com.nexus.git::status`. Delete the `git2` dep and standalone command.
@@ -94,24 +115,26 @@ Mechanical replacement. Each plugin flips one `invoke('…')` to `api.kernel.inv
 
 ## Phase 2 — Feature plugins (per design bundle layout)
 
-Each is a self-contained plugin. Order by dependency + value.
+Each is a self-contained plugin. Order by dependency + value. `Status` column tracks commit or "queued".
 
-| # | Plugin | Kernel-side | Slots | Design ref |
-|---|---|---|---|---|
-| 1 | `nexus.editor` | `com.nexus.editor::open/save/apply_transaction` | `editorArea` + `editorTabs` | [forge_doc.jsx](../.design-bundle/project/forge_doc.jsx) |
-| 2 | `nexus.outline` | editor content + local parser | `rightPanel` (Outline tab) | [forge_panels.jsx](../.design-bundle/project/forge_panels.jsx) |
-| 3 | `nexus.search` | `com.nexus.storage::search` (Tantivy) | `activityBar`, `sidebarContent` | forge_panels |
-| 4 | `nexus.backlinks` | `com.nexus.storage::query_backlinks` | `rightPanel` (Backlinks tab) | forge_panels |
-| 5 | `nexus.graph` | `com.nexus.storage::query_graph` | `rightPanel` (Graph tab) | forge_panels |
-| 6 | `nexus.commandPalette` | aggregated commands | `overlay` (⌘P) | Forge PALETTE data |
-| 7 | `nexus.terminal` | `com.nexus.terminal::create_session/send_input/pump` | `panelArea` | [forge_processes.jsx](../.design-bundle/project/forge_processes.jsx) |
-| 8 | `nexus.processes` | kernel plugin status + pump | full-pane mode | forge_processes |
-| 9 | `nexus.tasks` | `com.nexus.storage::task_query` | `activityBar`, `sidebarContent` | — |
-| 10 | `nexus.ai` | `com.nexus.ai::stream_chat/session_*` | full-pane mode | [forge_orchestrate.jsx](../.design-bundle/project/forge_orchestrate.jsx) (partial) — sidebar chat v1 delivered via `::ask` (stateless RAG); streaming + full-pane follow-up |
-| 11 | `nexus.agent` | `com.nexus.agent::plan/run` | full-pane mode | forge_orchestrate |
-| 12 | `nexus.workflow` | `com.nexus.workflow::list/run` | full-pane mode | — |
-| 13 | `nexus.templates` | kernel read | full-pane mode | [forge_templates.jsx](../.design-bundle/project/forge_templates.jsx) |
-| 14 | `nexus.skills` / `nexus.mcp` / `nexus.settings` / `nexus.plugins-mgmt` | respective kernel plugins | various | — |
+| # | Plugin | Kernel-side | Slots | Design ref | Status |
+|---|---|---|---|---|---|
+| 1 | `nexus.editor` | `com.nexus.storage::read_file/write_file` (no `com.nexus.editor` handlers used yet) | `editorArea` | [forge_doc.jsx](../.design-bundle/project/forge_doc.jsx) | `0a736a7` read-only · `6a7ac5b` markdown · `ca1825c` tabs · `f497656` edit+save+dirty · `7715730` scroll-to-heading |
+| 2 | `nexus.outline` | editor content + local parser | `rightPanelContent` (Outline tab) | [forge_panels.jsx](../.design-bundle/project/forge_panels.jsx) | `32c7556` (+ `7715730` scroll wire) |
+| 3 | `nexus.search` | `com.nexus.storage::search` (Tantivy) | `activityBar`, `sidebarContent` | forge_panels | `cced076` |
+| 4 | `nexus.backlinks` | `com.nexus.storage::backlinks` | `rightPanelContent` (Backlinks tab) | forge_panels | `e5929b4` |
+| 5 | `nexus.graph` | `com.nexus.storage::outgoing_links` + `backlinks` | `rightPanelContent` (Graph tab) | forge_panels | `7414f15` |
+| 6 | `nexus.commandPalette` | aggregated commands | `overlay` (⌘⇧P) | Forge PALETTE data | `efc0c90` (+ `09e31da` keybinding-pill backfill) |
+| 7 | `nexus.terminal` | `com.nexus.terminal::create_session/send_input/pump` | `panelArea` | [forge_processes.jsx](../.design-bundle/project/forge_processes.jsx) | `08d6a66` |
+| 8 | `nexus.processes` | `com.nexus.terminal::list_sessions` + `com.nexus.mcp.host::list_servers` + shell-side `pluginList` + 9 event prefixes | `paneMode` (full-pane) | forge_processes | `1ef3d81` |
+| 9 | `nexus.tasks` | `com.nexus.storage::task_query` | `activityBar`, `sidebarContent` | — | queued |
+| 10 | `nexus.ai` | `com.nexus.ai::ask` (stateless RAG; streaming deferred) | `sidebarContent` | [forge_orchestrate.jsx](../.design-bundle/project/forge_orchestrate.jsx) (partial) | `4694bef` (sidebar v1 — streaming + full-pane are follow-ups) |
+| 11 | `nexus.agent` | `com.nexus.agent::plan/run` | `paneMode` (full-pane) | forge_orchestrate | queued |
+| 12 | `nexus.workflow` | `com.nexus.workflow::list/run` | `paneMode` (full-pane) | — | queued |
+| 13 | `nexus.templates` | kernel read | `paneMode` (full-pane) | [forge_templates.jsx](../.design-bundle/project/forge_templates.jsx) | queued |
+| 14 | `nexus.pluginsMgmt` | `pluginList` + `communityPluginManifests` services | `overlay` (⌘⇧X) | — | `b168e9a` |
+| 15 | `nexus.paneMode` (infra) | — | new `paneMode` SlotId | — | `4504667` |
+| 16 | `nexus.skills` / `nexus.mcp` / `nexus.settings` | respective kernel plugins | various | — | queued |
 
 Pane-mode plugins (terminal/processes, ai/agent, templates) mirror the design's `pane === 'ai' | 'terminal' | 'templates'` flag — when their activity icon is active the tri-pane is replaced with a full-window workspace view.
 
@@ -152,15 +175,37 @@ Remaining:
 
 ## Delivered
 
-_Nothing yet — Phase 0 scaffolding in progress._
+Commit log on `feat/ui-shell-rebuild`, most-recent first. Shell-side theme fixes (`850ca2c`, `23f96f1`, `9d84f80`) are pre-Phase-0 housekeeping from earlier in the branch and not listed here.
 
-### Phase 2 item k — `nexus.ai` sidebar chat (first cut)
+### Phase 0 — bridge infra
 
-Sidebar-slot chat view backed by `com.nexus.ai::ask` (stateless RAG).
-Messages top, composer bottom, Enter to send, Shift+Enter newline,
-Escape to clear. Assistant responses render through the editor's
-shared `renderMarkdown` helper under `.nexus-markdown-body`. Pulsing
-"…" while awaiting the kernel. Commands `nexus.ai.focus`
-(Ctrl+Alt+A) and `nexus.ai.clear`. Activity-bar item: sparkle glyph,
-priority 50. No streaming, no multi-turn memory, no full-pane mode —
-all deferred.
+- `21509d0` — `nexus.launcher` plugin + `shell-state.json` persistence (Obsidian-style recents/Open/Create).
+- `2581e8e` — add `nexus-kernel` / `nexus-bootstrap` / `nexus-plugin-api` / `nexus-plugins` path deps; empty `KernelRuntime` Tauri managed state.
+- `36d7672` — `init_forge` / `boot_kernel` / `shutdown_kernel` Tauri commands + window-close hook. Kernel boots under `com.nexus.cli` invoker identity (upstream `build_shell_runtime` follow-up).
+- `3ee56c5` — `kernel_invoke` / `kernel_subscribe` / `kernel_unsubscribe` Tauri commands + `api.kernel` frontend surface (`invoke`, `on`, `available`). Sync `AtomicBool` backs `available()`; `PluginContext` is `Arc`-cloned out of the mutex before `ipc_call.await` so invokes don't serialise.
+- `9323cd5` — `nexus.workspace` drives the full kernel lifecycle (`null → path`, `path → other`, `path → null`). Boot failures re-throw so the launcher doesn't persist a broken recent.
+- `5e354b1` — hoist `:root` token blocks into `shell/index.html` inline `<style>`. Vite's JS-injected `shell.css` was dropping them on documentElement; structural rules stay in `shell.css`.
+
+### Phase 1 — retire standalone commands
+
+- `0fee389` + `ccc99c6` — `nexus.files` via `com.nexus.storage::list_dir`, subscribed to `com.nexus.storage.file_{created,modified,deleted,renamed}`. Standalone `read_dir` Tauri command removed. Tree keys on forge-relative paths; `isDir` wire field.
+- `186a6b0` — `nexus.gitStatus` via `com.nexus.git::status`; single prefix subscription covers state/branch_changed/commit/dirty_changed; `git2` direct dep dropped (transitively supplied by `nexus-git`).
+
+### Phase 2 — feature plugins
+
+- `0a736a7` — `nexus.editor` v0: read file via kernel, raw `<pre>`, top strip, no tabs.
+- `6a7ac5b` — markdown rendering via `marked` + `dompurify`; shared `renderMarkdown` helper later extracted.
+- `ca1825c` — tab bar: multi-file, click-to-switch, per-tab loading/error, × close button, `Ctrl+W` keybinding + `nexus.editor.hasActiveTab` context key.
+- `f497656` — per-tab preview/source toggle, dirty tracking, save via `com.nexus.storage::write_file`, `Ctrl+S`, close-while-dirty confirm.
+- `efc0c90` — `nexus.commandPalette` overlay, fuzzy subsequence match, `Ctrl+Shift+P` (+ `Ctrl+P` alias).
+- `32c7556` — `nexus.rightPanel` host + `nexus.outline` plugin. New `rightPanelContent` SlotId; tab registration via `rightPanel:registerTab` event. `Ctrl+Alt+R` toggles visibility.
+- `cced076` — `nexus.search` via `com.nexus.storage::search` (Tantivy); activity-bar item + sidebar view; 150ms debounce + `requestId` race guard; `Ctrl+Shift+F` focus command with focuser-singleton pattern.
+- `e5929b4` — `nexus.backlinks` right-panel tab via `com.nexus.storage::backlinks`. Kernel returns edge metadata only (no line/excerpt).
+- `7414f15` — `nexus.graph` right-panel tab; parallel `outgoing_links` + `backlinks` call, merged by neighbour with incoming/outgoing/both tagging; radial SVG layout, no physics.
+- `08d6a66` — `nexus.terminal` in panelArea, backed by `com.nexus.terminal::create_session/send_raw_input/pump`. xterm.js + xterm-addon-fit; output is 50ms pull-poll (no kernel event topic yet); no resize handler upstream. `Ctrl+\`` toggles.
+- `4694bef` — `nexus.ai` sidebar chat v1. Stateless RAG via `com.nexus.ai::ask { question, limit? }`; `RagResponse { answer, sources, model }`. No streaming, no multi-turn. Extracts `renderMarkdown` to `shell/src/plugins/nexus/editor/markdownRender.ts` for reuse.
+- `7715730` — outline→editor scroll. Outline emits `editor:scrollToHeading { index, line }`; editor's preview body does `querySelectorAll('h1..h6')[index].scrollIntoView`, source mode scrolls textarea to the line. Added `index` to `OutlineHeading`.
+- `09e31da` — `api.commands.all()` joins `KeybindingRegistry.all()` by commandId, populating `CommandEntry.keybinding` so palette rows can render a chord pill.
+- `4504667` — pane-mode infra. New `paneMode` SlotId; `usePaneModeStore { activeViewId, enter, exit }`; `nexus.paneMode` plugin owns `nexus.paneMode.enter/exit` commands, `nexus.paneMode.active` + `nexus.paneMode.activeViewId` context keys, Escape exit gated by `!nexus.commandPalette.visible`. App.tsx swaps the tri-pane body for the active pane-mode entry when set.
+- `b168e9a` — `nexus.pluginsMgmt` overlay modal, `Ctrl+Shift+X`. Reads `pluginList` + `communityPluginManifests` services; community rows toggle via `set_plugin_enabled` with optimistic UI + rollback on error. `core: true` for internal service access.
+- `1ef3d81` — `nexus.processes` pane-mode. Left column lists built-in + community plugins from shell services, terminal sessions from `com.nexus.terminal::list_sessions`, MCP servers from `com.nexus.mcp.host::list_servers`. Right column streams a rolling 500-event buffer from 9 topic prefixes; filter input, follow-to-bottom toggle, clear button. Activity-bar item (2×2 grid glyph) routes in/out of pane mode via the existing `activityBar:activeChanged` event.
