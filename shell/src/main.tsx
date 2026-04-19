@@ -58,6 +58,7 @@ import { backlinksPlugin } from './plugins/nexus/backlinks'
 import { graphPlugin } from './plugins/nexus/graph'
 import { searchPlugin } from './plugins/nexus/search'
 import { commandPalettePlugin } from './plugins/nexus/commandPalette'
+import { terminalPlugin } from './plugins/nexus/terminal'
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -83,10 +84,12 @@ async function boot() {
   // Applies data-theme="dark" to <html> so shell.css :root tokens win.
   useThemeStore.getState().setTheme('dark')
 
-  // No plugin currently contributes to panelArea. Its layoutStore
-  // default leaves a wide empty strip in the window. Force hidden
-  // until a host plugin lands. rightPanel is owned by
-  // nexus.rightPanel — it flips visibility on activate.
+  // panelArea is host to nexus.terminal as of Phase 2 item j, but it
+  // stays hidden on boot — the user toggles it via Ctrl+Backquote or
+  // the terminal activity-bar item. Force-hide here because the
+  // persisted layoutStore may have been left visible by an earlier
+  // session. rightPanel is owned by nexus.rightPanel — it flips
+  // visibility on activate.
   useLayoutStore.setState((s) => ({
     panelArea:  { ...s.panelArea,  visible: false },
   }))
@@ -109,6 +112,7 @@ async function boot() {
     graphPlugin,
     searchPlugin,
     commandPalettePlugin,
+    terminalPlugin,
   ]
 
   // Validate that all imports resolved to real plugins
