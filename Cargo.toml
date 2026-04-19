@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["shell"]
 members = [
     "crates/nexus-types",
     "crates/nexus-plugin-api",
