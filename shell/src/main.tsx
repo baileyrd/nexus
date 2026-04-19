@@ -30,6 +30,9 @@ import { themeServicePlugin }         from './plugins/core/themeService'
 // UI will be rebuilt piece-by-piece as nexus.* plugins consuming real backend
 // data. See memory: feedback_no_hardcoded_ui.md.
 
+// ── Nexus plugins ─────────────────────────────────────────────────────────────
+import { workspacePlugin } from './plugins/nexus/workspace'
+
 function showFatal(message: string) {
   const root = document.getElementById('root')
   if (!root) return
@@ -53,8 +56,7 @@ async function boot() {
     notificationServicePlugin,
     fileSystemServicePlugin,
     themeServicePlugin,
-    // UI/feature plugins intentionally absent — rebuild as nexus.* against
-    // real backend data, one feature at a time.
+    workspacePlugin,
   ]
 
   // Validate that all imports resolved to real plugins
