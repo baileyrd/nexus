@@ -19,6 +19,24 @@
   margin: 0;
 }
 
+/* Source-mode textarea — shown when the tab's mode is 'source'. */
+.nexus-editor-source {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--f-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  border: 0;
+  outline: 0;
+  padding: 16px 20px;
+  resize: none;
+  tab-size: 2;
+  box-sizing: border-box;
+}
+.nexus-editor-source:focus { outline: 0; }
+
 /* ---- Markdown body -------------------------------------------------- */
 
 .nexus-markdown-body {

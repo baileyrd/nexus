@@ -1,11 +1,17 @@
 import { useMemo } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { useEditorStore, type EditorTab } from './editorStore'
+import { useEditorStore, isDirty, type EditorTab, type EditorTabMode } from './editorStore'
 import './markdown.css'
 
 interface EditorViewProps {
   onRetry: (relpath: string) => void
+  /**
+   * Confirm-then-close entry point shared with the keybinding
+   * command handler in index.ts. Prompts only if the tab is dirty;
+   * cancelling aborts the close.
+   */
+  onRequestClose: (relpath: string) => void
 }
 
 function isMarkdown(name: string): boolean {
@@ -21,23 +27,19 @@ function renderMarkdown(content: string): string {
 }
 
 /**
- * Read-only viewer for the currently-open file. Renders into the
- * `editorArea` slot.
- *
- * Layout: a 36px horizontal tab row above a scrollable body. Each
- * tab reports its own filename, is click-to-activate, and carries a
- * small × close button. The body area reads the active tab and
- * renders its `content` — markdown-vs-pre branch is keyed on the
- * active tab's name / content.
+ * Editor view: tab row with per-tab dirty dot + a mode-toggle button
+ * at the right end of the tab row, above a body that renders the
+ * active tab either as markdown/<pre> (preview) or as a monospaced
+ * textarea (source).
  *
  * Empty, loading, and error states are computed per-tab so a failed
  * load on one tab doesn't bleed into any neighbour.
  */
-export function EditorView({ onRetry }: EditorViewProps) {
+export function EditorView({ onRetry, onRequestClose }: EditorViewProps) {
   const tabs = useEditorStore((s) => s.tabs)
   const activeRelpath = useEditorStore((s) => s.activeRelpath)
   const setActive = useEditorStore((s) => s.setActive)
-  const closeTab = useEditorStore((s) => s.closeTab)
+  const setMode = useEditorStore((s) => s.setMode)
 
   const activeTab = useMemo<EditorTab | null>(
     () => tabs.find((t) => t.relpath === activeRelpath) ?? null,
@@ -49,9 +51,17 @@ export function EditorView({ onRetry }: EditorViewProps) {
   const markdownHtml = useMemo(() => {
     if (!activeTab) return ''
     if (activeTab.loading || activeTab.error) return ''
+    if (activeTab.mode !== 'preview') return ''
     if (!isMarkdown(activeTab.name)) return ''
     return renderMarkdown(activeTab.content)
-  }, [activeTab?.relpath, activeTab?.content, activeTab?.name, activeTab?.loading, activeTab?.error])
+  }, [
+    activeTab?.relpath,
+    activeTab?.content,
+    activeTab?.name,
+    activeTab?.loading,
+    activeTab?.error,
+    activeTab?.mode,
+  ])
 
   const rootStyle: React.CSSProperties = {
     display: 'flex',
@@ -88,8 +98,14 @@ export function EditorView({ onRetry }: EditorViewProps) {
       <TabBar
         tabs={tabs}
         activeRelpath={activeRelpath}
+        activeTab={activeTab}
         onSelect={setActive}
-        onClose={closeTab}
+        onRequestClose={onRequestClose}
+        onToggleMode={() => {
+          if (!activeTab) return
+          const next: EditorTabMode = activeTab.mode === 'preview' ? 'source' : 'preview'
+          setMode(activeTab.relpath, next)
+        }}
       />
       <div style={{ flex: '1 1 auto', overflow: 'auto' }}>
         {activeTab ? (
@@ -107,11 +123,13 @@ export function EditorView({ onRetry }: EditorViewProps) {
 interface TabBarProps {
   tabs: EditorTab[]
   activeRelpath: string | null
+  activeTab: EditorTab | null
   onSelect: (relpath: string) => void
-  onClose: (relpath: string) => void
+  onRequestClose: (relpath: string) => void
+  onToggleMode: () => void
 }
 
-function TabBar({ tabs, activeRelpath, onSelect, onClose }: TabBarProps) {
+function TabBar({ tabs, activeRelpath, activeTab, onSelect, onRequestClose, onToggleMode }: TabBarProps) {
   return (
     <div
       style={{
@@ -121,19 +139,30 @@ function TabBar({ tabs, activeRelpath, onSelect, onClose }: TabBarProps) {
         flex: '0 0 36px',
         background: 'var(--bg-raised)',
         borderBottom: '1px solid var(--line-soft)',
-        overflowX: 'auto',
-        overflowY: 'hidden',
+        overflow: 'hidden',
       }}
     >
-      {tabs.map((tab) => (
-        <TabItem
-          key={tab.relpath}
-          tab={tab}
-          active={tab.relpath === activeRelpath}
-          onSelect={onSelect}
-          onClose={onClose}
-        />
-      ))}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'stretch',
+          flex: '1 1 auto',
+          minWidth: 0,
+          overflowX: 'auto',
+          overflowY: 'hidden',
+        }}
+      >
+        {tabs.map((tab) => (
+          <TabItem
+            key={tab.relpath}
+            tab={tab}
+            active={tab.relpath === activeRelpath}
+            onSelect={onSelect}
+            onRequestClose={onRequestClose}
+          />
+        ))}
+      </div>
+      {activeTab ? <ModeToggle mode={activeTab.mode} onClick={onToggleMode} /> : null}
     </div>
   )
 }
@@ -142,10 +171,11 @@ interface TabItemProps {
   tab: EditorTab
   active: boolean
   onSelect: (relpath: string) => void
-  onClose: (relpath: string) => void
+  onRequestClose: (relpath: string) => void
 }
 
-function TabItem({ tab, active, onSelect, onClose }: TabItemProps) {
+function TabItem({ tab, active, onSelect, onRequestClose }: TabItemProps) {
+  const dirty = isDirty(tab)
   const style: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -182,17 +212,34 @@ function TabItem({ tab, active, onSelect, onClose }: TabItemProps) {
     >
       <span
         style={{
+          display: 'flex',
+          alignItems: 'center',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           fontWeight: active ? 500 : 400,
+          minWidth: 0,
         }}
       >
-        {tab.name}
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{tab.name}</span>
+        {dirty ? (
+          <span
+            aria-hidden
+            title="Unsaved changes"
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: 'var(--fg)',
+              marginLeft: 4,
+              flexShrink: 0,
+            }}
+          />
+        ) : null}
       </span>
       <CloseButton
         onClick={(e) => {
           e.stopPropagation()
-          onClose(tab.relpath)
+          onRequestClose(tab.relpath)
         }}
       />
     </div>
@@ -247,6 +294,83 @@ function CloseButton({ onClick }: CloseButtonProps) {
   )
 }
 
+interface ModeToggleProps {
+  mode: EditorTabMode
+  onClick: () => void
+}
+
+/**
+ * Right-edge mode toggle. Shows the icon for the action the click
+ * will perform: pencil when in preview (click to edit), eye when in
+ * source (click to preview). Aria-label mirrors the action.
+ */
+function ModeToggle({ mode, onClick }: ModeToggleProps) {
+  const willEdit = mode === 'preview'
+  const label = willEdit ? 'Edit' : 'Preview'
+
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+      }}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flex: '0 0 32px',
+        width: 32,
+        height: 32,
+        alignSelf: 'center',
+        marginRight: 4,
+        padding: 0,
+        border: 0,
+        background: 'transparent',
+        color: 'var(--fg-muted)',
+        cursor: 'pointer',
+        borderRadius: 'var(--r)',
+      }}
+    >
+      {willEdit ? (
+        // Pencil — click to edit (currently in preview)
+        <svg
+          width={16}
+          height={16}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.75}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 20 h9 M16.5 3.5 a2.12 2.12 0 0 1 3 3 L7 19 l-4 1 1 -4 z" />
+        </svg>
+      ) : (
+        // Eye — click to preview (currently in source)
+        <svg
+          width={16}
+          height={16}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.75}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M2 12 s3.5 -7 10 -7 s10 7 10 7 s-3.5 7 -10 7 s-10 -7 -10 -7 z" />
+          <circle cx={12} cy={12} r={3} />
+        </svg>
+      )}
+    </button>
+  )
+}
+
 interface TabBodyProps {
   tab: EditorTab
   markdownHtml: string
@@ -291,6 +415,20 @@ function TabBody({ tab, markdownHtml, onRetry }: TabBodyProps) {
 
   if (tab.loading) {
     return <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>Loading…</div>
+  }
+
+  if (tab.mode === 'source') {
+    return (
+      <textarea
+        className="nexus-editor-source"
+        value={tab.content}
+        onChange={(e) =>
+          useEditorStore.getState().setContent(tab.relpath, e.target.value)
+        }
+        spellCheck={false}
+        autoCapitalize="off"
+      />
+    )
   }
 
   if (isMarkdown(tab.name)) {
