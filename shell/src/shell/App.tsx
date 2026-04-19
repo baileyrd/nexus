@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useSlotStore } from '../registry/SlotRegistry'
 import { useLayoutStore } from '../stores/layoutStore'
+import { usePaneModeStore } from '../stores/paneModeStore'
 import { SlotSurface } from './slots/SlotSurface'
 import { ResizeHandle } from './ResizeHandle'
 import { getRegistry } from '../host/shellRegistry'
@@ -13,6 +14,7 @@ export default function App() {
     sidebar, panelArea, rightPanel,
     resizeSidebar, resizePanelArea, resizeRightPanel,
   } = useLayoutStore()
+  const paneModeViewId = usePaneModeStore(s => s.activeViewId)
   const [debugInfo, setDebugInfo] = useState<string>('')
 
   useEffect(() => {
@@ -88,44 +90,75 @@ export default function App() {
       </div>
 
       {/* Body */}
-      <div className="shell-body">
-        <div className="shell-activitybar">
-          <SlotSurface entries={slots.activityBar} />
-        </div>
+      {(() => {
+        // Pane-mode: one slot entry takes over the entire body region.
+        // The activity bar stays visible so the user can switch out;
+        // the titlebar, statusbar, and overlay are untouched (rendered
+        // outside this branch).
+        const paneEntry = paneModeViewId
+          ? slots.paneMode.find(e => e.id === paneModeViewId)
+          : undefined
 
-        {sidebar.visible && (
-          <>
-            <div className="shell-sidebar" style={{ width: sidebar.width }}>
-              <SlotSurface entries={slots.sidebar} />
-            </div>
-            <ResizeHandle direction="horizontal" onResize={resizeSidebar} />
-          </>
-        )}
+        if (paneModeViewId && !paneEntry) {
+          console.warn(
+            `[App] Pane-mode viewId "${paneModeViewId}" is set but no matching slot entry exists; falling through to tri-pane.`,
+          )
+        }
 
-        <div className="shell-center">
-          <div className="shell-editor-area">
-            <SlotSurface entries={slots.editorArea} />
-          </div>
-
-          {panelArea.visible && (
-            <>
-              <ResizeHandle direction="vertical" onResize={resizePanelArea} />
-              <div className="shell-panel-area" style={{ height: panelArea.height }}>
-                <SlotSurface entries={slots.panelArea} />
+        if (paneEntry) {
+          return (
+            <div className="shell-body">
+              <div className="shell-activitybar">
+                <SlotSurface entries={slots.activityBar} />
               </div>
-            </>
-          )}
-        </div>
-
-        {rightPanel.visible && (
-          <>
-            <ResizeHandle direction="horizontal" onResize={resizeRightPanel} />
-            <div className="shell-right-panel" style={{ width: rightPanel.width }}>
-              <SlotSurface entries={slots.rightPanel} />
+              <div className="shell-pane-mode">
+                <SlotSurface entries={[paneEntry]} />
+              </div>
             </div>
-          </>
-        )}
-      </div>
+          )
+        }
+
+        return (
+          <div className="shell-body">
+            <div className="shell-activitybar">
+              <SlotSurface entries={slots.activityBar} />
+            </div>
+
+            {sidebar.visible && (
+              <>
+                <div className="shell-sidebar" style={{ width: sidebar.width }}>
+                  <SlotSurface entries={slots.sidebar} />
+                </div>
+                <ResizeHandle direction="horizontal" onResize={resizeSidebar} />
+              </>
+            )}
+
+            <div className="shell-center">
+              <div className="shell-editor-area">
+                <SlotSurface entries={slots.editorArea} />
+              </div>
+
+              {panelArea.visible && (
+                <>
+                  <ResizeHandle direction="vertical" onResize={resizePanelArea} />
+                  <div className="shell-panel-area" style={{ height: panelArea.height }}>
+                    <SlotSurface entries={slots.panelArea} />
+                  </div>
+                </>
+              )}
+            </div>
+
+            {rightPanel.visible && (
+              <>
+                <ResizeHandle direction="horizontal" onResize={resizeRightPanel} />
+                <div className="shell-right-panel" style={{ width: rightPanel.width }}>
+                  <SlotSurface entries={slots.rightPanel} />
+                </div>
+              </>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Status bar */}
       <div className="shell-statusbar">

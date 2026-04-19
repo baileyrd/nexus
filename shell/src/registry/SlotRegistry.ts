@@ -19,6 +19,7 @@ export type SlotId =
   | 'sidebarContent'
   | 'panelAreaContent'
   | 'rightPanelContent'
+  | 'paneMode'
 
 export interface SlotEntry {
   id: string
@@ -48,6 +49,7 @@ export const useSlotStore = create<SlotStore>((set) => ({
     sidebarContent: [],
     panelAreaContent: [],
     rightPanelContent: [],
+    paneMode: [],
   },
 
   register: (slotId, entry) =>

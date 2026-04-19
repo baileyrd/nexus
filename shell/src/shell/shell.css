@@ -60,6 +60,22 @@ body {
   overflow: hidden;
 }
 
+/* ─── Pane mode ──────────────────────────────────────────────────────────── */
+/* When a plugin has taken over the body via usePaneModeStore, App.tsx
+   swaps the tri-pane (sidebar/editor/rightPanel) for a single container
+   that fills the body region. The activity bar stays alongside. */
+.shell-pane-mode {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+  background: var(--bg);
+}
+.shell-pane-mode > * {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* ─── Activity bar ───────────────────────────────────────────────────────── */
 .shell-activitybar {
   flex-shrink: 0;

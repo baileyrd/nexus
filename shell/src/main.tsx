@@ -58,6 +58,7 @@ import { backlinksPlugin } from './plugins/nexus/backlinks'
 import { graphPlugin } from './plugins/nexus/graph'
 import { searchPlugin } from './plugins/nexus/search'
 import { commandPalettePlugin } from './plugins/nexus/commandPalette'
+import { paneModePlugin } from './plugins/nexus/paneMode'
 import { terminalPlugin } from './plugins/nexus/terminal'
 import { aiPlugin } from './plugins/nexus/ai'
 
@@ -113,6 +114,7 @@ async function boot() {
     graphPlugin,
     searchPlugin,
     commandPalettePlugin,
+    paneModePlugin,
     terminalPlugin,
     aiPlugin,
   ]
