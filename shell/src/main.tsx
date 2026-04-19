@@ -49,6 +49,7 @@ import { gitStatusPlugin } from './plugins/nexus/gitStatus'
 import { titleBarPlugin } from './plugins/nexus/titleBar'
 import { activityBarPlugin } from './plugins/nexus/activityBar'
 import { sidebarPlugin } from './plugins/nexus/sidebar'
+import { launcherPlugin } from './plugins/nexus/launcher'
 import { filesPlugin } from './plugins/nexus/files'
 
 function showFatal(message: string) {
@@ -93,6 +94,7 @@ async function boot() {
     titleBarPlugin,
     activityBarPlugin,
     sidebarPlugin,
+    launcherPlugin,
     filesPlugin,
   ]
 

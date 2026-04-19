@@ -1,5 +1,7 @@
 // src-tauri/src/lib.rs
 
+mod persistence;
+
 use std::fs;
 use serde::{Deserialize, Serialize};
 
@@ -279,6 +281,10 @@ pub fn run() {
             path_exists,
             get_git_status,
             read_dir,
+            persistence::get_shell_state,
+            persistence::save_shell_state,
+            persistence::write_last_forge_path,
+            persistence::forget_forge_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

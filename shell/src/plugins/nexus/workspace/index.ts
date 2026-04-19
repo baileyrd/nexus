@@ -10,6 +10,7 @@ const CONTEXT_KEY_HAS_ROOT = 'nexus.workspace.hasRoot'
 const EVENT_OPENED = 'workspace:opened'
 const EVENT_CLOSED = 'workspace:closed'
 const COMMAND_OPEN = 'nexus.workspace.open'
+const COMMAND_SET_ROOT = 'nexus.workspace.setRoot'
 
 export const workspacePlugin: Plugin = {
   manifest: {
@@ -23,6 +24,11 @@ export const workspacePlugin: Plugin = {
         {
           id: COMMAND_OPEN,
           title: 'Open Folder…',
+          category: 'Workspace',
+        },
+        {
+          id: COMMAND_SET_ROOT,
+          title: 'Set Workspace Root',
           category: 'Workspace',
         },
       ],
@@ -96,6 +102,19 @@ export const workspacePlugin: Plugin = {
         setRoot(picked)
       }
       return picked ?? null
+    })
+
+    // Direct path activation — the launcher's recents row bypasses the
+    // folder-picker and hands us a path we already trust. Centralises
+    // the full setRoot dance (store + context + storage + event) so
+    // the launcher doesn't duplicate any of it.
+    api.commands.register(COMMAND_SET_ROOT, async (...args: unknown[]) => {
+      const path = args[0]
+      if (typeof path !== 'string' || path.length === 0) {
+        return null
+      }
+      setRoot(path)
+      return path
     })
 
     store.setOpenHandler(() => {
