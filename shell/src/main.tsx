@@ -55,6 +55,7 @@ import { filesPlugin } from './plugins/nexus/files'
 import { editorPlugin } from './plugins/nexus/editor'
 import { outlinePlugin } from './plugins/nexus/outline'
 import { backlinksPlugin } from './plugins/nexus/backlinks'
+import { graphPlugin } from './plugins/nexus/graph'
 import { searchPlugin } from './plugins/nexus/search'
 import { commandPalettePlugin } from './plugins/nexus/commandPalette'
 
@@ -105,6 +106,7 @@ async function boot() {
     editorPlugin,
     outlinePlugin,
     backlinksPlugin,
+    graphPlugin,
     searchPlugin,
     commandPalettePlugin,
   ]
