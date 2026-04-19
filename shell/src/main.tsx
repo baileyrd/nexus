@@ -61,6 +61,7 @@ import { commandPalettePlugin } from './plugins/nexus/commandPalette'
 import { paneModePlugin } from './plugins/nexus/paneMode'
 import { terminalPlugin } from './plugins/nexus/terminal'
 import { aiPlugin } from './plugins/nexus/ai'
+import { pluginsMgmtPlugin } from './plugins/nexus/pluginsMgmt'
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -117,6 +118,7 @@ async function boot() {
     paneModePlugin,
     terminalPlugin,
     aiPlugin,
+    pluginsMgmtPlugin,
   ]
 
   // Validate that all imports resolved to real plugins
