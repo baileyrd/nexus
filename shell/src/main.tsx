@@ -17,25 +17,18 @@ import {
 } from './host/communityPluginLoader'
 
 // ── Service plugins ───────────────────────────────────────────────────────────
+// Infrastructure only — no UI, no hardcoded product content.
 import { configurationServicePlugin } from './plugins/core/configurationService'
 import { notificationServicePlugin }  from './plugins/core/notificationService'
 import { fileSystemServicePlugin }    from './plugins/core/fileSystemService'
 import { themeServicePlugin }         from './plugins/core/themeService'
 
-// ── UI plugins ────────────────────────────────────────────────────────────────
-import { titleBarPlugin }       from './plugins/core/titleBar'
-import { activityBarPlugin }    from './plugins/core/activityBar'
-import { sidebarPlugin }        from './plugins/core/sidebar'
-import { editorAreaPlugin }     from './plugins/core/editorArea'
-import { panelAreaPlugin }      from './plugins/core/panelArea'
-import { rightPanelPlugin }     from './plugins/core/rightPanel'
-import { statusBarPlugin }      from './plugins/core/statusBar'
-import { commandPalettePlugin } from './plugins/core/commandPalette'
-import { settingsPlugin }       from './plugins/core/settings'
-
-// ── Feature plugins ───────────────────────────────────────────────────────────
-import { fileExplorerPlugin }   from './plugins/core/fileExplorer'
-import { terminalPlugin }       from './plugins/core/terminal'
+// ── UI & feature plugins (DISABLED) ───────────────────────────────────────────
+// The template's plugins/core/* UI files ship with hardcoded Nexus product
+// content ("Forge", "Tantivy · 0 docs", stub SHAs, placeholder file counts).
+// They are retained on disk as reference only and must NOT be loaded. Real
+// UI will be rebuilt piece-by-piece as nexus.* plugins consuming real backend
+// data. See memory: feedback_no_hardcoded_ui.md.
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -60,17 +53,8 @@ async function boot() {
     notificationServicePlugin,
     fileSystemServicePlugin,
     themeServicePlugin,
-    titleBarPlugin,
-    activityBarPlugin,
-    sidebarPlugin,
-    editorAreaPlugin,
-    panelAreaPlugin,
-    rightPanelPlugin,
-    statusBarPlugin,
-    commandPalettePlugin,
-    settingsPlugin,
-    fileExplorerPlugin,
-    terminalPlugin,
+    // UI/feature plugins intentionally absent — rebuild as nexus.* against
+    // real backend data, one feature at a time.
   ]
 
   // Validate that all imports resolved to real plugins
