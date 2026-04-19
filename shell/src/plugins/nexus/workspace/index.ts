@@ -1,6 +1,6 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
-import { exists } from '@tauri-apps/plugin-fs'
+import { invoke } from '@tauri-apps/api/core'
 import { useWorkspaceStore } from './workspaceStore'
 import { WorkspaceStatusItem } from './WorkspaceStatusItem'
 
@@ -57,6 +57,7 @@ export const workspacePlugin: Plugin = {
       api.context.set(CONTEXT_KEY_HAS_ROOT, path !== null)
       if (path) {
         api.storage.set(STORAGE_KEY, path)
+        console.info('[nexus.workspace] saved root:', path)
         api.events.emit(EVENT_OPENED, { path })
       } else {
         api.storage.delete(STORAGE_KEY)
@@ -65,11 +66,15 @@ export const workspacePlugin: Plugin = {
     }
 
     const persisted = api.storage.get(STORAGE_KEY)
+    console.info('[nexus.workspace] boot — persisted root:', persisted ?? '<none>')
     if (persisted) {
       try {
-        if (await exists(persisted)) {
+        const stillExists = await invoke<boolean>('path_exists', { path: persisted })
+        if (stillExists) {
+          console.info('[nexus.workspace] restoring', persisted)
           setRoot(persisted)
         } else {
+          console.info('[nexus.workspace] persisted path no longer exists, clearing')
           api.storage.delete(STORAGE_KEY)
           setRoot(null)
         }

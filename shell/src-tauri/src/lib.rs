@@ -167,6 +167,16 @@ fn set_plugin_enabled(plugin_id: String, enabled: bool) -> Result<(), String> {
     Err(format!("Plugin '{plugin_id}' not found"))
 }
 
+/// Unscoped path existence check. tauri-plugin-fs scopes paths to a
+/// configured allowlist, which rejects arbitrary user-picked folders
+/// before we ever see them. This bypass uses std::path directly so the
+/// workspace plugin can verify a persisted root on boot without having
+/// to preconfigure every possible folder the user might open.
+#[tauri::command]
+fn path_exists(path: String) -> bool {
+    std::path::Path::new(&path).exists()
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -178,6 +188,7 @@ pub fn run() {
             scan_plugin_directory,
             scan_plugin_directory_at,
             set_plugin_enabled,
+            path_exists,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
