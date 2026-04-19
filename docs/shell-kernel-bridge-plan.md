@@ -11,7 +11,7 @@ See the **Delivered** section at the bottom for the full commit list. Queued ite
 - **Pane-mode plugins** (infra landed in `4504667`): `nexus.agent` (orchestrate), `nexus.templates` (gallery).
 - **Sidebar plugins**: `nexus.tasks` (`com.nexus.storage::task_query` — kernel handler not yet present, blocked).
 - **Overlays**: `nexus.settings`, per-plugin settings schemas.
-- **Specialty**: `nexus.skills`, `nexus.mcp` client UI.
+- **Specialty**: `nexus.mcp` client UI (kernel handlers in `com.nexus.mcp.host`).
 - **Editor polish**: outline ↔ editor wiring is bidirectional now — `editor:scrollToHeading` (`7715730`) plus `editor:activeHeadingChanged` scroll-spy that highlights and auto-scrolls the active outline row. Next polish item TBD.
 - **Visual polish** (Phase 3): port `forge_icons.jsx` into a typed icon module; nudge layout widths to design defaults; flesh out the titlebar cluster.
 
@@ -134,7 +134,8 @@ Each is a self-contained plugin. Order by dependency + value. `Status` column tr
 | 13 | `nexus.templates` | kernel read | `paneMode` (full-pane) | [forge_templates.jsx](../.design-bundle/project/forge_templates.jsx) | queued |
 | 14 | `nexus.pluginsMgmt` | `pluginList` + `communityPluginManifests` services | `overlay` (⌘⇧X) | — | `b168e9a` |
 | 15 | `nexus.paneMode` (infra) | — | new `paneMode` SlotId | — | `4504667` |
-| 16 | `nexus.skills` / `nexus.mcp` / `nexus.settings` | respective kernel plugins | various | — | queued |
+| 16 | `nexus.skills` | `com.nexus.skills::list` (full Skill struct including body) | `activityBar`, `sidebarContent` | — | _(pending commit)_ sidebar v1 — list + inline expand panel |
+| 17 | `nexus.mcp` / `nexus.settings` | respective kernel plugins | various | — | queued |
 
 Pane-mode plugins (terminal/processes, ai/agent, templates) mirror the design's `pane === 'ai' | 'terminal' | 'templates'` flag — when their activity icon is active the tri-pane is replaced with a full-window workspace view.
 
