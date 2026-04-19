@@ -52,9 +52,11 @@ const BUILTIN_LAYOUTS: Record<string, LayoutDefinition> = {
   default: {
     id: 'default', name: 'Default', version: 1,
     panels: {
-      sidebar:     { visible: true,  width: 260,  activeView: 'fileExplorer' },
+      // Widths track the design bundle's documented defaults
+      // (.design-bundle/project/forge_app.jsx — sidebar 220, rightPanel 240).
+      sidebar:     { visible: true,  width: 220,  activeView: 'fileExplorer' },
       panelArea:   { visible: false, height: 200, activePanel: 'terminal' },
-      rightPanel:  { visible: true,  width: 300 },
+      rightPanel:  { visible: true,  width: 240 },
       activityBar: { visible: true },
       statusBar:   { visible: true },
     },
@@ -84,9 +86,9 @@ const BUILTIN_LAYOUTS: Record<string, LayoutDefinition> = {
 export const useLayoutStore = create<LayoutStore>()(
   persist(
     (set, get) => ({
-      sidebar:     { visible: true,  width: 260,  activeView: 'fileExplorer' },
+      sidebar:     { visible: true,  width: 220,  activeView: 'fileExplorer' },
       panelArea:   { visible: false, height: 200, activePanel: 'terminal' },
-      rightPanel:  { visible: true,  width: 300 },
+      rightPanel:  { visible: true,  width: 240 },
       activityBar: { visible: true },
       statusBar:   { visible: true },
 

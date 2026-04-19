@@ -148,7 +148,7 @@ Already done: `shell.css :root` carries the exact oklch palette from the design 
 
 Remaining:
 - **Icon module** `shell/src/icons/` — port SVG path constants from [forge_icons.jsx](../.design-bundle/project/forge_icons.jsx) into a typed TS map. Replace ad-hoc `<svg>` definitions scattered across plugins.
-- **Layout widths** — activity 44 (done), sidebar default 220 (currently 260), rightPanel default 240 (currently 300), statusbar 32 (currently 24). One-line tweaks in [layoutStore](../shell/src/stores/layoutStore.ts).
+- **Layout widths** — done in _(pending commit)_: sidebar default 220, rightPanel default 240 (BUILTIN_LAYOUTS.default + initial state in [layoutStore](../shell/src/stores/layoutStore.ts)), `.shell-statusbar` 24px → 32px in [shell.css](../shell/src/shell/shell.css). Persist version not bumped — existing user layouts keep their resized widths via shallow merge; new users land on the design bundle defaults.
 - **Titlebar cluster** — left-side icon cluster (folder / search / star) + breadcrumb with workspace · file · type badge, as Phase 2 plugins progressively contribute.
 
 ---

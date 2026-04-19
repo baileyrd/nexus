@@ -137,7 +137,7 @@ body {
 /* ─── Status bar ─────────────────────────────────────────────────────────── */
 .shell-statusbar {
   flex-shrink: 0;
-  height: 24px;
+  height: 32px;
   background: var(--bg-raised);
   color: var(--fg-muted);
   border-top: 1px solid var(--line);
