@@ -9,7 +9,7 @@ import App from './shell/App'
 import './shell/shell.css'
 // Importing the store triggers persist rehydration, which sets
 // data-theme/data-density on <html> before the first paint.
-import './stores/themeStore'
+import { useThemeStore } from './stores/themeStore'
 import { useLayoutStore } from './stores/layoutStore'
 import type { Plugin } from './types/plugin'
 import {
@@ -58,6 +58,12 @@ async function boot() {
 
   // Expose via singleton — no circular import
   setRegistry(reg)
+
+  // Force dark theme on boot. themeStore may have 'light' persisted
+  // from when core.theme-service was auto-flipping based on OS
+  // preference, and we have no theme-switcher UI to correct it yet.
+  // Applies data-theme="dark" to <html> so shell.css :root tokens win.
+  useThemeStore.getState().setTheme('dark')
 
   // No plugin currently contributes to rightPanel or panelArea. Their
   // layoutStore defaults (rightPanel.visible: true) leave a wide empty
