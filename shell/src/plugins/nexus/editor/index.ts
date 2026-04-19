@@ -23,6 +23,12 @@ const COMMAND_SAVE = 'nexus.editor.save'
 const CONTEXT_KEY_HAS_ACTIVE_TAB = 'nexus.editor.hasActiveTab'
 const CONTEXT_KEY_ACTIVE_TAB_DIRTY = 'nexus.editor.activeTabDirty'
 
+// Configuration keys read by the editor at runtime via
+// api.configuration.getValue. The Settings panel (core.settings) auto-
+// generates UI from the schema we register in `activate`.
+const CONFIG_CONFIRM_CLOSE_DIRTY = 'nexus.editor.confirmCloseDirty'
+const CONFIG_DEFAULT_MODE = 'nexus.editor.defaultMode'
+
 interface FileOpenPayload {
   relpath: string
   name: string
@@ -99,6 +105,13 @@ export const editorPlugin: Plugin = {
       // Already-open file: openTab raised it active; no refetch.
       if (!isNew) return
 
+      // openTab seeds new tabs in 'preview' mode; honour the user's
+      // default-mode preference if they've flipped it to 'source'.
+      const defaultMode = api.configuration.getValue<string>(CONFIG_DEFAULT_MODE, 'preview')
+      if (defaultMode === 'source') {
+        useEditorStore.getState().setMode(payload.relpath, 'source')
+      }
+
       try {
         const resp = await api.kernel.invoke<ReadFileResponse>(
           STORAGE_PLUGIN_ID,
@@ -150,8 +163,13 @@ export const editorPlugin: Plugin = {
       const tab = useEditorStore.getState().tabs.find((t) => t.relpath === relpath)
       if (!tab) return
       if (isDirty(tab)) {
-        const ok = await api.input.confirm(`${tab.name} has unsaved changes. Close anyway?`)
-        if (!ok) return
+        // Power users can disable the confirm via Settings — the
+        // default keeps the safety net on.
+        const shouldConfirm = api.configuration.getValue(CONFIG_CONFIRM_CLOSE_DIRTY, true)
+        if (shouldConfirm) {
+          const ok = await api.input.confirm(`${tab.name} has unsaved changes. Close anyway?`)
+          if (!ok) return
+        }
       }
       useEditorStore.getState().closeTab(relpath)
     }
@@ -164,6 +182,33 @@ export const editorPlugin: Plugin = {
           onRequestClose: confirmAndClose,
         }),
       priority: 10,
+    })
+
+    // Settings panel auto-generates UI from this. Defaults match the
+    // pre-settings behaviour so existing users don't see a regression.
+    api.configuration.register({
+      pluginId: 'nexus.editor',
+      title: 'Editor',
+      order: 10,
+      schema: [
+        {
+          key: CONFIG_CONFIRM_CLOSE_DIRTY,
+          title: 'Confirm before closing dirty tabs',
+          description:
+            'Show a confirmation dialog when closing a tab with unsaved changes. Disable for a faster keyboard-driven flow.',
+          type: 'boolean',
+          default: true,
+        },
+        {
+          key: CONFIG_DEFAULT_MODE,
+          title: 'Default mode for new tabs',
+          description:
+            'Whether newly-opened markdown files start in rendered preview or raw source. Read at tab-open time.',
+          type: 'select',
+          default: 'preview',
+          options: ['preview', 'source'],
+        },
+      ],
     })
 
     api.events.on<FileOpenPayload>(EVENT_FILE_OPEN, (payload) => {

@@ -31,6 +31,7 @@ import {
 import { configurationServicePlugin } from './plugins/core/configurationService'
 import { notificationServicePlugin }  from './plugins/core/notificationService'
 import { fileSystemServicePlugin }    from './plugins/core/fileSystemService'
+import { settingsPlugin }             from './plugins/core/settings'
 // themeServicePlugin is intentionally not loaded — it carries Nexus-branded
 // theme names ("Forge Ember", "Forge Paper") and auto-flips to the light
 // theme based on OS preference, which leaves empty slots looking white.
@@ -107,6 +108,7 @@ async function boot() {
     configurationServicePlugin,
     notificationServicePlugin,
     fileSystemServicePlugin,
+    settingsPlugin,
     workspacePlugin,
     gitStatusPlugin,
     titleBarPlugin,
