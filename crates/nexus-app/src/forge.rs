@@ -115,7 +115,49 @@ fn init_layout(root: &Path) -> Result<(), String> {
         fs::create_dir_all(root.join(sub)).map_err(|e| e.to_string())?;
     }
     nexus_bootstrap::init_forge(root).map_err(|e| format!("{e:#}"))?;
+    seed_if_empty(root).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Write starter notes if `notes/` is empty, so the Files tree has
+/// something to show on first launch. Skipped when the directory is
+/// missing or already populated, so pointing Nexus at an existing
+/// knowledge base never overwrites user content.
+fn seed_if_empty(root: &Path) -> std::io::Result<()> {
+    let notes = root.join("notes");
+    let mut entries = match fs::read_dir(&notes) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if entries.next().is_some() {
+        // Already has content — leave it alone.
+        return Ok(());
+    }
+
+    for (relpath, body) in seed_files() {
+        let abs = notes.join(relpath);
+        if let Some(parent) = abs.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(abs, body)?;
+    }
+    Ok(())
+}
+
+/// Seed file set — paths relative to `notes/`. Each file exercises a
+/// different formatter feature (wikilinks, tables, callouts, tasks,
+/// code blocks) so the editor surface has something meaningful to
+/// render on a fresh forge.
+fn seed_files() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("Welcome.md", include_str!("../seeds/Welcome.md")),
+        ("Quick start.md", include_str!("../seeds/Quick start.md")),
+        ("Ideas/Tasks.md", include_str!("../seeds/Tasks.md")),
+        ("Ideas/Reading list.md", include_str!("../seeds/Reading list.md")),
+        ("Design/Architecture.md", include_str!("../seeds/Architecture.md")),
+        ("Design/Decision log.md", include_str!("../seeds/Decision log.md")),
+    ]
 }
 
 fn info_for(root: &Path) -> ForgeInfo {
