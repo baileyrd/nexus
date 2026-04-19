@@ -7,6 +7,11 @@ import { useEditorStore } from '../editor/editorStore'
 const VIEW_ID = 'nexus.outline.view'
 const EVENT_REGISTER_TAB = 'rightPanel:registerTab'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
+const EVENT_ACTIVE_HEADING_CHANGED = 'editor:activeHeadingChanged'
+
+interface ActiveHeadingPayload {
+  index: number | null
+}
 
 export const outlinePlugin: Plugin = {
   manifest: {
@@ -46,7 +51,12 @@ export const outlinePlugin: Plugin = {
         useOutlineStore.getState().clear()
         return
       }
+      // Reset activeIndex with the headings: the editor will re-emit
+      // a fresh `activeHeadingChanged` once its scroll-spy effect
+      // re-runs against the new content. Leaving the old index in
+      // place would briefly highlight the wrong row.
       useOutlineStore.getState().setHeadings(parseHeadings(tab.content))
+      useOutlineStore.getState().setActiveIndex(null)
     }
 
     useEditorStore.subscribe((state, prev) => {
@@ -64,6 +74,16 @@ export const outlinePlugin: Plugin = {
 
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
       useOutlineStore.getState().clear()
+    })
+
+    api.events.on<ActiveHeadingPayload>(EVENT_ACTIVE_HEADING_CHANGED, (payload) => {
+      if (!payload) return
+      const idx = payload.index
+      // Defensive bound check: an in-flight event from a prior tab
+      // could outlive the recompute that shrank the heading list.
+      const headings = useOutlineStore.getState().headings
+      if (idx !== null && (idx < 0 || idx >= headings.length)) return
+      useOutlineStore.getState().setActiveIndex(idx)
     })
   },
 }

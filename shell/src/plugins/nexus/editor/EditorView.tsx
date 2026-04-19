@@ -2,7 +2,21 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useEditorStore, isDirty, type EditorTab, type EditorTabMode } from './editorStore'
 import { renderMarkdown } from './markdownRender'
 import { eventBus } from '../../../host/EventBus'
+import { useOutlineStore } from '../outline/outlineStore'
 import './markdown.css'
+
+/**
+ * Reverse contract of `editor:scrollToHeading`: the editor reports the
+ * topmost heading currently at/above the visible region so the outline
+ * can highlight that row. `index` is null when there are no headings or
+ * the editor has scrolled above the first heading.
+ */
+const EVENT_ACTIVE_HEADING_CHANGED = 'editor:activeHeadingChanged'
+
+/** Pixel tolerance below the scroll-container top: a heading whose top
+ *  is within `[wrapTop, wrapTop + ACTIVE_HEADING_OFFSET]` still counts
+ *  as "above the fold". Avoids flicker right at the boundary. */
+const ACTIVE_HEADING_OFFSET = 8
 
 /**
  * Outline → editor scroll contract. The outline plugin emits
@@ -56,6 +70,11 @@ export function EditorView({ onRetry, onRequestClose }: EditorViewProps) {
   // the textarea. Only one is mounted at a time.
   const markdownBodyRef = useRef<HTMLDivElement | null>(null)
   const sourceRef = useRef<HTMLTextAreaElement | null>(null)
+  // The `overflow: auto` wrapper around the active tab body. In preview
+  // mode this is the element whose scroll position drives heading
+  // visibility (markdownBodyRef is the inner content). In source mode
+  // the textarea scrolls itself.
+  const scrollWrapRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const unsub = eventBus.on<ScrollToHeadingPayload>('editor:scrollToHeading', (payload) => {
@@ -93,6 +112,99 @@ export function EditorView({ onRetry, onRequestClose }: EditorViewProps) {
     })
     return unsub
   }, [])
+
+  // Scroll-spy: report the topmost heading at/above the scroll
+  // container's top edge so the outline can highlight it. The effect
+  // re-binds on tab/mode change and on rendered-content changes (the
+  // markdown body re-mounts via dangerouslySetInnerHTML; source-mode
+  // line shifts can move headings). Compute is rAF-throttled, and we
+  // emit only on transitions to avoid event spam.
+  useEffect(() => {
+    if (!activeTab || activeTab.loading || activeTab.error) return
+    let raf = 0
+    let lastIndex: number | null | undefined = undefined
+    const emit = (idx: number | null) => {
+      if (idx === lastIndex) return
+      lastIndex = idx
+      eventBus.emit(EVENT_ACTIVE_HEADING_CHANGED, { index: idx })
+    }
+    const compute = () => {
+      raf = 0
+      if (activeTab.mode === 'preview') {
+        const wrap = scrollWrapRef.current
+        const body = markdownBodyRef.current
+        if (!wrap || !body) {
+          emit(null)
+          return
+        }
+        const headings = body.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')
+        if (headings.length === 0) {
+          emit(null)
+          return
+        }
+        const wrapTop = wrap.getBoundingClientRect().top
+        // Walk until we find the first heading still below the fold —
+        // the previous one is the active section. If even the first is
+        // still below, highlight it anyway: feels more grounded than
+        // an unhighlighted outline at document top.
+        let active = 0
+        for (let i = 0; i < headings.length; i++) {
+          const top = headings[i].getBoundingClientRect().top
+          if (top <= wrapTop + ACTIVE_HEADING_OFFSET) active = i
+          else break
+        }
+        emit(active)
+      } else {
+        // Source mode: the textarea owns scroll. Map scrollTop ÷
+        // line-height to a 1-based line number and find the heading
+        // whose source line is at or above that. Headings are read
+        // from the outline store — same cross-plugin store import
+        // pattern outline/index.ts uses on the editor store.
+        const ta = sourceRef.current
+        if (!ta) {
+          emit(null)
+          return
+        }
+        const headings = useOutlineStore.getState().headings
+        if (headings.length === 0) {
+          emit(null)
+          return
+        }
+        const cs = window.getComputedStyle(ta)
+        const lh = parseFloat(cs.lineHeight)
+        const topLine = Number.isFinite(lh) && lh > 0
+          ? Math.floor(ta.scrollTop / lh) + 1
+          : 1
+        let active = 0
+        for (let i = 0; i < headings.length; i++) {
+          if (headings[i].line <= topLine) active = i
+          else break
+        }
+        emit(active)
+      }
+    }
+    const schedule = () => {
+      if (raf) return
+      raf = requestAnimationFrame(compute)
+    }
+    const target = activeTab.mode === 'preview' ? scrollWrapRef.current : sourceRef.current
+    if (!target) return
+    target.addEventListener('scroll', schedule, { passive: true })
+    // Initial compute after the next paint so the freshly-rendered DOM
+    // (especially preview after innerHTML swap) has measurable layout.
+    const initial = setTimeout(compute, 0)
+    return () => {
+      target.removeEventListener('scroll', schedule)
+      clearTimeout(initial)
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [
+    activeTab?.relpath,
+    activeTab?.mode,
+    activeTab?.loading,
+    activeTab?.error,
+    activeTab?.content,
+  ])
 
   // Parse markdown once per content change — re-running marked + DOMPurify
   // on every unrelated parent re-render would be needlessly expensive.
@@ -155,7 +267,7 @@ export function EditorView({ onRetry, onRequestClose }: EditorViewProps) {
           setMode(activeTab.relpath, next)
         }}
       />
-      <div style={{ flex: '1 1 auto', overflow: 'auto' }}>
+      <div ref={scrollWrapRef} style={{ flex: '1 1 auto', overflow: 'auto' }}>
         {activeTab ? (
           <TabBody
             tab={activeTab}

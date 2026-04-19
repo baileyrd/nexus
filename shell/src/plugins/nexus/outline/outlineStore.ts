@@ -20,12 +20,23 @@ export interface OutlineHeading {
 
 interface OutlineState {
   headings: OutlineHeading[]
+  /**
+   * Index of the heading currently active in the editor (the topmost
+   * heading at or above the visible region). `null` when there are no
+   * headings or the editor hasn't reported a position yet. The editor
+   * publishes via `editor:activeHeadingChanged`; outline/index.ts
+   * forwards into here.
+   */
+  activeIndex: number | null
   setHeadings: (hs: OutlineHeading[]) => void
+  setActiveIndex: (i: number | null) => void
   clear: () => void
 }
 
 export const useOutlineStore = create<OutlineState>((set) => ({
   headings: [],
+  activeIndex: null,
   setHeadings: (headings) => set({ headings }),
-  clear: () => set({ headings: [] }),
+  setActiveIndex: (activeIndex) => set({ activeIndex }),
+  clear: () => set({ headings: [], activeIndex: null }),
 }))
