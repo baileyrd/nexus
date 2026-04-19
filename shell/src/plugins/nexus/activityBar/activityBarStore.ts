@@ -4,6 +4,8 @@ export interface ActivityBarItem {
   id: string
   pluginId: string
   icon: string
+  /** Optional SVG path `d` (viewBox 0 0 24 24, stroke-only). When set, renders as an SVG instead of `icon` text. */
+  iconPath?: string
   title: string
   viewId: string
   priority: number

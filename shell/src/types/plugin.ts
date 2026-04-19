@@ -220,6 +220,8 @@ export interface ActivityBarAPI {
   addItem(config: {
     id: string
     icon: string
+    /** Optional SVG path `d` for a stroke-only icon (viewBox 0 0 24 24). When present, wins over `icon`. */
+    iconPath?: string
     title: string
     viewId: string
     priority: number

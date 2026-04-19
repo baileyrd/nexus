@@ -80,7 +80,23 @@ function ActivityBarButton({
           }}
         />
       )}
-      <span style={{ lineHeight: 1 }}>{item.icon}</span>
+      {item.iconPath ? (
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d={item.iconPath} />
+        </svg>
+      ) : (
+        <span style={{ lineHeight: 1 }}>{item.icon}</span>
+      )}
     </button>
   )
 }
