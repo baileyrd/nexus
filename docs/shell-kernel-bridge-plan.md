@@ -107,7 +107,7 @@ Each is a self-contained plugin. Order by dependency + value.
 | 7 | `nexus.terminal` | `com.nexus.terminal::create_session/send_input/pump` | `panelArea` | [forge_processes.jsx](../.design-bundle/project/forge_processes.jsx) |
 | 8 | `nexus.processes` | kernel plugin status + pump | full-pane mode | forge_processes |
 | 9 | `nexus.tasks` | `com.nexus.storage::task_query` | `activityBar`, `sidebarContent` | — |
-| 10 | `nexus.ai` | `com.nexus.ai::stream_chat/session_*` | full-pane mode | [forge_orchestrate.jsx](../.design-bundle/project/forge_orchestrate.jsx) (partial) |
+| 10 | `nexus.ai` | `com.nexus.ai::stream_chat/session_*` | full-pane mode | [forge_orchestrate.jsx](../.design-bundle/project/forge_orchestrate.jsx) (partial) — sidebar chat v1 delivered via `::ask` (stateless RAG); streaming + full-pane follow-up |
 | 11 | `nexus.agent` | `com.nexus.agent::plan/run` | full-pane mode | forge_orchestrate |
 | 12 | `nexus.workflow` | `com.nexus.workflow::list/run` | full-pane mode | — |
 | 13 | `nexus.templates` | kernel read | full-pane mode | [forge_templates.jsx](../.design-bundle/project/forge_templates.jsx) |
@@ -153,3 +153,14 @@ Remaining:
 ## Delivered
 
 _Nothing yet — Phase 0 scaffolding in progress._
+
+### Phase 2 item k — `nexus.ai` sidebar chat (first cut)
+
+Sidebar-slot chat view backed by `com.nexus.ai::ask` (stateless RAG).
+Messages top, composer bottom, Enter to send, Shift+Enter newline,
+Escape to clear. Assistant responses render through the editor's
+shared `renderMarkdown` helper under `.nexus-markdown-body`. Pulsing
+"…" while awaiting the kernel. Commands `nexus.ai.focus`
+(Ctrl+Alt+A) and `nexus.ai.clear`. Activity-bar item: sparkle glyph,
+priority 50. No streaming, no multi-turn memory, no full-pane mode —
+all deferred.

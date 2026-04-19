@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
 import { useEditorStore, isDirty, type EditorTab, type EditorTabMode } from './editorStore'
+import { renderMarkdown } from './markdownRender'
 import './markdown.css'
 
 interface EditorViewProps {
@@ -16,14 +15,6 @@ interface EditorViewProps {
 
 function isMarkdown(name: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(name)
-}
-
-// marked.parse returns string when `async: false`. Sanitize before
-// we hand the HTML to React's dangerouslySetInnerHTML — user notes
-// aren't hostile, but DOMPurify is cheap insurance.
-function renderMarkdown(content: string): string {
-  const raw = marked.parse(content, { async: false }) as string
-  return DOMPurify.sanitize(raw)
 }
 
 /**

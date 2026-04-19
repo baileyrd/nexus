@@ -59,6 +59,7 @@ import { graphPlugin } from './plugins/nexus/graph'
 import { searchPlugin } from './plugins/nexus/search'
 import { commandPalettePlugin } from './plugins/nexus/commandPalette'
 import { terminalPlugin } from './plugins/nexus/terminal'
+import { aiPlugin } from './plugins/nexus/ai'
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -113,6 +114,7 @@ async function boot() {
     searchPlugin,
     commandPalettePlugin,
     terminalPlugin,
+    aiPlugin,
   ]
 
   // Validate that all imports resolved to real plugins
