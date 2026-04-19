@@ -32,6 +32,7 @@ import { themeServicePlugin }         from './plugins/core/themeService'
 
 // ── Nexus plugins ─────────────────────────────────────────────────────────────
 import { workspacePlugin } from './plugins/nexus/workspace'
+import { gitStatusPlugin } from './plugins/nexus/gitStatus'
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -57,6 +58,7 @@ async function boot() {
     fileSystemServicePlugin,
     themeServicePlugin,
     workspacePlugin,
+    gitStatusPlugin,
   ]
 
   // Validate that all imports resolved to real plugins

@@ -177,6 +177,53 @@ fn path_exists(path: String) -> bool {
     std::path::Path::new(&path).exists()
 }
 
+// ── Git status ────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatus {
+    /// Current branch shorthand (e.g. "main"), or None for detached HEAD.
+    pub branch: Option<String>,
+    /// First 7 chars of HEAD commit OID. None when the repo has no commits yet.
+    pub short_sha: Option<String>,
+    /// True when the working tree has any uncommitted changes (including untracked).
+    pub dirty: bool,
+}
+
+/// Report git state for the repository that contains `path` (walks upward to
+/// find the nearest `.git`). Returns Ok(None) when no repo is found so the
+/// caller can distinguish "not a git workspace" from an actual failure.
+#[tauri::command]
+fn get_git_status(path: String) -> Result<Option<GitStatus>, String> {
+    let repo = match git2::Repository::discover(&path) {
+        Ok(r) => r,
+        Err(e) if e.code() == git2::ErrorCode::NotFound => return Ok(None),
+        Err(e) => return Err(format!("git discover failed: {e}")),
+    };
+
+    let (branch, short_sha) = match repo.head() {
+        Ok(head) => {
+            let branch = head.shorthand().map(|s| s.to_string());
+            let short_sha = head
+                .target()
+                .map(|oid| oid.to_string().chars().take(7).collect::<String>());
+            (branch, short_sha)
+        }
+        // Unborn branch — repo initialized but no commits yet.
+        Err(e) if e.code() == git2::ErrorCode::UnbornBranch => (None, None),
+        Err(e) => return Err(format!("git head failed: {e}")),
+    };
+
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(true).include_ignored(false);
+    let statuses = repo
+        .statuses(Some(&mut opts))
+        .map_err(|e| format!("git statuses failed: {e}"))?;
+    let dirty = !statuses.is_empty();
+
+    Ok(Some(GitStatus { branch, short_sha, dirty }))
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -189,6 +236,7 @@ pub fn run() {
             scan_plugin_directory_at,
             set_plugin_enabled,
             path_exists,
+            get_git_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
