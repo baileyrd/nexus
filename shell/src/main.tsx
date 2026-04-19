@@ -57,6 +57,7 @@ import { outlinePlugin } from './plugins/nexus/outline'
 import { backlinksPlugin } from './plugins/nexus/backlinks'
 import { graphPlugin } from './plugins/nexus/graph'
 import { searchPlugin } from './plugins/nexus/search'
+import { workflowPlugin } from './plugins/nexus/workflow'
 import { commandPalettePlugin } from './plugins/nexus/commandPalette'
 import { paneModePlugin } from './plugins/nexus/paneMode'
 import { terminalPlugin } from './plugins/nexus/terminal'
@@ -115,6 +116,7 @@ async function boot() {
     backlinksPlugin,
     graphPlugin,
     searchPlugin,
+    workflowPlugin,
     commandPalettePlugin,
     paneModePlugin,
     terminalPlugin,
