@@ -62,6 +62,7 @@ import { paneModePlugin } from './plugins/nexus/paneMode'
 import { terminalPlugin } from './plugins/nexus/terminal'
 import { aiPlugin } from './plugins/nexus/ai'
 import { pluginsMgmtPlugin } from './plugins/nexus/pluginsMgmt'
+import { processesPlugin } from './plugins/nexus/processes'
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -119,6 +120,7 @@ async function boot() {
     terminalPlugin,
     aiPlugin,
     pluginsMgmtPlugin,
+    processesPlugin,
   ]
 
   // Validate that all imports resolved to real plugins
