@@ -5,6 +5,7 @@ mod persistence;
 
 use std::fs;
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 // ── Community plugin manifest ─────────────────────────────────────────────────
 
@@ -276,6 +277,23 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(bridge::KernelRuntime::new())
+        // Fire the kernel shutdown when the user closes a window. Fire-and-
+        // forget for now — Tauri 2's `CloseRequested` has an `api` handle we
+        // could use to delay the actual close until shutdown completes, but
+        // that adds complexity we don't need until something demonstrates a
+        // race. A warning is logged if shutdown fails so it at least shows up
+        // in the dev console.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                let app_handle = window.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let runtime = app_handle.state::<bridge::KernelRuntime>();
+                    if let Err(e) = runtime.shutdown().await {
+                        eprintln!("[shutdown] kernel shutdown failed: {e}");
+                    }
+                });
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             scan_plugin_directory,
             scan_plugin_directory_at,
@@ -287,6 +305,9 @@ pub fn run() {
             persistence::save_shell_state,
             persistence::write_last_forge_path,
             persistence::forget_forge_path,
+            bridge::init_forge,
+            bridge::boot_kernel,
+            bridge::shutdown_kernel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
