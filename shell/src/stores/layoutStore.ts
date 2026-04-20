@@ -15,6 +15,7 @@ export interface LayoutDefinition {
     rightPanel: { visible: boolean; width: number }
     activityBar:{ visible: boolean }
     statusBar:  { visible: boolean }
+    showViewHeader: boolean
   }
 }
 
@@ -24,6 +25,9 @@ interface LayoutStore {
   rightPanel: { visible: boolean; width: number }
   activityBar:{ visible: boolean }
   statusBar:  { visible: boolean }
+  // `show-view-header` body class (Obsidian parity). Controls per-pane
+  // view headers; toggled via settings, not a spatial control.
+  showViewHeader: boolean
 
   savedLayouts: Record<string, LayoutDefinition>
 
@@ -31,6 +35,7 @@ interface LayoutStore {
   toggleSidebar:    () => void
   togglePanelArea:  () => void
   toggleRightPanel: () => void
+  toggleViewHeader: () => void
 
   // Panel resize (with min/max clamping)
   resizeSidebar:    (width: number)  => void
@@ -48,37 +53,45 @@ interface LayoutStore {
   resetToDefault:() => void
 }
 
+// Built-in layouts intentionally do NOT hardcode sidebar/panel view ids.
+// The shell's boot resolver (App.tsx) picks the highest-priority registered
+// view for each slot when activeView/activePanel is empty or unresolved —
+// so layouts reference whatever plugins are actually loaded instead of
+// dangling against renamed/missing view types (Obsidian-style).
 const BUILTIN_LAYOUTS: Record<string, LayoutDefinition> = {
   default: {
     id: 'default', name: 'Default', version: 1,
     panels: {
       // Widths track the design bundle's documented defaults
       // (.design-bundle/project/forge_app.jsx — sidebar 220, rightPanel 240).
-      sidebar:     { visible: true,  width: 220,  activeView: 'fileExplorer' },
-      panelArea:   { visible: false, height: 200, activePanel: 'terminal' },
+      sidebar:     { visible: true,  width: 220,  activeView: '' },
+      panelArea:   { visible: false, height: 200, activePanel: '' },
       rightPanel:  { visible: true,  width: 240 },
       activityBar: { visible: true },
       statusBar:   { visible: true },
+      showViewHeader: true,
     },
   },
   zen: {
     id: 'zen', name: 'Zen Mode', version: 1,
     panels: {
-      sidebar:     { visible: false, width: 260,  activeView: 'fileExplorer' },
-      panelArea:   { visible: false, height: 200, activePanel: 'terminal' },
+      sidebar:     { visible: false, width: 260,  activeView: '' },
+      panelArea:   { visible: false, height: 200, activePanel: '' },
       rightPanel:  { visible: false, width: 300 },
       activityBar: { visible: false },
       statusBar:   { visible: false },
+      showViewHeader: false,
     },
   },
   debug: {
     id: 'debug', name: 'Debug', version: 1,
     panels: {
-      sidebar:     { visible: true,  width: 280,  activeView: 'debugExplorer' },
-      panelArea:   { visible: true,  height: 300, activePanel: 'debugConsole' },
+      sidebar:     { visible: true,  width: 280,  activeView: '' },
+      panelArea:   { visible: true,  height: 300, activePanel: '' },
       rightPanel:  { visible: false, width: 300 },
       activityBar: { visible: true },
       statusBar:   { visible: true },
+      showViewHeader: true,
     },
   },
 }
@@ -86,17 +99,23 @@ const BUILTIN_LAYOUTS: Record<string, LayoutDefinition> = {
 export const useLayoutStore = create<LayoutStore>()(
   persist(
     (set, get) => ({
-      sidebar:     { visible: true,  width: 220,  activeView: 'fileExplorer' },
-      panelArea:   { visible: false, height: 200, activePanel: 'terminal' },
+      // activeView/activePanel start empty; App.tsx's boot resolver
+      // fills them with the highest-priority registered view after
+      // plugins activate. Keeps defaults from dangling against
+      // renamed/missing view ids.
+      sidebar:     { visible: true,  width: 220,  activeView: '' },
+      panelArea:   { visible: false, height: 200, activePanel: '' },
       rightPanel:  { visible: true,  width: 240 },
       activityBar: { visible: true },
       statusBar:   { visible: true },
+      showViewHeader: true,
 
       savedLayouts: { ...BUILTIN_LAYOUTS },
 
       toggleSidebar:    () => set(s => ({ sidebar:    { ...s.sidebar,    visible: !s.sidebar.visible } })),
       togglePanelArea:  () => set(s => ({ panelArea:  { ...s.panelArea,  visible: !s.panelArea.visible } })),
       toggleRightPanel: () => set(s => ({ rightPanel: { ...s.rightPanel, visible: !s.rightPanel.visible } })),
+      toggleViewHeader: () => set(s => ({ showViewHeader: !s.showViewHeader })),
 
       resizeSidebar:    (w) => set(s => ({ sidebar:    { ...s.sidebar,    width:  clamp(w, 180, 600) } })),
       resizePanelArea:  (h) => set(s => ({ panelArea:  { ...s.panelArea,  height: clamp(h, 120, 600) } })),
@@ -115,6 +134,7 @@ export const useLayoutStore = create<LayoutStore>()(
             rightPanel:  s.rightPanel,
             activityBar: s.activityBar,
             statusBar:   s.statusBar,
+            showViewHeader: s.showViewHeader,
           },
         }
         set(s => ({ savedLayouts: { ...s.savedLayouts, [id]: def } }))
@@ -132,6 +152,8 @@ export const useLayoutStore = create<LayoutStore>()(
           rightPanel:  layout.panels.rightPanel,
           activityBar: layout.panels.activityBar,
           statusBar:   layout.panels.statusBar,
+          // Tolerate pre-existing saved layouts that lack the flag.
+          showViewHeader: layout.panels.showViewHeader ?? true,
         })
       },
 

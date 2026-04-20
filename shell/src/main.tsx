@@ -47,7 +47,6 @@ import { settingsPlugin }             from './plugins/core/settings'
 // ── Nexus plugins ─────────────────────────────────────────────────────────────
 import { workspacePlugin } from './plugins/nexus/workspace'
 import { gitStatusPlugin } from './plugins/nexus/gitStatus'
-import { titleBarPlugin } from './plugins/nexus/titleBar'
 import { activityBarPlugin } from './plugins/nexus/activityBar'
 import { sidebarPlugin } from './plugins/nexus/sidebar'
 import { rightPanelPlugin } from './plugins/nexus/rightPanel'
@@ -116,7 +115,6 @@ async function boot() {
     settingsPlugin,
     workspacePlugin,
     gitStatusPlugin,
-    titleBarPlugin,
     activityBarPlugin,
     sidebarPlugin,
     rightPanelPlugin,

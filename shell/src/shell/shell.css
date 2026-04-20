@@ -4,9 +4,22 @@
    The design-token :root + [data-theme="light"] + [data-density="…"]
    blocks have been hoisted into shell/index.html's inline <style> so
    they are guaranteed to register on documentElement before the React
-   tree mounts. That file is the source of truth for every --bg,
-   --fg, --accent, --line, --f-ui, --r, --shadow, --ui-size, etc.
-   token the shell uses. Do not redeclare them here. */
+   tree mounts. That file is the source of truth for every token the
+   shell uses. Do not redeclare them here.
+
+   As of Task A (no-titlebar-test) the canonical token taxonomy is
+   Obsidian's: --background-primary, --background-secondary,
+   --background-modifier-hover/-border, --text-normal / -muted / -faint,
+   --interactive-accent, --font-interface / -monospace, --radius-s/-m/-l,
+   --size-4-* / --size-2-*, --header-height, --divider-color,
+   --tab-container-background, --titlebar-background, etc.
+
+   Legacy Forge names (--bg, --fg, --line, --r, --f-ui, --f-mono,
+   --accent, --bg-raised, --bg-soft, --bg-hover, --line-soft, --accent-soft,
+   --fg-muted, --fg-dim, --accent-ink) are still referenced throughout
+   this file and in plugin .tsx inline styles. They resolve via the
+   backwards-compat alias block in index.html. New code should prefer
+   the Obsidian names. */
 
 /* ─── Reset ─────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -43,19 +56,12 @@ body {
   pointer-events: none;
 }
 
-/* ─── Title bar ──────────────────────────────────────────────────────────── */
-.shell-titlebar {
-  flex-shrink: 0;
-  height: 36px;
-  background: linear-gradient(to bottom, var(--bg-raised), var(--bg));
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  /* Tauri custom titlebar drag region is set inside the plugin component */
-}
-
-/* ─── Body ───────────────────────────────────────────────────────────────── */
-.shell-body {
+/* ─── Upper row ──────────────────────────────────────────────────────────── */
+/* Holds the full-height activity bar and the body columns (sidebar,
+   center, right panel) as direct flex siblings. Obsidian-faithful: no
+   shared top strip — each body column renders its own 36px top row
+   internally (see sidebar-top-row / editor-tab-header / rp-top-row). */
+.shell-upper {
   display: flex;
   flex: 1;
   overflow: hidden;
@@ -1681,4 +1687,20 @@ body {
   padding: 1px 6px;
   border-radius: 4px;
   color: var(--fg);
+}
+
+/* ── Body-class wiring demo (Obsidian parity) ──────────────────────────────
+   Proves installBodyClasses() is live. The shell's titlebar-equivalent
+   rows dim subtly when the window loses focus, matching Obsidian's
+   is-focused behavior. Tokens fall back to --titlebar-bg until Task A's
+   rename lands. */
+body:not(.is-focused) .editor-tab-header,
+body:not(.is-focused) .rp-top-row,
+body:not(.is-focused) .sidebar-top-row {
+  background: var(--titlebar-background, var(--titlebar-bg));
+}
+body.is-focused .editor-tab-header,
+body.is-focused .rp-top-row,
+body.is-focused .sidebar-top-row {
+  background: var(--titlebar-background-focused, var(--titlebar-bg));
 }

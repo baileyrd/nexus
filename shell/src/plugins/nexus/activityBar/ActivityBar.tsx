@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useActivityBarStore, type ActivityBarItem } from './activityBarStore'
 import { Icon } from '../../../icons'
+import { useLayoutStore } from '../../../stores/layoutStore'
 
 interface ActivityBarProps {
   onItemClick: (item: ActivityBarItem) => void
@@ -23,6 +24,9 @@ export function ActivityBar({ onItemClick }: ActivityBarProps) {
         height: '100%',
       }}
     >
+      {/* Built-in sidebar toggle — always first, above plugin items */}
+      <SidebarToggleButton />
+
       {/* Top navigation items */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         {topItems.map((item) => (
@@ -56,6 +60,38 @@ export function ActivityBar({ onItemClick }: ActivityBarProps) {
         </div>
       )}
     </div>
+  )
+}
+
+function SidebarToggleButton() {
+  const [hover, setHover] = useState(false)
+  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar)
+  return (
+    <button
+      type="button"
+      onClick={toggleSidebar}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      aria-label="Toggle sidebar"
+      title="Toggle sidebar"
+      style={{
+        position: 'relative',
+        height: 44,
+        background: hover ? 'var(--bg-hover)' : 'transparent',
+        border: 'none',
+        color: 'var(--fg-muted)',
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 0,
+        font: 'inherit',
+        fontSize: 18,
+        transition: 'background 0.08s, color 0.08s',
+      }}
+    >
+      <Icon name="panelLeft" size={18} />
+    </button>
   )
 }
 

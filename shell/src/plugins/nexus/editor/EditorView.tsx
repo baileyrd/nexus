@@ -3,7 +3,30 @@ import { useEditorStore, type EditorTab, type EditorTabMode } from './editorStor
 import { renderMarkdown } from './markdownRender'
 import { eventBus } from '../../../host/EventBus'
 import { useOutlineStore } from '../outline/outlineStore'
+import { Icon } from '../../../icons'
+import { useLayoutStore } from '../../../stores/layoutStore'
+import { WindowControls } from '../../../shell/WindowControls'
+import { EditorTabStrip } from './TabStrip'
+import { getEditorRuntime } from './runtime'
 import './markdown.css'
+
+/**
+ * Untitled tabs use `untitled-N` as their relpath placeholder. Such
+ * tabs don't have real path segments to walk — the breadcrumb should
+ * just show the tab name with no chevron trail.
+ */
+function isUntitledRelpath(relpath: string): boolean {
+  return /^untitled-\d+$/i.test(relpath)
+}
+
+/**
+ * Split a forge-relative path into segments. Forward-slash separated
+ * per the `files:open` contract; we defensively split on backslashes
+ * too so pasted Windows paths don't render as a single blob.
+ */
+function splitPathSegments(relpath: string): string[] {
+  return relpath.split(/[\\/]+/).filter((s) => s.length > 0)
+}
 
 /**
  * Reverse contract of `editor:scrollToHeading`: the editor reports the
@@ -52,11 +75,25 @@ export function EditorView({ onRetry }: EditorViewProps) {
   const tabs = useEditorStore((s) => s.tabs)
   const activeRelpath = useEditorStore((s) => s.activeRelpath)
   const setMode = useEditorStore((s) => s.setMode)
+  const setActive = useEditorStore((s) => s.setActive)
+  const rightPanelVisible = useLayoutStore((s) => s.rightPanel.visible)
 
   const activeTab = useMemo<EditorTab | null>(
     () => tabs.find((t) => t.relpath === activeRelpath) ?? null,
     [tabs, activeRelpath],
   )
+
+  const requestCloseTab = (relpath: string) => {
+    const rt = getEditorRuntime()
+    if (!rt) return
+    void rt.confirmAndClose(relpath)
+  }
+
+  const requestNewTab = () => {
+    const rt = getEditorRuntime()
+    if (!rt) return
+    rt.openUntitled()
+  }
 
   // Refs into the rendered body so an outline click can actually scroll
   // the right element. Preview uses the markdown body div; source uses
@@ -236,9 +273,36 @@ export function EditorView({ onRetry }: EditorViewProps) {
     height: '100%',
   }
 
+  const tabHeader = (
+    <div
+      className="editor-tab-header"
+      data-tauri-drag-region
+      style={{
+        height: 'var(--header-height)',
+        flex: '0 0 var(--header-height)',
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'stretch',
+        background: 'var(--bg-raised)',
+        borderBottom: '1px solid var(--line-soft)',
+      }}
+    >
+      <EditorTabStrip
+        tabs={tabs}
+        activeRelpath={activeRelpath}
+        onSelect={setActive}
+        onClose={requestCloseTab}
+        onNewTab={requestNewTab}
+      />
+      {!rightPanelVisible && <WindowControls />}
+    </div>
+  )
+
   if (tabs.length === 0) {
     return (
       <div style={rootStyle}>
+        {tabHeader}
+        <ViewHeader activeTab={null} />
         <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>
           Select a file to view
         </div>
@@ -248,6 +312,8 @@ export function EditorView({ onRetry }: EditorViewProps) {
 
   return (
     <div style={rootStyle}>
+      {tabHeader}
+      <ViewHeader activeTab={activeTab} />
       <div ref={scrollWrapRef} style={{ flex: '1 1 auto', overflow: 'auto', position: 'relative' }}>
         {activeTab ? (
           <>
@@ -282,6 +348,145 @@ export function EditorView({ onRetry }: EditorViewProps) {
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * Per-view header strip at the top of the editor area, mirroring
+ * Obsidian's `.view-header` pattern. Three slots:
+ *   left    — reserved for future back/forward navigation
+ *   title   — breadcrumb over `activeTab.relpath`, final segment in
+ *             --fg, earlier segments in --fg-muted, separated by a
+ *             right-chevron icon
+ *   actions — reserved for future view-actions (e.g. pin, more menu)
+ *
+ * Always renders so the row height doesn't flicker in/out as tabs
+ * open and close. With no active tab it shows a muted placeholder.
+ * Untitled tabs (`untitled-N`) show just their tab name with no
+ * path trail — they have no real directory hierarchy yet.
+ */
+function ViewHeader({ activeTab }: { activeTab: EditorTab | null }) {
+  return (
+    <div
+      className="editor-view-header"
+      style={{
+        height: 'var(--header-height)',
+        flex: '0 0 var(--header-height)',
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 6px 0 12px',
+        background: 'var(--bg-raised)',
+        borderBottom: '1px solid var(--line-soft)',
+        gap: 4,
+        userSelect: 'none',
+      }}
+    >
+      <div
+        className="editor-view-header-left"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          flexShrink: 0,
+        }}
+      />
+      <div
+        className="editor-view-header-title"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+          fontSize: 'var(--ui-size, 12px)',
+        }}
+      >
+        <BreadcrumbSegments activeTab={activeTab} />
+      </div>
+      <div
+        className="editor-view-header-actions"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          flexShrink: 0,
+          gap: 2,
+        }}
+      />
+    </div>
+  )
+}
+
+function BreadcrumbSegments({ activeTab }: { activeTab: EditorTab | null }) {
+  if (!activeTab) {
+    return (
+      <span style={{ color: 'var(--fg-dim)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        No file open
+      </span>
+    )
+  }
+
+  // Untitled tabs have no path hierarchy — render the bare name.
+  if (isUntitledRelpath(activeTab.relpath)) {
+    return (
+      <span style={{ color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {activeTab.name}
+      </span>
+    )
+  }
+
+  const segments = splitPathSegments(activeTab.relpath)
+  if (segments.length === 0) {
+    return (
+      <span style={{ color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {activeTab.name}
+      </span>
+    )
+  }
+
+  const lastIndex = segments.length - 1
+  return (
+    <>
+      {segments.map((seg, i) => {
+        const isLast = i === lastIndex
+        return (
+          <span
+            key={i}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              minWidth: 0,
+            }}
+          >
+            <span
+              style={{
+                color: isLast ? 'var(--fg)' : 'var(--fg-muted)',
+                fontWeight: isLast ? 500 : 400,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {seg}
+            </span>
+            {!isLast && (
+              <span
+                aria-hidden
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  color: 'var(--fg-dim)',
+                  flexShrink: 0,
+                }}
+              >
+                <Icon name="chev" size={12} />
+              </span>
+            )}
+          </span>
+        )
+      })}
+    </>
   )
 }
 

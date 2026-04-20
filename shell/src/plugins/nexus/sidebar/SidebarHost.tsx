@@ -1,9 +1,11 @@
-import { createElement } from 'react'
+import { createElement, useMemo } from 'react'
 import { useSlotStore } from '../../../registry/SlotRegistry'
-import { useLayoutStore } from '../../../stores/layoutStore'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
+import { useActivityBarStore } from '../activityBar/activityBarStore'
 import { Icon } from '../../../icons'
 import { getRegistry } from '../../../host/shellRegistry'
+import { SidebarTabStrip } from './SidebarTabStrip'
+import { useSidebarSplitStore } from './sidebarSplitStore'
 
 function basename(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, '')
@@ -54,16 +56,51 @@ function SidebarIconBtn({
   )
 }
 
+function EmptyPlaceholder({ message }: { message: string }) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '24px 16px',
+        textAlign: 'center',
+        color: 'var(--text-muted)',
+        fontSize: 12,
+        userSelect: 'none',
+      }}
+    >
+      {message}
+    </div>
+  )
+}
+
 export function SidebarHost() {
-  const activeViewId = useLayoutStore((s) => s.sidebar.activeView)
   const entries = useSlotStore((s) => s.slots.sidebarContent)
   const rootPath = useWorkspaceStore((s) => s.rootPath)
+  const activityItems = useActivityBarStore((s) => s.items)
 
-  if (!activeViewId) return null
-  const match = entries.find((e) => e.id === activeViewId)
-  if (!match) return null
+  const leaves = useSidebarSplitStore((s) => s.leaves)
+  const activeLeafId = useSidebarSplitStore((s) => s.activeLeafId)
+  const setActiveLeaf = useSidebarSplitStore((s) => s.setActiveLeaf)
+  const removeLeaf = useSidebarSplitStore((s) => s.removeLeaf)
 
   const workspaceName = rootPath ? basename(rootPath) : null
+
+  // Title resolver — activity bar items map viewId → title. Falls back to
+  // the raw type string when a leaf references a view with no activity-bar
+  // entry (rare, but keeps the tab from rendering blank).
+  const getTitle = useMemo(() => {
+    const byViewId = new Map<string, string>()
+    for (const item of activityItems) byViewId.set(item.viewId, item.title)
+    return (type: string) => byViewId.get(type) ?? type
+  }, [activityItems])
+
+  const activeLeaf = leaves.find((l) => l.id === activeLeafId) ?? null
+  const match = activeLeaf
+    ? entries.find((e) => e.id === activeLeaf.type)
+    : null
 
   const openSettings = () => {
     const reg = getRegistry()
@@ -80,11 +117,23 @@ export function SidebarHost() {
         overflow: 'hidden',
       }}
     >
-      {/* Active view content — each view renders its own header /
-          toolbar. The shared workspace-label row was dropped so
-          view-specific actions (e.g. the files toolbar) sit flush
-          against the top. */}
+      {/* Tab strip — replaces the old 30px sidebar-top-row drag strip.
+          Itself carries data-tauri-drag-region so empty space beyond
+          the tabs drags the window. */}
+      <SidebarTabStrip
+        leaves={leaves}
+        activeLeafId={activeLeafId}
+        onSelect={setActiveLeaf}
+        onClose={removeLeaf}
+        getTitle={getTitle}
+      />
+
+      {/* Active leaf body — renders the view matching the active leaf's
+          type. Surfaces an Obsidian-style placeholder when the registry
+          has no match (plugin missing/disabled) or when the user has
+          closed every tab. */}
       <div
+        className="sidebar-leaf-body"
         style={{
           flex: 1,
           overflow: 'hidden',
@@ -93,10 +142,16 @@ export function SidebarHost() {
           minHeight: 0,
         }}
       >
-        {createElement(match.component)}
+        {!activeLeaf ? (
+          <EmptyPlaceholder message="No tabs open — pick one from the activity bar" />
+        ) : !match ? (
+          <EmptyPlaceholder message="No view — plugin missing or disabled" />
+        ) : (
+          createElement(match.component)
+        )}
       </div>
 
-      {/* Vault footer */}
+      {/* Vault footer — unchanged. */}
       <div
         style={{
           flexShrink: 0,

@@ -1,6 +1,7 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { useLayoutStore } from '../../../stores/layoutStore'
 import { SidebarHost } from './SidebarHost'
+import { useSidebarSplitStore } from './sidebarSplitStore'
 
 const EVENT_SHOW = 'sidebar:showView'
 const EVENT_HIDE = 'sidebar:hide'
@@ -28,6 +29,11 @@ export const sidebarPlugin: Plugin = {
     }
 
     api.events.on<{ viewId: string }>(EVENT_SHOW, ({ viewId }) => {
+      // Obsidian-faithful reveal: find an existing leaf of this type and
+      // activate it, else create a new one. The legacy layoutStore
+      // activeView field is kept as a mirror so the activity bar's
+      // "which icon is highlighted" logic still lines up.
+      useSidebarSplitStore.getState().revealLeaf(viewId)
       useLayoutStore.getState().setActiveSidebarView(viewId)
       useLayoutStore.setState((s) => ({ sidebar: { ...s.sidebar, visible: true } }))
     })

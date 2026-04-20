@@ -7,6 +7,7 @@ import { SlotSurface } from './slots/SlotSurface'
 import { ResizeHandle } from './ResizeHandle'
 import { getRegistry } from '../host/shellRegistry'
 import { contextKeyService } from '../host/ContextKeyService'
+import { useSidebarSplitStore } from '../plugins/nexus/sidebar/sidebarSplitStore'
 
 export default function App() {
   const slots = useSlotStore(s => s.slots)
@@ -23,7 +24,6 @@ export default function App() {
       const reg = getRegistry()
       const info = [
         `Registry: ${reg ? 'loaded' : 'NULL'}`,
-        `titleBar: ${slots.titleBar.length}`,
         `activityBar: ${slots.activityBar.length}`,
         `sidebar: ${slots.sidebar.length}`,
         `editorArea: ${slots.editorArea.length}`,
@@ -36,6 +36,40 @@ export default function App() {
     }, 500)
     return () => clearTimeout(timer)
   }, [slots])
+
+  // Boot-time view resolver — Obsidian-faithful. When sidebar.activeView
+  // (or the panelArea equivalent) doesn't resolve against the live slot
+  // registry, pick the highest-priority registered view and heal state
+  // so activity-bar clicks, activity-bar state, and the rendered view
+  // all agree. Runs whenever the relevant slot set changes, so plugin
+  // enable/disable self-corrects too. The right panel has its own
+  // first-registered-wins logic in rightPanelStore, so it's excluded.
+  useEffect(() => {
+    const sbEntries = slots.sidebarContent ?? []
+    if (sbEntries.length === 0) return
+    const current = useLayoutStore.getState().sidebar.activeView
+    if (!current || !sbEntries.some((e) => e.id === current)) {
+      // SlotRegistry already stores entries sorted ascending by priority.
+      useLayoutStore.getState().setActiveSidebarView(sbEntries[0].id)
+    }
+    // Heal the split store too: if the user has no open leaves but a
+    // sidebarContent view exists, seed one so the sidebar boots with a
+    // visible tab (Obsidian's "first-registered-wins" behaviour). The
+    // legacy activeView resolver above still runs for back-compat with
+    // code that mirrors activeView for activity-bar highlighting.
+    const split = useSidebarSplitStore.getState()
+    if (split.leaves.length === 0) {
+      split.revealLeaf(sbEntries[0].id)
+    }
+  }, [slots.sidebarContent])
+
+  useEffect(() => {
+    const paEntries = slots.panelArea ?? []
+    if (paEntries.length === 0) return
+    const current = useLayoutStore.getState().panelArea.activePanel
+    if (current && paEntries.some((e) => e.id === current)) return
+    useLayoutStore.getState().setActivePanel(paEntries[0].id)
+  }, [slots.panelArea])
 
   // Global keyboard dispatcher
   useEffect(() => {
@@ -84,83 +118,82 @@ export default function App() {
         <SlotSurface entries={slots.overlay} />
       </div>
 
-      {/* Title bar */}
-      <div className="shell-titlebar">
-        <SlotSurface entries={slots.titleBar} />
-      </div>
+      {/* Upper row: full-height activity bar sits alongside the body
+          columns (sidebar / center / rightPanel). Obsidian-faithful
+          structure — there is no shared top strip; each body column
+          renders its own 36px top row internally. */}
+      <div className="shell-upper">
 
-      {/* Body */}
-      {(() => {
-        // Pane-mode: one slot entry takes over the entire body region.
-        // The activity bar stays visible so the user can switch out;
-        // the titlebar, statusbar, and overlay are untouched (rendered
-        // outside this branch).
-        const paneEntry = paneModeViewId
-          ? slots.paneMode.find(e => e.id === paneModeViewId)
-          : undefined
+        {/* Activity bar — full height of upper row, i.e. window top down
+            to the statusbar. */}
+        <div className="shell-activitybar">
+          <SlotSurface entries={slots.activityBar} />
+        </div>
 
-        if (paneModeViewId && !paneEntry) {
-          console.warn(
-            `[App] Pane-mode viewId "${paneModeViewId}" is set but no matching slot entry exists; falling through to tri-pane.`,
-          )
-        }
+        {(() => {
+          // Pane-mode: one slot entry takes over the entire body region.
+          // The activity bar stays visible (it's a sibling of this
+          // branch); the statusbar and overlay are untouched (rendered
+          // outside this branch).
+          const paneEntry = paneModeViewId
+            ? slots.paneMode.find(e => e.id === paneModeViewId)
+            : undefined
 
-        if (paneEntry) {
-          return (
-            <div className="shell-body">
-              <div className="shell-activitybar">
-                <SlotSurface entries={slots.activityBar} />
-              </div>
+          if (paneModeViewId && !paneEntry) {
+            console.warn(
+              `[App] Pane-mode viewId "${paneModeViewId}" is set but no matching slot entry exists; falling through to tri-pane.`,
+            )
+          }
+
+          if (paneEntry) {
+            return (
               <div className="shell-pane-mode">
                 <SlotSurface entries={[paneEntry]} />
               </div>
-            </div>
-          )
-        }
+            )
+          }
 
-        return (
-          <div className="shell-body">
-            <div className="shell-activitybar">
-              <SlotSurface entries={slots.activityBar} />
-            </div>
+          return (
+            <>
+              {sidebar.visible && (
+                <>
+                  <div className="shell-sidebar" style={{ width: sidebar.width }}>
+                    <SlotSurface entries={slots.sidebar} />
+                  </div>
+                  <ResizeHandle direction="horizontal" onResize={resizeSidebar} />
+                </>
+              )}
 
-            {sidebar.visible && (
-              <>
-                <div className="shell-sidebar" style={{ width: sidebar.width }}>
-                  <SlotSurface entries={slots.sidebar} />
+              <div className="shell-center">
+                <div className="shell-editor-area">
+                  <SlotSurface entries={slots.editorArea} />
                 </div>
-                <ResizeHandle direction="horizontal" onResize={resizeSidebar} />
-              </>
-            )}
 
-            <div className="shell-center">
-              <div className="shell-editor-area">
-                <SlotSurface entries={slots.editorArea} />
+                {panelArea.visible && (
+                  <>
+                    <ResizeHandle direction="vertical" onResize={resizePanelArea} />
+                    <div className="shell-panel-area" style={{ height: panelArea.height }}>
+                      <SlotSurface entries={slots.panelArea} />
+                    </div>
+                  </>
+                )}
               </div>
 
-              {panelArea.visible && (
+              {rightPanel.visible && (
                 <>
-                  <ResizeHandle direction="vertical" onResize={resizePanelArea} />
-                  <div className="shell-panel-area" style={{ height: panelArea.height }}>
-                    <SlotSurface entries={slots.panelArea} />
+                  <ResizeHandle direction="horizontal" onResize={resizeRightPanel} />
+                  <div className="shell-right-panel" style={{ width: rightPanel.width }}>
+                    <SlotSurface entries={slots.rightPanel} />
                   </div>
                 </>
               )}
-            </div>
+            </>
+          )
+        })()}
+      </div>
 
-            {rightPanel.visible && (
-              <>
-                <ResizeHandle direction="horizontal" onResize={resizeRightPanel} />
-                <div className="shell-right-panel" style={{ width: rightPanel.width }}>
-                  <SlotSurface entries={slots.rightPanel} />
-                </div>
-              </>
-            )}
-          </div>
-        )
-      })()}
-
-      {/* Status bar */}
+      {/* Status bar — stays full-width at the very bottom of root,
+          spanning under the activity bar too. */}
       <div className="shell-statusbar">
         <div className="shell-statusbar-left">
           <SlotSurface entries={slots.statusBarLeft} />
