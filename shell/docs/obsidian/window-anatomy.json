@@ -1,0 +1,18 @@
+{
+  "title": "Obsidian Window Anatomy",
+  "subtitle": "Top-down skeleton of desktop chrome with CSS sources",
+  "canvas": {"width": 960, "height": 780},
+  "zones": [
+    {"id": "browserwindow", "title": "BrowserWindow (Electron)", "classes": ["body.is-frameless", "mod-windows", "mod-macos", "mod-linux", "is-focused"]},
+    {"id": "titlebar", "title": "Titlebar", "selector": ".titlebar", "height_variants_px": {"native": 0, "frameless": 30, "hidden_frameless": 39, "fullscreen": "display:none"}, "css_var": "--titlebar-height", "lines": [3960, 3979, 3987, 3993]},
+    {"id": "ribbon", "title": "Ribbon (activity bar)", "selector": ".workspace-ribbon.mod-left", "width_px": 44, "css_var": "--ribbon-width", "margin_top_px": 40, "lines": [2598, 4393, 4416]},
+    {"id": "left-split", "title": "Left sidedock", "selector": ".workspace-split.mod-left-split", "width_px": "runtime (JS)", "flex": "0 0 auto", "lines": [5957, 4204]},
+    {"id": "root-split", "title": "Editor / root split", "selector": ".workspace-split.mod-root", "width_px": "flex 1", "lines": [5861, 4188, 4288]},
+    {"id": "right-split", "title": "Right sidedock", "selector": ".workspace-split.mod-right-split", "width_px": "runtime (JS)", "hosts_window_controls": true, "lines": [5957, 4040, 6076]},
+    {"id": "status-bar", "title": "Status bar", "selector": ".status-bar", "position": "fixed", "min_height_px": 18, "border_radius": "8px 0 0 0", "lines": [5536, 2664]}
+  ],
+  "edges": [
+    {"from": "titlebar", "to": "right-split", "label": "min/max/close nest in rightmost tab-header on Win/Linux hidden-frameless"},
+    {"from": "ribbon", "to": "left-split", "label": "adjacent flex siblings · 1px --divider-color"}
+  ]
+}

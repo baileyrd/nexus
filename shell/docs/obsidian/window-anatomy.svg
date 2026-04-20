@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 780" width="960" height="780">
+  <defs>
+    <filter id="shadowSoft" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+    text { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+    .title { font-size: 28px; font-weight: 700; fill: #111827; }
+    .subtitle { font-size: 13px; font-weight: 500; fill: #6b7280; }
+    .section { font-size: 12px; font-weight: 700; fill: #2563eb; letter-spacing: 1.3px; }
+    .node-title { font-size: 15px; font-weight: 700; fill: #111827; }
+    .node-sub { font-size: 11px; font-weight: 500; fill: #6b7280; }
+    .node-type { font-size: 10px; font-weight: 700; fill: #9ca3af; letter-spacing: 0.08em; }
+    .mono-dim { font-family: Menlo, Consolas, monospace; font-size: 10px; fill: #7c3aed; }
+    .legend { font-size: 11px; font-weight: 500; fill: #6b7280; }
+    </style>
+  </defs>
+  <rect width="960" height="780" fill="#ffffff"/>
+  <text x="40" y="44" class="title">Obsidian Window Anatomy</text>
+  <text x="40" y="64" class="subtitle">Top-down skeleton of the desktop chrome · every region traced to a CSS custom property or app.css line</text>
+
+  <!-- Outer window frame -->
+  <rect x="40" y="90" width="880" height="640" rx="12" fill="#ffffff" stroke="#111827" stroke-width="2" filter="url(#shadowSoft)"/>
+  <text x="56" y="112" class="section">BROWSERWINDOW (ELECTRON)</text>
+  <text x="56" y="128" class="node-sub">body.is-frameless · body.mod-windows / mod-macos / mod-linux · body.is-focused</text>
+
+  <!-- Titlebar row (0 on win/linux normal, 30px when is-frameless, 39px when is-hidden-frameless) -->
+  <rect x="56" y="140" width="848" height="32" rx="6" fill="#f8fafc" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="72" y="158" class="node-type">TITLEBAR  .titlebar</text>
+  <text x="72" y="172" class="node-sub">height: 0 / 30 / 39px via body class · bg --titlebar-background</text>
+  <text x="720" y="160" class="mono-dim">--titlebar-height: 30px (app.css:3960)</text>
+  <text x="720" y="173" class="mono-dim">hidden-frameless: 39px (app.css:3987)</text>
+
+  <!-- Inside: ribbon + left split + root + right split, and status bar -->
+  <rect x="56" y="184" width="848" height="512" rx="6" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 5"/>
+  <text x="72" y="202" class="section">WORKSPACE ROW (flex)</text>
+
+  <!-- Ribbon -->
+  <rect x="72" y="216" width="66" height="460" rx="8" fill="#ffffff" stroke="#7c3aed" stroke-width="1.8"/>
+  <text x="105" y="234" text-anchor="middle" class="node-type">RIBBON</text>
+  <text x="105" y="252" text-anchor="middle" class="node-title">.workspace</text>
+  <text x="105" y="268" text-anchor="middle" class="node-title">-ribbon</text>
+  <text x="105" y="284" text-anchor="middle" class="node-title">.mod-left</text>
+  <text x="105" y="308" text-anchor="middle" class="mono-dim">width: 44px</text>
+  <text x="105" y="322" text-anchor="middle" class="mono-dim">--ribbon-width</text>
+  <text x="105" y="336" text-anchor="middle" class="mono-dim">(css:2598)</text>
+  <text x="105" y="358" text-anchor="middle" class="node-sub">margin-top:</text>
+  <text x="105" y="372" text-anchor="middle" class="node-sub">40px (css:4394)</text>
+  <text x="105" y="396" text-anchor="middle" class="node-sub">flex 0 0 44px</text>
+  <text x="105" y="410" text-anchor="middle" class="node-sub">border-right 1px</text>
+  <text x="105" y="630" text-anchor="middle" class="node-type">VAULT PROFILE</text>
+  <text x="105" y="648" text-anchor="middle" class="node-sub">.workspace-sidedock-</text>
+  <text x="105" y="662" text-anchor="middle" class="node-sub">vault-profile</text>
+
+  <!-- Left split -->
+  <rect x="148" y="216" width="200" height="460" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.8"/>
+  <text x="248" y="234" text-anchor="middle" class="node-type">LEFT SIDEDOCK</text>
+  <text x="248" y="252" text-anchor="middle" class="node-title">.workspace-split</text>
+  <text x="248" y="268" text-anchor="middle" class="node-title">.mod-left-split</text>
+  <rect x="158" y="284" width="180" height="34" rx="4" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+  <text x="248" y="299" text-anchor="middle" class="node-type">TAB HEADER  40px</text>
+  <text x="248" y="313" text-anchor="middle" class="mono-dim">--header-height (css:6092)</text>
+  <rect x="158" y="326" width="180" height="70" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="248" y="342" text-anchor="middle" class="node-type">NAV-HEADER</text>
+  <text x="248" y="358" text-anchor="middle" class="node-sub">.search-input-container</text>
+  <text x="248" y="374" text-anchor="middle" class="node-sub">.nav-buttons-container</text>
+  <text x="248" y="388" text-anchor="middle" class="mono-dim">padding 8px (css:8345)</text>
+  <rect x="158" y="404" width="180" height="260" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="248" y="420" text-anchor="middle" class="node-type">VIEW-CONTENT</text>
+  <text x="248" y="440" text-anchor="middle" class="node-sub">files tree · nav-files</text>
+  <text x="248" y="458" text-anchor="middle" class="mono-dim">view-header display:none</text>
+  <text x="248" y="472" text-anchor="middle" class="mono-dim">(css:4204-4207)</text>
+  <text x="248" y="496" text-anchor="middle" class="mono-dim">width: runtime (JS)</text>
+  <text x="248" y="510" text-anchor="middle" class="mono-dim">flex: 0 0 auto (css:5957)</text>
+
+  <!-- Root split -->
+  <rect x="358" y="216" width="360" height="460" rx="8" fill="#ffffff" stroke="#10b981" stroke-width="2.2"/>
+  <rect x="364" y="222" width="348" height="448" rx="5" fill="none" stroke="#10b981" stroke-width="1" opacity="0.55"/>
+  <text x="538" y="240" text-anchor="middle" class="node-type">EDITOR / ROOT SPLIT</text>
+  <text x="538" y="258" text-anchor="middle" class="node-title">.workspace-split.mod-root</text>
+  <rect x="372" y="270" width="332" height="36" rx="4" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+  <text x="538" y="286" text-anchor="middle" class="node-type">TAB HEADER  40px</text>
+  <text x="538" y="300" text-anchor="middle" class="mono-dim">--tab-container-background (css:2693)</text>
+  <rect x="372" y="312" width="332" height="36" rx="4" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+  <text x="538" y="328" text-anchor="middle" class="node-type">VIEW HEADER  40px  (visible here)</text>
+  <text x="538" y="342" text-anchor="middle" class="mono-dim">.view-header height:40 (css:4188-4196)</text>
+  <rect x="372" y="354" width="332" height="310" rx="4" fill="#ffffff" stroke="#6ee7b7" stroke-width="1"/>
+  <text x="538" y="380" text-anchor="middle" class="node-type">VIEW-CONTENT</text>
+  <text x="538" y="404" text-anchor="middle" class="node-title">markdown editor</text>
+  <text x="538" y="430" text-anchor="middle" class="node-sub">height: calc(100% - --header-height)</text>
+  <text x="538" y="446" text-anchor="middle" class="mono-dim">(css:4288-4290)</text>
+  <text x="538" y="472" text-anchor="middle" class="node-sub">bg --background-primary</text>
+  <text x="538" y="488" text-anchor="middle" class="mono-dim">(css:4292-4294)</text>
+
+  <!-- Right split -->
+  <rect x="728" y="216" width="170" height="460" rx="8" fill="#ffffff" stroke="#f97316" stroke-width="1.8"/>
+  <text x="813" y="234" text-anchor="middle" class="node-type">RIGHT SIDEDOCK</text>
+  <text x="813" y="252" text-anchor="middle" class="node-title">.mod-right-split</text>
+  <rect x="738" y="266" width="150" height="34" rx="4" fill="#fff7ed" stroke="#fdba74" stroke-width="1"/>
+  <text x="813" y="281" text-anchor="middle" class="node-type">TAB HEADER  40px</text>
+  <text x="813" y="295" text-anchor="middle" class="mono-dim">mod-top-right-space</text>
+  <rect x="819" y="269" width="66" height="28" rx="3" fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+  <text x="852" y="287" text-anchor="middle" class="mono-dim">min|max|×</text>
+  <text x="852" y="310" text-anchor="middle" class="mono-dim" fill="#b45309">+126px --frame-right-space</text>
+  <text x="813" y="322" text-anchor="middle" class="mono-dim" fill="#b45309">(css:3972, 4040)</text>
+  <rect x="738" y="334" width="150" height="330" rx="4" fill="#ffffff" stroke="#fdba74" stroke-width="1"/>
+  <text x="813" y="352" text-anchor="middle" class="node-type">VIEW-CONTENT</text>
+  <text x="813" y="374" text-anchor="middle" class="node-sub">outline · backlinks · etc</text>
+  <text x="813" y="398" text-anchor="middle" class="mono-dim">view-header display:none</text>
+  <text x="813" y="412" text-anchor="middle" class="mono-dim">(css:4204-4207)</text>
+  <text x="813" y="438" text-anchor="middle" class="mono-dim">width: runtime (JS)</text>
+  <text x="813" y="454" text-anchor="middle" class="mono-dim">flex: 0 0 auto</text>
+
+  <!-- Status bar -->
+  <rect x="616" y="696" width="288" height="24" rx="6" fill="#f8fafc" stroke="#6b7280" stroke-width="1.4"/>
+  <text x="630" y="712" class="node-type">STATUS BAR</text>
+  <text x="760" y="712" text-anchor="middle" class="node-sub">fixed · bottom:0 · right:0 · min-h 18px</text>
+  <text x="760" y="726" text-anchor="middle" class="mono-dim">css:5536-5556 · z-index 15</text>
+
+  <!-- Legend -->
+  <rect x="40" y="740" width="880" height="28" rx="6" fill="none" stroke="#e5e7eb" stroke-width="1"/>
+  <circle cx="60" cy="754" r="5" fill="#7c3aed"/><text x="72" y="758" class="legend">Ribbon chrome</text>
+  <circle cx="180" cy="754" r="5" fill="#2563eb"/><text x="192" y="758" class="legend">Left sidedock</text>
+  <circle cx="300" cy="754" r="5" fill="#10b981"/><text x="312" y="758" class="legend">Root/editor (double-border)</text>
+  <circle cx="490" cy="754" r="5" fill="#f97316"/><text x="502" y="758" class="legend">Right sidedock (hosts window controls)</text>
+  <circle cx="730" cy="754" r="5" fill="#6b7280"/><text x="742" y="758" class="legend">Status bar · fixed overlay</text>
+</svg>

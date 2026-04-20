@@ -1,0 +1,50 @@
+{
+  "title": "Status Bar Anatomy",
+  "selector": ".status-bar",
+  "canvas": {"width": 960, "height": 720},
+  "container": {
+    "position": "fixed",
+    "bottom": 0,
+    "right": 0,
+    "width": "auto",
+    "min_height_px": 18,
+    "padding_px": 4,
+    "gap_px": 4,
+    "z_index": 15,
+    "border_radius": "8px 0 0 0",
+    "border_width": "top + left only",
+    "lines": [5536, 5556]
+  },
+  "fullscreen_override": {
+    "selector": "body:not(.is-fullscreen) .status-bar",
+    "padding_right_px": 8,
+    "line": 5557
+  },
+  "item": {
+    "selector": ".status-bar-item",
+    "padding": "3px 4px",
+    "border_radius_px": 4,
+    "line_height": 1,
+    "lines": [5560, 5567]
+  },
+  "segment": {
+    "selector": ".status-bar-item-segment",
+    "margin_inline_end_px": 8,
+    "gap_px": 4,
+    "lines": [5595, 5602]
+  },
+  "states": [
+    {"selector": ".status-bar-item.mod-clickable:hover", "bg": "--background-modifier-hover", "line": 5571},
+    {"selector": ".status-bar-item:empty", "rule": "display:none", "line": 5587},
+    {"selector": ".is-screenshotting .status-bar", "rule": "display:none", "line": 5604}
+  ],
+  "tokens": [
+    {"name": "--status-bar-background", "value": "--background-secondary", "line": 2658},
+    {"name": "--status-bar-border-color", "value": "--divider-color", "line": 2659},
+    {"name": "--status-bar-border-width", "value": "--border-width 0 0 --border-width", "line": 2660},
+    {"name": "--status-bar-font-size", "value": "--font-ui-smaller", "line": 2661},
+    {"name": "--status-bar-text-color", "value": "--text-muted", "line": 2662},
+    {"name": "--status-bar-position", "value": "fixed", "line": 2663},
+    {"name": "--status-bar-radius", "value": "--radius-m 0 0 0", "line": 2664}
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "title": "Right Panel (Right Split) Anatomy",
+  "selector": ".workspace-split.mod-right-split",
+  "canvas": {"width": 960, "height": 820},
+  "scenarios": [
+    {
+      "platform": "windows|linux",
+      "frame_state": "is-hidden-frameless",
+      "controls_location": ".workspace-tab-header-container .titlebar-button-container.mod-right",
+      "reserved_right_px": 126,
+      "css_var": "--frame-right-space",
+      "lines": [5675, 4061, 4040, 3972]
+    },
+    {
+      "platform": "macos",
+      "frame_state": "is-hidden-frameless",
+      "controls_location": "OS native traffic lights (no in-app)",
+      "right_toggle": {
+        "selector": ".mod-macos.is-hidden-frameless:not(.is-popout-window) .sidebar-toggle-button.mod-right",
+        "position": "fixed",
+        "top": 0,
+        "right": 0,
+        "z_index_token": "--layer-cover",
+        "lines": [6621, 6628]
+      },
+      "clearance_padding_px": 38,
+      "clearance_line": 6629
+    }
+  ],
+  "view_header": {"state": "display:none", "lines": [4204, 4207]},
+  "view_content": {"height": "100%", "overflow": "auto", "lines": [4298, 4301]},
+  "resize_handle": {"selector": ".workspace-split.mod-right-split > .workspace-leaf-resize-handle", "width_px": 3, "border_side": "inline-start", "lines": [5934, 5945]}
+}

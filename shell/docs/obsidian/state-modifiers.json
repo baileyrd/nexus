@@ -1,0 +1,76 @@
+{
+  "title": "Body State Modifier Classes",
+  "canvas": {"width": 960, "height": 900},
+  "groups": [
+    {
+      "group": "frame",
+      "classes": [
+        {"class": "is-frameless", "effects": [
+          {"rule": "body padding-top 30px", "line": 3976},
+          {"rule": ".titlebar height 30px", "lines": [3979, 3982]},
+          {"rule": ":not(is-maximized) padding-top 2px", "lines": [3984, 3985]}
+        ]},
+        {"class": "is-hidden-frameless", "effects": [
+          {"rule": ".titlebar height 39px", "line": 3987},
+          {"rule": "-webkit-app-region: no-drag on titlebar", "line": 4022},
+          {"rule": "--divider-vertical-height: 100%", "line": 4008},
+          {"rule": ".titlebar-button.mod-logo display:none", "line": 4025},
+          {"rule": "mod-macos titlebar display:none; mod-windows|linux titlebar transparent pointer-events:none", "lines": [5701, 5720]}
+        ]},
+        {"class": "starter", "effects": [
+          {"rule": "restores titlebar to 30px under hidden-frameless", "line": 3990},
+          {"rule": "keeps drag region (excluded from 4022)", "line": 4022}
+        ]}
+      ]
+    },
+    {
+      "group": "platform",
+      "classes": [
+        {"class": "mod-macos", "effects": [
+          {"rule": "--frame-left-space 36px · --frame-right-space 0", "lines": [3963, 3964]},
+          {"rule": "titlebar-button-container top:8px", "line": 5650},
+          {"rule": "mod-left left: 80px/zoom", "line": 5656},
+          {"rule": "titlebar-button radius-s", "line": 5694}
+        ]},
+        {"class": "mod-windows", "effects": [
+          {"rule": "--frame-left-space 0 · --frame-right-space 126px", "lines": [3971, 3972]},
+          {"rule": "titlebar-button padding 0 16px", "lines": [5728, 5731]},
+          {"rule": "full-height button container", "line": 5723},
+          {"rule": "close:hover error bg + white icon", "lines": [5738, 5746]}
+        ]},
+        {"class": "mod-linux", "effects": [
+          {"rule": "same as mod-windows (selector list)", "lines": [3969, 3972]},
+          {"rule": "close:hover error bg", "lines": [5738, 5746]}
+        ]}
+      ]
+    },
+    {
+      "group": "window",
+      "classes": [
+        {"class": "is-maximized", "effects": [{"rule": "removes the 2px padding-top under frameless", "lines": [3983, 3985]}]},
+        {"class": "is-fullscreen", "effects": [
+          {"rule": ".titlebar display:none", "lines": [3993, 3994]},
+          {"rule": "disables frame-space padding rules", "lines": [4037, 4040]},
+          {"rule": "status-bar loses 8px right padding", "lines": [5557, 5559]}
+        ]},
+        {"class": "is-focused", "effects": [
+          {"rule": "--titlebar-background → -focused", "lines": [4000, 4002]},
+          {"rule": "--tab-container-background → -focused", "lines": [4004, 4006]},
+          {"rule": ".workspace-leaf.mod-active .view-header bg focused", "line": 4201},
+          {"rule": "is-active tab colors", "lines": [6132, 6147]}
+        ]}
+      ]
+    },
+    {
+      "group": "visibility",
+      "classes": [
+        {"class": "show-view-header", "absence_rule": ".view-header display:none outside mod-root", "lines": [4198, 4207]},
+        {"class": "show-ribbon", "absence_rule": "--ribbon-width 0 + display:none", "lines": [4409, 4414]},
+        {"class": "is-translucent", "effects": [
+          {"rule": "collapsed side tabs visibility:hidden", "lines": [5961, 5964]},
+          {"rule": "sidebar-toggle chrome tweak", "lines": [5765, 5768]}
+        ]}
+      ]
+    }
+  ]
+}

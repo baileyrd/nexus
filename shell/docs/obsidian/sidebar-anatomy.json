@@ -1,0 +1,32 @@
+{
+  "title": "Sidebar (Left Split) Anatomy",
+  "selector": ".workspace-split.mod-left-split",
+  "canvas": {"width": 960, "height": 820},
+  "stack": [
+    {"selector": ".workspace-tabs.mod-top", "kind": "tab container"},
+    {"selector": ".workspace-tab-header-container", "height_px": 40, "css_var": "--header-height", "line": 6092},
+    {"selector": ".view-header", "state": "display:none in sidebars", "lines": [4204, 4207]},
+    {"selector": ".view-content", "height": "100%", "overflow": "auto", "lines": [4298, 4301]},
+    {"selector": ".nav-header", "padding_px": 8, "line": 8344},
+    {"selector": ".nav-header .search-input-container", "margin": "4px auto", "line": 8347},
+    {"selector": ".nav-buttons-container", "gap_px": 2, "flex_wrap": true, "line": 8351},
+    {"selector": ".nav-files-container", "kind": "tree"}
+  ],
+  "split": {
+    "flex": "0 0 auto",
+    "width_px": "runtime (JS)",
+    "line": 5957
+  },
+  "resize_handle": {
+    "selector": ".workspace-split.mod-left-split > .workspace-leaf-resize-handle",
+    "width_px": 3,
+    "css_var": "--divider-width-hover",
+    "height": "calc(100% - --header-height)",
+    "z_index": 15,
+    "lines": [5926, 5965]
+  },
+  "vault_profile": {
+    "selector": "body:not(.is-mobile) .workspace-split.mod-left-split .workspace-sidedock-vault-profile",
+    "lines": [5778, 5830]
+  }
+}

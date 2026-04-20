@@ -1,0 +1,33 @@
+{
+  "title": "Editor / Root Split Anatomy",
+  "selector": ".workspace-split.mod-root",
+  "canvas": {"width": 960, "height": 800},
+  "stack": [
+    {"selector": ".workspace-tab-header-container", "height_px": 40, "line": 6092},
+    {"selector": ".view-header", "height_px": 40, "padding": "0 12px", "gap_px": 8, "visible_in": "mod-root only", "lines": [4188, 4204]},
+    {"selector": ".view-content", "height": "calc(100% − --header-height)", "bg": "--background-primary", "lines": [4288, 4294]}
+  ],
+  "view_header_parts": [
+    {"selector": ".view-header-left", "line": 4218},
+    {"selector": ".view-header-title-container", "flex": "1 1 auto", "justify": "center (--file-header-justify)", "lines": [4223, 4235]},
+    {"selector": ".view-header-nav-buttons", "icon_size_px": 16, "lines": [5972, 5979]}
+  ],
+  "focus_states": [
+    {"selector": ".is-focused .workspace-leaf.mod-active .view-header", "bg": "--file-header-background-focused", "line": 4201},
+    {"selector": ".is-focused .workspace-tab-header-container .workspace-tab-header.is-active", "line": 6135}
+  ],
+  "visibility_toggle": {
+    "selector": "body:not(.show-view-header):not(.is-phone) .view-header",
+    "rule": "display:none",
+    "line": 4198,
+    "exception": ".workspace-split.mod-root escapes the side-split display:none at 4204-4207"
+  },
+  "tokens": [
+    {"name": "--header-height", "value": "40px", "line": 2237},
+    {"name": "--file-header-background", "value": "--background-primary", "line": 2233},
+    {"name": "--file-header-background-focused", "value": "--background-primary", "line": 2234},
+    {"name": "--file-header-border", "value": "--border-width solid transparent", "line": 2235},
+    {"name": "--tab-outline-width", "value": "1px", "line": 2696},
+    {"name": "--tab-container-background", "value": "--background-secondary", "line": 2693}
+  ]
+}

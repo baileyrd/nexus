@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 780" width="960" height="780">
+  <defs>
+    <filter id="shadowSoft" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+    text { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+    .title { font-size: 28px; font-weight: 700; fill: #111827; }
+    .subtitle { font-size: 13px; font-weight: 500; fill: #6b7280; }
+    .section { font-size: 12px; font-weight: 700; fill: #2563eb; letter-spacing: 1.3px; }
+    .node-title { font-size: 14px; font-weight: 700; fill: #111827; }
+    .node-sub { font-size: 11px; font-weight: 500; fill: #6b7280; }
+    .node-type { font-size: 10px; font-weight: 700; fill: #9ca3af; letter-spacing: 0.08em; }
+    .mono-dim { font-family: Menlo, Consolas, monospace; font-size: 10px; fill: #7c3aed; }
+    .legend { font-size: 11px; font-weight: 500; fill: #6b7280; }
+    </style>
+  </defs>
+  <rect width="960" height="780" fill="#ffffff"/>
+  <text x="40" y="44" class="title">Ribbon Anatomy — .workspace-ribbon.mod-left</text>
+  <text x="40" y="64" class="subtitle">Left activity bar · 44px wide · column flex · sits below the 40px top corner well</text>
+
+  <!-- Left side: ribbon diagram -->
+  <rect x="48" y="96" width="180" height="640" rx="10" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 5"/>
+  <text x="64" y="116" class="section">RENDERED RIBBON</text>
+
+  <!-- Corner well (40 tall, 44 wide overlay -) -->
+  <rect x="94" y="128" width="88" height="44" rx="4" fill="#e5e7eb" stroke="#9ca3af" stroke-width="1.4"/>
+  <text x="138" y="148" text-anchor="middle" class="node-type">CORNER WELL</text>
+  <text x="138" y="163" text-anchor="middle" class="mono-dim">40×44  (css:4397)</text>
+  <rect x="110" y="134" width="56" height="32" rx="4" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
+  <text x="138" y="154" text-anchor="middle" class="node-sub">toggle ⇤</text>
+
+  <!-- Main ribbon column -->
+  <rect x="94" y="176" width="88" height="460" rx="4" fill="#f8fafc" stroke="#7c3aed" stroke-width="2"/>
+  <text x="138" y="196" text-anchor="middle" class="node-type">.workspace-ribbon</text>
+  <text x="138" y="211" text-anchor="middle" class="node-type">.mod-left</text>
+
+  <!-- Ribbon items (icons) -->
+  <g>
+    <rect x="118" y="226" width="40" height="32" rx="4" fill="#ffffff" stroke="#cbd5e1"/><text x="138" y="246" text-anchor="middle" class="node-sub">◫</text>
+    <rect x="118" y="262" width="40" height="32" rx="4" fill="#ffffff" stroke="#cbd5e1"/><text x="138" y="282" text-anchor="middle" class="node-sub">≡</text>
+    <rect x="118" y="298" width="40" height="32" rx="4" fill="#ffffff" stroke="#cbd5e1"/><text x="138" y="318" text-anchor="middle" class="node-sub">◎</text>
+    <rect x="118" y="334" width="40" height="32" rx="4" fill="#ffffff" stroke="#cbd5e1"/><text x="138" y="354" text-anchor="middle" class="node-sub">✎</text>
+    <rect x="118" y="370" width="40" height="32" rx="4" fill="#ffffff" stroke="#cbd5e1"/><text x="138" y="390" text-anchor="middle" class="node-sub">★</text>
+  </g>
+
+  <!-- Settings area (margin-top:auto pins bottom) -->
+  <rect x="100" y="520" width="76" height="100" rx="4" fill="#ffffff" stroke="#f97316" stroke-width="1.4"/>
+  <text x="138" y="540" text-anchor="middle" class="node-type">SETTINGS</text>
+  <text x="138" y="556" text-anchor="middle" class="node-sub">.side-dock-settings</text>
+  <text x="138" y="572" text-anchor="middle" class="node-sub">margin-top: auto</text>
+  <text x="138" y="586" text-anchor="middle" class="mono-dim">(css:4451-4453)</text>
+  <rect x="118" y="592" width="40" height="22" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="138" y="608" text-anchor="middle" class="node-sub">⚙</text>
+
+  <!-- Vault profile below (on desktop) -->
+  <rect x="94" y="644" width="88" height="86" rx="4" fill="#ffffff" stroke="#10b981" stroke-width="1.6"/>
+  <text x="138" y="662" text-anchor="middle" class="node-type">VAULT PROFILE</text>
+  <text x="138" y="678" text-anchor="middle" class="node-sub">desktop only</text>
+  <text x="138" y="692" text-anchor="middle" class="mono-dim">css:5778-5830</text>
+  <text x="138" y="710" text-anchor="middle" class="node-sub">◇ switcher · actions</text>
+
+  <!-- Right side: measurements / tokens -->
+  <rect x="268" y="96" width="644" height="420" rx="10" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 5"/>
+  <text x="284" y="116" class="section">DIMENSIONS &amp; TOKENS</text>
+
+  <rect x="284" y="132" width="612" height="58" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="300" y="150" class="node-type">.workspace-ribbon  (css:4416-4428)</text>
+  <text x="300" y="168" class="node-title">width / flex / padding / bg / border</text>
+  <text x="300" y="184" class="mono-dim">width: var(--ribbon-width) = 44px  ·  flex: 0 0 44px  ·  padding: 8px 4px 12px  ·  gap: 4px  ·  border-right: 1px solid --divider-color</text>
+
+  <rect x="284" y="200" width="612" height="58" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="300" y="218" class="node-type">.workspace-ribbon.mod-left  (css:4393-4396)</text>
+  <text x="300" y="236" class="node-title">margin-top: var(--header-height) = 40px</text>
+  <text x="300" y="252" class="mono-dim">reserves the 40×44 top-left corner for the sidebar-toggle-button</text>
+
+  <rect x="284" y="268" width="612" height="58" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="300" y="286" class="node-type">.workspace-ribbon.mod-left:before  (css:4397-4408)</text>
+  <text x="300" y="304" class="node-title">Corner-well paint — 40px × 44px</text>
+  <text x="300" y="320" class="mono-dim">bg --titlebar-background · bottom border --tab-outline-width · -webkit-app-region: drag</text>
+
+  <rect x="284" y="336" width="612" height="58" rx="6" fill="#ffffff" stroke="#10b981" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="300" y="354" class="node-type">.sidebar-toggle-button  (css:6591-6601)</text>
+  <text x="300" y="372" class="node-title">height: calc(--header-height - 1px) = 39px</text>
+  <text x="300" y="388" class="mono-dim">padding: 8px 0 7px · --icon-size: --icon-l = 18px · position:absolute top:0 left:0 inside ribbon (css:4011-4016)</text>
+
+  <rect x="284" y="404" width="612" height="58" rx="6" fill="#ffffff" stroke="#f97316" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="300" y="422" class="node-type">.workspace-ribbon.mod-left.is-collapsed  (css:4429-4433)</text>
+  <text x="300" y="440" class="node-title">250ms fade to --ribbon-background-collapsed</text>
+  <text x="300" y="456" class="mono-dim">--ribbon-background-collapsed = --background-primary (css:2597)</text>
+
+  <rect x="284" y="472" width="612" height="40" rx="6" fill="#ffffff" stroke="#ef4444" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="300" y="490" class="node-type">body:not(.show-ribbon)  (css:4409-4414)</text>
+  <text x="300" y="506" class="mono-dim">--ribbon-width: 0px  +  .workspace-ribbon { display: none }</text>
+
+  <!-- Related tokens -->
+  <rect x="268" y="528" width="644" height="168" rx="10" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 5"/>
+  <text x="284" y="548" class="section">CUSTOM PROPERTIES CONSUMED</text>
+  <text x="284" y="568" class="mono-dim">--ribbon-width: 44px                                   css:2598</text>
+  <text x="284" y="584" class="mono-dim">--ribbon-padding: var(--size-4-2) var(--size-4-1) var(--size-4-3)   = 8px 4px 12px   css:2599</text>
+  <text x="284" y="600" class="mono-dim">--ribbon-background: var(--background-secondary)       css:2596</text>
+  <text x="284" y="616" class="mono-dim">--ribbon-background-collapsed: var(--background-primary)  css:2597</text>
+  <text x="284" y="632" class="mono-dim">--icon-l: 18px  ·  --icon-l-stroke-width: 1.75px       css:2339, 2344</text>
+  <text x="284" y="648" class="mono-dim">--divider-color: var(--background-modifier-border)     css:2195</text>
+  <text x="284" y="664" class="mono-dim">--divider-width: 1px                                   css:2197</text>
+  <text x="284" y="680" class="mono-dim">.workspace-ribbon.mod-right → display: none (desktop) — css:4434-4436</text>
+
+  <!-- Legend -->
+  <rect x="48" y="744" width="864" height="24" rx="5" fill="none" stroke="#e5e7eb" stroke-width="1"/>
+  <circle cx="62" cy="758" r="5" fill="#7c3aed"/><text x="74" y="761" class="legend">Ribbon container</text>
+  <circle cx="200" cy="758" r="5" fill="#2563eb"/><text x="212" y="761" class="legend">Corner &amp; toggle</text>
+  <circle cx="340" cy="758" r="5" fill="#10b981"/><text x="352" y="761" class="legend">Sidebar-toggle / vault profile</text>
+  <circle cx="540" cy="758" r="5" fill="#f97316"/><text x="552" y="761" class="legend">State (collapsed)</text>
+  <circle cx="700" cy="758" r="5" fill="#ef4444"/><text x="712" y="761" class="legend">Hidden state override</text>
+</svg>

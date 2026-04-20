@@ -1,0 +1,49 @@
+{
+  "template_type": "architecture",
+  "style": 1,
+  "title": "Obsidian Workspace Model",
+  "subtitle": "How persisted leaves are reconciled with the live view registry at boot — and the fallback that keeps columns from ever going blank",
+  "canvas": { "width": 960, "height": 780 },
+  "containers": [
+    { "x": 20, "y": 100, "width": 920, "height": 200, "label": "DATA MODEL",           "subtitle": "persisted in .obsidian/workspace.json — tree of splits, leaves, and activeLeaf pointers",               "stroke": "#cbd5e1", "fill": "none", "accent": "#2563eb" },
+    { "x": 20, "y": 320, "width": 920, "height": 230, "label": "RUNTIME RESOLUTION",   "subtitle": "at app boot — each persisted leaf is looked up against the live plugin registry, with a guaranteed fallback", "stroke": "#cbd5e1", "fill": "none", "accent": "#7c3aed" },
+    { "x": 20, "y": 570, "width": 920, "height": 190, "label": "LIFECYCLE EVENTS",     "subtitle": "how the workspace self-heals — plugin enable/disable, user actions, first launch",                         "stroke": "#cbd5e1", "fill": "none", "accent": "#10b981" }
+  ],
+  "nodes": [
+    { "id": "workspaceRoot", "kind": "double_rect", "x": 408, "y": 154, "width": 144, "height": 50, "label": "Root",              "type_label": "WORKSPACE",    "fill": "#ffffff", "stroke": "#2563eb" },
+    { "id": "leftSplit",     "kind": "rect",        "x":  60, "y": 230, "width": 220, "height": 60, "label": "leaves: [file-explorer, search, bookmark]", "type_label": "LEFT-SPLIT",  "fill": "#ffffff", "stroke": "#2563eb" },
+    { "id": "rootSplit",     "kind": "rect",        "x": 370, "y": 230, "width": 220, "height": 60, "label": "leaves: [markdown, markdown, pdf] · activeLeaf", "type_label": "ROOT-SPLIT", "fill": "#ffffff", "stroke": "#2563eb" },
+    { "id": "rightSplit",    "kind": "rect",        "x": 680, "y": 230, "width": 220, "height": 60, "label": "leaves: [outline, backlink, graph]", "type_label": "RIGHT-SPLIT", "fill": "#ffffff", "stroke": "#2563eb" },
+
+    { "id": "persistedLeaf", "kind": "rect",        "x":  52, "y": 390, "width": 170, "height": 60, "label": "Persisted leaf",   "type_label": "INPUT",        "sub": "{type, state}",        "fill": "#ffffff", "stroke": "#94a3b8" },
+    { "id": "viewRegistry",  "kind": "double_rect", "x": 362, "y": 380, "width": 236, "height": 80, "label": "getCreator(type)", "type_label": "VIEW REGISTRY","sub": "type → creator(leaf)", "fill": "#ffffff", "stroke": "#7c3aed" },
+    { "id": "mountReal",     "kind": "rect",        "x": 700, "y": 360, "width": 210, "height": 60, "label": "Mount real view",  "type_label": "HAPPY PATH",   "sub": "plugin's component renders",                 "fill": "#ffffff", "stroke": "#10b981" },
+    { "id": "substituteEmpty","kind": "rect",       "x": 700, "y": 440, "width": 210, "height": 60, "label": "Substitute 'empty'","type_label": "FALLBACK",    "sub": "EmptyView placeholder — never blank",        "fill": "#ffffff", "stroke": "#f97316" },
+    { "id": "invariant",     "kind": "note",        "x":  52, "y": 490, "width": 270, "height": 44, "label": "core types (file-explorer, markdown, backlink, empty) register BEFORE reconciliation", "type_label": "INVARIANT", "fill": "#faf5ff", "stroke": "#e9d5ff" },
+
+    { "id": "pluginEnable",  "kind": "rect",        "x":  48, "y": 630, "width": 270, "height": 110, "label": "registerView(type, creator)", "type_label": "PLUGIN ENABLE",  "sub": "Any existing 'empty' leaves that match the reactivated type can revive when the user reopens or refreshes them.", "fill": "#ffffff", "stroke": "#10b981" },
+    { "id": "pluginDisable", "kind": "rect",        "x": 345, "y": 630, "width": 270, "height": 110, "label": "unregisterView(type)",        "type_label": "PLUGIN DISABLE", "sub": "Open leaves of that type auto-convert to 'empty' — visible placeholder, not silent removal.",                   "fill": "#ffffff", "stroke": "#f97316" },
+    { "id": "firstLaunch",   "kind": "rect",        "x": 642, "y": 630, "width": 270, "height": 110, "label": "no workspace.json",           "type_label": "FIRST LAUNCH",   "sub": "Default workspace constructed at runtime from core types only — never from a hardcoded string that could dangle.", "fill": "#ffffff", "stroke": "#2563eb" }
+  ],
+  "arrows": [
+    { "source": "workspaceRoot", "target": "leftSplit",       "flow": "data", "color": "#2563eb" },
+    { "source": "workspaceRoot", "target": "rootSplit",       "flow": "data", "color": "#2563eb" },
+    { "source": "workspaceRoot", "target": "rightSplit",      "flow": "data", "color": "#2563eb" },
+
+    { "source": "leftSplit",     "target": "persistedLeaf",   "flow": "data",     "color": "#2563eb", "dashed": true, "label": "per leaf" },
+    { "source": "persistedLeaf", "target": "viewRegistry",    "flow": "control",  "color": "#7c3aed", "label": "lookup type" },
+    { "source": "viewRegistry",  "target": "mountReal",       "flow": "happy",    "color": "#10b981", "label": "creator found" },
+    { "source": "viewRegistry",  "target": "substituteEmpty", "flow": "fallback", "color": "#f97316", "dashed": true, "label": "missing / unregistered" },
+
+    { "source": "pluginEnable",  "target": "rightSplit",      "flow": "feedback", "color": "#10b981", "dashed": true, "label": "mutates registry + leaf tree" },
+    { "source": "pluginDisable", "target": "substituteEmpty", "flow": "feedback", "color": "#10b981", "dashed": true },
+    { "source": "firstLaunch",   "target": "viewRegistry",    "flow": "feedback", "color": "#2563eb", "dashed": true }
+  ],
+  "legend": [
+    { "color": "#2563eb", "dashed": false, "label": "data" },
+    { "color": "#7c3aed", "dashed": false, "label": "resolution" },
+    { "color": "#10b981", "dashed": false, "label": "happy path" },
+    { "color": "#f97316", "dashed": true,  "label": "fallback" },
+    { "color": "#2563eb", "dashed": true,  "label": "feedback / self-heal" }
+  ]
+}

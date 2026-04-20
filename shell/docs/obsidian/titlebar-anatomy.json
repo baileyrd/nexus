@@ -1,0 +1,22 @@
+{
+  "title": "Titlebar Anatomy & Drag Regions",
+  "canvas": {"width": 960, "height": 820},
+  "modes": [
+    {"id": "A", "body_classes": [], "titlebar_height": 0, "note": "native OS chrome, .titlebar matches but is 0-height"},
+    {"id": "B", "body_classes": ["is-frameless"], "titlebar_height": 30, "css_var": "--titlebar-height", "lines": [3960, 3979]},
+    {"id": "C_win_linux", "body_classes": ["is-hidden-frameless", "mod-windows|mod-linux"], "titlebar_height": 39, "titlebar_computed": "calc(--header-height - 1px)", "hosts_controls_in": ".workspace-tab-header-container .titlebar-button-container.mod-right", "lines": [3987, 5704, 4061]},
+    {"id": "D_macos", "body_classes": ["is-hidden-frameless", "mod-macos"], "titlebar": "display:none", "traffic_lights": "OS native at 80px offset", "right_toggle_fixed": true, "lines": [5701, 6621]}
+  ],
+  "drag_regions": [
+    {"selector": ".titlebar", "region": "drag", "line": 5608},
+    {"selector": ".titlebar-button", "region": "no-drag", "line": 5679},
+    {"selector": ".is-hidden-frameless:not(.starter) .titlebar", "region": "no-drag", "line": 4022},
+    {"selector": ".workspace-tab-header-container-inner", "region": "drag", "line": 6106},
+    {"selector": ".workspace-tabs.mod-top-left-space .workspace-tab-header-container::before", "region": "no-drag", "reserved_px": "--frame-left-space", "line": 4043},
+    {"selector": ".workspace-tabs.mod-top-right-space .workspace-tab-header-container::after", "region": "no-drag", "reserved_px": "--frame-right-space", "line": 4052}
+  ],
+  "frame_space_tokens": {
+    "mod-macos": {"left": "calc(80px - --ribbon-width) = 36px", "right": "0px", "lines": [3963, 3964]},
+    "mod-windows|mod-linux": {"left": "0px", "right": "126px", "lines": [3971, 3972]}
+  }
+}

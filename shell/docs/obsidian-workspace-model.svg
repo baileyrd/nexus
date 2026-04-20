@@ -1,0 +1,197 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 780" width="960" height="780">
+  <defs>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#10b981"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#f97316"/>
+    </marker>
+    <marker id="arrowGray" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#9ca3af"/>
+    </marker>
+    <filter id="shadowSoft" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+    text { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+    .title { font-size: 28px; font-weight: 700; fill: #111827; }
+    .subtitle { font-size: 13px; font-weight: 500; fill: #6b7280; }
+    .section { font-size: 12px; font-weight: 700; fill: #2563eb; letter-spacing: 1.4px; }
+    .section-sub { font-size: 11px; font-weight: 500; fill: #94a3b8; }
+    .node-title { font-size: 15px; font-weight: 700; fill: #111827; }
+    .node-sub { font-size: 11px; font-weight: 500; fill: #6b7280; }
+    .node-type { font-size: 10px; font-weight: 700; fill: #9ca3af; letter-spacing: 0.08em; }
+    .arrow-label { font-size: 11px; font-weight: 600; fill: #4b5563; }
+    .arrow-label-bg { fill: #ffffff; }
+    .mono { font-family: 'Menlo', 'Consolas', monospace; font-size: 11px; fill: #334155; }
+    .mono-dim { font-family: 'Menlo', 'Consolas', monospace; font-size: 10px; fill: #94a3b8; }
+    .leaf-label { font-size: 10px; font-weight: 600; fill: #1f2937; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="780" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text class="title" x="30" y="48">Obsidian Workspace Model</text>
+  <text class="subtitle" x="30" y="72">How persisted leaves are reconciled with the live view registry at boot — and the fallback that keeps columns from ever going blank</text>
+
+  <!-- ============================================================ -->
+  <!-- Zone 1: DATA MODEL -->
+  <!-- ============================================================ -->
+  <rect x="20" y="100" width="920" height="200" rx="6" fill="none" stroke="#cbd5e1" stroke-dasharray="4,3"/>
+  <text class="section" x="36" y="122">DATA MODEL</text>
+  <text class="section-sub" x="36" y="138">persisted in .obsidian/workspace.json — tree of splits, leaves, and activeLeaf pointers</text>
+
+  <!-- WorkspaceRoot (double rect) -->
+  <rect x="408" y="154" width="144" height="50" rx="4" fill="#ffffff" stroke="#2563eb" stroke-width="2" filter="url(#shadowSoft)"/>
+  <rect x="412" y="158" width="136" height="42" rx="3" fill="none" stroke="#2563eb" stroke-width="1"/>
+  <text class="node-type" x="480" y="172" text-anchor="middle">WORKSPACE</text>
+  <text class="node-title" x="480" y="191" text-anchor="middle">Root</text>
+
+  <!-- LeftSplit -->
+  <rect x="60" y="230" width="220" height="60" rx="4" fill="#ffffff" stroke="#2563eb" filter="url(#shadowSoft)"/>
+  <text class="node-type" x="72" y="248">LEFT-SPLIT</text>
+  <text class="mono" x="72" y="266">leaves: [file-explorer,</text>
+  <text class="mono" x="72" y="280">  search, bookmark]</text>
+
+  <!-- RootSplit -->
+  <rect x="370" y="230" width="220" height="60" rx="4" fill="#ffffff" stroke="#2563eb" filter="url(#shadowSoft)"/>
+  <text class="node-type" x="382" y="248">ROOT-SPLIT</text>
+  <text class="mono" x="382" y="266">leaves: [markdown,</text>
+  <text class="mono" x="382" y="280">  markdown, pdf]   activeLeaf</text>
+
+  <!-- RightSplit -->
+  <rect x="680" y="230" width="220" height="60" rx="4" fill="#ffffff" stroke="#2563eb" filter="url(#shadowSoft)"/>
+  <text class="node-type" x="692" y="248">RIGHT-SPLIT</text>
+  <text class="mono" x="692" y="266">leaves: [outline,</text>
+  <text class="mono" x="692" y="280">  backlink, graph]</text>
+
+  <!-- Arrows from WorkspaceRoot to splits -->
+  <path d="M 440 204 L 170 230" stroke="#2563eb" stroke-width="1.5" fill="none" marker-end="url(#arrowBlue)"/>
+  <path d="M 480 204 L 480 230" stroke="#2563eb" stroke-width="1.5" fill="none" marker-end="url(#arrowBlue)"/>
+  <path d="M 520 204 L 790 230" stroke="#2563eb" stroke-width="1.5" fill="none" marker-end="url(#arrowBlue)"/>
+
+  <!-- Annotation: leaf shape -->
+  <text class="mono-dim" x="935" y="168" text-anchor="end">each leaf = {</text>
+  <text class="mono-dim" x="935" y="180" text-anchor="end">  type: 'markdown' | 'file-explorer' | 'search' | ... | 'empty',</text>
+  <text class="mono-dim" x="935" y="192" text-anchor="end">  state: { … per-view snapshot … }</text>
+  <text class="mono-dim" x="935" y="204" text-anchor="end">}</text>
+
+  <!-- ============================================================ -->
+  <!-- Zone 2: RUNTIME RESOLUTION -->
+  <!-- ============================================================ -->
+  <rect x="20" y="320" width="920" height="230" rx="6" fill="none" stroke="#cbd5e1" stroke-dasharray="4,3"/>
+  <text class="section" x="36" y="342" style="fill: #7c3aed">RUNTIME RESOLUTION</text>
+  <text class="section-sub" x="36" y="358">at app boot — each persisted leaf is looked up against the live plugin registry, with a guaranteed fallback</text>
+
+  <!-- Persisted leaf input (left) -->
+  <rect x="52" y="390" width="170" height="60" rx="4" fill="#ffffff" stroke="#94a3b8" filter="url(#shadowSoft)"/>
+  <text class="node-type" x="64" y="408">INPUT</text>
+  <text class="node-title" x="64" y="428">Persisted leaf</text>
+  <text class="mono" x="64" y="444">{type, state}</text>
+
+  <!-- ViewRegistry (double rect center) -->
+  <rect x="362" y="380" width="236" height="80" rx="4" fill="#ffffff" stroke="#7c3aed" stroke-width="2" filter="url(#shadowSoft)"/>
+  <rect x="366" y="384" width="228" height="72" rx="3" fill="none" stroke="#7c3aed" stroke-width="1"/>
+  <text class="node-type" x="480" y="402" text-anchor="middle">VIEW REGISTRY</text>
+  <text class="node-title" x="480" y="424" text-anchor="middle">getCreator(type)</text>
+  <text class="node-sub" x="480" y="444" text-anchor="middle">type → creator(leaf)</text>
+
+  <!-- Branch A: creator found -->
+  <rect x="700" y="360" width="210" height="60" rx="4" fill="#ffffff" stroke="#10b981" filter="url(#shadowSoft)"/>
+  <text class="node-type" x="712" y="378">HAPPY PATH</text>
+  <text class="node-title" x="712" y="398">Mount real view</text>
+  <text class="node-sub" x="712" y="414">plugin's component renders</text>
+
+  <!-- Branch B: creator missing -->
+  <rect x="700" y="440" width="210" height="60" rx="4" fill="#ffffff" stroke="#f97316" filter="url(#shadowSoft)"/>
+  <text class="node-type" x="712" y="458">FALLBACK</text>
+  <text class="node-title" x="712" y="478">Substitute 'empty'</text>
+  <text class="node-sub" x="712" y="494">EmptyView placeholder — never blank</text>
+
+  <!-- Arrow: Persisted leaf → Registry -->
+  <path d="M 222 420 L 362 420" stroke="#7c3aed" stroke-width="1.8" fill="none" marker-end="url(#arrowPurple)"/>
+  <rect class="arrow-label-bg" x="255" y="410" width="75" height="14" opacity="0.95"/>
+  <text class="arrow-label" x="292" y="421" text-anchor="middle">lookup type</text>
+
+  <!-- Arrow: Registry → happy path -->
+  <path d="M 598 404 L 700 390" stroke="#10b981" stroke-width="1.8" fill="none" marker-end="url(#arrowGreen)"/>
+  <rect class="arrow-label-bg" x="605" y="386" width="80" height="14" opacity="0.95"/>
+  <text class="arrow-label" x="645" y="397" text-anchor="middle">creator found</text>
+
+  <!-- Arrow: Registry → fallback (dashed) -->
+  <path d="M 598 436 L 700 470" stroke="#f97316" stroke-width="1.8" stroke-dasharray="6,3" fill="none" marker-end="url(#arrowOrange)"/>
+  <rect class="arrow-label-bg" x="605" y="448" width="110" height="14" opacity="0.95"/>
+  <text class="arrow-label" x="660" y="459" text-anchor="middle">missing / unregistered</text>
+
+  <!-- Annotation strip at bottom of Zone 2 -->
+  <rect x="52" y="490" width="270" height="44" rx="4" fill="#faf5ff" stroke="#e9d5ff"/>
+  <text class="node-type" x="64" y="506" style="fill: #7c3aed">INVARIANT</text>
+  <text class="mono" x="64" y="522">core types (file-explorer, markdown,</text>
+  <text class="mono" x="64" y="535">backlink, empty) register BEFORE reconciliation</text>
+
+  <!-- ============================================================ -->
+  <!-- Zone 3: LIFECYCLE EVENTS -->
+  <!-- ============================================================ -->
+  <rect x="20" y="570" width="920" height="190" rx="6" fill="none" stroke="#cbd5e1" stroke-dasharray="4,3"/>
+  <text class="section" x="36" y="592" style="fill: #10b981">LIFECYCLE EVENTS</text>
+  <text class="section-sub" x="36" y="608">how the workspace self-heals — plugin enable/disable, user actions, first launch</text>
+
+  <!-- Event column 1: Plugin enable -->
+  <rect x="48" y="630" width="270" height="110" rx="4" fill="#ffffff" stroke="#10b981" filter="url(#shadowSoft)"/>
+  <text class="node-type" x="60" y="648" style="fill: #10b981">PLUGIN ENABLE</text>
+  <text class="node-title" x="60" y="668">registerView(type, creator)</text>
+  <text class="node-sub" x="60" y="688">Any existing 'empty' leaves that match</text>
+  <text class="node-sub" x="60" y="702">the reactivated type can revive when the</text>
+  <text class="node-sub" x="60" y="716">user reopens or refreshes them.</text>
+
+  <!-- Event column 2: Plugin disable -->
+  <rect x="345" y="630" width="270" height="110" rx="4" fill="#ffffff" stroke="#f97316" filter="url(#shadowSoft)"/>
+  <text class="node-type" x="357" y="648" style="fill: #f97316">PLUGIN DISABLE</text>
+  <text class="node-title" x="357" y="668">unregisterView(type)</text>
+  <text class="node-sub" x="357" y="688">Open leaves of that type auto-convert</text>
+  <text class="node-sub" x="357" y="702">to 'empty' — visible placeholder, not</text>
+  <text class="node-sub" x="357" y="716">silent removal.</text>
+
+  <!-- Event column 3: First launch -->
+  <rect x="642" y="630" width="270" height="110" rx="4" fill="#ffffff" stroke="#2563eb" filter="url(#shadowSoft)"/>
+  <text class="node-type" x="654" y="648" style="fill: #2563eb">FIRST LAUNCH</text>
+  <text class="node-title" x="654" y="668">no workspace.json</text>
+  <text class="node-sub" x="654" y="688">Default workspace constructed at runtime</text>
+  <text class="node-sub" x="654" y="702">from core types only — never from a</text>
+  <text class="node-sub" x="654" y="716">hardcoded string that could dangle.</text>
+
+  <!-- Inter-zone arrows -->
+  <!-- Zone 1 → Zone 2: persisted state flows into resolver -->
+  <path d="M 170 290 C 170 340, 137 370, 137 390" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5,3" fill="none" marker-end="url(#arrowBlue)"/>
+  <rect class="arrow-label-bg" x="60" y="348" width="68" height="14" opacity="0.95"/>
+  <text class="arrow-label" x="94" y="359" text-anchor="middle">per leaf</text>
+
+  <!-- Zone 2 → Zone 3 (feedback loop): plugin events feed back to registry -->
+  <path d="M 183 630 C 183 580, 265 570, 420 540" stroke="#10b981" stroke-width="1.5" stroke-dasharray="5,3" fill="none" marker-end="url(#arrowGreen)"/>
+  <path d="M 480 630 C 480 580, 480 575, 480 460" stroke="#10b981" stroke-width="1.5" stroke-dasharray="5,3" fill="none" marker-end="url(#arrowGreen)"/>
+  <path d="M 777 630 C 777 580, 700 570, 600 460" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5,3" fill="none" marker-end="url(#arrowBlue)"/>
+  <rect class="arrow-label-bg" x="395" y="555" width="170" height="14" opacity="0.95"/>
+  <text class="arrow-label" x="480" y="566" text-anchor="middle">mutates registry + leaf tree</text>
+
+  <!-- Legend -->
+  <g transform="translate(30, 760)">
+    <line x1="0" y1="-2" x2="24" y2="-2" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrowBlue)"/>
+    <text class="legend" x="32" y="2">data</text>
+    <line x1="80" y1="-2" x2="104" y2="-2" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#arrowPurple)"/>
+    <text class="legend" x="112" y="2">resolution</text>
+    <line x1="190" y1="-2" x2="214" y2="-2" stroke="#10b981" stroke-width="1.8" marker-end="url(#arrowGreen)"/>
+    <text class="legend" x="222" y="2">happy path</text>
+    <line x1="310" y1="-2" x2="334" y2="-2" stroke="#f97316" stroke-width="1.8" stroke-dasharray="6,3" marker-end="url(#arrowOrange)"/>
+    <text class="legend" x="342" y="2">fallback</text>
+    <line x1="410" y1="-2" x2="434" y2="-2" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrowBlue)"/>
+    <text class="legend" x="442" y="2">feedback / self-heal</text>
+  </g>
+</svg>
