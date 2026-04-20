@@ -13,6 +13,7 @@ interface RegisterTabPayload {
   viewId: string
   title: string
   priority?: number
+  iconName?: string
 }
 
 interface UnregisterTabPayload {
@@ -73,6 +74,7 @@ export const rightPanelPlugin: Plugin = {
       useRightPanelStore.getState().registerTab(payload.viewId, {
         title: payload.title ?? payload.viewId,
         priority: typeof payload.priority === 'number' ? payload.priority : 100,
+        iconName: typeof payload.iconName === 'string' ? payload.iconName : undefined,
       })
     })
 

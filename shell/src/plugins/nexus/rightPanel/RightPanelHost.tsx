@@ -2,18 +2,12 @@ import { createElement, useMemo } from 'react'
 import { useSlotStore } from '../../../registry/SlotRegistry'
 import { useRightPanelStore } from './rightPanelStore'
 import { useLayoutStore } from '../../../stores/layoutStore'
-import { useOutlineStore } from '../outline/outlineStore'
-import { useBacklinksStore } from '../backlinks/backlinksStore'
-import { Icon } from '../../../icons'
+import { Icon, type IconName } from '../../../icons'
 import { WindowControls } from '../../../shell/WindowControls'
-
-const OUTLINE_VIEW_ID = 'nexus.outline.view'
-const BACKLINKS_VIEW_ID = 'nexus.backlinks.view'
 
 /**
  * Right-panel toggle — the `x` that collapses the panel. Lives at the
  * right edge of the tab row, immediately left of WindowControls.
- * Mirrors the hover behaviour of the old INSPECTOR-header close.
  */
 function RightPanelToggleButton({ onClick }: { onClick: () => void }) {
   return (
@@ -22,21 +16,14 @@ function RightPanelToggleButton({ onClick }: { onClick: () => void }) {
       aria-label="Hide inspector"
       title="Hide inspector"
       onClick={onClick}
-      onMouseEnter={(e) => {
-        ;(e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
-        ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--fg)'
-      }}
-      onMouseLeave={(e) => {
-        ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
-        ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--fg-muted)'
-      }}
+      className="clickable-icon sidebar-toggle-button mod-right"
       style={{
         width: 28,
         height: 'var(--header-height)',
         padding: 0,
         border: 0,
         background: 'transparent',
-        color: 'var(--fg-muted)',
+        color: 'var(--icon-color)',
         cursor: 'pointer',
         display: 'inline-flex',
         alignItems: 'center',
@@ -50,16 +37,12 @@ function RightPanelToggleButton({ onClick }: { onClick: () => void }) {
 }
 
 /**
- * The view the rightPanel host registers into the `rightPanel` slot.
- * Single top row (--header-height, 30px Obsidian-faithful): tabs +
- * right-panel-toggle + window controls (rightmost column gets the
- * window controls). The old INSPECTOR label + StarButton were dropped
- * during the column-refactor (Task 6); the tab titles themselves
- * carry enough identity.
- *
+ * The right-panel host renders the Obsidian `.workspace-split.mod-right-split`
+ * interior — a `.workspace-tabs.mod-top` column whose tab-header is
+ * icon-only (per app.css:6351) with the title shown via tooltip.
  * Plugins contribute a tab by:
  *   1. `api.views.register(viewId, { slot: 'rightPanelContent', component, priority })`
- *   2. `api.events.emit('rightPanel:registerTab', { viewId, title, priority })`
+ *   2. `api.events.emit('rightPanel:registerTab', { viewId, title, priority, iconName })`
  */
 export function RightPanelHost() {
   const tabs = useRightPanelStore((s) => s.tabs)
@@ -67,9 +50,6 @@ export function RightPanelHost() {
   const setActive = useRightPanelStore((s) => s.setActive)
   const entries = useSlotStore((s) => s.slots.rightPanelContent)
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel)
-
-  const outlineCount = useOutlineStore((s) => s.headings.length)
-  const backlinksCount = useBacklinksStore((s) => s.links.length)
 
   const ordered = useMemo(() => {
     return Object.entries(tabs)
@@ -80,14 +60,9 @@ export function RightPanelHost() {
   const activeEntry =
     activeViewId != null ? entries.find((e) => e.id === activeViewId) : undefined
 
-  const getCount = (viewId: string): number | null => {
-    if (viewId === OUTLINE_VIEW_ID) return outlineCount
-    if (viewId === BACKLINKS_VIEW_ID) return backlinksCount
-    return null
-  }
-
   return (
     <div
+      className="workspace-tabs mod-top"
       style={{
         height: '100%',
         width: '100%',
@@ -96,77 +71,29 @@ export function RightPanelHost() {
         overflow: 'hidden',
       }}
     >
-      {/* Top row — tab strip, right-panel-toggle, window controls.
-          RightPanelHost only renders when rightPanel.visible, so this
-          column is always the rightmost when present and is where the
-          window controls live. */}
-      <div
-        className="rp-top-row"
-        data-tauri-drag-region
-        style={{
-          height: 'var(--header-height)',
-          flex: '0 0 var(--header-height)',
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'stretch',
-          background: 'var(--bg-raised)',
-          borderBottom: '1px solid var(--line-soft)',
-        }}
-      >
-        <div
-          className="rp-tabs"
-          style={{
-            flex: '1 1 auto',
-            display: 'flex',
-            alignItems: 'stretch',
-            overflowX: 'auto',
-            overflowY: 'hidden',
-            whiteSpace: 'nowrap',
-            minWidth: 0,
-          }}
-        >
+      {/* Tab header — Obsidian structure. The window controls live at the
+          far right of this row so min/max/close stays reachable when the
+          right panel is the rightmost column. */}
+      <div className="workspace-tab-header-container" data-tauri-drag-region>
+        <div className="workspace-tab-header-container-inner" data-tauri-drag-region>
           {ordered.map((t) => {
             const isActive = t.viewId === activeViewId
-            const count = getCount(t.viewId)
+            const iconName = (t.iconName ?? 'filePlus') as IconName
             return (
               <div
                 key={t.viewId}
+                className={`workspace-tab-header${isActive ? ' is-active' : ''}`}
+                role="tab"
+                aria-selected={isActive}
                 onClick={() => setActive(t.viewId)}
                 title={t.title}
-                style={{
-                  flex: '0 0 auto',
-                  height: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  padding: '0 var(--size-4-2)',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  color: isActive ? 'var(--text-normal)' : 'var(--text-muted)',
-                  boxShadow: isActive ? 'inset 0 -2px 0 var(--interactive-accent)' : undefined,
-                  userSelect: 'none',
-                  position: 'relative',
-                  whiteSpace: 'nowrap',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isActive) e.currentTarget.style.background = 'var(--bg-hover)'
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive) e.currentTarget.style.background = 'transparent'
-                }}
               >
-                {t.title}
-                {count !== null && count > 0 && (
-                  <span
-                    style={{
-                      fontFamily: 'var(--f-mono)',
-                      fontSize: 10,
-                      color: 'var(--fg-dim)',
-                    }}
-                  >
-                    {count}
-                  </span>
-                )}
+                <div className="workspace-tab-header-inner">
+                  <div className="workspace-tab-header-inner-icon">
+                    <Icon name={iconName} size={18} />
+                  </div>
+                  <div className="workspace-tab-header-inner-title">{t.title}</div>
+                </div>
               </div>
             )
           })}
@@ -176,21 +103,26 @@ export function RightPanelHost() {
       </div>
 
       {/* Body */}
-      <div style={{ flex: '1 1 auto', overflow: 'auto', minHeight: 0 }}>
-        {activeEntry ? (
-          createElement(activeEntry.component)
-        ) : (
-          <div
-            style={{
-              padding: 16,
-              color: 'var(--fg-dim)',
-              fontSize: 12,
-              textAlign: 'center',
-            }}
-          >
-            No inspectors registered
-          </div>
-        )}
+      <div
+        className="workspace-leaf"
+        style={{ flex: '1 1 auto', overflow: 'auto', minHeight: 0 }}
+      >
+        <div className="workspace-leaf-content view-content">
+          {activeEntry ? (
+            createElement(activeEntry.component)
+          ) : (
+            <div
+              style={{
+                padding: 16,
+                color: 'var(--text-faint)',
+                fontSize: 12,
+                textAlign: 'center',
+              }}
+            >
+              No inspectors registered
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

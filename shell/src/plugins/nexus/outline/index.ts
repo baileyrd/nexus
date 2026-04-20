@@ -44,6 +44,7 @@ export const outlinePlugin: Plugin = {
       viewId: VIEW_ID,
       title: 'Outline',
       priority: 10,
+      iconName: 'list',
     })
 
     // Cross-plugin store import: read editor tabs directly. This is

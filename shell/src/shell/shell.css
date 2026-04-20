@@ -56,17 +56,6 @@ body {
   pointer-events: none;
 }
 
-/* ─── Upper row ──────────────────────────────────────────────────────────── */
-/* Holds the full-height activity bar and the body columns (sidebar,
-   center, right panel) as direct flex siblings. Obsidian-faithful: no
-   shared top strip — each body column renders its own 36px top row
-   internally (see sidebar-top-row / editor-tab-header / rp-top-row). */
-.shell-upper {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-
 /* ─── Pane mode ──────────────────────────────────────────────────────────── */
 /* When a plugin has taken over the body via usePaneModeStore, App.tsx
    swaps the tri-pane (sidebar/editor/rightPanel) for a single container
@@ -83,50 +72,7 @@ body {
   min-width: 0;
 }
 
-/* ─── Activity bar ───────────────────────────────────────────────────────── */
-.shell-activitybar {
-  flex-shrink: 0;
-  width: 44px;
-  background: var(--bg-raised);
-  border-right: 1px solid var(--line-soft);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 4px 0;
-}
-
-/* ─── Right panel ────────────────────────────────────────────────────────── */
-.shell-right-panel {
-  flex-shrink: 0;
-  min-width: 220px;
-  max-width: 600px;
-  background: var(--bg-soft);
-  border-left: 1px solid var(--line-soft);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-/* ─── Sidebar ────────────────────────────────────────────────────────────── */
-.shell-sidebar {
-  flex-shrink: 0;
-  min-width: 180px;
-  max-width: 600px;
-  background: var(--bg);
-  border-right: 1px solid var(--line);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-/* ─── Center column ──────────────────────────────────────────────────────── */
-.shell-center {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  overflow: hidden;
-}
-
+/* ─── Editor area wrapper (legacy; used by App.tsx to host the editor view) */
 .shell-editor-area {
   flex: 1;
   overflow: hidden;
@@ -139,27 +85,6 @@ body {
   max-height: 600px;
   background: var(--panel-bg, #1e1e1e);
   border-top: 1px solid var(--border, #3c3c3c);
-}
-
-/* ─── Status bar ─────────────────────────────────────────────────────────── */
-.shell-statusbar {
-  flex-shrink: 0;
-  height: 32px;
-  background: var(--bg-raised);
-  color: var(--fg-muted);
-  border-top: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 10px;
-  font-size: 11px;
-}
-
-.shell-statusbar-left,
-.shell-statusbar-right {
-  display: flex;
-  align-items: center;
-  gap: 14px;
 }
 
 /* ─── Resize handles ─────────────────────────────────────────────────────── */
@@ -1694,13 +1619,607 @@ body {
    rows dim subtly when the window loses focus, matching Obsidian's
    is-focused behavior. Tokens fall back to --titlebar-bg until Task A's
    rename lands. */
-body:not(.is-focused) .editor-tab-header,
-body:not(.is-focused) .rp-top-row,
-body:not(.is-focused) .sidebar-top-row {
-  background: var(--titlebar-background, var(--titlebar-bg));
+/* Legacy body-focused styling for per-column top rows. Superseded by
+   the Obsidian `body.is-focused .workspace-tab-header-container ...`
+   rules below, kept empty for now — remove once any plugin-specific
+   consumer is migrated. */
+
+/* ══════════════════════════════════════════════════════════════════════════
+   OBSIDIAN CHROME PORT
+   ══════════════════════════════════════════════════════════════════════════
+   Verbatim-ported Obsidian rules against our Obsidian-aligned tokens.
+   Source: obsidian-unpacked/app.css (see shell/docs/obsidian/
+   obsidian-measurements.md for line-numbered traces). Only the token
+   names are adjusted; every layout / color / hover rule mirrors
+   Obsidian's chrome 1:1. Scope is strictly chrome — PDF, canvas, graph,
+   embedded-backlinks, bases, rss, and community modal CSS are NOT
+   ported; they are app-specific views.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Root tokens Obsidian expects at :root level ─────────────────────── */
+:root {
+  --sidebar-tab-text-display: none;              /* app.css:2641 */
+  --sidebar-markdown-font-size: calc(13px * 0.9); /* app.css:2640 */
+  --file-margins: 24px;                           /* app.css:2227–2229 */
+  --ribbon-width: 44px;                           /* app.css:2598 */
+  --ribbon-padding: 8px 4px 12px;                 /* app.css:2599 */
+  --ribbon-background: var(--background-secondary);            /* app.css:2596 */
+  --ribbon-background-collapsed: var(--background-primary);    /* app.css:2597 */
+  --divider-width-hover: 3px;                     /* app.css:2198 */
+  --divider-vertical-height: calc(100% - var(--header-height));/* app.css:2199 */
+  --divider-color-hover: var(--interactive-accent);
+  --tab-background-active: var(--background-primary);          /* app.css:2684 */
+  --tab-text-color: var(--text-faint);                         /* app.css:2685 */
+  --tab-text-color-active: var(--text-muted);                  /* app.css:2686 */
+  --tab-text-color-focused: var(--text-muted);                 /* app.css:2687 */
+  --tab-text-color-focused-active: var(--text-muted);          /* app.css:2688 */
+  --tab-text-color-focused-highlighted: var(--interactive-accent); /* app.css:2689 */
+  --tab-text-color-focused-active-current: var(--text-normal); /* app.css:2690 */
+  --tab-font-size: var(--font-ui-small);                       /* app.css:2691 */
+  --tab-font-weight: inherit;                                  /* app.css:2692 */
+  --tab-divider-color: var(--background-modifier-border);      /* app.css:2694 */
+  --tab-curve: 6px;                                            /* app.css:2697 */
+  --tab-radius: var(--radius-s);                               /* app.css:2698 */
+  --tab-radius-active: 6px 6px 0 0;                            /* app.css:2699 */
+  --tab-width: 200px;                                          /* app.css:2700 */
+  --tab-max-width: 320px;                                      /* app.css:2701 */
+  --icon-color: var(--text-muted);                             /* app.css:2346 */
+  --icon-color-hover: var(--text-muted);                       /* app.css:2347 */
+  --icon-color-active: var(--interactive-accent);              /* app.css:2348 */
+  --icon-color-focused: var(--text-normal);                    /* app.css:2349 */
+  --icon-opacity: 0.85;                                        /* app.css:2350 */
+  --icon-opacity-hover: 1;                                     /* app.css:2351 */
+  --icon-opacity-active: 1;                                    /* app.css:2352 */
+  --icon-s: 16px;
+  --icon-m: 18px;
+  --icon-l: 18px;
+  --icon-xs: 14px;
+  --icon-s-stroke-width: 2px;
+  --icon-m-stroke-width: 1.75px;
+  --icon-l-stroke-width: 1.75px;
+  --icon-xs-stroke-width: 2px;
+  --nav-item-size: var(--font-ui-small);                       /* app.css:2434 */
+  --nav-item-radius: var(--radius-s);                          /* app.css:2435 */
+  --nav-item-color: var(--text-muted);                         /* app.css:2436 */
+  --nav-item-color-hover: var(--text-normal);                  /* app.css:2437 */
+  --nav-item-color-active: var(--text-normal);                 /* app.css:2438 */
+  --nav-item-color-selected: var(--text-normal);               /* app.css:2439 */
+  --nav-item-color-highlighted: var(--interactive-accent);     /* app.css:2440 */
+  --nav-item-background-hover: var(--background-modifier-hover);   /* app.css:2441 */
+  --nav-item-background-active: var(--background-modifier-hover);  /* app.css:2442 */
+  --nav-item-background-selected: var(--interactive-accent-soft);  /* app.css:2443 */
+  --nav-item-padding: var(--size-4-1) var(--size-4-2) var(--size-4-1) var(--size-4-6); /* app.css:2444 */
+  --nav-item-parent-padding: var(--nav-item-padding);          /* app.css:2445 */
+  --nav-item-margin-bottom: var(--size-2-1);                   /* app.css:2446 */
+  --nav-item-children-padding-start: var(--size-2-2);          /* app.css:2447 */
+  --nav-item-children-margin-start: var(--size-4-3);           /* app.css:2448 */
+  --nav-item-weight: inherit;
+  --nav-item-weight-hover: inherit;
+  --nav-item-weight-active: inherit;
+  --nav-item-white-space: pre;
+  --nav-indentation-guide-width: 1px;
+  --nav-indentation-guide-color: var(--background-modifier-border);
+  --nav-tag-background: transparent;
+  --nav-tag-radius: var(--radius-s);
+  --nav-tag-color: var(--text-faint);
+  --status-bar-background: var(--background-secondary);        /* app.css:2658 */
+  --status-bar-border-color: var(--divider-color);             /* app.css:2659 */
+  --status-bar-border-width: var(--divider-width) 0 0 var(--divider-width); /* app.css:2660 */
+  --status-bar-font-size: var(--font-ui-smaller);              /* app.css:2661 */
+  --status-bar-position: fixed;                                /* app.css:2663 */
+  --status-bar-radius: var(--radius-m) 0 0 0;                  /* app.css:2664 */
+  --status-bar-text-color: var(--text-muted);                  /* app.css:2662 */
+  --file-header-font: var(--font-interface);
+  --file-header-font-size: var(--font-ui-small);
+  --file-header-font-weight: var(--font-normal);
+  --file-header-justify: center;                               /* app.css:2236 */
+  --corner-shape: round;
+  --cursor: default;
+  --indent-size: 4;
+  --line-height-tight: 1.3;
+  --line-height-normal: 1.5;
 }
-body.is-focused .editor-tab-header,
-body.is-focused .rp-top-row,
-body.is-focused .sidebar-top-row {
-  background: var(--titlebar-background-focused, var(--titlebar-bg));
+
+/* ── Workspace root / body columns ───────────────────────────────────── */
+/* Obsidian has one `.workspace` container that holds the ribbon + the
+   left/root/right splits as flex siblings. Our shell-root wraps an
+   outer column with overlay + workspace + status-bar. The .shell-upper
+   holder becomes `.workspace`. */
+.workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+.workspace-split {
+  display: flex;
+  background-color: var(--tab-container-background);
+  position: relative;
+}
+.workspace-split.mod-vertical {
+  flex-direction: row;
+}
+.workspace-split.mod-horizontal {
+  flex-direction: column;
+}
+.workspace-split.mod-root {
+  background-color: var(--background-primary);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.workspace-split.mod-left-split,
+.workspace-split.mod-right-split {
+  flex: 0 0 auto;
+  min-width: 180px;
+  max-width: 600px;
+  overflow: hidden;
+  flex-direction: column;
+  display: flex;
+}
+.workspace-split.mod-left-split {
+  background-color: var(--background-secondary);
+  border-right: var(--divider-width) solid var(--divider-color);
+}
+.workspace-split.mod-right-split {
+  background-color: var(--background-secondary);
+  border-left: var(--divider-width) solid var(--divider-color);
+}
+.workspace-split.mod-root {
+  flex-direction: column;
+  display: flex;
+}
+
+/* ── Ribbon (activity bar) ───────────────────────────────────────────── */
+.workspace-ribbon {
+  width: var(--ribbon-width);
+  flex: 0 0 var(--ribbon-width);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--ribbon-background);
+  color: var(--text-muted);
+  padding: var(--ribbon-padding);
+  gap: var(--size-4-1);
+  border-right: var(--divider-width) solid var(--divider-color);
+}
+.workspace-ribbon.mod-left {
+  /* Obsidian offsets the ribbon 40px down so the corner above it
+     becomes a drag well; our layout puts the ribbon flush top because
+     we don't render a titlebar. Keep margin 0 but retain class for
+     parity. */
+  margin-top: 0;
+}
+.workspace-ribbon.mod-right {
+  display: none;
+}
+body:not(.show-ribbon) .workspace-ribbon {
+  display: none;
+}
+.side-dock-settings {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-3);
+}
+.side-dock-ribbon-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--size-2-2) var(--size-2-3);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-s);
+  color: var(--icon-color);
+  opacity: var(--icon-opacity);
+  cursor: pointer;
+}
+.side-dock-ribbon-action:hover {
+  color: var(--icon-color-hover);
+  opacity: var(--icon-opacity-hover);
+  background-color: var(--background-modifier-hover);
+}
+.side-dock-ribbon-action.is-active {
+  color: var(--icon-color-focused);
+  background-color: var(--background-modifier-hover);
+}
+
+/* ── Tab containers (per-column) ─────────────────────────────────────── */
+.workspace-tabs {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  height: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.workspace-tab-header-container {
+  display: flex;
+  background-color: var(--tab-container-background);
+  height: var(--header-height);
+  border-bottom: var(--tab-outline-width) solid var(--tab-outline-color);
+  flex: 0 0 auto;
+  padding-left: var(--size-4-2);
+  padding-right: var(--size-4-2);
+  position: relative;
+}
+.workspace-tab-header-container-inner {
+  -webkit-app-region: drag;
+  display: flex;
+  flex: 0 1 auto;
+  overflow: auto;
+  margin: 6px -5px calc(var(--tab-outline-width) * -1);
+  padding: 1px 15px 0;
+}
+.mod-root .workspace-tab-header-container-inner {
+  padding: 1px 15px 0;
+}
+.workspace-tab-header-container-inner::-webkit-scrollbar,
+.workspace-tab-header-container-inner::-webkit-scrollbar-thumb {
+  display: none;
+}
+.workspace-tab-header-container .workspace-tab-header {
+  -webkit-app-region: no-drag;
+  color: var(--tab-text-color);
+  display: flex;
+  position: relative;
+  padding: 1px 4px 3.5px;
+  text-align: center;
+  border-radius: var(--tab-radius-active);
+  cursor: pointer;
+  user-select: none;
+}
+.workspace-tab-header-container .workspace-tab-header:not(.is-active):hover .workspace-tab-header-inner {
+  background-color: var(--background-modifier-hover);
+}
+.workspace-tab-header-container .workspace-tab-header.is-active {
+  box-shadow: 0 0 0 var(--tab-outline-width) var(--tab-outline-color);
+  color: var(--tab-text-color-active);
+  background-color: var(--tab-background-active);
+}
+.workspace-tab-header-inner {
+  align-items: center;
+  display: flex;
+  gap: var(--size-2-1);
+  height: 100%;
+  border-radius: var(--tab-radius);
+  overflow: hidden;
+  padding: 0 8px;
+  width: 100%;
+}
+.workspace-tab-header-inner .workspace-tab-header-inner-icon {
+  color: var(--icon-color);
+  opacity: var(--icon-opacity);
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.workspace-tab-header-inner-title {
+  flex: 1 1 auto;
+  font-size: var(--tab-font-size);
+  font-weight: var(--tab-font-weight);
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+.workspace-tab-header-inner-close-button {
+  cursor: pointer;
+  padding: var(--size-2-1);
+  border-radius: var(--radius-s);
+  display: flex;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--tab-text-color);
+  flex-shrink: 0;
+}
+.workspace-tab-header:hover .workspace-tab-header-inner-close-button {
+  color: var(--tab-text-color-focused);
+}
+.workspace-tab-header-inner-close-button:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--tab-text-color-focused-active-current);
+}
+.workspace-tab-header.is-active .workspace-tab-header-inner-close-button {
+  color: var(--tab-text-color-focused-active);
+}
+
+/* Tab color 6-state system — focus-aware colors (app.css:6132–6148) */
+body.is-focused .workspace-tab-header-container .workspace-tab-header {
+  color: var(--tab-text-color-focused);
+}
+body.is-focused .workspace-tab-header-container .workspace-tab-header.is-active {
+  color: var(--tab-text-color-focused-active);
+}
+body.is-focused .mod-active .workspace-tab-header-container .workspace-tab-header.is-active .workspace-tab-header-inner-icon,
+body.is-focused .mod-active .workspace-tab-header-container .workspace-tab-header.is-active .workspace-tab-header-inner-title {
+  color: var(--tab-text-color-focused-active-current);
+}
+body.is-focused .workspace-tab-header-container .workspace-tab-header.is-highlighted .workspace-tab-header-inner-icon,
+body.is-focused .workspace-tab-header-container .workspace-tab-header.is-highlighted .workspace-tab-header-inner-title {
+  color: var(--tab-text-color-focused-highlighted);
+}
+
+/* Sidebar-specific tab overrides — icon-only, no close (app.css:6350–6437) */
+.mod-left-split .workspace-tab-header-inner-title,
+.mod-right-split .workspace-tab-header-inner-title {
+  display: var(--sidebar-tab-text-display);
+}
+.mod-left-split .workspace-tab-header-inner-close-button,
+.mod-right-split .workspace-tab-header-inner-close-button {
+  display: none;
+}
+.mod-left-split .workspace-tab-header-container .workspace-tab-header-container-inner,
+.mod-right-split .workspace-tab-header-container .workspace-tab-header-container-inner {
+  padding: 1px 0 7px;
+  margin: 6px 0 0 0;
+  gap: 3px;
+}
+.mod-left-split .workspace-tab-header-container .workspace-tab-header,
+.mod-right-split .workspace-tab-header-container .workspace-tab-header {
+  box-shadow: none;
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+  border-radius: var(--radius-s);
+}
+.mod-left-split .workspace-tab-header-container .workspace-tab-header:before,
+.mod-right-split .workspace-tab-header-container .workspace-tab-header:before,
+.mod-left-split .workspace-tab-header-container .workspace-tab-header:after,
+.mod-right-split .workspace-tab-header-container .workspace-tab-header:after {
+  display: none;
+}
+.mod-left-split .workspace-tab-header-container .workspace-tab-header.is-active,
+.mod-right-split .workspace-tab-header-container .workspace-tab-header.is-active {
+  background-color: var(--background-modifier-hover);
+}
+.mod-left-split .workspace-tab-header-container .workspace-tab-header.is-active .workspace-tab-header-inner-icon,
+.mod-right-split .workspace-tab-header-container .workspace-tab-header.is-active .workspace-tab-header-inner-icon {
+  opacity: var(--icon-opacity-active);
+  color: var(--icon-color-focused);
+}
+
+/* ── view-header (editor root only) ──────────────────────────────────── */
+.view-header {
+  height: var(--header-height);
+  display: flex;
+  border-bottom: var(--file-header-border);
+  background-color: var(--file-header-background);
+  z-index: 1;
+  position: relative;
+  gap: var(--size-4-2);
+  padding: 0 var(--size-4-3);
+  align-items: center;
+  user-select: none;
+}
+body:not(.show-view-header):not(.is-phone) .view-header {
+  /* Keep view-header visible by default in Nexus — show-view-header
+     is a power-user toggle not yet exposed. Commenting out the hide
+     rule until that toggle ships. */
+}
+.is-focused .workspace-leaf.mod-active .view-header {
+  background-color: var(--file-header-background-focused);
+}
+.workspace-split.mod-left-split .view-header,
+.workspace-split.mod-right-split .view-header {
+  display: none;
+}
+.view-header-left {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+.view-header-title-container {
+  font-family: var(--file-header-font);
+  font-size: var(--file-header-font-size);
+  font-weight: var(--file-header-font-weight);
+  flex: 1 1 auto;
+  overflow: hidden;
+  position: relative;
+  justify-content: var(--file-header-justify);
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  min-width: 0;
+}
+.view-header-title-parent {
+  color: var(--text-muted);
+  flex: 0 100 auto;
+  display: flex;
+  gap: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.view-header-title-parent:empty {
+  display: none;
+}
+.view-header-title-parent .view-header-breadcrumb {
+  padding: 2px 4px;
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.view-header-title-parent .view-header-breadcrumb:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.view-header-title-parent .view-header-breadcrumb-separator {
+  padding: 2px 1px;
+  color: var(--text-faint);
+  display: inline-flex;
+  align-items: center;
+}
+.view-header-title {
+  flex: 0 0 auto;
+  max-width: 100%;
+  word-wrap: normal;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+.is-focused .workspace-leaf.mod-active .view-header-title {
+  color: var(--text-normal);
+}
+.view-actions {
+  display: flex;
+  gap: 0;
+  align-items: center;
+  --icon-size: var(--icon-s);
+}
+.view-content {
+  width: 100%;
+  height: calc(100% - var(--header-height));
+}
+.workspace-split.mod-root .view-content {
+  background-color: var(--background-primary);
+}
+.workspace-split.mod-left-split .view-content,
+.workspace-split.mod-right-split .view-content {
+  height: 100%;
+  overflow: auto;
+}
+
+/* ── Nav tree (file explorer) ────────────────────────────────────────── */
+.nav-files-container {
+  flex-grow: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--size-4-1) var(--size-4-3) var(--size-4-6) var(--size-4-3);
+}
+.tree-item-self {
+  align-items: baseline;
+  display: flex;
+  border-radius: var(--nav-item-radius);
+  color: var(--nav-item-color);
+  font-size: var(--nav-item-size);
+  line-height: var(--line-height-tight);
+  font-weight: var(--nav-item-weight);
+  margin-bottom: var(--nav-item-margin-bottom);
+  padding: var(--nav-item-padding);
+  position: relative;
+  cursor: default;
+}
+.tree-item-self.mod-collapsible {
+  padding: var(--nav-item-parent-padding);
+}
+.tree-item-self.is-clickable {
+  cursor: pointer;
+}
+.tree-item-self.is-clickable:hover {
+  color: var(--nav-item-color-hover);
+  background-color: var(--nav-item-background-hover);
+  font-weight: var(--nav-item-weight-hover);
+}
+.tree-item-self.is-active {
+  color: var(--nav-item-color-active);
+  background-color: var(--nav-item-background-active);
+  font-weight: var(--nav-item-weight-active);
+}
+.tree-item-self.is-selected {
+  color: var(--nav-item-color-selected);
+  background-color: var(--nav-item-background-selected);
+}
+.tree-item-self .tree-item-icon {
+  position: absolute;
+  margin-inline-start: calc(-1 * var(--size-4-5));
+  width: var(--size-4-4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: var(--icon-opacity);
+  color: var(--icon-color);
+  flex: 0 0 auto;
+}
+.tree-item-inner {
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+.tree-item-inner-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-item-children {
+  padding-inline-start: var(--nav-item-children-padding-start);
+  margin-inline-start: var(--nav-item-children-margin-start);
+  border-inline-start: var(--nav-indentation-guide-width) solid var(--nav-indentation-guide-color);
+}
+.nav-folder.is-being-dragged-over {
+  border-radius: var(--radius-s);
+  background: var(--interactive-accent-soft);
+}
+.nav-folder.is-being-dragged-over > .nav-folder-title {
+  color: var(--nav-item-color-highlighted);
+}
+.nav-file-title-content,
+.nav-folder-title-content {
+  display: inline-block;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+  white-space: var(--nav-item-white-space);
+  text-overflow: ellipsis;
+}
+
+/* ── Status bar ──────────────────────────────────────────────────────── */
+.status-bar {
+  /* Obsidian uses position: fixed + a rounded upper-left corner to
+     float the status bar over the right-panel content. We keep it
+     flow-laid-out to preserve our existing full-width spanning, but
+     port Obsidian's border / padding / typography. */
+  background-color: var(--status-bar-background);
+  color: var(--status-bar-text-color);
+  display: flex;
+  font-size: var(--status-bar-font-size);
+  min-height: 18px;
+  padding: var(--size-4-1);
+  padding-right: var(--size-4-2);
+  gap: var(--size-4-1);
+  user-select: none;
+  border-top: var(--divider-width) solid var(--status-bar-border-color);
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.status-bar .status-bar-item {
+  border-radius: var(--radius-s);
+  display: inline-flex;
+  align-items: center;
+  padding: 3px var(--size-2-2);
+  line-height: 1;
+  color: var(--status-bar-text-color);
+}
+.status-bar .status-bar-item.mod-clickable {
+  cursor: pointer;
+}
+.status-bar .status-bar-item.mod-clickable:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.status-bar .status-bar-item-segment {
+  margin-inline-end: var(--size-4-2);
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+.status-bar .status-bar-item-segment:last-child {
+  margin-inline-end: 0;
+}
+
+/* ── Resize handles ──────────────────────────────────────────────────── */
+.workspace-leaf-resize-handle {
+  position: relative;
+  flex: 0 0 var(--divider-width-hover);
+  background-color: transparent;
+  transition: background-color 200ms ease-in-out, border-color 200ms ease-in-out;
+}
+.workspace-leaf-resize-handle:hover {
+  background-color: var(--divider-color-hover);
+}
+.workspace-split.mod-vertical > .workspace-leaf-resize-handle,
+.workspace-split.mod-left-split > .workspace-leaf-resize-handle,
+.workspace-split.mod-right-split > .workspace-leaf-resize-handle {
+  width: var(--divider-width-hover);
+  height: 100%;
+  cursor: col-resize;
 }

@@ -48,6 +48,7 @@ export const outgoingLinksPlugin: Plugin = {
       viewId: VIEW_ID,
       title: 'Outgoing',
       priority: 25,
+      iconName: 'linkOut',
     })
     api.commands.register(COMMAND_FOCUS, () => {
       useLayoutStore.setState((s) => ({

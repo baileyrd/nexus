@@ -202,7 +202,7 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
         onCollapseAll={collapseAll}
       />
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '4px 0', fontSize: 'var(--ui-size, 13px)' }}>
+      <div className="nav-files-container">
         {rootEntries ? (
           sortEntries(rootEntries, sortMode).map((entry) => (
             <TreeNode
@@ -215,7 +215,7 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
             />
           ))
         ) : (
-          <div style={{ padding: '12px 14px', color: 'var(--fg-dim)' }}>Loading…</div>
+          <div style={{ padding: '12px 14px', color: 'var(--text-faint)' }}>Loading…</div>
         )}
       </div>
     </div>
@@ -491,8 +491,9 @@ function TreeNode({
 
   const tooltip = entry.relpath ? `${rootPath}/${entry.relpath}` : rootPath
 
+  const wrapperClass = entry.isDir ? 'nav-folder' : 'nav-file'
   return (
-    <div>
+    <div className={wrapperClass}>
       <Row
         entry={entry}
         depth={depth}
@@ -503,7 +504,7 @@ function TreeNode({
         buttonRef={rowRef}
       />
       {entry.isDir && expanded && children && (
-        <div>
+        <div className="nav-folder-children tree-item-children">
           {sortEntries(children, sortMode).map((child) => (
             <TreeNode
               key={child.relpath}
@@ -537,6 +538,12 @@ function Row({
   onClick: () => void
   buttonRef: React.RefObject<HTMLButtonElement>
 }) {
+  const titleClass = entry.isDir ? 'nav-folder-title' : 'nav-file-title'
+  const contentClass = entry.isDir ? 'nav-folder-title-content' : 'nav-file-title-content'
+  const selfClass =
+    `tree-item-self ${titleClass} is-clickable` +
+    (entry.isDir ? ' mod-collapsible' : '') +
+    (selected ? ' is-active' : '')
   return (
     <button
       type="button"
@@ -544,6 +551,7 @@ function Row({
       onClick={onClick}
       onDoubleClick={onClick}
       title={tooltip}
+      className={selfClass}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -551,48 +559,34 @@ function Row({
         width: '100%',
         textAlign: 'left',
         border: 'none',
-        background: selected ? 'var(--accent-soft)' : 'transparent',
-        color: selected ? 'var(--fg)' : 'var(--fg-muted)',
-        cursor: 'pointer',
         font: 'inherit',
         padding: `3px 8px 3px ${8 + depth * INDENT_PX}px`,
-        height: 24,
         lineHeight: '18px',
-        transition: 'background 0.06s',
-      }}
-      onMouseEnter={(e) => {
-        if (!selected) e.currentTarget.style.background = 'var(--bg-hover)'
-      }}
-      onMouseLeave={(e) => {
-        if (!selected) e.currentTarget.style.background = 'transparent'
       }}
     >
       <span
         aria-hidden
+        className="tree-item-icon collapse-icon"
         style={{
           width: 12,
           display: 'inline-flex',
           justifyContent: 'center',
-          color: 'var(--fg-dim)',
+          position: 'static',
+          margin: 0,
+          color: 'var(--icon-color)',
         }}
       >
         {entry.isDir ? (expanded ? <Icon name="chev" size={10} style={{ transform: 'rotate(90deg)' }} /> : <Icon name="chev" size={10} />) : null}
       </span>
-      <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center' }}>
+      <span aria-hidden className={entry.isDir ? '' : 'nav-file-icon'} style={{ display: 'inline-flex', alignItems: 'center', position: 'static', margin: 0 }}>
         {entry.isDir ? (
           <Icon name={expanded ? 'folderOpen' : 'folder'} size={14} />
         ) : (
           <Icon name="doc" size={14} />
         )}
       </span>
-      <span
-        style={{
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {entry.name}
+      <span className={`tree-item-inner ${contentClass}`}>
+        <span className="tree-item-inner-text">{entry.name}</span>
       </span>
     </button>
   )

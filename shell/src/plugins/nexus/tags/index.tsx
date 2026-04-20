@@ -48,6 +48,7 @@ export const tagsPlugin: Plugin = {
       viewId: VIEW_ID,
       title: 'Tags',
       priority: 30,
+      iconName: 'tag',
     })
     api.commands.register(COMMAND_FOCUS, () => {
       useLayoutStore.setState((s) => ({

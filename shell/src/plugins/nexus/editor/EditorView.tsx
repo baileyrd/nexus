@@ -275,25 +275,18 @@ export function EditorView({ onRetry }: EditorViewProps) {
 
   const tabHeader = (
     <div
-      className="editor-tab-header"
+      className="workspace-tab-header-container"
       data-tauri-drag-region
-      style={{
-        height: 'var(--header-height)',
-        flex: '0 0 var(--header-height)',
-        flexShrink: 0,
-        display: 'flex',
-        alignItems: 'stretch',
-        background: 'var(--bg-raised)',
-        borderBottom: '1px solid var(--line-soft)',
-      }}
     >
-      <EditorTabStrip
-        tabs={tabs}
-        activeRelpath={activeRelpath}
-        onSelect={setActive}
-        onClose={requestCloseTab}
-        onNewTab={requestNewTab}
-      />
+      <div className="workspace-tab-header-container-inner" data-tauri-drag-region>
+        <EditorTabStrip
+          tabs={tabs}
+          activeRelpath={activeRelpath}
+          onSelect={setActive}
+          onClose={requestCloseTab}
+          onNewTab={requestNewTab}
+        />
+      </div>
       {!rightPanelVisible && <WindowControls />}
     </div>
   )
@@ -367,52 +360,14 @@ export function EditorView({ onRetry }: EditorViewProps) {
  */
 function ViewHeader({ activeTab }: { activeTab: EditorTab | null }) {
   return (
-    <div
-      className="editor-view-header"
-      style={{
-        height: 'var(--header-height)',
-        flex: '0 0 var(--header-height)',
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 6px 0 12px',
-        background: 'var(--bg-raised)',
-        borderBottom: '1px solid var(--line-soft)',
-        gap: 4,
-        userSelect: 'none',
-      }}
-    >
-      <div
-        className="editor-view-header-left"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          flexShrink: 0,
-        }}
-      />
-      <div
-        className="editor-view-header-title"
-        style={{
-          flex: 1,
-          minWidth: 0,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          overflow: 'hidden',
-          whiteSpace: 'nowrap',
-          fontSize: 'var(--ui-size, 12px)',
-        }}
-      >
-        <BreadcrumbSegments activeTab={activeTab} />
+    <div className="view-header">
+      <div className="view-header-left" />
+      <div className="view-header-title-container">
+        <div className="view-header-title-parent">
+          <BreadcrumbSegments activeTab={activeTab} />
+        </div>
       </div>
-      <div
-        className="editor-view-header-actions"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          flexShrink: 0,
-          gap: 2,
-        }}
-      />
+      <div className="view-actions" />
     </div>
   )
 }
@@ -420,7 +375,7 @@ function ViewHeader({ activeTab }: { activeTab: EditorTab | null }) {
 function BreadcrumbSegments({ activeTab }: { activeTab: EditorTab | null }) {
   if (!activeTab) {
     return (
-      <span style={{ color: 'var(--fg-dim)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <span className="view-header-title" style={{ color: 'var(--text-faint)' }}>
         No file open
       </span>
     )
@@ -428,64 +383,26 @@ function BreadcrumbSegments({ activeTab }: { activeTab: EditorTab | null }) {
 
   // Untitled tabs have no path hierarchy — render the bare name.
   if (isUntitledRelpath(activeTab.relpath)) {
-    return (
-      <span style={{ color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        {activeTab.name}
-      </span>
-    )
+    return <span className="view-header-title">{activeTab.name}</span>
   }
 
   const segments = splitPathSegments(activeTab.relpath)
   if (segments.length === 0) {
-    return (
-      <span style={{ color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        {activeTab.name}
-      </span>
-    )
+    return <span className="view-header-title">{activeTab.name}</span>
   }
 
   const lastIndex = segments.length - 1
   return (
     <>
-      {segments.map((seg, i) => {
-        const isLast = i === lastIndex
-        return (
-          <span
-            key={i}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              minWidth: 0,
-            }}
-          >
-            <span
-              style={{
-                color: isLast ? 'var(--fg)' : 'var(--fg-muted)',
-                fontWeight: isLast ? 500 : 400,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {seg}
-            </span>
-            {!isLast && (
-              <span
-                aria-hidden
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  color: 'var(--fg-dim)',
-                  flexShrink: 0,
-                }}
-              >
-                <Icon name="chev" size={12} />
-              </span>
-            )}
+      {segments.slice(0, -1).map((seg, i) => (
+        <span key={i} style={{ display: 'inline-flex', alignItems: 'center' }}>
+          <span className="view-header-breadcrumb">{seg}</span>
+          <span className="view-header-breadcrumb-separator" aria-hidden>
+            <Icon name="chev" size={12} />
           </span>
-        )
-      })}
+        </span>
+      ))}
+      <span className="view-header-title">{segments[lastIndex]}</span>
     </>
   )
 }

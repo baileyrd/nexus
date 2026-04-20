@@ -28,26 +28,19 @@ function SidebarIconBtn({
       aria-label={label}
       title={label}
       onClick={onClick}
-      onMouseEnter={(e) => {
-        ;(e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
-        ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--fg)'
-      }}
-      onMouseLeave={(e) => {
-        ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
-        ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--fg-muted)'
-      }}
+      className="clickable-icon"
       style={{
         width: 22,
         height: 22,
         padding: 0,
         border: 0,
         background: 'transparent',
-        color: 'var(--fg-muted)',
+        color: 'var(--text-muted)',
         cursor: 'pointer',
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 'var(--r)',
+        borderRadius: 'var(--radius-s)',
         flexShrink: 0,
       }}
     >
@@ -88,13 +81,12 @@ export function SidebarHost() {
 
   const workspaceName = rootPath ? basename(rootPath) : null
 
-  // Title resolver — activity bar items map viewId → title. Falls back to
-  // the raw type string when a leaf references a view with no activity-bar
-  // entry (rare, but keeps the tab from rendering blank).
-  const getTitle = useMemo(() => {
-    const byViewId = new Map<string, string>()
-    for (const item of activityItems) byViewId.set(item.viewId, item.title)
-    return (type: string) => byViewId.get(type) ?? type
+  // Title + icon resolver — activity bar items map viewId → title/iconName.
+  const getMeta = useMemo(() => {
+    const byViewId = new Map<string, { title: string; iconName?: string }>()
+    for (const item of activityItems)
+      byViewId.set(item.viewId, { title: item.title, iconName: item.iconName })
+    return (type: string) => byViewId.get(type) ?? { title: type }
   }, [activityItems])
 
   const activeLeaf = leaves.find((l) => l.id === activeLeafId) ?? null
@@ -109,6 +101,7 @@ export function SidebarHost() {
 
   return (
     <div
+      className="workspace-tabs mod-top"
       style={{
         height: '100%',
         width: '100%',
@@ -117,23 +110,19 @@ export function SidebarHost() {
         overflow: 'hidden',
       }}
     >
-      {/* Tab strip — replaces the old 30px sidebar-top-row drag strip.
-          Itself carries data-tauri-drag-region so empty space beyond
-          the tabs drags the window. */}
+      {/* Sidebar tab strip — `.workspace-tab-header-container` with
+          inner `.workspace-tab-header-container-inner` scroll element. */}
       <SidebarTabStrip
         leaves={leaves}
         activeLeafId={activeLeafId}
         onSelect={setActiveLeaf}
         onClose={removeLeaf}
-        getTitle={getTitle}
+        getMeta={getMeta}
       />
 
-      {/* Active leaf body — renders the view matching the active leaf's
-          type. Surfaces an Obsidian-style placeholder when the registry
-          has no match (plugin missing/disabled) or when the user has
-          closed every tab. */}
+      {/* Active leaf body. */}
       <div
-        className="sidebar-leaf-body"
+        className="workspace-leaf"
         style={{
           flex: 1,
           overflow: 'hidden',
@@ -142,17 +131,29 @@ export function SidebarHost() {
           minHeight: 0,
         }}
       >
-        {!activeLeaf ? (
-          <EmptyPlaceholder message="No tabs open — pick one from the activity bar" />
-        ) : !match ? (
-          <EmptyPlaceholder message="No view — plugin missing or disabled" />
-        ) : (
-          createElement(match.component)
-        )}
+        <div
+          className="workspace-leaf-content"
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          {!activeLeaf ? (
+            <EmptyPlaceholder message="No tabs open — pick one from the activity bar" />
+          ) : !match ? (
+            <EmptyPlaceholder message="No view — plugin missing or disabled" />
+          ) : (
+            createElement(match.component)
+          )}
+        </div>
       </div>
 
-      {/* Vault footer — unchanged. */}
+      {/* Vault footer — analogous to Obsidian's .workspace-sidedock-vault-profile. */}
       <div
+        className="workspace-sidedock-vault-profile"
         style={{
           flexShrink: 0,
           display: 'flex',
@@ -160,9 +161,9 @@ export function SidebarHost() {
           gap: 6,
           padding: '0 6px 0 10px',
           height: 32,
-          borderTop: '1px solid var(--line-soft)',
+          borderTop: 'var(--divider-width) solid var(--divider-color)',
           fontSize: 12,
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
         }}
       >
         <Icon name="folder" size={13} />

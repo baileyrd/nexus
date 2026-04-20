@@ -49,6 +49,7 @@ export const allPropertiesPlugin: Plugin = {
       viewId: VIEW_ID,
       title: 'Properties',
       priority: 35,
+      iconName: 'archive',
     })
     api.commands.register(COMMAND_FOCUS, () => {
       useLayoutStore.setState((s) => ({

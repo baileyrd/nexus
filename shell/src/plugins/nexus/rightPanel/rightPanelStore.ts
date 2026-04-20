@@ -11,6 +11,9 @@ import { create } from 'zustand'
 export interface RightPanelTabMeta {
   title: string
   priority: number
+  /** Icon glyph name (from `shell/src/icons`). Required for the
+   *  Obsidian-faithful icon-only tab render in the right sidebar. */
+  iconName?: string
 }
 
 interface RightPanelState {

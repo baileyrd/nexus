@@ -118,15 +118,14 @@ export default function App() {
         <SlotSurface entries={slots.overlay} />
       </div>
 
-      {/* Upper row: full-height activity bar sits alongside the body
-          columns (sidebar / center / rightPanel). Obsidian-faithful
-          structure — there is no shared top strip; each body column
-          renders its own 36px top row internally. */}
-      <div className="shell-upper">
+      {/* Workspace — Obsidian-faithful top-level container. Hosts the
+          ribbon (.workspace-ribbon.mod-left) and the body columns
+          (.workspace-split.mod-left-split / .mod-root / .mod-right-split)
+          as direct flex siblings. */}
+      <div className="workspace">
 
-        {/* Activity bar — full height of upper row, i.e. window top down
-            to the statusbar. */}
-        <div className="shell-activitybar">
+        {/* Activity bar — `.workspace-ribbon.mod-left` in Obsidian. */}
+        <div className="workspace-ribbon mod-left">
           <SlotSurface entries={slots.activityBar} />
         </div>
 
@@ -157,14 +156,14 @@ export default function App() {
             <>
               {sidebar.visible && (
                 <>
-                  <div className="shell-sidebar" style={{ width: sidebar.width }}>
+                  <div className="workspace-split mod-left-split mod-vertical" style={{ width: sidebar.width }}>
                     <SlotSurface entries={slots.sidebar} />
                   </div>
                   <ResizeHandle direction="horizontal" onResize={resizeSidebar} />
                 </>
               )}
 
-              <div className="shell-center">
+              <div className="workspace-split mod-root mod-vertical">
                 <div className="shell-editor-area">
                   <SlotSurface entries={slots.editorArea} />
                 </div>
@@ -182,7 +181,7 @@ export default function App() {
               {rightPanel.visible && (
                 <>
                   <ResizeHandle direction="horizontal" onResize={resizeRightPanel} />
-                  <div className="shell-right-panel" style={{ width: rightPanel.width }}>
+                  <div className="workspace-split mod-right-split mod-vertical" style={{ width: rightPanel.width }}>
                     <SlotSurface entries={slots.rightPanel} />
                   </div>
                 </>
@@ -192,13 +191,13 @@ export default function App() {
         })()}
       </div>
 
-      {/* Status bar — stays full-width at the very bottom of root,
-          spanning under the activity bar too. */}
-      <div className="shell-statusbar">
-        <div className="shell-statusbar-left">
+      {/* Status bar — `.status-bar` matches Obsidian. Full-width at
+          the bottom of shell-root; items on left/right in two segments. */}
+      <div className="status-bar">
+        <div className="status-bar-item-segment">
           <SlotSurface entries={slots.statusBarLeft} />
         </div>
-        <div className="shell-statusbar-right">
+        <div className="status-bar-item-segment">
           <SlotSurface entries={slots.statusBarRight} />
         </div>
       </div>

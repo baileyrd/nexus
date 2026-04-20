@@ -1,12 +1,12 @@
 // src/plugins/nexus/sidebar/SidebarTabStrip.tsx
-// Header row for the left sidebar's multi-leaf model. Mirrors Obsidian's
-// per-split tab container — one tab per open leaf, click to activate,
-// hover to reveal the close chip. Empty space doubles as a Tauri drag
-// region so the sidebar column participates in window dragging the same
-// way the editor/right-panel tab rows do.
+// Header row for the left sidebar's multi-leaf model. Migrated to
+// Obsidian-faithful DOM: `.workspace-tab-header-container` →
+// `.workspace-tab-header-container-inner` → `.workspace-tab-header` →
+// `.workspace-tab-header-inner > .workspace-tab-header-inner-icon`.
+// Sidebar tabs are icon-only (app.css:6351) — the title goes in the
+// tooltip. CSS handles styling, hover, and active states.
 
-import { useState } from 'react'
-import { Icon } from '../../../icons'
+import { Icon, type IconName } from '../../../icons'
 import type { SidebarLeaf } from './sidebarSplitStore'
 
 export interface SidebarTabStripProps {
@@ -14,116 +14,39 @@ export interface SidebarTabStripProps {
   activeLeafId: string | null
   onSelect: (id: string) => void
   onClose: (id: string) => void
-  /** Resolve a display title for a leaf's view type. Falls back to the
-   *  raw type string when no contributed title is found. */
-  getTitle: (type: string) => string
+  /** Resolve display metadata (title + iconName) for a leaf's view type. */
+  getMeta: (type: string) => { title: string; iconName?: string }
 }
 
 export function SidebarTabStrip(props: SidebarTabStripProps) {
-  const { leaves, activeLeafId, onSelect, onClose, getTitle } = props
-  const [hoverId, setHoverId] = useState<string | null>(null)
+  const { leaves, activeLeafId, onSelect, getMeta } = props
 
   return (
-    <div
-      data-tauri-drag-region
-      style={{
-        height: 'var(--header-height)',
-        flex: '0 0 var(--header-height)',
-        display: 'flex',
-        alignItems: 'stretch',
-        background: 'var(--tab-container-background)',
-        borderBottom: 'var(--tab-outline-width) solid var(--tab-outline-color)',
-        overflow: 'hidden',
-      }}
-    >
-      {leaves.map((leaf) => {
-        const isActive = leaf.id === activeLeafId
-        const isHovered = hoverId === leaf.id
-        return (
-          <div
-            key={leaf.id}
-            role="tab"
-            aria-selected={isActive}
-            onClick={() => onSelect(leaf.id)}
-            onMouseEnter={() => setHoverId(leaf.id)}
-            onMouseLeave={() => setHoverId((h) => (h === leaf.id ? null : h))}
-            title={getTitle(leaf.type)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '0 8px 0 10px',
-              maxWidth: 160,
-              minWidth: 0,
-              cursor: 'pointer',
-              color: isActive ? 'var(--text-normal)' : 'var(--text-muted)',
-              fontSize: 12,
-              userSelect: 'none',
-              boxShadow: isActive
-                ? 'inset 0 -2px 0 var(--interactive-accent)'
-                : 'none',
-              background: isActive
-                ? 'var(--tab-background-active, transparent)'
-                : 'transparent',
-            }}
-          >
-            <span
-              style={{
-                flex: 1,
-                minWidth: 0,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
+    <div className="workspace-tab-header-container" data-tauri-drag-region>
+      <div className="workspace-tab-header-container-inner" data-tauri-drag-region>
+        {leaves.map((leaf) => {
+          const isActive = leaf.id === activeLeafId
+          const meta = getMeta(leaf.type)
+          const iconName = (meta.iconName ?? 'filePlus') as IconName
+          return (
+            <div
+              key={leaf.id}
+              className={`workspace-tab-header${isActive ? ' is-active' : ''}`}
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => onSelect(leaf.id)}
+              title={meta.title}
             >
-              {getTitle(leaf.type)}
-            </span>
-            {/* Close chip — visible on hover or when active so the user can
-                always dismiss the current tab without fishing for it. */}
-            <button
-              type="button"
-              aria-label={`Close ${getTitle(leaf.type)}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                onClose(leaf.id)
-              }}
-              style={{
-                width: 16,
-                height: 16,
-                padding: 0,
-                border: 0,
-                background: 'transparent',
-                color: 'inherit',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: 'var(--r)',
-                flexShrink: 0,
-                opacity: isActive || isHovered ? 0.75 : 0,
-                transition: 'opacity 80ms linear',
-              }}
-              onMouseEnter={(e) => {
-                ;(e.currentTarget as HTMLButtonElement).style.opacity = '1'
-                ;(e.currentTarget as HTMLButtonElement).style.background =
-                  'var(--bg-hover)'
-              }}
-              onMouseLeave={(e) => {
-                ;(e.currentTarget as HTMLButtonElement).style.opacity =
-                  isActive || isHovered ? '0.75' : '0'
-                ;(e.currentTarget as HTMLButtonElement).style.background =
-                  'transparent'
-              }}
-            >
-              <Icon name="x" size={12} />
-            </button>
-          </div>
-        )
-      })}
-      {/* Trailing flex filler — inherits data-tauri-drag-region from parent
-          because it has no pointer-events-changing children, so empty
-          space drags the window. */}
-      <div style={{ flex: 1 }} />
+              <div className="workspace-tab-header-inner">
+                <div className="workspace-tab-header-inner-icon">
+                  <Icon name={iconName} size={18} />
+                </div>
+                <div className="workspace-tab-header-inner-title">{meta.title}</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

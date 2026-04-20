@@ -2,10 +2,10 @@
 // `nexus.titleBar` plugin when we distributed top-strip content into
 // per-column top rows (Task 6).
 //
-// The surrounding "editor-tab-header" row in EditorView provides the
-// Tauri drag region via `data-tauri-drag-region`; tab elements
-// themselves must NOT carry the attribute (on Windows, Tauri 2 eats
-// click events inside a drag region).
+// The surrounding `.workspace-tab-header-container` row in EditorView
+// provides the Tauri drag region via `data-tauri-drag-region`; tab
+// elements themselves must NOT carry the attribute (on Windows, Tauri 2
+// eats click events inside a drag region).
 //
 // Naming note: the editor store already exports an `EditorTab` type
 // (the data model). The header-row components are suffixed `Chip` /
@@ -64,7 +64,7 @@ export function EditorTabStrip({
       </div>
       {/* Empty gap that eats remaining space so the tab menu stays
           flush right. Not marked draggable itself — the parent
-          `editor-tab-header` row carries `data-tauri-drag-region`,
+          `.workspace-tab-header-container` row carries `data-tauri-drag-region`,
           which covers this empty area because a plain <div> with no
           click handler doesn't intercept pointer events above the
           parent's drag surface. Tabs above also carry no drag
@@ -90,114 +90,51 @@ function EditorTabChip({
   onSelect: (relpath: string) => void
   onClose: (relpath: string) => void
 }) {
-  const [hover, setHover] = useState(false)
   const dirty = isDirty(tab)
-  const bg = active ? 'var(--bg)' : hover ? 'var(--bg-hover)' : 'transparent'
-  const fg = active ? 'var(--fg)' : 'var(--fg-muted)'
-
   return (
     <div
       role="tab"
       aria-selected={active}
       title={tab.relpath}
       onClick={() => onSelect(tab.relpath)}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '0 8px 0 10px',
-        height: '100%',
-        borderRight: '1px solid var(--line-soft)',
-        cursor: 'pointer',
-        whiteSpace: 'nowrap',
-        flexShrink: 0,
-        maxWidth: 220,
-        minWidth: 80,
-        background: bg,
-        color: fg,
-        position: 'relative',
-      }}
+      className={`workspace-tab-header${active ? ' is-active' : ''}`}
+      data-type="markdown"
     >
-      {active && (
-        <span
-          aria-hidden
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: 2,
-            background: 'var(--accent)',
+      <div className="workspace-tab-header-inner">
+        <div className="workspace-tab-header-inner-icon">
+          <Icon name="doc" size={14} />
+        </div>
+        <div className="workspace-tab-header-inner-title">
+          {tab.name}
+          {dirty && (
+            <span
+              aria-hidden
+              title="Unsaved changes"
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: 'var(--text-normal)',
+                marginLeft: 6,
+                display: 'inline-block',
+              }}
+            />
+          )}
+        </div>
+        <button
+          type="button"
+          aria-label="Close"
+          className="workspace-tab-header-inner-close-button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onClose(tab.relpath)
           }}
-        />
-      )}
-      <span
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          fontWeight: active ? 500 : 400,
-          minWidth: 0,
-        }}
-      >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{tab.name}</span>
-        {dirty && (
-          <span
-            aria-hidden
-            title="Unsaved changes"
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: 'var(--fg)',
-              marginLeft: 6,
-              flexShrink: 0,
-            }}
-          />
-        )}
-      </span>
-      {active ? (
-        <TabCloseButton onClick={(e) => {
-          e.stopPropagation()
-          onClose(tab.relpath)
-        }} />
-      ) : (
-        <span style={{ width: 16, height: 16, flexShrink: 0 }} />
-      )}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <Icon name="x" size={12} />
+        </button>
+      </div>
     </div>
-  )
-}
-
-function TabCloseButton({ onClick }: { onClick: (e: React.MouseEvent) => void }) {
-  const [hover, setHover] = useState(false)
-  return (
-    <button
-      type="button"
-      aria-label="Close"
-      onClick={onClick}
-      onMouseDown={(e) => e.stopPropagation()}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 16,
-        height: 16,
-        padding: 0,
-        border: 0,
-        background: hover ? 'var(--bg-hover)' : 'transparent',
-        color: 'inherit',
-        cursor: 'pointer',
-        borderRadius: 'var(--r)',
-        flexShrink: 0,
-      }}
-    >
-      <Icon name="x" size={12} />
-    </button>
   )
 }
 

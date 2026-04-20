@@ -118,6 +118,7 @@ export const graphPlugin: Plugin = {
       viewId: VIEW_ID,
       title: 'Graph',
       priority: 30,
+      iconName: 'graph',
     })
 
     // ── Loader + requestId guard ─────────────────────────────────────

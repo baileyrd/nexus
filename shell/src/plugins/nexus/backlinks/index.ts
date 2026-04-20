@@ -90,6 +90,7 @@ export const backlinksPlugin: Plugin = {
       viewId: VIEW_ID,
       title: 'Backlinks',
       priority: 20,
+      iconName: 'linkIn',
     })
 
     // ── Loader + requestId guard ─────────────────────────────────────
