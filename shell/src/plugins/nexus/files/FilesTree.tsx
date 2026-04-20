@@ -3,8 +3,9 @@ import { useFilesStore, type FilesDirEntry, type SortMode } from './filesStore'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useEditorStore } from '../editor/editorStore'
 import { createDir, createFile, loadChildren } from './kernelClient'
-import { Icon, type IconName } from '../../../icons'
+import { Icon } from '../../../icons'
 import { getApi } from './runtime'
+import { NavActionButton, NavButtonsContainer, NavHeader } from '../../../primitives/NavHeader'
 
 interface FilesTreeProps {
   onFileActivate: (entry: FilesDirEntry) => void
@@ -265,34 +266,37 @@ function Toolbar({
   const sortBtnRef = useRef<HTMLButtonElement>(null)
 
   return (
-    <div
-      style={{
-        flexShrink: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 4,
-        padding: '6px 8px',
-        borderBottom: '1px solid var(--line-soft)',
-        position: 'relative',
-      }}
-    >
-      <ToolbarButton label="New note" icon="filePlus" onClick={onNewFile} />
-      <ToolbarButton label="New folder" icon="folderPlus" onClick={onNewFolder} />
-      <ToolbarButton
-        label="Change sort order"
-        icon="sortAZ"
-        buttonRef={sortBtnRef}
-        active={sortMenuOpen}
-        onClick={() => setSortMenuOpen((v) => !v)}
-      />
-      <ToolbarButton
-        label={autoReveal ? 'Auto-reveal: on' : 'Auto-reveal current file'}
-        icon="crosshair"
-        active={autoReveal}
-        onClick={onToggleAutoReveal}
-      />
-      <ToolbarButton label="Collapse all" icon="collapseAll" onClick={onCollapseAll} />
+    <NavHeader style={{ position: 'relative' }}>
+      <NavButtonsContainer hasSeparator>
+        <NavActionButton
+          label="New note"
+          icon={<Icon name="filePlus" size={14} />}
+          onClick={onNewFile}
+        />
+        <NavActionButton
+          label="New folder"
+          icon={<Icon name="folderPlus" size={14} />}
+          onClick={onNewFolder}
+        />
+        <NavActionButton
+          ref={sortBtnRef}
+          label="Change sort order"
+          icon={<Icon name="sortAZ" size={14} />}
+          active={sortMenuOpen}
+          onClick={() => setSortMenuOpen((v) => !v)}
+        />
+        <NavActionButton
+          label={autoReveal ? 'Auto-reveal: on' : 'Auto-reveal current file'}
+          icon={<Icon name="crosshair" size={14} />}
+          active={autoReveal}
+          onClick={onToggleAutoReveal}
+        />
+        <NavActionButton
+          label="Collapse all"
+          icon={<Icon name="collapseAll" size={14} />}
+          onClick={onCollapseAll}
+        />
+      </NavButtonsContainer>
 
       {sortMenuOpen && (
         <SortMenu
@@ -305,52 +309,7 @@ function Toolbar({
           onDismiss={() => setSortMenuOpen(false)}
         />
       )}
-    </div>
-  )
-}
-
-function ToolbarButton({
-  label,
-  icon,
-  onClick,
-  active,
-  buttonRef,
-}: {
-  label: string
-  icon: IconName
-  onClick: () => void
-  active?: boolean
-  buttonRef?: React.RefObject<HTMLButtonElement>
-}) {
-  const [hover, setHover] = useState(false)
-  return (
-    <button
-      ref={buttonRef}
-      type="button"
-      aria-label={label}
-      title={label}
-      aria-pressed={active}
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        width: 26,
-        height: 24,
-        padding: 0,
-        border: 0,
-        background: active ? 'var(--bg)' : hover ? 'var(--bg-hover)' : 'transparent',
-        color: active || hover ? 'var(--fg)' : 'var(--fg-muted)',
-        cursor: 'pointer',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 'var(--r)',
-        flexShrink: 0,
-        transition: 'background 0.08s, color 0.08s',
-      }}
-    >
-      <Icon name={icon} size={14} />
-    </button>
+    </NavHeader>
   )
 }
 
