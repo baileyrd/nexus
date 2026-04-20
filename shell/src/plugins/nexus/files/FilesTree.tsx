@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react'
-import { useFilesStore, type FilesDirEntry } from './filesStore'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useFilesStore, type FilesDirEntry, type SortMode } from './filesStore'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
-import { loadChildren } from './kernelClient'
+import { useEditorStore } from '../editor/editorStore'
+import { createDir, createFile, loadChildren } from './kernelClient'
+import { Icon, type IconName } from '../../../icons'
+import { getApi } from './runtime'
 
 interface FilesTreeProps {
   onFileActivate: (entry: FilesDirEntry) => void
@@ -10,11 +13,79 @@ interface FilesTreeProps {
 const INDENT_PX = 14
 const ROOT_RELPATH = ''
 
+/** Sort entries in-place by the user's chosen mode. Directories always
+ *  come first (VSCode / Obsidian convention); the mode only orders
+ *  within each bucket. Missing timestamps sink to the bottom. */
+function sortEntries(entries: FilesDirEntry[], mode: SortMode): FilesDirEntry[] {
+  const sorted = [...entries]
+  sorted.sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+    switch (mode) {
+      case 'nameAsc':
+        return a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+      case 'nameDesc':
+        return b.name.toLowerCase().localeCompare(a.name.toLowerCase())
+      case 'modifiedDesc':
+        return compareNullableNumber(b.modifiedMs, a.modifiedMs, a.name, b.name)
+      case 'modifiedAsc':
+        return compareNullableNumber(a.modifiedMs, b.modifiedMs, a.name, b.name)
+      case 'createdDesc':
+        return compareNullableNumber(b.createdMs, a.createdMs, a.name, b.name)
+      case 'createdAsc':
+        return compareNullableNumber(a.createdMs, b.createdMs, a.name, b.name)
+    }
+  })
+  return sorted
+}
+
+/** Numeric comparator that treats `undefined` as "worst" (pushed to
+ *  the end) and breaks ties by case-insensitive name. */
+function compareNullableNumber(
+  a: number | undefined,
+  b: number | undefined,
+  nameA: string,
+  nameB: string,
+): number {
+  if (a === undefined && b === undefined) {
+    return nameA.toLowerCase().localeCompare(nameB.toLowerCase())
+  }
+  if (a === undefined) return 1
+  if (b === undefined) return -1
+  if (a !== b) return a - b
+  return nameA.toLowerCase().localeCompare(nameB.toLowerCase())
+}
+
+/** Forge-relative parent of a relpath. `""` → `""`. Forward-slash only. */
+function parentRelpath(relpath: string): string {
+  const i = relpath.lastIndexOf('/')
+  return i === -1 ? '' : relpath.slice(0, i)
+}
+
+/** All ancestor relpaths of `relpath`, outermost first, excluding the
+ *  root sentinel `""` (which is always "expanded" implicitly). */
+function ancestors(relpath: string): string[] {
+  const out: string[] = []
+  let cur = parentRelpath(relpath)
+  while (cur !== '') {
+    out.unshift(cur)
+    cur = parentRelpath(cur)
+  }
+  return out
+}
+
 export function FilesTree({ onFileActivate }: FilesTreeProps) {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const rootEntries = useFilesStore((s) => s.children[ROOT_RELPATH])
   const setChildren = useFilesStore((s) => s.setChildren)
-  const [filter, setFilter] = useState('')
+  const sortMode = useFilesStore((s) => s.sortMode)
+  const autoReveal = useFilesStore((s) => s.autoReveal)
+  const selected = useFilesStore((s) => s.selected)
+  const setSelected = useFilesStore((s) => s.setSelected)
+  const setExpanded = useFilesStore((s) => s.setExpanded)
+  const collapseAll = useFilesStore((s) => s.collapseAll)
+  const setSortMode = useFilesStore((s) => s.setSortMode)
+  const setAutoReveal = useFilesStore((s) => s.setAutoReveal)
+  const activeRelpath = useEditorStore((s) => s.activeRelpath)
 
   useEffect(() => {
     if (!rootPath) return
@@ -24,10 +95,25 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
     )
   }, [rootPath, rootEntries, setChildren])
 
-  // Clear filter when workspace changes
+  // Auto-reveal: whenever the active editor file changes and the user
+  // has the flag on, expand every ancestor directory, select the file,
+  // and scroll its row into view.
   useEffect(() => {
-    setFilter('')
-  }, [rootPath])
+    if (!autoReveal) return
+    if (!activeRelpath) return
+    for (const dir of ancestors(activeRelpath)) {
+      setExpanded(dir, true)
+      // Fire-and-forget: unexpanded dirs haven't been listed yet, so
+      // `loadChildren` populates them before TreeNode renders them.
+      const cached = useFilesStore.getState().children[dir]
+      if (!cached) {
+        loadChildren(dir).then((entries) =>
+          useFilesStore.getState().setChildren(dir, entries),
+        )
+      }
+    }
+    setSelected(activeRelpath)
+  }, [autoReveal, activeRelpath, setExpanded, setSelected])
 
   if (!rootPath) {
     return (
@@ -43,114 +129,360 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
     )
   }
 
-  if (!rootEntries) {
-    return (
-      <div
-        style={{
-          padding: '12px 14px',
-          color: 'var(--fg-dim)',
-          fontSize: 'var(--ui-size, 12px)',
-        }}
-      >
-        Loading…
-      </div>
-    )
+  // Determine the parent dir for new-file / new-folder: the selected
+  // directory itself, the selected file's parent, or the root.
+  const parentForNew = (): string => {
+    if (!selected) return ''
+    const entries = rootEntries ?? []
+    const match = findEntry(entries, selected, useFilesStore.getState().children)
+    if (match?.isDir) return match.relpath
+    return parentRelpath(selected)
   }
 
-  const normalizedFilter = filter.trim().toLowerCase()
+  const refreshParent = async (parent: string) => {
+    const entries = await loadChildren(parent)
+    setChildren(parent, entries)
+  }
+
+  const handleNewFile = async () => {
+    const api = getApi()
+    if (!api) return
+    const name = await api.input.prompt('New note name')
+    if (!name) return
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const withExt = /\.[^/\\]+$/.test(trimmed) ? trimmed : `${trimmed}.md`
+    const parent = parentForNew()
+    const relpath = parent ? `${parent}/${withExt}` : withExt
+    try {
+      await createFile(relpath)
+      setExpanded(parent, true)
+      await refreshParent(parent)
+      setSelected(relpath)
+    } catch (err) {
+      console.warn('[nexus.files] create_file failed:', err)
+      await api.input.confirm(`Failed to create "${withExt}": ${(err as Error).message ?? err}`)
+    }
+  }
+
+  const handleNewFolder = async () => {
+    const api = getApi()
+    if (!api) return
+    const name = await api.input.prompt('New folder name')
+    if (!name) return
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const parent = parentForNew()
+    const relpath = parent ? `${parent}/${trimmed}` : trimmed
+    try {
+      await createDir(relpath)
+      setExpanded(parent, true)
+      setExpanded(relpath, true)
+      await refreshParent(parent)
+    } catch (err) {
+      console.warn('[nexus.files] create_dir failed:', err)
+      await api.input.confirm(`Failed to create "${trimmed}": ${(err as Error).message ?? err}`)
+    }
+  }
+
+  const handleToggleAutoReveal = () => {
+    setAutoReveal(!autoReveal)
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      {/* Filter row */}
-      <div
-        style={{
-          flexShrink: 0,
-          padding: '4px 8px',
-          borderBottom: '1px solid var(--line-soft)',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            background: 'var(--bg)',
-            border: '1px solid var(--line-soft)',
-            borderRadius: 'var(--r)',
-            padding: '3px 8px',
-          }}
-        >
-          <svg
-            width={12}
-            height={12}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.75}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ color: 'var(--fg-dim)', flexShrink: 0 }}
-            aria-hidden
-          >
-            <circle cx="11" cy="11" r="7" />
-            <path d="m20 20-3-3" />
-          </svg>
-          <input
-            type="text"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter files…"
-            aria-label="Filter files"
-            style={{
-              flex: 1,
-              background: 'transparent',
-              border: 0,
-              outline: 'none',
-              color: 'var(--fg)',
-              fontSize: 'var(--ui-size, 12px)',
-              fontFamily: 'var(--f-ui)',
-              padding: 0,
-              lineHeight: '20px',
-            }}
-          />
-          {filter && (
-            <button
-              type="button"
-              aria-label="Clear filter"
-              onClick={() => setFilter('')}
-              style={{
-                background: 'transparent',
-                border: 0,
-                color: 'var(--fg-dim)',
-                cursor: 'pointer',
-                padding: 0,
-                display: 'inline-flex',
-                alignItems: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
+      <Toolbar
+        sortMode={sortMode}
+        autoReveal={autoReveal}
+        onNewFile={handleNewFile}
+        onNewFolder={handleNewFolder}
+        onPickSort={setSortMode}
+        onToggleAutoReveal={handleToggleAutoReveal}
+        onCollapseAll={collapseAll}
+      />
 
-      {/* Tree */}
       <div style={{ flex: 1, overflow: 'auto', padding: '4px 0', fontSize: 'var(--ui-size, 13px)' }}>
-        {rootEntries.map((entry) => (
-          <TreeNode
-            key={entry.relpath}
-            entry={entry}
-            depth={0}
-            rootPath={rootPath}
-            filter={normalizedFilter}
-            onFileActivate={onFileActivate}
-          />
-        ))}
+        {rootEntries ? (
+          sortEntries(rootEntries, sortMode).map((entry) => (
+            <TreeNode
+              key={entry.relpath}
+              entry={entry}
+              depth={0}
+              rootPath={rootPath}
+              sortMode={sortMode}
+              onFileActivate={onFileActivate}
+            />
+          ))
+        ) : (
+          <div style={{ padding: '12px 14px', color: 'var(--fg-dim)' }}>Loading…</div>
+        )}
       </div>
     </div>
+  )
+}
+
+/** Walk the cached tree to resolve a relpath to its entry. Returns
+ *  null when any segment along the path is missing from the cache. */
+function findEntry(
+  rootEntries: FilesDirEntry[],
+  relpath: string,
+  cache: Record<string, FilesDirEntry[]>,
+): FilesDirEntry | null {
+  if (!relpath) return null
+  const segments = relpath.split('/')
+  let current: FilesDirEntry[] | undefined = rootEntries
+  let path = ''
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]
+    if (!current) return null
+    const next: FilesDirEntry | undefined = current.find((e) => e.name === seg)
+    if (!next) return null
+    if (i === segments.length - 1) return next
+    path = path ? `${path}/${seg}` : seg
+    current = cache[path]
+  }
+  return null
+}
+
+function Toolbar({
+  sortMode,
+  autoReveal,
+  onNewFile,
+  onNewFolder,
+  onPickSort,
+  onToggleAutoReveal,
+  onCollapseAll,
+}: {
+  sortMode: SortMode
+  autoReveal: boolean
+  onNewFile: () => void
+  onNewFolder: () => void
+  onPickSort: (mode: SortMode) => void
+  onToggleAutoReveal: () => void
+  onCollapseAll: () => void
+}) {
+  const [sortMenuOpen, setSortMenuOpen] = useState(false)
+  const sortBtnRef = useRef<HTMLButtonElement>(null)
+
+  return (
+    <div
+      style={{
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 4,
+        padding: '6px 8px',
+        borderBottom: '1px solid var(--line-soft)',
+        position: 'relative',
+      }}
+    >
+      <ToolbarButton label="New note" icon="filePlus" onClick={onNewFile} />
+      <ToolbarButton label="New folder" icon="folderPlus" onClick={onNewFolder} />
+      <ToolbarButton
+        label="Change sort order"
+        icon="sortAZ"
+        buttonRef={sortBtnRef}
+        active={sortMenuOpen}
+        onClick={() => setSortMenuOpen((v) => !v)}
+      />
+      <ToolbarButton
+        label={autoReveal ? 'Auto-reveal: on' : 'Auto-reveal current file'}
+        icon="crosshair"
+        active={autoReveal}
+        onClick={onToggleAutoReveal}
+      />
+      <ToolbarButton label="Collapse all" icon="collapseAll" onClick={onCollapseAll} />
+
+      {sortMenuOpen && (
+        <SortMenu
+          sortMode={sortMode}
+          anchorRef={sortBtnRef}
+          onPick={(mode) => {
+            onPickSort(mode)
+            setSortMenuOpen(false)
+          }}
+          onDismiss={() => setSortMenuOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+function ToolbarButton({
+  label,
+  icon,
+  onClick,
+  active,
+  buttonRef,
+}: {
+  label: string
+  icon: IconName
+  onClick: () => void
+  active?: boolean
+  buttonRef?: React.RefObject<HTMLButtonElement>
+}) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: 26,
+        height: 24,
+        padding: 0,
+        border: 0,
+        background: active ? 'var(--bg)' : hover ? 'var(--bg-hover)' : 'transparent',
+        color: active || hover ? 'var(--fg)' : 'var(--fg-muted)',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 'var(--r)',
+        flexShrink: 0,
+        transition: 'background 0.08s, color 0.08s',
+      }}
+    >
+      <Icon name={icon} size={14} />
+    </button>
+  )
+}
+
+const SORT_OPTIONS: ReadonlyArray<{ mode: SortMode; label: string; group: number }> = [
+  { mode: 'nameAsc', label: 'File name (A to Z)', group: 0 },
+  { mode: 'nameDesc', label: 'File name (Z to A)', group: 0 },
+  { mode: 'modifiedDesc', label: 'Modified time (new to old)', group: 1 },
+  { mode: 'modifiedAsc', label: 'Modified time (old to new)', group: 1 },
+  { mode: 'createdDesc', label: 'Created time (new to old)', group: 2 },
+  { mode: 'createdAsc', label: 'Created time (old to new)', group: 2 },
+]
+
+function SortMenu({
+  sortMode,
+  anchorRef,
+  onPick,
+  onDismiss,
+}: {
+  sortMode: SortMode
+  anchorRef: React.RefObject<HTMLButtonElement>
+  onPick: (mode: SortMode) => void
+  onDismiss: () => void
+}) {
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Dismiss on outside click / Escape. Use capture so a click on a
+  // toolbar button re-opening the same menu cleanly toggles rather
+  // than re-opening after this handler fires.
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null
+      if (!t) return
+      if (menuRef.current?.contains(t)) return
+      if (anchorRef.current?.contains(t)) return
+      onDismiss()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onDismiss()
+    }
+    document.addEventListener('mousedown', onDown, true)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown, true)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [anchorRef, onDismiss])
+
+  return (
+    <div
+      ref={menuRef}
+      role="menu"
+      style={{
+        position: 'absolute',
+        top: '100%',
+        right: 8,
+        marginTop: 4,
+        minWidth: 220,
+        background: 'var(--bg-raised)',
+        border: '1px solid var(--line)',
+        borderRadius: 'var(--r)',
+        boxShadow: '0 6px 24px rgba(0,0,0,0.4)',
+        padding: '4px 0',
+        zIndex: 10,
+        fontSize: 12,
+      }}
+    >
+      {SORT_OPTIONS.map((opt, i) => {
+        const prev = SORT_OPTIONS[i - 1]
+        const divider = prev && prev.group !== opt.group
+        return (
+          <div key={opt.mode}>
+            {divider && (
+              <div
+                aria-hidden
+                style={{ height: 1, background: 'var(--line-soft)', margin: '4px 0' }}
+              />
+            )}
+            <SortMenuItem
+              label={opt.label}
+              selected={sortMode === opt.mode}
+              onClick={() => onPick(opt.mode)}
+            />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function SortMenuItem({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string
+  selected: boolean
+  onClick: () => void
+}) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={selected}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        width: '100%',
+        border: 0,
+        background: hover ? 'var(--bg-hover)' : 'transparent',
+        color: selected ? 'var(--fg)' : 'var(--fg-muted)',
+        textAlign: 'left',
+        padding: '6px 10px 6px 24px',
+        cursor: 'pointer',
+        font: 'inherit',
+        position: 'relative',
+      }}
+    >
+      {selected && (
+        <span
+          aria-hidden
+          style={{ position: 'absolute', left: 8, display: 'inline-flex', color: 'var(--fg)' }}
+        >
+          <Icon name="check" size={12} />
+        </span>
+      )}
+      {label}
+    </button>
   )
 }
 
@@ -158,13 +490,13 @@ function TreeNode({
   entry,
   depth,
   rootPath,
-  filter,
+  sortMode,
   onFileActivate,
 }: {
   entry: FilesDirEntry
   depth: number
   rootPath: string
-  filter: string
+  sortMode: SortMode
   onFileActivate: (entry: FilesDirEntry) => void
 }) {
   const expanded = useFilesStore((s) => s.expanded.has(entry.relpath))
@@ -173,11 +505,16 @@ function TreeNode({
   const setChildren = useFilesStore((s) => s.setChildren)
   const selected = useFilesStore((s) => s.selected === entry.relpath)
   const setSelected = useFilesStore((s) => s.setSelected)
+  const rowRef = useRef<HTMLButtonElement>(null)
 
-  // When a filter is active, hide non-matching files (keep all dirs visible)
-  if (filter && !entry.isDir && !entry.name.toLowerCase().includes(filter)) {
-    return null
-  }
+  // Scroll-into-view when auto-reveal selected this row. We scroll on
+  // every `selected` transition — the cost is a single smooth scroll
+  // per click, which is cheap.
+  useEffect(() => {
+    if (selected && rowRef.current) {
+      rowRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [selected])
 
   const handleClick = () => {
     if (entry.isDir) {
@@ -204,16 +541,17 @@ function TreeNode({
         selected={selected}
         tooltip={tooltip}
         onClick={handleClick}
+        buttonRef={rowRef}
       />
       {entry.isDir && expanded && children && (
         <div>
-          {children.map((child) => (
+          {sortEntries(children, sortMode).map((child) => (
             <TreeNode
               key={child.relpath}
               entry={child}
               depth={depth + 1}
               rootPath={rootPath}
-              filter={filter}
+              sortMode={sortMode}
               onFileActivate={onFileActivate}
             />
           ))}
@@ -230,6 +568,7 @@ function Row({
   selected,
   tooltip,
   onClick,
+  buttonRef,
 }: {
   entry: FilesDirEntry
   depth: number
@@ -237,10 +576,12 @@ function Row({
   selected: boolean
   tooltip: string
   onClick: () => void
+  buttonRef: React.RefObject<HTMLButtonElement>
 }) {
   return (
     <button
       type="button"
+      ref={buttonRef}
       onClick={onClick}
       onDoubleClick={onClick}
       title={tooltip}
@@ -276,16 +617,13 @@ function Row({
           color: 'var(--fg-dim)',
         }}
       >
-        {entry.isDir ? (expanded ? <ChevronDown /> : <ChevronRight />) : null}
+        {entry.isDir ? (expanded ? <Icon name="chev" size={10} style={{ transform: 'rotate(90deg)' }} /> : <Icon name="chev" size={10} />) : null}
       </span>
-      <span
-        aria-hidden
-        style={{ display: 'inline-flex', alignItems: 'center' }}
-      >
+      <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center' }}>
         {entry.isDir ? (
-          expanded ? <FolderOpenIcon /> : <FolderIcon />
+          <Icon name={expanded ? 'folderOpen' : 'folder'} size={14} />
         ) : (
-          <FileIcon />
+          <Icon name="doc" size={14} />
         )}
       </span>
       <span
@@ -298,59 +636,5 @@ function Row({
         {entry.name}
       </span>
     </button>
-  )
-}
-
-function svgProps() {
-  return {
-    width: 14,
-    height: 14,
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 1.75,
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-  }
-}
-
-function ChevronRight() {
-  return (
-    <svg {...svgProps()} width={10} height={10}>
-      <path d="M9 6l6 6-6 6" />
-    </svg>
-  )
-}
-
-function ChevronDown() {
-  return (
-    <svg {...svgProps()} width={10} height={10}>
-      <path d="M6 9l6 6 6-6" />
-    </svg>
-  )
-}
-
-function FolderIcon() {
-  return (
-    <svg {...svgProps()}>
-      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z" />
-    </svg>
-  )
-}
-
-function FolderOpenIcon() {
-  return (
-    <svg {...svgProps()}>
-      <path d="M6 14l1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6A2 2 0 0 1 18.46 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2A2 2 0 0 0 12.07 6H18a2 2 0 0 1 2 2v2" />
-    </svg>
-  )
-}
-
-function FileIcon() {
-  return (
-    <svg {...svgProps()}>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <path d="M14 2v6h6" />
-    </svg>
   )
 }

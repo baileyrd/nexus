@@ -36,3 +36,24 @@ export async function loadChildren(relpath: string): Promise<FilesDirEntry[]> {
     return []
   }
 }
+
+/**
+ * Create an empty file at `relpath`. Resolves on success and rejects
+ * with the kernel error (already refuses to overwrite per the storage
+ * plugin contract). Callers should handle the error — typical cases
+ * are "file exists" when the user types an existing name.
+ */
+export async function createFile(relpath: string): Promise<void> {
+  if (!kernel) throw new Error('kernel handle missing')
+  await kernel.invoke<Record<string, never>>(STORAGE_PLUGIN_ID, 'create_file', {
+    relpath,
+  })
+}
+
+/** Create a directory at `relpath`. `mkdir -p` semantics on the Rust side. */
+export async function createDir(relpath: string): Promise<void> {
+  if (!kernel) throw new Error('kernel handle missing')
+  await kernel.invoke<Record<string, never>>(STORAGE_PLUGIN_ID, 'create_dir', {
+    relpath,
+  })
+}

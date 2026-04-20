@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { useEditorStore, isDirty, type EditorTab, type EditorTabMode } from './editorStore'
+import { useEditorStore, type EditorTab, type EditorTabMode } from './editorStore'
 import { renderMarkdown } from './markdownRender'
 import { eventBus } from '../../../host/EventBus'
 import { useOutlineStore } from '../outline/outlineStore'
@@ -33,12 +33,6 @@ interface ScrollToHeadingPayload {
 
 interface EditorViewProps {
   onRetry: (relpath: string) => void
-  /**
-   * Confirm-then-close entry point shared with the keybinding
-   * command handler in index.ts. Prompts only if the tab is dirty;
-   * cancelling aborts the close.
-   */
-  onRequestClose: (relpath: string) => void
 }
 
 function isMarkdown(name: string): boolean {
@@ -54,10 +48,9 @@ function isMarkdown(name: string): boolean {
  * Empty, loading, and error states are computed per-tab so a failed
  * load on one tab doesn't bleed into any neighbour.
  */
-export function EditorView({ onRetry, onRequestClose }: EditorViewProps) {
+export function EditorView({ onRetry }: EditorViewProps) {
   const tabs = useEditorStore((s) => s.tabs)
   const activeRelpath = useEditorStore((s) => s.activeRelpath)
-  const setActive = useEditorStore((s) => s.setActive)
   const setMode = useEditorStore((s) => s.setMode)
 
   const activeTab = useMemo<EditorTab | null>(
@@ -255,27 +248,33 @@ export function EditorView({ onRetry, onRequestClose }: EditorViewProps) {
 
   return (
     <div style={rootStyle}>
-      <TabBar
-        tabs={tabs}
-        activeRelpath={activeRelpath}
-        activeTab={activeTab}
-        onSelect={setActive}
-        onRequestClose={onRequestClose}
-        onToggleMode={() => {
-          if (!activeTab) return
-          const next: EditorTabMode = activeTab.mode === 'preview' ? 'source' : 'preview'
-          setMode(activeTab.relpath, next)
-        }}
-      />
-      <div ref={scrollWrapRef} style={{ flex: '1 1 auto', overflow: 'auto' }}>
+      <div ref={scrollWrapRef} style={{ flex: '1 1 auto', overflow: 'auto', position: 'relative' }}>
         {activeTab ? (
-          <TabBody
-            tab={activeTab}
-            markdownHtml={markdownHtml}
-            onRetry={onRetry}
-            markdownBodyRef={markdownBodyRef}
-            sourceRef={sourceRef}
-          />
+          <>
+            <div
+              style={{
+                position: 'absolute',
+                top: 8,
+                right: 12,
+                zIndex: 2,
+              }}
+            >
+              <ModeToggle
+                mode={activeTab.mode}
+                onClick={() => {
+                  const next: EditorTabMode = activeTab.mode === 'preview' ? 'source' : 'preview'
+                  setMode(activeTab.relpath, next)
+                }}
+              />
+            </div>
+            <TabBody
+              tab={activeTab}
+              markdownHtml={markdownHtml}
+              onRetry={onRetry}
+              markdownBodyRef={markdownBodyRef}
+              sourceRef={sourceRef}
+            />
+          </>
         ) : (
           <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>
             Select a tab
@@ -283,181 +282,6 @@ export function EditorView({ onRetry, onRequestClose }: EditorViewProps) {
         )}
       </div>
     </div>
-  )
-}
-
-interface TabBarProps {
-  tabs: EditorTab[]
-  activeRelpath: string | null
-  activeTab: EditorTab | null
-  onSelect: (relpath: string) => void
-  onRequestClose: (relpath: string) => void
-  onToggleMode: () => void
-}
-
-function TabBar({ tabs, activeRelpath, activeTab, onSelect, onRequestClose, onToggleMode }: TabBarProps) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'stretch',
-        height: 36,
-        flex: '0 0 36px',
-        background: 'var(--bg-raised)',
-        borderBottom: '1px solid var(--line-soft)',
-        overflow: 'hidden',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'stretch',
-          flex: '1 1 auto',
-          minWidth: 0,
-          overflowX: 'auto',
-          overflowY: 'hidden',
-          scrollbarWidth: 'none',
-        }}
-      >
-        {tabs.map((tab) => (
-          <TabItem
-            key={tab.relpath}
-            tab={tab}
-            active={tab.relpath === activeRelpath}
-            onSelect={onSelect}
-            onRequestClose={onRequestClose}
-          />
-        ))}
-      </div>
-      {activeTab ? <ModeToggle mode={activeTab.mode} onClick={onToggleMode} /> : null}
-    </div>
-  )
-}
-
-interface TabItemProps {
-  tab: EditorTab
-  active: boolean
-  onSelect: (relpath: string) => void
-  onRequestClose: (relpath: string) => void
-}
-
-function TabItem({ tab, active, onSelect, onRequestClose }: TabItemProps) {
-  const dirty = isDirty(tab)
-  const style: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '0 10px',
-    height: '100%',
-    borderRight: '1px solid var(--line-soft)',
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-    flexShrink: 0,
-    maxWidth: 220,
-    minWidth: 80,
-    background: active ? 'var(--bg)' : 'transparent',
-    color: active ? 'var(--fg)' : 'var(--fg-muted)',
-  }
-
-  return (
-    <div
-      role="tab"
-      aria-selected={active}
-      title={tab.relpath}
-      style={style}
-      onClick={() => onSelect(tab.relpath)}
-      onMouseEnter={(e) => {
-        if (!active) {
-          (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-hover)'
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!active) {
-          (e.currentTarget as HTMLDivElement).style.background = 'transparent'
-        }
-      }}
-    >
-      <span
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          fontWeight: active ? 500 : 400,
-          minWidth: 0,
-        }}
-      >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{tab.name}</span>
-        {dirty ? (
-          <span
-            aria-hidden
-            title="Unsaved changes"
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: 'var(--fg)',
-              marginLeft: 4,
-              flexShrink: 0,
-            }}
-          />
-        ) : null}
-      </span>
-      <CloseButton
-        onClick={(e) => {
-          e.stopPropagation()
-          onRequestClose(tab.relpath)
-        }}
-      />
-    </div>
-  )
-}
-
-interface CloseButtonProps {
-  onClick: (e: React.MouseEvent) => void
-}
-
-function CloseButton({ onClick }: CloseButtonProps) {
-  return (
-    <button
-      type="button"
-      aria-label="Close"
-      onClick={onClick}
-      onMouseDown={(e) => e.stopPropagation()}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
-      }}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 16,
-        height: 16,
-        padding: 0,
-        border: 0,
-        background: 'transparent',
-        color: 'inherit',
-        cursor: 'pointer',
-        borderRadius: 'var(--r)',
-      }}
-    >
-      <svg
-        width={12}
-        height={12}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.75}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M18 6 6 18" />
-        <path d="m6 6 12 12" />
-      </svg>
-    </button>
   )
 }
 

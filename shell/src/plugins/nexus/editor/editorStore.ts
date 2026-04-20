@@ -72,6 +72,12 @@ interface EditorState {
    */
   closeTab: (relpath: string) => void
   setActive: (relpath: string) => void
+  /**
+   * Create a new in-memory tab not yet backed by disk. `relpath` is
+   * expected to be a non-colliding placeholder like `untitled-1`;
+   * callers are responsible for picking the next free number.
+   */
+  openUntitled: (relpath: string, name: string) => void
   /** Wipe all tabs — used on `workspace:closed`. */
   clear: () => void
 }
@@ -174,6 +180,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (get().tabs.some((t) => t.relpath === relpath)) {
       set({ activeRelpath: relpath })
     }
+  },
+
+  openUntitled: (relpath, name) => {
+    const tab: EditorTab = {
+      relpath,
+      name,
+      content: '',
+      savedContent: '',
+      mode: 'preview',
+      loading: false,
+      error: null,
+    }
+    set((s) => ({ tabs: [...s.tabs, tab], activeRelpath: relpath }))
   },
 
   clear: () => set({ tabs: [], activeRelpath: null }),

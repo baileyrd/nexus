@@ -2,8 +2,11 @@ import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { BacklinksView } from './BacklinksView'
 import { useBacklinksStore, type Backlink } from './backlinksStore'
 import { useEditorStore } from '../editor/editorStore'
+import { useLayoutStore } from '../../../stores/layoutStore'
+import { useRightPanelStore } from '../rightPanel/rightPanelStore'
 
 const VIEW_ID = 'nexus.backlinks.view'
+const COMMAND_FOCUS = 'nexus.backlinks.focus'
 const EVENT_REGISTER_TAB = 'rightPanel:registerTab'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
@@ -67,7 +70,9 @@ export const backlinksPlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     dependsOn: ['nexus.rightPanel'],
-    contributes: {},
+    contributes: {
+      commands: [{ id: COMMAND_FOCUS, title: 'Focus Backlinks', category: 'View' }],
+    },
   },
 
   activate(api: PluginAPI) {
@@ -169,6 +174,15 @@ export const backlinksPlugin: Plugin = {
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
       currentRequestId++
       useBacklinksStore.getState().clear()
+    })
+
+    // Focus command — ensures the right panel is visible and selects
+    // the Backlinks tab. Titlebar shortcut + command palette entry.
+    api.commands.register(COMMAND_FOCUS, () => {
+      useLayoutStore.setState((s) => ({
+        rightPanel: { ...s.rightPanel, visible: true },
+      }))
+      useRightPanelStore.getState().setActive(VIEW_ID)
     })
   },
 }

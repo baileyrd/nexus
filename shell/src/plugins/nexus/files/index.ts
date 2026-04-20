@@ -3,9 +3,12 @@ import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { FilesTree } from './FilesTree'
 import { useFilesStore, type FilesDirEntry } from './filesStore'
 import { loadChildren, setKernel } from './kernelClient'
+import { setApi } from './runtime'
 
 const VIEW_ID = 'nexus.files.tree'
+const COMMAND_FOCUS = 'nexus.files.focus'
 const EVENT_FILE_OPEN = 'files:open'
+const EVENT_SIDEBAR_SHOW_VIEW = 'sidebar:showView'
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
@@ -60,11 +63,20 @@ export const filesPlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar'],
-    contributes: {},
+    contributes: {
+      commands: [
+        {
+          id: COMMAND_FOCUS,
+          title: 'Focus Files',
+          category: 'Files',
+        },
+      ],
+    },
   },
 
   async activate(api: PluginAPI) {
     setKernel(api.kernel)
+    setApi(api)
 
     const handleFileActivate = (entry: FilesDirEntry) => {
       api.events.emit(EVENT_FILE_OPEN, {
@@ -86,6 +98,14 @@ export const filesPlugin: Plugin = {
       title: 'Files',
       viewId: VIEW_ID,
       priority: 10,
+    })
+
+    // Focus command — raises the files view in the sidebar. Mirrors
+    // nexus.search.focus so the titlebar shortcut (and any future
+    // keybinding) can trigger the same affordance the activity-bar
+    // item already provides.
+    api.commands.register(COMMAND_FOCUS, () => {
+      api.events.emit(EVENT_SIDEBAR_SHOW_VIEW, { viewId: VIEW_ID })
     })
 
     // ── Live refresh on storage events ───────────────────────────────────

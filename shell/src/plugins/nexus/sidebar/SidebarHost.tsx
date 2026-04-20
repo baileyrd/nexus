@@ -5,14 +5,6 @@ import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { Icon } from '../../../icons'
 import { getRegistry } from '../../../host/shellRegistry'
 
-function CollapseIcon() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M5 12h14" />
-    </svg>
-  )
-}
-
 function basename(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, '')
   const parts = trimmed.split(/[\\/]/)
@@ -66,15 +58,12 @@ export function SidebarHost() {
   const activeViewId = useLayoutStore((s) => s.sidebar.activeView)
   const entries = useSlotStore((s) => s.slots.sidebarContent)
   const rootPath = useWorkspaceStore((s) => s.rootPath)
-  const openWorkspace = useWorkspaceStore((s) => s.open)
 
   if (!activeViewId) return null
   const match = entries.find((e) => e.id === activeViewId)
   if (!match) return null
 
   const workspaceName = rootPath ? basename(rootPath) : null
-
-  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar)
 
   const openSettings = () => {
     const reg = getRegistry()
@@ -91,46 +80,10 @@ export function SidebarHost() {
         overflow: 'hidden',
       }}
     >
-      {/* Workspace header */}
-      <div
-        style={{
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 2,
-          padding: '0 6px 0 12px',
-          height: 34,
-          borderBottom: '1px solid var(--line-soft)',
-        }}
-      >
-        <span
-          style={{
-            flex: 1,
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: 'var(--fg-muted)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            userSelect: 'none',
-          }}
-        >
-          {workspaceName ?? 'No workspace'}
-        </span>
-        <SidebarIconBtn label="New file">
-          <Icon name="plus" size={14} />
-        </SidebarIconBtn>
-        <SidebarIconBtn label="Open workspace" onClick={() => openWorkspace()}>
-          <Icon name="folderOpen" size={14} />
-        </SidebarIconBtn>
-        <SidebarIconBtn label="Collapse sidebar" onClick={() => toggleSidebar()}>
-          <CollapseIcon />
-        </SidebarIconBtn>
-      </div>
-
-      {/* Active view content */}
+      {/* Active view content — each view renders its own header /
+          toolbar. The shared workspace-label row was dropped so
+          view-specific actions (e.g. the files toolbar) sit flush
+          against the top. */}
       <div
         style={{
           flex: 1,

@@ -3,8 +3,11 @@ import { OutlineView } from './OutlineView'
 import { useOutlineStore } from './outlineStore'
 import { parseHeadings } from './parse'
 import { useEditorStore } from '../editor/editorStore'
+import { useLayoutStore } from '../../../stores/layoutStore'
+import { useRightPanelStore } from '../rightPanel/rightPanelStore'
 
 const VIEW_ID = 'nexus.outline.view'
+const COMMAND_FOCUS = 'nexus.outline.focus'
 const EVENT_REGISTER_TAB = 'rightPanel:registerTab'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 const EVENT_ACTIVE_HEADING_CHANGED = 'editor:activeHeadingChanged'
@@ -21,7 +24,9 @@ export const outlinePlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     dependsOn: ['nexus.rightPanel'],
-    contributes: {},
+    contributes: {
+      commands: [{ id: COMMAND_FOCUS, title: 'Focus Outline', category: 'View' }],
+    },
   },
 
   activate(api: PluginAPI) {
@@ -84,6 +89,13 @@ export const outlinePlugin: Plugin = {
       const headings = useOutlineStore.getState().headings
       if (idx !== null && (idx < 0 || idx >= headings.length)) return
       useOutlineStore.getState().setActiveIndex(idx)
+    })
+
+    api.commands.register(COMMAND_FOCUS, () => {
+      useLayoutStore.setState((s) => ({
+        rightPanel: { ...s.rightPanel, visible: true },
+      }))
+      useRightPanelStore.getState().setActive(VIEW_ID)
     })
   },
 }

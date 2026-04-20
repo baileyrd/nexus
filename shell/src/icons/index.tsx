@@ -133,11 +133,59 @@ const RENDERERS = {
       </>
     ),
   },
+  // Chain link with a leftward arrow — "backlinks" / incoming links.
+  linkIn: {
+    body: (
+      <>
+        <path d="M14 8h3a4 4 0 0 1 0 8h-3" />
+        <path d="M10 12H3" />
+        <path d="M7 8l-4 4 4 4" />
+      </>
+    ),
+  },
+  // Chain link with a rightward arrow — "outgoing links".
+  linkOut: {
+    body: (
+      <>
+        <path d="M10 8H7a4 4 0 0 0 0 8h3" />
+        <path d="M14 12h7" />
+        <path d="M17 8l4 4-4 4" />
+      </>
+    ),
+  },
+  // Upright box / archive crate — "all properties".
+  archive: {
+    body: (
+      <>
+        <rect x="3" y="4" width="18" height="4" rx="1" />
+        <path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" />
+        <path d="M10 12h4" />
+      </>
+    ),
+  },
+  // Three horizontal lines with leading dots — "outline" / list view.
+  list: {
+    body: (
+      <>
+        <path d="M8 6h13M8 12h13M8 18h13" />
+        <path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01" />
+      </>
+    ),
+    strokeWidth: 2,
+  },
   panel: {
     body: (
       <>
         <rect x="3" y="4" width="18" height="16" rx="2" />
         <path d="M14 4v16" />
+      </>
+    ),
+  },
+  panelLeft: {
+    body: (
+      <>
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <path d="M10 4v16" />
       </>
     ),
   },
@@ -206,6 +254,53 @@ const RENDERERS = {
         <rect x="14" y="3" width="7" height="7" rx="0.5" />
         <rect x="3" y="14" width="7" height="7" rx="0.5" />
         <rect x="14" y="14" width="7" height="7" rx="0.5" />
+      </>
+    ),
+  },
+  // Document outline with a plus glyph in the body — "new note".
+  filePlus: {
+    body: (
+      <>
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+        <path d="M14 3v5h5" />
+        <path d="M12 12v6M9 15h6" />
+      </>
+    ),
+  },
+  // Folder with a plus glyph — "new folder".
+  folderPlus: {
+    body: (
+      <>
+        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+        <path d="M12 11v6M9 14h6" />
+      </>
+    ),
+  },
+  // Two stacked arrows pointing in opposite directions — "change sort order".
+  sortAZ: {
+    body: (
+      <>
+        <path d="M7 4v16M3 8l4-4 4 4" />
+        <path d="M17 20V4M13 16l4 4 4-4" />
+      </>
+    ),
+  },
+  // Circle + crosshair — "auto-reveal current file".
+  crosshair: {
+    body: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+      </>
+    ),
+  },
+  // Two stacked up-chevrons over a baseline — "collapse all".
+  collapseAll: {
+    body: (
+      <>
+        <path d="M17 10l-5-5-5 5" />
+        <path d="M17 16l-5-5-5 5" />
       </>
     ),
   },

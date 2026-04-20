@@ -1,35 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { useWorkspaceStore } from '../workspace/workspaceStore'
-import { useEditorStore } from '../editor/editorStore'
+import { useEditorStore, isDirty, type EditorTab } from '../editor/editorStore'
+import { getEditorRuntime } from '../editor/runtime'
 import { useLayoutStore } from '../../../stores/layoutStore'
 import { Icon } from '../../../icons'
 import { getApi } from './runtime'
 
+const FILES_FOCUS_COMMAND = 'nexus.files.focus'
 const SEARCH_FOCUS_COMMAND = 'nexus.search.focus'
-
-function basename(path: string): string {
-  const trimmed = path.replace(/[\\/]+$/, '')
-  const parts = trimmed.split(/[\\/]/)
-  return parts[parts.length - 1] || trimmed
-}
-
-function fileExt(name: string): string | null {
-  const i = name.lastIndexOf('.')
-  if (i <= 0 || i === name.length - 1) return null
-  return name.slice(i + 1).toLowerCase()
-}
-
-/** Approximate word count for the breadcrumb badge. Splits on
- *  whitespace which matches how the design bundle renders the figure
- *  (rough; not character-accurate). Returns null for non-textual or
- *  empty content so the badge stays out of the DOM. */
-function wordCount(content: string | null | undefined): number | null {
-  if (!content) return null
-  const trimmed = content.trim()
-  if (!trimmed) return null
-  return trimmed.split(/\s+/).length
-}
+const BOOKMARKS_FOCUS_COMMAND = 'nexus.bookmarks.focus'
+const BACKLINKS_FOCUS_COMMAND = 'nexus.backlinks.focus'
+const OUTGOING_LINKS_FOCUS_COMMAND = 'nexus.outgoingLinks.focus'
+const TAGS_FOCUS_COMMAND = 'nexus.tags.focus'
+const ALL_PROPERTIES_FOCUS_COMMAND = 'nexus.allProperties.focus'
+const OUTLINE_FOCUS_COMMAND = 'nexus.outline.focus'
+const NEW_UNTITLED_COMMAND = 'nexus.editor.newUntitled'
 
 const baseControlStyle: React.CSSProperties = {
   width: 40,
@@ -116,11 +101,6 @@ function CloseIcon() {
   )
 }
 
-/**
- * Square icon button used by the left cluster + right cluster.
- * Visually distinct from the Windows controls (smaller width, hover
- * uses raised bg rather than the platform highlight).
- */
 function ClusterButton({
   onClick,
   label,
@@ -163,10 +143,11 @@ function ClusterButton({
 }
 
 export function TitleBar() {
-  const rootPath = useWorkspaceStore((s) => s.rootPath)
-  const openWorkspace = useWorkspaceStore((s) => s.open)
   const tabs = useEditorStore((s) => s.tabs)
   const activeRelpath = useEditorStore((s) => s.activeRelpath)
+  const setActive = useEditorStore((s) => s.setActive)
+  const sidebarVisible = useLayoutStore((s) => s.sidebar.visible)
+  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar)
   const rightPanelVisible = useLayoutStore((s) => s.rightPanel.visible)
   const toggleRightPanel = useLayoutStore((s) => s.toggleRightPanel)
   const [maximized, setMaximized] = useState(false)
@@ -197,20 +178,20 @@ export function TitleBar() {
   const toggleMaximize = () => getCurrentWindow().toggleMaximize()
   const close = () => getCurrentWindow().close()
 
-  const focusSearch = () => {
-    // Same dispatcher path the command palette uses internally. The
-    // search plugin's command both raises the sidebar view and
-    // focuses the input.
+  const execute = (commandId: string) => () => {
     const api = getApi()
     if (!api) return
-    void api.commands.execute(SEARCH_FOCUS_COMMAND)
+    void api.commands.execute(commandId)
   }
 
-  const activeTab = tabs.find((t) => t.relpath === activeRelpath) ?? null
+  const requestCloseTab = (relpath: string) => {
+    const rt = getEditorRuntime()
+    if (!rt) return
+    void rt.confirmAndClose(relpath)
+  }
 
   return (
     <div
-      data-tauri-drag-region
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -226,42 +207,38 @@ export function TitleBar() {
       {/* Left cluster — non-draggable */}
       <div style={{ flexShrink: 0, zIndex: 1 }}>
         <LeftCluster
-          rootPath={rootPath}
-          onOpen={() => openWorkspace()}
-          onSearch={focusSearch}
+          sidebarVisible={sidebarVisible}
+          onToggleSidebar={toggleSidebar}
+          onFiles={execute(FILES_FOCUS_COMMAND)}
+          onSearch={execute(SEARCH_FOCUS_COMMAND)}
+          onBookmarks={execute(BOOKMARKS_FOCUS_COMMAND)}
         />
       </div>
 
-      {/* Centered breadcrumb — absolutely positioned so it doesn't
-          shift when the left/right clusters change width. The breadcrumb
-          contains no interactive elements so pointer events pass through
-          to the drag region behind it. */}
-      <div
-        style={{
-          position: 'absolute',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          maxWidth: 'calc(100% - 360px)',
-          overflow: 'hidden',
-          pointerEvents: 'none',
-          zIndex: 1,
-        }}
-      >
-        <Breadcrumb
-          rootPath={rootPath}
-          activeRelpath={activeRelpath}
-          activeContent={activeTab?.content ?? null}
-        />
-      </div>
-
-      {/* Drag region fills the rest */}
-      <div style={{ flex: 1, height: '100%' }} />
+      {/* Tab strip — flex-grows to fill the middle. */}
+      <TabStrip
+        tabs={tabs}
+        activeRelpath={activeRelpath}
+        onSelect={setActive}
+        onClose={requestCloseTab}
+        onNewTab={execute(NEW_UNTITLED_COMMAND)}
+      />
 
       {/* Right cluster — non-draggable */}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', zIndex: 1 }}>
+        <TabMenu
+          tabs={tabs}
+          activeRelpath={activeRelpath}
+          onSelect={setActive}
+        />
         <RightCluster
           rightPanelVisible={rightPanelVisible}
           onToggleRightPanel={toggleRightPanel}
+          onBacklinks={execute(BACKLINKS_FOCUS_COMMAND)}
+          onOutgoingLinks={execute(OUTGOING_LINKS_FOCUS_COMMAND)}
+          onTags={execute(TAGS_FOCUS_COMMAND)}
+          onAllProperties={execute(ALL_PROPERTIES_FOCUS_COMMAND)}
+          onOutline={execute(OUTLINE_FOCUS_COMMAND)}
         />
         <ControlButton onClick={minimize} label="Minimize">
           <MinimizeIcon />
@@ -281,13 +258,17 @@ export function TitleBar() {
 }
 
 function LeftCluster({
-  rootPath,
-  onOpen,
+  sidebarVisible,
+  onToggleSidebar,
+  onFiles,
   onSearch,
+  onBookmarks,
 }: {
-  rootPath: string | null
-  onOpen: () => void
+  sidebarVisible: boolean
+  onToggleSidebar: () => void
+  onFiles: () => void
   onSearch: () => void
+  onBookmarks: () => void
 }) {
   return (
     <div
@@ -303,119 +284,432 @@ function LeftCluster({
       }}
     >
       <ClusterButton
-        onClick={onOpen}
-        label={rootPath ? `Workspace · ${rootPath}` : 'Open workspace'}
+        onClick={onToggleSidebar}
+        label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+        active={sidebarVisible}
       >
-        <Icon name="folder" size={14} />
+        <Icon name="panelLeft" size={14} />
       </ClusterButton>
-      <ClusterButton onClick={onSearch} label="Focus search">
-        <Icon name="search" size={14} />
-      </ClusterButton>
+      {sidebarVisible && (
+        <>
+          <ClusterButton onClick={onFiles} label="Files">
+            <Icon name="folder" size={14} />
+          </ClusterButton>
+          <ClusterButton onClick={onSearch} label="Search">
+            <Icon name="search" size={14} />
+          </ClusterButton>
+          <ClusterButton onClick={onBookmarks} label="Bookmarks">
+            <Icon name="book" size={14} />
+          </ClusterButton>
+        </>
+      )}
     </div>
   )
 }
 
-function Breadcrumb({
-  rootPath,
+function TabStrip({
+  tabs,
   activeRelpath,
-  activeContent,
+  onSelect,
+  onClose,
+  onNewTab,
 }: {
-  rootPath: string | null
+  tabs: EditorTab[]
   activeRelpath: string | null
-  activeContent: string | null
+  onSelect: (relpath: string) => void
+  onClose: (relpath: string) => void
+  onNewTab: () => void
 }) {
-  const workspaceName = rootPath ? basename(rootPath) : null
-  const fileName = activeRelpath ? basename(activeRelpath) : null
-  const ext = fileName ? fileExt(fileName) : null
-  const words = activeContent ? wordCount(activeContent) : null
-
   return (
     <div
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        height: 24,
-        padding: '0 10px',
-        background: 'var(--bg-raised)',
-        border: '1px solid var(--line)',
-        borderRadius: 999,
+        flex: '1 1 auto',
+        display: 'flex',
+        alignItems: 'stretch',
         minWidth: 0,
-        overflow: 'hidden',
-        fontSize: 12,
+        height: '100%',
+        zIndex: 1,
+        paddingLeft: 8,
       }}
     >
-      <span
-        title={rootPath ? 'Forge synced' : 'No workspace open'}
-        aria-hidden
+      <div
         style={{
-          width: 6,
-          height: 6,
-          borderRadius: '50%',
-          background: rootPath ? 'var(--ok)' : 'var(--fg-dim)',
-          flex: '0 0 auto',
-          boxShadow: rootPath ? '0 0 4px var(--ok)' : 'none',
+          display: 'flex',
+          alignItems: 'stretch',
+          minWidth: 0,
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          scrollbarWidth: 'none',
+          flex: '0 1 auto',
         }}
-      />
-      {workspaceName ? (
+      >
+        {tabs.map((tab) => (
+          <TitleBarTab
+            key={tab.relpath}
+            tab={tab}
+            active={tab.relpath === activeRelpath}
+            onSelect={onSelect}
+            onClose={onClose}
+          />
+        ))}
+        <NewTabButton onClick={onNewTab} />
+      </div>
+      {/* Empty gap that eats remaining space — draggable. Tabs above
+          must NOT carry the drag-region attribute: on Windows, Tauri 2
+          swallows click events inside a drag region so the tab onClick
+          would never fire. */}
+      <div data-tauri-drag-region style={{ flex: '1 1 auto', minWidth: 12 }} />
+    </div>
+  )
+}
+
+function TitleBarTab({
+  tab,
+  active,
+  onSelect,
+  onClose,
+}: {
+  tab: EditorTab
+  active: boolean
+  onSelect: (relpath: string) => void
+  onClose: (relpath: string) => void
+}) {
+  const [hover, setHover] = useState(false)
+  const dirty = isDirty(tab)
+  const bg = active ? 'var(--bg)' : hover ? 'var(--bg-hover)' : 'transparent'
+  const fg = active ? 'var(--fg)' : 'var(--fg-muted)'
+
+  return (
+    <div
+      role="tab"
+      aria-selected={active}
+      title={tab.relpath}
+      onClick={() => onSelect(tab.relpath)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '0 8px 0 10px',
+        height: '100%',
+        borderRight: '1px solid var(--line-soft)',
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+        maxWidth: 220,
+        minWidth: 80,
+        background: bg,
+        color: fg,
+        position: 'relative',
+      }}
+    >
+      {active && (
         <span
-          title={rootPath ?? undefined}
+          aria-hidden
           style={{
-            color: 'var(--fg-muted)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            flex: '0 1 auto',
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 2,
+            background: 'var(--accent)',
+          }}
+        />
+      )}
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          fontWeight: active ? 500 : 400,
+          minWidth: 0,
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{tab.name}</span>
+        {dirty && (
+          <span
+            aria-hidden
+            title="Unsaved changes"
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: 'var(--fg)',
+              marginLeft: 6,
+              flexShrink: 0,
+            }}
+          />
+        )}
+      </span>
+      {active ? (
+        <TabCloseButton onClick={(e) => {
+          e.stopPropagation()
+          onClose(tab.relpath)
+        }} />
+      ) : (
+        <span style={{ width: 16, height: 16, flexShrink: 0 }} />
+      )}
+    </div>
+  )
+}
+
+function TabCloseButton({ onClick }: { onClick: (e: React.MouseEvent) => void }) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      type="button"
+      aria-label="Close"
+      onClick={onClick}
+      onMouseDown={(e) => e.stopPropagation()}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 16,
+        height: 16,
+        padding: 0,
+        border: 0,
+        background: hover ? 'var(--bg-hover)' : 'transparent',
+        color: 'inherit',
+        cursor: 'pointer',
+        borderRadius: 'var(--r)',
+        flexShrink: 0,
+      }}
+    >
+      <Icon name="x" size={12} />
+    </button>
+  )
+}
+
+function NewTabButton({ onClick }: { onClick: () => void }) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      type="button"
+      aria-label="New tab"
+      title="New tab"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: 28,
+        height: '100%',
+        padding: 0,
+        border: 0,
+        background: hover ? 'var(--bg-hover)' : 'transparent',
+        color: hover ? 'var(--fg)' : 'var(--fg-muted)',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}
+    >
+      <Icon name="plus" size={14} />
+    </button>
+  )
+}
+
+function TabMenu({
+  tabs,
+  activeRelpath,
+  onSelect,
+}: {
+  tabs: EditorTab[]
+  activeRelpath: string | null
+  onSelect: (relpath: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null
+      if (!t) return
+      if (menuRef.current?.contains(t)) return
+      if (anchorRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown, true)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown, true)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const [hover, setHover] = useState(false)
+
+  const stackTabs = () => {
+    console.log('[nexus.titleBar] Stack tabs — not yet implemented')
+    setOpen(false)
+  }
+  const bookmarkTabs = () => {
+    console.log(`[nexus.titleBar] Bookmark ${tabs.length} tabs — not yet implemented`)
+    setOpen(false)
+  }
+  const closeAll = () => {
+    const rt = getEditorRuntime()
+    setOpen(false)
+    if (!rt) return
+    void rt.closeAll()
+  }
+  const pickTab = (relpath: string) => {
+    onSelect(relpath)
+    setOpen(false)
+  }
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+      <button
+        ref={anchorRef}
+        type="button"
+        aria-label="Tab menu"
+        title="Tab menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{
+          width: 28,
+          height: 26,
+          padding: 0,
+          background: open ? 'var(--bg)' : hover ? 'var(--bg-hover)' : 'transparent',
+          border: 0,
+          color: open ? 'var(--fg)' : hover ? 'var(--fg)' : 'var(--fg-muted)',
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 'var(--r)',
+          marginRight: 4,
+        }}
+      >
+        <span style={{ display: 'inline-flex', transform: 'rotate(90deg)' }}>
+          <Icon name="chev" size={14} />
+        </span>
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          role="menu"
+          style={{
+            position: 'absolute',
+            top: '100%',
+            right: 0,
+            marginTop: 4,
+            minWidth: 240,
+            background: 'var(--bg-raised)',
+            border: '1px solid var(--line)',
+            borderRadius: 'var(--r)',
+            boxShadow: '0 6px 24px rgba(0,0,0,0.4)',
+            padding: '4px 0',
+            zIndex: 20,
+            fontSize: 12,
+            color: 'var(--fg)',
           }}
         >
-          {workspaceName}
-        </span>
-      ) : (
-        <span style={{ color: 'var(--fg-dim)', fontStyle: 'italic' }}>No workspace</span>
+          <TabMenuItem label="Stack tabs" onClick={stackTabs} />
+          <TabMenuItem label={`Bookmark ${tabs.length} tabs…`} onClick={bookmarkTabs} />
+          <MenuDivider />
+          <TabMenuItem label="Close all" onClick={closeAll} />
+          {tabs.length > 0 && <MenuDivider />}
+          {tabs.map((tab) => (
+            <TabMenuItem
+              key={tab.relpath}
+              label={tab.name}
+              selected={tab.relpath === activeRelpath}
+              onClick={() => pickTab(tab.relpath)}
+            />
+          ))}
+        </div>
       )}
-      {fileName ? (
-        <>
-          <span style={{ color: 'var(--fg-dim)', flex: '0 0 auto' }}>/</span>
-          <span
-            title={activeRelpath ?? undefined}
-            style={{
-              color: 'var(--fg)',
-              fontWeight: 500,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              minWidth: 0,
-            }}
-          >
-            {fileName}
-          </span>
-          {ext || words !== null ? (
-            <span
-              style={{
-                marginLeft: 4,
-                color: 'var(--fg-dim)',
-                fontFamily: 'var(--f-mono, monospace)',
-                fontSize: 10,
-                flex: '0 0 auto',
-              }}
-            >
-              {[ext, words !== null ? `${words.toLocaleString()}w` : null]
-                .filter(Boolean)
-                .join(' · ')}
-            </span>
-          ) : null}
-        </>
-      ) : null}
     </div>
+  )
+}
+
+function MenuDivider() {
+  return (
+    <div
+      aria-hidden
+      style={{ height: 1, background: 'var(--line-soft)', margin: '4px 0' }}
+    />
+  )
+}
+
+function TabMenuItem({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string
+  selected?: boolean
+  onClick: () => void
+}) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        width: '100%',
+        border: 0,
+        background: hover ? 'var(--bg-hover)' : 'transparent',
+        color: selected ? 'var(--fg)' : 'var(--fg-muted)',
+        textAlign: 'left',
+        padding: '6px 10px 6px 24px',
+        cursor: 'pointer',
+        font: 'inherit',
+        position: 'relative',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+      }}
+    >
+      {selected && (
+        <span
+          aria-hidden
+          style={{ position: 'absolute', left: 8, display: 'inline-flex', color: 'var(--fg)' }}
+        >
+          <Icon name="check" size={12} />
+        </span>
+      )}
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+    </button>
   )
 }
 
 function RightCluster({
   rightPanelVisible,
   onToggleRightPanel,
+  onBacklinks,
+  onOutgoingLinks,
+  onTags,
+  onAllProperties,
+  onOutline,
 }: {
   rightPanelVisible: boolean
   onToggleRightPanel: () => void
+  onBacklinks: () => void
+  onOutgoingLinks: () => void
+  onTags: () => void
+  onAllProperties: () => void
+  onOutline: () => void
 }) {
   return (
     <div
@@ -435,6 +729,25 @@ function RightCluster({
       >
         <Icon name="panel" size={14} />
       </ClusterButton>
+      {rightPanelVisible && (
+        <>
+          <ClusterButton onClick={onBacklinks} label="Backlinks">
+            <Icon name="linkIn" size={14} />
+          </ClusterButton>
+          <ClusterButton onClick={onOutgoingLinks} label="Outgoing links">
+            <Icon name="linkOut" size={14} />
+          </ClusterButton>
+          <ClusterButton onClick={onTags} label="Tags">
+            <Icon name="tag" size={14} />
+          </ClusterButton>
+          <ClusterButton onClick={onAllProperties} label="All properties">
+            <Icon name="archive" size={14} />
+          </ClusterButton>
+          <ClusterButton onClick={onOutline} label="Outline">
+            <Icon name="list" size={14} />
+          </ClusterButton>
+        </>
+      )}
     </div>
   )
 }

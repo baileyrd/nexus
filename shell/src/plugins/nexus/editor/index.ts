@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { EditorView } from './EditorView'
 import { useEditorStore, isDirty } from './editorStore'
+import { setEditorRuntime } from './runtime'
 
 const VIEW_ID = 'nexus.editor.view'
 const EVENT_FILE_OPEN = 'files:open'
@@ -20,6 +21,8 @@ const WRITE_FILE_COMMAND = 'write_file'
 
 const COMMAND_CLOSE_TAB = 'nexus.editor.closeTab'
 const COMMAND_SAVE = 'nexus.editor.save'
+const COMMAND_NEW_UNTITLED = 'nexus.editor.newUntitled'
+const COMMAND_CLOSE_ALL = 'nexus.editor.closeAll'
 const CONTEXT_KEY_HAS_ACTIVE_TAB = 'nexus.editor.hasActiveTab'
 const CONTEXT_KEY_ACTIVE_TAB_DIRTY = 'nexus.editor.activeTabDirty'
 
@@ -68,6 +71,8 @@ export const editorPlugin: Plugin = {
       commands: [
         { id: COMMAND_CLOSE_TAB, title: 'Close Tab', category: 'Editor' },
         { id: COMMAND_SAVE, title: 'Save', category: 'Editor' },
+        { id: COMMAND_NEW_UNTITLED, title: 'New Untitled Tab', category: 'Editor' },
+        { id: COMMAND_CLOSE_ALL, title: 'Close All Tabs', category: 'Editor' },
       ],
       keybindings: [
         {
@@ -179,7 +184,6 @@ export const editorPlugin: Plugin = {
       component: () =>
         createElement(EditorView, {
           onRetry: handleRetry,
-          onRequestClose: confirmAndClose,
         }),
       priority: 10,
     })
@@ -224,6 +228,34 @@ export const editorPlugin: Plugin = {
       const s = useEditorStore.getState()
       if (s.activeRelpath) confirmAndClose(s.activeRelpath)
     })
+
+    const openUntitled = () => {
+      const existing = useEditorStore.getState().tabs
+      let n = 1
+      const names = new Set(existing.map((t) => t.relpath))
+      while (names.has(`untitled-${n}`)) n++
+      const relpath = `untitled-${n}`
+      useEditorStore.getState().openUntitled(relpath, relpath)
+    }
+
+    const closeAll = async () => {
+      // Snapshot relpaths up front — confirmAndClose mutates the tabs
+      // array, iterating the live array would skip entries.
+      const relpaths = useEditorStore.getState().tabs.map((t) => t.relpath)
+      for (const relpath of relpaths) {
+        await confirmAndClose(relpath)
+      }
+    }
+
+    api.commands.register(COMMAND_NEW_UNTITLED, async () => {
+      openUntitled()
+    })
+
+    api.commands.register(COMMAND_CLOSE_ALL, async () => {
+      await closeAll()
+    })
+
+    setEditorRuntime({ confirmAndClose, openUntitled, closeAll })
 
     api.commands.register(COMMAND_SAVE, async () => {
       const s = useEditorStore.getState()

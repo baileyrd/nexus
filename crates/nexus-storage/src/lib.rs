@@ -45,6 +45,15 @@ pub struct TreeEntry {
     pub relpath: String,
     /// `true` if this entry is a directory.
     pub is_dir: bool,
+    /// Last-modified time, unix millis. `None` when the filesystem /
+    /// platform does not expose it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_ms: Option<i64>,
+    /// Created time, unix millis. `None` when the filesystem /
+    /// platform does not expose it (Linux with older `statx`, some
+    /// network mounts, etc.).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_ms: Option<i64>,
 }
 pub use parser::{parse_markdown, ParsedBlock, ParsedFile, ParsedLink, ParsedTag, Property};
 pub use tasks::{ParsedTask, TaskRecord, TaskFilter, insert_tasks, query_tasks, toggle_task, toggle_task_in_file};
@@ -473,10 +482,16 @@ impl StorageEngine {
             } else {
                 format!("{}/{}", relpath.trim_end_matches('/'), name)
             };
+            let (modified_ms, created_ms) = match entry.metadata() {
+                Ok(md) => (system_time_to_ms(md.modified().ok()), system_time_to_ms(md.created().ok())),
+                Err(_) => (None, None),
+            };
             entries.push(TreeEntry {
                 name,
                 relpath: rel,
                 is_dir: ft.is_dir(),
+                modified_ms,
+                created_ms,
             });
         }
         entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
@@ -1242,6 +1257,12 @@ fn unix_now() -> i64 {
             .as_secs(),
     )
     .unwrap_or(0)
+}
+
+fn system_time_to_ms(t: Option<std::time::SystemTime>) -> Option<i64> {
+    use std::time::UNIX_EPOCH;
+    t.and_then(|st| st.duration_since(UNIX_EPOCH).ok())
+        .and_then(|d| i64::try_from(d.as_millis()).ok())
 }
 
 // ── Integration tests ─────────────────────────────────────────────────────────
