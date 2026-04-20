@@ -16,67 +16,157 @@
          blocks in the initial HTML document, whereas Vite's JS-injected
          stylesheet can end up with its :root block not registering on
          documentElement in some browsers/tauri configurations. This
-         guarantees var(--bg) / var(--fg) / var(--accent) etc. resolve
-         before the React tree mounts. */
+         guarantees tokens resolve before the React tree mounts.
+
+         Task A (no-titlebar-test) renamed the shell's internal token
+         taxonomy to Obsidian's. Every hex/oklch VALUE below is the same
+         as before — only the variable NAMES changed. The legacy `--bg`,
+         `--fg`, `--line`, `--r`, `--f-ui`, etc. names are preserved via
+         the alias block at the bottom of :root so existing consumers
+         keep working until each is migrated. */
       :root {
-        --bg:          oklch(0.185 0.008 260);
-        --bg-raised:   oklch(0.215 0.008 260);
-        --bg-soft:     oklch(0.235 0.009 60);
-        --bg-hover:    oklch(0.27  0.01  260);
-        --bg-active:   oklch(0.32  0.012 260);
-        --line:        oklch(0.30  0.008 260);
-        --line-soft:   oklch(0.26  0.008 260);
-        --fg:          oklch(0.94  0.005 80);
-        --fg-muted:    oklch(0.72  0.008 80);
-        --fg-dim:      oklch(0.55  0.008 80);
-        --accent:      oklch(0.78  0.14  70);
-        --accent-soft: oklch(0.78  0.14  70 / 0.16);
-        --accent-ink:  oklch(0.22  0.05  70);
-        --ok:          oklch(0.78  0.12  165);
-        --warn:        oklch(0.82  0.14  85);
-        --risk:        oklch(0.72  0.17  25);
-        --cool:        oklch(0.76  0.09  230);
+        /* ── Obsidian background tokens ───────────────────────────── */
+        --background-primary:            oklch(0.185 0.008 260);
+        --background-secondary:          oklch(0.215 0.008 260);
+        --background-secondary-alt:      oklch(0.235 0.009 60);
+        --background-modifier-hover:     oklch(0.27  0.01  260);
+        --background-modifier-active:    oklch(0.32  0.012 260);
+        --background-modifier-border:    oklch(0.30  0.008 260);
 
-        --f-ui:   'Inter', system-ui, -apple-system, sans-serif;
-        --f-body: 'IBM Plex Serif', Georgia, serif;
-        --f-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
+        /* ── Obsidian text tokens ─────────────────────────────────── */
+        --text-normal:                   oklch(0.94  0.005 80);
+        --text-muted:                    oklch(0.72  0.008 80);
+        --text-faint:                    oklch(0.55  0.008 80);
 
-        --r:    6px;
-        --r-lg: 10px;
+        /* ── Obsidian interactive / accent ────────────────────────── */
+        --interactive-accent:            oklch(0.78  0.14  70);
+        --interactive-accent-soft:       oklch(0.78  0.14  70 / 0.16);
+        --interactive-accent-ink:        oklch(0.22  0.05  70);
+
+        /* ── Semantic status colors (Forge palette — Obsidian has no
+              direct equivalents; kept under their original names per
+              design-bundle feedback) ─────────────────────────────── */
+        --ok:                            oklch(0.78  0.12  165);
+        --warn:                          oklch(0.82  0.14  85);
+        --risk:                          oklch(0.72  0.17  25);
+        --cool:                          oklch(0.76  0.09  230);
+
+        /* ── Typography tokens ────────────────────────────────────── */
+        --font-interface: 'Inter', system-ui, -apple-system, sans-serif;
+        --font-text:      'IBM Plex Serif', Georgia, serif;
+        --font-monospace: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
+
+        --font-ui-smaller: 11px;
+        --font-ui-small:   12px;
+        --font-ui-medium:  13px;
+        --font-ui-large:   15px;
+        --font-bold:   600;
+        --font-normal: 400;
+
+        /* ── Radius scale ─────────────────────────────────────────── */
+        --radius-s: 4px;
+        --radius-m: 6px;
+        --radius-l: 10px;
+
+        /* ── Spacing scale (Obsidian's 4-n / 2-n series) ──────────── */
+        --size-2-1: 2px;
+        --size-2-2: 4px;
+        --size-2-3: 6px;
+        --size-4-1: 4px;
+        --size-4-2: 8px;
+        --size-4-3: 12px;
+        --size-4-4: 16px;
+        --size-4-5: 20px;
+        --size-4-6: 24px;
+
+        /* ── Chrome dimensions ────────────────────────────────────── */
+        --header-height: 30px;
+
+        /* ── Dividers / tab outlines ──────────────────────────────── */
+        --divider-width: 1px;
+        --divider-color: var(--background-modifier-border);
+        --tab-outline-width: 1px;
+        --tab-outline-color: var(--background-modifier-border);
+
+        /* ── Region-derived tokens ────────────────────────────────── */
+        --tab-container-background:      var(--background-secondary);
+        --titlebar-background:           var(--background-secondary);
+        --titlebar-background-focused:   var(--background-secondary-alt);
+        --titlebar-text-color:           var(--text-muted);
+        --titlebar-text-color-focused:   var(--text-normal);
+        --file-header-background:        var(--background-primary);
+        --file-header-background-focused:var(--background-primary);
+        --file-header-border:            var(--divider-width) solid var(--divider-color);
+
+        /* ── Shadow (unchanged) ───────────────────────────────────── */
         --shadow: 0 1px 0 oklch(1 0 0 / 0.03) inset, 0 10px 30px oklch(0 0 0 / 0.35);
 
-        /* Legacy token compat shim — removed once every plugin uses Forge names. */
-        --shell-bg:       var(--bg);
-        --shell-fg:       var(--fg);
-        --titlebar-bg:    var(--bg-raised);
-        --activitybar-bg: var(--bg-raised);
-        --sidebar-bg:     var(--bg-raised);
-        --editor-bg:      var(--bg);
-        --panel-bg:       var(--bg-raised);
-        --statusbar-bg:   var(--bg-raised);
-        --statusbar-fg:   var(--fg-muted);
-        --border:         var(--line);
-        --list-hover:     var(--bg-hover);
-        --list-active:    var(--bg-active);
-        --input-bg:       var(--bg);
-        --font-ui:        var(--f-ui);
-        --font-mono:      var(--f-mono);
+        /* ──────────────────────────────────────────────────────────
+           Backwards-compat aliases — legacy Forge names that existing
+           .tsx inline styles and unmigrated selectors still reference.
+           Remove these once every consumer uses the Obsidian names
+           above. Nothing else in :root should depend on these.
+           ────────────────────────────────────────────────────────── */
+        --bg:          var(--background-primary);
+        --bg-raised:   var(--background-secondary);
+        --bg-soft:     var(--background-secondary-alt);
+        --bg-hover:    var(--background-modifier-hover);
+        --bg-active:   var(--background-modifier-active);
+        --line:        var(--background-modifier-border);
+        --line-soft:   var(--divider-color);
+        --fg:          var(--text-normal);
+        --fg-muted:    var(--text-muted);
+        --fg-dim:      var(--text-faint);
+        --accent:      var(--interactive-accent);
+        --accent-soft: var(--interactive-accent-soft);
+        --accent-ink:  var(--interactive-accent-ink);
+        --f-ui:        var(--font-interface);
+        --f-body:      var(--font-text);
+        --f-mono:      var(--font-monospace);
+        --r:           var(--radius-s);
+        --r-lg:        var(--radius-l);
+
+        /* Older still-in-tree legacy shims (VSCode-flavored names
+           used by some .tsx / .css selectors). Kept pointing at the
+           Obsidian tokens so nothing visibly shifts. */
+        --shell-bg:       var(--background-primary);
+        --shell-fg:       var(--text-normal);
+        --titlebar-bg:    var(--background-secondary);
+        --activitybar-bg: var(--background-secondary);
+        --sidebar-bg:     var(--background-secondary);
+        --editor-bg:      var(--background-primary);
+        --panel-bg:       var(--background-secondary);
+        --statusbar-bg:   var(--background-secondary);
+        --statusbar-fg:   var(--text-muted);
+        --border:         var(--background-modifier-border);
+        --list-hover:     var(--background-modifier-hover);
+        --list-active:    var(--background-modifier-active);
+        --input-bg:       var(--background-primary);
+        --font-ui:        var(--font-interface);
+        --font-mono:      var(--font-monospace);
       }
 
       [data-theme="light"] {
-        --bg:          oklch(0.985 0.004 80);
-        --bg-raised:   oklch(0.965 0.004 80);
-        --bg-soft:     oklch(0.975 0.008 80);
-        --bg-hover:    oklch(0.945 0.004 80);
-        --bg-active:   oklch(0.92  0.006 80);
-        --line:        oklch(0.88  0.005 80);
-        --line-soft:   oklch(0.92  0.005 80);
-        --fg:          oklch(0.22  0.012 260);
-        --fg-muted:    oklch(0.42  0.012 260);
-        --fg-dim:      oklch(0.58  0.012 260);
-        --accent:      oklch(0.62  0.15  45);
-        --accent-soft: oklch(0.62  0.15  45 / 0.14);
-        --accent-ink:  oklch(0.98  0.01  60);
+        /* Light-theme palette — same values as before, but under the
+           new Obsidian token names. Aliases above cascade through. */
+        --background-primary:            oklch(0.985 0.004 80);
+        --background-secondary:          oklch(0.965 0.004 80);
+        --background-secondary-alt:      oklch(0.975 0.008 80);
+        --background-modifier-hover:     oklch(0.945 0.004 80);
+        --background-modifier-active:    oklch(0.92  0.006 80);
+        --background-modifier-border:    oklch(0.88  0.005 80);
+        /* Light theme's soft divider is a touch lighter than the
+           hard border. Expose it as --divider-color override. */
+        --divider-color:                 oklch(0.92  0.005 80);
+
+        --text-normal:                   oklch(0.22  0.012 260);
+        --text-muted:                    oklch(0.42  0.012 260);
+        --text-faint:                    oklch(0.58  0.012 260);
+
+        --interactive-accent:            oklch(0.62  0.15  45);
+        --interactive-accent-soft:       oklch(0.62  0.15  45 / 0.14);
+        --interactive-accent-ink:        oklch(0.98  0.01  60);
+
         --shadow: 0 1px 0 oklch(0 0 0 / 0.03) inset, 0 10px 30px oklch(0 0 0 / 0.06);
       }
 
@@ -86,7 +176,7 @@
       [data-density="spacious"] { --ui-size: 14px; --row-h: 30px; --body-size: 17px; }
 
       /* Prevent white flash before the React tree mounts. */
-      html, body { margin: 0; padding: 0; background: var(--bg); height: 100%; overflow: hidden; }
+      html, body { margin: 0; padding: 0; background: var(--background-primary); height: 100%; overflow: hidden; }
       #root { height: 100%; }
     </style>
   </head>
