@@ -29,9 +29,14 @@
         --background-primary:            oklch(0.185 0.008 260);
         --background-secondary:          oklch(0.215 0.008 260);
         --background-secondary-alt:      oklch(0.235 0.009 60);
-        --background-modifier-hover:     oklch(0.27  0.01  260);
-        --background-modifier-active:    oklch(0.32  0.012 260);
-        --background-modifier-border:    oklch(0.30  0.008 260);
+        /* Hover / active / border use translucent white overlays so they
+           tint whatever surface they sit on, matching Obsidian's
+           rgba(var(--mono-rgb-100), …) approach (app.css:2827). This keeps
+           active-tab / hovered-row highlights subtle instead of looking
+           like discrete solid rectangles on deep backgrounds. */
+        --background-modifier-hover:     rgba(255, 255, 255, 0.067);
+        --background-modifier-active:    rgba(255, 255, 255, 0.12);
+        --background-modifier-border:    rgba(255, 255, 255, 0.10);
 
         /* ── Obsidian text tokens ─────────────────────────────────── */
         --text-normal:                   oklch(0.94  0.005 80);
@@ -152,9 +157,12 @@
         --background-primary:            oklch(0.985 0.004 80);
         --background-secondary:          oklch(0.965 0.004 80);
         --background-secondary-alt:      oklch(0.975 0.008 80);
-        --background-modifier-hover:     oklch(0.945 0.004 80);
-        --background-modifier-active:    oklch(0.92  0.006 80);
-        --background-modifier-border:    oklch(0.88  0.005 80);
+        /* Light-theme variants of Obsidian's mono-rgb tinting —
+           translucent black over the panel surface keeps hover/active
+           highlights calibrated to whatever surface they overlay. */
+        --background-modifier-hover:     rgba(0, 0, 0, 0.05);
+        --background-modifier-active:    rgba(0, 0, 0, 0.09);
+        --background-modifier-border:    rgba(0, 0, 0, 0.12);
         /* Light theme's soft divider is a touch lighter than the
            hard border. Expose it as --divider-color override. */
         --divider-color:                 oklch(0.92  0.005 80);

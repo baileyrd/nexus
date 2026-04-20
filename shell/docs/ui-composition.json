@@ -1,0 +1,43 @@
+{
+  "template_type": "architecture",
+  "style": 1,
+  "title": "Nexus Shell — UI Composition",
+  "subtitle": "plugins register contributions into named slots — the shell chrome is empty geometry until they fill it",
+  "containers": [
+    { "x": 20,  "y": 85, "width": 320, "height": 500, "label": "PLUGINS",                "subtitle": "each registers via api.views.register(slot, component, priority)", "stroke": "#cbd5e1", "fill": "none" },
+    { "x": 360, "y": 85, "width": 580, "height": 500, "label": "SHELL CHROME",           "subtitle": "slots rendered by App.tsx — pane-mode swaps the center for a full view", "stroke": "#cbd5e1", "fill": "none" }
+  ],
+  "nodes": [
+    { "id": "p_files",   "kind": "rect", "x": 35, "y": 140, "width": 290, "height": 44, "label": "nexus.files",         "type_label": "→ sidebar (file tree)",              "fill": "#ffffff", "stroke": "#d1d5db" },
+    { "id": "p_editor",  "kind": "rect", "x": 35, "y": 192, "width": 290, "height": 44, "label": "nexus.editor",        "type_label": "→ editor (markdown / code view)",    "fill": "#ffffff", "stroke": "#d1d5db" },
+    { "id": "p_outline", "kind": "rect", "x": 35, "y": 244, "width": 290, "height": 44, "label": "nexus.outline",       "type_label": "→ rightPanel (PRD tracker)",         "fill": "#ffffff", "stroke": "#d1d5db" },
+    { "id": "p_words",   "kind": "rect", "x": 35, "y": 296, "width": 290, "height": 44, "label": "nexus.wordCount",     "type_label": "→ statusBar segment",                "fill": "#ffffff", "stroke": "#d1d5db" },
+    { "id": "p_tap",     "kind": "rect", "x": 35, "y": 348, "width": 290, "height": 44, "label": "nexus.tapStatus",     "type_label": "→ statusBar segment",                "fill": "#ffffff", "stroke": "#d1d5db" },
+    { "id": "p_proc",    "kind": "rect", "x": 35, "y": 400, "width": 290, "height": 44, "label": "nexus.processes",     "type_label": "→ activityBar + paneMode view",      "fill": "#ffffff", "stroke": "#f97316" },
+    { "id": "p_agent",   "kind": "rect", "x": 35, "y": 452, "width": 290, "height": 44, "label": "nexus.agent",         "type_label": "→ activityBar + paneMode view",      "fill": "#ffffff", "stroke": "#f97316" },
+    { "id": "p_tmpl",    "kind": "rect", "x": 35, "y": 504, "width": 290, "height": 44, "label": "nexus.templates",     "type_label": "→ activityBar + paneMode view",      "fill": "#ffffff", "stroke": "#f97316" },
+
+    { "id": "titleBar",    "kind": "rect", "x": 380, "y": 150, "width": 540, "height": 34, "label": "titleBar",     "type_label": "", "fill": "#f8fafc", "stroke": "#cbd5e1" },
+    { "id": "activityBar", "kind": "rect", "x": 380, "y": 194, "width": 40,  "height": 252, "label": "A",           "type_label": "", "fill": "#f8fafc", "stroke": "#cbd5e1" },
+    { "id": "sidebar",     "kind": "rect", "x": 428, "y": 194, "width": 150, "height": 252, "label": "sidebar",     "type_label": "", "fill": "#ffffff", "stroke": "#94a3b8" },
+    { "id": "editor",      "kind": "rect", "x": 586, "y": 194, "width": 166, "height": 252, "label": "editor",      "type_label": "", "fill": "#ffffff", "stroke": "#10b981" },
+    { "id": "rightPanel",  "kind": "rect", "x": 760, "y": 194, "width": 160, "height": 252, "label": "rightPanel",  "type_label": "", "fill": "#ffffff", "stroke": "#94a3b8" },
+    { "id": "panelArea",   "kind": "rect", "x": 428, "y": 456, "width": 492, "height": 36,  "label": "panelArea",   "type_label": "", "fill": "#f8fafc", "stroke": "#cbd5e1" },
+    { "id": "statusBar",   "kind": "rect", "x": 380, "y": 502, "width": 540, "height": 34,  "label": "statusBar",   "type_label": "", "fill": "#f8fafc", "stroke": "#cbd5e1" }
+  ],
+  "arrows": [
+    { "source": "p_files",   "target": "sidebar",     "source_port": "right", "target_port": "top",    "flow": "control" },
+    { "source": "p_editor",  "target": "editor",      "source_port": "right", "target_port": "top",    "flow": "control" },
+    { "source": "p_outline", "target": "rightPanel",  "source_port": "right", "target_port": "top",    "flow": "control" },
+    { "source": "p_words",   "target": "statusBar",   "source_port": "right", "target_port": "left",   "flow": "data" },
+    { "source": "p_proc",    "target": "activityBar", "source_port": "right", "target_port": "left",   "flow": "feedback", "label": "pane-mode", "dashed": true }
+  ],
+  "legend": [
+    { "flow": "control",  "label": "UI view contribution" },
+    { "flow": "data",     "label": "statusBar segment" },
+    { "flow": "feedback", "label": "pane-mode contribution (full-pane takeover)" }
+  ],
+  "legend_position": "bottom-left",
+  "legend_y": 605,
+  "footer": ""
+}

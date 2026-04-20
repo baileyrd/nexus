@@ -1,0 +1,45 @@
+{
+  "template_type": "data-flow",
+  "style": 1,
+  "title": "Nexus Event System",
+  "subtitle": "Two buses, one Tauri bridge — kernel events stream down, invokes go back up",
+  "containers": [
+    { "x": 20,  "y": 100, "width": 920, "height": 150, "label": "IN-SHELL BUS  (TypeScript)",        "subtitle": "EventBus singleton · files:open · workspace:opened · plugin:activated",           "stroke": "#cbd5e1", "fill": "none" },
+    { "x": 20,  "y": 270, "width": 920, "height": 315, "label": "KERNEL BUS (Rust)  +  TAURI BRIDGE", "subtitle": "com.nexus.storage.* · one channel, demuxed by subscriptionId",                     "stroke": "#cbd5e1", "fill": "none" }
+  ],
+  "nodes": [
+    { "id": "ts_emit",  "kind": "rect",        "x":  40, "y": 168, "width": 200, "height": 56, "label": "TS plugins / UI",         "type_label": "EMITTERS",       "fill": "#ffffff", "stroke": "#d1d5db" },
+    { "id": "eventbus", "kind": "double_rect", "x": 370, "y": 166, "width": 220, "height": 60, "label": "eventBus singleton",      "type_label": "EventBus.ts",    "fill": "#ffffff", "stroke": "#7c3aed" },
+    { "id": "ts_subs",  "kind": "rect",        "x": 720, "y": 168, "width": 200, "height": 56, "label": "hooks / zustand stores", "type_label": "api.events.on", "fill": "#ffffff", "stroke": "#d1d5db" },
+
+    { "id": "rust",     "kind": "rect",        "x":  40, "y": 330, "width": 200, "height": 60, "label": "Rust kernel plugins",        "type_label": "publish_event", "fill": "#ffffff", "stroke": "#d1d5db" },
+    { "id": "task",     "kind": "double_rect", "x": 370, "y": 328, "width": 220, "height": 66, "label": "bridge.rs subscribe task",   "type_label": "KernelRuntime", "fill": "#ffffff", "stroke": "#10b981" },
+    { "id": "stores",   "kind": "rect",        "x": 720, "y": 330, "width": 200, "height": 60, "label": "zustand store → React",      "type_label": "CONSUMERS",     "fill": "#ffffff", "stroke": "#d1d5db" },
+
+    { "id": "channel",  "kind": "double_rect", "x": 370, "y": 420, "width": 220, "height": 56, "label": "\"kernel:event\" channel", "type_label": "Tauri IPC",     "fill": "#ffffff", "stroke": "#2563eb" },
+    { "id": "api_on",   "kind": "rect",        "x": 720, "y": 422, "width": 200, "height": 52, "label": "api.kernel.on(prefix, fn)", "type_label": "PluginAPI.ts",  "fill": "#ffffff", "stroke": "#d1d5db" },
+
+    { "id": "invoke",   "kind": "rect",        "x": 370, "y": 505, "width": 220, "height": 52, "label": "api.kernel.invoke(…)",      "type_label": "REQ / RES",     "fill": "#ffffff", "stroke": "#f97316" }
+  ],
+  "arrows": [
+    { "source": "ts_emit",  "target": "eventbus", "source_port": "right",  "target_port": "left",   "flow": "control", "label": "emit" },
+    { "source": "eventbus", "target": "ts_subs",  "source_port": "right",  "target_port": "left",   "flow": "read",    "label": "deliver" },
+
+    { "source": "rust",     "target": "task",     "source_port": "right",  "target_port": "left",   "flow": "control", "label": "NexusEvent::Custom" },
+    { "source": "task",     "target": "channel",  "source_port": "bottom", "target_port": "top",    "flow": "data",    "label": "envelope" },
+    { "source": "channel",  "target": "api_on",   "source_port": "right",  "target_port": "left",   "flow": "data",    "label": "demux by subId" },
+    { "source": "api_on",   "target": "stores",   "source_port": "top",    "target_port": "bottom", "flow": "read" },
+
+    { "source": "ts_subs",  "target": "invoke",   "source_port": "bottom", "target_port": "right",  "flow": "feedback", "label": "back-channel", "dashed": true, "route_points": [[820, 480], [820, 531]] },
+    { "source": "invoke",   "target": "rust",     "source_port": "left",   "target_port": "bottom", "flow": "feedback", "label": "invoke",       "dashed": true, "route_points": [[300, 531], [300, 430], [140, 430]] }
+  ],
+  "legend": [
+    { "flow": "control",  "label": "emit / primary path" },
+    { "flow": "read",     "label": "subscriber delivery" },
+    { "flow": "data",     "label": "Tauri bridge transport" },
+    { "flow": "feedback", "label": "UI → kernel back-channel (req/res)" }
+  ],
+  "legend_position": "bottom-left",
+  "legend_y": 615,
+  "footer": ""
+}

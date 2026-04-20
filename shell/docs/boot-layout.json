@@ -1,0 +1,45 @@
+{
+  "template_type": "architecture",
+  "style": 1,
+  "title": "Nexus Shell — Boot & Layout",
+  "subtitle": "main.tsx → plugin activation → App renders tri-pane or pane-mode, backed by stores · registries · kernel bridge",
+  "containers": [
+    { "x": 20, "y":  85, "width": 920, "height": 135, "label": "BOOT SEQUENCE  (main.tsx)",        "subtitle": "force theme · register services · load 18 nexus.* plugins · mount React", "stroke": "#cbd5e1", "fill": "none" },
+    { "x": 20, "y": 235, "width": 920, "height": 170, "label": "REACT TREE  (App.tsx)",             "subtitle": "branches on usePaneModeStore.activeViewId",                                  "stroke": "#cbd5e1", "fill": "none" },
+    { "x": 20, "y": 420, "width": 920, "height": 155, "label": "SUBSYSTEMS",                        "subtitle": "state · contribution points · kernel boundary",                             "stroke": "#cbd5e1", "fill": "none" }
+  ],
+  "nodes": [
+    { "id": "main",       "kind": "rect",        "x":  40, "y": 155, "width": 150, "height": 52, "label": "main.tsx",                "type_label": "ENTRY",              "fill": "#ffffff", "stroke": "#d1d5db" },
+    { "id": "preg",       "kind": "rect",        "x": 215, "y": 155, "width": 170, "height": 52, "label": "PluginRegistry",          "type_label": "host",               "fill": "#ffffff", "stroke": "#d1d5db" },
+    { "id": "ehost",      "kind": "double_rect", "x": 410, "y": 153, "width": 180, "height": 56, "label": "ExtensionHost",           "type_label": "resolve + activate", "fill": "#ffffff", "stroke": "#7c3aed" },
+    { "id": "mount",      "kind": "rect",        "x": 615, "y": 155, "width": 285, "height": 52, "label": "ReactDOM.render(<App/>)", "type_label": "MOUNT",              "fill": "#ffffff", "stroke": "#d1d5db" },
+
+    { "id": "paneView",   "kind": "rect",        "x":  50, "y": 290, "width": 260, "height": 95, "label": "PaneView",          "type_label": "pane-mode — processes · agent · templates", "fill": "#ffffff", "stroke": "#f97316" },
+    { "id": "tripane",    "kind": "double_rect", "x": 345, "y": 290, "width": 575, "height": 95, "label": "tri-pane shell",    "type_label": "titleBar · activityBar · sidebar · editor · rightPanel · panelArea · statusBar", "fill": "#ffffff", "stroke": "#10b981" },
+
+    { "id": "stores",     "kind": "rect",        "x":  50, "y": 470, "width": 270, "height": 85, "label": "Zustand stores",    "type_label": "layoutStore · paneModeStore · slot · processes", "fill": "#ffffff", "stroke": "#7c3aed" },
+    { "id": "registries", "kind": "rect",        "x": 345, "y": 470, "width": 270, "height": 85, "label": "Registries",         "type_label": "Command · Keybinding · Slot · ContextKey",        "fill": "#ffffff", "stroke": "#2563eb" },
+    { "id": "kernel",     "kind": "rect",        "x": 640, "y": 470, "width": 280, "height": 85, "label": "Kernel bridge",      "type_label": "api.kernel.invoke/on  →  bridge.rs",              "fill": "#ffffff", "stroke": "#10b981" }
+  ],
+  "arrows": [
+    { "source": "main",    "target": "preg",    "source_port": "right",  "target_port": "left", "flow": "control", "label": "new" },
+    { "source": "preg",    "target": "ehost",   "source_port": "right",  "target_port": "left", "flow": "control", "label": "deps" },
+    { "source": "ehost",   "target": "mount",   "source_port": "right",  "target_port": "left", "flow": "control", "label": "ready" },
+
+    { "source": "mount",   "target": "tripane", "source_port": "bottom", "target_port": "top",  "flow": "control", "label": "render" },
+    { "source": "mount",   "target": "paneView","source_port": "bottom", "target_port": "top",  "flow": "feedback","label": "if paneModeId", "dashed": true, "route_points": [[757, 260], [180, 260]] },
+
+    { "source": "tripane", "target": "stores",      "source_port": "bottom", "target_port": "top", "flow": "read",  "label": "subscribe", "route_points": [[632, 425], [185, 425]] },
+    { "source": "tripane", "target": "registries",  "source_port": "bottom", "target_port": "top", "flow": "read",  "label": "slot entries" },
+    { "source": "tripane", "target": "kernel",      "source_port": "bottom", "target_port": "top", "flow": "data",  "label": "api.kernel.*", "dashed": true, "route_points": [[900, 425], [780, 425]] }
+  ],
+  "legend": [
+    { "flow": "control",  "label": "boot / render path" },
+    { "flow": "read",     "label": "UI subscribes to state" },
+    { "flow": "feedback", "label": "conditional branch (pane-mode)" },
+    { "flow": "data",     "label": "plugin → kernel surface" }
+  ],
+  "legend_position": "bottom-left",
+  "legend_y": 600,
+  "footer": ""
+}
