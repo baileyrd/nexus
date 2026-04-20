@@ -14,6 +14,7 @@ import { PluginRegistry } from './host/PluginRegistry'
 import { ExtensionHost } from './host/ExtensionHost'
 import { contextKeyService } from './host/ContextKeyService'
 import { setRegistry } from './host/shellRegistry'
+import { installBodyClasses } from './host/bodyClasses'
 import App from './shell/App'
 import './shell/shell.css'
 // Importing the store triggers persist rehydration, which sets
@@ -196,6 +197,12 @@ async function boot() {
 
   contextKeyService.set('shellReady', true)
 }
+
+// Install Obsidian-faithful body-class state machine. Runs once, before
+// React mounts, so platform / frameless / focus classes are present on
+// first paint and CSS can key off them (`body.mod-windows`, etc.). The
+// Tauri listeners it registers persist for the app lifetime.
+installBodyClasses()
 
 // Mount React IMMEDIATELY so the user sees SOMETHING even if boot fails mid-way.
 // App renders a "Loading plugins..." placeholder until slots populate.
