@@ -69,6 +69,7 @@ import { terminalPlugin } from './plugins/nexus/terminal'
 import { aiPlugin } from './plugins/nexus/ai'
 import { pluginsMgmtPlugin } from './plugins/nexus/pluginsMgmt'
 import { processesPlugin } from './plugins/nexus/processes'
+import { statusBarPlugin } from './plugins/nexus/statusBar'
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -133,6 +134,7 @@ async function boot() {
     aiPlugin,
     pluginsMgmtPlugin,
     processesPlugin,
+    statusBarPlugin,
   ]
 
   // Validate that all imports resolved to real plugins

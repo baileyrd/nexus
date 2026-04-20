@@ -210,47 +210,72 @@ export function TitleBar() {
 
   return (
     <div
+      data-tauri-drag-region
       style={{
         display: 'flex',
         alignItems: 'center',
         height: '100%',
         width: '100%',
+        position: 'relative',
         userSelect: 'none',
         color: 'var(--fg-muted)',
         fontSize: 'var(--ui-size, 12px)',
-        gap: 4,
         paddingLeft: 6,
       }}
     >
-      <LeftCluster
-        rootPath={rootPath}
-        onOpen={() => openWorkspace()}
-        onSearch={focusSearch}
-      />
+      {/* Left cluster — non-draggable */}
+      <div style={{ flexShrink: 0, zIndex: 1 }}>
+        <LeftCluster
+          rootPath={rootPath}
+          onOpen={() => openWorkspace()}
+          onSearch={focusSearch}
+        />
+      </div>
 
-      <Breadcrumb rootPath={rootPath} activeRelpath={activeRelpath} activeContent={activeTab?.content ?? null} />
-
-      {/* Drag region: middle spacer only. Keeping interactive buttons out of
-          the drag region avoids eaten pointer events on Windows/Tauri 2. */}
-      <div data-tauri-drag-region style={{ flex: 1, height: '100%' }} />
-
-      <RightCluster
-        rightPanelVisible={rightPanelVisible}
-        onToggleRightPanel={toggleRightPanel}
-      />
-
-      <ControlButton onClick={minimize} label="Minimize">
-        <MinimizeIcon />
-      </ControlButton>
-      <ControlButton
-        onClick={toggleMaximize}
-        label={maximized ? 'Restore' : 'Maximize'}
+      {/* Centered breadcrumb — absolutely positioned so it doesn't
+          shift when the left/right clusters change width. The breadcrumb
+          contains no interactive elements so pointer events pass through
+          to the drag region behind it. */}
+      <div
+        style={{
+          position: 'absolute',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          maxWidth: 'calc(100% - 360px)',
+          overflow: 'hidden',
+          pointerEvents: 'none',
+          zIndex: 1,
+        }}
       >
-        {maximized ? <RestoreIcon /> : <MaximizeIcon />}
-      </ControlButton>
-      <ControlButton onClick={close} label="Close" closeAccent>
-        <CloseIcon />
-      </ControlButton>
+        <Breadcrumb
+          rootPath={rootPath}
+          activeRelpath={activeRelpath}
+          activeContent={activeTab?.content ?? null}
+        />
+      </div>
+
+      {/* Drag region fills the rest */}
+      <div style={{ flex: 1, height: '100%' }} />
+
+      {/* Right cluster — non-draggable */}
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', zIndex: 1 }}>
+        <RightCluster
+          rightPanelVisible={rightPanelVisible}
+          onToggleRightPanel={toggleRightPanel}
+        />
+        <ControlButton onClick={minimize} label="Minimize">
+          <MinimizeIcon />
+        </ControlButton>
+        <ControlButton
+          onClick={toggleMaximize}
+          label={maximized ? 'Restore' : 'Maximize'}
+        >
+          {maximized ? <RestoreIcon /> : <MaximizeIcon />}
+        </ControlButton>
+        <ControlButton onClick={close} label="Close" closeAccent>
+          <CloseIcon />
+        </ControlButton>
+      </div>
     </div>
   )
 }
@@ -310,9 +335,14 @@ function Breadcrumb({
         display: 'inline-flex',
         alignItems: 'center',
         gap: 8,
-        marginLeft: 8,
+        height: 24,
+        padding: '0 10px',
+        background: 'var(--bg-raised)',
+        border: '1px solid var(--line)',
+        borderRadius: 999,
         minWidth: 0,
         overflow: 'hidden',
+        fontSize: 12,
       }}
     >
       <span

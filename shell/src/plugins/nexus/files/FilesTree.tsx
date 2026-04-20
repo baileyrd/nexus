@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useFilesStore, type FilesDirEntry } from './filesStore'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { loadChildren } from './kernelClient'
@@ -8,14 +8,13 @@ interface FilesTreeProps {
 }
 
 const INDENT_PX = 14
-/** Empty string is the forge-root sentinel — that's the relpath the
- * storage plugin's `list_dir` accepts for "list the forge root itself". */
 const ROOT_RELPATH = ''
 
 export function FilesTree({ onFileActivate }: FilesTreeProps) {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const rootEntries = useFilesStore((s) => s.children[ROOT_RELPATH])
   const setChildren = useFilesStore((s) => s.setChildren)
+  const [filter, setFilter] = useState('')
 
   useEffect(() => {
     if (!rootPath) return
@@ -24,6 +23,11 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
       setChildren(ROOT_RELPATH, entries),
     )
   }, [rootPath, rootEntries, setChildren])
+
+  // Clear filter when workspace changes
+  useEffect(() => {
+    setFilter('')
+  }, [rootPath])
 
   if (!rootPath) {
     return (
@@ -53,17 +57,99 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
     )
   }
 
+  const normalizedFilter = filter.trim().toLowerCase()
+
   return (
-    <div style={{ padding: '4px 0', fontSize: 'var(--ui-size, 13px)' }}>
-      {rootEntries.map((entry) => (
-        <TreeNode
-          key={entry.relpath}
-          entry={entry}
-          depth={0}
-          rootPath={rootPath}
-          onFileActivate={onFileActivate}
-        />
-      ))}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* Filter row */}
+      <div
+        style={{
+          flexShrink: 0,
+          padding: '4px 8px',
+          borderBottom: '1px solid var(--line-soft)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            background: 'var(--bg)',
+            border: '1px solid var(--line-soft)',
+            borderRadius: 'var(--r)',
+            padding: '3px 8px',
+          }}
+        >
+          <svg
+            width={12}
+            height={12}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.75}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ color: 'var(--fg-dim)', flexShrink: 0 }}
+            aria-hidden
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3-3" />
+          </svg>
+          <input
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter files…"
+            aria-label="Filter files"
+            style={{
+              flex: 1,
+              background: 'transparent',
+              border: 0,
+              outline: 'none',
+              color: 'var(--fg)',
+              fontSize: 'var(--ui-size, 12px)',
+              fontFamily: 'var(--f-ui)',
+              padding: 0,
+              lineHeight: '20px',
+            }}
+          />
+          {filter && (
+            <button
+              type="button"
+              aria-label="Clear filter"
+              onClick={() => setFilter('')}
+              style={{
+                background: 'transparent',
+                border: 0,
+                color: 'var(--fg-dim)',
+                cursor: 'pointer',
+                padding: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Tree */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '4px 0', fontSize: 'var(--ui-size, 13px)' }}>
+        {rootEntries.map((entry) => (
+          <TreeNode
+            key={entry.relpath}
+            entry={entry}
+            depth={0}
+            rootPath={rootPath}
+            filter={normalizedFilter}
+            onFileActivate={onFileActivate}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -72,11 +158,13 @@ function TreeNode({
   entry,
   depth,
   rootPath,
+  filter,
   onFileActivate,
 }: {
   entry: FilesDirEntry
   depth: number
   rootPath: string
+  filter: string
   onFileActivate: (entry: FilesDirEntry) => void
 }) {
   const expanded = useFilesStore((s) => s.expanded.has(entry.relpath))
@@ -85,6 +173,11 @@ function TreeNode({
   const setChildren = useFilesStore((s) => s.setChildren)
   const selected = useFilesStore((s) => s.selected === entry.relpath)
   const setSelected = useFilesStore((s) => s.setSelected)
+
+  // When a filter is active, hide non-matching files (keep all dirs visible)
+  if (filter && !entry.isDir && !entry.name.toLowerCase().includes(filter)) {
+    return null
+  }
 
   const handleClick = () => {
     if (entry.isDir) {
@@ -100,9 +193,6 @@ function TreeNode({
     }
   }
 
-  // Display-only: user-facing tooltip still shows absolute path. The
-  // workspace root is the ONLY absolute path we touch — kernel calls
-  // always use forge-relative paths.
   const tooltip = entry.relpath ? `${rootPath}/${entry.relpath}` : rootPath
 
   return (
@@ -123,6 +213,7 @@ function TreeNode({
               entry={child}
               depth={depth + 1}
               rootPath={rootPath}
+              filter={filter}
               onFileActivate={onFileActivate}
             />
           ))}

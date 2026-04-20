@@ -316,6 +316,7 @@ function TabBar({ tabs, activeRelpath, activeTab, onSelect, onRequestClose, onTo
           minWidth: 0,
           overflowX: 'auto',
           overflowY: 'hidden',
+          scrollbarWidth: 'none',
         }}
       >
         {tabs.map((tab) => (

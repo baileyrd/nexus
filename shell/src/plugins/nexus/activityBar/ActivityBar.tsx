@@ -10,6 +10,9 @@ export function ActivityBar({ onItemClick }: ActivityBarProps) {
   const items = useActivityBarStore((s) => s.items)
   const activeViewId = useActivityBarStore((s) => s.activeViewId)
 
+  const topItems = items.filter((i) => (i.placement ?? 'top') === 'top')
+  const bottomItems = items.filter((i) => i.placement === 'bottom')
+
   return (
     <div
       style={{
@@ -20,14 +23,38 @@ export function ActivityBar({ onItemClick }: ActivityBarProps) {
         height: '100%',
       }}
     >
-      {items.map((item) => (
-        <ActivityBarButton
-          key={item.id}
-          item={item}
-          active={item.viewId === activeViewId}
-          onClick={() => onItemClick(item)}
-        />
-      ))}
+      {/* Top navigation items */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        {topItems.map((item) => (
+          <ActivityBarButton
+            key={item.id}
+            item={item}
+            active={item.viewId === activeViewId}
+            onClick={() => onItemClick(item)}
+          />
+        ))}
+      </div>
+
+      {/* Bottom action items */}
+      {bottomItems.length > 0 && (
+        <div
+          style={{
+            flexShrink: 0,
+            borderTop: '1px solid var(--line-soft)',
+            paddingTop: 2,
+            paddingBottom: 4,
+          }}
+        >
+          {bottomItems.map((item) => (
+            <ActivityBarButton
+              key={item.id}
+              item={item}
+              active={false}
+              onClick={() => onItemClick(item)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

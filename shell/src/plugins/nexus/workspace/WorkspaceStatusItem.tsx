@@ -1,14 +1,10 @@
 import { useWorkspaceStore } from './workspaceStore'
 
-function basename(path: string): string {
-  const trimmed = path.replace(/[\\/]+$/, '')
-  const parts = trimmed.split(/[\\/]/)
-  return parts[parts.length - 1] || trimmed
-}
-
 export function WorkspaceStatusItem() {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const open = useWorkspaceStore((s) => s.open)
+  const synced = rootPath !== null
+
   return (
     <button
       type="button"
@@ -19,11 +15,25 @@ export function WorkspaceStatusItem() {
         border: 'none',
         color: 'inherit',
         font: 'inherit',
-        padding: '0 8px',
+        padding: '0 4px',
         cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
       }}
     >
-      {rootPath ? basename(rootPath) : 'No workspace'}
+      <span
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          flexShrink: 0,
+          background: synced ? 'var(--ok)' : 'var(--fg-dim)',
+          boxShadow: synced ? '0 0 4px var(--ok)' : 'none',
+        }}
+      />
+      <span>{synced ? 'Forge synced' : 'No workspace'}</span>
     </button>
   )
 }

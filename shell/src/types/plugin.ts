@@ -272,6 +272,13 @@ export interface ActivityBarAPI {
     title: string
     viewId: string
     priority: number
+    /** Where in the bar to render the item. Defaults to 'top'. */
+    placement?: 'top' | 'bottom'
+    /**
+     * If set, clicking this item executes the named command instead of
+     * toggling a sidebar view. Intended for action items (e.g. settings).
+     */
+    command?: string
   }): void
   removeItem(id: string): void
 }

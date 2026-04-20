@@ -48,6 +48,11 @@ export const activityBarPlugin: Plugin = {
     })
 
     const handleItemClick = (item: ActivityBarItem) => {
+      // Command items (e.g. settings) execute directly without touching sidebar.
+      if (item.command) {
+        api.commands.execute(item.command)
+        return
+      }
       const s = useActivityBarStore.getState()
       if (s.activeViewId === item.viewId) {
         // Toggle off — deactivate and hide sidebar.

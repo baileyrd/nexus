@@ -13,7 +13,7 @@ export const settingsPlugin: Plugin = {
     version: '1.0.0',
     core: true,
     activationEvents: ['onStartup'],
-    dependsOn: ['core.configuration-service'],
+    dependsOn: ['core.configuration-service', 'nexus.activityBar'],
     contributes: {
       commands: [
         {
@@ -54,5 +54,16 @@ export const settingsPlugin: Plugin = {
     })
 
     api.context.set('settingsPanelVisible', false)
+
+    api.activityBar.addItem({
+      id: 'core.settings.activityBarItem',
+      icon: '',
+      iconName: 'settings',
+      title: 'Settings',
+      viewId: 'core.settings.view',
+      priority: 100,
+      placement: 'bottom',
+      command: 'workbench.action.openSettings',
+    })
   },
 }

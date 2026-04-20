@@ -47,7 +47,8 @@ body {
 .shell-titlebar {
   flex-shrink: 0;
   height: 36px;
-  background: var(--titlebar-bg, #3c3c3c);
+  background: linear-gradient(to bottom, var(--bg-raised), var(--bg));
+  border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
   /* Tauri custom titlebar drag region is set inside the plugin component */

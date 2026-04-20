@@ -22,6 +22,14 @@ export interface ActivityBarItem {
   title: string
   viewId: string
   priority: number
+  /** Where in the bar to render the item. Defaults to 'top'. */
+  placement?: 'top' | 'bottom'
+  /**
+   * If set, clicking the item executes this command ID instead of
+   * toggling a sidebar view. Intended for action items (e.g. settings)
+   * that live in the bottom cluster.
+   */
+  command?: string
 }
 
 interface ActivityBarState {
