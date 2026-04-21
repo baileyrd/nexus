@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 820" width="960" height="820">
+  <defs>
+    <filter id="shadowSoft" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+    text { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+    .title { font-size: 28px; font-weight: 700; fill: #111827; }
+    .subtitle { font-size: 13px; font-weight: 500; fill: #6b7280; }
+    .section { font-size: 12px; font-weight: 700; fill: #2563eb; letter-spacing: 1.3px; }
+    .node-title { font-size: 14px; font-weight: 700; fill: #111827; }
+    .node-sub { font-size: 11px; font-weight: 500; fill: #6b7280; }
+    .node-type { font-size: 10px; font-weight: 700; fill: #9ca3af; letter-spacing: 0.08em; }
+    .mono-dim { font-family: Menlo, Consolas, monospace; font-size: 10px; fill: #7c3aed; }
+    .legend { font-size: 11px; font-weight: 500; fill: #6b7280; }
+    </style>
+  </defs>
+  <rect width="960" height="820" fill="#ffffff"/>
+  <text x="40" y="44" class="title">Right Panel (Right Split) Anatomy</text>
+  <text x="40" y="64" class="subtitle">.workspace-split.mod-right-split · hosts window controls (Win/Linux) and a fixed sidebar-toggle (macOS quirk)</text>
+
+  <!-- Scenario A: Win/Linux hidden-frameless -->
+  <text x="40" y="98" class="section">SCENARIO A · WINDOWS / LINUX · IS-HIDDEN-FRAMELESS</text>
+  <text x="40" y="114" class="node-sub">Window controls nest inside the rightmost split's tab-header-container; tab row reserves 126px on the right</text>
+
+  <rect x="40" y="124" width="880" height="250" rx="10" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 5"/>
+
+  <!-- Right split container -->
+  <rect x="56" y="140" width="848" height="218" rx="8" fill="#ffffff" stroke="#f97316" stroke-width="2"/>
+  <text x="72" y="158" class="node-type">.workspace-split.mod-right-split</text>
+
+  <!-- Tab header container with window controls on the right -->
+  <rect x="72" y="170" width="816" height="40" rx="4" fill="#fff7ed" stroke="#fdba74" stroke-width="1.6"/>
+  <text x="84" y="186" class="node-type">.workspace-tabs.mod-top-right-space .workspace-tab-header-container</text>
+  <text x="84" y="200" class="mono-dim">height 40px · padding-right +126px frame-right-space (css:4040)</text>
+
+  <!-- Inspector tabs inside -->
+  <rect x="80" y="178" width="92" height="24" rx="3" fill="#ffffff" stroke="#fdba74"/>
+  <text x="126" y="194" text-anchor="middle" class="node-sub">Outline</text>
+  <rect x="176" y="178" width="92" height="24" rx="3" fill="#fef3c7" stroke="#fcd34d"/>
+  <text x="222" y="194" text-anchor="middle" class="node-sub">Backlinks</text>
+  <rect x="272" y="178" width="92" height="24" rx="3" fill="#fef3c7" stroke="#fcd34d"/>
+  <text x="318" y="194" text-anchor="middle" class="node-sub">Tags</text>
+
+  <!-- Frame-right-space reserved -->
+  <rect x="730" y="172" width="126" height="36" rx="3" fill="#fde68a" stroke="#b45309" stroke-width="1.4" stroke-dasharray="3 2"/>
+  <text x="793" y="192" text-anchor="middle" class="mono-dim" fill="#92400e">--frame-right-space = 126px</text>
+
+  <!-- Titlebar-button-container.mod-right nested here -->
+  <rect x="820" y="174" width="68" height="32" rx="3" fill="#fef3c7" stroke="#d97706" stroke-width="1.4"/>
+  <text x="854" y="195" text-anchor="middle" class="mono-dim" fill="#92400e">— □ ×</text>
+
+  <!-- Inspector view content below -->
+  <rect x="72" y="216" width="816" height="134" rx="4" fill="#ffffff" stroke="#fdba74"/>
+  <text x="84" y="232" class="node-type">.view-content  (view-header SUPPRESSED · css:4204-4207)</text>
+  <text x="84" y="260" class="node-sub">outline entries · backlinks list · etc.</text>
+  <text x="84" y="284" class="mono-dim">.workspace-split.mod-right-split .view-content — height 100% · overflow auto (css:4298-4301)</text>
+
+  <!-- Arrow callout to controls -->
+  <path d="M 854 174 L 854 130 L 880 130" stroke="#d97706" stroke-width="1.4" fill="none"/>
+  <text x="580" y="135" class="mono-dim" fill="#92400e">.titlebar-button-container.mod-right nests INSIDE the tab-header · css:5675, 4061-4065</text>
+
+  <!-- Scenario B: macOS hidden-frameless -->
+  <text x="40" y="404" class="section">SCENARIO B · MACOS · IS-HIDDEN-FRAMELESS</text>
+  <text x="40" y="420" class="node-sub">No in-app window buttons. Right-sidebar toggle floats as position:fixed overlay; tab-header gets +38px right padding to clear it</text>
+
+  <rect x="40" y="430" width="880" height="218" rx="10" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 5"/>
+
+  <rect x="56" y="446" width="848" height="186" rx="8" fill="#ffffff" stroke="#10b981" stroke-width="1.8"/>
+  <text x="72" y="464" class="node-type">.workspace-split.mod-right-split  (mod-macos)</text>
+
+  <rect x="72" y="476" width="816" height="40" rx="4" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1.6"/>
+  <text x="84" y="494" class="node-type">.workspace-tabs.mod-top-right-space .workspace-tab-header-container</text>
+  <text x="84" y="508" class="mono-dim">padding-right: 38px  (css:6629-6630 macOS override)</text>
+
+  <rect x="80" y="484" width="92" height="24" rx="3" fill="#ffffff" stroke="#a7f3d0"/>
+  <text x="126" y="500" text-anchor="middle" class="node-sub">Outline</text>
+  <rect x="176" y="484" width="92" height="24" rx="3" fill="#d1fae5" stroke="#a7f3d0"/>
+  <text x="222" y="500" text-anchor="middle" class="node-sub">Backlinks</text>
+
+  <!-- Fixed toggle overlay (floating) -->
+  <rect x="856" y="444" width="32" height="32" rx="4" fill="#fef3c7" stroke="#b45309" stroke-width="1.6"/>
+  <text x="872" y="464" text-anchor="middle" class="mono-dim" fill="#92400e">⇥</text>
+  <text x="720" y="440" class="mono-dim" fill="#92400e">fixed top:0 right:0  ·  z-index --layer-cover = 5</text>
+  <path d="M 872 444 L 872 420 L 848 420" stroke="#b45309" stroke-width="1.2" fill="none"/>
+
+  <rect x="72" y="522" width="816" height="102" rx="4" fill="#ffffff" stroke="#6ee7b7"/>
+  <text x="84" y="538" class="node-type">.view-content  (view-header SUPPRESSED)</text>
+  <text x="84" y="562" class="node-sub">outline · backlinks · etc.</text>
+
+  <!-- Right pane: macOS quirk note -->
+  <rect x="40" y="668" width="880" height="128" rx="10" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 5"/>
+  <text x="56" y="688" class="section">MACOS QUIRK · FIXED RIGHT TOGGLE</text>
+
+  <rect x="56" y="700" width="408" height="80" rx="6" fill="#ffffff" stroke="#f97316" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="72" y="718" class="node-type">.mod-macos.is-hidden-frameless:not(.is-popout-window)</text>
+  <text x="72" y="734" class="node-title">.sidebar-toggle-button.mod-right</text>
+  <text x="72" y="752" class="mono-dim">position: fixed · top:0 · right:0 · padding-right: 8px</text>
+  <text x="72" y="768" class="mono-dim">bg: --tab-container-background · z-index: --layer-cover  (css:6621-6628)</text>
+
+  <rect x="488" y="700" width="416" height="80" rx="6" fill="#ffffff" stroke="#b45309" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="504" y="718" class="node-type">CLEARANCE PADDING</text>
+  <text x="504" y="734" class="node-title">tab-header-container +38px padding-right</text>
+  <text x="504" y="752" class="mono-dim">.mod-macos.is-hidden-frameless:not(.is-popout-window) .workspace</text>
+  <text x="504" y="766" class="mono-dim">.workspace-tabs.mod-top-right-space .workspace-tab-header-container  (css:6629-6630)</text>
+
+  <!-- Legend -->
+  <rect x="40" y="806" width="880" height="14" rx="5" fill="none" stroke="#e5e7eb" stroke-width="1"/>
+</svg>

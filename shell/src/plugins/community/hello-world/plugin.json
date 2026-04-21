@@ -1,0 +1,9 @@
+{
+  "id": "community.hello-world",
+  "name": "Hello World",
+  "version": "1.0.0",
+  "main": "index.js",
+  "enabled": true,
+  "description": "Example community plugin — shows a notification and a status bar item on load.",
+  "author": "you"
+}

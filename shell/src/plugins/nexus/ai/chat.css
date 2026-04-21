@@ -1,0 +1,43 @@
+/* Styles for nexus.ai chat. All colours + radii resolve through the
+ * design-bundle token palette — no literals. Flat, no nesting.
+ *
+ * Scope: `.nexus-ai-assistant-body` tightens the default
+ * `.nexus-markdown-body` padding for the narrow sidebar, and
+ * `.nexus-ai-pending` drives the "…" pulse while awaiting a response.
+ */
+
+/* The editor's .nexus-markdown-body uses max-width:760px + padding
+ * 24px/32px which is fine for a full-pane viewer but wastes space in
+ * a 260px sidebar. Override once inside chat. */
+.nexus-ai-assistant-body.nexus-markdown-body {
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.nexus-ai-assistant-body.nexus-markdown-body h1 { font-size: 18px; }
+.nexus-ai-assistant-body.nexus-markdown-body h2 { font-size: 16px; }
+.nexus-ai-assistant-body.nexus-markdown-body h3 { font-size: 14px; }
+.nexus-ai-assistant-body.nexus-markdown-body h4,
+.nexus-ai-assistant-body.nexus-markdown-body h5,
+.nexus-ai-assistant-body.nexus-markdown-body h6 { font-size: 13px; }
+
+.nexus-ai-assistant-body.nexus-markdown-body pre {
+  font-size: 11.5px;
+  padding: 8px 10px;
+}
+
+.nexus-ai-assistant-body.nexus-markdown-body p:first-child { margin-top: 0; }
+.nexus-ai-assistant-body.nexus-markdown-body p:last-child  { margin-bottom: 0; }
+
+/* Pending "…" indicator — slow pulse while the kernel is working. */
+.nexus-ai-pending {
+  animation: nexus-ai-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes nexus-ai-pulse {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 1; }
+}

@@ -1,0 +1,170 @@
+/* Styles for the nexus.editor markdown viewer.
+ *
+ * Scope: everything sits under `.nexus-markdown-body` so it cannot bleed
+ * into other slots. All colours, fonts, and radii resolve through the
+ * token palette declared in shell/index.html — no hex / rgb literals.
+ *
+ * Kept flat intentionally. No nesting, no `*` resets, no `!important`.
+ * If you find yourself reaching for any of those, the token didn't exist
+ * and you should add one in index.html first.
+ */
+
+/* Raw (non-markdown) file fallback — still served by the editor. */
+.nexus-editor-raw {
+  font-family: var(--f-mono);
+  color: var(--fg);
+  padding: 16px 20px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+}
+
+/* Source-mode textarea — shown when the tab's mode is 'source'. */
+.nexus-editor-source {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--f-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  border: 0;
+  outline: 0;
+  padding: 16px 20px;
+  resize: none;
+  tab-size: 2;
+  box-sizing: border-box;
+}
+.nexus-editor-source:focus { outline: 0; }
+
+/* ---- Markdown body -------------------------------------------------- */
+
+.nexus-markdown-body {
+  color: var(--fg);
+  font-family: var(--f-body);
+  line-height: 1.6;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 32px;
+}
+
+.nexus-markdown-body > :first-child {
+  margin-top: 0;
+}
+
+/* Headings */
+.nexus-markdown-body h1,
+.nexus-markdown-body h2,
+.nexus-markdown-body h3,
+.nexus-markdown-body h4,
+.nexus-markdown-body h5,
+.nexus-markdown-body h6 {
+  font-family: var(--f-ui);
+  color: var(--fg);
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 1.6em 0 0.6em;
+}
+
+.nexus-markdown-body h1 { font-size: 28px; }
+.nexus-markdown-body h2 { font-size: 22px; }
+.nexus-markdown-body h3 { font-size: 18px; }
+.nexus-markdown-body h4,
+.nexus-markdown-body h5,
+.nexus-markdown-body h6 { font-size: 16px; }
+
+/* Paragraphs */
+.nexus-markdown-body p {
+  margin: 0.8em 0;
+}
+
+/* Links */
+.nexus-markdown-body a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.nexus-markdown-body a:hover {
+  text-decoration: underline;
+}
+
+/* Inline code */
+.nexus-markdown-body code {
+  font-family: var(--f-mono);
+  font-size: 0.88em;
+  background: var(--bg-raised);
+  padding: 1px 6px;
+  border-radius: var(--r);
+  color: var(--fg);
+}
+
+/* Fenced code blocks */
+.nexus-markdown-body pre {
+  font-family: var(--f-mono);
+  background: var(--bg-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 12px 0;
+}
+
+.nexus-markdown-body pre > code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* Blockquote */
+.nexus-markdown-body blockquote {
+  border-left: 3px solid var(--line);
+  padding: 2px 14px;
+  margin: 1em 0;
+  color: var(--fg-muted);
+}
+
+/* Lists */
+.nexus-markdown-body ul,
+.nexus-markdown-body ol {
+  margin: 0.6em 0;
+  padding-left: 1.5em;
+}
+
+.nexus-markdown-body li {
+  margin: 0.25em 0;
+}
+
+/* Horizontal rule */
+.nexus-markdown-body hr {
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  margin: 1.5em 0;
+}
+
+/* Tables */
+.nexus-markdown-body table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.92em;
+}
+
+.nexus-markdown-body th,
+.nexus-markdown-body td {
+  border: 1px solid var(--line-soft);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.nexus-markdown-body th {
+  background: var(--bg-raised);
+  font-weight: 600;
+}
+
+/* Images */
+.nexus-markdown-body img {
+  max-width: 100%;
+  border-radius: var(--r);
+}

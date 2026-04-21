@@ -8,3 +8,6 @@ Cargo.lock
 crates/**/SESSION_SUMMARIES.md
 # Per-install plugin settings written by the Settings modal.
 plugins/*/settings.json
+# shell/ (Tauri + React UI rebuild) — frontend build artifacts
+shell/node_modules/
+shell/dist/

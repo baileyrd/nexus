@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800">
+  <defs>
+    <filter id="shadowSoft" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+    text { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+    .title { font-size: 28px; font-weight: 700; fill: #111827; }
+    .subtitle { font-size: 13px; font-weight: 500; fill: #6b7280; }
+    .section { font-size: 12px; font-weight: 700; fill: #2563eb; letter-spacing: 1.3px; }
+    .node-title { font-size: 14px; font-weight: 700; fill: #111827; }
+    .node-sub { font-size: 11px; font-weight: 500; fill: #6b7280; }
+    .node-type { font-size: 10px; font-weight: 700; fill: #9ca3af; letter-spacing: 0.08em; }
+    .mono-dim { font-family: Menlo, Consolas, monospace; font-size: 10px; fill: #7c3aed; }
+    .legend { font-size: 11px; font-weight: 500; fill: #6b7280; }
+    </style>
+  </defs>
+  <rect width="960" height="800" fill="#ffffff"/>
+  <text x="40" y="44" class="title">Editor / Root Split Anatomy</text>
+  <text x="40" y="64" class="subtitle">.workspace-split.mod-root · tab-header + view-header (both 40px) · view-content · the only split where view-header is visible</text>
+
+  <!-- Rendered editor on left -->
+  <rect x="40" y="96" width="480" height="660" rx="10" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 5"/>
+  <text x="56" y="116" class="section">RENDERED EDITOR</text>
+
+  <!-- Tab header -->
+  <rect x="56" y="130" width="448" height="40" rx="4" fill="#ecfdf5" stroke="#10b981" stroke-width="1.6"/>
+  <text x="280" y="148" text-anchor="middle" class="node-type">.workspace-tab-header-container</text>
+  <text x="280" y="164" text-anchor="middle" class="mono-dim">height 40px · bg --tab-container-background (css:6092-6101)</text>
+  <!-- Active tab -->
+  <rect x="64" y="138" width="130" height="26" rx="3" fill="#ffffff" stroke="#6ee7b7" stroke-width="1.2"/>
+  <text x="129" y="154" text-anchor="middle" class="node-sub">● Daily.md</text>
+  <rect x="198" y="140" width="100" height="22" rx="3" fill="#d1fae5" stroke="#a7f3d0"/>
+  <text x="248" y="155" text-anchor="middle" class="node-sub">Readme.md</text>
+  <rect x="302" y="140" width="100" height="22" rx="3" fill="#d1fae5" stroke="#a7f3d0"/>
+  <text x="352" y="155" text-anchor="middle" class="node-sub">Projects.md</text>
+  <text x="490" y="156" text-anchor="end" class="node-sub">＋</text>
+
+  <!-- View header (visible here!) -->
+  <rect x="56" y="176" width="448" height="40" rx="4" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+  <text x="72" y="192" class="node-type">.view-header  (VISIBLE in mod-root only)</text>
+  <text x="72" y="208" class="node-sub">height 40px · bg --file-header-background · padding 0 12px · gap 8px</text>
+  <!-- View header nav buttons (left) -->
+  <circle cx="70" cy="206" r="6" fill="none" stroke="#cbd5e1"/>
+  <!-- breadcrumb title center -->
+  <text x="280" y="206" text-anchor="middle" class="node-title">Projects › Nexus › Daily.md</text>
+  <!-- view-actions right -->
+  <text x="496" y="208" text-anchor="end" class="node-sub">⋯ ♡ ⌄</text>
+
+  <!-- View content -->
+  <rect x="56" y="222" width="448" height="520" rx="4" fill="#ffffff" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="72" y="242" class="node-type">.view-content · height calc(100% − 40px)</text>
+  <text x="72" y="276" class="node-sub">.markdown-preview-view · max-width --file-line-width</text>
+  <text x="72" y="308" class="node-title" style="font-size:22px;">Today's Notes</text>
+  <text x="72" y="338" class="node-sub" style="font-size:13px;">A paragraph of text with some *emphasis* and a [[wikilink]].</text>
+  <text x="72" y="364" class="node-sub" style="font-size:13px;">- bullet item one</text>
+  <text x="72" y="382" class="node-sub" style="font-size:13px;">- bullet item two</text>
+  <text x="72" y="402" class="node-sub" style="font-size:13px;">1. ordered item</text>
+  <text x="72" y="426" class="node-sub" style="font-size:13px;">&gt; callout block</text>
+  <text x="72" y="460" class="mono-dim">padding: var(--file-margins)</text>
+  <text x="72" y="476" class="mono-dim">scrollbar-gutter: stable (css:4360)</text>
+
+  <!-- Active tab outline callout -->
+  <path d="M 129 164 L 129 122 L 176 122" stroke="#7c3aed" stroke-width="1.2" fill="none"/>
+  <text x="180" y="124" class="mono-dim">is-active · ::before + ::after outline 1px (css:6189-6198)</text>
+
+  <!-- Right pane: measurements -->
+  <rect x="536" y="96" width="384" height="660" rx="10" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 5"/>
+  <text x="552" y="116" class="section">DIMENSIONS &amp; SOURCES</text>
+
+  <rect x="552" y="132" width="352" height="60" rx="6" fill="#ffffff" stroke="#10b981" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="568" y="150" class="node-type">.workspace-split.mod-root  (css:5861-5863)</text>
+  <text x="568" y="168" class="node-title">bg var(--background-primary)</text>
+  <text x="568" y="184" class="mono-dim">hosts visible .view-header · display:none rule excludes it</text>
+
+  <rect x="552" y="200" width="352" height="60" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="568" y="218" class="node-type">.view-header  (css:4188-4207)</text>
+  <text x="568" y="236" class="node-title">height: --header-height = 40px</text>
+  <text x="568" y="252" class="mono-dim">gap 8px · padding 0 12px · border-bottom --file-header-border</text>
+
+  <rect x="552" y="268" width="352" height="60" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="568" y="286" class="node-type">.view-header-title-container  (css:4223-4235)</text>
+  <text x="568" y="304" class="node-title">flex: 1 · --file-header-font/size/weight</text>
+  <text x="568" y="320" class="mono-dim">justify: --file-header-justify = center (css:2236)</text>
+
+  <rect x="552" y="336" width="352" height="60" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="568" y="354" class="node-type">.view-header-nav-buttons  (css:5972-5976)</text>
+  <text x="568" y="372" class="node-title">--icon-size: --icon-s = 16px</text>
+  <text x="568" y="388" class="mono-dim">hidden on body.is-phone (css:5977-5979)</text>
+
+  <rect x="552" y="404" width="352" height="60" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="568" y="422" class="node-type">.view-content  (css:4288-4294)</text>
+  <text x="568" y="440" class="node-title">height: calc(100% − --header-height)</text>
+  <text x="568" y="456" class="mono-dim">.workspace-split.mod-root .view-content bg --background-primary</text>
+
+  <rect x="552" y="472" width="352" height="60" rx="6" fill="#ffffff" stroke="#10b981" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="568" y="490" class="node-type">.workspace-tab-header-container  (css:6092-6101)</text>
+  <text x="568" y="508" class="node-title">height 40px · border-bottom --tab-outline-width</text>
+  <text x="568" y="524" class="mono-dim">--tab-outline-width = 1px (css:2696)</text>
+
+  <rect x="552" y="540" width="352" height="60" rx="6" fill="#ffffff" stroke="#f97316" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="568" y="558" class="node-type">is-focused FOCUS STATES</text>
+  <text x="568" y="576" class="node-title">active-leaf tabs get -focused color swap</text>
+  <text x="568" y="592" class="mono-dim">.is-focused .workspace-leaf.mod-active .view-header → --file-header-background-focused (css:4201)</text>
+
+  <rect x="552" y="608" width="352" height="60" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="568" y="626" class="node-type">STACKED TABS MODE  (css:6582-6588)</text>
+  <text x="568" y="644" class="node-title">.workspace-tabs.mod-stacked .workspace-leaf</text>
+  <text x="568" y="660" class="mono-dim">width: --tab-stacked-pane-width · --tab-stacked-header-width: 40px (css:2711)</text>
+
+  <rect x="552" y="676" width="352" height="60" rx="6" fill="#ffffff" stroke="#ef4444" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="568" y="694" class="node-type">VIEW HEADER VISIBILITY  (css:4198-4207)</text>
+  <text x="568" y="712" class="node-title">body:not(.show-view-header) → display:none globally</text>
+  <text x="568" y="728" class="mono-dim">...except mod-root keeps rendering  (the second rule excludes it)</text>
+
+  <!-- Legend -->
+  <rect x="40" y="766" width="880" height="24" rx="5" fill="none" stroke="#e5e7eb" stroke-width="1"/>
+  <circle cx="54" cy="780" r="5" fill="#10b981"/><text x="66" y="783" class="legend">Root/editor region</text>
+  <circle cx="210" cy="780" r="5" fill="#2563eb"/><text x="222" y="783" class="legend">Container / content</text>
+  <circle cx="380" cy="780" r="5" fill="#7c3aed"/><text x="392" y="783" class="legend">Sub-element / typography</text>
+  <circle cx="580" cy="780" r="5" fill="#f97316"/><text x="592" y="783" class="legend">State / focus</text>
+  <circle cx="720" cy="780" r="5" fill="#ef4444"/><text x="732" y="783" class="legend">Visibility toggle</text>
+</svg>

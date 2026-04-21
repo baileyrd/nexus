@@ -1,0 +1,40 @@
+{
+  "title": "Ribbon Anatomy",
+  "selector": ".workspace-ribbon.mod-left",
+  "canvas": {"width": 960, "height": 780},
+  "dimensions": {
+    "width_px": 44,
+    "css_var": "--ribbon-width",
+    "margin_top_px": 40,
+    "padding": "8px 4px 12px",
+    "gap_px": 4,
+    "border_right": "1px solid --divider-color",
+    "flex": "0 0 auto"
+  },
+  "corner_well": {
+    "selector": ".workspace-ribbon.mod-left:before",
+    "size_px": "40 × 44",
+    "bg": "--titlebar-background",
+    "drag_region": "drag",
+    "lines": [4397, 4408]
+  },
+  "toggle_button": {
+    "selector": ".sidebar-toggle-button",
+    "height_px": 39,
+    "formula": "calc(--header-height - 1px)",
+    "icon_size_px": 18,
+    "position_in_ribbon": "absolute top:0 left:0 width:44",
+    "lines": [6591, 4011]
+  },
+  "tokens": [
+    {"name": "--ribbon-width", "value": "44px", "line": 2598},
+    {"name": "--ribbon-padding", "value": "8px 4px 12px", "line": 2599},
+    {"name": "--ribbon-background", "value": "var(--background-secondary)", "line": 2596},
+    {"name": "--ribbon-background-collapsed", "value": "var(--background-primary)", "line": 2597}
+  ],
+  "states": [
+    {"class": "is-collapsed", "effect": "250ms fade to --ribbon-background-collapsed", "line": 4429},
+    {"class": "body:not(.show-ribbon)", "effect": "--ribbon-width:0 + display:none", "lines": [4409, 4412]},
+    {"class": ".workspace-ribbon.mod-right", "effect": "display:none on desktop", "line": 4434}
+  ]
+}

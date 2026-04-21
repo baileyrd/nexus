@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "cd ../crates/nexus-app && tauri dev",
+    "tauri:dev:wsl": "LIBGL_ALWAYS_SOFTWARE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_FORCE_SANDBOX=0 GDK_BACKEND=x11 npm run tauri:dev",
     "tauri:build": "cd ../crates/nexus-app && tauri build",
     "test": "vitest run"
   },

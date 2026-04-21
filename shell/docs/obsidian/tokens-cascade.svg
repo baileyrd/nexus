@@ -1,0 +1,214 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 880" width="960" height="880">
+  <defs>
+    <marker id="arrBlue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrPurple" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrGreen" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#10b981"/>
+    </marker>
+    <filter id="shadowSoft" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+    text { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+    .title { font-size: 28px; font-weight: 700; fill: #111827; }
+    .subtitle { font-size: 13px; font-weight: 500; fill: #6b7280; }
+    .section { font-size: 12px; font-weight: 700; fill: #2563eb; letter-spacing: 1.3px; }
+    .node-title { font-size: 13px; font-weight: 700; fill: #111827; }
+    .node-sub { font-size: 11px; font-weight: 500; fill: #6b7280; }
+    .node-type { font-size: 10px; font-weight: 700; fill: #9ca3af; letter-spacing: 0.08em; }
+    .mono { font-family: Menlo, Consolas, monospace; font-size: 11px; fill: #111827; }
+    .mono-dim { font-family: Menlo, Consolas, monospace; font-size: 10px; fill: #7c3aed; }
+    .legend { font-size: 11px; font-weight: 500; fill: #6b7280; }
+    </style>
+  </defs>
+  <rect width="960" height="880" fill="#ffffff"/>
+  <text x="40" y="44" class="title">CSS Custom Property Cascade</text>
+  <text x="40" y="64" class="subtitle">Root palette → region tokens → applied on chrome selectors · three layers, left to right</text>
+
+  <!-- Column headers -->
+  <text x="140" y="104" text-anchor="middle" class="section">ROOT TOKENS (:root / body)</text>
+  <text x="480" y="104" text-anchor="middle" class="section">REGION TOKENS</text>
+  <text x="820" y="104" text-anchor="middle" class="section">CONSUMED ON SELECTOR</text>
+
+  <!-- Root tokens column -->
+  <rect x="40" y="120" width="200" height="720" rx="10" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 5"/>
+
+  <!-- Palette group -->
+  <rect x="52" y="134" width="176" height="148" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="64" y="152" class="node-type">PALETTE</text>
+  <text x="64" y="168" class="mono">--background-primary</text>
+  <text x="64" y="184" class="mono">--background-secondary</text>
+  <text x="64" y="200" class="mono">--background-secondary-alt</text>
+  <text x="64" y="216" class="mono">--text-normal</text>
+  <text x="64" y="232" class="mono">--text-muted</text>
+  <text x="64" y="248" class="mono">--divider-color</text>
+  <text x="64" y="264" class="mono-dim">css:2195, 2824-2843, 2903</text>
+
+  <!-- Dimensions -->
+  <rect x="52" y="294" width="176" height="168" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="64" y="312" class="node-type">DIMENSIONS</text>
+  <text x="64" y="328" class="mono">--header-height  40px</text>
+  <text x="64" y="344" class="mono">--titlebar-height 30px</text>
+  <text x="64" y="360" class="mono">--ribbon-width  44px</text>
+  <text x="64" y="376" class="mono">--divider-width  1px</text>
+  <text x="64" y="392" class="mono">--divider-width-hover 3px</text>
+  <text x="64" y="408" class="mono">--tab-outline-width 1px</text>
+  <text x="64" y="424" class="mono">--radius-s 4px · --radius-m 8px</text>
+  <text x="64" y="440" class="mono">--size-4-* / --size-2-*</text>
+  <text x="64" y="456" class="mono-dim">css:2197, 2237, 2582, 2598, 2624-2638</text>
+
+  <!-- Icons -->
+  <rect x="52" y="474" width="176" height="100" rx="6" fill="#ffffff" stroke="#10b981" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="64" y="492" class="node-type">ICONS</text>
+  <text x="64" y="508" class="mono">--icon-s 16 · --icon-m 18</text>
+  <text x="64" y="524" class="mono">--icon-l 18</text>
+  <text x="64" y="540" class="mono">--icon-*-stroke-width</text>
+  <text x="64" y="560" class="mono-dim">css:2337-2344</text>
+
+  <!-- Layer stack -->
+  <rect x="52" y="586" width="176" height="128" rx="6" fill="#ffffff" stroke="#f97316" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="64" y="604" class="node-type">LAYER STACK</text>
+  <text x="64" y="620" class="mono">--layer-cover 5</text>
+  <text x="64" y="636" class="mono">--layer-sidedock 10</text>
+  <text x="64" y="652" class="mono">--layer-status-bar 15</text>
+  <text x="64" y="668" class="mono">--layer-popover 30</text>
+  <text x="64" y="684" class="mono">--layer-modal 50</text>
+  <text x="64" y="700" class="mono-dim">css:2389-2398</text>
+
+  <!-- Frame space -->
+  <rect x="52" y="726" width="176" height="100" rx="6" fill="#ffffff" stroke="#ef4444" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="64" y="744" class="node-type">FRAME SPACE</text>
+  <text x="64" y="760" class="mono">--frame-left-space</text>
+  <text x="64" y="776" class="mono">  macOS 36px · WL 0</text>
+  <text x="64" y="792" class="mono">--frame-right-space</text>
+  <text x="64" y="808" class="mono">  macOS 0 · WL 126px</text>
+  <text x="64" y="822" class="mono-dim">css:3963-3972</text>
+
+  <!-- Region tokens column -->
+  <rect x="380" y="120" width="200" height="720" rx="10" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 5"/>
+
+  <rect x="392" y="134" width="176" height="90" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="404" y="152" class="node-type">TITLEBAR</text>
+  <text x="404" y="168" class="mono">--titlebar-background</text>
+  <text x="404" y="184" class="mono">--titlebar-background-focused</text>
+  <text x="404" y="200" class="mono">--titlebar-text-color</text>
+  <text x="404" y="216" class="mono-dim">css:2776-2782</text>
+
+  <rect x="392" y="234" width="176" height="72" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="404" y="252" class="node-type">TABS</text>
+  <text x="404" y="268" class="mono">--tab-container-background</text>
+  <text x="404" y="284" class="mono">--tab-outline-color</text>
+  <text x="404" y="300" class="mono-dim">css:2693, 2695</text>
+
+  <rect x="392" y="316" width="176" height="86" rx="6" fill="#ffffff" stroke="#10b981" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="404" y="334" class="node-type">FILE HEADER</text>
+  <text x="404" y="350" class="mono">--file-header-background</text>
+  <text x="404" y="366" class="mono">--file-header-background-focused</text>
+  <text x="404" y="382" class="mono">--file-header-border / font</text>
+  <text x="404" y="398" class="mono-dim">css:2230-2236</text>
+
+  <rect x="392" y="412" width="176" height="72" rx="6" fill="#ffffff" stroke="#f97316" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="404" y="430" class="node-type">RIBBON</text>
+  <text x="404" y="446" class="mono">--ribbon-background</text>
+  <text x="404" y="462" class="mono">--ribbon-background-collapsed</text>
+  <text x="404" y="478" class="mono-dim">css:2596-2599</text>
+
+  <rect x="392" y="494" width="176" height="118" rx="6" fill="#ffffff" stroke="#6b7280" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="404" y="512" class="node-type">STATUS BAR</text>
+  <text x="404" y="528" class="mono">--status-bar-background</text>
+  <text x="404" y="544" class="mono">--status-bar-text-color</text>
+  <text x="404" y="560" class="mono">--status-bar-border-color</text>
+  <text x="404" y="576" class="mono">--status-bar-radius</text>
+  <text x="404" y="592" class="mono">--status-bar-position</text>
+  <text x="404" y="608" class="mono-dim">css:2658-2664</text>
+
+  <rect x="392" y="622" width="176" height="72" rx="6" fill="#ffffff" stroke="#ef4444" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="404" y="640" class="node-type">TRAFFIC LIGHTS</text>
+  <text x="404" y="656" class="mono">--traffic-lights-offset-x</text>
+  <text x="404" y="672" class="mono">--traffic-lights-offset-y</text>
+  <text x="404" y="688" class="mono-dim">= --header-height (css:2774-2775)</text>
+
+  <rect x="392" y="706" width="176" height="72" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="404" y="724" class="node-type">NAV / TREE</text>
+  <text x="404" y="740" class="mono">--nav-item-padding</text>
+  <text x="404" y="756" class="mono">--nav-item-radius</text>
+  <text x="404" y="772" class="mono-dim">css:2435, 2444</text>
+
+  <!-- Consumed column -->
+  <rect x="720" y="120" width="200" height="720" rx="10" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="6 5"/>
+
+  <rect x="732" y="134" width="176" height="56" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="744" y="152" class="node-type">.titlebar</text>
+  <text x="744" y="168" class="mono-dim">background-color, height</text>
+  <text x="744" y="182" class="mono-dim">css:5607-5616</text>
+
+  <rect x="732" y="200" width="176" height="56" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="744" y="218" class="node-type">.workspace-tab-header-container</text>
+  <text x="744" y="234" class="mono-dim">bg, border, height</text>
+  <text x="744" y="248" class="mono-dim">css:6092-6101</text>
+
+  <rect x="732" y="266" width="176" height="56" rx="6" fill="#ffffff" stroke="#10b981" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="744" y="284" class="node-type">.view-header</text>
+  <text x="744" y="300" class="mono-dim">bg, border-bottom, height</text>
+  <text x="744" y="314" class="mono-dim">css:4188-4196</text>
+
+  <rect x="732" y="332" width="176" height="56" rx="6" fill="#ffffff" stroke="#f97316" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="744" y="350" class="node-type">.workspace-ribbon</text>
+  <text x="744" y="366" class="mono-dim">bg, width, padding</text>
+  <text x="744" y="380" class="mono-dim">css:4416-4428</text>
+
+  <rect x="732" y="398" width="176" height="56" rx="6" fill="#ffffff" stroke="#6b7280" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="744" y="416" class="node-type">.status-bar</text>
+  <text x="744" y="432" class="mono-dim">bg, border, radius, position</text>
+  <text x="744" y="446" class="mono-dim">css:5536-5556</text>
+
+  <rect x="732" y="464" width="176" height="56" rx="6" fill="#ffffff" stroke="#ef4444" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="744" y="482" class="node-type">.titlebar-button-container.mod-right</text>
+  <text x="744" y="498" class="mono-dim">bg from titlebar tokens</text>
+  <text x="744" y="512" class="mono-dim">css:4061-4065</text>
+
+  <rect x="732" y="530" width="176" height="56" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="744" y="548" class="node-type">.workspace-leaf-resize-handle</text>
+  <text x="744" y="564" class="mono-dim">width, border-color</text>
+  <text x="744" y="578" class="mono-dim">css:5895-5941</text>
+
+  <rect x="732" y="596" width="176" height="56" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="744" y="614" class="node-type">.nav-header / -buttons-container</text>
+  <text x="744" y="630" class="mono-dim">padding, gap</text>
+  <text x="744" y="644" class="mono-dim">css:8344-8362</text>
+
+  <rect x="732" y="662" width="176" height="56" rx="6" fill="#ffffff" stroke="#10b981" stroke-width="1.6" filter="url(#shadowSoft)"/>
+  <text x="744" y="680" class="node-type">.sidebar-toggle-button</text>
+  <text x="744" y="696" class="mono-dim">height, icon-size</text>
+  <text x="744" y="710" class="mono-dim">css:6591-6601</text>
+
+  <!-- Arrows root → region -->
+  <path d="M 228 200 L 392 178" stroke="#2563eb" stroke-width="1.6" fill="none" marker-end="url(#arrBlue)"/>
+  <path d="M 228 232 L 392 280" stroke="#2563eb" stroke-width="1.6" fill="none" marker-end="url(#arrBlue)"/>
+  <path d="M 228 170 L 392 360" stroke="#7c3aed" stroke-width="1.6" fill="none" marker-end="url(#arrPurple)"/>
+  <path d="M 228 208 L 392 530" stroke="#7c3aed" stroke-width="1.6" fill="none" marker-end="url(#arrPurple)"/>
+  <path d="M 228 352 L 392 470" stroke="#10b981" stroke-width="1.4" fill="none" marker-end="url(#arrGreen)"/>
+  <path d="M 228 328 L 392 258" stroke="#10b981" stroke-width="1.4" fill="none" marker-end="url(#arrGreen)"/>
+
+  <!-- Arrows region → consumed -->
+  <path d="M 568 170 L 732 160" stroke="#2563eb" stroke-width="1.6" fill="none" marker-end="url(#arrBlue)"/>
+  <path d="M 568 270 L 732 220" stroke="#7c3aed" stroke-width="1.6" fill="none" marker-end="url(#arrPurple)"/>
+  <path d="M 568 358 L 732 294" stroke="#10b981" stroke-width="1.4" fill="none" marker-end="url(#arrGreen)"/>
+  <path d="M 568 450 L 732 360" stroke="#f97316" stroke-width="1.6" fill="none" marker-end="url(#arrPurple)"/>
+  <path d="M 568 550 L 732 426" stroke="#6b7280" stroke-width="1.4" fill="none" marker-end="url(#arrPurple)"/>
+  <path d="M 568 190 L 732 490" stroke="#2563eb" stroke-width="1.4" fill="none" marker-end="url(#arrBlue)"/>
+  <path d="M 568 740 L 732 624" stroke="#7c3aed" stroke-width="1.4" fill="none" marker-end="url(#arrPurple)"/>
+
+  <!-- Legend -->
+  <rect x="40" y="852" width="880" height="22" rx="5" fill="none" stroke="#e5e7eb" stroke-width="1"/>
+  <line x1="54" y1="864" x2="76" y2="864" stroke="#2563eb" stroke-width="2" marker-end="url(#arrBlue)"/>
+  <text x="84" y="867" class="legend">color / palette flow</text>
+  <line x1="220" y1="864" x2="242" y2="864" stroke="#7c3aed" stroke-width="2" marker-end="url(#arrPurple)"/>
+  <text x="250" y="867" class="legend">dimension / structure flow</text>
+  <line x1="410" y1="864" x2="432" y2="864" stroke="#10b981" stroke-width="2" marker-end="url(#arrGreen)"/>
+  <text x="440" y="867" class="legend">icon / focus flow</text>
+</svg>

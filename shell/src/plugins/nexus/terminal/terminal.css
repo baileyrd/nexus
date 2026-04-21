@@ -1,0 +1,29 @@
+/*
+ * Sizing + chrome for the xterm container inside panelArea.
+ *
+ * xterm renders its viewport to a canvas-backed DOM. CSS vars don't
+ * cascade into its theme (that's resolved at construction time in
+ * TerminalView), so we only use tokens here for the frame — the
+ * canvas' background is set to transparent so the panel background
+ * below (--bg-raised) shows through.
+ */
+
+.nexus-terminal-root {
+  height: 100%;
+  width: 100%;
+  background: var(--bg-raised);
+  padding: 6px 10px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.nexus-terminal-root .xterm,
+.nexus-terminal-root .xterm-viewport,
+.nexus-terminal-root .xterm-screen {
+  height: 100%;
+  width: 100%;
+}
+
+.nexus-terminal-root .xterm-viewport {
+  background: transparent !important;
+}

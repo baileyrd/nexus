@@ -1,0 +1,78 @@
+import { createElement } from 'react'
+import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { ChatView } from './ChatView'
+import { useAiStore } from './aiStore'
+import { setKernel, requestFocus } from './aiRuntime'
+
+const VIEW_ID = 'nexus.ai.view'
+const COMMAND_FOCUS = 'nexus.ai.focus'
+const COMMAND_CLEAR = 'nexus.ai.clear'
+
+const EVENT_SIDEBAR_SHOW_VIEW = 'sidebar:showView'
+const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
+
+// Lucide-style "sparkles" glyph — four-point star in a 24x24 box,
+// stroke-only to match the iconPath contract used by the other
+// activity-bar items.
+const AI_ICON_PATH = 'M12 3l2.4 5.2L20 10l-5.2 2.4L12 18l-2.4-5.6L4 10l5.6-1.8L12 3z'
+
+export const aiPlugin: Plugin = {
+  manifest: {
+    id: 'nexus.ai',
+    name: 'AI Chat',
+    version: '0.1.0',
+    core: false,
+    activationEvents: ['onStartup'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar'],
+    contributes: {
+      commands: [
+        { id: COMMAND_FOCUS, title: 'Focus Chat', category: 'AI' },
+        { id: COMMAND_CLEAR, title: 'Clear Chat', category: 'AI' },
+      ],
+      keybindings: [
+        { command: COMMAND_FOCUS, key: 'ctrl+alt+a', mac: 'cmd+alt+a' },
+      ],
+    },
+  },
+
+  activate(api: PluginAPI) {
+    setKernel(api.kernel)
+
+    api.views.register(VIEW_ID, {
+      slot: 'sidebarContent',
+      component: () => createElement(ChatView),
+      priority: 50,
+    })
+
+    api.activityBar.addItem({
+      id: 'nexus.ai.activityItem',
+      icon: '',
+      iconPath: AI_ICON_PATH,
+      title: 'AI Chat',
+      viewId: VIEW_ID,
+      priority: 50,
+    })
+
+    // Focus command — flip the sidebar host to our viewId (if it
+    // isn't already) and focus the composer. Works whether or not
+    // ChatView is currently mounted (same focuser-singleton pattern
+    // as nexus.search).
+    api.commands.register(COMMAND_FOCUS, () => {
+      api.events.emit(EVENT_SIDEBAR_SHOW_VIEW, { viewId: VIEW_ID })
+      requestFocus()
+    })
+
+    // Clear command — drop all messages + composer state. There's no
+    // kernel-side session to delete: com.nexus.ai::ask is stateless
+    // RAG (no server-held conversation context in v1).
+    api.commands.register(COMMAND_CLEAR, () => {
+      useAiStore.getState().clear()
+    })
+
+    // Wipe the store when the workspace closes. Messages from a
+    // previous forge don't belong in a freshly opened one.
+    api.events.on(EVENT_WORKSPACE_CLOSED, () => {
+      useAiStore.getState().clear()
+    })
+  },
+}
