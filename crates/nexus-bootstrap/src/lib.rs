@@ -301,6 +301,10 @@ fn register_core_plugins(
                     ("search", nexus_storage::core_plugin::HANDLER_SEARCH),
                     ("write_file", nexus_storage::core_plugin::HANDLER_WRITE_FILE),
                     (
+                        "write_vault_file",
+                        nexus_storage::core_plugin::HANDLER_WRITE_VAULT_FILE,
+                    ),
+                    (
                         "delete_file",
                         nexus_storage::core_plugin::HANDLER_DELETE_FILE,
                     ),

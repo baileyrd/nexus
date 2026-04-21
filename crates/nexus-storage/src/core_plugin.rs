@@ -107,6 +107,12 @@ pub const HANDLER_DELETE_ENTRY: u32 = 31;
 /// just wants to render a base in a view panel can skip the index
 /// roundtrip.
 pub const HANDLER_BASE_LOAD: u32 = 32;
+/// Handler id for `write_vault_file`. Args: `{ "path": String, "bytes": Vec<u8> }`;
+/// Returns: `{}`. Writes bytes to disk atomically like
+/// [`HANDLER_WRITE_FILE`] but **skips** the FTS index, knowledge graph, and
+/// all post-write listeners. Intended for shell-owned `.forge/` metadata
+/// (e.g. `workspace.json`) that must not pollute search results.
+pub const HANDLER_WRITE_VAULT_FILE: u32 = 33;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -322,6 +328,21 @@ impl CorePlugin for StorageCorePlugin {
                     .write_file(&path, &bytes)
                     .map_err(|e| exec_err(format!("write_file: {e}")))?;
                 to_value(&meta, "write_file")
+            }
+            HANDLER_WRITE_VAULT_FILE => {
+                let path = path_arg(args, "write_vault_file")?;
+                let bytes: Vec<u8> = args
+                    .get("bytes")
+                    .ok_or_else(|| exec_err("write_vault_file: missing 'bytes'".to_string()))
+                    .and_then(|v| {
+                        serde_json::from_value(v.clone()).map_err(|e| {
+                            exec_err(format!("write_vault_file: bytes decode: {e}"))
+                        })
+                    })?;
+                engine
+                    .write_raw(&path, &bytes)
+                    .map_err(|e| exec_err(format!("write_vault_file: {e}")))?;
+                Ok(serde_json::json!({}))
             }
             HANDLER_DELETE_FILE => {
                 let path = path_arg(args, "delete_file")?;

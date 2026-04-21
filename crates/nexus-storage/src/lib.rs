@@ -280,6 +280,26 @@ impl StorageEngine {
         }
     }
 
+    /// Write `content` to `path` (vault-relative) atomically **without**
+    /// touching the FTS index, knowledge graph, or any post-write listeners.
+    ///
+    /// Intended for shell-owned metadata under `.forge/` (e.g.
+    /// `workspace.json`) that the user never sees as vault content and must
+    /// not pollute search results. User-facing writes MUST continue to go
+    /// through [`StorageEngine::write_file`] so indexing stays consistent.
+    ///
+    /// `path` must be relative to the forge root. Parent directories are
+    /// created as needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O failure.
+    pub fn write_raw(&self, path: &str, content: &[u8]) -> Result<(), StorageError> {
+        let abs_target = self.forge.root().join(path);
+        atomic_write(&abs_target, content, &self.forge.temp_dir())?;
+        Ok(())
+    }
+
     /// Read the raw bytes of the file at `path` from disk.
     ///
     /// # Errors
@@ -1422,7 +1442,50 @@ mod tests {
         );
     }
 
-    // ── 9. open_nonexistent_forge_returns_error ────────────────────────────────
+    // ── 9. write_raw_bypasses_index ───────────────────────────────────────────
+
+    #[test]
+    fn write_raw_bypasses_index() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        // Write a markdown-like file via write_raw to a path the index would
+        // normally pick up. Contains a tag that would show up in query_tags
+        // if the indexing pipeline ran.
+        let rel = ".forge/workspace.json";
+        let content = b"# Raw\n\nHas a #rawtag inside.";
+        engine.write_raw(rel, content).expect("write_raw");
+
+        // Bytes are on disk, exactly as written.
+        let abs = dir.path().join(rel);
+        assert!(abs.exists(), "file must exist on disk after write_raw");
+        assert_eq!(
+            std::fs::read(&abs).expect("read back"),
+            content,
+            "disk content must match bytes passed to write_raw"
+        );
+
+        // Index must NOT have picked up the file: no row in the files table,
+        // no tag inserted, no graph node created. Contrast with write_file
+        // which always runs the full pipeline (see write_and_read_file test).
+        assert!(
+            !engine.file_exists(rel).expect("file_exists"),
+            "write_raw must not insert an index row"
+        );
+        let tags = engine.query_tags("rawtag").expect("query_tags");
+        assert!(
+            tags.is_empty(),
+            "write_raw must not index tags, got {tags:?}"
+        );
+        let stats = engine.graph_stats().expect("graph_stats");
+        assert_eq!(
+            stats.node_count, 0,
+            "write_raw must not add graph nodes, got {} nodes",
+            stats.node_count
+        );
+    }
+
+    // ── 10. open_nonexistent_forge_returns_error ──────────────────────────────
 
     #[test]
     fn open_nonexistent_forge_returns_error() {

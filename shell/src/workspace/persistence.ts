@@ -6,23 +6,15 @@
 // (before `hydrate`), saved debounced (250ms) whenever the layout changes.
 //
 // File I/O goes through the kernel bridge's `com.nexus.storage:read_file` /
-// `write_file` handlers. Those accept vault-relative paths and are the only
-// Tauri-backed file primitives the shell has access to that work with the
-// user's current vault (tauri-plugin-fs is scope-limited; see the
+// `write_vault_file` handlers. Those accept vault-relative paths and are the
+// only Tauri-backed file primitives the shell has access to that work with
+// the user's current vault (tauri-plugin-fs is scope-limited; see the
 // `path_exists` comment in src-tauri/src/lib.rs:179-182).
 //
-// TODO(phase 7+): `com.nexus.storage:write_file` unfortunately indexes the
-// written file as markdown (core_plugin.rs HANDLER_WRITE_FILE → StorageEngine::
-// write_file at lib.rs:177). `should_ignore` filters `.forge/` out of the
-// initial scan, but a direct `write_file` call to `.forge/workspace.json`
-// still inserts a row into the FTS index and knowledge graph. Two
-// mitigations for a follow-up:
-//   (a) add a dedicated `write_vault_file` kernel handler that skips
-//       indexing for paths under `.forge/`, or
-//   (b) add a Tauri-side passthrough command with an allowlist restricted
-//       to `<vault>/.forge/*`.
-// For Phase 6 we accept the minor index pollution — workspace.json is a
-// single file, not user content, and the index entry is harmless.
+// Writes go through `write_vault_file` (not `write_file`) because
+// workspace.json lives under `.forge/` and must NOT be indexed into FTS or
+// the knowledge graph. `write_vault_file` does atomic write + mkdir_p only;
+// no post-write hooks.
 
 import { invoke } from '@tauri-apps/api/core'
 import type { SerializedNode, WorkspaceJSON } from './types.ts'
@@ -35,7 +27,7 @@ import { workspace } from './workspaceStore.ts'
 
 const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 const READ_FILE_COMMAND = 'read_file'
-const WRITE_FILE_COMMAND = 'write_file'
+const WRITE_VAULT_FILE_COMMAND = 'write_vault_file'
 const FILE_EXISTS_COMMAND = 'file_exists'
 
 const WORKSPACE_REL = '.forge/workspace.json'
@@ -57,9 +49,9 @@ interface FileExistsResponse {
 
 /**
  * Default kernel bridge — talks to `com.nexus.storage` via Tauri's
- * `kernel_invoke` command. The storage engine's `write_file` handler
- * creates parent directories automatically (atomic_write in
- * crates/nexus-storage/src/lib.rs:180).
+ * `kernel_invoke` command. The storage engine's `write_vault_file`
+ * handler creates parent directories automatically (atomic_write in
+ * crates/nexus-storage/src/lib.rs).
  */
 const defaultBridge: KernelBridge = {
   async readVaultFile(relPath: string): Promise<string | null> {
@@ -89,7 +81,7 @@ const defaultBridge: KernelBridge = {
     const bytes = Array.from(new TextEncoder().encode(content))
     await invoke<unknown>('kernel_invoke', {
       pluginId: STORAGE_PLUGIN_ID,
-      commandId: WRITE_FILE_COMMAND,
+      commandId: WRITE_VAULT_FILE_COMMAND,
       args: { path: relPath, bytes },
       timeoutMs: null,
     })
