@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useActivityBarStore, type ActivityBarItem } from './activityBarStore'
 import { Icon } from '../../../icons'
-import { useLayoutStore } from '../../../stores/layoutStore'
+import { workspace } from '../../../workspace'
 
 interface ActivityBarProps {
   onItemClick: (item: ActivityBarItem) => void
@@ -65,7 +65,8 @@ export function ActivityBar({ onItemClick }: ActivityBarProps) {
 
 function SidebarToggleButton() {
   const [hover, setHover] = useState(false)
-  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar)
+  const toggleSidebar = () =>
+    workspace.setSidedockCollapsed('left', !workspace.leftSplit.collapsed)
   return (
     <button
       type="button"

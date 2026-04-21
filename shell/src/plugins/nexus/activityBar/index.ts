@@ -48,8 +48,7 @@ export const activityBarPlugin: Plugin = {
     // `command` (typically its plugin's focus command, which calls
     // `workspace.ensureLeafOfType + revealLeaf`). For legacy items
     // without a command we still mark them active so the icon
-    // highlight stays coherent, but we no longer emit the deleted
-    // `sidebar:showView` event.
+    // highlight stays coherent.
     const handleItemClick = (item: ActivityBarItem) => {
       if (item.command) {
         api.commands.execute(item.command)

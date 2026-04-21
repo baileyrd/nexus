@@ -1,6 +1,10 @@
 // src/plugins/core/terminal/index.ts
+// Legacy template plugin — retained on disk but NOT loaded from main.tsx.
+// The active terminal plugin is `nexus.terminal`, which hosts a Leaf in
+// the workspace right sidedock. This file's toggle command no-ops
+// because the panel-area concept was retired by Phase 7 and its
+// bottom-dock replacement is still pending (follow-up task #11).
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { useLayoutStore } from '../../../stores/layoutStore'
 import { useTerminalStore } from './terminalStore'
 
 export const terminalPlugin: Plugin = {
@@ -45,17 +49,8 @@ export const terminalPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
-    // Phase 7: legacy slot:'panelAreaContent' registration removed.
     api.commands.register('terminal.toggle', () => {
-      const store = useLayoutStore.getState()
-      if (!store.panelArea.visible) {
-        store.togglePanelArea()
-        store.setActivePanel('terminal')
-      } else if (store.panelArea.activePanel === 'terminal') {
-        store.togglePanelArea()
-      } else {
-        store.setActivePanel('terminal')
-      }
+      // No-op: use `nexus.terminal.toggle` instead.
     })
 
     api.commands.register('terminal.clear', () => {

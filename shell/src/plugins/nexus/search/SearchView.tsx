@@ -44,13 +44,13 @@ export function SearchView({ onHitActivate }: SearchViewProps) {
   // shown the search view.
   useEffect(() => {
     const focus = () => {
-      // requestAnimationFrame to let the sidebar host actually mount
-      // us if `sidebar:showView` fired in the same tick.
+      // requestAnimationFrame to let the sidedock finish mounting us
+      // if `revealLeaf` was called in the same tick.
       requestAnimationFrame(() => inputRef.current?.focus())
     }
     registerFocuser(focus)
     // Autofocus on first mount (the standard flow: activity-bar
-    // click → sidebar:showView → SearchView mounts).
+    // click → focus command → revealLeaf → SearchView mounts).
     focus()
     return () => registerFocuser(null)
   }, [])

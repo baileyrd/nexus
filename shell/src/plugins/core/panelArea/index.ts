@@ -1,9 +1,15 @@
-import type { Plugin, PluginAPI } from '../../../types/plugin'
+// Legacy template plugin — retained on disk but NOT loaded from main.tsx.
+// The panel-area concept was retired by Phase 7 of the leaf-migration
+// (see docs/leaf-migration-plan.md). The bottom-dock restoration is
+// tracked under follow-up task #11; when that lands this file will
+// either be deleted or rewritten against the new workspace node.
+import type { Plugin } from '../../../types/plugin'
 import { usePanelAreaStore } from './panelAreaStore'
-import { useLayoutStore } from '../../../stores/layoutStore'
 
 export { usePanelAreaStore } from './panelAreaStore'
 export type { PanelTab } from './panelAreaStore'
+
+void usePanelAreaStore // keep the symbol reachable for dead-code analysis
 
 export const panelAreaPlugin: Plugin = {
   manifest: {
@@ -21,10 +27,7 @@ export const panelAreaPlugin: Plugin = {
       ],
     },
   },
-  activate(api: PluginAPI) {
-    // Phase 7: legacy slot:'panelArea' registration removed.
-    api.commands.register('panel.toggle', () => {
-      useLayoutStore.getState().togglePanelArea()
-    })
+  activate() {
+    // No-op: the workspace owns bottom-dock state (task #11 pending).
   },
 }

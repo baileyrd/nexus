@@ -230,9 +230,9 @@ export const processesPlugin: Plugin = {
 
     // ── Activity-bar routing ──────────────────────────────────────────
     //
-    // Sidebar-based plugins ride the `sidebar:showView` event fired by
-    // the activity bar on click. Pane-mode plugins intercept
-    // `activityBar:activeChanged` instead:
+    // Sidebar-based plugins route through their focus command (which
+    // calls `workspace.ensureLeafOfType + revealLeaf`). Pane-mode
+    // plugins intercept `activityBar:activeChanged` instead:
     //
     //   • new viewId matches ours → enter pane mode on our view.
     //   • new viewId is anything else and WE are currently the
@@ -240,9 +240,6 @@ export const processesPlugin: Plugin = {
     //     not exit unconditionally — another pane-mode plugin may own
     //     the transition and we'd clobber its entry.
     //   • new viewId is null (toggle off) → exit only if we're active.
-    //
-    // `sidebar:showView` with our viewId is harmless: no sidebarContent
-    // entry is registered under this id so nexus.sidebar no-ops.
     api.events.on<{ viewId: string | null }>(
       EVENT_ACTIVITY_BAR_ACTIVE_CHANGED,
       ({ viewId }) => {

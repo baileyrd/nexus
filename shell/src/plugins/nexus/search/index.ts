@@ -83,9 +83,9 @@ export const searchPlugin: Plugin = {
     //   * View is active & mounted: focus() runs immediately via
     //     the registered focuser.
     //   * View is registered but sidebar is hidden / showing a
-    //     different view: `sidebar:showView` flips the host to us;
-    //     SearchView mounts; its mount effect drains the pending
-    //     focus flag set by requestFocus() below.
+    //     different view: `ensureLeafOfType + revealLeaf` flips the
+    //     sidedock to us; SearchView mounts; its mount effect drains
+    //     the pending focus flag set by requestFocus() below.
     api.commands.register(COMMAND_FOCUS, async () => {
       const leaf = await workspace.ensureLeafOfType('search', 'left')
       workspace.revealLeaf(leaf)

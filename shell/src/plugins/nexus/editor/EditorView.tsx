@@ -4,7 +4,7 @@ import { renderMarkdown } from './markdownRender'
 import { eventBus } from '../../../host/EventBus'
 import { useOutlineStore } from '../outline/outlineStore'
 import { Icon } from '../../../icons'
-import { useLayoutStore } from '../../../stores/layoutStore'
+import { useWorkspaceField, workspace } from '../../../workspace'
 import { WindowControls } from '../../../shell/WindowControls'
 import { EditorTabStrip } from './TabStrip'
 import { getEditorRuntime } from './runtime'
@@ -76,7 +76,7 @@ export function EditorView({ onRetry }: EditorViewProps) {
   const activeRelpath = useEditorStore((s) => s.activeRelpath)
   const setMode = useEditorStore((s) => s.setMode)
   const setActive = useEditorStore((s) => s.setActive)
-  const rightPanelVisible = useLayoutStore((s) => s.rightPanel.visible)
+  const rightPanelVisible = useWorkspaceField(() => !workspace.rightSplit.collapsed)
 
   const activeTab = useMemo<EditorTab | null>(
     () => tabs.find((t) => t.relpath === activeRelpath) ?? null,

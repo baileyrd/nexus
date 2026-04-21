@@ -1,7 +1,6 @@
 // src/shell/App.tsx
 import { useEffect, useRef, useState } from 'react'
 import { useSlotStore } from '../registry/SlotRegistry'
-import { useLayoutStore } from '../stores/layoutStore'
 import { usePaneModeStore } from '../stores/paneModeStore'
 import { SlotSurface } from './slots/SlotSurface'
 import { getRegistry } from '../host/shellRegistry'
@@ -153,8 +152,6 @@ export default function App() {
 
   // Swallow debugInfo for now — surfaced via console.info above.
   void debugInfo
-  void useLayoutStore // legacy panel sizing removed; import preserved for
-  // backward compat with consumers that still mutate the store directly.
 
   return (
     <div className="shell-root">

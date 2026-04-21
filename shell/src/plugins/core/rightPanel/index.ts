@@ -3,8 +3,12 @@
 // into the `rightPanel` slot, exposes a toggle command + keybinding,
 // and flips rightPanel.visible on so it shows up by default.
 
+// Legacy template plugin — retained on disk but NOT loaded from main.tsx.
+// The active right-panel plugin is `nexus.rightPanel` which drives the
+// workspace right sidedock directly.
+
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { useLayoutStore } from '../../../stores/layoutStore'
+import { workspace } from '../../../workspace'
 
 export const rightPanelPlugin: Plugin = {
   manifest: {
@@ -23,9 +27,8 @@ export const rightPanelPlugin: Plugin = {
     },
   },
   activate(api: PluginAPI) {
-    // Phase 7: legacy slot:'rightPanel' registration removed.
     api.commands.register('rightPanel.toggle', () => {
-      useLayoutStore.getState().toggleRightPanel()
+      workspace.setSidedockCollapsed('right', !workspace.rightSplit.collapsed)
     })
   },
 }

@@ -3,7 +3,7 @@
 // shared Ic map so plugin authors reference icons by name.
 
 import { useActivityBarStore } from './activityBarStore'
-import { useLayoutStore } from '../../../stores/layoutStore'
+import { workspace } from '../../../workspace'
 import { getRegistry } from '../../../host/shellRegistry'
 import { Ic, type IconName } from '../../../shell/icons'
 
@@ -12,17 +12,21 @@ function resolveIcon(name: string) {
   return Ic[key] ?? Ic.doc
 }
 
+// Legacy template view — retained on disk but NOT loaded from main.tsx.
+// The active activity-bar component is at plugins/nexus/activityBar.
 export function ActivityBarView() {
   const { items, activeId, setActive } = useActivityBarStore()
-  const { setActiveSidebarView, toggleSidebar, sidebar } = useLayoutStore()
 
   const handleClick = (item: typeof items[number]) => {
-    if (activeId === item.id && sidebar.visible) {
-      toggleSidebar()
+    const sidebarVisible = !workspace.leftSplit.collapsed
+    if (activeId === item.id && sidebarVisible) {
+      workspace.setSidedockCollapsed('left', true)
     } else {
       setActive(item.id)
-      setActiveSidebarView(item.viewId)
-      if (!sidebar.visible) toggleSidebar()
+      // Phase 7 removed the active-sidebar-view concept; consumers that
+      // need a specific view now call `workspace.ensureLeafOfType +
+      // revealLeaf` directly from their focus command.
+      if (!sidebarVisible) workspace.setSidedockCollapsed('left', false)
     }
   }
 

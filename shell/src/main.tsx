@@ -20,7 +20,6 @@ import './shell/shell.css'
 // Importing the store triggers persist rehydration, which sets
 // data-theme/data-density on <html> before the first paint.
 import { useThemeStore } from './stores/themeStore'
-import { useLayoutStore } from './stores/layoutStore'
 import type { Plugin } from './types/plugin'
 import {
   scanCommunityPlugins,
@@ -99,15 +98,10 @@ async function boot() {
   // Applies data-theme="dark" to <html> so shell.css :root tokens win.
   useThemeStore.getState().setTheme('dark')
 
-  // panelArea is host to nexus.terminal as of Phase 2 item j, but it
-  // stays hidden on boot — the user toggles it via Ctrl+Backquote or
-  // the terminal activity-bar item. Force-hide here because the
-  // persisted layoutStore may have been left visible by an earlier
-  // session. rightPanel is owned by nexus.rightPanel — it flips
-  // visibility on activate.
-  useLayoutStore.setState((s) => ({
-    panelArea:  { ...s.panelArea,  visible: false },
-  }))
+  // Terminal visibility on boot: it is a Leaf inside the right sidedock
+  // (see nexus.terminal). The user toggles it via Ctrl+Backquote or the
+  // terminal activity-bar item; there is no boot-time force-hide since
+  // the persisted workspace tree is authoritative.
 
   const plugins: Plugin[] = [
     configurationServicePlugin,

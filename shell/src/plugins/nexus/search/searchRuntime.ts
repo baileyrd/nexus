@@ -30,17 +30,16 @@ export function getKernel(): KernelAPI | null {
 
 // ── Focus plumbing ──────────────────────────────────────────────────────
 //
-// The sidebar host is lazy: SearchView only exists in the DOM while
-// `nexus.search.view` is the active sidebar view. The
-// `nexus.search.focus` command needs to (a) raise the view if it
-// isn't showing and (b) focus the input. We handle (a) by emitting
-// `sidebar:showView` (the same event the activity bar fires); we
-// handle (b) via this registered focuser callback, set by SearchView
-// in a layout effect. If the view was previously unmounted, the
-// callback is null — we set a pending flag so the next time the view
-// mounts it auto-focuses. That flag is also set on initial open from
-// the activity bar so the input is focused when the view first
-// appears.
+// SearchView only exists in the DOM while the search Leaf is mounted
+// in a sidedock. The `nexus.search.focus` command needs to (a) raise
+// the view if it isn't showing and (b) focus the input. We handle (a)
+// by calling `workspace.ensureLeafOfType + revealLeaf` from the focus
+// command itself; we handle (b) via this registered focuser callback,
+// set by SearchView in a layout effect. If the view was previously
+// unmounted, the callback is null — we set a pending flag so the next
+// time the view mounts it auto-focuses. That flag is also set on
+// initial open from the activity bar so the input is focused when the
+// view first appears.
 
 type Focuser = () => void
 let focuser: Focuser | null = null

@@ -3,7 +3,7 @@
 // visually complete placeholders pending real data sources.
 
 import { useState } from 'react'
-import { useLayoutStore } from '../../../stores/layoutStore'
+import { workspace } from '../../../workspace'
 import { useDocStore } from '../../../stores/docStore'
 import { Ic } from '../../../shell/icons'
 
@@ -12,7 +12,8 @@ type Tab = 'outline' | 'backlinks' | 'graph'
 export function RightPanelView() {
   const [tab, setTab] = useState<Tab>('outline')
   const headings      = useDocStore(s => s.headings)
-  const toggle        = useLayoutStore(s => s.toggleRightPanel)
+  const toggle        = () =>
+    workspace.setSidedockCollapsed('right', !workspace.rightSplit.collapsed)
 
   return (
     <div className="rightpanel">

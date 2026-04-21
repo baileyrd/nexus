@@ -1,12 +1,11 @@
 import type { Plugin } from '../../../types/plugin'
 
 /**
- * Phase 7 (leaf-migration-plan.md): the legacy sidebar host + its
- * slot:'sidebar' registration + the `sidebar:showView`/`sidebar:hide`
- * event pair were removed when the left sidedock became a workspace
- * sidedock rendered by <Workspace>. Plugins that previously emitted
- * those events now call `workspace.ensureLeafOfType + revealLeaf`
- * from their focus command.
+ * Phase 7 (leaf-migration-plan.md): the legacy sidebar host +
+ * slot:'sidebar' registration were removed when the left sidedock
+ * became a workspace sidedock rendered by <Workspace>. Plugins call
+ * `workspace.ensureLeafOfType + revealLeaf` from their focus command
+ * instead.
  *
  * The plugin manifest is kept so that `dependsOn: ['nexus.sidebar']`
  * declarations in existing plugins still resolve without requiring a
