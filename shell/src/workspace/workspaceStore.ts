@@ -34,6 +34,7 @@ interface WorkspaceStoreState {
   rootSplit: Split
   leftSplit: Sidedock
   rightSplit: Sidedock
+  bottomSplit: Sidedock
   floating: FloatingWindow[]
   activeLeafId: string | null
   leaves: Map<string, Leaf>
@@ -54,14 +55,21 @@ function makeEmptySplit(direction: 'horizontal' | 'vertical' = 'horizontal'): Sp
 }
 
 /** Build a fresh `Sidedock` with one empty Tabs child. */
-function makeEmptySidedock(side: 'left' | 'right', size = 300): Sidedock {
+function makeEmptySidedock(
+  side: 'left' | 'right' | 'bottom',
+  size = 300,
+): Sidedock {
   return {
     kind: 'split',
     id: newId(),
-    direction: 'vertical',
+    // Left/right docks stack vertically inside the dock column; the
+    // bottom drawer is a horizontal strip under everything else.
+    direction: side === 'bottom' ? 'horizontal' : 'vertical',
     children: [makeTabs()],
     side,
-    collapsed: false,
+    // Bottom drawer starts collapsed because an expanded terminal is
+    // intrusive for first-run users. Sides retain the previous default.
+    collapsed: side === 'bottom',
     size,
   }
 }
@@ -147,6 +155,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>(() => ({
   rootSplit: makeEmptySplit('horizontal'),
   leftSplit: makeEmptySidedock('left'),
   rightSplit: makeEmptySidedock('right'),
+  bottomSplit: makeEmptySidedock('bottom', 240),
   floating: [],
   activeLeafId: null,
   leaves: new Map(),
@@ -207,9 +216,16 @@ function createLeaf(parent: WorkspaceParent): Leaf {
   return leaf
 }
 
+/** Look up the sidedock for the given side. */
+function dockForSide(side: 'left' | 'right' | 'bottom'): Sidedock {
+  if (side === 'left') return state().leftSplit
+  if (side === 'right') return state().rightSplit
+  return state().bottomSplit
+}
+
 /** Return the first leaf in a sidedock, creating Tabs/Leaf if empty. */
 function getSideLeaf(side: 'left' | 'right', reveal?: boolean): Leaf {
-  const dock = side === 'left' ? state().leftSplit : state().rightSplit
+  const dock = dockForSide(side)
   let tabs = findFirstTabs(dock)
   if (!tabs) {
     tabs = makeTabs()
@@ -230,14 +246,14 @@ function getSideLeaf(side: 'left' | 'right', reveal?: boolean): Leaf {
 
 async function ensureLeafOfType(
   type: string,
-  side: 'left' | 'right',
+  side: 'left' | 'right' | 'bottom',
 ): Promise<Leaf> {
   // Existence only: if any leaf in the workspace already has this viewType,
   // return it unchanged. Never move, never reveal. (Plan resolved decision #2.)
   for (const leaf of state().leaves.values()) {
     if (leaf.view?.viewType === type) return leaf
   }
-  const dock = side === 'left' ? state().leftSplit : state().rightSplit
+  const dock = dockForSide(side)
   let tabs = findFirstTabs(dock)
   if (!tabs) {
     tabs = makeTabs()
@@ -258,6 +274,7 @@ function revealLeaf(leaf: Leaf): void {
     state().rootSplit,
     state().leftSplit,
     state().rightSplit,
+    state().bottomSplit,
     ...state().floating,
   ]
   let chain: WorkspaceParent[] | null = null
@@ -305,8 +322,11 @@ function setActiveLeaf(leaf: Leaf): void {
 }
 
 /** Clamp + write `dock.size`; emit `layout-change`. Minimum size 150 (plan §Phase 4). */
-function setSidedockSize(side: 'left' | 'right', size: number): void {
-  const dock = side === 'left' ? state().leftSplit : state().rightSplit
+function setSidedockSize(
+  side: 'left' | 'right' | 'bottom',
+  size: number,
+): void {
+  const dock = dockForSide(side)
   const clamped = Math.max(150, Math.floor(size))
   if (dock.size === clamped) return
   dock.size = clamped
@@ -314,8 +334,11 @@ function setSidedockSize(side: 'left' | 'right', size: number): void {
 }
 
 /** Set `dock.collapsed`; emit `layout-change`. */
-function setSidedockCollapsed(side: 'left' | 'right', collapsed: boolean): void {
-  const dock = side === 'left' ? state().leftSplit : state().rightSplit
+function setSidedockCollapsed(
+  side: 'left' | 'right' | 'bottom',
+  collapsed: boolean,
+): void {
+  const dock = dockForSide(side)
   if (dock.collapsed === collapsed) return
   dock.collapsed = collapsed
   emitInternal('layout-change')
@@ -330,6 +353,7 @@ function setTabActiveIndex(tabsId: string, index: number): void {
     state().rootSplit,
     state().leftSplit,
     state().rightSplit,
+    state().bottomSplit,
     ...state().floating,
   ]
   const found = findTabsById(tabsId, roots)
@@ -465,6 +489,7 @@ function serialize(): WorkspaceJSON {
     main: serializeNode(state().rootSplit),
     left: serializeNode(state().leftSplit),
     right: serializeNode(state().rightSplit),
+    bottom: serializeNode(state().bottomSplit),
     active: state().activeLeafId,
     lastOpenFiles: [], // Phase 6 will populate.
   }
@@ -559,12 +584,39 @@ function expectSplit(node: WorkspaceParent, label: string): Split {
   return node as Split
 }
 
-function expectSidedock(node: WorkspaceParent, side: 'left' | 'right'): Sidedock {
+function expectSidedock(
+  node: WorkspaceParent,
+  side: 'left' | 'right' | 'bottom',
+): Sidedock {
   const split = expectSplit(node, `${side} dock`)
   if (!isSidedock(split) || split.side !== side) {
     throw new Error(`[workspaceStore.hydrate] ${side} dock is not a Sidedock with side='${side}'`)
   }
   return split
+}
+
+/**
+ * Build a fresh default bottom sidedock. Used during hydrate when the
+ * persisted JSON has no `bottom` field (backwards-compat path for
+ * workspace.json files written before the bottom drawer landed) and
+ * during resetToDefault().
+ */
+function buildDefaultBottomDock(leaves: Map<string, Leaf>): Sidedock {
+  const tabs = makeTabs()
+  const dock: Sidedock = {
+    kind: 'split',
+    id: newId(),
+    direction: 'horizontal',
+    children: [tabs],
+    side: 'bottom',
+    collapsed: true,
+    size: 240,
+  }
+  const leaf = new LeafImpl(tabs, boundEmit)
+  leaves.set(leaf.id, leaf)
+  tabs.leaves.push(leaf)
+  void leaf.setViewState({ type: 'empty' })
+  return dock
 }
 
 async function hydrate(json?: WorkspaceJSON): Promise<void> {
@@ -580,11 +632,19 @@ async function hydrate(json?: WorkspaceJSON): Promise<void> {
   const main = expectSplit(hydrateNode(json.main, leaves, pending), 'main')
   const left = expectSidedock(hydrateNode(json.left, leaves, pending), 'left')
   const right = expectSidedock(hydrateNode(json.right, leaves, pending), 'right')
+  // Backwards-compat: older workspace.json files predate the bottom
+  // drawer and have no `bottom` field. Seed a collapsed default so
+  // existing users see no visual regression on first load after
+  // upgrading.
+  const bottom = json.bottom
+    ? expectSidedock(hydrateNode(json.bottom, leaves, pending), 'bottom')
+    : buildDefaultBottomDock(leaves)
 
   useWorkspaceStore.setState({
     rootSplit: main,
     leftSplit: left,
     rightSplit: right,
+    bottomSplit: bottom,
     floating: [],
     activeLeafId: json.active,
     leaves,
@@ -631,6 +691,19 @@ function resetToDefault(): void {
     size: 300,
   }
 
+  const bottomTabs = makeTabs()
+  const bottomSplit: Sidedock = {
+    kind: 'split',
+    id: newId(),
+    direction: 'horizontal',
+    children: [bottomTabs],
+    side: 'bottom',
+    // Default-collapsed so first-run users don't see an empty drawer
+    // eating vertical space under the main editor.
+    collapsed: true,
+    size: 240,
+  }
+
   const leaves = new Map<string, Leaf>()
 
   const seed = (parent: Tabs): Leaf => {
@@ -643,11 +716,13 @@ function resetToDefault(): void {
   const rootLeaf = seed(rootTabs)
   seed(leftTabs)
   seed(rightTabs)
+  seed(bottomTabs)
 
   useWorkspaceStore.setState({
     rootSplit,
     leftSplit,
     rightSplit,
+    bottomSplit,
     floating: [],
     activeLeafId: null,
     leaves,
@@ -697,6 +772,9 @@ export const workspace = {
   },
   get rightSplit(): Sidedock {
     return state().rightSplit
+  },
+  get bottomSplit(): Sidedock {
+    return state().bottomSplit
   },
   get floating(): FloatingWindow[] {
     return state().floating

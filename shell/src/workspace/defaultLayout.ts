@@ -73,12 +73,27 @@ export function buildDefaultLayout(): WorkspaceJSON {
     size: 280,
   }
 
+  // Bottom drawer: terminal + future build-log / problems panes live
+  // here. Starts collapsed — an expanded-by-default drawer is intrusive
+  // for users who never open a terminal (matches VS Code behavior).
+  const bottomTabs = makeTabs(['empty'])
+  const bottomDock: SerializedSplit = {
+    kind: 'split',
+    id: newId(),
+    direction: 'horizontal',
+    children: [bottomTabs],
+    side: 'bottom',
+    collapsed: true,
+    size: 240,
+  }
+
   const activeLeafId = mainTabs.leaves[0]!.id
 
   return {
     main: mainSplit,
     left: leftDock,
     right: rightDock,
+    bottom: bottomDock,
     active: activeLeafId,
     lastOpenFiles: [],
   }

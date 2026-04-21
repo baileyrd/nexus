@@ -153,6 +153,11 @@ function isWorkspaceJSON(v: unknown): v is WorkspaceJSON {
   if (!isSerializedNode(v.main)) return false
   if (!isSerializedNode(v.left)) return false
   if (!isSerializedNode(v.right)) return false
+  // `bottom` is optional for backwards-compat with workspace.json files
+  // written before the bottom drawer landed. Only validate if present.
+  if ('bottom' in v && v.bottom !== undefined && !isSerializedNode(v.bottom)) {
+    return false
+  }
   if (v.active !== null && typeof v.active !== 'string') return false
   if ('lastOpenFiles' in v && !Array.isArray(v.lastOpenFiles)) return false
   return true

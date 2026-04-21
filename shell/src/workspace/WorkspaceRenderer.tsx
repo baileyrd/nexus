@@ -50,11 +50,23 @@ function useLayoutVersion(): void {
 // <Workspace> — top-level. Renders left dock + main area + right dock.
 // ---------------------------------------------------------------------------
 
+// Outer container: stacks a horizontal row (left|main|right) on top of
+// the bottom drawer so the drawer spans the full window width, matching
+// Obsidian's bottom pane / VS Code's integrated-terminal drawer layout.
 const ROOT_STYLE: CSSProperties = {
   display: 'flex',
-  flexDirection: 'row',
+  flexDirection: 'column',
   width: '100%',
   height: '100%',
+  minWidth: 0,
+  minHeight: 0,
+  overflow: 'hidden',
+}
+
+const UPPER_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'row',
+  flex: '1 1 auto',
   minWidth: 0,
   minHeight: 0,
   overflow: 'hidden',
@@ -73,15 +85,19 @@ export function Workspace(): JSX.Element {
   const rootSplit = workspace.rootSplit
   const leftSplit = workspace.leftSplit
   const rightSplit = workspace.rightSplit
+  const bottomSplit = workspace.bottomSplit
   const floating = workspace.floating
 
   return (
     <div className="workspace-root" style={ROOT_STYLE}>
-      <SidedockFrame side="left" dock={leftSplit} />
-      <div className="workspace-main" style={MAIN_STYLE}>
-        <RenderNode node={rootSplit} />
+      <div className="workspace-upper" style={UPPER_ROW_STYLE}>
+        <SidedockFrame side="left" dock={leftSplit} />
+        <div className="workspace-main" style={MAIN_STYLE}>
+          <RenderNode node={rootSplit} />
+        </div>
+        <SidedockFrame side="right" dock={rightSplit} />
       </div>
-      <SidedockFrame side="right" dock={rightSplit} />
+      <SidedockFrame side="bottom" dock={bottomSplit} />
       {floating.map((fw) => (
         <div
           key={fw.id}
@@ -103,9 +119,14 @@ export function Workspace(): JSX.Element {
 const COLLAPSE_THRESHOLD = 120
 const DOCK_MIN_SIZE = 150
 const RIBBON_WIDTH = 24
+// Height of the collapsed bottom-drawer strip. Roughly matches a single
+// tab row — enough to host a label + expand button without eating space.
+const BOTTOM_COLLAPSED_HEIGHT = 28
+
+type DockSide = 'left' | 'right' | 'bottom'
 
 interface SidedockFrameProps {
-  side: 'left' | 'right'
+  side: DockSide
   dock: Sidedock
 }
 
@@ -120,6 +141,8 @@ const COLLAPSED_BAR_STYLE: CSSProperties = {
 }
 
 function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
+  if (side === 'bottom') return <BottomSidedockFrame dock={dock} />
+
   if (dock.collapsed) {
     return (
       <div
@@ -204,6 +227,90 @@ function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
   )
 }
 
+// ---------------------------------------------------------------------------
+// <BottomSidedockFrame> — horizontal drawer spanning the full window width.
+// Collapse state shows a 28-px strip with an expand button; expanded state
+// shows the tabs group with a top-edge resize handle.
+// ---------------------------------------------------------------------------
+
+function BottomSidedockFrame({ dock }: { dock: Sidedock }): JSX.Element {
+  if (dock.collapsed) {
+    return (
+      <div
+        className="workspace-sidedock mod-bottom is-collapsed"
+        style={{
+          flex: `0 0 ${BOTTOM_COLLAPSED_HEIGHT}px`,
+          height: BOTTOM_COLLAPSED_HEIGHT,
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 8px',
+          background: 'var(--background-secondary, var(--bg-raised, #252526))',
+          borderTop: '1px solid var(--divider-color, var(--line, #333))',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 12,
+            color: 'var(--text-muted, var(--fg-muted, #888))',
+          }}
+        >
+          Terminal
+        </span>
+        <button
+          type="button"
+          title="Expand bottom drawer"
+          onClick={() => workspace.setSidedockCollapsed('bottom', false)}
+          style={COLLAPSE_BUTTON_STYLE}
+        >
+          {/* up-chevron when collapsed — click to expand upward */}
+          ▴
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="workspace-sidedock mod-bottom"
+      style={{
+        flex: `0 0 ${dock.size}px`,
+        height: dock.size,
+        minHeight: DOCK_MIN_SIZE,
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--background-secondary, var(--bg-raised, #252526))',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Top-edge resize handle: dragging up grows the drawer. */}
+      <DockResizeHandle side="bottom" initialSize={dock.size} />
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          padding: '2px 4px',
+          borderBottom: '1px solid var(--divider-color, var(--line, #333))',
+        }}
+      >
+        <button
+          type="button"
+          title="Collapse bottom drawer"
+          onClick={() => workspace.setSidedockCollapsed('bottom', true)}
+          style={COLLAPSE_BUTTON_STYLE}
+        >
+          {/* down-chevron when expanded — click to collapse downward */}
+          ▾
+        </button>
+      </div>
+      <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex' }}>
+        <RenderNode node={dock} />
+      </div>
+    </div>
+  )
+}
+
 const COLLAPSE_BUTTON_STYLE: CSSProperties = {
   background: 'transparent',
   border: 'none',
@@ -222,24 +329,29 @@ const COLLAPSE_BUTTON_STYLE: CSSProperties = {
 // ---------------------------------------------------------------------------
 
 interface DockResizeHandleProps {
-  side: 'left' | 'right'
+  side: DockSide
   initialSize: number
 }
 
 function DockResizeHandle({ side, initialSize }: DockResizeHandleProps): JSX.Element {
-  const startX = useRef(0)
+  const startPos = useRef(0)
   const startSize = useRef(initialSize)
+  const horizontal = side === 'bottom'
 
   const onMouseDown = (e: React.MouseEvent): void => {
     e.preventDefault()
-    startX.current = e.clientX
+    startPos.current = horizontal ? e.clientY : e.clientX
     startSize.current = initialSize
 
     const onMouseMove = (ev: MouseEvent): void => {
-      const delta = ev.clientX - startX.current
-      // Left dock grows on positive delta; right dock grows on negative delta.
-      const target =
-        side === 'left' ? startSize.current + delta : startSize.current - delta
+      const cur = horizontal ? ev.clientY : ev.clientX
+      const delta = cur - startPos.current
+      // Left dock grows on +X delta; right dock grows on -X delta;
+      // bottom dock grows on -Y delta (dragging up expands height).
+      let target: number
+      if (side === 'left') target = startSize.current + delta
+      else if (side === 'right') target = startSize.current - delta
+      else target = startSize.current - delta // bottom
       if (target < COLLAPSE_THRESHOLD) {
         workspace.setSidedockCollapsed(side, true)
         cleanup()
@@ -261,13 +373,24 @@ function DockResizeHandle({ side, initialSize }: DockResizeHandleProps): JSX.Ele
     <div
       className="workspace-dock-resize-handle"
       onMouseDown={onMouseDown}
-      style={{
-        flex: '0 0 4px',
-        width: 4,
-        cursor: 'col-resize',
-        background: 'transparent',
-        zIndex: 1,
-      }}
+      style={
+        horizontal
+          ? {
+              flex: '0 0 4px',
+              height: 4,
+              width: '100%',
+              cursor: 'row-resize',
+              background: 'transparent',
+              zIndex: 1,
+            }
+          : {
+              flex: '0 0 4px',
+              width: 4,
+              cursor: 'col-resize',
+              background: 'transparent',
+              zIndex: 1,
+            }
+      }
     />
   )
 }

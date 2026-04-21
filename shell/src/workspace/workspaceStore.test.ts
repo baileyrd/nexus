@@ -122,6 +122,24 @@ test('hydrate round-trip preserves ids and tree shape', async () => {
         },
       ],
     },
+    bottom: {
+      kind: 'split',
+      id: 'bottom-dock',
+      direction: 'horizontal',
+      side: 'bottom',
+      collapsed: true,
+      size: 240,
+      children: [
+        {
+          kind: 'tabs',
+          id: 'bottom-tabs',
+          activeIndex: 0,
+          leaves: [
+            { kind: 'leaf', id: 'leaf-bottom-1', viewState: { type: 'empty', state: {} } },
+          ],
+        },
+      ],
+    },
     active: 'leaf-main-1',
     lastOpenFiles: [],
   }
@@ -153,6 +171,84 @@ test('ensureLeafOfType creates in the named side if none exists', async () => {
     'new leaf must live in rightSplit first Tabs',
   )
   assert.equal(leaf.view?.viewType, 'foo')
+})
+
+test('ensureLeafOfType("terminal", "bottom") creates a leaf inside bottomSplit', async () => {
+  freshLayout()
+  const leaf = await workspace.ensureLeafOfType('foo', 'bottom')
+  const bottomTabs = firstTabs(workspace.bottomSplit)
+  assert.ok(
+    bottomTabs.leaves.some(l => l.id === leaf.id),
+    'new leaf must live in bottomSplit first Tabs',
+  )
+  assert.equal(leaf.view?.viewType, 'foo')
+  assert.equal(workspace.bottomSplit.side, 'bottom')
+})
+
+test('hydrate without a `bottom` field creates a default collapsed bottom split', async () => {
+  // Simulate a workspace.json written before the bottom drawer landed:
+  // the persisted shape has no `bottom` key. Hydrate must tolerate it.
+  const legacy: WorkspaceJSON = {
+    main: {
+      kind: 'split',
+      id: 'main-split',
+      direction: 'horizontal',
+      children: [
+        {
+          kind: 'tabs',
+          id: 'main-tabs',
+          activeIndex: 0,
+          leaves: [
+            { kind: 'leaf', id: 'leaf-main-1', viewState: { type: 'empty', state: {} } },
+          ],
+        },
+      ],
+    },
+    left: {
+      kind: 'split',
+      id: 'left-dock',
+      direction: 'vertical',
+      side: 'left',
+      collapsed: false,
+      size: 300,
+      children: [
+        {
+          kind: 'tabs',
+          id: 'left-tabs',
+          activeIndex: 0,
+          leaves: [
+            { kind: 'leaf', id: 'leaf-left-1', viewState: { type: 'empty', state: {} } },
+          ],
+        },
+      ],
+    },
+    right: {
+      kind: 'split',
+      id: 'right-dock',
+      direction: 'vertical',
+      side: 'right',
+      collapsed: false,
+      size: 300,
+      children: [
+        {
+          kind: 'tabs',
+          id: 'right-tabs',
+          activeIndex: 0,
+          leaves: [
+            { kind: 'leaf', id: 'leaf-right-1', viewState: { type: 'empty', state: {} } },
+          ],
+        },
+      ],
+    },
+    active: null,
+    lastOpenFiles: [],
+  }
+
+  await workspace.hydrate(legacy)
+  assert.ok(workspace.bottomSplit, 'bottomSplit must be present after hydrate')
+  assert.equal(workspace.bottomSplit.side, 'bottom')
+  assert.equal(workspace.bottomSplit.collapsed, true, 'default bottom is collapsed')
+  assert.equal(workspace.bottomSplit.size, 240)
 })
 
 test('revealLeaf expands collapsed dock + sets activeIndex + activeLeafId', async () => {

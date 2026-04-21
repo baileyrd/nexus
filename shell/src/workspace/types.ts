@@ -62,7 +62,7 @@ export interface Tabs {
 // only discriminator between a generic split and a dock.
 export interface Sidedock extends Split {
   kind: 'split'
-  side: 'left' | 'right'
+  side: 'left' | 'right' | 'bottom'
   collapsed: boolean
   size: number
 }
@@ -91,7 +91,7 @@ export interface SerializedSplit {
   children: SerializedNode[]
   sizes?: number[]
   // Sidedock-only fields; present when this split is a dock.
-  side?: 'left' | 'right'
+  side?: 'left' | 'right' | 'bottom'
   collapsed?: boolean
   size?: number
 }
@@ -133,6 +133,10 @@ export interface WorkspaceJSON {
   main: SerializedNode
   left: SerializedNode
   right: SerializedNode
+  // Optional for backwards-compatibility: existing workspace.json files
+  // written before the bottom drawer landed have no `bottom` field.
+  // `hydrate()` falls back to a collapsed default when absent.
+  bottom?: SerializedNode
   active: string | null
   lastOpenFiles: string[]
 }

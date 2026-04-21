@@ -125,12 +125,16 @@ export const terminalPlugin: Plugin = {
 
     // ── Commands ────────────────────────────────────────────────────
     //
-    // Post-migration the terminal lives as a Leaf in the right sidedock
-    // (a tabbed pane, just like any other view). Toggle = detach if
-    // present, otherwise ensure + reveal. Focus = ensure + reveal + emit
-    // the focus event the TerminalView subscribes to.
+    // Post-migration the terminal lives as a Leaf in the bottom drawer
+    // (a tabbed pane, just like any other view). Focus = ensure + reveal
+    // + emit the focus event the TerminalView subscribes to.
+    //
+    // Toggle behavior mirrors Obsidian / VS Code: if the terminal is
+    // already visible, collapse the drawer — do NOT detach the leaf, so
+    // the terminal session (PTY buffer, cursor, scrollback) survives
+    // across toggles. Otherwise ensure + reveal, uncollapsing as needed.
     const ensureAndReveal = async () => {
-      const leaf = await workspace.ensureLeafOfType('terminal', 'right')
+      const leaf = await workspace.ensureLeafOfType('terminal', 'bottom')
       workspace.revealLeaf(leaf)
       useTerminalStore.getState().setVisible(true)
       api.context.set(CONTEXT_KEY_VISIBLE, true)
@@ -140,8 +144,12 @@ export const terminalPlugin: Plugin = {
 
     api.commands.register(COMMAND_TOGGLE, async () => {
       const existing = workspace.getLeavesOfType('terminal')
-      if (existing.length > 0) {
-        for (const leaf of existing) workspace.detachLeaf(leaf)
+      const bottomVisible = !workspace.bottomSplit.collapsed
+      const activeId = workspace.activeLeafId
+      const anyActive = existing.some((l) => l.id === activeId)
+      if (existing.length > 0 && bottomVisible && anyActive) {
+        // Collapse (preserve terminal state) rather than detach.
+        workspace.setSidedockCollapsed('bottom', true)
         useTerminalStore.getState().setVisible(false)
         api.context.set(CONTEXT_KEY_VISIBLE, false)
         return
