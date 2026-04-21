@@ -33,6 +33,10 @@ export interface Leaf {
   setViewState(state: ViewState, eState?: unknown): Promise<void>
   getViewState(): ViewState
   detach(): Promise<void>
+  // Mount/unmount the DOM host. Phase 4's LeafHost assigns via useEffect.
+  // Non-null: invokes view.onOpen on first mount (deferred-open replay).
+  // Null: transient unmount — view stays alive; onClose runs only on detach.
+  attachContainer(el: HTMLElement | null): Promise<void>
 }
 
 export type WorkspaceParent = Split | Tabs | Sidedock | Root | FloatingWindow
