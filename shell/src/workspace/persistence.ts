@@ -28,7 +28,6 @@ import { workspace } from './workspaceStore.ts'
 const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 const READ_FILE_COMMAND = 'read_file'
 const WRITE_VAULT_FILE_COMMAND = 'write_vault_file'
-const FILE_EXISTS_COMMAND = 'file_exists'
 
 const WORKSPACE_REL = '.forge/workspace.json'
 
@@ -43,10 +42,6 @@ interface ReadFileResponse {
   bytes?: number[]
 }
 
-interface FileExistsResponse {
-  exists?: boolean
-}
-
 /**
  * Default kernel bridge — talks to `com.nexus.storage` via Tauri's
  * `kernel_invoke` command. The storage engine's `write_vault_file`
@@ -55,14 +50,10 @@ interface FileExistsResponse {
  */
 const defaultBridge: KernelBridge = {
   async readVaultFile(relPath: string): Promise<string | null> {
+    // Don't probe via file_exists: that handler queries the SQLite file index,
+    // which is intentionally bypassed for .forge/ writes. Let read_file fail
+    // naturally on missing files — FileNotFound arrives as a rejected invoke.
     try {
-      const existsResp = await invoke<FileExistsResponse>('kernel_invoke', {
-        pluginId: STORAGE_PLUGIN_ID,
-        commandId: FILE_EXISTS_COMMAND,
-        args: { path: relPath },
-        timeoutMs: null,
-      })
-      if (!existsResp?.exists) return null
       const resp = await invoke<ReadFileResponse>('kernel_invoke', {
         pluginId: STORAGE_PLUGIN_ID,
         commandId: READ_FILE_COMMAND,
@@ -72,7 +63,10 @@ const defaultBridge: KernelBridge = {
       const bytes = resp.bytes ?? []
       return new TextDecoder().decode(new Uint8Array(bytes))
     } catch (err) {
-      console.warn('[workspace.persistence] readVaultFile failed', err)
+      const msg = String((err as { message?: string })?.message ?? err)
+      if (!/not found|FileNotFound|no such file/i.test(msg)) {
+        console.warn('[workspace.persistence] readVaultFile failed', err)
+      }
       return null
     }
   },
@@ -179,7 +173,10 @@ export async function loadWorkspace(
   if (!vaultPath) return null
   void vaultPath // vault-relative semantics: bridge knows the active vault
   const text = await activeBridge.readVaultFile(WORKSPACE_REL)
-  if (text === null) return null
+  if (text === null) {
+    console.log('[persistence] loadWorkspace: no saved file (first boot or missing)')
+    return null
+  }
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
@@ -191,6 +188,7 @@ export async function loadWorkspace(
     console.warn('[workspace.persistence] workspace.json failed schema validation, falling back to default')
     return null
   }
+  console.log('[persistence] loadWorkspace: loaded', text.length, 'bytes')
   return parsed
 }
 
@@ -207,6 +205,7 @@ export async function saveWorkspace(
   const text = JSON.stringify(json, null, 2)
   try {
     await activeBridge.writeVaultFile(WORKSPACE_REL, text)
+    console.log('[persistence] saveWorkspace: wrote', text.length, 'bytes')
   } catch (err) {
     console.error('[workspace.persistence] saveWorkspace failed', err)
   }
