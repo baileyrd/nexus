@@ -173,10 +173,7 @@ export async function loadWorkspace(
   if (!vaultPath) return null
   void vaultPath // vault-relative semantics: bridge knows the active vault
   const text = await activeBridge.readVaultFile(WORKSPACE_REL)
-  if (text === null) {
-    console.log('[persistence] loadWorkspace: no saved file (first boot or missing)')
-    return null
-  }
+  if (text === null) return null
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
@@ -188,7 +185,6 @@ export async function loadWorkspace(
     console.warn('[workspace.persistence] workspace.json failed schema validation, falling back to default')
     return null
   }
-  console.log('[persistence] loadWorkspace: loaded', text.length, 'bytes')
   return parsed
 }
 
@@ -205,7 +201,6 @@ export async function saveWorkspace(
   const text = JSON.stringify(json, null, 2)
   try {
     await activeBridge.writeVaultFile(WORKSPACE_REL, text)
-    console.log('[persistence] saveWorkspace: wrote', text.length, 'bytes')
   } catch (err) {
     console.error('[workspace.persistence] saveWorkspace failed', err)
   }
