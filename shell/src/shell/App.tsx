@@ -98,6 +98,13 @@ export default function App() {
 
     return () => {
       cancelled = true
+      // Clear the ref so a StrictMode re-invocation (which runs the cleanup
+      // before install/setHydrated have completed) retries instead of short-
+      // circuiting on line 71. The cancelled flag prevents the aborted run
+      // from racing the retry.
+      if (lastHydratedPathRef.current === rootPath) {
+        lastHydratedPathRef.current = null
+      }
     }
   }, [rootPath])
 
