@@ -4,7 +4,7 @@ import { useSlotStore } from '../registry/SlotRegistry'
 import { usePaneModeStore } from '../stores/paneModeStore'
 import { SlotSurface } from './slots/SlotSurface'
 import { getRegistry } from '../host/shellRegistry'
-import { contextKeyService } from '../host/ContextKeyService'
+import { contextKeyService, useContextKey } from '../host/ContextKeyService'
 import { useWorkspaceStore as useNexusWorkspaceStore } from '../plugins/nexus/workspace/workspaceStore'
 import { Workspace } from '../workspace/WorkspaceRenderer'
 import { workspace as workspaceStore } from '../workspace/workspaceStore'
@@ -18,6 +18,13 @@ export default function App() {
   const slots = useSlotStore(s => s.slots)
   const paneModeViewId = usePaneModeStore(s => s.activeViewId)
   const rootPath = useNexusWorkspaceStore(s => s.rootPath)
+  // shellReady flips to true in main.tsx boot() AFTER every plugin has
+  // activated — guarantees all viewRegistry.register(...) calls have run
+  // before we hydrate. Without this gate, workspacePlugin (which publishes
+  // rootPath) activates early, hydrate runs while filesPlugin/editorPlugin/
+  // etc. haven't registered their view creators, and every saved leaf
+  // falls back to the `empty` creator.
+  const shellReady = useContextKey('shellReady') === true
   const [debugInfo, setDebugInfo] = useState<string>('')
   const [hydrated, setHydrated] = useState(false)
   const autoSaveStopRef = useRef<(() => void) | null>(null)
@@ -68,6 +75,7 @@ export default function App() {
       lastHydratedPathRef.current = null
       return
     }
+    if (!shellReady) return
     if (lastHydratedPathRef.current === rootPath) return
     lastHydratedPathRef.current = rootPath
 
@@ -106,7 +114,7 @@ export default function App() {
         lastHydratedPathRef.current = null
       }
     }
-  }, [rootPath])
+  }, [rootPath, shellReady])
 
   // Unmount-time cleanup: dispose auto-save subscriptions.
   useEffect(() => {
