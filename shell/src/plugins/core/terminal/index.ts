@@ -1,6 +1,5 @@
 // src/plugins/core/terminal/index.ts
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { TerminalView } from './TerminalView'
 import { useLayoutStore } from '../../../stores/layoutStore'
 import { useTerminalStore } from './terminalStore'
 
@@ -46,12 +45,7 @@ export const terminalPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
-    api.views.register('terminal', {
-      slot: 'panelAreaContent',
-      component: TerminalView,
-      priority: 10,
-    })
-
+    // Phase 7: legacy slot:'panelAreaContent' registration removed.
     api.commands.register('terminal.toggle', () => {
       const store = useLayoutStore.getState()
       if (!store.panelArea.visible) {

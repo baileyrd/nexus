@@ -1,5 +1,4 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { EditorAreaView } from './EditorAreaView'
 import { useEditorStore } from './editorStore'
 
 export { useEditorStore } from './editorStore'
@@ -28,11 +27,8 @@ export const editorAreaPlugin: Plugin = {
     },
   },
   activate(api: PluginAPI) {
-    api.views.register('editorArea', {
-      slot: 'editorArea',
-      component: EditorAreaView,
-      priority: 0,
-    })
+    // Phase 7: legacy slot:'editorArea' registration removed.
+    // EditorAreaView is no longer mounted via SlotRegistry.
 
     api.commands.register('editor.closeTab', () => {
       const { activeTabId, closeTab } = useEditorStore.getState()

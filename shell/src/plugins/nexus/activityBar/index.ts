@@ -6,8 +6,6 @@ import { useActivityBarStore, type ActivityBarItem } from './activityBarStore'
 const EVENT_ITEM_ADDED = 'activityBar:itemAdded'
 const EVENT_ITEM_REMOVED = 'activityBar:itemRemoved'
 const EVENT_ACTIVE_CHANGED = 'activityBar:activeChanged'
-const EVENT_SIDEBAR_SHOW_VIEW = 'sidebar:showView'
-const EVENT_SIDEBAR_HIDE = 'sidebar:hide'
 const CONTEXT_KEY_ACTIVE = 'nexus.activityBar.activeView'
 
 export const activityBarPlugin: Plugin = {
@@ -42,28 +40,28 @@ export const activityBarPlugin: Plugin = {
       if (removed && removed.viewId === s.activeViewId) {
         s.setActive(null)
         api.context.set(CONTEXT_KEY_ACTIVE, '')
-        api.events.emit(EVENT_SIDEBAR_HIDE, {})
         api.events.emit(EVENT_ACTIVE_CHANGED, { viewId: null })
       }
     })
 
+    // Post-Phase-7: every activity-bar item is expected to supply a
+    // `command` (typically its plugin's focus command, which calls
+    // `workspace.ensureLeafOfType + revealLeaf`). For legacy items
+    // without a command we still mark them active so the icon
+    // highlight stays coherent, but we no longer emit the deleted
+    // `sidebar:showView` event.
     const handleItemClick = (item: ActivityBarItem) => {
-      // Command items (e.g. settings) execute directly without touching sidebar.
       if (item.command) {
         api.commands.execute(item.command)
-        return
       }
       const s = useActivityBarStore.getState()
       if (s.activeViewId === item.viewId) {
-        // Toggle off — deactivate and hide sidebar.
         s.setActive(null)
         api.context.set(CONTEXT_KEY_ACTIVE, '')
-        api.events.emit(EVENT_SIDEBAR_HIDE, {})
         api.events.emit(EVENT_ACTIVE_CHANGED, { viewId: null })
       } else {
         s.setActive(item.viewId)
         api.context.set(CONTEXT_KEY_ACTIVE, item.viewId)
-        api.events.emit(EVENT_SIDEBAR_SHOW_VIEW, { viewId: item.viewId })
         api.events.emit(EVENT_ACTIVE_CHANGED, { viewId: item.viewId })
       }
     }

@@ -1,9 +1,7 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { useLayoutStore } from '../../../stores/layoutStore'
-import { RightPanelHost } from './RightPanelHost'
+import { workspace } from '../../../workspace'
 import { useRightPanelStore } from './rightPanelStore'
 
-const VIEW_ID = 'nexus.rightPanel.host'
 const EVENT_REGISTER_TAB = 'rightPanel:registerTab'
 const EVENT_UNREGISTER_TAB = 'rightPanel:unregisterTab'
 const COMMAND_TOGGLE = 'nexus.rightPanel.toggle'
@@ -45,30 +43,19 @@ export const rightPanelPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
-    // Host view into the rightPanel slot. It will be rendered whenever
-    // layoutStore.rightPanel.visible is true.
-    api.views.register(VIEW_ID, {
-      slot: 'rightPanel',
-      component: RightPanelHost,
-      priority: 10,
-    })
+    // Phase 7: legacy SlotRegistry slot:'rightPanel' host removed —
+    // the right sidedock is now rendered by <Workspace>. The tab
+    // metadata store + toggle command remain so existing rightPanel-
+    // aware plugins keep working.
 
-    // Flip the strip visible on activate so the host shows up the
-    // moment the plugin loads. main.tsx no longer forces it hidden.
-    useLayoutStore.setState((s) => ({
-      rightPanel: { ...s.rightPanel, visible: true },
-    }))
+    // Seed + track the visible context key from the workspace sidedock.
+    const syncVisible = () => {
+      api.context.set(CONTEXT_KEY_VISIBLE, !workspace.rightSplit.collapsed)
+    }
+    syncVisible()
+    workspace.on('layout-change', syncVisible)
 
-    // Seed + track the visible context key.
-    api.context.set(CONTEXT_KEY_VISIBLE, useLayoutStore.getState().rightPanel.visible)
-    useLayoutStore.subscribe((state, prev) => {
-      if (state.rightPanel.visible !== prev.rightPanel.visible) {
-        api.context.set(CONTEXT_KEY_VISIBLE, state.rightPanel.visible)
-      }
-    })
-
-    // Tab metadata registration. Fires in tandem with each
-    // contributor's api.views.register call for rightPanelContent.
+    // Tab metadata registration. Retained for legacy consumers.
     api.events.on<RegisterTabPayload>(EVENT_REGISTER_TAB, (payload) => {
       if (!payload || typeof payload.viewId !== 'string') return
       useRightPanelStore.getState().registerTab(payload.viewId, {
@@ -83,8 +70,9 @@ export const rightPanelPlugin: Plugin = {
       useRightPanelStore.getState().unregisterTab(payload.viewId)
     })
 
-    api.commands.register(COMMAND_TOGGLE, async () => {
-      useLayoutStore.getState().toggleRightPanel()
+    api.commands.register(COMMAND_TOGGLE, () => {
+      const current = workspace.rightSplit.collapsed
+      workspace.setSidedockCollapsed('right', !current)
     })
   },
 }

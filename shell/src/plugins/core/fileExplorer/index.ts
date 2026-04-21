@@ -1,6 +1,5 @@
 // src/plugins/core/fileExplorer/index.ts
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { FileExplorerView } from './FileExplorerView'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 
 export const fileExplorerPlugin: Plugin = {
@@ -47,11 +46,7 @@ export const fileExplorerPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
-    api.views.register('fileExplorer', {
-      slot: 'sidebarContent',
-      component: FileExplorerView,
-      priority: 10,
-    })
+    // Phase 7: legacy slot:'sidebarContent' registration removed.
 
     api.activityBar.addItem({
       id: 'fileExplorer',

@@ -181,18 +181,8 @@ export const editorPlugin: Plugin = {
       useEditorStore.getState().closeTab(relpath)
     }
 
-    api.views.register(VIEW_ID, {
-      slot: 'editorArea',
-      component: () =>
-        createElement(EditorView, {
-          onRetry: handleRetry,
-        }),
-      priority: 10,
-    })
-
-    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
-    // The centrepiece View — once Phase 6 flips App.tsx to <Workspace>,
-    // `.md` opens land as leaves of this type in the main dock.
+    // Phase 7: legacy SlotRegistry slot:'editorArea' entry removed.
+    // `.md` opens now land as leaves of type 'markdown' in the main dock.
     viewRegistry.register(
       'markdown',
       markdownViewCreator(() => createElement(EditorView, { onRetry: handleRetry })),

@@ -1,12 +1,10 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
+import { viewRegistry, workspace } from '../../../workspace'
 import { BacklinksView } from './BacklinksView'
 import { backlinkViewCreator } from './BacklinkView'
 import { useBacklinksStore, type Backlink } from './backlinksStore'
 import { useEditorStore } from '../editor/editorStore'
-import { useLayoutStore } from '../../../stores/layoutStore'
-import { useRightPanelStore } from '../rightPanel/rightPanelStore'
 
 const VIEW_ID = 'nexus.backlinks.view'
 const COMMAND_FOCUS = 'nexus.backlinks.focus'
@@ -79,16 +77,7 @@ export const backlinksPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
-    // Contribute the body into the rightPanelContent slot. Priority 20
-    // places us after nexus.outline (priority 10), so Outline stays the
-    // first-registered-wins default tab.
-    api.views.register(VIEW_ID, {
-      slot: 'rightPanelContent',
-      component: BacklinksView,
-      priority: 20,
-    })
-
-    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    // Phase 7: legacy SlotRegistry slot:'rightPanelContent' entry removed.
     viewRegistry.register(
       'backlink',
       backlinkViewCreator(() => createElement(BacklinksView)),
@@ -188,11 +177,9 @@ export const backlinksPlugin: Plugin = {
 
     // Focus command — ensures the right panel is visible and selects
     // the Backlinks tab. Titlebar shortcut + command palette entry.
-    api.commands.register(COMMAND_FOCUS, () => {
-      useLayoutStore.setState((s) => ({
-        rightPanel: { ...s.rightPanel, visible: true },
-      }))
-      useRightPanelStore.getState().setActive(VIEW_ID)
+    api.commands.register(COMMAND_FOCUS, async () => {
+      const leaf = await workspace.ensureLeafOfType('backlink', 'right')
+      workspace.revealLeaf(leaf)
     })
   },
 }

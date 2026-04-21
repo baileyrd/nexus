@@ -7,6 +7,7 @@ import type { PluginRegistry } from './PluginRegistry'
 import { useSlotStore, type SlotId } from '../registry/SlotRegistry'
 import { contextKeyService } from './ContextKeyService'
 import { eventBus } from './EventBus'
+import { workspace, viewRegistry } from '../workspace'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { ComponentType } from 'react'
@@ -62,6 +63,13 @@ export function buildPluginAPI(
         registry.track(pluginId, `slot:${viewId}`)
       },
     },
+
+    // ─── Workspace / ViewRegistry ─────────────────────────────────────────
+    // Injected so plugins can reach the Leaf-based workspace facade via their
+    // `api` argument without importing shell internals directly. See
+    // docs/leaf-architecture.md.
+    workspace,
+    viewRegistry,
 
     // ─── Context keys ───────────────────────────────────────────────────────
     context: {

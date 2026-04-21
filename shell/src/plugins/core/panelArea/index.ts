@@ -1,5 +1,4 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { PanelAreaView } from './PanelAreaView'
 import { usePanelAreaStore } from './panelAreaStore'
 import { useLayoutStore } from '../../../stores/layoutStore'
 
@@ -23,11 +22,7 @@ export const panelAreaPlugin: Plugin = {
     },
   },
   activate(api: PluginAPI) {
-    api.views.register('panelArea', {
-      slot: 'panelArea',
-      component: PanelAreaView,
-      priority: 0,
-    })
+    // Phase 7: legacy slot:'panelArea' registration removed.
     api.commands.register('panel.toggle', () => {
       useLayoutStore.getState().togglePanelArea()
     })

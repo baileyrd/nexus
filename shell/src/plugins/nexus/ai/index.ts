@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
+import { viewRegistry, workspace } from '../../../workspace'
 import { ChatView } from './ChatView'
 import { aiChatViewCreator } from './AiChatView'
 import { useAiStore } from './aiStore'
@@ -10,7 +10,6 @@ const VIEW_ID = 'nexus.ai.view'
 const COMMAND_FOCUS = 'nexus.ai.focus'
 const COMMAND_CLEAR = 'nexus.ai.clear'
 
-const EVENT_SIDEBAR_SHOW_VIEW = 'sidebar:showView'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
 // Lucide-style "sparkles" glyph — four-point star in a 24x24 box,
@@ -40,13 +39,7 @@ export const aiPlugin: Plugin = {
   activate(api: PluginAPI) {
     setKernel(api.kernel)
 
-    api.views.register(VIEW_ID, {
-      slot: 'sidebarContent',
-      component: () => createElement(ChatView),
-      priority: 50,
-    })
-
-    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    // Phase 7: legacy SlotRegistry slot:'sidebarContent' entry removed.
     viewRegistry.register('ai-chat', aiChatViewCreator(() => createElement(ChatView)))
 
     api.activityBar.addItem({
@@ -56,14 +49,14 @@ export const aiPlugin: Plugin = {
       title: 'AI Chat',
       viewId: VIEW_ID,
       priority: 50,
+      command: COMMAND_FOCUS,
     })
 
-    // Focus command — flip the sidebar host to our viewId (if it
-    // isn't already) and focus the composer. Works whether or not
-    // ChatView is currently mounted (same focuser-singleton pattern
-    // as nexus.search).
-    api.commands.register(COMMAND_FOCUS, () => {
-      api.events.emit(EVENT_SIDEBAR_SHOW_VIEW, { viewId: VIEW_ID })
+    // Focus command — ensure an ai-chat leaf exists on the right and
+    // reveal it; focuser drains on mount.
+    api.commands.register(COMMAND_FOCUS, async () => {
+      const leaf = await workspace.ensureLeafOfType('ai-chat', 'right')
+      workspace.revealLeaf(leaf)
       requestFocus()
     })
 

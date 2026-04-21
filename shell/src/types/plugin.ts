@@ -3,6 +3,7 @@
 
 import type { ComponentType } from 'react'
 import type { SlotId } from '../registry/SlotRegistry'
+import type { workspace, viewRegistry } from '../workspace'
 
 // ─── Manifest ────────────────────────────────────────────────────────────────
 
@@ -99,7 +100,19 @@ export interface Plugin {
 
 export interface PluginAPI {
   commands: CommandsAPI
+  /**
+   * Chrome-slot registration only (titleBar, activityBar, statusBarLeft,
+   * statusBarRight, overlay, paneMode). For movable panes, use
+   * `viewRegistry` + `workspace` instead — see docs/leaf-architecture.md.
+   */
   views: ViewsAPI
+  /**
+   * The Leaf/View workspace facade. Plugins register view creators with
+   * `viewRegistry.register(type, creator)` and create/reveal leaves with
+   * `workspace.ensureLeafOfType(type, side)` + `workspace.revealLeaf(leaf)`.
+   */
+  workspace: typeof workspace
+  viewRegistry: typeof viewRegistry
   context: ContextAPI
   events: EventsAPI
   storage: StorageAPI

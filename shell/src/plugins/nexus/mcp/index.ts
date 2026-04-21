@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
+import { viewRegistry, workspace } from '../../../workspace'
 import { McpView } from './McpView'
 import { mcpPaneViewCreator } from './McpPaneView'
 import { ToolCallModal } from './ToolCallModal'
@@ -17,7 +17,6 @@ const TOOL_MODAL_VIEW_ID = 'nexus.mcp.toolCallModal'
 
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
-const EVENT_SIDEBAR_SHOW_VIEW = 'sidebar:showView'
 
 const COMMAND_REFRESH = 'nexus.mcp.refresh'
 const COMMAND_SHOW = 'nexus.mcp.show'
@@ -280,13 +279,7 @@ export const mcpPlugin: Plugin = {
         onCallTool: handleCallTool,
       })
 
-    api.views.register(VIEW_ID, {
-      slot: 'sidebarContent',
-      component: renderMcpView,
-      priority: 50,
-    })
-
-    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    // Phase 7: legacy SlotRegistry slot:'sidebarContent' entry removed.
     viewRegistry.register('mcp', mcpPaneViewCreator(renderMcpView))
 
     api.views.register(TOOL_MODAL_VIEW_ID, {
@@ -305,13 +298,15 @@ export const mcpPlugin: Plugin = {
       title: 'MCP',
       viewId: VIEW_ID,
       priority: 50,
+      command: COMMAND_SHOW,
     })
 
     api.commands.register(COMMAND_REFRESH, () => {
       void refresh()
     })
-    api.commands.register(COMMAND_SHOW, () => {
-      api.events.emit(EVENT_SIDEBAR_SHOW_VIEW, { viewId: VIEW_ID })
+    api.commands.register(COMMAND_SHOW, async () => {
+      const leaf = await workspace.ensureLeafOfType('mcp', 'right')
+      workspace.revealLeaf(leaf)
     })
 
     api.events.on(EVENT_WORKSPACE_OPENED, () => {

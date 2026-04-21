@@ -1,10 +1,10 @@
+import { createRoot, type Root } from 'react-dom/client'
+import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { useLayoutStore } from '../../../stores/layoutStore'
-import { useRightPanelStore } from '../rightPanel/rightPanelStore'
+import { ViewBase, viewRegistry, workspace, type Leaf } from '../../../workspace'
 
-const VIEW_ID = 'nexus.outgoingLinks.view'
+const VIEW_TYPE = 'outgoing-links'
 const COMMAND_FOCUS = 'nexus.outgoingLinks.focus'
-const EVENT_REGISTER_TAB = 'rightPanel:registerTab'
 
 /** Placeholder body. Extraction of outgoing links from the active
  *  editor buffer is not yet implemented; the tab + command are
@@ -25,6 +25,25 @@ function OutgoingLinksView() {
   )
 }
 
+class OutgoingLinksPaneView extends ViewBase {
+  readonly viewType = VIEW_TYPE
+  private root: Root | null = null
+
+  constructor(leaf: Leaf) {
+    super(leaf)
+  }
+
+  async onOpen(containerEl: HTMLElement): Promise<void> {
+    this.root = createRoot(containerEl)
+    this.root.render(createElement(OutgoingLinksView))
+  }
+
+  async onClose(): Promise<void> {
+    this.root?.unmount()
+    this.root = null
+  }
+}
+
 export const outgoingLinksPlugin: Plugin = {
   manifest: {
     id: 'nexus.outgoingLinks',
@@ -32,29 +51,16 @@ export const outgoingLinksPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    dependsOn: ['nexus.rightPanel'],
     contributes: {
       commands: [{ id: COMMAND_FOCUS, title: 'Focus Outgoing Links', category: 'View' }],
     },
   },
 
   activate(api: PluginAPI) {
-    api.views.register(VIEW_ID, {
-      slot: 'rightPanelContent',
-      component: OutgoingLinksView,
-      priority: 25,
-    })
-    api.events.emit(EVENT_REGISTER_TAB, {
-      viewId: VIEW_ID,
-      title: 'Outgoing',
-      priority: 25,
-      iconName: 'linkOut',
-    })
-    api.commands.register(COMMAND_FOCUS, () => {
-      useLayoutStore.setState((s) => ({
-        rightPanel: { ...s.rightPanel, visible: true },
-      }))
-      useRightPanelStore.getState().setActive(VIEW_ID)
+    viewRegistry.register(VIEW_TYPE, (leaf) => new OutgoingLinksPaneView(leaf))
+    api.commands.register(COMMAND_FOCUS, async () => {
+      const leaf = await workspace.ensureLeafOfType(VIEW_TYPE, 'right')
+      workspace.revealLeaf(leaf)
     })
   },
 }

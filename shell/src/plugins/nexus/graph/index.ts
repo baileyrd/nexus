@@ -111,13 +111,7 @@ export const graphPlugin: Plugin = {
     // inspector is the most expensive to render, so parking it last
     // also means it doesn't win by accident if something reorders
     // activation.
-    api.views.register(VIEW_ID, {
-      slot: 'rightPanelContent',
-      component: GraphView,
-      priority: 30,
-    })
-
-    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    // Phase 7: legacy SlotRegistry slot:'rightPanelContent' entry removed.
     viewRegistry.register(
       'graph',
       graphPaneViewCreator(() => createElement(GraphView)),

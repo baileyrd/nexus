@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
+import { viewRegistry, workspace } from '../../../workspace'
 import { WorkflowView } from './WorkflowView'
 import { workflowPaneViewCreator } from './WorkflowPaneView'
 import { useWorkflowStore, type WorkflowEntry } from './workflowStore'
@@ -9,7 +9,6 @@ const VIEW_ID = 'nexus.workflow.view'
 
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
-const EVENT_SIDEBAR_SHOW_VIEW = 'sidebar:showView'
 
 const COMMAND_REFRESH = 'nexus.workflow.refresh'
 const COMMAND_SHOW = 'nexus.workflow.show'
@@ -130,13 +129,7 @@ export const workflowPlugin: Plugin = {
         onRefresh: () => void refresh(),
       })
 
-    api.views.register(VIEW_ID, {
-      slot: 'sidebarContent',
-      component: renderWorkflowView,
-      priority: 30,
-    })
-
-    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    // Phase 7: legacy SlotRegistry slot:'sidebarContent' entry removed.
     viewRegistry.register('workflow', workflowPaneViewCreator(renderWorkflowView))
 
     api.activityBar.addItem({
@@ -146,13 +139,15 @@ export const workflowPlugin: Plugin = {
       title: 'Workflows',
       viewId: VIEW_ID,
       priority: 30,
+      command: COMMAND_SHOW,
     })
 
     api.commands.register(COMMAND_REFRESH, () => {
       void refresh()
     })
-    api.commands.register(COMMAND_SHOW, () => {
-      api.events.emit(EVENT_SIDEBAR_SHOW_VIEW, { viewId: VIEW_ID })
+    api.commands.register(COMMAND_SHOW, async () => {
+      const leaf = await workspace.ensureLeafOfType('workflow', 'right')
+      workspace.revealLeaf(leaf)
     })
 
     // Reload the list whenever a workspace opens; clear it on close so

@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
+import { viewRegistry, workspace } from '../../../workspace'
 import { SearchView } from './SearchView'
 import { searchPaneViewCreator } from './SearchPaneView'
 import { useSearchStore, type SearchHit } from './searchStore'
@@ -14,7 +14,6 @@ const VIEW_ID = 'nexus.search.view'
 const COMMAND_FOCUS = 'nexus.search.focus'
 
 const EVENT_FILE_OPEN = 'files:open'
-const EVENT_SIDEBAR_SHOW_VIEW = 'sidebar:showView'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
 /** Basename of a forge-relative path. Forward-slash only. */
@@ -58,14 +57,9 @@ export const searchPlugin: Plugin = {
       })
     }
 
-    api.views.register(VIEW_ID, {
-      slot: 'sidebarContent',
-      component: () => createElement(SearchView, { onHitActivate: handleHitActivate }),
-      priority: 20,
-    })
-
-    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
-    // Coexists with the SlotRegistry entry above until Phase 7 cleanup.
+    // Phase 7: legacy SlotRegistry slot:'sidebarContent' registration
+    // removed. The view is now hosted exclusively via the Leaf/View
+    // pipeline below.
     viewRegistry.register(
       'search',
       searchPaneViewCreator(() =>
@@ -80,6 +74,7 @@ export const searchPlugin: Plugin = {
       title: 'Search',
       viewId: VIEW_ID,
       priority: 20,
+      command: COMMAND_FOCUS,
     })
 
     // Focus command — raises the view and focuses the input.
@@ -91,8 +86,9 @@ export const searchPlugin: Plugin = {
     //     different view: `sidebar:showView` flips the host to us;
     //     SearchView mounts; its mount effect drains the pending
     //     focus flag set by requestFocus() below.
-    api.commands.register(COMMAND_FOCUS, () => {
-      api.events.emit(EVENT_SIDEBAR_SHOW_VIEW, { viewId: VIEW_ID })
+    api.commands.register(COMMAND_FOCUS, async () => {
+      const leaf = await workspace.ensureLeafOfType('search', 'left')
+      workspace.revealLeaf(leaf)
       requestFocus()
     })
 

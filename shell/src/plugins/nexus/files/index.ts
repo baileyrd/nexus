@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
+import { viewRegistry, workspace } from '../../../workspace'
 import { FilesTree } from './FilesTree'
 import { fileExplorerViewCreator } from './FileExplorerView'
 import { useFilesStore, type FilesDirEntry } from './filesStore'
@@ -10,7 +10,6 @@ import { setApi } from './runtime'
 const VIEW_ID = 'nexus.files.tree'
 const COMMAND_FOCUS = 'nexus.files.focus'
 const EVENT_FILE_OPEN = 'files:open'
-const EVENT_SIDEBAR_SHOW_VIEW = 'sidebar:showView'
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
@@ -87,16 +86,9 @@ export const filesPlugin: Plugin = {
       })
     }
 
-    api.views.register(VIEW_ID, {
-      slot: 'sidebarContent',
-      component: () => createElement(FilesTree, { onFileActivate: handleFileActivate }),
-      priority: 10,
-    })
-
-    // Phase 5 (leaf-migration-plan.md): same React subtree, wrapped as
-    // a workspace View so Phase 6 can mount it into a leaf. Lives
-    // alongside the SlotRegistry registration — Phase 7 removes the
-    // latter once App.tsx flips to <Workspace>.
+    // Phase 7 (leaf-migration-plan.md): the legacy SlotRegistry
+    // registration for slot:'sidebarContent' was removed. The tree now
+    // mounts through the Leaf/View pipeline below.
     viewRegistry.register(
       'file-explorer',
       fileExplorerViewCreator(() =>
@@ -111,14 +103,15 @@ export const filesPlugin: Plugin = {
       title: 'Files',
       viewId: VIEW_ID,
       priority: 10,
+      command: COMMAND_FOCUS,
     })
 
-    // Focus command — raises the files view in the sidebar. Mirrors
-    // nexus.search.focus so the titlebar shortcut (and any future
-    // keybinding) can trigger the same affordance the activity-bar
-    // item already provides.
-    api.commands.register(COMMAND_FOCUS, () => {
-      api.events.emit(EVENT_SIDEBAR_SHOW_VIEW, { viewId: VIEW_ID })
+    // Focus command — ensure a file-explorer leaf exists in the left
+    // sidedock and reveal it. Existence/visibility split follows
+    // docs/leaf-migration-plan.md §Resolved decision #2.
+    api.commands.register(COMMAND_FOCUS, async () => {
+      const leaf = await workspace.ensureLeafOfType('file-explorer', 'left')
+      workspace.revealLeaf(leaf)
     })
 
     // ── Live refresh on storage events ───────────────────────────────────

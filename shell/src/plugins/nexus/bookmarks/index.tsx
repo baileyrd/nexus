@@ -1,8 +1,11 @@
+import { createRoot, type Root } from 'react-dom/client'
+import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { ViewBase, viewRegistry, workspace, type Leaf } from '../../../workspace'
 
 const VIEW_ID = 'nexus.bookmarks.view'
+const VIEW_TYPE = 'bookmarks'
 const COMMAND_FOCUS = 'nexus.bookmarks.focus'
-const EVENT_SIDEBAR_SHOW_VIEW = 'sidebar:showView'
 
 function BookmarksView() {
   return (
@@ -20,6 +23,29 @@ function BookmarksView() {
   )
 }
 
+/**
+ * Phase 7: bookmarks now mounts as a Leaf-hosted View. Placeholder
+ * component will be replaced when real bookmark storage ships.
+ */
+class BookmarksPaneView extends ViewBase {
+  readonly viewType = VIEW_TYPE
+  private root: Root | null = null
+
+  constructor(leaf: Leaf) {
+    super(leaf)
+  }
+
+  async onOpen(containerEl: HTMLElement): Promise<void> {
+    this.root = createRoot(containerEl)
+    this.root.render(createElement(BookmarksView))
+  }
+
+  async onClose(): Promise<void> {
+    this.root?.unmount()
+    this.root = null
+  }
+}
+
 export const bookmarksPlugin: Plugin = {
   manifest: {
     id: 'nexus.bookmarks',
@@ -27,18 +53,14 @@ export const bookmarksPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    dependsOn: ['nexus.activityBar', 'nexus.sidebar'],
+    dependsOn: ['nexus.activityBar'],
     contributes: {
       commands: [{ id: COMMAND_FOCUS, title: 'Focus Bookmarks', category: 'View' }],
     },
   },
 
   activate(api: PluginAPI) {
-    api.views.register(VIEW_ID, {
-      slot: 'sidebarContent',
-      component: BookmarksView,
-      priority: 30,
-    })
+    viewRegistry.register(VIEW_TYPE, (leaf) => new BookmarksPaneView(leaf))
 
     api.activityBar.addItem({
       id: 'nexus.bookmarks.activityItem',
@@ -47,10 +69,12 @@ export const bookmarksPlugin: Plugin = {
       title: 'Bookmarks',
       viewId: VIEW_ID,
       priority: 30,
+      command: COMMAND_FOCUS,
     })
 
-    api.commands.register(COMMAND_FOCUS, () => {
-      api.events.emit(EVENT_SIDEBAR_SHOW_VIEW, { viewId: VIEW_ID })
+    api.commands.register(COMMAND_FOCUS, async () => {
+      const leaf = await workspace.ensureLeafOfType(VIEW_TYPE, 'left')
+      workspace.revealLeaf(leaf)
     })
   },
 }

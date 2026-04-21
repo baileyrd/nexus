@@ -4,7 +4,6 @@
 // and flips rightPanel.visible on so it shows up by default.
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { RightPanelView } from './RightPanelView'
 import { useLayoutStore } from '../../../stores/layoutStore'
 
 export const rightPanelPlugin: Plugin = {
@@ -24,12 +23,7 @@ export const rightPanelPlugin: Plugin = {
     },
   },
   activate(api: PluginAPI) {
-    api.views.register('rightPanel', {
-      slot: 'rightPanel',
-      component: RightPanelView,
-      priority: 0,
-    })
-
+    // Phase 7: legacy slot:'rightPanel' registration removed.
     api.commands.register('rightPanel.toggle', () => {
       useLayoutStore.getState().toggleRightPanel()
     })

@@ -90,6 +90,10 @@ npm install
 npm run tauri:dev    # launches the Rust shell + Vite + webview
 ```
 
+The shell's pane / tab model is the Leaf + `ViewRegistry` primitives from
+[`docs/leaf-architecture.md`](docs/leaf-architecture.md) — read that before
+writing a plugin View.
+
 ### MCP Server
 
 Start the MCP server for use with Claude Code, Cursor, or any MCP client:

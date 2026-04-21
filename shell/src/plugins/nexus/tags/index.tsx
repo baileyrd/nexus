@@ -1,10 +1,10 @@
+import { createRoot, type Root } from 'react-dom/client'
+import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { useLayoutStore } from '../../../stores/layoutStore'
-import { useRightPanelStore } from '../rightPanel/rightPanelStore'
+import { ViewBase, viewRegistry, workspace, type Leaf } from '../../../workspace'
 
-const VIEW_ID = 'nexus.tags.view'
+const VIEW_TYPE = 'tags'
 const COMMAND_FOCUS = 'nexus.tags.focus'
-const EVENT_REGISTER_TAB = 'rightPanel:registerTab'
 
 /** Placeholder body. A tag inspector — listing the active note's
  *  tags and offering filters into the global tag index — is not yet
@@ -25,6 +25,25 @@ function TagsView() {
   )
 }
 
+class TagsPaneView extends ViewBase {
+  readonly viewType = VIEW_TYPE
+  private root: Root | null = null
+
+  constructor(leaf: Leaf) {
+    super(leaf)
+  }
+
+  async onOpen(containerEl: HTMLElement): Promise<void> {
+    this.root = createRoot(containerEl)
+    this.root.render(createElement(TagsView))
+  }
+
+  async onClose(): Promise<void> {
+    this.root?.unmount()
+    this.root = null
+  }
+}
+
 export const tagsPlugin: Plugin = {
   manifest: {
     id: 'nexus.tags',
@@ -32,29 +51,16 @@ export const tagsPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    dependsOn: ['nexus.rightPanel'],
     contributes: {
       commands: [{ id: COMMAND_FOCUS, title: 'Focus Tags', category: 'View' }],
     },
   },
 
   activate(api: PluginAPI) {
-    api.views.register(VIEW_ID, {
-      slot: 'rightPanelContent',
-      component: TagsView,
-      priority: 30,
-    })
-    api.events.emit(EVENT_REGISTER_TAB, {
-      viewId: VIEW_ID,
-      title: 'Tags',
-      priority: 30,
-      iconName: 'tag',
-    })
-    api.commands.register(COMMAND_FOCUS, () => {
-      useLayoutStore.setState((s) => ({
-        rightPanel: { ...s.rightPanel, visible: true },
-      }))
-      useRightPanelStore.getState().setActive(VIEW_ID)
+    viewRegistry.register(VIEW_TYPE, (leaf) => new TagsPaneView(leaf))
+    api.commands.register(COMMAND_FOCUS, async () => {
+      const leaf = await workspace.ensureLeafOfType(VIEW_TYPE, 'right')
+      workspace.revealLeaf(leaf)
     })
   },
 }

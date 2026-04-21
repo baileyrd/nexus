@@ -1,10 +1,9 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
+import { viewRegistry, workspace } from '../../../workspace'
 import { TerminalView } from './TerminalView'
 import { terminalPaneViewCreator } from './TerminalPaneView'
 import { useTerminalStore } from './terminalStore'
-import { useLayoutStore } from '../../../stores/layoutStore'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 
 const PLUGIN_ID = 'com.nexus.terminal'
@@ -19,7 +18,6 @@ const COMMAND_FOCUS = 'nexus.terminal.focus'
 
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
-const EVENT_ACTIVITY_BAR_ACTIVE_CHANGED = 'activityBar:activeChanged'
 const EVENT_TERMINAL_FOCUS = 'nexus.terminal:focus'
 
 const CONTEXT_KEY_VISIBLE = 'nexus.terminal.visible'
@@ -64,22 +62,8 @@ export const terminalPlugin: Plugin = {
   },
 
   async activate(api: PluginAPI) {
-    // ── View registration ───────────────────────────────────────────
-    //
-    // The panelArea slot already exists in SlotRegistry. Wrap
-    // TerminalView so it receives the kernel/events refs — it owns a
-    // plain xterm instance that needs to invoke the kernel directly
-    // on every keystroke and poll tick, so passing the API through
-    // props keeps the component testable without pulling in the
-    // whole plugin API singleton.
-    api.views.register(VIEW_ID, {
-      slot: 'panelArea',
-      component: () =>
-        createElement(TerminalView, { kernel: api.kernel, events: api.events }),
-      priority: 10,
-    })
-
-    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    // Phase 7: legacy SlotRegistry slot:'panelArea' entry removed.
+    // TerminalView now mounts exclusively through the Leaf/View pipeline.
     viewRegistry.register(
       'terminal',
       terminalPaneViewCreator(() =>
@@ -135,64 +119,38 @@ export const terminalPlugin: Plugin = {
 
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
       void destroySession()
-      // Drop the panel on workspace close. Reopening the workspace
-      // will not auto-show the terminal — the user toggles it back.
-      useLayoutStore.setState((s) => ({
-        panelArea: { ...s.panelArea, visible: false },
-      }))
       useTerminalStore.getState().setVisible(false)
       api.context.set(CONTEXT_KEY_VISIBLE, false)
     })
 
-    // ── Visibility plumbing ─────────────────────────────────────────
+    // ── Commands ────────────────────────────────────────────────────
     //
-    // panelArea lives outside the sidebar, so the activity-bar's
-    // default `sidebar:showView` emission isn't useful to us. We
-    // instead listen for `activityBar:activeChanged` — when the
-    // terminal item becomes active, show panelArea + ensure a
-    // session exists. We deliberately DO NOT auto-hide panelArea
-    // when the activity bar switches away (the user can have the
-    // terminal open alongside a sidebar view). They close it via the
-    // keybinding or by clicking the activity-bar item again (which
-    // toggles it off in activityBar's own click handler).
-    //
-    // The activityBar plugin will also emit `sidebar:showView` with
-    // our viewId. The sidebar plugin ignores unknown viewIds (no
-    // sidebarContent slot registered for nexus.terminal.panelView),
-    // so this is harmless.
-    const setVisible = (visible: boolean) => {
-      useLayoutStore.setState((s) => ({
-        panelArea: { ...s.panelArea, visible },
-      }))
-      useTerminalStore.getState().setVisible(visible)
-      api.context.set(CONTEXT_KEY_VISIBLE, visible)
+    // Post-migration the terminal lives as a Leaf in the right sidedock
+    // (a tabbed pane, just like any other view). Toggle = detach if
+    // present, otherwise ensure + reveal. Focus = ensure + reveal + emit
+    // the focus event the TerminalView subscribes to.
+    const ensureAndReveal = async () => {
+      const leaf = await workspace.ensureLeafOfType('terminal', 'right')
+      workspace.revealLeaf(leaf)
+      useTerminalStore.getState().setVisible(true)
+      api.context.set(CONTEXT_KEY_VISIBLE, true)
+      void ensureSession()
+      return leaf
     }
 
-    api.events.on<{ viewId: string | null }>(
-      EVENT_ACTIVITY_BAR_ACTIVE_CHANGED,
-      ({ viewId }) => {
-        if (viewId === VIEW_ID) {
-          setVisible(true)
-          void ensureSession()
-        }
-      },
-    )
-
-    // ── Commands ────────────────────────────────────────────────────
-    api.commands.register(COMMAND_TOGGLE, () => {
-      const currentlyVisible = useLayoutStore.getState().panelArea.visible
-      const next = !currentlyVisible
-      setVisible(next)
-      if (next) {
-        void ensureSession()
+    api.commands.register(COMMAND_TOGGLE, async () => {
+      const existing = workspace.getLeavesOfType('terminal')
+      if (existing.length > 0) {
+        for (const leaf of existing) workspace.detachLeaf(leaf)
+        useTerminalStore.getState().setVisible(false)
+        api.context.set(CONTEXT_KEY_VISIBLE, false)
+        return
       }
+      await ensureAndReveal()
     })
 
-    api.commands.register(COMMAND_FOCUS, () => {
-      setVisible(true)
-      void ensureSession()
-      // TerminalView subscribes to this event and calls term.focus()
-      // on the embedded xterm instance.
+    api.commands.register(COMMAND_FOCUS, async () => {
+      await ensureAndReveal()
       api.events.emit(EVENT_TERMINAL_FOCUS, {})
     })
 
@@ -204,6 +162,7 @@ export const terminalPlugin: Plugin = {
       title: 'Terminal',
       viewId: VIEW_ID,
       priority: 40,
+      command: COMMAND_FOCUS,
     })
 
     // ── Boot-time reconciliation ────────────────────────────────────

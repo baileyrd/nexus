@@ -1,11 +1,17 @@
-import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { useLayoutStore } from '../../../stores/layoutStore'
-import { SidebarHost } from './SidebarHost'
-import { useSidebarSplitStore } from './sidebarSplitStore'
+import type { Plugin } from '../../../types/plugin'
 
-const EVENT_SHOW = 'sidebar:showView'
-const EVENT_HIDE = 'sidebar:hide'
-
+/**
+ * Phase 7 (leaf-migration-plan.md): the legacy sidebar host + its
+ * slot:'sidebar' registration + the `sidebar:showView`/`sidebar:hide`
+ * event pair were removed when the left sidedock became a workspace
+ * sidedock rendered by <Workspace>. Plugins that previously emitted
+ * those events now call `workspace.ensureLeafOfType + revealLeaf`
+ * from their focus command.
+ *
+ * The plugin manifest is kept so that `dependsOn: ['nexus.sidebar']`
+ * declarations in existing plugins still resolve without requiring a
+ * host-wide rename. The activate hook is a no-op.
+ */
 export const sidebarPlugin: Plugin = {
   manifest: {
     id: 'nexus.sidebar',
@@ -16,36 +22,7 @@ export const sidebarPlugin: Plugin = {
     contributes: {},
   },
 
-  activate(api: PluginAPI) {
-    const layout = useLayoutStore.getState()
-
-    // Start with no active view. persist middleware may have retained
-    // a stale id from a previous run (e.g. 'fileExplorer' from the
-    // template's default) — wipe it so we don't point the host at a
-    // view that no plugin contributes.
-    layout.setActiveSidebarView('')
-    if (layout.sidebar.visible) {
-      useLayoutStore.setState((s) => ({ sidebar: { ...s.sidebar, visible: false } }))
-    }
-
-    api.events.on<{ viewId: string }>(EVENT_SHOW, ({ viewId }) => {
-      // Obsidian-faithful reveal: find an existing leaf of this type and
-      // activate it, else create a new one. The legacy layoutStore
-      // activeView field is kept as a mirror so the activity bar's
-      // "which icon is highlighted" logic still lines up.
-      useSidebarSplitStore.getState().revealLeaf(viewId)
-      useLayoutStore.getState().setActiveSidebarView(viewId)
-      useLayoutStore.setState((s) => ({ sidebar: { ...s.sidebar, visible: true } }))
-    })
-
-    api.events.on(EVENT_HIDE, () => {
-      useLayoutStore.setState((s) => ({ sidebar: { ...s.sidebar, visible: false } }))
-    })
-
-    api.views.register('nexus.sidebar.host', {
-      slot: 'sidebar',
-      component: SidebarHost,
-      priority: 10,
-    })
+  activate() {
+    // no-op — retained purely for dependency-graph compatibility.
   },
 }

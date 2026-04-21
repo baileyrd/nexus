@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
+import { viewRegistry, workspace } from '../../../workspace'
 import { SkillsView } from './SkillsView'
 import { skillsPaneViewCreator } from './SkillsPaneView'
 import { useSkillsStore, type SkillEntry } from './skillsStore'
@@ -9,7 +9,6 @@ const VIEW_ID = 'nexus.skills.view'
 
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
-const EVENT_SIDEBAR_SHOW_VIEW = 'sidebar:showView'
 
 const COMMAND_REFRESH = 'nexus.skills.refresh'
 const COMMAND_SHOW = 'nexus.skills.show'
@@ -105,13 +104,7 @@ export const skillsPlugin: Plugin = {
         onRefresh: () => void refresh(),
       })
 
-    api.views.register(VIEW_ID, {
-      slot: 'sidebarContent',
-      component: renderSkillsView,
-      priority: 40,
-    })
-
-    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    // Phase 7: legacy SlotRegistry slot:'sidebarContent' entry removed.
     viewRegistry.register('skills', skillsPaneViewCreator(renderSkillsView))
 
     api.activityBar.addItem({
@@ -121,13 +114,15 @@ export const skillsPlugin: Plugin = {
       title: 'Skills',
       viewId: VIEW_ID,
       priority: 40,
+      command: COMMAND_SHOW,
     })
 
     api.commands.register(COMMAND_REFRESH, () => {
       void refresh()
     })
-    api.commands.register(COMMAND_SHOW, () => {
-      api.events.emit(EVENT_SIDEBAR_SHOW_VIEW, { viewId: VIEW_ID })
+    api.commands.register(COMMAND_SHOW, async () => {
+      const leaf = await workspace.ensureLeafOfType('skills', 'right')
+      workspace.revealLeaf(leaf)
     })
 
     // Same load-on-open / clear-on-close lifecycle as nexus.workflow.
