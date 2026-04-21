@@ -1,22 +1,28 @@
 // src/shell/App.tsx
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSlotStore } from '../registry/SlotRegistry'
 import { useLayoutStore } from '../stores/layoutStore'
 import { usePaneModeStore } from '../stores/paneModeStore'
 import { SlotSurface } from './slots/SlotSurface'
-import { ResizeHandle } from './ResizeHandle'
 import { getRegistry } from '../host/shellRegistry'
 import { contextKeyService } from '../host/ContextKeyService'
-import { useSidebarSplitStore } from '../plugins/nexus/sidebar/sidebarSplitStore'
+import { useWorkspaceStore as useNexusWorkspaceStore } from '../plugins/nexus/workspace/workspaceStore'
+import { Workspace } from '../workspace/WorkspaceRenderer'
+import { workspace as workspaceStore } from '../workspace/workspaceStore'
+import {
+  buildDefaultLayout,
+  installAutoSave,
+  loadWorkspace,
+} from '../workspace'
 
 export default function App() {
   const slots = useSlotStore(s => s.slots)
-  const {
-    sidebar, panelArea, rightPanel,
-    resizeSidebar, resizePanelArea, resizeRightPanel,
-  } = useLayoutStore()
   const paneModeViewId = usePaneModeStore(s => s.activeViewId)
+  const rootPath = useNexusWorkspaceStore(s => s.rootPath)
   const [debugInfo, setDebugInfo] = useState<string>('')
+  const [hydrated, setHydrated] = useState(false)
+  const autoSaveStopRef = useRef<(() => void) | null>(null)
+  const lastHydratedPathRef = useRef<string | null>(null)
 
   useEffect(() => {
     // Debug: log what's in each slot after mount
@@ -25,8 +31,6 @@ export default function App() {
       const info = [
         `Registry: ${reg ? 'loaded' : 'NULL'}`,
         `activityBar: ${slots.activityBar.length}`,
-        `sidebar: ${slots.sidebar.length}`,
-        `editorArea: ${slots.editorArea.length}`,
         `statusBarLeft: ${slots.statusBarLeft.length}`,
         `statusBarRight: ${slots.statusBarRight.length}`,
         `overlay: ${slots.overlay.length}`,
@@ -37,39 +41,76 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [slots])
 
-  // Boot-time view resolver — Obsidian-faithful. When sidebar.activeView
-  // (or the panelArea equivalent) doesn't resolve against the live slot
-  // registry, pick the highest-priority registered view and heal state
-  // so activity-bar clicks, activity-bar state, and the rendered view
-  // all agree. Runs whenever the relevant slot set changes, so plugin
-  // enable/disable self-corrects too. The right panel has its own
-  // first-registered-wins logic in rightPanelStore, so it's excluded.
+  // ── Workspace boot sequence ───────────────────────────────────────────────
+  //
+  // Plan: /home/baileyrd/projects/nexus/docs/leaf-migration-plan.md §Phase 6.
+  //
+  // Ordering constraint: every plugin's `viewRegistry.register(...)` call
+  // must have run BEFORE `hydrate(json)` so `setViewState` can resolve
+  // every saved leaf's creator. Plugin activation happens in main.tsx's
+  // `boot()` and is NOT awaited before React mounts — activation races
+  // the initial render. We key hydration off `rootPath` becoming
+  // non-null: `nexus.workspace` only publishes a root after `boot_kernel`
+  // resolves, and by that point every core plugin's `activate()` has
+  // been awaited in `ExtensionHost.loadAll` (main.tsx line 158). So
+  // rootPath!==null implies all view types are registered.
+  //
+  // When the user switches workspaces (rootPath changes), we re-run the
+  // cycle: stop auto-save for the previous vault, load+hydrate the new
+  // vault's workspace.json, restart auto-save.
   useEffect(() => {
-    const sbEntries = slots.sidebarContent ?? []
-    if (sbEntries.length === 0) return
-    const current = useLayoutStore.getState().sidebar.activeView
-    if (!current || !sbEntries.some((e) => e.id === current)) {
-      // SlotRegistry already stores entries sorted ascending by priority.
-      useLayoutStore.getState().setActiveSidebarView(sbEntries[0].id)
+    if (rootPath === null) {
+      // Vault closed. Stop autosaving into the previous vault's path.
+      if (autoSaveStopRef.current) {
+        autoSaveStopRef.current()
+        autoSaveStopRef.current = null
+      }
+      setHydrated(false)
+      lastHydratedPathRef.current = null
+      return
     }
-    // Heal the split store too: if the user has no open leaves but a
-    // sidebarContent view exists, seed one so the sidebar boots with a
-    // visible tab (Obsidian's "first-registered-wins" behaviour). The
-    // legacy activeView resolver above still runs for back-compat with
-    // code that mirrors activeView for activity-bar highlighting.
-    const split = useSidebarSplitStore.getState()
-    if (split.leaves.length === 0) {
-      split.revealLeaf(sbEntries[0].id)
-    }
-  }, [slots.sidebarContent])
+    if (lastHydratedPathRef.current === rootPath) return
+    lastHydratedPathRef.current = rootPath
 
+    let cancelled = false
+    void (async () => {
+      try {
+        const saved = await loadWorkspace(rootPath)
+        if (cancelled) return
+        const json = saved ?? buildDefaultLayout()
+        await workspaceStore.hydrate(json)
+        if (cancelled) return
+        // Replace any previous autosave subscription before installing new.
+        if (autoSaveStopRef.current) autoSaveStopRef.current()
+        autoSaveStopRef.current = installAutoSave(rootPath)
+        setHydrated(true)
+      } catch (err) {
+        console.error('[App] workspace hydrate failed, falling back to default', err)
+        if (cancelled) return
+        const fallback = buildDefaultLayout()
+        await workspaceStore.hydrate(fallback)
+        if (!cancelled) {
+          if (autoSaveStopRef.current) autoSaveStopRef.current()
+          autoSaveStopRef.current = installAutoSave(rootPath)
+          setHydrated(true)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [rootPath])
+
+  // Unmount-time cleanup: dispose auto-save subscriptions.
   useEffect(() => {
-    const paEntries = slots.panelArea ?? []
-    if (paEntries.length === 0) return
-    const current = useLayoutStore.getState().panelArea.activePanel
-    if (current && paEntries.some((e) => e.id === current)) return
-    useLayoutStore.getState().setActivePanel(paEntries[0].id)
-  }, [slots.panelArea])
+    return () => {
+      if (autoSaveStopRef.current) {
+        autoSaveStopRef.current()
+        autoSaveStopRef.current = null
+      }
+    }
+  }, [])
 
   // Global keyboard dispatcher
   useEffect(() => {
@@ -110,6 +151,11 @@ export default function App() {
     )
   }
 
+  // Swallow debugInfo for now — surfaced via console.info above.
+  void debugInfo
+  void useLayoutStore // legacy panel sizing removed; import preserved for
+  // backward compat with consumers that still mutate the store directly.
+
   return (
     <div className="shell-root">
 
@@ -124,23 +170,23 @@ export default function App() {
           as direct flex siblings. */}
       <div className="workspace">
 
-        {/* Activity bar — `.workspace-ribbon.mod-left` in Obsidian. */}
+        {/* Activity bar — `.workspace-ribbon.mod-left` in Obsidian.
+            Chrome slot — kept as SlotRegistry entry. */}
         <div className="workspace-ribbon mod-left">
           <SlotSurface entries={slots.activityBar} />
         </div>
 
         {(() => {
-          // Pane-mode: one slot entry takes over the entire body region.
-          // The activity bar stays visible (it's a sibling of this
-          // branch); the statusbar and overlay are untouched (rendered
-          // outside this branch).
+          // Pane-mode: one slot entry takes over the entire body region,
+          // bypassing the leaf renderer. The activity bar stays visible
+          // (sibling above); statusbar / overlay are rendered outside.
           const paneEntry = paneModeViewId
             ? slots.paneMode.find(e => e.id === paneModeViewId)
             : undefined
 
           if (paneModeViewId && !paneEntry) {
             console.warn(
-              `[App] Pane-mode viewId "${paneModeViewId}" is set but no matching slot entry exists; falling through to tri-pane.`,
+              `[App] Pane-mode viewId "${paneModeViewId}" is set but no matching slot entry exists; falling through to workspace renderer.`,
             )
           }
 
@@ -152,47 +198,26 @@ export default function App() {
             )
           }
 
+          // Phase 6 (plan line 182): <Workspace> owns the entire body
+          // region — sidebar + main editor + right panel. Replaces the
+          // former SlotSurface renders for sidebar / editorArea /
+          // panelArea / rightPanel. Those slots become dead once
+          // plugins stop registering into them (Phase 7 cleanup).
+          //
+          // Until the workspace has hydrated we render an empty shell
+          // so chrome (activity bar, status bar, overlay) is visible and
+          // plugin activation can finish without a flash of the old
+          // layout.
           return (
-            <>
-              {sidebar.visible && (
-                <>
-                  <div className="workspace-split mod-left-split mod-vertical" style={{ width: sidebar.width }}>
-                    <SlotSurface entries={slots.sidebar} />
-                  </div>
-                  <ResizeHandle direction="horizontal" onResize={resizeSidebar} />
-                </>
-              )}
-
-              <div className="workspace-split mod-root mod-vertical">
-                <div className="shell-editor-area">
-                  <SlotSurface entries={slots.editorArea} />
-                </div>
-
-                {panelArea.visible && (
-                  <>
-                    <ResizeHandle direction="vertical" onResize={resizePanelArea} />
-                    <div className="shell-panel-area" style={{ height: panelArea.height }}>
-                      <SlotSurface entries={slots.panelArea} />
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {rightPanel.visible && (
-                <>
-                  <ResizeHandle direction="horizontal" onResize={resizeRightPanel} />
-                  <div className="workspace-split mod-right-split mod-vertical" style={{ width: rightPanel.width }}>
-                    <SlotSurface entries={slots.rightPanel} />
-                  </div>
-                </>
-              )}
-            </>
+            <div className="workspace-main-region" style={{ flex: '1 1 auto', minWidth: 0, display: 'flex' }}>
+              {hydrated ? <Workspace /> : null}
+            </div>
           )
         })()}
       </div>
 
-      {/* Status bar — `.status-bar` matches Obsidian. Full-width at
-          the bottom of shell-root; items on left/right in two segments. */}
+      {/* Status bar — chrome. `.status-bar` matches Obsidian. Full-width
+          at the bottom; items on left/right in two segments. */}
       <div className="status-bar">
         <div className="status-bar-item-segment">
           <SlotSurface entries={slots.statusBarLeft} />
