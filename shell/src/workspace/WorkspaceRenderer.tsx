@@ -1,0 +1,563 @@
+// React render layer for the Leaf + ViewRegistry workspace model.
+// Plan reference: /home/baileyrd/projects/nexus/docs/leaf-migration-plan.md §Phase 4.
+//
+// Design notes:
+// - Tree nodes are mutated IN PLACE by the store; top-level Zustand state
+//   identity does not change on tree edits. We force re-render by
+//   subscribing to the `layout-change` event (see `useLayoutVersion`).
+// - `<LeafHost>` is the one place a View's DOM lives. The wrapper div has
+//   no React children — there is nothing for React to diff inside. Tab
+//   switches toggle `display: none`, leaving mounted DOM intact so
+//   switching back is instant (plan line 134).
+// - Floating windows are rendered inline with `data-floating="true"` for
+//   Phase 4 scope. Tauri multi-window comes later.
+import {
+  memo,
+  useEffect,
+  useReducer,
+  useRef,
+  type CSSProperties,
+} from 'react'
+import type {
+  FloatingWindow as FloatingWindowNode,
+  Leaf,
+  Root,
+  Sidedock,
+  Split,
+  Tabs,
+  WorkspaceParent,
+} from './types.ts'
+import { workspace } from './workspaceStore.ts'
+
+// ---------------------------------------------------------------------------
+// Layout-change subscription hook.
+//
+// Tree mutations are in-place; object identity of `workspace.rootSplit` etc.
+// does NOT change. We bump a local counter on every `layout-change` so the
+// render tree re-runs. One hook per top-level component is plenty — inner
+// renderers flow from props, which read the mutated tree on every render.
+// ---------------------------------------------------------------------------
+
+function useLayoutVersion(): void {
+  const [, force] = useReducer((x: number) => x + 1, 0)
+  useEffect(() => {
+    const off = workspace.on('layout-change', () => force())
+    return off
+  }, [])
+}
+
+// ---------------------------------------------------------------------------
+// <Workspace> — top-level. Renders left dock + main area + right dock.
+// ---------------------------------------------------------------------------
+
+const ROOT_STYLE: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'row',
+  width: '100%',
+  height: '100%',
+  minWidth: 0,
+  minHeight: 0,
+  overflow: 'hidden',
+}
+
+const MAIN_STYLE: CSSProperties = {
+  flex: '1 1 auto',
+  display: 'flex',
+  minWidth: 0,
+  minHeight: 0,
+  overflow: 'hidden',
+}
+
+export function Workspace(): JSX.Element {
+  useLayoutVersion()
+  const rootSplit = workspace.rootSplit
+  const leftSplit = workspace.leftSplit
+  const rightSplit = workspace.rightSplit
+  const floating = workspace.floating
+
+  return (
+    <div className="workspace-root" style={ROOT_STYLE}>
+      <SidedockFrame side="left" dock={leftSplit} />
+      <div className="workspace-main" style={MAIN_STYLE}>
+        <RenderNode node={rootSplit} />
+      </div>
+      <SidedockFrame side="right" dock={rightSplit} />
+      {floating.map((fw) => (
+        <div
+          key={fw.id}
+          data-floating="true"
+          style={{ display: 'none' }}
+          aria-hidden="true"
+        >
+          <RenderNode node={fw} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// <SidedockFrame> — a Sidedock plus collapse button + resize handle.
+// ---------------------------------------------------------------------------
+
+const COLLAPSE_THRESHOLD = 120
+const DOCK_MIN_SIZE = 150
+const RIBBON_WIDTH = 24
+
+interface SidedockFrameProps {
+  side: 'left' | 'right'
+  dock: Sidedock
+}
+
+const COLLAPSED_BAR_STYLE: CSSProperties = {
+  width: RIBBON_WIDTH,
+  flex: `0 0 ${RIBBON_WIDTH}px`,
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'center',
+  background: 'var(--background-secondary, var(--bg-raised, #252526))',
+  borderRight: '1px solid var(--divider-color, var(--line, #333))',
+}
+
+function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
+  if (dock.collapsed) {
+    return (
+      <div
+        className={`workspace-sidedock mod-${side} is-collapsed`}
+        style={{
+          ...COLLAPSED_BAR_STYLE,
+          borderRight: side === 'left' ? COLLAPSED_BAR_STYLE.borderRight : 'none',
+          borderLeft:
+            side === 'right'
+              ? '1px solid var(--divider-color, var(--line, #333))'
+              : 'none',
+        }}
+      >
+        <button
+          type="button"
+          title={`Expand ${side} sidebar`}
+          onClick={() => workspace.setSidedockCollapsed(side, false)}
+          style={COLLAPSE_BUTTON_STYLE}
+        >
+          {side === 'left' ? '›' : '‹'}
+        </button>
+      </div>
+    )
+  }
+
+  const panel = (
+    <div
+      className={`workspace-sidedock mod-${side}`}
+      style={{
+        flex: `0 0 ${dock.size}px`,
+        width: dock.size,
+        minWidth: DOCK_MIN_SIZE,
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--background-secondary, var(--bg-raised, #252526))',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: side === 'left' ? 'flex-end' : 'flex-start',
+          padding: '2px 4px',
+          borderBottom: '1px solid var(--divider-color, var(--line, #333))',
+        }}
+      >
+        <button
+          type="button"
+          title={`Collapse ${side} sidebar`}
+          onClick={() => workspace.setSidedockCollapsed(side, true)}
+          style={COLLAPSE_BUTTON_STYLE}
+        >
+          {side === 'left' ? '‹' : '›'}
+        </button>
+      </div>
+      <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex' }}>
+        <RenderNode node={dock} />
+      </div>
+    </div>
+  )
+
+  const handle = (
+    <DockResizeHandle
+      key={`handle-${side}`}
+      side={side}
+      initialSize={dock.size}
+    />
+  )
+
+  // Handle placement: inner edge. Left dock -> handle right of panel;
+  // right dock -> handle left of panel.
+  return side === 'left' ? (
+    <>
+      {panel}
+      {handle}
+    </>
+  ) : (
+    <>
+      {handle}
+      {panel}
+    </>
+  )
+}
+
+const COLLAPSE_BUTTON_STYLE: CSSProperties = {
+  background: 'transparent',
+  border: 'none',
+  color: 'var(--text-muted, var(--fg-muted, #888))',
+  cursor: 'pointer',
+  fontSize: 14,
+  lineHeight: 1,
+  padding: '2px 6px',
+}
+
+// ---------------------------------------------------------------------------
+// DockResizeHandle — local variant. ResizeHandle.tsx measures
+// `previousElementSibling`; it only fits when the handle sits to the right
+// of the panel. Our right dock reverses that, so we implement a small
+// side-aware handle rather than force-fit the shared one.
+// ---------------------------------------------------------------------------
+
+interface DockResizeHandleProps {
+  side: 'left' | 'right'
+  initialSize: number
+}
+
+function DockResizeHandle({ side, initialSize }: DockResizeHandleProps): JSX.Element {
+  const startX = useRef(0)
+  const startSize = useRef(initialSize)
+
+  const onMouseDown = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    startX.current = e.clientX
+    startSize.current = initialSize
+
+    const onMouseMove = (ev: MouseEvent): void => {
+      const delta = ev.clientX - startX.current
+      // Left dock grows on positive delta; right dock grows on negative delta.
+      const target =
+        side === 'left' ? startSize.current + delta : startSize.current - delta
+      if (target < COLLAPSE_THRESHOLD) {
+        workspace.setSidedockCollapsed(side, true)
+        cleanup()
+        return
+      }
+      workspace.setSidedockSize(side, target)
+    }
+
+    const cleanup = (): void => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', cleanup)
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', cleanup)
+  }
+
+  return (
+    <div
+      className="workspace-dock-resize-handle"
+      onMouseDown={onMouseDown}
+      style={{
+        flex: '0 0 4px',
+        width: 4,
+        cursor: 'col-resize',
+        background: 'transparent',
+        zIndex: 1,
+      }}
+    />
+  )
+}
+
+// ---------------------------------------------------------------------------
+// <RenderNode> — pure switch on node.kind. No own state.
+// ---------------------------------------------------------------------------
+
+interface RenderNodeProps {
+  node: WorkspaceParent
+}
+
+function RenderNode({ node }: RenderNodeProps): JSX.Element | null {
+  switch (node.kind) {
+    case 'split':
+      return <SplitNode node={node} />
+    case 'tabs':
+      return <TabGroup tabs={node} />
+    case 'root':
+      return <RenderNode node={(node as Root).child} />
+    case 'floating':
+      return (
+        <div data-floating="true" style={{ width: '100%', height: '100%' }}>
+          <RenderNode node={(node as FloatingWindowNode).child} />
+        </div>
+      )
+    default: {
+      // Exhaustiveness guard. Unreachable at runtime; type model covers all variants.
+      const _never: never = node
+      void _never
+      return null
+    }
+  }
+}
+
+function SplitNode({ node }: { node: Split }): JSX.Element {
+  const style: CSSProperties = {
+    display: 'flex',
+    flexDirection: node.direction === 'horizontal' ? 'row' : 'column',
+    flex: '1 1 auto',
+    minWidth: 0,
+    minHeight: 0,
+    width: '100%',
+    height: '100%',
+  }
+  return (
+    <div className="workspace-split" style={style}>
+      {node.children.map((child, i) => {
+        const childFlex = node.sizes?.[i] ?? 1
+        return (
+          <div
+            key={childKey(child)}
+            style={{
+              flex: `${childFlex} ${childFlex} 0`,
+              minWidth: 0,
+              minHeight: 0,
+              display: 'flex',
+            }}
+          >
+            <RenderNode node={child} />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function childKey(node: WorkspaceParent): string {
+  return (node as { id?: string }).id ?? 'anon'
+}
+
+// ---------------------------------------------------------------------------
+// <TabGroup> — TabStrip on top + all LeafHosts (inactive hidden via display).
+// CRITICAL (plan line 134): render ALL leaves, hide inactive with display:none.
+// ---------------------------------------------------------------------------
+
+interface TabGroupProps {
+  tabs: Tabs
+}
+
+function TabGroup({ tabs }: TabGroupProps): JSX.Element {
+  const activeLeaf = tabs.leaves[tabs.activeIndex] ?? null
+
+  return (
+    <div
+      className="workspace-tab-group"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: '1 1 auto',
+        minWidth: 0,
+        minHeight: 0,
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+      }}
+    >
+      <TabStrip tabs={tabs} />
+      <div
+        className="workspace-tab-body"
+        style={{
+          flex: '1 1 auto',
+          minHeight: 0,
+          position: 'relative',
+          display: 'flex',
+        }}
+      >
+        {tabs.leaves.map((leaf) => (
+          <LeafHost
+            key={leaf.id}
+            leaf={leaf}
+            hidden={leaf !== activeLeaf}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// <TabStrip> — horizontal list of tab buttons.
+// ---------------------------------------------------------------------------
+
+function TabStrip({ tabs }: { tabs: Tabs }): JSX.Element {
+  return (
+    <div
+      className="workspace-tab-strip"
+      role="tablist"
+      style={{
+        display: 'flex',
+        flexDirection: 'row',
+        flex: '0 0 auto',
+        background: 'var(--tab-container-background, var(--bg-soft, #2d2d2d))',
+        borderBottom: '1px solid var(--divider-color, var(--line, #333))',
+        minHeight: 28,
+        overflow: 'hidden',
+      }}
+    >
+      {tabs.leaves.map((leaf, i) => {
+        const isActive = i === tabs.activeIndex
+        return (
+          <TabButton
+            key={leaf.id}
+            leaf={leaf}
+            active={isActive}
+            canClose={tabs.leaves.length > 1}
+            onActivate={() => workspace.setTabActiveIndex(tabs.id, i)}
+            onClose={() => {
+              void workspace.detachLeaf(leaf)
+            }}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+interface TabButtonProps {
+  leaf: Leaf
+  active: boolean
+  canClose: boolean
+  onActivate: () => void
+  onClose: () => void
+}
+
+function TabButton({
+  leaf,
+  active,
+  canClose,
+  onActivate,
+  onClose,
+}: TabButtonProps): JSX.Element {
+  // Display text: no `View.getDisplayText()` in the Phase 4 API surface yet.
+  // Fall back to `viewType`, or "Empty" when the view is null. A dedicated
+  // display-text hook is a Phase 5+ concern (plugin-contributed labels).
+  // TODO(phase 5): add an optional `view.getDisplayText(): string` override.
+  const label = leaf.view?.viewType ?? 'Empty'
+  const closable = canClose && !leaf.pinned
+
+  return (
+    <div
+      role="tab"
+      aria-selected={active}
+      onClick={onActivate}
+      className={`workspace-tab${active ? ' is-active' : ''}`}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '4px 10px',
+        cursor: 'pointer',
+        background: active
+          ? 'var(--background-primary, var(--bg, #1e1e1e))'
+          : 'transparent',
+        color: active
+          ? 'var(--text-normal, var(--fg, #ccc))'
+          : 'var(--text-muted, var(--fg-muted, #888))',
+        borderRight: '1px solid var(--divider-color, var(--line, #333))',
+        fontSize: 12,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {leaf.pinned && (
+        <span aria-label="pinned" title="Pinned" style={{ fontSize: 10 }}>
+          ●
+        </span>
+      )}
+      <span>{label}</span>
+      {closable && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onClose()
+          }}
+          title="Close tab"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'inherit',
+            cursor: 'pointer',
+            padding: '0 2px',
+            fontSize: 12,
+            lineHeight: 1,
+          }}
+        >
+          ×
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// <LeafHost> — the one place a View's DOM lives.
+//
+// The wrapper div has NO React children, so React has nothing to diff
+// inside it. Only the `style` attribute changes between renders when
+// `hidden` toggles — the imperative view DOM is untouched.
+//
+// memo(LeafHost, ...) additionally freezes re-renders when neither leaf
+// nor hidden changed, preventing stray parent re-renders from reaching
+// this subtree.
+// ---------------------------------------------------------------------------
+
+interface LeafHostProps {
+  leaf: Leaf
+  hidden: boolean
+}
+
+const LeafHostInner = ({ leaf, hidden }: LeafHostProps): JSX.Element => {
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    void leaf.attachContainer(el)
+    return () => {
+      void leaf.attachContainer(null)
+    }
+  }, [leaf])
+
+  return (
+    <div
+      ref={ref}
+      className="workspace-leaf-host"
+      data-leaf-id={leaf.id}
+      style={{
+        display: hidden ? 'none' : 'flex',
+        flex: '1 1 auto',
+        width: '100%',
+        height: '100%',
+        minWidth: 0,
+        minHeight: 0,
+        position: 'absolute',
+        inset: 0,
+      }}
+    />
+  )
+}
+
+export const LeafHost = memo(LeafHostInner, (prev, next) => {
+  // Re-render only when the leaf identity or hidden flag changes. The
+  // view's DOM is owned imperatively — nothing inside this div ever
+  // changes from React's perspective.
+  return prev.leaf === next.leaf && prev.hidden === next.hidden
+})
+
+// ---------------------------------------------------------------------------
+// Named exports for the component set (plan requirement).
+// ---------------------------------------------------------------------------
+
+export { RenderNode, SidedockFrame, TabGroup, TabStrip }

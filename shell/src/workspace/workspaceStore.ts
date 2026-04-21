@@ -304,6 +304,65 @@ function setActiveLeaf(leaf: Leaf): void {
   emitInternal('active-leaf-change', { leaf })
 }
 
+/** Clamp + write `dock.size`; emit `layout-change`. Minimum size 150 (plan §Phase 4). */
+function setSidedockSize(side: 'left' | 'right', size: number): void {
+  const dock = side === 'left' ? state().leftSplit : state().rightSplit
+  const clamped = Math.max(150, Math.floor(size))
+  if (dock.size === clamped) return
+  dock.size = clamped
+  emitInternal('layout-change')
+}
+
+/** Set `dock.collapsed`; emit `layout-change`. */
+function setSidedockCollapsed(side: 'left' | 'right', collapsed: boolean): void {
+  const dock = side === 'left' ? state().leftSplit : state().rightSplit
+  if (dock.collapsed === collapsed) return
+  dock.collapsed = collapsed
+  emitInternal('layout-change')
+}
+
+/**
+ * Walk the tree for a Tabs node by id; set its `activeIndex` and mark the
+ * newly-selected leaf active. Emits `layout-change` + `active-leaf-change`.
+ */
+function setTabActiveIndex(tabsId: string, index: number): void {
+  const roots: WorkspaceParent[] = [
+    state().rootSplit,
+    state().leftSplit,
+    state().rightSplit,
+    ...state().floating,
+  ]
+  const found = findTabsById(tabsId, roots)
+  if (!found) return
+  if (index < 0 || index >= found.leaves.length) return
+  if (found.activeIndex === index) return
+  found.activeIndex = index
+  emitInternal('layout-change')
+  const selected = found.leaves[index]
+  if (selected) setActiveLeaf(selected)
+}
+
+function findTabsById(id: string, roots: WorkspaceParent[]): Tabs | null {
+  const visit = (n: WorkspaceParent): Tabs | null => {
+    if (n.kind === 'tabs') return n.id === id ? n : null
+    if (n.kind === 'split') {
+      for (const c of n.children) {
+        const r = visit(c)
+        if (r) return r
+      }
+      return null
+    }
+    const withChild = n as { child?: WorkspaceParent }
+    if (withChild.child) return visit(withChild.child)
+    return null
+  }
+  for (const r of roots) {
+    const t = visit(r)
+    if (t) return t
+  }
+  return null
+}
+
 async function detachLeaf(leaf: Leaf): Promise<void> {
   // Plan decision #2 on order: await detach() first (triggers onClose,
   // clears the view) before tree mutation, so subscribers observing
@@ -619,6 +678,9 @@ export const workspace = {
   revealLeaf,
   getLeavesOfType,
   setActiveLeaf,
+  setSidedockSize,
+  setSidedockCollapsed,
+  setTabActiveIndex,
   detachLeaf,
   emit: emitInternal,
   on,
