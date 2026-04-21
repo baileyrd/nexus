@@ -1,5 +1,8 @@
+import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { viewRegistry } from '../../../workspace'
 import { BacklinksView } from './BacklinksView'
+import { backlinkViewCreator } from './BacklinkView'
 import { useBacklinksStore, type Backlink } from './backlinksStore'
 import { useEditorStore } from '../editor/editorStore'
 import { useLayoutStore } from '../../../stores/layoutStore'
@@ -84,6 +87,12 @@ export const backlinksPlugin: Plugin = {
       component: BacklinksView,
       priority: 20,
     })
+
+    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    viewRegistry.register(
+      'backlink',
+      backlinkViewCreator(() => createElement(BacklinksView)),
+    )
 
     // Advertise the tab label to the rightPanel host.
     api.events.emit(EVENT_REGISTER_TAB, {

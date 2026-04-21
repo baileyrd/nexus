@@ -1,6 +1,8 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { viewRegistry } from '../../../workspace'
 import { FilesTree } from './FilesTree'
+import { fileExplorerViewCreator } from './FileExplorerView'
 import { useFilesStore, type FilesDirEntry } from './filesStore'
 import { loadChildren, setKernel } from './kernelClient'
 import { setApi } from './runtime'
@@ -90,6 +92,17 @@ export const filesPlugin: Plugin = {
       component: () => createElement(FilesTree, { onFileActivate: handleFileActivate }),
       priority: 10,
     })
+
+    // Phase 5 (leaf-migration-plan.md): same React subtree, wrapped as
+    // a workspace View so Phase 6 can mount it into a leaf. Lives
+    // alongside the SlotRegistry registration — Phase 7 removes the
+    // latter once App.tsx flips to <Workspace>.
+    viewRegistry.register(
+      'file-explorer',
+      fileExplorerViewCreator(() =>
+        createElement(FilesTree, { onFileActivate: handleFileActivate }),
+      ),
+    )
 
     api.activityBar.addItem({
       id: 'nexus.files.activityItem',

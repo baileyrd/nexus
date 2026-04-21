@@ -1,6 +1,8 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { viewRegistry } from '../../../workspace'
 import { EditorView } from './EditorView'
+import { markdownViewCreator } from './MarkdownView'
 import { useEditorStore, isDirty } from './editorStore'
 import { setEditorRuntime } from './runtime'
 
@@ -187,6 +189,15 @@ export const editorPlugin: Plugin = {
         }),
       priority: 10,
     })
+
+    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    // The centrepiece View — once Phase 6 flips App.tsx to <Workspace>,
+    // `.md` opens land as leaves of this type in the main dock.
+    viewRegistry.register(
+      'markdown',
+      markdownViewCreator(() => createElement(EditorView, { onRetry: handleRetry })),
+    )
+    viewRegistry.registerExtensions(['md', 'markdown'], 'markdown')
 
     // Settings panel auto-generates UI from this. Defaults match the
     // pre-settings behaviour so existing users don't see a regression.

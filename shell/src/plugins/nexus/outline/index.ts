@@ -1,5 +1,8 @@
+import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { viewRegistry } from '../../../workspace'
 import { OutlineView } from './OutlineView'
+import { outlinePaneViewCreator } from './OutlinePaneView'
 import { useOutlineStore } from './outlineStore'
 import { parseHeadings } from './parse'
 import { useEditorStore } from '../editor/editorStore'
@@ -36,6 +39,12 @@ export const outlinePlugin: Plugin = {
       component: OutlineView,
       priority: 10,
     })
+
+    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    viewRegistry.register(
+      'outline',
+      outlinePaneViewCreator(() => createElement(OutlineView)),
+    )
 
     // And advertise its tab label to the rightPanel host. The host
     // auto-activates the first-registered tab, so outline — being

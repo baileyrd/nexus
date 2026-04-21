@@ -1,6 +1,8 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { viewRegistry } from '../../../workspace'
 import { McpView } from './McpView'
+import { mcpPaneViewCreator } from './McpPaneView'
 import { ToolCallModal } from './ToolCallModal'
 import {
   useMcpStore,
@@ -269,18 +271,23 @@ export const mcpPlugin: Plugin = {
       }
     }
 
+    const renderMcpView = () =>
+      createElement(McpView, {
+        onRefresh: () => void refresh(),
+        onConnect: (name: string) => void handleConnect(name),
+        onDisconnect: (name: string) => void handleDisconnect(name),
+        onExpand: handleExpand,
+        onCallTool: handleCallTool,
+      })
+
     api.views.register(VIEW_ID, {
       slot: 'sidebarContent',
-      component: () =>
-        createElement(McpView, {
-          onRefresh: () => void refresh(),
-          onConnect: (name) => void handleConnect(name),
-          onDisconnect: (name) => void handleDisconnect(name),
-          onExpand: handleExpand,
-          onCallTool: handleCallTool,
-        }),
+      component: renderMcpView,
       priority: 50,
     })
+
+    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    viewRegistry.register('mcp', mcpPaneViewCreator(renderMcpView))
 
     api.views.register(TOOL_MODAL_VIEW_ID, {
       slot: 'overlay',

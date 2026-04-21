@@ -1,5 +1,8 @@
+import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { viewRegistry } from '../../../workspace'
 import { GraphView } from './GraphView'
+import { graphPaneViewCreator } from './GraphPaneView'
 import {
   useGraphStore,
   type EdgeDirection,
@@ -113,6 +116,12 @@ export const graphPlugin: Plugin = {
       component: GraphView,
       priority: 30,
     })
+
+    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    viewRegistry.register(
+      'graph',
+      graphPaneViewCreator(() => createElement(GraphView)),
+    )
 
     api.events.emit(EVENT_REGISTER_TAB, {
       viewId: VIEW_ID,

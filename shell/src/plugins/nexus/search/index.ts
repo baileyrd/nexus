@@ -1,6 +1,8 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { viewRegistry } from '../../../workspace'
 import { SearchView } from './SearchView'
+import { searchPaneViewCreator } from './SearchPaneView'
 import { useSearchStore, type SearchHit } from './searchStore'
 import {
   cancelInFlight,
@@ -61,6 +63,15 @@ export const searchPlugin: Plugin = {
       component: () => createElement(SearchView, { onHitActivate: handleHitActivate }),
       priority: 20,
     })
+
+    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    // Coexists with the SlotRegistry entry above until Phase 7 cleanup.
+    viewRegistry.register(
+      'search',
+      searchPaneViewCreator(() =>
+        createElement(SearchView, { onHitActivate: handleHitActivate }),
+      ),
+    )
 
     api.activityBar.addItem({
       id: 'nexus.search.activityItem',

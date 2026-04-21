@@ -1,6 +1,8 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { viewRegistry } from '../../../workspace'
 import { WorkflowView } from './WorkflowView'
+import { workflowPaneViewCreator } from './WorkflowPaneView'
 import { useWorkflowStore, type WorkflowEntry } from './workflowStore'
 
 const VIEW_ID = 'nexus.workflow.view'
@@ -122,15 +124,20 @@ export const workflowPlugin: Plugin = {
       }
     }
 
+    const renderWorkflowView = () =>
+      createElement(WorkflowView, {
+        onRun: (name: string) => void runWorkflow(name),
+        onRefresh: () => void refresh(),
+      })
+
     api.views.register(VIEW_ID, {
       slot: 'sidebarContent',
-      component: () =>
-        createElement(WorkflowView, {
-          onRun: (name) => void runWorkflow(name),
-          onRefresh: () => void refresh(),
-        }),
+      component: renderWorkflowView,
       priority: 30,
     })
+
+    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    viewRegistry.register('workflow', workflowPaneViewCreator(renderWorkflowView))
 
     api.activityBar.addItem({
       id: 'nexus.workflow.activityItem',

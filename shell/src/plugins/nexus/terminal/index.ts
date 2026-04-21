@@ -1,6 +1,8 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { viewRegistry } from '../../../workspace'
 import { TerminalView } from './TerminalView'
+import { terminalPaneViewCreator } from './TerminalPaneView'
 import { useTerminalStore } from './terminalStore'
 import { useLayoutStore } from '../../../stores/layoutStore'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
@@ -76,6 +78,14 @@ export const terminalPlugin: Plugin = {
         createElement(TerminalView, { kernel: api.kernel, events: api.events }),
       priority: 10,
     })
+
+    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    viewRegistry.register(
+      'terminal',
+      terminalPaneViewCreator(() =>
+        createElement(TerminalView, { kernel: api.kernel, events: api.events }),
+      ),
+    )
 
     // ── Session lifecycle ───────────────────────────────────────────
     //

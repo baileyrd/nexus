@@ -1,6 +1,8 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { viewRegistry } from '../../../workspace'
 import { ChatView } from './ChatView'
+import { aiChatViewCreator } from './AiChatView'
 import { useAiStore } from './aiStore'
 import { setKernel, requestFocus } from './aiRuntime'
 
@@ -43,6 +45,9 @@ export const aiPlugin: Plugin = {
       component: () => createElement(ChatView),
       priority: 50,
     })
+
+    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    viewRegistry.register('ai-chat', aiChatViewCreator(() => createElement(ChatView)))
 
     api.activityBar.addItem({
       id: 'nexus.ai.activityItem',

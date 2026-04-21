@@ -1,6 +1,8 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { viewRegistry } from '../../../workspace'
 import { SkillsView } from './SkillsView'
+import { skillsPaneViewCreator } from './SkillsPaneView'
 import { useSkillsStore, type SkillEntry } from './skillsStore'
 
 const VIEW_ID = 'nexus.skills.view'
@@ -98,14 +100,19 @@ export const skillsPlugin: Plugin = {
       }
     }
 
+    const renderSkillsView = () =>
+      createElement(SkillsView, {
+        onRefresh: () => void refresh(),
+      })
+
     api.views.register(VIEW_ID, {
       slot: 'sidebarContent',
-      component: () =>
-        createElement(SkillsView, {
-          onRefresh: () => void refresh(),
-        }),
+      component: renderSkillsView,
       priority: 40,
     })
+
+    // Phase 5 workspace-View registration (leaf-migration-plan §Phase 5).
+    viewRegistry.register('skills', skillsPaneViewCreator(renderSkillsView))
 
     api.activityBar.addItem({
       id: 'nexus.skills.activityItem',
