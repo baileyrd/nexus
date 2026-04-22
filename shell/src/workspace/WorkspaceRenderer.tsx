@@ -172,6 +172,9 @@ function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
             side === 'right'
               ? '1px solid var(--divider-color, var(--line, #333))'
               : 'none',
+          // When right sidedock is collapsed, push the expand chevron
+          // down past the WindowControls row (36px) so it isn't obscured.
+          ...(side === 'right' ? { paddingTop: 36 } : {}),
         }}
       >
         <button
@@ -576,6 +579,14 @@ function TabStrip({
         borderBottom: '1px solid var(--divider-color, var(--line, #333))',
         minHeight: 36,
         overflow: 'hidden',
+        // Reserve horizontal space at the trailing edge for the absolute
+        // WindowControls cluster (3 × 40px = 120px) when this tab strip is
+        // the rightmost visible column. That's the right sidedock when
+        // expanded, or the main dock when the right sidedock is collapsed.
+        ...(sideDock === 'right' ||
+        (isMainDock && workspace.rightSplit.collapsed)
+          ? { paddingRight: 120 }
+          : {}),
       }}
     >
       {/* Left-side collapse chevron — only rendered for the right sidedock,
