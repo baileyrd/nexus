@@ -64,23 +64,6 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
 
 ### Not in any PRD — new spec work needed
 
-- [ ] **Global graph view as a main-dock tab.** Current
-  `shell/src/plugins/nexus/graph/` renders a one-hop neighborhood of
-  the active file as a right-panel sidecar. The Obsidian-style global
-  view (every note + every link, force-directed, in the main dock)
-  has no PRD coverage. Plan: [docs/global-graph-view-plan.md](../global-graph-view-plan.md)
-  (4 phases; `nexus-storage::list_all_links` bulk handler → frontend
-  plumbing → canvas force-directed renderer with zoom/pan → gear
-  drawer for filter/group/display). Keeps the existing local-
-  neighborhood pane alive as a separate view type.
-- [ ] **Per-tab context menu (Obsidian-style ⋯).** The disabled "more
-  options" button at `shell/src/plugins/nexus/editor/EditorView.tsx:398`
-  is the anchor. Plan: [docs/tab-context-menu-plan.md](../tab-context-menu-plan.md)
-  (3 phases; easy wires → stubbed structure → real features one at a
-  time). Ship the shared `ContextMenu` primitive first; every action
-  routes through the command registry so keyboard palette and future
-  keybindings compose for free.
-
 ## Architecture audit (2026-04-16) — follow-ups
 
 Findings surfaced by the microkernel + editor-shell audit that weren't already tracked above.
