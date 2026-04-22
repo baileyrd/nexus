@@ -76,6 +76,15 @@ export function readTheme(el: HTMLElement): Theme {
   }
 }
 
+/** Axis-aligned rect in world space. Drawn as a translucent accent
+ *  overlay above nodes while a marquee drag is in progress. */
+export interface MarqueeRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface RenderContext {
   ctx: CanvasRenderingContext2D
   width: number
@@ -84,6 +93,32 @@ export interface RenderContext {
   theme: Theme
   dpr: number
   selection?: Set<string>
+  marquee?: MarqueeRect | null
+}
+
+/** World-space rect-vs-node test: any pixel of overlap counts as a
+ *  hit, matching Figma / Obsidian. Groups participate so you can
+ *  marquee-pick them too. */
+export function marqueeHit(nodes: readonly CanvasNode[], rect: MarqueeRect): string[] {
+  const x2 = rect.x + rect.width
+  const y2 = rect.y + rect.height
+  const ids: string[] = []
+  for (const n of nodes) {
+    const nx2 = n.x + n.width
+    const ny2 = n.y + n.height
+    if (n.x < x2 && nx2 > rect.x && n.y < y2 && ny2 > rect.y) ids.push(n.id)
+  }
+  return ids
+}
+
+/** Build a marquee rect from two world-space points in any order. */
+export function marqueeFromPoints(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): MarqueeRect {
+  const x = Math.min(a.x, b.x)
+  const y = Math.min(a.y, b.y)
+  return { x, y, width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y) }
 }
 
 export function render(rc: RenderContext, doc: CanvasDoc | null): void {
@@ -119,6 +154,16 @@ export function render(rc: RenderContext, doc: CanvasDoc | null): void {
   for (const edge of doc.edges) drawEdge(ctx, edge, byId, theme)
 
   for (const n of nonGroups) drawNode(ctx, n, theme, selection.has(n.id))
+
+  if (rc.marquee && (rc.marquee.width > 0 || rc.marquee.height > 0)) {
+    ctx.save()
+    ctx.fillStyle = hexWithAlpha(theme.accent, 0.1)
+    ctx.fillRect(rc.marquee.x, rc.marquee.y, rc.marquee.width, rc.marquee.height)
+    ctx.strokeStyle = theme.accent
+    ctx.lineWidth = 1 / camera.zoom
+    ctx.strokeRect(rc.marquee.x, rc.marquee.y, rc.marquee.width, rc.marquee.height)
+    ctx.restore()
+  }
 }
 
 function drawGrid(

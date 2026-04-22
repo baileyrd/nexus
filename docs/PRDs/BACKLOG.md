@@ -56,18 +56,20 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   layer parses/serializes/indexes canvas files; CLI shipped; kernel
   IPC surface landed 2026-04-22 (`canvas_read` / `canvas_write` /
   `canvas_patch` / `canvas_nodes` / `canvas_edges` on
-  `com.nexus.storage`, handler ids 35–39). Shell Phases 1–3 (first
-  half) landed 2026-04-22: view + extension registration, canvas-
-  element renderer (RAF, DPR-aware, typed node cards +
+  `com.nexus.storage`, handler ids 35–39). Shell Phases 1–3 landed 2026-04-22: view + extension registration,
+  canvas-element renderer (RAF, DPR-aware, typed node cards +
   bezier/solid/dashed/dotted edges + arrow heads + dot grid +
-  zoom-to-fit), wheel-zoom (10%–400%) anchored on pointer,
-  drag/wheel pan, click-to-select with accent outline, drag-to-
-  move with `canvas_patch` flush on mouseup, Delete/Backspace to
-  remove, double-click empty → new text node. Plan:
+  zoom-to-fit), wheel-zoom (10%–400%) anchored on pointer, pan
+  (middle-click drag or wheel scroll), shift-click multi-select,
+  left-drag-marquee select (additive with shift), drag-to-move
+  single or grouped selection with one batched `canvas_patch` on
+  mouseup, Delete/Backspace to remove a selection (incident edges
+  drop with the nodes via apply_patch), double-click empty →
+  new text node. Plan:
   [docs/canvas-shell-plan.md](../canvas-shell-plan.md) — remaining
-  Phase 3 follow-ups (shift-click multi-select, marquee, resize
-  handles, drag-from-edge create, undo/redo stack) plus phases
-  4–6 (edges + inspector → rich node embeds → polish).
+  Phase 3 follow-ups (resize handles, drag-from-edge create,
+  client-side undo/redo stack) plus phases 4–6 (edges + inspector
+  → rich node embeds → polish).
 - [ ] **Notion-style block UX on top of the existing block-tree engine
   (PRD-08).** Block tree + transactions + annotations are shipped
   (3.7k LoC in `nexus-editor`); what's missing is the UI layer —

@@ -11,12 +11,19 @@ import {
   MIN_ZOOM,
   MAX_ZOOM,
   newNodeId,
-  applyNodeMove,
   applyNodeAdd,
   applyNodeRemove,
   type Camera,
 } from './canvasStore'
-import { render, readTheme, hitTestNode, DEFAULT_TEXT_NODE_SIZE } from './renderer'
+import {
+  render,
+  readTheme,
+  hitTestNode,
+  marqueeHit,
+  marqueeFromPoints,
+  DEFAULT_TEXT_NODE_SIZE,
+  type MarqueeRect,
+} from './renderer'
 import type {
   CanvasKernelClient,
   CanvasDoc,
@@ -44,6 +51,7 @@ export function CanvasView({ relpath, client }: Props) {
   const cameraRef = useRef<Camera>({ x: 0, y: 0, zoom: 1 })
   const cameraDirtyRef = useRef(false)
   const selectionRef = useRef<Set<string>>(new Set())
+  const marqueeRef = useRef<MarqueeRect | null>(null)
   const clientRef = useRef(client)
   clientRef.current = client
 
@@ -142,6 +150,7 @@ export function CanvasView({ relpath, client }: Props) {
           theme,
           dpr,
           selection: selectionRef.current,
+          marquee: marqueeRef.current,
         },
         docRef.current,
       )
@@ -219,14 +228,19 @@ export function CanvasView({ relpath, client }: Props) {
           nodeId: string
           startWorldX: number
           startWorldY: number
-          startNodeX: number
-          startNodeY: number
+          startPositions: Map<string, { x: number; y: number }>
           armed: boolean
-          /** Screen-pixel pointer position at pointerdown — used for
-           *  DRAG_THRESHOLD_PX so a noisy click doesn't trigger a move
-           *  and a zero-delta patch. */
           downCX: number
           downCY: number
+        }
+      | {
+          kind: 'marquee'
+          /** World-space anchor of the drag. */
+          startWorld: { x: number; y: number }
+          /** Selection before the drag — used as the base for shift-
+           *  additive marquees so previously-selected nodes stay lit. */
+          base: Set<string>
+          additive: boolean
         }
     let drag: DragMode = { kind: 'none' }
 
@@ -238,29 +252,55 @@ export function CanvasView({ relpath, client }: Props) {
       const world = screenToWorld(cx, cy)
       const doc = docRef.current
       const hit = doc ? hitTestNode(doc.nodes, world.x, world.y) : null
+      const additive = e.shiftKey
 
-      // Middle click OR empty-space click → pan.
-      if (e.button === 1 || !hit) {
-        if (!hit && e.button === 0) {
-          // Clear selection when clicking empty space.
-          useCanvasStore.getState().setSelection(relpath, [])
-        }
+      // Middle click → pan regardless of what's under the cursor.
+      if (e.button === 1) {
         drag = { kind: 'pan', lastX: e.clientX, lastY: e.clientY }
         canvas.setPointerCapture(e.pointerId)
         canvas.style.cursor = 'grabbing'
         return
       }
 
-      // Node click → select + arm a move drag (don't commit to
-      // move-mode until the pointer clears DRAG_THRESHOLD_PX).
-      useCanvasStore.getState().setSelection(relpath, [hit.id])
+      if (!hit) {
+        // Empty-space left-drag → marquee. Non-additive clicks clear
+        // the selection on down (feels snappier than waiting for up).
+        const base = additive ? new Set(selectionRef.current) : new Set<string>()
+        if (!additive) useCanvasStore.getState().setSelection(relpath, [])
+        drag = { kind: 'marquee', startWorld: world, base, additive }
+        marqueeRef.current = { x: world.x, y: world.y, width: 0, height: 0 }
+        canvas.setPointerCapture(e.pointerId)
+        return
+      }
+
+      // Node click: shift toggles, plain click replaces.
+      const curr = selectionRef.current
+      let nextSel: string[]
+      if (additive) {
+        const next = new Set(curr)
+        if (next.has(hit.id)) next.delete(hit.id)
+        else next.add(hit.id)
+        nextSel = Array.from(next)
+      } else {
+        nextSel = curr.has(hit.id) ? Array.from(curr) : [hit.id]
+      }
+      useCanvasStore.getState().setSelection(relpath, nextSel)
+
+      // Arm a move drag for every selected node — moves a multi-select
+      // as a rigid group.
+      const selectedSet = new Set(nextSel)
+      const startPositions = new Map<string, { x: number; y: number }>()
+      if (doc) {
+        for (const n of doc.nodes) {
+          if (selectedSet.has(n.id)) startPositions.set(n.id, { x: n.x, y: n.y })
+        }
+      }
       drag = {
         kind: 'move-node',
         nodeId: hit.id,
         startWorldX: world.x,
         startWorldY: world.y,
-        startNodeX: hit.x,
-        startNodeY: hit.y,
+        startPositions,
         armed: false,
         downCX: cx,
         downCY: cy,
@@ -284,6 +324,26 @@ export function CanvasView({ relpath, client }: Props) {
         cameraDirtyRef.current = true
         return
       }
+      if (drag.kind === 'marquee') {
+        const rect = canvas.getBoundingClientRect()
+        const cx = e.clientX - rect.left
+        const cy = e.clientY - rect.top
+        const world = screenToWorld(cx, cy)
+        const marquee = marqueeFromPoints(drag.startWorld, world)
+        marqueeRef.current = marquee
+        const doc = docRef.current
+        if (doc) {
+          const hits = marqueeHit(doc.nodes, marquee)
+          const next = new Set(drag.base)
+          for (const id of hits) next.add(id)
+          // Only write when the selection actually changes — skip
+          // redundant store writes during fine marquee movement.
+          if (!setEquals(selectionRef.current, next)) {
+            useCanvasStore.getState().setSelection(relpath, Array.from(next))
+          }
+        }
+        return
+      }
       // move-node
       const rect = canvas.getBoundingClientRect()
       const cx = e.clientX - rect.left
@@ -296,9 +356,16 @@ export function CanvasView({ relpath, client }: Props) {
         canvas.style.cursor = 'grabbing'
       }
       const world = screenToWorld(cx, cy)
-      const nx = drag.startNodeX + (world.x - drag.startWorldX)
-      const ny = drag.startNodeY + (world.y - drag.startWorldY)
-      useCanvasStore.getState().updateDoc(relpath, (doc) => applyNodeMove(doc, drag.kind === 'move-node' ? drag.nodeId : '', nx, ny))
+      const dx = world.x - drag.startWorldX
+      const dy = world.y - drag.startWorldY
+      const starts = drag.startPositions
+      useCanvasStore.getState().updateDoc(relpath, (doc) => ({
+        ...doc,
+        nodes: doc.nodes.map((n) => {
+          const start = starts.get(n.id)
+          return start ? { ...n, x: start.x + dx, y: start.y + dy } : n
+        }),
+      }))
     }
 
     const onPointerUp = (e: PointerEvent) => {
@@ -312,19 +379,25 @@ export function CanvasView({ relpath, client }: Props) {
       drag = { kind: 'none' }
       canvas.style.cursor = 'grab'
 
+      if (finished.kind === 'marquee') {
+        marqueeRef.current = null
+        return
+      }
+
       if (finished.kind === 'move-node' && finished.armed) {
         const doc = docRef.current
-        const node = doc?.nodes.find((n) => n.id === finished.nodeId)
-        if (!node) return
-        // Only flush if the move actually changed the position.
-        if (node.x === finished.startNodeX && node.y === finished.startNodeY) return
-        void clientRef.current
-          .patch(relpath, [
-            { op: 'node_move', id: finished.nodeId, x: node.x, y: node.y },
-          ])
-          .catch((err) => {
-            console.warn('[nexus.canvas] node_move patch failed:', err)
-          })
+        if (!doc) return
+        const ops: CanvasPatchOp[] = []
+        for (const n of doc.nodes) {
+          const start = finished.startPositions.get(n.id)
+          if (!start) continue
+          if (n.x === start.x && n.y === start.y) continue
+          ops.push({ op: 'node_move', id: n.id, x: n.x, y: n.y })
+        }
+        if (ops.length === 0) return
+        void clientRef.current.patch(relpath, ops).catch((err) => {
+          console.warn('[nexus.canvas] node_move patch failed:', err)
+        })
       }
     }
 
@@ -458,6 +531,12 @@ function CornerLabel({ children }: { children: React.ReactNode }) {
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v
+}
+
+function setEquals(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const v of a) if (!b.has(v)) return false
+  return true
 }
 
 /** Compute a camera that centres every node within a small margin. */
