@@ -1642,7 +1642,7 @@ body {
   --sidebar-markdown-font-size: calc(13px * 0.9); /* app.css:2640 */
   --file-margins: 24px;                           /* app.css:2227–2229 */
   --ribbon-width: 44px;                           /* app.css:2598 */
-  --ribbon-padding: 8px 4px 12px;                 /* app.css:2599 */
+  --ribbon-padding: 0 4px 12px;                   /* Nexus: no top padding so sidebar-toggle (first button) sits on the same 36px top row as the tab strips */
   --ribbon-background: var(--background-secondary);            /* app.css:2596 */
   --ribbon-background-collapsed: var(--background-primary);    /* app.css:2597 */
   --divider-width-hover: 3px;                     /* app.css:2198 */
