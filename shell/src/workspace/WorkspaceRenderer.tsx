@@ -162,33 +162,11 @@ function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
   if (side === 'bottom') return <BottomSidedockFrame dock={dock} />
 
   if (dock.collapsed) {
-    // Right sidedock: fully hidden when collapsed. The re-expand
-    // affordance lives in the main dock's tab strip (PanelRight icon
-    // in the trailing edge of TabStrip), so no narrow bar is needed.
-    if (side === 'right') return <></>
-
-    // Left sidedock: render the 24-px bar with an expand chevron so
-    // the user has a way to re-open it if they haven't bound the
-    // activity-bar toggle or a keyboard shortcut.
-    return (
-      <div
-        className={`workspace-sidedock mod-${side} is-collapsed`}
-        style={{
-          ...COLLAPSED_BAR_STYLE,
-          borderRight: COLLAPSED_BAR_STYLE.borderRight,
-          borderLeft: 'none',
-        }}
-      >
-        <button
-          type="button"
-          title="Expand left sidebar"
-          onClick={() => workspace.setSidedockCollapsed('left', false)}
-          style={COLLAPSE_BUTTON_STYLE}
-        >
-          ›
-        </button>
-      </div>
-    )
+    // Both sidedocks are fully hidden when collapsed. Re-expand
+    // affordances:
+    //   - left:  activity bar's sidebar-toggle button (top-left)
+    //   - right: PanelRight icon in the main dock's tab strip
+    return <></>
   }
 
   const panel = (
@@ -243,42 +221,11 @@ function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
 // ---------------------------------------------------------------------------
 
 function BottomSidedockFrame({ dock }: { dock: Sidedock }): JSX.Element {
-  if (dock.collapsed) {
-    return (
-      <div
-        className="workspace-sidedock mod-bottom is-collapsed"
-        style={{
-          flex: `0 0 ${BOTTOM_COLLAPSED_HEIGHT}px`,
-          height: BOTTOM_COLLAPSED_HEIGHT,
-          display: 'flex',
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 8px',
-          background: 'var(--background-secondary, var(--bg-raised, #252526))',
-          borderTop: '1px solid var(--divider-color, var(--line, #333))',
-        }}
-      >
-        <span
-          style={{
-            fontSize: 12,
-            color: 'var(--text-muted, var(--fg-muted, #888))',
-          }}
-        >
-          Terminal
-        </span>
-        <button
-          type="button"
-          title="Expand bottom drawer"
-          onClick={() => workspace.setSidedockCollapsed('bottom', false)}
-          style={COLLAPSE_BUTTON_STYLE}
-        >
-          {/* up-chevron when collapsed — click to expand upward */}
-          ▴
-        </button>
-      </div>
-    )
-  }
+  // Bottom drawer fully hidden when collapsed — same treatment as the
+  // side docks. Re-expand via a terminal / bottom-drawer toggle command
+  // or keybinding; no persistent strip.
+  if (dock.collapsed) return <></>
+
 
   return (
     <div

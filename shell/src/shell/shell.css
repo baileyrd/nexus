@@ -2027,9 +2027,11 @@ body:not(.show-view-header):not(.is-phone) .view-header {
   color: var(--text-muted);
   flex: 0 100 auto;
   display: flex;
+  align-items: center;                                           /* keep text baseline on the row's vertical centre so breadcrumb sits level with back/forward icons */
   gap: 0;
   overflow: hidden;
   white-space: nowrap;
+  line-height: 1;
 }
 .view-header-title-parent:empty {
   display: none;
@@ -2058,6 +2060,7 @@ body:not(.show-view-header):not(.is-phone) .view-header {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: pre;
+  line-height: 1;
 }
 .is-focused .workspace-leaf.mod-active .view-header-title {
   color: var(--text-normal);
