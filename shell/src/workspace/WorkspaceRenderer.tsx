@@ -589,21 +589,6 @@ function TabStrip({
           : {}),
       }}
     >
-      {/* Left-side collapse chevron — only rendered for the right sidedock,
-          at the leading edge so it reads as "collapse this panel to the
-          right". For the left sidedock we put the chevron at the trailing
-          edge (below, after the new-tab button). */}
-      {sideDock === 'right' && (
-        <button
-          type="button"
-          aria-label="Collapse right sidebar"
-          title="Collapse right sidebar"
-          onClick={() => workspace.setSidedockCollapsed('right', true)}
-          style={collapseButtonStyle}
-        >
-          ›
-        </button>
-      )}
       {tabs.leaves.map((leaf, i) => {
         const isActive = i === tabs.activeIndex
         return (
@@ -642,17 +627,43 @@ function TabStrip({
           <Icon name="plus" size={14} />
         </button>
       )}
+      {/* Right-sidedock collapse / expand — lives at the far right of the
+          main dock's tab strip (mirroring the activity-bar left-panel
+          toggle). Uses the PanelRight icon so the affordance matches the
+          left toggle style. Toggles collapsed state, so it also serves
+          as the re-expand control once hidden. */}
+      {isMainDock && (
+        <button
+          type="button"
+          aria-label={
+            workspace.rightSplit.collapsed
+              ? 'Show right sidebar'
+              : 'Hide right sidebar'
+          }
+          title={
+            workspace.rightSplit.collapsed
+              ? 'Show right sidebar'
+              : 'Hide right sidebar'
+          }
+          onClick={() =>
+            workspace.setSidedockCollapsed('right', !workspace.rightSplit.collapsed)
+          }
+          style={{ ...collapseButtonStyle, marginLeft: 'auto' }}
+        >
+          <Icon name="panel" size={14} />
+        </button>
+      )}
       {/* Left sidedock collapse chevron — trailing edge so the row reads
-          [tabs ...] ‹ and the chevron indicates "collapse to the left". */}
+          [tabs ...] [icon] and toggles the left sidebar. */}
       {sideDock === 'left' && (
         <button
           type="button"
-          aria-label="Collapse left sidebar"
-          title="Collapse left sidebar"
+          aria-label="Hide left sidebar"
+          title="Hide left sidebar"
           onClick={() => workspace.setSidedockCollapsed('left', true)}
           style={{ ...collapseButtonStyle, marginLeft: 'auto' }}
         >
-          ‹
+          <Icon name="panelLeft" size={14} />
         </button>
       )}
     </div>
