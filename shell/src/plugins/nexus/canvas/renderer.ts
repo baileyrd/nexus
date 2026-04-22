@@ -573,12 +573,8 @@ function drawNode(
     // can show a live OG preview (favicon + title + description +
     // image). The 2D canvas keeps the card chrome above.
   } else if (node.type === 'database') {
-    ctx.fillStyle = muted
-    ctx.font = '11px var(--font-monospace, ui-monospace, monospace)'
-    ctx.fillText('DATABASE', node.x + pad, node.y + pad + 10)
-    ctx.fillStyle = fg
-    ctx.font = '14px var(--font-family, system-ui, sans-serif)'
-    ctx.fillText(node.source ?? '(no source)', node.x + pad, node.y + pad + 32)
+    // Database body is drawn by the DOM overlay layer (Phase 5d) —
+    // a mini-grid of the linked `.bases` schema + records.
   } else if (node.type === 'terminal') {
     ctx.fillStyle = muted
     ctx.font = '11px var(--font-monospace, ui-monospace, monospace)'

@@ -66,6 +66,29 @@ export type CanvasPatchOp =
   | { op: 'edge_remove'; id: string }
   | { op: 'edge_update'; edge: CanvasEdge }
 
+/** Minimal subset of `nexus_types::bases::Base` that the canvas
+ *  database-node overlay actually reads. The kernel returns the
+ *  full Base; we type only what the mini-grid needs so future
+ *  additions (views, relations, metadata) can extend this
+ *  interface without widening every consumer. */
+export interface BaseSummary {
+  name: string
+  schema: {
+    version?: string
+    /** Field name → field definition. Definitions are opaque to the
+     *  shell (they're editor-specific config); we only use the keys
+     *  to order columns. */
+    fields: Record<string, unknown>
+  }
+  records: Array<{
+    id: string
+    /** All non-id record fields flatten into the same object on the
+     *  wire thanks to `#[serde(flatten)]`, so anything that isn't
+     *  `id` is a user-defined field value. */
+    [field: string]: unknown
+  }>
+}
+
 /** Shape returned by com.nexus.linkpreview::fetch. Every metadata
  *  field is nullable — the shell renders whatever it gets and falls
  *  back to the raw URL when everything is missing. Mirrors
@@ -91,6 +114,9 @@ export interface CanvasKernelClient {
    *  or null if the file doesn't exist. The file-node overlay uses
    *  this to embed previews of linked `.md` / image / text files. */
   readFile(relpath: string): Promise<Uint8Array | null>
+  /** Load a `.bases` directory's full contents (schema + records).
+   *  Used by the database-node overlay to render a mini-grid. */
+  loadBase(relpath: string): Promise<BaseSummary>
 }
 
 export function makeCanvasKernelClient(kernel: PluginAPI['kernel']): CanvasKernelClient {
@@ -115,6 +141,11 @@ export function makeCanvasKernelClient(kernel: PluginAPI['kernel']): CanvasKerne
         { path: relpath },
       )
       return resp.bytes == null ? null : Uint8Array.from(resp.bytes)
+    },
+    async loadBase(relpath) {
+      return kernel.invoke<BaseSummary>(STORAGE_PLUGIN_ID, 'base_load', {
+        path: relpath,
+      })
     },
   }
 }

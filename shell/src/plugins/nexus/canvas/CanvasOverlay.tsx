@@ -9,7 +9,7 @@
 // everything passive so text nodes can't eat clicks.
 
 import { forwardRef, useEffect, useMemo, useState } from 'react'
-import type { CanvasKernelClient, CanvasNode, LinkPreview } from './kernelClient'
+import type { BaseSummary, CanvasKernelClient, CanvasNode, LinkPreview } from './kernelClient'
 import { renderMarkdown } from '../editor/markdownRender'
 
 interface Props {
@@ -54,12 +54,287 @@ export const CanvasOverlay = forwardRef<HTMLDivElement, Props>(function CanvasOv
           if (n.type === 'text') return <TextNodeOverlay key={n.id} node={n} />
           if (n.type === 'link') return <LinkNodeOverlay key={n.id} node={n} client={client} />
           if (n.type === 'file') return <FileNodeOverlay key={n.id} node={n} client={client} />
+          if (n.type === 'database') return <DatabaseNodeOverlay key={n.id} node={n} client={client} />
           return null
         })}
       </div>
     </div>
   )
 })
+
+/** Cap on the number of rows the database-node mini-grid shows at
+ *  once. Past this we render a "+ N more" footer — nobody wants a
+ *  10k-row table scroll-locked inside a card. */
+const DB_NODE_ROW_CAP = 50
+/** Cap on columns in the mini-grid. First four schema fields are
+ *  usually the primary-ish ones; the rest get elided. */
+const DB_NODE_COL_CAP = 4
+
+const basePreviewCache = new Map<string, BaseSummary>()
+const basePreviewPending = new Map<string, Promise<BaseSummary>>()
+
+function loadBaseCached(
+  client: CanvasKernelClient,
+  relpath: string,
+): Promise<BaseSummary> {
+  const hit = basePreviewCache.get(relpath)
+  if (hit) return Promise.resolve(hit)
+  const pending = basePreviewPending.get(relpath)
+  if (pending) return pending
+  const p = client
+    .loadBase(relpath)
+    .then((base) => {
+      basePreviewCache.set(relpath, base)
+      basePreviewPending.delete(relpath)
+      return base
+    })
+    .catch((err) => {
+      basePreviewPending.delete(relpath)
+      throw err
+    })
+  basePreviewPending.set(relpath, p)
+  return p
+}
+
+function DatabaseNodeOverlay({
+  node,
+  client,
+}: {
+  node: CanvasNode
+  client: CanvasKernelClient
+}) {
+  // Canvas PRD-06 says database nodes reference a `.bases` file via
+  // `file`; older / Obsidian-ish canvases sometimes use `source`.
+  // Prefer `file`, fall back to `source` so we cover both.
+  const relpath = node.file ?? node.source ?? ''
+  const [base, setBase] = useState<BaseSummary | null>(
+    () => basePreviewCache.get(relpath) ?? null,
+  )
+  const [loading, setLoading] = useState(!!relpath && !basePreviewCache.has(relpath))
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!relpath) {
+      setBase(null)
+      setLoading(false)
+      setError(null)
+      return
+    }
+    const cached = basePreviewCache.get(relpath)
+    if (cached) {
+      setBase(cached)
+      setLoading(false)
+      setError(null)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    loadBaseCached(client, relpath)
+      .then((b) => {
+        if (!cancelled) {
+          setBase(b)
+          setLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(String(err))
+          setLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [relpath, client])
+
+  const columns = useMemo(() => {
+    if (!base) return [] as string[]
+    return Object.keys(base.schema.fields).slice(0, DB_NODE_COL_CAP)
+  }, [base])
+  const rows = useMemo(() => {
+    if (!base) return [] as BaseSummary['records']
+    return base.records.slice(0, DB_NODE_ROW_CAP)
+  }, [base])
+  const title = base?.name || basenameOf(relpath) || 'Database'
+  const totalRows = base?.records.length ?? 0
+  const hiddenRows = Math.max(0, totalRows - rows.length)
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: node.x,
+        top: node.y,
+        width: node.width,
+        height: node.height,
+        padding: 10,
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        color: 'var(--fg, #e5e7eb)',
+        fontFamily: 'var(--font-family, system-ui, sans-serif)',
+        fontSize: 12,
+        lineHeight: 1.35,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 6,
+          minHeight: 14,
+        }}
+      >
+        <div
+          style={{
+            color: 'var(--fg-muted, #9ca3af)',
+            fontSize: 10,
+            letterSpacing: 0.4,
+            textTransform: 'uppercase',
+            fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          DATABASE · {title}
+          {loading && ' · loading…'}
+        </div>
+        {!loading && base && (
+          <div
+            style={{
+              color: 'var(--fg-muted, #9ca3af)',
+              fontSize: 10,
+              fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
+              flex: '0 0 auto',
+            }}
+          >
+            {totalRows} row{totalRows === 1 ? '' : 's'}
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div style={{ color: 'var(--risk, #ef4444)', fontSize: 11 }}>
+          failed to load: {error}
+        </div>
+      )}
+
+      {!error && !loading && base && columns.length > 0 && (
+        <div style={{ flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
+          <table
+            style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              fontSize: 11,
+              tableLayout: 'fixed',
+            }}
+          >
+            <thead>
+              <tr>
+                {columns.map((c) => (
+                  <th
+                    key={c}
+                    style={{
+                      textAlign: 'left',
+                      padding: '3px 6px',
+                      color: 'var(--fg-muted, #9ca3af)',
+                      borderBottom: '1px solid var(--divider-color, #3f3f46)',
+                      fontWeight: 500,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {c}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  {columns.map((c) => (
+                    <td
+                      key={c}
+                      style={{
+                        padding: '3px 6px',
+                        borderBottom: '1px solid rgba(255,255,255,0.05)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {formatCell(r[c])}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!error && !loading && base && columns.length === 0 && (
+        <div style={{ color: 'var(--fg-muted, #9ca3af)', fontSize: 11 }}>
+          No schema fields defined.
+        </div>
+      )}
+
+      {!error && !loading && !base && !relpath && (
+        <div style={{ color: 'var(--fg-muted, #9ca3af)', fontSize: 11 }}>
+          No database linked.
+        </div>
+      )}
+
+      {hiddenRows > 0 && (
+        <div
+          style={{
+            color: 'var(--fg-muted, #9ca3af)',
+            fontSize: 10,
+            fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
+            flex: '0 0 auto',
+          }}
+        >
+          + {hiddenRows} more row{hiddenRows === 1 ? '' : 's'}
+        </div>
+      )}
+
+      {relpath && (
+        <div
+          style={{
+            color: 'var(--fg-muted, #9ca3af)',
+            fontSize: 10,
+            fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {relpath}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Render a cell value as a short string. Objects / arrays get a
+ *  compact JSON-ish display so the grid doesn't explode into
+ *  multi-line layouts. */
+function formatCell(v: unknown): string {
+  if (v == null) return ''
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  try {
+    return JSON.stringify(v)
+  } catch {
+    return String(v)
+  }
+}
 
 /** How many bytes of a text file we render inside a node preview.
  *  Past this we clip with an ellipsis indicator — no-one wants a
