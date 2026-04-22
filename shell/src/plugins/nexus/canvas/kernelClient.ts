@@ -7,6 +7,7 @@
 import type { PluginAPI } from '../../../types/plugin'
 
 export const STORAGE_PLUGIN_ID = 'com.nexus.storage'
+export const LINKPREVIEW_PLUGIN_ID = 'com.nexus.linkpreview'
 
 export type CanvasNodeType =
   | 'file'
@@ -65,9 +66,26 @@ export type CanvasPatchOp =
   | { op: 'edge_remove'; id: string }
   | { op: 'edge_update'; edge: CanvasEdge }
 
+/** Shape returned by com.nexus.linkpreview::fetch. Every metadata
+ *  field is nullable — the shell renders whatever it gets and falls
+ *  back to the raw URL when everything is missing. Mirrors
+ *  `nexus_linkpreview::LinkPreview`. */
+export interface LinkPreview {
+  url: string
+  title?: string | null
+  description?: string | null
+  image_url?: string | null
+  site_name?: string | null
+  favicon_url?: string | null
+}
+
 export interface CanvasKernelClient {
   read(relpath: string): Promise<CanvasDoc>
   patch(relpath: string, ops: CanvasPatchOp[]): Promise<void>
+  /** Fetch preview metadata for an external URL. Resolves with a
+   *  best-effort preview (mostly-empty on transport failure) or
+   *  rejects if the URL itself is invalid. */
+  fetchLinkPreview(url: string): Promise<LinkPreview>
 }
 
 export function makeCanvasKernelClient(kernel: PluginAPI['kernel']): CanvasKernelClient {
@@ -81,6 +99,9 @@ export function makeCanvasKernelClient(kernel: PluginAPI['kernel']): CanvasKerne
         path: relpath,
         ops,
       })
+    },
+    async fetchLinkPreview(url) {
+      return kernel.invoke<LinkPreview>(LINKPREVIEW_PLUGIN_ID, 'fetch', { url })
     },
   }
 }

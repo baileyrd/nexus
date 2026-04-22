@@ -24,6 +24,7 @@ nexus-types = { path = "../nexus-types" }
 nexus-agent = { path = "../nexus-agent" }
 nexus-skills = { path = "../nexus-skills" }
 nexus-workflow = { path = "../nexus-workflow" }
+nexus-linkpreview = { path = "../nexus-linkpreview" }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

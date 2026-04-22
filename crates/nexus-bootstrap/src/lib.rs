@@ -242,6 +242,7 @@ fn register_core_plugins(
 ) -> Result<()> {
     use nexus_agent::AgentCorePlugin;
     use nexus_ai::AiCorePlugin;
+    use nexus_linkpreview::core_plugin::LinkPreviewCorePlugin;
     use nexus_skills::SkillsCorePlugin;
     use nexus_workflow::WorkflowCorePlugin;
     use nexus_editor::EditorCorePlugin;
@@ -697,6 +698,23 @@ fn register_core_plugins(
             Box::new(WorkflowCorePlugin::open(workflows_dir)),
         )
         .context("failed to register com.nexus.workflow")?;
+
+    // Link preview — outbound HTTP fetcher that backs the canvas
+    // link-node overlay in the shell. Stateless; the shell owns the
+    // cache. Fetches are best-effort and time-bounded (5 s) so a
+    // slow host can't hang a canvas render.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.linkpreview",
+                "Link preview",
+                LifecycleFlags::NONE,
+                &[("fetch", nexus_linkpreview::core_plugin::HANDLER_FETCH)],
+            ),
+            forge_root,
+            Box::new(LinkPreviewCorePlugin::new()),
+        )
+        .context("failed to register com.nexus.linkpreview")?;
 
     // Agent system — PRD-15 scaffold. Thin dispatch surface over
     // `nexus-agent::{LlmAgent, PlanExecutor}`; bridges to `com.nexus.ai`

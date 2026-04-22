@@ -578,19 +578,9 @@ function drawNode(
       ctx.fillText(node.file, node.x + pad, node.y + pad + 50)
     }
   } else if (node.type === 'link') {
-    ctx.fillStyle = muted
-    ctx.font = '11px var(--font-monospace, ui-monospace, monospace)'
-    ctx.fillText('LINK', node.x + pad, node.y + pad + 10)
-    ctx.fillStyle = theme.accent
-    ctx.font = '13px var(--font-family, system-ui, sans-serif)'
-    wrapText(
-      ctx,
-      node.url ?? '(no url)',
-      node.x + pad,
-      node.y + pad + 32,
-      node.width - pad * 2,
-      16,
-    )
+    // Link body is drawn by the DOM overlay layer (Phase 5b) so we
+    // can show a live OG preview (favicon + title + description +
+    // image). The 2D canvas keeps the card chrome above.
   } else if (node.type === 'database') {
     ctx.fillStyle = muted
     ctx.font = '11px var(--font-monospace, ui-monospace, monospace)'

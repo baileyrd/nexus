@@ -894,7 +894,7 @@ export function CanvasView({ relpath, client }: Props) {
           touchAction: 'none',
         }}
       />
-      <CanvasOverlay ref={overlayLayerRef} nodes={doc?.nodes ?? []} />
+      <CanvasOverlay ref={overlayLayerRef} nodes={doc?.nodes ?? []} client={client} />
       {tab?.loading && <CornerLabel>Loading…</CornerLabel>}
       {tab?.error && <CornerLabel>Error: {tab.error}</CornerLabel>}
       {!tab?.loading && !tab?.error && (
