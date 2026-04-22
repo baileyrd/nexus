@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { TransactionId } from './types.ts'
 
 /**
  * Preview vs source view mode, per tab. `preview` renders the file's
@@ -37,6 +38,78 @@ interface EditorState {
   tabs: EditorTab[]
   /** null when no tabs are open. */
   activeRelpath: string | null
+
+  /**
+   * Highest revision we've observed from the kernel for each open
+   * session, keyed by relpath. Populated by the
+   * `com.nexus.editor.changed.<relpath>` subscription set up in
+   * `sessionManager.acquire` (Phase 4) — and, later, by the Phase 5
+   * transaction-bridge snapshot reconciliation.
+   *
+   * Using a native `Map` rather than a plain object so set/delete are
+   * O(1) without Zustand needing to diff an object's full keyspace.
+   * Callers must use the setter so Zustand's subscribers see the
+   * change (Maps are compared by reference).
+   */
+  sessionRevision: Map<string, number>
+  /**
+   * Phase 6: last kernel revision we observed at successful-save time,
+   * keyed by relpath. `isDirty` compares this against
+   * `sessionRevision` to decide whether a tab diverges from disk. The
+   * bridge/subscription advances `sessionRevision` on any local or
+   * remote edit; `markSaved` snapshots the current `sessionRevision`
+   * into `savedRevision` so the tab goes clean atomically with the
+   * write.
+   *
+   * Tabs without a kernel session (untitled placeholders, non-markdown
+   * files for which we never acquire) simply have no entry in either
+   * map — `isDirty` falls back to the legacy `content !== savedContent`
+   * check for those.
+   */
+  savedRevision: Map<string, number>
+  /**
+   * Transaction ids the shell has dispatched locally and is still
+   * waiting to see echoed back through the `changed` event. Populated
+   * by the Phase 5 transaction bridge *before* `apply_transaction` is
+   * invoked; drained by the Phase 4 subscription handler when the
+   * echo arrives. Stays empty for Phase 4 in isolation — the set is
+   * added here so the subscription code has a stable place to check.
+   */
+  pendingLocalRevisions: Set<TransactionId>
+
+  /** Replace the known revision for `relpath`. */
+  setSessionRevision: (relpath: string, revision: number) => void
+  /** Drop any tracked revision for `relpath` (called on release). */
+  clearSessionRevision: (relpath: string) => void
+  /**
+   * Snapshot the current `sessionRevision` for `relpath` into
+   * `savedRevision`. Called after a successful save and after an
+   * untitled → named transition establishes the session. Also seeds
+   * `savedContent := content` for the legacy dirty fallback.
+   */
+  markSavedRevision: (relpath: string) => void
+  /** Drop the saved revision for `relpath` (on tab close / release). */
+  clearSavedRevision: (relpath: string) => void
+  /**
+   * Atomically rename a tab's relpath — used by the untitled → named
+   * transition in `COMMAND_SAVE`. Moves any sessionRevision /
+   * savedRevision entries keyed by the old path to the new path and
+   * re-points `activeRelpath` if needed. Idempotent when
+   * `oldRelpath === newRelpath`.
+   */
+  renameTab: (oldRelpath: string, newRelpath: string, newName?: string) => void
+  /**
+   * Record a transaction id as in-flight so the subscription handler
+   * knows to drop its corresponding echo event. Idempotent — adding
+   * the same id twice is harmless.
+   */
+  addPendingLocalRevision: (transactionId: TransactionId) => void
+  /**
+   * Remove a transaction id from the pending set. Returns `true` if
+   * the id WAS pending (i.e. this is an echo the caller should drop),
+   * `false` otherwise.
+   */
+  consumePendingLocalRevision: (transactionId: TransactionId) => boolean
 
   /**
    * Add (or raise) a tab for `relpath`. When the tab already exists
@@ -87,8 +160,24 @@ interface EditorState {
  * subscription — notably the command handler / context-key
  * subscription side. Kept outside the store so it can be imported
  * without pulling Zustand reactivity along.
+ *
+ * Phase 6: dirty is now primarily determined by server revision —
+ * `sessionRevision[relpath]` vs `savedRevision[relpath]`. The
+ * transaction bridge advances `sessionRevision` on every local edit,
+ * and `markSaved` snapshots it into `savedRevision` after a
+ * successful write. We only fall back to the legacy content-diff
+ * check for tabs that have no kernel session (untitled placeholders,
+ * non-markdown buffers for which we never acquire).
  */
 export function isDirty(tab: EditorTab): boolean {
+  const state = useEditorStore.getState()
+  const current = state.sessionRevision.get(tab.relpath)
+  if (current !== undefined) {
+    // SessionManager seeds both maps on acquire so a freshly-opened
+    // tab reads as clean; after that, any divergence is a real edit.
+    const saved = state.savedRevision.get(tab.relpath) ?? current
+    return current !== saved
+  }
   return tab.content !== tab.savedContent
 }
 
@@ -101,6 +190,92 @@ export function isDirty(tab: EditorTab): boolean {
 export const useEditorStore = create<EditorState>((set, get) => ({
   tabs: [],
   activeRelpath: null,
+  sessionRevision: new Map<string, number>(),
+  savedRevision: new Map<string, number>(),
+  pendingLocalRevisions: new Set<TransactionId>(),
+
+  setSessionRevision: (relpath, revision) =>
+    set((s) => {
+      const next = new Map(s.sessionRevision)
+      next.set(relpath, revision)
+      return { sessionRevision: next }
+    }),
+
+  clearSessionRevision: (relpath) =>
+    set((s) => {
+      if (!s.sessionRevision.has(relpath)) return s
+      const next = new Map(s.sessionRevision)
+      next.delete(relpath)
+      return { sessionRevision: next }
+    }),
+
+  markSavedRevision: (relpath) =>
+    set((s) => {
+      const current = s.sessionRevision.get(relpath)
+      if (current === undefined) return s
+      const next = new Map(s.savedRevision)
+      next.set(relpath, current)
+      return { savedRevision: next }
+    }),
+
+  clearSavedRevision: (relpath) =>
+    set((s) => {
+      if (!s.savedRevision.has(relpath)) return s
+      const next = new Map(s.savedRevision)
+      next.delete(relpath)
+      return { savedRevision: next }
+    }),
+
+  renameTab: (oldRelpath, newRelpath, newName) =>
+    set((s) => {
+      if (oldRelpath === newRelpath) {
+        if (!newName) return s
+        return {
+          tabs: s.tabs.map((t) =>
+            t.relpath === oldRelpath ? { ...t, name: newName } : t,
+          ),
+        }
+      }
+      const tabs = s.tabs.map((t) =>
+        t.relpath === oldRelpath
+          ? { ...t, relpath: newRelpath, name: newName ?? t.name }
+          : t,
+      )
+      const activeRelpath =
+        s.activeRelpath === oldRelpath ? newRelpath : s.activeRelpath
+
+      const remap = <V,>(src: Map<string, V>): Map<string, V> => {
+        if (!src.has(oldRelpath)) return src
+        const next = new Map(src)
+        const val = next.get(oldRelpath) as V
+        next.delete(oldRelpath)
+        next.set(newRelpath, val)
+        return next
+      }
+      return {
+        tabs,
+        activeRelpath,
+        sessionRevision: remap(s.sessionRevision),
+        savedRevision: remap(s.savedRevision),
+      }
+    }),
+
+  addPendingLocalRevision: (transactionId) =>
+    set((s) => {
+      if (s.pendingLocalRevisions.has(transactionId)) return s
+      const next = new Set(s.pendingLocalRevisions)
+      next.add(transactionId)
+      return { pendingLocalRevisions: next }
+    }),
+
+  consumePendingLocalRevision: (transactionId) => {
+    const current = get().pendingLocalRevisions
+    if (!current.has(transactionId)) return false
+    const next = new Set(current)
+    next.delete(transactionId)
+    set({ pendingLocalRevisions: next })
+    return true
+  },
 
   openTab: (relpath, name) => {
     const existing = get().tabs.find((t) => t.relpath === relpath)
@@ -147,11 +322,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     })),
 
   markSaved: (relpath) =>
-    set((s) => ({
-      tabs: s.tabs.map((t) =>
+    set((s) => {
+      // Legacy content snapshot (still used for the untitled / no-session
+      // fallback path in `isDirty`).
+      const tabs = s.tabs.map((t) =>
         t.relpath === relpath ? { ...t, savedContent: t.content } : t,
-      ),
-    })),
+      )
+      // Phase 6: promote the current kernel revision to "saved". If
+      // the tab has no session (untitled save-then-open race, or a
+      // non-markdown write) we just skip the revision update — the
+      // content snapshot above is enough to keep the tab clean.
+      const current = s.sessionRevision.get(relpath)
+      if (current === undefined) return { tabs }
+      const nextSaved = new Map(s.savedRevision)
+      nextSaved.set(relpath, current)
+      return { tabs, savedRevision: nextSaved }
+    }),
 
   setMode: (relpath, mode) =>
     set((s) => ({
@@ -173,7 +359,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const left = nextTabs[idx - 1]
         nextActive = right?.relpath ?? left?.relpath ?? null
       }
-      return { tabs: nextTabs, activeRelpath: nextActive }
+      // Phase 6: drop the saved-revision entry. The session-revision
+      // entry is managed by `sessionManager.release` which already
+      // fires from the index.ts subscribe handler.
+      let savedRevision = s.savedRevision
+      if (savedRevision.has(relpath)) {
+        const next = new Map(savedRevision)
+        next.delete(relpath)
+        savedRevision = next
+      }
+      return { tabs: nextTabs, activeRelpath: nextActive, savedRevision }
     }),
 
   setActive: (relpath) => {
@@ -195,5 +390,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((s) => ({ tabs: [...s.tabs, tab], activeRelpath: relpath }))
   },
 
-  clear: () => set({ tabs: [], activeRelpath: null }),
+  clear: () =>
+    set({
+      tabs: [],
+      activeRelpath: null,
+      sessionRevision: new Map<string, number>(),
+      savedRevision: new Map<string, number>(),
+      pendingLocalRevisions: new Set<TransactionId>(),
+    }),
 }))

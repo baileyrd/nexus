@@ -2,17 +2,18 @@
 // (leaf-migration-plan.md §Phase 5). This is the centerpiece View —
 // one leaf per open tab in the Phase 6 model.
 //
-// The existing `EditorView` React component reads the whole tab set
-// from `useEditorStore`; for now we mount that component verbatim so
-// Phase 5 is a no-behaviour-change wrap. A future refactor splits the
-// tab-set into a per-leaf file-path plus a shared content cache, but
-// that belongs in the Phase 6/7 cleanup when the shell flips to
-// `<Workspace>` rendering.
+// Phase 3 of `docs/editor-transaction-wiring-plan.md` adds per-leaf
+// kernel-session lifecycle: on `onOpen` the leaf acquires a refcount
+// against a `SessionManager`; on `onClose` it releases. Actual content
+// hydration still flows through `index.ts`'s `files:open` handler — the
+// View just keeps the session pinned for as long as a leaf renders it
+// (so splits / layout-restore don't force a close+reopen).
 
 import { createRoot, type Root } from 'react-dom/client'
 import type { ReactElement } from 'react'
 import type { Leaf, ViewCreator } from '../../../workspace'
 import { ViewBase } from '../../../workspace'
+import type { SessionManager } from './sessionManager.ts'
 
 type RenderFn = () => ReactElement
 
@@ -30,10 +31,19 @@ export class MarkdownView extends ViewBase {
   private root: Root | null = null
   private state: MarkdownViewState = {}
   private readonly render: RenderFn
+  private readonly sessionManager: SessionManager | null
+  /** Relpath we called `acquire` for — tracked so `onClose`'s release
+   *  matches even if `setState` fires after the initial acquire. */
+  private acquiredRelpath: string | null = null
 
-  constructor(leaf: Leaf, render: RenderFn) {
+  constructor(
+    leaf: Leaf,
+    render: RenderFn,
+    sessionManager: SessionManager | null,
+  ) {
     super(leaf)
     this.render = render
+    this.sessionManager = sessionManager
   }
 
   getState(): MarkdownViewState {
@@ -54,14 +64,33 @@ export class MarkdownView extends ViewBase {
   onOpen(el: HTMLElement): void {
     this.root = createRoot(el)
     this.root.render(this.render())
+
+    // Pin the kernel session as long as this leaf is mounted. Untitled
+    // / empty relpaths resolve to `null` in SessionManager and are a
+    // no-op. Fire-and-forget: hydration is driven by `files:open` in
+    // index.ts; the acquire here is purely about refcount lifetime.
+    const relpath = this.state.relpath
+    if (this.sessionManager && relpath) {
+      this.acquiredRelpath = relpath
+      void this.sessionManager.acquire(relpath)
+    }
   }
 
   onClose(): void {
     this.root?.unmount()
     this.root = null
+
+    if (this.sessionManager && this.acquiredRelpath) {
+      const relpath = this.acquiredRelpath
+      this.acquiredRelpath = null
+      void this.sessionManager.release(relpath)
+    }
   }
 }
 
-export function markdownViewCreator(render: RenderFn): ViewCreator {
-  return (leaf) => new MarkdownView(leaf, render)
+export function markdownViewCreator(
+  render: RenderFn,
+  sessionManager: SessionManager | null = null,
+): ViewCreator {
+  return (leaf) => new MarkdownView(leaf, render, sessionManager)
 }

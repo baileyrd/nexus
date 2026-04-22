@@ -5,6 +5,8 @@ import { EditorView } from './EditorView'
 import { markdownViewCreator } from './MarkdownView'
 import { useEditorStore, isDirty } from './editorStore'
 import { setEditorRuntime } from './runtime'
+import { makeEditorClient } from './kernelClient'
+import { makeSessionManager } from './sessionManager'
 
 const VIEW_ID = 'nexus.editor.view'
 const EVENT_FILE_OPEN = 'files:open'
@@ -106,6 +108,58 @@ export const editorPlugin: Plugin = {
   },
 
   async activate(api: PluginAPI) {
+    // Phase 3: shell now acquires a kernel session for every markdown
+    // tab and hydrates content via `get_markdown` so what the user sees
+    // round-trips through the same parser/serializer pair that `save`
+    // writes back — no parallel `storage::read_file` for `.md` files.
+    // Non-markdown files keep the storage-read path (no editor session
+    // lifecycle for binaries / code files). See
+    // `docs/editor-transaction-wiring-plan.md` §Phase 3.
+    const editorClient = makeEditorClient(api.kernel)
+    // Phase 4: pass the kernel API so the manager can open a
+    // `com.nexus.editor.changed.<relpath>` subscription on acquire.
+    const sessionManager = makeSessionManager(editorClient, api.kernel)
+
+    /** `true` iff the editor should treat `name` (or relpath) as a
+     *  markdown file eligible for a kernel session. Matches the
+     *  extensions registered via `viewRegistry.registerExtensions`. */
+    const isMarkdownPath = (name: string): boolean => {
+      const lower = name.toLowerCase()
+      return lower.endsWith('.md') || lower.endsWith('.markdown')
+    }
+
+    /** Hydrate a markdown tab via the editor plugin: acquire a session
+     *  (which parses the on-disk file into a block tree) then pull the
+     *  canonical serialized form. The cached snapshot is kept alive by
+     *  the refcount until `release` is called — we pair this acquire
+     *  with a release in the tab-removed subscription below. */
+    const loadMarkdownContent = async (relpath: string): Promise<void> => {
+      try {
+        await sessionManager.acquire(relpath)
+        const content = await editorClient.getMarkdown(relpath)
+        useEditorStore.getState().setTabContent(relpath, content)
+      } catch (err) {
+        useEditorStore.getState().setTabError(relpath, String(err))
+      }
+    }
+
+    /** Hydrate a non-markdown tab via the storage plugin — same path
+     *  as the pre-Phase-3 implementation. Binaries / code files don't
+     *  round-trip through the editor block tree. */
+    const loadStorageContent = async (relpath: string): Promise<void> => {
+      try {
+        const resp = await api.kernel.invoke<ReadFileResponse>(
+          STORAGE_PLUGIN_ID,
+          READ_FILE_COMMAND,
+          { path: relpath },
+        )
+        const content = decodeUtf8(resp.bytes ?? [])
+        useEditorStore.getState().setTabContent(relpath, content)
+      } catch (err) {
+        useEditorStore.getState().setTabError(relpath, String(err))
+      }
+    }
+
     const loadFile = async (payload: FileOpenPayload) => {
       const store = useEditorStore.getState()
       const isNew = store.openTab(payload.relpath, payload.name)
@@ -119,16 +173,10 @@ export const editorPlugin: Plugin = {
         useEditorStore.getState().setMode(payload.relpath, 'source')
       }
 
-      try {
-        const resp = await api.kernel.invoke<ReadFileResponse>(
-          STORAGE_PLUGIN_ID,
-          READ_FILE_COMMAND,
-          { path: payload.relpath },
-        )
-        const content = decodeUtf8(resp.bytes ?? [])
-        useEditorStore.getState().setTabContent(payload.relpath, content)
-      } catch (err) {
-        useEditorStore.getState().setTabError(payload.relpath, String(err))
+      if (isMarkdownPath(payload.name) || isMarkdownPath(payload.relpath)) {
+        await loadMarkdownContent(payload.relpath)
+      } else {
+        await loadStorageContent(payload.relpath)
       }
     }
 
@@ -144,16 +192,10 @@ export const editorPlugin: Plugin = {
         ),
       }))
       void (async () => {
-        try {
-          const resp = await api.kernel.invoke<ReadFileResponse>(
-            STORAGE_PLUGIN_ID,
-            READ_FILE_COMMAND,
-            { path: relpath },
-          )
-          const content = decodeUtf8(resp.bytes ?? [])
-          useEditorStore.getState().setTabContent(relpath, content)
-        } catch (err) {
-          useEditorStore.getState().setTabError(relpath, String(err))
+        if (isMarkdownPath(tab.name) || isMarkdownPath(relpath)) {
+          await loadMarkdownContent(relpath)
+        } else {
+          await loadStorageContent(relpath)
         }
       })()
     }
@@ -185,7 +227,10 @@ export const editorPlugin: Plugin = {
     // `.md` opens now land as leaves of type 'markdown' in the main dock.
     viewRegistry.register(
       'markdown',
-      markdownViewCreator(() => createElement(EditorView, { onRetry: handleRetry })),
+      markdownViewCreator(
+        () => createElement(EditorView, { onRetry: handleRetry }),
+        sessionManager,
+      ),
     )
     viewRegistry.registerExtensions(['md', 'markdown'], 'markdown')
 
@@ -256,25 +301,104 @@ export const editorPlugin: Plugin = {
       await closeAll()
     })
 
-    setEditorRuntime({ confirmAndClose, openUntitled, closeAll })
+    setEditorRuntime({
+      confirmAndClose,
+      openUntitled,
+      closeAll,
+      kernelClient: editorClient,
+      sessionManager,
+      reportBridgeError: (message, err) => {
+        api.notifications.show({
+          type: 'error',
+          message: `${message}: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      },
+    })
+
+    /**
+     * Write bytes via the storage plugin. Used by the non-markdown
+     * save branch and by the untitled → named transition to seed the
+     * file before a kernel session is opened on top of it.
+     */
+    const writeStorageFile = async (
+      relpath: string,
+      content: string,
+    ): Promise<void> => {
+      const bytes = Array.from(new TextEncoder().encode(content))
+      await api.kernel.invoke<unknown>(STORAGE_PLUGIN_ID, WRITE_FILE_COMMAND, {
+        path: relpath,
+        bytes,
+      })
+    }
 
     api.commands.register(COMMAND_SAVE, async () => {
       const s = useEditorStore.getState()
       const tab = s.tabs.find((t) => t.relpath === s.activeRelpath)
       if (!tab) return
       if (!isDirty(tab)) return
+
+      const isMd = isMarkdownPath(tab.name) || isMarkdownPath(tab.relpath)
+      const hasSession = sessionManager.refcount(tab.relpath) > 0
+
       try {
-        // serde_json decodes Vec<u8> from a JSON number array — pass
-        // the UTF-8 bytes that way. An alternative base64 envelope
-        // would require matching on the Rust side; we use the
-        // straightforward number-array path that `write_file`
-        // already expects.
-        const bytes = Array.from(new TextEncoder().encode(tab.content))
-        await api.kernel.invoke<unknown>(
-          STORAGE_PLUGIN_ID,
-          WRITE_FILE_COMMAND,
-          { path: tab.relpath, bytes },
-        )
+        if (isMd && hasSession) {
+          // Named markdown file with a live session — go through the
+          // kernel so the bytes on disk match the in-memory block
+          // tree byte-for-byte. `save` runs
+          // `MarkdownSerializer::serialize` under the session lock and
+          // hands off to `com.nexus.storage::write_file` atomically
+          // (see `crates/nexus-editor/src/core_plugin.rs` ~L370).
+          await editorClient.saveSession(tab.relpath)
+          useEditorStore.getState().markSaved(tab.relpath)
+          return
+        }
+
+        if (isMd && !hasSession) {
+          // Untitled markdown (or a markdown tab that failed to
+          // acquire earlier). We need an on-disk file before the
+          // editor plugin can open a session for it, so:
+          //   1. Serialize the current in-memory `content` via
+          //      storage::write_file (creates / overwrites the file).
+          //   2. Re-key the tab from the untitled placeholder to the
+          //      real relpath (if they differ — for now the new
+          //      relpath IS the old one, since the untitled-rename
+          //      flow routes through a separate UI gesture; this
+          //      branch mostly handles "file existed but session
+          //      acquire failed" today). Still route through
+          //      `renameTab` so the revision maps follow.
+          //   3. Open a session and seed savedRevision so future
+          //      saves take the kernel path above.
+          const newRelpath = tab.relpath
+          await writeStorageFile(newRelpath, tab.content)
+          if (newRelpath !== tab.relpath) {
+            useEditorStore.getState().renameTab(tab.relpath, newRelpath)
+          }
+          // Mark clean against current content before opening the
+          // session — if `acquire` races a concurrent edit, the
+          // transaction bridge will advance `sessionRevision` and
+          // `isDirty` will flip back to true next paint.
+          useEditorStore.getState().markSaved(newRelpath)
+          try {
+            await sessionManager.acquire(newRelpath)
+            // acquire seeds sessionRevision + savedRevision from the
+            // open-time snapshot, so the tab stays clean until the
+            // next local edit.
+          } catch (acquireErr) {
+            // Acquire failure after a successful write is non-fatal —
+            // subsequent saves will re-try the acquire via
+            // loadMarkdownContent / retry. Surface but don't throw.
+            api.notifications.show({
+              type: 'warning',
+              message: `Save wrote the file, but could not reopen an editor session: ${
+                acquireErr instanceof Error ? acquireErr.message : String(acquireErr)
+              }`,
+            })
+          }
+          return
+        }
+
+        // Non-markdown named file — same storage-write as pre-Phase-6.
+        await writeStorageFile(tab.relpath, tab.content)
         useEditorStore.getState().markSaved(tab.relpath)
       } catch (err) {
         api.notifications.show({
@@ -309,6 +433,20 @@ export const editorPlugin: Plugin = {
       const prevDirty = !!prevActiveTab && isDirty(prevActiveTab)
       if (dirty !== prevDirty) {
         api.context.set(CONTEXT_KEY_ACTIVE_TAB_DIRTY, dirty)
+      }
+
+      // Phase 3 refcount pairing: every `loadFile` that acquired a
+      // markdown session needs a matching release when the tab goes
+      // away. Detect tabs that existed in `prev` but are gone from
+      // `state` and release them. The refcount lets the leaf-held
+      // acquire (MarkdownView.onOpen) keep the session alive if the
+      // leaf is still mounted — e.g. during a re-layout.
+      const currentPaths = new Set(state.tabs.map((t) => t.relpath))
+      for (const prevTab of prev.tabs) {
+        if (currentPaths.has(prevTab.relpath)) continue
+        if (isMarkdownPath(prevTab.name) || isMarkdownPath(prevTab.relpath)) {
+          void sessionManager.release(prevTab.relpath)
+        }
       }
     })
   },

@@ -132,6 +132,12 @@ api.commands.register('myplugin.outline.focus', async () => {
 Plugins can reach the workspace facade via `api.workspace` /
 `api.viewRegistry` instead of importing `@/workspace` directly.
 
+`MarkdownView` owns a kernel session lifecycle — `onOpen` acquires a
+refcount against the `SessionManager`, `onClose` releases it (see
+[editor-transaction-wiring-plan](./editor-transaction-wiring-plan.md)
+Phase 3, and [editor-transaction-architecture](./editor-transaction-architecture.md)
+for the full edit-flow reference).
+
 ## The remaining role of `SlotRegistry`
 
 After Phase 7, `SlotRegistry` serves *chrome* only:

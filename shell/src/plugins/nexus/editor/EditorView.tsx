@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import { EditorView as CMEditorView } from '@codemirror/view'
 import { useEditorStore, type EditorTab, type EditorTabMode } from './editorStore'
 import { renderMarkdown } from './markdownRender'
 import { eventBus } from '../../../host/EventBus'
@@ -8,7 +9,32 @@ import { useWorkspaceField, workspace } from '../../../workspace'
 import { WindowControls } from '../../../shell/WindowControls'
 import { EditorTabStrip } from './TabStrip'
 import { getEditorRuntime } from './runtime'
+import { CodeMirrorHost, type CodeMirrorHostHandle } from './cm/CodeMirrorHost'
+import { transactionBridge } from './cm/transactionBridge'
 import './markdown.css'
+
+/** Untitled placeholder relpaths have no kernel session; treat them
+ *  locally only. Mirrors the predicate in `sessionManager.ts`. */
+function isUntitled(relpath: string): boolean {
+  return /^untitled-\d+$/i.test(relpath)
+}
+
+/**
+ * Scroll a CodeMirror view so that `line1` (1-based) lands at the top
+ * of the viewport. Clamps to doc bounds so callers can pass stale
+ * heading line numbers without blowing up. Kept local to the editor
+ * view — the helper is load-bearing for outline → source scrolling
+ * but isn't generally useful outside this file.
+ */
+function viewToLine(view: CMEditorView, line1: number): void {
+  const total = view.state.doc.lines
+  if (total === 0) return
+  const clamped = Math.max(1, Math.min(line1, total))
+  const pos = view.state.doc.line(clamped).from
+  view.dispatch({
+    effects: CMEditorView.scrollIntoView(pos, { y: 'start' }),
+  })
+}
 
 /**
  * Untitled tabs use `untitled-N` as their relpath placeholder. Such
@@ -46,7 +72,7 @@ const ACTIVE_HEADING_OFFSET = 8
  * `editor:scrollToHeading` with the 0-based heading index (among all
  * headings in the active doc) and the 1-based source line number.
  * Preview mode scrolls the Nth heading element into view; source mode
- * scrolls the textarea to the matching line.
+ * scrolls the CodeMirror view to the matching line.
  */
 interface ScrollToHeadingPayload {
   headingId?: string
@@ -65,8 +91,8 @@ function isMarkdown(name: string): boolean {
 /**
  * Editor view: tab row with per-tab dirty dot + a mode-toggle button
  * at the right end of the tab row, above a body that renders the
- * active tab either as markdown/<pre> (preview) or as a monospaced
- * textarea (source).
+ * active tab either as markdown/<pre> (preview) or as a CodeMirror
+ * view (source).
  *
  * Empty, loading, and error states are computed per-tab so a failed
  * load on one tab doesn't bleed into any neighbour.
@@ -97,13 +123,14 @@ export function EditorView({ onRetry }: EditorViewProps) {
 
   // Refs into the rendered body so an outline click can actually scroll
   // the right element. Preview uses the markdown body div; source uses
-  // the textarea. Only one is mounted at a time.
+  // the CodeMirror view (via its imperative handle). Only one body is
+  // mounted at a time.
   const markdownBodyRef = useRef<HTMLDivElement | null>(null)
-  const sourceRef = useRef<HTMLTextAreaElement | null>(null)
+  const cmViewRef = useRef<CodeMirrorHostHandle | null>(null)
   // The `overflow: auto` wrapper around the active tab body. In preview
   // mode this is the element whose scroll position drives heading
   // visibility (markdownBodyRef is the inner content). In source mode
-  // the textarea scrolls itself.
+  // the CodeMirror view owns its own scrolling.
   const scrollWrapRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -124,20 +151,11 @@ export function EditorView({ onRetry }: EditorViewProps) {
         if (!target) return
         target.scrollIntoView({ behavior: 'smooth', block: 'start' })
       } else if (tab.mode === 'source') {
-        // Source: best-effort line scroll. Put the caret at the start of
-        // the target line so native textarea behaviour lands it in view.
-        const textarea = sourceRef.current
-        if (!textarea) return
-        const lines = tab.content.split(/\r?\n/)
-        const lineIndex = Math.max(0, Math.min(payload.line - 1, lines.length - 1))
-        let offset = 0
-        for (let i = 0; i < lineIndex; i++) offset += lines[i].length + 1
-        textarea.focus()
-        textarea.setSelectionRange(offset, offset)
-        // Nudge scroll: compute approximate pixel offset via line-height.
-        const cs = window.getComputedStyle(textarea)
-        const lh = parseFloat(cs.lineHeight)
-        if (!Number.isNaN(lh) && lh > 0) textarea.scrollTop = lh * lineIndex
+        // Source: scroll the CM view so the target line lands at the top.
+        // CM's doc.line is 1-based, matching our payload.
+        const view = cmViewRef.current?.view ?? null
+        if (!view) return
+        viewToLine(view, payload.line)
       }
     })
     return unsub
@@ -185,13 +203,13 @@ export function EditorView({ onRetry }: EditorViewProps) {
         }
         emit(active)
       } else {
-        // Source mode: the textarea owns scroll. Map scrollTop ÷
-        // line-height to a 1-based line number and find the heading
-        // whose source line is at or above that. Headings are read
-        // from the outline store — same cross-plugin store import
-        // pattern outline/index.ts uses on the editor store.
-        const ta = sourceRef.current
-        if (!ta) {
+        // Source mode: the CM view owns scroll. Ask CM which line
+        // corresponds to the scroll-container's top edge, then find
+        // the heading at or above that. Headings come from the
+        // outline store — same cross-plugin import pattern
+        // outline/index.ts uses on the editor store.
+        const view = cmViewRef.current?.view ?? null
+        if (!view) {
           emit(null)
           return
         }
@@ -200,11 +218,13 @@ export function EditorView({ onRetry }: EditorViewProps) {
           emit(null)
           return
         }
-        const cs = window.getComputedStyle(ta)
-        const lh = parseFloat(cs.lineHeight)
-        const topLine = Number.isFinite(lh) && lh > 0
-          ? Math.floor(ta.scrollTop / lh) + 1
-          : 1
+        const scrollDom = view.scrollDOM
+        const topY = scrollDom.getBoundingClientRect().top
+        // `posAtCoords` resolves a viewport coordinate to a doc offset;
+        // then `doc.lineAt` gives us the 1-based line. Fall back to
+        // line 1 if CM can't resolve (e.g. view hasn't laid out yet).
+        const pos = view.posAtCoords({ x: scrollDom.getBoundingClientRect().left + 1, y: topY + 1 })
+        const topLine = pos != null ? view.state.doc.lineAt(pos).number : 1
         let active = 0
         for (let i = 0; i < headings.length; i++) {
           if (headings[i].line <= topLine) active = i
@@ -217,7 +237,10 @@ export function EditorView({ onRetry }: EditorViewProps) {
       if (raf) return
       raf = requestAnimationFrame(compute)
     }
-    const target = activeTab.mode === 'preview' ? scrollWrapRef.current : sourceRef.current
+    const target =
+      activeTab.mode === 'preview'
+        ? scrollWrapRef.current
+        : cmViewRef.current?.view?.scrollDOM ?? null
     if (!target) return
     target.addEventListener('scroll', schedule, { passive: true })
     // Initial compute after the next paint so the freshly-rendered DOM
@@ -331,7 +354,7 @@ export function EditorView({ onRetry }: EditorViewProps) {
               markdownHtml={markdownHtml}
               onRetry={onRetry}
               markdownBodyRef={markdownBodyRef}
-              sourceRef={sourceRef}
+              cmViewRef={cmViewRef}
             />
           </>
         ) : (
@@ -489,10 +512,10 @@ interface TabBodyProps {
   markdownHtml: string
   onRetry: (relpath: string) => void
   markdownBodyRef: React.MutableRefObject<HTMLDivElement | null>
-  sourceRef: React.MutableRefObject<HTMLTextAreaElement | null>
+  cmViewRef: React.MutableRefObject<CodeMirrorHostHandle | null>
 }
 
-function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, sourceRef }: TabBodyProps) {
+function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: TabBodyProps) {
   const centredStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -533,16 +556,63 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, sourceRef }: Tab
   }
 
   if (tab.mode === 'source') {
+    // Phase 5: markdown tabs with an open kernel session route their
+    // edits through `com.nexus.editor::apply_transaction` via the
+    // bridge — `onChange` becomes a no-op for the hot path and the
+    // authoritative snapshot drives the doc. Untitled tabs (no
+    // session) keep the Phase 2 behaviour: `setContent` mutates the
+    // store directly so the local buffer stays live until first save.
+    const runtime = getEditorRuntime()
+    const bridgeEligible =
+      runtime !== null &&
+      !isUntitled(tab.relpath) &&
+      isMarkdown(tab.name) &&
+      runtime.sessionManager.refcount(tab.relpath) > 0
+
+    if (bridgeEligible && runtime) {
+      return (
+        <CodeMirrorHost
+          key={`bridge:${tab.relpath}`}
+          ref={cmViewRef}
+          className="nexus-editor-source"
+          value={tab.content}
+          onChange={() => {
+            // No-op on the hot path. The bridge owns dispatching the
+            // edit through the kernel; the store's `content` is
+            // reconciled lazily when a snapshot update lands.
+          }}
+          kernelUndo={{
+            relpath: tab.relpath,
+            kernelClient: runtime.kernelClient,
+            applyCanonical: (view, canonical) => {
+              const current = view.state.doc.toString()
+              if (current === canonical) return
+              view.dispatch({
+                changes: { from: 0, to: current.length, insert: canonical },
+              })
+            },
+            onError: runtime.reportBridgeError,
+          }}
+          buildExtensions={() => [
+            transactionBridge({
+              relpath: tab.relpath,
+              kernelClient: runtime.kernelClient,
+              getSnapshot: () => runtime.sessionManager.getSnapshot(tab.relpath),
+              onError: runtime.reportBridgeError,
+            }),
+          ]}
+        />
+      )
+    }
+
+    // Untitled / non-markdown / pre-session fallback — Phase 2 behaviour.
     return (
-      <textarea
-        ref={sourceRef}
+      <CodeMirrorHost
+        key={`local:${tab.relpath}`}
+        ref={cmViewRef}
         className="nexus-editor-source"
         value={tab.content}
-        onChange={(e) =>
-          useEditorStore.getState().setContent(tab.relpath, e.target.value)
-        }
-        spellCheck={false}
-        autoCapitalize="off"
+        onChange={(v) => useEditorStore.getState().setContent(tab.relpath, v)}
       />
     )
   }

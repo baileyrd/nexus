@@ -451,10 +451,17 @@ fn register_core_plugins(
                         "sync_content",
                         nexus_editor::core_plugin::HANDLER_SYNC_CONTENT,
                     ),
+                    (
+                        "get_markdown",
+                        nexus_editor::core_plugin::HANDLER_GET_MARKDOWN,
+                    ),
                 ],
             ),
             forge_root,
-            Box::new(EditorCorePlugin::new(forge_root.to_path_buf())),
+            Box::new(EditorCorePlugin::with_event_bus(
+                forge_root.to_path_buf(),
+                Arc::clone(event_bus),
+            )),
         )
         .context("failed to register com.nexus.editor")?;
 

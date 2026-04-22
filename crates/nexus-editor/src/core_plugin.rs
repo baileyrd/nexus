@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_kernel::{EventBus, KernelPluginContext, PluginContext};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -36,6 +36,15 @@ const STORAGE_IPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Reverse-DNS identifier for this plugin.
 pub const PLUGIN_ID: &str = "com.nexus.editor";
+
+/// Prefix for per-session mutation events. Each mutation handler
+/// emits a `NexusEvent::Custom` with `type_id` of the form
+/// `com.nexus.editor.changed.<relpath>` so shell subscribers can
+/// filter by prefix (via [`nexus_kernel::EventFilter::CustomPrefix`])
+/// and still see which file changed. Payload shape:
+/// `{ "relpath": String, "revision": u64, "transaction_id": Option<Uuid> }`.
+/// Phase 4 of `docs/editor-transaction-wiring-plan.md`.
+pub const EVENT_CHANGED_PREFIX: &str = "com.nexus.editor.changed.";
 
 // ── IPC handler ids ──────────────────────────────────────────────────────────
 //
@@ -66,6 +75,15 @@ pub const HANDLER_LIST_OPEN: u32 = 8;
 /// created. The undo tree is left untouched — this is a background resync
 /// for read-only consumers (AI, MCP, outline), not a user transaction.
 pub const HANDLER_SYNC_CONTENT: u32 = 9;
+/// Handler id for `get_markdown`. Args: `{ "relpath": String }`; Returns: `String`.
+///
+/// Serializes the session's current block tree via
+/// [`MarkdownSerializer::serialize`] and returns the canonical markdown
+/// form — the exact text the kernel would write back on save. Shells
+/// use this for content hydration so rendered text round-trips through
+/// the same parser/serializer pair the disk write uses (Phase 3 of the
+/// editor transaction wiring plan).
+pub const HANDLER_GET_MARKDOWN: u32 = 10;
 
 // ── Wire types ───────────────────────────────────────────────────────────────
 
@@ -89,6 +107,12 @@ pub struct EditorSnapshot {
     pub can_undo: bool,
     /// `true` if `redo` would produce a state change.
     pub can_redo: bool,
+    /// Monotonic per-session mutation counter. Incremented on every
+    /// successful `apply_transaction` / `undo` / `redo` / `sync_content`
+    /// before the snapshot is taken. Shell subscribers use this (via
+    /// the `com.nexus.editor.changed.<relpath>` event) to detect stale
+    /// local state and to dedupe the echoes of their own dispatches.
+    pub revision: u64,
 }
 
 // ── Plugin state ─────────────────────────────────────────────────────────────
@@ -98,6 +122,8 @@ struct Session {
     tree: BlockTree,
     undo: UndoTree,
     relpath: String,
+    /// Monotonic mutation counter. See [`EditorSnapshot::revision`].
+    revision: u64,
 }
 
 /// Editor core plugin.
@@ -119,16 +145,37 @@ pub struct EditorCorePlugin {
     /// [`CorePlugin::wire_context`] once the bootstrap has the shared
     /// dispatcher assembled; `None` for sync-only test drivers.
     context: Option<Arc<KernelPluginContext>>,
+    /// Kernel event bus used to publish
+    /// `com.nexus.editor.changed.<relpath>` events after every
+    /// successful mutation. `None` for unit tests that drive the
+    /// plugin without a full runtime — events are silently dropped.
+    event_bus: Option<Arc<EventBus>>,
 }
 
 impl EditorCorePlugin {
-    /// Create a new plugin rooted at `forge_root`.
+    /// Create a new plugin rooted at `forge_root`, without an event
+    /// bus. Mutation events will be silently dropped — used by the
+    /// unit tests in this module that drive the plugin directly.
     #[must_use]
     pub fn new(forge_root: PathBuf) -> Self {
         Self {
             forge_root,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             context: None,
+            event_bus: None,
+        }
+    }
+
+    /// Create a new plugin wired to an event bus. The bootstrap uses
+    /// this path so shell subscribers can observe edits via
+    /// [`EVENT_CHANGED_PREFIX`].
+    #[must_use]
+    pub fn with_event_bus(forge_root: PathBuf, event_bus: Arc<EventBus>) -> Self {
+        Self {
+            forge_root,
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            context: None,
+            event_bus: Some(event_bus),
         }
     }
 }
@@ -156,11 +203,16 @@ impl CorePlugin for EditorCorePlugin {
             HANDLER_CLOSE => handle_close(&self.sessions, args),
             HANDLER_GET_TREE => handle_get_tree(&self.sessions, args),
             HANDLER_SAVE => handle_save_sync(&self.forge_root, &self.sessions, args),
-            HANDLER_APPLY_TRANSACTION => handle_apply_transaction(&self.sessions, args),
-            HANDLER_UNDO => handle_undo(&self.sessions, args),
-            HANDLER_REDO => handle_redo(&self.sessions, args),
+            HANDLER_APPLY_TRANSACTION => {
+                handle_apply_transaction(&self.sessions, self.event_bus.as_ref(), args)
+            }
+            HANDLER_UNDO => handle_undo(&self.sessions, self.event_bus.as_ref(), args),
+            HANDLER_REDO => handle_redo(&self.sessions, self.event_bus.as_ref(), args),
             HANDLER_LIST_OPEN => handle_list_open(&self.sessions),
-            HANDLER_SYNC_CONTENT => handle_sync_content(&self.sessions, args),
+            HANDLER_SYNC_CONTENT => {
+                handle_sync_content(&self.sessions, self.event_bus.as_ref(), args)
+            }
+            HANDLER_GET_MARKDOWN => handle_get_markdown(&self.sessions, args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -220,6 +272,7 @@ fn finish_open(
         tree,
         undo: UndoTree::new(),
         relpath: relpath.clone(),
+        revision: 0,
     };
     let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
     guard.insert(relpath.clone(), session);
@@ -361,6 +414,7 @@ async fn handle_save_async(
 
 fn handle_apply_transaction(
     sessions: &Mutex<HashMap<String, Session>>,
+    event_bus: Option<&Arc<EventBus>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "apply_transaction")?;
@@ -370,47 +424,71 @@ fn handle_apply_transaction(
         .clone();
     let tx: crate::Transaction = serde_json::from_value(tx_value)
         .map_err(|e| exec_err(format!("apply_transaction: invalid transaction: {e}")))?;
+    let tx_id = tx.id;
 
-    let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    let s = guard.get_mut(&relpath).ok_or_else(|| {
-        exec_err(format!(
-            "apply_transaction: no open session for '{relpath}'"
-        ))
-    })?;
-    s.undo
-        .execute(tx, &mut s.tree)
-        .map_err(|e| exec_err(format!("apply_transaction: {e}")))?;
-    snapshot_to_value(&snapshot_of(s), "apply_transaction")
+    let (value, revision) = {
+        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+        let s = guard.get_mut(&relpath).ok_or_else(|| {
+            exec_err(format!(
+                "apply_transaction: no open session for '{relpath}'"
+            ))
+        })?;
+        s.undo
+            .execute(tx, &mut s.tree)
+            .map_err(|e| exec_err(format!("apply_transaction: {e}")))?;
+        s.revision = s.revision.saturating_add(1);
+        let rev = s.revision;
+        let val = snapshot_to_value(&snapshot_of(s), "apply_transaction")?;
+        (val, rev)
+    };
+    publish_changed(event_bus, &relpath, revision, Some(tx_id));
+    Ok(value)
 }
 
 fn handle_undo(
     sessions: &Mutex<HashMap<String, Session>>,
+    event_bus: Option<&Arc<EventBus>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "undo")?;
-    let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    let s = guard
-        .get_mut(&relpath)
-        .ok_or_else(|| exec_err(format!("undo: no open session for '{relpath}'")))?;
-    s.undo
-        .undo(&mut s.tree)
-        .map_err(|e| exec_err(format!("undo: {e}")))?;
-    snapshot_to_value(&snapshot_of(s), "undo")
+    let (value, revision) = {
+        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+        let s = guard
+            .get_mut(&relpath)
+            .ok_or_else(|| exec_err(format!("undo: no open session for '{relpath}'")))?;
+        s.undo
+            .undo(&mut s.tree)
+            .map_err(|e| exec_err(format!("undo: {e}")))?;
+        s.revision = s.revision.saturating_add(1);
+        let rev = s.revision;
+        let val = snapshot_to_value(&snapshot_of(s), "undo")?;
+        (val, rev)
+    };
+    publish_changed(event_bus, &relpath, revision, None);
+    Ok(value)
 }
 
 fn handle_redo(
     sessions: &Mutex<HashMap<String, Session>>,
+    event_bus: Option<&Arc<EventBus>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "redo")?;
-    let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    let s = guard
-        .get_mut(&relpath)
-        .ok_or_else(|| exec_err(format!("redo: no open session for '{relpath}'")))?;
-    s.undo
-        .redo(&mut s.tree)
-        .map_err(|e| exec_err(format!("redo: {e}")))?;
-    snapshot_to_value(&snapshot_of(s), "redo")
+    let (value, revision) = {
+        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+        let s = guard
+            .get_mut(&relpath)
+            .ok_or_else(|| exec_err(format!("redo: no open session for '{relpath}'")))?;
+        s.undo
+            .redo(&mut s.tree)
+            .map_err(|e| exec_err(format!("redo: {e}")))?;
+        s.revision = s.revision.saturating_add(1);
+        let rev = s.revision;
+        let val = snapshot_to_value(&snapshot_of(s), "redo")?;
+        (val, rev)
+    };
+    publish_changed(event_bus, &relpath, revision, None);
+    Ok(value)
 }
 
 fn handle_list_open(sessions: &Mutex<HashMap<String, Session>>) -> Result<Value, PluginError> {
@@ -426,6 +504,7 @@ fn handle_list_open(sessions: &Mutex<HashMap<String, Session>>) -> Result<Value,
 /// for read-only consumers (AI, MCP, outline), not a user-visible transaction.
 fn handle_sync_content(
     sessions: &Mutex<HashMap<String, Session>>,
+    event_bus: Option<&Arc<EventBus>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "sync_content")?;
@@ -441,15 +520,37 @@ fn handle_sync_content(
         .parse(content)
         .map_err(|e| exec_err(format!("sync_content: parse '{relpath}': {e}")))?;
 
-    let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    let session = guard.entry(relpath.clone()).or_insert_with(|| Session {
-        tree: BlockTree::default(),
-        undo: UndoTree::new(),
-        relpath: relpath.clone(),
-    });
-    session.tree = tree;
+    let revision = {
+        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+        let session = guard.entry(relpath.clone()).or_insert_with(|| Session {
+            tree: BlockTree::default(),
+            undo: UndoTree::new(),
+            relpath: relpath.clone(),
+            revision: 0,
+        });
+        session.tree = tree;
+        session.revision = session.revision.saturating_add(1);
+        session.revision
+    };
+    publish_changed(event_bus, &relpath, revision, None);
 
     Ok(serde_json::json!({}))
+}
+
+/// Serialize the session's block tree to markdown and return it as a
+/// bare JSON string. Matches `serialize_session` but surfaces the
+/// result over IPC rather than routing it to disk.
+fn handle_get_markdown(
+    sessions: &Mutex<HashMap<String, Session>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let relpath = relpath_arg(args, "get_markdown")?;
+    let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+    let s = guard
+        .get(&relpath)
+        .ok_or_else(|| exec_err(format!("get_markdown: no open session for '{relpath}'")))?;
+    let markdown = MarkdownSerializer::serialize(&s.tree);
+    Ok(Value::String(markdown))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -468,6 +569,40 @@ fn snapshot_of(s: &Session) -> EditorSnapshot {
         undo_len,
         can_undo,
         can_redo,
+        revision: s.revision,
+    }
+}
+
+/// Publish a `com.nexus.editor.changed.<relpath>` custom event with
+/// `{ relpath, revision, transaction_id }`. `transaction_id` is the
+/// applied transaction's UUID for `apply_transaction` and `None`
+/// (serialized as JSON `null`) for `undo` / `redo` / `sync_content`
+/// — none of those carry a client-supplied id the shell could echo-
+/// suppress on. Mirrors the publish-on-mutation pattern used by
+/// `com.nexus.theme` (see `crates/nexus-theme/src/core_plugin.rs`).
+fn publish_changed(
+    event_bus: Option<&Arc<EventBus>>,
+    relpath: &str,
+    revision: u64,
+    transaction_id: Option<uuid::Uuid>,
+) {
+    let Some(bus) = event_bus else { return };
+    let type_id = format!("{EVENT_CHANGED_PREFIX}{relpath}");
+    let payload = serde_json::json!({
+        "relpath": relpath,
+        "revision": revision,
+        "transaction_id": transaction_id,
+    });
+    // Bus publish errors are namespace/closed-channel cases we can't
+    // meaningfully recover from inside a handler — log and move on
+    // so the mutation itself still succeeds for the caller.
+    if let Err(err) = bus.publish_plugin(PLUGIN_ID, &type_id, payload) {
+        tracing::warn!(
+            plugin = PLUGIN_ID,
+            %err,
+            relpath = %relpath,
+            "failed to publish editor changed event"
+        );
     }
 }
 
@@ -852,6 +987,199 @@ mod tests {
             .unwrap();
         let paths: Vec<String> = serde_json::from_value(both).unwrap();
         assert_eq!(paths, vec!["notes/a.md".to_string(), "notes/b.md".into()]);
+    }
+
+    #[test]
+    fn get_markdown_returns_serialized_tree() {
+        use crate::{Operation, Transaction, TransactionMetadata};
+        let (_tmp, root) = setup_forge();
+        write_note(&root, "notes/a.md", "Hello\n");
+        let mut p = new_plugin(root);
+
+        // Open and apply a transaction so the on-disk file and the
+        // in-memory tree diverge — then verify get_markdown reflects
+        // the in-memory state, not the disk contents.
+        let snap: EditorSnapshot = serde_json::from_value(
+            p.dispatch(
+                HANDLER_OPEN,
+                &serde_json::json!({ "relpath": "notes/a.md" }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let para_id = snap.tree.root_blocks[0];
+        let content_len = snap.tree.blocks[&para_id].content.len();
+        let tx = Transaction::new(
+            vec![Operation::InsertText {
+                block_id: para_id,
+                pos: content_len,
+                text: " world".into(),
+                pre_annotations: Vec::new(),
+            }],
+            TransactionMetadata::default(),
+        );
+        p.dispatch(
+            HANDLER_APPLY_TRANSACTION,
+            &serde_json::json!({
+                "relpath": "notes/a.md",
+                "transaction": serde_json::to_value(&tx).unwrap(),
+            }),
+        )
+        .unwrap();
+
+        // Call get_markdown and compare against a direct serialize of
+        // the session's current tree (round-trip check).
+        let resp = p
+            .dispatch(
+                HANDLER_GET_MARKDOWN,
+                &serde_json::json!({ "relpath": "notes/a.md" }),
+            )
+            .unwrap();
+        let md: String = serde_json::from_value(resp).unwrap();
+        let snap2: EditorSnapshot = serde_json::from_value(
+            p.dispatch(
+                HANDLER_GET_TREE,
+                &serde_json::json!({ "relpath": "notes/a.md" }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(md, MarkdownSerializer::serialize(&snap2.tree));
+        assert!(md.contains("Hello world"));
+    }
+
+    #[test]
+    fn get_markdown_on_unopen_errors() {
+        let (_tmp, root) = setup_forge();
+        let mut p = new_plugin(root);
+        assert!(p
+            .dispatch(
+                HANDLER_GET_MARKDOWN,
+                &serde_json::json!({ "relpath": "never-opened.md" }),
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn apply_transaction_publishes_changed_event_with_revision_and_tx_id() {
+        use crate::{Operation, Transaction, TransactionMetadata};
+        use nexus_kernel::{EventFilter, NexusEvent};
+
+        let (_tmp, root) = setup_forge();
+        write_note(&root, "notes/a.md", "abc\n");
+
+        let bus = Arc::new(EventBus::new(16));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+            "com.nexus.editor.changed.".to_string(),
+        ));
+        let mut p = EditorCorePlugin::with_event_bus(root, Arc::clone(&bus));
+        p.on_init().unwrap();
+
+        // open should NOT emit a changed event — it's not a mutation.
+        let snap: EditorSnapshot = serde_json::from_value(
+            p.dispatch(
+                HANDLER_OPEN,
+                &serde_json::json!({ "relpath": "notes/a.md" }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(snap.revision, 0, "fresh session starts at revision 0");
+        let para_id = snap.tree.root_blocks[0];
+
+        let tx = Transaction::new(
+            vec![Operation::InsertText {
+                block_id: para_id,
+                pos: 3,
+                text: "d".into(),
+                pre_annotations: Vec::new(),
+            }],
+            TransactionMetadata::default(),
+        );
+        let tx_id = tx.id;
+        let snap: EditorSnapshot = serde_json::from_value(
+            p.dispatch(
+                HANDLER_APPLY_TRANSACTION,
+                &serde_json::json!({
+                    "relpath": "notes/a.md",
+                    "transaction": serde_json::to_value(&tx).unwrap(),
+                }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(snap.revision, 1, "apply_transaction bumps revision");
+
+        let event = sub.try_recv().unwrap().unwrap();
+        match &event.event {
+            NexusEvent::Custom {
+                type_id,
+                payload,
+                emitting_plugin,
+            } => {
+                assert_eq!(type_id, "com.nexus.editor.changed.notes/a.md");
+                assert_eq!(emitting_plugin, PLUGIN_ID);
+                assert_eq!(payload["relpath"], "notes/a.md");
+                assert_eq!(payload["revision"], 1);
+                assert_eq!(
+                    payload["transaction_id"].as_str().unwrap(),
+                    tx_id.to_string(),
+                );
+            }
+            other => panic!("expected Custom, got {other:?}"),
+        }
+
+        // undo also emits, with transaction_id: null.
+        let snap: EditorSnapshot = serde_json::from_value(
+            p.dispatch(
+                HANDLER_UNDO,
+                &serde_json::json!({ "relpath": "notes/a.md" }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(snap.revision, 2, "undo bumps revision");
+        let event = sub.try_recv().unwrap().unwrap();
+        match &event.event {
+            NexusEvent::Custom { payload, .. } => {
+                assert_eq!(payload["revision"], 2);
+                assert!(payload["transaction_id"].is_null());
+            }
+            other => panic!("expected Custom, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sync_content_publishes_changed_event() {
+        use nexus_kernel::{EventFilter, NexusEvent};
+
+        let (_tmp, root) = setup_forge();
+        write_note(&root, "notes/a.md", "first\n");
+
+        let bus = Arc::new(EventBus::new(16));
+        let mut sub = bus.subscribe(EventFilter::CustomPrefix(
+            "com.nexus.editor.changed.".to_string(),
+        ));
+        let mut p = EditorCorePlugin::with_event_bus(root, Arc::clone(&bus));
+        p.on_init().unwrap();
+
+        // sync_content on a previously-unopened session is allowed — it
+        // creates the session. Still counts as a mutation → event fires.
+        p.dispatch(
+            HANDLER_SYNC_CONTENT,
+            &serde_json::json!({ "relpath": "notes/a.md", "content": "updated\n" }),
+        )
+        .unwrap();
+
+        let event = sub.try_recv().unwrap().unwrap();
+        match &event.event {
+            NexusEvent::Custom { type_id, payload, .. } => {
+                assert_eq!(type_id, "com.nexus.editor.changed.notes/a.md");
+                assert_eq!(payload["revision"], 1);
+                assert!(payload["transaction_id"].is_null());
+            }
+            other => panic!("expected Custom, got {other:?}"),
+        }
     }
 
     #[test]
