@@ -150,7 +150,7 @@ export function OutlineView() {
               fontSize: 12,
             }}
           >
-            No headings
+            No headings found.
           </div>
         ) : rows.length === 0 ? (
           <div

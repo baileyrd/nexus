@@ -57,7 +57,7 @@ export function BacklinksView() {
   } else if (loading) {
     body = <StateMessage color="var(--fg-muted)">Loading…</StateMessage>
   } else if (links.length === 0) {
-    body = <StateMessage color="var(--fg-dim)">No backlinks.</StateMessage>
+    body = <StateMessage color="var(--fg-dim)">No backlinks found.</StateMessage>
   } else {
     body = (
       <div style={{ overflowY: 'auto', flex: 1 }}>
