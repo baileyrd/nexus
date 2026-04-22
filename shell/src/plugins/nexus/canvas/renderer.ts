@@ -31,6 +31,145 @@ const FALLBACK_THEME: Theme = {
  *  "double-click empty space" behaviour. */
 export const DEFAULT_TEXT_NODE_SIZE = { width: 250, height: 60 }
 
+/** Minimum node dimensions in world units, enforced on resize so a
+ *  careless drag can't collapse a node into an invisible sliver. */
+export const MIN_NODE_SIZE = 40
+
+/** Half-size of a resize handle in CSS pixels. Handles stay this many
+ *  screen pixels wide at every zoom level so they're always clickable. */
+export const HANDLE_HALF_CSS = 5
+
+export type ResizeHandle =
+  | 'nw' | 'n' | 'ne'
+  | 'w' |       'e'
+  | 'sw' | 's' | 'se'
+
+export const RESIZE_HANDLES: readonly ResizeHandle[] = [
+  'nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se',
+] as const
+
+/** Return the centre of `handle` on `node` in world coordinates. */
+export function handleCentre(node: CanvasNode, handle: ResizeHandle): { x: number; y: number } {
+  const cx = node.x + node.width / 2
+  const cy = node.y + node.height / 2
+  const x2 = node.x + node.width
+  const y2 = node.y + node.height
+  switch (handle) {
+    case 'nw': return { x: node.x, y: node.y }
+    case 'n':  return { x: cx,     y: node.y }
+    case 'ne': return { x: x2,     y: node.y }
+    case 'w':  return { x: node.x, y: cy }
+    case 'e':  return { x: x2,     y: cy }
+    case 'sw': return { x: node.x, y: y2 }
+    case 's':  return { x: cx,     y: y2 }
+    case 'se': return { x: x2,     y: y2 }
+  }
+}
+
+/** Hit-test the eight resize handles of `node` at screen position
+ *  `(screenX, screenY)` (CSS pixels inside the canvas). Returns the
+ *  first handle whose bounding square contains the point, or `null`. */
+export function hitTestHandle(
+  node: CanvasNode,
+  camera: Camera,
+  screenX: number,
+  screenY: number,
+): ResizeHandle | null {
+  for (const h of RESIZE_HANDLES) {
+    const c = handleCentre(node, h)
+    const sx = (c.x - camera.x) * camera.zoom
+    const sy = (c.y - camera.y) * camera.zoom
+    if (
+      Math.abs(screenX - sx) <= HANDLE_HALF_CSS + 2 &&
+      Math.abs(screenY - sy) <= HANDLE_HALF_CSS + 2
+    ) {
+      return h
+    }
+  }
+  return null
+}
+
+/** CSS cursor name appropriate for pointing at `handle`. */
+export function cursorForHandle(handle: ResizeHandle): string {
+  switch (handle) {
+    case 'nw': case 'se': return 'nwse-resize'
+    case 'ne': case 'sw': return 'nesw-resize'
+    case 'n':  case 's':  return 'ns-resize'
+    case 'e':  case 'w':  return 'ew-resize'
+  }
+}
+
+/** Apply a pointer-delta to `start`, producing the resized rect. `dx`
+ *  and `dy` are in world units. `lockAspect` preserves the starting
+ *  rect's aspect ratio (Shift during a corner drag). */
+export function resizeRect(
+  start: { x: number; y: number; width: number; height: number },
+  handle: ResizeHandle,
+  dx: number,
+  dy: number,
+  lockAspect: boolean,
+): { x: number; y: number; width: number; height: number } {
+  let x = start.x
+  let y = start.y
+  let w = start.width
+  let h = start.height
+
+  // Fixed-corner semantics: the corner opposite the dragged handle
+  // stays put; the dragged handle follows the pointer.
+  const right = start.x + start.width
+  const bottom = start.y + start.height
+
+  const touchesLeft = handle === 'nw' || handle === 'w' || handle === 'sw'
+  const touchesTop = handle === 'nw' || handle === 'n' || handle === 'ne'
+  const touchesRight = handle === 'ne' || handle === 'e' || handle === 'se'
+  const touchesBottom = handle === 'sw' || handle === 's' || handle === 'se'
+
+  if (touchesLeft) {
+    x = start.x + dx
+    w = start.width - dx
+  }
+  if (touchesTop) {
+    y = start.y + dy
+    h = start.height - dy
+  }
+  if (touchesRight) {
+    w = start.width + dx
+  }
+  if (touchesBottom) {
+    h = start.height + dy
+  }
+
+  if (lockAspect && handle !== 'n' && handle !== 's' && handle !== 'e' && handle !== 'w') {
+    const ratio = start.width / Math.max(start.height, 1)
+    // Use the larger relative delta to drive both axes.
+    const relW = Math.abs(w - start.width) / Math.max(start.width, 1)
+    const relH = Math.abs(h - start.height) / Math.max(start.height, 1)
+    if (relW >= relH) {
+      h = w / ratio
+    } else {
+      w = h * ratio
+    }
+    // Re-anchor the non-touching side so the opposite corner still
+    // stays fixed after the aspect lock moves things.
+    if (touchesLeft) x = right - w
+    if (touchesTop) y = bottom - h
+  }
+
+  // Clamp: pin the dragged handle so we never flip through the fixed
+  // corner. When min is hit on the left/top side, keep the right/bottom
+  // edge fixed by recomputing x/y from the opposite edge.
+  if (w < MIN_NODE_SIZE) {
+    w = MIN_NODE_SIZE
+    if (touchesLeft) x = right - w
+  }
+  if (h < MIN_NODE_SIZE) {
+    h = MIN_NODE_SIZE
+    if (touchesTop) y = bottom - h
+  }
+
+  return { x, y, width: w, height: h }
+}
+
 /**
  * Hit-test: return the topmost node whose bounding rect contains
  * `(worldX, worldY)`, or `null`. Non-group nodes are searched first
@@ -154,6 +293,16 @@ export function render(rc: RenderContext, doc: CanvasDoc | null): void {
   for (const edge of doc.edges) drawEdge(ctx, edge, byId, theme)
 
   for (const n of nonGroups) drawNode(ctx, n, theme, selection.has(n.id))
+
+  // Resize handles render only for a single selected node — matches
+  // Obsidian. Multi-select shows selection outlines but no handles,
+  // since resizing a group needs a separate UX pass.
+  if (selection.size === 1) {
+    const only = doc.nodes.find((n) => n.id === Array.from(selection)[0])
+    if (only && only.type !== 'group') {
+      drawResizeHandles(ctx, only, camera, theme)
+    }
+  }
 
   if (rc.marquee && (rc.marquee.width > 0 || rc.marquee.height > 0)) {
     ctx.save()
@@ -334,6 +483,28 @@ function drawEdge(
     ctx.textAlign = 'center'
     ctx.fillText(edge.label, lx, ly + 3)
     ctx.textAlign = 'start'
+  }
+  ctx.restore()
+}
+
+function drawResizeHandles(
+  ctx: CanvasRenderingContext2D,
+  node: CanvasNode,
+  camera: Camera,
+  theme: Theme,
+): void {
+  // Handles are drawn in world space but at a constant visual size
+  // regardless of zoom — scale the box by 1/zoom so HANDLE_HALF_CSS
+  // is preserved.
+  const r = HANDLE_HALF_CSS / camera.zoom
+  ctx.save()
+  ctx.fillStyle = theme.bgMuted
+  ctx.strokeStyle = theme.accent
+  ctx.lineWidth = 1.5 / camera.zoom
+  for (const h of RESIZE_HANDLES) {
+    const c = handleCentre(node, h)
+    ctx.fillRect(c.x - r, c.y - r, r * 2, r * 2)
+    ctx.strokeRect(c.x - r, c.y - r, r * 2, r * 2)
   }
   ctx.restore()
 }

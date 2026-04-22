@@ -19,10 +19,14 @@ import {
   render,
   readTheme,
   hitTestNode,
+  hitTestHandle,
+  cursorForHandle,
+  resizeRect,
   marqueeHit,
   marqueeFromPoints,
   DEFAULT_TEXT_NODE_SIZE,
   type MarqueeRect,
+  type ResizeHandle,
 } from './renderer'
 import type {
   CanvasKernelClient,
@@ -242,7 +246,35 @@ export function CanvasView({ relpath, client }: Props) {
           base: Set<string>
           additive: boolean
         }
+      | {
+          kind: 'resize-node'
+          nodeId: string
+          handle: ResizeHandle
+          startWorldX: number
+          startWorldY: number
+          startRect: { x: number; y: number; width: number; height: number }
+        }
     let drag: DragMode = { kind: 'none' }
+
+    /** Hover helper: when exactly one non-group node is selected and
+     *  the pointer is over one of its resize handles, show the right
+     *  cursor. Called from pointermove when not mid-drag. */
+    const updateHoverCursor = (cx: number, cy: number) => {
+      const sel = selectionRef.current
+      if (sel.size !== 1) {
+        canvas.style.cursor = 'grab'
+        return
+      }
+      const doc = docRef.current
+      if (!doc) return
+      const only = doc.nodes.find((n) => n.id === Array.from(sel)[0])
+      if (!only || only.type === 'group') {
+        canvas.style.cursor = 'grab'
+        return
+      }
+      const handle = hitTestHandle(only, cameraRef.current, cx, cy)
+      canvas.style.cursor = handle ? cursorForHandle(handle) : 'grab'
+    }
 
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0 && e.button !== 1) return
@@ -260,6 +292,36 @@ export function CanvasView({ relpath, client }: Props) {
         canvas.setPointerCapture(e.pointerId)
         canvas.style.cursor = 'grabbing'
         return
+      }
+
+      // Resize handles take priority over everything else when a single
+      // non-group node is selected — they sit on top of the node so we
+      // have to check them before the hit-test falls through to
+      // move-drag semantics.
+      const sel = selectionRef.current
+      if (sel.size === 1 && doc) {
+        const only = doc.nodes.find((n) => n.id === Array.from(sel)[0])
+        if (only && only.type !== 'group') {
+          const handle = hitTestHandle(only, cameraRef.current, cx, cy)
+          if (handle) {
+            drag = {
+              kind: 'resize-node',
+              nodeId: only.id,
+              handle,
+              startWorldX: world.x,
+              startWorldY: world.y,
+              startRect: {
+                x: only.x,
+                y: only.y,
+                width: only.width,
+                height: only.height,
+              },
+            }
+            canvas.setPointerCapture(e.pointerId)
+            canvas.style.cursor = cursorForHandle(handle)
+            return
+          }
+        }
       }
 
       if (!hit) {
@@ -309,7 +371,11 @@ export function CanvasView({ relpath, client }: Props) {
     }
 
     const onPointerMove = (e: PointerEvent) => {
-      if (drag.kind === 'none') return
+      if (drag.kind === 'none') {
+        const rect = canvas.getBoundingClientRect()
+        updateHoverCursor(e.clientX - rect.left, e.clientY - rect.top)
+        return
+      }
       if (drag.kind === 'pan') {
         const dx = e.clientX - drag.lastX
         const dy = e.clientY - drag.lastY
@@ -322,6 +388,23 @@ export function CanvasView({ relpath, client }: Props) {
           zoom: cam.zoom,
         }
         cameraDirtyRef.current = true
+        return
+      }
+      if (drag.kind === 'resize-node') {
+        const rect = canvas.getBoundingClientRect()
+        const cx = e.clientX - rect.left
+        const cy = e.clientY - rect.top
+        const world = screenToWorld(cx, cy)
+        const dx = world.x - drag.startWorldX
+        const dy = world.y - drag.startWorldY
+        const next = resizeRect(drag.startRect, drag.handle, dx, dy, e.shiftKey)
+        const nodeId = drag.nodeId
+        useCanvasStore.getState().updateDoc(relpath, (doc) => ({
+          ...doc,
+          nodes: doc.nodes.map((n) =>
+            n.id === nodeId ? { ...n, ...next } : n,
+          ),
+        }))
         return
       }
       if (drag.kind === 'marquee') {
@@ -381,6 +464,26 @@ export function CanvasView({ relpath, client }: Props) {
 
       if (finished.kind === 'marquee') {
         marqueeRef.current = null
+        return
+      }
+
+      if (finished.kind === 'resize-node') {
+        const doc = docRef.current
+        if (!doc) return
+        const node = doc.nodes.find((n) => n.id === finished.nodeId)
+        if (!node) return
+        const s = finished.startRect
+        if (
+          node.x === s.x &&
+          node.y === s.y &&
+          node.width === s.width &&
+          node.height === s.height
+        ) {
+          return
+        }
+        void clientRef.current
+          .patch(relpath, [{ op: 'node_update', node }])
+          .catch((err) => console.warn('[nexus.canvas] node_update patch failed:', err))
         return
       }
 
