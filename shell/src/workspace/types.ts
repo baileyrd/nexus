@@ -15,6 +15,12 @@ export interface View {
    *  `viewType`. Views whose label depends on per-instance state
    *  (e.g. markdown showing the filename) implement this. */
   getDisplayText?(): string
+  /** Optional icon name (from the shared icon registry) shown on the
+   *  sidedock tab strip in place of the label — Obsidian-style icon-
+   *  only sidebar tabs. Main-dock tabs still use the label. Views in
+   *  sidedocks (file-explorer, search, outline, backlinks, graph, etc.)
+   *  should return a stable icon key. */
+  getIcon?(): string
 }
 
 export type ViewCreator = (leaf: Leaf) => View

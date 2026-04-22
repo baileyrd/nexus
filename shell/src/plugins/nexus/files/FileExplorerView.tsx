@@ -32,6 +32,10 @@ export class FileExplorerView extends ViewBase {
     this.render = render
   }
 
+  getIcon(): string {
+    return 'folder'
+  }
+
   getState(): Record<string, never> {
     return {}
   }

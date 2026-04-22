@@ -550,6 +550,7 @@ function TabStrip({
             onClose={() => {
               void workspace.detachLeaf(leaf)
             }}
+            sideDock={sideDock}
           />
         )
       })}
@@ -614,6 +615,35 @@ interface TabButtonProps {
   canClose: boolean
   onActivate: () => void
   onClose: () => void
+  /** When set, this tab lives in a sidedock and should render as an
+   *  icon-only button with no ×-close (Obsidian sidebar-tab pattern).
+   *  Left-undefined for main-dock tabs, which keep label + close. */
+  sideDock?: 'left' | 'right'
+}
+
+/** Fallback viewType → icon mapping for sidebar tabs. Used when a
+ *  view doesn't implement `getIcon()`. Keep in sync with the plugin
+ *  viewType keys. */
+const SIDEBAR_VIEW_ICON_MAP: Record<string, string> = {
+  'file-explorer': 'folder',
+  search: 'search',
+  bookmarks: 'star',
+  outline: 'list',
+  backlinks: 'linkIn',
+  graph: 'graph',
+  tags: 'tag',
+  'all-properties': 'sliders',
+  'outgoing-links': 'linkOut',
+}
+
+function iconForSidebarLeaf(leaf: Leaf): string | null {
+  const fromView = leaf.view?.getIcon?.()
+  if (fromView) return fromView
+  const viewType = leaf.view?.viewType
+  if (viewType && SIDEBAR_VIEW_ICON_MAP[viewType]) {
+    return SIDEBAR_VIEW_ICON_MAP[viewType]
+  }
+  return null
 }
 
 function TabButton({
@@ -622,13 +652,57 @@ function TabButton({
   canClose,
   onActivate,
   onClose,
+  sideDock,
 }: TabButtonProps): JSX.Element {
   // Views may override `getDisplayText()` to show a per-instance label
   // (e.g. markdown shows the filename). Fall back to `viewType`, or
   // "Empty" when the view is null.
   const label =
     leaf.view?.getDisplayText?.() ?? leaf.view?.viewType ?? 'Empty'
-  const closable = canClose && !leaf.pinned
+  const closable = canClose && !leaf.pinned && !sideDock
+
+  // Sidebar tabs: icon-only, square, no text, no close ×.
+  if (sideDock) {
+    const iconName = iconForSidebarLeaf(leaf)
+    return (
+      <button
+        type="button"
+        role="tab"
+        aria-selected={active}
+        aria-label={label}
+        title={label}
+        onClick={onActivate}
+        className={`workspace-tab sidebar-tab${active ? ' is-active' : ''}`}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 36,
+          height: 36,
+          padding: 0,
+          cursor: 'pointer',
+          background: active
+            ? 'var(--background-primary, var(--bg, #1e1e1e))'
+            : 'transparent',
+          color: active
+            ? 'var(--text-normal, var(--fg, #ccc))'
+            : 'var(--text-muted, var(--fg-muted, #888))',
+          border: 'none',
+        }}
+      >
+        {iconName ? (
+          <Icon name={iconName as never} size={16} />
+        ) : (
+          // Final fallback: first letter of the viewType if we have no
+          // icon mapping. Keeps the row non-empty for unknown views
+          // during development.
+          <span style={{ fontSize: 11, textTransform: 'uppercase' }}>
+            {(leaf.view?.viewType ?? '?').slice(0, 1)}
+          </span>
+        )}
+      </button>
+    )
+  }
 
   return (
     <div
