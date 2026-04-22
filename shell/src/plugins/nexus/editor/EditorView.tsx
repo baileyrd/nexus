@@ -10,6 +10,7 @@ import { WindowControls } from '../../../shell/WindowControls'
 import { getEditorRuntime } from './runtime'
 import { CodeMirrorHost, type CodeMirrorHostHandle } from './cm/CodeMirrorHost'
 import { transactionBridge } from './cm/transactionBridge'
+import { getRegistry } from '../../../host/shellRegistry'
 import './markdown.css'
 
 /** Untitled placeholder relpaths have no kernel session; treat them
@@ -309,8 +310,8 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
       <div style={rootStyle}>
         {titleBar}
         <ViewHeader activeTab={null} />
-        <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>
-          Select a file to view
+        <div style={centredStyle}>
+          <EmptyStateActions hasAnyTab={tabs.length > 0} />
         </div>
       </div>
     )
@@ -409,6 +410,97 @@ function BreadcrumbSegments({ activeTab }: { activeTab: EditorTab | null }) {
       ))}
       <span className="view-header-title">{segments[lastIndex]}</span>
     </>
+  )
+}
+
+/**
+ * Obsidian-style action-link stack shown when the editor pane has no
+ * active tab. Three links: create new note, open command palette
+ * ("Go to file"), and close the current tab. The close link is only
+ * shown when there's at least one tab in the store — otherwise there's
+ * nothing to close and the link would be a dead end.
+ *
+ * Each link is styled as an inline text-button using existing CSS
+ * tokens (no new colours). Keybinding hints use documented defaults;
+ * the KeybindingRegistry doesn't expose a lookup-by-command helper
+ * today, so we can't resolve the live binding at render time.
+ * TODO: source keybinding hints from the KeybindingRegistry once it
+ * gains a `findByCommand` method.
+ */
+function EmptyStateActions({ hasAnyTab }: { hasAnyTab: boolean }) {
+  const linkStyle: React.CSSProperties = {
+    background: 'transparent',
+    border: 0,
+    padding: '4px 8px',
+    color: 'var(--accent)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    textAlign: 'center',
+    borderRadius: 'var(--r, 4px)',
+  }
+  const hintStyle: React.CSSProperties = {
+    color: 'var(--fg-muted)',
+    marginLeft: 4,
+  }
+
+  const runCommand = (commandId: string) => {
+    const reg = getRegistry()
+    if (!reg) return
+    void reg.commands.execute(commandId)
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 6,
+      }}
+    >
+      <button
+        type="button"
+        style={linkStyle}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline'
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none'
+        }}
+        onClick={() => runCommand('nexus.editor.newUntitled')}
+      >
+        Create new note<span style={hintStyle}>(Ctrl + N)</span>
+      </button>
+      <button
+        type="button"
+        style={linkStyle}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline'
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none'
+        }}
+        onClick={() => runCommand('nexus.commandPalette.open')}
+      >
+        Go to file<span style={hintStyle}>(Ctrl + O)</span>
+      </button>
+      {hasAnyTab && (
+        <button
+          type="button"
+          style={linkStyle}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline'
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none'
+          }}
+          onClick={() => runCommand('nexus.editor.closeTab')}
+        >
+          Close
+        </button>
+      )}
+    </div>
   )
 }
 
