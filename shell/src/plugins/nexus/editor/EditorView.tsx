@@ -7,7 +7,6 @@ import { useOutlineStore } from '../outline/outlineStore'
 import { Icon } from '../../../icons'
 import { useWorkspaceField, workspace } from '../../../workspace'
 import { WindowControls } from '../../../shell/WindowControls'
-import { EditorTabStrip } from './TabStrip'
 import { getEditorRuntime } from './runtime'
 import { CodeMirrorHost, type CodeMirrorHostHandle } from './cm/CodeMirrorHost'
 import { transactionBridge } from './cm/transactionBridge'
@@ -81,6 +80,10 @@ interface ScrollToHeadingPayload {
 }
 
 interface EditorViewProps {
+  /** Relpath this leaf is bound to — sourced from the hosting
+   *  `MarkdownView`'s `state.relpath`. Undefined for leaves that
+   *  haven't been assigned a file yet (empty state). */
+  relpath: string | undefined
   onRetry: (relpath: string) => void
 }
 
@@ -97,29 +100,19 @@ function isMarkdown(name: string): boolean {
  * Empty, loading, and error states are computed per-tab so a failed
  * load on one tab doesn't bleed into any neighbour.
  */
-export function EditorView({ onRetry }: EditorViewProps) {
+export function EditorView({ relpath, onRetry }: EditorViewProps) {
   const tabs = useEditorStore((s) => s.tabs)
-  const activeRelpath = useEditorStore((s) => s.activeRelpath)
   const setMode = useEditorStore((s) => s.setMode)
-  const setActive = useEditorStore((s) => s.setActive)
   const rightPanelVisible = useWorkspaceField(() => !workspace.rightSplit.collapsed)
 
+  // Each leaf binds to exactly one file via its workspace state.relpath;
+  // the leaf's own TabButton in `WorkspaceRenderer.TabStrip` is the
+  // tab-switching UI now, so the editor plugin no longer draws its own
+  // tab row on top of it.
   const activeTab = useMemo<EditorTab | null>(
-    () => tabs.find((t) => t.relpath === activeRelpath) ?? null,
-    [tabs, activeRelpath],
+    () => (relpath ? tabs.find((t) => t.relpath === relpath) ?? null : null),
+    [tabs, relpath],
   )
-
-  const requestCloseTab = (relpath: string) => {
-    const rt = getEditorRuntime()
-    if (!rt) return
-    void rt.confirmAndClose(relpath)
-  }
-
-  const requestNewTab = () => {
-    const rt = getEditorRuntime()
-    if (!rt) return
-    rt.openUntitled()
-  }
 
   // Refs into the rendered body so an outline click can actually scroll
   // the right element. Preview uses the markdown body div; source uses
@@ -296,28 +289,25 @@ export function EditorView({ onRetry }: EditorViewProps) {
     height: '100%',
   }
 
-  const tabHeader = (
-    <div
-      className="workspace-tab-header-container"
-      data-tauri-drag-region
-    >
-      <div className="workspace-tab-header-container-inner" data-tauri-drag-region>
-        <EditorTabStrip
-          tabs={tabs}
-          activeRelpath={activeRelpath}
-          onSelect={setActive}
-          onClose={requestCloseTab}
-          onNewTab={requestNewTab}
-        />
-      </div>
+  // Minimal drag-region + window-controls strip. The workspace-level
+  // `<TabStrip>` in WorkspaceRenderer handles tab switching / close /
+  // new-tab now; EditorView only needs to keep the title-bar
+  // drag-region and (on the rightmost column) the OS window controls.
+  const titleBar = (
+    <div className="workspace-tab-header-container" data-tauri-drag-region>
+      <div
+        className="workspace-tab-header-container-inner"
+        data-tauri-drag-region
+        style={{ flex: '1 1 auto' }}
+      />
       {!rightPanelVisible && <WindowControls />}
     </div>
   )
 
-  if (tabs.length === 0) {
+  if (!activeTab) {
     return (
       <div style={rootStyle}>
-        {tabHeader}
+        {titleBar}
         <ViewHeader activeTab={null} />
         <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>
           Select a file to view
@@ -328,40 +318,32 @@ export function EditorView({ onRetry }: EditorViewProps) {
 
   return (
     <div style={rootStyle}>
-      {tabHeader}
+      {titleBar}
       <ViewHeader activeTab={activeTab} />
       <div ref={scrollWrapRef} style={{ flex: '1 1 auto', overflow: 'auto', position: 'relative' }}>
-        {activeTab ? (
-          <>
-            <div
-              style={{
-                position: 'absolute',
-                top: 8,
-                right: 12,
-                zIndex: 2,
-              }}
-            >
-              <ModeToggle
-                mode={activeTab.mode}
-                onClick={() => {
-                  const next: EditorTabMode = activeTab.mode === 'preview' ? 'source' : 'preview'
-                  setMode(activeTab.relpath, next)
-                }}
-              />
-            </div>
-            <TabBody
-              tab={activeTab}
-              markdownHtml={markdownHtml}
-              onRetry={onRetry}
-              markdownBodyRef={markdownBodyRef}
-              cmViewRef={cmViewRef}
-            />
-          </>
-        ) : (
-          <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>
-            Select a tab
-          </div>
-        )}
+        <div
+          style={{
+            position: 'absolute',
+            top: 8,
+            right: 12,
+            zIndex: 2,
+          }}
+        >
+          <ModeToggle
+            mode={activeTab.mode}
+            onClick={() => {
+              const next: EditorTabMode = activeTab.mode === 'preview' ? 'source' : 'preview'
+              setMode(activeTab.relpath, next)
+            }}
+          />
+        </div>
+        <TabBody
+          tab={activeTab}
+          markdownHtml={markdownHtml}
+          onRetry={onRetry}
+          markdownBodyRef={markdownBodyRef}
+          cmViewRef={cmViewRef}
+        />
       </div>
     </div>
   )
