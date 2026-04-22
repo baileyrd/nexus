@@ -59,6 +59,7 @@ import { outlinePlugin } from './plugins/nexus/outline'
 import { backlinksPlugin } from './plugins/nexus/backlinks'
 import { bookmarksPlugin } from './plugins/nexus/bookmarks'
 import { outgoingLinksPlugin } from './plugins/nexus/outgoingLinks'
+import { filePropertiesPlugin } from './plugins/nexus/fileProperties'
 import { tagsPlugin } from './plugins/nexus/tags'
 import { allPropertiesPlugin } from './plugins/nexus/allProperties'
 import { graphPlugin } from './plugins/nexus/graph'
@@ -171,6 +172,7 @@ async function boot() {
     backlinksPlugin,
     bookmarksPlugin,
     outgoingLinksPlugin,
+    filePropertiesPlugin,
     tagsPlugin,
     allPropertiesPlugin,
     graphPlugin,

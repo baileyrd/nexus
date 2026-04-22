@@ -16,6 +16,7 @@ import {
   useEffect,
   useReducer,
   useRef,
+  useState,
   type CSSProperties,
 } from 'react'
 import { Icon } from '../icons/index.tsx'
@@ -577,6 +578,7 @@ function TabStrip({
           <Icon name="plus" size={14} />
         </button>
       )}
+      {isMainDock && <TabListDropdown tabs={tabs} />}
       {/* Right-sidedock collapse / expand — lives at the far right of the
           main dock's tab strip (mirroring the activity-bar left-panel
           toggle). Uses the PanelRight icon so the affordance matches the
@@ -609,6 +611,177 @@ function TabStrip({
   )
 }
 
+// ---------------------------------------------------------------------------
+// <TabListDropdown> — Obsidian-style `v` chevron next to the + new-tab
+// button. Opens a menu listing the current tab titles (click to
+// activate) plus a "Close all" action. Positioned fixed so it floats
+// over the editor content.
+// ---------------------------------------------------------------------------
+
+function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  // Close on outside click.
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (menuRef.current?.contains(target)) return
+      if (anchorRef.current?.contains(target)) return
+      setOpen(false)
+    }
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onEscape)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onEscape)
+    }
+  }, [open])
+
+  const rect = anchorRef.current?.getBoundingClientRect()
+
+  const closeAll = () => {
+    const snapshot = [...tabs.leaves]
+    for (const leaf of snapshot) {
+      void workspace.detachLeaf(leaf)
+    }
+    setOpen(false)
+  }
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        aria-label="Tab list"
+        title="Tab list"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: 'var(--text-muted, var(--fg-muted, #888))',
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '0 8px',
+          fontSize: 12,
+          lineHeight: 1,
+        }}
+      >
+        <Icon name="chevDown" size={14} />
+      </button>
+      {open && rect && (
+        <div
+          ref={menuRef}
+          role="menu"
+          style={{
+            position: 'fixed',
+            top: rect.bottom + 4,
+            left: Math.max(4, rect.right - 240),
+            zIndex: 200,
+            minWidth: 220,
+            background: 'var(--background-primary, var(--bg, #1e1e1e))',
+            border: '1px solid var(--divider-color, var(--line, #333))',
+            borderRadius: 6,
+            boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
+            padding: 4,
+            fontSize: 12,
+          }}
+        >
+          {tabs.leaves.map((leaf, i) => {
+            const isActive = i === tabs.activeIndex
+            const label =
+              leaf.view?.getDisplayText?.() ?? leaf.view?.viewType ?? 'Empty'
+            return (
+              <button
+                key={leaf.id}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  workspace.setTabActiveIndex(tabs.id, i)
+                  setOpen(false)
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  width: '100%',
+                  padding: '6px 8px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-normal, var(--fg, #ccc))',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  borderRadius: 4,
+                  gap: 8,
+                }}
+                onMouseEnter={(e) => {
+                  ;(e.currentTarget as HTMLButtonElement).style.background =
+                    'var(--background-modifier-hover, var(--bg-hover, #2a2a2a))'
+                }}
+                onMouseLeave={(e) => {
+                  ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                }}
+              >
+                <span style={{ width: 12, display: 'inline-flex' }}>
+                  {isActive ? <Icon name="check" size={12} /> : null}
+                </span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {label}
+                </span>
+              </button>
+            )
+          })}
+          <div
+            style={{
+              height: 1,
+              background: 'var(--divider-color, var(--line, #333))',
+              margin: '4px 0',
+            }}
+          />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={closeAll}
+            disabled={tabs.leaves.length <= 1}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              width: '100%',
+              padding: '6px 8px',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-normal, var(--fg, #ccc))',
+              cursor: tabs.leaves.length <= 1 ? 'default' : 'pointer',
+              opacity: tabs.leaves.length <= 1 ? 0.4 : 1,
+              textAlign: 'left',
+              borderRadius: 4,
+              gap: 8,
+            }}
+            onMouseEnter={(e) => {
+              if (tabs.leaves.length <= 1) return
+              ;(e.currentTarget as HTMLButtonElement).style.background =
+                'var(--background-modifier-hover, var(--bg-hover, #2a2a2a))'
+            }}
+            onMouseLeave={(e) => {
+              ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+            }}
+          >
+            <span style={{ width: 12 }} />
+            <span>Close all</span>
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
+
 interface TabButtonProps {
   leaf: Leaf
   active: boolean
@@ -635,6 +808,7 @@ const SIDEBAR_VIEW_ICON_MAP: Record<string, string> = {
   tags: 'tag',
   'all-properties': 'archive', // Obsidian-parity icon
   'outgoing-links': 'linkOut',
+  'file-properties': 'info',
 }
 
 function iconForSidebarLeaf(leaf: Leaf): string | null {

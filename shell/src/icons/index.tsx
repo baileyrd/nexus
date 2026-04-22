@@ -6,6 +6,7 @@ import {
   ArrowRight,
   BookOpen,
   Check,
+  ChevronDown,
   ChevronRight,
   ChevronsUpDown,
   Clock,
@@ -20,6 +21,7 @@ import {
   FolderOpen,
   FolderPlus,
   Grid3x3,
+  Info,
   Link,
   List,
   Minus,
@@ -90,7 +92,9 @@ const ICON_MAP = {
   panelLeft:   { component: PanelLeft },
   arrowLeft:   { component: ArrowLeft },
   arrowRight:  { component: ArrowRight },
+  chevDown:    { component: ChevronDown },
   more:        { component: MoreHorizontal },
+  info:        { component: Info },
 
   // Knowledge graph / links
   link:        { component: Link },
