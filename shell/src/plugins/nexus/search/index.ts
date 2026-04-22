@@ -67,15 +67,9 @@ export const searchPlugin: Plugin = {
       ),
     )
 
-    api.activityBar.addItem({
-      id: 'nexus.search.activityItem',
-      icon: '',
-      iconName: 'search',
-      title: 'Search',
-      viewId: VIEW_ID,
-      priority: 20,
-      command: COMMAND_FOCUS,
-    })
+    // Search view is reached via the sidebar tab strip's search icon
+    // (rendered by WorkspaceRenderer for sidedock leaves). No separate
+    // activity-bar entry.
 
     // Focus command — raises the view and focuses the input.
     //

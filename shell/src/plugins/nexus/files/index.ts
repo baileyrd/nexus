@@ -96,15 +96,9 @@ export const filesPlugin: Plugin = {
       ),
     )
 
-    api.activityBar.addItem({
-      id: 'nexus.files.activityItem',
-      icon: '',
-      iconName: 'folder',
-      title: 'Files',
-      viewId: VIEW_ID,
-      priority: 10,
-      command: COMMAND_FOCUS,
-    })
+    // Files view is reached via the sidebar tab strip's folder icon
+    // (rendered by WorkspaceRenderer for sidedock leaves). No separate
+    // activity-bar entry — it would duplicate the sidebar tab.
 
     // Focus command — ensure a file-explorer leaf exists in the left
     // sidedock and reveal it. Existence/visibility split follows

@@ -48,13 +48,8 @@ export const fileExplorerPlugin: Plugin = {
   activate(api: PluginAPI) {
     // Phase 7: legacy slot:'sidebarContent' registration removed.
 
-    api.activityBar.addItem({
-      id: 'fileExplorer',
-      icon: 'files',
-      title: 'Explorer',
-      viewId: 'fileExplorer',
-      priority: 10,
-    })
+    // File explorer view is reached via the sidebar tab strip; no
+    // activity-bar entry needed (duplicate of sidebar-tab affordance).
 
     api.commands.register('fileExplorer.openFolder', async () => {
       const selected = await openDialog({ directory: true, multiple: false })
