@@ -630,9 +630,10 @@ const SIDEBAR_VIEW_ICON_MAP: Record<string, string> = {
   bookmarks: 'star',
   outline: 'list',
   backlinks: 'linkIn',
+  backlink: 'linkIn', // plugin registers under singular viewType
   graph: 'graph',
   tags: 'tag',
-  'all-properties': 'sliders',
+  'all-properties': 'archive', // Obsidian-parity icon
   'outgoing-links': 'linkOut',
 }
 
