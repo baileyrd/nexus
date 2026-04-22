@@ -599,7 +599,7 @@ function TabStrip({
           }
           style={{ ...collapseButtonStyle, marginLeft: 'auto' }}
         >
-          <Icon name="panel" size={14} />
+          <Icon name="panel" size={18} />
         </button>
       )}
       {/* Left sidebar collapse lives in the activity bar (single source
