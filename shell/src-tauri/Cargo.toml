@@ -10,6 +10,13 @@ build   = "build.rs"
 name       = "nexus_shell_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# `custom-protocol` switches Tauri from dev-mode (loads `devUrl`) to
+# production-mode (serves embedded `frontendDist` via the asset protocol).
+# `tauri build` passes this automatically; plain `cargo build` does not,
+# so the e2e harness must build with `--features custom-protocol`.
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

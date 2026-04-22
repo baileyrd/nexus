@@ -66,8 +66,10 @@ export const config: WebdriverIO.Config = {
         // check (e.g. `invoke('is_e2e')`) can read it from `std::env`.
         env: { VITE_E2E: 'true', NEXUS_E2E_VAULT: SCRATCH_VAULT },
       },
-      // Edge WebView2 exposes a chromium-flavored remote-debug surface.
-      browserName: 'webview2',
+      // Tauri's official WebdriverIO example uses `wry` — the engine name
+      // tauri-driver gates on. `webview2` (a msedgedriver alias) leaves the
+      // session attached to about:blank with no initial navigation.
+      browserName: 'wry',
     } as WebdriverIO.Capabilities,
   ],
 

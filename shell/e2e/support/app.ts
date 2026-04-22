@@ -13,22 +13,23 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { Key } from 'webdriverio'
 
-/** Wait for the workspace view to be ready.
+/** Open the e2e vault and wait for the workspace to be ready.
  *
  * The kernel is pre-booted by the Rust `setup` hook when NEXUS_E2E_VAULT
- * is set (see shell/src-tauri/src/lib.rs), and the nexus.workspace
- * plugin restores the root from shell-state's lastForgePath. By the
- * time the shell API is attached and `.cm-editor` is mountable, the
- * workspace is open and ready for file-open events. No webdriver-side
- * invoke() calls are needed — which is the whole point of this path,
- * since Tauri v2 + tauri-driver BiDi rejects webdriver-injected invokes
- * with "Origin header is not a valid URL".
+ * is set (see shell/src-tauri/src/lib.rs), and `last_forge_path` is
+ * persisted so the launcher's restore path points at the e2e vault.
+ * But the workspace plugin's auto-restore runs asynchronously during
+ * plugin activation — rather than race it, we drive the same command
+ * the launcher's "Open recent" row fires.
+ *
+ * The initial navigation also needs a kick: tauri-driver hands the
+ * WebView to msedgedriver at about:blank and Tauri's own bundle load
+ * never fires. Navigating once via `browser.url('http://tauri.localhost/')`
+ * triggers the asset protocol (asset embedding requires the
+ * `custom-protocol` cargo feature — see shell/src-tauri/Cargo.toml).
  */
-export async function openVault(_vaultAbsPath: string): Promise<void> {
-  // 0) Force navigation. tauri-driver hands the WebView to msedgedriver at
-  //    about:blank; Tauri's own navigation never fires while WebDriver owns
-  //    the context. On Windows WebView2, Tauri's embedded bundle is served
-  //    from http://tauri.localhost/ (index.html at the root).
+export async function openVault(vaultAbsPath: string): Promise<void> {
+  // 0) Force the initial navigation. tauri-driver leaves us at about:blank.
   const currentUrl = await browser.getUrl()
   if (!currentUrl.startsWith('http://tauri.localhost')) {
     await browser.url('http://tauri.localhost/')
@@ -45,10 +46,7 @@ export async function openVault(_vaultAbsPath: string): Promise<void> {
     { timeout: 30_000, timeoutMsg: '__nexusShellApi never attached' },
   )
 
-  // 2) Wait for the kernel to report booted — pure in-renderer `invoke`
-  //    via @tauri-apps/api/core works because the call originates from
-  //    the page's own JS context (not a webdriver-injected script with
-  //    a bad Origin).
+  // 2) Wait for the kernel to report booted.
   await browser.waitUntil(
     async () =>
       browser.execute(async () => {
@@ -65,39 +63,58 @@ export async function openVault(_vaultAbsPath: string): Promise<void> {
     { timeout: 30_000, timeoutMsg: 'kernel never reported booted' },
   )
 
-  // 3) Wait for the workspace store to reflect an open root. The
-  //    workspace plugin emits `workspace:opened` at the end of setRoot;
-  //    by the time the context key flips on, downstream plugins
-  //    (files, editor) have registered their commands.
-  await browser.waitUntil(
-    async () =>
-      browser.execute(() => {
-        const root = document.documentElement
-        // nexus.workspace sets this context key; bodyClasses mirrors
-        // nothing for it, so fall back to the launcher overlay being
-        // gone as the ready signal.
-        const overlay = document.querySelector(
-          '[data-view-id="nexus.launcher.view"]',
-        )
-        return !overlay || root.getAttribute('data-workspace-ready') === 'true'
-      }),
-    { timeout: 30_000, timeoutMsg: 'launcher overlay never cleared' },
-  ).catch(() => {
-    // Non-fatal: a future view-id rename would break the heuristic
-    // above. The subsequent openFile() will fail loudly if the
-    // workspace really isn't ready, so don't block the happy path.
-  })
+  // 3) Drive the same command the launcher uses — idempotent if the
+  //    workspace plugin's auto-restore already fired.
+  await browser.execute(async (vault: string) => {
+    const api = (window as unknown as { __nexusShellApi?: {
+      commands?: { execute: (id: string, ...args: unknown[]) => Promise<unknown> }
+    } }).__nexusShellApi
+    if (!api?.commands) throw new Error('shell plugin API missing commands registry')
+    await api.commands.execute('nexus.workspace.setRoot', vault)
+  }, vaultAbsPath)
 }
 
 /** Open a file in the editor via the `files:open` event bus contract. */
 export async function openFile(relpath: string): Promise<void> {
-  await browser.execute((rel: string) => {
+  const before = await browser.execute(() => ({
+    ribbonBtns: document.querySelectorAll('.workspace-ribbon button').length,
+    mainRegionHtmlLen: document.querySelector('.workspace-main-region')?.innerHTML?.length ?? -1,
+    cmCount: document.querySelectorAll('.cm-content').length,
+    bodyLen: document.body?.innerHTML?.length ?? 0,
+  }))
+  console.log('[e2e-debug] pre-openFile', JSON.stringify(before))
+
+  const emitResult = await browser.execute((rel: string) => {
     const api = (window as unknown as { __nexusShellApi?: {
-      events?: { emit: (topic: string, payload: unknown) => void }
+      events?: { emit: (topic: string, payload: unknown) => void; listenerCount?: (topic: string) => number }
     } }).__nexusShellApi
     if (!api?.events) throw new Error('shell plugin API not on window')
-    api.events.emit('files:open', { path: rel })
+    const name = rel.split('/').pop() ?? rel
+    const listeners = api.events.listenerCount?.('files:open') ?? 'n/a'
+    api.events.emit('files:open', { relpath: rel, name })
+    return { listeners, name }
   }, relpath)
+  console.log('[e2e-debug] openFile emit', JSON.stringify(emitResult))
+
+  // Give the plugin handler a beat, then probe again.
+  await browser.pause(2000)
+  const after = await browser.execute(() => {
+    const classes = new Set<string>()
+    document.querySelectorAll('[class]').forEach((el) => {
+      el.className.toString().split(/\s+/).forEach((c) => {
+        if (c.startsWith('cm-') || c.startsWith('nexus-editor') || c.startsWith('markdown-')) classes.add(c)
+      })
+    })
+    const leaf = document.querySelector('.workspace-leaf')
+    return {
+      cmCount: document.querySelectorAll('.cm-content').length,
+      leafCount: document.querySelectorAll('.workspace-leaf').length,
+      tabCount: document.querySelectorAll('.workspace-tab-header').length,
+      editorClasses: Array.from(classes),
+      leafInner: leaf?.innerHTML?.slice(0, 600) ?? '(no leaf)',
+    }
+  })
+  console.log('[e2e-debug] post-openFile', JSON.stringify(after))
 
   // Wait for CM6 to mount. The editor creates a `.cm-content` contenteditable
   // per open file; the active one takes focus.
