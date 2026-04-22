@@ -228,17 +228,6 @@ export default function App() {
         })()}
       </div>
 
-      {/* Status bar — chrome. `.status-bar` matches Obsidian. Full-width
-          at the bottom; items on left/right in two segments. */}
-      <div className="status-bar">
-        <div className="status-bar-item-segment">
-          <SlotSurface entries={slots.statusBarLeft} />
-        </div>
-        <div className="status-bar-item-segment">
-          <SlotSurface entries={slots.statusBarRight} />
-        </div>
-      </div>
-
     </div>
   )
 }

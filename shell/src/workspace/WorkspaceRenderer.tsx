@@ -31,6 +31,8 @@ import type {
   WorkspaceParent,
 } from './types.ts'
 import { workspace } from './workspaceStore.ts'
+import { ForgeSelector } from './ForgeSelector.tsx'
+import { RightPanelFooter } from './RightPanelFooter.tsx'
 
 // ---------------------------------------------------------------------------
 // Layout-change subscription hook.
@@ -200,6 +202,8 @@ function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex' }}>
         <RenderNode node={dock} sideDock={side} />
       </div>
+      {side === 'left' && <ForgeSelector />}
+      {side === 'right' && <RightPanelFooter />}
     </div>
   )
 

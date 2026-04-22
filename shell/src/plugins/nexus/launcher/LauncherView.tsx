@@ -261,12 +261,22 @@ function ActionRow({
 
 export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps) {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
+  const manageReturnTo = useLauncherStore((s) => s.manageReturnTo)
+  const clearReturnTo = useLauncherStore((s) => s.setManageReturnTo)
 
   // Once the user has a workspace open the launcher disappears. The
   // shell's regular tri-pane layout takes over. This is cheaper than
   // unmounting the plugin — keeping it in the slot lets it reappear
   // instantly if the workspace is later closed.
   if (rootPath) return null
+
+  const onDismiss = manageReturnTo
+    ? () => {
+        const target = manageReturnTo
+        clearReturnTo(null)
+        void onActivatePath(target)
+      }
+    : null
 
   return (
     <div
@@ -287,6 +297,41 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
         fontFamily: 'var(--f-ui)',
       }}
     >
+      {onDismiss && (
+        <button
+          type="button"
+          aria-label="Close launcher"
+          title="Return to current forge"
+          onClick={onDismiss}
+          style={{
+            position: 'absolute',
+            top: 12,
+            right: 16,
+            width: 28,
+            height: 28,
+            display: 'inline-grid',
+            placeItems: 'center',
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--fg-muted)',
+            cursor: 'pointer',
+            borderRadius: 4,
+            fontSize: 18,
+            lineHeight: 1,
+            zIndex: 1,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--bg-hover)'
+            e.currentTarget.style.color = 'var(--fg)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'var(--fg-muted)'
+          }}
+        >
+          ✕
+        </button>
+      )}
       {/* Left column — recents */}
       <div
         style={{

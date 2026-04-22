@@ -26,6 +26,11 @@ export const settingsPlugin: Plugin = {
           title: 'Open Keyboard Shortcuts',
           category: 'Preferences',
         },
+        {
+          id: 'workbench.action.openHelp',
+          title: 'Open Help',
+          category: 'Help',
+        },
       ],
       keybindings: [
         {
@@ -53,7 +58,26 @@ export const settingsPlugin: Plugin = {
       api.context.set('settingsActiveTab', 'keybindings')
     })
 
+    api.commands.register('workbench.action.openHelp', () => {
+      // Tauri webviews honour window.open with an external target —
+      // the host OS opens the URL in the default browser.
+      window.open('https://github.com/baileyrd/nexus', '_blank')
+    })
+
     api.context.set('settingsPanelVisible', false)
+
+    // Priority orders bottom items from top to bottom (lower = higher).
+    // Help sits above Settings to match Obsidian's chrome order.
+    api.activityBar.addItem({
+      id: 'core.help.activityBarItem',
+      icon: '',
+      iconName: 'help',
+      title: 'Help',
+      viewId: 'core.help.view',
+      priority: 99,
+      placement: 'bottom',
+      command: 'workbench.action.openHelp',
+    })
 
     api.activityBar.addItem({
       id: 'core.settings.activityBarItem',

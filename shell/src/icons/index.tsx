@@ -46,6 +46,7 @@ import {
   X,
   Zap,
   GitBranch,
+  HelpCircle,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -116,6 +117,7 @@ const ICON_MAP = {
   grid:        { component: Grid3x3 },
   task:        { component: SquareCheckBig },
   settings:    { component: Settings },
+  help:        { component: HelpCircle },
   sliders:     { component: SlidersHorizontal },
   refresh:     { component: RefreshCw },
   clock:       { component: Clock },
