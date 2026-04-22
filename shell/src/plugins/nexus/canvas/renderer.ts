@@ -224,6 +224,15 @@ export interface MarqueeRect {
   height: number
 }
 
+/** State for an in-progress drag-to-create-edge gesture: anchor on
+ *  the source node's side centre, live pointer position in world
+ *  space. The renderer draws a dashed preview bezier between them. */
+export interface EdgeDragPreview {
+  fromNodeId: string
+  fromSide: NodeSide
+  toWorld: { x: number; y: number }
+}
+
 export interface RenderContext {
   ctx: CanvasRenderingContext2D
   width: number
@@ -233,6 +242,8 @@ export interface RenderContext {
   dpr: number
   selection?: Set<string>
   marquee?: MarqueeRect | null
+  hoveredNodeId?: string | null
+  edgeDrag?: EdgeDragPreview | null
 }
 
 /** World-space rect-vs-node test: any pixel of overlap counts as a
@@ -248,6 +259,68 @@ export function marqueeHit(nodes: readonly CanvasNode[], rect: MarqueeRect): str
     if (n.x < x2 && nx2 > rect.x && n.y < y2 && ny2 > rect.y) ids.push(n.id)
   }
   return ids
+}
+
+export type NodeSide = 'n' | 's' | 'e' | 'w'
+
+export const NODE_SIDES: readonly NodeSide[] = ['n', 'e', 's', 'w']
+
+/** Centre of a side of the node's rect. Used both for drawing the
+ *  edge-create affordances and as the anchor for preview edges. */
+export function sideCentre(node: CanvasNode, side: NodeSide): { x: number; y: number } {
+  const cx = node.x + node.width / 2
+  const cy = node.y + node.height / 2
+  const x2 = node.x + node.width
+  const y2 = node.y + node.height
+  switch (side) {
+    case 'n': return { x: cx, y: node.y }
+    case 's': return { x: cx, y: y2 }
+    case 'e': return { x: x2, y: cy }
+    case 'w': return { x: node.x, y: cy }
+  }
+}
+
+/** How far (in CSS pixels) the edge-create affordance sits outside the
+ *  node's border — far enough to clear the mid-edge resize handle when
+ *  the node happens to be single-selected. */
+const EDGE_HANDLE_OFFSET_CSS = 14
+/** Radius of the affordance hit circle in CSS pixels. */
+export const EDGE_HANDLE_RADIUS_CSS = 7
+
+/** Screen-space centre of the edge-create affordance for `side`. */
+function edgeHandleScreenCentre(
+  node: CanvasNode,
+  side: NodeSide,
+  camera: Camera,
+): { x: number; y: number } {
+  const c = sideCentre(node, side)
+  const sx = (c.x - camera.x) * camera.zoom
+  const sy = (c.y - camera.y) * camera.zoom
+  switch (side) {
+    case 'n': return { x: sx, y: sy - EDGE_HANDLE_OFFSET_CSS }
+    case 's': return { x: sx, y: sy + EDGE_HANDLE_OFFSET_CSS }
+    case 'e': return { x: sx + EDGE_HANDLE_OFFSET_CSS, y: sy }
+    case 'w': return { x: sx - EDGE_HANDLE_OFFSET_CSS, y: sy }
+  }
+}
+
+/** Hit-test the four edge-create affordances on `node` in screen
+ *  space. */
+export function hitTestEdgeHandle(
+  node: CanvasNode,
+  camera: Camera,
+  screenX: number,
+  screenY: number,
+): NodeSide | null {
+  for (const side of NODE_SIDES) {
+    const c = edgeHandleScreenCentre(node, side, camera)
+    const dx = screenX - c.x
+    const dy = screenY - c.y
+    if (dx * dx + dy * dy <= EDGE_HANDLE_RADIUS_CSS * EDGE_HANDLE_RADIUS_CSS) {
+      return side
+    }
+  }
+  return null
 }
 
 /** Build a marquee rect from two world-space points in any order. */
@@ -302,6 +375,21 @@ export function render(rc: RenderContext, doc: CanvasDoc | null): void {
     if (only && only.type !== 'group') {
       drawResizeHandles(ctx, only, camera, theme)
     }
+  }
+
+  // Edge-create affordances show on the hovered node (unless it's a
+  // group). They sit OUTSIDE the node so they don't overlap the mid-
+  // edge resize handles when the node also happens to be selected.
+  if (rc.hoveredNodeId && !rc.edgeDrag) {
+    const hover = doc.nodes.find((n) => n.id === rc.hoveredNodeId)
+    if (hover && hover.type !== 'group') {
+      drawEdgeHandles(ctx, hover, camera, theme)
+    }
+  }
+
+  if (rc.edgeDrag) {
+    const src = doc.nodes.find((n) => n.id === rc.edgeDrag!.fromNodeId)
+    if (src) drawEdgePreview(ctx, src, rc.edgeDrag.fromSide, rc.edgeDrag.toWorld, theme, camera)
   }
 
   if (rc.marquee && (rc.marquee.width > 0 || rc.marquee.height > 0)) {
@@ -506,6 +594,67 @@ function drawResizeHandles(
     ctx.fillRect(c.x - r, c.y - r, r * 2, r * 2)
     ctx.strokeRect(c.x - r, c.y - r, r * 2, r * 2)
   }
+  ctx.restore()
+}
+
+function drawEdgeHandles(
+  ctx: CanvasRenderingContext2D,
+  node: CanvasNode,
+  camera: Camera,
+  theme: Theme,
+): void {
+  // Drawn in screen space via an inverse-zoom transform so the circles
+  // always render at EDGE_HANDLE_RADIUS_CSS regardless of camera zoom.
+  const r = EDGE_HANDLE_RADIUS_CSS / camera.zoom
+  ctx.save()
+  ctx.fillStyle = theme.bgMuted
+  ctx.strokeStyle = theme.accent
+  ctx.lineWidth = 1.5 / camera.zoom
+  for (const side of NODE_SIDES) {
+    const c = sideCentre(node, side)
+    // Offset world-space position to mirror edgeHandleScreenCentre,
+    // converting the CSS-pixel offset into world units via /zoom.
+    const off = 14 / camera.zoom
+    let cx = c.x
+    let cy = c.y
+    if (side === 'n') cy -= off
+    else if (side === 's') cy += off
+    else if (side === 'e') cx += off
+    else if (side === 'w') cx -= off
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+    // Small plus glyph.
+    ctx.beginPath()
+    const plusR = r * 0.5
+    ctx.moveTo(cx - plusR, cy)
+    ctx.lineTo(cx + plusR, cy)
+    ctx.moveTo(cx, cy - plusR)
+    ctx.lineTo(cx, cy + plusR)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+function drawEdgePreview(
+  ctx: CanvasRenderingContext2D,
+  src: CanvasNode,
+  fromSide: NodeSide,
+  toWorld: { x: number; y: number },
+  theme: Theme,
+  camera: Camera,
+): void {
+  const start = sideCentre(src, fromSide)
+  const midX = (start.x + toWorld.x) / 2
+  ctx.save()
+  ctx.strokeStyle = theme.accent
+  ctx.lineWidth = 1.5 / camera.zoom
+  ctx.setLineDash([8 / camera.zoom, 5 / camera.zoom])
+  ctx.beginPath()
+  ctx.moveTo(start.x, start.y)
+  ctx.bezierCurveTo(midX, start.y, midX, toWorld.y, toWorld.x, toWorld.y)
+  ctx.stroke()
   ctx.restore()
 }
 

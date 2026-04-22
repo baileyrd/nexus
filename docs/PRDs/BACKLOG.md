@@ -75,10 +75,16 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   —  delete captures every incident edge so undo restores them.
   Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y redo; drives
   the same `canvas_patch` path as a fresh edit, so kernel state
-  stays the source of truth. Plan:
-  [docs/canvas-shell-plan.md](../canvas-shell-plan.md) — remaining
-  Phase 3 follow-up (drag-from-edge create) plus phases 4–6
-  (edges + inspector → rich node embeds → polish).
+  stays the source of truth. Drag-from-edge-to-create landed too:
+  hovering a non-group node shows four small accent circles
+  offset from each side midpoint; dragging from one shows a
+  dashed preview bezier that tracks the cursor; release over
+  empty space creates a new text node + connecting edge; release
+  over another node creates only the edge; release over the
+  source cancels. All history-tracked. Phase 3 complete. Plan:
+  [docs/canvas-shell-plan.md](../canvas-shell-plan.md) —
+  remaining phases 4–6 (edges + inspector → rich node embeds →
+  polish).
 - [ ] **Notion-style block UX on top of the existing block-tree engine
   (PRD-08).** Block tree + transactions + annotations are shipped
   (3.7k LoC in `nexus-editor`); what's missing is the UI layer —

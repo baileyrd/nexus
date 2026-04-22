@@ -22,6 +22,7 @@ import {
   readTheme,
   hitTestNode,
   hitTestHandle,
+  hitTestEdgeHandle,
   cursorForHandle,
   resizeRect,
   marqueeHit,
@@ -29,6 +30,8 @@ import {
   DEFAULT_TEXT_NODE_SIZE,
   type MarqueeRect,
   type ResizeHandle,
+  type NodeSide,
+  type EdgeDragPreview,
 } from './renderer'
 import type {
   CanvasKernelClient,
@@ -58,6 +61,8 @@ export function CanvasView({ relpath, client }: Props) {
   const cameraDirtyRef = useRef(false)
   const selectionRef = useRef<Set<string>>(new Set())
   const marqueeRef = useRef<MarqueeRect | null>(null)
+  const hoveredNodeIdRef = useRef<string | null>(null)
+  const edgeDragRef = useRef<EdgeDragPreview | null>(null)
   const clientRef = useRef(client)
   clientRef.current = client
 
@@ -157,6 +162,8 @@ export function CanvasView({ relpath, client }: Props) {
           dpr,
           selection: selectionRef.current,
           marquee: marqueeRef.current,
+          hoveredNodeId: hoveredNodeIdRef.current,
+          edgeDrag: edgeDragRef.current,
         },
         docRef.current,
       )
@@ -279,26 +286,65 @@ export function CanvasView({ relpath, client }: Props) {
           startWorldY: number
           startRect: { x: number; y: number; width: number; height: number }
         }
+      | {
+          kind: 'create-edge'
+          fromNodeId: string
+          fromSide: NodeSide
+        }
     let drag: DragMode = { kind: 'none' }
 
     /** Hover helper: when exactly one non-group node is selected and
      *  the pointer is over one of its resize handles, show the right
-     *  cursor. Called from pointermove when not mid-drag. */
+     *  cursor. Also tracks the hovered node so the edge-create
+     *  affordances render. */
     const updateHoverCursor = (cx: number, cy: number) => {
-      const sel = selectionRef.current
-      if (sel.size !== 1) {
-        canvas.style.cursor = 'grab'
-        return
-      }
       const doc = docRef.current
-      if (!doc) return
-      const only = doc.nodes.find((n) => n.id === Array.from(sel)[0])
-      if (!only || only.type === 'group') {
-        canvas.style.cursor = 'grab'
-        return
+      const cam = cameraRef.current
+      const world = screenToWorld(cx, cy)
+
+      // Hovered-for-edge-create: topmost non-group node under the
+      // cursor, or within the affordance offset area. We also promote
+      // to "hovered" when the cursor is over one of the 4 affordance
+      // circles (which sit outside the node rect).
+      let hovered: string | null = null
+      if (doc) {
+        const over = hitTestNode(doc.nodes, world.x, world.y)
+        if (over && over.type !== 'group') {
+          hovered = over.id
+        } else {
+          for (const n of doc.nodes) {
+            if (n.type === 'group') continue
+            if (hitTestEdgeHandle(n, cam, cx, cy)) {
+              hovered = n.id
+              break
+            }
+          }
+        }
       }
-      const handle = hitTestHandle(only, cameraRef.current, cx, cy)
-      canvas.style.cursor = handle ? cursorForHandle(handle) : 'grab'
+      if (hovered !== hoveredNodeIdRef.current) {
+        hoveredNodeIdRef.current = hovered
+      }
+
+      // Cursor priority: resize handle > edge-create affordance > grab.
+      const sel = selectionRef.current
+      if (sel.size === 1 && doc) {
+        const only = doc.nodes.find((n) => n.id === Array.from(sel)[0])
+        if (only && only.type !== 'group') {
+          const handle = hitTestHandle(only, cam, cx, cy)
+          if (handle) {
+            canvas.style.cursor = cursorForHandle(handle)
+            return
+          }
+        }
+      }
+      if (hovered) {
+        const n = doc?.nodes.find((x) => x.id === hovered)
+        if (n && hitTestEdgeHandle(n, cam, cx, cy)) {
+          canvas.style.cursor = 'crosshair'
+          return
+        }
+      }
+      canvas.style.cursor = 'grab'
     }
 
     const onPointerDown = (e: PointerEvent) => {
@@ -317,6 +363,29 @@ export function CanvasView({ relpath, client }: Props) {
         canvas.setPointerCapture(e.pointerId)
         canvas.style.cursor = 'grabbing'
         return
+      }
+
+      // Edge-create affordances take priority: they sit outside the
+      // node rect so a pointerdown there would otherwise route to
+      // empty-space (marquee). Check every non-group node — the
+      // affordance area is small and affordance-on-node-A doesn't
+      // overlap affordance-on-node-B in practice.
+      if (doc) {
+        for (const n of doc.nodes) {
+          if (n.type === 'group') continue
+          const side = hitTestEdgeHandle(n, cameraRef.current, cx, cy)
+          if (side) {
+            drag = { kind: 'create-edge', fromNodeId: n.id, fromSide: side }
+            edgeDragRef.current = {
+              fromNodeId: n.id,
+              fromSide: side,
+              toWorld: world,
+            }
+            canvas.setPointerCapture(e.pointerId)
+            canvas.style.cursor = 'crosshair'
+            return
+          }
+        }
       }
 
       // Resize handles take priority over everything else when a single
@@ -415,6 +484,18 @@ export function CanvasView({ relpath, client }: Props) {
         cameraDirtyRef.current = true
         return
       }
+      if (drag.kind === 'create-edge') {
+        const rect = canvas.getBoundingClientRect()
+        const cx = e.clientX - rect.left
+        const cy = e.clientY - rect.top
+        const world = screenToWorld(cx, cy)
+        edgeDragRef.current = {
+          fromNodeId: drag.fromNodeId,
+          fromSide: drag.fromSide,
+          toWorld: world,
+        }
+        return
+      }
       if (drag.kind === 'resize-node') {
         const rect = canvas.getBoundingClientRect()
         const cx = e.clientX - rect.left
@@ -489,6 +570,61 @@ export function CanvasView({ relpath, client }: Props) {
 
       if (finished.kind === 'marquee') {
         marqueeRef.current = null
+        return
+      }
+
+      if (finished.kind === 'create-edge') {
+        const preview = edgeDragRef.current
+        edgeDragRef.current = null
+        if (!preview) return
+        const doc = docRef.current
+        if (!doc) return
+        const world = preview.toWorld
+
+        // Release over another non-group node → just an edge.
+        // Release over empty space → new text node + edge.
+        // Release over the source node → cancel.
+        const target = hitTestNode(doc.nodes, world.x, world.y)
+        const forward: CanvasPatchOp[] = []
+        const inverse: CanvasPatchOp[] = []
+        if (target && target.id === finished.fromNodeId) {
+          return
+        }
+        const edgeId = newNodeId()
+        let toNodeId: string
+        if (target && target.type !== 'group') {
+          toNodeId = target.id
+        } else {
+          const { width, height } = DEFAULT_TEXT_NODE_SIZE
+          const newNode: CanvasNode = {
+            id: newNodeId(),
+            type: 'text',
+            x: world.x - width / 2,
+            y: world.y - height / 2,
+            width,
+            height,
+            text: '',
+          }
+          toNodeId = newNode.id
+          forward.push({ op: 'node_add', node: newNode })
+          inverse.push({ op: 'node_remove', id: newNode.id })
+          useCanvasStore.getState().updateDoc(relpath, (d) => applyNodeAdd(d, newNode))
+        }
+        const edge = {
+          id: edgeId,
+          fromNode: finished.fromNodeId,
+          toNode: toNodeId,
+        }
+        forward.push({ op: 'edge_add', edge })
+        // Inverse prepended so undo drops the edge before the node it
+        // pointed to, matching apply_patch's serial semantics.
+        inverse.unshift({ op: 'edge_remove', id: edgeId })
+        useCanvasStore.getState().updateDoc(relpath, (d) => ({
+          ...d,
+          edges: [...d.edges, edge],
+        }))
+        useCanvasStore.getState().setSelection(relpath, [toNodeId])
+        commitRef.current(forward, inverse)
         return
       }
 
