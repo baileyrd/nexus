@@ -15,6 +15,8 @@ import { ExtensionHost } from './host/ExtensionHost'
 import { contextKeyService } from './host/ContextKeyService'
 import { setRegistry } from './host/shellRegistry'
 import { installBodyClasses } from './host/bodyClasses'
+import { eventBus } from './host/EventBus'
+import { invoke } from '@tauri-apps/api/core'
 import App from './shell/App'
 import './shell/shell.css'
 // Importing the store triggers persist rehydration, which sets
@@ -91,6 +93,55 @@ async function boot() {
 
   // Expose via singleton — no circular import
   setRegistry(reg)
+
+  // ── E2E test hook ─────────────────────────────────────────────────────────
+  // Gated on VITE_E2E alone. The e2e build step (`pnpm e2e:build`) sets
+  // VITE_E2E=true before `vite build`, so the flag is inlined at build time
+  // and only ever present in e2e-targeted bundles. Production and normal
+  // `pnpm dev`/`pnpm build` runs never set it. Note: `import.meta.env.DEV`
+  // is false under `vite build`, so gating on it here would never let the
+  // production e2e bundle expose the global — which is why we don't.
+  if (import.meta.env.VITE_E2E === 'true') {
+    ;(window as unknown as { __nexusShellApi: unknown }).__nexusShellApi = {
+      // Shared subsystems (not plugin-scoped). Commands and events are
+      // process-wide; the e2e harness dispatches through them exactly as a
+      // registered plugin would.
+      kernel: {
+        invoke: <T = unknown>(
+          pluginId: string,
+          commandId: string,
+          args: unknown = {},
+          timeoutMs?: number,
+        ): Promise<T> =>
+          invoke<T>('kernel_invoke', {
+            pluginId,
+            commandId,
+            args,
+            timeoutMs: timeoutMs ?? null,
+          }),
+        available: (): Promise<boolean> => invoke<boolean>('kernel_is_booted'),
+      },
+      commands: {
+        execute: (id: string, ...args: unknown[]) =>
+          reg.commands.execute(id, ...args),
+        all: () => reg.commands.all(),
+      },
+      events: {
+        emit: (topic: string, payload: unknown) => eventBus.emit(topic, payload),
+        on: <T = unknown>(topic: string, handler: (p: T) => void) =>
+          eventBus.on<T>(topic, handler),
+      },
+      storage: {
+        get: (key: string) => localStorage.getItem(key),
+        set: (key: string, value: string) => localStorage.setItem(key, value),
+        delete: (key: string) => localStorage.removeItem(key),
+      },
+      // Escape hatch for future specs that need deeper surface area without
+      // another round-trip through this file.
+      registry: reg,
+    }
+    console.info('[Boot] __nexusShellApi attached (VITE_E2E=true)')
+  }
 
   // Force dark theme on boot. themeStore may have 'light' persisted
   // from when core.theme-service was auto-flipping based on OS

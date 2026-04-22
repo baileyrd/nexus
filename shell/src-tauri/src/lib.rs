@@ -200,6 +200,55 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(bridge::KernelRuntime::new())
+        // E2E-only: if NEXUS_E2E_VAULT is set, init + boot the kernel here
+        // directly (bypassing the webview IPC path). Webdriver-injected
+        // `invoke()` calls fail with "Origin header is not a valid URL" on
+        // Tauri v2 + tauri-driver BiDi, so we pre-seed the runtime from
+        // Rust. We also write the vault into shell-state's last_forge_path
+        // so the launcher's recents / frontend restore paths see it too.
+        .setup(|app| {
+            let vault = match std::env::var("NEXUS_E2E_VAULT") {
+                Ok(v) if !v.is_empty() => v,
+                _ => return Ok(()),
+            };
+            eprintln!("[e2e-setup] NEXUS_E2E_VAULT={vault} — seeding kernel");
+
+            let vault_path = std::path::PathBuf::from(&vault);
+            let runtime_state = app.state::<bridge::KernelRuntime>();
+
+            // Cap the block so a hung init/boot can't freeze app startup.
+            let boot_result = tauri::async_runtime::block_on(async {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    async {
+                        bridge::init_forge(vault.clone()).await?;
+                        runtime_state.boot_at(&vault_path).await
+                    },
+                )
+                .await
+                .map_err(|_| "timed out waiting for init_forge/boot_kernel".to_string())
+                .and_then(|r| r)
+            });
+
+            match boot_result {
+                Ok(()) => {
+                    eprintln!("[e2e-setup] kernel booted at {vault}");
+                    // Write to shell-state so the launcher's recents and any
+                    // "restore last forge" path reflects the e2e vault.
+                    if let Err(e) = persistence::write_last_forge_path(
+                        app.handle().clone(),
+                        vault.clone(),
+                    ) {
+                        eprintln!("[e2e-setup] write_last_forge_path failed: {e}");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[e2e-setup] kernel boot failed: {e} (continuing)");
+                }
+            }
+
+            Ok(())
+        })
         // Fire the kernel shutdown when the user closes a window. Fire-and-
         // forget for now — Tauri 2's `CloseRequested` has an `api` handle we
         // could use to delay the actual close until shutdown completes, but

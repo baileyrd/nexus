@@ -107,7 +107,14 @@ export const workspacePlugin: Plugin = {
       if (path !== null) {
         try {
           await invoke('init_forge', { path })
-          await invoke('boot_kernel', { path })
+          // In the e2e harness the Rust `setup` hook may have already
+          // booted the kernel (NEXUS_E2E_VAULT path) — in that case
+          // skip boot_kernel rather than erroring with "kernel already
+          // booted". Normal runs hit the `!alreadyBooted` branch.
+          const alreadyBooted = await invoke<boolean>('kernel_is_booted')
+          if (!alreadyBooted) {
+            await invoke('boot_kernel', { path })
+          }
         } catch (err) {
           console.error('[nexus.workspace] kernel boot failed for', path, err)
           // Force-clear so the UI reflects "no workspace" rather than
@@ -135,7 +142,22 @@ export const workspacePlugin: Plugin = {
       }
     }
 
-    const persisted = api.storage.get(STORAGE_KEY)
+    // Primary source: plugin-local localStorage (normal runs). Fallback:
+    // the shell-state file's lastForgePath — populated by the Rust setup
+    // hook when NEXUS_E2E_VAULT is set, so the e2e harness's pre-booted
+    // kernel is picked up here without any special e2e branching.
+    let persisted = api.storage.get(STORAGE_KEY)
+    if (!persisted) {
+      try {
+        const state = await invoke<{ lastForgePath: string | null }>('get_shell_state')
+        if (state.lastForgePath) {
+          persisted = state.lastForgePath
+          console.info('[nexus.workspace] restoring from shell-state lastForgePath')
+        }
+      } catch (err) {
+        console.warn('[nexus.workspace] get_shell_state failed:', err)
+      }
+    }
     console.info('[nexus.workspace] boot — persisted root:', persisted ?? '<none>')
     if (persisted) {
       try {

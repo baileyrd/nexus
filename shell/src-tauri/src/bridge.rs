@@ -113,6 +113,33 @@ impl KernelRuntime {
         self.booted.load(Ordering::Acquire)
     }
 
+    /// Boot a kernel runtime rooted at `path` and stash it in the slot.
+    ///
+    /// Extracted from the `#[tauri::command] boot_kernel` body so the
+    /// `setup` hook in `lib.rs` can boot the runtime before any webview
+    /// IPC is in play (needed for the e2e harness, which can't reliably
+    /// invoke commands through the BiDi bridge — Tauri v2 rejects the
+    /// webdriver-injected Origin header).
+    pub async fn boot_at(&self, path: &std::path::Path) -> Result<(), String> {
+        let mut guard = self.inner.lock().await;
+        if guard.is_some() {
+            return Err("kernel already booted".to_string());
+        }
+        let Runtime {
+            kernel,
+            context,
+            loader,
+        } = nexus_bootstrap::build_cli_runtime(path.to_path_buf())
+            .map_err(|e| format!("{e:#}"))?;
+        *guard = Some(BootedRuntime {
+            kernel,
+            context: Arc::new(context),
+            loader,
+        });
+        self.booted.store(true, Ordering::Release);
+        Ok(())
+    }
+
     /// Drain the runtime: pull it out of the slot, abort every active
     /// subscription forwarder, call `kernel.shutdown().await`, then unload
     /// every plugin.
@@ -219,30 +246,13 @@ pub async fn boot_kernel(
     path: String,
     runtime: tauri::State<'_, KernelRuntime>,
 ) -> Result<(), String> {
-    let mut guard = runtime.inner.lock().await;
-    if guard.is_some() {
-        return Err("kernel already booted".to_string());
-    }
-
-    let forge_root = PathBuf::from(&path);
     // `nexus_bootstrap::build` is private; `build_cli_runtime` is the public
     // entry that forwards to `build(forge_root, "com.nexus.cli", "Nexus
     // CLI")`. Using it here means the shell's invoker identity is
     // `com.nexus.cli` for now — acceptable during Phase 0 since no kernel
     // plugin gates on invoker id. A dedicated `build_shell_runtime` can be
     // added to nexus-bootstrap later.
-    let Runtime {
-        kernel,
-        context,
-        loader,
-    } = nexus_bootstrap::build_cli_runtime(forge_root).map_err(|e| format!("{e:#}"))?;
-    *guard = Some(BootedRuntime {
-        kernel,
-        context: Arc::new(context),
-        loader,
-    });
-    runtime.booted.store(true, Ordering::Release);
-    Ok(())
+    runtime.boot_at(&PathBuf::from(&path)).await
 }
 
 /// Tear down the kernel runtime if one is booted. Idempotent.
