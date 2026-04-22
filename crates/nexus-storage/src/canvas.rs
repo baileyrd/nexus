@@ -513,7 +513,7 @@ mod tests {
                 text: Some("Hello".to_string()),
                 url: None,
                 source: None,
-                command: None,
+                command: None, extra: serde_json::Map::new(),
             }],
             edges: vec![CanvasEdge {
                 id: "e1".to_string(),
@@ -521,7 +521,7 @@ mod tests {
                 to_node: "n2".to_string(),
                 edge_type: CanvasEdgeType::Dashed,
                 label: Some("links to".to_string()),
-                color: None,
+                color: None, extra: serde_json::Map::new(),
             }],
             ..CanvasFile::default()
         };
@@ -560,14 +560,14 @@ mod tests {
                     node_type: CanvasNodeType::Text,
                     x: 0.0, y: 0.0, width: 100.0, height: 100.0,
                     color: None, label: Some("Hello".to_string()), collapsed: false,
-                    file: None, text: Some("content".to_string()), url: None, source: None, command: None,
+                    file: None, text: Some("content".to_string()), url: None, source: None, command: None, extra: serde_json::Map::new(),
                 },
                 CanvasNode {
                     id: "n2".to_string(),
                     node_type: CanvasNodeType::File,
                     x: 200.0, y: 0.0, width: 250.0, height: 300.0,
                     color: None, label: None, collapsed: false,
-                    file: Some("notes/a.md".to_string()), text: None, url: None, source: None, command: None,
+                    file: Some("notes/a.md".to_string()), text: None, url: None, source: None, command: None, extra: serde_json::Map::new(),
                 },
             ],
             edges: vec![CanvasEdge {
@@ -576,7 +576,7 @@ mod tests {
                 to_node: "n2".to_string(),
                 edge_type: CanvasEdgeType::Solid,
                 label: Some("references".to_string()),
-                color: None,
+                color: None, extra: serde_json::Map::new(),
             }],
             ..CanvasFile::default()
         };
@@ -617,7 +617,7 @@ mod tests {
                 node_type: CanvasNodeType::Text,
                 x: 0.0, y: 0.0, width: 100.0, height: 100.0,
                 color: None, label: None, collapsed: false,
-                file: None, text: Some("hi".to_string()), url: None, source: None, command: None,
+                file: None, text: Some("hi".to_string()), url: None, source: None, command: None, extra: serde_json::Map::new(),
             }],
             ..CanvasFile::default()
         };
@@ -637,14 +637,14 @@ mod tests {
                     node_type: CanvasNodeType::File,
                     x: 0.0, y: 0.0, width: 100.0, height: 100.0,
                     color: None, label: None, collapsed: false,
-                    file: Some("notes/a.md".to_string()), text: None, url: None, source: None, command: None,
+                    file: Some("notes/a.md".to_string()), text: None, url: None, source: None, command: None, extra: serde_json::Map::new(),
                 },
                 CanvasNode {
                     id: "n2".to_string(),
                     node_type: CanvasNodeType::Text,
                     x: 0.0, y: 0.0, width: 100.0, height: 100.0,
                     color: None, label: None, collapsed: false,
-                    file: None, text: Some("hi".to_string()), url: None, source: None, command: None,
+                    file: None, text: Some("hi".to_string()), url: None, source: None, command: None, extra: serde_json::Map::new(),
                 },
             ],
             ..CanvasFile::default()
@@ -659,7 +659,7 @@ mod tests {
             node_type: CanvasNodeType::Text,
             x, y, width: 100.0, height: 100.0,
             color: None, label: None, collapsed: false,
-            file: None, text: Some("t".to_string()), url: None, source: None, command: None,
+            file: None, text: Some("t".to_string()), url: None, source: None, command: None, extra: serde_json::Map::new(),
         }
     }
 
@@ -670,7 +670,7 @@ mod tests {
             to_node: to.to_string(),
             edge_type: CanvasEdgeType::Solid,
             label: None,
-            color: None,
+            color: None, extra: serde_json::Map::new(),
         }
     }
 

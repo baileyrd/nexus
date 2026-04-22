@@ -137,6 +137,7 @@ pub fn add_node(
         } else {
             None
         },
+        extra: serde_json::Map::new(),
     };
     canvas.nodes.push(node);
     save_canvas(app, path, &canvas)?;
@@ -167,6 +168,7 @@ pub fn add_edge(
         edge_type: et,
         label: label.map(str::to_string),
         color: None,
+        extra: serde_json::Map::new(),
     });
     save_canvas(app, path, &canvas)?;
     output::print_success(

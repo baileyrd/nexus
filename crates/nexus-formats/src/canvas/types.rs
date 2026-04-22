@@ -80,6 +80,12 @@ pub struct CanvasNode {
     /// Shell command for `terminal` nodes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// Unknown fields preserved for forward-compatibility (e.g. Obsidian's
+    /// `subpath` on file nodes, or `styleAttributes`). Allows nodes
+    /// authored in other JSON Canvas 1.0 implementations to round-trip
+    /// through Nexus without losing data.
+    #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Discriminant for canvas node types.
@@ -120,11 +126,14 @@ impl CanvasNodeType {
 pub struct CanvasEdge {
     /// Unique edge identifier.
     pub id: String,
-    /// Source node ID.
-    #[serde(rename = "from")]
+    /// Source node ID. Accepts `fromNode` (JSON Canvas 1.0 spec, used by
+    /// Obsidian) on read and also the legacy `from` key produced by
+    /// older Nexus writes. Serialized as `fromNode` going forward.
+    #[serde(rename = "fromNode", alias = "from")]
     pub from_node: String,
-    /// Target node ID.
-    #[serde(rename = "to")]
+    /// Target node ID. Accepts `toNode` (spec) + `to` (legacy) on read;
+    /// serialized as `toNode`.
+    #[serde(rename = "toNode", alias = "to")]
     pub to_node: String,
     /// Edge line style (defaults to solid).
     #[serde(rename = "type", default = "default_edge_type")]
@@ -135,6 +144,10 @@ pub struct CanvasEdge {
     /// Optional display color.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Unknown edge fields (e.g. JSON Canvas 1.0's `fromSide` /
+    /// `toSide` / `fromEnd` / `toEnd`) preserved for round-trip.
+    #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 fn default_edge_type() -> CanvasEdgeType {

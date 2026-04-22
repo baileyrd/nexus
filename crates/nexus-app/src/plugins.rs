@@ -121,12 +121,25 @@ impl IpcDispatcher for TauriIpcDispatcher {
                 plugin_id: target_plugin_id.to_string(),
                 command: command_id.to_string(),
             })?;
-        guard
-            .dispatch(handler_id, args)
-            .map_err(|_| IpcError::PluginCrashedDuringCall {
+        guard.dispatch(handler_id, args).map_err(|e| {
+            // `PluginCrashedDuringCall` has no `reason` field (stable
+            // error surface), so log the real failure at warn level
+            // before collapsing it. Without this a handler that
+            // returns `ExecutionFailed { reason: "canvas_read: ..." }`
+            // surfaces in the UI as a content-free "plugin crashed"
+            // message and there's no breadcrumb to the actual cause.
+            tracing::warn!(
+                audit = true,
+                plugin_id = target_plugin_id,
+                command = command_id,
+                error = %e,
+                "IPC dispatch failed"
+            );
+            IpcError::PluginCrashedDuringCall {
                 plugin_id: target_plugin_id.to_string(),
                 command: command_id.to_string(),
-            })
+            }
+        })
     }
 }
 

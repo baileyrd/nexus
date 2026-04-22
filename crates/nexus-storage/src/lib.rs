@@ -1838,7 +1838,7 @@ mod tests {
             x: 0.0, y: 0.0, width: 100.0, height: 100.0,
             color: None, label: None, collapsed: false,
             file: None, text: Some("hi".to_string()),
-            url: None, source: None, command: None,
+            url: None, source: None, command: None, extra: serde_json::Map::new(),
         });
 
         engine

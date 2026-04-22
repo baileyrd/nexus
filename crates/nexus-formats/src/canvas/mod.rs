@@ -146,6 +146,42 @@ mod tests {
     }
 
     #[test]
+    fn parses_obsidian_json_canvas_1_0() {
+        // Real-world Obsidian .canvas: edges use fromNode/toNode (spec,
+        // not the legacy from/to), nodes carry extra fields like
+        // `subpath` and `styleAttributes` that we don't model directly.
+        let json = r##"{
+          "nodes": [
+            {"id":"a","type":"file","file":"notes/one.md","subpath":"#h1",
+             "x":0,"y":0,"width":400,"height":300,
+             "styleAttributes":{}}
+          ],
+          "edges": [
+            {"id":"e1","fromNode":"a","toNode":"a","fromSide":"right","toSide":"left"}
+          ]
+        }"##;
+        let c = parse(json).expect("obsidian canvas should parse");
+        assert_eq!(c.nodes[0].id, "a");
+        assert!(c.nodes[0].extra.contains_key("subpath"));
+        assert!(c.nodes[0].extra.contains_key("styleAttributes"));
+        assert_eq!(c.edges[0].from_node, "a");
+        assert_eq!(c.edges[0].to_node, "a");
+        assert!(c.edges[0].extra.contains_key("fromSide"));
+        assert!(c.edges[0].extra.contains_key("toSide"));
+    }
+
+    #[test]
+    fn accepts_legacy_from_to_aliases() {
+        let json = r#"{
+          "nodes": [],
+          "edges": [{"id":"e1","from":"a","to":"b"}]
+        }"#;
+        let c = parse(json).unwrap();
+        assert_eq!(c.edges[0].from_node, "a");
+        assert_eq!(c.edges[0].to_node, "b");
+    }
+
+    #[test]
     fn serialize_round_trip() {
         let original = CanvasFile {
             version: "1.0".to_string(),
@@ -154,13 +190,13 @@ mod tests {
                 node_type: CanvasNodeType::Text,
                 x: 10.0, y: 20.0, width: 300.0, height: 200.0,
                 color: None, label: None, collapsed: false,
-                file: None, text: Some("Hello".into()), url: None, source: None, command: None,
+                file: None, text: Some("Hello".into()), url: None, source: None, command: None, extra: serde_json::Map::new(),
             }],
             edges: vec![CanvasEdge {
                 id: "e1".to_string(),
                 from_node: "n1".into(), to_node: "n2".into(),
                 edge_type: CanvasEdgeType::Dashed,
-                label: Some("links to".into()), color: None,
+                label: Some("links to".into()), color: None, extra: serde_json::Map::new(),
             }],
             extra: serde_json::Map::new(),
         };
