@@ -91,9 +91,11 @@ Findings from `docs/MICROKERNEL-AUDIT.md` not yet tracked. Ordered by audit prio
 
 ### 🔴 Red — blockers for untrusted plugin distribution
 
-- [ ] **Extract `nexus-plugin-api` crate (F-2.1.1, F-1.3.1).** `crates/nexus-plugins/Cargo.toml:10` takes a direct path dep on `nexus-kernel`, making the plugin ABI identical to the kernel's full public surface. Any kernel refactor is a silent plugin-compat break. Fix: create `crates/nexus-plugin-api` containing `Capability`, `CapabilitySet`, `TrustLevel`, `PluginInfo`, `PluginContext` (trait), `CorePlugin` (trait), `IpcDispatcher` (trait), `EventFilter`, `NexusEvent` (stable JSON-oriented), the plugin-observable error variants, and `PLUGIN_API_VERSION: u32 = 1`. Both `nexus-kernel` and `nexus-plugins` depend on it; plugin authors depend only on it.
+_None outstanding._ F-2.1.1 closed 2026-04-22 — see archive.
 
 ### 🟠 Orange — address before marketplace or next minor release
+
+- [ ] **CI guard: `nexus-plugin-api` stays kernel-free (follow-up to F-2.1.1).** With the plugin-api crate extracted, plugin authors only see its public surface — but nothing prevents future edits from re-importing kernel-internal types into it. Add a small workspace test (or a `cargo deny` rule, or a `cargo-public-api` check in CI) that asserts `nexus-plugin-api`'s public surface references no symbol from `nexus-kernel` or `nexus-plugins`. Cheap; prevents the slippage the original audit feared.
 
 ### 🟡 Yellow — quality / correctness improvements
 
