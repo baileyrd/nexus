@@ -4,8 +4,10 @@ import { viewRegistry, workspace } from '../../../workspace'
 import { OutlineView } from './OutlineView'
 import { outlinePaneViewCreator } from './OutlinePaneView'
 import { useOutlineStore } from './outlineStore'
-import { parseHeadings } from './parse'
+import { parseHeadings, treeToHeadings } from './parse'
 import { useEditorStore } from '../editor/editorStore'
+import { getEditorRuntime } from '../editor/runtime'
+import type { BlockTree, EditorChangedPayload } from '../editor/types'
 
 const VIEW_ID = 'nexus.outline.view'
 const COMMAND_FOCUS = 'nexus.outline.focus'
@@ -15,6 +17,23 @@ const EVENT_ACTIVE_HEADING_CHANGED = 'editor:activeHeadingChanged'
 
 interface ActiveHeadingPayload {
   index: number | null
+}
+
+/**
+ * Rough test for "relpath could have an editor session".
+ * Matches the same suffix set the editor plugin considers markdown
+ * (`.md` / `.markdown`) — only those paths get a kernel session we
+ * can subscribe to for change events. Non-markdown (code / binary)
+ * tabs still fall through to the `openUntitled` placeholder path
+ * below, which has no session and therefore no outline refresh.
+ */
+function isMarkdownRelpath(name: string): boolean {
+  const lower = name.toLowerCase()
+  return lower.endsWith('.md') || lower.endsWith('.markdown')
+}
+
+function isUntitledRelpath(relpath: string): boolean {
+  return /^untitled-\d+$/i.test(relpath)
 }
 
 export const outlinePlugin: Plugin = {
@@ -47,38 +66,155 @@ export const outlinePlugin: Plugin = {
       iconName: 'list',
     })
 
-    // Cross-plugin store import: read editor tabs directly. This is
-    // the accepted shell pattern — titleBar / gitStatus similarly
-    // read workspaceStore without going through the event bus.
-    const recompute = () => {
+    // ── Phase 7 wiring ────────────────────────────────────────────────
+    //
+    // The outline now derives from the kernel's canonical BlockTree,
+    // not from `tab.content`. Lifecycle:
+    //   1. On activation, subscribe to the editor runtime's
+    //      `sessionManager.onChanged` — fires when the Rust plugin
+    //      publishes `com.nexus.editor.changed.<relpath>` (after echo
+    //      suppression). Any change for the active relpath debounces
+    //      into a `recompute()`.
+    //   2. On active-tab change (a different subscription to
+    //      `useEditorStore`), recompute immediately for the new tab.
+    //   3. `recompute()` calls `kernelClient.getTree(relpath)`, walks
+    //      the tree's root_blocks, and emits an `OutlineHeading[]`.
+    //
+    // Rate-limit recomputes to one per animation frame so a
+    // keystroke-per-ms burst (paste / IME) collapses into a single
+    // kernel round-trip.
+
+    let rafHandle: number | null = null
+    let generation = 0
+    const scheduleRecompute = () => {
+      if (rafHandle !== null) return
+      rafHandle = requestAnimationFrame(() => {
+        rafHandle = null
+        void recompute()
+      })
+    }
+
+    /**
+     * Pull the latest tree for the active tab and publish headings.
+     * `generation` guards against a stale getTree resolution arriving
+     * after the user has switched tabs — late responses are dropped.
+     */
+    const recompute = async () => {
+      const myGen = ++generation
       const s = useEditorStore.getState()
-      const tab = s.tabs.find((t) => t.relpath === s.activeRelpath)
-      if (!tab) {
+      const relpath = s.activeRelpath
+      const tab = s.tabs.find((t) => t.relpath === relpath)
+
+      // No active tab, or an untitled placeholder / non-markdown tab:
+      // there's no kernel session we could read a tree from. Clear.
+      if (!tab || !relpath || isUntitledRelpath(relpath)) {
         useOutlineStore.getState().clear()
         return
       }
-      // Reset activeIndex with the headings: the editor will re-emit
-      // a fresh `activeHeadingChanged` once its scroll-spy effect
-      // re-runs against the new content. Leaving the old index in
-      // place would briefly highlight the wrong row.
-      useOutlineStore.getState().setHeadings(parseHeadings(tab.content))
+      if (!isMarkdownRelpath(tab.name) && !isMarkdownRelpath(relpath)) {
+        useOutlineStore.getState().clear()
+        return
+      }
+
+      const runtime = getEditorRuntime()
+      if (!runtime) {
+        // Editor plugin hasn't finished activating yet. Fall back to
+        // the legacy content parse so the first paint isn't empty;
+        // the next scheduleRecompute (driven by changes or tab
+        // switches) will take the kernel path.
+        useOutlineStore
+          .getState()
+          .setHeadings(parseHeadings(tab.content))
+        useOutlineStore.getState().setActiveIndex(null)
+        return
+      }
+
+      let tree: BlockTree | null = null
+      let markdown: string | null = null
+      try {
+        // Fetch tree (primary source) + markdown (for source-mode line
+        // hints) in parallel. Both come from the same session so they
+        // represent a coherent snapshot.
+        const [snapshot, md] = await Promise.all([
+          runtime.kernelClient.getTree(relpath),
+          runtime.kernelClient.getMarkdown(relpath),
+        ])
+        tree = snapshot.tree
+        markdown = md
+      } catch {
+        // Session may have closed between `changed` firing and our
+        // fetch, or the kernel is tearing down. Fall through to the
+        // content-based parse so the outline stays populated with
+        // the last-known state.
+        useOutlineStore
+          .getState()
+          .setHeadings(parseHeadings(tab.content))
+        useOutlineStore.getState().setActiveIndex(null)
+        return
+      }
+
+      // Drop late responses after a fast tab switch.
+      if (myGen !== generation) return
+
+      // Recover 1-based source line numbers from the canonical
+      // markdown so source-mode scroll-to-heading (CM viewToLine)
+      // keeps working. The tree walker already agrees with
+      // `parseHeadings` on ordering — both skip fenced code blocks
+      // and both honour document order — so a positional zip by
+      // index is safe.
+      const lineHints: number[] = []
+      if (markdown) {
+        const parsed = parseHeadings(markdown)
+        for (const h of parsed) lineHints.push(h.line)
+      }
+
+      const headings = treeToHeadings(tree, lineHints)
+      useOutlineStore.getState().setHeadings(headings)
+      // Reset activeIndex — the editor's scroll-spy will re-emit a
+      // fresh `activeHeadingChanged` once it runs against the new
+      // rendered body.
       useOutlineStore.getState().setActiveIndex(null)
     }
 
-    useEditorStore.subscribe((state, prev) => {
+    // Subscribe to the editor runtime's changed-event emitter. The
+    // runtime is set up synchronously by `editor/index.ts::activate`;
+    // our `dependsOn: ['nexus.rightPanel']` doesn't order us after
+    // the editor, so we microtask-defer the subscribe to let the
+    // editor plugin's activate() finish first.
+    let unsubscribeChanged: (() => void) | null = null
+    queueMicrotask(() => {
+      const runtime = getEditorRuntime()
+      if (!runtime) return
+      unsubscribeChanged = runtime.sessionManager.onChanged(
+        (payload: EditorChangedPayload) => {
+          // Ignore events for any relpath other than the active tab —
+          // the outline only ever describes one file at a time.
+          const active = useEditorStore.getState().activeRelpath
+          if (payload.relpath !== active) return
+          scheduleRecompute()
+        },
+      )
+    })
+
+    // Active-tab transitions recompute immediately (no rAF debounce —
+    // the user just switched files and the UX expects the outline to
+    // catch up in one paint). Content-level edits route through the
+    // change-event path above.
+    const unsubscribeStore = useEditorStore.subscribe((state, prev) => {
       if (state.activeRelpath !== prev.activeRelpath) {
-        recompute()
-        return
+        void recompute()
       }
-      const a = state.tabs.find((t) => t.relpath === state.activeRelpath)
-      const b = prev.tabs.find((t) => t.relpath === prev.activeRelpath)
-      if (a?.content !== b?.content) recompute()
     })
 
     // Seed with whatever is active right now.
-    recompute()
+    void recompute()
 
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
+      generation++
+      if (rafHandle !== null) {
+        cancelAnimationFrame(rafHandle)
+        rafHandle = null
+      }
       useOutlineStore.getState().clear()
     })
 
@@ -96,5 +232,10 @@ export const outlinePlugin: Plugin = {
       const leaf = await workspace.ensureLeafOfType('outline', 'right')
       workspace.revealLeaf(leaf)
     })
+
+    // Retain references so the tree-shaker doesn't strip the
+    // subscription cleanups — they're owned by the plugin lifetime.
+    void unsubscribeChanged
+    void unsubscribeStore
   },
 }

@@ -5,6 +5,8 @@ import { BacklinksView } from './BacklinksView'
 import { backlinkViewCreator } from './BacklinkView'
 import { useBacklinksStore, type Backlink } from './backlinksStore'
 import { useEditorStore } from '../editor/editorStore'
+import { getEditorRuntime } from '../editor/runtime'
+import type { EditorChangedPayload } from '../editor/types'
 
 const VIEW_ID = 'nexus.backlinks.view'
 const COMMAND_FOCUS = 'nexus.backlinks.focus'
@@ -151,13 +153,89 @@ export const backlinksPlugin: Plugin = {
       }
     }
 
-    // Subscribe to active-tab changes. Only kick a reload when
-    // `activeRelpath` itself changes — content edits on the same tab
-    // don't affect the backlinks set for this one-shot inspector.
+    /**
+     * Silent refresh — re-queries the backlinks index for `relpath`
+     * without flashing the UI through a `loading` state. Used by the
+     * Phase 7 change-event hook: an in-progress edit to the active
+     * file does not change its *inbound* backlinks (those live on
+     * other files), but a future write-through reindex triggered off
+     * an editor change could. Keeping this as a silent refresh means
+     * we pick up any such update without the UI shimmering to
+     * "Loading…" on every keystroke.
+     *
+     * Request-id guarded against tab-switch races (same pattern as
+     * `load` above).
+     */
+    const refresh = async (relpath: string) => {
+      const requestId = ++currentRequestId
+      let available = false
+      try {
+        available = await api.kernel.available()
+      } catch {
+        available = false
+      }
+      if (!available) return
+      if (requestId !== currentRequestId) return
+      try {
+        const raw = await api.kernel.invoke<KernelBacklink[]>(
+          STORAGE_PLUGIN_ID,
+          BACKLINKS_COMMAND,
+          { path: relpath },
+        )
+        if (requestId !== currentRequestId) return
+        const store = useBacklinksStore.getState()
+        // Only write through if we're still looking at this file —
+        // otherwise the user has switched tabs and `load` for the new
+        // tab has already taken over.
+        if (store.currentRelpath !== relpath) return
+        store.setLinks(decode(raw, relpath))
+        store.setError(null)
+      } catch {
+        // Silent refresh — failures here shouldn't clobber the
+        // currently-displayed results. The next explicit tab switch
+        // will surface any persistent error.
+      }
+    }
+
+    // Subscribe to active-tab changes. A tab switch does a full
+    // `load` (flashes "Loading…"); a content edit on the same tab
+    // does a silent `refresh` (see onChanged below). We skip the
+    // subscribe-driven reload for same-relpath mutations so this
+    // handler only fires on actual file switches.
     useEditorStore.subscribe((state, prev) => {
       if (state.activeRelpath !== prev.activeRelpath) {
         void load(state.activeRelpath)
       }
+    })
+
+    // Phase 7: subscribe to editor change events for parity with the
+    // outline plugin. Note the architectural caveat: backlinks-TO a
+    // file change when OTHER files' link tables update, not when the
+    // file itself is edited. Today the `com.nexus.editor.changed`
+    // channel only fires on tree mutations of the same file, so this
+    // subscription is largely a no-op for typing — but it gives us a
+    // well-defined hook for future cross-file change events
+    // (e.g. a future "storage:reindexed" fan-out after `save` writes
+    // through). We run a coalesced silent refresh so the UI stays
+    // stable even if events fire rapidly.
+    let rafHandle: number | null = null
+    let unsubscribeChanged: (() => void) | null = null
+    queueMicrotask(() => {
+      const runtime = getEditorRuntime()
+      if (!runtime) return
+      unsubscribeChanged = runtime.sessionManager.onChanged(
+        (payload: EditorChangedPayload) => {
+          const active = useEditorStore.getState().activeRelpath
+          if (payload.relpath !== active) return
+          if (rafHandle !== null) return
+          rafHandle = requestAnimationFrame(() => {
+            rafHandle = null
+            const relpath = useEditorStore.getState().activeRelpath
+            if (!relpath) return
+            void refresh(relpath)
+          })
+        },
+      )
     })
 
     // Seed with whatever is active at activation time. Covers the
@@ -172,6 +250,10 @@ export const backlinksPlugin: Plugin = {
 
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
       currentRequestId++
+      if (rafHandle !== null) {
+        cancelAnimationFrame(rafHandle)
+        rafHandle = null
+      }
       useBacklinksStore.getState().clear()
     })
 
@@ -181,5 +263,8 @@ export const backlinksPlugin: Plugin = {
       const leaf = await workspace.ensureLeafOfType('backlink', 'right')
       workspace.revealLeaf(leaf)
     })
+
+    // Keep a reference so tree-shaking doesn't strip the teardown.
+    void unsubscribeChanged
   },
 }
