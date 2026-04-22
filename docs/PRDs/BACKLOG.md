@@ -56,10 +56,13 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   layer parses/serializes/indexes canvas files; CLI shipped; kernel
   IPC surface landed 2026-04-22 (`canvas_read` / `canvas_write` /
   `canvas_patch` / `canvas_nodes` / `canvas_edges` on
-  `com.nexus.storage`, handler ids 35–39). `.canvas` still falls
-  through to CodeMirror in the shell. Plan:
-  [docs/canvas-shell-plan.md](../canvas-shell-plan.md) — remaining
-  shell phases 1–6 (routing → canvas renderer with zoom/pan →
+  `com.nexus.storage`, handler ids 35–39). Shell Phase 1 (routing +
+  blank surface) landed 2026-04-22: `shell/src/plugins/nexus/canvas/`
+  registers view type `canvas`, claims the `.canvas` extension
+  (routed via the existing `viewTypeForFile` path), and renders a
+  grey pane with a "N nodes · M edges" overlay sourced from
+  `canvas_read`. Plan: [docs/canvas-shell-plan.md](../canvas-shell-plan.md)
+  — remaining phases 2–6 (canvas renderer with zoom/pan →
   interactions → edges + inspector → rich node embeds → polish).
 - [ ] **Notion-style block UX on top of the existing block-tree engine
   (PRD-08).** Block tree + transactions + annotations are shipped

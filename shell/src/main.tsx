@@ -73,6 +73,7 @@ import { confirmPlugin } from './plugins/nexus/confirm'
 import { commandPalettePlugin } from './plugins/nexus/commandPalette'
 import { paneModePlugin } from './plugins/nexus/paneMode'
 import { terminalPlugin } from './plugins/nexus/terminal'
+import { canvasPlugin } from './plugins/nexus/canvas'
 import { aiPlugin } from './plugins/nexus/ai'
 import { pluginsMgmtPlugin } from './plugins/nexus/pluginsMgmt'
 import { processesPlugin } from './plugins/nexus/processes'
@@ -187,6 +188,7 @@ async function boot() {
     commandPalettePlugin,
     paneModePlugin,
     terminalPlugin,
+    canvasPlugin,
     aiPlugin,
     pluginsMgmtPlugin,
     processesPlugin,
