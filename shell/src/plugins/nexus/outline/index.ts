@@ -203,6 +203,20 @@ export const outlinePlugin: Plugin = {
     const unsubscribeStore = useEditorStore.subscribe((state, prev) => {
       if (state.activeRelpath !== prev.activeRelpath) {
         void recompute()
+        return
+      }
+      // Re-recompute when the active tab finishes loading. On fresh
+      // boot `openTab` sets activeRelpath synchronously (firing a
+      // recompute) before `sessionManager.acquire` resolves, so the
+      // first recompute's getTree returns empty and parseHeadings
+      // runs against empty tab.content. Without this hook the outline
+      // would stay empty until the user edits or re-opens the file.
+      const ap = state.activeRelpath
+      if (!ap) return
+      const curTab = state.tabs.find((t) => t.relpath === ap)
+      const prevTab = prev.tabs.find((t) => t.relpath === ap)
+      if (curTab && prevTab && prevTab.loading && !curTab.loading) {
+        void recompute()
       }
     })
 
