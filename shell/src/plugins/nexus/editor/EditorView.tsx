@@ -288,24 +288,13 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
     height: '100%',
   }
 
-  // WindowControls now live in the global workspace titlebar
-  // (shell/src/workspace/WorkspaceRenderer.tsx). EditorView no longer
-  // needs a per-column title strip — just a thin drag region so the
-  // user can still drag the window by the top of this column.
-  const titleBar = (
-    <div className="workspace-tab-header-container" data-tauri-drag-region>
-      <div
-        className="workspace-tab-header-container-inner"
-        data-tauri-drag-region
-        style={{ flex: '1 1 auto' }}
-      />
-    </div>
-  )
+  // The workspace-level TabStrip (WorkspaceRenderer.tsx) already sits
+  // above this view and hosts the tab buttons + drag region space; no
+  // per-column title bar is needed here.
 
   if (!activeTab) {
     return (
       <div style={rootStyle}>
-        {titleBar}
         <ViewHeader activeTab={null} />
         <div style={centredStyle}>
           <EmptyStateActions hasAnyTab={tabs.length > 0} />
@@ -316,7 +305,6 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
 
   return (
     <div style={rootStyle}>
-      {titleBar}
       <ViewHeader activeTab={activeTab} />
       <div ref={scrollWrapRef} style={{ flex: '1 1 auto', overflow: 'auto', position: 'relative' }}>
         <div
