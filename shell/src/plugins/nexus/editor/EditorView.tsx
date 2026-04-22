@@ -305,24 +305,15 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
 
   return (
     <div style={rootStyle}>
-      <ViewHeader activeTab={activeTab} />
+      <ViewHeader
+        activeTab={activeTab}
+        mode={activeTab.mode}
+        onToggleMode={() => {
+          const next: EditorTabMode = activeTab.mode === 'preview' ? 'source' : 'preview'
+          setMode(activeTab.relpath, next)
+        }}
+      />
       <div ref={scrollWrapRef} style={{ flex: '1 1 auto', overflow: 'auto', position: 'relative' }}>
-        <div
-          style={{
-            position: 'absolute',
-            top: 8,
-            right: 12,
-            zIndex: 2,
-          }}
-        >
-          <ModeToggle
-            mode={activeTab.mode}
-            onClick={() => {
-              const next: EditorTabMode = activeTab.mode === 'preview' ? 'source' : 'preview'
-              setMode(activeTab.relpath, next)
-            }}
-          />
-        </div>
         <TabBody
           tab={activeTab}
           markdownHtml={markdownHtml}
@@ -349,7 +340,13 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
  * Untitled tabs (`untitled-N`) show just their tab name with no
  * path trail — they have no real directory hierarchy yet.
  */
-function ViewHeader({ activeTab }: { activeTab: EditorTab | null }) {
+interface ViewHeaderProps {
+  activeTab: EditorTab | null
+  mode?: EditorTabMode
+  onToggleMode?: () => void
+}
+
+function ViewHeader({ activeTab, mode, onToggleMode }: ViewHeaderProps) {
   // Back / forward navigation is scaffolded but not wired to a history
   // store yet — the buttons render disabled so the row lines up with
   // Obsidian's pattern (and lets us add nav later without reshuffling
@@ -395,6 +392,9 @@ function ViewHeader({ activeTab }: { activeTab: EditorTab | null }) {
         </div>
       </div>
       <div className="view-actions" style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+        {mode && onToggleMode && (
+          <ModeToggle mode={mode} onClick={onToggleMode} />
+        )}
         <button
           type="button"
           aria-label="More options"
