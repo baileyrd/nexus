@@ -199,25 +199,11 @@ function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
         overflow: 'hidden',
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: side === 'left' ? 'flex-end' : 'flex-start',
-          padding: '2px 4px',
-          borderBottom: '1px solid var(--divider-color, var(--line, #333))',
-        }}
-      >
-        <button
-          type="button"
-          title={`Collapse ${side} sidebar`}
-          onClick={() => workspace.setSidedockCollapsed(side, true)}
-          style={COLLAPSE_BUTTON_STYLE}
-        >
-          {side === 'left' ? '‹' : '›'}
-        </button>
-      </div>
+      {/* Collapse chevron now lives inside the TabStrip (threaded via
+          sideDock prop) so left/center/right columns all have a single
+          36px header row that lines up with WindowControls. */}
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex' }}>
-        <RenderNode node={dock} />
+        <RenderNode node={dock} sideDock={side} />
       </div>
     </div>
   )
@@ -424,16 +410,20 @@ interface RenderNodeProps {
    *  affordance is main-dock only, matching Obsidian. Sidedocks and
    *  floating windows don't get it. */
   isMainDock?: boolean
+  /** Set when this subtree is the left or right sidedock. Threaded down
+   *  so the TabStrip can render the sidebar collapse chevron inline
+   *  with its tabs (rather than a separate stacked row above). */
+  sideDock?: 'left' | 'right'
 }
 
-function RenderNode({ node, isMainDock = false }: RenderNodeProps): JSX.Element | null {
+function RenderNode({ node, isMainDock = false, sideDock }: RenderNodeProps): JSX.Element | null {
   switch (node.kind) {
     case 'split':
-      return <SplitNode node={node} isMainDock={isMainDock} />
+      return <SplitNode node={node} isMainDock={isMainDock} sideDock={sideDock} />
     case 'tabs':
-      return <TabGroup tabs={node} isMainDock={isMainDock} />
+      return <TabGroup tabs={node} isMainDock={isMainDock} sideDock={sideDock} />
     case 'root':
-      return <RenderNode node={(node as Root).child} isMainDock={isMainDock} />
+      return <RenderNode node={(node as Root).child} isMainDock={isMainDock} sideDock={sideDock} />
     case 'floating':
       return (
         <div data-floating="true" style={{ width: '100%', height: '100%' }}>
@@ -449,7 +439,7 @@ function RenderNode({ node, isMainDock = false }: RenderNodeProps): JSX.Element 
   }
 }
 
-function SplitNode({ node, isMainDock }: { node: Split; isMainDock: boolean }): JSX.Element {
+function SplitNode({ node, isMainDock, sideDock }: { node: Split; isMainDock: boolean; sideDock?: 'left' | 'right' }): JSX.Element {
   const style: CSSProperties = {
     display: 'flex',
     flexDirection: node.direction === 'horizontal' ? 'row' : 'column',
@@ -473,7 +463,7 @@ function SplitNode({ node, isMainDock }: { node: Split; isMainDock: boolean }): 
               display: 'flex',
             }}
           >
-            <RenderNode node={child} isMainDock={isMainDock} />
+            <RenderNode node={child} isMainDock={isMainDock} sideDock={sideDock} />
           </div>
         )
       })}
@@ -493,9 +483,10 @@ function childKey(node: WorkspaceParent): string {
 interface TabGroupProps {
   tabs: Tabs
   isMainDock: boolean
+  sideDock?: 'left' | 'right'
 }
 
-function TabGroup({ tabs, isMainDock }: TabGroupProps): JSX.Element {
+function TabGroup({ tabs, isMainDock, sideDock }: TabGroupProps): JSX.Element {
   const activeLeaf = tabs.leaves[tabs.activeIndex] ?? null
 
   return (
@@ -512,7 +503,7 @@ function TabGroup({ tabs, isMainDock }: TabGroupProps): JSX.Element {
         overflow: 'hidden',
       }}
     >
-      <TabStrip tabs={tabs} isMainDock={isMainDock} />
+      <TabStrip tabs={tabs} isMainDock={isMainDock} sideDock={sideDock} />
       <div
         className="workspace-tab-body"
         style={{
@@ -538,7 +529,15 @@ function TabGroup({ tabs, isMainDock }: TabGroupProps): JSX.Element {
 // <TabStrip> — horizontal list of tab buttons.
 // ---------------------------------------------------------------------------
 
-function TabStrip({ tabs, isMainDock = false }: { tabs: Tabs; isMainDock?: boolean }): JSX.Element {
+function TabStrip({
+  tabs,
+  isMainDock = false,
+  sideDock,
+}: {
+  tabs: Tabs
+  isMainDock?: boolean
+  sideDock?: 'left' | 'right'
+}): JSX.Element {
   const handleNewTab = (): void => {
     const leaf = workspace.createLeaf(tabs)
     tabs.leaves.push(leaf)
@@ -551,6 +550,20 @@ function TabStrip({ tabs, isMainDock = false }: { tabs: Tabs; isMainDock?: boole
     workspace.emit('layout-change')
   }
 
+  const collapseButtonStyle: CSSProperties = {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--text-muted, var(--fg-muted, #888))',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '0 8px',
+    fontSize: 14,
+    lineHeight: 1,
+    flex: '0 0 auto',
+  }
+
   return (
     <div
       className="workspace-tab-strip"
@@ -561,10 +574,25 @@ function TabStrip({ tabs, isMainDock = false }: { tabs: Tabs; isMainDock?: boole
         flex: '0 0 auto',
         background: 'var(--tab-container-background, var(--bg-soft, #2d2d2d))',
         borderBottom: '1px solid var(--divider-color, var(--line, #333))',
-        minHeight: 28,
+        minHeight: 36,
         overflow: 'hidden',
       }}
     >
+      {/* Left-side collapse chevron — only rendered for the right sidedock,
+          at the leading edge so it reads as "collapse this panel to the
+          right". For the left sidedock we put the chevron at the trailing
+          edge (below, after the new-tab button). */}
+      {sideDock === 'right' && (
+        <button
+          type="button"
+          aria-label="Collapse right sidebar"
+          title="Collapse right sidebar"
+          onClick={() => workspace.setSidedockCollapsed('right', true)}
+          style={collapseButtonStyle}
+        >
+          ›
+        </button>
+      )}
       {tabs.leaves.map((leaf, i) => {
         const isActive = i === tabs.activeIndex
         return (
@@ -601,6 +629,19 @@ function TabStrip({ tabs, isMainDock = false }: { tabs: Tabs; isMainDock?: boole
           }}
         >
           <Icon name="plus" size={14} />
+        </button>
+      )}
+      {/* Left sidedock collapse chevron — trailing edge so the row reads
+          [tabs ...] ‹ and the chevron indicates "collapse to the left". */}
+      {sideDock === 'left' && (
+        <button
+          type="button"
+          aria-label="Collapse left sidebar"
+          title="Collapse left sidebar"
+          onClick={() => workspace.setSidedockCollapsed('left', true)}
+          style={{ ...collapseButtonStyle, marginLeft: 'auto' }}
+        >
+          ‹
         </button>
       )}
     </div>
