@@ -63,6 +63,7 @@ import { filePropertiesPlugin } from './plugins/nexus/fileProperties'
 import { tagsPlugin } from './plugins/nexus/tags'
 import { allPropertiesPlugin } from './plugins/nexus/allProperties'
 import { graphPlugin } from './plugins/nexus/graph'
+import { graphGlobalPlugin } from './plugins/nexus/graph/globalIndex'
 import { searchPlugin } from './plugins/nexus/search'
 import { workflowPlugin } from './plugins/nexus/workflow'
 import { skillsPlugin } from './plugins/nexus/skills'
@@ -176,6 +177,7 @@ async function boot() {
     tagsPlugin,
     allPropertiesPlugin,
     graphPlugin,
+    graphGlobalPlugin,
     searchPlugin,
     workflowPlugin,
     skillsPlugin,

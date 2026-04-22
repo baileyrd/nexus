@@ -332,6 +332,10 @@ fn register_core_plugins(
                         "graph_neighbors",
                         nexus_storage::core_plugin::HANDLER_GRAPH_NEIGHBORS,
                     ),
+                    (
+                        "list_all_links",
+                        nexus_storage::core_plugin::HANDLER_LIST_ALL_LINKS,
+                    ),
                     ("query_tags", nexus_storage::core_plugin::HANDLER_QUERY_TAGS),
                     (
                         "vector_insert",

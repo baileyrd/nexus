@@ -116,6 +116,10 @@ pub const HANDLER_BASE_LOAD: u32 = 32;
 /// all post-write listeners. Intended for shell-owned `.forge/` metadata
 /// (e.g. `workspace.json`) that must not pollute search results.
 pub const HANDLER_WRITE_VAULT_FILE: u32 = 33;
+/// Handler id for `list_all_links`. Args: `{}`. Returns:
+/// [`crate::graph::GraphSnapshot`] — every node and every edge in one
+/// payload, used by the global graph view.
+pub const HANDLER_LIST_ALL_LINKS: u32 = 34;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -396,6 +400,12 @@ impl CorePlugin for StorageCorePlugin {
                     .unresolved_links()
                     .map_err(|e| exec_err(format!("unresolved_links: {e}")))?;
                 to_value(&links, "unresolved_links")
+            }
+            HANDLER_LIST_ALL_LINKS => {
+                let snapshot = engine
+                    .list_all_links()
+                    .map_err(|e| exec_err(format!("list_all_links: {e}")))?;
+                to_value(&snapshot, "list_all_links")
             }
             HANDLER_GRAPH_NEIGHBORS => {
                 let path = path_arg(args, "graph_neighbors")?;
