@@ -655,19 +655,8 @@ function TabStrip({
           <Icon name="panel" size={14} />
         </button>
       )}
-      {/* Left sidedock collapse chevron — trailing edge so the row reads
-          [tabs ...] [icon] and toggles the left sidebar. */}
-      {sideDock === 'left' && (
-        <button
-          type="button"
-          aria-label="Hide left sidebar"
-          title="Hide left sidebar"
-          onClick={() => workspace.setSidedockCollapsed('left', true)}
-          style={{ ...collapseButtonStyle, marginLeft: 'auto' }}
-        >
-          <Icon name="panelLeft" size={14} />
-        </button>
-      )}
+      {/* Left sidebar collapse lives in the activity bar (single source
+          of truth); no duplicate affordance in the tab strip. */}
     </div>
   )
 }

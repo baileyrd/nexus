@@ -1712,7 +1712,7 @@ body {
   --file-header-font: var(--font-interface);
   --file-header-font-size: var(--font-ui-small);
   --file-header-font-weight: var(--font-normal);
-  --file-header-justify: center;                               /* app.css:2236 */
+  --file-header-justify: flex-start;                            /* Obsidian-parity: breadcrumb hugs back/forward row instead of centring between side slots */
   --corner-shape: round;
   --cursor: default;
   --indent-size: 4;

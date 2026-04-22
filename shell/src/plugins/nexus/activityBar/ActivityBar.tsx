@@ -77,7 +77,7 @@ function SidebarToggleButton() {
       title="Toggle sidebar"
       style={{
         position: 'relative',
-        height: 44,
+        height: 36,
         background: hover ? 'var(--bg-hover)' : 'transparent',
         border: 'none',
         color: 'var(--fg-muted)',
@@ -88,6 +88,7 @@ function SidebarToggleButton() {
         padding: 0,
         font: 'inherit',
         fontSize: 18,
+        borderBottom: '1px solid var(--divider-color, var(--line, #333))',
         transition: 'background 0.08s, color 0.08s',
       }}
     >
