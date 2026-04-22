@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
+import { viewRegistry, workspace } from '../../../workspace'
 import { EditorView } from './EditorView'
 import { markdownViewCreator } from './MarkdownView'
 import { useEditorStore, isDirty } from './editorStore'
@@ -228,7 +228,7 @@ export const editorPlugin: Plugin = {
     viewRegistry.register(
       'markdown',
       markdownViewCreator(
-        () => createElement(EditorView, { onRetry: handleRetry }),
+        (relpath) => createElement(EditorView, { relpath, onRetry: handleRetry }),
         sessionManager,
       ),
     )
@@ -405,6 +405,31 @@ export const editorPlugin: Plugin = {
           type: 'error',
           message: `Save failed: ${err instanceof Error ? err.message : String(err)}`,
         })
+      }
+    })
+
+    // Keep `editorStore.activeRelpath` in sync with the focused
+    // workspace leaf so COMMAND_CLOSE_TAB / COMMAND_SAVE and the
+    // editor context keys track whatever file the user is currently
+    // editing. Each markdown leaf owns exactly one file via its
+    // view state (see `MarkdownView.state.relpath`); non-markdown
+    // leaves clear the active relpath so command predicates don't
+    // pretend there's still an editor focused.
+    workspace.on('active-leaf-change', (payload) => {
+      const leaf = (payload as {
+        leaf?: {
+          view: { viewType: string } | null
+          getViewState: () => { state?: unknown }
+        }
+      } | undefined)?.leaf
+      if (!leaf || leaf.view?.viewType !== 'markdown') return
+      const vs = leaf.getViewState()
+      const relpath =
+        vs.state && typeof vs.state === 'object' && 'relpath' in vs.state
+          ? (vs.state as Record<string, unknown>).relpath
+          : undefined
+      if (typeof relpath === 'string') {
+        useEditorStore.getState().setActive(relpath)
       }
     })
 
