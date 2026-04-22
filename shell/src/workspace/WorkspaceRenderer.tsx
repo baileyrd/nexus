@@ -570,10 +570,17 @@ function TabStrip({
           <Icon name="plus" size={14} />
         </button>
       )}
-      {/* Spacer pushes the tab-list dropdown chevron and the right-sidedock
-          collapse toggle to the far right of the strip, keeping them
-          adjacent to each other. */}
-      {isMainDock && <div style={{ flex: '1 1 auto' }} />}
+      {/* Flex spacer — drag region. Main dock: pushes the tab-list
+          dropdown chevron and the right-sidedock collapse toggle to the
+          far right. Sidedocks: fills any space past the tabs so the
+          empty area of a sidedock's tab strip is also draggable. In all
+          cases doubles as the window drag region — no dedicated title
+          bar exists, so clicking-and-dragging empty tab-strip space
+          moves the Tauri window. */}
+      <div
+        style={{ flex: '1 1 auto', alignSelf: 'stretch', minWidth: 0 }}
+        data-tauri-drag-region
+      />
       {isMainDock && <TabListDropdown tabs={tabs} />}
       {/* Right-sidedock collapse / expand — lives at the far right of the
           main dock's tab strip (mirroring the activity-bar left-panel
