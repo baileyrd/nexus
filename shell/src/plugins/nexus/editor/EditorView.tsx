@@ -350,15 +350,61 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
  * path trail — they have no real directory hierarchy yet.
  */
 function ViewHeader({ activeTab }: { activeTab: EditorTab | null }) {
+  // Back / forward navigation is scaffolded but not wired to a history
+  // store yet — the buttons render disabled so the row lines up with
+  // Obsidian's pattern (and lets us add nav later without reshuffling
+  // layout). Same goes for the trailing "more" menu.
+  const disabledNavStyle: React.CSSProperties = {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--fg-muted)',
+    cursor: 'default',
+    opacity: 0.45,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 28,
+    height: 28,
+    borderRadius: 4,
+  }
   return (
     <div className="view-header">
-      <div className="view-header-left" />
+      <div className="view-header-left" style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+        <button
+          type="button"
+          aria-label="Back"
+          title="Back"
+          disabled
+          style={disabledNavStyle}
+        >
+          <Icon name="arrowLeft" size={16} />
+        </button>
+        <button
+          type="button"
+          aria-label="Forward"
+          title="Forward"
+          disabled
+          style={disabledNavStyle}
+        >
+          <Icon name="arrowRight" size={16} />
+        </button>
+      </div>
       <div className="view-header-title-container">
         <div className="view-header-title-parent">
           <BreadcrumbSegments activeTab={activeTab} />
         </div>
       </div>
-      <div className="view-actions" />
+      <div className="view-actions" style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+        <button
+          type="button"
+          aria-label="More options"
+          title="More options"
+          disabled
+          style={disabledNavStyle}
+        >
+          <Icon name="more" size={16} />
+        </button>
+      </div>
     </div>
   )
 }

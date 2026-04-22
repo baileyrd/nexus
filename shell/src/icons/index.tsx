@@ -2,6 +2,8 @@ import type { ReactElement, SVGProps } from 'react'
 import {
   Archive,
   ArrowDownUp,
+  ArrowLeft,
+  ArrowRight,
   BookOpen,
   Check,
   ChevronRight,
@@ -21,6 +23,7 @@ import {
   Link,
   List,
   Minus,
+  MoreHorizontal,
   PanelLeft,
   PanelRight,
   Play,
@@ -85,6 +88,9 @@ const ICON_MAP = {
   collapseAll: { component: ChevronsUpDown },
   panel:       { component: PanelRight },
   panelLeft:   { component: PanelLeft },
+  arrowLeft:   { component: ArrowLeft },
+  arrowRight:  { component: ArrowRight },
+  more:        { component: MoreHorizontal },
 
   // Knowledge graph / links
   link:        { component: Link },
