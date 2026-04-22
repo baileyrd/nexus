@@ -529,6 +529,20 @@ export const editorPlugin: Plugin = {
     // view state (see `MarkdownView.state.relpath`); non-markdown
     // leaves clear the active relpath so command predicates don't
     // pretend there's still an editor focused.
+    //
+    // When a markdown leaf becomes active whose relpath has no tab
+    // in the editor store yet, lazily seed it via `loadFile`. This
+    // covers two flows that don't go through `files:open`:
+    //   (a) workspace hydration from a persisted layout — MarkdownView
+    //       leaves are recreated via `setViewState` but no file-open
+    //       event fires, so the editor store stays empty until the
+    //       user re-opens the file from the sidebar;
+    //   (b) tab-click onto a leaf that was created by the mount flow
+    //       but whose editor tab was evicted (e.g. closeAll) while
+    //       the leaf lived on.
+    // Without this, the active leaf renders the editor's "Select a
+    // file to view" empty state even though the tab strip shows the
+    // file as active.
     workspace.on('active-leaf-change', (payload) => {
       const leaf = (payload as {
         leaf?: {
@@ -542,9 +556,21 @@ export const editorPlugin: Plugin = {
         vs.state && typeof vs.state === 'object' && 'relpath' in vs.state
           ? (vs.state as Record<string, unknown>).relpath
           : undefined
-      if (typeof relpath === 'string') {
-        useEditorStore.getState().setActive(relpath)
+      if (typeof relpath !== 'string') return
+
+      const hasTab = useEditorStore
+        .getState()
+        .tabs.some((t) => t.relpath === relpath)
+      if (!hasTab) {
+        // Derive the display name the same way MarkdownView.getDisplayText
+        // does — basename of the relpath. `loadFile` will hydrate
+        // content via the kernel (markdown) or storage (other) path.
+        const sepIdx = Math.max(relpath.lastIndexOf('/'), relpath.lastIndexOf('\\'))
+        const name = sepIdx >= 0 ? relpath.slice(sepIdx + 1) : relpath
+        void loadFile({ relpath, name })
+        return
       }
+      useEditorStore.getState().setActive(relpath)
     })
 
     // Seed + sync context keys to the store. We track two
