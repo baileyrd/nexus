@@ -43,16 +43,36 @@ export function CanvasView({ relpath, client }: Props) {
     if (tab?.camera) cameraRef.current = tab.camera
   }, [tab])
 
-  // Zoom-to-fit the document on first render after it loads.
+  // Zoom-to-fit the document once both (a) the doc has loaded and (b)
+  // the container has a non-zero layout size. The size gate matters on
+  // the first mount of a tab that was opened into an off-screen leaf —
+  // if we fit against a 0×0 viewport, the clamp pins zoom to 10% and
+  // the content disappears offscreen. We poll via RAF until the layout
+  // settles, then fire once.
   useEffect(() => {
     if (!tab?.doc || tab.cameraInitialized) return
-    const canvas = canvasRef.current
     const container = containerRef.current
-    if (!canvas || !container) return
-    const rect = container.getBoundingClientRect()
-    const fit = fitCameraToDoc(tab.doc, rect.width, rect.height)
-    cameraRef.current = fit
-    useCanvasStore.getState().setCamera(relpath, fit)
+    if (!container) return
+    let raf = 0
+    let cancelled = false
+    const tryFit = () => {
+      if (cancelled) return
+      const rect = container.getBoundingClientRect()
+      if (rect.width < 1 || rect.height < 1) {
+        raf = requestAnimationFrame(tryFit)
+        return
+      }
+      const doc = tab.doc
+      if (!doc) return
+      const fit = fitCameraToDoc(doc, rect.width, rect.height)
+      cameraRef.current = fit
+      useCanvasStore.getState().setCamera(relpath, fit)
+    }
+    raf = requestAnimationFrame(tryFit)
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(raf)
+    }
   }, [tab?.doc, tab?.cameraInitialized, relpath])
 
   // RAF-driven render loop. One loop per mount; tears down on unmount.
