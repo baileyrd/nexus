@@ -162,28 +162,30 @@ function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
   if (side === 'bottom') return <BottomSidedockFrame dock={dock} />
 
   if (dock.collapsed) {
+    // Right sidedock: fully hidden when collapsed. The re-expand
+    // affordance lives in the main dock's tab strip (PanelRight icon
+    // in the trailing edge of TabStrip), so no narrow bar is needed.
+    if (side === 'right') return <></>
+
+    // Left sidedock: render the 24-px bar with an expand chevron so
+    // the user has a way to re-open it if they haven't bound the
+    // activity-bar toggle or a keyboard shortcut.
     return (
       <div
         className={`workspace-sidedock mod-${side} is-collapsed`}
         style={{
           ...COLLAPSED_BAR_STYLE,
-          borderRight: side === 'left' ? COLLAPSED_BAR_STYLE.borderRight : 'none',
-          borderLeft:
-            side === 'right'
-              ? '1px solid var(--divider-color, var(--line, #333))'
-              : 'none',
-          // When right sidedock is collapsed, push the expand chevron
-          // down past the WindowControls row (36px) so it isn't obscured.
-          ...(side === 'right' ? { paddingTop: 36 } : {}),
+          borderRight: COLLAPSED_BAR_STYLE.borderRight,
+          borderLeft: 'none',
         }}
       >
         <button
           type="button"
-          title={`Expand ${side} sidebar`}
-          onClick={() => workspace.setSidedockCollapsed(side, false)}
+          title="Expand left sidebar"
+          onClick={() => workspace.setSidedockCollapsed('left', false)}
           style={COLLAPSE_BUTTON_STYLE}
         >
-          {side === 'left' ? '›' : '‹'}
+          ›
         </button>
       </div>
     )
