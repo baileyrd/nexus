@@ -95,8 +95,6 @@ _None outstanding._ F-2.1.1 closed 2026-04-22 — see archive.
 
 ### 🟠 Orange — address before marketplace or next minor release
 
-- [ ] **CI guard: `nexus-plugin-api` stays kernel-free (follow-up to F-2.1.1).** With the plugin-api crate extracted, plugin authors only see its public surface — but nothing prevents future edits from re-importing kernel-internal types into it. Add a small workspace test (or a `cargo deny` rule, or a `cargo-public-api` check in CI) that asserts `nexus-plugin-api`'s public surface references no symbol from `nexus-kernel` or `nexus-plugins`. Cheap; prevents the slippage the original audit feared.
-
 ### 🟡 Yellow — quality / correctness improvements
 
 ## Suspected issues — not fully investigated
