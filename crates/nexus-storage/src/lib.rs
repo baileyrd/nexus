@@ -70,7 +70,8 @@ pub use index::{JsxRecord, insert_jsx_components, query_jsx_components};
 pub use canvas::{
     CanvasFile, CanvasNode, CanvasNodeType, CanvasEdge, CanvasEdgeType,
     CanvasNodeRecord, CanvasEdgeRecord,
-    parse_canvas, serialize_canvas, extract_file_links,
+    CanvasPatchOp, CanvasPatchError,
+    parse_canvas, serialize_canvas, apply_patch, extract_file_links,
 };
 
 use std::path::Path;
@@ -355,6 +356,77 @@ impl StorageEngine {
             rusqlite::Error::InvalidParameterName(e.to_string()),
         ))?;
         canvas::query_canvas_edges(&conn, file_id)
+    }
+
+    /// Resolve `path` to its index file id and return all canvas nodes.
+    ///
+    /// Returns an empty vector when the path is not indexed (the caller can
+    /// treat this the same as "no nodes yet").
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
+    pub fn canvas_nodes_by_path(&self, path: &str) -> Result<Vec<CanvasNodeRecord>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        let Some(record) = file_by_path(&conn, path)? else {
+            return Ok(Vec::new());
+        };
+        canvas::query_canvas_nodes(&conn, record.id.cast_signed())
+    }
+
+    /// Resolve `path` to its index file id and return all canvas edges.
+    ///
+    /// Returns an empty vector when the path is not indexed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Database`] on any `SQLite` failure.
+    pub fn canvas_edges_by_path(&self, path: &str) -> Result<Vec<CanvasEdgeRecord>, StorageError> {
+        let conn = self.pool.get().map_err(|e| StorageError::Database(
+            rusqlite::Error::InvalidParameterName(e.to_string()),
+        ))?;
+        let Some(record) = file_by_path(&conn, path)? else {
+            return Ok(Vec::new());
+        };
+        canvas::query_canvas_edges(&conn, record.id.cast_signed())
+    }
+
+    /// Serialize `canvas` and write it through [`Self::write_file`] so the
+    /// SQLite canvas index + knowledge graph stay in sync.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on serialize, I/O, or database failure.
+    pub fn write_canvas(&self, path: &str, canvas: &CanvasFile) -> Result<FileMetadata, StorageError> {
+        let json = canvas::serialize_canvas(canvas)?;
+        self.write_file(path, json.as_bytes())
+    }
+
+    /// Read `path`, apply `ops`, and write the result back through
+    /// [`Self::write_canvas`] so the canvas index is kept current.
+    ///
+    /// Used by the `canvas_patch` IPC handler; the shell debounces patch
+    /// flushes so this is called once per idle burst rather than per frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O / parse / serialize failure. Patch
+    /// errors (duplicate add) surface as [`StorageError::CorruptFile`] with
+    /// the originating message so callers get a typed failure without
+    /// widening [`StorageError`]'s variant set for a single caller.
+    pub fn patch_canvas(
+        &self,
+        path: &str,
+        ops: &[canvas::CanvasPatchOp],
+    ) -> Result<FileMetadata, StorageError> {
+        let mut canvas_file = self.read_canvas(path)?;
+        canvas::apply_patch(&mut canvas_file, ops).map_err(|e| StorageError::CorruptFile {
+            path: path.to_string(),
+            reason: e.to_string(),
+        })?;
+        self.write_canvas(path, &canvas_file)
     }
 
     // ── Bases operations ──────────────────────────────────────────────────
@@ -1499,7 +1571,58 @@ mod tests {
         );
     }
 
-    // ── 10. open_nonexistent_forge_returns_error ──────────────────────────────
+    // ── 10. canvas_write_read_patch_roundtrip ─────────────────────────────────
+
+    #[test]
+    fn canvas_write_read_patch_roundtrip() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        let mut initial = CanvasFile::default();
+        initial.nodes.push(CanvasNode {
+            id: "a".to_string(),
+            node_type: CanvasNodeType::Text,
+            x: 0.0, y: 0.0, width: 100.0, height: 100.0,
+            color: None, label: None, collapsed: false,
+            file: None, text: Some("hi".to_string()),
+            url: None, source: None, command: None,
+        });
+
+        engine
+            .write_canvas("boards/one.canvas", &initial)
+            .expect("write_canvas");
+
+        let nodes = engine.canvas_nodes_by_path("boards/one.canvas").expect("nodes");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].node_id, "a");
+
+        engine
+            .patch_canvas(
+                "boards/one.canvas",
+                &[CanvasPatchOp::NodeMove { id: "a".to_string(), x: 42.0, y: 7.0 }],
+            )
+            .expect("patch_canvas");
+
+        let parsed = engine.read_canvas("boards/one.canvas").expect("read_canvas");
+        assert!((parsed.nodes[0].x - 42.0).abs() < f64::EPSILON);
+        assert!((parsed.nodes[0].y - 7.0).abs() < f64::EPSILON);
+
+        let after = engine.canvas_nodes_by_path("boards/one.canvas").expect("nodes2");
+        assert_eq!(after.len(), 1);
+        assert!((after[0].x - 42.0).abs() < f64::EPSILON);
+    }
+
+    // ── 11. canvas_queries_by_path_on_missing_return_empty ────────────────────
+
+    #[test]
+    fn canvas_queries_by_path_on_missing_return_empty() {
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+        assert!(engine.canvas_nodes_by_path("nope.canvas").expect("nodes").is_empty());
+        assert!(engine.canvas_edges_by_path("nope.canvas").expect("edges").is_empty());
+    }
+
+    // ── 12. open_nonexistent_forge_returns_error ──────────────────────────────
 
     #[test]
     fn open_nonexistent_forge_returns_error() {

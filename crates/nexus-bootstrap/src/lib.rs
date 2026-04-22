@@ -383,6 +383,26 @@ fn register_core_plugins(
                         "delete_entry",
                         nexus_storage::core_plugin::HANDLER_DELETE_ENTRY,
                     ),
+                    (
+                        "canvas_read",
+                        nexus_storage::core_plugin::HANDLER_CANVAS_READ,
+                    ),
+                    (
+                        "canvas_write",
+                        nexus_storage::core_plugin::HANDLER_CANVAS_WRITE,
+                    ),
+                    (
+                        "canvas_patch",
+                        nexus_storage::core_plugin::HANDLER_CANVAS_PATCH,
+                    ),
+                    (
+                        "canvas_nodes",
+                        nexus_storage::core_plugin::HANDLER_CANVAS_NODES,
+                    ),
+                    (
+                        "canvas_edges",
+                        nexus_storage::core_plugin::HANDLER_CANVAS_EDGES,
+                    ),
                 ],
             ),
             forge_root,

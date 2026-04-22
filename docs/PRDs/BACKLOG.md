@@ -43,13 +43,14 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   missing CRUD IPC handlers (`load_base`, `query_records`, record +
   property + view mutators) on `com.nexus.database`.
 - [ ] **`.canvas` board renderer in the shell (PRD-06 §4).** Storage
-  layer parses/serializes/indexes canvas files; CLI shipped; backlog
-  line 84 notes `.canvas` currently falls through to CodeMirror. Plan:
-  [docs/canvas-shell-plan.md](../canvas-shell-plan.md) (6 phases;
-  kernel adds `canvas_read`/`canvas_write`/`canvas_patch`/`canvas_nodes`/
-  `canvas_edges` IPC; shell ships routing → canvas renderer with
-  zoom/pan → interactions → edges + inspector → rich node embeds →
-  polish).
+  layer parses/serializes/indexes canvas files; CLI shipped; kernel
+  IPC surface landed 2026-04-22 (`canvas_read` / `canvas_write` /
+  `canvas_patch` / `canvas_nodes` / `canvas_edges` on
+  `com.nexus.storage`, handler ids 35–39). `.canvas` still falls
+  through to CodeMirror in the shell. Plan:
+  [docs/canvas-shell-plan.md](../canvas-shell-plan.md) — remaining
+  shell phases 1–6 (routing → canvas renderer with zoom/pan →
+  interactions → edges + inspector → rich node embeds → polish).
 - [ ] **Notion-style block UX on top of the existing block-tree engine
   (PRD-08).** Block tree + transactions + annotations are shipped
   (3.7k LoC in `nexus-editor`); what's missing is the UI layer —

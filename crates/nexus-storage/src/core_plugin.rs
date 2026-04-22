@@ -120,6 +120,29 @@ pub const HANDLER_WRITE_VAULT_FILE: u32 = 33;
 /// [`crate::graph::GraphSnapshot`] — every node and every edge in one
 /// payload, used by the global graph view.
 pub const HANDLER_LIST_ALL_LINKS: u32 = 34;
+/// Handler id for `canvas_read`. Args: `{ "path": String }` — forge-relative
+/// `.canvas` path. Returns the parsed [`crate::CanvasFile`].
+pub const HANDLER_CANVAS_READ: u32 = 35;
+/// Handler id for `canvas_write`. Args:
+/// `{ "path": String, "canvas": CanvasFile }`. Serializes `canvas` and
+/// writes it through [`crate::StorageEngine::write_file`] so the canvas
+/// SQLite index + knowledge graph stay in sync. Returns
+/// [`crate::FileMetadata`].
+pub const HANDLER_CANVAS_WRITE: u32 = 36;
+/// Handler id for `canvas_patch`. Args:
+/// `{ "path": String, "ops": Vec<CanvasPatchOp> }`. Reads the file, applies
+/// the op list in order, and rewrites. Returns [`crate::FileMetadata`].
+/// The shell debounces patch flushes so this is called once per idle
+/// burst, not per frame.
+pub const HANDLER_CANVAS_PATCH: u32 = 37;
+/// Handler id for `canvas_nodes`. Args: `{ "path": String }`. Returns all
+/// indexed nodes for that canvas — `Vec<CanvasNodeRecord>`. Empty vector
+/// when the path is not yet indexed.
+pub const HANDLER_CANVAS_NODES: u32 = 38;
+/// Handler id for `canvas_edges`. Args: `{ "path": String }`. Returns all
+/// indexed edges for that canvas — `Vec<CanvasEdgeRecord>`. Empty vector
+/// when the path is not yet indexed.
+pub const HANDLER_CANVAS_EDGES: u32 = 39;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -406,6 +429,55 @@ impl CorePlugin for StorageCorePlugin {
                     .list_all_links()
                     .map_err(|e| exec_err(format!("list_all_links: {e}")))?;
                 to_value(&snapshot, "list_all_links")
+            }
+            HANDLER_CANVAS_READ => {
+                let path = path_arg(args, "canvas_read")?;
+                let canvas_file = engine
+                    .read_canvas(&path)
+                    .map_err(|e| exec_err(format!("canvas_read: {e}")))?;
+                to_value(&canvas_file, "canvas_read")
+            }
+            HANDLER_CANVAS_WRITE => {
+                let path = path_arg(args, "canvas_write")?;
+                let canvas_file: crate::CanvasFile = args
+                    .get("canvas")
+                    .ok_or_else(|| exec_err("canvas_write: missing 'canvas'".to_string()))
+                    .and_then(|v| {
+                        serde_json::from_value(v.clone())
+                            .map_err(|e| exec_err(format!("canvas_write: canvas decode: {e}")))
+                    })?;
+                let meta = engine
+                    .write_canvas(&path, &canvas_file)
+                    .map_err(|e| exec_err(format!("canvas_write: {e}")))?;
+                to_value(&meta, "canvas_write")
+            }
+            HANDLER_CANVAS_PATCH => {
+                let path = path_arg(args, "canvas_patch")?;
+                let ops: Vec<crate::CanvasPatchOp> = args
+                    .get("ops")
+                    .ok_or_else(|| exec_err("canvas_patch: missing 'ops'".to_string()))
+                    .and_then(|v| {
+                        serde_json::from_value(v.clone())
+                            .map_err(|e| exec_err(format!("canvas_patch: ops decode: {e}")))
+                    })?;
+                let meta = engine
+                    .patch_canvas(&path, &ops)
+                    .map_err(|e| exec_err(format!("canvas_patch: {e}")))?;
+                to_value(&meta, "canvas_patch")
+            }
+            HANDLER_CANVAS_NODES => {
+                let path = path_arg(args, "canvas_nodes")?;
+                let nodes = engine
+                    .canvas_nodes_by_path(&path)
+                    .map_err(|e| exec_err(format!("canvas_nodes: {e}")))?;
+                to_value(&nodes, "canvas_nodes")
+            }
+            HANDLER_CANVAS_EDGES => {
+                let path = path_arg(args, "canvas_edges")?;
+                let edges = engine
+                    .canvas_edges_by_path(&path)
+                    .map_err(|e| exec_err(format!("canvas_edges: {e}")))?;
+                to_value(&edges, "canvas_edges")
             }
             HANDLER_GRAPH_NEIGHBORS => {
                 let path = path_arg(args, "graph_neighbors")?;

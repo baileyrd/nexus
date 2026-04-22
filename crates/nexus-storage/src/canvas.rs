@@ -15,7 +15,8 @@ pub use nexus_formats::canvas::{
 };
 
 /// A canvas node record from the database.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CanvasNodeRecord {
     /// Database row ID.
     pub id: i64,
@@ -44,7 +45,8 @@ pub struct CanvasNodeRecord {
 }
 
 /// A canvas edge record from the database.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CanvasEdgeRecord {
     /// Database row ID.
     pub id: i64,
@@ -261,6 +263,135 @@ pub fn extract_file_links(canvas: &CanvasFile) -> Vec<String> {
             }
         })
         .collect()
+}
+
+// ── Patch ops ────────────────────────────────────────────────────────────────
+
+/// A single edit applied to a [`CanvasFile`] by [`apply_patch`].
+///
+/// The shell sends a list of these through the `canvas_patch` IPC handler —
+/// the kernel re-reads the file, applies the list in order, then rewrites.
+/// Keep the op set small: the goal is minimal round-trip cost for drag /
+/// create / delete. Fine-grained edits (label, colour, style) use
+/// [`Self::NodeUpdate`] / [`Self::EdgeUpdate`] which replace the whole
+/// record in place by id.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum CanvasPatchOp {
+    /// Append a new node. Fails if the id already exists.
+    NodeAdd {
+        /// Node to insert.
+        node: CanvasNode,
+    },
+    /// Remove a node by id. Also removes any incident edges. No-op if the
+    /// id is unknown.
+    NodeRemove {
+        /// Target node id.
+        id: String,
+    },
+    /// Move a node to new coordinates. No-op if the id is unknown.
+    NodeMove {
+        /// Target node id.
+        id: String,
+        /// New x coordinate.
+        x: f64,
+        /// New y coordinate.
+        y: f64,
+    },
+    /// Replace a node by id with the supplied record. No-op if the id is
+    /// unknown — callers wanting upsert semantics should use
+    /// [`Self::NodeAdd`] followed by this op.
+    NodeUpdate {
+        /// Replacement node. `node.id` identifies the target.
+        node: CanvasNode,
+    },
+    /// Append a new edge. Fails if the id already exists.
+    EdgeAdd {
+        /// Edge to insert.
+        edge: CanvasEdge,
+    },
+    /// Remove an edge by id. No-op if the id is unknown.
+    EdgeRemove {
+        /// Target edge id.
+        id: String,
+    },
+    /// Replace an edge by id with the supplied record.
+    EdgeUpdate {
+        /// Replacement edge. `edge.id` identifies the target.
+        edge: CanvasEdge,
+    },
+}
+
+/// Error cases [`apply_patch`] surfaces back to the caller.
+///
+/// Distinct from [`StorageError`] so the IPC layer can map duplicate-id
+/// failures to a specific error rather than a generic corrupt-file.
+#[derive(Debug, thiserror::Error)]
+pub enum CanvasPatchError {
+    /// An `NodeAdd` op tried to insert a node whose id is already present.
+    #[error("canvas already has node id '{0}'")]
+    DuplicateNodeId(String),
+    /// An `EdgeAdd` op tried to insert an edge whose id is already present.
+    #[error("canvas already has edge id '{0}'")]
+    DuplicateEdgeId(String),
+}
+
+/// Apply each op in order to `canvas`, mutating it in place.
+///
+/// Semantics per op are documented on [`CanvasPatchOp`]. Unknown-id removes
+/// / moves / updates are deliberate no-ops so that optimistic client-side
+/// state that races a concurrent save doesn't crash the patch. Adds with a
+/// duplicate id are rejected to prevent silent data loss.
+///
+/// # Errors
+///
+/// Returns [`CanvasPatchError`] on duplicate-id add.
+pub fn apply_patch(
+    canvas: &mut CanvasFile,
+    ops: &[CanvasPatchOp],
+) -> Result<(), CanvasPatchError> {
+    for op in ops {
+        match op {
+            CanvasPatchOp::NodeAdd { node } => {
+                if canvas.nodes.iter().any(|n| n.id == node.id) {
+                    return Err(CanvasPatchError::DuplicateNodeId(node.id.clone()));
+                }
+                canvas.nodes.push(node.clone());
+            }
+            CanvasPatchOp::NodeRemove { id } => {
+                canvas.nodes.retain(|n| &n.id != id);
+                canvas
+                    .edges
+                    .retain(|e| &e.from_node != id && &e.to_node != id);
+            }
+            CanvasPatchOp::NodeMove { id, x, y } => {
+                if let Some(n) = canvas.nodes.iter_mut().find(|n| &n.id == id) {
+                    n.x = *x;
+                    n.y = *y;
+                }
+            }
+            CanvasPatchOp::NodeUpdate { node } => {
+                if let Some(slot) = canvas.nodes.iter_mut().find(|n| n.id == node.id) {
+                    *slot = node.clone();
+                }
+            }
+            CanvasPatchOp::EdgeAdd { edge } => {
+                if canvas.edges.iter().any(|e| e.id == edge.id) {
+                    return Err(CanvasPatchError::DuplicateEdgeId(edge.id.clone()));
+                }
+                canvas.edges.push(edge.clone());
+            }
+            CanvasPatchOp::EdgeRemove { id } => {
+                canvas.edges.retain(|e| &e.id != id);
+            }
+            CanvasPatchOp::EdgeUpdate { edge } => {
+                if let Some(slot) = canvas.edges.iter_mut().find(|e| e.id == edge.id) {
+                    *slot = edge.clone();
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -520,6 +651,98 @@ mod tests {
         };
         let links = extract_file_links(&canvas);
         assert_eq!(links, vec!["notes/a.md"]);
+    }
+
+    fn text_node(id: &str, x: f64, y: f64) -> CanvasNode {
+        CanvasNode {
+            id: id.to_string(),
+            node_type: CanvasNodeType::Text,
+            x, y, width: 100.0, height: 100.0,
+            color: None, label: None, collapsed: false,
+            file: None, text: Some("t".to_string()), url: None, source: None, command: None,
+        }
+    }
+
+    fn edge(id: &str, from: &str, to: &str) -> CanvasEdge {
+        CanvasEdge {
+            id: id.to_string(),
+            from_node: from.to_string(),
+            to_node: to.to_string(),
+            edge_type: CanvasEdgeType::Solid,
+            label: None,
+            color: None,
+        }
+    }
+
+    #[test]
+    fn apply_patch_node_add_remove_move() {
+        let mut c = CanvasFile::default();
+        apply_patch(&mut c, &[CanvasPatchOp::NodeAdd { node: text_node("a", 0.0, 0.0) }]).unwrap();
+        assert_eq!(c.nodes.len(), 1);
+
+        apply_patch(&mut c, &[CanvasPatchOp::NodeMove { id: "a".into(), x: 50.0, y: 60.0 }]).unwrap();
+        assert!((c.nodes[0].x - 50.0).abs() < f64::EPSILON);
+        assert!((c.nodes[0].y - 60.0).abs() < f64::EPSILON);
+
+        apply_patch(&mut c, &[CanvasPatchOp::NodeRemove { id: "a".into() }]).unwrap();
+        assert!(c.nodes.is_empty());
+    }
+
+    #[test]
+    fn apply_patch_duplicate_node_add_errors() {
+        let mut c = CanvasFile { nodes: vec![text_node("a", 0.0, 0.0)], ..Default::default() };
+        let err = apply_patch(&mut c, &[CanvasPatchOp::NodeAdd { node: text_node("a", 1.0, 1.0) }])
+            .unwrap_err();
+        assert!(matches!(err, CanvasPatchError::DuplicateNodeId(ref id) if id == "a"));
+    }
+
+    #[test]
+    fn apply_patch_node_remove_also_removes_incident_edges() {
+        let mut c = CanvasFile {
+            nodes: vec![text_node("a", 0.0, 0.0), text_node("b", 0.0, 0.0)],
+            edges: vec![edge("e1", "a", "b")],
+            ..Default::default()
+        };
+        apply_patch(&mut c, &[CanvasPatchOp::NodeRemove { id: "a".into() }]).unwrap();
+        assert!(c.edges.is_empty(), "edge incident to removed node must be dropped");
+    }
+
+    #[test]
+    fn apply_patch_unknown_id_is_noop() {
+        let mut c = CanvasFile::default();
+        apply_patch(&mut c, &[
+            CanvasPatchOp::NodeRemove { id: "ghost".into() },
+            CanvasPatchOp::NodeMove { id: "ghost".into(), x: 1.0, y: 1.0 },
+            CanvasPatchOp::EdgeRemove { id: "ghost".into() },
+        ]).unwrap();
+        assert!(c.nodes.is_empty() && c.edges.is_empty());
+    }
+
+    #[test]
+    fn apply_patch_edge_add_remove() {
+        let mut c = CanvasFile {
+            nodes: vec![text_node("a", 0.0, 0.0), text_node("b", 0.0, 0.0)],
+            ..Default::default()
+        };
+        apply_patch(&mut c, &[CanvasPatchOp::EdgeAdd { edge: edge("e1", "a", "b") }]).unwrap();
+        assert_eq!(c.edges.len(), 1);
+
+        let err = apply_patch(&mut c, &[CanvasPatchOp::EdgeAdd { edge: edge("e1", "a", "b") }])
+            .unwrap_err();
+        assert!(matches!(err, CanvasPatchError::DuplicateEdgeId(_)));
+
+        apply_patch(&mut c, &[CanvasPatchOp::EdgeRemove { id: "e1".into() }]).unwrap();
+        assert!(c.edges.is_empty());
+    }
+
+    #[test]
+    fn apply_patch_node_update_replaces_in_place() {
+        let mut c = CanvasFile { nodes: vec![text_node("a", 0.0, 0.0)], ..Default::default() };
+        let mut replacement = text_node("a", 999.0, 999.0);
+        replacement.label = Some("updated".to_string());
+        apply_patch(&mut c, &[CanvasPatchOp::NodeUpdate { node: replacement }]).unwrap();
+        assert_eq!(c.nodes[0].label.as_deref(), Some("updated"));
+        assert!((c.nodes[0].x - 999.0).abs() < f64::EPSILON);
     }
 
     #[test]
