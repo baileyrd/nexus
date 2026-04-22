@@ -241,6 +241,10 @@ export interface RenderContext {
   theme: Theme
   dpr: number
   selection?: Set<string>
+  /** Id of the currently selected edge (Phase 4). Drawn thicker +
+   *  accent-coloured when set so the user can see which edge the
+   *  inspector is editing. */
+  selectedEdgeId?: string | null
   marquee?: MarqueeRect | null
   hoveredNodeId?: string | null
   edgeDrag?: EdgeDragPreview | null
@@ -323,6 +327,88 @@ export function hitTestEdgeHandle(
   return null
 }
 
+/** Return the id of the edge whose rendered curve passes within
+ *  `tolerance` world units of `(worldX, worldY)`, or null. Used for
+ *  click-to-select edges in Phase 4.
+ *
+ *  Implementation note: we sample the same cubic bezier that
+ *  `drawEdge` renders and run a point-to-segment distance over the
+ *  polyline. 16 samples is the smallest count that keeps a smoothly
+ *  curving edge reliably clickable at 1× zoom without being too
+ *  generous on orthogonal-ish edges. Callers should scale the
+ *  tolerance by 1/zoom so it stays at ~6 CSS pixels at every zoom. */
+export function hitTestEdge(
+  doc: CanvasDoc,
+  worldX: number,
+  worldY: number,
+  tolerance: number,
+): string | null {
+  const byId = new Map(doc.nodes.map((n) => [n.id, n]))
+  const tol2 = tolerance * tolerance
+  // Reverse so edges painted last (on top) win ties.
+  for (let i = doc.edges.length - 1; i >= 0; i--) {
+    const edge = doc.edges[i]
+    const from = byId.get(edge.fromNode)
+    const to = byId.get(edge.toNode)
+    if (!from || !to) continue
+    const start = nearestBorderPoint(from, centerOf(to))
+    const end = nearestBorderPoint(to, centerOf(from))
+    const midX = (start.x + end.x) / 2
+    // Sample the same bezier drawEdge emits.
+    let prev = start
+    const steps = 16
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps
+      const p = cubicBezier(start, { x: midX, y: start.y }, { x: midX, y: end.y }, end, t)
+      if (pointSegmentDist2(worldX, worldY, prev, p) <= tol2) return edge.id
+      prev = p
+    }
+  }
+  return null
+}
+
+function cubicBezier(
+  p0: { x: number; y: number },
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  p3: { x: number; y: number },
+  t: number,
+): { x: number; y: number } {
+  const mt = 1 - t
+  const a = mt * mt * mt
+  const b = 3 * mt * mt * t
+  const c = 3 * mt * t * t
+  const d = t * t * t
+  return {
+    x: a * p0.x + b * p1.x + c * p2.x + d * p3.x,
+    y: a * p0.y + b * p1.y + c * p2.y + d * p3.y,
+  }
+}
+
+function pointSegmentDist2(
+  px: number,
+  py: number,
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const len2 = dx * dx + dy * dy
+  if (len2 === 0) {
+    const ex = px - a.x
+    const ey = py - a.y
+    return ex * ex + ey * ey
+  }
+  let t = ((px - a.x) * dx + (py - a.y) * dy) / len2
+  if (t < 0) t = 0
+  else if (t > 1) t = 1
+  const cx = a.x + t * dx
+  const cy = a.y + t * dy
+  const ex = px - cx
+  const ey = py - cy
+  return ex * ex + ey * ey
+}
+
 /** Build a marquee rect from two world-space points in any order. */
 export function marqueeFromPoints(
   a: { x: number; y: number },
@@ -363,7 +449,10 @@ export function render(rc: RenderContext, doc: CanvasDoc | null): void {
 
   // Edges sit under the nodes they connect (but above groups).
   const byId = new Map(doc.nodes.map((n) => [n.id, n]))
-  for (const edge of doc.edges) drawEdge(ctx, edge, byId, theme)
+  const selectedEdgeId = rc.selectedEdgeId ?? null
+  for (const edge of doc.edges) {
+    drawEdge(ctx, edge, byId, theme, edge.id === selectedEdgeId)
+  }
 
   for (const n of nonGroups) drawNode(ctx, n, theme, selection.has(n.id))
 
@@ -532,6 +621,7 @@ function drawEdge(
   edge: CanvasEdge,
   byId: Map<string, CanvasNode>,
   theme: Theme,
+  selected: boolean,
 ): void {
   const from = byId.get(edge.fromNode)
   const to = byId.get(edge.toNode)
@@ -539,11 +629,11 @@ function drawEdge(
 
   const start = nearestBorderPoint(from, centerOf(to))
   const end = nearestBorderPoint(to, centerOf(from))
-  const color = edge.color ?? theme.fgMuted
+  const color = selected ? theme.accent : edge.color ?? theme.fgMuted
 
   ctx.save()
   ctx.strokeStyle = color
-  ctx.lineWidth = 1.5
+  ctx.lineWidth = selected ? 2.5 : 1.5
   if (edge.type === 'dashed') ctx.setLineDash([8, 5])
   else if (edge.type === 'dotted') ctx.setLineDash([2, 4])
 

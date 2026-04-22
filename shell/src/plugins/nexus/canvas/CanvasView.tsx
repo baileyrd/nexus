@@ -15,6 +15,7 @@ import {
   applyNodeRemove,
   applyPatchOps,
   buildDeleteInverse,
+  buildEdgeDeleteInverse,
   type Camera,
 } from './canvasStore'
 import {
@@ -22,6 +23,7 @@ import {
   readTheme,
   hitTestNode,
   hitTestHandle,
+  hitTestEdge,
   hitTestEdgeHandle,
   cursorForHandle,
   resizeRect,
@@ -33,9 +35,11 @@ import {
   type NodeSide,
   type EdgeDragPreview,
 } from './renderer'
+import { Inspector } from './Inspector'
 import type {
   CanvasKernelClient,
   CanvasDoc,
+  CanvasEdge,
   CanvasNode,
   CanvasPatchOp,
 } from './kernelClient'
@@ -50,6 +54,11 @@ interface Props {
  *  into move-mode. */
 const DRAG_THRESHOLD_PX = 3
 
+/** Click tolerance for edge hit-testing, in CSS pixels. Divided by
+ *  camera zoom at call time so the clickable width stays constant
+ *  on screen even when the user zooms out. */
+const EDGE_HIT_TOLERANCE_CSS = 6
+
 export function CanvasView({ relpath, client }: Props) {
   const tab = useCanvasStore((s) => s.tabs.get(relpath))
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -60,6 +69,7 @@ export function CanvasView({ relpath, client }: Props) {
   const cameraRef = useRef<Camera>({ x: 0, y: 0, zoom: 1 })
   const cameraDirtyRef = useRef(false)
   const selectionRef = useRef<Set<string>>(new Set())
+  const selectedEdgeIdRef = useRef<string | null>(null)
   const marqueeRef = useRef<MarqueeRect | null>(null)
   const hoveredNodeIdRef = useRef<string | null>(null)
   const edgeDragRef = useRef<EdgeDragPreview | null>(null)
@@ -85,6 +95,7 @@ export function CanvasView({ relpath, client }: Props) {
     docRef.current = tab?.doc ?? null
     if (tab?.camera) cameraRef.current = tab.camera
     selectionRef.current = tab?.selection ?? new Set()
+    selectedEdgeIdRef.current = tab?.selectedEdgeId ?? null
   }, [tab])
 
   // Zoom-to-fit the document once both (a) the doc has loaded and (b)
@@ -161,6 +172,7 @@ export function CanvasView({ relpath, client }: Props) {
           theme,
           dpr,
           selection: selectionRef.current,
+          selectedEdgeId: selectedEdgeIdRef.current,
           marquee: marqueeRef.current,
           hoveredNodeId: hoveredNodeIdRef.current,
           edgeDrag: edgeDragRef.current,
@@ -419,10 +431,28 @@ export function CanvasView({ relpath, client }: Props) {
       }
 
       if (!hit) {
+        // Before falling through to a marquee, give edges a shot at the
+        // click — users expect to click a thin curve to select it.
+        // Tolerance shrinks with zoom so the clickable band stays the
+        // same width on screen.
+        if (doc) {
+          const tol = EDGE_HIT_TOLERANCE_CSS / cameraRef.current.zoom
+          const edgeId = hitTestEdge(doc, world.x, world.y, tol)
+          if (edgeId) {
+            useCanvasStore.getState().setSelectedEdge(relpath, edgeId)
+            // Don't start a drag — a plain click is select-only. A
+            // subsequent drag (if the user keeps moving) would just
+            // start a marquee, which is fine.
+            return
+          }
+        }
         // Empty-space left-drag → marquee. Non-additive clicks clear
         // the selection on down (feels snappier than waiting for up).
         const base = additive ? new Set(selectionRef.current) : new Set<string>()
-        if (!additive) useCanvasStore.getState().setSelection(relpath, [])
+        if (!additive) {
+          useCanvasStore.getState().setSelection(relpath, [])
+          useCanvasStore.getState().setSelectedEdge(relpath, null)
+        }
         drag = { kind: 'marquee', startWorld: world, base, additive }
         marqueeRef.current = { x: world.x, y: world.y, width: 0, height: 0 }
         canvas.setPointerCapture(e.pointerId)
@@ -745,11 +775,27 @@ export function CanvasView({ relpath, client }: Props) {
       }
 
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
+      const doc = docRef.current
+      if (!doc) return
+      // Edge selection takes priority: if an edge is selected it's
+      // the visible target of the inspector, so Delete should drop
+      // the edge — not fall through to (the usually-empty) node set.
+      const selectedEdgeId = selectedEdgeIdRef.current
+      if (selectedEdgeId) {
+        e.preventDefault()
+        const inverse = buildEdgeDeleteInverse(doc, selectedEdgeId)
+        if (inverse.length === 0) return
+        useCanvasStore.getState().updateDoc(relpath, (d) => ({
+          ...d,
+          edges: d.edges.filter((edge) => edge.id !== selectedEdgeId),
+        }))
+        useCanvasStore.getState().setSelectedEdge(relpath, null)
+        commitRef.current([{ op: 'edge_remove', id: selectedEdgeId }], inverse)
+        return
+      }
       const sel = selectionRef.current
       if (sel.size === 0) return
       e.preventDefault()
-      const doc = docRef.current
-      if (!doc) return
       const ids = Array.from(sel)
       const inverse = buildDeleteInverse(doc, ids)
       useCanvasStore.getState().updateDoc(relpath, (d) => {
@@ -781,6 +827,40 @@ export function CanvasView({ relpath, client }: Props) {
   const nodeCount = doc?.nodes.length ?? 0
   const edgeCount = doc?.edges.length ?? 0
 
+  // Resolve the currently-inspected target. Edge selection wins over
+  // node selection (they're mutually exclusive in the store, but be
+  // defensive here). For nodes, the inspector only binds when exactly
+  // one is selected — multi-node property editing is out of scope for
+  // Phase 4.
+  const selectedEdge: CanvasEdge | null = tab?.selectedEdgeId && doc
+    ? doc.edges.find((e) => e.id === tab.selectedEdgeId) ?? null
+    : null
+  const selectedNode: CanvasNode | null =
+    !selectedEdge && tab?.selection && tab.selection.size === 1 && doc
+      ? doc.nodes.find((n) => n.id === Array.from(tab.selection)[0]) ?? null
+      : null
+
+  const onUpdateNode = (next: CanvasNode, prev: CanvasNode) => {
+    useCanvasStore.getState().updateDoc(relpath, (d) => ({
+      ...d,
+      nodes: d.nodes.map((n) => (n.id === next.id ? next : n)),
+    }))
+    commitRef.current(
+      [{ op: 'node_update', node: next }],
+      [{ op: 'node_update', node: prev }],
+    )
+  }
+  const onUpdateEdge = (next: CanvasEdge, prev: CanvasEdge) => {
+    useCanvasStore.getState().updateDoc(relpath, (d) => ({
+      ...d,
+      edges: d.edges.map((e) => (e.id === next.id ? next : e)),
+    }))
+    commitRef.current(
+      [{ op: 'edge_update', edge: next }],
+      [{ op: 'edge_update', edge: prev }],
+    )
+  }
+
   return (
     <div
       ref={containerRef}
@@ -810,6 +890,14 @@ export function CanvasView({ relpath, client }: Props) {
           {edgeCount === 1 ? '' : 's'} · {Math.round((tab?.camera.zoom ?? 1) * 100)}%
         </CornerLabel>
       )}
+      {(selectedNode || selectedEdge) && (
+        <Inspector
+          node={selectedNode}
+          edge={selectedEdge}
+          onUpdateNode={onUpdateNode}
+          onUpdateEdge={onUpdateEdge}
+        />
+      )}
     </div>
   )
 }
@@ -819,7 +907,7 @@ function CornerLabel({ children }: { children: React.ReactNode }) {
     <div
       style={{
         position: 'absolute',
-        top: 8,
+        bottom: 8,
         right: 12,
         fontSize: 12,
         color: 'var(--fg-muted, #9ca3af)',

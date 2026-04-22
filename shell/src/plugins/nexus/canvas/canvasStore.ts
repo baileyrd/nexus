@@ -45,6 +45,12 @@ export interface CanvasTabState {
   cameraInitialized: boolean
   /** Set of selected node ids. Empty = no selection. */
   selection: Set<string>
+  /** Id of the currently selected edge, or null. Mutually exclusive
+   *  with node selection — clicking an edge clears the node set, and
+   *  selecting any node clears this. Kept as a single id because the
+   *  Phase-4 inspector drives one-edge-at-a-time editing and multi-
+   *  edge selection isn't in scope yet. */
+  selectedEdgeId: string | null
   /** LIFO stack of applied edits; top is the most recent. */
   undo: HistoryEntry[]
   /** LIFO stack of undone edits available to redo; cleared whenever a
@@ -61,6 +67,7 @@ interface CanvasStore {
   get: (relpath: string) => CanvasTabState | undefined
   setCamera: (relpath: string, camera: Camera) => void
   setSelection: (relpath: string, ids: string[]) => void
+  setSelectedEdge: (relpath: string, edgeId: string | null) => void
   /** Apply a partial mutator to the doc. Caller is responsible for
    *  sending the matching patch to the kernel. */
   updateDoc: (relpath: string, fn: (doc: CanvasDoc) => CanvasDoc) => void
@@ -79,6 +86,7 @@ const emptyState: CanvasTabState = {
   camera: DEFAULT_CAMERA,
   cameraInitialized: false,
   selection: new Set(),
+  selectedEdgeId: null,
   undo: [],
   redo: [],
 }
@@ -117,7 +125,21 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       }),
     })),
   setSelection: (relpath, ids) =>
-    set((s) => ({ tabs: produce(s.tabs, relpath, { selection: new Set(ids) }) })),
+    set((s) => ({
+      tabs: produce(s.tabs, relpath, {
+        selection: new Set(ids),
+        // Selecting any node clears the edge selection so the inspector
+        // switches cleanly between the two kinds of target.
+        selectedEdgeId: ids.length > 0 ? null : s.tabs.get(relpath)?.selectedEdgeId ?? null,
+      }),
+    })),
+  setSelectedEdge: (relpath, edgeId) =>
+    set((s) => ({
+      tabs: produce(s.tabs, relpath, {
+        selectedEdgeId: edgeId,
+        selection: edgeId ? new Set() : s.tabs.get(relpath)?.selection ?? new Set(),
+      }),
+    })),
   updateDoc: (relpath, fn) =>
     set((s) => {
       const prev = s.tabs.get(relpath)?.doc
@@ -209,6 +231,17 @@ export function buildDeleteInverse(
     }
   }
   return ops
+}
+
+/** Build the inverse op list for deleting a single edge — just
+ *  re-adds the edge verbatim. Split out so the delete-key path in
+ *  CanvasView doesn't have to care about the shape of the inverse. */
+export function buildEdgeDeleteInverse(
+  doc: CanvasDoc,
+  edgeId: string,
+): CanvasPatchOp[] {
+  const edge = doc.edges.find((e) => e.id === edgeId)
+  return edge ? [{ op: 'edge_add', edge }] : []
 }
 
 export type { CanvasEdge }
