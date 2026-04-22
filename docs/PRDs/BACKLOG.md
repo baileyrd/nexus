@@ -39,17 +39,19 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   but the current `shell/` UI has no renderer — `.bases` files fall
   through to CodeMirror as raw TOML. Plan: [docs/bases-shell-plan.md](../bases-shell-plan.md)
   (6 phases; routing skeleton → Table view → Board/List → Calendar/
-  Gallery/Timeline → view persistence → polish). Record-CRUD IPC
-  handlers landed 2026-04-22 on `com.nexus.storage` (not
-  `com.nexus.database` as originally planned — storage already owns
-  `base_load` / `base_index` / `base_query` / `base_list` and has
-  `forge_root`; colocating the mutators keeps the reindex atomic
-  within a single dispatch). Handler ids 40–42:
-  `base_record_create` / `base_record_update` / `base_record_delete`.
-  Still to land on storage: property + view mutators (`create_property`
-  / `update_property` / `delete_property` / `create_view` /
-  `update_view` / `delete_view`). Soft-delete waits on a `deleted_at`
-  slot on `BaseRecord`.
+  Gallery/Timeline → view persistence → polish). CRUD IPC handlers
+  landed 2026-04-22 on `com.nexus.storage` (not `com.nexus.database`
+  as originally planned — storage already owns `base_load` /
+  `base_index` / `base_query` / `base_list` and has `forge_root`;
+  colocating the mutators keeps the reindex atomic within a single
+  dispatch). Handler ids 40–48: record CRUD
+  (`base_record_create/update/delete`, 40–42), property CRUD
+  (`base_property_create/update/delete`, 43–45), view CRUD
+  (`base_view_create/update/delete`, 46–48). Only shell-side phases
+  1–6 remain. Known follow-ups: property-rename + type-migration (the
+  current `base_property_update` replaces the definition in place but
+  does not walk records or rename the column); record soft-delete
+  waits on a `deleted_at` slot on `BaseRecord`.
 - [ ] **`.canvas` board renderer in the shell (PRD-06 §4).** Storage
   layer parses/serializes/indexes canvas files; CLI shipped; kernel
   IPC surface landed 2026-04-22 (`canvas_read` / `canvas_write` /

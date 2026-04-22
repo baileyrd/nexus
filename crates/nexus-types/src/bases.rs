@@ -391,16 +391,28 @@ pub fn save_base(dir: &Path, base: &Base) -> Result<(), BasesError> {
         })?;
     std::fs::write(dir.join("records.json"), records_json)?;
 
-    // views.toml
-    if !base.views.is_empty() {
+    // views.toml — remove when the list is empty so "delete the last view"
+    // round-trips correctly. Leaving a stale file behind would reload as
+    // views we just dropped.
+    let views_path = dir.join("views.toml");
+    if base.views.is_empty() {
+        if views_path.exists() {
+            std::fs::remove_file(&views_path)?;
+        }
+    } else {
         let views_toml = serialize_views_toml(&base.views)?;
-        std::fs::write(dir.join("views.toml"), views_toml)?;
+        std::fs::write(&views_path, views_toml)?;
     }
 
-    // relations.toml
-    if !base.relations.is_empty() {
+    // relations.toml — same empty-state rule as views.toml.
+    let relations_path = dir.join("relations.toml");
+    if base.relations.is_empty() {
+        if relations_path.exists() {
+            std::fs::remove_file(&relations_path)?;
+        }
+    } else {
         let relations_toml = serialize_relations_toml(&base.relations)?;
-        std::fs::write(dir.join("relations.toml"), relations_toml)?;
+        std::fs::write(&relations_path, relations_toml)?;
     }
 
     // metadata.json

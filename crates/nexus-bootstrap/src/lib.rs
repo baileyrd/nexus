@@ -415,6 +415,30 @@ fn register_core_plugins(
                         "base_record_delete",
                         nexus_storage::core_plugin::HANDLER_BASE_RECORD_DELETE,
                     ),
+                    (
+                        "base_property_create",
+                        nexus_storage::core_plugin::HANDLER_BASE_PROPERTY_CREATE,
+                    ),
+                    (
+                        "base_property_update",
+                        nexus_storage::core_plugin::HANDLER_BASE_PROPERTY_UPDATE,
+                    ),
+                    (
+                        "base_property_delete",
+                        nexus_storage::core_plugin::HANDLER_BASE_PROPERTY_DELETE,
+                    ),
+                    (
+                        "base_view_create",
+                        nexus_storage::core_plugin::HANDLER_BASE_VIEW_CREATE,
+                    ),
+                    (
+                        "base_view_update",
+                        nexus_storage::core_plugin::HANDLER_BASE_VIEW_UPDATE,
+                    ),
+                    (
+                        "base_view_delete",
+                        nexus_storage::core_plugin::HANDLER_BASE_VIEW_DELETE,
+                    ),
                 ],
             ),
             forge_root,

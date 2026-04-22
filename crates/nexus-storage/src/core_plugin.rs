@@ -158,6 +158,35 @@ pub const HANDLER_BASE_RECORD_UPDATE: u32 = 41;
 /// `{ "path": String, "record_id": String }`. Removes the record from
 /// disk + index. Missing ids are a no-op (idempotent). Returns `{}`.
 pub const HANDLER_BASE_RECORD_DELETE: u32 = 42;
+/// Handler id for `base_property_create`. Args:
+/// `{ "path": String, "name": String, "definition": Value }`. Adds
+/// `name → definition` to `schema.fields`; rejects duplicates. Returns
+/// `{}`.
+pub const HANDLER_BASE_PROPERTY_CREATE: u32 = 43;
+/// Handler id for `base_property_update`. Args:
+/// `{ "path": String, "name": String, "definition": Value }`. Replaces
+/// the definition of an existing property (no rename, no value
+/// migration — see the engine doc on [`crate::StorageEngine::base_property_update`]).
+/// Returns `{}`.
+pub const HANDLER_BASE_PROPERTY_UPDATE: u32 = 44;
+/// Handler id for `base_property_delete`. Args:
+/// `{ "path": String, "name": String }`. Removes the property from the
+/// schema and drops the key from every record. Missing names are a
+/// no-op. Returns `{}`.
+pub const HANDLER_BASE_PROPERTY_DELETE: u32 = 45;
+/// Handler id for `base_view_create`. Args:
+/// `{ "path": String, "view": BaseView }`. Appends `view` to the views
+/// list keyed by `view.name`; rejects duplicate names. Returns `{}`.
+pub const HANDLER_BASE_VIEW_CREATE: u32 = 46;
+/// Handler id for `base_view_update`. Args:
+/// `{ "path": String, "view": BaseView }`. Replaces the existing view
+/// with the same `view.name`. To rename, call delete + create.
+/// Returns `{}`.
+pub const HANDLER_BASE_VIEW_UPDATE: u32 = 47;
+/// Handler id for `base_view_delete`. Args:
+/// `{ "path": String, "name": String }`. Removes the named view.
+/// Missing names are a no-op. Returns `{}`.
+pub const HANDLER_BASE_VIEW_DELETE: u32 = 48;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -542,6 +571,80 @@ impl CorePlugin for StorageCorePlugin {
                     .map_err(|e| exec_err(format!("base_record_delete: {e}")))?;
                 Ok(serde_json::json!({}))
             }
+            HANDLER_BASE_PROPERTY_CREATE => {
+                let path = path_arg(args, "base_property_create")?;
+                let name = name_arg(args, "base_property_create")?;
+                let definition = args
+                    .get("definition")
+                    .cloned()
+                    .ok_or_else(|| {
+                        exec_err("base_property_create: missing 'definition'".to_string())
+                    })?;
+                engine
+                    .base_property_create(&path, &name, definition)
+                    .map_err(|e| exec_err(format!("base_property_create: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_BASE_PROPERTY_UPDATE => {
+                let path = path_arg(args, "base_property_update")?;
+                let name = name_arg(args, "base_property_update")?;
+                let definition = args
+                    .get("definition")
+                    .cloned()
+                    .ok_or_else(|| {
+                        exec_err("base_property_update: missing 'definition'".to_string())
+                    })?;
+                engine
+                    .base_property_update(&path, &name, definition)
+                    .map_err(|e| exec_err(format!("base_property_update: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_BASE_PROPERTY_DELETE => {
+                let path = path_arg(args, "base_property_delete")?;
+                let name = name_arg(args, "base_property_delete")?;
+                engine
+                    .base_property_delete(&path, &name)
+                    .map_err(|e| exec_err(format!("base_property_delete: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_BASE_VIEW_CREATE => {
+                let path = path_arg(args, "base_view_create")?;
+                let view: nexus_types::bases::BaseView = args
+                    .get("view")
+                    .ok_or_else(|| exec_err("base_view_create: missing 'view'".to_string()))
+                    .and_then(|v| {
+                        serde_json::from_value(v.clone()).map_err(|e| {
+                            exec_err(format!("base_view_create: view decode: {e}"))
+                        })
+                    })?;
+                engine
+                    .base_view_create(&path, view)
+                    .map_err(|e| exec_err(format!("base_view_create: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_BASE_VIEW_UPDATE => {
+                let path = path_arg(args, "base_view_update")?;
+                let view: nexus_types::bases::BaseView = args
+                    .get("view")
+                    .ok_or_else(|| exec_err("base_view_update: missing 'view'".to_string()))
+                    .and_then(|v| {
+                        serde_json::from_value(v.clone()).map_err(|e| {
+                            exec_err(format!("base_view_update: view decode: {e}"))
+                        })
+                    })?;
+                engine
+                    .base_view_update(&path, view)
+                    .map_err(|e| exec_err(format!("base_view_update: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_BASE_VIEW_DELETE => {
+                let path = path_arg(args, "base_view_delete")?;
+                let name = name_arg(args, "base_view_delete")?;
+                engine
+                    .base_view_delete(&path, &name)
+                    .map_err(|e| exec_err(format!("base_view_delete: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
             HANDLER_GRAPH_NEIGHBORS => {
                 let path = path_arg(args, "graph_neighbors")?;
                 let depth = args
@@ -783,6 +886,14 @@ fn relpath_arg(value: &serde_json::Value, command: &str) -> Result<String, Plugi
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| exec_err(format!("{command}: missing 'relpath' string argument")))
+}
+
+fn name_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
+    value
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| exec_err(format!("{command}: missing 'name' string argument")))
 }
 
 fn to_value<T: serde::Serialize>(

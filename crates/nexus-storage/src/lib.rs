@@ -531,6 +531,159 @@ impl StorageEngine {
         Ok(updated)
     }
 
+    /// Append a property to the schema of the base at `path`.
+    ///
+    /// `definition` is the raw JSON object describing the field (type,
+    /// required, options, etc.) as stored under the field name in
+    /// `schema.json`. Rejects duplicate names with
+    /// [`StorageError::CorruptFile`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O / parse / DB failure or duplicate.
+    pub fn base_property_create(
+        &self,
+        path: &str,
+        name: &str,
+        definition: serde_json::Value,
+    ) -> Result<(), StorageError> {
+        let abs_dir = self.forge.root().join(path);
+        let mut base = nexus_types::bases::load_base(&abs_dir)?;
+        if base.schema.fields.contains_key(name) {
+            return Err(StorageError::CorruptFile {
+                path: path.to_string(),
+                reason: format!("property '{name}' already exists"),
+            });
+        }
+        base.schema.fields.insert(name.to_string(), definition);
+        nexus_types::bases::save_base(&abs_dir, &base)?;
+        self.index_base(path, &base)?;
+        Ok(())
+    }
+
+    /// Replace the definition of an existing property. Does not rename the
+    /// column or migrate per-record values (both are follow-up work — the
+    /// plan's full "rename / retype with migration" requires walking every
+    /// record and coercing values, which this slice deliberately skips).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::FileNotFound`] when the property is unknown,
+    /// or [`StorageError`] on I/O / parse / DB failure.
+    pub fn base_property_update(
+        &self,
+        path: &str,
+        name: &str,
+        definition: serde_json::Value,
+    ) -> Result<(), StorageError> {
+        let abs_dir = self.forge.root().join(path);
+        let mut base = nexus_types::bases::load_base(&abs_dir)?;
+        if !base.schema.fields.contains_key(name) {
+            return Err(StorageError::FileNotFound(format!(
+                "property {name} in {path}"
+            )));
+        }
+        base.schema.fields.insert(name.to_string(), definition);
+        nexus_types::bases::save_base(&abs_dir, &base)?;
+        self.index_base(path, &base)?;
+        Ok(())
+    }
+
+    /// Remove the property `name` from the schema of the base at `path`
+    /// and drop the corresponding key from every record's fields map.
+    ///
+    /// Missing names are a no-op so deletes are idempotent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O / parse / DB failure.
+    pub fn base_property_delete(&self, path: &str, name: &str) -> Result<(), StorageError> {
+        let abs_dir = self.forge.root().join(path);
+        let mut base = nexus_types::bases::load_base(&abs_dir)?;
+        if base.schema.fields.remove(name).is_none() {
+            return Ok(());
+        }
+        for record in &mut base.records {
+            record.fields.remove(name);
+        }
+        nexus_types::bases::save_base(&abs_dir, &base)?;
+        self.index_base(path, &base)?;
+        Ok(())
+    }
+
+    /// Append `view` to the views list of the base at `path`. Views are
+    /// keyed by `view.name`; a duplicate name is rejected with
+    /// [`StorageError::CorruptFile`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O / parse / DB failure or duplicate.
+    pub fn base_view_create(
+        &self,
+        path: &str,
+        view: nexus_types::bases::BaseView,
+    ) -> Result<(), StorageError> {
+        let abs_dir = self.forge.root().join(path);
+        let mut base = nexus_types::bases::load_base(&abs_dir)?;
+        if base.views.iter().any(|v| v.name == view.name) {
+            return Err(StorageError::CorruptFile {
+                path: path.to_string(),
+                reason: format!("view '{}' already exists", view.name),
+            });
+        }
+        base.views.push(view);
+        nexus_types::bases::save_base(&abs_dir, &base)?;
+        self.index_base(path, &base)?;
+        Ok(())
+    }
+
+    /// Replace a view by name with `view`. Uses `view.name` as the key — to
+    /// rename a view, delete the old one and create a new one with the
+    /// desired name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::FileNotFound`] when the view name is
+    /// unknown, or [`StorageError`] on I/O / parse / DB failure.
+    pub fn base_view_update(
+        &self,
+        path: &str,
+        view: nexus_types::bases::BaseView,
+    ) -> Result<(), StorageError> {
+        let abs_dir = self.forge.root().join(path);
+        let mut base = nexus_types::bases::load_base(&abs_dir)?;
+        let slot = base
+            .views
+            .iter_mut()
+            .find(|v| v.name == view.name)
+            .ok_or_else(|| {
+                StorageError::FileNotFound(format!("view {} in {path}", view.name))
+            })?;
+        *slot = view;
+        nexus_types::bases::save_base(&abs_dir, &base)?;
+        self.index_base(path, &base)?;
+        Ok(())
+    }
+
+    /// Remove a view by `name` from the base at `path`. Missing names are
+    /// a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O / parse / DB failure.
+    pub fn base_view_delete(&self, path: &str, name: &str) -> Result<(), StorageError> {
+        let abs_dir = self.forge.root().join(path);
+        let mut base = nexus_types::bases::load_base(&abs_dir)?;
+        let before = base.views.len();
+        base.views.retain(|v| v.name != name);
+        if base.views.len() == before {
+            return Ok(());
+        }
+        nexus_types::bases::save_base(&abs_dir, &base)?;
+        self.index_base(path, &base)?;
+        Ok(())
+    }
+
     /// Remove the record identified by `record_id` from the base at `path`.
     ///
     /// Hard-delete: the record is removed from `records.json` and the index
@@ -1848,7 +2001,135 @@ mod tests {
         assert!(matches!(err, StorageError::FileNotFound(_)));
     }
 
-    // ── 15. open_nonexistent_forge_returns_error ──────────────────────────────
+    // ── 15. base_property_crud ────────────────────────────────────────────────
+
+    #[test]
+    fn base_property_crud() {
+        use nexus_types::bases::{Base, BaseRecord, BaseSchema, BaseMetadata};
+
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+        let base_rel = "p.bases";
+        let abs = dir.path().join(base_rel);
+        let seed = Base {
+            name: "P".to_string(),
+            schema: BaseSchema {
+                version: "1.0".to_string(),
+                fields: {
+                    let mut m = serde_json::Map::new();
+                    m.insert("legacy".to_string(), serde_json::json!({ "type": "text" }));
+                    m
+                },
+            },
+            records: vec![BaseRecord {
+                id: "r1".into(),
+                fields: {
+                    let mut m = serde_json::Map::new();
+                    m.insert("legacy".to_string(), serde_json::json!("stale"));
+                    m
+                },
+            }],
+            views: Vec::new(),
+            relations: Vec::new(),
+            metadata: BaseMetadata::default(),
+        };
+        nexus_types::bases::save_base(&abs, &seed).expect("save");
+        engine.index_base(base_rel, &seed).expect("index");
+
+        // Create.
+        engine
+            .base_property_create(base_rel, "title", serde_json::json!({ "type": "title" }))
+            .expect("create");
+        let loaded = nexus_types::bases::load_base(&abs).expect("load");
+        assert!(loaded.schema.fields.contains_key("title"));
+
+        // Duplicate create → error.
+        let err = engine
+            .base_property_create(base_rel, "title", serde_json::json!({ "type": "text" }))
+            .expect_err("dup");
+        assert!(matches!(err, StorageError::CorruptFile { .. }));
+
+        // Update.
+        engine
+            .base_property_update(base_rel, "title", serde_json::json!({ "type": "text", "required": true }))
+            .expect("update");
+        let loaded = nexus_types::bases::load_base(&abs).expect("load2");
+        assert_eq!(
+            loaded.schema.fields["title"].get("required"),
+            Some(&serde_json::Value::Bool(true))
+        );
+
+        // Update unknown → error.
+        let err = engine
+            .base_property_update(base_rel, "nope", serde_json::json!({}))
+            .expect_err("unknown");
+        assert!(matches!(err, StorageError::FileNotFound(_)));
+
+        // Delete drops record key.
+        engine.base_property_delete(base_rel, "legacy").expect("delete legacy");
+        let loaded = nexus_types::bases::load_base(&abs).expect("load3");
+        assert!(!loaded.records[0].fields.contains_key("legacy"));
+
+        // Delete unknown → no-op.
+        engine.base_property_delete(base_rel, "ghost").expect("delete ghost");
+    }
+
+    // ── 16. base_view_crud ────────────────────────────────────────────────────
+
+    #[test]
+    fn base_view_crud() {
+        use nexus_types::bases::{Base, BaseSchema, BaseMetadata, BaseView, ViewType};
+
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+        let base_rel = "v.bases";
+        let abs = dir.path().join(base_rel);
+        let seed = Base {
+            name: "V".to_string(),
+            schema: BaseSchema { version: "1.0".to_string(), fields: serde_json::Map::new() },
+            records: Vec::new(),
+            views: Vec::new(),
+            relations: Vec::new(),
+            metadata: BaseMetadata::default(),
+        };
+        nexus_types::bases::save_base(&abs, &seed).expect("save");
+        engine.index_base(base_rel, &seed).expect("index");
+
+        let board = BaseView {
+            name: "Board".to_string(),
+            view_type: ViewType::Kanban,
+            fields: vec!["title".to_string()],
+            sort: Vec::new(),
+            filter: Vec::new(),
+            group_field: Some("status".to_string()),
+            date_field: None,
+        };
+        engine.base_view_create(base_rel, board.clone()).expect("create");
+        let loaded = nexus_types::bases::load_base(&abs).expect("load");
+        assert_eq!(loaded.views.len(), 1);
+        assert_eq!(loaded.views[0].name, "Board");
+
+        let err = engine.base_view_create(base_rel, board.clone()).expect_err("dup");
+        assert!(matches!(err, StorageError::CorruptFile { .. }));
+
+        let mut updated = board.clone();
+        updated.group_field = Some("priority".to_string());
+        engine.base_view_update(base_rel, updated).expect("update");
+        let loaded = nexus_types::bases::load_base(&abs).expect("load2");
+        assert_eq!(loaded.views[0].group_field.as_deref(), Some("priority"));
+
+        let ghost = BaseView { name: "Ghost".to_string(), ..board };
+        let err = engine.base_view_update(base_rel, ghost).expect_err("unknown");
+        assert!(matches!(err, StorageError::FileNotFound(_)));
+
+        engine.base_view_delete(base_rel, "Board").expect("delete");
+        let loaded = nexus_types::bases::load_base(&abs).expect("load3");
+        assert!(loaded.views.is_empty());
+
+        engine.base_view_delete(base_rel, "noop").expect("noop delete");
+    }
+
+    // ── 17. open_nonexistent_forge_returns_error ──────────────────────────────
 
     #[test]
     fn open_nonexistent_forge_returns_error() {
