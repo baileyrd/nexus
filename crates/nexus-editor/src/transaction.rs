@@ -226,8 +226,27 @@ impl Operation {
                 id,
                 old_parent_id,
                 old_index_in_parent,
-                ..
-            } => tree.reparent(*id, *old_parent_id, *old_index_in_parent),
+                new_parent_id,
+                new_index_in_parent,
+            } => {
+                // [`BlockTree::reparent`] treats `new_index` as a pre-detach
+                // position and auto-subtracts 1 on forward same-parent
+                // moves. That adjustment is one-sided — reversing a
+                // *backward* same-parent move (new_index < old_index)
+                // means replaying a forward same-parent move in reverse,
+                // which needs `old_index + 1` to land in the right slot
+                // once `id` is unlinked. The asymmetry is invisible for
+                // cross-parent reparents, which is why the existing
+                // reparent_roundtrip test passes.
+                let reverse_target = if old_parent_id == new_parent_id
+                    && new_index_in_parent < old_index_in_parent
+                {
+                    *old_index_in_parent + 1
+                } else {
+                    *old_index_in_parent
+                };
+                tree.reparent(*id, *old_parent_id, reverse_target)
+            }
             Self::UpdateBlockContent {
                 id,
                 old_content,
@@ -361,6 +380,52 @@ impl Transaction {
         }
         tree.metadata.updated_at = now_ms();
         Ok(())
+    }
+
+    /// Build a single-op [`Operation::ReparentBlock`] transaction that
+    /// moves `id` under `new_parent` at `new_index`, auto-filling the
+    /// block's current parent + index from `tree`.
+    ///
+    /// This is the canonical "move block" entry point for block-drag UX
+    /// (notion-block-ux-plan.md Phase 3). Single op = single undo step,
+    /// so `ctrl+z` after a drag reverses the whole move atomically
+    /// instead of re-inserting and re-deleting one edge at a time.
+    ///
+    /// `metadata` defaults to
+    /// `BlockOperation { op: Move { direction: "reorder" } }` when
+    /// `None`, which is the telemetry shape the existing undo UI already
+    /// groups together. Callers that want a different `UserAction`
+    /// (e.g. drag-drop) should pass one explicitly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EditorError::BlockNotFound`] if `id` doesn't resolve
+    /// in `tree`.
+    pub fn move_block(
+        tree: &BlockTree,
+        id: BlockId,
+        new_parent: Option<BlockId>,
+        new_index: usize,
+        metadata: Option<TransactionMetadata>,
+    ) -> Result<Self> {
+        let block = tree.get(id).ok_or(EditorError::BlockNotFound(id))?;
+        let op = Operation::ReparentBlock {
+            id,
+            old_parent_id: block.parent_id,
+            old_index_in_parent: block.index_in_parent,
+            new_parent_id: new_parent,
+            new_index_in_parent: new_index,
+        };
+        let metadata = metadata.unwrap_or(TransactionMetadata {
+            user_action: UserAction::BlockOperation {
+                op: BlockOp::Move {
+                    direction: "reorder".to_string(),
+                },
+            },
+            source: TransactionSource::User,
+            ai_edit: false,
+        });
+        Ok(Self::new(vec![op], metadata))
     }
 }
 
@@ -714,6 +779,91 @@ mod tests {
         assert_eq!(tree.get(id).unwrap().content, "abc");
         tx.reverse(&mut tree).unwrap();
         assert!(trees_structurally_equal(&tree, &snapshot));
+    }
+
+    #[test]
+    fn reparent_same_parent_backward_roundtrip() {
+        // Regression: reversing a backward same-parent move used to land
+        // the block one slot short because tree.reparent's pre-detach
+        // auto-adjust is one-sided.
+        let mut tree = BlockTree::new(DocumentMetadata::empty());
+        let a = tree.insert(para("a"), None, 0).unwrap();
+        let b = tree.insert(para("b"), None, 1).unwrap();
+        let c = tree.insert(para("c"), None, 2).unwrap();
+        let snapshot = tree.clone();
+
+        let op = Operation::ReparentBlock {
+            id: c,
+            old_parent_id: None,
+            old_index_in_parent: 2,
+            new_parent_id: None,
+            new_index_in_parent: 0,
+        };
+        op.apply(&mut tree).unwrap();
+        assert_eq!(tree.root_blocks, vec![c, a, b]);
+        op.reverse(&mut tree).unwrap();
+        assert!(trees_structurally_equal(&tree, &snapshot));
+    }
+
+    #[test]
+    fn reparent_same_parent_forward_roundtrip() {
+        let mut tree = BlockTree::new(DocumentMetadata::empty());
+        let a = tree.insert(para("a"), None, 0).unwrap();
+        let b = tree.insert(para("b"), None, 1).unwrap();
+        let c = tree.insert(para("c"), None, 2).unwrap();
+        let snapshot = tree.clone();
+
+        let op = Operation::ReparentBlock {
+            id: a,
+            old_parent_id: None,
+            old_index_in_parent: 0,
+            new_parent_id: None,
+            new_index_in_parent: 3,
+        };
+        op.apply(&mut tree).unwrap();
+        assert_eq!(tree.root_blocks, vec![b, c, a]);
+        op.reverse(&mut tree).unwrap();
+        assert!(trees_structurally_equal(&tree, &snapshot));
+    }
+
+    #[test]
+    fn move_block_constructor_autofills_old_location() {
+        let mut tree = BlockTree::new(DocumentMetadata::empty());
+        let a = tree.insert(para("a"), None, 0).unwrap();
+        let b = tree.insert(para("b"), None, 1).unwrap();
+        let c = tree.insert(para("c"), None, 2).unwrap();
+        let snapshot = tree.clone();
+
+        // Move c to position 0: [c, a, b].
+        let tx = Transaction::move_block(&tree, c, None, 0, None).unwrap();
+        assert_eq!(tx.operations.len(), 1, "move is a single op");
+        tx.apply(&mut tree).unwrap();
+        assert_eq!(tree.root_blocks, vec![c, a, b]);
+
+        // One undo reverses the whole move.
+        tx.reverse(&mut tree).unwrap();
+        assert!(trees_structurally_equal(&tree, &snapshot));
+    }
+
+    #[test]
+    fn move_block_reports_missing_id() {
+        let tree = BlockTree::new(DocumentMetadata::empty());
+        let err = Transaction::move_block(&tree, Uuid::new_v4(), None, 0, None).unwrap_err();
+        assert!(matches!(err, EditorError::BlockNotFound(_)));
+    }
+
+    #[test]
+    fn move_block_default_metadata_tags_reorder() {
+        let mut tree = BlockTree::new(DocumentMetadata::empty());
+        let a = tree.insert(para("a"), None, 0).unwrap();
+        let _b = tree.insert(para("b"), None, 1).unwrap();
+        let tx = Transaction::move_block(&tree, a, None, 1, None).unwrap();
+        match &tx.metadata.user_action {
+            UserAction::BlockOperation { op: BlockOp::Move { direction } } => {
+                assert_eq!(direction, "reorder");
+            }
+            other => panic!("expected BlockOperation::Move, got {other:?}"),
+        }
     }
 
     #[test]

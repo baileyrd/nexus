@@ -67,9 +67,22 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   slash menu, block selection, gutter handles + per-block menu +
   drag-to-reorder, inline annotation toolbar. Plan:
   [docs/notion-block-ux-plan.md](../notion-block-ux-plan.md) (6
-  phases; phases 1–3 are the "feels like Notion" threshold). Two
-  small kernel asks: dedicated block-move transaction for clean
-  undo; verify persistent block ids survive save+reopen roundtrip.
+  phases; phases 1–3 are the "feels like Notion" threshold).
+  Kernel asks addressed 2026-04-22: (1) `Transaction::move_block(tree,
+  id, new_parent, new_index, metadata)` constructor landed — single
+  `ReparentBlock` op = single undo step for block-drag. Fixed an
+  incidental `ReparentBlock::reverse` bug where same-parent backward
+  moves couldn't be cleanly reversed (the existing
+  `reparent_roundtrip` test was cross-parent and missed it). (2)
+  Block-id stability over save+reopen: `deterministic_block_id` keys
+  on `(file_path, visit_order, block_type)`, so ids are stable for
+  files that round-trip unchanged. An insert mid-document shifts
+  `visit_order` for every downstream block and produces new ids on
+  reload — the plan's proposed fixes (HTML-comment stamping in
+  markdown or an out-of-band `.forge/blocks.json` sidecar) remain
+  the options. Left deferred until the Phase-6 block-link UX forces
+  a choice, since today no feature depends on cross-session block
+  id stability under edits.
 
 ### Half-specced: manifest keys exist, but no UI/wiring spec in PRD-07
 
