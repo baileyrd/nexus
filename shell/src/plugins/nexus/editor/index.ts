@@ -1,14 +1,18 @@
 import { createElement } from 'react'
+import { open as openInShell } from '@tauri-apps/plugin-shell'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { viewRegistry, workspace } from '../../../workspace'
 import type { Leaf, Tabs, WorkspaceParent } from '../../../workspace'
 import { EditorView } from './EditorView'
 import { markdownViewCreator } from './MarkdownView'
 import { emptyViewCreator, EMPTY_VIEW_TYPE } from './EmptyView'
-import { useEditorStore, isDirty } from './editorStore'
-import { setEditorRuntime } from './runtime'
+import { useEditorStore, isDirty, type EditorTabMode } from './editorStore'
+import { openSearchPanel } from '@codemirror/search'
+import { setEditorRuntime, getActiveCmView } from './runtime'
 import { makeEditorClient } from './kernelClient'
 import { makeSessionManager } from './sessionManager'
+import { useWorkspaceStore } from '../workspace/workspaceStore'
+import { useFilesStore } from '../files/filesStore'
 
 const VIEW_ID = 'nexus.editor.view'
 const EVENT_FILE_OPEN = 'files:open'
@@ -29,6 +33,16 @@ const COMMAND_CLOSE_TAB = 'nexus.editor.closeTab'
 const COMMAND_SAVE = 'nexus.editor.save'
 const COMMAND_NEW_UNTITLED = 'nexus.editor.newUntitled'
 const COMMAND_CLOSE_ALL = 'nexus.editor.closeAll'
+const COMMAND_TOGGLE_MODE = 'nexus.editor.toggleMode'
+const COMMAND_FIND = 'nexus.editor.find'
+const COMMAND_REPLACE = 'nexus.editor.replace'
+const COMMAND_COPY_REL_PATH = 'nexus.editor.copyRelativePath'
+const COMMAND_COPY_ABS_PATH = 'nexus.editor.copyAbsolutePath'
+const COMMAND_REVEAL_IN_NAV = 'nexus.editor.revealInNavigation'
+const COMMAND_REVEAL_IN_OS = 'nexus.editor.revealInOS'
+const COMMAND_OPEN_DEFAULT_APP = 'nexus.editor.openInDefaultApp'
+const COMMAND_DELETE_FILE = 'nexus.editor.deleteFile'
+const DELETE_FILE_HANDLER = 'delete_file'
 const CONTEXT_KEY_HAS_ACTIVE_TAB = 'nexus.editor.hasActiveTab'
 const CONTEXT_KEY_ACTIVE_TAB_DIRTY = 'nexus.editor.activeTabDirty'
 
@@ -79,6 +93,15 @@ export const editorPlugin: Plugin = {
         { id: COMMAND_SAVE, title: 'Save', category: 'Editor' },
         { id: COMMAND_NEW_UNTITLED, title: 'New Untitled Tab', category: 'Editor' },
         { id: COMMAND_CLOSE_ALL, title: 'Close All Tabs', category: 'Editor' },
+        { id: COMMAND_TOGGLE_MODE, title: 'Toggle Reading View', category: 'Editor' },
+        { id: COMMAND_FIND, title: 'Find', category: 'Editor' },
+        { id: COMMAND_REPLACE, title: 'Replace', category: 'Editor' },
+        { id: COMMAND_COPY_REL_PATH, title: 'Copy Path (relative)', category: 'Editor' },
+        { id: COMMAND_COPY_ABS_PATH, title: 'Copy Path (absolute)', category: 'Editor' },
+        { id: COMMAND_REVEAL_IN_NAV, title: 'Reveal File in Navigation', category: 'Editor' },
+        { id: COMMAND_REVEAL_IN_OS, title: 'Show in System Explorer', category: 'Editor' },
+        { id: COMMAND_OPEN_DEFAULT_APP, title: 'Open in Default App', category: 'Editor' },
+        { id: COMMAND_DELETE_FILE, title: 'Delete File', category: 'Editor' },
       ],
       keybindings: [
         {
@@ -420,6 +443,174 @@ export const editorPlugin: Plugin = {
 
     api.commands.register(COMMAND_CLOSE_ALL, async () => {
       await closeAll()
+    })
+
+    const activeTabRelpath = (): string | null => {
+      const s = useEditorStore.getState()
+      return s.activeRelpath ?? null
+    }
+
+    const joinAbsPath = (root: string, rel: string): string => {
+      const sep = root.includes('\\') && !root.includes('/') ? '\\' : '/'
+      const trimmed = root.endsWith('/') || root.endsWith('\\') ? root.slice(0, -1) : root
+      return `${trimmed}${sep}${rel}`
+    }
+
+    const parentDir = (path: string): string => {
+      const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+      if (idx <= 0) return path
+      return path.slice(0, idx)
+    }
+
+    api.commands.register(COMMAND_TOGGLE_MODE, async () => {
+      const s = useEditorStore.getState()
+      const tab = s.tabs.find((t) => t.relpath === s.activeRelpath)
+      if (!tab) return
+      const next: EditorTabMode = tab.mode === 'preview' ? 'source' : 'preview'
+      s.setMode(tab.relpath, next)
+    })
+
+    api.commands.register(COMMAND_FIND, async () => {
+      const view = getActiveCmView()
+      if (!view) {
+        api.notifications.show({
+          type: 'info',
+          message: 'Find requires an active editor in source mode.',
+        })
+        return
+      }
+      view.focus()
+      openSearchPanel(view)
+    })
+
+    api.commands.register(COMMAND_REPLACE, async () => {
+      const view = getActiveCmView()
+      if (!view) {
+        api.notifications.show({
+          type: 'info',
+          message: 'Replace requires an active editor in source mode.',
+        })
+        return
+      }
+      view.focus()
+      openSearchPanel(view)
+    })
+
+    api.commands.register(COMMAND_COPY_REL_PATH, async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      try {
+        await navigator.clipboard.writeText(relpath)
+        api.notifications.show({ type: 'info', message: 'Copied relative path.' })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Copy failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    api.commands.register(COMMAND_COPY_ABS_PATH, async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      const root = useWorkspaceStore.getState().rootPath
+      if (!root) {
+        api.notifications.show({
+          type: 'warning',
+          message: 'No workspace open — absolute path is unavailable.',
+        })
+        return
+      }
+      try {
+        await navigator.clipboard.writeText(joinAbsPath(root, relpath))
+        api.notifications.show({ type: 'info', message: 'Copied absolute path.' })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Copy failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    api.commands.register(COMMAND_REVEAL_IN_NAV, async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      const filesStore = useFilesStore.getState()
+      const segments = relpath.split('/').filter((s) => s.length > 0)
+      let acc = ''
+      for (let i = 0; i < segments.length - 1; i++) {
+        acc = acc ? `${acc}/${segments[i]}` : segments[i]
+        filesStore.setExpanded(acc, true)
+      }
+      filesStore.setSelected(relpath)
+      const leaf = await workspace.ensureLeafOfType('file-explorer', 'left')
+      workspace.revealLeaf(leaf)
+    })
+
+    api.commands.register(COMMAND_OPEN_DEFAULT_APP, async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      const root = useWorkspaceStore.getState().rootPath
+      if (!root) {
+        api.notifications.show({
+          type: 'warning',
+          message: 'No workspace open.',
+        })
+        return
+      }
+      try {
+        await openInShell(joinAbsPath(root, relpath))
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Open failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    api.commands.register(COMMAND_REVEAL_IN_OS, async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      const root = useWorkspaceStore.getState().rootPath
+      if (!root) {
+        api.notifications.show({
+          type: 'warning',
+          message: 'No workspace open.',
+        })
+        return
+      }
+      try {
+        await openInShell(parentDir(joinAbsPath(root, relpath)))
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Reveal failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    api.commands.register(COMMAND_DELETE_FILE, async () => {
+      const relpath = activeTabRelpath()
+      if (!relpath) return
+      if (/^untitled-\d+$/i.test(relpath)) {
+        await confirmAndClose(relpath)
+        return
+      }
+      const ok = await api.input.confirm(
+        `Delete "${relpath}"? This cannot be undone.`,
+      )
+      if (!ok) return
+      try {
+        await api.kernel.invoke<unknown>(STORAGE_PLUGIN_ID, DELETE_FILE_HANDLER, {
+          path: relpath,
+        })
+        useEditorStore.getState().closeTab(relpath)
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Delete failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
     })
 
     setEditorRuntime({

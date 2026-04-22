@@ -7,6 +7,7 @@ import { markdown } from '@codemirror/lang-markdown'
 // Local undo in CM would compete with the authoritative stack and would
 // not cover AI-generated edits applied via `apply_transaction`.
 import { defaultKeymap } from '@codemirror/commands'
+import { search, searchKeymap } from '@codemirror/search'
 
 import type { EditorKernelClient } from '../kernelClient.ts'
 
@@ -94,7 +95,8 @@ export function baselineExtensions(
 
   const exts: Extension[] = [
     markdown(),
-    keymap.of(keys),
+    search({ top: true }),
+    keymap.of([...searchKeymap, ...keys]),
     EditorView.lineWrapping,
   ]
   if (opts.lineNumbers) exts.push(lineNumbers())

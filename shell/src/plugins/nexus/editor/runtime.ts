@@ -4,6 +4,7 @@
 // but the exported value is the operation bundle rather than the raw
 // api — the ops already carry the api through closure.
 
+import type { EditorView as CMEditorView } from '@codemirror/view'
 import type { EditorKernelClient } from './kernelClient.ts'
 import type { SessionManager } from './sessionManager.ts'
 
@@ -39,3 +40,19 @@ export function setEditorRuntime(runtime: EditorRuntime) {
 export function getEditorRuntime(): EditorRuntime | null {
   return _runtime
 }
+
+// Active CodeMirror view registry. The Find/Replace commands in
+// `index.ts` need to call `openSearchPanel(view)` on whichever CM
+// view the user is currently editing. EditorView mounts/unmounts
+// register the active view here so the command can resolve it
+// without taking a React dep.
+let _activeCmView: CMEditorView | null = null
+
+export function setActiveCmView(view: CMEditorView | null) {
+  _activeCmView = view
+}
+
+export function getActiveCmView(): CMEditorView | null {
+  return _activeCmView
+}
+

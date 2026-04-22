@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { EditorView as CMEditorView } from '@codemirror/view'
 import { useEditorStore, type EditorTab, type EditorTabMode } from './editorStore'
 import { renderMarkdown } from './markdownRender'
@@ -6,10 +6,12 @@ import { eventBus } from '../../../host/EventBus'
 import { useOutlineStore } from '../outline/outlineStore'
 import { Icon } from '../../../icons'
 import { useWorkspaceField, workspace } from '../../../workspace'
-import { getEditorRuntime } from './runtime'
+import { getEditorRuntime, setActiveCmView } from './runtime'
 import { CodeMirrorHost, type CodeMirrorHostHandle } from './cm/CodeMirrorHost'
 import { transactionBridge } from './cm/transactionBridge'
 import { getRegistry } from '../../../host/shellRegistry'
+import { ContextMenu } from '../../../shell/ContextMenu'
+import { buildTabContextMenu } from './TabContextMenu'
 import './markdown.css'
 
 /** Untitled placeholder relpaths have no kernel session; treat them
@@ -251,6 +253,28 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
     activeTab?.content,
   ])
 
+  // Publish the currently-mounted CM view to the editor runtime so
+  // the Find / Replace commands (registered in index.ts) can call
+  // `openSearchPanel` on the active editor without taking a React
+  // dependency. Only source mode mounts a CM host; preview mode
+  // clears the registration.
+  useEffect(() => {
+    if (!activeTab || activeTab.mode !== 'source') {
+      setActiveCmView(null)
+      return
+    }
+    const view = cmViewRef.current?.view ?? null
+    setActiveCmView(view)
+    return () => {
+      setActiveCmView(null)
+    }
+  }, [
+    activeTab?.relpath,
+    activeTab?.mode,
+    activeTab?.loading,
+    activeTab?.error,
+  ])
+
   // Parse markdown once per content change — re-running marked + DOMPurify
   // on every unrelated parent re-render would be needlessly expensive.
   const markdownHtml = useMemo(() => {
@@ -347,16 +371,39 @@ interface ViewHeaderProps {
 }
 
 function ViewHeader({ activeTab, mode, onToggleMode }: ViewHeaderProps) {
-  // Back / forward navigation is scaffolded but not wired to a history
-  // store yet — the buttons render disabled so the row lines up with
-  // Obsidian's pattern (and lets us add nav later without reshuffling
-  // layout). Same goes for the trailing "more" menu.
+  const moreButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreAnchorRect = moreOpen
+    ? moreButtonRef.current?.getBoundingClientRect() ?? null
+    : null
+
+  const isUntitledRel = activeTab ? /^untitled-\d+$/i.test(activeTab.relpath) : false
+  const moreItems = useMemo(
+    () =>
+      activeTab
+        ? buildTabContextMenu({ mode: activeTab.mode, isUntitled: isUntitledRel })
+        : [],
+    [activeTab?.mode, activeTab?.relpath, isUntitledRel],
+  )
+
   const disabledNavStyle: React.CSSProperties = {
     background: 'transparent',
     border: 'none',
     color: 'var(--fg-muted)',
     cursor: 'default',
     opacity: 0.45,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 28,
+    height: 28,
+    borderRadius: 4,
+  }
+  const activeNavStyle: React.CSSProperties = {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--fg-muted)',
+    cursor: 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -396,14 +443,26 @@ function ViewHeader({ activeTab, mode, onToggleMode }: ViewHeaderProps) {
           <ModeToggle mode={mode} onClick={onToggleMode} />
         )}
         <button
+          ref={moreButtonRef}
           type="button"
           aria-label="More options"
           title="More options"
-          disabled
-          style={disabledNavStyle}
+          aria-expanded={moreOpen}
+          disabled={!activeTab}
+          onClick={() => {
+            if (!activeTab) return
+            setMoreOpen((v) => !v)
+          }}
+          style={activeTab ? activeNavStyle : disabledNavStyle}
         >
           <Icon name="more" size={16} />
         </button>
+        <ContextMenu
+          open={moreOpen}
+          anchorRect={moreAnchorRect}
+          items={moreItems}
+          onClose={() => setMoreOpen(false)}
+        />
       </div>
     </div>
   )
