@@ -78,6 +78,7 @@ export class LeafImpl implements Leaf {
     // 3. Instantiate.
     this.view = creator(this)
     this._opened = false
+    this._openedEl = null
 
     // 4. Hydrate view-specific state.
     if (state.state !== undefined) {
@@ -88,6 +89,7 @@ export class LeafImpl implements Leaf {
     if (this.containerEl) {
       await this.view.onOpen(this.containerEl)
       this._opened = true
+      this._openedEl = this.containerEl
       this._pendingOpen = null
     } else {
       this._pendingOpen = { state, eState }
@@ -137,18 +139,24 @@ export class LeafImpl implements Leaf {
     this.containerEl = null
     this._pendingOpen = null
     this._opened = false
+    this._openedEl = null
   }
 
   /**
    * Attach or detach the DOM host for this leaf.
    *
    * - Setting `el` non-null: record it. If a pending-open stash exists and
-   *   the view hasn't been opened yet, invoke `onOpen(el)` now. A re-mount
-   *   after a transient unmount (no new `setViewState`) does NOT re-invoke
-   *   `onOpen` — the view still owns its DOM from the first mount.
+   *   the view hasn't been opened yet, invoke `onOpen(el)` now. If the view
+   *   was previously opened into a different element (e.g. the sidebar was
+   *   collapsed so React unmounted the old LeafHost, and is now being
+   *   re-rendered on reopen), tear down the old mount via `onClose` and
+   *   re-mount into the new `el` — the view's DOM lived inside the old
+   *   element which is no longer in the tree.
    * - Setting `el` null (unmount): do NOT call `onClose`. Views are only
    *   unloaded on `detach` (plan line 134).
    */
+  private _openedEl: HTMLElement | null = null
+
   async attachContainer(el: HTMLElement | null): Promise<void> {
     this.containerEl = el
     if (el === null) {
@@ -158,7 +166,17 @@ export class LeafImpl implements Leaf {
     if (this.view && this._pendingOpen && !this._opened) {
       await this.view.onOpen(el)
       this._opened = true
+      this._openedEl = el
       this._pendingOpen = null
+      return
+    }
+    // Re-attach to a fresh container after a transient unmount (e.g.
+    // sidedock collapse/reopen). The view's DOM is in the previous
+    // (now-detached) element; re-home it by closing + re-opening.
+    if (this.view && this._opened && this._openedEl !== el) {
+      await this.view.onClose()
+      await this.view.onOpen(el)
+      this._openedEl = el
     }
   }
 }
