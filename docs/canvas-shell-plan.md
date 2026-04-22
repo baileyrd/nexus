@@ -61,14 +61,19 @@ Register the string names in the bootstrap plugin (same table as
 
 ### Shell UI phases
 
-> **Status (2026-04-22):** Phases 1–3 complete. Next pickup is
-> Phase 4 (edges + inspector). The kernel surface (`canvas_read` /
+> **Status (2026-04-22):** Phases 1–4 complete. Next pickup is
+> Phase 5 (node body embeds). The kernel surface (`canvas_read` /
 > `canvas_write` / `canvas_patch` / `canvas_nodes` / `canvas_edges`
 > on `com.nexus.storage`, handler ids 35–39) and every client-side
 > interaction listed under Phase 3 below (select, marquee, drag-
 > move, resize, delete, create text, drag-from-edge-to-create, undo/
-> redo) landed. Shell code lives under
-> `shell/src/plugins/nexus/canvas/`.
+> redo) landed, plus Phase 4 — edge click-to-select with bezier
+> hit-testing, selected-edge highlighting, delete-key edge removal,
+> and a floating inspector drawer that edits label / colour / line-
+> style for edges and label / text / colour for nodes (every edit
+> patches through `*_update` ops so undo/redo covers properties).
+> Shell code lives under `shell/src/plugins/nexus/canvas/`
+> (`Inspector.tsx` is the Phase-4 addition).
 
 #### Phase 1 — view registration + blank surface
 
@@ -132,22 +137,21 @@ Budget: 2 days.
   redo/undo produces a `canvas_patch`.
 - **Zoom-to-fit** / **zoom-to-selection** keyboard shortcuts.
 
-#### Phase 4 — edges + inspector  ← **pickup here**
+#### Phase 4 — edges + inspector
 
-Budget: 1 day.
+Budget: 1 day. **Done 2026-04-22.**
 
 - **Edge creation**: drag from a node's border handle (shown on
-  hover) onto a target node. **Landed in Phase 3** — the hover
-  affordance, drag-to-create, new-text-node-on-empty-drop, and
-  history wiring are all in `CanvasView.tsx`. Remaining Phase 4
-  work on edges narrows to selection + editing + deletion.
-- **Edge editing**: click to select; side inspector for label / color /
-  line style.
-- **Edge deletion**: `delete` while edge is selected.
+  hover) onto a target node. Landed in Phase 3.
+- **Edge editing**: click to select; floating inspector for label /
+  color / line style. Landed.
+- **Edge deletion**: `delete` while edge is selected. Landed.
 - **Inspector panel**: floating drawer on the right when a node or
   edge is selected — properties editor (label, color, type, size).
+  Landed. Multi-select node property editing is still out of scope;
+  the drawer binds only when exactly one node is selected.
 
-#### Phase 5 — node body embeds
+#### Phase 5 — node body embeds  ← **pickup here**
 
 Budget: 1–2 days total, each node type incrementally.
 
@@ -178,10 +182,11 @@ Budget: 1–2 days total, each node type incrementally.
 ## Phasing recap
 
 - Phase 1: routing + blank canvas leaf — no regression when opening
-  `.canvas`.
+  `.canvas`. **Done.**
 - Phase 2: render + camera — can view existing Obsidian canvases.
-- Phase 3: interactions — can create + rearrange.
-- Phase 4: edges + inspector — fully editable graph.
+  **Done.**
+- Phase 3: interactions — can create + rearrange. **Done.**
+- Phase 4: edges + inspector — fully editable graph. **Done.**
 - Phase 5: rich node embeds — feature parity with Obsidian.
 - Phase 6: polish.
 
