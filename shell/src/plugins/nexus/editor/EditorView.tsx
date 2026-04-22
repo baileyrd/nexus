@@ -6,7 +6,6 @@ import { eventBus } from '../../../host/EventBus'
 import { useOutlineStore } from '../outline/outlineStore'
 import { Icon } from '../../../icons'
 import { useWorkspaceField, workspace } from '../../../workspace'
-import { WindowControls } from '../../../shell/WindowControls'
 import { getEditorRuntime } from './runtime'
 import { CodeMirrorHost, type CodeMirrorHostHandle } from './cm/CodeMirrorHost'
 import { transactionBridge } from './cm/transactionBridge'
@@ -104,7 +103,6 @@ function isMarkdown(name: string): boolean {
 export function EditorView({ relpath, onRetry }: EditorViewProps) {
   const tabs = useEditorStore((s) => s.tabs)
   const setMode = useEditorStore((s) => s.setMode)
-  const rightPanelVisible = useWorkspaceField(() => !workspace.rightSplit.collapsed)
 
   // Each leaf binds to exactly one file via its workspace state.relpath;
   // the leaf's own TabButton in `WorkspaceRenderer.TabStrip` is the
@@ -290,10 +288,10 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
     height: '100%',
   }
 
-  // Minimal drag-region + window-controls strip. The workspace-level
-  // `<TabStrip>` in WorkspaceRenderer handles tab switching / close /
-  // new-tab now; EditorView only needs to keep the title-bar
-  // drag-region and (on the rightmost column) the OS window controls.
+  // WindowControls now live in the global workspace titlebar
+  // (shell/src/workspace/WorkspaceRenderer.tsx). EditorView no longer
+  // needs a per-column title strip — just a thin drag region so the
+  // user can still drag the window by the top of this column.
   const titleBar = (
     <div className="workspace-tab-header-container" data-tauri-drag-region>
       <div
@@ -301,7 +299,6 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
         data-tauri-drag-region
         style={{ flex: '1 1 auto' }}
       />
-      {!rightPanelVisible && <WindowControls />}
     </div>
   )
 
