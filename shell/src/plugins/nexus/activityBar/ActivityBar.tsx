@@ -39,16 +39,12 @@ export function ActivityBar({ onItemClick }: ActivityBarProps) {
         ))}
       </div>
 
-      {/* Bottom action items */}
+      {/* Bottom action items — no extra padding or border so buttons
+          stay visually identical to the top-group buttons (same height,
+          same centering). The upstream ribbon flex-column already
+          handles separation via `flex: 1` on the top container. */}
       {bottomItems.length > 0 && (
-        <div
-          style={{
-            flexShrink: 0,
-            borderTop: '1px solid var(--line-soft)',
-            paddingTop: 2,
-            paddingBottom: 4,
-          }}
-        >
+        <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
           {bottomItems.map((item) => (
             <ActivityBarButton
               key={item.id}
