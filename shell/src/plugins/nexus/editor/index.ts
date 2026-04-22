@@ -4,6 +4,7 @@ import { viewRegistry, workspace } from '../../../workspace'
 import type { Leaf, Tabs, WorkspaceParent } from '../../../workspace'
 import { EditorView } from './EditorView'
 import { markdownViewCreator } from './MarkdownView'
+import { emptyViewCreator, EMPTY_VIEW_TYPE } from './EmptyView'
 import { useEditorStore, isDirty } from './editorStore'
 import { setEditorRuntime } from './runtime'
 import { makeEditorClient } from './kernelClient'
@@ -348,6 +349,12 @@ export const editorPlugin: Plugin = {
     )
     viewRegistry.registerExtensions(['md', 'markdown'], 'markdown')
 
+    // Override the default no-op empty view (shell/src/workspace/ViewRegistry.ts)
+    // with one that renders the Obsidian-style action links — used by
+    // the tab-strip `+` button and any other leaf that lands on the
+    // empty type (e.g. restored placeholder leaves).
+    viewRegistry.register(EMPTY_VIEW_TYPE, emptyViewCreator)
+
     // Settings panel auto-generates UI from this. Defaults match the
     // pre-settings behaviour so existing users don't see a regression.
     api.configuration.register({
@@ -550,7 +557,14 @@ export const editorPlugin: Plugin = {
           getViewState: () => { state?: unknown }
         }
       } | undefined)?.leaf
-      if (!leaf || leaf.view?.viewType !== 'markdown') return
+      if (!leaf) return
+      // Non-markdown leaf active → clear editorStore active so the
+      // status bar (word/char/backlinks) doesn't keep showing stats
+      // for whichever markdown file was last focused.
+      if (leaf.view?.viewType !== 'markdown') {
+        useEditorStore.getState().setActive(null)
+        return
+      }
       const vs = leaf.getViewState()
       const relpath =
         vs.state && typeof vs.state === 'object' && 'relpath' in vs.state

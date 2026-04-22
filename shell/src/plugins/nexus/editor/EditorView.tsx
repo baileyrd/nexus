@@ -427,7 +427,7 @@ function BreadcrumbSegments({ activeTab }: { activeTab: EditorTab | null }) {
  * TODO: source keybinding hints from the KeybindingRegistry once it
  * gains a `findByCommand` method.
  */
-function EmptyStateActions({ hasAnyTab }: { hasAnyTab: boolean }) {
+export function EmptyStateActions({ hasAnyTab }: { hasAnyTab: boolean }) {
   const linkStyle: React.CSSProperties = {
     background: 'transparent',
     border: 0,

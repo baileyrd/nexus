@@ -144,7 +144,10 @@ interface EditorState {
    *   right neighbour → left neighbour → null.
    */
   closeTab: (relpath: string) => void
-  setActive: (relpath: string) => void
+  /** Set the focused tab. `null` clears active state — used when a
+   *  non-markdown workspace leaf becomes active so the status bar
+   *  stops showing stats for a file that isn't in focus. */
+  setActive: (relpath: string | null) => void
   /**
    * Create a new in-memory tab not yet backed by disk. `relpath` is
    * expected to be a non-colliding placeholder like `untitled-1`;
@@ -372,6 +375,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }),
 
   setActive: (relpath) => {
+    if (relpath === null) {
+      set({ activeRelpath: null })
+      return
+    }
     if (get().tabs.some((t) => t.relpath === relpath)) {
       set({ activeRelpath: relpath })
     }

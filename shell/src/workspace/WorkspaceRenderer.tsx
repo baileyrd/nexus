@@ -526,6 +526,10 @@ function TabStrip({ tabs, isMainDock = false }: { tabs: Tabs; isMainDock?: boole
     const leaf = workspace.createLeaf(tabs)
     tabs.leaves.push(leaf)
     tabs.activeIndex = tabs.leaves.length - 1
+    // Seed the leaf with the empty viewType so its creator runs and
+    // the action-links placeholder mounts. Without this `leaf.view`
+    // stays null and LeafHost renders a blank container.
+    void leaf.setViewState({ type: 'empty', active: true })
     workspace.setActiveLeaf(leaf)
     workspace.emit('layout-change')
   }
