@@ -63,6 +63,36 @@ pub struct UnresolvedLink {
     pub referenced_by: Vec<String>,
 }
 
+/// One node entry in the bulk graph response. Phantom (unresolved) nodes
+/// are included so the frontend can render dimmed link targets.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphNodeEntry {
+    /// Forge-relative path of the file (or unresolved link target).
+    pub path: String,
+    /// True when this node is a phantom (no real file backs it).
+    pub is_phantom: bool,
+}
+
+/// One directed edge in the bulk graph response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphEdgeEntry {
+    /// Source file path.
+    pub source: String,
+    /// Target file path (may be a phantom).
+    pub target: String,
+    /// True when the target file actually exists in the forge.
+    pub is_resolved: bool,
+}
+
+/// Bulk projection of the entire link graph for a single IPC call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphSnapshot {
+    /// All nodes (real + phantom).
+    pub nodes: Vec<GraphNodeEntry>,
+    /// All directed edges.
+    pub edges: Vec<GraphEdgeEntry>,
+}
+
 /// Summary statistics for the knowledge graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphStats {
@@ -219,6 +249,36 @@ impl KnowledgeGraph {
                 }
             })
             .collect()
+    }
+
+    /// Return a flat projection of every node and every edge in the graph.
+    ///
+    /// Used by the bulk `list_all_links` IPC handler to power the global
+    /// graph view. Edges are emitted once per stored edge (no dedup); the
+    /// caller can collapse duplicates if it wants.
+    #[must_use]
+    pub fn snapshot(&self) -> GraphSnapshot {
+        let mut nodes = Vec::with_capacity(self.graph.node_count());
+        for idx in self.graph.node_indices() {
+            nodes.push(GraphNodeEntry {
+                path: self.graph[idx].path.clone(),
+                is_phantom: self.phantom_nodes.contains(&idx),
+            });
+        }
+
+        let mut edges = Vec::with_capacity(self.graph.edge_count());
+        for src in self.graph.node_indices() {
+            for edge in self.graph.edges_directed(src, Direction::Outgoing) {
+                let tgt = edge.target();
+                edges.push(GraphEdgeEntry {
+                    source: self.graph[src].path.clone(),
+                    target: self.graph[tgt].path.clone(),
+                    is_resolved: !self.phantom_nodes.contains(&tgt),
+                });
+            }
+        }
+
+        GraphSnapshot { nodes, edges }
     }
 
     /// BFS traversal from `path` up to `depth` hops in both directions.
@@ -652,5 +712,103 @@ mod tests {
         let unresolved = kg.unresolved_links();
         assert_eq!(unresolved.len(), 1);
         assert_eq!(unresolved[0].target_path, "notes/missing.md");
+    }
+
+    // ── snapshot() tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn snapshot_empty_graph() {
+        let snap = KnowledgeGraph::new().snapshot();
+        assert!(snap.nodes.is_empty());
+        assert!(snap.edges.is_empty());
+    }
+
+    #[test]
+    fn snapshot_single_note_no_links() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_note("notes/a.md");
+        let snap = kg.snapshot();
+        assert_eq!(snap.nodes.len(), 1);
+        assert!(snap.edges.is_empty());
+        assert_eq!(snap.nodes[0].path, "notes/a.md");
+        assert!(!snap.nodes[0].is_phantom);
+    }
+
+    #[test]
+    fn snapshot_unresolved_link_keeps_phantom_node() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_note("notes/a.md");
+        kg.add_link(
+            "notes/a.md",
+            "notes/missing.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "missing".to_string(),
+                fragment: None,
+            },
+        );
+        let snap = kg.snapshot();
+        assert_eq!(snap.nodes.len(), 2);
+        let phantom = snap.nodes.iter().find(|n| n.path == "notes/missing.md").unwrap();
+        assert!(phantom.is_phantom);
+        assert_eq!(snap.edges.len(), 1);
+        assert!(!snap.edges[0].is_resolved);
+    }
+
+    #[test]
+    fn snapshot_cycle_two_notes() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_note("a.md");
+        kg.add_note("b.md");
+        kg.add_link(
+            "a.md",
+            "b.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "b".to_string(),
+                fragment: None,
+            },
+        );
+        kg.add_link(
+            "b.md",
+            "a.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "a".to_string(),
+                fragment: None,
+            },
+        );
+        let snap = kg.snapshot();
+        assert_eq!(snap.nodes.len(), 2);
+        assert_eq!(snap.edges.len(), 2);
+        assert!(snap.edges.iter().all(|e| e.is_resolved));
+    }
+
+    #[test]
+    fn snapshot_dense_subgraph() {
+        let mut kg = KnowledgeGraph::new();
+        let paths = ["a.md", "b.md", "c.md", "d.md"];
+        for p in &paths {
+            kg.add_note(p);
+        }
+        for s in &paths {
+            for t in &paths {
+                if s == t {
+                    continue;
+                }
+                kg.add_link(
+                    s,
+                    t,
+                    EdgeData {
+                        link_type: "wikilink".to_string(),
+                        link_text: (*t).to_string(),
+                        fragment: None,
+                    },
+                );
+            }
+        }
+        let snap = kg.snapshot();
+        assert_eq!(snap.nodes.len(), 4);
+        assert_eq!(snap.edges.len(), 12);
     }
 }

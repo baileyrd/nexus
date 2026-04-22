@@ -875,6 +875,20 @@ impl StorageEngine {
         Ok(g.stats())
     }
 
+    /// Return a flat snapshot of every node and edge in the knowledge graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the graph lock is poisoned.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal graph `RwLock` is poisoned.
+    pub fn list_all_links(&self) -> Result<graph::GraphSnapshot, StorageError> {
+        let g = self.graph.read().expect("graph lock poisoned");
+        Ok(g.snapshot())
+    }
+
     /// Return all files within `depth` hops of `path` in the knowledge graph.
     ///
     /// # Errors
