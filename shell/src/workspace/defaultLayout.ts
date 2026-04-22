@@ -64,15 +64,12 @@ export function buildDefaultLayout(): WorkspaceJSON {
 
   // Order mirrors Obsidian's default right-dock tab order:
   //   backlinks → outgoing-links → tags → all-properties → outline
-  //   → file-properties → bookmarks
   const rightTabs = makeTabs([
     'backlink',
     'outgoing-links',
     'tags',
     'all-properties',
     'outline',
-    'file-properties',
-    'bookmarks',
   ])
   const rightDock: SerializedSplit = {
     kind: 'split',

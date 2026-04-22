@@ -146,7 +146,7 @@ export const workflowPlugin: Plugin = {
       void refresh()
     })
     api.commands.register(COMMAND_SHOW, async () => {
-      const leaf = await workspace.ensureLeafOfType('workflow', 'right')
+      const leaf = await workspace.ensureLeafOfType('workflow', 'main')
       workspace.revealLeaf(leaf)
     })
 

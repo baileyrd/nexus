@@ -4,6 +4,7 @@ import { eventBus } from '../../../host/EventBus'
 import { Icon, type IconName } from '../../../icons'
 
 const EVENT_SCROLL_TO = 'editor:scrollToHeading'
+const EVENT_REQUEST_REFRESH = 'nexus.outline:requestRefresh'
 
 /** One row in the flat "visible" list we build for rendering.
  *  Carries the depth in the section hierarchy (0-based, smallest
@@ -114,6 +115,14 @@ export function OutlineView() {
       activeRowRef.current.scrollIntoView({ block: 'nearest' })
     }
   }, [activeIndex, autoScroll])
+
+  // Ask the plugin to rebuild headings whenever this view mounts — the
+  // view may have been hidden (right-dock tab switch) during the last
+  // editor-store transition, in which case its last recompute predates
+  // the current active file.
+  useEffect(() => {
+    eventBus.emit(EVENT_REQUEST_REFRESH, null)
+  }, [])
 
   const focusSearch = () => {
     searchRef.current?.focus()

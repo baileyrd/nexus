@@ -246,18 +246,21 @@ function getSideLeaf(side: 'left' | 'right', reveal?: boolean): Leaf {
 
 async function ensureLeafOfType(
   type: string,
-  side: 'left' | 'right' | 'bottom',
+  side: 'left' | 'right' | 'bottom' | 'main',
 ): Promise<Leaf> {
   // Existence only: if any leaf in the workspace already has this viewType,
   // return it unchanged. Never move, never reveal. (Plan resolved decision #2.)
   for (const leaf of state().leaves.values()) {
     if (leaf.view?.viewType === type) return leaf
   }
-  const dock = dockForSide(side)
-  let tabs = findFirstTabs(dock)
+  // 'main' routes into the root split (center panel) rather than a sidedock,
+  // so workbench-level views (workflow, mcp, skills, ai) don't clutter the
+  // note-sidecar tab strip on the right.
+  const parent = side === 'main' ? state().rootSplit : dockForSide(side)
+  let tabs = findFirstTabs(parent)
   if (!tabs) {
     tabs = makeTabs()
-    dock.children.push(tabs)
+    parent.children.push(tabs)
   }
   const leaf = createLeaf(tabs)
   tabs.leaves.push(leaf)

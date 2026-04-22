@@ -305,7 +305,7 @@ export const mcpPlugin: Plugin = {
       void refresh()
     })
     api.commands.register(COMMAND_SHOW, async () => {
-      const leaf = await workspace.ensureLeafOfType('mcp', 'right')
+      const leaf = await workspace.ensureLeafOfType('mcp', 'main')
       workspace.revealLeaf(leaf)
     })
 

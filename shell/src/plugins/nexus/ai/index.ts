@@ -55,7 +55,7 @@ export const aiPlugin: Plugin = {
     // Focus command — ensure an ai-chat leaf exists on the right and
     // reveal it; focuser drains on mount.
     api.commands.register(COMMAND_FOCUS, async () => {
-      const leaf = await workspace.ensureLeafOfType('ai-chat', 'right')
+      const leaf = await workspace.ensureLeafOfType('ai-chat', 'main')
       workspace.revealLeaf(leaf)
       requestFocus()
     })

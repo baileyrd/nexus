@@ -14,6 +14,13 @@ const COMMAND_FOCUS = 'nexus.outline.focus'
 const EVENT_REGISTER_TAB = 'rightPanel:registerTab'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 const EVENT_ACTIVE_HEADING_CHANGED = 'editor:activeHeadingChanged'
+/** Fired by `OutlineView` on mount so the plugin forces a recompute —
+ *  covers the case where the view was hidden during the last tab
+ *  transition (sidedock tab switch, dock collapse) and therefore
+ *  missed the store-driven recompute. */
+const EVENT_OUTLINE_REQUEST_REFRESH = 'nexus.outline:requestRefresh'
+
+export const OUTLINE_EVENT_REQUEST_REFRESH = EVENT_OUTLINE_REQUEST_REFRESH
 
 interface ActiveHeadingPayload {
   index: number | null
@@ -222,6 +229,10 @@ export const outlinePlugin: Plugin = {
 
     // Seed with whatever is active right now.
     void recompute()
+
+    api.events.on(EVENT_OUTLINE_REQUEST_REFRESH, () => {
+      void recompute()
+    })
 
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
       generation++

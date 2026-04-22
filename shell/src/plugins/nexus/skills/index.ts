@@ -121,7 +121,7 @@ export const skillsPlugin: Plugin = {
       void refresh()
     })
     api.commands.register(COMMAND_SHOW, async () => {
-      const leaf = await workspace.ensureLeafOfType('skills', 'right')
+      const leaf = await workspace.ensureLeafOfType('skills', 'main')
       workspace.revealLeaf(leaf)
     })
 

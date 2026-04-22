@@ -564,11 +564,17 @@ export const editorPlugin: Plugin = {
         useEditorStore.getState().setActive(null)
         return
       }
-      // Non-markdown leaf active → clear editorStore active so the
-      // status bar (word/char/backlinks) doesn't keep showing stats
-      // for whichever markdown file was last focused.
+      // Sidecar leaves (outline, backlinks, terminal, search, etc.)
+      // becoming active must NOT clear editorStore.activeRelpath —
+      // dependents like the outline plugin recompute off that value,
+      // and clearing it every time the user clicks a right-dock tab
+      // would wipe their panels. Only react to markdown leaves here;
+      // non-markdown editor-dock leaves (the `empty` new-tab placeholder)
+      // still clear below since they ARE in the main editor area.
       if (leaf.view?.viewType !== 'markdown') {
-        useEditorStore.getState().setActive(null)
+        if (leaf.view?.viewType === 'empty') {
+          useEditorStore.getState().setActive(null)
+        }
         return
       }
       const vs = leaf.getViewState()
