@@ -39,9 +39,17 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   but the current `shell/` UI has no renderer — `.bases` files fall
   through to CodeMirror as raw TOML. Plan: [docs/bases-shell-plan.md](../bases-shell-plan.md)
   (6 phases; routing skeleton → Table view → Board/List → Calendar/
-  Gallery/Timeline → view persistence → polish). First PR adds the
-  missing CRUD IPC handlers (`load_base`, `query_records`, record +
-  property + view mutators) on `com.nexus.database`.
+  Gallery/Timeline → view persistence → polish). Record-CRUD IPC
+  handlers landed 2026-04-22 on `com.nexus.storage` (not
+  `com.nexus.database` as originally planned — storage already owns
+  `base_load` / `base_index` / `base_query` / `base_list` and has
+  `forge_root`; colocating the mutators keeps the reindex atomic
+  within a single dispatch). Handler ids 40–42:
+  `base_record_create` / `base_record_update` / `base_record_delete`.
+  Still to land on storage: property + view mutators (`create_property`
+  / `update_property` / `delete_property` / `create_view` /
+  `update_view` / `delete_view`). Soft-delete waits on a `deleted_at`
+  slot on `BaseRecord`.
 - [ ] **`.canvas` board renderer in the shell (PRD-06 §4).** Storage
   layer parses/serializes/indexes canvas files; CLI shipped; kernel
   IPC surface landed 2026-04-22 (`canvas_read` / `canvas_write` /

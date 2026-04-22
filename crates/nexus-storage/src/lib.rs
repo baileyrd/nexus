@@ -457,6 +457,106 @@ impl StorageEngine {
         bases::query_bases(&conn)
     }
 
+    /// Append `record` to the base at `path` (forge-relative `.bases`
+    /// directory), save the TOML / JSON files back to disk, and reindex.
+    ///
+    /// When `record.id` is empty a v4 UUID is generated. A collision with an
+    /// existing record id is rejected with [`StorageError::CorruptFile`].
+    /// Reindex uses `insert_base` which is `INSERT OR REPLACE` + record wipe
+    /// + reinsert, so there's no orphan risk.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O, parse, validation, or DB failure.
+    pub fn base_record_create(
+        &self,
+        path: &str,
+        mut record: nexus_types::bases::BaseRecord,
+    ) -> Result<nexus_types::bases::BaseRecord, StorageError> {
+        let abs_dir = self.forge.root().join(path);
+        let mut base = nexus_types::bases::load_base(&abs_dir)?;
+
+        if record.id.is_empty() {
+            record.id = uuid::Uuid::new_v4().to_string();
+        } else if base.records.iter().any(|r| r.id == record.id) {
+            return Err(StorageError::CorruptFile {
+                path: path.to_string(),
+                reason: format!("record id '{}' already exists", record.id),
+            });
+        }
+
+        nexus_types::bases::validate_record(&base.schema, &record)?;
+        base.records.push(record.clone());
+        nexus_types::bases::save_base(&abs_dir, &base)?;
+        self.index_base(path, &base)?;
+        Ok(record)
+    }
+
+    /// Merge `fields` into the record identified by `record_id` in the base
+    /// at `path`. Keys present in `fields` overwrite existing values; keys
+    /// absent from `fields` are left intact. The `id` key in `fields` is
+    /// ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::FileNotFound`] when the record id is unknown,
+    /// or [`StorageError`] on I/O / parse / DB failure.
+    pub fn base_record_update(
+        &self,
+        path: &str,
+        record_id: &str,
+        fields: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<nexus_types::bases::BaseRecord, StorageError> {
+        let abs_dir = self.forge.root().join(path);
+        let mut base = nexus_types::bases::load_base(&abs_dir)?;
+
+        let record = base
+            .records
+            .iter_mut()
+            .find(|r| r.id == record_id)
+            .ok_or_else(|| {
+                StorageError::FileNotFound(format!("record {record_id} in {path}"))
+            })?;
+
+        for (k, v) in fields {
+            if k == "id" {
+                continue;
+            }
+            record.fields.insert(k.clone(), v.clone());
+        }
+        let updated = record.clone();
+        nexus_types::bases::validate_record(&base.schema, &updated)?;
+        nexus_types::bases::save_base(&abs_dir, &base)?;
+        self.index_base(path, &base)?;
+        Ok(updated)
+    }
+
+    /// Remove the record identified by `record_id` from the base at `path`.
+    ///
+    /// Hard-delete: the record is removed from `records.json` and the index
+    /// is rebuilt. A dedicated soft-delete slot (`deleted_at`) on
+    /// [`nexus_types::bases::BaseRecord`] is tracked as a separate backlog
+    /// item — see the bases shell plan.
+    ///
+    /// Returns `Ok(())` when the record is removed. A missing id is a no-op
+    /// so the caller can dedupe retries without racing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O / parse / DB failure.
+    pub fn base_record_delete(&self, path: &str, record_id: &str) -> Result<(), StorageError> {
+        let abs_dir = self.forge.root().join(path);
+        let mut base = nexus_types::bases::load_base(&abs_dir)?;
+        let before = base.records.len();
+        base.records.retain(|r| r.id != record_id);
+        if base.records.len() == before {
+            return Ok(());
+        }
+        nexus_types::bases::save_base(&abs_dir, &base)?;
+        self.index_base(path, &base)?;
+        Ok(())
+    }
+
     /// Delete a file from disk and remove its index entry.
     ///
     /// Silently succeeds when the file does not exist on disk.
@@ -1622,7 +1722,133 @@ mod tests {
         assert!(engine.canvas_edges_by_path("nope.canvas").expect("edges").is_empty());
     }
 
-    // ── 12. open_nonexistent_forge_returns_error ──────────────────────────────
+    // ── 12. base_record_crud_roundtrip ────────────────────────────────────────
+
+    #[test]
+    fn base_record_crud_roundtrip() {
+        use nexus_types::bases::{Base, BaseRecord, BaseSchema, BaseMetadata};
+
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        let base_rel = "tasks.bases";
+        let abs = dir.path().join(base_rel);
+        let mut fields = serde_json::Map::new();
+        fields.insert(
+            "title".to_string(),
+            serde_json::json!({ "type": "title", "required": true }),
+        );
+        let seed = Base {
+            name: "Tasks".to_string(),
+            schema: BaseSchema { version: "1.0".to_string(), fields },
+            records: Vec::new(),
+            views: Vec::new(),
+            relations: Vec::new(),
+            metadata: BaseMetadata::default(),
+        };
+        nexus_types::bases::save_base(&abs, &seed).expect("save seed");
+        engine.index_base(base_rel, &seed).expect("index seed");
+
+        // Create with server-generated id.
+        let created = engine
+            .base_record_create(
+                base_rel,
+                BaseRecord {
+                    id: String::new(),
+                    fields: {
+                        let mut m = serde_json::Map::new();
+                        m.insert("title".to_string(), serde_json::json!("Buy milk"));
+                        m
+                    },
+                },
+            )
+            .expect("create");
+        assert!(!created.id.is_empty(), "id should be generated");
+        let created_id = created.id.clone();
+
+        // Update — patch one field.
+        let patch = {
+            let mut m = serde_json::Map::new();
+            m.insert("title".to_string(), serde_json::json!("Buy oat milk"));
+            m
+        };
+        let updated = engine
+            .base_record_update(base_rel, &created_id, &patch)
+            .expect("update");
+        assert_eq!(updated.fields.get("title").unwrap(), "Buy oat milk");
+
+        // Re-read from disk to confirm round-trip.
+        let reloaded = nexus_types::bases::load_base(&abs).expect("load");
+        assert_eq!(reloaded.records.len(), 1);
+        assert_eq!(reloaded.records[0].fields.get("title").unwrap(), "Buy oat milk");
+
+        // Delete.
+        engine.base_record_delete(base_rel, &created_id).expect("delete");
+        let reloaded = nexus_types::bases::load_base(&abs).expect("load2");
+        assert!(reloaded.records.is_empty());
+
+        // Delete again — idempotent no-op.
+        engine.base_record_delete(base_rel, &created_id).expect("delete noop");
+    }
+
+    // ── 13. base_record_create_rejects_duplicate_id ───────────────────────────
+
+    #[test]
+    fn base_record_create_rejects_duplicate_id() {
+        use nexus_types::bases::{Base, BaseRecord, BaseSchema, BaseMetadata};
+
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        let base_rel = "d.bases";
+        let seed = Base {
+            name: "D".to_string(),
+            schema: BaseSchema { version: "1.0".to_string(), fields: serde_json::Map::new() },
+            records: vec![BaseRecord { id: "r1".into(), fields: serde_json::Map::new() }],
+            views: Vec::new(),
+            relations: Vec::new(),
+            metadata: BaseMetadata::default(),
+        };
+        nexus_types::bases::save_base(&dir.path().join(base_rel), &seed).expect("save");
+        engine.index_base(base_rel, &seed).expect("index");
+
+        let err = engine
+            .base_record_create(
+                base_rel,
+                BaseRecord { id: "r1".into(), fields: serde_json::Map::new() },
+            )
+            .expect_err("duplicate should fail");
+        assert!(matches!(err, StorageError::CorruptFile { .. }));
+    }
+
+    // ── 14. base_record_update_unknown_id_errors ──────────────────────────────
+
+    #[test]
+    fn base_record_update_unknown_id_errors() {
+        use nexus_types::bases::{Base, BaseSchema, BaseMetadata};
+
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+
+        let base_rel = "u.bases";
+        let seed = Base {
+            name: "U".to_string(),
+            schema: BaseSchema { version: "1.0".to_string(), fields: serde_json::Map::new() },
+            records: Vec::new(),
+            views: Vec::new(),
+            relations: Vec::new(),
+            metadata: BaseMetadata::default(),
+        };
+        nexus_types::bases::save_base(&dir.path().join(base_rel), &seed).expect("save");
+        engine.index_base(base_rel, &seed).expect("index");
+
+        let err = engine
+            .base_record_update(base_rel, "ghost", &serde_json::Map::new())
+            .expect_err("unknown id should fail");
+        assert!(matches!(err, StorageError::FileNotFound(_)));
+    }
+
+    // ── 15. open_nonexistent_forge_returns_error ──────────────────────────────
 
     #[test]
     fn open_nonexistent_forge_returns_error() {

@@ -403,6 +403,18 @@ fn register_core_plugins(
                         "canvas_edges",
                         nexus_storage::core_plugin::HANDLER_CANVAS_EDGES,
                     ),
+                    (
+                        "base_record_create",
+                        nexus_storage::core_plugin::HANDLER_BASE_RECORD_CREATE,
+                    ),
+                    (
+                        "base_record_update",
+                        nexus_storage::core_plugin::HANDLER_BASE_RECORD_UPDATE,
+                    ),
+                    (
+                        "base_record_delete",
+                        nexus_storage::core_plugin::HANDLER_BASE_RECORD_DELETE,
+                    ),
                 ],
             ),
             forge_root,

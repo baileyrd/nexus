@@ -143,6 +143,21 @@ pub const HANDLER_CANVAS_NODES: u32 = 38;
 /// indexed edges for that canvas — `Vec<CanvasEdgeRecord>`. Empty vector
 /// when the path is not yet indexed.
 pub const HANDLER_CANVAS_EDGES: u32 = 39;
+/// Handler id for `base_record_create`. Args:
+/// `{ "path": String, "record": BaseRecord }`. Appends `record` to the
+/// base at `path`, saves the `.bases` directory to disk, and reindexes.
+/// Generates a v4 UUID when `record.id` is empty. Returns the stored
+/// record (with the generated id if applicable).
+pub const HANDLER_BASE_RECORD_CREATE: u32 = 40;
+/// Handler id for `base_record_update`. Args:
+/// `{ "path": String, "record_id": String, "fields": Map<String, Value> }`.
+/// Merges `fields` into the record (shallow overwrite), saves, and
+/// reindexes. Returns the updated record.
+pub const HANDLER_BASE_RECORD_UPDATE: u32 = 41;
+/// Handler id for `base_record_delete`. Args:
+/// `{ "path": String, "record_id": String }`. Removes the record from
+/// disk + index. Missing ids are a no-op (idempotent). Returns `{}`.
+pub const HANDLER_BASE_RECORD_DELETE: u32 = 42;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -478,6 +493,54 @@ impl CorePlugin for StorageCorePlugin {
                     .canvas_edges_by_path(&path)
                     .map_err(|e| exec_err(format!("canvas_edges: {e}")))?;
                 to_value(&edges, "canvas_edges")
+            }
+            HANDLER_BASE_RECORD_CREATE => {
+                let path = path_arg(args, "base_record_create")?;
+                let record: nexus_types::bases::BaseRecord = args
+                    .get("record")
+                    .ok_or_else(|| exec_err("base_record_create: missing 'record'".to_string()))
+                    .and_then(|v| {
+                        serde_json::from_value(v.clone()).map_err(|e| {
+                            exec_err(format!("base_record_create: record decode: {e}"))
+                        })
+                    })?;
+                let stored = engine
+                    .base_record_create(&path, record)
+                    .map_err(|e| exec_err(format!("base_record_create: {e}")))?;
+                to_value(&stored, "base_record_create")
+            }
+            HANDLER_BASE_RECORD_UPDATE => {
+                let path = path_arg(args, "base_record_update")?;
+                let record_id = args
+                    .get("record_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        exec_err("base_record_update: missing 'record_id' string".to_string())
+                    })?;
+                let fields = args
+                    .get("fields")
+                    .and_then(serde_json::Value::as_object)
+                    .cloned()
+                    .ok_or_else(|| {
+                        exec_err("base_record_update: missing 'fields' object".to_string())
+                    })?;
+                let updated = engine
+                    .base_record_update(&path, record_id, &fields)
+                    .map_err(|e| exec_err(format!("base_record_update: {e}")))?;
+                to_value(&updated, "base_record_update")
+            }
+            HANDLER_BASE_RECORD_DELETE => {
+                let path = path_arg(args, "base_record_delete")?;
+                let record_id = args
+                    .get("record_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        exec_err("base_record_delete: missing 'record_id' string".to_string())
+                    })?;
+                engine
+                    .base_record_delete(&path, record_id)
+                    .map_err(|e| exec_err(format!("base_record_delete: {e}")))?;
+                Ok(serde_json::json!({}))
             }
             HANDLER_GRAPH_NEIGHBORS => {
                 let path = path_arg(args, "graph_neighbors")?;
