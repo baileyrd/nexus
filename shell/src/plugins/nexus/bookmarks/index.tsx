@@ -3,7 +3,6 @@ import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { ViewBase, viewRegistry, workspace, type Leaf } from '../../../workspace'
 
-const VIEW_ID = 'nexus.bookmarks.view'
 const VIEW_TYPE = 'bookmarks'
 const COMMAND_FOCUS = 'nexus.bookmarks.focus'
 
@@ -53,7 +52,6 @@ export const bookmarksPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
-    dependsOn: ['nexus.activityBar'],
     contributes: {
       commands: [{ id: COMMAND_FOCUS, title: 'Focus Bookmarks', category: 'View' }],
     },
@@ -62,18 +60,8 @@ export const bookmarksPlugin: Plugin = {
   activate(api: PluginAPI) {
     viewRegistry.register(VIEW_TYPE, (leaf) => new BookmarksPaneView(leaf))
 
-    api.activityBar.addItem({
-      id: 'nexus.bookmarks.activityItem',
-      icon: '',
-      iconName: 'book',
-      title: 'Bookmarks',
-      viewId: VIEW_ID,
-      priority: 30,
-      command: COMMAND_FOCUS,
-    })
-
     api.commands.register(COMMAND_FOCUS, async () => {
-      const leaf = await workspace.ensureLeafOfType(VIEW_TYPE, 'left')
+      const leaf = await workspace.ensureLeafOfType(VIEW_TYPE, 'right')
       workspace.revealLeaf(leaf)
     })
   },

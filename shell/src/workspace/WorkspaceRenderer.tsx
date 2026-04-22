@@ -528,7 +528,12 @@ function TabStrip({
         background: 'var(--tab-container-background, var(--bg-soft, #2d2d2d))',
         borderBottom: '1px solid var(--divider-color, var(--line, #333))',
         minHeight: 36,
-        overflow: 'hidden',
+        // Sidedocks are narrow (default 280px) and hold many icon tabs;
+        // let them scroll horizontally instead of clipping tabs past the
+        // visible area. Main dock still hides overflow — it has the
+        // tab-list dropdown for overflow access.
+        overflowX: sideDock ? 'auto' : 'hidden',
+        overflowY: 'hidden',
         // Reserve horizontal space at the trailing edge for the absolute
         // WindowControls cluster (3 × 40px = 120px) when this tab strip is
         // the rightmost visible column. That's the right sidedock when
@@ -578,6 +583,10 @@ function TabStrip({
           <Icon name="plus" size={14} />
         </button>
       )}
+      {/* Spacer pushes the tab-list dropdown chevron and the right-sidedock
+          collapse toggle to the far right of the strip, keeping them
+          adjacent to each other. */}
+      {isMainDock && <div style={{ flex: '1 1 auto' }} />}
       {isMainDock && <TabListDropdown tabs={tabs} />}
       {/* Right-sidedock collapse / expand — lives at the far right of the
           main dock's tab strip (mirroring the activity-bar left-panel
@@ -600,7 +609,7 @@ function TabStrip({
           onClick={() =>
             workspace.setSidedockCollapsed('right', !workspace.rightSplit.collapsed)
           }
-          style={{ ...collapseButtonStyle, marginLeft: 'auto' }}
+          style={collapseButtonStyle}
         >
           <Icon name="panel" size={18} />
         </button>
