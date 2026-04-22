@@ -18,6 +18,7 @@ import {
   useRef,
   type CSSProperties,
 } from 'react'
+import { Icon } from '../icons/index.tsx'
 import type {
   FloatingWindow as FloatingWindowNode,
   Leaf,
@@ -93,7 +94,7 @@ export function Workspace(): JSX.Element {
       <div className="workspace-upper" style={UPPER_ROW_STYLE}>
         <SidedockFrame side="left" dock={leftSplit} />
         <div className="workspace-main" style={MAIN_STYLE}>
-          <RenderNode node={rootSplit} />
+          <RenderNode node={rootSplit} isMainDock />
         </div>
         <SidedockFrame side="right" dock={rightSplit} />
       </div>
@@ -401,20 +402,25 @@ function DockResizeHandle({ side, initialSize }: DockResizeHandleProps): JSX.Ele
 
 interface RenderNodeProps {
   node: WorkspaceParent
+  /** True when this subtree is descended from the main (rootSplit) dock.
+   *  Used to gate the trailing "+ new tab" button on tab strips — that
+   *  affordance is main-dock only, matching Obsidian. Sidedocks and
+   *  floating windows don't get it. */
+  isMainDock?: boolean
 }
 
-function RenderNode({ node }: RenderNodeProps): JSX.Element | null {
+function RenderNode({ node, isMainDock = false }: RenderNodeProps): JSX.Element | null {
   switch (node.kind) {
     case 'split':
-      return <SplitNode node={node} />
+      return <SplitNode node={node} isMainDock={isMainDock} />
     case 'tabs':
-      return <TabGroup tabs={node} />
+      return <TabGroup tabs={node} isMainDock={isMainDock} />
     case 'root':
-      return <RenderNode node={(node as Root).child} />
+      return <RenderNode node={(node as Root).child} isMainDock={isMainDock} />
     case 'floating':
       return (
         <div data-floating="true" style={{ width: '100%', height: '100%' }}>
-          <RenderNode node={(node as FloatingWindowNode).child} />
+          <RenderNode node={(node as FloatingWindowNode).child} isMainDock={false} />
         </div>
       )
     default: {
@@ -426,7 +432,7 @@ function RenderNode({ node }: RenderNodeProps): JSX.Element | null {
   }
 }
 
-function SplitNode({ node }: { node: Split }): JSX.Element {
+function SplitNode({ node, isMainDock }: { node: Split; isMainDock: boolean }): JSX.Element {
   const style: CSSProperties = {
     display: 'flex',
     flexDirection: node.direction === 'horizontal' ? 'row' : 'column',
@@ -450,7 +456,7 @@ function SplitNode({ node }: { node: Split }): JSX.Element {
               display: 'flex',
             }}
           >
-            <RenderNode node={child} />
+            <RenderNode node={child} isMainDock={isMainDock} />
           </div>
         )
       })}
@@ -469,9 +475,10 @@ function childKey(node: WorkspaceParent): string {
 
 interface TabGroupProps {
   tabs: Tabs
+  isMainDock: boolean
 }
 
-function TabGroup({ tabs }: TabGroupProps): JSX.Element {
+function TabGroup({ tabs, isMainDock }: TabGroupProps): JSX.Element {
   const activeLeaf = tabs.leaves[tabs.activeIndex] ?? null
 
   return (
@@ -488,7 +495,7 @@ function TabGroup({ tabs }: TabGroupProps): JSX.Element {
         overflow: 'hidden',
       }}
     >
-      <TabStrip tabs={tabs} />
+      <TabStrip tabs={tabs} isMainDock={isMainDock} />
       <div
         className="workspace-tab-body"
         style={{
@@ -514,7 +521,15 @@ function TabGroup({ tabs }: TabGroupProps): JSX.Element {
 // <TabStrip> — horizontal list of tab buttons.
 // ---------------------------------------------------------------------------
 
-function TabStrip({ tabs }: { tabs: Tabs }): JSX.Element {
+function TabStrip({ tabs, isMainDock = false }: { tabs: Tabs; isMainDock?: boolean }): JSX.Element {
+  const handleNewTab = (): void => {
+    const leaf = workspace.createLeaf(tabs)
+    tabs.leaves.push(leaf)
+    tabs.activeIndex = tabs.leaves.length - 1
+    workspace.setActiveLeaf(leaf)
+    workspace.emit('layout-change')
+  }
+
   return (
     <div
       className="workspace-tab-strip"
@@ -544,6 +559,29 @@ function TabStrip({ tabs }: { tabs: Tabs }): JSX.Element {
           />
         )
       })}
+      {isMainDock && (
+        <button
+          type="button"
+          aria-label="New tab"
+          title="New tab"
+          onClick={handleNewTab}
+          className="workspace-tab-new"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-muted, var(--fg-muted, #888))',
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '0 8px',
+            fontSize: 12,
+            lineHeight: 1,
+          }}
+        >
+          <Icon name="plus" size={14} />
+        </button>
+      )}
     </div>
   )
 }
