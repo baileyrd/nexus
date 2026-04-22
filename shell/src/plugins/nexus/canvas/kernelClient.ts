@@ -8,6 +8,7 @@ import type { PluginAPI } from '../../../types/plugin'
 
 export const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 export const LINKPREVIEW_PLUGIN_ID = 'com.nexus.linkpreview'
+export const TERMINAL_PLUGIN_ID = 'com.nexus.terminal'
 
 export type CanvasNodeType =
   | 'file'
@@ -117,6 +118,22 @@ export interface CanvasKernelClient {
   /** Load a `.bases` directory's full contents (schema + records).
    *  Used by the database-node overlay to render a mini-grid. */
   loadBase(relpath: string): Promise<BaseSummary>
+  /** Start a fresh PTY session. Returns the session id — callers
+   *  hand it to `sendInput` / `readRawSince` / `closeSession`. Used
+   *  by the terminal-node overlay's Run button. */
+  createTerminalSession(): Promise<string>
+  /** Send a line of input to a session. `send_input` automatically
+   *  appends a newline, which is what we want for "run one command". */
+  sendTerminalInput(sessionId: string, line: string): Promise<void>
+  /** Drain raw PTY bytes past `cursor`. Returns the bytes plus the
+   *  advanced cursor for the next call. */
+  readTerminalRaw(
+    sessionId: string,
+    cursor: number,
+  ): Promise<{ cursor: number; bytes: Uint8Array }>
+  /** Tear a session down. Safe to call multiple times — the kernel
+   *  treats unknown ids as no-ops for the overlay's cleanup path. */
+  closeTerminalSession(sessionId: string): Promise<void>
 }
 
 export function makeCanvasKernelClient(kernel: PluginAPI['kernel']): CanvasKernelClient {
@@ -146,6 +163,38 @@ export function makeCanvasKernelClient(kernel: PluginAPI['kernel']): CanvasKerne
       return kernel.invoke<BaseSummary>(STORAGE_PLUGIN_ID, 'base_load', {
         path: relpath,
       })
+    },
+    async createTerminalSession() {
+      const resp = await kernel.invoke<{ id: string }>(
+        TERMINAL_PLUGIN_ID,
+        'create_session',
+        {},
+      )
+      return resp.id
+    },
+    async sendTerminalInput(sessionId, line) {
+      await kernel.invoke<unknown>(TERMINAL_PLUGIN_ID, 'send_input', {
+        id: sessionId,
+        input: line,
+      })
+    },
+    async readTerminalRaw(sessionId, cursor) {
+      const resp = await kernel.invoke<{ cursor: number; data: number[] }>(
+        TERMINAL_PLUGIN_ID,
+        'read_raw_since',
+        { id: sessionId, cursor },
+      )
+      return {
+        cursor: resp.cursor,
+        bytes: resp.data.length ? Uint8Array.from(resp.data) : new Uint8Array(),
+      }
+    },
+    async closeTerminalSession(sessionId) {
+      await kernel
+        .invoke<unknown>(TERMINAL_PLUGIN_ID, 'close_session', { id: sessionId })
+        .catch(() => {
+          // Session already gone — canvas teardown is idempotent.
+        })
     },
   }
 }

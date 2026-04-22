@@ -530,8 +530,6 @@ function drawNode(
   const fill = node.color ?? theme.bgRaised
   const stroke = selected ? theme.accent : theme.border
   const strokeWidth = selected ? 2 : 1
-  const fg = theme.fg
-  const muted = theme.fgMuted
 
   ctx.save()
   if (node.type === 'group') {
@@ -544,53 +542,20 @@ function drawNode(
     strokeRoundRect(ctx, node.x, node.y, node.width, node.height, radius)
     ctx.setLineDash([])
     if (node.label) {
-      drawLabelTab(ctx, node.x + 8, node.y - 2, node.label, fg, theme.bgMuted)
+      drawLabelTab(ctx, node.x + 8, node.y - 2, node.label, theme.fg, theme.bgMuted)
     }
     ctx.restore()
     return
   }
 
+  // Non-group nodes: draw the card chrome and stop. The DOM overlay
+  // (Phases 5a–5e) owns the body content for every non-group type,
+  // so there's nothing left to render inside the rect from here.
   ctx.fillStyle = fill
   fillRoundRect(ctx, node.x, node.y, node.width, node.height, radius)
   ctx.strokeStyle = stroke
   ctx.lineWidth = 1
   strokeRoundRect(ctx, node.x, node.y, node.width, node.height, radius)
-
-  clipRoundRect(ctx, node.x + 1, node.y + 1, node.width - 2, node.height - 2, radius - 1)
-  const pad = 10
-
-  if (node.type === 'text') {
-    // Text body is drawn by the DOM overlay layer (Phase 5a) so
-    // markdown formatting + links render as real HTML. The 2D canvas
-    // keeps the card background + border it already drew above, which
-    // is enough to show selection/resize affordances.
-  } else if (node.type === 'file') {
-    // File body is drawn by the DOM overlay layer (Phase 5c) so we
-    // can embed markdown / text / image previews inline. The 2D
-    // canvas keeps the card chrome above.
-  } else if (node.type === 'link') {
-    // Link body is drawn by the DOM overlay layer (Phase 5b) so we
-    // can show a live OG preview (favicon + title + description +
-    // image). The 2D canvas keeps the card chrome above.
-  } else if (node.type === 'database') {
-    // Database body is drawn by the DOM overlay layer (Phase 5d) —
-    // a mini-grid of the linked `.bases` schema + records.
-  } else if (node.type === 'terminal') {
-    ctx.fillStyle = muted
-    ctx.font = '11px var(--font-monospace, ui-monospace, monospace)'
-    ctx.fillText('TERMINAL', node.x + pad, node.y + pad + 10)
-    ctx.fillStyle = fg
-    ctx.font = '12px var(--font-monospace, ui-monospace, monospace)'
-    wrapText(
-      ctx,
-      '$ ' + (node.command ?? ''),
-      node.x + pad,
-      node.y + pad + 32,
-      node.width - pad * 2,
-      15,
-    )
-  }
-
   ctx.restore()
 }
 

@@ -8,7 +8,7 @@
 // phases need scrollbars, links, or input focus — but Phase 5a keeps
 // everything passive so text nodes can't eat clicks.
 
-import { forwardRef, useEffect, useMemo, useState } from 'react'
+import { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
 import type { BaseSummary, CanvasKernelClient, CanvasNode, LinkPreview } from './kernelClient'
 import { renderMarkdown } from '../editor/markdownRender'
 
@@ -55,12 +55,258 @@ export const CanvasOverlay = forwardRef<HTMLDivElement, Props>(function CanvasOv
           if (n.type === 'link') return <LinkNodeOverlay key={n.id} node={n} client={client} />
           if (n.type === 'file') return <FileNodeOverlay key={n.id} node={n} client={client} />
           if (n.type === 'database') return <DatabaseNodeOverlay key={n.id} node={n} client={client} />
+          if (n.type === 'terminal') return <TerminalNodeOverlay key={n.id} node={n} client={client} />
           return null
         })}
       </div>
     </div>
   )
 })
+
+/** How much output we keep around per terminal node. Plenty for a
+ *  visible transcript without letting a chatty command balloon
+ *  the doc's memory. */
+const TERMINAL_BUFFER_CAP = 32 * 1024
+/** Polling interval for PTY drains. Slower than the main terminal
+ *  (which runs at ~30 ms) because a canvas node is a summary, not
+ *  an interactive surface — 250 ms lag is fine and keeps CPU cost
+ *  low when many terminal nodes are on-screen. */
+const TERMINAL_POLL_MS = 250
+
+/** Strip ANSI escape sequences + cursor/control codes so the raw
+ *  PTY bytes render cleanly inside a `<pre>`. Matches CSI / OSC /
+ *  ESC sequences and the bare control characters that xterm would
+ *  otherwise consume. Good enough for a mini transcript — the main
+ *  terminal uses full xterm.js for interactivity. */
+function stripAnsi(s: string): string {
+  // CSI and similar: ESC [ ... letter, ESC ] ... BEL/ST, ESC @...
+  // See https://en.wikipedia.org/wiki/ANSI_escape_code
+  return s
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
+    .replace(/\x1b[@-Z\\-_]/g, '')
+    .replace(/\r/g, '')
+}
+
+function TerminalNodeOverlay({
+  node,
+  client,
+}: {
+  node: CanvasNode
+  client: CanvasKernelClient
+}) {
+  const command = node.command ?? ''
+  const [output, setOutput] = useState('')
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // Session state lives in refs so the polling loop doesn't close
+  // over stale React state. The tail ref is the canonical output
+  // buffer; `setOutput` is only a notification that the ref changed.
+  const sessionRef = useRef<string | null>(null)
+  const cursorRef = useRef(0)
+  const outputRef = useRef('')
+  const pollTimerRef = useRef<number | null>(null)
+  const decoderRef = useRef<TextDecoder>(new TextDecoder('utf-8', { fatal: false }))
+
+  // Always tear down the session on unmount — otherwise a deleted /
+  // navigated-away node would leave a live PTY orphan for every
+  // run, which adds up fast.
+  useEffect(() => {
+    return () => {
+      const id = sessionRef.current
+      if (pollTimerRef.current != null) window.clearTimeout(pollTimerRef.current)
+      if (id) void client.closeTerminalSession(id)
+    }
+  }, [client])
+
+  const appendOutput = (chunk: string) => {
+    if (!chunk) return
+    const next = outputRef.current + chunk
+    const trimmed =
+      next.length > TERMINAL_BUFFER_CAP
+        ? next.slice(next.length - TERMINAL_BUFFER_CAP)
+        : next
+    outputRef.current = trimmed
+    setOutput(trimmed)
+  }
+
+  const stopPolling = () => {
+    if (pollTimerRef.current != null) {
+      window.clearTimeout(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+  }
+
+  const tick = async () => {
+    const id = sessionRef.current
+    if (!id) return
+    try {
+      const { cursor, bytes } = await client.readTerminalRaw(id, cursorRef.current)
+      cursorRef.current = cursor
+      if (bytes.length > 0) {
+        appendOutput(stripAnsi(decoderRef.current.decode(bytes, { stream: true })))
+      }
+    } catch (err) {
+      // Session dropped (user closed, timeout, etc.). Stop polling
+      // but keep whatever output we did capture visible.
+      setError(String(err))
+      stopPolling()
+      setRunning(false)
+      sessionRef.current = null
+      return
+    }
+    if (sessionRef.current) {
+      pollTimerRef.current = window.setTimeout(() => void tick(), TERMINAL_POLL_MS)
+    }
+  }
+
+  const onRun = async () => {
+    if (running) return
+    if (!command.trim()) {
+      setError('No command set on this node.')
+      return
+    }
+    setError(null)
+    setOutput('')
+    outputRef.current = ''
+    cursorRef.current = 0
+    setRunning(true)
+    try {
+      const id = await client.createTerminalSession()
+      sessionRef.current = id
+      // Brief pause so the shell prints its prompt before we
+      // overlay our command — not strictly needed, but it makes
+      // the transcript readable instead of "$command\n$prompt".
+      await new Promise((r) => setTimeout(r, 30))
+      await client.sendTerminalInput(id, command)
+      void tick()
+    } catch (err) {
+      setError(String(err))
+      setRunning(false)
+      sessionRef.current = null
+    }
+  }
+
+  const onStop = async () => {
+    const id = sessionRef.current
+    sessionRef.current = null
+    stopPolling()
+    setRunning(false)
+    if (id) await client.closeTerminalSession(id)
+  }
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: node.x,
+        top: node.y,
+        width: node.width,
+        height: node.height,
+        padding: 10,
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        color: 'var(--fg, #e5e7eb)',
+        fontFamily: 'var(--font-family, system-ui, sans-serif)',
+        fontSize: 12,
+        lineHeight: 1.35,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 6,
+          minHeight: 18,
+        }}
+      >
+        <div
+          style={{
+            color: 'var(--fg-muted, #9ca3af)',
+            fontSize: 10,
+            letterSpacing: 0.4,
+            textTransform: 'uppercase',
+            fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            flex: '1 1 auto',
+            minWidth: 0,
+          }}
+        >
+          TERMINAL {running && '· running…'}
+        </div>
+        <button
+          type="button"
+          onClick={() => void (running ? onStop() : onRun())}
+          style={{
+            // pointer-events: auto so the button is clickable despite
+            // the overlay root being passive. Everything else in the
+            // card stays pass-through.
+            pointerEvents: 'auto',
+            background: running
+              ? 'var(--risk, #ef4444)'
+              : 'var(--accent, #3b82f6)',
+            border: 'none',
+            color: '#fff',
+            fontSize: 10,
+            fontWeight: 600,
+            padding: '2px 8px',
+            borderRadius: 4,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            flex: '0 0 auto',
+          }}
+        >
+          {running ? 'Stop' : 'Run'}
+        </button>
+      </div>
+
+      <div
+        style={{
+          color: 'var(--accent, #3b82f6)',
+          fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
+          fontSize: 11,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        $ {command || '(no command)'}
+      </div>
+
+      {error && (
+        <div style={{ color: 'var(--risk, #ef4444)', fontSize: 11 }}>{error}</div>
+      )}
+
+      <pre
+        style={{
+          flex: '1 1 auto',
+          margin: 0,
+          overflow: 'hidden',
+          fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
+          fontSize: 11,
+          lineHeight: 1.4,
+          color: 'var(--fg, #e5e7eb)',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          // Anchor to bottom so the newest output is always visible
+          // without needing a scroll container that would eat canvas
+          // drag events.
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'flex-end',
+        }}
+      >
+        {output || (running ? '' : '(not run yet)')}
+      </pre>
+    </div>
+  )
+}
 
 /** Cap on the number of rows the database-node mini-grid shows at
  *  once. Past this we render a "+ N more" footer — nobody wants a
