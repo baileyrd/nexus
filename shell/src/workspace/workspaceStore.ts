@@ -407,8 +407,30 @@ async function detachLeaf(leaf: Leaf): Promise<void> {
   const leaves = new Map(state().leaves)
   leaves.delete(leaf.id)
   const next: Partial<WorkspaceStoreState> = { leaves }
-  if (state().activeLeafId === leaf.id) next.activeLeafId = null
+  const wasActive = state().activeLeafId === leaf.id
+  // If the detached leaf was the active one, promote the next leaf
+  // in its tabs group (post-splice) to active. This keeps activeLeafId
+  // consistent with the tab strip's activeIndex and lets subscribers
+  // (outline, status bar, editor plugin's active-leaf-change handler)
+  // react to the tab change. If no such group exists or it is empty,
+  // fall back to null — same as the pre-fix behaviour.
+  let nextActive: Leaf | null = null
+  if (wasActive && parent && parent.kind === 'tabs' && parent.leaves.length > 0) {
+    nextActive = parent.leaves[parent.activeIndex] ?? parent.leaves[0] ?? null
+  }
+  if (wasActive) {
+    next.activeLeafId = nextActive?.id ?? null
+  }
   useWorkspaceStore.setState(next)
+
+  // Fire active-leaf-change after the setState so subscribers see a
+  // coherent store. Emit with the next leaf if one exists, otherwise
+  // with an explicit null-leaf payload so listeners can clear (this
+  // matches the shape the editor plugin already handles — a null
+  // leaf short-circuits to clearing editorStore.activeRelpath).
+  if (wasActive) {
+    emitInternal('active-leaf-change', { leaf: nextActive })
+  }
 
   emitInternal('layout-change')
 }

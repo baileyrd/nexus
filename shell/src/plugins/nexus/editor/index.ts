@@ -557,7 +557,13 @@ export const editorPlugin: Plugin = {
           getViewState: () => { state?: unknown }
         }
       } | undefined)?.leaf
-      if (!leaf) return
+      // leaf: null means the last leaf in the main dock was detached
+      // (closed) or the workspace has no active leaf. Either way the
+      // editor has nothing to focus.
+      if (!leaf) {
+        useEditorStore.getState().setActive(null)
+        return
+      }
       // Non-markdown leaf active → clear editorStore active so the
       // status bar (word/char/backlinks) doesn't keep showing stats
       // for whichever markdown file was last focused.
@@ -619,6 +625,32 @@ export const editorPlugin: Plugin = {
     // (activation order is not guaranteed), seed immediately — any leaves
     // already present get their tabs hydrated.
     queueMicrotask(seedFromLayout)
+
+    // Reconcile editor tabs against markdown leaves on layout changes.
+    // When the user closes a tab via the workspace-level × (which calls
+    // `workspace.detachLeaf`), only the workspace leaf is removed — the
+    // editor store tab persists. Walk the markdown leaves and drop any
+    // editor tab whose relpath no longer has a corresponding leaf.
+    // Untitled tabs (no on-disk backing) are kept as-is: they are
+    // owned by the editor store, not the workspace.
+    const reconcileTabs = () => {
+      const mdLeaves = workspace.getLeavesOfType('markdown')
+      const mdRelpaths = new Set<string>()
+      for (const leaf of mdLeaves) {
+        const st = leaf.view?.getState() as { relpath?: unknown } | undefined
+        if (typeof st?.relpath === 'string') mdRelpaths.add(st.relpath)
+      }
+      const store = useEditorStore.getState()
+      for (const tab of store.tabs) {
+        // Preserve untitled tabs — they have no backing workspace leaf
+        // by design.
+        if (/^untitled-\d+$/i.test(tab.relpath)) continue
+        if (!mdRelpaths.has(tab.relpath)) {
+          store.closeTab(tab.relpath)
+        }
+      }
+    }
+    workspace.on('layout-change', reconcileTabs)
 
     // Seed + sync context keys to the store. We track two
     // transitions: (a) activeRelpath presence, (b) whether the

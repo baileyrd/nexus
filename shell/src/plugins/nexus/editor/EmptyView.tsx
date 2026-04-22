@@ -37,6 +37,17 @@ class EmptyView implements View {
   }
 
   onOpen(el: HTMLElement): void {
+    // Defensive: if this view instance was re-opened on the same
+    // leaf (e.g. after attachContainer was called twice by React
+    // StrictMode dev-only double-mount) tear down the previous host
+    // first so we never have two empty-state stacks stacked.
+    if (this.hostEl && this.hostEl.parentNode === el) {
+      this.root?.unmount()
+      this.root = null
+      el.removeChild(this.hostEl)
+      this.hostEl = null
+    }
+
     // Render into a dedicated child div so we never mutate the
     // LeafHost container's inline style — the host manages
     // display:none for inactive leaves, and writing to its .style
