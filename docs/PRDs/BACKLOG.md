@@ -33,9 +33,53 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
 
 ### Spec'd in a PRD, not yet implemented
 
+- [ ] **`.bases` database renderer in the shell (PRD-10).** Kernel side of
+  the Database Engine is shipped (`.bases` TOML parser + SQLite index +
+  formula evaluator + CSV import/export behind `com.nexus.database`),
+  but the current `shell/` UI has no renderer — `.bases` files fall
+  through to CodeMirror as raw TOML. Plan: [docs/bases-shell-plan.md](../bases-shell-plan.md)
+  (6 phases; routing skeleton → Table view → Board/List → Calendar/
+  Gallery/Timeline → view persistence → polish). First PR adds the
+  missing CRUD IPC handlers (`load_base`, `query_records`, record +
+  property + view mutators) on `com.nexus.database`.
+- [ ] **`.canvas` board renderer in the shell (PRD-06 §4).** Storage
+  layer parses/serializes/indexes canvas files; CLI shipped; backlog
+  line 84 notes `.canvas` currently falls through to CodeMirror. Plan:
+  [docs/canvas-shell-plan.md](../canvas-shell-plan.md) (6 phases;
+  kernel adds `canvas_read`/`canvas_write`/`canvas_patch`/`canvas_nodes`/
+  `canvas_edges` IPC; shell ships routing → canvas renderer with
+  zoom/pan → interactions → edges + inspector → rich node embeds →
+  polish).
+- [ ] **Notion-style block UX on top of the existing block-tree engine
+  (PRD-08).** Block tree + transactions + annotations are shipped
+  (3.7k LoC in `nexus-editor`); what's missing is the UI layer —
+  slash menu, block selection, gutter handles + per-block menu +
+  drag-to-reorder, inline annotation toolbar. Plan:
+  [docs/notion-block-ux-plan.md](../notion-block-ux-plan.md) (6
+  phases; phases 1–3 are the "feels like Notion" threshold). Two
+  small kernel asks: dedicated block-move transaction for clean
+  undo; verify persistent block ids survive save+reopen roundtrip.
+
 ### Half-specced: manifest keys exist, but no UI/wiring spec in PRD-07
 
 ### Not in any PRD — new spec work needed
+
+- [ ] **Global graph view as a main-dock tab.** Current
+  `shell/src/plugins/nexus/graph/` renders a one-hop neighborhood of
+  the active file as a right-panel sidecar. The Obsidian-style global
+  view (every note + every link, force-directed, in the main dock)
+  has no PRD coverage. Plan: [docs/global-graph-view-plan.md](../global-graph-view-plan.md)
+  (4 phases; `nexus-storage::list_all_links` bulk handler → frontend
+  plumbing → canvas force-directed renderer with zoom/pan → gear
+  drawer for filter/group/display). Keeps the existing local-
+  neighborhood pane alive as a separate view type.
+- [ ] **Per-tab context menu (Obsidian-style ⋯).** The disabled "more
+  options" button at `shell/src/plugins/nexus/editor/EditorView.tsx:398`
+  is the anchor. Plan: [docs/tab-context-menu-plan.md](../tab-context-menu-plan.md)
+  (3 phases; easy wires → stubbed structure → real features one at a
+  time). Ship the shared `ContextMenu` primitive first; every action
+  routes through the command registry so keyboard palette and future
+  keybindings compose for free.
 
 ## Architecture audit (2026-04-16) — follow-ups
 
