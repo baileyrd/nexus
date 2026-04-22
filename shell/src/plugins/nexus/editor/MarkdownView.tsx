@@ -50,6 +50,16 @@ export class MarkdownView extends ViewBase {
     return this.state
   }
 
+  /** Tab label for the workspace header — shows the file's basename
+   *  (last path segment). Falls back to `viewType` when no relpath is
+   *  set yet (brief window between creator and the first setState). */
+  getDisplayText(): string {
+    const relpath = this.state.relpath
+    if (!relpath) return this.viewType
+    const i = Math.max(relpath.lastIndexOf('/'), relpath.lastIndexOf('\\'))
+    return i >= 0 ? relpath.slice(i + 1) : relpath
+  }
+
   setState(state: unknown): void {
     // The shape is validated shallowly — anything else gets dropped
     // so a malformed persisted layout doesn't crash hydrate.

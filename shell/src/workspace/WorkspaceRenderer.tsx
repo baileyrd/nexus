@@ -563,11 +563,11 @@ function TabButton({
   onActivate,
   onClose,
 }: TabButtonProps): JSX.Element {
-  // Display text: no `View.getDisplayText()` in the Phase 4 API surface yet.
-  // Fall back to `viewType`, or "Empty" when the view is null. A dedicated
-  // display-text hook is a Phase 5+ concern (plugin-contributed labels).
-  // TODO(phase 5): add an optional `view.getDisplayText(): string` override.
-  const label = leaf.view?.viewType ?? 'Empty'
+  // Views may override `getDisplayText()` to show a per-instance label
+  // (e.g. markdown shows the filename). Fall back to `viewType`, or
+  // "Empty" when the view is null.
+  const label =
+    leaf.view?.getDisplayText?.() ?? leaf.view?.viewType ?? 'Empty'
   const closable = canClose && !leaf.pinned
 
   return (

@@ -10,6 +10,11 @@ export interface View {
   setState(state: unknown, eState?: unknown): Promise<void> | void
   onOpen(containerEl: HTMLElement): Promise<void> | void
   onClose(): Promise<void> | void
+  /** Optional human-readable label for this view instance, shown in the
+   *  workspace tab header. When omitted the renderer falls back to
+   *  `viewType`. Views whose label depends on per-instance state
+   *  (e.g. markdown showing the filename) implement this. */
+  getDisplayText?(): string
 }
 
 export type ViewCreator = (leaf: Leaf) => View

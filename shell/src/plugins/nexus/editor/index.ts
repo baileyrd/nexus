@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { viewRegistry } from '../../../workspace'
+import { viewRegistry, workspace } from '../../../workspace'
+import type { Leaf, Tabs, WorkspaceParent } from '../../../workspace'
 import { EditorView } from './EditorView'
 import { markdownViewCreator } from './MarkdownView'
 import { useEditorStore, isDirty } from './editorStore'
@@ -160,9 +161,122 @@ export const editorPlugin: Plugin = {
       }
     }
 
+    /** Enumerate every leaf inside the main dock (rootSplit). Side
+     *  docks and floating windows are excluded — file-opens should
+     *  never mount into the sidebar or a popout. */
+    const collectMainLeaves = (node: WorkspaceParent, acc: Leaf[]): void => {
+      if (node.kind === 'tabs') {
+        for (const l of node.leaves) acc.push(l)
+        return
+      }
+      if (node.kind === 'split') {
+        for (const c of node.children) collectMainLeaves(c, acc)
+        return
+      }
+      const withChild = node as { child?: WorkspaceParent }
+      if (withChild.child) collectMainLeaves(withChild.child, acc)
+    }
+
+    /** First Tabs node found walking rootSplit depth-first — target
+     *  for appending a new tab when no empty leaf is available. */
+    const findFirstMainTabs = (node: WorkspaceParent): Tabs | null => {
+      if (node.kind === 'tabs') return node
+      if (node.kind === 'split') {
+        for (const c of node.children) {
+          const t = findFirstMainTabs(c)
+          if (t) return t
+        }
+        return null
+      }
+      const withChild = node as { child?: WorkspaceParent }
+      if (withChild.child) return findFirstMainTabs(withChild.child)
+      return null
+    }
+
+    /** Derive a viewType from a filename. Falls back to `markdown` if
+     *  the extension isn't registered — that matches what the default
+     *  layout expects the main dock to render for content files. */
+    const viewTypeForFile = (name: string, relpath: string): string => {
+      const candidates = [name, relpath]
+      for (const s of candidates) {
+        const dot = s.lastIndexOf('.')
+        if (dot < 0) continue
+        const ext = s.slice(dot + 1).toLowerCase()
+        const type = viewRegistry.getTypeForExt(ext)
+        if (type) return type
+      }
+      return 'markdown'
+    }
+
+    /** Ensure a main-pane leaf is rendering `payload.relpath` with the
+     *  correct view type, and raise it active. Strategy:
+     *    1. If a main leaf already holds this relpath → reveal it.
+     *    2. Else prefer the currently-active main leaf if it is an
+     *       `empty` placeholder (first-open flow from defaultLayout).
+     *    3. Else reuse any `empty` main leaf.
+     *    4. Else append a new tab to the first main Tabs group.
+     *  The final setViewState passes `active: true` so the workspace
+     *  store's active-leaf-change bridge fires, keeping sidebars and
+     *  status in sync with what the main pane shows. */
+    const mountFileInMainLeaf = (payload: FileOpenPayload): void => {
+      const type = viewTypeForFile(payload.name, payload.relpath)
+
+      const mainLeaves: Leaf[] = []
+      collectMainLeaves(workspace.rootSplit, mainLeaves)
+
+      const existing = mainLeaves.find((l) => {
+        if (l.view?.viewType !== type) return false
+        const st = l.view.getState() as { relpath?: unknown } | undefined
+        return typeof st?.relpath === 'string' && st.relpath === payload.relpath
+      })
+      if (existing) {
+        workspace.revealLeaf(existing)
+        return
+      }
+
+      const activeId = workspace.activeLeafId
+      const activeLeaf = activeId ? workspace.leaves.get(activeId) ?? null : null
+      let target: Leaf | null = null
+      if (
+        activeLeaf &&
+        mainLeaves.includes(activeLeaf) &&
+        activeLeaf.view?.viewType === 'empty'
+      ) {
+        target = activeLeaf
+      }
+      if (!target) {
+        target = mainLeaves.find((l) => l.view?.viewType === 'empty') ?? null
+      }
+
+      if (!target) {
+        const tabs = findFirstMainTabs(workspace.rootSplit)
+        if (!tabs) return
+        target = workspace.createLeaf(tabs)
+        tabs.leaves.push(target)
+        tabs.activeIndex = tabs.leaves.length - 1
+        workspace.emit('layout-change')
+      }
+
+      void target.setViewState({
+        type,
+        state: { relpath: payload.relpath },
+        active: true,
+      })
+      workspace.revealLeaf(target)
+    }
+
     const loadFile = async (payload: FileOpenPayload) => {
       const store = useEditorStore.getState()
       const isNew = store.openTab(payload.relpath, payload.name)
+
+      // Mount / reveal the main-pane leaf for this file. Without this
+      // step the editor store holds the tab but the main dock still
+      // renders whatever view type the target leaf was on (typically
+      // `empty` from the default layout), so the user sees a blank
+      // pane. Done regardless of `isNew` so re-opening a file also
+      // raises its existing leaf into view.
+      mountFileInMainLeaf(payload)
+
       // Already-open file: openTab raised it active; no refetch.
       if (!isNew) return
 
