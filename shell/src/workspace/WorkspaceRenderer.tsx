@@ -56,6 +56,7 @@ function useLayoutVersion(): void {
 // the bottom drawer so the drawer spans the full window width, matching
 // Obsidian's bottom pane / VS Code's integrated-terminal drawer layout.
 const ROOT_STYLE: CSSProperties = {
+  position: 'relative',
   display: 'flex',
   flexDirection: 'column',
   width: '100%',
@@ -92,26 +93,6 @@ export function Workspace(): JSX.Element {
 
   return (
     <div className="workspace-root" style={ROOT_STYLE}>
-      {/* Persistent window-chrome row. Always rendered at the very top of
-          the workspace so WindowControls (min/max/close) stay visible
-          regardless of sidebar collapse state or which view is active.
-          The rest of the row is a drag region so the user can still move
-          the window by its top edge. */}
-      <div
-        className="workspace-titlebar"
-        data-tauri-drag-region
-        style={{
-          display: 'flex',
-          flex: '0 0 auto',
-          height: 36,
-          alignItems: 'stretch',
-          background: 'var(--titlebar-background, var(--bg-soft, #252526))',
-          borderBottom: '1px solid var(--divider-color, var(--line, #333))',
-        }}
-      >
-        <div data-tauri-drag-region style={{ flex: '1 1 auto' }} />
-        <WindowControls />
-      </div>
       <div className="workspace-upper" style={UPPER_ROW_STYLE}>
         <SidedockFrame side="left" dock={leftSplit} />
         <div className="workspace-main" style={MAIN_STYLE}>
@@ -120,6 +101,21 @@ export function Workspace(): JSX.Element {
         <SidedockFrame side="right" dock={rightSplit} />
       </div>
       <SidedockFrame side="bottom" dock={bottomSplit} />
+      {/* Floating window-controls anchor. Absolutely positioned at the
+          window's top-right corner so it sits over whichever view /
+          panel happens to render there, without introducing a new
+          title-bar row that would stack beneath the native chrome. */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          zIndex: 100,
+          pointerEvents: 'auto',
+        }}
+      >
+        <WindowControls />
+      </div>
       {floating.map((fw) => (
         <div
           key={fw.id}
