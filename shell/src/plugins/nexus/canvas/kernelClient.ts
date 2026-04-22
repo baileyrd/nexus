@@ -86,6 +86,11 @@ export interface CanvasKernelClient {
    *  best-effort preview (mostly-empty on transport failure) or
    *  rejects if the URL itself is invalid. */
   fetchLinkPreview(url: string): Promise<LinkPreview>
+  /** Read an arbitrary file's bytes out of the forge. Returns the
+   *  raw byte array (same shape as `com.nexus.storage::read_file`),
+   *  or null if the file doesn't exist. The file-node overlay uses
+   *  this to embed previews of linked `.md` / image / text files. */
+  readFile(relpath: string): Promise<Uint8Array | null>
 }
 
 export function makeCanvasKernelClient(kernel: PluginAPI['kernel']): CanvasKernelClient {
@@ -102,6 +107,14 @@ export function makeCanvasKernelClient(kernel: PluginAPI['kernel']): CanvasKerne
     },
     async fetchLinkPreview(url) {
       return kernel.invoke<LinkPreview>(LINKPREVIEW_PLUGIN_ID, 'fetch', { url })
+    },
+    async readFile(relpath) {
+      const resp = await kernel.invoke<{ bytes: number[] | null }>(
+        STORAGE_PLUGIN_ID,
+        'read_file',
+        { path: relpath },
+      )
+      return resp.bytes == null ? null : Uint8Array.from(resp.bytes)
     },
   }
 }

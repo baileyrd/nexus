@@ -565,18 +565,9 @@ function drawNode(
     // keeps the card background + border it already drew above, which
     // is enough to show selection/resize affordances.
   } else if (node.type === 'file') {
-    const basename = basenameOf(node.file ?? '')
-    ctx.fillStyle = muted
-    ctx.font = '11px var(--font-monospace, ui-monospace, monospace)'
-    ctx.fillText('FILE', node.x + pad, node.y + pad + 10)
-    ctx.fillStyle = fg
-    ctx.font = '14px var(--font-family, system-ui, sans-serif)'
-    ctx.fillText(basename || '(untitled)', node.x + pad, node.y + pad + 32)
-    if (node.file) {
-      ctx.fillStyle = muted
-      ctx.font = '11px var(--font-monospace, ui-monospace, monospace)'
-      ctx.fillText(node.file, node.x + pad, node.y + pad + 50)
-    }
+    // File body is drawn by the DOM overlay layer (Phase 5c) so we
+    // can embed markdown / text / image previews inline. The 2D
+    // canvas keeps the card chrome above.
   } else if (node.type === 'link') {
     // Link body is drawn by the DOM overlay layer (Phase 5b) so we
     // can show a live OG preview (favicon + title + description +

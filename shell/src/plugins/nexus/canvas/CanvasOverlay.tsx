@@ -53,12 +53,295 @@ export const CanvasOverlay = forwardRef<HTMLDivElement, Props>(function CanvasOv
         {nodes.map((n) => {
           if (n.type === 'text') return <TextNodeOverlay key={n.id} node={n} />
           if (n.type === 'link') return <LinkNodeOverlay key={n.id} node={n} client={client} />
+          if (n.type === 'file') return <FileNodeOverlay key={n.id} node={n} client={client} />
           return null
         })}
       </div>
     </div>
   )
 })
+
+/** How many bytes of a text file we render inside a node preview.
+ *  Past this we clip with an ellipsis indicator — no-one wants a
+ *  megabyte README painted across the canvas. */
+const FILE_PREVIEW_TEXT_CAP = 64 * 1024
+/** Image MIME lookup — keyed by lowercase extension. Unknown
+ *  extensions fall back to the plain-text path. */
+const IMAGE_EXT_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon',
+}
+/** Per-relpath cached file contents. Module-scope so it survives tab
+ *  remounts. No eviction — file previews are small (capped above). */
+interface FilePreviewData {
+  kind: 'markdown' | 'image' | 'text' | 'binary'
+  /** Rendered HTML for markdown, data: URL for images, raw preview
+   *  string for text, empty for binary. */
+  content: string
+  /** Surfaced in the badge when content is truncated so users know
+   *  they're looking at a partial view. */
+  truncated?: boolean
+}
+const filePreviewCache = new Map<string, FilePreviewData>()
+const filePreviewPending = new Map<string, Promise<FilePreviewData>>()
+
+/** Classify a relpath by extension. Returns `null` for "no file". */
+function classifyFile(relpath: string): 'markdown' | 'image' | 'text' | 'binary' | null {
+  if (!relpath) return null
+  const ext = relpath.toLowerCase().split('.').pop() ?? ''
+  if (ext === 'md' || ext === 'mdx' || ext === 'markdown') return 'markdown'
+  if (ext in IMAGE_EXT_MIME) return 'image'
+  // Everything that's plausibly text gets the text path; unknowns go
+  // to binary + a placeholder card.
+  if (
+    ['txt', 'json', 'yaml', 'yml', 'toml', 'csv', 'tsv', 'log', 'rs', 'ts', 'tsx', 'js', 'jsx',
+     'py', 'go', 'sh', 'html', 'css', 'xml', 'conf', 'ini', 'env'].includes(ext)
+  ) {
+    return 'text'
+  }
+  return 'binary'
+}
+
+/** Build a base64 data: URL from raw bytes. Done in chunks so we
+ *  don't hit the "maximum call stack" cap of `String.fromCharCode`
+ *  on large images. */
+function bytesToDataUrl(bytes: Uint8Array, mime: string): string {
+  const chunk = 0x8000
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  const b64 = btoa(binary)
+  return `data:${mime};base64,${b64}`
+}
+
+function loadFilePreview(
+  client: CanvasKernelClient,
+  relpath: string,
+): Promise<FilePreviewData> {
+  const hit = filePreviewCache.get(relpath)
+  if (hit) return Promise.resolve(hit)
+  const pending = filePreviewPending.get(relpath)
+  if (pending) return pending
+  const kind = classifyFile(relpath)
+  const p = (async (): Promise<FilePreviewData> => {
+    const bytes = await client.readFile(relpath)
+    if (bytes == null) return { kind: 'binary', content: '' }
+    if (kind === 'image') {
+      const ext = relpath.toLowerCase().split('.').pop() ?? ''
+      const mime = IMAGE_EXT_MIME[ext] ?? 'application/octet-stream'
+      return { kind: 'image', content: bytesToDataUrl(bytes, mime) }
+    }
+    if (kind === 'markdown' || kind === 'text') {
+      const truncated = bytes.length > FILE_PREVIEW_TEXT_CAP
+      const slice = truncated ? bytes.subarray(0, FILE_PREVIEW_TEXT_CAP) : bytes
+      let text: string
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(slice)
+      } catch {
+        return { kind: 'binary', content: '' }
+      }
+      if (kind === 'markdown') {
+        return { kind: 'markdown', content: renderMarkdown(text), truncated }
+      }
+      return { kind: 'text', content: text, truncated }
+    }
+    return { kind: 'binary', content: '' }
+  })()
+    .then((data) => {
+      filePreviewCache.set(relpath, data)
+      filePreviewPending.delete(relpath)
+      return data
+    })
+    .catch((err) => {
+      filePreviewPending.delete(relpath)
+      throw err
+    })
+  filePreviewPending.set(relpath, p)
+  return p
+}
+
+function FileNodeOverlay({
+  node,
+  client,
+}: {
+  node: CanvasNode
+  client: CanvasKernelClient
+}) {
+  const relpath = node.file ?? ''
+  const [data, setData] = useState<FilePreviewData | null>(
+    () => filePreviewCache.get(relpath) ?? null,
+  )
+  const [loading, setLoading] = useState(!!relpath && !filePreviewCache.has(relpath))
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!relpath) {
+      setData(null)
+      setLoading(false)
+      setError(null)
+      return
+    }
+    const cached = filePreviewCache.get(relpath)
+    if (cached) {
+      setData(cached)
+      setLoading(false)
+      setError(null)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    loadFilePreview(client, relpath)
+      .then((d) => {
+        if (!cancelled) {
+          setData(d)
+          setLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(String(err))
+          setLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [relpath, client])
+
+  const basename = basenameOf(relpath)
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: node.x,
+        top: node.y,
+        width: node.width,
+        height: node.height,
+        padding: 10,
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        color: 'var(--fg, #e5e7eb)',
+        fontFamily: 'var(--font-family, system-ui, sans-serif)',
+        fontSize: 12,
+        lineHeight: 1.35,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 6,
+          minHeight: 14,
+        }}
+      >
+        <div
+          style={{
+            color: 'var(--fg-muted, #9ca3af)',
+            fontSize: 10,
+            letterSpacing: 0.4,
+            textTransform: 'uppercase',
+            fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          FILE · {basename || '(untitled)'}
+          {loading && ' · loading…'}
+          {data?.truncated && ' · truncated'}
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ color: 'var(--risk, #ef4444)', fontSize: 11 }}>
+          failed to read: {error}
+        </div>
+      )}
+
+      {!error && !loading && data?.kind === 'markdown' && (
+        <div
+          className="nexus-markdown-body"
+          style={{ flex: '1 1 auto', overflow: 'hidden', fontSize: 12 }}
+          dangerouslySetInnerHTML={{ __html: data.content }}
+        />
+      )}
+
+      {!error && !loading && data?.kind === 'text' && (
+        <pre
+          style={{
+            flex: '1 1 auto',
+            overflow: 'hidden',
+            margin: 0,
+            fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
+            fontSize: 11,
+            lineHeight: 1.4,
+            color: 'var(--fg, #e5e7eb)',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
+          {data.content}
+        </pre>
+      )}
+
+      {!error && !loading && data?.kind === 'image' && (
+        <img
+          src={data.content}
+          alt={basename}
+          style={{
+            flex: '1 1 auto',
+            width: '100%',
+            minHeight: 0,
+            objectFit: 'contain',
+            borderRadius: 4,
+          }}
+        />
+      )}
+
+      {!error && !loading && data?.kind === 'binary' && (
+        <div style={{ color: 'var(--fg-muted, #9ca3af)', fontSize: 11 }}>
+          {relpath
+            ? 'Binary or unsupported file type — no preview available.'
+            : 'No file linked.'}
+        </div>
+      )}
+
+      {relpath && (
+        <div
+          style={{
+            color: 'var(--fg-muted, #9ca3af)',
+            fontSize: 10,
+            fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {relpath}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function basenameOf(path: string): string {
+  if (!path) return ''
+  const i = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return i >= 0 ? path.slice(i + 1) : path
+}
 
 /** In-memory cache of URL → preview so opening multiple tabs (or
  *  flipping away and back to the same canvas) doesn't refetch the
