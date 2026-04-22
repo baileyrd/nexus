@@ -560,9 +560,10 @@ function drawNode(
   const pad = 10
 
   if (node.type === 'text') {
-    ctx.fillStyle = fg
-    ctx.font = '13px var(--font-family, system-ui, sans-serif)'
-    wrapText(ctx, node.text ?? '', node.x + pad, node.y + pad + 12, node.width - pad * 2, 16)
+    // Text body is drawn by the DOM overlay layer (Phase 5a) so
+    // markdown formatting + links render as real HTML. The 2D canvas
+    // keeps the card background + border it already drew above, which
+    // is enough to show selection/resize affordances.
   } else if (node.type === 'file') {
     const basename = basenameOf(node.file ?? '')
     ctx.fillStyle = muted

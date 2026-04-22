@@ -36,6 +36,7 @@ import {
   type EdgeDragPreview,
 } from './renderer'
 import { Inspector } from './Inspector'
+import { CanvasOverlay } from './CanvasOverlay'
 import type {
   CanvasKernelClient,
   CanvasDoc,
@@ -63,6 +64,7 @@ export function CanvasView({ relpath, client }: Props) {
   const tab = useCanvasStore((s) => s.tabs.get(relpath))
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const overlayLayerRef = useRef<HTMLDivElement | null>(null)
   // Cached refs so RAF doesn't allocate per frame and event handlers see
   // the latest values without re-binding.
   const docRef = useRef<CanvasDoc | null>(null)
@@ -179,6 +181,16 @@ export function CanvasView({ relpath, client }: Props) {
         },
         docRef.current,
       )
+      // Mirror the camera transform onto the DOM overlay so its children
+      // (world-positioned divs) line up with the 2D canvas. Written
+      // imperatively so camera changes don't thrash React.
+      const layer = overlayLayerRef.current
+      if (layer) {
+        const cam = cameraRef.current
+        const tx = -cam.x * cam.zoom
+        const ty = -cam.y * cam.zoom
+        layer.style.transform = `translate(${tx}px, ${ty}px) scale(${cam.zoom})`
+      }
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -882,6 +894,7 @@ export function CanvasView({ relpath, client }: Props) {
           touchAction: 'none',
         }}
       />
+      <CanvasOverlay ref={overlayLayerRef} nodes={doc?.nodes ?? []} />
       {tab?.loading && <CornerLabel>Loading…</CornerLabel>}
       {tab?.error && <CornerLabel>Error: {tab.error}</CornerLabel>}
       {!tab?.loading && !tab?.error && (
