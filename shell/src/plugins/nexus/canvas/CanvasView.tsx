@@ -13,6 +13,8 @@ import {
   newNodeId,
   applyNodeAdd,
   applyNodeRemove,
+  applyPatchOps,
+  buildDeleteInverse,
   type Camera,
 } from './canvasStore'
 import {
@@ -187,6 +189,29 @@ export function CanvasView({ relpath, client }: Props) {
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
   }, [relpath])
+
+  // ── Commit helpers ───────────────────────────────────────────────────
+
+  /** Flush a forward patch to the kernel and record the matching
+   *  inverse for undo. `skipHistory = true` means the caller is itself
+   *  driving undo/redo — the history stacks are managed separately in
+   *  that path. */
+  const commit = (
+    forward: import('./kernelClient').CanvasPatchOp[],
+    inverse: import('./kernelClient').CanvasPatchOp[],
+    opts: { skipHistory?: boolean } = {},
+  ) => {
+    if (forward.length === 0) return
+    if (!opts.skipHistory) {
+      useCanvasStore.getState().pushHistory(relpath, { forward, inverse })
+    }
+    void clientRef.current
+      .patch(relpath, forward)
+      .catch((err) => console.warn('[nexus.canvas] patch failed:', err))
+  }
+
+  const commitRef = useRef(commit)
+  commitRef.current = commit
 
   // ── Pointer input ────────────────────────────────────────────────────
   useEffect(() => {
@@ -481,26 +506,31 @@ export function CanvasView({ relpath, client }: Props) {
         ) {
           return
         }
-        void clientRef.current
-          .patch(relpath, [{ op: 'node_update', node }])
-          .catch((err) => console.warn('[nexus.canvas] node_update patch failed:', err))
+        // Inverse restores every field on the node — use the pre-drag
+        // snapshot so undo also reverses type-specific edits if the
+        // resize shape ever grows beyond x/y/w/h.
+        const before: CanvasNode = { ...node, ...s }
+        commitRef.current(
+          [{ op: 'node_update', node }],
+          [{ op: 'node_update', node: before }],
+        )
         return
       }
 
       if (finished.kind === 'move-node' && finished.armed) {
         const doc = docRef.current
         if (!doc) return
-        const ops: CanvasPatchOp[] = []
+        const forward: CanvasPatchOp[] = []
+        const inverse: CanvasPatchOp[] = []
         for (const n of doc.nodes) {
           const start = finished.startPositions.get(n.id)
           if (!start) continue
           if (n.x === start.x && n.y === start.y) continue
-          ops.push({ op: 'node_move', id: n.id, x: n.x, y: n.y })
+          forward.push({ op: 'node_move', id: n.id, x: n.x, y: n.y })
+          inverse.push({ op: 'node_move', id: n.id, x: start.x, y: start.y })
         }
-        if (ops.length === 0) return
-        void clientRef.current.patch(relpath, ops).catch((err) => {
-          console.warn('[nexus.canvas] node_move patch failed:', err)
-        })
+        if (forward.length === 0) return
+        commitRef.current(forward, inverse)
       }
     }
 
@@ -524,9 +554,10 @@ export function CanvasView({ relpath, client }: Props) {
       }
       useCanvasStore.getState().updateDoc(relpath, (d) => applyNodeAdd(d, node))
       useCanvasStore.getState().setSelection(relpath, [node.id])
-      void clientRef.current
-        .patch(relpath, [{ op: 'node_add', node }])
-        .catch((err) => console.warn('[nexus.canvas] node_add patch failed:', err))
+      commitRef.current(
+        [{ op: 'node_add', node }],
+        [{ op: 'node_remove', id: node.id }],
+      )
     }
 
     canvas.addEventListener('wheel', onWheel, { passive: false })
@@ -557,22 +588,55 @@ export function CanvasView({ relpath, client }: Props) {
       if (!container.contains(document.activeElement) && document.activeElement !== container) {
         return
       }
+      const isUndo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey
+      const isRedo =
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && e.shiftKey) ||
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y')
+
+      if (isUndo) {
+        e.preventDefault()
+        const entry = useCanvasStore.getState().popUndo(relpath)
+        if (!entry) return
+        applyHistoryEntry(entry.inverse)
+        return
+      }
+      if (isRedo) {
+        e.preventDefault()
+        const entry = useCanvasStore.getState().popRedo(relpath)
+        if (!entry) return
+        applyHistoryEntry(entry.forward)
+        return
+      }
+
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
       const sel = selectionRef.current
       if (sel.size === 0) return
       e.preventDefault()
+      const doc = docRef.current
+      if (!doc) return
       const ids = Array.from(sel)
-      useCanvasStore.getState().updateDoc(relpath, (doc) => {
-        let d = doc
-        for (const id of ids) d = applyNodeRemove(d, id)
-        return d
+      const inverse = buildDeleteInverse(doc, ids)
+      useCanvasStore.getState().updateDoc(relpath, (d) => {
+        let out = d
+        for (const id of ids) out = applyNodeRemove(out, id)
+        return out
       })
       useCanvasStore.getState().setSelection(relpath, [])
-      const ops: CanvasPatchOp[] = ids.map((id) => ({ op: 'node_remove', id }))
+      const forward: CanvasPatchOp[] = ids.map((id) => ({ op: 'node_remove', id }))
+      commitRef.current(forward, inverse)
+    }
+
+    /** Drive undo/redo: apply `ops` locally and flush to the kernel.
+     *  Skips the history push because popUndo/popRedo already moved
+     *  the entry between stacks. */
+    const applyHistoryEntry = (ops: CanvasPatchOp[]) => {
+      if (ops.length === 0) return
+      useCanvasStore.getState().updateDoc(relpath, (d) => applyPatchOps(d, ops))
       void clientRef.current
         .patch(relpath, ops)
-        .catch((err) => console.warn('[nexus.canvas] node_remove patch failed:', err))
+        .catch((err) => console.warn('[nexus.canvas] undo/redo patch failed:', err))
     }
+
     container.addEventListener('keydown', onKey)
     return () => container.removeEventListener('keydown', onKey)
   }, [relpath])

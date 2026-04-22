@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { CanvasDoc, CanvasNode } from './kernelClient'
+import type { CanvasDoc, CanvasEdge, CanvasNode, CanvasPatchOp } from './kernelClient'
 
 export interface Camera {
   /** Top-left world-space x that maps to viewport (0, 0). */
@@ -20,6 +20,21 @@ function clampZoom(z: number): number {
   return z
 }
 
+/** One atomic user-visible edit. `forward` is what was applied; the
+ *  canonical `inverse` op list is what must run to restore the state
+ *  that existed before `forward`. Kept as op lists (not doc snapshots)
+ *  so the undo pipeline drives the same `canvas_patch` path as a
+ *  fresh edit — no bespoke revert codepath. */
+export interface HistoryEntry {
+  forward: CanvasPatchOp[]
+  inverse: CanvasPatchOp[]
+}
+
+/** History cap per tab. 200 entries is plenty for a single editing
+ *  session without letting a pathological drag+undo loop balloon
+ *  memory. */
+const HISTORY_CAP = 200
+
 export interface CanvasTabState {
   doc: CanvasDoc | null
   loading: boolean
@@ -30,6 +45,11 @@ export interface CanvasTabState {
   cameraInitialized: boolean
   /** Set of selected node ids. Empty = no selection. */
   selection: Set<string>
+  /** LIFO stack of applied edits; top is the most recent. */
+  undo: HistoryEntry[]
+  /** LIFO stack of undone edits available to redo; cleared whenever a
+   *  non-undo/redo edit lands. */
+  redo: HistoryEntry[]
 }
 
 interface CanvasStore {
@@ -44,6 +64,12 @@ interface CanvasStore {
   /** Apply a partial mutator to the doc. Caller is responsible for
    *  sending the matching patch to the kernel. */
   updateDoc: (relpath: string, fn: (doc: CanvasDoc) => CanvasDoc) => void
+  /** Record a fresh edit; clears the redo stack. */
+  pushHistory: (relpath: string, entry: HistoryEntry) => void
+  /** Pop the top undo entry (if any) and move it to the redo stack. */
+  popUndo: (relpath: string) => HistoryEntry | null
+  /** Pop the top redo entry (if any) and move it to the undo stack. */
+  popRedo: (relpath: string) => HistoryEntry | null
 }
 
 const emptyState: CanvasTabState = {
@@ -53,6 +79,8 @@ const emptyState: CanvasTabState = {
   camera: DEFAULT_CAMERA,
   cameraInitialized: false,
   selection: new Set(),
+  undo: [],
+  redo: [],
 }
 
 function produce(
@@ -96,7 +124,94 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       if (!prev) return s
       return { tabs: produce(s.tabs, relpath, { doc: fn(prev) }) }
     }),
+  pushHistory: (relpath, entry) =>
+    set((s) => {
+      const prev = s.tabs.get(relpath) ?? emptyState
+      const undo = [...prev.undo, entry]
+      if (undo.length > HISTORY_CAP) undo.splice(0, undo.length - HISTORY_CAP)
+      return { tabs: produce(s.tabs, relpath, { undo, redo: [] }) }
+    }),
+  popUndo: (relpath) => {
+    const prev = get().tabs.get(relpath)
+    if (!prev || prev.undo.length === 0) return null
+    const undo = prev.undo.slice(0, -1)
+    const entry = prev.undo[prev.undo.length - 1]
+    const redo = [...prev.redo, entry]
+    set((s) => ({ tabs: produce(s.tabs, relpath, { undo, redo }) }))
+    return entry
+  },
+  popRedo: (relpath) => {
+    const prev = get().tabs.get(relpath)
+    if (!prev || prev.redo.length === 0) return null
+    const redo = prev.redo.slice(0, -1)
+    const entry = prev.redo[prev.redo.length - 1]
+    const undo = [...prev.undo, entry]
+    set((s) => ({ tabs: produce(s.tabs, relpath, { undo, redo }) }))
+    return entry
+  },
 }))
+
+/** Apply a single CanvasPatchOp to a doc locally. Mirrors the kernel's
+ *  apply_patch behaviour so the optimistic in-memory doc converges on
+ *  the same state the kernel will write. */
+export function applyPatchOp(doc: CanvasDoc, op: CanvasPatchOp): CanvasDoc {
+  switch (op.op) {
+    case 'node_add':
+      if (doc.nodes.some((n) => n.id === op.node.id)) return doc
+      return { ...doc, nodes: [...doc.nodes, op.node] }
+    case 'node_remove':
+      return {
+        ...doc,
+        nodes: doc.nodes.filter((n) => n.id !== op.id),
+        edges: doc.edges.filter((e) => e.fromNode !== op.id && e.toNode !== op.id),
+      }
+    case 'node_move':
+      return {
+        ...doc,
+        nodes: doc.nodes.map((n) => (n.id === op.id ? { ...n, x: op.x, y: op.y } : n)),
+      }
+    case 'node_update':
+      return {
+        ...doc,
+        nodes: doc.nodes.map((n) => (n.id === op.node.id ? op.node : n)),
+      }
+    case 'edge_add':
+      if (doc.edges.some((e) => e.id === op.edge.id)) return doc
+      return { ...doc, edges: [...doc.edges, op.edge] }
+    case 'edge_remove':
+      return { ...doc, edges: doc.edges.filter((e) => e.id !== op.id) }
+    case 'edge_update':
+      return {
+        ...doc,
+        edges: doc.edges.map((e) => (e.id === op.edge.id ? op.edge : e)),
+      }
+  }
+}
+
+export function applyPatchOps(doc: CanvasDoc, ops: CanvasPatchOp[]): CanvasDoc {
+  let d = doc
+  for (const op of ops) d = applyPatchOp(d, op)
+  return d
+}
+
+/** Build the inverse op list for a delete of `ids` against `doc`.
+ *  Restores every node + every edge incident to any deleted node. */
+export function buildDeleteInverse(
+  doc: CanvasDoc,
+  ids: readonly string[],
+): CanvasPatchOp[] {
+  const idSet = new Set(ids)
+  const ops: CanvasPatchOp[] = []
+  for (const n of doc.nodes) if (idSet.has(n.id)) ops.push({ op: 'node_add', node: n })
+  for (const e of doc.edges) {
+    if (idSet.has(e.fromNode) || idSet.has(e.toNode)) {
+      ops.push({ op: 'edge_add', edge: e })
+    }
+  }
+  return ops
+}
+
+export type { CanvasEdge }
 
 /** Generate a short random id for a new node. 12 chars of hex is
  *  enough for cross-session uniqueness in a single .canvas file. */

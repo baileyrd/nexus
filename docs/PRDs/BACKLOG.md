@@ -65,15 +65,20 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   single or grouped selection with one batched `canvas_patch` on
   mouseup, Delete/Backspace to remove a selection (incident edges
   drop with the nodes via apply_patch), double-click empty →
-  new text node. Resize handles landed too: single-selected non-group nodes draw 8
-  screen-space-sized handles; pointer-over updates the cursor
-  (nwse / nesw / ns / ew); drag resizes with the opposite corner
-  fixed, 40-unit minimum, shift locks aspect on corner drags;
-  flush is a single `node_update` patch on mouseup. Plan:
+  new text node. Resize handles: single-selected non-group nodes draw 8 screen-
+  space-sized handles; pointer-over updates the cursor (nwse /
+  nesw / ns / ew); drag resizes with the opposite corner fixed,
+  40-unit minimum, shift locks aspect on corner drags; flush is a
+  single `node_update` patch on mouseup. Undo/redo: per-tab LIFO
+  stacks of `{forward, inverse}` op lists (capped at 200). Every
+  flush (move / add / remove / resize) records a matching inverse
+  —  delete captures every incident edge so undo restores them.
+  Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y redo; drives
+  the same `canvas_patch` path as a fresh edit, so kernel state
+  stays the source of truth. Plan:
   [docs/canvas-shell-plan.md](../canvas-shell-plan.md) — remaining
-  Phase 3 follow-ups (drag-from-edge create, client-side
-  undo/redo stack) plus phases 4–6 (edges + inspector → rich node
-  embeds → polish).
+  Phase 3 follow-up (drag-from-edge create) plus phases 4–6
+  (edges + inspector → rich node embeds → polish).
 - [ ] **Notion-style block UX on top of the existing block-tree engine
   (PRD-08).** Block tree + transactions + annotations are shipped
   (3.7k LoC in `nexus-editor`); what's missing is the UI layer —
