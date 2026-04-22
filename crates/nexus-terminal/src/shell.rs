@@ -32,6 +32,24 @@ impl ShellSpec {
             args: Vec::new(),
         }
     }
+
+    /// Build a spec for `program` with `-i` set when the shell is a known
+    /// POSIX interactive shell. An interactive shell prints its prompt, does
+    /// line editing (so keystrokes are visible), and sources the user's rc
+    /// file — all of which the terminal UI needs.
+    #[must_use]
+    pub fn interactive(program: impl Into<PathBuf>) -> Self {
+        let program = program.into();
+        let args = match program
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(|s| s.strip_suffix(".exe").unwrap_or(s))
+        {
+            Some("bash" | "zsh" | "sh" | "fish") => vec!["-i".to_string()],
+            _ => Vec::new(),
+        };
+        Self { program, args }
+    }
 }
 
 /// Detect a usable default shell for this platform.
@@ -47,7 +65,7 @@ pub fn detect_default_shell() -> ShellSpec {
         let candidate = PathBuf::from(&env_shell);
         if is_executable(&candidate) {
             tracing::debug!(shell = %env_shell, "using $SHELL");
-            return ShellSpec::bare(candidate);
+            return ShellSpec::interactive(candidate);
         }
         tracing::warn!(
             shell = %env_shell,
@@ -70,13 +88,13 @@ fn platform_fallback() -> ShellSpec {
         let path = PathBuf::from(candidate);
         if is_executable(&path) {
             tracing::debug!(shell = %candidate, "using unix fallback");
-            return ShellSpec::bare(path);
+            return ShellSpec::interactive(path);
         }
     }
     // Last-resort: return /bin/sh even if we couldn't stat it — spawn will
     // fail cleanly with a helpful error at Session::spawn time.
     tracing::warn!("no unix fallback shell exists — returning /bin/sh as last resort");
-    ShellSpec::bare("/bin/sh")
+    ShellSpec::interactive("/bin/sh")
 }
 
 #[cfg(windows)]

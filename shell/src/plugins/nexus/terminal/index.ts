@@ -155,6 +155,7 @@ export const terminalPlugin: Plugin = {
         return
       }
       await ensureAndReveal()
+      api.events.emit(EVENT_TERMINAL_FOCUS, {})
     })
 
     api.commands.register(COMMAND_FOCUS, async () => {
@@ -170,7 +171,7 @@ export const terminalPlugin: Plugin = {
       title: 'Terminal',
       viewId: VIEW_ID,
       priority: 40,
-      command: COMMAND_FOCUS,
+      command: COMMAND_TOGGLE,
     })
 
     // ── Boot-time reconciliation ────────────────────────────────────

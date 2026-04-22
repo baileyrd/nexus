@@ -51,7 +51,7 @@ export function buildDefaultLayout(): WorkspaceJSON {
     children: [mainTabs],
   }
 
-  const leftTabs = makeTabs(['file-explorer', 'search'])
+  const leftTabs = makeTabs(['file-explorer', 'search', 'bookmarks'])
   const leftDock: SerializedSplit = {
     kind: 'split',
     id: newId(),

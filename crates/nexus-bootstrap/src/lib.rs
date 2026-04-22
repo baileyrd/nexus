@@ -780,6 +780,10 @@ fn register_core_plugins(
                     ("pump", nexus_terminal::HANDLER_PUMP),
                     ("read_output", nexus_terminal::HANDLER_READ_OUTPUT),
                     (
+                        "read_raw_since",
+                        nexus_terminal::HANDLER_READ_RAW_SINCE,
+                    ),
+                    (
                         "search_output",
                         nexus_terminal::HANDLER_SEARCH_OUTPUT,
                     ),

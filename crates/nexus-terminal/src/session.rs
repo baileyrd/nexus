@@ -226,6 +226,12 @@ impl Session {
         if let Some(ref wd) = config.working_dir {
             cmd.cwd(wd);
         }
+        // Declare a sane terminal type. Without TERM the shell's line editor
+        // (readline / zle) falls back to a dumb mode that doesn't echo
+        // characters as they are typed — keystrokes appear only after Enter.
+        // `xterm-256color` matches what xterm.js on the frontend emulates.
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
         for (k, v) in &config.env {
             cmd.env(k, v);
         }

@@ -12,31 +12,40 @@ const PLUGIN_ID = 'com.nexus.terminal'
 // from xterm must go through `send_raw_input` so control sequences
 // (arrows, Ctrl-C, tab) reach the shell verbatim.
 const CMD_SEND_RAW_INPUT = 'send_raw_input'
-const CMD_PUMP = 'pump'
-const CMD_READ_OUTPUT = 'read_output'
+// `read_raw_since` folds the old `pump` + `read_output` tick into one
+// call that returns raw PTY bytes past a monotonic cursor. xterm parses
+// ANSI natively, so feeding bytes verbatim is both simpler and — for
+// interactive shells — correct: the line-buffered `read_output` path
+// never surfaces pre-Enter keystrokes because they sit in
+// LineBuffer.pending until a newline arrives.
+const CMD_READ_RAW_SINCE = 'read_raw_since'
 
-// Output is pull-model in the current kernel contract — the terminal
-// plugin ships only `pump` (drain the PTY into the line buffer) and
-// `read_output` (return `[start, start+count)`). No event topic is
-// published for new output yet. 50ms is the smallest interval that
-// still feels "live" without pinning a core; the kernel's own pump
-// call holds a 100ms deadline inside the PTY read, so the IPC round
-// trip is the only thing we're paying for each tick.
-const POLL_INTERVAL_MS = 50
-// One PTY-read deadline per pump, matches the kernel's default.
-const PUMP_TIMEOUT_MS = 100
+// Output is pull-model in the current kernel contract — no event
+// topic is published for new output yet. 120ms is the smallest
+// interval that still feels "live" without pinning a core.
+const POLL_INTERVAL_MS = 120
+// PTY-read deadline folded into each `read_raw_since` call. Kept well
+// below POLL_INTERVAL_MS so each tick releases the server Mutex long
+// enough for concurrent send_raw_input calls (typing) to acquire it —
+// std::sync::Mutex is unfair and would otherwise starve input under a
+// tighter schedule.
+const PUMP_TIMEOUT_MS = 30
 
 interface TerminalViewProps {
   kernel: KernelAPI
   events: EventsAPI
 }
 
-interface OutputLine {
-  timestamp_ms: number
-  content: string
+/**
+ * Backend `ReadRawSinceResponse`. `cursor` is a u64 on the server; over
+ * JSON-IPC we accept it as either a number (values below 2^53 — the
+ * usual case for a single session's lifetime) or a string (serde's
+ * escape hatch for larger values).
+ */
+interface ReadRawSinceResponse {
+  cursor: number | string
   /** Raw bytes as a JSON number array (serde Vec<u8> over IPC). */
-  raw: number[]
-  repeats: number
+  data: number[]
 }
 
 /**
@@ -89,6 +98,12 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(container)
+    term.focus()
+    const focusTerm = () => {
+      term.textarea?.focus()
+    }
+    container.addEventListener('click', focusTerm)
+    container.addEventListener('pointerdown', focusTerm)
     try {
       fit.fit()
     } catch {
@@ -96,56 +111,53 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       // ResizeObserver below will retry on the next frame.
     }
 
-    // Track last-read line offset. The kernel side keeps a monotonic
-    // line buffer; on each tick we only write lines we haven't seen.
-    let nextLineIndex = 0
+    // Monotonic byte offset of the last PTY byte we've written into
+    // xterm. Advanced by each tick's response cursor. Number (not
+    // BigInt) is sufficient for any realistic session lifetime —
+    // 2^53 bytes is ~9 PB. The backend returns either number or
+    // string, so we normalise at read time.
+    let cursor = 0
     let disposed = false
     let pollTimer: number | null = null
     let lastSessionId: string | null = null
 
     /**
-     * One poll tick: pump the PTY, read any new lines, write their
-     * raw bytes into xterm. xterm handles ANSI / cursor motion
-     * natively — we only need to append a newline since OutputLine's
-     * raw bytes are stored without the trailing `\n`.
+     * One poll tick: pump-and-read via `read_raw_since`, then feed
+     * raw bytes straight into xterm. xterm parses ANSI / cursor
+     * motion natively; we never need to synthesise newlines because
+     * the shell's own output (including echoed keystrokes) carries
+     * them when appropriate.
      */
     const tick = async () => {
       if (disposed) return
       const id = useTerminalStore.getState().sessionId
       if (!id) return
       // Session changed out from under us (workspace switch). Reset
-      // the cursor so we start at the new session's line 0.
+      // cursor + clear xterm so we start fresh.
       if (id !== lastSessionId) {
-        nextLineIndex = 0
+        cursor = 0
         lastSessionId = id
         term.reset()
       }
+      let resp: ReadRawSinceResponse
       try {
-        await kernel.invoke(PLUGIN_ID, CMD_PUMP, { id, timeout_ms: PUMP_TIMEOUT_MS })
+        resp = await kernel.invoke<ReadRawSinceResponse>(
+          PLUGIN_ID,
+          CMD_READ_RAW_SINCE,
+          { id, cursor, timeout_ms: PUMP_TIMEOUT_MS },
+        )
       } catch {
         // PTY may be closed mid-tick (workspace close race). Swallow;
         // the outer close handler will clear the session id.
         return
       }
-      let lines: OutputLine[]
-      try {
-        lines = await kernel.invoke<OutputLine[]>(PLUGIN_ID, CMD_READ_OUTPUT, {
-          id,
-          start: nextLineIndex,
-        })
-      } catch {
-        return
-      }
-      if (lines.length === 0) return
-      for (const line of lines) {
-        // Raw bytes preserve ANSI escape sequences the shell emitted
-        // (colours, cursor moves). xterm's `write` accepts Uint8Array
-        // as well as strings.
-        const bytes = new Uint8Array(line.raw)
-        term.write(bytes)
-        term.write('\r\n')
-      }
-      nextLineIndex += lines.length
+      // Cursor arrives as number or string depending on the IPC
+      // encoder; Number() handles both (string → parse, number →
+      // identity). NaN would reset us to 0, which is safe.
+      const nextCursor = Number(resp.cursor)
+      cursor = Number.isFinite(nextCursor) ? nextCursor : cursor
+      if (resp.data.length === 0) return
+      term.write(new Uint8Array(resp.data))
     }
 
     pollTimer = window.setInterval(() => {
@@ -196,6 +208,8 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       if (pollTimer !== null) {
         window.clearInterval(pollTimer)
       }
+      container.removeEventListener('click', focusTerm)
+      container.removeEventListener('pointerdown', focusTerm)
       try {
         onDataSub.dispose()
       } catch {}

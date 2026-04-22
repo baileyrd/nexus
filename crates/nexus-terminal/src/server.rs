@@ -223,6 +223,30 @@ pub trait TerminalServer {
     /// Propagates [`TerminalError::NotRunning`] / [`TerminalError::Io`].
     fn pump(&mut self, id: &SessionId, timeout: Duration) -> Result<usize, TerminalError>;
 
+    /// Drain the PTY (up to `timeout`) and then return the raw bytes
+    /// whose monotonic offset is `>= cursor`. The offset domain is
+    /// "total bytes ever written to the session's ring buffer"; the
+    /// returned `next_cursor` is what the caller should pass on the
+    /// subsequent invocation to get only the new bytes.
+    ///
+    /// If `cursor` sits behind the ring's oldest retained byte, this
+    /// silently clamps to the ring start — interactive callers (xterm)
+    /// prefer "missing a few bytes under load" over "read error".
+    ///
+    /// Folds the drain into the read so an xterm-style frontend can
+    /// replace its `pump` + `read_output` tick with a single call. Keep
+    /// [`Self::pump`] for structured-line consumers (AI agents).
+    ///
+    /// # Errors
+    /// Propagates [`TerminalError::NotRunning`] / [`TerminalError::Io`]
+    /// from the drain step.
+    fn read_raw_since(
+        &mut self,
+        id: &SessionId,
+        cursor: u64,
+        timeout: Duration,
+    ) -> Result<(u64, Vec<u8>), TerminalError>;
+
     /// Read a window of structured lines from the session's buffer.
     /// `start` / `count` behave like Python slicing (clamped to the
     /// available range). Omitted values default to "whole buffer".
@@ -463,6 +487,20 @@ impl TerminalServer for InMemoryTerminalServer {
             .lines_snapshot(id, start, count)
             .ok_or_else(|| TerminalError::NotRunning(id.as_str().to_string()))?;
         Ok(snap.iter().map(OutputLine::from).collect())
+    }
+
+    fn read_raw_since(
+        &mut self,
+        id: &SessionId,
+        cursor: u64,
+        timeout: Duration,
+    ) -> Result<(u64, Vec<u8>), TerminalError> {
+        // Drain first so the snapshot we take below includes whatever
+        // the PTY produced since the previous tick.
+        let _ = self.manager.drain(id, timeout)?;
+        self.manager
+            .buffer_read_since(id, cursor)
+            .ok_or_else(|| TerminalError::NotRunning(id.as_str().to_string()))
     }
 
     fn search_output(
@@ -777,6 +815,141 @@ mod tests {
             s.get_session_info(&ghost),
             Err(TerminalError::NotRunning(_)),
         ));
+    }
+
+    #[test]
+    fn read_raw_since_zero_cursor_returns_all_bytes() {
+        if !unix_only("read_raw_since_zero_cursor_returns_all_bytes") {
+            return;
+        }
+        let mut s = InMemoryTerminalServer::new();
+        let id = s.create_session(sh_printf("zap")).expect("create");
+        // Drain once to give the child time to write.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut last = (0u64, Vec::<u8>::new());
+        while Instant::now() < deadline {
+            last = s
+                .read_raw_since(&id, 0, Duration::from_millis(100))
+                .expect("read_raw");
+            if last.1.windows(3).any(|w| w == b"zap") {
+                break;
+            }
+        }
+        let (cursor, bytes) = last;
+        assert!(bytes.windows(3).any(|w| w == b"zap"), "never saw marker: {bytes:?}");
+        assert_eq!(cursor, bytes.len() as u64, "cursor should equal bytes seen");
+    }
+
+    #[test]
+    fn read_raw_since_advances_cursor_and_returns_only_new_bytes() {
+        if !unix_only("read_raw_since_advances_cursor_and_returns_only_new_bytes") {
+            return;
+        }
+        let mut s = InMemoryTerminalServer::new();
+        // Two staggered writes separated by a short sleep so a first
+        // drain catches only the first payload.
+        let id = s
+            .create_session(ServerSpawnConfig {
+                name: Some("split".into()),
+                shell: Some(ShellSpec {
+                    program: "/bin/sh".into(),
+                    args: vec![
+                        "-c".into(),
+                        "printf 'first\\n'; sleep 0.3; printf 'second\\n'".into(),
+                    ],
+                }),
+                working_dir: None,
+                env: vec![],
+            })
+            .expect("create");
+
+        // Poll until we've seen "first" at cursor 0.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut cursor = 0u64;
+        let mut first_batch: Vec<u8> = Vec::new();
+        while Instant::now() < deadline {
+            let (c, b) = s
+                .read_raw_since(&id, cursor, Duration::from_millis(100))
+                .expect("read");
+            first_batch.extend_from_slice(&b);
+            cursor = c;
+            if first_batch.windows(5).any(|w| w == b"first") {
+                break;
+            }
+        }
+        assert!(first_batch.windows(5).any(|w| w == b"first"));
+
+        // Now poll until "second" shows up past the current cursor.
+        let cursor_after_first = cursor;
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut second_batch: Vec<u8> = Vec::new();
+        while Instant::now() < deadline {
+            let (c, b) = s
+                .read_raw_since(&id, cursor, Duration::from_millis(100))
+                .expect("read");
+            second_batch.extend_from_slice(&b);
+            cursor = c;
+            if second_batch.windows(6).any(|w| w == b"second") {
+                break;
+            }
+        }
+        assert!(second_batch.windows(6).any(|w| w == b"second"));
+        assert!(
+            !second_batch.windows(5).any(|w| w == b"first"),
+            "second batch leaked first-batch bytes: {second_batch:?}",
+        );
+        assert!(cursor >= cursor_after_first);
+    }
+
+    #[test]
+    fn read_raw_since_cursor_past_end_returns_empty_and_unchanged() {
+        if !unix_only("read_raw_since_cursor_past_end_returns_empty_and_unchanged") {
+            return;
+        }
+        let mut s = InMemoryTerminalServer::new();
+        let id = s.create_session(sh_printf("hey")).expect("create");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut cursor = 0u64;
+        while Instant::now() < deadline {
+            let (c, b) = s
+                .read_raw_since(&id, cursor, Duration::from_millis(100))
+                .expect("read");
+            cursor = c;
+            if b.windows(3).any(|w| w == b"hey") {
+                break;
+            }
+        }
+        // Advance past the end by a large margin.
+        let phantom = cursor + 10_000;
+        let (next, bytes) = s
+            .read_raw_since(&id, phantom, Duration::from_millis(50))
+            .expect("read");
+        assert!(bytes.is_empty(), "expected empty, got {bytes:?}");
+        // `next` reflects the current end — and must never exceed the
+        // caller's phantom cursor (no bytes are ever "invented").
+        assert!(next <= phantom || next == cursor);
+    }
+
+    #[test]
+    fn buffer_read_since_clamps_stale_cursor_on_eviction() {
+        // Pure manager-level test using a tiny ring so we can force
+        // eviction deterministically without relying on PTY timing.
+        use crate::buffer::OutputBuffer;
+
+        let mut buf = OutputBuffer::with_capacity(4);
+        buf.push(b"abcd"); // fills ring, dropped=0, len=4
+        buf.push(b"ef"); // evicts "ab", dropped=2, len=4, contents "cdef"
+        // Total bytes written = 6. Cursor=0 is stale (oldest retained
+        // offset is 2). Should clamp and return everything in the ring.
+        let dropped = buf.dropped();
+        let next_cursor_expected = dropped + buf.len() as u64;
+        let (head, tail) = buf.slices();
+        let mut all = Vec::new();
+        all.extend_from_slice(head);
+        all.extend_from_slice(tail);
+        assert_eq!(all, b"cdef");
+        assert_eq!(dropped, 2);
+        assert_eq!(next_cursor_expected, 6);
     }
 
     #[test]

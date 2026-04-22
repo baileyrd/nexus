@@ -26,7 +26,7 @@ export function TitleBarView() {
       <div className="cluster">
         <button className="icon-btn" title="Open folder"><Ic.folder /></button>
         <button className="icon-btn" title="Search"><Ic.search /></button>
-        <button className="icon-btn" title="Starred"><Ic.star /></button>
+        <button className="icon-btn" title="Bookmarks"><Ic.bookmark /></button>
       </div>
 
       <div className="breadcrumb" data-tauri-drag-region>

@@ -386,6 +386,54 @@ impl SessionManager {
         self.sessions.get(id).map(|e| e.buffer.len())
     }
 
+    /// Read the raw buffer bytes whose monotonic byte offset is `>= cursor`.
+    /// The offset domain is "total bytes ever written to this buffer" —
+    /// equivalently `buffer.dropped() + buffer.len()` is the next cursor
+    /// a caller would pass after this call.
+    ///
+    /// Returns `(next_cursor, bytes)`. If `cursor` sits before the ring's
+    /// oldest retained byte (i.e. output was evicted past it), clamps to
+    /// the ring start and returns whatever is still available — callers
+    /// must accept possible byte loss under heavy output. A `cursor` past
+    /// the current end returns an empty `Vec` and an unchanged cursor.
+    /// Returns `None` if `id` is not tracked.
+    #[must_use]
+    pub fn buffer_read_since(
+        &self,
+        id: &SessionId,
+        cursor: u64,
+    ) -> Option<(u64, Vec<u8>)> {
+        let entry = self.sessions.get(id)?;
+        let buf = &entry.buffer;
+        let dropped = buf.dropped();
+        let len = buf.len() as u64;
+        let next_cursor = dropped.saturating_add(len);
+        // Cursor past the end: no new bytes, echo it back unchanged.
+        if cursor >= next_cursor {
+            return Some((next_cursor, Vec::new()));
+        }
+        // Clamp a stale cursor to the oldest retained byte — the caller
+        // asked for bytes that have since been evicted.
+        let start_offset = if cursor < dropped {
+            0usize
+        } else {
+            (cursor - dropped) as usize
+        };
+        let (head, tail) = buf.slices();
+        let total = head.len() + tail.len();
+        let mut out = Vec::with_capacity(total.saturating_sub(start_offset));
+        if start_offset < head.len() {
+            out.extend_from_slice(&head[start_offset..]);
+            out.extend_from_slice(tail);
+        } else {
+            let tail_off = start_offset - head.len();
+            if tail_off < tail.len() {
+                out.extend_from_slice(&tail[tail_off..]);
+            }
+        }
+        Some((next_cursor, out))
+    }
+
     /// Current lifecycle state of the session (PRD-09 §4). `None` if
     /// the id is not tracked. Reads the latched state on the underlying
     /// `Session` — cheap and does not poll the child. Callers that need

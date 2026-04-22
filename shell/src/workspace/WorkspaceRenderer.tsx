@@ -79,6 +79,15 @@ const UPPER_ROW_STYLE: CSSProperties = {
 const MAIN_STYLE: CSSProperties = {
   flex: '1 1 auto',
   display: 'flex',
+  flexDirection: 'column',
+  minWidth: 0,
+  minHeight: 0,
+  overflow: 'hidden',
+}
+
+const MAIN_CONTENT_STYLE: CSSProperties = {
+  flex: '1 1 auto',
+  display: 'flex',
   minWidth: 0,
   minHeight: 0,
   overflow: 'hidden',
@@ -97,11 +106,13 @@ export function Workspace(): JSX.Element {
       <div className="workspace-upper" style={UPPER_ROW_STYLE}>
         <SidedockFrame side="left" dock={leftSplit} />
         <div className="workspace-main" style={MAIN_STYLE}>
-          <RenderNode node={rootSplit} isMainDock />
+          <div className="workspace-main-content" style={MAIN_CONTENT_STYLE}>
+            <RenderNode node={rootSplit} isMainDock />
+          </div>
+          <SidedockFrame side="bottom" dock={bottomSplit} />
         </div>
         <SidedockFrame side="right" dock={rightSplit} />
       </div>
-      <SidedockFrame side="bottom" dock={bottomSplit} />
       {/* Floating window-controls anchor. Absolutely positioned at the
           window's top-right corner so it sits over whichever view /
           panel happens to render there, without introducing a new
@@ -243,39 +254,11 @@ function BottomSidedockFrame({ dock }: { dock: Sidedock }): JSX.Element {
     >
       {/* Top-edge resize handle: dragging up grows the drawer. */}
       <DockResizeHandle side="bottom" initialSize={dock.size} />
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          padding: '2px 4px',
-          borderBottom: '1px solid var(--divider-color, var(--line, #333))',
-        }}
-      >
-        <button
-          type="button"
-          title="Collapse bottom drawer"
-          onClick={() => workspace.setSidedockCollapsed('bottom', true)}
-          style={COLLAPSE_BUTTON_STYLE}
-        >
-          {/* down-chevron when expanded — click to collapse downward */}
-          ▾
-        </button>
-      </div>
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex' }}>
-        <RenderNode node={dock} />
+        <RenderNode node={dock} hideTabStrip />
       </div>
     </div>
   )
-}
-
-const COLLAPSE_BUTTON_STYLE: CSSProperties = {
-  background: 'transparent',
-  border: 'none',
-  color: 'var(--text-muted, var(--fg-muted, #888))',
-  cursor: 'pointer',
-  fontSize: 14,
-  lineHeight: 1,
-  padding: '2px 6px',
 }
 
 // ---------------------------------------------------------------------------
@@ -367,16 +350,19 @@ interface RenderNodeProps {
    *  so the TabStrip can render the sidebar collapse chevron inline
    *  with its tabs (rather than a separate stacked row above). */
   sideDock?: 'left' | 'right'
+  /** Suppress rendering of the tab strip on any descendant tab groups.
+   *  Used by the bottom drawer to render a chrome-free full-bleed view. */
+  hideTabStrip?: boolean
 }
 
-function RenderNode({ node, isMainDock = false, sideDock }: RenderNodeProps): JSX.Element | null {
+function RenderNode({ node, isMainDock = false, sideDock, hideTabStrip }: RenderNodeProps): JSX.Element | null {
   switch (node.kind) {
     case 'split':
-      return <SplitNode node={node} isMainDock={isMainDock} sideDock={sideDock} />
+      return <SplitNode node={node} isMainDock={isMainDock} sideDock={sideDock} hideTabStrip={hideTabStrip} />
     case 'tabs':
-      return <TabGroup tabs={node} isMainDock={isMainDock} sideDock={sideDock} />
+      return <TabGroup tabs={node} isMainDock={isMainDock} sideDock={sideDock} hideTabStrip={hideTabStrip} />
     case 'root':
-      return <RenderNode node={(node as Root).child} isMainDock={isMainDock} sideDock={sideDock} />
+      return <RenderNode node={(node as Root).child} isMainDock={isMainDock} sideDock={sideDock} hideTabStrip={hideTabStrip} />
     case 'floating':
       return (
         <div data-floating="true" style={{ width: '100%', height: '100%' }}>
@@ -392,7 +378,7 @@ function RenderNode({ node, isMainDock = false, sideDock }: RenderNodeProps): JS
   }
 }
 
-function SplitNode({ node, isMainDock, sideDock }: { node: Split; isMainDock: boolean; sideDock?: 'left' | 'right' }): JSX.Element {
+function SplitNode({ node, isMainDock, sideDock, hideTabStrip }: { node: Split; isMainDock: boolean; sideDock?: 'left' | 'right'; hideTabStrip?: boolean }): JSX.Element {
   const style: CSSProperties = {
     display: 'flex',
     flexDirection: node.direction === 'horizontal' ? 'row' : 'column',
@@ -416,7 +402,7 @@ function SplitNode({ node, isMainDock, sideDock }: { node: Split; isMainDock: bo
               display: 'flex',
             }}
           >
-            <RenderNode node={child} isMainDock={isMainDock} sideDock={sideDock} />
+            <RenderNode node={child} isMainDock={isMainDock} sideDock={sideDock} hideTabStrip={hideTabStrip} />
           </div>
         )
       })}
@@ -437,9 +423,10 @@ interface TabGroupProps {
   tabs: Tabs
   isMainDock: boolean
   sideDock?: 'left' | 'right'
+  hideTabStrip?: boolean
 }
 
-function TabGroup({ tabs, isMainDock, sideDock }: TabGroupProps): JSX.Element {
+function TabGroup({ tabs, isMainDock, sideDock, hideTabStrip }: TabGroupProps): JSX.Element {
   const activeLeaf = tabs.leaves[tabs.activeIndex] ?? null
 
   return (
@@ -456,7 +443,7 @@ function TabGroup({ tabs, isMainDock, sideDock }: TabGroupProps): JSX.Element {
         overflow: 'hidden',
       }}
     >
-      <TabStrip tabs={tabs} isMainDock={isMainDock} sideDock={sideDock} />
+      {!hideTabStrip && <TabStrip tabs={tabs} isMainDock={isMainDock} sideDock={sideDock} />}
       <div
         className="workspace-tab-body"
         style={{

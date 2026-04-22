@@ -98,6 +98,11 @@ export const Star = (p: P) => (
     <path d="m12 3 2.8 5.8 6.4.9-4.6 4.5 1 6.3L12 17.8 6.4 20.5l1-6.3L2.8 9.7l6.4-.9L12 3z" />
   </svg>
 )
+export const Bookmark = (p: P) => (
+  <svg {...common} strokeWidth={1.75} {...p}>
+    <path d="M6 3h12v18l-6-4-6 4V3z" />
+  </svg>
+)
 export const Clock = (p: P) => (
   <svg {...common} strokeWidth={1.75} {...p}>
     <circle cx={12} cy={12} r={9} />
@@ -176,7 +181,7 @@ export const Sliders = (p: P) => (
 export const Ic = {
   folder: Folder, folderOpen: FolderOpen, doc: Doc, chev: Chev, search: Search,
   graph: Graph, bolt: Bolt, sparkle: Sparkle, terminal: Terminal, task: Task,
-  git: Git, plug: Plug, settings: Settings, star: Star, clock: Clock, link: Link,
+  git: Git, plug: Plug, settings: Settings, star: Star, bookmark: Bookmark, clock: Clock, link: Link,
   panel: PanelIcon, x: X, plus: Plus, check: Check, ember: Ember, db: Db,
   tag: Tag, book: Book, min: Min, max: Max, sliders: Sliders,
   // aliases — stable names used by the activity bar store

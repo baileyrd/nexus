@@ -32,6 +32,7 @@
 //! | 8          | `wait_for_pattern`   | Block until a pattern matches / timeout |
 //! | 9          | `get_session_info`   | Metadata for one session                |
 //! | 10         | `list_sessions`      | Metadata for every session              |
+//! | 16         | `read_raw_since`     | Pump + return raw bytes past a cursor   |
 //!
 //! Ids are **append-only** — never reused after retirement — because
 //! manifest registrations in loaded plugins bake them in.
@@ -93,6 +94,10 @@ pub const HANDLER_SAVED_UPDATE: u32 = 13;
 pub const HANDLER_SAVED_DELETE: u32 = 14;
 /// `saved_reorder` handler id. Args: `{ slug: string, sidebar_order?: i32 }`.
 pub const HANDLER_SAVED_REORDER: u32 = 15;
+/// `read_raw_since` handler id. Folds [`HANDLER_PUMP`] + a raw-bytes
+/// read into one call for xterm-style frontends that just want the PTY
+/// byte stream. See [`ReadRawSinceArgs`].
+pub const HANDLER_READ_RAW_SINCE: u32 = 16;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -180,6 +185,34 @@ pub struct ReadOutputArgs {
     /// How many lines to return. `None` = to the end.
     #[serde(default)]
     pub count: Option<usize>,
+}
+
+/// Arguments for `read_raw_since`. The cursor is the monotonic
+/// "total bytes ever written to this session's ring" counter returned
+/// by the previous call — start at `0` for a fresh session. Bytes
+/// before the ring's oldest retained offset are silently skipped
+/// (clamp-on-eviction) because xterm prefers a gap to an error.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadRawSinceArgs {
+    /// Target session id.
+    pub id: String,
+    /// Monotonic byte offset the caller last saw. Use `0` on first call.
+    pub cursor: u64,
+    /// Drain deadline in ms. Defaults to 30 ms — short enough that an
+    /// idle session releases the server Mutex promptly for concurrent
+    /// `send_raw_input` calls.
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+}
+
+/// Response from `read_raw_since`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadRawSinceResponse {
+    /// Cursor to pass on the next call — equals `dropped + len` after
+    /// the drain.
+    pub cursor: u64,
+    /// Raw bytes past the caller's cursor (ANSI sequences intact).
+    pub data: Vec<u8>,
 }
 
 /// Arguments for `search_output`.
@@ -292,6 +325,7 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_SAVED_UPDATE => self.dispatch_saved_update(args),
             HANDLER_SAVED_DELETE => self.dispatch_saved_delete(args),
             HANDLER_SAVED_REORDER => self.dispatch_saved_reorder(args),
+            HANDLER_READ_RAW_SINCE => self.dispatch_read_raw_since(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -400,6 +434,22 @@ impl TerminalCorePlugin {
             .read_output(&id, a.start, a.count)
             .map_err(crate_err)?;
         to_value(&lines, "read_output")
+    }
+
+    fn dispatch_read_raw_since(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: ReadRawSinceArgs = parse_args(args, "read_raw_since")?;
+        let id = SessionId::from_string(a.id);
+        let timeout = Duration::from_millis(a.timeout_ms.unwrap_or(30));
+        let (cursor, data) = self
+            .server
+            .lock()
+            .map_err(poisoned)?
+            .read_raw_since(&id, a.cursor, timeout)
+            .map_err(crate_err)?;
+        to_value(&ReadRawSinceResponse { cursor, data }, "read_raw_since")
     }
 
     fn dispatch_search_output(
