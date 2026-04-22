@@ -22,6 +22,7 @@ class EmptyView implements View {
   readonly viewType = EMPTY_VIEW_TYPE
   leaf: Leaf
   private root: Root | null = null
+  private hostEl: HTMLDivElement | null = null
 
   constructor(leaf: Leaf) {
     this.leaf = leaf
@@ -36,17 +37,24 @@ class EmptyView implements View {
   }
 
   onOpen(el: HTMLElement): void {
-    // Match the editor's layout conventions — centred vertically,
-    // muted accent colour. The host leaf container is a flex column;
-    // this wrapper fills it and centres the action stack.
-    el.style.display = 'flex'
-    el.style.flexDirection = 'column'
-    el.style.alignItems = 'center'
-    el.style.justifyContent = 'center'
-    el.style.height = '100%'
-    el.style.color = 'var(--fg-dim, var(--fg-muted, #888))'
+    // Render into a dedicated child div so we never mutate the
+    // LeafHost container's inline style — the host manages
+    // display:none for inactive leaves, and writing to its .style
+    // directly races React's style prop and can leave inactive
+    // leaves visible on top of the active one.
+    const host = document.createElement('div')
+    host.className = 'empty-view-host'
+    host.style.display = 'flex'
+    host.style.flexDirection = 'column'
+    host.style.alignItems = 'center'
+    host.style.justifyContent = 'center'
+    host.style.width = '100%'
+    host.style.height = '100%'
+    host.style.color = 'var(--fg-dim, var(--fg-muted, #888))'
+    el.appendChild(host)
+    this.hostEl = host
 
-    this.root = createRoot(el)
+    this.root = createRoot(host)
     const hasAnyTab = useEditorStore.getState().tabs.length > 0
     this.root.render(createElement(EmptyStateActions, { hasAnyTab }))
   }
@@ -54,6 +62,10 @@ class EmptyView implements View {
   onClose(): void {
     this.root?.unmount()
     this.root = null
+    if (this.hostEl && this.hostEl.parentNode) {
+      this.hostEl.parentNode.removeChild(this.hostEl)
+    }
+    this.hostEl = null
   }
 
   getDisplayText(): string {
