@@ -573,6 +573,39 @@ export const editorPlugin: Plugin = {
       useEditorStore.getState().setActive(relpath)
     })
 
+    // Hydration-path seed. `workspaceStore.hydrate` drives each persisted
+    // leaf through `setViewState(sLeaf.viewState)`, but `getViewState()`
+    // intentionally omits the `active` flag (it is a workspace-level
+    // property recorded against `json.active`). That means `Leaf.ts`
+    // never emits `active-leaf-change` during hydrate — only
+    // `view-changed` — so the `active-leaf-change` handler above doesn't
+    // fire for the restored active leaf. Without this seed the user sees
+    // the "Select a file to view" empty state on app boot even though
+    // the tab strip shows a.md as active.
+    //
+    // On `layout-ready` (fired once all hydrate setViewState calls
+    // resolve), walk every markdown leaf and `loadFile` for any relpath
+    // we don't already have a tab for, then set the active tab to the
+    // currently-active leaf's relpath if it is a markdown leaf.
+    const seedFromLayout = () => {
+      const leaves = workspace.getLeavesOfType('markdown')
+      for (const leaf of leaves) {
+        const st = leaf.view?.getState() as { relpath?: unknown } | undefined
+        const relpath = typeof st?.relpath === 'string' ? st.relpath : null
+        if (!relpath) continue
+        const hasTab = useEditorStore.getState().tabs.some((t) => t.relpath === relpath)
+        if (hasTab) continue
+        const sepIdx = Math.max(relpath.lastIndexOf('/'), relpath.lastIndexOf('\\'))
+        const name = sepIdx >= 0 ? relpath.slice(sepIdx + 1) : relpath
+        void loadFile({ relpath, name })
+      }
+    }
+    workspace.on('layout-ready', seedFromLayout)
+    // If the workspace has already hydrated before this plugin activated
+    // (activation order is not guaranteed), seed immediately — any leaves
+    // already present get their tabs hydrated.
+    queueMicrotask(seedFromLayout)
+
     // Seed + sync context keys to the store. We track two
     // transitions: (a) activeRelpath presence, (b) whether the
     // active tab is dirty. `subscribe` is called on every store
