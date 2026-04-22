@@ -4,10 +4,10 @@
 // rendered WebView2 DOM (keyboard + CM6 contenteditable) or drops into the
 // page context via `browser.execute(...)` to invoke kernel IPC directly.
 //
-// Why mix the two: some operations (open-a-file) are faster & more
-// deterministic over IPC than driving the file-tree UI, but the spec's
-// purpose is to exercise the real editor glue — so saves, undos, and text
-// edits go through actual keyboard input.
+// Why mix the two: some operations (open-a-file, save, close) are faster
+// and more deterministic over IPC than driving the UI, but the spec's
+// purpose is to exercise the real editor glue — so typing and undo go
+// through actual keyboard input.
 
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -64,61 +64,54 @@ export async function openVault(vaultAbsPath: string): Promise<void> {
   )
 
   // 3) Drive the same command the launcher uses — idempotent if the
-  //    workspace plugin's auto-restore already fired.
+  //    workspace plugin's auto-restore already fired. Also flip two
+  //    editor configs so specs can drive keystrokes directly:
+  //    - defaultMode=source: markdown files open straight into a CM6
+  //      instance rather than the preview renderer.
+  //    - confirmCloseDirty=false: closeTab() silently discards the
+  //      buffer instead of stalling on a modal confirm dialog.
   await browser.execute(async (vault: string) => {
     const api = (window as unknown as { __nexusShellApi?: {
       commands?: { execute: (id: string, ...args: unknown[]) => Promise<unknown> }
+      configuration?: { setValue: (key: string, value: unknown) => void | Promise<void> }
     } }).__nexusShellApi
     if (!api?.commands) throw new Error('shell plugin API missing commands registry')
     await api.commands.execute('nexus.workspace.setRoot', vault)
+    if (api.configuration) {
+      await api.configuration.setValue('nexus.editor.defaultMode', 'source')
+      await api.configuration.setValue('nexus.editor.confirmCloseDirty', false)
+    }
   }, vaultAbsPath)
 }
 
 /** Open a file in the editor via the `files:open` event bus contract. */
 export async function openFile(relpath: string): Promise<void> {
-  const before = await browser.execute(() => ({
-    ribbonBtns: document.querySelectorAll('.workspace-ribbon button').length,
-    mainRegionHtmlLen: document.querySelector('.workspace-main-region')?.innerHTML?.length ?? -1,
-    cmCount: document.querySelectorAll('.cm-content').length,
-    bodyLen: document.body?.innerHTML?.length ?? 0,
-  }))
-  console.log('[e2e-debug] pre-openFile', JSON.stringify(before))
-
-  const emitResult = await browser.execute((rel: string) => {
+  await browser.execute((rel: string) => {
     const api = (window as unknown as { __nexusShellApi?: {
-      events?: { emit: (topic: string, payload: unknown) => void; listenerCount?: (topic: string) => number }
+      events?: { emit: (topic: string, payload: unknown) => void }
     } }).__nexusShellApi
     if (!api?.events) throw new Error('shell plugin API not on window')
     const name = rel.split('/').pop() ?? rel
-    const listeners = api.events.listenerCount?.('files:open') ?? 'n/a'
     api.events.emit('files:open', { relpath: rel, name })
-    return { listeners, name }
   }, relpath)
-  console.log('[e2e-debug] openFile emit', JSON.stringify(emitResult))
 
-  // Give the plugin handler a beat, then probe again.
-  await browser.pause(2000)
-  const after = await browser.execute(() => {
-    const classes = new Set<string>()
-    document.querySelectorAll('[class]').forEach((el) => {
-      el.className.toString().split(/\s+/).forEach((c) => {
-        if (c.startsWith('cm-') || c.startsWith('nexus-editor') || c.startsWith('markdown-')) classes.add(c)
-      })
-    })
-    const leaf = document.querySelector('.workspace-leaf')
-    return {
-      cmCount: document.querySelectorAll('.cm-content').length,
-      leafCount: document.querySelectorAll('.workspace-leaf').length,
-      tabCount: document.querySelectorAll('.workspace-tab-header').length,
-      editorClasses: Array.from(classes),
-      leafInner: leaf?.innerHTML?.slice(0, 600) ?? '(no leaf)',
-    }
-  })
-  console.log('[e2e-debug] post-openFile', JSON.stringify(after))
-
-  // Wait for CM6 to mount. The editor creates a `.cm-content` contenteditable
-  // per open file; the active one takes focus.
-  await $('.cm-content').waitForExist({ timeout: 15_000 })
+  // If the tab lands in preview mode, flip it to source so the keystroke
+  // helpers below target a real CodeMirror instance. openVault() sets
+  // `nexus.editor.defaultMode=source`, but that preference is read only
+  // when a NEW tab is opened — reopening an already-known file can land
+  // in whatever mode was last active.
+  await browser.waitUntil(
+    async () => {
+      const hasCm = await $('.cm-content').isExisting()
+      if (hasCm) return true
+      const editBtn = await $('button[aria-label="Edit"][title="Edit"]')
+      if (await editBtn.isExisting()) {
+        await editBtn.click()
+      }
+      return false
+    },
+    { timeout: 15_000, timeoutMsg: 'editor never reached source mode' },
+  )
 }
 
 export async function focusEditor(): Promise<void> {
@@ -131,23 +124,39 @@ export async function typeInEditor(text: string): Promise<void> {
   await browser.keys(text.split(''))
 }
 
-/** Send Ctrl+S (Cmd+S on macOS). */
+/** Save the active tab. Routes through the editor plugin's command
+ *  rather than a Ctrl+S key chord — WebDriver-injected modifier chords
+ *  get swallowed by the shell's global keybinding dispatcher before
+ *  they reach the CodeMirror scope. */
 export async function save(): Promise<void> {
-  const mod = process.platform === 'darwin' ? Key.Command : Key.Ctrl
-  await browser.keys([mod, 's'])
-  await browser.keys([mod]) // key-up
+  await browser.execute(async () => {
+    const api = (window as unknown as { __nexusShellApi?: {
+      commands?: { execute: (id: string, ...args: unknown[]) => Promise<unknown> }
+    } }).__nexusShellApi
+    if (!api?.commands) throw new Error('shell plugin API missing commands')
+    await api.commands.execute('nexus.editor.save')
+  })
 }
 
+/** Undo inside the active CodeMirror instance. Uses a key chord — undo
+ *  is a CM6 binding, not a plugin command, so the command-API detour
+ *  used for save/close doesn't apply. */
 export async function undo(): Promise<void> {
+  await focusEditor()
   const mod = process.platform === 'darwin' ? Key.Command : Key.Ctrl
   await browser.keys([mod, 'z'])
   await browser.keys([mod])
 }
 
+/** Close the active tab via the editor plugin's command. */
 export async function closeTab(): Promise<void> {
-  const mod = process.platform === 'darwin' ? Key.Command : Key.Ctrl
-  await browser.keys([mod, 'w'])
-  await browser.keys([mod])
+  await browser.execute(async () => {
+    const api = (window as unknown as { __nexusShellApi?: {
+      commands?: { execute: (id: string, ...args: unknown[]) => Promise<unknown> }
+    } }).__nexusShellApi
+    if (!api?.commands) throw new Error('shell plugin API missing commands')
+    await api.commands.execute('nexus.editor.closeTab')
+  })
 }
 
 /** Re-open a file that was just closed. */
