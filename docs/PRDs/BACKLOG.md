@@ -56,14 +56,18 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   layer parses/serializes/indexes canvas files; CLI shipped; kernel
   IPC surface landed 2026-04-22 (`canvas_read` / `canvas_write` /
   `canvas_patch` / `canvas_nodes` / `canvas_edges` on
-  `com.nexus.storage`, handler ids 35–39). Shell Phase 1 (routing +
-  blank surface) landed 2026-04-22: `shell/src/plugins/nexus/canvas/`
-  registers view type `canvas`, claims the `.canvas` extension
-  (routed via the existing `viewTypeForFile` path), and renders a
-  grey pane with a "N nodes · M edges" overlay sourced from
-  `canvas_read`. Plan: [docs/canvas-shell-plan.md](../canvas-shell-plan.md)
-  — remaining phases 2–6 (canvas renderer with zoom/pan →
-  interactions → edges + inspector → rich node embeds → polish).
+  `com.nexus.storage`, handler ids 35–39). Shell Phases 1–2 landed
+  2026-04-22: `shell/src/plugins/nexus/canvas/` registers view type
+  `canvas`, claims the `.canvas` extension, and ships a
+  canvas-element renderer (imperative RAF loop, DPR-aware) with
+  typed node cards (file/text/link/group/database/terminal), bezier
+  edges with arrow heads + solid/dashed/dotted, wheel-zoom anchored
+  on the pointer (10%–400%), pan (wheel scroll without modifiers,
+  or drag), zoom-to-fit on first load, and a dot grid that
+  auto-hides past 35% zoom. Plan:
+  [docs/canvas-shell-plan.md](../canvas-shell-plan.md) — remaining
+  phases 3–6 (interactions: select / move / resize / create →
+  edges + inspector → rich node embeds → polish).
 - [ ] **Notion-style block UX on top of the existing block-tree engine
   (PRD-08).** Block tree + transactions + annotations are shipped
   (3.7k LoC in `nexus-editor`); what's missing is the UI layer —

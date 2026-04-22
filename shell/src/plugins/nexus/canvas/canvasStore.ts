@@ -1,12 +1,33 @@
 import { create } from 'zustand'
 import type { CanvasDoc } from './kernelClient'
 
-/** Per-relpath load state. Phase 1 stores the full doc + a loading
- *  flag; camera / selection / pending patches come in later phases. */
+export interface Camera {
+  /** Top-left world-space x that maps to viewport (0, 0). */
+  x: number
+  /** Top-left world-space y that maps to viewport (0, 0). */
+  y: number
+  /** 1.0 = 1:1. Clamped to [MIN_ZOOM, MAX_ZOOM] at write time. */
+  zoom: number
+}
+
+export const MIN_ZOOM = 0.1
+export const MAX_ZOOM = 4.0
+const DEFAULT_CAMERA: Camera = { x: 0, y: 0, zoom: 1 }
+
+function clampZoom(z: number): number {
+  if (z < MIN_ZOOM) return MIN_ZOOM
+  if (z > MAX_ZOOM) return MAX_ZOOM
+  return z
+}
+
 export interface CanvasTabState {
   doc: CanvasDoc | null
   loading: boolean
   error: string | null
+  camera: Camera
+  /** Cleared when the user has panned/zoomed at least once so we don't
+   *  reset their view on every re-render. */
+  cameraInitialized: boolean
 }
 
 interface CanvasStore {
@@ -16,9 +37,16 @@ interface CanvasStore {
   setError: (relpath: string, error: string) => void
   clear: (relpath: string) => void
   get: (relpath: string) => CanvasTabState | undefined
+  setCamera: (relpath: string, camera: Camera) => void
 }
 
-const emptyState: CanvasTabState = { doc: null, loading: false, error: null }
+const emptyState: CanvasTabState = {
+  doc: null,
+  loading: false,
+  error: null,
+  camera: DEFAULT_CAMERA,
+  cameraInitialized: false,
+}
 
 function produce(
   tabs: Map<string, CanvasTabState>,
@@ -46,4 +74,11 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       return { tabs: next }
     }),
   get: (relpath) => get().tabs.get(relpath),
+  setCamera: (relpath, camera) =>
+    set((s) => ({
+      tabs: produce(s.tabs, relpath, {
+        camera: { ...camera, zoom: clampZoom(camera.zoom) },
+        cameraInitialized: true,
+      }),
+    })),
 }))
