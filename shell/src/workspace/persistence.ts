@@ -39,7 +39,8 @@ export interface KernelBridge {
 }
 
 interface ReadFileResponse {
-  bytes?: number[]
+  /** `null` when the file does not exist on disk; array of bytes otherwise. */
+  bytes?: number[] | null
 }
 
 /**
@@ -50,9 +51,10 @@ interface ReadFileResponse {
  */
 const defaultBridge: KernelBridge = {
   async readVaultFile(relPath: string): Promise<string | null> {
-    // Don't probe via file_exists: that handler queries the SQLite file index,
-    // which is intentionally bypassed for .forge/ writes. Let read_file fail
-    // naturally on missing files — FileNotFound arrives as a rejected invoke.
+    // Storage's read_file returns `{ bytes: null }` for missing files so
+    // the IPC bridge doesn't collapse FileNotFound into
+    // `PluginCrashedDuringCall`. Any thrown error here is a genuine
+    // failure (path validation, IO error, plugin panic) and worth logging.
     try {
       const resp = await invoke<ReadFileResponse>('kernel_invoke', {
         pluginId: STORAGE_PLUGIN_ID,
@@ -60,13 +62,10 @@ const defaultBridge: KernelBridge = {
         args: { path: relPath },
         timeoutMs: null,
       })
-      const bytes = resp.bytes ?? []
-      return new TextDecoder().decode(new Uint8Array(bytes))
+      if (resp.bytes == null) return null
+      return new TextDecoder().decode(new Uint8Array(resp.bytes))
     } catch (err) {
-      const msg = String((err as { message?: string })?.message ?? err)
-      if (!/not found|FileNotFound|no such file/i.test(msg)) {
-        console.warn('[workspace.persistence] readVaultFile failed', err)
-      }
+      console.warn('[workspace.persistence] readVaultFile failed', err)
       return null
     }
   },

@@ -32,7 +32,10 @@ pub const PLUGIN_ID: &str = "com.nexus.storage";
 
 /// Handler id for `query_files`. Args: [`FileFilter`]; Returns: `Vec<FileRecord>`.
 pub const HANDLER_QUERY_FILES: u32 = 1;
-/// Handler id for `read_file`. Args: `{ "path": String }`; Returns: `{ "bytes": Vec<u8> }`.
+/// Handler id for `read_file`. Args: `{ "path": String }`; Returns:
+/// `{ "bytes": Option<Vec<u8>> }` — `null` when the file does not exist,
+/// so callers can distinguish a missing file from a genuine failure without
+/// the IPC layer collapsing the error into `PluginCrashedDuringCall`.
 pub const HANDLER_READ_FILE: u32 = 2;
 /// Handler id for `backlinks`. Args: `{ "path": String }`; Returns: `Vec<BacklinkResult>`.
 pub const HANDLER_BACKLINKS: u32 = 3;
@@ -269,10 +272,17 @@ impl CorePlugin for StorageCorePlugin {
             }
             HANDLER_READ_FILE => {
                 let path = path_arg(args, "read_file")?;
-                let bytes = engine
-                    .read_file(&path)
-                    .map_err(|e| exec_err(format!("read_file: {e}")))?;
-                Ok(serde_json::json!({ "bytes": bytes }))
+                match engine.read_file(&path) {
+                    Ok(bytes) => Ok(serde_json::json!({ "bytes": bytes })),
+                    // Missing files are an expected outcome for callers probing
+                    // `.forge/workspace.json` on first boot, etc. Return a typed
+                    // null rather than an error so the IPC bridge doesn't
+                    // surface it as `PluginCrashedDuringCall`.
+                    Err(crate::StorageError::FileNotFound(_)) => {
+                        Ok(serde_json::json!({ "bytes": null }))
+                    }
+                    Err(e) => Err(exec_err(format!("read_file: {e}"))),
+                }
             }
             HANDLER_BACKLINKS => {
                 let path = path_arg(args, "backlinks")?;

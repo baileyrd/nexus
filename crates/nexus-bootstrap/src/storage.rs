@@ -234,11 +234,26 @@ pub fn query_tags(runtime: &Runtime, rt: &TokioRuntime, name: &str) -> Result<Ve
     )
 }
 
-/// Read a file's bytes by forge-relative path.
+/// Read a file's bytes by forge-relative path. Returns an error when the
+/// file does not exist — callers that want a typed "missing" signal should
+/// use [`read_file_optional`].
 pub fn read_file(runtime: &Runtime, rt: &TokioRuntime, path: &str) -> Result<Vec<u8>> {
+    read_file_optional(runtime, rt, path)?
+        .with_context(|| format!("read_file: file not found: {path}"))
+}
+
+/// Read a file's bytes by forge-relative path. Returns `Ok(None)` when the
+/// file does not exist (storage returns `{ "bytes": null }` for missing),
+/// `Err` for any other failure.
+pub fn read_file_optional(
+    runtime: &Runtime,
+    rt: &TokioRuntime,
+    path: &str,
+) -> Result<Option<Vec<u8>>> {
     #[derive(Deserialize)]
     struct Resp {
-        bytes: Vec<u8>,
+        #[serde(default)]
+        bytes: Option<Vec<u8>>,
     }
     let resp: Resp = call(
         runtime,
