@@ -61,6 +61,15 @@ Register the string names in the bootstrap plugin (same table as
 
 ### Shell UI phases
 
+> **Status (2026-04-22):** Phases 1–3 complete. Next pickup is
+> Phase 4 (edges + inspector). The kernel surface (`canvas_read` /
+> `canvas_write` / `canvas_patch` / `canvas_nodes` / `canvas_edges`
+> on `com.nexus.storage`, handler ids 35–39) and every client-side
+> interaction listed under Phase 3 below (select, marquee, drag-
+> move, resize, delete, create text, drag-from-edge-to-create, undo/
+> redo) landed. Shell code lives under
+> `shell/src/plugins/nexus/canvas/`.
+
 #### Phase 1 — view registration + blank surface
 
 Budget: half a day.
@@ -123,12 +132,15 @@ Budget: 2 days.
   redo/undo produces a `canvas_patch`.
 - **Zoom-to-fit** / **zoom-to-selection** keyboard shortcuts.
 
-#### Phase 4 — edges + inspector
+#### Phase 4 — edges + inspector  ← **pickup here**
 
 Budget: 1 day.
 
 - **Edge creation**: drag from a node's border handle (shown on
-  hover) onto a target node.
+  hover) onto a target node. **Landed in Phase 3** — the hover
+  affordance, drag-to-create, new-text-node-on-empty-drop, and
+  history wiring are all in `CanvasView.tsx`. Remaining Phase 4
+  work on edges narrows to selection + editing + deletion.
 - **Edge editing**: click to select; side inspector for label / color /
   line style.
 - **Edge deletion**: `delete` while edge is selected.
