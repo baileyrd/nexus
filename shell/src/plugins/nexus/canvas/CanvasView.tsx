@@ -1,17 +1,38 @@
-// Phase-2 canvas surface: <canvas>-based renderer with camera
-// (wheel-zoom anchored on cursor, drag-to-pan). Nodes render as typed
-// cards, edges as bezier lines with arrow heads. Hit-testing + drag +
-// create + inspector are Phase 3; full node-body embeds are Phase 5.
+// Phase-3 canvas surface: selection, drag-to-move, delete, and
+// double-click-to-create-text. Changes flush through canvas_patch so
+// the SQLite index + knowledge graph stay in sync.
+//
+// Deferred to a later Phase-3 cut: shift-click multi-select, marquee
+// selection, resize handles, drag-from-edge create, undo/redo stack.
 
 import { useEffect, useRef } from 'react'
-import { useCanvasStore, MIN_ZOOM, MAX_ZOOM, type Camera } from './canvasStore'
-import { render, readTheme } from './renderer'
-import type { CanvasKernelClient, CanvasDoc } from './kernelClient'
+import {
+  useCanvasStore,
+  MIN_ZOOM,
+  MAX_ZOOM,
+  newNodeId,
+  applyNodeMove,
+  applyNodeAdd,
+  applyNodeRemove,
+  type Camera,
+} from './canvasStore'
+import { render, readTheme, hitTestNode, DEFAULT_TEXT_NODE_SIZE } from './renderer'
+import type {
+  CanvasKernelClient,
+  CanvasDoc,
+  CanvasNode,
+  CanvasPatchOp,
+} from './kernelClient'
 
 interface Props {
   relpath: string
   client: CanvasKernelClient
 }
+
+/** Clicks within this many CSS pixels of pointerdown are a click, not
+ *  a drag. Prevents microscopic cursor jitter from kicking the view
+ *  into move-mode. */
+const DRAG_THRESHOLD_PX = 3
 
 export function CanvasView({ relpath, client }: Props) {
   const tab = useCanvasStore((s) => s.tabs.get(relpath))
@@ -22,6 +43,9 @@ export function CanvasView({ relpath, client }: Props) {
   const docRef = useRef<CanvasDoc | null>(null)
   const cameraRef = useRef<Camera>({ x: 0, y: 0, zoom: 1 })
   const cameraDirtyRef = useRef(false)
+  const selectionRef = useRef<Set<string>>(new Set())
+  const clientRef = useRef(client)
+  clientRef.current = client
 
   useEffect(() => {
     const store = useCanvasStore.getState()
@@ -41,6 +65,7 @@ export function CanvasView({ relpath, client }: Props) {
   useEffect(() => {
     docRef.current = tab?.doc ?? null
     if (tab?.camera) cameraRef.current = tab.camera
+    selectionRef.current = tab?.selection ?? new Set()
   }, [tab])
 
   // Zoom-to-fit the document once both (a) the doc has loaded and (b)
@@ -116,6 +141,7 @@ export function CanvasView({ relpath, client }: Props) {
           camera: cameraRef.current,
           theme,
           dpr,
+          selection: selectionRef.current,
         },
         docRef.current,
       )
@@ -149,10 +175,15 @@ export function CanvasView({ relpath, client }: Props) {
     return () => cancelAnimationFrame(raf)
   }, [relpath])
 
-  // ── Input ────────────────────────────────────────────────────────────
+  // ── Pointer input ────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
+
+    const screenToWorld = (cx: number, cy: number) => {
+      const cam = cameraRef.current
+      return { x: cam.x + cx / cam.zoom, y: cam.y + cy / cam.zoom }
+    }
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
@@ -160,11 +191,7 @@ export function CanvasView({ relpath, client }: Props) {
       const cx = e.clientX - rect.left
       const cy = e.clientY - rect.top
       const cam = cameraRef.current
-      // Ctrl/cmd + wheel and pinch (ctrlKey set by browsers on trackpad
-      // pinch) both zoom; plain wheel is scroll/pan.
       if (e.ctrlKey || e.metaKey) {
-        // Zoom anchored on pointer: keep the world point under the
-        // cursor fixed across the zoom change.
         const worldX = cam.x + cx / cam.zoom
         const worldY = cam.y + cy / cam.zoom
         const factor = Math.exp(-e.deltaY * 0.002)
@@ -184,41 +211,146 @@ export function CanvasView({ relpath, client }: Props) {
       cameraDirtyRef.current = true
     }
 
-    let panning = false
-    let lastX = 0
-    let lastY = 0
+    type DragMode =
+      | { kind: 'none' }
+      | { kind: 'pan'; lastX: number; lastY: number }
+      | {
+          kind: 'move-node'
+          nodeId: string
+          startWorldX: number
+          startWorldY: number
+          startNodeX: number
+          startNodeY: number
+          armed: boolean
+          /** Screen-pixel pointer position at pointerdown — used for
+           *  DRAG_THRESHOLD_PX so a noisy click doesn't trigger a move
+           *  and a zero-delta patch. */
+          downCX: number
+          downCY: number
+        }
+    let drag: DragMode = { kind: 'none' }
+
     const onPointerDown = (e: PointerEvent) => {
-      // Middle click = dedicated pan; left click with space also pans
-      // later (Phase 3 adds selection). For Phase 2, left-click-drag on
-      // empty space pans too — there's no selection to conflict with.
-      const middle = e.button === 1
-      const left = e.button === 0
-      if (!middle && !left) return
-      panning = true
-      lastX = e.clientX
-      lastY = e.clientY
-      canvas.setPointerCapture(e.pointerId)
-      canvas.style.cursor = 'grabbing'
-    }
-    const onPointerMove = (e: PointerEvent) => {
-      if (!panning) return
-      const dx = e.clientX - lastX
-      const dy = e.clientY - lastY
-      lastX = e.clientX
-      lastY = e.clientY
-      const cam = cameraRef.current
-      cameraRef.current = {
-        x: cam.x - dx / cam.zoom,
-        y: cam.y - dy / cam.zoom,
-        zoom: cam.zoom,
+      if (e.button !== 0 && e.button !== 1) return
+      const rect = canvas.getBoundingClientRect()
+      const cx = e.clientX - rect.left
+      const cy = e.clientY - rect.top
+      const world = screenToWorld(cx, cy)
+      const doc = docRef.current
+      const hit = doc ? hitTestNode(doc.nodes, world.x, world.y) : null
+
+      // Middle click OR empty-space click → pan.
+      if (e.button === 1 || !hit) {
+        if (!hit && e.button === 0) {
+          // Clear selection when clicking empty space.
+          useCanvasStore.getState().setSelection(relpath, [])
+        }
+        drag = { kind: 'pan', lastX: e.clientX, lastY: e.clientY }
+        canvas.setPointerCapture(e.pointerId)
+        canvas.style.cursor = 'grabbing'
+        return
       }
-      cameraDirtyRef.current = true
+
+      // Node click → select + arm a move drag (don't commit to
+      // move-mode until the pointer clears DRAG_THRESHOLD_PX).
+      useCanvasStore.getState().setSelection(relpath, [hit.id])
+      drag = {
+        kind: 'move-node',
+        nodeId: hit.id,
+        startWorldX: world.x,
+        startWorldY: world.y,
+        startNodeX: hit.x,
+        startNodeY: hit.y,
+        armed: false,
+        downCX: cx,
+        downCY: cy,
+      }
+      canvas.setPointerCapture(e.pointerId)
     }
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (drag.kind === 'none') return
+      if (drag.kind === 'pan') {
+        const dx = e.clientX - drag.lastX
+        const dy = e.clientY - drag.lastY
+        drag.lastX = e.clientX
+        drag.lastY = e.clientY
+        const cam = cameraRef.current
+        cameraRef.current = {
+          x: cam.x - dx / cam.zoom,
+          y: cam.y - dy / cam.zoom,
+          zoom: cam.zoom,
+        }
+        cameraDirtyRef.current = true
+        return
+      }
+      // move-node
+      const rect = canvas.getBoundingClientRect()
+      const cx = e.clientX - rect.left
+      const cy = e.clientY - rect.top
+      if (!drag.armed) {
+        const ddx = cx - drag.downCX
+        const ddy = cy - drag.downCY
+        if (Math.hypot(ddx, ddy) < DRAG_THRESHOLD_PX) return
+        drag.armed = true
+        canvas.style.cursor = 'grabbing'
+      }
+      const world = screenToWorld(cx, cy)
+      const nx = drag.startNodeX + (world.x - drag.startWorldX)
+      const ny = drag.startNodeY + (world.y - drag.startWorldY)
+      useCanvasStore.getState().updateDoc(relpath, (doc) => applyNodeMove(doc, drag.kind === 'move-node' ? drag.nodeId : '', nx, ny))
+    }
+
     const onPointerUp = (e: PointerEvent) => {
-      if (!panning) return
-      panning = false
-      canvas.releasePointerCapture(e.pointerId)
+      if (drag.kind === 'none') return
+      try {
+        canvas.releasePointerCapture(e.pointerId)
+      } catch {
+        // capture may already be released if focus moved away
+      }
+      const finished = drag
+      drag = { kind: 'none' }
       canvas.style.cursor = 'grab'
+
+      if (finished.kind === 'move-node' && finished.armed) {
+        const doc = docRef.current
+        const node = doc?.nodes.find((n) => n.id === finished.nodeId)
+        if (!node) return
+        // Only flush if the move actually changed the position.
+        if (node.x === finished.startNodeX && node.y === finished.startNodeY) return
+        void clientRef.current
+          .patch(relpath, [
+            { op: 'node_move', id: finished.nodeId, x: node.x, y: node.y },
+          ])
+          .catch((err) => {
+            console.warn('[nexus.canvas] node_move patch failed:', err)
+          })
+      }
+    }
+
+    const onDoubleClick = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect()
+      const cx = e.clientX - rect.left
+      const cy = e.clientY - rect.top
+      const world = screenToWorld(cx, cy)
+      const doc = docRef.current
+      if (!doc) return
+      if (hitTestNode(doc.nodes, world.x, world.y)) return // on-node dbl-click is a future editor trigger
+      const { width, height } = DEFAULT_TEXT_NODE_SIZE
+      const node: CanvasNode = {
+        id: newNodeId(),
+        type: 'text',
+        x: world.x - width / 2,
+        y: world.y - height / 2,
+        width,
+        height,
+        text: '',
+      }
+      useCanvasStore.getState().updateDoc(relpath, (d) => applyNodeAdd(d, node))
+      useCanvasStore.getState().setSelection(relpath, [node.id])
+      void clientRef.current
+        .patch(relpath, [{ op: 'node_add', node }])
+        .catch((err) => console.warn('[nexus.canvas] node_add patch failed:', err))
     }
 
     canvas.addEventListener('wheel', onWheel, { passive: false })
@@ -226,6 +358,7 @@ export function CanvasView({ relpath, client }: Props) {
     canvas.addEventListener('pointermove', onPointerMove)
     canvas.addEventListener('pointerup', onPointerUp)
     canvas.addEventListener('pointercancel', onPointerUp)
+    canvas.addEventListener('dblclick', onDoubleClick)
     canvas.style.cursor = 'grab'
 
     return () => {
@@ -234,8 +367,39 @@ export function CanvasView({ relpath, client }: Props) {
       canvas.removeEventListener('pointermove', onPointerMove)
       canvas.removeEventListener('pointerup', onPointerUp)
       canvas.removeEventListener('pointercancel', onPointerUp)
+      canvas.removeEventListener('dblclick', onDoubleClick)
     }
-  }, [])
+  }, [relpath])
+
+  // ── Keyboard: delete selected ───────────────────────────────────────
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const onKey = (e: KeyboardEvent) => {
+      // Only when the canvas container (or a child of it) has focus, so
+      // typing Delete inside an unrelated pane doesn't nuke a node.
+      if (!container.contains(document.activeElement) && document.activeElement !== container) {
+        return
+      }
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return
+      const sel = selectionRef.current
+      if (sel.size === 0) return
+      e.preventDefault()
+      const ids = Array.from(sel)
+      useCanvasStore.getState().updateDoc(relpath, (doc) => {
+        let d = doc
+        for (const id of ids) d = applyNodeRemove(d, id)
+        return d
+      })
+      useCanvasStore.getState().setSelection(relpath, [])
+      const ops: CanvasPatchOp[] = ids.map((id) => ({ op: 'node_remove', id }))
+      void clientRef.current
+        .patch(relpath, ops)
+        .catch((err) => console.warn('[nexus.canvas] node_remove patch failed:', err))
+    }
+    container.addEventListener('keydown', onKey)
+    return () => container.removeEventListener('keydown', onKey)
+  }, [relpath])
 
   const doc = tab?.doc
   const nodeCount = doc?.nodes.length ?? 0
@@ -244,11 +408,13 @@ export function CanvasView({ relpath, client }: Props) {
   return (
     <div
       ref={containerRef}
+      tabIndex={0}
       style={{
         position: 'relative',
         width: '100%',
         height: '100%',
         overflow: 'hidden',
+        outline: 'none',
       }}
     >
       <canvas

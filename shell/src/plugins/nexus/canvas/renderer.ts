@@ -27,6 +27,39 @@ const FALLBACK_THEME: Theme = {
   border: '#3f3f46',
 }
 
+/** Default rectangle for freshly-created text nodes — matches Obsidian's
+ *  "double-click empty space" behaviour. */
+export const DEFAULT_TEXT_NODE_SIZE = { width: 250, height: 60 }
+
+/**
+ * Hit-test: return the topmost node whose bounding rect contains
+ * `(worldX, worldY)`, or `null`. Non-group nodes are searched first
+ * (they render above groups), in reverse iteration order so the
+ * most-recently-drawn node wins — matches visual z-order.
+ */
+export function hitTestNode(
+  nodes: readonly CanvasNode[],
+  worldX: number,
+  worldY: number,
+): CanvasNode | null {
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const n = nodes[i]
+    if (n.type === 'group') continue
+    if (rectContains(n, worldX, worldY)) return n
+  }
+  // Groups last so clicking inside a group-only region still works.
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const n = nodes[i]
+    if (n.type !== 'group') continue
+    if (rectContains(n, worldX, worldY)) return n
+  }
+  return null
+}
+
+function rectContains(n: CanvasNode, x: number, y: number): boolean {
+  return x >= n.x && x <= n.x + n.width && y >= n.y && y <= n.y + n.height
+}
+
 export function readTheme(el: HTMLElement): Theme {
   const styles = window.getComputedStyle(el)
   const read = (name: string, fallback: string) => {
@@ -50,6 +83,7 @@ export interface RenderContext {
   camera: Camera
   theme: Theme
   dpr: number
+  selection?: Set<string>
 }
 
 export function render(rc: RenderContext, doc: CanvasDoc | null): void {
@@ -76,13 +110,15 @@ export function render(rc: RenderContext, doc: CanvasDoc | null): void {
   const groups = doc.nodes.filter((n) => n.type === 'group')
   const nonGroups = doc.nodes.filter((n) => n.type !== 'group')
 
-  for (const g of groups) drawNode(ctx, g, theme)
+  const selection = rc.selection ?? new Set<string>()
+
+  for (const g of groups) drawNode(ctx, g, theme, selection.has(g.id))
 
   // Edges sit under the nodes they connect (but above groups).
   const byId = new Map(doc.nodes.map((n) => [n.id, n]))
   for (const edge of doc.edges) drawEdge(ctx, edge, byId, theme)
 
-  for (const n of nonGroups) drawNode(ctx, n, theme)
+  for (const n of nonGroups) drawNode(ctx, n, theme, selection.has(n.id))
 }
 
 function drawGrid(
@@ -117,10 +153,12 @@ function drawNode(
   ctx: CanvasRenderingContext2D,
   node: CanvasNode,
   theme: Theme,
+  selected: boolean,
 ): void {
   const radius = node.type === 'group' ? 4 : 8
   const fill = node.color ?? theme.bgRaised
-  const stroke = theme.border
+  const stroke = selected ? theme.accent : theme.border
+  const strokeWidth = selected ? 2 : 1
   const fg = theme.fg
   const muted = theme.fgMuted
 
@@ -131,7 +169,7 @@ function drawNode(
     fillRoundRect(ctx, node.x, node.y, node.width, node.height, radius)
     ctx.setLineDash([8, 6])
     ctx.strokeStyle = stroke
-    ctx.lineWidth = 1
+    ctx.lineWidth = strokeWidth
     strokeRoundRect(ctx, node.x, node.y, node.width, node.height, radius)
     ctx.setLineDash([])
     if (node.label) {
