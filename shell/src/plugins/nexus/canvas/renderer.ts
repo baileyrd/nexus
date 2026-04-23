@@ -248,6 +248,8 @@ export interface RenderContext {
   marquee?: MarqueeRect | null
   hoveredNodeId?: string | null
   edgeDrag?: EdgeDragPreview | null
+  /** Toggle for the 64-unit dot grid. Defaults to on when omitted. */
+  showGrid?: boolean
 }
 
 /** World-space rect-vs-node test: any pixel of overlap counts as a
@@ -409,6 +411,26 @@ function pointSegmentDist2(
   return ex * ex + ey * ey
 }
 
+/** Axis-aligned bbox containing every node in `doc`, in world units.
+ *  Returns `null` when the doc has no nodes. Shared by the minimap
+ *  (scale + centring) and the PNG exporter (fit-to-content camera). */
+export function contentBounds(
+  doc: CanvasDoc,
+): { x: number; y: number; width: number; height: number } | null {
+  if (doc.nodes.length === 0) return null
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const n of doc.nodes) {
+    if (n.x < minX) minX = n.x
+    if (n.y < minY) minY = n.y
+    if (n.x + n.width > maxX) maxX = n.x + n.width
+    if (n.y + n.height > maxY) maxY = n.y + n.height
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+}
+
 /** Build a marquee rect from two world-space points in any order. */
 export function marqueeFromPoints(
   a: { x: number; y: number },
@@ -435,7 +457,7 @@ export function render(rc: RenderContext, doc: CanvasDoc | null): void {
   ctx.translate(-camera.x * camera.zoom, -camera.y * camera.zoom)
   ctx.scale(camera.zoom, camera.zoom)
 
-  drawGrid(ctx, camera, width, height, theme)
+  if (rc.showGrid !== false) drawGrid(ctx, camera, width, height, theme)
 
   if (!doc) return
 

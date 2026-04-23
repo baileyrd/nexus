@@ -51,6 +51,10 @@ export interface CanvasTabState {
    *  Phase-4 inspector drives one-edge-at-a-time editing and multi-
    *  edge selection isn't in scope yet. */
   selectedEdgeId: string | null
+  /** Whether the 64-unit dot grid renders. Kept per-tab so toggling
+   *  on one canvas doesn't flicker every other open leaf. Not
+   *  serialized to the `.canvas` file — purely a view preference. */
+  showGrid: boolean
   /** LIFO stack of applied edits; top is the most recent. */
   undo: HistoryEntry[]
   /** LIFO stack of undone edits available to redo; cleared whenever a
@@ -68,6 +72,7 @@ interface CanvasStore {
   setCamera: (relpath: string, camera: Camera) => void
   setSelection: (relpath: string, ids: string[]) => void
   setSelectedEdge: (relpath: string, edgeId: string | null) => void
+  setShowGrid: (relpath: string, showGrid: boolean) => void
   /** Apply a partial mutator to the doc. Caller is responsible for
    *  sending the matching patch to the kernel. */
   updateDoc: (relpath: string, fn: (doc: CanvasDoc) => CanvasDoc) => void
@@ -87,6 +92,7 @@ const emptyState: CanvasTabState = {
   cameraInitialized: false,
   selection: new Set(),
   selectedEdgeId: null,
+  showGrid: true,
   undo: [],
   redo: [],
 }
@@ -140,6 +146,8 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         selection: edgeId ? new Set() : s.tabs.get(relpath)?.selection ?? new Set(),
       }),
     })),
+  setShowGrid: (relpath, showGrid) =>
+    set((s) => ({ tabs: produce(s.tabs, relpath, { showGrid }) })),
   updateDoc: (relpath, fn) =>
     set((s) => {
       const prev = s.tabs.get(relpath)?.doc

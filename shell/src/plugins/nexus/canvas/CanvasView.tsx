@@ -5,7 +5,7 @@
 // Deferred to a later Phase-3 cut: shift-click multi-select, marquee
 // selection, resize handles, drag-from-edge create, undo/redo stack.
 
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   useCanvasStore,
   MIN_ZOOM,
@@ -37,6 +37,8 @@ import {
 } from './renderer'
 import { Inspector } from './Inspector'
 import { CanvasOverlay } from './CanvasOverlay'
+import { Minimap, type MinimapHandle } from './Minimap'
+import { exportCanvasPng, triggerDownload } from './exportPng'
 import type {
   CanvasKernelClient,
   CanvasDoc,
@@ -65,6 +67,8 @@ export function CanvasView({ relpath, client }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const overlayLayerRef = useRef<HTMLDivElement | null>(null)
+  const minimapRef = useRef<MinimapHandle | null>(null)
+  const showGridRef = useRef(true)
   // Cached refs so RAF doesn't allocate per frame and event handlers see
   // the latest values without re-binding.
   const docRef = useRef<CanvasDoc | null>(null)
@@ -98,6 +102,7 @@ export function CanvasView({ relpath, client }: Props) {
     if (tab?.camera) cameraRef.current = tab.camera
     selectionRef.current = tab?.selection ?? new Set()
     selectedEdgeIdRef.current = tab?.selectedEdgeId ?? null
+    showGridRef.current = tab?.showGrid ?? true
   }, [tab])
 
   // Zoom-to-fit the document once both (a) the doc has loaded and (b)
@@ -178,9 +183,18 @@ export function CanvasView({ relpath, client }: Props) {
           marquee: marqueeRef.current,
           hoveredNodeId: hoveredNodeIdRef.current,
           edgeDrag: edgeDragRef.current,
+          showGrid: showGridRef.current,
         },
         docRef.current,
       )
+      // Mirror the main render into the minimap — cheap because the
+      // minimap only draws node rects + a viewport frame.
+      if (minimapRef.current) {
+        minimapRef.current.redraw(docRef.current, cameraRef.current, {
+          w: lastWidth,
+          h: lastHeight,
+        })
+      }
       // Mirror the camera transform onto the DOM overlay so its children
       // (world-positioned divs) line up with the 2D canvas. Written
       // imperatively so camera changes don't thrash React.
@@ -838,6 +852,46 @@ export function CanvasView({ relpath, client }: Props) {
   const doc = tab?.doc
   const nodeCount = doc?.nodes.length ?? 0
   const edgeCount = doc?.edges.length ?? 0
+  const showGrid = tab?.showGrid ?? true
+  const [exporting, setExporting] = useState(false)
+
+  // Minimap click-drag: recenter the camera so the clicked world
+  // point sits at the middle of the main viewport. Stable callback
+  // so Minimap's pointerdown effect doesn't reattach every frame.
+  const onMinimapRecenter = useCallback(
+    (worldX: number, worldY: number) => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const rect = canvas.getBoundingClientRect()
+      const cam = cameraRef.current
+      cameraRef.current = {
+        x: worldX - rect.width / (2 * cam.zoom),
+        y: worldY - rect.height / (2 * cam.zoom),
+        zoom: cam.zoom,
+      }
+      cameraDirtyRef.current = true
+    },
+    [],
+  )
+
+  const onToggleGrid = () => {
+    useCanvasStore.getState().setShowGrid(relpath, !showGrid)
+  }
+
+  const onExportPng = async () => {
+    const container = containerRef.current
+    const currentDoc = docRef.current
+    if (!container || !currentDoc || exporting) return
+    setExporting(true)
+    try {
+      const blob = await exportCanvasPng(currentDoc, container)
+      if (!blob) return
+      const base = basenameNoExt(relpath) || 'canvas'
+      triggerDownload(blob, `${base}.png`)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   // Resolve the currently-inspected target. Edge selection wins over
   // node selection (they're mutually exclusive in the store, but be
@@ -911,8 +965,110 @@ export function CanvasView({ relpath, client }: Props) {
           onUpdateEdge={onUpdateEdge}
         />
       )}
+      <Minimap ref={minimapRef} onRecenter={onMinimapRecenter} />
+      <ControlStrip
+        showGrid={showGrid}
+        onToggleGrid={onToggleGrid}
+        onExportPng={onExportPng}
+        exporting={exporting}
+        canExport={nodeCount > 0}
+      />
     </div>
   )
+}
+
+function ControlStrip({
+  showGrid,
+  onToggleGrid,
+  onExportPng,
+  exporting,
+  canExport,
+}: {
+  showGrid: boolean
+  onToggleGrid: () => void
+  onExportPng: () => void
+  exporting: boolean
+  canExport: boolean
+}) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: 12,
+        bottom: 12,
+        display: 'flex',
+        gap: 6,
+        padding: 4,
+        borderRadius: 6,
+        background: 'var(--bg-raised, #2d2d2d)',
+        border: '1px solid var(--divider-color, #3f3f46)',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+        pointerEvents: 'auto',
+      }}
+    >
+      <ControlButton
+        active={showGrid}
+        onClick={onToggleGrid}
+        title={showGrid ? 'Hide grid' : 'Show grid'}
+      >
+        Grid
+      </ControlButton>
+      <ControlButton
+        onClick={onExportPng}
+        disabled={!canExport || exporting}
+        title={canExport ? 'Export canvas as PNG' : 'Nothing to export'}
+      >
+        {exporting ? '…' : 'Export'}
+      </ControlButton>
+    </div>
+  )
+}
+
+function ControlButton({
+  active,
+  onClick,
+  children,
+  title,
+  disabled,
+}: {
+  active?: boolean
+  onClick: () => void
+  children: React.ReactNode
+  title: string
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      disabled={disabled}
+      style={{
+        background: active
+          ? 'var(--accent, #3b82f6)'
+          : 'var(--bg-muted, #1e1e1e)',
+        color: active ? '#fff' : 'var(--fg, #e5e7eb)',
+        border: '1px solid var(--divider-color, #3f3f46)',
+        borderRadius: 4,
+        padding: '4px 10px',
+        fontSize: 11,
+        fontWeight: 500,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.4 : 1,
+        fontFamily: 'inherit',
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+function basenameNoExt(path: string): string {
+  if (!path) return ''
+  const i = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  const base = i >= 0 ? path.slice(i + 1) : path
+  const dot = base.lastIndexOf('.')
+  return dot > 0 ? base.slice(0, dot) : base
 }
 
 function CornerLabel({ children }: { children: React.ReactNode }) {
