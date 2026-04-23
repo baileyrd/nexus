@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { Capability } from '@nexus/extension-api'
 
 /**
  * State for the Plugins modal.
@@ -9,6 +10,12 @@ import { create } from 'zustand'
  *
  * They're tagged with a discriminant `kind` at read time so the view can
  * render two different row shapes without a second lookup.
+ *
+ * `capabilities` is `null` when the manifest field is absent (rendered as
+ * "(unknown)") and `[]` when the plugin explicitly declares no
+ * capabilities (rendered as "(none)"). See `capabilityInfo.ts` for the
+ * risk bucketing and the `parseManifestCapabilities` helper that
+ * normalises the raw manifest value into this shape.
  */
 
 export interface BuiltInPluginRow {
@@ -19,6 +26,7 @@ export interface BuiltInPluginRow {
   core: boolean
   state: string
   error?: string
+  capabilities: Capability[] | null
 }
 
 export interface CommunityPluginRow {
@@ -31,6 +39,7 @@ export interface CommunityPluginRow {
   author?: string
   dir: string
   manifestPath: string
+  capabilities: Capability[] | null
 }
 
 export type PluginRow = BuiltInPluginRow | CommunityPluginRow

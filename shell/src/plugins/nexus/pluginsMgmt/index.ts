@@ -9,6 +9,7 @@ import {
   type PluginRow,
 } from './pluginsMgmtStore'
 import { setApi } from './pluginsMgmtRuntime'
+import { parseManifestCapabilities } from './capabilityInfo'
 
 const VIEW_ID = 'nexus.pluginsMgmt.overlay'
 
@@ -31,6 +32,15 @@ interface RegistryPluginEntry {
   core: boolean
   state: string
   error?: string
+  /**
+   * Optional capability declaration. Not currently populated by
+   * `main.tsx` (the shell-side `PluginManifest` has no capabilities
+   * field — see `shell/src/types/plugin.ts`). Read defensively as
+   * `unknown` so the row code path is ready the moment that field
+   * is wired through, without forcing a churning typecast cascade
+   * back through the manifest plumbing today.
+   */
+  capabilities?: unknown
 }
 
 /**
@@ -54,6 +64,7 @@ function readRows(api: PluginAPI): PluginRow[] {
         core: p.core,
         state: p.state,
         error: p.error,
+        capabilities: parseManifestCapabilities(p.capabilities),
       }),
     )
   } catch (err) {
@@ -76,6 +87,13 @@ function readRows(api: PluginAPI): PluginRow[] {
         author: m.author,
         dir: m.dir,
         manifestPath: m.manifestPath,
+        // CommunityPluginManifest doesn't yet expose `capabilities`
+        // (the Rust scanner in `src-tauri/src/lib.rs` doesn't
+        // deserialise that field), but read it defensively so we
+        // surface declared caps the moment that plumbing arrives.
+        capabilities: parseManifestCapabilities(
+          (m as unknown as { capabilities?: unknown }).capabilities,
+        ),
       }),
     )
   } catch (err) {

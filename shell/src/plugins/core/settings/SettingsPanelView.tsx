@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import type { Capability } from '@nexus/extension-api'
 import { getRegistry } from '../../../host/shellRegistry'
 import { useContextKey, useContextKeyStore } from '../../../host/ContextKeyService'
 import { useConfigStore, useConfigValue } from '../../../stores/configStore'
@@ -20,6 +21,14 @@ import {
   type BindingRow,
   type OverrideStorage,
 } from '../../../registry/KeybindingRegistry'
+import {
+  CAPABILITY_INFO,
+  bucketByRisk,
+  chipColours,
+  hasHighRisk,
+  parseManifestCapabilities,
+  type RiskLevel,
+} from '../../nexus/pluginsMgmt/capabilityInfo'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +39,14 @@ interface PluginInfo {
   core:    boolean
   state:   string
   error?:  string
+  /**
+   * Optional declared capability list (WI-18). The shell-side
+   * `pluginList` service does not currently populate this field — see
+   * the FIXME in `usePluginList()` — but the row code path reads it
+   * defensively so the manifest plumbing can land in a follow-up
+   * without further UI churn.
+   */
+  capabilities?: unknown
 }
 
 // ─── Data hooks ───────────────────────────────────────────────────────────────
@@ -869,6 +886,7 @@ function PluginsTab({
 }) {
   const [pendingChanges, setPendingChanges] = useState<Record<string, boolean>>({})
   const [saving,         setSaving]         = useState<string | null>(null)
+  const [highRiskOnly,   setHighRiskOnly]   = useState(false)
 
   const handleToggle = async (pluginId: string, enabled: boolean) => {
     setSaving(pluginId)
@@ -885,6 +903,29 @@ function PluginsTab({
   const hasPending = Object.keys(pendingChanges).length > 0
   const errorCount = corePlugins.filter(p => p.state === 'error').length
 
+  // `highRiskOnly` filters by the parsed capability list. Plugins
+  // whose manifest doesn't declare capabilities at all (most of them
+  // today) are *not* hidden by the filter — better to show them as
+  // "(unknown)" than to silently drop them, since "unknown" is itself
+  // a risk signal worth surfacing to the user.
+  const filteredCore = useMemo(() => {
+    if (!highRiskOnly) return corePlugins
+    return corePlugins.filter(p => {
+      const caps = parseManifestCapabilities(p.capabilities)
+      return caps !== null && hasHighRisk(caps)
+    })
+  }, [corePlugins, highRiskOnly])
+
+  const filteredCommunity = useMemo(() => {
+    if (!highRiskOnly) return community
+    return community.filter(m => {
+      const caps = parseManifestCapabilities(
+        (m as unknown as { capabilities?: unknown }).capabilities,
+      )
+      return caps !== null && hasHighRisk(caps)
+    })
+  }, [community, highRiskOnly])
+
   return (
     <div className="plugins-tab">
       {/* Restart banner */}
@@ -894,20 +935,54 @@ function PluginsTab({
         </div>
       )}
 
+      {/* High-risk filter — keeps the audit-style "what's spawning
+          processes / writing outside the forge?" question one click
+          away. Doesn't filter out (unknown)-capability plugins on
+          purpose — see filter memo above. */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          padding: '0 8px 8px 8px',
+        }}
+      >
+        <label
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: '0.85em',
+            opacity: 0.8,
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+          title="Show only plugins with at least one high-risk capability"
+        >
+          <input
+            type="checkbox"
+            checked={highRiskOnly}
+            onChange={e => setHighRiskOnly(e.target.checked)}
+          />
+          Show only high-risk plugins
+        </label>
+      </div>
+
       {/* ── Core plugins ── */}
       <div className="plugins-tab__section-header">
         Core plugins
-        <span className="plugins-tab__section-count">{corePlugins.length}</span>
+        <span className="plugins-tab__section-count">{filteredCore.length}</span>
         {errorCount > 0 && (
           <span className="plugins-tab__error-badge">{errorCount} error{errorCount > 1 ? 's' : ''}</span>
         )}
       </div>
 
       <div className="plugins-tab__list">
-        {corePlugins.length === 0 ? (
-          <p className="settings-empty">No core plugins loaded.</p>
+        {filteredCore.length === 0 ? (
+          <p className="settings-empty">
+            {highRiskOnly ? 'No core plugins with high-risk capabilities.' : 'No core plugins loaded.'}
+          </p>
         ) : (
-          corePlugins.map(p => (
+          filteredCore.map(p => (
             <CorePluginRow key={p.id} plugin={p} />
           ))
         )}
@@ -916,22 +991,26 @@ function PluginsTab({
       {/* ── Community plugins ── */}
       <div className="plugins-tab__section-header" style={{ marginTop: 24 }}>
         Community plugins
-        <span className="plugins-tab__section-count">{community.length}</span>
+        <span className="plugins-tab__section-count">{filteredCommunity.length}</span>
       </div>
 
       <div className="plugins-tab__list">
-        {community.length === 0 ? (
-          <div className="plugins-tab__empty-community">
-            <p>No community plugins found.</p>
-            <p className="plugins-tab__empty-hint">
-              Drop a plugin folder into{' '}
-              <code>~/.nexus-shell/plugins/</code> then restart.
-              Each folder needs a <code>plugin.json</code> and a bundled{' '}
-              <code>index.js</code>.
-            </p>
-          </div>
+        {filteredCommunity.length === 0 ? (
+          highRiskOnly ? (
+            <p className="settings-empty">No community plugins with high-risk capabilities.</p>
+          ) : (
+            <div className="plugins-tab__empty-community">
+              <p>No community plugins found.</p>
+              <p className="plugins-tab__empty-hint">
+                Drop a plugin folder into{' '}
+                <code>~/.nexus-shell/plugins/</code> then restart.
+                Each folder needs a <code>plugin.json</code> and a bundled{' '}
+                <code>index.js</code>.
+              </p>
+            </div>
+          )
         ) : (
-          community.map(m => (
+          filteredCommunity.map(m => (
             <CommunityPluginRow
               key={m.id}
               manifest={m}
@@ -949,6 +1028,10 @@ function PluginsTab({
 // ─── Core plugin row (read-only — always enabled) ─────────────────────────────
 
 function CorePluginRow({ plugin }: { plugin: PluginInfo }) {
+  const capabilities = useMemo(
+    () => parseManifestCapabilities(plugin.capabilities),
+    [plugin.capabilities],
+  )
   return (
     <div className={`plugin-row ${plugin.state === 'error' ? 'plugin-row--error' : ''}`}>
       <div className="plugin-row__dot" data-state={plugin.state} />
@@ -965,6 +1048,7 @@ function CorePluginRow({ plugin }: { plugin: PluginInfo }) {
         {plugin.state === 'error' && plugin.error && (
           <div className="plugin-row__error">{plugin.error}</div>
         )}
+        <CapabilityChipsRow capabilities={capabilities} />
       </div>
     </div>
   )
@@ -982,6 +1066,18 @@ function CommunityPluginRow({
 }) {
   // Optimistic local state
   const [enabled, setEnabled] = useState(manifest.enabled)
+
+  // Read capabilities defensively — `CommunityPluginManifest` doesn't
+  // declare a `capabilities` field today, but the Rust scanner may
+  // grow one (matching the Rust-side `PluginManifest`); when it does,
+  // chips appear without further UI changes.
+  const capabilities = useMemo(
+    () =>
+      parseManifestCapabilities(
+        (manifest as unknown as { capabilities?: unknown }).capabilities,
+      ),
+    [manifest],
+  )
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const next = e.target.checked
@@ -1016,9 +1112,95 @@ function CommunityPluginRow({
         {manifest.description && (
           <div className="plugin-row__description">{manifest.description}</div>
         )}
+        <CapabilityChipsRow capabilities={capabilities} />
       </div>
     </div>
   )
+}
+
+// ─── Capability chips (shared by Core + Community rows) ──────────────────────
+//
+// Mirrors `PluginsMgmtView`'s chip layout but slots into the existing
+// `.plugin-row__body` flow — chips render as a row underneath the
+// header/description so the row's overall information density stays
+// the same.
+
+function CapabilityChipsRow({
+  capabilities,
+}: {
+  capabilities: Capability[] | null
+}) {
+  if (capabilities === null) {
+    return (
+      <div style={settingsChipRowStyle}>
+        <span
+          style={settingsChipMutedStyle}
+          title="Plugin manifest does not declare a capabilities list"
+        >
+          (unknown)
+        </span>
+      </div>
+    )
+  }
+  if (capabilities.length === 0) {
+    return (
+      <div style={settingsChipRowStyle}>
+        <span style={settingsChipMutedStyle} title="Plugin declared no capabilities">
+          (none)
+        </span>
+      </div>
+    )
+  }
+
+  const buckets = bucketByRisk(capabilities)
+  const ordered: Array<{ risk: RiskLevel; cap: Capability }> = [
+    ...buckets.high.map(cap => ({ risk: 'high' as const, cap })),
+    ...buckets.medium.map(cap => ({ risk: 'medium' as const, cap })),
+    ...buckets.low.map(cap => ({ risk: 'low' as const, cap })),
+  ]
+
+  return (
+    <div style={settingsChipRowStyle}>
+      {ordered.map(({ risk, cap }) => {
+        const meta = CAPABILITY_INFO[cap]
+        const c = chipColours(risk)
+        return (
+          <span
+            key={cap}
+            title={`${risk.toUpperCase()} — ${meta?.description ?? cap}`}
+            style={{
+              padding: '1px 6px',
+              borderRadius: 3,
+              background: c.bg,
+              color: c.fg,
+              border: `1px solid ${c.border}`,
+              fontSize: '0.72em',
+              fontFamily: 'var(--f-mono, monospace)',
+              fontWeight: 500,
+              lineHeight: 1.4,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {cap}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+const settingsChipRowStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 4,
+  marginTop: 6,
+}
+
+const settingsChipMutedStyle: React.CSSProperties = {
+  fontSize: '0.72em',
+  fontFamily: 'var(--f-mono, monospace)',
+  fontStyle: 'italic',
+  opacity: 0.55,
 }
 
 // ─── Settings tab components ──────────────────────────────────────────────────
