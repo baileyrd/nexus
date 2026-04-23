@@ -33,8 +33,12 @@ jobs:
 
       - name: Run scripts/test_all.sh
         env:
-          # ubuntu-latest only has 7 GB RAM; GNU ld OOMs when linking
-          # tauri/webkit targets. mold uses ~10× less memory.
-          CARGO_BUILD_JOBS: "2"
+          # ubuntu-latest only has 7 GB RAM. Even with mold, rustc
+          # itself OOMs while compiling tauri/webkit2gtk under any
+          # concurrency. Skip nexus-app (the only crate pulling the
+          # webview stack) on CI — its 15 unit tests don't exercise
+          # the crates E2E+IPC contract tests already cover.
+          CARGO_BUILD_JOBS: "1"
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+          NEXUS_SKIP_TAURI_CRATES: "1"
         run: bash scripts/test_all.sh

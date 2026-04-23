@@ -8,4 +8,12 @@ cd "$(dirname "$0")/.." || exit 1
 if [ -d "$HOME/.cargo/bin" ]; then
   export PATH="$HOME/.cargo/bin:$PATH"
 fi
-cargo test --workspace 2>&1 | tail -80
+# In memory-constrained environments (7 GB GitHub runner) the tauri
+# crate graph OOM-kills the agent. Set NEXUS_SKIP_TAURI_CRATES=1 to
+# exclude nexus-app (the only crate pulling webkit2gtk/soup3). Local
+# runs keep the full workspace.
+if [ "${NEXUS_SKIP_TAURI_CRATES:-0}" = "1" ]; then
+  cargo test --workspace --exclude nexus-app 2>&1 | tail -80
+else
+  cargo test --workspace 2>&1 | tail -80
+fi
