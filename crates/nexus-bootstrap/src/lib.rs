@@ -851,6 +851,10 @@ fn register_core_plugins(
             TerminalCorePlugin::new()
         }
     };
+    // Phase 2 WI-12: stream PTY output as kernel events so the shell
+    // can switch off its 100ms poll. The legacy `pump` handler still
+    // returns its byte count; this is purely additive.
+    let terminal_plugin = terminal_plugin.with_event_bus(Arc::clone(event_bus));
     loader
         .register_core(
             core_manifest_with_ipc(

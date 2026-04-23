@@ -37,21 +37,36 @@
 //! Ids are **append-only** — never reused after retirement — because
 //! manifest registrations in loaded plugins bake them in.
 //!
+//! # Output streaming (Phase 2 WI-12)
+//!
+//! When the plugin is built via [`TerminalCorePlugin::with_event_bus`] the
+//! `pump` and `read_raw_since` handlers additionally publish a
+//! `com.nexus.terminal.output.<session_id>` `NexusEvent::Custom` whenever
+//! they observe new bytes for a session. The payload is
+//! `{ data: Vec<u8>, seq: u64, ts_ms: i64 }` — `data` matches the byte
+//! shape of `read_raw_since` so a single TS subscriber can union the two
+//! paths, and `seq` is a per-session monotonic counter so the subscriber
+//! can detect drops/reorders. The legacy poll-style `pump` handler still
+//! returns its byte count unchanged; subscribers that miss events can
+//! always fall back to a `read_raw_since` snapshot.
+//!
 //! # What this is NOT (yet)
 //!
-//! - Event streaming. [`crate::TerminalEvent`] broadcast uses sync
-//!   mpsc channels and there is no plugin-host IPC convention for
-//!   streams today; when one lands, `subscribe_events` becomes
-//!   handler #11 without reshuffling the others.
+//! - General [`crate::TerminalEvent`] broadcast (`SessionCreated`,
+//!   `SessionClosed`, `PatternMatched`). Those still travel through the
+//!   library's sync mpsc subscribers; only the high-volume output
+//!   stream is bridged onto the kernel bus today.
 //! - Saved-commands / ad-hoc CRUD. Those live in their own tables and
 //!   will get a sibling `com.nexus.terminal.commands` plugin in a
 //!   later slice — keeping the handler surface small here makes it
 //!   easy to audit and version independently.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, PluginError};
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +77,15 @@ use crate::shell::ShellSpec;
 
 /// Reverse-DNS identifier registered with the plugin loader.
 pub const PLUGIN_ID: &str = "com.nexus.terminal";
+
+/// Prefix for per-session output stream events. Each `pump` /
+/// `read_raw_since` dispatch that observes new bytes emits a
+/// `NexusEvent::Custom` with `type_id = "com.nexus.terminal.output.<id>"`
+/// so a TS subscriber can filter by prefix
+/// (via [`nexus_kernel::EventFilter::CustomPrefix`]) and still see which
+/// session produced the chunk. Payload shape: [`OutputStreamPayload`].
+/// See `docs/PHASE-2-IMPLEMENTATION-PLAN.md` §4.4 (WI-12).
+pub const EVENT_OUTPUT_PREFIX: &str = "com.nexus.terminal.output.";
 
 /// `create_session` handler id.
 pub const HANDLER_CREATE_SESSION: u32 = 1;
@@ -215,6 +239,27 @@ pub struct ReadRawSinceResponse {
     pub data: Vec<u8>,
 }
 
+/// Payload published on `com.nexus.terminal.output.<session_id>` events.
+///
+/// Bytes are passed through verbatim — no UTF-8 decode, no ANSI
+/// sanitisation. The TS subscriber feeds them straight into xterm.js
+/// (or buffers them) the same way the `read_raw_since` snapshot path
+/// does, so the two read paths can be unioned by the shell without
+/// reshaping. `seq` is a per-session monotonic counter (starts at `1`
+/// for a session's first published chunk) so the subscriber can detect
+/// drops or out-of-order delivery; `ts_ms` is the publisher's wall
+/// clock in unix milliseconds and is informational only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputStreamPayload {
+    /// Raw bytes appended to the session's ring buffer this dispatch.
+    pub data: Vec<u8>,
+    /// Per-session sequence number. Increments by one per published
+    /// chunk for a given session id.
+    pub seq: u64,
+    /// Publisher wall-clock at emission, unix milliseconds.
+    pub ts_ms: i64,
+}
+
 /// Arguments for `search_output`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchOutputArgs {
@@ -262,6 +307,31 @@ pub struct TerminalCorePlugin {
     /// instantiated without a forge path (tests, embedded runtimes) —
     /// the saved-command handlers return a clear error in that case.
     saved: Option<Mutex<SqliteSavedCommandStore>>,
+    /// Optional kernel event bus. When `Some`, every `pump` /
+    /// `read_raw_since` dispatch that observes new bytes publishes a
+    /// `com.nexus.terminal.output.<session_id>` event (Phase 2 WI-12).
+    /// `None` keeps the plugin a pure poll surface — used by the
+    /// in-crate unit tests that drive the plugin without a kernel.
+    event_bus: Option<Arc<EventBus>>,
+    /// Per-session emitter state — tracks the internal byte cursor we
+    /// last published from and the next sequence number to assign.
+    /// Independent of the caller-supplied cursor in `read_raw_since`
+    /// so a fast `read_raw_since` consumer doesn't starve the slower
+    /// `pump` event subscriber (and vice-versa).
+    emitters: Mutex<HashMap<SessionId, EmitterState>>,
+}
+
+/// Per-session bookkeeping for the output event stream. Mutated under
+/// the [`TerminalCorePlugin::emitters`] mutex.
+#[derive(Debug, Default, Clone, Copy)]
+struct EmitterState {
+    /// Monotonic byte offset we last published bytes up to. Starts at
+    /// `0`; on the first emit we publish from offset `0` to whatever
+    /// the buffer currently exposes.
+    cursor: u64,
+    /// Next `seq` value to assign on publish. The first published chunk
+    /// for a session carries `seq = 1`.
+    next_seq: u64,
 }
 
 impl TerminalCorePlugin {
@@ -274,6 +344,8 @@ impl TerminalCorePlugin {
         Self {
             server: Mutex::new(InMemoryTerminalServer::new()),
             saved: None,
+            event_bus: None,
+            emitters: Mutex::new(HashMap::new()),
         }
     }
 
@@ -284,6 +356,8 @@ impl TerminalCorePlugin {
         Self {
             server: Mutex::new(server),
             saved: None,
+            event_bus: None,
+            emitters: Mutex::new(HashMap::new()),
         }
     }
 
@@ -293,6 +367,17 @@ impl TerminalCorePlugin {
     #[must_use]
     pub fn with_saved_store(mut self, store: SqliteSavedCommandStore) -> Self {
         self.saved = Some(Mutex::new(store));
+        self
+    }
+
+    /// Wire the plugin to a kernel event bus. After this call, `pump`
+    /// and `read_raw_since` dispatches that observe new bytes publish
+    /// a `com.nexus.terminal.output.<session_id>` custom event with
+    /// payload [`OutputStreamPayload`] — the streaming half of WI-12.
+    /// The legacy poll path keeps working unchanged.
+    #[must_use]
+    pub fn with_event_bus(mut self, bus: Arc<EventBus>) -> Self {
+        self.event_bus = Some(bus);
         self
     }
 }
@@ -412,12 +497,18 @@ impl TerminalCorePlugin {
         let a: PumpArgs = parse_args(args, "pump")?;
         let id = SessionId::from_string(a.id);
         let timeout = Duration::from_millis(a.timeout_ms.unwrap_or(100));
-        let bytes = self
-            .server
-            .lock()
-            .map_err(poisoned)?
-            .pump(&id, timeout)
-            .map_err(crate_err)?;
+        // Hold the server lock just long enough to drain + read the new
+        // bytes since our internal cursor; release before publishing so
+        // a slow subscriber can't back-pressure the next IPC dispatch.
+        let (bytes, new_chunk) = {
+            let mut server = self.server.lock().map_err(poisoned)?;
+            let bytes = server.pump(&id, timeout).map_err(crate_err)?;
+            let new_chunk = self.fetch_new_bytes(&server, &id);
+            (bytes, new_chunk)
+        };
+        if let Some((next_cursor, data)) = new_chunk {
+            self.publish_output(&id, next_cursor, data);
+        }
         to_value(&PumpResponse { bytes }, "pump")
     }
 
@@ -443,12 +534,20 @@ impl TerminalCorePlugin {
         let a: ReadRawSinceArgs = parse_args(args, "read_raw_since")?;
         let id = SessionId::from_string(a.id);
         let timeout = Duration::from_millis(a.timeout_ms.unwrap_or(30));
-        let (cursor, data) = self
-            .server
-            .lock()
-            .map_err(poisoned)?
-            .read_raw_since(&id, a.cursor, timeout)
-            .map_err(crate_err)?;
+        // Same lock-discipline as `dispatch_pump`: drain inside the
+        // server lock, derive the event bytes from the plugin's
+        // independent cursor, then drop the lock before publishing.
+        let (cursor, data, new_chunk) = {
+            let mut server = self.server.lock().map_err(poisoned)?;
+            let (cursor, data) = server
+                .read_raw_since(&id, a.cursor, timeout)
+                .map_err(crate_err)?;
+            let new_chunk = self.fetch_new_bytes(&server, &id);
+            (cursor, data, new_chunk)
+        };
+        if let Some((next_cursor, bytes)) = new_chunk {
+            self.publish_output(&id, next_cursor, bytes);
+        }
         to_value(&ReadRawSinceResponse { cursor, data }, "read_raw_since")
     }
 
@@ -504,6 +603,98 @@ impl TerminalCorePlugin {
     ) -> Result<serde_json::Value, PluginError> {
         let list = self.server.lock().map_err(poisoned)?.list_sessions();
         to_value(&list, "list_sessions")
+    }
+
+    /// Read the bytes appended to `id`'s ring buffer since this
+    /// plugin's last published cursor and atomically advance the
+    /// cursor. Returns `None` when there is no event bus wired
+    /// (publish path disabled) or when the session has no new bytes.
+    /// The returned tuple is `(next_cursor, fresh_bytes)` — the cursor
+    /// is recorded back into [`Self::emitters`] before this returns
+    /// so two interleaved dispatches can't double-publish the same
+    /// bytes even if one was paused mid-call.
+    ///
+    /// Caller holds the server lock for the whole window between
+    /// pumping and reading the buffer; we deliberately read the
+    /// snapshot from the manager (no further drain) so the byte
+    /// shape matches exactly what `read_raw_since` would have
+    /// returned for the same cursor.
+    fn fetch_new_bytes(
+        &self,
+        server: &InMemoryTerminalServer,
+        id: &SessionId,
+    ) -> Option<(u64, Vec<u8>)> {
+        if self.event_bus.is_none() {
+            return None;
+        }
+        let mut emitters = self.emitters.lock().ok()?;
+        let entry = emitters.entry(id.clone()).or_default();
+        let cursor = entry.cursor;
+        let (next_cursor, bytes) = server.manager().buffer_read_since(id, cursor)?;
+        if bytes.is_empty() {
+            // Cursor advances past evicted bytes too — keep the local
+            // cursor in lockstep with the buffer's tail so a future
+            // write doesn't replay the catch-up window.
+            entry.cursor = next_cursor;
+            return None;
+        }
+        entry.cursor = next_cursor;
+        Some((next_cursor, bytes))
+    }
+
+    /// Publish a `com.nexus.terminal.output.<session_id>` event with
+    /// the freshly-drained bytes, assigning the next per-session
+    /// sequence number under the emitters lock. `next_cursor` is the
+    /// caller-side cursor that comes after this chunk and is
+    /// informational only — it's already been recorded by
+    /// [`Self::fetch_new_bytes`].
+    fn publish_output(&self, id: &SessionId, _next_cursor: u64, data: Vec<u8>) {
+        let Some(bus) = self.event_bus.as_ref() else {
+            return;
+        };
+        let seq = match self.emitters.lock() {
+            Ok(mut emitters) => {
+                let entry = emitters.entry(id.clone()).or_default();
+                entry.next_seq = entry.next_seq.saturating_add(1);
+                if entry.next_seq == 0 {
+                    // saturating_add into u64::MAX would have set it to MAX,
+                    // not 0; the explicit check is defensive only.
+                    entry.next_seq = 1;
+                }
+                entry.next_seq
+            }
+            Err(_) => {
+                // Lock poisoned — skip publish rather than panic; the
+                // pump return value is still correct for the caller.
+                return;
+            }
+        };
+        let type_id = format!("{EVENT_OUTPUT_PREFIX}{}", id.as_str());
+        let payload = OutputStreamPayload {
+            data,
+            seq,
+            ts_ms: chrono::Utc::now().timestamp_millis(),
+        };
+        let payload_value = match serde_json::to_value(&payload) {
+            Ok(v) => v,
+            Err(err) => {
+                tracing::warn!(
+                    plugin = PLUGIN_ID,
+                    %err,
+                    session = id.as_str(),
+                    "failed to serialize output stream payload"
+                );
+                return;
+            }
+        };
+        if let Err(err) = bus.publish_plugin(PLUGIN_ID, &type_id, payload_value) {
+            tracing::warn!(
+                plugin = PLUGIN_ID,
+                %err,
+                session = id.as_str(),
+                "failed to publish terminal output event"
+            );
+        }
     }
 
     fn saved_store(&self) -> Result<&Mutex<SqliteSavedCommandStore>, PluginError> {
@@ -762,6 +953,123 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn pump_publishes_output_event_with_monotonic_seq() {
+        if !unix_only("pump_publishes_output_event_with_monotonic_seq") {
+            return;
+        }
+        use nexus_kernel::{EventFilter, NexusEvent};
+
+        let bus = Arc::new(EventBus::new(64));
+        let mut sub =
+            bus.subscribe(EventFilter::CustomPrefix(EVENT_OUTPUT_PREFIX.to_string()));
+
+        // Two `printf`s separated by a sleep so the pump observes the
+        // output in two distinct flushes — the second pump must produce
+        // a fresh event with `seq = 2`.
+        let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
+        let create = serde_json::json!({
+            "name": "stream-test",
+            "shell": "/bin/sh",
+            "shell_args": ["-c", "printf 'hello\\n'; sleep 0.2; printf 'world\\n'"],
+        });
+        let CreateSessionResponse { id } = serde_json::from_value(
+            p.dispatch(HANDLER_CREATE_SESSION, &create).expect("create"),
+        )
+        .expect("decode");
+
+        // Pump until we see the first event (printf may take a tick to
+        // flush through the PTY). 3s upper bound matches the sibling
+        // pump tests in this module.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let first = loop {
+            let _ = p
+                .dispatch(
+                    HANDLER_PUMP,
+                    &serde_json::json!({ "id": id, "timeout_ms": 100 }),
+                )
+                .expect("pump");
+            match sub.try_recv().expect("bus alive") {
+                Some(evt) => break evt,
+                None => {}
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("never received first output event");
+            }
+        };
+        let (type_id, payload) = match &first.event {
+            NexusEvent::Custom { type_id, payload, .. } => (type_id.clone(), payload.clone()),
+            other => panic!("expected Custom, got {other:?}"),
+        };
+        assert_eq!(
+            type_id,
+            format!("{EVENT_OUTPUT_PREFIX}{id}"),
+            "topic must include session id",
+        );
+        let payload: OutputStreamPayload =
+            serde_json::from_value(payload).expect("payload decodes");
+        assert_eq!(payload.seq, 1, "first chunk for a session is seq = 1");
+        assert!(!payload.data.is_empty(), "payload bytes should be non-empty");
+
+        // Force the second flush to land. Drain any extra pre-second-
+        // printf events so we can assert seq strictly increments.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let mut last_seq = payload.seq;
+        loop {
+            let _ = p
+                .dispatch(
+                    HANDLER_PUMP,
+                    &serde_json::json!({ "id": id, "timeout_ms": 100 }),
+                )
+                .expect("pump");
+            while let Some(evt) = sub.try_recv().expect("bus alive") {
+                if let NexusEvent::Custom { payload, .. } = &evt.event {
+                    let p: OutputStreamPayload =
+                        serde_json::from_value(payload.clone()).expect("decode");
+                    assert!(
+                        p.seq > last_seq,
+                        "seq must increase monotonically: prev={last_seq}, got={}",
+                        p.seq,
+                    );
+                    last_seq = p.seq;
+                }
+            }
+            if last_seq >= 2 {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("second emission never produced seq >= 2 (last={last_seq})");
+            }
+        }
+    }
+
+    #[test]
+    fn pump_without_event_bus_remains_silent_publish_path() {
+        if !unix_only("pump_without_event_bus_remains_silent_publish_path") {
+            return;
+        }
+        // No event_bus wired — the legacy poll-only path must keep its
+        // exact byte-count contract and never touch the (absent) bus.
+        let mut p = TerminalCorePlugin::new();
+        let CreateSessionResponse { id } = serde_json::from_value(
+            p.dispatch(HANDLER_CREATE_SESSION, &create_args("printf 'x\\n'"))
+                .expect("create"),
+        )
+        .expect("decode");
+        let resp = p
+            .dispatch(
+                HANDLER_PUMP,
+                &serde_json::json!({ "id": id, "timeout_ms": 100 }),
+            )
+            .expect("pump");
+        let r: PumpResponse = serde_json::from_value(resp).expect("decode");
+        // Don't assert exact byte count (PTY can return 0 on the first
+        // tick if the printf hasn't flushed yet) — the contract we care
+        // about here is that the response shape is unchanged and the
+        // call doesn't panic on a missing bus.
+        let _ = r.bytes;
     }
 
     #[test]
