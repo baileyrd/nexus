@@ -18,7 +18,8 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@nexus/extension-api": ["../packages/nexus-extension-api/src/index.ts"]
     }
   },
   "include": ["src"],

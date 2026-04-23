@@ -1,11 +1,67 @@
 // src/types/plugin.ts
-// Core type definitions for the plugin system
+//
+// Compat re-export shim — phased move to `@nexus/extension-api` per
+// WI-20 / docs/PHASE-1-IMPLEMENTATION-PLAN.md §5.
+//
+// Existing shell imports continue to work unchanged; new code should
+// import directly from `@nexus/extension-api` once the package is
+// wired into the build (workspace + path mapping land in a follow-up
+// commit). Until then we re-export via a relative path so the shell
+// typecheck is self-contained.
+//
+// Two buckets of types live here:
+//
+//   1. Portable shapes — re-exported from the extension-api package
+//      (manifest, contribution DTOs, configuration, kernel envelope,
+//      filesystem entries, etc).
+//
+//   2. Shell-coupled shapes — kept inline below because their bodies
+//      reference `SlotId` from `'../registry/SlotRegistry'` or the
+//      `workspace` / `viewRegistry` singletons. These can move once
+//      the relevant shell internals land in the kernel contract
+//      (slot ids: WI-24 / Phase 7).
 
 import type { ComponentType } from 'react'
 import type { SlotId } from '../registry/SlotRegistry'
 import type { workspace, viewRegistry } from '../workspace'
 
-// ─── Manifest ────────────────────────────────────────────────────────────────
+// Re-export portable contribution / config / kernel-envelope shapes
+// from the extension-api package. `@nexus/extension-api` resolves via
+// the pnpm workspace symlink + tsconfig `paths` alias.
+//
+// `PluginManifest` is NOT re-exported because its `contributes` field
+// references the shell-coupled `PluginContributions` aggregate; it is
+// declared inline below.
+export type {
+  CommandContribution,
+  MenuContribution,
+  KeybindingContribution,
+  StatusBarContribution,
+  ContextKeyContribution,
+  ConfigSection,
+  ConfigSchema,
+  KernelEventEnvelope,
+  FileEntry,
+  FsEvent,
+} from '@nexus/extension-api'
+
+import type {
+  CommandContribution,
+  MenuContribution,
+  KeybindingContribution,
+  StatusBarContribution,
+  ContextKeyContribution,
+  ConfigSection,
+  FileEntry,
+  FsEvent,
+} from '@nexus/extension-api'
+
+// ─── Shell-coupled manifest + contributions ─────────────────────────────────
+//
+// `ViewContribution` references `SlotId`, which is a shell-internal
+// type from `registry/SlotRegistry`. TODO: promote to kernel contract
+// (WI-24 / Phase 7) and move into the extension-api package; at that
+// point `PluginContributions` and `PluginManifest` follow it.
 
 export interface PluginManifest {
   id: string
@@ -15,6 +71,13 @@ export interface PluginManifest {
   activationEvents: string[]
   dependsOn?: string[]
   contributes?: PluginContributions
+}
+
+export interface ViewContribution {
+  id: string
+  slot: SlotId
+  title: string
+  priority?: number
 }
 
 export interface PluginContributions {
@@ -27,67 +90,6 @@ export interface PluginContributions {
   contextKeys?: ContextKeyContribution[]
 }
 
-export interface CommandContribution {
-  id: string
-  title: string
-  category?: string
-  icon?: string
-}
-
-export interface ViewContribution {
-  id: string
-  slot: SlotId
-  title: string
-  priority?: number
-}
-
-export interface MenuContribution {
-  menu: string
-  command: string
-  group?: string
-  order?: number
-  when?: string
-}
-
-export interface KeybindingContribution {
-  command: string
-  key: string
-  mac?: string
-  when?: string
-}
-
-export interface StatusBarContribution {
-  id: string
-  slot: 'left' | 'right'
-  priority: number
-  text: string
-}
-
-export interface ContextKeyContribution {
-  key: string
-  description: string
-  type: 'boolean' | 'string' | 'number'
-}
-
-// ─── Configuration ────────────────────────────────────────────────────────────
-
-export interface ConfigSection {
-  pluginId: string
-  title: string
-  order: number
-  schema: ConfigSchema[]
-}
-
-export interface ConfigSchema {
-  key: string
-  title: string
-  description: string
-  type: 'boolean' | 'string' | 'number' | 'select' | 'keybinding'
-  default: unknown
-  options?: string[]
-  when?: string
-}
-
 // ─── Plugin contract ──────────────────────────────────────────────────────────
 
 export interface Plugin {
@@ -97,6 +99,13 @@ export interface Plugin {
 }
 
 // ─── Plugin API ───────────────────────────────────────────────────────────────
+//
+// `PluginAPI` references the `workspace` and `viewRegistry` singletons
+// from `../workspace`, so it stays shell-side. Individual sub-API
+// shapes that ARE portable still live in this file (rather than the
+// package) because they're consumed exclusively through the
+// shell-coupled `PluginAPI` aggregate; moving them piecemeal would
+// require splitting the file without simplifying any consumer.
 
 export interface PluginAPI {
   commands: CommandsAPI
@@ -208,17 +217,6 @@ export interface NotificationsAPI {
   }): void
 }
 
-export interface FileEntry {
-  name: string
-  path: string
-  isDirectory: boolean
-}
-
-export interface FsEvent {
-  kind: 'created' | 'modified' | 'deleted' | 'renamed'
-  path: string
-}
-
 export interface FilesystemAPI {
   read(path: string): Promise<string>
   write(path: string, content: string): Promise<void>
@@ -231,12 +229,6 @@ export interface FilesystemAPI {
 }
 
 // ─── Kernel bridge ────────────────────────────────────────────────────────────
-
-export interface KernelEventEnvelope {
-  subscriptionId: string
-  topic: string
-  payload: unknown
-}
 
 export interface KernelAPI {
   /**

@@ -1,0 +1,9 @@
+{
+  "name": "nexus-workspace-root",
+  "private": true,
+  "description": "Root package for the Nexus pnpm workspace (shell + packages/*). The legacy `app/` uses npm and stays outside the workspace per ADR 0011.",
+  "engines": {
+    "node": ">=18",
+    "pnpm": ">=10"
+  }
+}

@@ -10,6 +10,6 @@ Cargo.lock
 **/SESSION_SUMMARIES.md
 # Per-install plugin settings written by the Settings modal.
 plugins/*/settings.json
-# shell/ (Tauri + React UI rebuild) — frontend build artifacts
-shell/node_modules/
+# Node / pnpm — workspace-wide
+node_modules/
 shell/dist/
