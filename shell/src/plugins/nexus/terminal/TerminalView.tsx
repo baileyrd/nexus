@@ -20,15 +20,20 @@ const CMD_SEND_RAW_INPUT = 'send_raw_input'
 // LineBuffer.pending until a newline arrives.
 const CMD_READ_RAW_SINCE = 'read_raw_since'
 
-// Output is pull-model in the current kernel contract — no event
-// topic is published for new output yet. 120ms is the smallest
-// interval that still feels "live" without pinning a core.
-const POLL_INTERVAL_MS = 120
-// PTY-read deadline folded into each `read_raw_since` call. Kept well
-// below POLL_INTERVAL_MS so each tick releases the server Mutex long
-// enough for concurrent send_raw_input calls (typing) to acquire it —
-// std::sync::Mutex is unfair and would otherwise starve input under a
-// tighter schedule.
+// WI-12: output is now event-driven via the
+// `com.nexus.terminal.output.<session_id>` topic — bytes land in xterm
+// through `useTerminalStore.handleStreamChunk` (subscription wired in
+// index.ts::activate). The pump path below is kept as a defensive 5s
+// heartbeat: it bootstraps any output that landed before the session
+// was wired, AND it acts as a catch-up channel if the broadcast
+// channel ever drops chunks (RecvError::Lagged). 5s is slow enough to
+// be invisible cost on an idle session yet fast enough to mask a
+// dropped subscription before the user notices typing lag.
+const POLL_INTERVAL_MS = 5000
+// PTY-read deadline folded into each `read_raw_since` call. Kept
+// short so each tick releases the server Mutex long enough for
+// concurrent send_raw_input calls (typing) to acquire it —
+// std::sync::Mutex is unfair and would otherwise starve input.
 const PUMP_TIMEOUT_MS = 30
 
 interface TerminalViewProps {
@@ -112,33 +117,70 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     }
 
     // Monotonic byte offset of the last PTY byte we've written into
-    // xterm. Advanced by each tick's response cursor. Number (not
-    // BigInt) is sufficient for any realistic session lifetime —
-    // 2^53 bytes is ~9 PB. The backend returns either number or
-    // string, so we normalise at read time.
+    // xterm via the *pump* path. Advanced by each tick's response
+    // cursor. WI-12: the event-stream path manages its own cursor
+    // inside terminalStore — the two coexist; pump is now a 5s
+    // defensive heartbeat. Number (not BigInt) is sufficient for any
+    // realistic session lifetime — 2^53 bytes is ~9 PB.
     let cursor = 0
     let disposed = false
     let pollTimer: number | null = null
     let lastSessionId: string | null = null
+    // Sink unregister fn for the currently-installed session. Replaced
+    // whenever sessionId flips so a stale sink can't catch chunks
+    // routed to the next session id.
+    let sinkUnsub: (() => void) | null = null
+
+    /** Hand bytes to xterm. The store calls this synchronously from
+     *  handleStreamChunk; we keep it lightweight so the broadcast
+     *  forwarder isn't held up by xterm's parser work. */
+    const writeBytes = (bytes: Uint8Array) => {
+      if (disposed) return
+      term.write(bytes)
+    }
 
     /**
-     * One poll tick: pump-and-read via `read_raw_since`, then feed
-     * raw bytes straight into xterm. xterm parses ANSI / cursor
-     * motion natively; we never need to synthesise newlines because
-     * the shell's own output (including echoed keystrokes) carries
-     * them when appropriate.
+     * Synchronise local state when the session id changes. Reset the
+     * pump cursor + xterm scrollback, then (re-)register a sink in
+     * the store so stream chunks for the new session route into this
+     * xterm.
+     */
+    const onSessionChange = (id: string | null) => {
+      if (id === lastSessionId) return
+      cursor = 0
+      lastSessionId = id
+      try {
+        term.reset()
+      } catch {
+        // Disposed underneath us; nothing to do.
+      }
+      if (sinkUnsub) {
+        try { sinkUnsub() } catch {}
+        sinkUnsub = null
+      }
+      if (id) {
+        sinkUnsub = useTerminalStore.getState().registerSink(id, writeBytes)
+      }
+    }
+
+    onSessionChange(useTerminalStore.getState().sessionId)
+    const offSessionSub = useTerminalStore.subscribe((s) => {
+      onSessionChange(s.sessionId)
+    })
+
+    /**
+     * One poll tick — defensive only post-WI-12. `read_raw_since`
+     * returns whatever bytes the pump path hasn't yet acknowledged;
+     * if the event stream is healthy `resp.data` will normally be
+     * empty. When it's NOT empty (boot-time backlog, or a dropped
+     * stream chunk) we write the bytes and advance both cursors so
+     * the store and the pump stay in coordinate-lockstep — see
+     * `advanceCursor`.
      */
     const tick = async () => {
       if (disposed) return
       const id = useTerminalStore.getState().sessionId
       if (!id) return
-      // Session changed out from under us (workspace switch). Reset
-      // cursor + clear xterm so we start fresh.
-      if (id !== lastSessionId) {
-        cursor = 0
-        lastSessionId = id
-        term.reset()
-      }
       let resp: ReadRawSinceResponse
       try {
         resp = await kernel.invoke<ReadRawSinceResponse>(
@@ -156,10 +198,22 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       // identity). NaN would reset us to 0, which is safe.
       const nextCursor = Number(resp.cursor)
       cursor = Number.isFinite(nextCursor) ? nextCursor : cursor
-      if (resp.data.length === 0) return
+      if (resp.data.length === 0) {
+        // Still publish the cursor so the store knows we're caught
+        // up — useful when the stream subscriber's seq baselines
+        // after a recovery.
+        useTerminalStore.getState().advanceCursor(id, cursor)
+        return
+      }
       term.write(new Uint8Array(resp.data))
+      useTerminalStore.getState().advanceCursor(id, cursor)
     }
 
+    // Kick off the first pump immediately to drain anything that
+    // landed before this view mounted (the kernel-side pump emits a
+    // stream event too, but the store may not have a sink registered
+    // yet at that instant). Subsequent pumps run on the heartbeat.
+    void tick()
     pollTimer = window.setInterval(() => {
       void tick()
     }, POLL_INTERVAL_MS)
@@ -218,6 +272,12 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       } catch {}
       try {
         offFocus()
+      } catch {}
+      try {
+        offSessionSub()
+      } catch {}
+      try {
+        sinkUnsub?.()
       } catch {}
       try {
         term.dispose()
