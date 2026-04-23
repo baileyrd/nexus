@@ -11,6 +11,8 @@ import { openSearchPanel } from '@codemirror/search'
 import { setEditorRuntime, getActiveCmView } from './runtime'
 import { makeEditorClient } from './kernelClient'
 import { makeSessionManager } from './sessionManager'
+import { installSlashMenuStyles } from './cm/slashCommand'
+import { installBlockHandleStyles } from './cm/blockHandle'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useFilesStore } from '../files/filesStore'
 
@@ -140,6 +142,8 @@ export const editorPlugin: Plugin = {
     // Non-markdown files keep the storage-read path (no editor session
     // lifecycle for binaries / code files). See
     // `docs/editor-transaction-wiring-plan.md` §Phase 3.
+    installSlashMenuStyles()
+    installBlockHandleStyles()
     const editorClient = makeEditorClient(api.kernel)
     // Phase 4: pass the kernel API so the manager can open a
     // `com.nexus.editor.changed.<relpath>` subscription on acquire.

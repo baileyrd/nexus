@@ -9,6 +9,9 @@ import { useWorkspaceField, workspace } from '../../../workspace'
 import { getEditorRuntime, setActiveCmView } from './runtime'
 import { CodeMirrorHost, type CodeMirrorHostHandle } from './cm/CodeMirrorHost'
 import { transactionBridge } from './cm/transactionBridge'
+import { slashCommandExt } from './cm/slashCommand'
+import { blockSelectionExt } from './cm/blockSelection'
+import { blockHandleExt } from './cm/blockHandle'
 import { getRegistry } from '../../../host/shellRegistry'
 import { ContextMenu } from '../../../shell/ContextMenu'
 import { buildTabContextMenu } from './TabContextMenu'
@@ -764,6 +767,9 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
               getSnapshot: () => runtime.sessionManager.getSnapshot(tab.relpath),
               onError: runtime.reportBridgeError,
             }),
+            slashCommandExt(),
+            blockSelectionExt(),
+            blockHandleExt(),
           ]}
         />
       )

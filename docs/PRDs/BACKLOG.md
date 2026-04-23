@@ -77,12 +77,21 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   `canvas.focused` context-key gate, and every shortcut is also
   a palette-accessible `canvas.*` command.
 - [ ] **Notion-style block UX on top of the existing block-tree engine
-  (PRD-08).** Block tree + transactions + annotations are shipped
-  (3.7k LoC in `nexus-editor`); what's missing is the UI layer —
-  slash menu, block selection, gutter handles + per-block menu +
-  drag-to-reorder, inline annotation toolbar. Plan:
-  [docs/notion-block-ux-plan.md](../notion-block-ux-plan.md) (6
-  phases; phases 1–3 are the "feels like Notion" threshold).
+  (PRD-08).** Phases 1–3 (the "feels like Notion" threshold) landed
+  2026-04-22. Shell-only: all mutations drive the doc through plain
+  CM `dispatch({ changes })` + the existing
+  `editor_sync_content` reparse, so no new kernel IPC. Three
+  CodeMirror extensions under
+  `shell/src/plugins/nexus/editor/cm/`: **`slashCommand.ts`** (typing
+  `/` at block start opens a categorised palette with
+  filter-as-you-type + runtime registry for plugin-contributed
+  commands); **`blockSelection.ts`** (Cmd/Ctrl+A expands caret →
+  block → document; Shift+Arrow at block edges steps by whole
+  blocks); **`blockHandle.ts`** (6-dot grip overlay per block,
+  click-menu with Turn-into submenu + Duplicate / Move up / Move
+  down / Delete, drag-to-reorder with a live drop-line indicator).
+  Remaining phases 4–6 (input rules audit, inline annotation
+  toolbar, polish / AI actions / comments) are still open.
   Kernel asks addressed 2026-04-22: (1) `Transaction::move_block(tree,
   id, new_parent, new_index, metadata)` constructor landed — single
   `ReparentBlock` op = single undo step for block-drag. Fixed an

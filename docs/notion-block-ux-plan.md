@@ -194,12 +194,30 @@ Everything above is shell work except:
 
 ## Phasing recap
 
-- **Phase 1** (slash menu) — biggest perceived-quality jump; wireable
-  without any Rust change.
-- **Phase 2** (block selection) — prerequisite for block-mode
-  operations. Tiny on its own.
-- **Phase 3** (handle + menu + drag) — makes the editor visually
-  Notion-like.
+- **Phase 1** (slash menu) — **Done 2026-04-22.** CM extension at
+  `shell/src/plugins/nexus/editor/cm/slashCommand.ts`. Typing `/` at
+  a block start opens a categorised palette (Basic / Lists /
+  Blocks) with arrow-key nav, filter-as-you-type, Enter/Tab to
+  commit, Escape to dismiss. Each command rewrites the line via
+  `stripBlockPrefix` + the chosen prefix; the kernel reparse
+  through `editor_sync_content` converges the block tree.
+  Registry (`slashCommands`) exposes a runtime `register(command)`
+  hook so other plugins can contribute commands.
+- **Phase 2** (block selection) — **Done 2026-04-22.** Extension
+  at `shell/src/plugins/nexus/editor/cm/blockSelection.ts`.
+  Cmd/Ctrl+A with the caret inside a block selects the block's
+  text range; a second Cmd/Ctrl+A expands to the whole document.
+  `Shift+ArrowUp`/`Shift+ArrowDown` at block edges step the
+  selection anchor by whole blocks (skipping blank separators).
+- **Phase 3** (handle + menu + drag) — **Done 2026-04-22.**
+  Extension at `shell/src/plugins/nexus/editor/cm/blockHandle.ts`.
+  A six-dot grip renders in an absolutely-positioned overlay next
+  to each block's first line. Click opens a dropdown (Turn into
+  submenu, Duplicate, Move up, Move down, Delete). Drag reorders
+  the block by cutting and re-inserting its text; a drop-line
+  indicator follows the cursor. All mutations flow through
+  existing CM `dispatch({ changes })` calls — the kernel
+  reconverges on reparse.
 - **Phase 4** (input rules) — housekeeping; just documents behaviour
   users partially already get.
 - **Phase 5** (inline annotations) — round-out edit controls.
