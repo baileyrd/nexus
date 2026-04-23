@@ -4,6 +4,18 @@ An AI-native, plugin-extensible knowledge environment built in Rust. Nexus combi
 
 > **Status:** Alpha (v0.1.0) — Phase 1 foundation is solid, Phase 4-5 features (AI, MCP) are functional. Not yet production-ready.
 
+> **⚠️ Desktop shell freeze (2026-04-23):** The plugin-first shell at
+> [`shell/`](shell/) + [`shell/src-tauri/`](shell/src-tauri/) (crate
+> `nexus-shell`) is the **single active** desktop target per
+> [ADR 0011](docs/adr/0011-adopt-plugin-first-shell.md). The legacy
+> shell at [`app/`](app/) + [`crates/nexus-app`](crates/nexus-app/) is
+> deprecated and frozen — bug fixes and security patches only.
+> New desktop work lands as a service-crate IPC handler plus a plugin
+> in `shell/src/plugins/nexus/`. See [`CONTRIBUTING.md`](CONTRIBUTING.md),
+> [`docs/INTEGRATION-REVIEW.md`](docs/INTEGRATION-REVIEW.md), and the
+> per-handler parity checklist in
+> [`docs/Shell-Capability-Comparison.xlsx`](docs/Shell-Capability-Comparison.xlsx).
+
 ## Architecture
 
 Nexus follows a **microkernel** design. A small core (kernel + event bus) coordinates independent subsystems, each in its own crate:

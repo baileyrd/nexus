@@ -1,4 +1,28 @@
-//! Nexus desktop shell.
+//! Nexus desktop shell — **DEPRECATED / LEGACY**.
+//!
+//! # Deprecation notice (2026-04-23)
+//!
+//! This crate is the **legacy Tauri desktop shell**. Per
+//! [ADR 0011](../../../docs/adr/0011-adopt-plugin-first-shell.md), the
+//! plugin-first shell at `shell/` + `shell/src-tauri/` (crate
+//! `nexus-shell`) is now the single desktop target. This crate is
+//! preserved only until feature parity is reached and it can be deleted.
+//!
+//! **Freeze policy:** Do not add new `#[tauri::command]` handlers, new
+//! event forwarders, or new capabilities here. Bug fixes and security
+//! patches only. New capability work goes into:
+//!
+//! 1. A service-crate IPC handler in the appropriate `nexus-*` crate,
+//!    reachable from CLI, TUI, MCP, and the new shell through
+//!    `context.ipc_call(plugin_id, command, args)`, and
+//! 2. A plugin in `shell/src/plugins/nexus/<feature>/`.
+//!
+//! See `docs/INTEGRATION-REVIEW.md`, `docs/SHELL-COMPARISON.md`, and
+//! `docs/Shell-Capability-Comparison.xlsx` for the migration plan and
+//! the per-handler parity checklist. A snapshot tag
+//! `v0.1.0-legacy-shell` preserves the pre-freeze state.
+//!
+//! ---
 //!
 //! Boots a Tauri 2 application that hosts the React/Vite frontend and
 //! bridges it to the Rust subsystems (currently `nexus-theme`; more will
