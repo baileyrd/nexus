@@ -43,6 +43,15 @@ export type {
   KernelEventEnvelope,
   FileEntry,
   FsEvent,
+  PlatformAPI,
+  PlatformFsAPI,
+  PlatformDialogAPI,
+  PlatformWindowAPI,
+  PlatformShellAPI,
+  PlatformDirEntry,
+  PlatformOpenFileOptions,
+  PlatformOpenDirectoryOptions,
+  PlatformSaveFileOptions,
 } from '@nexus/extension-api'
 
 import type {
@@ -54,6 +63,7 @@ import type {
   ConfigSection,
   FileEntry,
   FsEvent,
+  PlatformAPI,
 } from '@nexus/extension-api'
 
 // ─── Shell-coupled manifest + contributions ─────────────────────────────────
@@ -130,6 +140,12 @@ export interface PluginAPI {
   notifications: NotificationsAPI
   fs: FilesystemAPI
   kernel: KernelAPI
+  /**
+   * OS-level capabilities (filesystem, dialogs, window controls,
+   * open-in-default-app). Wraps `@tauri-apps/*` so plugins never import
+   * those directly — see WI-23 import-hygiene guardrail.
+   */
+  platform: PlatformAPI
   activityBar: ActivityBarAPI
   input: InputAPI
   /** Only available to core plugins (core: true) */

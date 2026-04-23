@@ -356,3 +356,105 @@ export interface FsEvent {
   kind: 'created' | 'modified' | 'deleted' | 'renamed';
   path: string;
 }
+
+// ─── Platform adapter surface (api.platform.*) ───────────────────────────────
+//
+// Plugins reach OS-level capabilities (filesystem, dialogs, window controls,
+// open-in-default-app) through these typed adapters instead of importing
+// `@tauri-apps/*` directly. The shell-side implementation in
+// `shell/src/host/PluginAPI.ts` is the chokepoint — `shell/src/host/` is
+// permitted to import Tauri primitives, while `shell/src/plugins/` is not
+// (WI-23 guardrail).
+//
+// Naming: `platform` (not `shell`) because the term `shell` is overloaded —
+// it already names the plugin host. These APIs wrap OS capabilities, which
+// is what `platform` conveys; it also future-proofs if Tauri is ever
+// swapped for a different native wrapper or a web shell.
+
+export interface PlatformDirEntry {
+  name: string;
+  /** True when the entry is a directory; false for files. */
+  isDirectory: boolean;
+}
+
+export interface PlatformOpenFileOptions {
+  /** Optional dialog title shown by the OS picker. */
+  title?: string;
+  /** When true, the user can pick multiple files. */
+  multiple?: boolean;
+  /** Pre-fill the picker with this absolute path. */
+  defaultPath?: string;
+  /** Filter list, e.g. `[{ name: 'Markdown', extensions: ['md'] }]`. */
+  filters?: ReadonlyArray<{ name: string; extensions: ReadonlyArray<string> }>;
+}
+
+export interface PlatformOpenDirectoryOptions {
+  title?: string;
+  defaultPath?: string;
+  /** When true, allow picking multiple directories. */
+  multiple?: boolean;
+}
+
+export interface PlatformSaveFileOptions {
+  title?: string;
+  defaultPath?: string;
+  filters?: ReadonlyArray<{ name: string; extensions: ReadonlyArray<string> }>;
+}
+
+export interface PlatformFsAPI {
+  /** Read the file at `path` as UTF-8 text. */
+  readText(path: string): Promise<string>;
+  /** Write UTF-8 `content` to the file at `path`, replacing any existing file. */
+  writeText(path: string, content: string): Promise<void>;
+  /** List the immediate entries (files + directories) inside `path`. */
+  readDir(path: string): Promise<PlatformDirEntry[]>;
+  /** Test whether a file or directory exists at `path`. */
+  exists(path: string): Promise<boolean>;
+  /** Create a directory; recursive by default. */
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
+  /** Delete the file or empty directory at `path`. */
+  remove(path: string): Promise<void>;
+  /** Rename or move `from` → `to`. */
+  rename(from: string, to: string): Promise<void>;
+}
+
+export interface PlatformDialogAPI {
+  /**
+   * Open a single file picker. Returns the selected absolute path, or null
+   * if the user cancelled. Pass `{ multiple: true }` to allow multi-select
+   * — the return type widens to `string[] | null`.
+   */
+  openFile(options?: PlatformOpenFileOptions & { multiple?: false }): Promise<string | null>;
+  openFile(options: PlatformOpenFileOptions & { multiple: true }): Promise<string[] | null>;
+  /** Open a directory picker. */
+  openDirectory(options?: PlatformOpenDirectoryOptions & { multiple?: false }): Promise<string | null>;
+  openDirectory(options: PlatformOpenDirectoryOptions & { multiple: true }): Promise<string[] | null>;
+  /** Save-as picker. Returns the chosen absolute path, or null if cancelled. */
+  saveFile(options?: PlatformSaveFileOptions): Promise<string | null>;
+}
+
+export interface PlatformWindowAPI {
+  minimize(): Promise<void>;
+  /** Toggle between maximized and restored. */
+  toggleMaximize(): Promise<void>;
+  close(): Promise<void>;
+  isMaximized(): Promise<boolean>;
+  /**
+   * Subscribe to OS-level resize events. Returns an unsubscribe function;
+   * also tracked via the plugin's subscription registry so deactivation
+   * sweeps it.
+   */
+  onResize(handler: () => void): Promise<() => void>;
+}
+
+export interface PlatformShellAPI {
+  /** Open a URL or filesystem path in the user's default handler. */
+  openExternal(target: string): Promise<void>;
+}
+
+export interface PlatformAPI {
+  fs: PlatformFsAPI;
+  dialog: PlatformDialogAPI;
+  window: PlatformWindowAPI;
+  shell: PlatformShellAPI;
+}

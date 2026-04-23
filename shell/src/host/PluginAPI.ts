@@ -11,6 +11,18 @@ import { workspace, viewRegistry } from '../workspace'
 import { KernelIpcError } from './KernelIpcError'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import {
+  readTextFile,
+  writeTextFile,
+  readDir,
+  exists as fsExists,
+  mkdir,
+  remove,
+  rename,
+} from '@tauri-apps/plugin-fs'
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
+import { open as openInShell } from '@tauri-apps/plugin-shell'
 import type { ComponentType } from 'react'
 
 interface BuildOptions {
@@ -274,6 +286,101 @@ export function buildPluginAPI(
       },
       async available(): Promise<boolean> {
         return invoke<boolean>('kernel_is_booted')
+      },
+    },
+
+    // ─── Platform adapter surface ─────────────────────────────────────────
+    // Wraps `@tauri-apps/*` so plugins never import those directly. The
+    // WI-23 import-hygiene test only checks `shell/src/plugins/**`; this
+    // file lives under `shell/src/host/` and is a permitted Tauri caller.
+    platform: {
+      fs: {
+        readText(path) {
+          return readTextFile(path)
+        },
+        writeText(path, content) {
+          return writeTextFile(path, content)
+        },
+        async readDir(path) {
+          const entries = await readDir(path)
+          return entries.map((e) => ({
+            name: e.name ?? '',
+            isDirectory: e.isDirectory ?? false,
+          }))
+        },
+        exists(path) {
+          return fsExists(path)
+        },
+        mkdir(path, options) {
+          return mkdir(path, { recursive: options?.recursive ?? true })
+        },
+        remove(path) {
+          return remove(path)
+        },
+        rename(from, to) {
+          return rename(from, to)
+        },
+      },
+      dialog: {
+        async openFile(options?: { multiple?: boolean; title?: string; defaultPath?: string; filters?: ReadonlyArray<{ name: string; extensions: ReadonlyArray<string> }> }) {
+          // Cast for tauri-plugin-dialog: it expects mutable arrays.
+          const result = await openDialog({
+            ...(options ?? {}),
+            multiple: options?.multiple ?? false,
+            directory: false,
+            filters: options?.filters?.map((f) => ({ name: f.name, extensions: [...f.extensions] })),
+          })
+          return result as string | string[] | null
+        },
+        async openDirectory(options?: { multiple?: boolean; title?: string; defaultPath?: string }) {
+          const result = await openDialog({
+            ...(options ?? {}),
+            multiple: options?.multiple ?? false,
+            directory: true,
+          })
+          return result as string | string[] | null
+        },
+        async saveFile(options) {
+          const result = await saveDialog({
+            ...(options ?? {}),
+            filters: options?.filters?.map((f) => ({ name: f.name, extensions: [...f.extensions] })),
+          })
+          return result
+        },
+      } as PluginAPI['platform']['dialog'],
+      window: {
+        async minimize() {
+          await getCurrentWindow().minimize()
+        },
+        async toggleMaximize() {
+          await getCurrentWindow().toggleMaximize()
+        },
+        async close() {
+          await getCurrentWindow().close()
+        },
+        async isMaximized() {
+          return getCurrentWindow().isMaximized()
+        },
+        async onResize(handler) {
+          // `onResized` is the modern Tauri v2 listener; it returns an
+          // unlisten promise. We track the resulting disposer through the
+          // plugin's subscription registry so deactivation sweeps it (mirrors
+          // `kernel.on`'s handling).
+          const unlisten = await getCurrentWindow().onResized(() => handler())
+          let disposed = false
+          const unsub = () => {
+            if (disposed) return
+            disposed = true
+            unlisten()
+          }
+          registry.trackSubscription(pluginId, unsub)
+          return unsub
+        },
+      },
+      shell: {
+        async openExternal(target) {
+          await openInShell(target)
+        },
       },
     },
 
