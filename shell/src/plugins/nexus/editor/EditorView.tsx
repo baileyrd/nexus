@@ -12,6 +12,8 @@ import { transactionBridge } from './cm/transactionBridge'
 import { slashCommandExt } from './cm/slashCommand'
 import { blockSelectionExt } from './cm/blockSelection'
 import { blockHandleExt } from './cm/blockHandle'
+import { inputRulesExt } from './cm/inputRules'
+import { inlineToolbarExt } from './cm/inlineToolbar'
 import { getRegistry } from '../../../host/shellRegistry'
 import { ContextMenu } from '../../../shell/ContextMenu'
 import { buildTabContextMenu } from './TabContextMenu'
@@ -770,6 +772,8 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
             slashCommandExt(),
             blockSelectionExt(),
             blockHandleExt(),
+            inputRulesExt(),
+            inlineToolbarExt(),
           ]}
         />
       )

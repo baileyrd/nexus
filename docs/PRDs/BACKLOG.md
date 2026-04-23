@@ -77,11 +77,10 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   `canvas.focused` context-key gate, and every shortcut is also
   a palette-accessible `canvas.*` command.
 - [ ] **Notion-style block UX on top of the existing block-tree engine
-  (PRD-08).** Phases 1–3 (the "feels like Notion" threshold) landed
-  2026-04-22. Shell-only: all mutations drive the doc through plain
-  CM `dispatch({ changes })` + the existing
-  `editor_sync_content` reparse, so no new kernel IPC. Three
-  CodeMirror extensions under
+  (PRD-08).** Phases 1–6 of the plan landed 2026-04-22. Shell-only:
+  every mutation drives the doc through plain CM
+  `dispatch({ changes })` + the existing `editor_sync_content`
+  reparse — no new kernel IPC. Five CodeMirror extensions under
   `shell/src/plugins/nexus/editor/cm/`: **`slashCommand.ts`** (typing
   `/` at block start opens a categorised palette with
   filter-as-you-type + runtime registry for plugin-contributed
@@ -89,9 +88,18 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   block → document; Shift+Arrow at block edges steps by whole
   blocks); **`blockHandle.ts`** (6-dot grip overlay per block,
   click-menu with Turn-into submenu + Duplicate / Move up / Move
-  down / Delete, drag-to-reorder with a live drop-line indicator).
-  Remaining phases 4–6 (input rules audit, inline annotation
-  toolbar, polish / AI actions / comments) are still open.
+  down / Delete, drag-to-reorder with a live drop-line indicator,
+  `Alt-ArrowUp/Down` keyboard equivalents); **`inputRules.ts`**
+  (`[]`/`[x]`/`*`/`+` space-normalization rules that fill the gap
+  where user expectation diverges from raw markdown);
+  **`inlineToolbar.ts`** (floating Bold/Italic/Code/Link toolbar
+  above non-empty single-block selections plus
+  `Mod-b/i/e/k` shortcuts with wrap/unwrap toggle).
+  Explicitly out of scope for this pass and tracked as separate
+  follow-ups: drag-to-embed into canvas (cross-plugin), block
+  links navigator (`[[…#^block-id]]`), side-margin comments
+  subsystem, block AI actions via `com.nexus.ai`, multi-cursor
+  from multi-block selection.
   Kernel asks addressed 2026-04-22: (1) `Transaction::move_block(tree,
   id, new_parent, new_index, metadata)` constructor landed — single
   `ReparentBlock` op = single undo step for block-drag. Fixed an

@@ -18,6 +18,7 @@ import {
   Decoration,
   EditorView,
   ViewPlugin,
+  keymap,
   type DecorationSet,
   type PluginValue,
   type ViewUpdate,
@@ -130,6 +131,17 @@ function deleteBlock(view: EditorView, block: BlockRange): void {
     selection: EditorSelection.cursor(block.from),
     userEvent: 'delete.block',
   })
+}
+
+function moveCaretBlock(view: EditorView, direction: 'up' | 'down'): boolean {
+  const head = view.state.selection.main.head
+  const line = view.state.doc.lineAt(head)
+  if (line.text.trim() === '') return false
+  const blocks = scanBlocks(view)
+  const block = blockAtLine(blocks, line.number)
+  if (!block) return false
+  moveBlock(view, block, direction)
+  return true
 }
 
 function moveBlock(view: EditorView, block: BlockRange, direction: 'up' | 'down'): void {
@@ -546,6 +558,18 @@ export function blockHandleExt(): Extension {
     dragField,
     plugin,
     EditorView.decorations.compute([menuField, dragField], () => buildDecorations()),
+    // Phase 6: Alt+ArrowUp / Alt+ArrowDown move the block containing
+    // the caret. Matches the plan's Phase-6 keyboard-shortcut entry.
+    keymap.of([
+      {
+        key: 'Alt-ArrowUp',
+        run: (view) => moveCaretBlock(view, 'up'),
+      },
+      {
+        key: 'Alt-ArrowDown',
+        run: (view) => moveCaretBlock(view, 'down'),
+      },
+    ]),
   ]
 }
 

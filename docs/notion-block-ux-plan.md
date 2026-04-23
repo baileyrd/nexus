@@ -218,6 +218,31 @@ Everything above is shell work except:
   indicator follows the cursor. All mutations flow through
   existing CM `dispatch({ changes })` calls — the kernel
   reconverges on reparse.
+- **Phase 4** (input rules) — **Done 2026-04-22.** Extension at
+  `shell/src/plugins/nexus/editor/cm/inputRules.ts`. Fills the gaps
+  where user expectation diverges from raw markdown: `[]`/`[x]`
+  + space → `- [ ]`/`- [x]`; `*`/`+` + space normalizes to `-`.
+  `#`/`##`/`###`/`-`/`1.`/`>`/`---` already work because they're
+  native markdown — the kernel reparse turns them into the right
+  `BlockType` without help.
+- **Phase 5** (inline annotation toolbar + shortcuts) —
+  **Done 2026-04-22.** Extension at
+  `shell/src/plugins/nexus/editor/cm/inlineToolbar.ts`. A floating
+  toolbar rides above non-empty single-block selections with
+  Bold / Italic / Code / Link buttons. Keyboard shortcuts
+  `Mod-b` / `Mod-i` / `Mod-e` / `Mod-k` hit the same wrap/unwrap
+  path. Wrap toggling covers both "selection inside markers" and
+  "markers immediately outside selection" so a second press of
+  the shortcut strips the marker. Link uses `window.prompt` for
+  v1 — a proper autocomplete picker is a follow-up.
+- **Phase 6** (keyboard polish) — **Done 2026-04-22.** Added
+  `Alt-ArrowUp` / `Alt-ArrowDown` in `blockHandle.ts` to move the
+  block containing the caret, same path as the Move up / Move
+  down menu items. Block AI actions, drag-to-embed, block links,
+  side-margin comments, and multi-cursor-from-multi-block each
+  need either a new subsystem (comments) or cross-plugin
+  integration (canvas embed) and are tracked as separate
+  follow-ups rather than bundled here.
 - **Phase 4** (input rules) — housekeeping; just documents behaviour
   users partially already get.
 - **Phase 5** (inline annotations) — round-out edit controls.

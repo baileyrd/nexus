@@ -13,6 +13,7 @@ import { makeEditorClient } from './kernelClient'
 import { makeSessionManager } from './sessionManager'
 import { installSlashMenuStyles } from './cm/slashCommand'
 import { installBlockHandleStyles } from './cm/blockHandle'
+import { installInlineToolbarStyles } from './cm/inlineToolbar'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useFilesStore } from '../files/filesStore'
 
@@ -144,6 +145,7 @@ export const editorPlugin: Plugin = {
     // `docs/editor-transaction-wiring-plan.md` §Phase 3.
     installSlashMenuStyles()
     installBlockHandleStyles()
+    installInlineToolbarStyles()
     const editorClient = makeEditorClient(api.kernel)
     // Phase 4: pass the kernel API so the manager can open a
     // `com.nexus.editor.changed.<relpath>` subscription on acquire.
