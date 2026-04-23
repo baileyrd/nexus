@@ -22,6 +22,7 @@ import {
   THEME_PLUGIN_ID,
   THEME_CHANGED_EVENT,
   type AppliedTheme,
+  type AvailableSnippet,
   type KernelThemeConfig,
   type ThemeManifestEntry,
 } from './themeStore.ts'
@@ -77,6 +78,7 @@ function reset(): void {
     theme: 'dark',
     density: 'cozy',
     availableThemes: [],
+    availableSnippets: [],
     activeThemeId: null,
     resolvedVariables: {},
     enabledSnippets: [],
@@ -268,6 +270,60 @@ test('event echo: a com.nexus.theme.changed notification triggers re-hydrate', a
   assert.equal(after.activeThemeId, 'nexus-light')
   assert.deepEqual(after.enabledSnippets, ['s1'])
   assert.deepEqual(after.resolvedVariables, { '--bg': '#fff' })
+})
+
+test('hydrate: populates availableSnippets from get_available_snippets', async () => {
+  reset()
+
+  const snippets: AvailableSnippet[] = [
+    { id: 'snip-a', name: 'Snippet A', description: 'first', enabled: true },
+    { id: 'snip-b', name: 'Snippet B', description: 'second', enabled: false },
+  ]
+  const config: KernelThemeConfig = {
+    theme_id: 'nexus-dark',
+    mode: 'dark',
+    enabled_snippets: ['snip-a'],
+  }
+
+  const { api, invocations } = makeMockApi(async (_p, cmd) => {
+    if (cmd === 'get_theme_config') return config
+    if (cmd === 'get_available_themes') return []
+    if (cmd === 'get_available_snippets') return snippets
+    if (cmd === 'compute_variables') return {}
+    throw new Error(`unexpected: ${cmd}`)
+  })
+
+  await useThemeStore.getState().hydrate(api)
+  assert.deepEqual(useThemeStore.getState().availableSnippets, snippets)
+
+  // Confirm hydrate actually called get_available_snippets — guards
+  // against a future refactor that drops the call and silently
+  // leaves the Appearance UI empty.
+  const cmds = invocations.filter((i) => i.pluginId === THEME_PLUGIN_ID).map((i) => i.commandId)
+  assert.ok(cmds.includes('get_available_snippets'))
+})
+
+test('setSnippetOrder: invokes reorder_snippets with `ids` arg key', async () => {
+  reset()
+
+  const { api, invocations } = makeMockApi(async (_p, cmd, args) => {
+    if (cmd === 'reorder_snippets') {
+      // Wire shape mirrors `ReorderSnippetsArgs` in
+      // crates/nexus-theme/src/core_plugin.rs — `ids`, not `ordered_ids`.
+      assert.deepEqual(args, { ids: ['snip-c', 'snip-a', 'snip-b'] })
+      return ['snip-c', 'snip-a', 'snip-b']
+    }
+    throw new Error(`unexpected: ${cmd}`)
+  })
+
+  await useThemeStore.getState().setSnippetOrder(api, ['snip-c', 'snip-a', 'snip-b'])
+  // No optimistic update: store waits for the .changed event echo,
+  // same convention as toggleSnippet.
+  assert.deepEqual(useThemeStore.getState().enabledSnippets, [])
+
+  const reorder = invocations.find((i) => i.commandId === 'reorder_snippets')
+  assert.ok(reorder)
+  assert.equal(reorder!.pluginId, THEME_PLUGIN_ID)
 })
 
 test('event constants are stable wire identifiers', () => {

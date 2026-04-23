@@ -7,7 +7,12 @@ import { invoke } from '@tauri-apps/api/core'
 import { getRegistry } from '../../../host/shellRegistry'
 import { useContextKey, useContextKeyStore } from '../../../host/ContextKeyService'
 import { useConfigStore, useConfigValue } from '../../../stores/configStore'
-import type { ConfigSection, ConfigSchema } from '../../../types/plugin'
+import {
+  useThemeStore,
+  type AvailableSnippet,
+  type ThemeMode,
+} from '../../../stores/themeStore'
+import type { ConfigSection, ConfigSchema, PluginAPI } from '../../../types/plugin'
 import type { CommunityPluginManifest } from '../../../host/communityPluginLoader'
 import {
   formatChord,
@@ -79,7 +84,7 @@ function useCommunityManifests(): CommunityPluginManifest[] {
 
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
-type NavTab = 'settings' | 'plugins' | 'keybindings'
+type NavTab = 'settings' | 'appearance' | 'keybindings' | 'plugins'
 
 // ─── Override storage (shared with the plugin's activate() hydrator) ─────────
 // Lives at the same `plugin:core.settings:keybinding-overrides` localStorage
@@ -108,7 +113,18 @@ export const keybindingOverrideStorage: OverrideStorage = {
   },
 }
 
-export function SettingsPanelView() {
+// `api` is supplied by the settings plugin's `views.register()` wrapper
+// in `index.ts` — the slot system itself doesn't pass props, so we
+// inject it via a closure component there. Optional here because the
+// Appearance tab is the only consumer; the other tabs reach the
+// registry directly. When `api` is undefined the Appearance tab still
+// renders but mutating actions are disabled.
+interface SettingsPanelViewProps {
+  api?: PluginAPI
+}
+
+export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
+  const { api } = props
   const visible    = useContextKey('settingsPanelVisible') as boolean
   const requestedTab = useContextKey('settingsActiveTab') as NavTab | undefined
   const sections   = useConfigSections()
@@ -180,6 +196,12 @@ export function SettingsPanelView() {
               Settings
             </button>
             <button
+              className={`settings-nav-tab ${navTab === 'appearance' ? 'settings-nav-tab--active' : ''}`}
+              onClick={() => setNavTab('appearance')}
+            >
+              Appearance
+            </button>
+            <button
               className={`settings-nav-tab ${navTab === 'keybindings' ? 'settings-nav-tab--active' : ''}`}
               onClick={() => setNavTab('keybindings')}
             >
@@ -235,6 +257,13 @@ export function SettingsPanelView() {
             </div>
           </div>
         )}
+        {navTab === 'appearance' && (
+          <div className="settings-body">
+            <div className="settings-content" style={{ padding: '16px 24px' }}>
+              <AppearanceTab api={api} />
+            </div>
+          </div>
+        )}
         {navTab === 'keybindings' && (
           <div className="settings-body">
             <div className="settings-content" style={{ padding: '16px 24px' }}>
@@ -251,6 +280,323 @@ export function SettingsPanelView() {
         )}
       </div>
     </div>
+  )
+}
+
+// ─── Appearance tab ───────────────────────────────────────────────────────────
+//
+// WI-02 part 3 — Settings > Appearance UI. Three sections, all routed
+// through `useThemeStore` actions which talk to the kernel
+// `com.nexus.theme` plugin:
+//
+//   1. Theme picker (dropdown) — `setActiveTheme`
+//   2. Mode radio (light/dark/system) — `setMode`
+//   3. Snippets list (checkbox + up/down reorder) —
+//      `toggleSnippet` / `setSnippetOrder`
+//
+// Live preview "just works": the store applies CSS variables to :root
+// on every kernel echo (themeStore.applyResolvedVariables), so picking
+// a theme repaints the chrome without any extra wiring here.
+//
+// Reorder UX is up/down buttons rather than HTML5 drag-drop. Drag-drop
+// is the nicer affordance but adds enough complexity (focus
+// management, accessibility, keyboard fallback) that buttons are the
+// right starting point for Phase 2; a follow-up can graduate to drag.
+
+function AppearanceTab({ api }: { api?: PluginAPI }) {
+  // Subscribe to the slices we render — Zustand re-renders only when
+  // these specific values change, so a snippet toggle won't re-render
+  // the theme dropdown and vice-versa.
+  const availableThemes   = useThemeStore(s => s.availableThemes)
+  const availableSnippets = useThemeStore(s => s.availableSnippets)
+  const activeThemeId     = useThemeStore(s => s.activeThemeId)
+  const enabledSnippets   = useThemeStore(s => s.enabledSnippets)
+  const mode              = useThemeStore(s => s.theme)
+  const loaded            = useThemeStore(s => s.loaded)
+
+  const [busy,  setBusy]  = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Centralised wrapper around the store actions. Sets the busy flag
+  // (drives the dropdown's `disabled` attr so the user can't fire two
+  // theme switches in flight) and surfaces kernel errors as a banner
+  // rather than crashing the panel.
+  const run = useCallback(
+    async (label: string, fn: () => Promise<void>) => {
+      if (!api) {
+        setError(`${label}: settings panel is not wired to the kernel API yet`)
+        return
+      }
+      setBusy(true)
+      setError(null)
+      try {
+        await fn()
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        setError(`${label} failed: ${reason}`)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [api],
+  )
+
+  const handleThemeChange = (id: string) => {
+    void run('Apply theme', () =>
+      useThemeStore.getState().setActiveTheme(api!, id),
+    )
+  }
+
+  const handleModeChange = (next: ThemeMode) => {
+    void run('Set mode', () => useThemeStore.getState().setMode(api!, next))
+  }
+
+  const handleSnippetToggle = (id: string) => {
+    void run('Toggle snippet', () =>
+      useThemeStore.getState().toggleSnippet(api!, id),
+    )
+  }
+
+  // Up/down reorder: build a fresh enabled-id list from the current
+  // store ordering, swap adjacent ids, and ship the whole list to the
+  // kernel via setSnippetOrder. Disabled snippets aren't part of the
+  // ordered list (the kernel only stores enabled ids in cascade order).
+  const handleReorder = (id: string, direction: 'up' | 'down') => {
+    const idx = enabledSnippets.indexOf(id)
+    if (idx === -1) return
+    const swap = direction === 'up' ? idx - 1 : idx + 1
+    if (swap < 0 || swap >= enabledSnippets.length) return
+    const next = [...enabledSnippets]
+    ;[next[idx], next[swap]] = [next[swap], next[idx]]
+    void run('Reorder snippets', () =>
+      useThemeStore.getState().setSnippetOrder(api!, next),
+    )
+  }
+
+  // Render snippets in two groups: enabled (in cascade order, with
+  // up/down controls) followed by disabled (alphabetical, just a
+  // checkbox). This mirrors the legacy `app/src/components/settings`
+  // layout intent — a cascading order needs visible hierarchy.
+  const enabledList = useMemo(
+    () =>
+      enabledSnippets
+        .map(id => availableSnippets.find(s => s.id === id))
+        .filter((s): s is AvailableSnippet => Boolean(s)),
+    [enabledSnippets, availableSnippets],
+  )
+  const disabledList = useMemo(
+    () =>
+      availableSnippets
+        .filter(s => !enabledSnippets.includes(s.id))
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [availableSnippets, enabledSnippets],
+  )
+
+  return (
+    <div className="appearance-tab">
+      <header style={{ marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>Appearance</h2>
+        <p className="settings-section-desc" style={{ margin: '4px 0 0', opacity: 0.75 }}>
+          Theme, light/dark mode, and CSS snippet cascade. Changes apply live.
+        </p>
+      </header>
+
+      {error && (
+        <div
+          role="alert"
+          style={{
+            padding: 8,
+            marginBottom: 12,
+            background: 'var(--color-error-bg, #fdd)',
+            color: 'var(--color-error, #900)',
+            borderRadius: 4,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {/* ── Theme picker ── */}
+      <section className="settings-section" style={{ marginBottom: 24 }}>
+        <h3 className="settings-section-title">Theme</h3>
+        <p className="settings-field-description">
+          Pick a base palette. Variables apply to :root immediately.
+        </p>
+        <div className="settings-field-control" style={{ marginTop: 8 }}>
+          <select
+            value={activeThemeId ?? ''}
+            disabled={busy || !loaded || availableThemes.length === 0}
+            onChange={e => handleThemeChange(e.target.value)}
+            style={{ minWidth: 240 }}
+          >
+            {availableThemes.length === 0 && (
+              <option value="">{loaded ? 'No themes installed' : 'Loading...'}</option>
+            )}
+            {availableThemes.map(t => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </section>
+
+      {/* ── Mode ── */}
+      <section className="settings-section" style={{ marginBottom: 24 }}>
+        <h3 className="settings-section-title">Mode</h3>
+        <p className="settings-field-description">
+          Light or dark, or follow the OS preference.
+        </p>
+        <div role="radiogroup" aria-label="Theme mode" style={{ marginTop: 8, display: 'flex', gap: 16 }}>
+          {(['light', 'dark', 'system'] as const).map(m => (
+            <label
+              key={m}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: busy ? 'wait' : 'pointer' }}
+            >
+              <input
+                type="radio"
+                name="theme-mode"
+                value={m}
+                checked={mode === m}
+                disabled={busy}
+                onChange={() => handleModeChange(m)}
+              />
+              <span style={{ textTransform: 'capitalize' }}>{m}</span>
+            </label>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Snippets ── */}
+      <section className="settings-section">
+        <h3 className="settings-section-title">CSS snippets</h3>
+        <p className="settings-field-description">
+          Layered after the theme. Drag order matters — later snippets
+          override earlier ones. Use up/down to reorder.
+        </p>
+
+        {availableSnippets.length === 0 ? (
+          <p className="settings-empty" style={{ marginTop: 12 }}>
+            No snippets installed. Drop a <code>.css</code> file into your
+            snippets directory and restart.
+          </p>
+        ) : (
+          <>
+            {enabledList.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: '0.85em', opacity: 0.6, marginBottom: 4 }}>
+                  Enabled (cascade order, top → bottom)
+                </div>
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {enabledList.map((s, i) => (
+                    <SnippetRow
+                      key={s.id}
+                      snippet={s}
+                      enabled
+                      busy={busy}
+                      canMoveUp={i > 0}
+                      canMoveDown={i < enabledList.length - 1}
+                      onToggle={() => handleSnippetToggle(s.id)}
+                      onMoveUp={() => handleReorder(s.id, 'up')}
+                      onMoveDown={() => handleReorder(s.id, 'down')}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {disabledList.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: '0.85em', opacity: 0.6, marginBottom: 4 }}>
+                  Available
+                </div>
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {disabledList.map(s => (
+                    <SnippetRow
+                      key={s.id}
+                      snippet={s}
+                      enabled={false}
+                      busy={busy}
+                      canMoveUp={false}
+                      canMoveDown={false}
+                      onToggle={() => handleSnippetToggle(s.id)}
+                      onMoveUp={() => {}}
+                      onMoveDown={() => {}}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function SnippetRow({
+  snippet, enabled, busy, canMoveUp, canMoveDown, onToggle, onMoveUp, onMoveDown,
+}: {
+  snippet:     AvailableSnippet
+  enabled:     boolean
+  busy:        boolean
+  canMoveUp:   boolean
+  canMoveDown: boolean
+  onToggle:    () => void
+  onMoveUp:    () => void
+  onMoveDown:  () => void
+}) {
+  return (
+    <li
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 8,
+        padding: '8px 6px',
+        borderBottom: '1px solid var(--color-border, #e0e0e0)',
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={enabled}
+        disabled={busy}
+        onChange={onToggle}
+        aria-label={`Enable ${snippet.name}`}
+        style={{ marginTop: 3 }}
+      />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 500 }}>{snippet.name}</div>
+        {snippet.description && (
+          <div style={{ fontSize: '0.85em', opacity: 0.7 }}>{snippet.description}</div>
+        )}
+        <div style={{ fontSize: '0.75em', opacity: 0.5 }}>{snippet.id}</div>
+      </div>
+      {enabled && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <button
+            type="button"
+            onClick={onMoveUp}
+            disabled={busy || !canMoveUp}
+            aria-label={`Move ${snippet.name} up`}
+            title="Move up"
+            style={{ padding: '2px 6px', fontSize: '0.75em' }}
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            onClick={onMoveDown}
+            disabled={busy || !canMoveDown}
+            aria-label={`Move ${snippet.name} down`}
+            title="Move down"
+            style={{ padding: '2px 6px', fontSize: '0.75em' }}
+          >
+            ▼
+          </button>
+        </div>
+      )}
+    </li>
   )
 }
 

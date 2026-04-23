@@ -52,6 +52,19 @@ export interface AppliedTheme {
   variables: Record<string, string>
 }
 
+// Listing-friendly snippet shape returned by the kernel's
+// `get_available_snippets` handler. Mirrors `SnippetMetadata` in
+// `crates/nexus-theme/src/api.rs`. Extra fields (mode, scope) are
+// passed through opaquely so a kernel-side bump doesn't force a
+// shell rebuild — Part 3 only renders id/name/description/enabled.
+export interface AvailableSnippet {
+  id: string
+  name: string
+  description: string
+  enabled: boolean
+  [key: string]: unknown
+}
+
 export const THEME_PLUGIN_ID = 'com.nexus.theme'
 export const THEME_CHANGED_EVENT = 'com.nexus.theme.changed'
 
@@ -65,6 +78,12 @@ interface ThemeStore {
 
   // ── Kernel-mirrored state ──────────────────────────────────────────
   availableThemes: ThemeManifestEntry[]
+  // Populated by hydrate() from `get_available_snippets`. The Part 3
+  // Appearance UI iterates this to render checkboxes + reorder
+  // controls. The `enabled` field is authoritative — `enabledSnippets`
+  // (above) is the same data flattened to ids in cascade order; both
+  // are kept so consumers can pick whichever shape is more ergonomic.
+  availableSnippets: AvailableSnippet[]
   activeThemeId: string | null
   resolvedVariables: Record<string, string>
   enabledSnippets: string[]
@@ -79,6 +98,10 @@ interface ThemeStore {
   setActiveTheme: (api: PluginAPI, themeId: string) => Promise<void>
   setMode: (api: PluginAPI, mode: ThemeMode) => Promise<void>
   toggleSnippet: (api: PluginAPI, snippetId: string) => Promise<void>
+  // Replace the full ordered list of enabled snippet ids. The kernel
+  // emits `com.nexus.theme.changed`, the themeService subscriber
+  // re-hydrates, and the new cascade lands on :root automatically.
+  setSnippetOrder: (api: PluginAPI, orderedIds: string[]) => Promise<void>
   applyResolvedVariables: () => void
 }
 
@@ -137,6 +160,7 @@ export const useThemeStore = create<ThemeStore>()(
       // has populated from the engine at least once; consumers can
       // gate UI on it to avoid flashing empty lists.
       availableThemes: [],
+      availableSnippets: [],
       activeThemeId: null,
       resolvedVariables: {},
       enabledSnippets: [],
@@ -144,12 +168,15 @@ export const useThemeStore = create<ThemeStore>()(
       appliedVariableNames: [],
 
       hydrate: async (api: PluginAPI) => {
-        // Two round-trips: the config snapshot (cheap) and the list
-        // of available themes (settings UI consumes it). The
-        // `compute_variables` call resolves the cascade for the
-        // currently-active theme + snippets; this is what actually
-        // populates the :root variable map.
-        const [config, availableThemes] = await Promise.all([
+        // Three parallel round-trips: the config snapshot (cheap), the
+        // list of available themes, and the list of available snippets
+        // (Part 3 settings UI consumes both). The `compute_variables`
+        // call below resolves the cascade for the currently-active
+        // theme + snippets; this is what actually populates the :root
+        // variable map. Snippet listing is best-effort — if the kernel
+        // plugin isn't installed we degrade to an empty list rather
+        // than failing the whole hydrate.
+        const [config, availableThemes, availableSnippets] = await Promise.all([
           api.kernel.invoke<KernelThemeConfig>(
             THEME_PLUGIN_ID,
             'get_theme_config',
@@ -162,6 +189,13 @@ export const useThemeStore = create<ThemeStore>()(
               {},
             )
             .catch(() => [] as ThemeManifestEntry[]),
+          api.kernel
+            .invoke<AvailableSnippet[]>(
+              THEME_PLUGIN_ID,
+              'get_available_snippets',
+              {},
+            )
+            .catch(() => [] as AvailableSnippet[]),
         ])
 
         const variables = await api.kernel
@@ -175,6 +209,7 @@ export const useThemeStore = create<ThemeStore>()(
           activeThemeId: config.theme_id,
           enabledSnippets: config.enabled_snippets,
           availableThemes,
+          availableSnippets,
           resolvedVariables: variables,
           loaded: true,
         })
@@ -218,6 +253,19 @@ export const useThemeStore = create<ThemeStore>()(
         // to do here. We don't optimistically update enabledSnippets
         // because the kernel's order-after-toggle is the source of
         // truth and we'd rather avoid a flicker if it differs.
+      },
+
+      setSnippetOrder: async (api: PluginAPI, orderedIds: string[]) => {
+        // Wire arg name is `ids` (not `ordered_ids`) — see
+        // `ReorderSnippetsArgs` in `crates/nexus-theme/src/core_plugin.rs`.
+        // The kernel emits `com.nexus.theme.changed` after applying;
+        // the themeService subscriber re-hydrates. We don't update
+        // local state optimistically: a server-side validation reject
+        // (unknown id) would otherwise leave the UI temporarily
+        // showing an order the kernel never accepted.
+        await api.kernel.invoke<string[]>(THEME_PLUGIN_ID, 'reorder_snippets', {
+          ids: orderedIds,
+        })
       },
 
       applyResolvedVariables: () => {

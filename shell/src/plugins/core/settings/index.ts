@@ -3,6 +3,7 @@
 // Auto-generates UI from schemas registered by other plugins via
 // core.configuration-service.
 
+import { createElement, type ComponentType } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { SettingsPanelView, keybindingOverrideStorage } from './SettingsPanelView'
 
@@ -43,9 +44,20 @@ export const settingsPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
+    // Wrap so the Appearance tab (WI-02 part 3) can call kernel-routed
+    // theme actions through `api`. The slot system itself doesn't pass
+    // props, so we close over `api` here. We cast the wrapped component
+    // to `ComponentType<{ api?: PluginAPI }>` so TS lets `createElement`
+    // accept the closure prop — `SettingsPanelView`'s default-param
+    // signature otherwise hides the prop from JSX/createElement
+    // inference. The wrapper gets a stable `displayName` to make
+    // React DevTools / e2e selectors readable.
+    const Wrapped = SettingsPanelView as ComponentType<{ api?: PluginAPI }>
+    const SettingsPanelHost = () => createElement(Wrapped, { api })
+    SettingsPanelHost.displayName = 'SettingsPanelHost'
     api.views.register('settingsPanel', {
       slot: 'overlay',
-      component: SettingsPanelView,
+      component: SettingsPanelHost,
       priority: 90,
     })
 
