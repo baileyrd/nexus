@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "lastPresetId": "vibe",
+  "lastForgePath": "/home/user/forges/notes",
+  "recentForgePaths": [
+    "/home/user/forges/notes",
+    "/home/user/forges/work",
+    "/home/user/forges/scratch"
+  ],
+  "layouts": {
+    "obsidian": {
+      "leftSidePanelCollapsed": false,
+      "rightSidePanelCollapsed": true,
+      "leftActivePanelId": "files",
+      "rightActivePanelId": null
+    },
+    "vibe": {
+      "leftSidePanelCollapsed": true,
+      "rightSidePanelCollapsed": false,
+      "leftActivePanelId": null,
+      "rightActivePanelId": "outline"
+    }
+  },
+  "forgeState": {
+    "/home/user/forges/notes": {
+      "expandedPaths": ["daily", "daily/2026"],
+      "openFile": "daily/2026/04-23.md",
+      "panes": {
+        "pane-main": {
+          "tabs": [
+            { "relpath": "daily/2026/04-23.md", "pinned": false },
+            { "relpath": "README.md", "pinned": true }
+          ],
+          "activeRelpath": "daily/2026/04-23.md"
+        }
+      }
+    }
+  }
+}
