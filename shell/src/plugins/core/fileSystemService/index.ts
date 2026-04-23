@@ -1,50 +1,49 @@
 // src/plugins/core/fileSystemService/index.ts
-// Service plugin — wraps Tauri's filesystem API into a sanctioned abstraction.
+// Service plugin — delegates filesystem ops to the sanctioned `api.platform.fs`
+// adapter surface (WI-25 Phase 2b). Retains a narrow `watch` import from
+// `@tauri-apps/plugin-fs` only, because `api.platform.fs` has no watch()
+// equivalent yet; orchestrator will keep this file allowlisted under WI-23
+// with that tight justification.
 
 import type { Plugin, PluginAPI, FileEntry, FsEvent } from '../../../types/plugin'
-import {
-  readTextFile,
-  writeTextFile,
-  readDir,
-  exists,
-  mkdir,
-  remove,
-  rename,
-  watch,
-} from '@tauri-apps/plugin-fs'
+import { watch } from '@tauri-apps/plugin-fs'
+
+type PlatformFs = PluginAPI['platform']['fs']
 
 export class FilesystemService {
+  constructor(private platformFs: PlatformFs) {}
+
   async read(path: string): Promise<string> {
-    return readTextFile(path)
+    return this.platformFs.readText(path)
   }
 
   async write(path: string, content: string): Promise<void> {
-    return writeTextFile(path, content)
+    return this.platformFs.writeText(path, content)
   }
 
   async list(path: string): Promise<FileEntry[]> {
-    const entries = await readDir(path)
+    const entries = await this.platformFs.readDir(path)
     return entries.map(e => ({
-      name: e.name ?? '',
+      name: e.name,
       path: `${path}/${e.name}`,
-      isDirectory: e.isDirectory ?? false,
+      isDirectory: e.isDirectory,
     }))
   }
 
   async exists(path: string): Promise<boolean> {
-    return exists(path)
+    return this.platformFs.exists(path)
   }
 
   async mkdir(path: string): Promise<void> {
-    return mkdir(path, { recursive: true })
+    return this.platformFs.mkdir(path, { recursive: true })
   }
 
   async delete(path: string): Promise<void> {
-    return remove(path)
+    return this.platformFs.remove(path)
   }
 
   async rename(from: string, to: string): Promise<void> {
-    return rename(from, to)
+    return this.platformFs.rename(from, to)
   }
 
   async watch(path: string, handler: (event: FsEvent) => void): Promise<() => void> {
@@ -73,7 +72,7 @@ export const fileSystemServicePlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
-    api.internal!.registerInternalService('fsService', new FilesystemService())
+    api.internal!.registerInternalService('fsService', new FilesystemService(api.platform.fs))
     console.info('[core.filesystem-service] ready')
   },
 }

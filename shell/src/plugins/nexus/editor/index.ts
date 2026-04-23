@@ -1,5 +1,4 @@
 import { createElement } from 'react'
-import { open as openInShell } from '@tauri-apps/plugin-shell'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { viewRegistry, workspace } from '../../../workspace'
 import type { Leaf, Tabs, WorkspaceParent } from '../../../workspace'
@@ -565,7 +564,7 @@ export const editorPlugin: Plugin = {
         return
       }
       try {
-        await openInShell(joinAbsPath(root, relpath))
+        await api.platform.shell.openExternal(joinAbsPath(root, relpath))
       } catch (err) {
         api.notifications.show({
           type: 'error',
@@ -586,7 +585,7 @@ export const editorPlugin: Plugin = {
         return
       }
       try {
-        await openInShell(parentDir(joinAbsPath(root, relpath)))
+        await api.platform.shell.openExternal(parentDir(joinAbsPath(root, relpath)))
       } catch (err) {
         api.notifications.show({
           type: 'error',

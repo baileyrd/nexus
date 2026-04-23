@@ -1,6 +1,5 @@
 // src/plugins/core/fileExplorer/index.ts
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { open as openDialog } from '@tauri-apps/plugin-dialog'
 
 export const fileExplorerPlugin: Plugin = {
   manifest: {
@@ -52,7 +51,7 @@ export const fileExplorerPlugin: Plugin = {
     // activity-bar entry needed (duplicate of sidebar-tab affordance).
 
     api.commands.register('fileExplorer.openFolder', async () => {
-      const selected = await openDialog({ directory: true, multiple: false })
+      const selected = await api.platform.dialog.openDirectory()
       if (selected) api.events.emit('fileExplorer:folderOpened', { path: selected })
     })
 

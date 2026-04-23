@@ -1,7 +1,6 @@
 // src/plugins/core/titleBar/index.ts
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { TitleBarView } from './TitleBarView'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 
 export const titleBarPlugin: Plugin = {
   manifest: {
@@ -27,15 +26,13 @@ export const titleBarPlugin: Plugin = {
     })
 
     api.commands.register('window.minimize', () => {
-      getCurrentWindow().minimize()
+      api.platform.window.minimize()
     })
     api.commands.register('window.maximize', async () => {
-      const win = getCurrentWindow()
-      if (await win.isMaximized()) win.unmaximize()
-      else win.maximize()
+      await api.platform.window.toggleMaximize()
     })
     api.commands.register('window.close', () => {
-      getCurrentWindow().close()
+      api.platform.window.close()
     })
   },
 }

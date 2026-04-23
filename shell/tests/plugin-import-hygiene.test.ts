@@ -38,18 +38,35 @@ const PLUGINS_ROOT = join(SHELL_DIR, 'src', 'plugins')
  * Do NOT add to this list without an explicit reason in your commit message.
  */
 const TAURI_IMPORT_ALLOWLIST: ReadonlySet<string> = new Set([
-  // Each entry: file uses Tauri primitive X, drained by WI-25.
+  // Each entry: why it stays allowlisted. Goal is to keep this list shrinking.
+  //
+  // ─── React-component views: no `api` in scope ──────────────────────────────
+  // These are standalone *View.tsx components rendered by the shell's view
+  // system, not via the plugin's `activate(api)` closure. Until React context
+  // for the plugin API is wired up (separate WI), they have no path to
+  // `api.platform.*` and continue to import Tauri primitives directly.
   'shell/src/plugins/core/editorArea/EditorAreaView.tsx',          // plugin-fs.readTextFile
   'shell/src/plugins/core/fileExplorer/FileExplorerView.tsx',      // plugin-dialog.open + plugin-fs.readDir
-  'shell/src/plugins/core/fileExplorer/index.ts',                  // plugin-dialog.open
-  'shell/src/plugins/core/fileSystemService/index.ts',             // plugin-fs.* (the legacy FS service)
-  'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // api/core.invoke
   'shell/src/plugins/core/titleBar/TitleBarView.tsx',              // api/window.getCurrentWindow
-  'shell/src/plugins/core/titleBar/index.ts',                      // api/window.getCurrentWindow
-  'shell/src/plugins/nexus/editor/index.ts',                       // plugin-shell.open
-  'shell/src/plugins/nexus/launcher/launcherState.ts',             // api/core.invoke
-  'shell/src/plugins/nexus/pluginsMgmt/index.ts',                  // api/core.invoke
-  'shell/src/plugins/nexus/workspace/index.ts',                    // plugin-dialog.open + api/core.invoke
+  //
+  // ─── Shell-internal callers: legitimate exceptions ─────────────────────────
+  // These plugins call shell-internal Tauri commands (boot_kernel,
+  // set_plugin_enabled, get_shell_state, etc.) that are NOT plugin-API
+  // capabilities — they're shell-lifecycle / shell-state ops that have no
+  // kernel equivalent. Plan §10 risk row anticipates this: "If something
+  // truly needs a bespoke Tauri command, allow it in `shell/src/src-tauri/`
+  // and document." A future WI may migrate some of these to kernel IPC.
+  'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // shell-internal: set_plugin_enabled
+  'shell/src/plugins/nexus/launcher/launcherState.ts',             // shell-internal: get/write/forget shell_state (recents)
+  'shell/src/plugins/nexus/pluginsMgmt/index.ts',                  // shell-internal: set_plugin_enabled
+  'shell/src/plugins/nexus/workspace/index.ts',                    // shell-internal: boot_kernel + init_forge + shutdown_kernel + plugin-dialog.open
+  //
+  // ─── Partial Tauri retention: missing api.platform surface ────────────────
+  // fileSystemService routed read/write/etc through api.platform.fs in WI-25
+  // Phase 2b but still imports `watch` from `@tauri-apps/plugin-fs` because
+  // PlatformFsAPI does not expose a watch() method. Once it does, this entry
+  // can be removed.
+  'shell/src/plugins/core/fileSystemService/index.ts',             // plugin-fs.watch only (rest moved to api.platform.fs)
 ])
 
 /**
