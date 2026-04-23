@@ -21,6 +21,15 @@ export class PluginRegistry {
   // Format: 'type:id' e.g. 'command:myPlugin.doThing', 'slot:myPlugin.view'
   private ownership = new Map<string, Set<string>>()
 
+  // Per-plugin kernel-bus subscription disposers. Tracked separately from
+  // `ownership` because subscriptions don't have a stable string id we can
+  // round-trip through the parse/switch path in `unregisterAll`. The shape
+  // is `pluginId → Set<unsubscribe>`; entries are added by
+  // `trackSubscription` (called from `api.kernel.on` in PluginAPI) and
+  // drained on plugin unload so dead listeners can't keep receiving events
+  // and the Rust-side forwarder tasks get torn down.
+  private subscriptions = new Map<string, Set<() => void>>()
+
   // ─── Ownership tracking ──────────────────────────────────────────────────
 
   track(pluginId: string, contributionKey: string) {
@@ -31,30 +40,59 @@ export class PluginRegistry {
   }
 
   /**
+   * Track a kernel-bus unsubscribe so it gets called automatically when the
+   * plugin is unloaded. The unsubscribe must be idempotent — it may be
+   * invoked by the plugin itself and again from `unregisterAll`.
+   */
+  trackSubscription(pluginId: string, unsubscribe: () => void) {
+    if (!this.subscriptions.has(pluginId)) {
+      this.subscriptions.set(pluginId, new Set())
+    }
+    this.subscriptions.get(pluginId)!.add(unsubscribe)
+  }
+
+  /**
    * Remove all contributions made by a plugin.
    * Called automatically by the ExtensionHost on plugin unload.
    */
   unregisterAll(pluginId: string) {
     const keys = this.ownership.get(pluginId)
-    if (!keys) return
+    if (keys) {
+      for (const key of keys) {
+        const colonIdx = key.indexOf(':')
+        const type = key.slice(0, colonIdx)
+        const id   = key.slice(colonIdx + 1)
 
-    for (const key of keys) {
-      const colonIdx = key.indexOf(':')
-      const type = key.slice(0, colonIdx)
-      const id   = key.slice(colonIdx + 1)
-
-      switch (type) {
-        case 'command':    this.commands.unregister(id);    break
-        case 'slot':       slotRegistry.unregister(id);     break
-        case 'statusBar':  this.statusBar.unregister(id);   break
-        case 'config':     this.config.unregister(id);      break
-        case 'keybinding': this.keybindings.unregister(id); break
-        default:
-          console.warn(`[PluginRegistry] Unknown contribution type: '${type}'`)
+        switch (type) {
+          case 'command':    this.commands.unregister(id);    break
+          case 'slot':       slotRegistry.unregister(id);     break
+          case 'statusBar':  this.statusBar.unregister(id);   break
+          case 'config':     this.config.unregister(id);      break
+          case 'keybinding': this.keybindings.unregister(id); break
+          default:
+            console.warn(`[PluginRegistry] Unknown contribution type: '${type}'`)
+        }
       }
+      this.ownership.delete(pluginId)
     }
 
-    this.ownership.delete(pluginId)
+    // Drain kernel-bus subscriptions. Wrapped individually so a single
+    // throwing disposer doesn't strand the rest (and doesn't abort the
+    // plugin-unload path in ExtensionHost).
+    const subs = this.subscriptions.get(pluginId)
+    if (subs) {
+      for (const unsub of subs) {
+        try {
+          unsub()
+        } catch (err) {
+          console.warn(
+            `[PluginRegistry] subscription disposer threw for '${pluginId}':`,
+            err,
+          )
+        }
+      }
+      this.subscriptions.delete(pluginId)
+    }
   }
 
   // ─── Internal service bus (core plugins only) ────────────────────────────

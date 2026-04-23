@@ -8,6 +8,7 @@ import { useSlotStore, type SlotId } from '../registry/SlotRegistry'
 import { contextKeyService } from './ContextKeyService'
 import { eventBus } from './EventBus'
 import { workspace, viewRegistry } from '../workspace'
+import { KernelIpcError } from './KernelIpcError'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { ComponentType } from 'react'
@@ -216,12 +217,25 @@ export function buildPluginAPI(
         args: unknown = {},
         timeoutMs?: number,
       ): Promise<T> {
-        return invoke<T>('kernel_invoke', {
-          pluginId,
-          commandId,
-          args,
-          timeoutMs: timeoutMs ?? null,
-        })
+        try {
+          return await invoke<T>('kernel_invoke', {
+            pluginId,
+            commandId,
+            args,
+            timeoutMs: timeoutMs ?? null,
+          })
+        } catch (raw) {
+          // Post-WI-06 the bridge always returns an `IpcErrorEnvelope` on
+          // failure; wrap it so plugins can branch on `err.kind` instead
+          // of string-sniffing `err.message`. Non-envelope errors (older
+          // bridge builds, JS-side serialization failures, etc.) bubble
+          // through unchanged so we don't accidentally swallow shape
+          // mismatches.
+          if (KernelIpcError.isEnvelope(raw)) {
+            throw new KernelIpcError(raw)
+          }
+          throw raw
+        }
       },
       async on<T = unknown>(
         topicPrefix: string,
@@ -233,7 +247,15 @@ export function buildPluginAPI(
             handler(ev.payload.topic, ev.payload.payload as T)
           }
         })
-        return () => {
+        // Idempotency guard: the same disposer is invoked both by plugin
+        // code (if it stored the returned unsubscribe) AND by
+        // `PluginRegistry.unregisterAll` on plugin unload. Without this
+        // flag the second call would re-issue `kernel_unsubscribe` (the
+        // Rust side tolerates it but logs a warning) — cheap to avoid.
+        let disposed = false
+        const unsub = () => {
+          if (disposed) return
+          disposed = true
           // Fire-and-forget: Tauri listener is dropped synchronously; the
           // Rust-side `kernel_unsubscribe` is best-effort (idempotent + logs
           // on failure) and doesn't need to block the caller's teardown.
@@ -242,6 +264,13 @@ export function buildPluginAPI(
             console.warn('[api.kernel.on] unsubscribe failed', e),
           )
         }
+        // Track for automatic sweep on plugin unload — without this the
+        // Tauri listener would keep firing into a dead handler and the
+        // Rust forwarder task would live on. Plugins that explicitly
+        // dispose via the returned function still work because `unsub`
+        // is idempotent.
+        registry.trackSubscription(pluginId, unsub)
+        return unsub
       },
       async available(): Promise<boolean> {
         return invoke<boolean>('kernel_is_booted')
