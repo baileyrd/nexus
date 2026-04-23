@@ -4,7 +4,7 @@
 // core.configuration-service.
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { SettingsPanelView } from './SettingsPanelView'
+import { SettingsPanelView, keybindingOverrideStorage } from './SettingsPanelView'
 
 export const settingsPlugin: Plugin = {
   manifest: {
@@ -65,6 +65,20 @@ export const settingsPlugin: Plugin = {
     })
 
     api.context.set('settingsPanelVisible', false)
+
+    // WI-04 — hydrate keybinding overrides from localStorage so any
+    // user-set chord wins over the manifest default at first dispatch.
+    // Failures here are non-fatal: the registry just falls back to
+    // defaults, which is the correct degraded behaviour. We reach into
+    // `api.internal.registry` (core-plugin only) rather than importing
+    // shell/host directly — that keeps the WI-23 hygiene allowlist for
+    // the settings folder unchanged (only SettingsPanelView is on it).
+    const reg = (api.internal?.registry as
+      | { keybindings: { loadOverrides: (s: typeof keybindingOverrideStorage) => Promise<void> } }
+      | undefined)
+    if (reg) {
+      void reg.keybindings.loadOverrides(keybindingOverrideStorage)
+    }
 
     // Priority orders bottom items from top to bottom (lower = higher).
     // Help sits above Settings to match Obsidian's chrome order.

@@ -97,6 +97,7 @@ const HOST_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
  */
 const REGISTRY_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/core/configurationService/index.ts',          // registry/ConfigurationRegistry
+  'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // registry/KeybindingRegistry — overrides UI (WI-04)
   'shell/src/plugins/core/statusBar/StatusBarView.tsx',            // registry/StatusBarRegistry
 ])
 
