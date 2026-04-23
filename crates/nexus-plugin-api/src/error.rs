@@ -5,6 +5,8 @@
 
 /// Errors from IPC calls between plugins. Stable across kernel versions.
 #[derive(Debug, Clone, thiserror::Error)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub enum IpcError {
     /// The target plugin is not loaded.
     #[error("target plugin '{plugin_id}' not found")]
@@ -86,6 +88,8 @@ pub enum IpcError {
 /// stable category so callers don't have to string-sniff `Display` output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub enum IpcErrorKind {
     /// IPC call exceeded its deadline.
     Timeout,
@@ -110,6 +114,8 @@ pub enum IpcErrorKind {
 /// underlying Rust enum.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub struct IpcErrorEnvelope {
     /// Coarse error category — see [`IpcErrorKind`].
     pub kind: IpcErrorKind,
@@ -229,6 +235,8 @@ impl IpcErrorEnvelope {
 
 /// Event bus errors visible to plugins.
 #[derive(Debug, thiserror::Error)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub enum BusError {
     /// The event bus has been shut down.
     #[error("event bus is closed")]
@@ -251,6 +259,8 @@ pub enum BusError {
 
 /// Capability system errors visible to plugins.
 #[derive(Debug, thiserror::Error)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub enum CapabilityError {
     /// A plugin requested a capability it was not granted.
     #[error("capability '{cap:?}' denied to plugin '{plugin_id}'")]

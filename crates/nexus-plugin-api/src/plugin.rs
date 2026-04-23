@@ -4,6 +4,8 @@ use crate::capability::CapabilitySet;
 
 /// Trust level declared by a plugin in its manifest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub enum TrustLevel {
     /// Core plugins (authored or explicitly blessed); any capability allowed.
     Core,
@@ -15,6 +17,8 @@ use serde::{Deserialize, Serialize};
 
 /// Plugin runtime state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub enum PluginStatus {
     /// Loaded from disk, manifest parsed, not yet initialized.
     Loaded,
@@ -30,6 +34,8 @@ pub enum PluginStatus {
 
 /// Public view of a loaded plugin's identity and state.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub struct PluginInfo {
     /// Plugin identifier (reverse-DNS).
     pub id: String,

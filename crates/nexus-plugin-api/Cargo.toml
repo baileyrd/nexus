@@ -6,6 +6,12 @@ license.workspace = true
 publish.workspace = true
 description = "Stable plugin contract for Nexus — capability types, IPC abstractions, event types, and the versioned plugin ABI"
 
+[features]
+# Emit TypeScript bindings into `packages/nexus-extension-api/src/generated/`.
+# Off by default so normal Rust builds don't pull ts-rs. Enable with
+# `cargo test -p nexus-plugin-api --features ts-export` when regenerating bindings.
+ts-export = ["dep:ts-rs"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -13,6 +19,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
+ts-rs = { workspace = true, optional = true, features = ["chrono-impl", "uuid-impl"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }

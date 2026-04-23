@@ -3,6 +3,8 @@
 
 /// Log severity for plugin-emitted messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub enum LogLevel {
     /// Fine-grained tracing information.
     Trace,

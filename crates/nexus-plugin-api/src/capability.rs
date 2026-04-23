@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 /// system. Plugin manifests reference them as hierarchical dot-namespaced
 /// strings (e.g., `"fs.read"`); this enum is the canonical in-memory form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub enum Capability {
     /// Read files within the forge root.
     FsRead,
@@ -41,6 +43,8 @@ pub enum Capability {
 
 /// Error parsing a capability string.
 #[derive(Debug, thiserror::Error)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub enum CapabilityParseError {
     /// The string does not match any known capability name.
     #[error("unknown capability string '{0}'")]
@@ -133,6 +137,8 @@ impl Capability {
 ///
 /// Internally a bitmask over the `Capability` discriminant for O(1) contains.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub struct CapabilitySet(std::collections::HashSet<Capability>);
 
 impl CapabilitySet {
