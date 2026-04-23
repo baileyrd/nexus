@@ -16,6 +16,7 @@ import {
   type FieldDefinition,
   type FieldKind,
 } from './fieldTypes'
+import { getBasesApi } from './runtime'
 
 interface Props {
   relpath: string
@@ -35,6 +36,7 @@ export function BasesTable({ relpath, base, client }: Props) {
   )
   const undoLen = useBasesStore((s) => s.tabs[relpath]?.undoStack.length ?? 0)
   const redoLen = useBasesStore((s) => s.tabs[relpath]?.redoStack.length ?? 0)
+  const trashOpen = useBasesStore((s) => s.tabs[relpath]?.trashOpen ?? false)
   const setSort = useBasesStore((s) => s.setSort)
   const setSelectedRecordId = useBasesStore((s) => s.setSelectedRecordId)
   const patchRecord = useBasesStore((s) => s.patchRecord)
@@ -128,31 +130,109 @@ export function BasesTable({ relpath, base, client }: Props) {
     }
   }
 
-  const handleDeleteRow = useCallback(
+  /** Default delete action (live view). Soft-deletes the record via
+   *  `base_record_soft_delete` so it lands in the trash view and can
+   *  be restored — WI-10 §4.2 acceptance. The kernel stamps
+   *  `deleted_at`; we mirror that locally via `patchRecord` so
+   *  `BasesView.filter((r) => !r.deletedAt)` hides it on next render.
+   *  Undo flips back through `base_record_restore`. */
+  const handleSoftDeleteRow = useCallback(
     async (recordId: string) => {
-      // Snapshot the full record so undo can resurrect it exactly.
-      const snapshot = useBasesStore.getState().tabs[relpath]?.base?.records.find((r) => r.id === recordId)
-      if (!snapshot) return
+      const api = getBasesApi()
+      // `api.input.confirm` on native routes through the OS dialog;
+      // in tests/headless it isn't installed, so we soft-delete
+      // without prompting if the runtime isn't wired yet.
+      if (api) {
+        const ok = await api.input.confirm('Move this record to the trash?')
+        if (!ok) return
+      }
+      try {
+        setOpError(null)
+        await client.softDeleteRecord(relpath, recordId)
+        const stamp = Math.floor(Date.now() / 1000)
+        patchRecord(relpath, recordId, { deletedAt: stamp })
+        pushHistory(relpath, {
+          label: 'Soft-delete row',
+          forward: async () => {
+            await client.softDeleteRecord(relpath, recordId)
+            patchRecord(relpath, recordId, { deletedAt: Math.floor(Date.now() / 1000) })
+          },
+          inverse: async () => {
+            await client.restoreRecord(relpath, recordId)
+            patchRecord(relpath, recordId, { deletedAt: null })
+          },
+        })
+      } catch (err) {
+        setOpError(`soft-delete failed: ${errMsg(err)}`)
+      }
+    },
+    [client, relpath, patchRecord, pushHistory],
+  )
+
+  /** Restore a soft-deleted record — only reachable from the trash
+   *  view. Mirror of `handleSoftDeleteRow`. */
+  const handleRestoreRow = useCallback(
+    async (recordId: string) => {
+      try {
+        setOpError(null)
+        await client.restoreRecord(relpath, recordId)
+        patchRecord(relpath, recordId, { deletedAt: null })
+        pushHistory(relpath, {
+          label: 'Restore row',
+          forward: async () => {
+            await client.restoreRecord(relpath, recordId)
+            patchRecord(relpath, recordId, { deletedAt: null })
+          },
+          inverse: async () => {
+            await client.softDeleteRecord(relpath, recordId)
+            patchRecord(relpath, recordId, { deletedAt: Math.floor(Date.now() / 1000) })
+          },
+        })
+      } catch (err) {
+        setOpError(`restore failed: ${errMsg(err)}`)
+      }
+    },
+    [client, relpath, patchRecord, pushHistory],
+  )
+
+  /** Permanent hard-delete. Only reachable from the trash view so the
+   *  user doesn't lose data from a reflex Backspace on a live record.
+   *  Prompts via `api.input.confirm` and skips the undo stack — the
+   *  kernel can't resurrect a hard-deleted record. */
+  const handleHardDeleteRow = useCallback(
+    async (recordId: string) => {
+      const api = getBasesApi()
+      if (api) {
+        const ok = await api.input.confirm(
+          'Delete this record forever? This cannot be undone.',
+        )
+        if (!ok) return
+      }
       try {
         setOpError(null)
         await client.deleteRecord(relpath, recordId)
         removeRecord(relpath, recordId)
-        pushHistory(relpath, {
-          label: 'Delete row',
-          forward: async () => {
-            await client.deleteRecord(relpath, recordId)
-            removeRecord(relpath, recordId)
-          },
-          inverse: async () => {
-            await client.createRecord(relpath, snapshot)
-            appendRecord(relpath, snapshot)
-          },
-        })
       } catch (err) {
         setOpError(`delete failed: ${errMsg(err)}`)
       }
     },
-    [client, relpath, removeRecord, appendRecord, pushHistory],
+    [client, relpath, removeRecord],
+  )
+
+  // Single handler the toolbar / Backspace path dispatches to based
+  // on whether the user is looking at the trash. In trash mode
+  // Backspace still does the hard-delete (user is already in a
+  // destructive-actions surface), matching the "Delete forever"
+  // button next to each trashed row.
+  const handleDeleteRow = useCallback(
+    async (recordId: string) => {
+      if (trashOpen) {
+        await handleHardDeleteRow(recordId)
+      } else {
+        await handleSoftDeleteRow(recordId)
+      }
+    },
+    [trashOpen, handleHardDeleteRow, handleSoftDeleteRow],
   )
 
   const handleExportCsv = async () => {
@@ -309,18 +389,41 @@ export function BasesTable({ relpath, base, client }: Props) {
         <button
           type="button"
           onClick={() => void handleAddRow()}
-          style={toolbarBtnStyle}
+          disabled={trashOpen}
+          title={trashOpen ? 'Cannot add rows while viewing the trash' : undefined}
+          style={{ ...toolbarBtnStyle, opacity: trashOpen ? 0.4 : 1 }}
         >
           + New row
         </button>
-        {selectedRecordId && (
+        {selectedRecordId && !trashOpen && (
           <button
             type="button"
-            onClick={() => void handleDeleteRow(selectedRecordId)}
+            onClick={() => void handleSoftDeleteRow(selectedRecordId)}
+            title="Move to trash"
             style={toolbarBtnStyle}
           >
-            Delete row
+            Move to trash
           </button>
+        )}
+        {selectedRecordId && trashOpen && (
+          <>
+            <button
+              type="button"
+              onClick={() => void handleRestoreRow(selectedRecordId)}
+              title="Restore from trash"
+              style={toolbarBtnStyle}
+            >
+              Restore
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleHardDeleteRow(selectedRecordId)}
+              title="Permanently delete (cannot be undone)"
+              style={{ ...toolbarBtnStyle, color: 'var(--risk, #f48771)' }}
+            >
+              Delete forever
+            </button>
+          </>
         )}
         <button
           type="button"

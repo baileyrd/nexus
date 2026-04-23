@@ -9,6 +9,8 @@ import { useBasesStore } from './basesStore'
 import type { Base, BasesKernelClient, BaseView } from './kernelClient'
 import {
   applyView,
+  filtersFromView,
+  hiddenFieldsFromView,
   isPersistableMode,
   viewFromTabState,
 } from './viewMapping'
@@ -27,10 +29,19 @@ export function BasesViewBar({ relpath, base, client }: Props) {
   const setSort = useBasesStore((s) => s.setSort)
   const setBoardGroupField = useBasesStore((s) => s.setBoardGroupField)
   const setCalendarDateField = useBasesStore((s) => s.setCalendarDateField)
+  const setHiddenFields = useBasesStore((s) => s.setHiddenFields)
+  const setViewFilters = useBasesStore((s) => s.setViewFilters)
 
   const [opError, setOpError] = useState<string | null>(null)
 
   if (!tab) return null
+
+  // Schema field list excluding the synthetic `id` column. Used to
+  // derive the saved `view.fields` allowlist from the tab's
+  // `hiddenFields` set and to invert that mapping on apply.
+  const allFields = Object.keys(base.schema.fields ?? {}).filter(
+    (f) => f !== 'id',
+  )
 
   const handleApply = (view: BaseView) => {
     const applied = applyView(view)
@@ -42,13 +53,44 @@ export function BasesViewBar({ relpath, base, client }: Props) {
     if (applied.mode === 'calendar') {
       setCalendarDateField(relpath, applied.calendarDateField)
     }
+    // Phase 5 round-trip — rehydrate hidden columns + filters from
+    // the saved `view.fields` allowlist + `view.filter` rules.
+    setHiddenFields(relpath, hiddenFieldsFromView(view, allFields))
+    setViewFilters(relpath, filtersFromView(view))
     setActiveView(relpath, view.name)
   }
+
+  /** Build the wire view from the current tab state. Includes the
+   *  Phase-5 round-trip fields (`fields`, `filter`). */
+  const snapshot = (name: string): BaseView =>
+    viewFromTabState(name, tab.viewMode, tab, allFields)
 
   const handleSave = async () => {
     if (!isPersistableMode(tab.viewMode)) {
       setOpError(`The ${tab.viewMode} view isn't persistable yet — save from Table / Board / Calendar / Gallery.`)
       return
+    }
+    // If a named view is currently active, "Save" updates it in
+    // place via `base_view_update` — which previously was dead code.
+    // The active view name is the one the user expects "Save" to
+    // overwrite; "Save as…" forks a new copy.
+    if (tab.activeView) {
+      const existing = base.views.find((v) => v.name === tab.activeView)
+      if (existing) {
+        try {
+          setOpError(null)
+          const updated = snapshot(existing.name)
+          await client.updateView(relpath, updated)
+          setViews(
+            relpath,
+            base.views.map((v) => (v.name === existing.name ? updated : v)),
+          )
+          return
+        } catch (err) {
+          setOpError(`save failed: ${errMsg(err)}`)
+          return
+        }
+      }
     }
     const raw = window.prompt('Name this view', defaultName(tab.viewMode, base.views))
     if (!raw) return
@@ -60,7 +102,7 @@ export function BasesViewBar({ relpath, base, client }: Props) {
     }
     try {
       setOpError(null)
-      const view = viewFromTabState(name, tab.viewMode, tab)
+      const view = snapshot(name)
       await client.createView(relpath, view)
       setViews(relpath, [...base.views, view])
       setActiveView(relpath, name)
@@ -148,10 +190,16 @@ export function BasesViewBar({ relpath, base, client }: Props) {
       <button
         type="button"
         onClick={() => void handleSave()}
-        title="Save the current mode + sort/group/date as a named view"
+        title={
+          tab.activeView && base.views.some((v) => v.name === tab.activeView)
+            ? `Save changes to "${tab.activeView}" (sort / group / hidden columns / filters)`
+            : 'Save the current mode + sort/group/date/hidden-columns/filters as a named view'
+        }
         style={newViewBtnStyle}
       >
-        + New view
+        {tab.activeView && base.views.some((v) => v.name === tab.activeView)
+          ? `Save "${tab.activeView}"`
+          : '+ New view'}
       </button>
       {opError && (
         <span

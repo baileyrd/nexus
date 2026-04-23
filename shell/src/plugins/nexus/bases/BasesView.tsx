@@ -38,6 +38,8 @@ export function BasesView({ relpath, client }: Props) {
   const setViewMode = useBasesStore((s) => s.setViewMode)
   const schemaEditorOpen = useBasesStore((s) => s.tabs[relpath]?.schemaEditorOpen ?? false)
   const setSchemaEditorOpen = useBasesStore((s) => s.setSchemaEditorOpen)
+  const trashOpen = useBasesStore((s) => s.tabs[relpath]?.trashOpen ?? false)
+  const setTrashOpen = useBasesStore((s) => s.setTrashOpen)
 
   useEffect(() => {
     ensureTab(relpath)
@@ -111,12 +113,15 @@ export function BasesView({ relpath, client }: Props) {
   }
   const fieldCount = Object.keys(base.schema.fields).length
   const mode = tab.viewMode
-  // Soft-deleted records stay on disk (so SchemaEditor / future
-  // trash-view can still see them) but every live view filters them
-  // out of the visible set. Wrap the base once so all downstream
-  // child components see the same filtered record list.
-  const visibleRecords = base.records.filter((r) => !r.deletedAt)
+  // Soft-deleted records stay on disk. The default ("live") set
+  // hides them; the trash filter inverts that so the user can
+  // restore or permanently delete from a single view. WI-10 §4.2
+  // acceptance — soft-deleted records reachable via UI, not just API.
+  const liveRecords = base.records.filter((r) => !r.deletedAt)
+  const trashedRecords = base.records.filter((r) => !!r.deletedAt)
+  const visibleRecords = trashOpen ? trashedRecords : liveRecords
   const visibleBase = { ...base, records: visibleRecords }
+  const trashCount = trashedRecords.length
   return (
     <div style={wrapperStyle}>
       <div style={headerStyle}>
@@ -128,6 +133,27 @@ export function BasesView({ relpath, client }: Props) {
         <span>·</span>
         <span>{base.views.length} views</span>
         <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={() => setTrashOpen(relpath, !trashOpen)}
+          title={
+            trashOpen
+              ? 'Back to live records'
+              : `Show soft-deleted records (${trashCount})`
+          }
+          style={{
+            padding: '3px 10px',
+            background: trashOpen ? 'var(--risk, #f48771)' : 'var(--bg-raised, #252529)',
+            color: trashOpen ? 'var(--fg-on-accent, #0f1117)' : 'var(--fg-primary, #e4e4e7)',
+            border: '1px solid var(--border-subtle, #2a2a2e)',
+            borderRadius: 3,
+            fontSize: 11,
+            cursor: 'pointer',
+            marginRight: 8,
+          }}
+        >
+          {trashOpen ? `← Live (${liveRecords.length})` : `Trash${trashCount > 0 ? ` (${trashCount})` : ''}`}
+        </button>
         <button
           type="button"
           onClick={() => setSchemaEditorOpen(relpath, !schemaEditorOpen)}

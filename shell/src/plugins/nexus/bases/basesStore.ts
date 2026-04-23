@@ -3,7 +3,7 @@
 // selection, pending edits, and an undo stack (mirrors canvasStore).
 
 import { create } from 'zustand'
-import type { Base, BaseRecord, BaseView } from './kernelClient'
+import type { Base, BaseRecord, BaseView, FilterRule } from './kernelClient'
 
 export type ViewMode = 'table' | 'board' | 'list' | 'calendar' | 'gallery' | 'timeline'
 
@@ -56,6 +56,19 @@ export interface BasesTabState {
   timelineDayPx: number
   /** Whether the schema-editor side panel is visible for this tab. */
   schemaEditorOpen: boolean
+  /** Trash mode — when true, the visible-records filter inverts:
+   *  views show ONLY soft-deleted records and the row actions surface
+   *  Restore + "Delete forever" instead of soft-delete. WI-10 §4.2
+   *  acceptance ("records can be restored via UI"). */
+  trashOpen: boolean
+  /** Per-view hidden columns — names that round-trip via the
+   *  `BaseView.fields` allowlist. Empty/null = show every column.
+   *  Phase 5 round-trip fix. */
+  hiddenFields: string[] | null
+  /** Per-view filter chips — round-trip via `BaseView.filter`.
+   *  Empty array = no filter; the shell narrows visible records by
+   *  AND-ing every rule. Phase 5 round-trip fix. */
+  viewFilters: FilterRule[]
   /** Undo stack — LIFO. Each entry owns a `forward` + `inverse`
    *  pair; `forward` was already applied when the entry was pushed,
    *  so `undo()` runs `inverse` and moves the entry to `redoStack`. */
@@ -97,6 +110,12 @@ interface BasesStore {
   setTimelineEndField(relpath: string, field: string | null): void
   setTimelineDayPx(relpath: string, px: number): void
   setSchemaEditorOpen(relpath: string, open: boolean): void
+  /** Toggle the trash filter for the tab — see `BasesTabState.trashOpen`. */
+  setTrashOpen(relpath: string, open: boolean): void
+  /** Replace the hidden-fields list for the tab. `null` = show all. */
+  setHiddenFields(relpath: string, fields: string[] | null): void
+  /** Replace the view filter rules for the tab. */
+  setViewFilters(relpath: string, filters: FilterRule[]): void
   /** Patch a single record's fields in the local cache. The caller
    *  is responsible for having already committed through the kernel;
    *  this just keeps the UI consistent without a full reload. */
@@ -138,6 +157,9 @@ const EMPTY: BasesTabState = {
   timelineEndField: null,
   timelineDayPx: 24,
   schemaEditorOpen: false,
+  trashOpen: false,
+  hiddenFields: null,
+  viewFilters: [],
   undoStack: [],
   redoStack: [],
 }
@@ -255,6 +277,31 @@ export const useBasesStore = create<BasesStore>((set) => ({
     set((s) => {
       const t = s.tabs[relpath] ?? { ...EMPTY }
       return { tabs: { ...s.tabs, [relpath]: { ...t, schemaEditorOpen: open } } }
+    })
+  },
+  setTrashOpen(relpath, open) {
+    set((s) => {
+      const t = s.tabs[relpath] ?? { ...EMPTY }
+      // Reset selection when switching modes — selected ids are
+      // disjoint between live and trash sets.
+      return {
+        tabs: {
+          ...s.tabs,
+          [relpath]: { ...t, trashOpen: open, selectedRecordId: null },
+        },
+      }
+    })
+  },
+  setHiddenFields(relpath, fields) {
+    set((s) => {
+      const t = s.tabs[relpath] ?? { ...EMPTY }
+      return { tabs: { ...s.tabs, [relpath]: { ...t, hiddenFields: fields } } }
+    })
+  },
+  setViewFilters(relpath, filters) {
+    set((s) => {
+      const t = s.tabs[relpath] ?? { ...EMPTY }
+      return { tabs: { ...s.tabs, [relpath]: { ...t, viewFilters: filters } } }
     })
   },
   toggleGroupCollapsed(relpath, key) {
