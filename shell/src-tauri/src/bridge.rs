@@ -37,7 +37,8 @@ use std::time::Duration;
 
 use nexus_bootstrap::Runtime;
 use nexus_kernel::{
-    EventFilter, IpcError, Kernel, KernelPluginContext, NexusEvent, PluginContext, RecvError,
+    EventFilter, IpcErrorEnvelope, IpcErrorKind, Kernel, KernelPluginContext, NexusEvent,
+    PluginContext, RecvError,
 };
 use nexus_plugins::SharedPluginLoader;
 use serde::Serialize;
@@ -275,11 +276,21 @@ pub async fn kernel_invoke(
     args: serde_json::Value,
     timeout_ms: Option<u64>,
     runtime: tauri::State<'_, KernelRuntime>,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, IpcErrorEnvelope> {
     let context = {
         let guard = runtime.inner.lock().await;
         let Some(booted) = guard.as_ref() else {
-            return Err("kernel not booted".to_string());
+            // No `IpcError` variant matches "kernel hasn't been booted yet"
+            // (that's a shell-side state, not a kernel-side dispatch failure).
+            // Surface it as DispatchFailed so the frontend can branch on
+            // `kind` rather than parse `message`.
+            return Err(IpcErrorEnvelope {
+                kind: IpcErrorKind::DispatchFailed,
+                plugin_id: plugin_id.clone(),
+                command: command_id.clone(),
+                message: "kernel not booted".to_string(),
+                retryable: false,
+            });
         };
         Arc::clone(&booted.context)
     };
@@ -289,7 +300,7 @@ pub async fn kernel_invoke(
     context
         .ipc_call(&plugin_id, &command_id, args, timeout)
         .await
-        .map_err(format_ipc_error)
+        .map_err(|e| IpcErrorEnvelope::from_ipc_error_in_context(&e, &plugin_id, &command_id))
 }
 
 /// Subscribe to kernel custom events whose `type_id` starts with
@@ -401,21 +412,34 @@ pub fn kernel_is_booted(runtime: tauri::State<'_, KernelRuntime>) -> bool {
     runtime.is_booted()
 }
 
-/// Render an [`IpcError`] as a human-readable string for the frontend.
-fn format_ipc_error(err: IpcError) -> String {
-    // The underlying `thiserror` Display already includes the variant's
-    // context (plugin id, command, timeout). Prefix with the variant name so
-    // frontend code can pattern-match without inventing its own error type.
-    let variant = match &err {
-        IpcError::PluginNotFound { .. } => "PluginNotFound",
-        IpcError::CommandNotFound { .. } => "CommandNotFound",
-        IpcError::Timeout { .. } => "Timeout",
-        IpcError::PluginCrashedDuringCall { .. } => "PluginCrashedDuringCall",
-        IpcError::SerializationFailed { .. } => "SerializationFailed",
-        IpcError::DeserializationFailed { .. } => "DeserializationFailed",
-        IpcError::CapabilityDenied { .. } => "CapabilityDenied",
-        IpcError::DispatcherUnavailable => "DispatcherUnavailable",
-        IpcError::ReentrantCall { .. } => "ReentrantCall",
-    };
-    format!("{variant}: {err}")
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_kernel::IpcError;
+
+    #[test]
+    fn from_ipc_error_in_context_preserves_timeout_kind() {
+        let err = IpcError::Timeout {
+            plugin_id: "com.real".to_string(),
+            command: "ping".to_string(),
+            timeout_ms: 100,
+        };
+        let env = IpcErrorEnvelope::from_ipc_error_in_context(&err, "fallback", "fallback");
+        assert_eq!(env.kind, IpcErrorKind::Timeout);
+        assert!(env.retryable);
+        assert_eq!(env.plugin_id, "com.real");
+        assert_eq!(env.command, "ping");
+    }
+
+    #[test]
+    fn from_ipc_error_in_context_fills_serialization_fallbacks() {
+        let err = IpcError::SerializationFailed {
+            reason: "boom".to_string(),
+        };
+        let env =
+            IpcErrorEnvelope::from_ipc_error_in_context(&err, "com.caller", "do_thing");
+        assert_eq!(env.kind, IpcErrorKind::Serialization);
+        assert_eq!(env.plugin_id, "com.caller");
+        assert_eq!(env.command, "do_thing");
+    }
 }

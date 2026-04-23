@@ -77,6 +77,156 @@ pub enum IpcError {
     },
 }
 
+/// Coarse classification of an [`IpcError`] suitable for cross-boundary
+/// branching by frontend / plugin code.
+///
+/// The Rust `IpcError` enum is the source of truth, but it has shape that
+/// doesn't survive a JSON serialization round-trip (e.g. nested strings,
+/// borrowed displays). [`IpcErrorEnvelope`] flattens the variant down to a
+/// stable category so callers don't have to string-sniff `Display` output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpcErrorKind {
+    /// IPC call exceeded its deadline.
+    Timeout,
+    /// The target plugin panicked while servicing the call.
+    PluginCrashed,
+    /// The caller lacks the required capability.
+    CapabilityDenied,
+    /// The kernel could not route the call (no plugin / command / dispatcher,
+    /// or a re-entrant call).
+    DispatchFailed,
+    /// (De)serialization of the IPC payload failed.
+    Serialization,
+    /// Variant the envelope mapper didn't recognize. Reserved for future
+    /// `IpcError` additions so old shells still surface the failure.
+    Unknown,
+}
+
+/// Wire-stable envelope describing an [`IpcError`].
+///
+/// Returned as the `Err` payload of `kernel_invoke` so the shell / frontend
+/// can branch on `kind` (and respect `retryable`) without reflecting on the
+/// underlying Rust enum.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct IpcErrorEnvelope {
+    /// Coarse error category — see [`IpcErrorKind`].
+    pub kind: IpcErrorKind,
+    /// The plugin id involved in the failed call. Empty string when the
+    /// underlying variant doesn't carry one (e.g. `SerializationFailed`).
+    pub plugin_id: String,
+    /// The command id involved in the failed call. Empty string when the
+    /// underlying variant doesn't carry one (e.g. `PluginNotFound`).
+    pub command: String,
+    /// Human-readable rendering of the original error (`thiserror::Display`).
+    pub message: String,
+    /// Whether the caller may retry the same call and reasonably expect a
+    /// different outcome. Only `Timeout` is currently retryable.
+    pub retryable: bool,
+}
+
+impl IpcErrorEnvelope {
+    /// Map an [`IpcError`] into a wire-stable envelope.
+    ///
+    /// Variants that don't carry plugin/command context produce empty
+    /// strings for those fields. Use
+    /// [`IpcErrorEnvelope::from_ipc_error_in_context`] when the caller has
+    /// fallback identifiers (e.g. the args passed to `kernel_invoke`).
+    pub fn from_ipc_error(err: &IpcError) -> Self {
+        let message = format!("{err}");
+        match err {
+            IpcError::Timeout {
+                plugin_id, command, ..
+            } => Self {
+                kind: IpcErrorKind::Timeout,
+                plugin_id: plugin_id.clone(),
+                command: command.clone(),
+                message,
+                retryable: true,
+            },
+            IpcError::PluginNotFound { plugin_id } => Self {
+                kind: IpcErrorKind::DispatchFailed,
+                plugin_id: plugin_id.clone(),
+                command: String::new(),
+                message,
+                retryable: false,
+            },
+            IpcError::CommandNotFound { plugin_id, command } => Self {
+                kind: IpcErrorKind::DispatchFailed,
+                plugin_id: plugin_id.clone(),
+                command: command.clone(),
+                message,
+                retryable: false,
+            },
+            IpcError::CapabilityDenied { plugin_id } => Self {
+                kind: IpcErrorKind::CapabilityDenied,
+                plugin_id: plugin_id.clone(),
+                command: String::new(),
+                message,
+                retryable: false,
+            },
+            IpcError::PluginCrashedDuringCall { plugin_id, command } => Self {
+                kind: IpcErrorKind::PluginCrashed,
+                plugin_id: plugin_id.clone(),
+                command: command.clone(),
+                message,
+                retryable: false,
+            },
+            IpcError::SerializationFailed { .. } => Self {
+                kind: IpcErrorKind::Serialization,
+                plugin_id: String::new(),
+                command: String::new(),
+                message,
+                retryable: false,
+            },
+            IpcError::DeserializationFailed { .. } => Self {
+                kind: IpcErrorKind::Serialization,
+                plugin_id: String::new(),
+                command: String::new(),
+                message,
+                retryable: false,
+            },
+            IpcError::DispatcherUnavailable => Self {
+                kind: IpcErrorKind::DispatchFailed,
+                plugin_id: String::new(),
+                command: String::new(),
+                message,
+                retryable: false,
+            },
+            IpcError::ReentrantCall { plugin_id, command } => Self {
+                kind: IpcErrorKind::DispatchFailed,
+                plugin_id: plugin_id.clone(),
+                command: command.clone(),
+                message,
+                retryable: false,
+            },
+        }
+    }
+
+    /// Like [`IpcErrorEnvelope::from_ipc_error`], but fills the empty
+    /// `plugin_id` / `command` fields with the caller-supplied fallbacks.
+    ///
+    /// Used at the `kernel_invoke` boundary, where the bridge knows which
+    /// plugin and command the caller addressed even when the kernel's
+    /// `IpcError` variant doesn't carry that context (e.g.
+    /// `SerializationFailed`, `DispatcherUnavailable`).
+    pub fn from_ipc_error_in_context(
+        err: &IpcError,
+        fallback_plugin_id: &str,
+        fallback_command: &str,
+    ) -> Self {
+        let mut env = Self::from_ipc_error(err);
+        if env.plugin_id.is_empty() {
+            env.plugin_id = fallback_plugin_id.to_string();
+        }
+        if env.command.is_empty() {
+            env.command = fallback_command.to_string();
+        }
+        env
+    }
+}
+
 /// Event bus errors visible to plugins.
 #[derive(Debug, thiserror::Error)]
 pub enum BusError {
@@ -146,5 +296,174 @@ mod tests {
     fn ipc_error_is_clone() {
         let e = IpcError::DispatcherUnavailable;
         let _e2 = e.clone();
+    }
+
+    // ── IpcErrorEnvelope mapping tests ──────────────────────────────────────
+
+    #[test]
+    fn envelope_maps_timeout() {
+        let err = IpcError::Timeout {
+            plugin_id: "com.test".to_string(),
+            command: "ping".to_string(),
+            timeout_ms: 1000,
+        };
+        let env = IpcErrorEnvelope::from_ipc_error(&err);
+        assert_eq!(env.kind, IpcErrorKind::Timeout);
+        assert!(env.retryable, "Timeout must be retryable");
+        assert_eq!(env.plugin_id, "com.test");
+        assert_eq!(env.command, "ping");
+        assert!(env.message.contains("1000"));
+    }
+
+    #[test]
+    fn envelope_maps_plugin_not_found() {
+        let err = IpcError::PluginNotFound {
+            plugin_id: "com.test".to_string(),
+        };
+        let env = IpcErrorEnvelope::from_ipc_error(&err);
+        assert_eq!(env.kind, IpcErrorKind::DispatchFailed);
+        assert!(!env.retryable);
+        assert_eq!(env.plugin_id, "com.test");
+        assert_eq!(env.command, "");
+    }
+
+    #[test]
+    fn envelope_maps_command_not_found() {
+        let err = IpcError::CommandNotFound {
+            plugin_id: "com.test".to_string(),
+            command: "nope".to_string(),
+        };
+        let env = IpcErrorEnvelope::from_ipc_error(&err);
+        assert_eq!(env.kind, IpcErrorKind::DispatchFailed);
+        assert!(!env.retryable);
+        assert_eq!(env.plugin_id, "com.test");
+        assert_eq!(env.command, "nope");
+    }
+
+    #[test]
+    fn envelope_maps_capability_denied() {
+        let err = IpcError::CapabilityDenied {
+            plugin_id: "com.caller".to_string(),
+        };
+        let env = IpcErrorEnvelope::from_ipc_error(&err);
+        assert_eq!(env.kind, IpcErrorKind::CapabilityDenied);
+        assert!(!env.retryable);
+        assert_eq!(env.plugin_id, "com.caller");
+        assert_eq!(env.command, "");
+    }
+
+    #[test]
+    fn envelope_maps_plugin_crashed() {
+        let err = IpcError::PluginCrashedDuringCall {
+            plugin_id: "com.test".to_string(),
+            command: "boom".to_string(),
+        };
+        let env = IpcErrorEnvelope::from_ipc_error(&err);
+        assert_eq!(env.kind, IpcErrorKind::PluginCrashed);
+        assert!(!env.retryable);
+        assert_eq!(env.plugin_id, "com.test");
+        assert_eq!(env.command, "boom");
+    }
+
+    #[test]
+    fn envelope_maps_serialization_failed() {
+        let err = IpcError::SerializationFailed {
+            reason: "bad json".to_string(),
+        };
+        let env = IpcErrorEnvelope::from_ipc_error(&err);
+        assert_eq!(env.kind, IpcErrorKind::Serialization);
+        assert!(!env.retryable);
+        assert_eq!(env.plugin_id, "");
+        assert_eq!(env.command, "");
+    }
+
+    #[test]
+    fn envelope_maps_deserialization_failed() {
+        let err = IpcError::DeserializationFailed {
+            reason: "not a u32".to_string(),
+        };
+        let env = IpcErrorEnvelope::from_ipc_error(&err);
+        assert_eq!(env.kind, IpcErrorKind::Serialization);
+        assert!(!env.retryable);
+        assert_eq!(env.plugin_id, "");
+        assert_eq!(env.command, "");
+    }
+
+    #[test]
+    fn envelope_maps_dispatcher_unavailable() {
+        let err = IpcError::DispatcherUnavailable;
+        let env = IpcErrorEnvelope::from_ipc_error(&err);
+        assert_eq!(env.kind, IpcErrorKind::DispatchFailed);
+        assert!(!env.retryable);
+        assert_eq!(env.plugin_id, "");
+        assert_eq!(env.command, "");
+    }
+
+    #[test]
+    fn envelope_maps_reentrant_call() {
+        let err = IpcError::ReentrantCall {
+            plugin_id: "com.test".to_string(),
+            command: "loop".to_string(),
+        };
+        let env = IpcErrorEnvelope::from_ipc_error(&err);
+        assert_eq!(env.kind, IpcErrorKind::DispatchFailed);
+        assert!(!env.retryable);
+        assert_eq!(env.plugin_id, "com.test");
+        assert_eq!(env.command, "loop");
+    }
+
+    #[test]
+    fn envelope_in_context_fills_empty_fields() {
+        let err = IpcError::SerializationFailed {
+            reason: "bad json".to_string(),
+        };
+        let env = IpcErrorEnvelope::from_ipc_error_in_context(&err, "com.fallback", "do_thing");
+        assert_eq!(env.kind, IpcErrorKind::Serialization);
+        assert_eq!(env.plugin_id, "com.fallback");
+        assert_eq!(env.command, "do_thing");
+    }
+
+    #[test]
+    fn envelope_in_context_does_not_overwrite_present_fields() {
+        let err = IpcError::Timeout {
+            plugin_id: "com.real".to_string(),
+            command: "ping".to_string(),
+            timeout_ms: 100,
+        };
+        let env = IpcErrorEnvelope::from_ipc_error_in_context(&err, "com.fallback", "fallback_cmd");
+        assert_eq!(env.plugin_id, "com.real");
+        assert_eq!(env.command, "ping");
+    }
+
+    #[test]
+    fn envelope_serializes_with_snake_case_keys() {
+        let env = IpcErrorEnvelope {
+            kind: IpcErrorKind::Timeout,
+            plugin_id: "com.test".to_string(),
+            command: "ping".to_string(),
+            message: "timed out".to_string(),
+            retryable: true,
+        };
+        let json = serde_json::to_string(&env).expect("serialize");
+        assert!(json.contains("\"kind\":\"timeout\""), "got: {json}");
+        assert!(json.contains("\"plugin_id\":\"com.test\""), "got: {json}");
+        assert!(json.contains("\"retryable\":true"), "got: {json}");
+        assert!(json.contains("\"command\":\"ping\""), "got: {json}");
+        assert!(json.contains("\"message\":\"timed out\""), "got: {json}");
+    }
+
+    #[test]
+    fn envelope_kind_serializes_each_variant_snake_case() {
+        for (kind, expected) in [
+            (IpcErrorKind::Timeout, "\"timeout\""),
+            (IpcErrorKind::PluginCrashed, "\"plugin_crashed\""),
+            (IpcErrorKind::CapabilityDenied, "\"capability_denied\""),
+            (IpcErrorKind::DispatchFailed, "\"dispatch_failed\""),
+            (IpcErrorKind::Serialization, "\"serialization\""),
+            (IpcErrorKind::Unknown, "\"unknown\""),
+        ] {
+            let s = serde_json::to_string(&kind).expect("serialize");
+            assert_eq!(s, expected);
+        }
     }
 }

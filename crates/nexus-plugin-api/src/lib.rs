@@ -12,6 +12,7 @@
 //! - [`NexusEvent`] / [`EventFilter`] / [`EventMetadata`] / [`PublishedEvent`] — events
 //! - [`IpcDispatcher`] / [`IpcFuture`] — IPC abstractions
 //! - [`IpcError`] / [`BusError`] / [`CapabilityError`] — stable error surface
+//! - [`IpcErrorEnvelope`] / [`IpcErrorKind`] — wire-stable IPC error envelope
 //! - [`LogLevel`] — log severity
 //! - [`PLUGIN_API_VERSION`] — current ABI version constant
 //!
@@ -36,7 +37,7 @@ pub mod log;
 pub mod plugin;
 
 pub use capability::{Capability, CapabilityParseError, CapabilitySet};
-pub use error::{BusError, CapabilityError, IpcError};
+pub use error::{BusError, CapabilityError, IpcError, IpcErrorEnvelope, IpcErrorKind};
 pub use event::{EventFilter, EventMetadata, NexusEvent, PublishedEvent, StopReason};
 pub use ipc::{IpcDispatcher, IpcFuture};
 pub use log::LogLevel;

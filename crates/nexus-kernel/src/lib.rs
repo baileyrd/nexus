@@ -37,7 +37,9 @@ pub use plugin::{PluginInfo, PluginStatus, TrustLevel};
 
 // Also re-export the version constant and the nexus-plugin-api error types
 // so downstream crates that currently import from nexus-kernel keep compiling.
-pub use nexus_plugin_api::{BusError, CapabilityError, IpcError, PLUGIN_API_VERSION};
+pub use nexus_plugin_api::{
+    BusError, CapabilityError, IpcError, IpcErrorEnvelope, IpcErrorKind, PLUGIN_API_VERSION,
+};
 
 // Kernel-internal types
 pub use config::KernelConfig;
