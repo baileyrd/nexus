@@ -34,10 +34,13 @@ import { configurationServicePlugin } from './plugins/core/configurationService'
 import { notificationServicePlugin }  from './plugins/core/notificationService'
 import { fileSystemServicePlugin }    from './plugins/core/fileSystemService'
 import { settingsPlugin }             from './plugins/core/settings'
-// themeServicePlugin is intentionally not loaded — it carries Nexus-branded
-// theme names ("Forge Ember", "Forge Paper") and auto-flips to the light
-// theme based on OS preference, which leaves empty slots looking white.
-// Dark comes for free from shell.css :root when no data-theme is set.
+// WI-02 part 2: themeServicePlugin is now a kernel-sync bridge, not the
+// old in-process palette holder. It hydrates `useThemeStore` from the
+// `com.nexus.theme` kernel plugin and subscribes to
+// `com.nexus.theme.changed` so palette swaps from any source flow
+// through the store and onto :root. The shell.css :root defaults
+// remain in place so there's no flash if hydrate is slow.
+import { themeServicePlugin }         from './plugins/core/themeService'
 
 // ── UI & feature plugins (DISABLED) ───────────────────────────────────────────
 // The template's plugins/core/* UI files ship with hardcoded Nexus product
@@ -163,6 +166,7 @@ async function boot() {
     notificationServicePlugin,
     fileSystemServicePlugin,
     settingsPlugin,
+    themeServicePlugin,
     workspacePlugin,
     gitStatusPlugin,
     activityBarPlugin,

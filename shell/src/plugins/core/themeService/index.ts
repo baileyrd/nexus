@@ -1,98 +1,70 @@
 // src/plugins/core/themeService/index.ts
-// Service plugin — manages CSS token themes.
+// Core service plugin — kernel theme bridge.
+//
+// Owns the *subscription* to `com.nexus.theme.changed` and the
+// initial hydrate from the kernel's theme engine. The store
+// (`stores/themeStore.ts`) owns state + DOM application; this
+// plugin is a thin lifecycle wrapper around it so the kernel
+// subscription is set up exactly once, at boot, with the
+// PluginRegistry-managed unsub teardown.
+//
+// Replaces the prior in-process `ThemeService` (which carried
+// brand-named built-in palettes and auto-flipped on OS prefs).
+// All theme data now flows from `crates/nexus-theme` via the
+// `com.nexus.theme` kernel plugin.
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-
-export interface Theme {
-  id: string
-  name: string
-  type: 'dark' | 'light'
-  tokens: Record<string, string>
-}
-
-// Forge-aligned palettes. Token *values* live in shell.css under
-// :root and [data-theme="light"]; themes here just flip data-theme
-// and optionally override individual tokens. Tokens map is empty by
-// default — a theme can still ship overrides (e.g., custom accent).
-
-const DEFAULT_DARK: Theme = {
-  id: 'default-dark',
-  name: 'Forge Ember (Dark)',
-  type: 'dark',
-  tokens: {},
-}
-
-const DEFAULT_LIGHT: Theme = {
-  id: 'default-light',
-  name: 'Forge Paper (Light)',
-  type: 'light',
-  tokens: {},
-}
-
-export class ThemeService {
-  private themes = new Map<string, Theme>([
-    [DEFAULT_DARK.id,  DEFAULT_DARK],
-    [DEFAULT_LIGHT.id, DEFAULT_LIGHT],
-  ])
-  private activeId = 'default-dark'
-
-  register(theme: Theme) {
-    this.themes.set(theme.id, theme)
-  }
-
-  activate(id: string) {
-    const theme = this.themes.get(id)
-    if (!theme) { console.warn(`[ThemeService] Unknown theme: ${id}`); return }
-    this.activeId = id
-    this.apply(theme)
-  }
-
-  current(): Theme {
-    return this.themes.get(this.activeId) ?? DEFAULT_DARK
-  }
-
-  all(): Theme[] {
-    return [...this.themes.values()]
-  }
-
-  private apply(theme: Theme) {
-    const root = document.documentElement
-    // Flip data-theme so the Forge token blocks in shell.css take effect.
-    root.dataset.theme = theme.type
-    // Clear any previously applied inline overrides before reapplying.
-    for (const key of this.lastOverrides) root.style.removeProperty(key)
-    this.lastOverrides = []
-    for (const [key, value] of Object.entries(theme.tokens)) {
-      root.style.setProperty(key, value)
-      this.lastOverrides.push(key)
-    }
-  }
-
-  private lastOverrides: string[] = []
-}
+import {
+  THEME_CHANGED_EVENT,
+  useThemeStore,
+  type KernelThemeConfig,
+} from '../../../stores/themeStore'
 
 export const themeServicePlugin: Plugin = {
   manifest: {
     id: 'core.theme-service',
     name: 'Theme Service',
-    version: '1.0.0',
+    version: '2.0.0',
     core: true,
     activationEvents: ['onStartup'],
     contributes: {},
   },
 
-  activate(api: PluginAPI) {
-    const svc = new ThemeService()
-    api.internal!.registerInternalService('themeService', svc)
-
-    // Apply default dark theme immediately
-    svc.activate('default-dark')
-
-    // Respect OS preference
-    if (window.matchMedia('(prefers-color-scheme: light)').matches) {
-      svc.activate('default-light')
+  async activate(api: PluginAPI) {
+    // Hydrate before subscribing so the first event echo (if it
+    // arrives mid-hydrate) doesn't race against an empty store.
+    try {
+      await useThemeStore.getState().hydrate(api)
+    } catch (err) {
+      console.warn(
+        '[core.theme-service] hydrate failed; using shell.css defaults',
+        err,
+      )
     }
 
-    console.info('[core.theme-service] ready')
+    // Subscribe with the prefix — handler routes by topic. The
+    // payload IS the ThemeConfig snapshot (theme_id, mode,
+    // enabled_snippets) per crates/nexus-theme/src/core_plugin.rs,
+    // but it does NOT carry resolved variables. We re-hydrate to
+    // pick those up — one extra round-trip per change, acceptable
+    // given how rare theme mutations are.
+    //
+    // PluginRegistry auto-cleans the unsub on plugin deactivate
+    // (Phase 1 wiring), so we don't track it manually.
+    try {
+      await api.kernel.on<KernelThemeConfig>(THEME_CHANGED_EVENT, (topic) => {
+        if (topic !== THEME_CHANGED_EVENT) return
+        // Re-hydrate. `compute_variables` is cheap and idempotent;
+        // the store no-ops if values match.
+        void useThemeStore.getState().hydrate(api)
+      })
+    } catch (err) {
+      console.warn(
+        '[core.theme-service] subscribe to com.nexus.theme.changed failed',
+        err,
+      )
+    }
+
+    console.info('[core.theme-service] kernel-sync ready')
   },
 }
