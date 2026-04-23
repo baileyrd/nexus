@@ -1,5 +1,7 @@
 import {
+  KNOWN_ARCHETYPES,
   useAgentStore,
+  type ArchetypeId,
   type HistoryRow,
   type Plan,
   type PlanStep,
@@ -32,9 +34,12 @@ interface AgentViewProps {
  *     com.nexus.agent.{run_start,step_start,step_done,run_done}
  *     topics — see index.ts), then the final observation if present.
  *
- * Per-step approval (HANDLER_EXECUTE_STEP) and archetype picker are
- * intentionally out of v1 — the kernel surface is ready when the UI
- * lands.
+ * Step-by-step approval (HANDLER_EXECUTE_STEP) and the archetype
+ * picker are both wired through the composer — see `ModeToggle`
+ * (auto vs step) and `ArchetypeSelect` below. Step-mode runs aren't
+ * persisted to history because the kernel's `execute_step` handler
+ * doesn't save records; that's a documented v1 limitation in
+ * `agentStore.ts::RunMode`, not a missing feature.
  */
 export function AgentView({
   onPlan,
@@ -334,6 +339,7 @@ function RunColumn({
             primary
           />
           <ModeToggle value={runMode} onChange={setRunMode} disabled={busy} />
+          <ArchetypeSelect disabled={busy} />
           {phase === 'done' && observation ? (
             <span
               style={{
@@ -414,6 +420,49 @@ function ModeToggle({
   )
 }
 
+/**
+ * Tiny archetype dropdown — forwards to `com.nexus.agent::{plan,run}`
+ * as the optional `archetype` arg. The kernel resolves the string
+ * case-insensitively (see crates/nexus-agent/src/archetypes.rs); an
+ * unknown value falls back to the default planner. The list is
+ * hardcoded against `KNOWN_ARCHETYPES`; once the kernel exposes a
+ * `list_archetypes` IPC the catalogue should be fetched at startup.
+ */
+function ArchetypeSelect({ disabled }: { disabled: boolean }) {
+  const archetype = useAgentStore((s) => s.archetype)
+  const setArchetype = useAgentStore((s) => s.setArchetype)
+  return (
+    <select
+      aria-label="Planner archetype"
+      title="Pick a planner archetype to bias the LLM toward a domain (writer, coder, researcher) — Default uses the general planner."
+      value={archetype ?? ''}
+      disabled={disabled}
+      onChange={(e) => {
+        const v = e.target.value
+        setArchetype(v === '' ? null : (v as ArchetypeId))
+      }}
+      style={{
+        padding: '4px 6px',
+        background: 'var(--bg-raised)',
+        color: 'var(--fg)',
+        border: '1px solid var(--line-soft)',
+        borderRadius: 'var(--r)',
+        font: 'inherit',
+        fontSize: 11,
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      <option value="">Default</option>
+      {KNOWN_ARCHETYPES.map((a) => (
+        <option key={a.id} value={a.id} title={a.description}>
+          {a.label}
+        </option>
+      ))}
+    </select>
+  )
+}
+
 function PlanView({
   plan,
   onApproveStep,
@@ -460,9 +509,14 @@ function PlanView({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
         {plan.steps.map((step, idx) => {
           const runtime = stepRuntime[step.id] ?? { status: 'queued' as StepStatus, error: null }
-          const finalStatus = observationByStep.get(step.id)?.status
+          const obsRow = observationByStep.get(step.id)
+          const finalStatus = obsRow?.status
           const status: StepStatus = finalStatus ?? runtime.status
           const error = runtime.error
+          // Prefer the live runtime response (captured during step-mode
+          // execution); fall back to the observation's response (set
+          // when a history row is loaded into the right column).
+          const response = runtime.response !== undefined ? runtime.response : obsRow?.response
           const awaitingThis = phase === 'awaiting' && pendingApprovalIndex === idx
           return (
             <StepRow
@@ -471,6 +525,7 @@ function PlanView({
               index={idx}
               status={status}
               error={error}
+              response={response}
               awaitingApproval={awaitingThis}
               onApprove={awaitingThis ? onApproveStep : undefined}
               onSkip={awaitingThis ? onSkipStep : undefined}
@@ -488,6 +543,7 @@ function StepRow({
   index,
   status,
   error,
+  response,
   awaitingApproval,
   onApprove,
   onSkip,
@@ -497,6 +553,13 @@ function StepRow({
   index: number
   status: StepStatus
   error: string | null
+  /**
+   * Raw tool-call return value for this step. `undefined` when the
+   * step hasn't run yet or was informational (no tool call). When
+   * present, rendered via a truncated <pre> block — matches the
+   * legacy AgentHistoryPanel.tsx render.
+   */
+  response: unknown
   awaitingApproval: boolean
   onApprove?: () => void
   onSkip?: () => void
@@ -554,6 +617,27 @@ function StepRow({
         )}
         {error ? (
           <div style={{ fontSize: 11, color: 'var(--risk)', lineHeight: 1.35 }}>{error}</div>
+        ) : null}
+        {response !== undefined && response !== null ? (
+          <pre
+            title="Tool-call response (truncated at 500 chars)"
+            style={{
+              margin: '4px 0 0',
+              padding: 8,
+              background: 'var(--bg)',
+              border: '1px solid var(--line-soft)',
+              borderRadius: 'var(--r)',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontFamily: 'var(--f-mono, monospace)',
+              fontSize: 11,
+              color: 'var(--fg-muted)',
+              maxHeight: 240,
+              overflow: 'auto',
+            }}
+          >
+            {previewJson(response)}
+          </pre>
         ) : null}
       </div>
       <div
@@ -640,6 +724,19 @@ function SmallButton({
       {label}
     </button>
   )
+}
+
+/**
+ * Pretty-print a tool-call response with a hard truncation. Mirrors
+ * legacy AgentHistoryPanel.tsx::previewJson but bumps the cap to 500
+ * (the legacy default was 400). Strings pass through unchanged so a
+ * raw text response doesn't end up double-quoted.
+ */
+function previewJson(value: unknown, max = 500): string {
+  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  if (text === undefined) return ''
+  if (text.length <= max) return text
+  return `${text.slice(0, max)}…`
 }
 
 const STATUS_PALETTE: Record<StepStatus, { bg: string; fg: string; label: string; border?: boolean }> = {

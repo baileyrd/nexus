@@ -32,6 +32,14 @@ export interface StepRuntime {
   status: StepStatus
   /** Error message when status === 'failed'; null otherwise. */
   error: string | null
+  /**
+   * Raw tool-call return value captured during step-mode execution
+   * (the `response` field from the kernel's `execute_step` result).
+   * `undefined` when the step hasn't run yet, was skipped, or was
+   * informational (no tool call). The plan view renders this via a
+   * truncated `<pre>` mirroring the legacy AgentHistoryPanel behaviour.
+   */
+  response?: unknown
 }
 
 /**
@@ -77,10 +85,50 @@ export type RunPhase = 'idle' | 'planning' | 'planned' | 'running' | 'awaiting' 
  */
 export type RunMode = 'auto' | 'step'
 
+/**
+ * Archetype id forwarded to `com.nexus.agent::{plan,run}` as the
+ * optional `archetype` arg. The kernel resolves the string
+ * case-insensitively and falls back to the default planner when
+ * unknown — see crates/nexus-agent/src/archetypes.rs::resolve_prompt.
+ *
+ * `null` means "default" (omit `archetype` from the IPC args). The
+ * known archetype ids ship in `KNOWN_ARCHETYPES` below; once the
+ * kernel exposes a `list_archetypes` IPC we can drop the hardcoded
+ * list and fetch at startup.
+ */
+export type ArchetypeId = 'writer' | 'coder' | 'researcher'
+
+/**
+ * Hardcoded archetype catalogue mirrors
+ * crates/nexus-agent/src/archetypes.rs (WRITER_ID / CODER_ID /
+ * RESEARCHER_ID). TODO(WI-07 follow-up): replace with a kernel
+ * `list_archetypes` IPC so the dropdown stays in sync if the set
+ * grows.
+ */
+export const KNOWN_ARCHETYPES: ReadonlyArray<{ id: ArchetypeId; label: string; description: string }> = [
+  {
+    id: 'writer',
+    label: 'Writer',
+    description: 'Markdown-authoring bias; prefers storage writes over shell.',
+  },
+  {
+    id: 'coder',
+    label: 'Coder',
+    description: 'Code edits + git + builds; small reversible steps.',
+  },
+  {
+    id: 'researcher',
+    label: 'Researcher',
+    description: 'RAG + storage search; reads over writes.',
+  },
+]
+
 interface AgentStoreState {
   // ── Composer ──
   goal: string
   runMode: RunMode
+  /** Selected archetype, or null for the default planner. */
+  archetype: ArchetypeId | null
 
   // ── Current plan + run ──
   phase: RunPhase
@@ -104,6 +152,7 @@ interface AgentStoreState {
 
   setGoal(g: string): void
   setRunMode(m: RunMode): void
+  setArchetype(a: ArchetypeId | null): void
 
   setPhase(p: RunPhase): void
   setPlan(p: Plan | null): void
@@ -114,6 +163,8 @@ interface AgentStoreState {
   /** Mark every step queued; used right before a run starts. */
   resetRuntime(): void
   setStepStatus(stepId: string, status: StepStatus, error?: string | null): void
+  /** Store the raw `response` payload returned by `execute_step` for one step. */
+  setStepResponse(stepId: string, response: unknown): void
 
   setHistoryLoading(b: boolean): void
   setHistoryError(e: string | null): void
@@ -127,6 +178,7 @@ const INITIAL_STEP_RUNTIME: StepRuntime = { status: 'queued', error: null }
 export const useAgentStore = create<AgentStoreState>((set) => ({
   goal: '',
   runMode: 'auto',
+  archetype: null,
 
   phase: 'idle',
   plan: null,
@@ -141,6 +193,7 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
 
   setGoal: (goal) => set({ goal }),
   setRunMode: (runMode) => set({ runMode }),
+  setArchetype: (archetype) => set({ archetype }),
 
   setPhase: (phase) => set({ phase }),
   setPlan: (plan) =>
@@ -170,8 +223,22 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
       stepRuntime: {
         ...s.stepRuntime,
         [stepId]: {
+          // Preserve any prior `response` so the in-progress
+          // status flip (queued → running → ok) doesn't clobber a
+          // payload captured by an earlier write.
+          ...(s.stepRuntime[stepId] ?? INITIAL_STEP_RUNTIME),
           status,
           error: status === 'failed' ? error : null,
+        },
+      },
+    })),
+  setStepResponse: (stepId, response) =>
+    set((s) => ({
+      stepRuntime: {
+        ...s.stepRuntime,
+        [stepId]: {
+          ...(s.stepRuntime[stepId] ?? INITIAL_STEP_RUNTIME),
+          response,
         },
       },
     })),
@@ -184,6 +251,7 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
     set({
       goal: '',
       runMode: 'auto',
+      archetype: null,
       phase: 'idle',
       plan: null,
       stepRuntime: {},

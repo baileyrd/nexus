@@ -22,7 +22,7 @@ const EVENT_ACTIVITY_BAR_ACTIVE_CHANGED = 'activityBar:activeChanged'
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
-const AGENT_PLUGIN_ID = 'com.nexus.agent'
+export const AGENT_PLUGIN_ID = 'com.nexus.agent'
 // Verified against crates/nexus-agent/src/core_plugin.rs:
 //   `plan`         args `{ goal, archetype? }`            → `Plan`
 //   `run`          args `{ goal, archetype? }`            → `Observation` (plans + executes)
@@ -63,7 +63,7 @@ interface RunEventPayload {
   success?: boolean
 }
 
-function decodePlan(raw: unknown): Plan | null {
+export function decodePlan(raw: unknown): Plan | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
   if (typeof r.id !== 'string' || typeof r.goal !== 'string') return null
@@ -89,7 +89,7 @@ function decodePlan(raw: unknown): Plan | null {
   return { id: r.id, goal: r.goal, steps }
 }
 
-function decodeObservation(raw: unknown): Observation | null {
+export function decodeObservation(raw: unknown): Observation | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
   if (typeof r.plan_id !== 'string') return null
@@ -106,7 +106,7 @@ function decodeObservation(raw: unknown): Observation | null {
   return { plan_id: r.plan_id, steps, success: r.success === true }
 }
 
-function decodeHistoryList(raw: unknown): HistoryRow[] {
+export function decodeHistoryList(raw: unknown): HistoryRow[] {
   if (!Array.isArray(raw)) return []
   const out: HistoryRow[] = []
   for (const item of raw) {
@@ -130,21 +130,51 @@ function decodeHistoryList(raw: unknown): HistoryRow[] {
   })
 }
 
-export const agentPlugin: Plugin = {
-  manifest: {
-    id: PLUGIN_ID,
-    name: 'Agent',
-    version: '0.1.0',
-    core: false,
-    activationEvents: ['onStartup'],
-    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.paneMode'],
-    contributes: {
-      commands: [{ id: COMMAND_SHOW, title: 'Show Agent', category: 'Agent' }],
-    },
-  },
+/**
+ * Narrow shape of the kernel + UI helpers the agent runtime depends
+ * on. `activate(api)` passes the full `PluginAPI`; tests pass a
+ * stub that only implements what the runtime actually touches.
+ *
+ * Keeping this surface explicit (rather than `Pick<PluginAPI, …>`)
+ * makes the test stub trivial to build and documents exactly which
+ * kernel calls + dialog hooks the runtime fires.
+ */
+export interface AgentRuntimeDeps {
+  kernel: {
+    invoke<T = unknown>(
+      pluginId: string,
+      commandId: string,
+      args?: unknown,
+      timeoutMs?: number,
+    ): Promise<T>
+    on<T = unknown>(
+      topicPrefix: string,
+      handler: (topic: string, payload: T) => void,
+    ): Promise<() => void>
+    available(): Promise<boolean>
+  }
+  input: { confirm(message: string): Promise<boolean> }
+  notifications: {
+    show(notification: {
+      message: string
+      type?: 'info' | 'warning' | 'error' | 'success'
+    }): void
+  }
+}
 
-  async activate(api: PluginAPI) {
-    const refreshHistory = async () => {
+/**
+ * Build the agent runtime — the closure-bag that owns the step
+ * machine, history flow, and topic router. Extracted from
+ * `activate()` so unit tests can drive each piece with a stub
+ * kernel + a synchronous `confirm` mock without touching the real
+ * Tauri bridge.
+ *
+ * The returned object is the same set of handlers the React view
+ * receives via callbacks; `activate()` just wires them into the
+ * `views.register` + workspace-lifecycle machinery.
+ */
+export function createAgentRuntime(api: AgentRuntimeDeps) {
+  const refreshHistory = async () => {
       const store = useAgentStore.getState()
       let available = false
       try {
@@ -172,6 +202,15 @@ export const agentPlugin: Plugin = {
       }
     }
 
+    // Build the {goal, archetype?} args the kernel `plan` and `run`
+    // handlers accept. Kernel-side `archetype` is Option<String> and
+    // unknown values fall back to the default planner — we still
+    // omit the key entirely when null so the IPC payload is minimal.
+    const buildPlanArgs = (goal: string): Record<string, unknown> => {
+      const a = useAgentStore.getState().archetype
+      return a ? { goal, archetype: a } : { goal }
+    }
+
     const planOnly = async () => {
       const store = useAgentStore.getState()
       const goal = store.goal.trim()
@@ -183,7 +222,7 @@ export const agentPlugin: Plugin = {
         const raw = await api.kernel.invoke<unknown>(
           AGENT_PLUGIN_ID,
           PLAN_COMMAND,
-          { goal },
+          buildPlanArgs(goal),
           RUN_TIMEOUT_MS,
         )
         const plan = decodePlan(raw)
@@ -226,7 +265,7 @@ export const agentPlugin: Plugin = {
         const raw = await api.kernel.invoke<unknown>(
           AGENT_PLUGIN_ID,
           RUN_COMMAND,
-          { goal },
+          buildPlanArgs(goal),
           RUN_TIMEOUT_MS,
         )
         const obs = decodeObservation(raw)
@@ -267,7 +306,7 @@ export const agentPlugin: Plugin = {
         const raw = await api.kernel.invoke<unknown>(
           AGENT_PLUGIN_ID,
           PLAN_COMMAND,
-          { goal },
+          buildPlanArgs(goal),
           RUN_TIMEOUT_MS,
         )
         const plan = decodePlan(raw)
@@ -300,7 +339,10 @@ export const agentPlugin: Plugin = {
         const rt = s.stepRuntime[step.id]
         const status: 'ok' | 'failed' | 'skipped' =
           rt?.status === 'ok' ? 'ok' : rt?.status === 'failed' ? 'failed' : 'skipped'
-        return { step_id: step.id, response: undefined, status }
+        // Carry the captured response through to the Observation so
+        // the StepRow's render path is uniform between live step-mode
+        // runs and history-loaded auto-mode runs.
+        return { step_id: step.id, response: rt?.response, status }
       })
       const success = steps.every((r) => r.status === 'ok')
       useAgentStore.getState().setObservation({
@@ -338,12 +380,17 @@ export const agentPlugin: Plugin = {
           { plan: s.plan, index: idx },
           RUN_TIMEOUT_MS,
         )
-        // Decode just enough to learn whether it succeeded — the full
-        // response shape (response field) isn't surfaced in v1.
+        // Capture both the per-step status AND the raw `response`
+        // payload so the StepRow can render the tool-call output
+        // (mirrors legacy app/src/components/panels/AgentHistoryPanel.tsx
+        // which renders the same field via a truncated <pre>).
         const result = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
         const status = result?.status === 'ok' || result?.status === 'failed' || result?.status === 'skipped'
           ? result.status
           : 'failed'
+        if (result && 'response' in result && result.response !== undefined) {
+          useAgentStore.getState().setStepResponse(step.id, result.response)
+        }
         useAgentStore.getState().setStepStatus(
           step.id,
           status === 'ok' ? 'ok' : status === 'skipped' ? 'skipped' : 'failed',
@@ -506,6 +553,52 @@ export const agentPlugin: Plugin = {
         agentUnsub = null
       }
     }
+
+    return {
+      refreshHistory,
+      planOnly,
+      planAndRun,
+      planThenAwaitApproval,
+      finishStepRun,
+      handleApproveStep,
+      handleSkipStep,
+      handleStopRun,
+      loadPlanIntoState,
+      handleLoadHistory,
+      handleDeleteHistory,
+      handleAgentTopic,
+      subscribeAgentTopics,
+      unsubscribeAgentTopics,
+    }
+  }
+
+export const agentPlugin: Plugin = {
+  manifest: {
+    id: PLUGIN_ID,
+    name: 'Agent',
+    version: '0.1.0',
+    core: false,
+    activationEvents: ['onStartup'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.paneMode'],
+    contributes: {
+      commands: [{ id: COMMAND_SHOW, title: 'Show Agent', category: 'Agent' }],
+    },
+  },
+
+  async activate(api: PluginAPI) {
+    const runtime = createAgentRuntime(api)
+    const {
+      refreshHistory,
+      planOnly,
+      planAndRun,
+      handleApproveStep,
+      handleSkipStep,
+      handleStopRun,
+      handleLoadHistory,
+      handleDeleteHistory,
+      subscribeAgentTopics,
+      unsubscribeAgentTopics,
+    } = runtime
 
     // ── View + activity bar ─────────────────────────────────────────────
     api.views.register(VIEW_ID, {
