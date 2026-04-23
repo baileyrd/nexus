@@ -1,0 +1,58 @@
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Windows-only: tauri-driver wraps msedgedriver to drive the
+  # WebView2 runtime, which is a Windows-specific host. WSL cannot
+  # spawn the Windows WebView2, so there is no ubuntu mirror job.
+  tauri-e2e:
+    name: shell/ Tauri e2e (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'shell/src-tauri -> target'
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: Install pnpm deps (shell/)
+        working-directory: shell
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck e2e
+        working-directory: shell
+        run: pnpm typecheck:e2e
+
+      # The hosted runners ship Edge WebView2 + msedgedriver. If the
+      # versions drift we'll need to pin via the
+      # Microsoft/setup-msedge action, but we start without it and
+      # add on failure.
+      - name: Build app in e2e shape
+        working-directory: shell
+        run: pnpm e2e:build
+
+      - name: Run e2e
+        working-directory: shell
+        run: pnpm e2e
