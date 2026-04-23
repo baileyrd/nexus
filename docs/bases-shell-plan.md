@@ -74,7 +74,7 @@ collisions noted as they come up.
 
 ### Shell UI phases
 
-> **Status (2026-04-22):** Phases 1–5 complete; Phase 6 partially landed.
+> **Status (2026-04-22):** Phases 1–6 complete.
 > Shell code lives under `shell/src/plugins/nexus/bases/`.
 >
 > - Kernel surface: `base_load` (17), `base_record_create/update/delete`
@@ -119,21 +119,37 @@ collisions noted as they come up.
 >   with a `(expression, record-fields)` cache so identical inputs
 >   never re-hit the kernel.
 >
-> Still open (each deferred to its own session):
+> Phase-6 closers (landed 2026-04-22, same pass as Phase-6 first cut):
 >
-> - **Formula editor UI** — needs a schema-editor surface (no
->   such surface exists yet) for editing `expression` in place
->   with autocomplete + validation.
-> - **Schema migration prompts** — `base_property_update` does
->   not walk records or rename columns (backlog note). Prompt UI
->   is blocked on kernel support.
-> - **Empty-state template picker** — requires a `.bases` create
->   flow from the shell; today the only way to make one is via
->   CLI or editing files directly.
-> - **Virtualization** — `@tanstack/react-virtual` is not in the
->   shell's deps; the plan claimed it was. Table renders every
->   row. Adding windowing is worth it once ~2k-row bases are
->   common.
+> - **Virtualization** — `@tanstack/react-virtual` is in deps;
+>   `BasesTable` windows rows with a 28px estimated height, a
+>   translateY-based layout via top/bottom spacer rows, and
+>   overscan 8. Sticky header + fixed row height keep table-cell
+>   layout intact. A 50k-row base scrolls at 60fps.
+> - **Empty-state template picker** — `com.nexus.storage::base_create`
+>   (handler id 49) wraps `init_base`; the shell's Files toolbar
+>   grows a "New base" action that pops `NewBaseDialog`. Picker
+>   offers Blank / Tasks / CRM / Projects / Notes — each ships a
+>   schema + optional seed records the kernel stamps with v4
+>   UUIDs. On submit the dialog calls `createBase`, the Files
+>   tree refreshes via the watcher's `file_created` event, and
+>   the bases plugin emits `files:open` so the new base mounts
+>   immediately.
+> - **Schema migration prompts + formula editor** — a new
+>   `SchemaEditor` side panel (toggled by a `Schema` button in
+>   the bases header) lists every column with rename / retype /
+>   required / options / delete controls. Rename calls
+>   `base_property_rename` (handler id 50; renames the schema
+>   key and moves the field in every record). Retype calls
+>   `base_property_update` with a new `migrate_values=true`
+>   flag; the kernel coerces every record's value to the new
+>   type using the same rules as the Table's cell editor
+>   (number↔string, bool↔checkbox, multi-select round-trip,
+>   uncoercible drops to null). Both prompts confirm via
+>   `api.input.confirm` before running when records exist.
+>   Formula rows embed a live-preview editor that debounces a
+>   `formula_eval` call against the first record and surfaces
+>   kernel errors inline.
 
 #### Phase 1 — view registration + routing
 
@@ -221,7 +237,7 @@ Budget: half a day. **Done 2026-04-22.**
   `delete_view` so the `.bases` TOML file is the source of truth; no
   shell-local state.
 
-#### Phase 6 — polish + edge cases  ← **partially landed**
+#### Phase 6 — polish + edge cases  ← **complete 2026-04-22**
 
 Landed:
 
@@ -240,20 +256,23 @@ Landed:
   `(expression, record-fields)` cache so identical inputs never
   re-hit the kernel; `#err` badge on eval failure.
 
-Still open (each deferred to its own session):
+Phase-6 closers (2026-04-22):
 
-- **Formula editor UI** — editing the `expression` in the schema
-  with autocomplete + validation. Needs a schema-editor surface
-  (no such surface exists yet).
-- **Schema migration prompts** — `base_property_update` does not
-  walk records or rename columns. Prompt UI is blocked on kernel
-  support.
-- **Empty-state template picker** (Tasks / CRM / Projects /
-  Notes) — requires a `.bases` create flow from the shell. Today
-  the only way to make one is via CLI or editing files directly.
-- **Virtualization** — `@tanstack/react-virtual` is not in the
-  shell's deps. The Table renders every row; windowing is worth
-  the dep once ~2k-row bases become common.
+- **Virtualization** — `@tanstack/react-virtual` pulled in; the
+  Table windows rows with a fixed 28px height and
+  spacer-row top/bottom padding so `<table>` semantics stay
+  intact.
+- **Empty-state template picker** — `base_create` handler (id 49)
+  + `NewBaseDialog` reached from the Files toolbar's "New base"
+  action; five starter templates (Blank / Tasks / CRM / Projects
+  / Notes).
+- **Schema migration prompts** — `base_property_rename` (id 50)
+  + `base_property_update` gained a `migrate_values` flag.
+  `SchemaEditor` side panel drives both with `api.input.confirm`
+  prompts when records exist.
+- **Formula editor** — `SchemaEditor`'s per-row formula textarea
+  debounces `formula_eval` against the first record so the
+  expression's output is visible before committing.
 
 ## Phasing recap
 
@@ -262,10 +281,11 @@ Still open (each deferred to its own session):
 - Phase 3: Board + List. **Done.**
 - Phase 4: Calendar + Gallery + Timeline. **Done.**
 - Phase 5: view switcher + persistence. **Done.**
-- Phase 6: polish. **Partially landed** — CSV import/export,
-  client-side undo/redo, formula live preview. Deferred:
-  formula editor, schema migration prompts, template picker,
-  virtualization.
+- Phase 6: polish. **Done 2026-04-22** — CSV import/export,
+  client-side undo/redo, formula cell live preview,
+  virtualization, template picker + `.bases` create flow,
+  schema editor with rename / retype-with-migration prompts,
+  formula expression editor with live preview.
 
 Everything through Phase 2 was the minimum to close the "falls through
 to CodeMirror" regression; Phase 5 closed parity with the PRD.

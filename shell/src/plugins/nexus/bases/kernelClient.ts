@@ -79,6 +79,14 @@ export interface BasesKernelClient {
   /** Load the full base (schema + records + views + relations) from
    *  a `.bases` directory. */
   loadBase(relpath: string): Promise<Base>
+  /** Create a new `.bases` directory at `relpath` with the given
+   *  schema (and optional seed records). Rejects if `relpath`
+   *  already exists. Returns the freshly-created base. */
+  createBase(
+    relpath: string,
+    schema: BaseSchema,
+    seedRecords?: BaseRecord[],
+  ): Promise<Base>
   /** Append a new record (kernel mints a v4 UUID if `id` is empty).
    *  Returns the stored record. */
   createRecord(relpath: string, record: BaseRecord): Promise<BaseRecord>
@@ -92,7 +100,19 @@ export interface BasesKernelClient {
   /** Remove the record; missing ids are a no-op. */
   deleteRecord(relpath: string, recordId: string): Promise<void>
   createProperty(relpath: string, name: string, definition: unknown): Promise<void>
-  updateProperty(relpath: string, name: string, definition: unknown): Promise<void>
+  /** Replace a property definition. When `migrateValues` is true the
+   *  kernel walks every record and coerces stored values to the new
+   *  type; values that cannot coerce are dropped to null. */
+  updateProperty(
+    relpath: string,
+    name: string,
+    definition: unknown,
+    migrateValues?: boolean,
+  ): Promise<void>
+  /** Rename a schema column. Moves the field definition and updates
+   *  every record's fields map in place. Rejects when `newName`
+   *  already exists. */
+  renameProperty(relpath: string, oldName: string, newName: string): Promise<void>
   deleteProperty(relpath: string, name: string): Promise<void>
   createView(relpath: string, view: BaseView): Promise<void>
   updateView(relpath: string, view: BaseView): Promise<void>
@@ -121,6 +141,13 @@ export function makeBasesKernelClient(kernel: PluginAPI['kernel']): BasesKernelC
     async loadBase(relpath) {
       return kernel.invoke<Base>(STORAGE_PLUGIN_ID, 'base_load', { path: relpath })
     },
+    async createBase(relpath, schema, seedRecords = []) {
+      return kernel.invoke<Base>(STORAGE_PLUGIN_ID, 'base_create', {
+        path: relpath,
+        schema,
+        seed_records: seedRecords,
+      })
+    },
     async createRecord(relpath, record) {
       return kernel.invoke<BaseRecord>(STORAGE_PLUGIN_ID, 'base_record_create', {
         path: relpath,
@@ -147,11 +174,19 @@ export function makeBasesKernelClient(kernel: PluginAPI['kernel']): BasesKernelC
         definition,
       })
     },
-    async updateProperty(relpath, name, definition) {
+    async updateProperty(relpath, name, definition, migrateValues = false) {
       await kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'base_property_update', {
         path: relpath,
         name,
         definition,
+        migrate_values: migrateValues,
+      })
+    },
+    async renameProperty(relpath, oldName, newName) {
+      await kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'base_property_rename', {
+        path: relpath,
+        old_name: oldName,
+        new_name: newName,
       })
     },
     async deleteProperty(relpath, name) {

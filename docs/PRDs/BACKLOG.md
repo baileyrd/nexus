@@ -33,33 +33,26 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
 
 ### Spec'd in a PRD, not yet implemented
 
-- [ ] **`.bases` database renderer in the shell (PRD-10).** Kernel
-  CRUD + index + formula + CSV handlers all ship
-  (`com.nexus.storage::base_*` ids 40–48 for record/property/view CRUD;
-  `com.nexus.database::csv_import`/`csv_export`/`formula_eval`).
-  Shell-side Phases 1–5 landed 2026-04-22; Phase 6 partially landed.
-  Plan: [docs/bases-shell-plan.md](../bases-shell-plan.md). Shell
-  code lives under `shell/src/plugins/nexus/bases/`. What's
-  live: routing (`.bases` bundle dirs open as document leaves via
-  `BUNDLE_DIR_EXTS` in `FilesTree.tsx`); editable virtualization-free
-  Table view (`BasesTable.tsx`) with per-type cells, sort, add/delete,
-  arrow-key nav; Board/List (`BasesBoard.tsx`, `BasesList.tsx`);
-  Calendar/Gallery/Timeline (`BasesCalendar.tsx`, `BasesGallery.tsx`,
-  `BasesTimeline.tsx`); view switcher + persistence
-  (`BasesViewBar.tsx`, `viewMapping.ts`) round-tripping through
-  `base_view_*`; CSV import/export toolbar, client-side undo/redo
-  stack (`Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` / `Ctrl/Cmd+Y`) wired to
-  every record mutation, and live formula preview via `formula_eval`
-  with a `(expression, record-fields)` cache. Deferred (each its own
-  session): formula-expression editor UI (needs a schema-editor
-  surface that doesn't exist yet); schema migration prompts (blocked
-  on `base_property_update` growing rename + value migration); empty-
-  state template picker (blocked on a shell-side `.bases` create
-  flow); table virtualization (`@tanstack/react-virtual` is not in
-  deps — works fine up to ~2k rows without it); list + timeline
-  views can't save as named views until the wire `ViewType` enum
-  grows past `table/kanban/calendar/gallery`; record soft-delete
-  still waits on a `deleted_at` slot on `BaseRecord`.
+- [ ] **`.bases` database renderer in the shell (PRD-10).** Phases
+  1–6 landed 2026-04-22 — every deferred Phase-6 item closed in the
+  same session. Kernel surface: `com.nexus.storage::base_*` ids
+  40–48 plus 49 (`base_create`) and 50 (`base_property_rename`);
+  `com.nexus.database::csv_import` / `csv_export` / `formula_eval`.
+  Shell code under `shell/src/plugins/nexus/bases/`. Phase-6
+  closers: `@tanstack/react-virtual` windowing in `BasesTable`
+  (fixed 28px row + spacer-row padding keeps `<table>` semantics);
+  "New base" Files-toolbar action → `NewBaseDialog` template
+  picker (Blank / Tasks / CRM / Projects / Notes) → `base_create`;
+  `SchemaEditor` side panel (rename calls `base_property_rename`,
+  retype calls `base_property_update` with the new
+  `migrate_values=true` flag so the kernel coerces every record's
+  value to the new type, with `api.input.confirm` prompts when
+  records exist); per-row formula editor that debounces
+  `formula_eval` against the first record for live preview.
+  Outstanding (separate sessions, not blockers): list + timeline
+  views still can't save as named views until the wire `ViewType`
+  enum grows past `table/kanban/calendar/gallery`; record
+  soft-delete still waits on a `deleted_at` slot on `BaseRecord`.
 - [ ] **`.canvas` board renderer in the shell (PRD-06 §4).** Storage
   layer parses/serializes/indexes canvas files; CLI shipped; kernel
   IPC surface landed 2026-04-22 (`canvas_read` / `canvas_write` /

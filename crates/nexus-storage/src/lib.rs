@@ -457,6 +457,50 @@ impl StorageEngine {
         bases::query_bases(&conn)
     }
 
+    /// Create a new `.bases` directory at `path` with `schema` and
+    /// zero records, then index it. Rejects if the target directory
+    /// already exists to avoid clobbering an existing base.
+    ///
+    /// The directory name (stripped of `.bases`) is used as the
+    /// human-readable base name in `metadata.json`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::CorruptFile`] if the path already
+    /// exists, or [`StorageError`] on I/O / validation / DB failure.
+    pub fn base_create(
+        &self,
+        path: &str,
+        schema: nexus_types::bases::BaseSchema,
+        seed_records: Vec<nexus_types::bases::BaseRecord>,
+    ) -> Result<nexus_types::bases::Base, StorageError> {
+        let abs_dir = self.forge.root().join(path);
+        if abs_dir.exists() {
+            return Err(StorageError::CorruptFile {
+                path: path.to_string(),
+                reason: "base directory already exists".to_string(),
+            });
+        }
+        let name = std::path::Path::new(path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Untitled")
+            .to_string();
+        let mut base = nexus_types::bases::init_base(&abs_dir, &name, &schema)?;
+        for mut record in seed_records {
+            if record.id.is_empty() {
+                record.id = uuid::Uuid::new_v4().to_string();
+            }
+            nexus_types::bases::validate_record(&base.schema, &record)?;
+            base.records.push(record);
+        }
+        if !base.records.is_empty() {
+            nexus_types::bases::save_base(&abs_dir, &base)?;
+        }
+        self.index_base(path, &base)?;
+        Ok(base)
+    }
+
     /// Append `record` to the base at `path` (forge-relative `.bases`
     /// directory), save the TOML / JSON files back to disk, and reindex.
     ///
@@ -561,10 +605,12 @@ impl StorageEngine {
         Ok(())
     }
 
-    /// Replace the definition of an existing property. Does not rename the
-    /// column or migrate per-record values (both are follow-up work — the
-    /// plan's full "rename / retype with migration" requires walking every
-    /// record and coercing values, which this slice deliberately skips).
+    /// Replace the definition of an existing property. When
+    /// `migrate_values` is true, walks every record and coerces the
+    /// value stored under `name` to the new type using a conservative
+    /// best-effort cast (number ↔ string, bool ↔ checkbox, array
+    /// round-trip for multi-select). Values that cannot be coerced
+    /// are dropped to null rather than silently producing garbage.
     ///
     /// # Errors
     ///
@@ -575,15 +621,66 @@ impl StorageEngine {
         path: &str,
         name: &str,
         definition: serde_json::Value,
+        migrate_values: bool,
     ) -> Result<(), StorageError> {
         let abs_dir = self.forge.root().join(path);
         let mut base = nexus_types::bases::load_base(&abs_dir)?;
-        if !base.schema.fields.contains_key(name) {
-            return Err(StorageError::FileNotFound(format!(
-                "property {name} in {path}"
-            )));
+        let old_def = base.schema.fields.get(name).cloned().ok_or_else(|| {
+            StorageError::FileNotFound(format!("property {name} in {path}"))
+        })?;
+        base.schema.fields.insert(name.to_string(), definition.clone());
+        if migrate_values {
+            let old_type = property_type(&old_def);
+            let new_type = property_type(&definition);
+            if old_type.as_deref() != new_type.as_deref() {
+                for record in &mut base.records {
+                    if let Some(v) = record.fields.get(name).cloned() {
+                        let coerced = coerce_property_value(&v, new_type.as_deref());
+                        record.fields.insert(name.to_string(), coerced);
+                    }
+                }
+            }
         }
-        base.schema.fields.insert(name.to_string(), definition);
+        nexus_types::bases::save_base(&abs_dir, &base)?;
+        self.index_base(path, &base)?;
+        Ok(())
+    }
+
+    /// Rename a schema column from `old_name` to `new_name`. The
+    /// schema key is moved (preserving its definition) and every
+    /// record's fields map has the old key copied to the new key and
+    /// the old key removed. Rejects when `old_name` is missing or
+    /// `new_name` already exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O / parse / DB failure.
+    pub fn base_property_rename(
+        &self,
+        path: &str,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), StorageError> {
+        if old_name == new_name {
+            return Ok(());
+        }
+        let abs_dir = self.forge.root().join(path);
+        let mut base = nexus_types::bases::load_base(&abs_dir)?;
+        if base.schema.fields.contains_key(new_name) {
+            return Err(StorageError::CorruptFile {
+                path: path.to_string(),
+                reason: format!("property '{new_name}' already exists"),
+            });
+        }
+        let def = base.schema.fields.remove(old_name).ok_or_else(|| {
+            StorageError::FileNotFound(format!("property {old_name} in {path}"))
+        })?;
+        base.schema.fields.insert(new_name.to_string(), def);
+        for record in &mut base.records {
+            if let Some(v) = record.fields.remove(old_name) {
+                record.fields.insert(new_name.to_string(), v);
+            }
+        }
         nexus_types::bases::save_base(&abs_dir, &base)?;
         self.index_base(path, &base)?;
         Ok(())
@@ -1624,6 +1721,82 @@ fn system_time_to_ms(t: Option<std::time::SystemTime>) -> Option<i64> {
         .and_then(|d| i64::try_from(d.as_millis()).ok())
 }
 
+/// Pull the `"type"` string out of a property definition JSON value.
+fn property_type(def: &serde_json::Value) -> Option<String> {
+    def.get("type")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
+/// Best-effort coercion of a record value to the target property
+/// type. Values that cannot be converted land as `null` rather than
+/// producing garbage. The rules mirror the shell's cell editor
+/// `coerce()` helper so round-trips (edit → migrate → edit) stay
+/// stable.
+fn coerce_property_value(
+    value: &serde_json::Value,
+    new_type: Option<&str>,
+) -> serde_json::Value {
+    use serde_json::Value;
+    let Some(kind) = new_type else { return value.clone() };
+    if value.is_null() {
+        return Value::Null;
+    }
+    match kind {
+        "number" | "currency" | "percent" => match value {
+            Value::Number(_) => value.clone(),
+            Value::String(s) => {
+                if s.trim().is_empty() {
+                    Value::Null
+                } else {
+                    s.parse::<f64>()
+                        .ok()
+                        .and_then(serde_json::Number::from_f64)
+                        .map_or(Value::Null, Value::Number)
+                }
+            }
+            Value::Bool(b) => Value::Number((*b as i64).into()),
+            _ => Value::Null,
+        },
+        "checkbox" => match value {
+            Value::Bool(_) => value.clone(),
+            Value::String(s) => {
+                let t = s.trim().to_ascii_lowercase();
+                Value::Bool(matches!(t.as_str(), "true" | "1" | "yes" | "y" | "on"))
+            }
+            Value::Number(n) => Value::Bool(n.as_f64().is_some_and(|f| f != 0.0)),
+            _ => Value::Bool(false),
+        },
+        "multi-select" => match value {
+            Value::Array(_) => value.clone(),
+            Value::String(s) if !s.is_empty() => Value::Array(
+                s.split(',')
+                    .map(|p| Value::String(p.trim().to_string()))
+                    .filter(|v| !matches!(v, Value::String(s) if s.is_empty()))
+                    .collect(),
+            ),
+            Value::Null => Value::Array(Vec::new()),
+            _ => Value::Array(vec![value.clone()]),
+        },
+        "text" | "long-text" | "title" | "url" | "email" | "phone" | "select"
+        | "date" | "time" | "datetime" => match value {
+            Value::String(_) => value.clone(),
+            Value::Null => Value::Null,
+            Value::Bool(b) => Value::String(b.to_string()),
+            Value::Number(n) => Value::String(n.to_string()),
+            Value::Array(items) => Value::String(
+                items
+                    .iter()
+                    .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            other => Value::String(other.to_string()),
+        },
+        _ => value.clone(),
+    }
+}
+
 // ── Integration tests ─────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2051,7 +2224,7 @@ mod tests {
 
         // Update.
         engine
-            .base_property_update(base_rel, "title", serde_json::json!({ "type": "text", "required": true }))
+            .base_property_update(base_rel, "title", serde_json::json!({ "type": "text", "required": true }), false)
             .expect("update");
         let loaded = nexus_types::bases::load_base(&abs).expect("load2");
         assert_eq!(
@@ -2061,7 +2234,7 @@ mod tests {
 
         // Update unknown → error.
         let err = engine
-            .base_property_update(base_rel, "nope", serde_json::json!({}))
+            .base_property_update(base_rel, "nope", serde_json::json!({}), false)
             .expect_err("unknown");
         assert!(matches!(err, StorageError::FileNotFound(_)));
 
@@ -2072,6 +2245,85 @@ mod tests {
 
         // Delete unknown → no-op.
         engine.base_property_delete(base_rel, "ghost").expect("delete ghost");
+    }
+
+    // ── 15b. base_create + property rename + retype-migration ─────────────────
+
+    #[test]
+    fn base_create_and_property_rename_retype() {
+        use nexus_types::bases::BaseSchema;
+
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+        let base_rel = "new.bases";
+
+        let schema = BaseSchema {
+            version: "1.0".to_string(),
+            fields: {
+                let mut m = serde_json::Map::new();
+                m.insert(
+                    "title".to_string(),
+                    serde_json::json!({ "type": "title", "required": true, "primary": true }),
+                );
+                m.insert("count".to_string(), serde_json::json!({ "type": "number" }));
+                m
+            },
+        };
+
+        // base_create — empty.
+        let created = engine
+            .base_create(base_rel, schema.clone(), Vec::new())
+            .expect("create");
+        assert_eq!(created.name, "new");
+        assert_eq!(created.records.len(), 0);
+
+        // Seed a record with a numeric value, then retype count → text
+        // with migration and verify it serialized as a string.
+        let record = nexus_types::bases::BaseRecord {
+            id: String::new(),
+            fields: {
+                let mut m = serde_json::Map::new();
+                m.insert("title".to_string(), serde_json::json!("Hello"));
+                m.insert("count".to_string(), serde_json::json!(42));
+                m
+            },
+        };
+        let stored = engine.base_record_create(base_rel, record).expect("record");
+        assert!(!stored.id.is_empty());
+
+        engine
+            .base_property_update(
+                base_rel,
+                "count",
+                serde_json::json!({ "type": "text" }),
+                true,
+            )
+            .expect("retype with migrate");
+        let abs = dir.path().join(base_rel);
+        let loaded = nexus_types::bases::load_base(&abs).expect("load1");
+        assert_eq!(loaded.records[0].fields["count"], serde_json::json!("42"));
+
+        // Rename column → schema key moves and record field key moves.
+        engine
+            .base_property_rename(base_rel, "count", "total")
+            .expect("rename");
+        let loaded = nexus_types::bases::load_base(&abs).expect("load2");
+        assert!(loaded.schema.fields.contains_key("total"));
+        assert!(!loaded.schema.fields.contains_key("count"));
+        assert_eq!(loaded.records[0].fields["total"], serde_json::json!("42"));
+        assert!(!loaded.records[0].fields.contains_key("count"));
+
+        // Rename collision → error.
+        let err = engine
+            .base_property_rename(base_rel, "total", "title")
+            .expect_err("collision");
+        assert!(matches!(err, StorageError::CorruptFile { .. }));
+
+        // base_create on existing path → error.
+        let err = engine
+            .base_create(base_rel, schema, Vec::new())
+            .expect_err("exists");
+        assert!(matches!(err, StorageError::CorruptFile { .. }));
     }
 
     // ── 16. base_view_crud ────────────────────────────────────────────────────

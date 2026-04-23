@@ -54,6 +54,8 @@ export interface BasesTabState {
   timelineEndField: string | null
   /** Pixels per day in the timeline. Clamped [2, 80]. */
   timelineDayPx: number
+  /** Whether the schema-editor side panel is visible for this tab. */
+  schemaEditorOpen: boolean
   /** Undo stack — LIFO. Each entry owns a `forward` + `inverse`
    *  pair; `forward` was already applied when the entry was pushed,
    *  so `undo()` runs `inverse` and moves the entry to `redoStack`. */
@@ -94,6 +96,7 @@ interface BasesStore {
   setTimelineStartField(relpath: string, field: string | null): void
   setTimelineEndField(relpath: string, field: string | null): void
   setTimelineDayPx(relpath: string, px: number): void
+  setSchemaEditorOpen(relpath: string, open: boolean): void
   /** Patch a single record's fields in the local cache. The caller
    *  is responsible for having already committed through the kernel;
    *  this just keeps the UI consistent without a full reload. */
@@ -134,6 +137,7 @@ const EMPTY: BasesTabState = {
   timelineStartField: null,
   timelineEndField: null,
   timelineDayPx: 24,
+  schemaEditorOpen: false,
   undoStack: [],
   redoStack: [],
 }
@@ -245,6 +249,12 @@ export const useBasesStore = create<BasesStore>((set) => ({
       const t = s.tabs[relpath] ?? { ...EMPTY }
       const clamped = Math.max(2, Math.min(80, px))
       return { tabs: { ...s.tabs, [relpath]: { ...t, timelineDayPx: clamped } } }
+    })
+  },
+  setSchemaEditorOpen(relpath, open) {
+    set((s) => {
+      const t = s.tabs[relpath] ?? { ...EMPTY }
+      return { tabs: { ...s.tabs, [relpath]: { ...t, schemaEditorOpen: open } } }
     })
   },
   toggleGroupCollapsed(relpath, key) {

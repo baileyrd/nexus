@@ -1,10 +1,10 @@
-// Phase 2 of docs/bases-shell-plan.md — Table view. Renders the full
-// record set as an HTML grid with inline editing. No virtualization
-// yet (the plan called for @tanstack/react-virtual but it isn't in
-// the shell's deps); rows < ~2k render fine in a scroll container.
-// Phase 6 brings windowing once it's worth the dep.
+// Phase 2 of docs/bases-shell-plan.md — Table view. Rows are
+// windowed via @tanstack/react-virtual so a 50k-row base still
+// scrolls smoothly; header is sticky and row heights are fixed so
+// we can use a simple index→translateY layout.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { useBasesStore, type SortDir } from './basesStore'
 import type { Base, BaseRecord, BasesKernelClient } from './kernelClient'
 import {
@@ -235,6 +235,14 @@ export function BasesTable({ relpath, base, client }: Props) {
   // rows. Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes.
   // Bind on the outer container, gated by `editing == null`.
   const containerRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const ROW_HEIGHT = 28
+  const rowVirtualizer = useVirtualizer({
+    count: records.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 8,
+  })
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -356,7 +364,7 @@ export function BasesTable({ relpath, base, client }: Props) {
         )}
         {opError && <span style={{ color: 'var(--risk, #f48771)' }}>{opError}</span>}
       </div>
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div ref={scrollRef} style={{ flex: 1, overflow: 'auto' }}>
         <table
           style={{
             borderCollapse: 'collapse',
@@ -422,23 +430,52 @@ export function BasesTable({ relpath, base, client }: Props) {
             </tr>
           </thead>
           <tbody>
-            {records.map((r) => (
-              <Row
-                key={r.id}
-                record={r}
-                columns={columns}
-                selected={r.id === selectedRecordId}
-                editing={editing?.id === r.id ? editing.field : null}
-                client={client}
-                onSelect={() => setSelectedRecordId(relpath, r.id)}
-                onStartEdit={(field) => {
-                  setSelectedRecordId(relpath, r.id)
-                  setEditing({ id: r.id, field })
-                }}
-                onCancelEdit={() => setEditing(null)}
-                onCommit={(field, value) => void commitEdit(r.id, field, value)}
-              />
-            ))}
+            {(() => {
+              if (records.length === 0) return null
+              const virtualRows = rowVirtualizer.getVirtualItems()
+              const total = rowVirtualizer.getTotalSize()
+              const topPad = virtualRows.length > 0 ? virtualRows[0].start : 0
+              const bottomPad =
+                virtualRows.length > 0
+                  ? total - virtualRows[virtualRows.length - 1].end
+                  : 0
+              return (
+                <>
+                  {topPad > 0 && (
+                    <tr style={{ height: topPad }}>
+                      <td colSpan={columns.length} style={{ padding: 0, border: 0 }} />
+                    </tr>
+                  )}
+                  {virtualRows.map((vr) => {
+                    const r = records[vr.index]
+                    if (!r) return null
+                    return (
+                      <Row
+                        key={r.id}
+                        record={r}
+                        columns={columns}
+                        selected={r.id === selectedRecordId}
+                        editing={editing?.id === r.id ? editing.field : null}
+                        client={client}
+                        rowHeight={ROW_HEIGHT}
+                        onSelect={() => setSelectedRecordId(relpath, r.id)}
+                        onStartEdit={(field) => {
+                          setSelectedRecordId(relpath, r.id)
+                          setEditing({ id: r.id, field })
+                        }}
+                        onCancelEdit={() => setEditing(null)}
+                        onCommit={(field, value) => void commitEdit(r.id, field, value)}
+                      />
+                    )
+                  })}
+                  {bottomPad > 0 && (
+                    <tr style={{ height: bottomPad }}>
+                      <td colSpan={columns.length} style={{ padding: 0, border: 0 }} />
+                    </tr>
+                  )}
+                </>
+              )
+            })()}
             {records.length === 0 && (
               <tr>
                 <td
@@ -466,6 +503,7 @@ interface RowProps {
   selected: boolean
   editing: string | null
   client: BasesKernelClient
+  rowHeight: number
   onSelect(): void
   onStartEdit(field: string): void
   onCancelEdit(): void
@@ -478,6 +516,7 @@ function Row({
   selected,
   editing,
   client,
+  rowHeight,
   onSelect,
   onStartEdit,
   onCancelEdit,
@@ -489,6 +528,7 @@ function Row({
       style={{
         background: selected ? 'var(--bg-selection, #2a2a35)' : 'transparent',
         cursor: 'default',
+        height: rowHeight,
       }}
     >
       {columns.map((c) => (

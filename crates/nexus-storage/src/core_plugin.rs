@@ -187,6 +187,18 @@ pub const HANDLER_BASE_VIEW_UPDATE: u32 = 47;
 /// `{ "path": String, "name": String }`. Removes the named view.
 /// Missing names are a no-op. Returns `{}`.
 pub const HANDLER_BASE_VIEW_DELETE: u32 = 48;
+/// Handler id for `base_create`. Args:
+/// `{ "path": String, "schema": BaseSchema, "seed_records"?: Vec<BaseRecord> }`.
+/// Creates a new `.bases` directory at `path` with `schema` (and optional
+/// seed records), then indexes it. Rejects if `path` already exists.
+/// Returns the freshly-created [`nexus_types::bases::Base`].
+pub const HANDLER_BASE_CREATE: u32 = 49;
+/// Handler id for `base_property_rename`. Args:
+/// `{ "path": String, "old_name": String, "new_name": String }`.
+/// Renames a schema column and updates every record's field map in
+/// place. Rejects when `old_name` is missing or `new_name` already
+/// exists. Returns `{}`.
+pub const HANDLER_BASE_PROPERTY_RENAME: u32 = 50;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -594,10 +606,58 @@ impl CorePlugin for StorageCorePlugin {
                     .ok_or_else(|| {
                         exec_err("base_property_update: missing 'definition'".to_string())
                     })?;
+                let migrate_values = args
+                    .get("migrate_values")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
                 engine
-                    .base_property_update(&path, &name, definition)
+                    .base_property_update(&path, &name, definition, migrate_values)
                     .map_err(|e| exec_err(format!("base_property_update: {e}")))?;
                 Ok(serde_json::json!({}))
+            }
+            HANDLER_BASE_PROPERTY_RENAME => {
+                let path = path_arg(args, "base_property_rename")?;
+                let old_name = args
+                    .get("old_name")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        exec_err("base_property_rename: missing 'old_name' string".to_string())
+                    })?
+                    .to_string();
+                let new_name = args
+                    .get("new_name")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        exec_err("base_property_rename: missing 'new_name' string".to_string())
+                    })?
+                    .to_string();
+                engine
+                    .base_property_rename(&path, &old_name, &new_name)
+                    .map_err(|e| exec_err(format!("base_property_rename: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_BASE_CREATE => {
+                let path = path_arg(args, "base_create")?;
+                let schema: nexus_types::bases::BaseSchema = args
+                    .get("schema")
+                    .ok_or_else(|| exec_err("base_create: missing 'schema'".to_string()))
+                    .and_then(|v| {
+                        serde_json::from_value(v.clone())
+                            .map_err(|e| exec_err(format!("base_create: schema decode: {e}")))
+                    })?;
+                let seed_records: Vec<nexus_types::bases::BaseRecord> = args
+                    .get("seed_records")
+                    .cloned()
+                    .map(|v| {
+                        serde_json::from_value(v)
+                            .map_err(|e| exec_err(format!("base_create: seed_records decode: {e}")))
+                    })
+                    .transpose()?
+                    .unwrap_or_default();
+                let base = engine
+                    .base_create(&path, schema, seed_records)
+                    .map_err(|e| exec_err(format!("base_create: {e}")))?;
+                to_value(&base, "base_create")
             }
             HANDLER_BASE_PROPERTY_DELETE => {
                 let path = path_arg(args, "base_property_delete")?;

@@ -13,6 +13,7 @@ import { BasesCalendar } from './BasesCalendar'
 import { BasesGallery } from './BasesGallery'
 import { BasesTimeline } from './BasesTimeline'
 import { BasesViewBar } from './BasesViewBar'
+import { SchemaEditor } from './SchemaEditor'
 
 interface Props {
   relpath: string
@@ -35,6 +36,8 @@ export function BasesView({ relpath, client }: Props) {
   const setError = useBasesStore((s) => s.setError)
   const setBase = useBasesStore((s) => s.setBase)
   const setViewMode = useBasesStore((s) => s.setViewMode)
+  const schemaEditorOpen = useBasesStore((s) => s.tabs[relpath]?.schemaEditorOpen ?? false)
+  const setSchemaEditorOpen = useBasesStore((s) => s.setSchemaEditorOpen)
 
   useEffect(() => {
     ensureTab(relpath)
@@ -119,6 +122,23 @@ export function BasesView({ relpath, client }: Props) {
         <span>·</span>
         <span>{base.views.length} views</span>
         <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={() => setSchemaEditorOpen(relpath, !schemaEditorOpen)}
+          title="Schema editor"
+          style={{
+            padding: '3px 10px',
+            background: schemaEditorOpen ? 'var(--accent, #60a5fa)' : 'var(--bg-raised, #252529)',
+            color: schemaEditorOpen ? 'var(--fg-on-accent, #0f1117)' : 'var(--fg-primary, #e4e4e7)',
+            border: '1px solid var(--border-subtle, #2a2a2e)',
+            borderRadius: 3,
+            fontSize: 11,
+            cursor: 'pointer',
+            marginRight: 8,
+          }}
+        >
+          Schema
+        </button>
         <div style={{ display: 'flex', gap: 4 }}>
           {VIEW_OPTIONS.map((opt) => {
             const active = opt.mode === mode
@@ -146,12 +166,17 @@ export function BasesView({ relpath, client }: Props) {
         </div>
       </div>
       <BasesViewBar relpath={relpath} base={base} client={client} />
-      {mode === 'table' && <BasesTable relpath={relpath} base={base} client={client} />}
-      {mode === 'board' && <BasesBoard relpath={relpath} base={base} client={client} />}
-      {mode === 'list' && <BasesList relpath={relpath} base={base} client={client} />}
-      {mode === 'calendar' && <BasesCalendar relpath={relpath} base={base} client={client} />}
-      {mode === 'gallery' && <BasesGallery relpath={relpath} base={base} client={client} />}
-      {mode === 'timeline' && <BasesTimeline relpath={relpath} base={base} client={client} />}
+      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          {mode === 'table' && <BasesTable relpath={relpath} base={base} client={client} />}
+          {mode === 'board' && <BasesBoard relpath={relpath} base={base} client={client} />}
+          {mode === 'list' && <BasesList relpath={relpath} base={base} client={client} />}
+          {mode === 'calendar' && <BasesCalendar relpath={relpath} base={base} client={client} />}
+          {mode === 'gallery' && <BasesGallery relpath={relpath} base={base} client={client} />}
+          {mode === 'timeline' && <BasesTimeline relpath={relpath} base={base} client={client} />}
+        </div>
+        {schemaEditorOpen && <SchemaEditor relpath={relpath} base={base} client={client} />}
+      </div>
     </div>
   )
 }

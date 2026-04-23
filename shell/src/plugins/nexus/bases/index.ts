@@ -10,6 +10,13 @@ import { viewRegistry } from '../../../workspace'
 import { BasesView } from './BasesView'
 import { basesPaneViewCreator } from './BasesPaneView'
 import { makeBasesKernelClient } from './kernelClient'
+import { NewBaseDialog } from './NewBaseDialog'
+import { useNewBaseStore } from './newBaseStore'
+import { setRuntime } from './runtime'
+
+const COMMAND_NEW = 'nexus.bases.new'
+const EVENT_FILE_OPEN = 'files:open'
+const DIALOG_VIEW_ID = 'nexus.bases.newDialog'
 
 export const basesPlugin: Plugin = {
   manifest: {
@@ -19,10 +26,20 @@ export const basesPlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     dependsOn: ['nexus.workspace'],
+    contributes: {
+      commands: [
+        {
+          id: COMMAND_NEW,
+          title: 'New base…',
+          category: 'Bases',
+        },
+      ],
+    },
   },
 
   async activate(api: PluginAPI) {
     const client = makeBasesKernelClient(api.kernel)
+    setRuntime(api, client)
 
     viewRegistry.register(
       'bases',
@@ -49,5 +66,26 @@ export const basesPlugin: Plugin = {
     // directory relpath, same as any file. The editor plugin routes
     // the resulting mount through viewRegistry.getTypeForExt().
     viewRegistry.registerExtensions(['bases'], 'bases')
+
+    api.views.register(DIALOG_VIEW_ID, {
+      slot: 'overlay',
+      component: NewBaseDialog,
+      priority: 70,
+    })
+
+    api.commands.register(COMMAND_NEW, async (args?: unknown) => {
+      // Caller may pass `{ parent: string }` to scope the new base to
+      // a subdirectory (e.g. invoked from a right-click on a folder).
+      const parent =
+        typeof args === 'object' && args && 'parent' in args && typeof (args as { parent?: unknown }).parent === 'string'
+          ? ((args as { parent: string }).parent)
+          : ''
+      const result = await useNewBaseStore.getState().request(parent)
+      if (!result) return
+      api.events.emit(EVENT_FILE_OPEN, {
+        relpath: result.relpath,
+        name: result.relpath.split('/').pop() ?? result.relpath,
+      })
+    })
   },
 }

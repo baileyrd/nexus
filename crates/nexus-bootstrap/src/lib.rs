@@ -440,6 +440,14 @@ fn register_core_plugins(
                         "base_view_delete",
                         nexus_storage::core_plugin::HANDLER_BASE_VIEW_DELETE,
                     ),
+                    (
+                        "base_create",
+                        nexus_storage::core_plugin::HANDLER_BASE_CREATE,
+                    ),
+                    (
+                        "base_property_rename",
+                        nexus_storage::core_plugin::HANDLER_BASE_PROPERTY_RENAME,
+                    ),
                 ],
             ),
             forge_root,

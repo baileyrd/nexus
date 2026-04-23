@@ -179,6 +179,12 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
     }
   }
 
+  const handleNewBase = async () => {
+    const api = getApi()
+    if (!api) return
+    await api.commands.execute('nexus.bases.new', { parent: parentForNew() })
+  }
+
   const handleNewFolder = async () => {
     const api = getApi()
     if (!api) return
@@ -210,6 +216,7 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
         autoReveal={autoReveal}
         onNewFile={handleNewFile}
         onNewFolder={handleNewFolder}
+        onNewBase={handleNewBase}
         onPickSort={setSortMode}
         onToggleAutoReveal={handleToggleAutoReveal}
         onCollapseAll={collapseAll}
@@ -263,6 +270,7 @@ function Toolbar({
   autoReveal,
   onNewFile,
   onNewFolder,
+  onNewBase,
   onPickSort,
   onToggleAutoReveal,
   onCollapseAll,
@@ -271,6 +279,7 @@ function Toolbar({
   autoReveal: boolean
   onNewFile: () => void
   onNewFolder: () => void
+  onNewBase: () => void
   onPickSort: (mode: SortMode) => void
   onToggleAutoReveal: () => void
   onCollapseAll: () => void
@@ -290,6 +299,11 @@ function Toolbar({
           label="New folder"
           icon={<Icon name="folderPlus" size={14} />}
           onClick={onNewFolder}
+        />
+        <NavActionButton
+          label="New base"
+          icon={<Icon name="db" size={14} />}
+          onClick={onNewBase}
         />
         <NavActionButton
           ref={sortBtnRef}
