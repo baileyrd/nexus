@@ -10,6 +10,12 @@
 // during hot-reload but two distinct plugins cannot silently shadow
 // each other's deep-link handlers.
 //
+// WI-19 — `dispatch` now consults `activationTriggers` for `onUri:<scheme>`
+// before looking up the handler. This is async-friendly: when a deferred
+// plugin owns the scheme, the trigger fires, the plugin's `activate()`
+// runs (which calls `register(scheme, ...)`), and the freshly-registered
+// handler is invoked. When nothing is gated, the path is unchanged.
+//
 // Wiring:
 //   - `api.uri.register(scheme, handler)` (see PluginAPI.ts) calls
 //     `register(scheme, pluginId, handler)` and the returned unsub is
@@ -24,6 +30,8 @@
 //     is responsible for delivering the URL string to the shell, which
 //     then constructs a `URL` and calls `dispatch(url)`. See the WI-13
 //     report for the deferred Tauri wiring.
+
+import { activationTriggers } from '../host/ActivationTriggers'
 
 export type UriHandler = (uri: URL) => void | Promise<void>
 
@@ -96,6 +104,32 @@ export class UriHandlerRegistry {
     const scheme = canonicalizeScheme(uri.protocol)
     if (!scheme) return false
 
+    // WI-19 — wake any plugin gated on `onUri:<scheme>` first. This
+    // path is fire-and-forget so `dispatch` keeps its sync `boolean`
+    // return shape: when a deferred plugin owns the scheme, we kick off
+    // activation, then dispatch the URL once the plugin has registered
+    // its handler. We return `true` *optimistically* in that case
+    // because a handler is on the way; callers that need a strict
+    // "handler ran" signal can subscribe to the eventBus instead.
+    const triggerKey = `onUri:${scheme}`
+    if (activationTriggers.hasPending(triggerKey)) {
+      activationTriggers
+        .fire(triggerKey)
+        .then(() => this.invoke(scheme, uri))
+        .catch((err) => {
+          console.error(
+            `[UriHandlerRegistry] activation trigger for '${scheme}' threw:`,
+            err,
+          )
+        })
+      return true
+    }
+
+    return this.invoke(scheme, uri)
+  }
+
+  /** Inner dispatch — assumes activation is already settled. */
+  private invoke(scheme: string, uri: URL): boolean {
     const entry = this.handlers.get(scheme)
     if (!entry) return false
 

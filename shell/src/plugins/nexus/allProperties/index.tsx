@@ -51,7 +51,12 @@ export const allPropertiesPlugin: Plugin = {
     name: 'All Properties',
     version: '0.1.0',
     core: false,
-    activationEvents: ['onStartup'],
+    // WI-19 — lazy activation. The view is only reached via either
+    // (a) the focus command (palette/keybinding) or (b) the persisted
+    // workspace re-hydrating a leaf of this type. Both paths fire the
+    // matching trigger before we're needed. No activity-bar item, no
+    // right-panel tab registration — nothing else has to run at boot.
+    activationEvents: [`onCommand:${COMMAND_FOCUS}`, `onView:${VIEW_TYPE}`],
     contributes: {
       commands: [{ id: COMMAND_FOCUS, title: 'Focus All Properties', category: 'View' }],
     },

@@ -51,7 +51,10 @@ export const bookmarksPlugin: Plugin = {
     name: 'Bookmarks',
     version: '0.1.0',
     core: false,
-    activationEvents: ['onStartup'],
+    // WI-19 — lazy activation. Reached only via the focus command or
+    // a hydrated leaf of this view type; both fire the matching
+    // trigger before activate() is needed.
+    activationEvents: [`onCommand:${COMMAND_FOCUS}`, `onView:${VIEW_TYPE}`],
     contributes: {
       commands: [{ id: COMMAND_FOCUS, title: 'Focus Bookmarks', category: 'View' }],
     },

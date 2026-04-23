@@ -3,6 +3,7 @@
 // Manifest contributions populate labels; activate() wires handlers.
 
 import type { CommandContribution, CommandEntry } from '../types/plugin'
+import { activationTriggers } from '../host/ActivationTriggers'
 
 export class CommandRegistry {
   private commands = new Map<string, CommandEntry & { handler?: (...args: unknown[]) => unknown }>()
@@ -35,6 +36,15 @@ export class CommandRegistry {
   }
 
   async execute(id: string, ...args: unknown[]): Promise<unknown> {
+    // WI-19 — wake any plugin gated on `onCommand:<id>` *before* the
+    // lookup. The trigger fire resolves once activation finishes, so a
+    // freshly-woken plugin's `register()` call has already populated the
+    // map by the time we read it back below. No-op when nothing is gated
+    // (the `hasPending` short-circuit avoids the await on the hot path).
+    const triggerKey = `onCommand:${id}`
+    if (activationTriggers.hasPending(triggerKey)) {
+      await activationTriggers.fire(triggerKey)
+    }
     const cmd = this.commands.get(id)
     if (!cmd?.handler) {
       console.warn(`[CommandRegistry] No handler for command '${id}'`)

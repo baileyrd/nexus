@@ -6,6 +6,7 @@ import type { Plugin } from '../types/plugin'
 import { PluginRegistry } from './PluginRegistry'
 import { buildPluginAPI } from './PluginAPI'
 import { eventBus } from './EventBus'
+import { activationTriggers } from './ActivationTriggers'
 
 export type PluginState =
   | 'registered'    // known but not yet activating
@@ -20,23 +21,89 @@ export class ExtensionHost {
   private plugins  = new Map<string, Plugin>()
   private states   = new Map<string, PluginState>()
   private errors   = new Map<string, Error>()
+  // Tracks which plugins have already had their manifest contributions
+  // (commands + keybindings) installed, so the eager-activation path
+  // doesn't re-register on top of the lazy pre-registration done in
+  // Pass 1 of `loadAll`. KeybindingRegistry.registerFromManifest is not
+  // idempotent (it pushes unconditionally) so a second call would
+  // duplicate the binding.
+  private contribsRegistered = new Set<string>()
 
   constructor(registry: PluginRegistry) {
     this.registry = registry
+    // Wire the activation-trigger singleton so trigger sources
+    // (CommandRegistry.execute, Leaf.setViewState, UriHandlerRegistry.dispatch)
+    // can wake deferred plugins on demand. See ActivationTriggers.ts.
+    activationTriggers.setActivator(async (pluginId) => {
+      const plugin = this.plugins.get(pluginId)
+      if (!plugin) {
+        console.warn(`[ExtensionHost] activator: unknown plugin '${pluginId}'`)
+        return
+      }
+      await this.activate(plugin)
+    })
   }
 
   // ─── Public API ──────────────────────────────────────────────────────────
 
-  /** Load all plugins in dependency order */
+  /**
+   * Two-pass loader (WI-19).
+   *
+   * Pass 1 — register manifests + parse `activationEvents`.
+   *   - `onStartup` (or empty / `*`) → queued for eager activation.
+   *   - `onView:X`, `onCommand:X`, `onUri:X`, `onLanguage:X` → recorded
+   *     in `activationTriggers`; the plugin stays in `registered` until
+   *     a trigger source fires for one of its keys.
+   *
+   * Pass 2 — activate the eager set in dependency order.
+   *
+   * Dep-resolution caveat: a lazy plugin that is `dependsOn`'d by an
+   * eager one is implicitly *promoted* to eager because `activate()`
+   * recursively pulls in dependencies. That's the documented escape
+   * hatch (the dep-graph wins over laziness — see PHASE-2 plan §5.4).
+   */
   async loadAll(plugins: Plugin[]) {
-    // Register all manifests first so dependency resolution can see them
+    // ── Pass 1: register everything, classify eager vs lazy ──
+    const eager: Plugin[] = []
     for (const plugin of plugins) {
-      this.plugins.set(plugin.manifest.id, plugin)
-      this.states.set(plugin.manifest.id, 'registered')
+      const id = plugin.manifest.id
+      this.plugins.set(id, plugin)
+      this.states.set(id, 'registered')
+
+      const events = plugin.manifest.activationEvents ?? []
+      const isEager =
+        events.length === 0 ||
+        events.includes('onStartup') ||
+        events.includes('*')
+
+      if (isEager) {
+        eager.push(plugin)
+      } else {
+        // For lazy plugins, pre-register manifest contributions (commands
+        // + keybindings) so the command palette / keybinding system can
+        // surface them without forcing activation. activate() is
+        // idempotent on these calls — `registerFromManifest` no-ops when
+        // the entry already exists, and the keybinding registry tolerates
+        // duplicate registrations from the same (plugin, command) pair.
+        // Without this step, a lazy plugin's `onCommand:` trigger would
+        // never fire because the command label wouldn't be in the palette
+        // for the user to invoke. See registerManifestContributions().
+        this.registerManifestContributions(plugin)
+      }
+
+      // A plugin can mix eager + trigger events (rare but legal — e.g.
+      // a service that wants to also wake on a specific deep link).
+      // Record every non-eager event so the trigger maps stay accurate
+      // even when the plugin is going to load eagerly anyway. The
+      // eviction step on activation cleans up the redundant entries.
+      for (const ev of events) {
+        if (ev === 'onStartup' || ev === '*') continue
+        activationTriggers.register(ev, id)
+      }
     }
 
-    const ordered = this.resolveDependencyOrder(plugins)
-
+    // ── Pass 2: dep-ordered activation of eager plugins only ──
+    const ordered = this.resolveDependencyOrder(eager)
     for (const plugin of ordered) {
       await this.activate(plugin)
     }
@@ -84,11 +151,19 @@ export class ExtensionHost {
     try {
       await plugin.activate(api)
       this.states.set(id, 'active')
+      // Drop any deferred-trigger entries this plugin still owned — it's
+      // active now, subsequent fires of the same trigger should be no-ops
+      // rather than re-attempts.
+      activationTriggers.evict(id)
       eventBus.emit('plugin:activated', { pluginId: id })
       console.info(`[ExtensionHost] ✓ ${id}`)
     } catch (err) {
       // Clean up any partial registrations before marking as failed
       this.registry.unregisterAll(id)
+      this.contribsRegistered.delete(id)
+      // Drop triggers too — re-firing won't help a plugin in `error` state
+      // (the activate() guard returns early on subsequent attempts).
+      activationTriggers.evict(id)
       this.fail(id, err as Error)
     }
   }
@@ -110,6 +185,9 @@ export class ExtensionHost {
 
     // Sweep all registry contributions this plugin made
     this.registry.unregisterAll(id)
+    // Forget the dedupe marker so a future re-activation re-registers
+    // manifest contributions.
+    this.contribsRegistered.delete(id)
 
     this.states.set(id, 'inactive')
     eventBus.emit('plugin:deactivated', { pluginId: id })
@@ -153,6 +231,14 @@ export class ExtensionHost {
   private registerManifestContributions(plugin: Plugin) {
     const { id, contributes } = plugin.manifest
     if (!contributes) return
+    // Idempotent guard: in lazy mode we register manifest contributions
+    // up front in `loadAll` Pass 1 so the command palette / keybinding
+    // matcher can see entries before activation. The eager-activation
+    // path then runs activate() which would re-enter here; without this
+    // skip, KeybindingRegistry.registerFromManifest would duplicate the
+    // binding (it pushes unconditionally).
+    if (this.contribsRegistered.has(id)) return
+    this.contribsRegistered.add(id)
 
     contributes.commands?.forEach(c => {
       this.registry.commands.registerFromManifest(id, c)

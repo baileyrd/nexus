@@ -8,6 +8,7 @@
 
 import type { Leaf, View, ViewState, WorkspaceParent } from './types.ts'
 import { viewRegistry } from './ViewRegistry.ts'
+import { activationTriggers } from '../host/ActivationTriggers.ts'
 
 type EmitFn = (event: string, payload?: unknown) => void
 
@@ -66,6 +67,15 @@ export class LeafImpl implements Leaf {
 
     // 2. Resolve creator, falling back to `empty` — never throw on unknown
     //    types (see plan §Phase 2 resilience note).
+    //
+    // WI-19 — wake any plugin gated on `onView:<type>` *before* the
+    // creator lookup. The plugin's `activate()` calls `viewRegistry.register`
+    // synchronously, so by the time `fire()` resolves the creator is in
+    // the map. No-op when nothing is gated (cheap pre-check).
+    const triggerKey = `onView:${state.type}`
+    if (activationTriggers.hasPending(triggerKey)) {
+      await activationTriggers.fire(triggerKey)
+    }
     const creator =
       viewRegistry.getCreator(state.type) ?? viewRegistry.getCreator('empty')
     if (!creator) {
