@@ -39,6 +39,7 @@ import { Inspector } from './Inspector'
 import { CanvasOverlay } from './CanvasOverlay'
 import { Minimap, type MinimapHandle } from './Minimap'
 import { exportCanvasPng, triggerDownload } from './exportPng'
+import { autoLayout } from './autoLayout'
 import type {
   CanvasKernelClient,
   CanvasDoc,
@@ -878,6 +879,33 @@ export function CanvasView({ relpath, client }: Props) {
     useCanvasStore.getState().setShowGrid(relpath, !showGrid)
   }
 
+  const onTidy = () => {
+    const currentDoc = docRef.current
+    if (!currentDoc) return
+    const moves = autoLayout(currentDoc)
+    if (moves.length === 0) return
+    // Build forward + inverse node_move pairs straight from the
+    // pre-layout doc so undo restores every position verbatim.
+    const byId = new Map(currentDoc.nodes.map((n) => [n.id, n]))
+    const forward: CanvasPatchOp[] = []
+    const inverse: CanvasPatchOp[] = []
+    for (const m of moves) {
+      const before = byId.get(m.id)
+      if (!before) continue
+      forward.push({ op: 'node_move', id: m.id, x: m.x, y: m.y })
+      inverse.push({ op: 'node_move', id: m.id, x: before.x, y: before.y })
+    }
+    if (forward.length === 0) return
+    useCanvasStore.getState().updateDoc(relpath, (d) => ({
+      ...d,
+      nodes: d.nodes.map((n) => {
+        const mv = moves.find((m) => m.id === n.id)
+        return mv ? { ...n, x: mv.x, y: mv.y } : n
+      }),
+    }))
+    commitRef.current(forward, inverse)
+  }
+
   const onExportPng = async () => {
     const container = containerRef.current
     const currentDoc = docRef.current
@@ -969,9 +997,11 @@ export function CanvasView({ relpath, client }: Props) {
       <ControlStrip
         showGrid={showGrid}
         onToggleGrid={onToggleGrid}
+        onTidy={onTidy}
         onExportPng={onExportPng}
         exporting={exporting}
         canExport={nodeCount > 0}
+        canTidy={nodeCount > 1}
       />
     </div>
   )
@@ -980,15 +1010,19 @@ export function CanvasView({ relpath, client }: Props) {
 function ControlStrip({
   showGrid,
   onToggleGrid,
+  onTidy,
   onExportPng,
   exporting,
   canExport,
+  canTidy,
 }: {
   showGrid: boolean
   onToggleGrid: () => void
+  onTidy: () => void
   onExportPng: () => void
   exporting: boolean
   canExport: boolean
+  canTidy: boolean
 }) {
   return (
     <div
@@ -1012,6 +1046,13 @@ function ControlStrip({
         title={showGrid ? 'Hide grid' : 'Show grid'}
       >
         Grid
+      </ControlButton>
+      <ControlButton
+        onClick={onTidy}
+        disabled={!canTidy}
+        title={canTidy ? 'Auto-layout nodes' : 'Need at least two nodes'}
+      >
+        Tidy
       </ControlButton>
       <ControlButton
         onClick={onExportPng}
