@@ -10,6 +10,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "lint": "eslint src --ext .ts,.tsx",
+    "test": "node --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json",
     "e2e:build": "cross-env VITE_E2E=true pnpm build && cd src-tauri && cargo build --features custom-protocol",
