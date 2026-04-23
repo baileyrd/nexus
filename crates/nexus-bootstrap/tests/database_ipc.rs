@@ -105,6 +105,65 @@ async fn formula_eval_computes_over_record_fields_through_ipc() {
 }
 
 #[tokio::test]
+async fn apply_view_groups_records_by_status_field() {
+    // The only non-CSV/formula handler on `com.nexus.database` is
+    // `apply_view`, which runs the pure filter/sort/group pipeline
+    // in-memory. Base-table CRUD (create_table / insert_record / query
+    // / update_cell / delete) is intentionally NOT on this plugin —
+    // those go through `com.nexus.storage` (`base_create`,
+    // `base_record_create`, `base_list`, `base_record_update`,
+    // `base_record_delete`) which owns the forge SQLite. See
+    // ARCHITECTURE.md §4.2. Those handlers are covered via
+    // storage-focused tests elsewhere.
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
+
+    let v = call(
+        &runtime,
+        "apply_view",
+        serde_json::json!({
+            "records": [
+                { "id": "a", "status": "todo", "priority": 1 },
+                { "id": "b", "status": "done", "priority": 2 },
+                { "id": "c", "status": "todo", "priority": 3 },
+            ],
+            "schema": { "version": "1.0", "fields": {} },
+            "view": {
+                "name": "Board",
+                "type": "kanban",
+                "fields": ["title"],
+                "sort": [{ "field": "priority", "direction": "asc" }],
+                "filter": [],
+                "groupField": "status",
+            },
+        }),
+    )
+    .await
+    .expect("apply_view dispatches cleanly");
+    assert_eq!(v["layout"]["kind"], "grouped");
+    let groups = v["layout"]["groups"].as_array().expect("groups");
+    assert_eq!(groups.len(), 2);
+}
+
+#[tokio::test]
+async fn csv_import_with_malformed_args_returns_handler_error() {
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
+
+    let err = call(
+        &runtime,
+        "csv_import",
+        serde_json::json!({ "csv_bytes": "not-a-byte-array" }),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(err, IpcError::PluginCrashedDuringCall { .. }),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
 async fn unknown_database_command_returns_command_not_found() {
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
