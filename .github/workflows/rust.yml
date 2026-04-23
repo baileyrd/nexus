@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Tauri system deps
+      - name: Install Tauri system deps + mold linker
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -22,7 +22,8 @@ jobs:
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            mold clang
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -32,7 +33,8 @@ jobs:
 
       - name: Run scripts/test_all.sh
         env:
-          # ubuntu-latest only has 7 GB RAM; linking tauri/webkit with
-          # full parallelism OOM-kills the linker (ld bus error).
+          # ubuntu-latest only has 7 GB RAM; GNU ld OOMs when linking
+          # tauri/webkit targets. mold uses ~10× less memory.
           CARGO_BUILD_JOBS: "2"
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: bash scripts/test_all.sh
