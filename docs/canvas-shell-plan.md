@@ -61,19 +61,31 @@ Register the string names in the bootstrap plugin (same table as
 
 ### Shell UI phases
 
-> **Status (2026-04-22):** Phases 1–4 complete. Next pickup is
-> Phase 5 (node body embeds). The kernel surface (`canvas_read` /
-> `canvas_write` / `canvas_patch` / `canvas_nodes` / `canvas_edges`
-> on `com.nexus.storage`, handler ids 35–39) and every client-side
-> interaction listed under Phase 3 below (select, marquee, drag-
-> move, resize, delete, create text, drag-from-edge-to-create, undo/
-> redo) landed, plus Phase 4 — edge click-to-select with bezier
-> hit-testing, selected-edge highlighting, delete-key edge removal,
-> and a floating inspector drawer that edits label / colour / line-
-> style for edges and label / text / colour for nodes (every edit
-> patches through `*_update` ops so undo/redo covers properties).
+> **Status (2026-04-22):** Phases 1–5 complete. Next pickup is
+> Phase 6 (polish — minimap, auto-layout, export, grid toggle, etc.).
+> Everything listed below is live in the shell:
+>
+> - Kernel surface: `canvas_read` / `canvas_write` / `canvas_patch` /
+>   `canvas_nodes` / `canvas_edges` on `com.nexus.storage` (handler
+>   ids 35–39).
+> - New plugin `com.nexus.linkpreview` (`nexus-linkpreview` crate) —
+>   one handler, `fetch`, for OG/Twitter/HTML-title metadata.
+> - Full Phase-3 interaction model (select / marquee / drag-move /
+>   resize / delete / create text / drag-from-edge-to-create / undo
+>   / redo).
+> - Phase-4 edges + inspector — bezier hit-testing, selected-edge
+>   highlight, delete on edge, floating inspector for node + edge
+>   properties (all edits patch through `*_update` ops).
+> - Phase-5 DOM overlay layer (`CanvasOverlay.tsx`) mounting
+>   camera-tracked, pointer-events-none HTML per node. Every non-
+>   group node body lives there now: text → markdown, file →
+>   markdown/image/text preview, link → OG card with favicon + hero,
+>   database → mini-grid of `.bases` schema + records, terminal →
+>   Run/Stop button + ANSI-stripped PTY transcript. The 2D canvas
+>   draws card chrome only for non-group nodes.
+>
 > Shell code lives under `shell/src/plugins/nexus/canvas/`
-> (`Inspector.tsx` is the Phase-4 addition).
+> (`CanvasOverlay.tsx`, `Inspector.tsx` are the Phase-4/5 additions).
 
 #### Phase 1 — view registration + blank surface
 
@@ -151,25 +163,30 @@ Budget: 1 day. **Done 2026-04-22.**
   Landed. Multi-select node property editing is still out of scope;
   the drawer binds only when exactly one node is selected.
 
-#### Phase 5 — node body embeds  ← **pickup here**
+#### Phase 5 — node body embeds
 
-Budget: 1–2 days total, each node type incrementally.
+Budget: 1–2 days total, each node type incrementally. **Done 2026-04-22.**
 
-- `file` node: embed the target file's rendered content inline,
-  scrollable within the node's bounds. Reuse the editor's render
-  pipeline so markdown extensions work.
-- `database` node: inline mini-grid of the linked `.bases`. Reuse
-  Phase-2 Bases Table view at reduced density.
-- `terminal` node: read-only transcript + a "Run" button that hands
-  the command to `com.nexus.terminal::create_session` +
-  `send_raw_input`, streaming output back into the card via
-  `read_raw_since` — same plumbing as the main terminal drawer.
-- `text` node: full markdown rendering (not just raw); supports
-  wikilinks and tags.
-- `link` node: OG-metadata card (title + favicon + description) using
-  an offline-friendly fallback when the link can't be fetched.
+- `text` node — full markdown rendering via the shared
+  `renderMarkdown` pipeline (marked + DOMPurify). Landed in 5a.
+- `link` node — OG/Twitter/HTML-title card (favicon + site + title +
+  description + hero image) via new `com.nexus.linkpreview::fetch`
+  handler (`nexus-linkpreview` crate, reqwest + regex). Offline
+  fallback = hostname + raw URL. Landed in 5b.
+- `file` node — inline preview of the linked forge file: markdown,
+  images (as base64 data URLs), text/code (as monospaced `<pre>`),
+  or a "no preview" placeholder for binaries. Text capped at 64
+  KiB with a truncated indicator. Landed in 5c.
+- `database` node — mini-grid of the linked `.bases` schema +
+  records (first 4 columns, first 50 rows) via
+  `com.nexus.storage::base_load`. Landed in 5d.
+- `terminal` node — Run / Stop button + live PTY transcript via
+  `com.nexus.terminal::{create_session, send_input, read_raw_since,
+  close_session}`. ANSI-stripped, last 32 KiB visible, bottom-
+  anchored so newest output stays on screen. Session torn down on
+  unmount / stop. Landed in 5e.
 
-#### Phase 6 — polish
+#### Phase 6 — polish  ← **pickup here**
 
 - **Minimap** in the corner showing full canvas with a viewport rect.
 - **Auto-layout**: one-click "tidy" that runs a force-directed pass.
@@ -187,7 +204,7 @@ Budget: 1–2 days total, each node type incrementally.
   **Done.**
 - Phase 3: interactions — can create + rearrange. **Done.**
 - Phase 4: edges + inspector — fully editable graph. **Done.**
-- Phase 5: rich node embeds — feature parity with Obsidian.
+- Phase 5: rich node embeds — feature parity with Obsidian. **Done.**
 - Phase 6: polish.
 
 Phase 1–3 is the minimum to call `.canvas` a first-class surface.
