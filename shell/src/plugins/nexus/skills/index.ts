@@ -3,7 +3,7 @@ import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { viewRegistry, workspace } from '../../../workspace'
 import { SkillsView } from './SkillsView'
 import { skillsPaneViewCreator } from './SkillsPaneView'
-import { useSkillsStore, type SkillEntry } from './skillsStore'
+import { useSkillsStore, type SkillEntry, type SkillParameter } from './skillsStore'
 
 const VIEW_ID = 'nexus.skills.view'
 
@@ -43,6 +43,7 @@ function decode(raw: unknown): SkillEntry[] {
       tags: stringArray(sk.tags),
       applicableContexts: stringArray(sk.applicable_contexts),
       triggers: stringArray(sk.triggers),
+      parameters: decodeParameters(sk.parameters),
       body: typeof sk.body === 'string' ? sk.body : '',
     })
   }
@@ -52,6 +53,44 @@ function decode(raw: unknown): SkillEntry[] {
 function stringArray(v: unknown): string[] {
   if (!Array.isArray(v)) return []
   return v.filter((x): x is string => typeof x === 'string')
+}
+
+/**
+ * Decode the `parameters:` block from `Skill.frontmatter`. Mirrors
+ * `SkillParameter` in crates/nexus-skills/src/lib.rs L114-134:
+ *
+ *   { name, type, description?, values?, items?, default? }
+ *
+ * `values` is YAML — could be scalars or sequences — but the form
+ * UI only uses string enum members, so we coerce to strings and
+ * drop anything that isn't representable.
+ */
+function decodeParameters(v: unknown): SkillParameter[] {
+  if (!Array.isArray(v)) return []
+  const out: SkillParameter[] = []
+  for (const item of v) {
+    if (!item || typeof item !== 'object') continue
+    const p = item as Record<string, unknown>
+    const name = typeof p.name === 'string' ? p.name : null
+    if (!name) continue
+    const ptype = typeof p.type === 'string' ? p.type : 'string'
+    const enumValues: string[] = []
+    if (Array.isArray(p.values)) {
+      for (const x of p.values) {
+        if (typeof x === 'string') enumValues.push(x)
+        else if (typeof x === 'number' || typeof x === 'boolean') enumValues.push(String(x))
+      }
+    }
+    out.push({
+      name,
+      type: ptype,
+      description: typeof p.description === 'string' ? p.description : '',
+      values: enumValues,
+      items: typeof p.items === 'string' ? p.items : null,
+      default: 'default' in p ? p.default : undefined,
+    })
+  }
+  return out
 }
 
 export const skillsPlugin: Plugin = {
@@ -102,6 +141,7 @@ export const skillsPlugin: Plugin = {
     const renderSkillsView = () =>
       createElement(SkillsView, {
         onRefresh: () => void refresh(),
+        kernel: api.kernel,
       })
 
     // Phase 7: legacy SlotRegistry slot:'sidebarContent' entry removed.
