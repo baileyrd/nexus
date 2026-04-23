@@ -13,6 +13,11 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { Key } from 'webdriverio'
 
+// Cold-boot on CI (fresh Tauri debug binary, no OS page cache, shared
+// runners) is dramatically slower than a warm local rebuild. Give it
+// headroom via env override; default stays tight for local dev.
+const BOOT_TIMEOUT_MS = Number(process.env.NEXUS_E2E_BOOT_TIMEOUT_MS ?? 30_000)
+
 /** Open the e2e vault and wait for the workspace to be ready.
  *
  * The kernel is pre-booted by the Rust `setup` hook when NEXUS_E2E_VAULT
@@ -43,7 +48,7 @@ export async function openVault(vaultAbsPath: string): Promise<void> {
         const w = window as unknown as { __nexusShellApi?: unknown }
         return Boolean(w.__nexusShellApi)
       }),
-    { timeout: 30_000, timeoutMsg: '__nexusShellApi never attached' },
+    { timeout: BOOT_TIMEOUT_MS, timeoutMsg: '__nexusShellApi never attached' },
   )
 
   // 2) Wait for the kernel to report booted.
@@ -60,7 +65,7 @@ export async function openVault(vaultAbsPath: string): Promise<void> {
           return false
         }
       }),
-    { timeout: 30_000, timeoutMsg: 'kernel never reported booted' },
+    { timeout: BOOT_TIMEOUT_MS, timeoutMsg: 'kernel never reported booted' },
   )
 
   // 3) Drive the same command the launcher uses — idempotent if the

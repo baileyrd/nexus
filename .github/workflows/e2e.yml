@@ -55,4 +55,8 @@ jobs:
 
       - name: Run e2e
         working-directory: shell
+        env:
+          # Cold CI runner is ~2-3x slower to boot the Tauri debug
+          # binary than a warm local rebuild.
+          NEXUS_E2E_BOOT_TIMEOUT_MS: '120000'
         run: pnpm e2e
