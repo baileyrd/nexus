@@ -3,6 +3,8 @@
 Cargo.lock
 .DS_Store
 *.swp
+# LibreOffice lockfiles
+.~lock.*#
 .superpowers/
 .claude/
 crates/**/SESSION_SUMMARIES.md
