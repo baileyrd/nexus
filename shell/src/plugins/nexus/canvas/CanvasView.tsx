@@ -801,6 +801,39 @@ export function CanvasView({ relpath, client }: Props) {
         return
       }
 
+      // '?' (and Shift+/) toggles the help overlay; Escape always
+      // closes it so the user has a guaranteed dismissal path.
+      if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+        e.preventDefault()
+        setShowHelp((v) => !v)
+        return
+      }
+      if (e.key === 'Escape') {
+        setShowHelp(false)
+        // Fall through so Escape can still be consumed by other
+        // handlers (e.g. future inspector blur).
+      }
+
+      // 'f' fits the current doc; Shift+f fits just the current
+      // selection. Matches the shortcut set Obsidian canvas uses.
+      if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        const doc = docRef.current
+        const canvas = canvasRef.current
+        if (!doc || !canvas) return
+        const rect = canvas.getBoundingClientRect()
+        const sel = selectionRef.current
+        const targets =
+          e.shiftKey && sel.size > 0
+            ? doc.nodes.filter((n) => sel.has(n.id))
+            : doc.nodes
+        if (targets.length === 0) return
+        const fit = fitCameraToNodes(targets, rect.width, rect.height)
+        cameraRef.current = fit
+        cameraDirtyRef.current = true
+        return
+      }
+
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
       const doc = docRef.current
       if (!doc) return
@@ -855,6 +888,7 @@ export function CanvasView({ relpath, client }: Props) {
   const edgeCount = doc?.edges.length ?? 0
   const showGrid = tab?.showGrid ?? true
   const [exporting, setExporting] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
 
   // Minimap click-drag: recenter the camera so the clicked world
   // point sits at the middle of the main viewport. Stable callback
@@ -1002,7 +1036,9 @@ export function CanvasView({ relpath, client }: Props) {
         exporting={exporting}
         canExport={nodeCount > 0}
         canTidy={nodeCount > 1}
+        onShowHelp={() => setShowHelp(true)}
       />
+      {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
     </div>
   )
 }
@@ -1015,6 +1051,7 @@ function ControlStrip({
   exporting,
   canExport,
   canTidy,
+  onShowHelp,
 }: {
   showGrid: boolean
   onToggleGrid: () => void
@@ -1023,6 +1060,7 @@ function ControlStrip({
   exporting: boolean
   canExport: boolean
   canTidy: boolean
+  onShowHelp: () => void
 }) {
   return (
     <div
@@ -1061,6 +1099,119 @@ function ControlStrip({
       >
         {exporting ? '…' : 'Export'}
       </ControlButton>
+      <ControlButton onClick={onShowHelp} title="Keyboard shortcuts (?)">
+        ?
+      </ControlButton>
+    </div>
+  )
+}
+
+function HelpOverlay({ onClose }: { onClose: () => void }) {
+  const rows: Array<[string, string]> = [
+    ['Click', 'Select node'],
+    ['Shift + click', 'Toggle in selection'],
+    ['Drag empty space', 'Marquee select'],
+    ['Drag node', 'Move node(s)'],
+    ['Drag node border handle', 'Create edge (or new node + edge)'],
+    ['Double-click empty space', 'New text node'],
+    ['Middle-click + drag', 'Pan canvas'],
+    ['Wheel', 'Scroll / pan'],
+    ['Ctrl / Cmd + wheel', 'Zoom'],
+    ['f', 'Zoom to fit content'],
+    ['Shift + f', 'Zoom to selection'],
+    ['Delete / Backspace', 'Delete selected node or edge'],
+    ['Ctrl / Cmd + Z', 'Undo'],
+    ['Ctrl / Cmd + Shift + Z', 'Redo'],
+    ['?', 'Toggle this help'],
+    ['Escape', 'Close help'],
+  ]
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(0,0,0,0.45)',
+        zIndex: 10,
+        // Overlay root is interactive — clicking the backdrop
+        // dismisses, clicking the card is a no-op via stopPropagation.
+        pointerEvents: 'auto',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          minWidth: 360,
+          maxWidth: 440,
+          padding: 18,
+          borderRadius: 8,
+          background: 'var(--bg-raised, #2d2d2d)',
+          border: '1px solid var(--divider-color, #3f3f46)',
+          color: 'var(--fg, #e5e7eb)',
+          fontFamily: 'var(--font-family, system-ui, sans-serif)',
+          fontSize: 12,
+          boxShadow: '0 8px 28px rgba(0,0,0,0.45)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 12,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              letterSpacing: 0.3,
+            }}
+          >
+            Canvas shortcuts
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--fg-muted, #9ca3af)',
+              fontSize: 16,
+              cursor: 'pointer',
+              padding: 0,
+              lineHeight: 1,
+            }}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <tbody>
+            {rows.map(([key, desc]) => (
+              <tr key={key}>
+                <td
+                  style={{
+                    padding: '4px 10px 4px 0',
+                    color: 'var(--fg-muted, #9ca3af)',
+                    fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
+                    fontSize: 11,
+                    whiteSpace: 'nowrap',
+                    verticalAlign: 'top',
+                  }}
+                >
+                  {key}
+                </td>
+                <td style={{ padding: '4px 0', verticalAlign: 'top' }}>{desc}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -1142,12 +1293,22 @@ function setEquals(a: Set<string>, b: Set<string>): boolean {
 
 /** Compute a camera that centres every node within a small margin. */
 function fitCameraToDoc(doc: CanvasDoc, viewW: number, viewH: number): Camera {
-  if (doc.nodes.length === 0) return { x: -viewW / 2, y: -viewH / 2, zoom: 1 }
+  return fitCameraToNodes(doc.nodes, viewW, viewH)
+}
+
+/** Shared fit-camera helper. Used for initial zoom-to-fit, the 'f'
+ *  shortcut (fit to all content), and 'Shift+f' (fit to selection). */
+function fitCameraToNodes(
+  nodes: readonly CanvasNode[],
+  viewW: number,
+  viewH: number,
+): Camera {
+  if (nodes.length === 0) return { x: -viewW / 2, y: -viewH / 2, zoom: 1 }
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
   let maxY = -Infinity
-  for (const n of doc.nodes) {
+  for (const n of nodes) {
     if (n.x < minX) minX = n.x
     if (n.y < minY) minY = n.y
     if (n.x + n.width > maxX) maxX = n.x + n.width
