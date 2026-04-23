@@ -12,13 +12,22 @@ const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
 const COMMAND_REFRESH = 'nexus.workflow.refresh'
 const COMMAND_SHOW = 'nexus.workflow.show'
+const COMMAND_VALIDATE = 'nexus.workflow.validate'
 
 const WORKFLOW_PLUGIN_ID = 'com.nexus.workflow'
 // Verified against crates/nexus-workflow/src/core_plugin.rs::dispatch_async:
-//   `list` args `{}` → `Workflow[]` (full struct per lib.rs::Workflow).
-//   `run`  args `{ name, variables? }` → `WorkflowRun` (final outcome).
+//   `list`     args `{}`              → `Workflow[]` (full struct per lib.rs::Workflow).
+//   `run`      args `{ name, variables? }` → `WorkflowRun` (final outcome).
+//   `validate` args `{ text }`        → parsed `Workflow` JSON, or
+//                                       `ExecutionFailed { reason: "invalid workflow: <serde err>" }`.
 const LIST_COMMAND = 'list'
 const RUN_COMMAND = 'run'
+const VALIDATE_COMMAND = 'validate'
+
+// Validate is a synchronous TOML parse on the kernel side. Five
+// seconds is plenty of headroom even for very large definitions and
+// keeps the UI from hanging if the bridge ever gets wedged.
+const VALIDATE_TIMEOUT_MS = 5_000
 
 // Long-running runs would otherwise hit the 30s default timeout in the
 // kernel bridge. Pick a generous ceiling — workflows can spawn agent
@@ -53,6 +62,22 @@ function decode(raw: unknown): WorkflowEntry[] {
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
+/**
+ * Pull `workflow.name` out of the kernel's `validate` response so the
+ * UI can confirm which workflow just parsed. The handler always
+ * returns the full `Workflow` JSON; the `name` field is required by
+ * the parser, so a successful response will always have it. Defensive
+ * fallback: an empty string keeps the success pill rendering even if
+ * the shape ever drifts.
+ */
+function extractWorkflowName(raw: unknown): string {
+  if (!raw || typeof raw !== 'object') return ''
+  const meta = (raw as Record<string, unknown>).workflow
+  if (!meta || typeof meta !== 'object') return ''
+  const name = (meta as Record<string, unknown>).name
+  return typeof name === 'string' ? name : ''
+}
+
 export const workflowPlugin: Plugin = {
   manifest: {
     id: 'nexus.workflow',
@@ -65,6 +90,7 @@ export const workflowPlugin: Plugin = {
       commands: [
         { id: COMMAND_REFRESH, title: 'Refresh Workflows', category: 'Workflows' },
         { id: COMMAND_SHOW, title: 'Show Workflows', category: 'Workflows' },
+        { id: COMMAND_VALIDATE, title: 'Validate Workflow TOML', category: 'Workflows' },
       ],
     },
   },
@@ -123,10 +149,52 @@ export const workflowPlugin: Plugin = {
       }
     }
 
+    const validateWorkflow = async (text: string) => {
+      const store = useWorkflowStore.getState()
+      // Empty text would just return a parser error from the kernel.
+      // Catch it client-side so the user gets a clearer hint.
+      if (text.trim().length === 0) {
+        store.setValidateStatus('error', { error: 'Paste a workflow TOML to validate.' })
+        return
+      }
+      let available = false
+      try {
+        available = await api.kernel.available()
+      } catch {
+        available = false
+      }
+      if (!available) {
+        store.setValidateStatus('error', {
+          error: 'Open a workspace before validating workflows.',
+        })
+        return
+      }
+      store.setValidateStatus('validating')
+      try {
+        const result = await api.kernel.invoke<unknown>(
+          WORKFLOW_PLUGIN_ID,
+          VALIDATE_COMMAND,
+          { text },
+          VALIDATE_TIMEOUT_MS,
+        )
+        const name = extractWorkflowName(result)
+        useWorkflowStore.getState().setValidateStatus('ok', { validatedName: name })
+      } catch (err) {
+        // Kernel surfaces parse errors as "invalid workflow: <serde
+        // message>" — strip the prefix when present so the inline
+        // panel reads cleanly. Position hints (line/col) inside the
+        // serde message are preserved.
+        const raw = err instanceof Error ? err.message : String(err)
+        const message = raw.replace(/^.*invalid workflow:\s*/, '')
+        useWorkflowStore.getState().setValidateStatus('error', { error: message })
+      }
+    }
+
     const renderWorkflowView = () =>
       createElement(WorkflowView, {
         onRun: (name: string) => void runWorkflow(name),
         onRefresh: () => void refresh(),
+        onValidate: (text: string) => void validateWorkflow(text),
       })
 
     // Phase 7: legacy SlotRegistry slot:'sidebarContent' entry removed.
@@ -148,6 +216,13 @@ export const workflowPlugin: Plugin = {
     api.commands.register(COMMAND_SHOW, async () => {
       const leaf = await workspace.ensureLeafOfType('workflow', 'main')
       workspace.revealLeaf(leaf)
+    })
+    // Command-palette entry mirrors the inline Validate button so a
+    // workflow author can run validation on the textarea contents
+    // without leaving the keyboard.
+    api.commands.register(COMMAND_VALIDATE, () => {
+      const text = useWorkflowStore.getState().validate.text
+      void validateWorkflow(text)
     })
 
     // Reload the list whenever a workspace opens; clear it on close so

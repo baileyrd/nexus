@@ -34,6 +34,26 @@ export interface RunState {
   finishedAt: number | null
 }
 
+/**
+ * Status for the most recent `validate` attempt. The kernel handler
+ * (`crates/nexus-workflow/src/core_plugin.rs::dispatch_validate`)
+ * accepts `{ text }` and either returns the parsed `Workflow` JSON or
+ * raises an `ExecutionFailed` carrying the parser error message —
+ * which we surface verbatim because the underlying TOML/serde
+ * messages already include a useful position hint.
+ */
+export type ValidateStatus = 'idle' | 'validating' | 'ok' | 'error'
+
+export interface ValidateState {
+  status: ValidateStatus
+  /** TOML text last submitted (echoed back so the panel persists). */
+  text: string
+  /** Parser-error message when status === 'error'. */
+  error: string | null
+  /** `workflow.name` of the parsed file when status === 'ok'. */
+  validatedName: string | null
+}
+
 interface WorkflowStoreState {
   /** List load state. */
   loading: boolean
@@ -41,11 +61,16 @@ interface WorkflowStoreState {
   workflows: WorkflowEntry[]
   /** Per-workflow run state, keyed by workflow name. */
   runs: Record<string, RunState>
+  /** Validation panel state. */
+  validate: ValidateState
 
   setLoading(b: boolean): void
   setLoadError(e: string | null): void
   setWorkflows(ws: WorkflowEntry[]): void
   setRunStatus(name: string, status: RunStatus, error?: string | null): void
+  setValidateText(text: string): void
+  setValidateStatus(status: ValidateStatus, opts?: { error?: string | null; validatedName?: string | null }): void
+  resetValidate(): void
   reset(): void
 }
 
@@ -55,11 +80,19 @@ const INITIAL_RUN_STATE: RunState = {
   finishedAt: null,
 }
 
+const INITIAL_VALIDATE_STATE: ValidateState = {
+  status: 'idle',
+  text: '',
+  error: null,
+  validatedName: null,
+}
+
 export const useWorkflowStore = create<WorkflowStoreState>((set) => ({
   loading: false,
   loadError: null,
   workflows: [],
   runs: {},
+  validate: { ...INITIAL_VALIDATE_STATE },
 
   setLoading: (b) => set({ loading: b }),
   setLoadError: (e) => set({ loadError: e }),
@@ -75,12 +108,35 @@ export const useWorkflowStore = create<WorkflowStoreState>((set) => ({
         },
       },
     })),
+  setValidateText: (text) =>
+    set((s) => ({
+      // Editing the text invalidates any prior verdict so the user
+      // doesn't see a stale "ok" pill while typing changes.
+      validate: {
+        ...s.validate,
+        text,
+        status: s.validate.status === 'validating' ? s.validate.status : 'idle',
+        error: null,
+        validatedName: null,
+      },
+    })),
+  setValidateStatus: (status, opts = {}) =>
+    set((s) => ({
+      validate: {
+        ...s.validate,
+        status,
+        error: status === 'error' ? opts.error ?? null : null,
+        validatedName: status === 'ok' ? opts.validatedName ?? null : null,
+      },
+    })),
+  resetValidate: () => set({ validate: { ...INITIAL_VALIDATE_STATE } }),
   reset: () =>
     set({
       loading: false,
       loadError: null,
       workflows: [],
       runs: {},
+      validate: { ...INITIAL_VALIDATE_STATE },
     }),
 }))
 

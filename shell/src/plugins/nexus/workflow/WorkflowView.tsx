@@ -1,9 +1,10 @@
-import { useWorkflowStore, type RunState, type WorkflowEntry } from './workflowStore'
+import { useWorkflowStore, type RunState, type ValidateState, type WorkflowEntry } from './workflowStore'
 import { Icon } from '../../../icons'
 
 interface WorkflowViewProps {
   onRun: (name: string) => void
   onRefresh: () => void
+  onValidate: (text: string) => void
 }
 
 /**
@@ -18,11 +19,14 @@ interface WorkflowViewProps {
  * surfaces as an error in the row's status pill. A future iteration
  * lifts an inputs-prompt modal in front of the run.
  */
-export function WorkflowView({ onRun, onRefresh }: WorkflowViewProps) {
+export function WorkflowView({ onRun, onRefresh, onValidate }: WorkflowViewProps) {
   const loading = useWorkflowStore((s) => s.loading)
   const loadError = useWorkflowStore((s) => s.loadError)
   const workflows = useWorkflowStore((s) => s.workflows)
   const runs = useWorkflowStore((s) => s.runs)
+  const validate = useWorkflowStore((s) => s.validate)
+  const setValidateText = useWorkflowStore((s) => s.setValidateText)
+  const resetValidate = useWorkflowStore((s) => s.resetValidate)
 
   return (
     <div
@@ -57,6 +61,12 @@ export function WorkflowView({ onRun, onRefresh }: WorkflowViewProps) {
           ))
         )}
       </div>
+      <ValidatePanel
+        validate={validate}
+        onTextChange={setValidateText}
+        onValidate={() => onValidate(validate.text)}
+        onClear={resetValidate}
+      />
     </div>
   )
 }
@@ -287,6 +297,194 @@ function RunStatusPill({ status, error }: RunStatusPillProps) {
 interface CenteredProps {
   colour: string
   children: React.ReactNode
+}
+
+interface ValidatePanelProps {
+  validate: ValidateState
+  onTextChange: (text: string) => void
+  onValidate: () => void
+  onClear: () => void
+}
+
+/**
+ * Inline workflow-TOML validator. Lives at the bottom of the
+ * sidebar — collapsed by default to keep the main list visible —
+ * and dispatches `com.nexus.workflow::validate` when the user clicks
+ * Validate. The kernel parser's error messages already include line
+ * hints from `serde_toml`; we render them verbatim in a monospace
+ * block so authors can correlate to their source.
+ *
+ * Sized for use as a sidebar pane (~280px wide). Textarea height is
+ * a fixed ~120px because the surrounding scroll container handles
+ * the rest.
+ */
+function ValidatePanel({ validate, onTextChange, onValidate, onClear }: ValidatePanelProps) {
+  const isOpen = validate.text.length > 0 || validate.status !== 'idle'
+  return (
+    <details
+      open={isOpen}
+      style={{
+        flex: '0 0 auto',
+        borderTop: '1px solid var(--line-soft)',
+        background: 'var(--bg-raised)',
+        fontSize: 12,
+      }}
+    >
+      <summary
+        style={{
+          listStyle: 'none',
+          cursor: 'pointer',
+          padding: '6px 10px',
+          color: 'var(--fg-muted)',
+          fontSize: 11,
+          textTransform: 'uppercase',
+          letterSpacing: '0.04em',
+          userSelect: 'none',
+        }}
+      >
+        Validate TOML
+      </summary>
+      <div style={{ padding: '6px 10px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <textarea
+          value={validate.text}
+          onChange={(e) => onTextChange(e.target.value)}
+          spellCheck={false}
+          placeholder={'[workflow]\nname = "Example"\n\n[trigger]\ntype = "manual"'}
+          aria-label="Workflow TOML to validate"
+          style={{
+            width: '100%',
+            minHeight: 120,
+            resize: 'vertical',
+            padding: 6,
+            fontFamily: 'var(--font-mono, monospace)',
+            fontSize: 11,
+            lineHeight: 1.4,
+            background: 'var(--bg)',
+            color: 'var(--fg)',
+            border: '1px solid var(--line-soft)',
+            borderRadius: 'var(--r)',
+            boxSizing: 'border-box',
+          }}
+        />
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={onValidate}
+            disabled={validate.status === 'validating'}
+            style={{
+              padding: '4px 10px',
+              background: 'var(--accent)',
+              color: 'var(--bg)',
+              border: 0,
+              borderRadius: 'var(--r)',
+              cursor: validate.status === 'validating' ? 'default' : 'pointer',
+              fontSize: 11,
+              opacity: validate.status === 'validating' ? 0.6 : 1,
+            }}
+          >
+            {validate.status === 'validating' ? 'Validating…' : 'Validate'}
+          </button>
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={validate.status === 'validating' || (validate.text === '' && validate.status === 'idle')}
+            style={{
+              padding: '4px 10px',
+              background: 'transparent',
+              color: 'var(--fg-muted)',
+              border: '1px solid var(--line-soft)',
+              borderRadius: 'var(--r)',
+              cursor: 'pointer',
+              fontSize: 11,
+            }}
+          >
+            Clear
+          </button>
+          <ValidateBadge state={validate} />
+        </div>
+        <ValidateResult state={validate} />
+      </div>
+    </details>
+  )
+}
+
+interface ValidateBadgeProps {
+  state: ValidateState
+}
+
+function ValidateBadge({ state }: ValidateBadgeProps) {
+  if (state.status === 'idle' || state.status === 'validating') return null
+  const palette =
+    state.status === 'ok'
+      ? { bg: 'var(--ok)', label: 'Valid' }
+      : { bg: 'var(--risk)', label: 'Invalid' }
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '1px 6px',
+        borderRadius: 999,
+        fontSize: 10,
+        background: palette.bg,
+        color: 'var(--bg)',
+      }}
+    >
+      {palette.label}
+    </span>
+  )
+}
+
+interface ValidateResultProps {
+  state: ValidateState
+}
+
+/**
+ * Bottom slot of the validator. Renders one of three things:
+ *  - parser error in a monospace block (preserves serde_toml's
+ *    line/col hints exactly as the kernel produced them);
+ *  - success line naming the parsed workflow;
+ *  - nothing (idle / validating).
+ */
+function ValidateResult({ state }: ValidateResultProps) {
+  if (state.status === 'error' && state.error) {
+    return (
+      <pre
+        style={{
+          margin: 0,
+          padding: '6px 8px',
+          background: 'var(--bg)',
+          color: 'var(--risk)',
+          border: '1px solid var(--risk)',
+          borderRadius: 'var(--r)',
+          fontFamily: 'var(--font-mono, monospace)',
+          fontSize: 11,
+          lineHeight: 1.4,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {state.error}
+      </pre>
+    )
+  }
+  if (state.status === 'ok') {
+    const label = state.validatedName
+      ? `Parsed workflow "${state.validatedName}".`
+      : 'Workflow TOML is valid.'
+    return (
+      <div
+        style={{
+          padding: '4px 0',
+          color: 'var(--ok)',
+          fontSize: 11,
+        }}
+      >
+        {label}
+      </div>
+    )
+  }
+  return null
 }
 
 function Centered({ colour, children }: CenteredProps) {
