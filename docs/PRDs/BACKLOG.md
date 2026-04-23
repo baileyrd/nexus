@@ -168,4 +168,13 @@ Threads from `docs/UI-AUDIT.md §6` not yet confirmed. Each is a 1–2 day targe
 - [ ] **SI-1 — Blob-URL same-origin inheritance.** **Deferred — verified as expected, conclusion pending UI F-8.1.1.** The MDN spec on blob URLs is clear: a `blob:` URL inherits the origin of the page that created it, so a plugin module loaded via `URL.createObjectURL` + `import()` runs in the shell's origin and can read `window.top`, `document.cookie`, and invoke any Tauri command the allowlist exposes. This is precisely the hole the UI F-8.1.1 iframe sandbox closes. No separate mitigation is tractable without that boundary; track as duplicate of F-8.1.1 for closure.
 - [ ] **SI-6 — `PluginManager` Mutex contention.** **Deferred — requires a dedicated load-test harness that doesn't exist yet.** Measuring requires 20+ chatty plugins and wall-clock profiling while a human drives the UI, which this environment cannot replicate. Hypothesis: per-plugin dispatch already uses `try_lock` + reentrancy guard + per-plugin backend mutex, so the `PluginManager` top-level mutex is only held during scan/load/unload/reload — not during steady-state dispatch. If the hypothesis holds this is cosmetic; if not, the fix is likely `RwLock<HashMap<id, …>>` inside the loader with per-plugin reader locks. Track as an explicit Phase-3 stability task once the load-test tooling exists.
 
+## E2E Tier-2 follow-ups (2026-04-23)
+
+Blockers that remained after the Tier-2 testability-hook pass (shell/ commit `8a4ce44`, PR #1). All selectors required by the skipped scenarios are now in place — each ticket captures the fixture, kernel, or test-harness work still needed to actually un-skip.
+
+- [ ] [E2E-T2-01 — Seed `.bases/` fixture for Tier-2 database specs](tickets/E2E-T2-01-bases-fixture.md) — unblocks 3 skips (column sort, row count, cell edit commit/cancel).
+- [ ] [E2E-T2-02 — Populate `WorkflowEntry.parseError` + seed bad `.workflow.toml`](tickets/E2E-T2-02-workflow-parse-error.md) — unblocks 1 skip (per-row parse error).
+- [ ] [E2E-T2-03 — Seed `.forge/skills/` fixture for Tier-2 skills spec](tickets/E2E-T2-03-skills-fixture.md) — unblocks 1 skip (body-preview expansion).
+- [ ] [E2E-T2-04 — Fake-LLM adapter for chat + agent E2E](tickets/E2E-T2-04-fake-llm-adapter.md) — unblocks 2 skips (chat streaming indicator, agent history ordering).
+
 ## Decisions — PRD-04 audit (2026-04-17)
