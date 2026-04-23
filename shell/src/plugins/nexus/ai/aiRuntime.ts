@@ -26,11 +26,18 @@
 // further chunks bounce off the matching-turn guard in the store.
 
 import type { KernelAPI, PluginAPI } from '../../../types/plugin'
-import { useAiStore, type AiConfig, type AiSource } from './aiStore'
+import { useAiStore, type AiConfig, type AiSessionMeta, type AiSource, type AiTurn } from './aiStore'
 
 const AI_PLUGIN_ID = 'com.nexus.ai'
 const HANDLER_CONFIG = 'config'
 const HANDLER_STREAM_ASK = 'stream_ask'
+// Slice C session handlers — verified against
+// `crates/nexus-ai/src/core_plugin.rs` (HANDLER_SESSION_LOAD = 8 etc.,
+// dispatched by string id in `dispatch_handler`).
+const HANDLER_SESSION_LIST = 'session_list'
+const HANDLER_SESSION_LOAD = 'session_load'
+const HANDLER_SESSION_SAVE = 'session_save'
+const HANDLER_SESSION_DELETE = 'session_delete'
 
 const TOPIC_PREFIX = 'com.nexus.ai.stream_'
 const TOPIC_CHUNK = 'com.nexus.ai.stream_chunk'
@@ -322,5 +329,404 @@ export async function retryLast(api: PluginAPI): Promise<void> {
       await submitQuestion(api, t.question)
       return
     }
+  }
+}
+
+// ── Session management (Slice C) ──────────────────────────────────────────
+//
+// IPC contract — verified against `crates/nexus-ai/src/core_plugin.rs`:
+//
+//   session_list   -> []  | [{ id, title?, updated_at?, bytes }]
+//   session_load   -> null | { id?, title?, turns: [...], ... }
+//                     args: { id }
+//   session_save   -> { bytes, id }
+//                     args: { id?, title?, turns: [...], updated_at? }
+//                     (kernel persists the bare object verbatim)
+//   session_delete -> { deleted: true, id }
+//                     args: { id }
+//
+// There is NO dedicated `session_rename` handler; rename = save with
+// the same id and a new `title` string. The kernel doesn't inspect
+// the payload shape, so we drive it from the shell.
+
+/** Min delay between auto-saves of the active session. Slice C target:
+ *  one persistence write per assistant `done`, debounced so a fast
+ *  retry / cancel-then-resend doesn't double-write. */
+const AUTOSAVE_DEBOUNCE_MS = 1000
+
+/** Title cap mirrors legacy ChatPanel.tsx:101 (48 chars + ellipsis). */
+const TITLE_MAX = 48
+
+/** Generated id format mirrors legacy makeSessionId (ChatPanel.tsx:158)
+ *  with `s-` prefix to keep it short on disk. The kernel validates
+ *  `[A-Za-z0-9_-]{1,64}` (core_plugin.rs `validate_session_id`); the
+ *  prefix + crypto suffix lands well inside that. */
+function newSessionId(): string {
+  const rand =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+      : Math.random().toString(36).slice(2, 14)
+  return `s-${Date.now().toString(36)}-${rand}`
+}
+
+/** Auto-derive a session title from the first user turn. Whitespace
+ *  collapsed, trimmed, capped at TITLE_MAX. Returns the empty string
+ *  if no user turn exists yet (caller decides what to do). Mirrors
+ *  legacy ChatPanel.tsx:101–106 verbatim. */
+function deriveTitle(turns: AiTurn[]): string {
+  for (const t of turns) {
+    if (t.kind === 'user') {
+      const trimmed = t.question.trim().replace(/\s+/g, ' ')
+      if (trimmed.length === 0) return ''
+      return trimmed.length > TITLE_MAX ? `${trimmed.slice(0, TITLE_MAX)}…` : trimmed
+    }
+  }
+  return ''
+}
+
+/** Coerce a raw `session_list` entry from the kernel into AiSessionMeta.
+ *  Drops entries with no id (defensive — the kernel always populates
+ *  id, but the wire is `unknown`). */
+function coerceSessionMeta(raw: unknown): AiSessionMeta | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (typeof r.id !== 'string' || r.id.length === 0) return null
+  return {
+    id: r.id,
+    title: typeof r.title === 'string' ? r.title : '',
+    updatedAt: typeof r.updated_at === 'string' ? r.updated_at : null,
+    bytes: typeof r.bytes === 'number' ? r.bytes : 0,
+  }
+}
+
+function coerceSessionList(raw: unknown): AiSessionMeta[] {
+  if (!Array.isArray(raw)) return []
+  const out: AiSessionMeta[] = []
+  for (const item of raw) {
+    const meta = coerceSessionMeta(item)
+    if (meta) out.push(meta)
+  }
+  // Newest-first by updated_at (lexicographic on ISO strings is
+  // chronological). Sessions without updated_at sink to the bottom.
+  out.sort((a, b) => {
+    if (a.updatedAt && b.updatedAt) return b.updatedAt.localeCompare(a.updatedAt)
+    if (a.updatedAt) return -1
+    if (b.updatedAt) return 1
+    return a.id.localeCompare(b.id)
+  })
+  return out
+}
+
+/** Strip non-persistable runtime state from turns before save. Currently
+ *  the AiTurn shape is already serializable (see Slice B), but if a
+ *  future field is request-lifetime only (e.g. an AbortController), it
+ *  would be filtered here. Also drops still-streaming assistant turns
+ *  — half-finished bubbles never hit disk (legacy ChatPanel.tsx:441). */
+function turnsForPersist(turns: AiTurn[]): AiTurn[] {
+  const out: AiTurn[] = []
+  for (const t of turns) {
+    if (t.kind === 'assistant' && t.status === 'streaming') continue
+    out.push(t)
+  }
+  return out
+}
+
+/**
+ * Refresh the saved-session list from the kernel.
+ *
+ * Toggles `sessionsLoading` around the round-trip so the picker can
+ * render a skeleton. List-refresh policy (Slice C decision): we ONLY
+ * call this on activate, after save, and after delete — NOT on every
+ * `turns.length` change. The legacy was chatty (reference §5); we're
+ * deliberately quieter.
+ */
+export async function loadSessions(api: PluginAPI): Promise<void> {
+  const store = useAiStore.getState()
+  store.setSessionsLoading(true)
+  try {
+    const raw = await api.kernel.invoke<unknown>(
+      AI_PLUGIN_ID,
+      HANDLER_SESSION_LIST,
+      {},
+    )
+    useAiStore.getState().setSessions(coerceSessionList(raw))
+  } catch (err) {
+    // Plugin may not be wired yet — swallow per legacy (ChatPanel.tsx:287).
+    // eslint-disable-next-line no-console
+    console.warn('[nexus.ai] loadSessions failed', err)
+    useAiStore.getState().setSessions([])
+  } finally {
+    useAiStore.getState().setSessionsLoading(false)
+  }
+}
+
+interface PersistedSession {
+  id?: string
+  title?: string
+  turns?: unknown
+  updated_at?: string
+}
+
+/** Reconstruct a turn from the persisted JSON. Mirrors the inverse of
+ *  `turnsForPersist`. Defensive: drops malformed entries silently so a
+ *  partially-corrupt session file doesn't strand the UI. */
+function decodeTurn(raw: unknown): AiTurn | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (r.kind === 'user') {
+    if (typeof r.id !== 'string' || typeof r.question !== 'string') return null
+    return {
+      kind: 'user',
+      id: r.id,
+      question: r.question,
+      askedAt: typeof r.askedAt === 'number' ? r.askedAt : Date.now(),
+    }
+  }
+  if (r.kind === 'assistant') {
+    if (typeof r.id !== 'string' || typeof r.requestId !== 'string') return null
+    const sources = Array.isArray(r.sources)
+      ? (r.sources as unknown[]).filter(
+          (s): s is AiSource =>
+            !!s && typeof s === 'object' && typeof (s as AiSource).path === 'string',
+        )
+      : []
+    // Persisted turns are never `streaming` (filtered by turnsForPersist),
+    // and `error` is rehydrated as 'done' since the Error object can't
+    // round-trip through JSON without losing its prototype. The persisted
+    // body still shows in the bubble.
+    return {
+      kind: 'assistant',
+      id: r.id,
+      requestId: r.requestId,
+      status: 'done',
+      streamedText: '',
+      finalText: typeof r.finalText === 'string' ? r.finalText : null,
+      sources,
+      error: null,
+    }
+  }
+  return null
+}
+
+function decodeTurns(raw: unknown): AiTurn[] {
+  if (!Array.isArray(raw)) return []
+  const out: AiTurn[] = []
+  for (const item of raw) {
+    const t = decodeTurn(item)
+    if (t) out.push(t)
+  }
+  return out
+}
+
+/**
+ * Load a saved session by id. Cancels any in-flight stream first so
+ * late chunks from the previous request can't land into the freshly
+ * hydrated turns. Sets activeSessionId on success.
+ */
+export async function loadSession(api: PluginAPI, id: string): Promise<void> {
+  // Cancel before swapping turns — otherwise a tail chunk from the
+  // departing stream would write into the hydrated assistant turn (or
+  // bounce off the missing-turn guard, depending on requestId).
+  cancelInFlight()
+  try {
+    const raw = await api.kernel.invoke<PersistedSession | null>(
+      AI_PLUGIN_ID,
+      HANDLER_SESSION_LOAD,
+      { id },
+    )
+    if (!raw || typeof raw !== 'object') {
+      // Empty / missing — show as empty and adopt id so subsequent
+      // saves overwrite the empty file rather than minting a new one.
+      useAiStore.getState().hydrateTurns([])
+      useAiStore.getState().setActiveSessionId(id)
+      return
+    }
+    const turns = decodeTurns(raw.turns)
+    useAiStore.getState().hydrateTurns(turns)
+    useAiStore.getState().setActiveSessionId(id)
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[nexus.ai] loadSession failed', err)
+  }
+}
+
+interface SaveResult {
+  bytes?: number
+  id?: string | null
+}
+
+/**
+ * Persist the current `turns` to the kernel.
+ *
+ * If `activeSessionId` is null, mints a new id (Slice C: this is how
+ * "fork from existing" works — call after `newSession` to start a
+ * fresh saved conversation). Title resolution order:
+ *
+ *   1. caller-supplied `title` arg (used by rename + explicit "Save as")
+ *   2. existing session's title (preserve user-edits across auto-saves)
+ *   3. `deriveTitle(turns)` — auto from first user turn
+ *   4. empty string (no user turns yet, no title supplied)
+ *
+ * Refreshes the session list on success so the picker reflects the
+ * new updated_at + (for new sessions) the new entry. Empty
+ * conversations are NOT persisted — they'd just be noise in the list.
+ */
+export async function saveCurrentSession(
+  api: PluginAPI,
+  title?: string,
+): Promise<string | null> {
+  const state = useAiStore.getState()
+  const persistTurns = turnsForPersist(state.turns)
+  if (persistTurns.length === 0) return null
+
+  const id = state.activeSessionId ?? newSessionId()
+  let resolvedTitle = title
+  if (resolvedTitle === undefined) {
+    const existing = state.sessions.find((s) => s.id === id)
+    resolvedTitle = existing?.title || deriveTitle(persistTurns)
+  }
+  const updated_at = new Date().toISOString()
+
+  try {
+    await api.kernel.invoke<SaveResult>(AI_PLUGIN_ID, HANDLER_SESSION_SAVE, {
+      id,
+      title: resolvedTitle,
+      turns: persistTurns,
+      updated_at,
+    })
+    if (state.activeSessionId !== id) {
+      useAiStore.getState().setActiveSessionId(id)
+    }
+    // Refresh list so the picker shows the new title / updated_at.
+    await loadSessions(api)
+    return id
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[nexus.ai] saveCurrentSession failed', err)
+    return null
+  }
+}
+
+/**
+ * Delete a session by id. If the deleted session is the active one,
+ * also clears the local conversation (the user's looking at content
+ * that no longer has a backing file — leaving it on screen invites
+ * an accidental save under a new id).
+ */
+export async function deleteSession(api: PluginAPI, id: string): Promise<void> {
+  try {
+    await api.kernel.invoke<unknown>(AI_PLUGIN_ID, HANDLER_SESSION_DELETE, { id })
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[nexus.ai] deleteSession failed', err)
+    // Still proceed to refresh the list — legacy ChatPanel.tsx:798
+    // pattern (warn + carry on; the file may already be gone).
+  }
+  const state = useAiStore.getState()
+  if (state.activeSessionId === id) {
+    cancelInFlight()
+    state.newSession()
+  }
+  await loadSessions(api)
+}
+
+/**
+ * Rename a session. The kernel doesn't expose a dedicated handler;
+ * this is `session_save` with the existing id + new title. We re-save
+ * the existing turns from disk to preserve the body (we may not have
+ * them in memory if the session isn't the active one).
+ *
+ * For the active session we shortcut and reuse the in-memory `turns`
+ * — saves the round-trip and avoids a momentary state where the disk
+ * file has fewer turns than the screen.
+ */
+export async function renameSession(
+  api: PluginAPI,
+  id: string,
+  title: string,
+): Promise<void> {
+  const trimmed = title.trim()
+  if (trimmed.length === 0) return
+  const state = useAiStore.getState()
+
+  let turnsToWrite: AiTurn[]
+  if (state.activeSessionId === id) {
+    turnsToWrite = turnsForPersist(state.turns)
+  } else {
+    try {
+      const raw = await api.kernel.invoke<PersistedSession | null>(
+        AI_PLUGIN_ID,
+        HANDLER_SESSION_LOAD,
+        { id },
+      )
+      turnsToWrite = decodeTurns(raw?.turns)
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[nexus.ai] renameSession load failed', err)
+      return
+    }
+  }
+
+  try {
+    await api.kernel.invoke<SaveResult>(AI_PLUGIN_ID, HANDLER_SESSION_SAVE, {
+      id,
+      title: trimmed,
+      turns: turnsToWrite,
+      updated_at: new Date().toISOString(),
+    })
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[nexus.ai] renameSession save failed', err)
+    return
+  }
+  await loadSessions(api)
+}
+
+/**
+ * "New chat" entrypoint. Auto-saves the outgoing conversation under
+ * its current id (so the user doesn't lose work mid-stream), cancels
+ * any in-flight request, then clears local state via `newSession`.
+ *
+ * The auto-save is fire-and-forget on the partial — the cancel-stream
+ * pathway flips the streaming assistant turn to `done` first
+ * (preserving streamedText as finalText), so what lands on disk is
+ * coherent and renderable on the next load.
+ */
+export async function startNewChat(api: PluginAPI): Promise<void> {
+  // Cancel BEFORE the autosave so the streaming turn is finalized into
+  // its partial finalText — turnsForPersist would otherwise drop it.
+  cancelInFlight()
+  // Best-effort; never block the new-chat action on save failure.
+  await saveCurrentSession(api).catch(() => undefined)
+  useAiStore.getState().newSession()
+}
+
+// ── Auto-save debouncer ───────────────────────────────────────────────────
+
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Schedule a debounced auto-save. Replaces any pending timer — only
+ * the trailing call wins, so a streaming burst that produces three
+ * `stream_done` events back-to-back collapses into one disk write.
+ *
+ * Wire this from `index.ts` via a `useAiStore.subscribe` on the turns
+ * array; whenever the most-recent assistant turn becomes `done`, call
+ * here. Empty conversations are no-ops (saveCurrentSession bails).
+ */
+export function scheduleAutosave(api: PluginAPI): void {
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null
+    void saveCurrentSession(api)
+  }, AUTOSAVE_DEBOUNCE_MS)
+}
+
+/** Tear down any pending autosave — used on plugin deactivate / test
+ *  isolation. */
+export function flushAutosave(): void {
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
   }
 }

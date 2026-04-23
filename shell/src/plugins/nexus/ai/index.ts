@@ -32,6 +32,14 @@ import {
   submitQuestion,
   cancelInFlight,
   retryLast,
+  loadSessions,
+  loadSession,
+  deleteSession,
+  renameSession,
+  saveCurrentSession,
+  startNewChat,
+  scheduleAutosave,
+  flushAutosave,
 } from './aiRuntime'
 
 const VIEW_ID = 'nexus.ai.view'
@@ -80,11 +88,30 @@ export const aiPlugin: Plugin = {
     const onEmit = (event: string, payload: unknown) => {
       api.events.emit(event, payload)
     }
+    // Slice C session-management bindings. Same closure-over-api
+    // pattern as send/cancel/retry above so the view stays decoupled
+    // from PluginAPI.
+    const onNewChat = () => startNewChat(api)
+    const onLoadSession = (id: string) => loadSession(api, id)
+    const onDeleteSession = (id: string) => deleteSession(api, id)
+    const onRenameSession = (id: string, title: string) =>
+      renameSession(api, id, title)
+    const onSaveSession = () => saveCurrentSession(api).then(() => undefined)
 
     viewRegistry.register(
       'ai-chat',
       aiChatViewCreator(() =>
-        createElement(ChatView, { onSend, onCancel, onRetry, onEmit }),
+        createElement(ChatView, {
+          onSend,
+          onCancel,
+          onRetry,
+          onEmit,
+          onNewChat,
+          onLoadSession,
+          onDeleteSession,
+          onRenameSession,
+          onSaveSession,
+        }),
       ),
     )
 
@@ -121,15 +148,43 @@ export const aiPlugin: Plugin = {
     // plugin unload.
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
       cancelInFlight()
+      flushAutosave()
       useAiStore.getState().reset()
       useAiStore.setState({ config: null })
     })
 
-    // Fan out two awaits: subscription must be live before any
+    // ── Slice C: auto-save on assistant turn completion ───────────────────
+    //
+    // Subscribe to the turns array. Whenever the most recent assistant
+    // turn flips to status='done' AND we have content worth saving,
+    // schedule a debounced save. The debounce collapses streaming
+    // bursts into one disk write; per `aiRuntime.AUTOSAVE_DEBOUNCE_MS`
+    // the trailing edge wins.
+    //
+    // Decision (vs legacy ChatPanel.tsx auto-save on every turns.length
+    // change): we only fire when an assistant turn finalizes, not on
+    // user-turn append. The user turn alone has nothing to recover —
+    // it's still in the composer-state-machine until the assistant
+    // responds, and a save under just a user prompt would create a
+    // titled session with no content if the kernel errors.
+    let lastDoneCount = 0
+    useAiStore.subscribe((state) => {
+      const doneCount = state.turns.reduce(
+        (n, t) => (t.kind === 'assistant' && t.status === 'done' ? n + 1 : n),
+        0,
+      )
+      if (doneCount > lastDoneCount && doneCount > 0) {
+        scheduleAutosave(api)
+      }
+      lastDoneCount = doneCount
+    })
+
+    // Fan out three awaits: subscription must be live before any
     // submit could fire (otherwise we'd miss the first chunks);
-    // config hydration is best-effort and non-blocking for UX.
+    // config + sessions hydration are best-effort and non-blocking.
     await subscribeStream(api)
     void hydrateConfig(api)
+    void loadSessions(api)
   },
 
   // No deactivate — PluginRegistry.unregisterAll sweeps the kernel

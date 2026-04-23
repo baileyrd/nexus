@@ -1,6 +1,7 @@
 // shell/src/plugins/nexus/ai/aiStore.ts
 //
 // WI-01 Slice B — multi-turn conversation store with RAG sources.
+// WI-01 Slice C — session management (save/load/list/delete/rename).
 //
 // Slice A held a single Q/A pair (`question`, `streamedAnswer`,
 // `finalAnswer`). Slice B replaces those with an ordered `turns`
@@ -88,6 +89,24 @@ export type AiTurn =
 
 export type AiStatus = 'idle' | 'asking' | 'streaming' | 'error'
 
+/** Lightweight session metadata returned by `com.nexus.ai::session_list`.
+ *  Mirrors the kernel's payload (`crates/nexus-ai/src/core_plugin.rs`
+ *  `handle_session_list`) — note the kernel returns `{ id, title?,
+ *  updated_at?, bytes }` only. There's no `created_at` or `turn_count`
+ *  on the wire, so we synthesize neither here. */
+export interface AiSessionMeta {
+  /** Stable, validated session id. Used as the kernel filename stem. */
+  id: string
+  /** Display title — auto-derived from the first user turn, or
+   *  user-renamed via inline edit. May be empty/null on disk. */
+  title: string
+  /** ISO timestamp from the most recent save; null if the kernel
+   *  didn't surface one (defensive — older sessions may lack it). */
+  updatedAt: string | null
+  /** Encoded byte size on disk. Surfaced for ops display only. */
+  bytes: number
+}
+
 export interface AiState {
   /** Lifecycle phase of the in-flight request (max one at a time). */
   status: AiStatus
@@ -99,6 +118,17 @@ export interface AiState {
   currentRequestId: string | null
   /** Hydrated once on activate from `com.nexus.ai::config`. */
   config: AiConfig | null
+
+  /** Saved sessions enumerated via `session_list`. Refreshed after save
+   *  / delete; not on every turn change (legacy was chatty — see
+   *  `docs/wi01-chatpanel-reference.md` §5). */
+  sessions: AiSessionMeta[]
+  /** Id of the currently-loaded session. `null` means a fresh, unsaved
+   *  conversation; the next `saveCurrentSession` call mints an id. */
+  activeSessionId: string | null
+  /** True while `session_list` is in flight. The picker shows a
+   *  skeleton/spinner during initial hydration. */
+  sessionsLoading: boolean
 
   // ── actions ──────────────────────────────────────────────────────────────
   setQuestion: (q: string) => void
@@ -117,6 +147,27 @@ export interface AiState {
   clearTurns: () => void
   /** Wipe everything except the hydrated config. Used by workspace close. */
   reset: () => void
+
+  // ── session-management actions (Slice C) ────────────────────────────────
+  /** Replace the in-memory session list. Fed by aiRuntime after a
+   *  successful `session_list` round-trip. */
+  setSessions: (sessions: AiSessionMeta[]) => void
+  /** Toggle the loading flag — used by the runtime around `session_list`. */
+  setSessionsLoading: (loading: boolean) => void
+  /** Set the active session id without otherwise mutating turns.
+   *  Used by `loadSession` after the kernel returns and `newSession`
+   *  to reset to "unsaved". */
+  setActiveSessionId: (id: string | null) => void
+  /** Replace `turns` wholesale with a hydrated session payload. The
+   *  runtime uses this when the user picks a session from the list.
+   *  Status/in-flight state is left alone — the caller is expected to
+   *  cancel/auto-save first (see `aiRuntime.loadSession`). */
+  hydrateTurns: (turns: AiTurn[]) => void
+  /** Local-only "new chat": clear turns + active id. No kernel call.
+   *  Auto-save lives in the runtime; the next save mints a fresh id.
+   *  Does NOT cancel an in-flight stream — the runtime handles that
+   *  before calling this so the partial can be auto-saved first. */
+  newSession: () => void
 }
 
 const INITIAL: Omit<
@@ -130,12 +181,20 @@ const INITIAL: Omit<
   | 'setConfig'
   | 'clearTurns'
   | 'reset'
+  | 'setSessions'
+  | 'setSessionsLoading'
+  | 'setActiveSessionId'
+  | 'hydrateTurns'
+  | 'newSession'
 > = {
   status: 'idle',
   turns: [],
   question: '',
   currentRequestId: null,
   config: null,
+  sessions: [],
+  activeSessionId: null,
+  sessionsLoading: false,
 }
 
 /** Locate the in-flight assistant turn for a given requestId. Returns
@@ -313,4 +372,26 @@ export const useAiStore = create<AiState>((set, get) => ({
       // request-lifetime state.
       config: s.config,
     })),
+
+  // ── session-management actions (Slice C) ────────────────────────────────
+
+  setSessions: (sessions) => set({ sessions }),
+
+  setSessionsLoading: (loading) => set({ sessionsLoading: loading }),
+
+  setActiveSessionId: (id) => set({ activeSessionId: id }),
+
+  hydrateTurns: (turns) =>
+    // Wholesale replace. We deliberately leave `status` /
+    // `currentRequestId` alone: the runtime is expected to cancel any
+    // in-flight stream BEFORE calling hydrate (otherwise loaded turns
+    // would get clobbered by a stale chunk landing afterward).
+    set({ turns }),
+
+  newSession: () =>
+    // Clear conversation + drop the active id so the next save mints
+    // a fresh one. Doesn't touch the in-flight stream — the runtime
+    // wraps this with `cancelInFlight()` and an auto-save of any
+    // unflushed turns when invoked from "New chat".
+    set({ turns: [], activeSessionId: null }),
 }))

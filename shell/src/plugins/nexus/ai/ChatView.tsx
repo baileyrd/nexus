@@ -1,6 +1,12 @@
 // shell/src/plugins/nexus/ai/ChatView.tsx
 //
 // WI-01 Slice B — multi-turn chat view with markdown + RAG chips.
+// WI-01 Slice C — session picker (collapsible drawer) at the top of
+// the column. Two-pane was rejected: the AI chat lives in the right
+// activity-bar pane, which docks at ~280–320px wide. A 200px session
+// rail would leave ~80px for the conversation, which is unusable for
+// reading. The drawer pattern keeps the conversation full-width and
+// surfaces the picker on demand without stealing horizontal space.
 //
 // Renders `useAiStore.turns` as a scrollable list above a fixed
 // composer. Each turn:
@@ -18,7 +24,7 @@
 // to the markdown editor preview.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useAiStore, type AiSource, type AiTurn } from './aiStore'
+import { useAiStore, type AiSessionMeta, type AiSource, type AiTurn } from './aiStore'
 import { registerFocuser } from './aiRuntime'
 import { renderMarkdown } from '../editor/markdownRender'
 import './chat.css'
@@ -32,14 +38,40 @@ export interface ChatViewProps {
   /** Emit a cross-plugin event. Lets us open a source file in the
    *  editor without reaching into PluginAPI from the view. */
   onEmit?: (event: string, payload: unknown) => void
+  // ── Slice C: session-management bindings ────────────────────────────────
+  /** "New chat" — clears + auto-saves outgoing under prior id. */
+  onNewChat?: () => void | Promise<void>
+  /** Switch to a saved session by id. Cancels in-flight first. */
+  onLoadSession?: (id: string) => void | Promise<void>
+  /** Remove a session permanently. */
+  onDeleteSession?: (id: string) => void | Promise<void>
+  /** Rename a session (kernel: session_save with same id, new title). */
+  onRenameSession?: (id: string, title: string) => void | Promise<void>
+  /** Manual save — used by the explicit "Save" button. Auto-save runs
+   *  on assistant-done debounced, but power users want a button too. */
+  onSaveSession?: () => void | Promise<void>
 }
 
-export function ChatView({ onSend, onCancel, onRetry, onEmit }: ChatViewProps) {
+export function ChatView({
+  onSend,
+  onCancel,
+  onRetry,
+  onEmit,
+  onNewChat,
+  onLoadSession,
+  onDeleteSession,
+  onRenameSession,
+  onSaveSession,
+}: ChatViewProps) {
   const status = useAiStore((s) => s.status)
   const turns = useAiStore((s) => s.turns)
   const question = useAiStore((s) => s.question)
   const config = useAiStore((s) => s.config)
+  const sessions = useAiStore((s) => s.sessions)
+  const activeSessionId = useAiStore((s) => s.activeSessionId)
+  const sessionsLoading = useAiStore((s) => s.sessionsLoading)
   const setQuestion = useAiStore((s) => s.setQuestion)
+  const [showSessions, setShowSessions] = useState(false)
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -137,6 +169,22 @@ export function ChatView({ onSend, onCancel, onRetry, onEmit }: ChatViewProps) {
       }}
     >
       <ConfigBanner config={config} />
+
+      {onNewChat || onLoadSession || onDeleteSession || onRenameSession ? (
+        <SessionBar
+          sessions={sessions}
+          activeId={activeSessionId}
+          loading={sessionsLoading}
+          expanded={showSessions}
+          onToggleExpanded={() => setShowSessions((v) => !v)}
+          onNewChat={onNewChat}
+          onSaveSession={onSaveSession}
+          onLoadSession={onLoadSession}
+          onDeleteSession={onDeleteSession}
+          onRenameSession={onRenameSession}
+          hasContent={turns.length > 0}
+        />
+      ) : null}
 
       <div
         ref={scrollRef}
@@ -663,6 +711,336 @@ function ActionButton({
         fontFamily: 'var(--f-ui)',
         fontSize: 12,
         opacity: disabled ? 0.55 : 1,
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+// ── Slice C: session bar + list ───────────────────────────────────────────
+
+interface SessionBarProps {
+  sessions: AiSessionMeta[]
+  activeId: string | null
+  loading: boolean
+  expanded: boolean
+  hasContent: boolean
+  onToggleExpanded: () => void
+  onNewChat?: () => void | Promise<void>
+  onSaveSession?: () => void | Promise<void>
+  onLoadSession?: (id: string) => void | Promise<void>
+  onDeleteSession?: (id: string) => void | Promise<void>
+  onRenameSession?: (id: string, title: string) => void | Promise<void>
+}
+
+function SessionBar({
+  sessions,
+  activeId,
+  loading,
+  expanded,
+  hasContent,
+  onToggleExpanded,
+  onNewChat,
+  onSaveSession,
+  onLoadSession,
+  onDeleteSession,
+  onRenameSession,
+}: SessionBarProps) {
+  const activeMeta = useMemo(
+    () => sessions.find((s) => s.id === activeId) ?? null,
+    [sessions, activeId],
+  )
+  // Header label: active title if loaded, otherwise "(unsaved)" when
+  // there's content, otherwise the count of saved sessions.
+  const headerLabel = activeMeta?.title?.trim()
+    ? activeMeta.title
+    : hasContent
+      ? '(unsaved)'
+      : sessions.length === 0
+        ? 'No saved sessions'
+        : `${sessions.length} saved`
+
+  return (
+    <div
+      style={{
+        borderBottom: '1px solid var(--line-soft)',
+        background: 'var(--bg-raised)',
+        flex: '0 0 auto',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '4px 8px',
+          minHeight: 28,
+        }}
+      >
+        <button
+          type="button"
+          onClick={onToggleExpanded}
+          title={expanded ? 'Hide sessions' : 'Show sessions'}
+          style={{
+            border: '1px solid var(--line-soft)',
+            background: 'transparent',
+            color: 'var(--fg-dim)',
+            borderRadius: 'var(--r)',
+            padding: '2px 6px',
+            fontFamily: 'var(--f-ui)',
+            fontSize: 11,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+          }}
+        >
+          <span aria-hidden style={{ display: 'inline-block', width: 8 }}>
+            {expanded ? '▾' : '▸'}
+          </span>
+          <span
+            style={{
+              maxWidth: 160,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {headerLabel}
+          </span>
+        </button>
+
+        <div style={{ flex: '1 1 auto' }} />
+
+        {onSaveSession && hasContent ? (
+          <SmallChip
+            label="Save"
+            onClick={onSaveSession}
+            title="Save current conversation"
+          />
+        ) : null}
+        {onNewChat ? (
+          <SmallChip
+            label="New"
+            onClick={onNewChat}
+            title="Start a fresh conversation"
+            tone="accent"
+          />
+        ) : null}
+      </div>
+
+      {expanded ? (
+        <div
+          style={{
+            borderTop: '1px solid var(--line-soft)',
+            maxHeight: 200,
+            overflowY: 'auto',
+            padding: '4px 0',
+          }}
+        >
+          {loading && sessions.length === 0 ? (
+            <div
+              style={{
+                padding: '6px 12px',
+                fontSize: 11,
+                color: 'var(--fg-muted)',
+              }}
+            >
+              Loading sessions…
+            </div>
+          ) : sessions.length === 0 ? (
+            <div
+              style={{
+                padding: '6px 12px',
+                fontSize: 11,
+                color: 'var(--fg-muted)',
+                fontStyle: 'italic',
+              }}
+            >
+              No saved sessions yet. Send a message to create one.
+            </div>
+          ) : (
+            sessions.map((s) => (
+              <SessionListItem
+                key={s.id}
+                meta={s}
+                active={s.id === activeId}
+                onLoad={onLoadSession}
+                onDelete={onDeleteSession}
+                onRename={onRenameSession}
+              />
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+interface SessionListItemProps {
+  meta: AiSessionMeta
+  active: boolean
+  onLoad?: (id: string) => void | Promise<void>
+  onDelete?: (id: string) => void | Promise<void>
+  onRename?: (id: string, title: string) => void | Promise<void>
+}
+
+function SessionListItem({ meta, active, onLoad, onDelete, onRename }: SessionListItemProps) {
+  // Inline rename: double-click switches to an input, Enter / blur
+  // commits, Escape cancels. Pattern picked over a separate "edit"
+  // button to keep the row dense — the activity-bar pane is narrow
+  // and a third action button would crowd the row.
+  const [editing, setEditing] = useState(false)
+  const [draftTitle, setDraftTitle] = useState(meta.title)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  }, [editing])
+
+  // Reset draft when we exit edit mode or the underlying title changes
+  // (e.g., another tab renamed it via session_save). Without this the
+  // input would show stale text on next double-click.
+  useEffect(() => {
+    if (!editing) setDraftTitle(meta.title)
+  }, [editing, meta.title])
+
+  const commitRename = useCallback(() => {
+    const trimmed = draftTitle.trim()
+    setEditing(false)
+    if (!trimmed || trimmed === meta.title) return
+    if (onRename) void onRename(meta.id, trimmed)
+  }, [draftTitle, meta.id, meta.title, onRename])
+
+  const displayTitle = meta.title?.trim() ? meta.title : '(untitled)'
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '4px 8px',
+        background: active ? 'var(--bg-active, var(--bg))' : 'transparent',
+        borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+        cursor: editing ? 'text' : 'pointer',
+      }}
+      onClick={() => {
+        if (editing) return
+        if (active) return
+        if (onLoad) void onLoad(meta.id)
+      }}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        if (onRename) setEditing(true)
+      }}
+      title={editing ? 'Renaming…' : 'Click to load · double-click to rename'}
+    >
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draftTitle}
+          onChange={(e) => setDraftTitle(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commitRename()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              setEditing(false)
+              setDraftTitle(meta.title)
+            }
+          }}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            flex: '1 1 auto',
+            minWidth: 0,
+            background: 'var(--bg)',
+            color: 'var(--fg)',
+            border: '1px solid var(--accent)',
+            borderRadius: 'var(--r)',
+            padding: '2px 6px',
+            fontFamily: 'var(--f-ui)',
+            fontSize: 12,
+            outline: 'none',
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            flex: '1 1 auto',
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            fontSize: 12,
+            color: meta.title?.trim() ? 'var(--fg)' : 'var(--fg-muted)',
+            fontStyle: meta.title?.trim() ? 'normal' : 'italic',
+          }}
+        >
+          {displayTitle}
+        </div>
+      )}
+
+      {!editing && onDelete ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            void onDelete(meta.id)
+          }}
+          title="Delete session"
+          style={{
+            flex: '0 0 auto',
+            border: '1px solid transparent',
+            background: 'transparent',
+            color: 'var(--fg-muted)',
+            borderRadius: 'var(--r)',
+            padding: '0 6px',
+            fontSize: 12,
+            lineHeight: '20px',
+            cursor: 'pointer',
+          }}
+        >
+          ×
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function SmallChip({
+  label,
+  onClick,
+  title,
+  tone,
+}: {
+  label: string
+  onClick: () => void | Promise<void>
+  title?: string
+  tone?: 'accent'
+}) {
+  const color = tone === 'accent' ? 'var(--accent)' : 'var(--fg-dim)'
+  return (
+    <button
+      type="button"
+      onClick={() => void onClick()}
+      title={title}
+      style={{
+        flex: '0 0 auto',
+        border: `1px solid ${tone === 'accent' ? color : 'var(--line-soft)'}`,
+        background: 'transparent',
+        color,
+        borderRadius: 'var(--r)',
+        padding: '2px 8px',
+        fontFamily: 'var(--f-ui)',
+        fontSize: 11,
+        cursor: 'pointer',
       }}
     >
       {label}
