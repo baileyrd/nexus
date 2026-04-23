@@ -41,6 +41,7 @@ import { Minimap, type MinimapHandle } from './Minimap'
 import { exportCanvasPng, triggerDownload } from './exportPng'
 import { autoLayout } from './autoLayout'
 import { setActiveCanvas, type CanvasHandle } from './activeCanvas'
+import { createPatchQueue } from './patchQueue'
 import { contextKeyService } from '../../../host/ContextKeyService'
 import type {
   CanvasKernelClient,
@@ -240,10 +241,50 @@ export function CanvasView({ relpath, client }: Props) {
 
   // ── Commit helpers ───────────────────────────────────────────────────
 
+  // WI-11 §4.3 closer: route every `canvas_patch` through a debounced
+  // single-flight queue (see patchQueue.ts for the rationale). One
+  // queue per canvas tab — recreated when `relpath` changes. The
+  // unmount cleanup awaits a final drain so closing a tab mid-edit
+  // doesn't drop pending patches.
+  const queueRef = useRef<ReturnType<typeof createPatchQueue> | null>(null)
+  useEffect(() => {
+    const queue = createPatchQueue({
+      patch: (ops) => clientRef.current.patch(relpath, ops),
+      onError: (err) => {
+        // Surface to the tab so the corner label flips to error
+        // mode; also keep the console breadcrumb the pre-WI-11
+        // handler had so existing operator runbooks still work.
+        console.warn('[nexus.canvas] patch failed:', err)
+        useCanvasStore.getState().setPatchError(relpath, String(err))
+      },
+    })
+    queueRef.current = queue
+    // Browser reload / tab close: best-effort flush. Async dispose
+    // can't block `pagehide`, but kicking the IPC out before the
+    // window dies catches the common "user typed something then
+    // hit Cmd-W" path.
+    const onPageHide = () => {
+      void queue.flushNow()
+    }
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      window.removeEventListener('pagehide', onPageHide)
+      queueRef.current = null
+      void queue.dispose()
+    }
+  }, [relpath])
+
   /** Flush a forward patch to the kernel and record the matching
    *  inverse for undo. `skipHistory = true` means the caller is itself
    *  driving undo/redo — the history stacks are managed separately in
-   *  that path. */
+   *  that path.
+   *
+   *  Pre-WI-11 this fired the IPC immediately and discarded the
+   *  promise. Now it enqueues onto the per-canvas patch queue
+   *  (debounced + single-flight). The `pointerup` handler calls
+   *  `flushNow()` so drag-end + edge-create + resize-end always
+   *  land before the next user action — preserving the existing
+   *  drag-coalescing guarantee. */
   const commit = (
     forward: import('./kernelClient').CanvasPatchOp[],
     inverse: import('./kernelClient').CanvasPatchOp[],
@@ -253,9 +294,7 @@ export function CanvasView({ relpath, client }: Props) {
     if (!opts.skipHistory) {
       useCanvasStore.getState().pushHistory(relpath, { forward, inverse })
     }
-    void clientRef.current
-      .patch(relpath, forward)
-      .catch((err) => console.warn('[nexus.canvas] patch failed:', err))
+    queueRef.current?.enqueue(forward)
   }
 
   const commitRef = useRef(commit)
@@ -626,7 +665,19 @@ export function CanvasView({ relpath, client }: Props) {
       const finished = drag
       drag = { kind: 'none' }
       canvas.style.cursor = 'grab'
+      // Drag-end flush: any patch enqueued by the gesture-end
+      // commits below should land before the next user action, so
+      // the existing structural drag-coalescing guarantee survives
+      // the move to a debounced queue (WI-11). Wrap the dispatch
+      // so every early-return path still triggers the flush.
+      try {
+        dispatchPointerUp(finished)
+      } finally {
+        void queueRef.current?.flushNow()
+      }
+    }
 
+    const dispatchPointerUp = (finished: Exclude<DragMode, { kind: 'none' }>) => {
       if (finished.kind === 'marquee') {
         marqueeRef.current = null
         return
@@ -784,9 +835,12 @@ export function CanvasView({ relpath, client }: Props) {
   const applyHistoryEntry = useCallback((ops: CanvasPatchOp[]) => {
     if (ops.length === 0) return
     useCanvasStore.getState().updateDoc(relpath, (d) => applyPatchOps(d, ops))
-    void clientRef.current
-      .patch(relpath, ops)
-      .catch((err) => console.warn('[nexus.canvas] undo/redo patch failed:', err))
+    // Route undo/redo through the same queue so a rapid Ctrl+Z mash
+    // collapses into one IPC and never reorders against an in-flight
+    // direct edit (single-flight serialises both code paths). Flush
+    // immediately — the user is asking for a state change "now".
+    queueRef.current?.enqueue(ops)
+    void queueRef.current?.flushNow()
   }, [relpath])
 
   const runUndo = useCallback(() => {

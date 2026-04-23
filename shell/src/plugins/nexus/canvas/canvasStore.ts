@@ -67,6 +67,12 @@ interface CanvasStore {
   setLoading: (relpath: string) => void
   setDoc: (relpath: string, doc: CanvasDoc) => void
   setError: (relpath: string, error: string) => void
+  /** Surface a `canvas_patch` failure into the tab without clearing
+   *  the `loading` flag (failure is on the write path, not the
+   *  initial load). The doc stays optimistically applied — the user
+   *  sees their edits and a banner; next flush either succeeds and
+   *  clears, or fails again. WI-11 hook for the patch queue. */
+  setPatchError: (relpath: string, error: string) => void
   clear: (relpath: string) => void
   get: (relpath: string) => CanvasTabState | undefined
   setCamera: (relpath: string, camera: Camera) => void
@@ -116,6 +122,8 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     set((s) => ({ tabs: produce(s.tabs, relpath, { doc, loading: false, error: null }) })),
   setError: (relpath, error) =>
     set((s) => ({ tabs: produce(s.tabs, relpath, { error, loading: false }) })),
+  setPatchError: (relpath, error) =>
+    set((s) => ({ tabs: produce(s.tabs, relpath, { error }) })),
   clear: (relpath) =>
     set((s) => {
       const next = new Map(s.tabs)
