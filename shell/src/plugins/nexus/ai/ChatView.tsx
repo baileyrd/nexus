@@ -1,28 +1,41 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import { useAiStore, type AiMessage } from './aiStore'
-import { registerFocuser, send } from './aiRuntime'
-import { renderMarkdown } from '../editor/markdownRender'
-import '../editor/markdown.css'
+// shell/src/plugins/nexus/ai/ChatView.tsx
+//
+// WI-01 Slice A — minimal chat view. Single Q + single streamed A.
+// No conversation history, no RAG source chips, no markdown
+// rendering, no copy buttons. Slices B/C add those.
+//
+// State lives in `useAiStore`; runtime calls in `aiRuntime`. This
+// file is purely presentational.
+
+import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useAiStore } from './aiStore'
+import { registerFocuser } from './aiRuntime'
 import './chat.css'
 
-/**
- * Sidebar chat view backed by com.nexus.ai::ask. Messages scroll up
- * top; input pinned at bottom. Send on Enter (Shift+Enter for
- * newline, Escape to clear the composer).
- *
- * This is a deliberately thin first cut — stateless RAG asks only.
- * Streaming + multi-turn memory are separate follow-ups.
- */
-export function ChatView() {
-  const messages = useAiStore((s) => s.messages)
-  const input = useAiStore((s) => s.input)
-  const sending = useAiStore((s) => s.sending)
-  const setInput = useAiStore((s) => s.setInput)
+export interface ChatViewProps {
+  /** Provided by the plugin's activate() — gives us a stable handle
+   *  on the same PluginAPI the runtime is using for kernel.invoke /
+   *  kernel.on. Decoupled from the runtime module so the view can
+   *  be rendered in isolation for tests. */
+  onSend: (question: string) => void | Promise<void>
+  onCancel: () => void
+  onRetry: () => void | Promise<void>
+}
 
-  const scrollRef = useRef<HTMLDivElement | null>(null)
+export function ChatView({ onSend, onCancel, onRetry }: ChatViewProps) {
+  const status = useAiStore((s) => s.status)
+  const question = useAiStore((s) => s.question)
+  const streamedAnswer = useAiStore((s) => s.streamedAnswer)
+  const finalAnswer = useAiStore((s) => s.finalAnswer)
+  const error = useAiStore((s) => s.error)
+  const config = useAiStore((s) => s.config)
+  const setQuestion = useAiStore((s) => s.setQuestion)
+
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
 
-  // Expose focus() to the focus command + autofocus on first mount.
+  // Wire the focus command. Drains pendingFocus on mount; clears the
+  // focuser on unmount so a stale ref doesn't outlive the view.
   useEffect(() => {
     const focus = () => {
       requestAnimationFrame(() => textareaRef.current?.focus())
@@ -32,59 +45,38 @@ export function ChatView() {
     return () => registerFocuser(null)
   }, [])
 
-  // Auto-scroll to bottom whenever the message count changes or the
-  // sending indicator flips. useLayoutEffect so we scroll in the same
-  // frame the new row paints — avoids a visible jump.
-  useLayoutEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-  }, [messages.length, sending])
-
-  // Auto-grow textarea up to 140px.
+  // Auto-grow textarea up to 140px (matches the prior skeleton).
   useLayoutEffect(() => {
     const ta = textareaRef.current
     if (!ta) return
     ta.style.height = 'auto'
-    const next = Math.min(140, ta.scrollHeight)
-    ta.style.height = `${next}px`
-  }, [input])
+    ta.style.height = `${Math.min(140, ta.scrollHeight)}px`
+  }, [question])
+
+  // Auto-scroll the answer pane as chunks land.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [streamedAnswer, finalAnswer])
+
+  const isInFlight = status === 'asking' || status === 'streaming'
+  const canSend = !isInFlight && question.trim().length > 0
+  // `finalAnswer ?? streamedAnswer` — the final wins once it lands.
+  const responseText = finalAnswer ?? streamedAnswer
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      void send()
+      if (canSend) void onSend(question)
       return
     }
     if (e.key === 'Escape') {
       e.preventDefault()
-      setInput('')
+      if (isInFlight) onCancel()
+      else setQuestion('')
     }
   }
-
-  const canSend = input.trim().length > 0 && !sending
-
-  const body =
-    messages.length === 0 ? (
-      <EmptyState onPickPrompt={(p) => setInput(p)} />
-    ) : (
-      <div
-        ref={scrollRef}
-        style={{
-          flex: '1 1 auto',
-          overflowY: 'auto',
-          padding: '12px 14px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
-        }}
-      >
-        {messages.map((m) => (
-          <MessageRow key={m.id} message={m} />
-        ))}
-        {sending ? <PendingRow /> : null}
-      </div>
-    )
 
   return (
     <div
@@ -99,7 +91,31 @@ export function ChatView() {
         fontSize: 13,
       }}
     >
-      {body}
+      <ConfigBanner config={config} />
+
+      <div
+        ref={scrollRef}
+        style={{
+          flex: '1 1 auto',
+          overflowY: 'auto',
+          padding: '12px 14px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          minHeight: 0,
+        }}
+      >
+        {responseText.length > 0 ? (
+          <ResponseBlock text={responseText} streaming={status === 'streaming'} />
+        ) : status === 'asking' ? (
+          <PendingRow />
+        ) : !error ? (
+          <EmptyState />
+        ) : null}
+
+        {error ? <ErrorBanner error={error} onRetry={() => void onRetry()} /> : null}
+      </div>
+
       <div
         style={{
           borderTop: '1px solid var(--line-soft)',
@@ -112,10 +128,12 @@ export function ChatView() {
       >
         <textarea
           ref={textareaRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Ask about your workspace…"
+          placeholder={
+            isInFlight ? 'Streaming response…' : 'Ask about your workspace…'
+          }
           spellCheck={false}
           rows={1}
           style={{
@@ -135,120 +153,75 @@ export function ChatView() {
             boxSizing: 'border-box',
           }}
         />
-        <SendButton disabled={!canSend} onClick={() => void send()} />
+        {isInFlight ? (
+          <ActionButton
+            label="Stop"
+            tone="danger"
+            onClick={onCancel}
+            title="Stop streaming (Esc)"
+          />
+        ) : (
+          <ActionButton
+            label="Send"
+            tone="accent"
+            disabled={!canSend}
+            onClick={() => void onSend(question)}
+            title="Send (Enter)"
+          />
+        )}
       </div>
     </div>
   )
 }
 
-function MessageRow({ message }: { message: AiMessage }) {
-  if (message.role === 'user') {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <div
-          style={{
-            background: 'var(--accent-soft)',
-            color: 'var(--fg)',
-            borderRadius: 'var(--r)',
-            padding: '6px 10px',
-            maxWidth: '85%',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            lineHeight: 1.45,
-          }}
-        >
-          {message.content}
-        </div>
-      </div>
-    )
-  }
-
-  if (message.role === 'assistant') {
-    return <AssistantRow message={message} />
-  }
-
-  if (message.role === 'error') {
+function ConfigBanner({ config }: { config: ReturnType<typeof useAiStore.getState>['config'] }) {
+  if (!config) return null
+  const ai = config.ai
+  if (!ai) {
     return (
       <div
         style={{
+          padding: '6px 12px',
+          fontSize: 11,
           color: 'var(--risk)',
-          fontSize: 12,
-          display: 'flex',
-          gap: 6,
-          alignItems: 'flex-start',
+          background: 'var(--bg-raised)',
+          borderBottom: '1px solid var(--line-soft)',
         }}
       >
-        <span aria-hidden>⚠</span>
-        <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {message.content}
-        </span>
+        No AI provider configured. Set NEXUS_AI_PROVIDER (anthropic, openai, ollama) and restart.
       </div>
     )
   }
-
-  // system
   return (
     <div
       style={{
-        color: 'var(--fg-muted)',
-        fontSize: 12,
-        fontStyle: 'italic',
-        whiteSpace: 'pre-wrap',
+        padding: '4px 12px',
+        fontSize: 10,
+        color: 'var(--fg-dim)',
+        background: 'var(--bg-raised)',
+        borderBottom: '1px solid var(--line-soft)',
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
       }}
     >
-      {message.content}
+      {ai.provider}
+      {ai.model ? ` · ${ai.model}` : ''}
     </div>
   )
 }
 
-function AssistantRow({ message }: { message: AiMessage }) {
-  const html = useMemo(() => renderMarkdown(message.content), [message.content])
-  const hasSources = Array.isArray(message.sources) && message.sources.length > 0
+function ResponseBlock({ text, streaming }: { text: string; streaming: boolean }) {
   return (
-    <div style={{ color: 'var(--fg)' }}>
-      <div
-        className="nexus-markdown-body nexus-ai-assistant-body"
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-      {hasSources ? (
-        <div
-          style={{
-            marginTop: 4,
-            paddingTop: 6,
-            borderTop: '1px dashed var(--line-soft)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 2,
-          }}
-        >
-          <div
-            style={{
-              color: 'var(--fg-dim)',
-              fontSize: 11,
-              textTransform: 'uppercase',
-              letterSpacing: 0.3,
-            }}
-          >
-            Sources
-          </div>
-          {message.sources!.map((s, i) => (
-            <div
-              key={`${s.file_path}:${s.block_id ?? i}`}
-              title={s.excerpt ?? s.file_path}
-              style={{
-                color: 'var(--fg-muted)',
-                fontSize: 11,
-                fontFamily: 'var(--f-mono)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {s.file_path}
-            </div>
-          ))}
-        </div>
-      ) : null}
+    <div
+      style={{
+        color: 'var(--fg)',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        lineHeight: 1.5,
+      }}
+    >
+      {text}
+      {streaming ? <span className="nexus-ai-pending"> ▍</span> : null}
     </div>
   )
 }
@@ -263,75 +236,12 @@ function PendingRow() {
         padding: '2px 0',
       }}
     >
-      …
+      Thinking…
     </div>
   )
 }
 
-function SendButton({
-  disabled,
-  onClick,
-}: {
-  disabled: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      aria-label="Send"
-      title="Send (Enter)"
-      onClick={onClick}
-      disabled={disabled}
-      onMouseEnter={(e) => {
-        if (!disabled) {
-          ;(e.currentTarget as HTMLButtonElement).style.background =
-            'var(--bg-hover)'
-        }
-      }}
-      onMouseLeave={(e) => {
-        ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
-      }}
-      style={{
-        flex: '0 0 32px',
-        width: 32,
-        height: 32,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 0,
-        border: 0,
-        borderRadius: 'var(--r)',
-        background: 'transparent',
-        color: disabled ? 'var(--fg-muted)' : 'var(--accent)',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.4 : 1,
-      }}
-    >
-      <svg
-        width={16}
-        height={16}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.75}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {/* Lucide "arrow-up" glyph */}
-        <path d="M12 19V5" />
-        <path d="m5 12 7-7 7 7" />
-      </svg>
-    </button>
-  )
-}
-
-const EXAMPLE_PROMPTS = [
-  'Summarise my notes',
-  "What's in the roadmap?",
-  'Find TODOs',
-]
-
-function EmptyState({ onPickPrompt }: { onPickPrompt: (p: string) => void }) {
+function EmptyState() {
   return (
     <div
       style={{
@@ -341,42 +251,108 @@ function EmptyState({ onPickPrompt }: { onPickPrompt: (p: string) => void }) {
         alignItems: 'center',
         justifyContent: 'center',
         padding: '20px 18px',
-        gap: 14,
+        color: 'var(--fg-dim)',
+        fontSize: 13,
         textAlign: 'center',
       }}
     >
-      <div style={{ color: 'var(--fg-dim)', fontSize: 13, maxWidth: 220 }}>
-        Ask anything about your workspace.
-      </div>
+      Ask about your workspace.
+    </div>
+  )
+}
+
+function ErrorBanner({
+  error,
+  onRetry,
+}: {
+  error: Error
+  onRetry: () => void
+}) {
+  return (
+    <div
+      role="alert"
+      style={{
+        border: '1px solid var(--risk)',
+        background: 'var(--bg-raised)',
+        color: 'var(--fg)',
+        borderRadius: 'var(--r)',
+        padding: '8px 10px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
       <div
         style={{
+          color: 'var(--risk)',
+          fontSize: 12,
           display: 'flex',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
           gap: 6,
-          maxWidth: 240,
+          alignItems: 'flex-start',
         }}
       >
-        {EXAMPLE_PROMPTS.map((p) => (
-          <button
-            key={p}
-            type="button"
-            onClick={() => onPickPrompt(p)}
-            style={{
-              border: '1px solid var(--line-soft)',
-              background: 'transparent',
-              color: 'var(--fg-muted)',
-              borderRadius: 999,
-              padding: '4px 10px',
-              fontFamily: 'var(--f-ui)',
-              fontSize: 11,
-              cursor: 'pointer',
-            }}
-          >
-            {p}
-          </button>
-        ))}
+        <span aria-hidden>⚠</span>
+        <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {error.message}
+        </span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={onRetry}
+          style={{
+            border: '1px solid var(--line-soft)',
+            background: 'transparent',
+            color: 'var(--fg)',
+            borderRadius: 'var(--r)',
+            padding: '4px 10px',
+            fontFamily: 'var(--f-ui)',
+            fontSize: 12,
+            cursor: 'pointer',
+          }}
+        >
+          Retry
+        </button>
       </div>
     </div>
+  )
+}
+
+function ActionButton({
+  label,
+  tone,
+  disabled,
+  onClick,
+  title,
+}: {
+  label: string
+  tone: 'accent' | 'danger'
+  disabled?: boolean
+  onClick: () => void
+  title?: string
+}) {
+  const color = tone === 'danger' ? 'var(--risk)' : 'var(--accent)'
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      style={{
+        flex: '0 0 auto',
+        height: 32,
+        padding: '0 12px',
+        border: `1px solid ${disabled ? 'var(--line-soft)' : color}`,
+        borderRadius: 'var(--r)',
+        background: 'transparent',
+        color: disabled ? 'var(--fg-muted)' : color,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        fontFamily: 'var(--f-ui)',
+        fontSize: 12,
+        opacity: disabled ? 0.55 : 1,
+      }}
+    >
+      {label}
+    </button>
   )
 }
