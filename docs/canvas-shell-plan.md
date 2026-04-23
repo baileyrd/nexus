@@ -61,9 +61,11 @@ Register the string names in the bootstrap plugin (same table as
 
 ### Shell UI phases
 
-> **Status (2026-04-22):** Phases 1–5 complete. Next pickup is
-> Phase 6 (polish — minimap, auto-layout, export, grid toggle, etc.).
-> Everything listed below is live in the shell:
+> **Status (2026-04-22):** Phases 1–5 complete; Phase 6 partially
+> landed. Remaining Phase-6 work (SVG/PDF export, overlay-inclusive
+> PNG export, per-canvas background) each need either a heavy
+> dependency or a `.canvas` file-format change — deferred to
+> separate sessions. Everything listed below is live in the shell:
 >
 > - Kernel surface: `canvas_read` / `canvas_write` / `canvas_patch` /
 >   `canvas_nodes` / `canvas_edges` on `com.nexus.storage` (handler
@@ -84,8 +86,21 @@ Register the string names in the bootstrap plugin (same table as
 >   Run/Stop button + ANSI-stripped PTY transcript. The 2D canvas
 >   draws card chrome only for non-group nodes.
 >
+> - Phase-6 first pass — bottom-left control strip with **Grid
+>   toggle** (per-tab view preference), **Tidy** (Fruchterman–
+>   Reingold auto-layout that emits one undoable `node_move`
+>   patch), **Export** (PNG of the 2D layer at content bbox + 48-
+>   unit margin, capped at 8192 px per edge), and a **?** button
+>   that opens the keyboard-shortcut help overlay. Top-left
+>   **minimap** shows every node + a viewport frame; click-drag
+>   inside pans the main camera. **`f`** zoom-to-fit /
+>   **`Shift+f`** zoom-to-selection shortcuts landed. Shared
+>   `contentBounds()` helper factored out of the fit math so
+>   minimap + exporter + fit-to-content agree on the bbox.
+>
 > Shell code lives under `shell/src/plugins/nexus/canvas/`
-> (`CanvasOverlay.tsx`, `Inspector.tsx` are the Phase-4/5 additions).
+> (`CanvasOverlay.tsx`, `Inspector.tsx`, `Minimap.tsx`,
+> `autoLayout.ts`, `exportPng.ts` are the Phase-4/5/6 additions).
 
 #### Phase 1 — view registration + blank surface
 
@@ -186,15 +201,44 @@ Budget: 1–2 days total, each node type incrementally. **Done 2026-04-22.**
   anchored so newest output stays on screen. Session torn down on
   unmount / stop. Landed in 5e.
 
-#### Phase 6 — polish  ← **pickup here**
+#### Phase 6 — polish  ← **partially landed**
 
-- **Minimap** in the corner showing full canvas with a viewport rect.
-- **Auto-layout**: one-click "tidy" that runs a force-directed pass.
-- **Export**: PNG / SVG / PDF of the current canvas (Tauri print pipe
-  or html2canvas).
-- **Keyboard shortcuts** (all of the above): documented + configurable.
-- **Grid toggle** in the bottom-right control strip.
-- **Background color / pattern** per-canvas as a file-level setting.
+Landed:
+
+- **Minimap** (top-left) — node rects + viewport frame, click-drag
+  to recenter main camera. `Minimap.tsx`.
+- **Auto-layout** — "Tidy" button runs a Fruchterman–Reingold pass
+  (all-pairs repulsion + per-edge attraction, 250 iterations with
+  linear cooling, soft-core overlap bump). Result emitted as one
+  `node_move` patch + inverse so undo covers it. `autoLayout.ts`.
+- **PNG export** — renders the 2D layer at content bbox + 48-unit
+  margin into an offscreen canvas, capped at 8192 px per edge,
+  downloaded as `<basename>.png`. `exportPng.ts`. **Known gap**:
+  DOM-overlay bodies (markdown, images, OG cards, db grid, PTY
+  transcript) aren't captured. Faithful overlay capture would need
+  html2canvas or a parallel SVG renderer and is deferred.
+- **Keyboard shortcuts** — `f` fits to content, `Shift+f` fits to
+  selection. Help overlay (`?` key or button) lists every
+  shortcut; Escape and backdrop-click dismiss it.
+- **Grid toggle** — per-tab view preference in the bottom-left
+  control strip. `showGrid` in `canvasStore`.
+
+Still open (each deferred to its own session):
+
+- **SVG export** — needs either a parallel SVG-emitting renderer
+  or an html2canvas-style DOM capture for the overlay layer.
+- **PDF export** — same overlay-capture problem plus a PDF lib.
+  Tauri's print pipeline could short-circuit both but needs
+  wiring through src-tauri.
+- **Overlay-inclusive PNG export** — same html2canvas blocker as
+  SVG. Would supersede the current 2D-only PNG path.
+- **Per-canvas background color / pattern** — needs a field on
+  `nexus_formats::CanvasFile` + round-trip through
+  `parse_canvas`/`serialize_canvas` + an Inspector control on the
+  document itself (not on a node).
+- **Configurable keybindings** — currently hard-coded; a later
+  pass could route these through the existing shell keybinding
+  plugin.
 
 ## Phasing recap
 
@@ -205,7 +249,10 @@ Budget: 1–2 days total, each node type incrementally. **Done 2026-04-22.**
 - Phase 3: interactions — can create + rearrange. **Done.**
 - Phase 4: edges + inspector — fully editable graph. **Done.**
 - Phase 5: rich node embeds — feature parity with Obsidian. **Done.**
-- Phase 6: polish.
+- Phase 6: polish. **Partially landed** — minimap, Tidy, PNG
+  (2D only), grid toggle, zoom-to-fit shortcuts, help overlay.
+  Deferred: SVG / PDF export, overlay-inclusive PNG, per-canvas
+  background.
 
 Phase 1–3 is the minimum to call `.canvas` a first-class surface.
 
