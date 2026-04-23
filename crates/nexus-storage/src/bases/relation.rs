@@ -231,6 +231,7 @@ mod tests {
         fields.insert("related".to_string(), serde_json::json!(["t1", "t2", "t3"]));
         let record = nexus_types::bases::BaseRecord {
             id: "source".to_string(),
+            deleted_at: None,
             fields,
         };
         let result = compute_rollup(&conn, &record, "related", 1, "score", RollupAggregation::Sum).unwrap();
@@ -244,6 +245,7 @@ mod tests {
         fields.insert("related".to_string(), serde_json::json!(["t1", "t2", "t3"]));
         let record = nexus_types::bases::BaseRecord {
             id: "source".to_string(),
+            deleted_at: None,
             fields,
         };
         let result = compute_rollup(&conn, &record, "related", 1, "score", RollupAggregation::Average).unwrap();
@@ -257,6 +259,7 @@ mod tests {
         fields.insert("related".to_string(), serde_json::json!(["t1", "t2"]));
         let record = nexus_types::bases::BaseRecord {
             id: "source".to_string(),
+            deleted_at: None,
             fields,
         };
         let result = compute_rollup(&conn, &record, "related", 1, "score", RollupAggregation::Count).unwrap();
@@ -270,6 +273,7 @@ mod tests {
         fields.insert("related".to_string(), serde_json::json!(["t1", "t2", "t3"]));
         let record = nexus_types::bases::BaseRecord {
             id: "source".to_string(),
+            deleted_at: None,
             fields,
         };
         let min = compute_rollup(&conn, &record, "related", 1, "score", RollupAggregation::Min).unwrap();
@@ -283,6 +287,7 @@ mod tests {
         let conn = setup_db();
         let record = nexus_types::bases::BaseRecord {
             id: "source".to_string(),
+            deleted_at: None,
             fields: serde_json::Map::new(),
         };
         let result = compute_rollup(&conn, &record, "missing", 1, "score", RollupAggregation::Sum).unwrap();

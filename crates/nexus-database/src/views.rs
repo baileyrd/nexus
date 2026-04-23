@@ -127,6 +127,19 @@ pub fn apply_view(records: &[BaseRecord], _schema: &BaseSchema, view: &BaseView)
             }
         }
         ViewType::Table | ViewType::Gallery => ViewLayout::Flat { records: sorted },
+        // List groups by `group_field` when set; Timeline produces
+        // swimlanes keyed on `group_field` (shell pairs this with
+        // `date_field` / `end_field` for bar spans). Both fall back
+        // to a flat layout when the grouping field is absent.
+        ViewType::List | ViewType::Timeline => {
+            if let Some(field) = view.group_field.as_deref() {
+                ViewLayout::Grouped {
+                    groups: group_by_field(&sorted, field),
+                }
+            } else {
+                ViewLayout::Flat { records: sorted }
+            }
+        }
     };
 
     AppliedView {
@@ -381,6 +394,7 @@ mod tests {
         let map = fields.as_object().cloned().unwrap_or_default();
         BaseRecord {
             id: id.to_string(),
+            deleted_at: None,
             fields: map,
         }
     }
@@ -401,6 +415,7 @@ mod tests {
             filter: vec![],
             group_field: None,
             date_field: None,
+            end_field: None,
         }
     }
 
@@ -656,6 +671,7 @@ mod tests {
             filter: vec![],
             group_field: Some("status".into()),
             date_field: None,
+            end_field: None,
         };
         let out = apply_view(&records, &empty_schema(), &view);
         let ViewLayout::Grouped { groups } = out.layout else {
@@ -684,6 +700,7 @@ mod tests {
             filter: vec![],
             group_field: None,
             date_field: None,
+            end_field: None,
         };
         assert!(matches!(
             apply_view(&records, &empty_schema(), &view).layout,
@@ -706,6 +723,7 @@ mod tests {
             filter: vec![],
             group_field: Some("status".into()),
             date_field: None,
+            end_field: None,
         };
         let ViewLayout::Grouped { groups } = apply_view(&records, &empty_schema(), &view).layout
         else {
@@ -731,6 +749,7 @@ mod tests {
             filter: vec![],
             group_field: None,
             date_field: Some("due".into()),
+            end_field: None,
         };
         let ViewLayout::Grouped { groups } = apply_view(&records, &empty_schema(), &view).layout
         else {
@@ -759,6 +778,7 @@ mod tests {
             filter: vec![],
             group_field: None,
             date_field: None,
+            end_field: None,
         };
         let out = apply_view(&records, &empty_schema(), &view);
         assert_eq!(out.view_type, ViewType::Gallery);
@@ -814,6 +834,7 @@ mod tests {
             }],
             group_field: Some("status".into()),
             date_field: None,
+            end_field: None,
         };
         let ViewLayout::Grouped { groups } = apply_view(&records, &empty_schema(), &view).layout
         else {

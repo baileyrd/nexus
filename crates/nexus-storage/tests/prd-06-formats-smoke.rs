@@ -202,6 +202,7 @@ fn bases_create_and_query() {
     // Add records.
     base.records.push(nexus_storage::bases::BaseRecord {
         id: "r1".to_string(),
+        deleted_at: None,
         fields: serde_json::json!({"title": "Buy milk", "status": "todo"})
             .as_object()
             .unwrap()
@@ -209,6 +210,7 @@ fn bases_create_and_query() {
     });
     base.records.push(nexus_storage::bases::BaseRecord {
         id: "r2".to_string(),
+        deleted_at: None,
         fields: serde_json::json!({"title": "Write tests", "status": "done"})
             .as_object()
             .unwrap()
@@ -235,6 +237,7 @@ fn bases_validation_rejects_bad_records() {
     // Valid record.
     let good = nexus_storage::bases::BaseRecord {
         id: "r1".to_string(),
+        deleted_at: None,
         fields: serde_json::json!({"title": "Valid"}).as_object().unwrap().clone(),
     };
     assert!(nexus_storage::bases::validate_record(&schema, &good).is_ok());
@@ -242,6 +245,7 @@ fn bases_validation_rejects_bad_records() {
     // Missing required field.
     let bad = nexus_storage::bases::BaseRecord {
         id: "r2".to_string(),
+        deleted_at: None,
         fields: serde_json::Map::new(),
     };
     assert!(nexus_storage::bases::validate_record(&schema, &bad).is_err());
@@ -268,6 +272,7 @@ fn bases_views_round_trip() {
         filter: vec![],
         group_field: None,
         date_field: None,
+        end_field: None,
     });
     base.views.push(nexus_storage::bases::BaseView {
         name: "By Status".to_string(),
@@ -277,6 +282,7 @@ fn bases_views_round_trip() {
         filter: vec![],
         group_field: Some("status".to_string()),
         date_field: None,
+        end_field: None,
     });
     nexus_storage::bases::save_base(&base_dir, &base).unwrap();
 
@@ -306,6 +312,7 @@ fn bases_full_lifecycle() {
     let mut base = nexus_storage::bases::load_base(&base_dir).unwrap();
     base.records.push(nexus_storage::bases::BaseRecord {
         id: "p1".to_string(),
+        deleted_at: None,
         fields: serde_json::json!({"name": "Nexus", "status": "active"}).as_object().unwrap().clone(),
     });
     nexus_storage::bases::save_base(&base_dir, &base).unwrap();

@@ -47,10 +47,16 @@ fn default_version() -> String {
 }
 
 /// A single data record in a base.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BaseRecord {
     /// Record unique identifier.
     pub id: String,
+    /// Soft-delete timestamp (Unix epoch seconds). `None` = live
+    /// record. Set by `base_record_soft_delete`; cleared by
+    /// `base_record_restore`. Kept separate from
+    /// `base_record_delete` which hard-removes from disk.
+    #[serde(rename = "deletedAt", skip_serializing_if = "Option::is_none", default)]
+    pub deleted_at: Option<i64>,
     /// Field values (keys match schema field names).
     #[serde(flatten)]
     pub fields: serde_json::Map<String, serde_json::Value>,
@@ -76,9 +82,14 @@ pub struct BaseView {
     /// Field to group by (for kanban views).
     #[serde(rename = "groupField", skip_serializing_if = "Option::is_none")]
     pub group_field: Option<String>,
-    /// Date field (for calendar views).
+    /// Date field (for calendar views; also the start-date field for
+    /// timeline views).
     #[serde(rename = "dateField", skip_serializing_if = "Option::is_none")]
     pub date_field: Option<String>,
+    /// End-date field (timeline views only — pairs with `date_field`
+    /// as the start). Absent for every other view type.
+    #[serde(rename = "endField", skip_serializing_if = "Option::is_none")]
+    pub end_field: Option<String>,
 }
 
 /// View display type.
@@ -93,6 +104,11 @@ pub enum ViewType {
     Calendar,
     /// Gallery card view.
     Gallery,
+    /// List view grouped by a field.
+    List,
+    /// Timeline / gantt view — swimlanes by `group_field`, bars
+    /// spanning `date_field` (start) → `end_field` (end).
+    Timeline,
 }
 
 /// Sort rule for a view.
@@ -666,6 +682,7 @@ mod tests {
         fields.insert("status".to_string(), serde_json::json!(status));
         BaseRecord {
             id: id.to_string(),
+            deleted_at: None,
             fields,
         }
     }
@@ -744,6 +761,7 @@ targetField = "id"
             filter: vec![],
             group_field: None,
             date_field: None,
+            end_field: None,
         });
         save_base(&base_dir, &base).unwrap();
 
@@ -766,6 +784,7 @@ targetField = "id"
         let schema = sample_schema();
         let record = BaseRecord {
             id: "r1".to_string(),
+            deleted_at: None,
             fields: serde_json::Map::new(), // missing "title" which is required
         };
         let result = validate_record(&schema, &record);

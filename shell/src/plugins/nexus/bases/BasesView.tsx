@@ -111,12 +111,18 @@ export function BasesView({ relpath, client }: Props) {
   }
   const fieldCount = Object.keys(base.schema.fields).length
   const mode = tab.viewMode
+  // Soft-deleted records stay on disk (so SchemaEditor / future
+  // trash-view can still see them) but every live view filters them
+  // out of the visible set. Wrap the base once so all downstream
+  // child components see the same filtered record list.
+  const visibleRecords = base.records.filter((r) => !r.deletedAt)
+  const visibleBase = { ...base, records: visibleRecords }
   return (
     <div style={wrapperStyle}>
       <div style={headerStyle}>
         <strong style={{ color: 'var(--fg-primary, #e4e4e7)' }}>{base.name}</strong>
         <span>·</span>
-        <span>{base.records.length} records</span>
+        <span>{visibleRecords.length} records</span>
         <span>·</span>
         <span>{fieldCount} fields</span>
         <span>·</span>
@@ -165,15 +171,15 @@ export function BasesView({ relpath, client }: Props) {
           })}
         </div>
       </div>
-      <BasesViewBar relpath={relpath} base={base} client={client} />
+      <BasesViewBar relpath={relpath} base={visibleBase} client={client} />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          {mode === 'table' && <BasesTable relpath={relpath} base={base} client={client} />}
-          {mode === 'board' && <BasesBoard relpath={relpath} base={base} client={client} />}
-          {mode === 'list' && <BasesList relpath={relpath} base={base} client={client} />}
-          {mode === 'calendar' && <BasesCalendar relpath={relpath} base={base} client={client} />}
-          {mode === 'gallery' && <BasesGallery relpath={relpath} base={base} client={client} />}
-          {mode === 'timeline' && <BasesTimeline relpath={relpath} base={base} client={client} />}
+          {mode === 'table' && <BasesTable relpath={relpath} base={visibleBase} client={client} />}
+          {mode === 'board' && <BasesBoard relpath={relpath} base={visibleBase} client={client} />}
+          {mode === 'list' && <BasesList relpath={relpath} base={visibleBase} client={client} />}
+          {mode === 'calendar' && <BasesCalendar relpath={relpath} base={visibleBase} client={client} />}
+          {mode === 'gallery' && <BasesGallery relpath={relpath} base={visibleBase} client={client} />}
+          {mode === 'timeline' && <BasesTimeline relpath={relpath} base={visibleBase} client={client} />}
         </div>
         {schemaEditorOpen && <SchemaEditor relpath={relpath} base={base} client={client} />}
       </div>

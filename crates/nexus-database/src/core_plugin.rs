@@ -270,6 +270,7 @@ mod tests {
         let mut plugin = DatabaseCorePlugin::new();
         let records = vec![nexus_types::bases::BaseRecord {
             id: "r1".to_string(),
+            deleted_at: None,
             fields: {
                 let mut m = serde_json::Map::new();
                 m.insert("name".to_string(), serde_json::json!("Alice"));

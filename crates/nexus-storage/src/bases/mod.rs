@@ -88,6 +88,8 @@ pub fn insert_base(conn: &Connection, path: &str, base: &Base) -> Result<i64, St
             ViewType::Kanban => "kanban",
             ViewType::Calendar => "calendar",
             ViewType::Gallery => "gallery",
+            ViewType::List => "list",
+            ViewType::Timeline => "timeline",
         };
         view_stmt.execute(rusqlite::params![base_id, view.name, vt, config])?;
     }
@@ -161,6 +163,7 @@ mod tests {
         fields.insert("title".to_string(), serde_json::json!(title));
         BaseRecord {
             id: id.to_string(),
+            deleted_at: None,
             fields,
         }
     }
@@ -186,6 +189,7 @@ mod tests {
                 filter: vec![],
                 group_field: None,
                 date_field: None,
+                end_field: None,
             }],
             relations: vec![],
             metadata: BaseMetadata::default(),

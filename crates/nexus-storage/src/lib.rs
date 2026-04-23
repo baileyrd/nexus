@@ -781,12 +781,66 @@ impl StorageEngine {
         Ok(())
     }
 
+    /// Set the `deleted_at` slot on the record identified by
+    /// `record_id` to `now` (Unix epoch seconds). The record stays in
+    /// `records.json` but shell consumers that honour the slot will
+    /// filter it out of visible lists. Missing ids are a no-op.
+    ///
+    /// Pairs with [`Self::base_record_restore`] — the two form the
+    /// soft-delete primitive. [`Self::base_record_delete`] still
+    /// hard-removes from disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O / parse / DB failure.
+    pub fn base_record_soft_delete(&self, path: &str, record_id: &str) -> Result<(), StorageError> {
+        let abs_dir = self.forge.root().join(path);
+        let mut base = nexus_types::bases::load_base(&abs_dir)?;
+        let mut touched = false;
+        for record in &mut base.records {
+            if record.id == record_id && record.deleted_at.is_none() {
+                record.deleted_at = Some(unix_now());
+                touched = true;
+            }
+        }
+        if !touched {
+            return Ok(());
+        }
+        nexus_types::bases::save_base(&abs_dir, &base)?;
+        self.index_base(path, &base)?;
+        Ok(())
+    }
+
+    /// Clear the `deleted_at` slot on the record identified by
+    /// `record_id`. Missing ids or records with no `deleted_at` set
+    /// are a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] on I/O / parse / DB failure.
+    pub fn base_record_restore(&self, path: &str, record_id: &str) -> Result<(), StorageError> {
+        let abs_dir = self.forge.root().join(path);
+        let mut base = nexus_types::bases::load_base(&abs_dir)?;
+        let mut touched = false;
+        for record in &mut base.records {
+            if record.id == record_id && record.deleted_at.is_some() {
+                record.deleted_at = None;
+                touched = true;
+            }
+        }
+        if !touched {
+            return Ok(());
+        }
+        nexus_types::bases::save_base(&abs_dir, &base)?;
+        self.index_base(path, &base)?;
+        Ok(())
+    }
+
     /// Remove the record identified by `record_id` from the base at `path`.
     ///
     /// Hard-delete: the record is removed from `records.json` and the index
-    /// is rebuilt. A dedicated soft-delete slot (`deleted_at`) on
-    /// [`nexus_types::bases::BaseRecord`] is tracked as a separate backlog
-    /// item — see the bases shell plan.
+    /// is rebuilt. The soft-delete variant ([`Self::base_record_soft_delete`])
+    /// sets a `deleted_at` timestamp instead, leaving the record on disk.
     ///
     /// Returns `Ok(())` when the record is removed. A missing id is a no-op
     /// so the caller can dedupe retries without racing.
@@ -2081,6 +2135,7 @@ mod tests {
                 base_rel,
                 BaseRecord {
                     id: String::new(),
+                    deleted_at: None,
                     fields: {
                         let mut m = serde_json::Map::new();
                         m.insert("title".to_string(), serde_json::json!("Buy milk"));
@@ -2130,7 +2185,7 @@ mod tests {
         let seed = Base {
             name: "D".to_string(),
             schema: BaseSchema { version: "1.0".to_string(), fields: serde_json::Map::new() },
-            records: vec![BaseRecord { id: "r1".into(), fields: serde_json::Map::new() }],
+            records: vec![BaseRecord { id: "r1".into(), deleted_at: None, fields: serde_json::Map::new() }],
             views: Vec::new(),
             relations: Vec::new(),
             metadata: BaseMetadata::default(),
@@ -2141,7 +2196,7 @@ mod tests {
         let err = engine
             .base_record_create(
                 base_rel,
-                BaseRecord { id: "r1".into(), fields: serde_json::Map::new() },
+                BaseRecord { id: "r1".into(), deleted_at: None, fields: serde_json::Map::new() },
             )
             .expect_err("duplicate should fail");
         assert!(matches!(err, StorageError::CorruptFile { .. }));
@@ -2196,6 +2251,7 @@ mod tests {
             },
             records: vec![BaseRecord {
                 id: "r1".into(),
+                deleted_at: None,
                 fields: {
                     let mut m = serde_json::Map::new();
                     m.insert("legacy".to_string(), serde_json::json!("stale"));
@@ -2247,6 +2303,72 @@ mod tests {
         engine.base_property_delete(base_rel, "ghost").expect("delete ghost");
     }
 
+    // ── 15a. base_record_soft_delete + restore ────────────────────────────────
+
+    #[test]
+    fn base_record_soft_delete_and_restore() {
+        use nexus_types::bases::BaseSchema;
+
+        let dir = tmp();
+        let engine = StorageEngine::init(dir.path()).expect("init");
+        let base_rel = "s.bases";
+
+        let schema = BaseSchema {
+            version: "1.0".to_string(),
+            fields: {
+                let mut m = serde_json::Map::new();
+                m.insert(
+                    "title".to_string(),
+                    serde_json::json!({ "type": "title", "required": true, "primary": true }),
+                );
+                m
+            },
+        };
+        engine
+            .base_create(base_rel, schema, Vec::new())
+            .expect("create");
+
+        let record = nexus_types::bases::BaseRecord {
+            id: String::new(),
+            deleted_at: None,
+            fields: {
+                let mut m = serde_json::Map::new();
+                m.insert("title".to_string(), serde_json::json!("Hello"));
+                m
+            },
+        };
+        let stored = engine.base_record_create(base_rel, record).expect("record");
+
+        engine
+            .base_record_soft_delete(base_rel, &stored.id)
+            .expect("soft delete");
+        let abs = dir.path().join(base_rel);
+        let loaded = nexus_types::bases::load_base(&abs).expect("load1");
+        assert_eq!(loaded.records.len(), 1, "soft-delete keeps the record on disk");
+        assert!(
+            loaded.records[0].deleted_at.is_some(),
+            "deleted_at should be set after soft delete",
+        );
+
+        // Restoring clears the slot.
+        engine
+            .base_record_restore(base_rel, &stored.id)
+            .expect("restore");
+        let loaded = nexus_types::bases::load_base(&abs).expect("load2");
+        assert!(
+            loaded.records[0].deleted_at.is_none(),
+            "deleted_at should be cleared after restore",
+        );
+
+        // Unknown id → no-op.
+        engine
+            .base_record_soft_delete(base_rel, "ghost")
+            .expect("ghost soft delete is no-op");
+        engine
+            .base_record_restore(base_rel, "ghost")
+            .expect("ghost restore is no-op");
+    }
+
     // ── 15b. base_create + property rename + retype-migration ─────────────────
 
     #[test]
@@ -2281,6 +2403,7 @@ mod tests {
         // with migration and verify it serialized as a string.
         let record = nexus_types::bases::BaseRecord {
             id: String::new(),
+            deleted_at: None,
             fields: {
                 let mut m = serde_json::Map::new();
                 m.insert("title".to_string(), serde_json::json!("Hello"));
@@ -2355,6 +2478,7 @@ mod tests {
             filter: Vec::new(),
             group_field: Some("status".to_string()),
             date_field: None,
+            end_field: None,
         };
         engine.base_view_create(base_rel, board.clone()).expect("create");
         let loaded = nexus_types::bases::load_base(&abs).expect("load");

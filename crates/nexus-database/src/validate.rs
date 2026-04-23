@@ -536,6 +536,7 @@ mod tests {
 
         let record = nexus_types::bases::BaseRecord {
             id: "r1".to_string(),
+            deleted_at: None,
             fields,
         };
 

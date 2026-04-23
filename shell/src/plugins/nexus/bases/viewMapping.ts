@@ -1,16 +1,17 @@
 // Helpers translating between the shell's view-mode enum and the
-// `.bases` TOML `ViewType` enum (PRD-10 / nexus_types::bases). The
-// kernel persists only `table | kanban | calendar | gallery`;
-// `list` and `timeline` are shell-only and can't be saved as named
-// views until that enum grows.
+// `.bases` TOML `ViewType` enum (PRD-10 / nexus_types::bases). All
+// six view modes (`table | kanban | calendar | gallery | list |
+// timeline`) now round-trip — `List` + `Timeline` landed in the
+// kernel wire schema alongside `BaseView.endField`.
 
 import type { BaseView } from './kernelClient'
 import type { BasesTabState, ViewMode } from './basesStore'
 
-export type PersistableMode = 'table' | 'board' | 'calendar' | 'gallery'
+export type PersistableMode = ViewMode
 
 export function isPersistableMode(m: ViewMode): m is PersistableMode {
-  return m === 'table' || m === 'board' || m === 'calendar' || m === 'gallery'
+  // Every ViewMode now has a ViewType counterpart.
+  return true
 }
 
 /** Map wire ViewType → shell ViewMode. Unknown types fall back to
@@ -24,6 +25,10 @@ export function modeFromViewType(type: BaseView['type']): ViewMode {
       return 'calendar'
     case 'gallery':
       return 'gallery'
+    case 'list':
+      return 'list'
+    case 'timeline':
+      return 'timeline'
     case 'table':
     default:
       return 'table'
@@ -38,6 +43,10 @@ export function viewTypeFromMode(m: PersistableMode): BaseView['type'] {
       return 'calendar'
     case 'gallery':
       return 'gallery'
+    case 'list':
+      return 'list'
+    case 'timeline':
+      return 'timeline'
     case 'table':
       return 'table'
   }
@@ -61,8 +70,16 @@ export function viewFromTabState(
   if (mode === 'board' && tab.boardGroupField) {
     view.groupField = tab.boardGroupField
   }
+  if (mode === 'list' && tab.listGroupField) {
+    view.groupField = tab.listGroupField
+  }
   if (mode === 'calendar' && tab.calendarDateField) {
     view.dateField = tab.calendarDateField
+  }
+  if (mode === 'timeline') {
+    if (tab.timelineGroupField) view.groupField = tab.timelineGroupField
+    if (tab.timelineStartField) view.dateField = tab.timelineStartField
+    if (tab.timelineEndField) view.endField = tab.timelineEndField
   }
   return view
 }
@@ -72,7 +89,11 @@ export interface AppliedView {
   mode: ViewMode
   sort: { field: string; dir: 'asc' | 'desc' } | null
   boardGroupField: string | null
+  listGroupField: string | null
   calendarDateField: string | null
+  timelineGroupField: string | null
+  timelineStartField: string | null
+  timelineEndField: string | null
 }
 
 export function applyView(view: BaseView): AppliedView {
@@ -83,6 +104,10 @@ export function applyView(view: BaseView): AppliedView {
     mode,
     sort: firstSort ? { field: firstSort.field, dir } : null,
     boardGroupField: mode === 'board' ? view.groupField ?? null : null,
+    listGroupField: mode === 'list' ? view.groupField ?? null : null,
     calendarDateField: mode === 'calendar' ? view.dateField ?? null : null,
+    timelineGroupField: mode === 'timeline' ? view.groupField ?? null : null,
+    timelineStartField: mode === 'timeline' ? view.dateField ?? null : null,
+    timelineEndField: mode === 'timeline' ? view.endField ?? null : null,
   }
 }

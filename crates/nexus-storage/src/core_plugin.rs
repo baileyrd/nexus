@@ -199,6 +199,16 @@ pub const HANDLER_BASE_CREATE: u32 = 49;
 /// place. Rejects when `old_name` is missing or `new_name` already
 /// exists. Returns `{}`.
 pub const HANDLER_BASE_PROPERTY_RENAME: u32 = 50;
+/// Handler id for `base_record_soft_delete`. Args:
+/// `{ "path": String, "record_id": String }`. Sets `deleted_at` on
+/// the record but keeps it in `records.json`. Missing ids are a
+/// no-op. Returns `{}`.
+pub const HANDLER_BASE_RECORD_SOFT_DELETE: u32 = 51;
+/// Handler id for `base_record_restore`. Args:
+/// `{ "path": String, "record_id": String }`. Clears `deleted_at` on
+/// a soft-deleted record. Missing ids or records with no
+/// `deleted_at` are a no-op. Returns `{}`.
+pub const HANDLER_BASE_RECORD_RESTORE: u32 = 52;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -613,6 +623,32 @@ impl CorePlugin for StorageCorePlugin {
                 engine
                     .base_property_update(&path, &name, definition, migrate_values)
                     .map_err(|e| exec_err(format!("base_property_update: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_BASE_RECORD_SOFT_DELETE => {
+                let path = path_arg(args, "base_record_soft_delete")?;
+                let record_id = args
+                    .get("record_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        exec_err("base_record_soft_delete: missing 'record_id' string".to_string())
+                    })?;
+                engine
+                    .base_record_soft_delete(&path, record_id)
+                    .map_err(|e| exec_err(format!("base_record_soft_delete: {e}")))?;
+                Ok(serde_json::json!({}))
+            }
+            HANDLER_BASE_RECORD_RESTORE => {
+                let path = path_arg(args, "base_record_restore")?;
+                let record_id = args
+                    .get("record_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        exec_err("base_record_restore: missing 'record_id' string".to_string())
+                    })?;
+                engine
+                    .base_record_restore(&path, record_id)
+                    .map_err(|e| exec_err(format!("base_record_restore: {e}")))?;
                 Ok(serde_json::json!({}))
             }
             HANDLER_BASE_PROPERTY_RENAME => {

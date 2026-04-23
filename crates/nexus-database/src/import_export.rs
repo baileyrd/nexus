@@ -90,6 +90,7 @@ pub fn import_csv<R: Read>(
 
         records.push(nexus_types::bases::BaseRecord {
             id: record_id,
+            deleted_at: None,
             fields,
         });
         result.imported += 1;
@@ -216,6 +217,7 @@ mod tests {
         let records = vec![
             nexus_types::bases::BaseRecord {
                 id: "r1".to_string(),
+                deleted_at: None,
                 fields: {
                     let mut m = serde_json::Map::new();
                     m.insert("name".to_string(), serde_json::json!("Alice"));
@@ -225,6 +227,7 @@ mod tests {
             },
             nexus_types::bases::BaseRecord {
                 id: "r2".to_string(),
+                deleted_at: None,
                 fields: {
                     let mut m = serde_json::Map::new();
                     m.insert("name".to_string(), serde_json::json!("Bob"));
@@ -249,6 +252,7 @@ mod tests {
     fn roundtrip_csv() {
         let records = vec![nexus_types::bases::BaseRecord {
             id: "r1".to_string(),
+            deleted_at: None,
             fields: {
                 let mut m = serde_json::Map::new();
                 m.insert("title".to_string(), serde_json::json!("Test"));

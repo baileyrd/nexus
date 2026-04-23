@@ -34,25 +34,27 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
 ### Spec'd in a PRD, not yet implemented
 
 - [ ] **`.bases` database renderer in the shell (PRD-10).** Phases
-  1–6 landed 2026-04-22 — every deferred Phase-6 item closed in the
-  same session. Kernel surface: `com.nexus.storage::base_*` ids
-  40–48 plus 49 (`base_create`) and 50 (`base_property_rename`);
+  1–6 landed 2026-04-22 along with every deferred tail item.
+  Kernel surface: `com.nexus.storage::base_*` ids 40–52
+  (including 49 `base_create`, 50 `base_property_rename`, 51
+  `base_record_soft_delete`, 52 `base_record_restore`);
   `com.nexus.database::csv_import` / `csv_export` / `formula_eval`.
-  Shell code under `shell/src/plugins/nexus/bases/`. Phase-6
-  closers: `@tanstack/react-virtual` windowing in `BasesTable`
-  (fixed 28px row + spacer-row padding keeps `<table>` semantics);
+  Wire schema grew two slots in the same pass: `ViewType` now
+  includes `List` + `Timeline`, `BaseView` gained `end_field`
+  (timeline end-date pairing with the existing `date_field` as
+  start), and `BaseRecord` gained `deleted_at: Option<i64>` to
+  carry the soft-delete state. Shell code under
+  `shell/src/plugins/nexus/bases/`. Phase-6 work: CSV + undo +
+  formula live preview, `@tanstack/react-virtual` windowing,
   "New base" Files-toolbar action → `NewBaseDialog` template
-  picker (Blank / Tasks / CRM / Projects / Notes) → `base_create`;
-  `SchemaEditor` side panel (rename calls `base_property_rename`,
-  retype calls `base_property_update` with the new
-  `migrate_values=true` flag so the kernel coerces every record's
-  value to the new type, with `api.input.confirm` prompts when
-  records exist); per-row formula editor that debounces
-  `formula_eval` against the first record for live preview.
-  Outstanding (separate sessions, not blockers): list + timeline
-  views still can't save as named views until the wire `ViewType`
-  enum grows past `table/kanban/calendar/gallery`; record
-  soft-delete still waits on a `deleted_at` slot on `BaseRecord`.
+  picker, `SchemaEditor` side panel with rename / retype
+  (migrate_values) / formula editor, list + timeline view
+  persistence via `viewMapping.ts`, and soft-delete: `BasesView`
+  filters `deletedAt != null` out of every live view's visible
+  set but keeps them on the base for the SchemaEditor and a
+  future trash view. Only truly open follow-ups now: a trash-view
+  UI surfacing soft-deleted records and a table-virtualization
+  retest when very large (>50k) bases land.
 - [ ] **`.canvas` board renderer in the shell (PRD-06 §4).** Phases
   1–6 complete 2026-04-22 — every deferred Phase-6 item closed in
   the same session. Kernel surface:

@@ -8,7 +8,7 @@ import type { PluginAPI } from '../../../types/plugin'
 export const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 export const DATABASE_PLUGIN_ID = 'com.nexus.database'
 
-export type ViewType = 'table' | 'kanban' | 'calendar' | 'gallery'
+export type ViewType = 'table' | 'kanban' | 'calendar' | 'gallery' | 'list' | 'timeline'
 
 export interface SortRule {
   field: string
@@ -29,10 +29,16 @@ export interface BaseView {
   filter?: FilterRule[]
   groupField?: string
   dateField?: string
+  /** Timeline views only — the record field holding the end-of-bar
+   *  date. Paired with `dateField` as the start. */
+  endField?: string
 }
 
 export interface BaseRecord {
   id: string
+  /** Soft-delete timestamp (Unix epoch seconds). `undefined`/`null`
+   *  = live record. Views filter records with this set. */
+  deletedAt?: number | null
   /** All non-id record fields flatten into the same object on the
    *  wire thanks to `#[serde(flatten)]`. */
   [field: string]: unknown
@@ -99,6 +105,11 @@ export interface BasesKernelClient {
   ): Promise<BaseRecord>
   /** Remove the record; missing ids are a no-op. */
   deleteRecord(relpath: string, recordId: string): Promise<void>
+  /** Set `deleted_at` on the record but keep it on disk. Views
+   *  filter soft-deleted records from their visible set. */
+  softDeleteRecord(relpath: string, recordId: string): Promise<void>
+  /** Clear `deleted_at` on a soft-deleted record. */
+  restoreRecord(relpath: string, recordId: string): Promise<void>
   createProperty(relpath: string, name: string, definition: unknown): Promise<void>
   /** Replace a property definition. When `migrateValues` is true the
    *  kernel walks every record and coerces stored values to the new
@@ -163,6 +174,18 @@ export function makeBasesKernelClient(kernel: PluginAPI['kernel']): BasesKernelC
     },
     async deleteRecord(relpath, recordId) {
       await kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'base_record_delete', {
+        path: relpath,
+        record_id: recordId,
+      })
+    },
+    async softDeleteRecord(relpath, recordId) {
+      await kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'base_record_soft_delete', {
+        path: relpath,
+        record_id: recordId,
+      })
+    },
+    async restoreRecord(relpath, recordId) {
+      await kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'base_record_restore', {
         path: relpath,
         record_id: recordId,
       })

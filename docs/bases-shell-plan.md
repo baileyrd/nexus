@@ -74,7 +74,17 @@ collisions noted as they come up.
 
 ### Shell UI phases
 
-> **Status (2026-04-22):** Phases 1–6 complete.
+> **Status (2026-04-22):** Phases 1–6 complete + every deferred
+> tail item closed in the same session. Kernel wire schema grew
+> `ViewType::List`, `ViewType::Timeline`, `BaseView.end_field`
+> (for timeline end-date pairing), and `BaseRecord.deleted_at`
+> (soft-delete timestamp). Two new handlers landed with the slot:
+> `base_record_soft_delete` (51) and `base_record_restore` (52).
+> Shell `viewMapping.ts` now round-trips list + timeline views
+> (including `group_field` / `date_field` / `end_field`), and
+> `BasesView` filters soft-deleted records out of every live view
+> while leaving them on the base for the SchemaEditor (future
+> trash-view surface).
 > Shell code lives under `shell/src/plugins/nexus/bases/`.
 >
 > - Kernel surface: `base_load` (17), `base_record_create/update/delete`

@@ -448,6 +448,14 @@ fn register_core_plugins(
                         "base_property_rename",
                         nexus_storage::core_plugin::HANDLER_BASE_PROPERTY_RENAME,
                     ),
+                    (
+                        "base_record_soft_delete",
+                        nexus_storage::core_plugin::HANDLER_BASE_RECORD_SOFT_DELETE,
+                    ),
+                    (
+                        "base_record_restore",
+                        nexus_storage::core_plugin::HANDLER_BASE_RECORD_RESTORE,
+                    ),
                 ],
             ),
             forge_root,
