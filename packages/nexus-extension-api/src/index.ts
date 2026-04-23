@@ -458,3 +458,26 @@ export interface PlatformAPI {
   window: PlatformWindowAPI;
   shell: PlatformShellAPI;
 }
+
+// ─── URI handler surface (api.uri.*) ─────────────────────────────────────────
+//
+// WI-13 / Phase 2 §5.3 — replaces the legacy `ctx.ui.registerUriHandler`
+// (which exposed an `{ id, scheme, handle }` DTO) with a flat
+// `register(scheme, handler)` form that matches the rest of the
+// `api.*.register` shape and integrates with `PluginRegistry`'s
+// auto-cleanup.
+
+export interface UriAPI {
+  /**
+   * Register a handler for a custom URI scheme. The handler receives a
+   * parsed `URL` when the user opens `<scheme>://...` or the OS routes
+   * such a URL into the app via the deep-link bridge.
+   *
+   * Returns an idempotent unsubscribe; `PluginRegistry` sweeps it on
+   * plugin deactivate. Two plugins may not register for the same
+   * scheme — the second registration is rejected with a console
+   * warning and the returned unsub is a no-op (first-match-wins,
+   * matching legacy SI-2).
+   */
+  register(scheme: string, handler: (url: URL) => void | Promise<void>): () => void;
+}

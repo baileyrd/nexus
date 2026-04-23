@@ -5,6 +5,7 @@
 import type { PluginAPI, ConfigSection, KernelEventEnvelope } from '../types/plugin'
 import type { PluginRegistry } from './PluginRegistry'
 import { useSlotStore, type SlotId } from '../registry/SlotRegistry'
+import { uriHandlerRegistry } from '../registry/UriHandlerRegistry'
 import { contextKeyService } from './ContextKeyService'
 import { eventBus } from './EventBus'
 import { workspace, viewRegistry } from '../workspace'
@@ -391,6 +392,20 @@ export function buildPluginAPI(
       },
       removeItem(id) {
         eventBus.emit('activityBar:itemRemoved', { id })
+      },
+    },
+
+    // ─── URI handlers (WI-13) ──────────────────────────────────────────────
+    // Deep-link dispatch surface. `register(scheme, handler)` claims a
+    // scheme; a Tauri-side bridge (deferred — see WI-13 report) calls
+    // `uriHandlerRegistry.dispatch(url)` with each incoming URL. The
+    // returned unsub is tracked so plugin deactivation sweeps the
+    // registration automatically (mirrors `kernel.on`).
+    uri: {
+      register(scheme, handler) {
+        const unsub = uriHandlerRegistry.register(scheme, pluginId, handler)
+        registry.trackSubscription(pluginId, unsub)
+        return unsub
       },
     },
 

@@ -7,6 +7,7 @@ import { ConfigurationRegistry } from '../registry/ConfigurationRegistry'
 import { KeybindingRegistry } from '../registry/KeybindingRegistry'
 import { StatusBarRegistry } from '../registry/StatusBarRegistry'
 import { slotRegistry } from '../registry/SlotRegistry'
+import { uriHandlerRegistry } from '../registry/UriHandlerRegistry'
 
 export class PluginRegistry {
   readonly commands    = new CommandRegistry()
@@ -93,6 +94,13 @@ export class PluginRegistry {
       }
       this.subscriptions.delete(pluginId)
     }
+
+    // Belt-and-braces: sweep any URI handlers still owned by the plugin.
+    // The per-handler unsub returned from `api.uri.register` is already
+    // tracked via `trackSubscription` and drained above; this catches
+    // the edge case where a handler entry survived (e.g. a plugin
+    // registered directly against the singleton in a future code path).
+    uriHandlerRegistry.unregisterByPlugin(pluginId)
   }
 
   // ─── Internal service bus (core plugins only) ────────────────────────────

@@ -52,6 +52,7 @@ export type {
   PlatformOpenFileOptions,
   PlatformOpenDirectoryOptions,
   PlatformSaveFileOptions,
+  UriAPI,
 } from '@nexus/extension-api'
 
 import type {
@@ -64,6 +65,7 @@ import type {
   FileEntry,
   FsEvent,
   PlatformAPI,
+  UriAPI,
 } from '@nexus/extension-api'
 
 // ─── Shell-coupled manifest + contributions ─────────────────────────────────
@@ -148,6 +150,13 @@ export interface PluginAPI {
   platform: PlatformAPI
   activityBar: ActivityBarAPI
   input: InputAPI
+  /**
+   * Custom URI scheme registry — `api.uri.register('nexus', handler)`
+   * routes deep links of the form `nexus://...` to the handler. Auto-
+   * cleaned on plugin deactivate via `PluginRegistry.trackSubscription`.
+   * See WI-13 / Phase 2 §5.3.
+   */
+  uri: UriAPI
   /** Only available to core plugins (core: true) */
   internal?: InternalAPI
 }
