@@ -8,18 +8,18 @@
 // `isDirty` compares the two. Untitled tabs (no kernel session) keep
 // the legacy content-diff behaviour.
 //
-// Run with: node --experimental-strip-types --test \
-//   src/plugins/nexus/editor/editorStore.test.ts
+// Run via the shell test runner: `pnpm --filter nexus-shell test`
+// (picked up through the `tests/editor-store.test.ts` re-export shim).
+// Static imports — top-level await + dynamic import doesn't survive
+// the tsx CJS transform that the test runner uses.
 
 import type { TransactionId } from './types.ts'
 import { isDirty, useEditorStore, type EditorTab } from './editorStore.ts'
 
-const nodeTest: string = 'node:test'
-const nodeAssert: string = 'node:assert/strict'
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { test } = (await import(nodeTest)) as any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const assert = ((await import(nodeAssert)) as any).default
+// @ts-expect-error — shell tsconfig omits @types/node; the test runner has it
+import { test } from 'node:test'
+// @ts-expect-error
+import assert from 'node:assert/strict'
 
 function resetStore(): void {
   useEditorStore.setState({
@@ -92,6 +92,35 @@ test('isDirty: save → markSaved snaps savedRevision = sessionRevision, tab cle
   // Further edit redirties:
   useEditorStore.getState().setSessionRevision('notes/a.md', 4)
   assert.equal(isDirty(tabFor('notes/a.md')), true)
+})
+
+// ── Invariant-violation safety net ─────────────────────────────────────────
+
+test('isDirty: sessionRevision present without savedRevision warns + treats as clean', () => {
+  resetStore()
+  const s = useEditorStore.getState()
+  s.openTab('notes/a.md', 'a.md')
+  // Deliberately skip markSavedRevision() to simulate a missed acquire
+  // seed (the latent invariant violation flagged in the editor phase
+  // audit). isDirty should fall back to "clean" rather than assume
+  // dirty (which would false-flag every newly-opened tab) — but it
+  // must console.warn so the broken invariant surfaces in dev.
+  s.setSessionRevision('notes/a.md', 0)
+
+  const warnings: string[] = []
+  const originalWarn = console.warn
+  console.warn = (msg: unknown) => {
+    if (typeof msg === 'string') warnings.push(msg)
+  }
+  try {
+    assert.equal(isDirty(tabFor('notes/a.md')), false, 'fallback is clean, not dirty')
+  } finally {
+    console.warn = originalWarn
+  }
+
+  assert.equal(warnings.length, 1, 'exactly one warning emitted')
+  assert.match(warnings[0]!, /invariant violation/, 'warning identifies the broken invariant')
+  assert.match(warnings[0]!, /notes\/a\.md/, 'warning includes the offending relpath')
 })
 
 // ── Untitled tabs keep the content-diff fallback ────────────────────────────

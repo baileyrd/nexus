@@ -130,6 +130,17 @@ interface EditorState {
    * Mutate the editable `content` only — does NOT touch
    * `savedContent`. This is what turns a tab dirty (when the
    * textarea diverges from disk).
+   *
+   * **Use only for tabs that are NOT bridge-eligible** (no kernel
+   * session — i.e. untitled drafts and non-markdown buffers). For
+   * tabs with a kernel session, mutations flow through the
+   * transaction bridge (`apply_transaction` IPC) and the store
+   * receives them via `setSessionRevision` / sync-back. Calling
+   * `setContent` on a session-bound tab bypasses the bridge and
+   * desyncs the kernel-side document.
+   *
+   * Legitimate call sites: `EditorView.tsx` no-session local-mode
+   * `<textarea>` fallback (one), `editorStore.test.ts` (two).
    */
   setContent: (relpath: string, content: string) => void
   /**
@@ -178,7 +189,19 @@ export function isDirty(tab: EditorTab): boolean {
   if (current !== undefined) {
     // SessionManager seeds both maps on acquire so a freshly-opened
     // tab reads as clean; after that, any divergence is a real edit.
-    const saved = state.savedRevision.get(tab.relpath) ?? current
+    const saved = state.savedRevision.get(tab.relpath)
+    if (saved === undefined) {
+      // Invariant violation: sessionRevision exists but savedRevision
+      // doesn't — acquire failed to seed savedRevision, or some path
+      // wrote sessionRevision before acquire. Defensive fallback:
+      // assume clean (matches prior `?? current` behaviour) so we
+      // don't false-flag every newly-opened tab as dirty, but log so
+      // the broken invariant surfaces in dev builds.
+      console.warn(
+        `[editorStore] isDirty: sessionRevision present but savedRevision missing for '${tab.relpath}' — invariant violation; treating as clean. This indicates a missed acquire seed in SessionManager.`,
+      )
+      return false
+    }
     return current !== saved
   }
   return tab.content !== tab.savedContent
