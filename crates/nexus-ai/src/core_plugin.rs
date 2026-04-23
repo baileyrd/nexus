@@ -518,9 +518,21 @@ async fn handle_session_save(
     let path = session_path(id.as_deref())?;
     let encoded = serde_json::to_vec_pretty(args)
         .map_err(|e| exec_err(format!("session_save: encode: {e}")))?;
-    ctx.write_file(&path, &encoded)
-        .await
-        .map_err(|e| exec_err(format!("session_save: write: {e}")))?;
+    // Route through storage `write_file` so the atomic-write helper's
+    // mkdir -p runs. `ctx.write_file` is plain `tokio::fs::write` and
+    // would silently fail on a fresh forge where
+    // `.forge/chat/sessions/` doesn't yet exist.
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| exec_err("session_save: path not UTF-8"))?;
+    ctx.ipc_call(
+        "com.nexus.storage",
+        "write_file",
+        serde_json::json!({ "path": path_str, "bytes": encoded }),
+        std::time::Duration::from_secs(10),
+    )
+    .await
+    .map_err(|e| exec_err(format!("session_save: write: {e}")))?;
     Ok(serde_json::json!({ "bytes": encoded.len(), "id": id }))
 }
 
