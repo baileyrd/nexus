@@ -1,38 +1,54 @@
 // shell/src/plugins/nexus/ai/ChatView.tsx
 //
-// WI-01 Slice A — minimal chat view. Single Q + single streamed A.
-// No conversation history, no RAG source chips, no markdown
-// rendering, no copy buttons. Slices B/C add those.
+// WI-01 Slice B — multi-turn chat view with markdown + RAG chips.
+//
+// Renders `useAiStore.turns` as a scrollable list above a fixed
+// composer. Each turn:
+//   - user:    plain pre-wrap bubble
+//   - asst-streaming: plain text bubble + blinking caret, no copy yet
+//   - asst-done:      sanitized markdown body + copy button + chips
+//   - asst-error:     red bubble + retry button
 //
 // State lives in `useAiStore`; runtime calls in `aiRuntime`. This
 // file is purely presentational.
+//
+// Cross-plugin import: we reuse `renderMarkdown` from the editor
+// plugin (canvas/CanvasOverlay.tsx already does the same — established
+// pattern). Sharing the helper keeps the AI bubbles styled identically
+// to the markdown editor preview.
 
-import { useEffect, useLayoutEffect, useRef } from 'react'
-import { useAiStore } from './aiStore'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useAiStore, type AiSource, type AiTurn } from './aiStore'
 import { registerFocuser } from './aiRuntime'
+import { renderMarkdown } from '../editor/markdownRender'
 import './chat.css'
 
+const EVENT_FILE_OPEN = 'files:open'
+
 export interface ChatViewProps {
-  /** Provided by the plugin's activate() — gives us a stable handle
-   *  on the same PluginAPI the runtime is using for kernel.invoke /
-   *  kernel.on. Decoupled from the runtime module so the view can
-   *  be rendered in isolation for tests. */
   onSend: (question: string) => void | Promise<void>
   onCancel: () => void
   onRetry: () => void | Promise<void>
+  /** Emit a cross-plugin event. Lets us open a source file in the
+   *  editor without reaching into PluginAPI from the view. */
+  onEmit?: (event: string, payload: unknown) => void
 }
 
-export function ChatView({ onSend, onCancel, onRetry }: ChatViewProps) {
+export function ChatView({ onSend, onCancel, onRetry, onEmit }: ChatViewProps) {
   const status = useAiStore((s) => s.status)
+  const turns = useAiStore((s) => s.turns)
   const question = useAiStore((s) => s.question)
-  const streamedAnswer = useAiStore((s) => s.streamedAnswer)
-  const finalAnswer = useAiStore((s) => s.finalAnswer)
-  const error = useAiStore((s) => s.error)
   const config = useAiStore((s) => s.config)
   const setQuestion = useAiStore((s) => s.setQuestion)
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  // Tracks whether the user has scrolled away from the bottom. Toggled
+  // on every scroll event; consulted by the auto-scroll effect so we
+  // only auto-scroll when the user is "following along". Mirrors the
+  // pattern called out in wi01-chatpanel-reference.md §7 ("legacy was
+  // unconditional autoscroll, the port should consider a guard").
+  const stickToBottomRef = useRef(true)
 
   // Wire the focus command. Drains pendingFocus on mount; clears the
   // focuser on unmount so a stale ref doesn't outlive the view.
@@ -45,7 +61,7 @@ export function ChatView({ onSend, onCancel, onRetry }: ChatViewProps) {
     return () => registerFocuser(null)
   }, [])
 
-  // Auto-grow textarea up to 140px (matches the prior skeleton).
+  // Auto-grow textarea up to 140px (matches Slice A).
   useLayoutEffect(() => {
     const ta = textareaRef.current
     if (!ta) return
@@ -53,17 +69,38 @@ export function ChatView({ onSend, onCancel, onRetry }: ChatViewProps) {
     ta.style.height = `${Math.min(140, ta.scrollHeight)}px`
   }, [question])
 
-  // Auto-scroll the answer pane as chunks land.
+  // Track whether the user has scrolled away from the bottom. The
+  // 32px threshold matches the gap between turn bubbles — within one
+  // bubble of the bottom counts as "still following".
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    stickToBottomRef.current = distanceFromBottom < 32
+  }, [])
+
+  // Auto-scroll on every chunk / new turn — but only if the user is
+  // still anchored to the bottom. If they've scrolled up to read an
+  // earlier turn, leave the scrollTop alone.
   useLayoutEffect(() => {
+    if (!stickToBottomRef.current) return
     const el = scrollRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
-  }, [streamedAnswer, finalAnswer])
+  }, [turns])
 
   const isInFlight = status === 'asking' || status === 'streaming'
   const canSend = !isInFlight && question.trim().length > 0
-  // `finalAnswer ?? streamedAnswer` — the final wins once it lands.
-  const responseText = finalAnswer ?? streamedAnswer
+
+  // Surface the most recent assistant error in the banner. Older
+  // errored turns stay visible inline as their own bubble.
+  const lastError = useMemo(() => {
+    for (let i = turns.length - 1; i >= 0; i -= 1) {
+      const t = turns[i]
+      if (t.kind === 'assistant' && t.status === 'error' && t.error) return t.error
+    }
+    return null
+  }, [turns])
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -77,6 +114,14 @@ export function ChatView({ onSend, onCancel, onRetry }: ChatViewProps) {
       else setQuestion('')
     }
   }
+
+  const handleSourceClick = useCallback(
+    (source: AiSource) => {
+      if (!onEmit) return
+      onEmit(EVENT_FILE_OPEN, { relpath: source.path, name: basename(source.path) })
+    },
+    [onEmit],
+  )
 
   return (
     <div
@@ -95,6 +140,7 @@ export function ChatView({ onSend, onCancel, onRetry }: ChatViewProps) {
 
       <div
         ref={scrollRef}
+        onScroll={onScroll}
         style={{
           flex: '1 1 auto',
           overflowY: 'auto',
@@ -105,15 +151,28 @@ export function ChatView({ onSend, onCancel, onRetry }: ChatViewProps) {
           minHeight: 0,
         }}
       >
-        {responseText.length > 0 ? (
-          <ResponseBlock text={responseText} streaming={status === 'streaming'} />
-        ) : status === 'asking' ? (
-          <PendingRow />
-        ) : !error ? (
+        {turns.length === 0 && status !== 'asking' && !lastError ? (
           <EmptyState />
         ) : null}
 
-        {error ? <ErrorBanner error={error} onRetry={() => void onRetry()} /> : null}
+        {turns.map((t) =>
+          t.kind === 'user' ? (
+            <UserBubble key={t.id} turn={t} />
+          ) : (
+            <AssistantBubble
+              key={t.id}
+              turn={t}
+              onSourceClick={handleSourceClick}
+              onRetry={t.status === 'error' ? () => void onRetry() : undefined}
+            />
+          ),
+        )}
+
+        {status === 'asking' && turns.length === 0 ? <PendingRow /> : null}
+
+        {lastError && status === 'error' ? (
+          <ErrorBanner error={lastError} onRetry={() => void onRetry()} />
+        ) : null}
       </div>
 
       <div
@@ -174,6 +233,276 @@ export function ChatView({ onSend, onCancel, onRetry }: ChatViewProps) {
   )
 }
 
+// ── Bubbles ────────────────────────────────────────────────────────────────
+
+function UserBubble({ turn }: { turn: Extract<AiTurn, { kind: 'user' }> }) {
+  return (
+    <div
+      style={{
+        alignSelf: 'flex-end',
+        maxWidth: '88%',
+        background: 'var(--bg-raised)',
+        border: '1px solid var(--line-soft)',
+        borderRadius: 'var(--r)',
+        padding: '8px 10px',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          color: 'var(--fg-dim)',
+          textTransform: 'uppercase',
+          letterSpacing: 0.4,
+          marginBottom: 4,
+        }}
+      >
+        You
+      </div>
+      <div
+        style={{
+          color: 'var(--fg)',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          lineHeight: 1.45,
+        }}
+      >
+        {turn.question}
+      </div>
+    </div>
+  )
+}
+
+function AssistantBubble({
+  turn,
+  onSourceClick,
+  onRetry,
+}: {
+  turn: Extract<AiTurn, { kind: 'assistant' }>
+  onSourceClick: (source: AiSource) => void
+  onRetry?: () => void
+}) {
+  const isStreaming = turn.status === 'streaming'
+  const isError = turn.status === 'error'
+  const body = turn.finalText ?? turn.streamedText
+
+  return (
+    <div
+      style={{
+        alignSelf: 'flex-start',
+        maxWidth: '92%',
+        width: '100%',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 4,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 10,
+            color: isError ? 'var(--risk)' : 'var(--fg-dim)',
+            textTransform: 'uppercase',
+            letterSpacing: 0.4,
+          }}
+        >
+          {isError ? 'Assistant · error' : isStreaming ? 'Assistant · streaming…' : 'Assistant'}
+        </div>
+        {turn.status === 'done' && turn.finalText ? (
+          <CopyButton text={turn.finalText} />
+        ) : null}
+      </div>
+
+      {isError ? (
+        <div
+          style={{
+            border: '1px solid var(--risk)',
+            background: 'var(--bg-raised)',
+            color: 'var(--fg)',
+            borderRadius: 'var(--r)',
+            padding: '8px 10px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <div
+            style={{
+              color: 'var(--risk)',
+              fontSize: 12,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {turn.error?.message ?? 'Unknown error'}
+          </div>
+          {body ? (
+            <div
+              style={{
+                fontSize: 12,
+                color: 'var(--fg-muted)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {body}
+            </div>
+          ) : null}
+          {onRetry ? (
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={onRetry}
+                style={{
+                  border: '1px solid var(--line-soft)',
+                  background: 'transparent',
+                  color: 'var(--fg)',
+                  borderRadius: 'var(--r)',
+                  padding: '4px 10px',
+                  fontFamily: 'var(--f-ui)',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : isStreaming ? (
+        // Streaming: render plain text. Markdown parsing on every
+        // chunk is wasteful and would re-flow code blocks mid-token.
+        // The legacy reference (§7) confirms code fences render as raw
+        // backticks during the stream — port preserves that.
+        <div
+          style={{
+            color: 'var(--fg)',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            lineHeight: 1.5,
+          }}
+        >
+          {body}
+          <span className="nexus-ai-pending"> ▍</span>
+        </div>
+      ) : (
+        // Done: parse markdown once, sanitize, render. Empty body
+        // (cancelled before any chunk) gets a placeholder.
+        body ? (
+          <MarkdownBody source={body} />
+        ) : (
+          <div style={{ color: 'var(--fg-muted)', fontStyle: 'italic' }}>
+            (no response)
+          </div>
+        )
+      )}
+
+      {turn.status === 'done' && turn.sources.length > 0 ? (
+        <SourceChipRow sources={turn.sources} onSourceClick={onSourceClick} />
+      ) : null}
+    </div>
+  )
+}
+
+function MarkdownBody({ source }: { source: string }) {
+  // Re-parse only when the source string changes. marked + DOMPurify
+  // are both synchronous and cheap, but the sanitized HTML can be
+  // sizable for long answers — memoize so React doesn't re-set
+  // dangerouslySetInnerHTML on unrelated re-renders.
+  const html = useMemo(() => renderMarkdown(source), [source])
+  return (
+    <div
+      className="nexus-ai-assistant-body nexus-markdown-body"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const onClick = useCallback(() => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) return
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    })
+  }, [text])
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Copy answer to clipboard"
+      style={{
+        marginLeft: 'auto',
+        border: '1px solid var(--line-soft)',
+        background: 'transparent',
+        color: copied ? 'var(--accent)' : 'var(--fg-dim)',
+        borderRadius: 'var(--r)',
+        padding: '1px 8px',
+        fontFamily: 'var(--f-ui)',
+        fontSize: 10,
+        cursor: 'pointer',
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
+      }}
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  )
+}
+
+function SourceChipRow({
+  sources,
+  onSourceClick,
+}: {
+  sources: AiSource[]
+  onSourceClick: (source: AiSource) => void
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 4,
+        marginTop: 6,
+      }}
+    >
+      {sources.map((s, i) => (
+        <button
+          key={`${s.path}-${s.blockId ?? i}`}
+          type="button"
+          onClick={() => onSourceClick(s)}
+          title={
+            (s.excerpt ? `${s.excerpt.slice(0, 240)}${s.excerpt.length > 240 ? '…' : ''}\n\n` : '') +
+            (typeof s.score === 'number' ? `score ${s.score.toFixed(3)}` : '')
+          }
+          style={{
+            border: '1px solid var(--line-soft)',
+            background: 'var(--bg-raised)',
+            color: 'var(--fg-dim)',
+            borderRadius: 'var(--r)',
+            padding: '2px 8px',
+            fontFamily: 'var(--f-ui)',
+            fontSize: 11,
+            cursor: 'pointer',
+            maxWidth: 220,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {s.path}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Chrome ────────────────────────────────────────────────────────────────
+
 function ConfigBanner({ config }: { config: ReturnType<typeof useAiStore.getState>['config'] }) {
   if (!config) return null
   const ai = config.ai
@@ -206,22 +535,6 @@ function ConfigBanner({ config }: { config: ReturnType<typeof useAiStore.getStat
     >
       {ai.provider}
       {ai.model ? ` · ${ai.model}` : ''}
-    </div>
-  )
-}
-
-function ResponseBlock({ text, streaming }: { text: string; streaming: boolean }) {
-  return (
-    <div
-      style={{
-        color: 'var(--fg)',
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-        lineHeight: 1.5,
-      }}
-    >
-      {text}
-      {streaming ? <span className="nexus-ai-pending"> ▍</span> : null}
     </div>
   )
 }
@@ -355,4 +668,11 @@ function ActionButton({
       {label}
     </button>
   )
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────
+
+function basename(relpath: string): string {
+  const i = relpath.lastIndexOf('/')
+  return i === -1 ? relpath : relpath.slice(i + 1)
 }

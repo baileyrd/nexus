@@ -1,7 +1,7 @@
 // shell/src/plugins/nexus/ai/aiRuntime.ts
 //
-// WI-01 Slice A — kernel-bridge plumbing for the chat plugin.
-// Held out of React so the focus command (and future activate-time
+// WI-01 Slice B — kernel-bridge plumbing for the chat plugin.
+// Held out of React so the focus command (and activate-time
 // hydration) work independently of the view's mount lifecycle.
 //
 // Contract with the AI core plugin (`crates/nexus-ai/src/core_plugin.rs`):
@@ -9,7 +9,7 @@
 //   - `com.nexus.ai::config`      → returns AiConfig snapshot (sync)
 //   - `com.nexus.ai::stream_ask`  → RAG retrieve + streaming chat
 //       args:    { messages: [{role,content}], session_id, limit? }
-//       returns: { session_id, text, sources }   (final consolidated)
+//       returns: { session_id, text, sources: ChunkMatch[] }
 //
 // Events published by the kernel (forwarded to JS via api.kernel.on):
 //
@@ -17,26 +17,16 @@
 //   - com.nexus.ai.stream_chunk  { session_id, chunk, index }
 //   - com.nexus.ai.stream_done   { session_id, text, sources }
 //
-// Note: `session_id` is what the kernel calls our request_id.
-// We treat them as the same correlation key; the store uses
-// `currentRequestId` semantically.
+// `session_id` is the kernel's term for our request_id; treated as a
+// single correlation key by the store.
 //
-// Cancel-on-shell semantics (Slice A): there's no kernel-side abort
-// API yet. `cancelInFlight()` clears `currentRequestId` so subsequent
-// chunks bounce off the mismatch check in the store. The kernel may
-// keep producing chunks + a final done — they're dropped on arrival.
-// A future kernel handler (`stream_cancel { session_id }`?) can layer
-// real cancellation on top without changing this shell contract.
+// Cancel semantics (Slice B unchanged from A): no kernel-side abort.
+// `cancelInFlight()` flips the assistant turn to 'done' (preserving
+// streamedText as finalText) and drops the request_id correlation;
+// further chunks bounce off the matching-turn guard in the store.
 
 import type { KernelAPI, PluginAPI } from '../../../types/plugin'
-import { useAiStore, type AiConfig } from './aiStore'
-
-// `api.kernel.invoke` rejects with a `KernelIpcError` (extends Error)
-// or a raw value if the bridge ever returns a non-envelope shape. We
-// don't import the class — WI-23 forbids plugins reaching into
-// shell/src/host. We treat `Error` as the common supertype and let
-// the view duck-type on `err.name === 'KernelIpcError'` if it ever
-// needs to branch on `kind`.
+import { useAiStore, type AiConfig, type AiSource } from './aiStore'
 
 const AI_PLUGIN_ID = 'com.nexus.ai'
 const HANDLER_CONFIG = 'config'
@@ -45,9 +35,10 @@ const HANDLER_STREAM_ASK = 'stream_ask'
 const TOPIC_PREFIX = 'com.nexus.ai.stream_'
 const TOPIC_CHUNK = 'com.nexus.ai.stream_chunk'
 const TOPIC_DONE = 'com.nexus.ai.stream_done'
-// stream_start exists on the wire but Slice A has no use for it (no
-// pre-allocated assistant turn to flip into "streaming"). Slice B
-// will need it for the source-chip pre-render.
+// `stream_start` carries `sources` too — Slice B could pre-attach them
+// to the assistant turn so the chips render before any tokens arrive.
+// Skipped for now: the `stream_done` payload also carries them, and
+// rendering chips beside a still-empty bubble feels jarring.
 
 /** Top-k RAG sources fetched per question. Match nexus-ai's default. */
 const DEFAULT_LIMIT = 5
@@ -62,10 +53,7 @@ export function setKernel(api: KernelAPI): void {
   kernel = api
 }
 
-// ── Focus plumbing (preserved from the prior skeleton) ────────────────────
-// Held module-side so the `nexus.ai.focus` command can poke the textarea
-// even when ChatView isn't currently mounted (the focuser registers on
-// mount and unregisters on unmount; pendingFocus drains on next mount).
+// ── Focus plumbing ────────────────────────────────────────────────────────
 
 type Focuser = () => void
 let focuser: Focuser | null = null
@@ -88,12 +76,6 @@ export function requestFocus(): void {
 }
 
 // ── Watchdog ──────────────────────────────────────────────────────────────
-//
-// One in-flight request at a time. When `submitQuestion` starts, we
-// arm a 60s timer keyed off the request id; on stream_done / error /
-// cancel we clear it. If it fires, we synthesize an error in the
-// store and clear `currentRequestId` so any late kernel events are
-// dropped by the store's request_id check.
 
 let watchdogTimer: ReturnType<typeof setTimeout> | null = null
 let watchdogRequestId: string | null = null
@@ -128,9 +110,44 @@ interface StreamChunkEvent {
   index?: number
 }
 
+/** Mirrors `ChunkMatch` in `crates/nexus-ai/src/vectorstore.rs`. */
+interface RawChunkMatch {
+  file_path?: string
+  block_id?: number
+  chunk_text?: string
+  score?: number
+}
+
 interface StreamDoneEvent {
   session_id?: string
   text?: string
+  sources?: RawChunkMatch[]
+}
+
+interface StreamAskResult {
+  session_id?: string
+  text?: string
+  sources?: RawChunkMatch[]
+}
+
+/** Coerce a raw `ChunkMatch` payload from the kernel into the store's
+ *  `AiSource`. Drops entries without a usable `file_path` — those are
+ *  unrenderable as chips. */
+function coerceSources(raw: unknown): AiSource[] {
+  if (!Array.isArray(raw)) return []
+  const out: AiSource[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const r = item as RawChunkMatch
+    if (typeof r.file_path !== 'string' || r.file_path.length === 0) continue
+    out.push({
+      path: r.file_path,
+      excerpt: typeof r.chunk_text === 'string' ? r.chunk_text : undefined,
+      score: typeof r.score === 'number' ? r.score : undefined,
+      blockId: typeof r.block_id === 'number' ? r.block_id : undefined,
+    })
+  }
+  return out
 }
 
 /**
@@ -155,24 +172,43 @@ export async function subscribeStream(api: PluginAPI): Promise<() => void> {
 
     if (topic === TOPIC_DONE) {
       const text = (payload as StreamDoneEvent).text ?? ''
+      const sources = coerceSources((payload as StreamDoneEvent).sources)
       if (watchdogRequestId === sessionId) clearWatchdog()
-      store.finishStream(sessionId, text)
+      store.finishStream(sessionId, text, sources)
       return
     }
 
-    // stream_start: no-op for Slice A.
+    // stream_start: no-op for Slice B (see TOPIC_START comment above).
   })
 }
 
 // ── Submit ────────────────────────────────────────────────────────────────
 
-/** crypto.randomUUID is global in Node18+/modern browsers. Fallback
- *  exists for the rare CI shape that lacks it. */
 function newRequestId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
   }
   return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+/** Build the `messages` array for `stream_ask`. Slice B sends the full
+ *  user/assistant transcript so the model has conversational context.
+ *  In-flight assistant turns are excluded (no point sending an empty
+ *  bubble back to the LLM). */
+function buildMessageHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
+  const turns = useAiStore.getState().turns
+  const out: Array<{ role: 'user' | 'assistant'; content: string }> = []
+  for (const t of turns) {
+    if (t.kind === 'user') {
+      out.push({ role: 'user', content: t.question })
+      continue
+    }
+    // Assistant: only include if we actually have body text.
+    const body = t.finalText ?? t.streamedText
+    if (t.status === 'streaming' || !body) continue
+    out.push({ role: 'assistant', content: body })
+  }
+  return out
 }
 
 /**
@@ -185,9 +221,6 @@ export async function hydrateConfig(api: PluginAPI): Promise<void> {
     const cfg = await api.kernel.invoke<AiConfig>(AI_PLUGIN_ID, HANDLER_CONFIG, {})
     useAiStore.getState().setConfig(cfg)
   } catch (err) {
-    // Non-fatal — chat still works without the snapshot, the user
-    // just won't see the model label until next activate. Log so the
-    // failure isn't silent in the dev console.
     // eslint-disable-next-line no-console
     console.warn('[nexus.ai] hydrateConfig failed', err)
   }
@@ -195,13 +228,16 @@ export async function hydrateConfig(api: PluginAPI): Promise<void> {
 
 /**
  * Send a question via `stream_ask`. The streaming response is
- * delivered through the event subscription set up by
- * `subscribeStream`; this function only initiates the request and
- * tracks the lifetime (timeouts, errors).
+ * delivered through the event subscription; this function only
+ * initiates the request and tracks the lifetime (timeouts, errors).
  *
- * Pre-conditions: kernel handle wired (setKernel called on activate),
- * subscribeStream already running (so the answer doesn't go to
- * /dev/null).
+ * Slice B: the user turn + assistant turn are appended by `startAsk`
+ * before invoke fires, so chunks arriving before invoke resolves
+ * always have a turn to land into.
+ *
+ * The full conversation transcript is sent in `messages` (legacy
+ * ChatPanel.tsx:540 pattern) — this is what gives us multi-turn
+ * coherence on the model side, not just on the UI.
  */
 export async function submitQuestion(
   api: PluginAPI,
@@ -217,40 +253,43 @@ export async function submitQuestion(
   }
 
   const requestId = newRequestId()
+  // Append the user turn FIRST so buildMessageHistory below picks it up.
   state.startAsk(requestId, trimmed)
   armWatchdog(requestId)
 
   try {
     if (!kernel) throw new Error('AI plugin not activated (kernel handle missing)')
 
-    // The kernel expects a `messages` array, not a flat `question` —
-    // it picks the last user message inside `handle_stream_ask`. For
-    // Slice A we send a single user turn; Slice B will append prior
-    // turns from the conversation model.
-    await api.kernel.invoke(
+    const messages = buildMessageHistory()
+
+    const result = await api.kernel.invoke<StreamAskResult>(
       AI_PLUGIN_ID,
       HANDLER_STREAM_ASK,
       {
-        messages: [{ role: 'user', content: trimmed }],
+        messages,
         session_id: requestId,
         limit: DEFAULT_LIMIT,
       },
       REQUEST_TIMEOUT_MS,
     )
     // The invoke promise resolves on the same path that fires
-    // stream_done; the event handler has already populated
-    // finalAnswer. Nothing to do here.
+    // stream_done. The event handler usually populated the turn
+    // already; if it didn't (e.g. the event was dropped), reconcile
+    // here from the invoke result so the user still sees the answer.
+    const stillStreaming =
+      useAiStore.getState().turns.find(
+        (t) => t.kind === 'assistant' && t.requestId === requestId && t.status === 'streaming',
+      )
+    if (stillStreaming && result && typeof result === 'object') {
+      const text = typeof result.text === 'string' ? result.text : ''
+      const sources = coerceSources(result.sources)
+      if (watchdogRequestId === requestId) clearWatchdog()
+      useAiStore.getState().finishStream(requestId, text, sources)
+    }
   } catch (err) {
-    // Only surface the error if we're still the in-flight request.
-    // If the user clicked Stop or a stale rejection arrives after a
-    // new submit, the store has already moved on and we shouldn't
-    // clobber it.
     const cur = useAiStore.getState().currentRequestId
     if (cur !== requestId && cur !== null) return
     if (watchdogRequestId === requestId) clearWatchdog()
-    // KernelIpcError extends Error, so this catches both typed and
-    // raw rejections. Non-Error rejections get wrapped so the store
-    // always sees an Error subclass.
     if (err instanceof Error) {
       useAiStore.getState().setError(err)
     } else {
@@ -260,11 +299,10 @@ export async function submitQuestion(
 }
 
 /**
- * Shell-side cancel. Drops the request_id correlation so any further
- * chunks/done events from the kernel are ignored. Does NOT cancel
- * the kernel-side stream — that needs a future `stream_cancel`
- * handler. Visible effect: streaming buffer clears, status idles,
- * Stop button disappears.
+ * Shell-side cancel. The store flips the in-flight assistant turn to
+ * 'done' (preserving streamedText as finalText) and drops the
+ * request_id correlation; further chunks bounce off the matching-turn
+ * guard. Does NOT cancel the kernel-side stream.
  */
 export function cancelInFlight(): void {
   clearWatchdog()
@@ -272,11 +310,17 @@ export function cancelInFlight(): void {
 }
 
 /**
- * Retry the last submitted question. Used by the error banner's
- * Retry button.
+ * Retry the most recent user question. Used by the error banner's
+ * Retry button. With Slice B, "the last question" is the most recent
+ * user turn — there's no longer a flat `lastQuestion` field.
  */
 export async function retryLast(api: PluginAPI): Promise<void> {
-  const last = useAiStore.getState().lastQuestion
-  if (!last) return
-  await submitQuestion(api, last)
+  const turns = useAiStore.getState().turns
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const t = turns[i]
+    if (t.kind === 'user') {
+      await submitQuestion(api, t.question)
+      return
+    }
+  }
 }

@@ -74,11 +74,17 @@ export const aiPlugin: Plugin = {
     const onSend = (q: string) => submitQuestion(api, q)
     const onCancel = () => cancelInFlight()
     const onRetry = () => retryLast(api)
+    // RAG source chips emit `files:open` so the editor plugin opens
+    // the cited document. Routed through PluginAPI's event bus, not
+    // direct kernel emit — the editor subscribes via `api.events.on`.
+    const onEmit = (event: string, payload: unknown) => {
+      api.events.emit(event, payload)
+    }
 
     viewRegistry.register(
       'ai-chat',
       aiChatViewCreator(() =>
-        createElement(ChatView, { onSend, onCancel, onRetry }),
+        createElement(ChatView, { onSend, onCancel, onRetry, onEmit }),
       ),
     )
 
@@ -100,12 +106,13 @@ export const aiPlugin: Plugin = {
       requestFocus()
     })
 
-    // Clear command — wipe the current Q/A + composer state. Slice A
-    // has no kernel-side conversation to delete; the runtime's
-    // cancel hook also stops any in-flight stream from rendering.
+    // Clear command — wipe the conversation history. We cancel any
+    // in-flight stream first so the assistant turn we're about to
+    // delete doesn't keep accruing chunks into nothing. `clearTurns`
+    // (vs `reset`) preserves the hydrated config + composer text.
     api.commands.register(COMMAND_CLEAR, () => {
       cancelInFlight()
-      useAiStore.getState().reset()
+      useAiStore.getState().clearTurns()
     })
 
     // Wipe the store when the workspace closes. Answers from a
