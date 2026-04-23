@@ -1,12 +1,12 @@
 [theme]
-name = "Nexus Forge"
+name = "High Contrast"
 version = "1.0.0"
-author = "Nexus"
-description = "Ember-dark workspace theme — warm amber accent, IBM Plex Serif body, Inter UI"
+author = "Default"
+description = "Warm high-contrast dark workspace theme — amber accent, IBM Plex Serif body, Inter UI"
 license = "MIT OR Apache-2.0"
 nexus_min_version = "0.1.0"
 nexus_max_version = "*"
-display_name = "Nexus Forge"
+display_name = "High Contrast"
 category = "dark"
 supports = ["dark"]
 platform_specific = ["macos", "windows"]
@@ -56,10 +56,10 @@ mono_font = "'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace"
 "--nx-bg-secondary" = "rgba(34, 35, 41, 0.72)"
 
 [tags]
-keywords = ["forge", "ember", "amber", "warm", "dark", "editor"]
+keywords = ["high-contrast", "amber", "warm", "dark", "editor"]
 color_temperature = "warm"
 contrast_level = "aa"
 use_case = ["writing", "notes", "long-sessions", "editor"]
 
 [version_history]
-"1.0.0" = "Initial ember-dark Forge theme"
+"1.0.0" = "Initial warm high-contrast dark theme"

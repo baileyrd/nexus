@@ -1,12 +1,12 @@
 [theme]
-name = "Nexus Dark"
+name = "Default Dark"
 version = "1.0.0"
-author = "Nexus"
+author = "Default"
 description = "Low-glare dark theme with high-contrast syntax colors"
 license = "MIT OR Apache-2.0"
 nexus_min_version = "0.1.0"
 nexus_max_version = "*"
-display_name = "Nexus Dark"
+display_name = "Default Dark"
 category = "dark"
 supports = ["dark"]
 platform_specific = ["macos", "windows"]

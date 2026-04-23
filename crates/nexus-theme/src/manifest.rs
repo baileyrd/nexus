@@ -45,7 +45,7 @@ pub struct ThemeManifest {
 /// `[theme]` table — metadata + feature flags.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThemeHeader {
-    /// Human-readable name (e.g. "Nexus Light").
+    /// Human-readable name (e.g. "Default Light").
     pub name: String,
 
     /// Semver theme version.
@@ -200,7 +200,7 @@ mod tests {
 
     const SAMPLE: &str = r##"
 [theme]
-name = "Nexus Light"
+name = "Default Light"
 version = "1.0.0"
 author = "Anthropic"
 description = "Clean, accessible light theme for focused work"
@@ -231,7 +231,7 @@ use_case = ["writing", "coding"]
     #[test]
     fn parses_full_manifest() {
         let m = ThemeManifest::from_toml(SAMPLE).unwrap();
-        assert_eq!(m.theme.name, "Nexus Light");
+        assert_eq!(m.theme.name, "Default Light");
         assert_eq!(m.theme.category, ThemeCategory::Light);
         assert_eq!(m.variables["--nx-color-primary"], "#4A90E2");
         assert_eq!(

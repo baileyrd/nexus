@@ -1,12 +1,12 @@
 [theme]
-name = "Nexus Light"
+name = "Default Light"
 version = "1.0.0"
-author = "Nexus"
+author = "Default"
 description = "Clean, accessible light theme for focused work"
 license = "MIT OR Apache-2.0"
 nexus_min_version = "0.1.0"
 nexus_max_version = "*"
-display_name = "Nexus Light"
+display_name = "Default Light"
 category = "light"
 supports = ["light"]
 platform_specific = ["macos", "windows"]

@@ -19,7 +19,7 @@ pub const BUILTIN_LIGHT_TOML: &str = include_str!("../themes/nexus-light/NEXUS.t
 /// Bundled dark theme manifest — see `themes/nexus-dark/NEXUS.toml`.
 pub const BUILTIN_DARK_TOML: &str = include_str!("../themes/nexus-dark/NEXUS.toml");
 
-/// Bundled Forge (ember) theme manifest — see `themes/nexus-forge/NEXUS.toml`.
+/// Bundled high-contrast theme manifest — see `themes/nexus-forge/NEXUS.toml`.
 pub const BUILTIN_FORGE_TOML: &str = include_str!("../themes/nexus-forge/NEXUS.toml");
 
 /// Identifier for the bundled light theme.
@@ -28,7 +28,7 @@ pub const BUILTIN_LIGHT_ID: &str = "nexus-light";
 /// Identifier for the bundled dark theme.
 pub const BUILTIN_DARK_ID: &str = "nexus-dark";
 
-/// Identifier for the bundled Forge ember theme.
+/// Identifier for the bundled high-contrast theme.
 pub const BUILTIN_FORGE_ID: &str = "nexus-forge";
 
 /// A loaded theme package — identifier + parsed manifest + source path if any.
