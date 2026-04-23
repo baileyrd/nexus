@@ -232,6 +232,8 @@ function ExpandedPanel({ skill }: { skill: SkillEntry }) {
       ) : null}
       {body ? (
         <pre
+          aria-label="Skill body preview"
+          data-testid="skill-body-preview"
           style={{
             margin: 0,
             padding: 8,

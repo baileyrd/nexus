@@ -60,18 +60,29 @@ describe('tier2: chat', () => {
     })
   })
 
-  // Skipped: no RAG-mode toggle exists in ChatView. `ask` is always
-  // RAG-mode (see shell/src/plugins/nexus/ai/index.ts). Revisit when a
-  // user-facing toggle lands.
-  it.skip('RAG toggle reflects enabled/disabled state', async () => {
-    // no-op
+  it('RAG toggle reflects enabled/disabled state', async () => {
+    await ChatPage.openPanel()
+    const toggle = await $('button[aria-label="RAG mode"]')
+    await toggle.waitForExist({ timeout: 10_000 })
+    // Defaults on — ChatView seeds aiStore.ragEnabled to true.
+    expect(await toggle.getAttribute('aria-pressed')).toBe('true')
+    await toggle.click()
+    await browser.waitUntil(
+      async () => (await toggle.getAttribute('aria-pressed')) === 'false',
+      { timeout: 5_000, timeoutMsg: 'RAG toggle never reflected off state' },
+    )
+    await toggle.click()
+    await browser.waitUntil(
+      async () => (await toggle.getAttribute('aria-pressed')) === 'true',
+      { timeout: 5_000, timeoutMsg: 'RAG toggle never reflected on state' },
+    )
   })
 
-  // Skipped: the streaming pending indicator (`.nexus-ai-pending`) is
-  // rendered only while the ask round-trip is in flight — which depends
-  // on an LLM backend being reachable. In CI the call returns quickly
-  // with an error and the pending row is torn down before WDIO can see
-  // it. Revisit with a fake-LLM adapter.
+  // Skipped: the streaming pending indicator now carries role="status"
+  // + aria-live="polite" + data-streaming="true", but is rendered only
+  // while the ask round-trip is in flight. In CI the call returns
+  // quickly with an error and the pending row is torn down before WDIO
+  // can see it. Revisit with a fake-LLM adapter.
   it.skip('streaming-in-progress indicator appears during a send', async () => {
     // no-op
   })

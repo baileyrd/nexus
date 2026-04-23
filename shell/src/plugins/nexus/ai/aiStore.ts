@@ -24,10 +24,16 @@ interface AiState {
   input: string
   sending: boolean
   error: string | null
+  /** UI preference for RAG retrieval. `ask` is always RAG-mode today;
+   *  this flag exists so a future non-RAG direct-ask path can branch
+   *  on it without another UI pass. Defaults on to match current
+   *  behavior. */
+  ragEnabled: boolean
   setInput: (s: string) => void
   appendMessage: (m: AiMessage) => void
   setSending: (b: boolean) => void
   setError: (e: string | null) => void
+  setRagEnabled: (b: boolean) => void
   clear: () => void
 }
 
@@ -36,9 +42,12 @@ export const useAiStore = create<AiState>((set) => ({
   input: '',
   sending: false,
   error: null,
+  ragEnabled: true,
   setInput: (s) => set({ input: s }),
   appendMessage: (m) => set((state) => ({ messages: [...state.messages, m] })),
   setSending: (b) => set({ sending: b }),
   setError: (e) => set({ error: e }),
-  clear: () => set({ messages: [], input: '', sending: false, error: null }),
+  setRagEnabled: (b) => set({ ragEnabled: b }),
+  clear: () =>
+    set({ messages: [], input: '', sending: false, error: null, ragEnabled: true }),
 }))

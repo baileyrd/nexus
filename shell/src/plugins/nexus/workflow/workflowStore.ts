@@ -21,6 +21,11 @@ export interface WorkflowEntry {
   triggerType: string
   stepCount: number
   hasInputs: boolean
+  /** Parse-time error from the kernel's `list` projection when a
+   *  `.workflow.toml` exists but cannot be decoded. Optional: the
+   *  kernel does not emit this yet; the field is reserved so the UI
+   *  can render a per-row invalid indicator without a second round-trip. */
+  parseError?: string | null
 }
 
 /** Status for the last `run` attempt against this workflow name. */

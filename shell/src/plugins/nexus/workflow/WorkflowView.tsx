@@ -133,15 +133,19 @@ interface WorkflowRowProps {
 function WorkflowRow({ workflow, run, onRun }: WorkflowRowProps) {
   const status = run?.status ?? 'idle'
   const isRunning = status === 'running'
+  const invalid = workflow.parseError != null
 
   return (
     <div
+      data-invalid={invalid ? 'true' : undefined}
+      aria-label={invalid ? `Workflow ${workflow.name} invalid` : undefined}
+      title={invalid ? workflow.parseError ?? undefined : undefined}
       style={{
         display: 'flex',
         flexDirection: 'column',
         gap: 4,
         padding: '8px 10px',
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: invalid ? '1px solid var(--risk)' : '1px solid var(--line-soft)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

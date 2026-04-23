@@ -18,6 +18,8 @@ export function ChatView() {
   const input = useAiStore((s) => s.input)
   const sending = useAiStore((s) => s.sending)
   const setInput = useAiStore((s) => s.setInput)
+  const ragEnabled = useAiStore((s) => s.ragEnabled)
+  const setRagEnabled = useAiStore((s) => s.setRagEnabled)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -110,6 +112,28 @@ export function ChatView() {
           gap: 8,
         }}
       >
+        <button
+          type="button"
+          role="switch"
+          aria-label="RAG mode"
+          aria-pressed={ragEnabled}
+          title={ragEnabled ? 'RAG on — answers cite workspace sources' : 'RAG off'}
+          onClick={() => setRagEnabled(!ragEnabled)}
+          style={{
+            flex: '0 0 auto',
+            padding: '2px 8px',
+            borderRadius: 999,
+            border: `1px solid ${ragEnabled ? 'var(--accent)' : 'var(--line-soft)'}`,
+            background: ragEnabled ? 'var(--accent-soft)' : 'transparent',
+            color: ragEnabled ? 'var(--fg)' : 'var(--fg-muted)',
+            fontFamily: 'var(--f-ui)',
+            fontSize: 10,
+            cursor: 'pointer',
+            alignSelf: 'center',
+          }}
+        >
+          RAG
+        </button>
         <textarea
           ref={textareaRef}
           value={input}
@@ -257,6 +281,10 @@ function PendingRow() {
   return (
     <div
       className="nexus-ai-pending"
+      role="status"
+      aria-live="polite"
+      aria-label="Streaming response"
+      data-streaming="true"
       style={{
         color: 'var(--fg-muted)',
         fontSize: 13,

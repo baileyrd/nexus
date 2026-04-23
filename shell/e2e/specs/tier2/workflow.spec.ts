@@ -48,10 +48,11 @@ describe('tier2: workflow', () => {
     expect(await WorkflowPage.workflowCount()).toBe(0)
   })
 
-  // Skipped: "invalid workflow shows error" requires seeding a bad
-  // .workflow.toml in the fixture vault AND a UI branch that surfaces
-  // per-row parse errors. WorkflowView only shows a global loadError
-  // today; per-row parse errors don't propagate as a distinct row.
+  // Skipped: UI branch is now in place — WorkflowRow renders
+  // data-invalid="true" and aria-label="Workflow {name} invalid" when
+  // the entry carries a parseError field. Remaining blocker: the
+  // kernel `list` projection does not yet populate parseError, and
+  // the fixture vault has no bad .workflow.toml to exercise it.
   it.skip('invalid workflow surfaces a per-row parse error', async () => {
     // no-op
   })

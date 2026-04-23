@@ -123,7 +123,9 @@ function HistoryColumn({
         ) : loading && history.length === 0 ? (
           <Centered colour="var(--fg-dim)">Loading…</Centered>
         ) : history.length === 0 ? (
-          <Centered colour="var(--fg-dim)">No past runs.</Centered>
+          <div role="status" aria-label="No history">
+            <Centered colour="var(--fg-dim)">No past runs.</Centered>
+          </div>
         ) : (
           history.map((h) => (
             <HistoryItem

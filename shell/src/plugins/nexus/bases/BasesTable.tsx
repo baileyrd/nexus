@@ -392,6 +392,9 @@ export function BasesTable({ relpath, base, client }: Props) {
                   <th
                     key={c.name}
                     onClick={() => handleHeaderClick(c.name)}
+                    role="columnheader"
+                    aria-label={`Sort by ${c.name}`}
+                    aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
                     style={{
                       padding: '6px 10px',
                       textAlign: 'left',
@@ -525,6 +528,9 @@ function Row({
   return (
     <tr
       onClick={onSelect}
+      role="row"
+      data-testid={`record-row-${record.id}`}
+      aria-selected={selected}
       style={{
         background: selected ? 'var(--bg-selection, #2a2a35)' : 'transparent',
         cursor: 'default',
@@ -729,6 +735,9 @@ interface EditorProps {
 }
 
 function CellEditor({ def, value, onCommit, onCancel }: EditorProps) {
+  // Commit fires on blur / Enter; cancel fires on Escape. The
+  // aria-labels below let E2E assert edit-mode is active without
+  // having to hardcode per-type selectors.
   const editorStyle: React.CSSProperties = {
     width: '100%',
     padding: '4px 10px',
@@ -749,6 +758,7 @@ function CellEditor({ def, value, onCommit, onCancel }: EditorProps) {
       return (
         <select
           autoFocus
+          aria-label="Commit cell"
           defaultValue={typeof value === 'string' ? value : ''}
           onBlur={(e) => commit(e.currentTarget.value)}
           onChange={(e) => commit(e.currentTarget.value)}
@@ -770,6 +780,7 @@ function CellEditor({ def, value, onCommit, onCancel }: EditorProps) {
         <select
           autoFocus
           multiple
+          aria-label="Commit cell"
           defaultValue={Array.from(selected)}
           onBlur={(e) => {
             const picks = Array.from(e.currentTarget.selectedOptions).map((o) => o.value)
@@ -789,6 +800,7 @@ function CellEditor({ def, value, onCommit, onCancel }: EditorProps) {
       return (
         <textarea
           autoFocus
+          aria-label="Commit cell"
           defaultValue={value == null ? '' : String(value)}
           onBlur={(e) => commit(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -808,6 +820,7 @@ function CellEditor({ def, value, onCommit, onCancel }: EditorProps) {
       return (
         <input
           autoFocus
+          aria-label="Commit cell"
           type={inputType}
           defaultValue={value == null ? '' : String(value)}
           onBlur={(e) => commit(e.currentTarget.value)}

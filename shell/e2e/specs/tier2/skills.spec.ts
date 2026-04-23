@@ -38,9 +38,10 @@ describe('tier2: skills', () => {
     expect(await btn.isExisting()).toBe(true)
   })
 
-  // Skipped: body preview is rendered by the ExpandedPanel branch in
-  // SkillsView.tsx, which only mounts when a row is clicked — requires
-  // a seeded .skill.md fixture. Revisit when the fixture lands.
+  // Skipped: selector now in place — the body preview <pre> carries
+  // aria-label="Skill body preview" and data-testid="skill-body-preview".
+  // Remaining blocker: ExpandedPanel only mounts when a row is
+  // clicked, which requires a seeded .skill.md fixture.
   it.skip('expanding a skill row reveals a body preview', async () => {
     // no-op
   })

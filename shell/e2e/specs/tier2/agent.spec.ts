@@ -70,10 +70,14 @@ describe('tier2: agent', () => {
     // no-op — needs fake LLM adapter
   })
 
-  it.skip('empty forge with no history shows the empty-state copy', async () => {
-    // Folded into the zero-rows test above — left here as a reminder
-    // that the dedicated Centered "No past runs." selector isn't
-    // uniquely addressable without hardcoding copy, which CLAUDE
-    // memory prohibits for UI strings that might drift.
+  it('empty forge with no history shows the empty-state element', async () => {
+    await AgentPage.openPanel()
+    await AgentPage.refreshHistory()
+    // HistoryColumn renders a role=status wrapper with aria-label="No
+    // history" when the store's history array is empty. Asserts the
+    // element's existence without hardcoding the visible copy.
+    const empty = await $('[aria-label="No history"]')
+    await empty.waitForExist({ timeout: 10_000 })
+    expect(await empty.isExisting()).toBe(true)
   })
 })

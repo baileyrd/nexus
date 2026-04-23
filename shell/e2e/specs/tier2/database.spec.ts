@@ -30,23 +30,22 @@ describe('tier2: database (bases)', () => {
     expect(dialogs.length).toBeLessThanOrEqual(1)
   })
 
-  // Skipped: needs a seeded `.bases` fixture directory and stable
-  // BasesTable column-header selectors. Fixture vault has no .bases/
-  // today.
+  // Skipped: needs a seeded `.bases` fixture directory. Selectors are
+  // now in place (each <th> carries aria-label="Sort by {field}" and
+  // aria-sort reflects asc/desc/none) — blocker is fixture-only.
   it.skip('column header click toggles sort order', async () => {
     // no-op
   })
 
-  // Skipped: row count assertion requires a seeded base with a known
-  // record count. See above — no fixture yet.
+  // Skipped: selectors exist (each row is role="row" with
+  // data-testid="record-row-{id}") but fixture vault has no .bases/.
   it.skip('row count reflects the seed', async () => {
     // no-op
   })
 
-  // Skipped: cell-commit / cell-cancel have no uniquely addressable
-  // selectors in BasesTable today (cells are DOM-level inputs with no
-  // aria-label distinguishing commit vs cancel). Flagged for a future
-  // UI task — needs stable affordances on the grid.
+  // Skipped: selectors exist (the inline CellEditor carries
+  // aria-label="Commit cell"; cancel is keyboard-only via Escape with
+  // the editor unmounting). Still needs a seeded base fixture.
   it.skip('cell edit commit persists; cancel reverts', async () => {
     // no-op
   })
