@@ -27,3 +27,203 @@
 .nexus-terminal-root .xterm-viewport {
   background: transparent !important;
 }
+
+/*
+ * Saved Commands sub-view (WI-05).
+ *
+ * Sidebar pane: vertical list of user-saved shell commands. Click the
+ * row body to send the command to the active terminal session; the
+ * actions strip on the right handles edit / delete / reorder.
+ */
+
+.nexus-saved-commands {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-raised);
+  overflow: auto;
+}
+
+.nexus-saved-commands-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.nexus-saved-commands-header h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-dim, var(--fg));
+}
+
+.nexus-saved-commands-add {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.nexus-saved-commands-add:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+}
+
+.nexus-saved-commands-error {
+  font-size: 11px;
+  color: var(--accent-danger, #e06c75);
+  background: var(--bg-danger-soft, rgba(224, 108, 117, 0.08));
+  padding: 4px 6px;
+  border-radius: 3px;
+  margin-bottom: 6px;
+}
+
+.nexus-saved-commands-empty {
+  font-size: 11px;
+  color: var(--fg-dim, var(--fg));
+  margin: 12px 0;
+}
+
+.nexus-saved-commands-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nexus-saved-command {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 4px;
+  background: var(--bg-base, transparent);
+}
+
+.nexus-saved-command-body {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.nexus-saved-command-body:hover .nexus-saved-command-name {
+  color: var(--accent, #7aa2f7);
+}
+
+.nexus-saved-command-name {
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.nexus-saved-command-cmd {
+  display: block;
+  font-family: var(--f-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  color: var(--fg-dim, var(--fg));
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.nexus-saved-command-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--fg-dim, var(--fg));
+  margin-top: 2px;
+}
+
+.nexus-saved-command-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.nexus-saved-command-actions button {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 3px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.nexus-saved-command-actions button:hover:not(:disabled) {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+}
+
+.nexus-saved-command-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.nexus-saved-command-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 4px;
+  background: var(--bg-base, transparent);
+}
+
+.nexus-saved-command-form label {
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  color: var(--fg-dim, var(--fg));
+  gap: 2px;
+}
+
+.nexus-saved-command-form input {
+  font-size: 11px;
+  padding: 3px 5px;
+  background: var(--bg-input, rgba(0, 0, 0, 0.2));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 3px;
+  color: var(--fg);
+}
+
+.nexus-saved-command-form-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.nexus-saved-command-form-actions button {
+  font-size: 11px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 3px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.nexus-saved-command-form-actions button[type='submit'] {
+  background: var(--accent, #7aa2f7);
+  border-color: var(--accent, #7aa2f7);
+  color: var(--accent-fg, #ffffff);
+}

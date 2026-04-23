@@ -4,6 +4,12 @@ import { viewRegistry, workspace } from '../../../workspace'
 import { TerminalView } from './TerminalView'
 import { terminalPaneViewCreator } from './TerminalPaneView'
 import { useTerminalStore } from './terminalStore'
+import {
+  SAVED_COMMANDS_VIEW_TYPE,
+  savedCommandsPaneViewCreator,
+} from './SavedCommandsPaneView'
+import { SavedCommandsView } from './SavedCommandsView'
+import { useSavedCommandsStore } from './savedCommandsStore'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 
 const PLUGIN_ID = 'com.nexus.terminal'
@@ -15,6 +21,10 @@ const ACTIVITY_ITEM_ID = 'nexus.terminal.activityItem'
 
 const COMMAND_TOGGLE = 'nexus.terminal.toggle'
 const COMMAND_FOCUS = 'nexus.terminal.focus'
+// WI-05: dedicated command to reveal the Saved Commands sub-view.
+// Listed in the command palette so the user can pull it up without
+// hunting for an activity-bar entry.
+const COMMAND_SAVED_SHOW = 'nexus.terminal.savedCommands.show'
 
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
@@ -43,6 +53,11 @@ export const terminalPlugin: Plugin = {
       commands: [
         { id: COMMAND_TOGGLE, title: 'Toggle Terminal', category: 'Terminal' },
         { id: COMMAND_FOCUS, title: 'Focus Terminal', category: 'Terminal' },
+        {
+          id: COMMAND_SAVED_SHOW,
+          title: 'Show Saved Commands',
+          category: 'Terminal',
+        },
       ],
       keybindings: [
         // VS Code convention: Ctrl-Backquote toggles the integrated
@@ -161,6 +176,51 @@ export const terminalPlugin: Plugin = {
     api.commands.register(COMMAND_FOCUS, async () => {
       await ensureAndReveal()
       api.events.emit(EVENT_TERMINAL_FOCUS, {})
+    })
+
+    // ── Saved Commands sub-view (WI-05) ─────────────────────────────
+    //
+    // Registered as a sidebar leaf rather than a slot inside
+    // TerminalView so the user can keep the terminal output visible
+    // while picking a command. Click-to-execute reads the active
+    // sessionId out of `terminalStore` and sends `send_input`
+    // (HANDLER_SEND_INPUT, kernel-side appends a newline). If no
+    // session exists, the view falls through to `ensureAndReveal`
+    // which creates one.
+    viewRegistry.register(
+      SAVED_COMMANDS_VIEW_TYPE,
+      savedCommandsPaneViewCreator(() =>
+        createElement(SavedCommandsView, {
+          kernel: api.kernel,
+          notifications: api.notifications,
+          focusTerminal: () => {
+            void ensureAndReveal().then(() => {
+              api.events.emit(EVENT_TERMINAL_FOCUS, {})
+            })
+          },
+        }),
+      ),
+    )
+
+    api.commands.register(COMMAND_SAVED_SHOW, async () => {
+      const leaf = await workspace.ensureLeafOfType(
+        SAVED_COMMANDS_VIEW_TYPE,
+        'left',
+      )
+      workspace.revealLeaf(leaf)
+      // Eagerly seed the cache so the view is non-empty on first open.
+      // The view itself also calls loadSaved on mount, but doing it
+      // here avoids the empty-flash between mount and first response.
+      if (await api.kernel.available()) {
+        void useSavedCommandsStore.getState().loadSaved(api.kernel)
+      }
+    })
+
+    // Reset the saved-commands cache when the workspace closes so the
+    // next workspace doesn't see stale rows from the previous forge's
+    // procmgr_commands table.
+    api.events.on(EVENT_WORKSPACE_CLOSED, () => {
+      useSavedCommandsStore.getState().reset()
     })
 
     // ── Activity bar item ───────────────────────────────────────────
