@@ -31,14 +31,25 @@ jobs:
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
 
+      - name: Monitor memory in background
+        run: |
+          (while true; do
+            date -u +%H:%M:%S
+            free -m | awk 'NR<=2'
+            echo "---"
+            sleep 15
+          done) > /tmp/memlog.txt 2>&1 &
+          echo $! > /tmp/memlog.pid
+
       - name: Run scripts/test_all.sh
         env:
-          # ubuntu-latest only has 7 GB RAM. Even with mold, rustc
-          # itself OOMs while compiling tauri/webkit2gtk under any
-          # concurrency. Skip nexus-app (the only crate pulling the
-          # webview stack) on CI — its 15 unit tests don't exercise
-          # the crates E2E+IPC contract tests already cover.
           CARGO_BUILD_JOBS: "1"
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
           NEXUS_SKIP_TAURI_CRATES: "1"
         run: bash scripts/test_all.sh
+
+      - name: Dump memory log (always)
+        if: always()
+        run: |
+          kill "$(cat /tmp/memlog.pid)" 2>/dev/null || true
+          tail -200 /tmp/memlog.txt || true

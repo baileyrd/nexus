@@ -12,8 +12,14 @@ fi
 # crate graph OOM-kills the agent. Set NEXUS_SKIP_TAURI_CRATES=1 to
 # exclude nexus-app (the only crate pulling webkit2gtk/soup3). Local
 # runs keep the full workspace.
+args=(test --workspace)
 if [ "${NEXUS_SKIP_TAURI_CRATES:-0}" = "1" ]; then
-  cargo test --workspace --exclude nexus-app 2>&1 | tail -80
+  args+=(--exclude nexus-app)
+fi
+# CI wants full streaming output so we can see what was in flight
+# if the runner OOM-kills. Local runs want the tail.
+if [ "${CI:-}" = "true" ] || [ "${NEXUS_NO_TAIL:-0}" = "1" ]; then
+  cargo "${args[@]}"
 else
-  cargo test --workspace 2>&1 | tail -80
+  cargo "${args[@]}" 2>&1 | tail -80
 fi
