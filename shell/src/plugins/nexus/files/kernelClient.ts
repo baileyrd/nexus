@@ -57,3 +57,28 @@ export async function createDir(relpath: string): Promise<void> {
     relpath,
   })
 }
+
+/**
+ * Rename / move a file or directory inside the active forge. Both
+ * `from` and `to` are forge-relative, forward-slash separated. Used
+ * by the context-menu Rename action and the drag-drop move flow.
+ */
+export async function renameEntry(from: string, to: string): Promise<void> {
+  if (!kernel) throw new Error('kernel handle missing')
+  await kernel.invoke<Record<string, never>>(STORAGE_PLUGIN_ID, 'rename_entry', {
+    from,
+    to,
+  })
+}
+
+/**
+ * Delete a file or directory at `relpath` (recursive for directories).
+ * The storage plugin's watcher emits a `file_deleted` event that the
+ * tree listens for to refresh the parent listing.
+ */
+export async function deleteEntry(relpath: string): Promise<void> {
+  if (!kernel) throw new Error('kernel handle missing')
+  await kernel.invoke<Record<string, never>>(STORAGE_PLUGIN_ID, 'delete_entry', {
+    relpath,
+  })
+}

@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { useFilesStore, type FilesDirEntry, type SortMode } from './filesStore'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useEditorStore } from '../editor/editorStore'
-import { createDir, createFile, loadChildren } from './kernelClient'
+import { createDir, createFile, loadChildren, renameEntry } from './kernelClient'
 import { Icon } from '../../../icons'
 import { getApi } from './runtime'
 import { NavActionButton, NavButtonsContainer, NavHeader } from '../../../primitives/NavHeader'
+import { FilesContextMenu, type FilesContextMenuItem } from './ContextMenu'
+
+const DRAG_MIME = 'application/x-nexus-relpath'
+const CONTEXT_KEY_FOCUSED = 'nexus.files.focused'
 
 interface FilesTreeProps {
   onFileActivate: (entry: FilesDirEntry) => void
@@ -87,6 +91,22 @@ function ancestors(relpath: string): string[] {
   return out
 }
 
+/** What was right-clicked: a specific entry, or the empty container
+ *  (target=null = "add to root"). */
+interface MenuTarget {
+  entry: FilesDirEntry | null
+  x: number
+  y: number
+}
+
+/**
+ * Closure plumbed down to each TreeNode so it can request the menu
+ * without prop-drilling. Uses module-scope React state via a singleton
+ * setter installed by `<FilesTree>` on mount; this avoids a context
+ * provider for a one-component-deep concern.
+ */
+let openMenuRef: ((t: MenuTarget) => void) | null = null
+
 export function FilesTree({ onFileActivate }: FilesTreeProps) {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const rootEntries = useFilesStore((s) => s.children[ROOT_RELPATH])
@@ -100,6 +120,46 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
   const setSortMode = useFilesStore((s) => s.setSortMode)
   const setAutoReveal = useFilesStore((s) => s.setAutoReveal)
   const activeRelpath = useEditorStore((s) => s.activeRelpath)
+
+  const [menu, setMenu] = useState<MenuTarget | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  // Install the menu-open callback while this tree is mounted. Pair
+  // with cleanup so a remount doesn't leave a stale closure that
+  // updates an unmounted component's state.
+  useEffect(() => {
+    openMenuRef = (t) => setMenu(t)
+    return () => {
+      openMenuRef = null
+    }
+  }, [])
+
+  // Track focus to drive the `nexus.files.focused` context key. The
+  // keybindings registered in the plugin manifest gate Del/F2 on this
+  // key, so when the user is typing in the editor the shortcuts stay
+  // out of the way. We watch DOM focus on the container with capture,
+  // covering inner buttons too.
+  useEffect(() => {
+    const api = getApi()
+    if (!api) return
+    const el = containerRef.current
+    if (!el) return
+    const onFocusIn = () => api.context.set(CONTEXT_KEY_FOCUSED, true)
+    const onFocusOut = (e: FocusEvent) => {
+      // focusout fires before focus moves; check if the next target
+      // is still inside the tree to avoid flicker.
+      const next = e.relatedTarget as Node | null
+      if (next && el.contains(next)) return
+      api.context.set(CONTEXT_KEY_FOCUSED, false)
+    }
+    el.addEventListener('focusin', onFocusIn)
+    el.addEventListener('focusout', onFocusOut)
+    return () => {
+      el.removeEventListener('focusin', onFocusIn)
+      el.removeEventListener('focusout', onFocusOut)
+      api.context.set(CONTEXT_KEY_FOCUSED, false)
+    }
+  }, [])
 
   useEffect(() => {
     if (!rootPath) return
@@ -209,8 +269,37 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
     setAutoReveal(!autoReveal)
   }
 
+  // Right-click on the container itself (not on a row) → "root" menu.
+  // The row's own onContextMenu stops propagation, so this only fires
+  // for the empty area / padding.
+  const handleContainerContextMenu = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) return
+    e.preventDefault()
+    setMenu({ entry: null, x: e.clientX, y: e.clientY })
+  }
+
+  // Drop on the empty container = move into the root.
+  const handleContainerDragOver = (e: ReactDragEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) return
+    if (!e.dataTransfer.types.includes(DRAG_MIME)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+  const handleContainerDrop = async (e: ReactDragEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) return
+    const from = e.dataTransfer.getData(DRAG_MIME)
+    if (!from) return
+    e.preventDefault()
+    await moveEntry(from, '')
+  }
+
+  const items = menu ? buildMenuItems(menu.entry) : []
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', overflow: 'hidden' }}>
+    <div
+      ref={containerRef}
+      style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', overflow: 'hidden' }}
+    >
       <Toolbar
         sortMode={sortMode}
         autoReveal={autoReveal}
@@ -222,7 +311,12 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
         onCollapseAll={collapseAll}
       />
 
-      <div className="nav-files-container">
+      <div
+        className="nav-files-container"
+        onContextMenu={handleContainerContextMenu}
+        onDragOver={handleContainerDragOver}
+        onDrop={handleContainerDrop}
+      >
         {rootEntries ? (
           sortEntries(rootEntries, sortMode).map((entry) => (
             <TreeNode
@@ -238,8 +332,121 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
           <div style={{ padding: '12px 14px', color: 'var(--text-faint)' }}>Loading…</div>
         )}
       </div>
+
+      {menu && (
+        <FilesContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={items}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   )
+}
+
+/** Build the right-click menu for a target (or null = root area).
+ *  Each item dispatches a registered command so the menu and the
+ *  Del / F2 shortcuts share a single code path. */
+function buildMenuItems(target: FilesDirEntry | null): FilesContextMenuItem[] {
+  const api = getApi()
+  if (!api) return []
+  // Parent directory for "New" actions: the target if it's a folder,
+  // else the target's parent, else the root.
+  const parent =
+    target === null
+      ? ''
+      : target.isDir
+        ? target.relpath
+        : parentRelpath(target.relpath)
+
+  const items: FilesContextMenuItem[] = [
+    {
+      id: 'new-file',
+      label: 'New File',
+      onSelect: () => void api.commands.execute('nexus.files.create.file', { parent }),
+    },
+    {
+      id: 'new-folder',
+      label: 'New Folder',
+      onSelect: () => void api.commands.execute('nexus.files.create.folder', { parent }),
+    },
+  ]
+
+  if (target) {
+    items.push({
+      id: 'rename',
+      label: 'Rename',
+      separatorBefore: true,
+      onSelect: () => void api.commands.execute('nexus.files.rename', { relpath: target.relpath }),
+    })
+    items.push({
+      id: 'delete',
+      label: target.isDir ? 'Delete Folder' : 'Delete',
+      onSelect: () => void api.commands.execute('nexus.files.delete', { relpath: target.relpath }),
+    })
+  }
+
+  items.push({
+    id: 'reveal',
+    label: 'Reveal in OS',
+    separatorBefore: true,
+    onSelect: () =>
+      void api.commands.execute(
+        'nexus.files.reveal',
+        target ? { relpath: target.relpath } : {},
+      ),
+  })
+
+  if (target) {
+    items.push({
+      id: 'copy-path',
+      label: 'Copy Path',
+      onSelect: () => void api.commands.execute('nexus.files.copyPath', { relpath: target.relpath }),
+    })
+  }
+
+  return items
+}
+
+/**
+ * Drag-drop move helper. Validates the move against three legal-edge
+ * constraints (mirrors the legacy tree's behavior + common-sense),
+ * then calls `rename_entry`. Returns silently for no-op moves.
+ */
+async function moveEntry(from: string, targetDir: string): Promise<void> {
+  if (!from) return
+  // Drop on self (file or folder dragged onto itself) → no-op.
+  if (from === targetDir) return
+  // Drop on the file's current parent → no-op (would rename to same path).
+  const fromParent = parentRelpath(from)
+  if (fromParent === targetDir) return
+  // Drop into a descendant of the dragged folder → would orphan it.
+  // `targetDir` starts with `from + "/"` iff target is inside `from`.
+  if (targetDir === from || targetDir.startsWith(`${from}/`)) return
+
+  const name = from.slice(from.lastIndexOf('/') + 1) || from
+  const dst = targetDir ? `${targetDir}/${name}` : name
+  if (dst === from) return
+
+  try {
+    await renameEntry(from, dst)
+    // Refresh both sides; the watcher will re-confirm but eager
+    // refresh keeps the UI snappy.
+    const entries1 = await loadChildren(fromParent)
+    useFilesStore.getState().setChildren(fromParent, entries1)
+    if (targetDir !== fromParent) {
+      const entries2 = await loadChildren(targetDir)
+      useFilesStore.getState().setChildren(targetDir, entries2)
+    }
+    useFilesStore.getState().setSelected(dst)
+  } catch (err) {
+    const api = getApi()
+    api?.notifications.show({
+      type: 'error',
+      message: `Move failed: ${err instanceof Error ? err.message : String(err)}`,
+    })
+  }
 }
 
 /** Walk the cached tree to resolve a relpath to its entry. Returns
@@ -503,6 +710,9 @@ function TreeNode({
   }, [selected])
 
   const bundle = isBundleDir(entry)
+  // Folders (real dirs, not bundle dirs) accept drops. Files don't.
+  const isDropTarget = entry.isDir && !bundle
+  const [dropHover, setDropHover] = useState(false)
 
   const handleClick = () => {
     if (entry.isDir && !bundle) {
@@ -518,13 +728,69 @@ function TreeNode({
     }
   }
 
+  const handleContextMenu = (e: ReactMouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setSelected(entry.relpath)
+    openMenuRef?.({ entry, x: e.clientX, y: e.clientY })
+  }
+
+  const handleDragStart = (e: ReactDragEvent<HTMLElement>) => {
+    e.dataTransfer.setData(DRAG_MIME, entry.relpath)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (e: ReactDragEvent<HTMLElement>) => {
+    if (!isDropTarget) return
+    if (!e.dataTransfer.types.includes(DRAG_MIME)) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    if (!dropHover) setDropHover(true)
+  }
+
+  const handleDragLeave = () => {
+    if (dropHover) setDropHover(false)
+  }
+
+  const handleDrop = async (e: ReactDragEvent<HTMLElement>) => {
+    if (!isDropTarget) return
+    const from = e.dataTransfer.getData(DRAG_MIME)
+    if (!from) return
+    e.preventDefault()
+    e.stopPropagation()
+    setDropHover(false)
+    await moveEntry(from, entry.relpath)
+    // Reveal the destination folder so the user sees the moved entry.
+    useFilesStore.getState().setExpanded(entry.relpath, true)
+    if (!useFilesStore.getState().children[entry.relpath]) {
+      loadChildren(entry.relpath).then((entries) =>
+        useFilesStore.getState().setChildren(entry.relpath, entries),
+      )
+    }
+  }
+
   const tooltip = entry.relpath ? `${rootPath}/${entry.relpath}` : rootPath
 
   // Bundle dirs render with the file wrapper so they don't get the
   // folder-expand affordance and their children are never listed.
   const wrapperClass = entry.isDir && !bundle ? 'nav-folder' : 'nav-file'
   return (
-    <div className={wrapperClass}>
+    <div
+      className={wrapperClass}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={
+        dropHover
+          ? {
+              outline: '1px solid var(--interactive-accent, var(--accent, #4a9eff))',
+              outlineOffset: -1,
+              borderRadius: 3,
+            }
+          : undefined
+      }
+    >
       <Row
         entry={entry}
         depth={depth}
@@ -532,6 +798,8 @@ function TreeNode({
         selected={selected}
         tooltip={tooltip}
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
+        onDragStart={handleDragStart}
         buttonRef={rowRef}
       />
       {entry.isDir && !bundle && expanded && children && (
@@ -559,6 +827,8 @@ function Row({
   selected,
   tooltip,
   onClick,
+  onContextMenu,
+  onDragStart,
   buttonRef,
 }: {
   entry: FilesDirEntry
@@ -567,6 +837,8 @@ function Row({
   selected: boolean
   tooltip: string
   onClick: () => void
+  onContextMenu: (e: ReactMouseEvent) => void
+  onDragStart: (e: ReactDragEvent<HTMLElement>) => void
   buttonRef: React.RefObject<HTMLButtonElement>
 }) {
   const bundle = isBundleDir(entry)
@@ -581,8 +853,11 @@ function Row({
     <button
       type="button"
       ref={buttonRef}
+      draggable
+      onDragStart={onDragStart}
       onClick={onClick}
       onDoubleClick={onClick}
+      onContextMenu={onContextMenu}
       title={tooltip}
       className={selfClass}
       style={{

@@ -4,11 +4,29 @@ import { viewRegistry, workspace } from '../../../workspace'
 import { FilesTree } from './FilesTree'
 import { fileExplorerViewCreator } from './FileExplorerView'
 import { useFilesStore, type FilesDirEntry } from './filesStore'
-import { loadChildren, setKernel } from './kernelClient'
+import {
+  createDir,
+  createFile,
+  deleteEntry,
+  loadChildren,
+  renameEntry,
+  setKernel,
+} from './kernelClient'
 import { setApi } from './runtime'
+import { useWorkspaceStore } from '../workspace/workspaceStore'
 
 const VIEW_ID = 'nexus.files.tree'
 const COMMAND_FOCUS = 'nexus.files.focus'
+// WI-21: context-menu / shortcut commands. Surface the same actions
+// the legacy app/src/components/panels/FileTree.tsx exposed via
+// right-click; bind Del + F2 to delete/rename for keyboard parity.
+const COMMAND_CREATE_FILE = 'nexus.files.create.file'
+const COMMAND_CREATE_FOLDER = 'nexus.files.create.folder'
+const COMMAND_RENAME = 'nexus.files.rename'
+const COMMAND_DELETE = 'nexus.files.delete'
+const COMMAND_REVEAL = 'nexus.files.reveal'
+const COMMAND_COPY_PATH = 'nexus.files.copyPath'
+const CONTEXT_KEY_FOCUSED = 'nexus.files.focused'
 const EVENT_FILE_OPEN = 'files:open'
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
@@ -66,10 +84,26 @@ export const filesPlugin: Plugin = {
     dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar'],
     contributes: {
       commands: [
+        { id: COMMAND_FOCUS, title: 'Focus Files', category: 'Files' },
+        { id: COMMAND_CREATE_FILE, title: 'New File', category: 'Files' },
+        { id: COMMAND_CREATE_FOLDER, title: 'New Folder', category: 'Files' },
+        { id: COMMAND_RENAME, title: 'Rename', category: 'Files' },
+        { id: COMMAND_DELETE, title: 'Delete', category: 'Files' },
+        { id: COMMAND_REVEAL, title: 'Reveal in OS', category: 'Files' },
+        { id: COMMAND_COPY_PATH, title: 'Copy Path', category: 'Files' },
+      ],
+      keybindings: [
+        // Gated by `nexus.files.focused` so Del / F2 only fire when
+        // the tree itself owns focus — typing in the editor (or any
+        // other input) keeps its native behavior.
+        { command: COMMAND_DELETE, key: 'Delete', when: CONTEXT_KEY_FOCUSED },
+        { command: COMMAND_RENAME, key: 'F2', when: CONTEXT_KEY_FOCUSED },
+      ],
+      contextKeys: [
         {
-          id: COMMAND_FOCUS,
-          title: 'Focus Files',
-          category: 'Files',
+          key: CONTEXT_KEY_FOCUSED,
+          description: 'True when the Files tree has DOM focus.',
+          type: 'boolean',
         },
       ],
     },
@@ -106,6 +140,238 @@ export const filesPlugin: Plugin = {
     api.commands.register(COMMAND_FOCUS, async () => {
       const leaf = await workspace.ensureLeafOfType('file-explorer', 'left')
       workspace.revealLeaf(leaf)
+    })
+
+    // Initialize the focus context key — set true/false from FilesTree's
+    // mount/focus/blur handlers (api.context.set(CONTEXT_KEY_FOCUSED, …)).
+    api.context.set(CONTEXT_KEY_FOCUSED, false)
+
+    // ── Power-user commands (WI-21) ───────────────────────────────────────
+    //
+    // Each command accepts an optional explicit `relpath` argument from
+    // the right-click menu (which knows what was clicked), and otherwise
+    // falls back to `useFilesStore.getState().selected` so the keyboard
+    // shortcuts (Del, F2) operate on the highlighted row.
+    //
+    // Commands that *create* (file/folder) accept an optional `parent`
+    // arg; with no arg they nest under the selected dir (or the
+    // selected file's parent, or the root).
+
+    /** Forge-relative parent of a relpath. `""` → `""`. */
+    const parentRel = (rel: string): string => {
+      const i = rel.lastIndexOf('/')
+      return i === -1 ? '' : rel.slice(0, i)
+    }
+
+    /** Last path segment, e.g. `"a/b/c.md"` → `"c.md"`. */
+    const basename = (rel: string): string => {
+      const i = rel.lastIndexOf('/')
+      return i === -1 ? rel : rel.slice(i + 1)
+    }
+
+    /** Walk the cached tree to find an entry by relpath. Returns null
+     *  when any segment along the path hasn't been listed yet. */
+    const findEntry = (relpath: string): FilesDirEntry | null => {
+      if (!relpath) return null
+      const cache = useFilesStore.getState().children
+      const root = cache['']
+      if (!root) return null
+      const segments = relpath.split('/')
+      let current: FilesDirEntry[] | undefined = root
+      let path = ''
+      for (let i = 0; i < segments.length; i++) {
+        if (!current) return null
+        const next = current.find((e) => e.name === segments[i])
+        if (!next) return null
+        if (i === segments.length - 1) return next
+        path = path ? `${path}/${segments[i]}` : segments[i]
+        current = cache[path]
+      }
+      return null
+    }
+
+    /** Resolve the "target dir for new entries" given an optional explicit
+     *  parent and the current selection. Mirrors FilesTree.parentForNew. */
+    const resolveParent = (explicit: string | undefined): string => {
+      if (typeof explicit === 'string') return explicit
+      const sel = useFilesStore.getState().selected
+      if (!sel) return ''
+      const entry = findEntry(sel)
+      if (entry?.isDir) return entry.relpath
+      return parentRel(sel)
+    }
+
+    const refreshDir = async (parent: string): Promise<void> => {
+      const entries = await loadChildren(parent)
+      useFilesStore.getState().setChildren(parent, entries)
+    }
+
+    const argRelpath = (args: unknown[]): string | undefined => {
+      const a = args[0]
+      if (a && typeof a === 'object' && 'relpath' in a) {
+        const v = (a as { relpath: unknown }).relpath
+        if (typeof v === 'string') return v
+      }
+      return undefined
+    }
+
+    const argParent = (args: unknown[]): string | undefined => {
+      const a = args[0]
+      if (a && typeof a === 'object' && 'parent' in a) {
+        const v = (a as { parent: unknown }).parent
+        if (typeof v === 'string') return v
+      }
+      return undefined
+    }
+
+    api.commands.register(COMMAND_CREATE_FILE, async (...args) => {
+      const parent = resolveParent(argParent(args))
+      const name = await api.input.prompt('File name:', 'untitled.md')
+      if (!name) return
+      const trimmed = name.trim()
+      if (!trimmed) return
+      // Default extension to `.md` when the user typed a bare name —
+      // matches the toolbar "New note" button.
+      const withExt = /\.[^/\\]+$/.test(trimmed) ? trimmed : `${trimmed}.md`
+      const relpath = parent ? `${parent}/${withExt}` : withExt
+      try {
+        await createFile(relpath)
+        useFilesStore.getState().setExpanded(parent, true)
+        await refreshDir(parent)
+        useFilesStore.getState().setSelected(relpath)
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Failed to create "${withExt}": ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    api.commands.register(COMMAND_CREATE_FOLDER, async (...args) => {
+      const parent = resolveParent(argParent(args))
+      const name = await api.input.prompt('Folder name:')
+      if (!name) return
+      const trimmed = name.trim()
+      if (!trimmed) return
+      const relpath = parent ? `${parent}/${trimmed}` : trimmed
+      try {
+        await createDir(relpath)
+        useFilesStore.getState().setExpanded(parent, true)
+        useFilesStore.getState().setExpanded(relpath, true)
+        await refreshDir(parent)
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Failed to create "${trimmed}": ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    api.commands.register(COMMAND_RENAME, async (...args) => {
+      const target = argRelpath(args) ?? useFilesStore.getState().selected
+      if (!target) return
+      const currentName = basename(target)
+      const next = await api.input.prompt('Rename to:', currentName)
+      if (!next) return
+      const trimmed = next.trim()
+      if (!trimmed || trimmed === currentName) return
+      const parent = parentRel(target)
+      const dst = parent ? `${parent}/${trimmed}` : trimmed
+      try {
+        await renameEntry(target, dst)
+        useFilesStore.getState().setSelected(dst)
+        // The watcher's file_renamed event refreshes the parent
+        // listing, but call it eagerly to avoid a perceptible lag.
+        await refreshDir(parent)
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Failed to rename: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    api.commands.register(COMMAND_DELETE, async (...args) => {
+      const target = argRelpath(args) ?? useFilesStore.getState().selected
+      if (!target) return
+      const entry = findEntry(target)
+      const isDir = entry?.isDir ?? false
+      const name = basename(target)
+      const ok = await api.input.confirm(
+        isDir
+          ? `Delete folder "${name}" and everything inside? This cannot be undone.`
+          : `Delete "${name}"? This cannot be undone.`,
+      )
+      if (!ok) return
+      try {
+        await deleteEntry(target)
+        // Clear selection if we just deleted the selected node.
+        if (useFilesStore.getState().selected === target) {
+          useFilesStore.getState().setSelected(null)
+        }
+        await refreshDir(parentRel(target))
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Failed to delete: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    /** Best-effort absolute-path join. Mirrors editor/index.ts —
+     *  picks `\` only when the root is clearly a Windows path. */
+    const joinAbsPath = (root: string, rel: string): string => {
+      const sep = root.includes('\\') && !root.includes('/') ? '\\' : '/'
+      const trimmed = root.endsWith('/') || root.endsWith('\\') ? root.slice(0, -1) : root
+      return rel ? `${trimmed}${sep}${rel}` : trimmed
+    }
+
+    const parentDirOfAbs = (path: string): string => {
+      const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+      if (idx <= 0) return path
+      return path.slice(0, idx)
+    }
+
+    api.commands.register(COMMAND_REVEAL, async (...args) => {
+      const target = argRelpath(args) ?? useFilesStore.getState().selected
+      const root = useWorkspaceStore.getState().rootPath
+      if (!root) {
+        api.notifications.show({ type: 'warning', message: 'No workspace open.' })
+        return
+      }
+      // Mirror editor's COMMAND_REVEAL_IN_OS: we open the *parent*
+      // directory in the OS file manager. For a directory target we
+      // open the directory itself (the legacy app's behavior was
+      // equivalent — `openExternal` on a dir opens the file manager
+      // there).
+      const abs = target ? joinAbsPath(root, target) : root
+      const entry = target ? findEntry(target) : null
+      const reveal = !target || (entry?.isDir ?? false) ? abs : parentDirOfAbs(abs)
+      try {
+        await api.platform.shell.openExternal(reveal)
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Reveal failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
+    api.commands.register(COMMAND_COPY_PATH, async (...args) => {
+      const target = argRelpath(args) ?? useFilesStore.getState().selected
+      if (!target) return
+      // Match the legacy file tree: copy the forge-relative path. The
+      // editor plugin offers separate "Copy Path (absolute)" if users
+      // want the abs form.
+      try {
+        await navigator.clipboard.writeText(target)
+        api.notifications.show({ type: 'info', message: 'Copied path.' })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Copy failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
     })
 
     // ── Live refresh on storage events ───────────────────────────────────
