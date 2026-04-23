@@ -61,11 +61,14 @@ Register the string names in the bootstrap plugin (same table as
 
 ### Shell UI phases
 
-> **Status (2026-04-22):** Phases 1–5 complete; Phase 6 partially
-> landed. Remaining Phase-6 work (SVG/PDF export, overlay-inclusive
-> PNG export, per-canvas background) each need either a heavy
-> dependency or a `.canvas` file-format change — deferred to
-> separate sessions. Everything listed below is live in the shell:
+> **Status (2026-04-22):** Phases 1–6 complete. The second Phase-6
+> pass (same day) closed every deferred item: SVG / PDF / overlay-
+> inclusive PNG export via `html-to-image` + `jspdf`; a per-canvas
+> background (color + optional dots / grid / lines pattern) via a
+> new `CanvasBackground` field on `CanvasFile` + `set_background`
+> patch op; canvas shortcuts routed through the shell keybinding
+> plugin with a `canvas.focused` context-key gate and palette-
+> accessible commands. Everything listed below is live in the shell:
 >
 > - Kernel surface: `canvas_read` / `canvas_write` / `canvas_patch` /
 >   `canvas_nodes` / `canvas_edges` on `com.nexus.storage` (handler
@@ -201,7 +204,7 @@ Budget: 1–2 days total, each node type incrementally. **Done 2026-04-22.**
   anchored so newest output stays on screen. Session torn down on
   unmount / stop. Landed in 5e.
 
-#### Phase 6 — polish  ← **partially landed**
+#### Phase 6 — polish  ← **complete 2026-04-22**
 
 Landed:
 
@@ -223,22 +226,42 @@ Landed:
 - **Grid toggle** — per-tab view preference in the bottom-left
   control strip. `showGrid` in `canvasStore`.
 
-Still open (each deferred to its own session):
+Closed in the second Phase-6 pass (2026-04-22):
 
-- **SVG export** — needs either a parallel SVG-emitting renderer
-  or an html2canvas-style DOM capture for the overlay layer.
-- **PDF export** — same overlay-capture problem plus a PDF lib.
-  Tauri's print pipeline could short-circuit both but needs
-  wiring through src-tauri.
-- **Overlay-inclusive PNG export** — same html2canvas blocker as
-  SVG. Would supersede the current 2D-only PNG path.
-- **Per-canvas background color / pattern** — needs a field on
-  `nexus_formats::CanvasFile` + round-trip through
-  `parse_canvas`/`serialize_canvas` + an Inspector control on the
-  document itself (not on a node).
-- **Configurable keybindings** — currently hard-coded; a later
-  pass could route these through the existing shell keybinding
-  plugin.
+- **Overlay-inclusive PNG + SVG + PDF export** —
+  `exportFormats.ts` wraps `html-to-image` (`toPng` / `toSvg`) and
+  `jspdf`. Chrome overlays (minimap, control strip, inspector,
+  corner label, help overlay) are tagged with
+  `data-canvas-export-exclude="true"` so the snapshot filter
+  drops them. The Export control-strip button opens a 3-option
+  popover (PNG / SVG / PDF); each option pulls the geometry from
+  `contentBounds()` + a 48-unit margin and caps at 8192 px per
+  edge. The 2D-only `exportPng.ts` path is retained so the
+  Phase-6 first-cut export stays available behind the shell
+  imports it through.
+- **Per-canvas background color / pattern** —
+  `CanvasBackground { color, pattern? }` is a new optional field
+  on `CanvasFile` (Nexus extension over JSON Canvas 1.0 — survives
+  round-trip through other readers via their `extra` catch-all).
+  Writes flow through a new `SetBackground` variant on
+  `CanvasPatchOp` (which undo/redo already knows how to pair).
+  The Inspector grows a `CANVAS` section (toggle from the `BG`
+  control-strip button) that exposes a color picker + pattern
+  dropdown (`none`/`dots`/`grid`/`lines`). The renderer paints
+  the color + pattern; a document pattern overrides the per-tab
+  grid toggle.
+- **Configurable keybindings** — canvas shortcuts now go through
+  `KeybindingRegistry` via manifest contributions in
+  `canvasPlugin.contributes`. A `canvas.focused` context key
+  toggles on focusin/focusout of the leaf container; commands
+  dispatch through a singleton "active canvas handle"
+  (`activeCanvas.ts`) that every `CanvasView` publishes on
+  focus. Every canvas shortcut is also a top-level palette
+  command (`canvas.undo`, `canvas.redo`, `canvas.delete`,
+  `canvas.fit`, `canvas.fitSelection`, `canvas.toggleHelp`,
+  `canvas.closeHelp`, `canvas.toggleGrid`,
+  `canvas.toggleBackground`, `canvas.tidy`, `canvas.export.png`
+  / `.svg` / `.pdf`).
 
 ## Phasing recap
 
@@ -249,10 +272,11 @@ Still open (each deferred to its own session):
 - Phase 3: interactions — can create + rearrange. **Done.**
 - Phase 4: edges + inspector — fully editable graph. **Done.**
 - Phase 5: rich node embeds — feature parity with Obsidian. **Done.**
-- Phase 6: polish. **Partially landed** — minimap, Tidy, PNG
-  (2D only), grid toggle, zoom-to-fit shortcuts, help overlay.
-  Deferred: SVG / PDF export, overlay-inclusive PNG, per-canvas
-  background.
+- Phase 6: polish. **Done 2026-04-22** — minimap, Tidy, grid
+  toggle, zoom-to-fit shortcuts, help overlay, overlay-inclusive
+  PNG + SVG + PDF export, per-canvas background (color +
+  pattern), shortcuts routed through the shell keybinding plugin
+  with palette-accessible commands.
 
 Phase 1–3 is the minimum to call `.canvas` a first-class surface.
 

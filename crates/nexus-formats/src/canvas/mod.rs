@@ -6,7 +6,9 @@
 
 mod types;
 
-pub use types::{CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeType};
+pub use types::{
+    CanvasBackground, CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeType,
+};
 
 use crate::error::CanvasError;
 
@@ -198,6 +200,7 @@ mod tests {
                 edge_type: CanvasEdgeType::Dashed,
                 label: Some("links to".into()), color: None, extra: serde_json::Map::new(),
             }],
+            background: None,
             extra: serde_json::Map::new(),
         };
         let json_str = serialize(&original).unwrap();

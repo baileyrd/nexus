@@ -448,7 +448,8 @@ export function render(rc: RenderContext, doc: CanvasDoc | null): void {
   // for the rest of the draw.
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, width * dpr, height * dpr)
-  ctx.fillStyle = theme.bgMuted
+  const docBg = doc?.background ?? undefined
+  ctx.fillStyle = docBg?.color ?? theme.bgMuted
   ctx.fillRect(0, 0, width * dpr, height * dpr)
 
   ctx.scale(dpr, dpr)
@@ -457,7 +458,14 @@ export function render(rc: RenderContext, doc: CanvasDoc | null): void {
   ctx.translate(-camera.x * camera.zoom, -camera.y * camera.zoom)
   ctx.scale(camera.zoom, camera.zoom)
 
-  if (rc.showGrid !== false) drawGrid(ctx, camera, width, height, theme)
+  // A document-level pattern overrides the per-tab grid toggle — the
+  // canvas author explicitly asked for this overlay. Otherwise fall
+  // back to the default 64-unit dot grid when the toggle is on.
+  if (docBg?.pattern) {
+    drawPattern(ctx, camera, width, height, theme, docBg.pattern)
+  } else if (rc.showGrid !== false) {
+    drawGrid(ctx, camera, width, height, theme)
+  }
 
   if (!doc) return
 
@@ -512,6 +520,65 @@ export function render(rc: RenderContext, doc: CanvasDoc | null): void {
     ctx.strokeRect(rc.marquee.x, rc.marquee.y, rc.marquee.width, rc.marquee.height)
     ctx.restore()
   }
+}
+
+/** Document-level background overlay. Unlike the per-tab dot grid,
+ *  patterns here are authored into the `.canvas` file and use the
+ *  theme `border` color at 40% alpha so they read against whatever
+ *  the user picked as their background color. */
+function drawPattern(
+  ctx: CanvasRenderingContext2D,
+  camera: Camera,
+  cssWidth: number,
+  cssHeight: number,
+  theme: Theme,
+  pattern: string,
+): void {
+  if (camera.zoom < 0.25) return
+  const step = 48
+  const viewLeft = camera.x
+  const viewTop = camera.y
+  const viewRight = camera.x + cssWidth / camera.zoom
+  const viewBottom = camera.y + cssHeight / camera.zoom
+  const startX = Math.floor(viewLeft / step) * step
+  const startY = Math.floor(viewTop / step) * step
+  ctx.save()
+  const stroke = hexWithAlpha(theme.border, 0.4)
+  if (pattern === 'dots') {
+    ctx.fillStyle = stroke
+    const r = 1.25 / camera.zoom
+    for (let x = startX; x <= viewRight; x += step) {
+      for (let y = startY; y <= viewBottom; y += step) {
+        ctx.beginPath()
+        ctx.arc(x, y, r, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+  } else if (pattern === 'grid') {
+    ctx.strokeStyle = stroke
+    ctx.lineWidth = 1 / camera.zoom
+    ctx.beginPath()
+    for (let x = startX; x <= viewRight; x += step) {
+      ctx.moveTo(x, viewTop)
+      ctx.lineTo(x, viewBottom)
+    }
+    for (let y = startY; y <= viewBottom; y += step) {
+      ctx.moveTo(viewLeft, y)
+      ctx.lineTo(viewRight, y)
+    }
+    ctx.stroke()
+  } else if (pattern === 'lines') {
+    ctx.strokeStyle = stroke
+    ctx.lineWidth = 1 / camera.zoom
+    ctx.beginPath()
+    for (let y = startY; y <= viewBottom; y += step) {
+      ctx.moveTo(viewLeft, y)
+      ctx.lineTo(viewRight, y)
+    }
+    ctx.stroke()
+  }
+  // Unknown pattern → silent no-op (solid fill already drawn).
+  ctx.restore()
 }
 
 function drawGrid(

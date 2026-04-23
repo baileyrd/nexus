@@ -21,6 +21,12 @@ pub struct CanvasFile {
     /// Edges connecting nodes.
     #[serde(default)]
     pub edges: Vec<CanvasEdge>,
+    /// Optional per-canvas background. `None` means the renderer uses
+    /// the shell's theme defaults. Nexus extension over JSON Canvas
+    /// 1.0 — Obsidian and other conforming readers will land this in
+    /// their own `extra` catch-all on round-trip.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub background: Option<CanvasBackground>,
     /// Unknown top-level fields preserved for forward-compatibility.
     /// Skipped during serialization when empty.
     #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]
@@ -33,9 +39,25 @@ impl Default for CanvasFile {
             version: default_canvas_version(),
             nodes: Vec::new(),
             edges: Vec::new(),
+            background: None,
             extra: serde_json::Map::new(),
         }
     }
+}
+
+/// Canvas-level background. Color is always set when the struct is
+/// present; pattern is optional (`None` = solid fill).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CanvasBackground {
+    /// Background color. Accepts any valid CSS color string the
+    /// shell renderer can parse (hex, `rgb(…)`, named). No validation
+    /// at this layer — the renderer falls back to theme defaults if
+    /// parsing fails.
+    pub color: String,
+    /// Optional overlay pattern. Known values are `"dots"`, `"grid"`,
+    /// `"lines"`; unknown values render as solid fill.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub pattern: Option<String>,
 }
 
 /// A node placed on the canvas.

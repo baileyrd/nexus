@@ -47,10 +47,19 @@ export interface CanvasEdge {
   color?: string
 }
 
+/** Optional canvas-level background. Nexus extension over JSON
+ *  Canvas 1.0 — absent field means the renderer uses theme defaults. */
+export interface CanvasBackground {
+  color: string
+  /** `'dots'` | `'grid'` | `'lines'` — unknown values render as solid. */
+  pattern?: string
+}
+
 export interface CanvasDoc {
   version: string
   nodes: CanvasNode[]
   edges: CanvasEdge[]
+  background?: CanvasBackground | null
 }
 
 /**
@@ -66,6 +75,7 @@ export type CanvasPatchOp =
   | { op: 'edge_add'; edge: CanvasEdge }
   | { op: 'edge_remove'; id: string }
   | { op: 'edge_update'; edge: CanvasEdge }
+  | { op: 'set_background'; background: CanvasBackground | null }
 
 /** Minimal subset of `nexus_types::bases::Base` that the canvas
  *  database-node overlay actually reads. The kernel returns the

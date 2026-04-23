@@ -192,6 +192,7 @@ export const Minimap = forwardRef<MinimapHandle, Props>(function Minimap(
       ref={canvasRef}
       width={MINIMAP_WIDTH}
       height={MINIMAP_HEIGHT}
+      data-canvas-export-exclude="true"
       style={{
         position: 'absolute',
         top: 12,

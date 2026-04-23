@@ -10,6 +10,25 @@ import { viewRegistry } from '../../../workspace'
 import { CanvasView } from './CanvasView'
 import { canvasPaneViewCreator } from './CanvasPaneView'
 import { makeCanvasKernelClient } from './kernelClient'
+import { withActiveCanvas } from './activeCanvas'
+
+/** Command ids are exported so CanvasView can reference them in the
+ *  help overlay rather than hard-coding strings. */
+export const CANVAS_COMMANDS = {
+  undo: 'canvas.undo',
+  redo: 'canvas.redo',
+  delete: 'canvas.delete',
+  fit: 'canvas.fit',
+  fitSelection: 'canvas.fitSelection',
+  toggleHelp: 'canvas.toggleHelp',
+  closeHelp: 'canvas.closeHelp',
+  toggleGrid: 'canvas.toggleGrid',
+  toggleBackground: 'canvas.toggleBackground',
+  tidy: 'canvas.tidy',
+  exportPng: 'canvas.export.png',
+  exportSvg: 'canvas.export.svg',
+  exportPdf: 'canvas.export.pdf',
+} as const
 
 export const canvasPlugin: Plugin = {
   manifest: {
@@ -19,6 +38,34 @@ export const canvasPlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     dependsOn: ['nexus.workspace'],
+    contributes: {
+      commands: [
+        { id: CANVAS_COMMANDS.undo, title: 'Canvas: Undo' },
+        { id: CANVAS_COMMANDS.redo, title: 'Canvas: Redo' },
+        { id: CANVAS_COMMANDS.delete, title: 'Canvas: Delete selection' },
+        { id: CANVAS_COMMANDS.fit, title: 'Canvas: Zoom to fit' },
+        { id: CANVAS_COMMANDS.fitSelection, title: 'Canvas: Zoom to selection' },
+        { id: CANVAS_COMMANDS.toggleHelp, title: 'Canvas: Toggle shortcut help' },
+        { id: CANVAS_COMMANDS.closeHelp, title: 'Canvas: Close help overlay' },
+        { id: CANVAS_COMMANDS.toggleGrid, title: 'Canvas: Toggle grid' },
+        { id: CANVAS_COMMANDS.toggleBackground, title: 'Canvas: Background inspector' },
+        { id: CANVAS_COMMANDS.tidy, title: 'Canvas: Tidy (auto-layout)' },
+        { id: CANVAS_COMMANDS.exportPng, title: 'Canvas: Export as PNG' },
+        { id: CANVAS_COMMANDS.exportSvg, title: 'Canvas: Export as SVG' },
+        { id: CANVAS_COMMANDS.exportPdf, title: 'Canvas: Export as PDF' },
+      ],
+      keybindings: [
+        { command: CANVAS_COMMANDS.undo, key: 'ctrl+z', mac: 'cmd+z', when: 'canvas.focused' },
+        { command: CANVAS_COMMANDS.redo, key: 'ctrl+shift+z', mac: 'cmd+shift+z', when: 'canvas.focused' },
+        { command: CANVAS_COMMANDS.redo, key: 'ctrl+y', mac: 'cmd+y', when: 'canvas.focused' },
+        { command: CANVAS_COMMANDS.delete, key: 'delete', when: 'canvas.focused' },
+        { command: CANVAS_COMMANDS.delete, key: 'backspace', when: 'canvas.focused' },
+        { command: CANVAS_COMMANDS.fit, key: 'f', when: 'canvas.focused' },
+        { command: CANVAS_COMMANDS.fitSelection, key: 'shift+f', when: 'canvas.focused' },
+        { command: CANVAS_COMMANDS.toggleHelp, key: 'shift+/', when: 'canvas.focused' },
+        { command: CANVAS_COMMANDS.closeHelp, key: 'escape', when: 'canvas.focused && canvas.helpOpen' },
+      ],
+    },
   },
 
   async activate(api: PluginAPI) {
@@ -43,5 +90,25 @@ export const canvasPlugin: Plugin = {
     // Opens `.canvas` files as leaves of view-type `canvas` via the
     // editor plugin's existing viewTypeForFile() path.
     viewRegistry.registerExtensions(['canvas'], 'canvas')
+
+    // Commands all dispatch to the currently-focused canvas leaf. A
+    // missing handle is a no-op (e.g. palette invocation with no
+    // canvas open), matching the "when"-gated behaviour of the
+    // keybindings themselves.
+    api.commands.register(CANVAS_COMMANDS.undo, () => withActiveCanvas((h) => h.undo()))
+    api.commands.register(CANVAS_COMMANDS.redo, () => withActiveCanvas((h) => h.redo()))
+    api.commands.register(CANVAS_COMMANDS.delete, () => withActiveCanvas((h) => h.deleteSelected()))
+    api.commands.register(CANVAS_COMMANDS.fit, () => withActiveCanvas((h) => h.fit()))
+    api.commands.register(CANVAS_COMMANDS.fitSelection, () => withActiveCanvas((h) => h.fitSelection()))
+    api.commands.register(CANVAS_COMMANDS.toggleHelp, () => withActiveCanvas((h) => h.toggleHelp()))
+    api.commands.register(CANVAS_COMMANDS.closeHelp, () => withActiveCanvas((h) => h.closeHelp()))
+    api.commands.register(CANVAS_COMMANDS.toggleGrid, () => withActiveCanvas((h) => h.toggleGrid()))
+    api.commands.register(CANVAS_COMMANDS.toggleBackground, () =>
+      withActiveCanvas((h) => h.toggleBackgroundInspector()),
+    )
+    api.commands.register(CANVAS_COMMANDS.tidy, () => withActiveCanvas((h) => h.tidy()))
+    api.commands.register(CANVAS_COMMANDS.exportPng, () => withActiveCanvas((h) => h.exportPng()))
+    api.commands.register(CANVAS_COMMANDS.exportSvg, () => withActiveCanvas((h) => h.exportSvg()))
+    api.commands.register(CANVAS_COMMANDS.exportPdf, () => withActiveCanvas((h) => h.exportPdf()))
   },
 }

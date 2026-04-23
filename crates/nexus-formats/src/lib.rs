@@ -36,7 +36,9 @@ pub use error::{
 
 pub use util::{attachment_name, detect_mime, sha256_hex, slugify, validate_filename, validate_path};
 
-pub use canvas::{CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeType};
+pub use canvas::{
+    CanvasBackground, CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeType,
+};
 pub use markdown::export_to_html;
 
 pub use config::{

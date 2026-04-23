@@ -11,7 +11,7 @@ use crate::StorageError;
 // ── Format types (owned by nexus-formats) ────────────────────────────────────
 
 pub use nexus_formats::canvas::{
-    CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeType,
+    CanvasBackground, CanvasEdge, CanvasEdgeType, CanvasFile, CanvasNode, CanvasNodeType,
 };
 
 /// A canvas node record from the database.
@@ -320,6 +320,12 @@ pub enum CanvasPatchOp {
         /// Replacement edge. `edge.id` identifies the target.
         edge: CanvasEdge,
     },
+    /// Set (or clear) the canvas-level background. `None` clears it
+    /// so the renderer falls back to theme defaults.
+    SetBackground {
+        /// New background, or `None` to clear the existing one.
+        background: Option<CanvasBackground>,
+    },
 }
 
 /// Error cases [`apply_patch`] surfaces back to the caller.
@@ -388,6 +394,9 @@ pub fn apply_patch(
                 if let Some(slot) = canvas.edges.iter_mut().find(|e| e.id == edge.id) {
                     *slot = edge.clone();
                 }
+            }
+            CanvasPatchOp::SetBackground { background } => {
+                canvas.background = background.clone();
             }
         }
     }
@@ -705,6 +714,27 @@ mod tests {
         };
         apply_patch(&mut c, &[CanvasPatchOp::NodeRemove { id: "a".into() }]).unwrap();
         assert!(c.edges.is_empty(), "edge incident to removed node must be dropped");
+    }
+
+    #[test]
+    fn apply_patch_set_background_round_trips() {
+        let mut c = CanvasFile::default();
+        assert!(c.background.is_none());
+        apply_patch(
+            &mut c,
+            &[CanvasPatchOp::SetBackground {
+                background: Some(CanvasBackground {
+                    color: "#112233".to_string(),
+                    pattern: Some("dots".to_string()),
+                }),
+            }],
+        )
+        .unwrap();
+        let bg = c.background.as_ref().unwrap();
+        assert_eq!(bg.color, "#112233");
+        assert_eq!(bg.pattern.as_deref(), Some("dots"));
+        apply_patch(&mut c, &[CanvasPatchOp::SetBackground { background: None }]).unwrap();
+        assert!(c.background.is_none());
     }
 
     #[test]

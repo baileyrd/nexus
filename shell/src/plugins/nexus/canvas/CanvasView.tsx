@@ -40,6 +40,8 @@ import { CanvasOverlay } from './CanvasOverlay'
 import { Minimap, type MinimapHandle } from './Minimap'
 import { exportCanvasPng, triggerDownload } from './exportPng'
 import { autoLayout } from './autoLayout'
+import { setActiveCanvas, type CanvasHandle } from './activeCanvas'
+import { contextKeyService } from '../../../host/ContextKeyService'
 import type {
   CanvasKernelClient,
   CanvasDoc,
@@ -771,117 +773,75 @@ export function CanvasView({ relpath, client }: Props) {
     }
   }, [relpath])
 
-  // ── Keyboard: delete selected ───────────────────────────────────────
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-    const onKey = (e: KeyboardEvent) => {
-      // Only when the canvas container (or a child of it) has focus, so
-      // typing Delete inside an unrelated pane doesn't nuke a node.
-      if (!container.contains(document.activeElement) && document.activeElement !== container) {
-        return
-      }
-      const isUndo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey
-      const isRedo =
-        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && e.shiftKey) ||
-        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y')
-
-      if (isUndo) {
-        e.preventDefault()
-        const entry = useCanvasStore.getState().popUndo(relpath)
-        if (!entry) return
-        applyHistoryEntry(entry.inverse)
-        return
-      }
-      if (isRedo) {
-        e.preventDefault()
-        const entry = useCanvasStore.getState().popRedo(relpath)
-        if (!entry) return
-        applyHistoryEntry(entry.forward)
-        return
-      }
-
-      // '?' (and Shift+/) toggles the help overlay; Escape always
-      // closes it so the user has a guaranteed dismissal path.
-      if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
-        e.preventDefault()
-        setShowHelp((v) => !v)
-        return
-      }
-      if (e.key === 'Escape') {
-        setShowHelp(false)
-        // Fall through so Escape can still be consumed by other
-        // handlers (e.g. future inspector blur).
-      }
-
-      // 'f' fits the current doc; Shift+f fits just the current
-      // selection. Matches the shortcut set Obsidian canvas uses.
-      if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'f') {
-        e.preventDefault()
-        const doc = docRef.current
-        const canvas = canvasRef.current
-        if (!doc || !canvas) return
-        const rect = canvas.getBoundingClientRect()
-        const sel = selectionRef.current
-        const targets =
-          e.shiftKey && sel.size > 0
-            ? doc.nodes.filter((n) => sel.has(n.id))
-            : doc.nodes
-        if (targets.length === 0) return
-        const fit = fitCameraToNodes(targets, rect.width, rect.height)
-        cameraRef.current = fit
-        cameraDirtyRef.current = true
-        return
-      }
-
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return
-      const doc = docRef.current
-      if (!doc) return
-      // Edge selection takes priority: if an edge is selected it's
-      // the visible target of the inspector, so Delete should drop
-      // the edge — not fall through to (the usually-empty) node set.
-      const selectedEdgeId = selectedEdgeIdRef.current
-      if (selectedEdgeId) {
-        e.preventDefault()
-        const inverse = buildEdgeDeleteInverse(doc, selectedEdgeId)
-        if (inverse.length === 0) return
-        useCanvasStore.getState().updateDoc(relpath, (d) => ({
-          ...d,
-          edges: d.edges.filter((edge) => edge.id !== selectedEdgeId),
-        }))
-        useCanvasStore.getState().setSelectedEdge(relpath, null)
-        commitRef.current([{ op: 'edge_remove', id: selectedEdgeId }], inverse)
-        return
-      }
-      const sel = selectionRef.current
-      if (sel.size === 0) return
-      e.preventDefault()
-      const ids = Array.from(sel)
-      const inverse = buildDeleteInverse(doc, ids)
-      useCanvasStore.getState().updateDoc(relpath, (d) => {
-        let out = d
-        for (const id of ids) out = applyNodeRemove(out, id)
-        return out
-      })
-      useCanvasStore.getState().setSelection(relpath, [])
-      const forward: CanvasPatchOp[] = ids.map((id) => ({ op: 'node_remove', id }))
-      commitRef.current(forward, inverse)
-    }
-
-    /** Drive undo/redo: apply `ops` locally and flush to the kernel.
-     *  Skips the history push because popUndo/popRedo already moved
-     *  the entry between stacks. */
-    const applyHistoryEntry = (ops: CanvasPatchOp[]) => {
-      if (ops.length === 0) return
-      useCanvasStore.getState().updateDoc(relpath, (d) => applyPatchOps(d, ops))
-      void clientRef.current
-        .patch(relpath, ops)
-        .catch((err) => console.warn('[nexus.canvas] undo/redo patch failed:', err))
-    }
-
-    container.addEventListener('keydown', onKey)
-    return () => container.removeEventListener('keydown', onKey)
+  // Keyboard actions are routed through the keybinding plugin via
+  // commands registered in this plugin's `activate`. The container's
+  // focus state flips the `canvas.focused` context key so the
+  // chords only fire when a canvas actually owns focus.
+  //
+  // Handlers shared between the keybinding commands and the control-
+  // strip buttons live in the closures below; the CanvasHandle
+  // published to `setActiveCanvas` just proxies them.
+  const applyHistoryEntry = useCallback((ops: CanvasPatchOp[]) => {
+    if (ops.length === 0) return
+    useCanvasStore.getState().updateDoc(relpath, (d) => applyPatchOps(d, ops))
+    void clientRef.current
+      .patch(relpath, ops)
+      .catch((err) => console.warn('[nexus.canvas] undo/redo patch failed:', err))
   }, [relpath])
+
+  const runUndo = useCallback(() => {
+    const entry = useCanvasStore.getState().popUndo(relpath)
+    if (!entry) return
+    applyHistoryEntry(entry.inverse)
+  }, [relpath, applyHistoryEntry])
+
+  const runRedo = useCallback(() => {
+    const entry = useCanvasStore.getState().popRedo(relpath)
+    if (!entry) return
+    applyHistoryEntry(entry.forward)
+  }, [relpath, applyHistoryEntry])
+
+  const runDelete = useCallback(() => {
+    const doc = docRef.current
+    if (!doc) return
+    const selectedEdgeId = selectedEdgeIdRef.current
+    if (selectedEdgeId) {
+      const inverse = buildEdgeDeleteInverse(doc, selectedEdgeId)
+      if (inverse.length === 0) return
+      useCanvasStore.getState().updateDoc(relpath, (d) => ({
+        ...d,
+        edges: d.edges.filter((edge) => edge.id !== selectedEdgeId),
+      }))
+      useCanvasStore.getState().setSelectedEdge(relpath, null)
+      commitRef.current([{ op: 'edge_remove', id: selectedEdgeId }], inverse)
+      return
+    }
+    const sel = selectionRef.current
+    if (sel.size === 0) return
+    const ids = Array.from(sel)
+    const inverse = buildDeleteInverse(doc, ids)
+    useCanvasStore.getState().updateDoc(relpath, (d) => {
+      let out = d
+      for (const id of ids) out = applyNodeRemove(out, id)
+      return out
+    })
+    useCanvasStore.getState().setSelection(relpath, [])
+    const forward: CanvasPatchOp[] = ids.map((id) => ({ op: 'node_remove', id }))
+    commitRef.current(forward, inverse)
+  }, [relpath])
+
+  const runFit = useCallback((selectionOnly: boolean) => {
+    const doc = docRef.current
+    const canvas = canvasRef.current
+    if (!doc || !canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const sel = selectionRef.current
+    const targets =
+      selectionOnly && sel.size > 0 ? doc.nodes.filter((n) => sel.has(n.id)) : doc.nodes
+    if (targets.length === 0) return
+    cameraRef.current = fitCameraToNodes(targets, rect.width, rect.height)
+    cameraDirtyRef.current = true
+  }, [])
 
   const doc = tab?.doc
   const nodeCount = doc?.nodes.length ?? 0
@@ -889,6 +849,7 @@ export function CanvasView({ relpath, client }: Props) {
   const showGrid = tab?.showGrid ?? true
   const [exporting, setExporting] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
+  const [showDocInspector, setShowDocInspector] = useState(false)
 
   // Minimap click-drag: recenter the camera so the clicked world
   // point sits at the middle of the main viewport. Stable callback
@@ -988,6 +949,109 @@ export function CanvasView({ relpath, client }: Props) {
       [{ op: 'edge_update', edge: prev }],
     )
   }
+  const onUpdateBackground = (
+    next: import('./kernelClient').CanvasBackground | null,
+    prev: import('./kernelClient').CanvasBackground | null,
+  ) => {
+    useCanvasStore.getState().updateDoc(relpath, (d) => ({ ...d, background: next }))
+    commitRef.current(
+      [{ op: 'set_background', background: next }],
+      [{ op: 'set_background', background: prev }],
+    )
+  }
+
+  const onExportSvg = async () => {
+    const container = containerRef.current
+    const currentDoc = docRef.current
+    if (!container || !currentDoc || exporting) return
+    setExporting(true)
+    try {
+      const { exportCanvasSvg } = await import('./exportFormats')
+      const blob = await exportCanvasSvg(currentDoc, container)
+      if (!blob) return
+      const base = basenameNoExt(relpath) || 'canvas'
+      triggerDownload(blob, `${base}.svg`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const onExportPdf = async () => {
+    const container = containerRef.current
+    const currentDoc = docRef.current
+    if (!container || !currentDoc || exporting) return
+    setExporting(true)
+    try {
+      const { exportCanvasPdf } = await import('./exportFormats')
+      const blob = await exportCanvasPdf(currentDoc, container)
+      if (!blob) return
+      const base = basenameNoExt(relpath) || 'canvas'
+      triggerDownload(blob, `${base}.pdf`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  // Publish the active-canvas handle whenever focus lands inside the
+  // container. Commands registered by the plugin dispatch against
+  // whichever canvas last claimed focus.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const handle: CanvasHandle = {
+      undo: runUndo,
+      redo: runRedo,
+      deleteSelected: runDelete,
+      fit: () => runFit(false),
+      fitSelection: () => runFit(true),
+      toggleHelp: () => setShowHelp((v) => !v),
+      closeHelp: () => setShowHelp(false),
+      toggleGrid: onToggleGrid,
+      toggleBackgroundInspector: () => setShowDocInspector((v) => !v),
+      tidy: onTidy,
+      exportPng: onExportPng,
+      exportSvg: onExportSvg,
+      exportPdf: onExportPdf,
+    }
+    const claimFocus = () => {
+      setActiveCanvas(handle)
+      contextKeyService.set('canvas.focused', true)
+    }
+    const releaseFocus = () => {
+      setActiveCanvas(null)
+      contextKeyService.set('canvas.focused', false)
+    }
+    // Ensure clicking anywhere in the canvas container focuses it,
+    // so the global keybinding dispatcher's `canvas.focused` gate
+    // opens as soon as the user interacts. Without this, the div
+    // (tabIndex=0) only gets focus via keyboard navigation.
+    const focusOnPointer = () => {
+      if (document.activeElement !== container && !container.contains(document.activeElement)) {
+        container.focus({ preventScroll: true })
+      }
+    }
+    container.addEventListener('focusin', claimFocus)
+    const onFocusOut = (e: FocusEvent) => {
+      const next = e.relatedTarget as Node | null
+      if (next && container.contains(next)) return
+      releaseFocus()
+    }
+    container.addEventListener('focusout', onFocusOut)
+    container.addEventListener('pointerdown', focusOnPointer)
+    return () => {
+      releaseFocus()
+      container.removeEventListener('focusin', claimFocus)
+      container.removeEventListener('focusout', onFocusOut)
+      container.removeEventListener('pointerdown', focusOnPointer)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runUndo, runRedo, runDelete, runFit, onToggleGrid, onTidy, onExportPng])
+
+  // Keep the help-overlay context key in sync so the Escape binding
+  // only fires when the overlay is actually open.
+  useEffect(() => {
+    contextKeyService.set('canvas.helpOpen', showHelp)
+  }, [showHelp])
 
   return (
     <div
@@ -1019,12 +1083,16 @@ export function CanvasView({ relpath, client }: Props) {
           {edgeCount === 1 ? '' : 's'} · {Math.round((tab?.camera.zoom ?? 1) * 100)}%
         </CornerLabel>
       )}
-      {(selectedNode || selectedEdge) && (
+      {(selectedNode || selectedEdge || showDocInspector) && (
         <Inspector
           node={selectedNode}
           edge={selectedEdge}
+          docBackground={doc?.background ?? null}
+          showDocInspector={showDocInspector && !selectedNode && !selectedEdge}
           onUpdateNode={onUpdateNode}
           onUpdateEdge={onUpdateEdge}
+          onUpdateBackground={onUpdateBackground}
+          onCloseDocInspector={() => setShowDocInspector(false)}
         />
       )}
       <Minimap ref={minimapRef} onRecenter={onMinimapRecenter} />
@@ -1033,10 +1101,14 @@ export function CanvasView({ relpath, client }: Props) {
         onToggleGrid={onToggleGrid}
         onTidy={onTidy}
         onExportPng={onExportPng}
+        onExportSvg={onExportSvg}
+        onExportPdf={onExportPdf}
         exporting={exporting}
         canExport={nodeCount > 0}
         canTidy={nodeCount > 1}
         onShowHelp={() => setShowHelp(true)}
+        docInspectorOpen={showDocInspector}
+        onToggleDocInspector={() => setShowDocInspector((v) => !v)}
       />
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
     </div>
@@ -1048,22 +1120,32 @@ function ControlStrip({
   onToggleGrid,
   onTidy,
   onExportPng,
+  onExportSvg,
+  onExportPdf,
   exporting,
   canExport,
   canTidy,
   onShowHelp,
+  docInspectorOpen,
+  onToggleDocInspector,
 }: {
   showGrid: boolean
   onToggleGrid: () => void
   onTidy: () => void
   onExportPng: () => void
+  onExportSvg: () => void
+  onExportPdf: () => void
   exporting: boolean
   canExport: boolean
   canTidy: boolean
   onShowHelp: () => void
+  docInspectorOpen: boolean
+  onToggleDocInspector: () => void
 }) {
+  const [exportOpen, setExportOpen] = useState(false)
   return (
     <div
+      data-canvas-export-exclude="true"
       style={{
         position: 'absolute',
         left: 12,
@@ -1092,12 +1174,68 @@ function ControlStrip({
       >
         Tidy
       </ControlButton>
+      <div style={{ position: 'relative' }}>
+        <ControlButton
+          onClick={() => setExportOpen((v) => !v)}
+          disabled={!canExport || exporting}
+          active={exportOpen}
+          title={canExport ? 'Export canvas (PNG / SVG / PDF)' : 'Nothing to export'}
+        >
+          {exporting ? '…' : 'Export'}
+        </ControlButton>
+        {exportOpen && (
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              bottom: '110%',
+              display: 'flex',
+              flexDirection: 'column',
+              background: 'var(--bg-raised, #2d2d2d)',
+              border: '1px solid var(--divider-color, #3f3f46)',
+              borderRadius: 4,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+              minWidth: 90,
+              padding: 2,
+            }}
+          >
+            {(
+              [
+                { label: 'PNG', run: onExportPng },
+                { label: 'SVG', run: onExportSvg },
+                { label: 'PDF', run: onExportPdf },
+              ] as const
+            ).map(({ label, run }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => {
+                  setExportOpen(false)
+                  run()
+                }}
+                style={{
+                  padding: '4px 10px',
+                  background: 'transparent',
+                  color: 'var(--fg, #e5e7eb)',
+                  border: 'none',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontFamily: 'inherit',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <ControlButton
-        onClick={onExportPng}
-        disabled={!canExport || exporting}
-        title={canExport ? 'Export canvas as PNG' : 'Nothing to export'}
+        active={docInspectorOpen}
+        onClick={onToggleDocInspector}
+        title="Canvas background"
       >
-        {exporting ? '…' : 'Export'}
+        BG
       </ControlButton>
       <ControlButton onClick={onShowHelp} title="Keyboard shortcuts (?)">
         ?
@@ -1107,6 +1245,7 @@ function ControlStrip({
 }
 
 function HelpOverlay({ onClose }: { onClose: () => void }) {
+  // HelpOverlay is chrome — exclude from export snapshots.
   const rows: Array<[string, string]> = [
     ['Click', 'Select node'],
     ['Shift + click', 'Toggle in selection'],
@@ -1124,10 +1263,12 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
     ['Ctrl / Cmd + Shift + Z', 'Redo'],
     ['?', 'Toggle this help'],
     ['Escape', 'Close help'],
+    ['—', 'Command palette → type "Canvas" for all commands (export PNG / SVG / PDF, background, tidy, grid toggle)'],
   ]
   return (
     <div
       onClick={onClose}
+      data-canvas-export-exclude="true"
       style={{
         position: 'absolute',
         inset: 0,
@@ -1266,6 +1407,7 @@ function basenameNoExt(path: string): string {
 function CornerLabel({ children }: { children: React.ReactNode }) {
   return (
     <div
+      data-canvas-export-exclude="true"
       style={{
         position: 'absolute',
         bottom: 8,

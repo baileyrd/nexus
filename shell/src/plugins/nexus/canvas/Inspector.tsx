@@ -10,21 +10,126 @@
 // already discrete interactions.
 
 import { useEffect, useState } from 'react'
-import type { CanvasEdge, CanvasEdgeType, CanvasNode } from './kernelClient'
+import type {
+  CanvasBackground,
+  CanvasEdge,
+  CanvasEdgeType,
+  CanvasNode,
+} from './kernelClient'
 
 interface Props {
   node: CanvasNode | null
   edge: CanvasEdge | null
+  /** Canvas-level background when `node` + `edge` are both null and
+   *  the user has opened the document inspector. Passing `undefined`
+   *  suppresses the doc section entirely (selection-based UX only). */
+  docBackground?: CanvasBackground | null
+  showDocInspector?: boolean
   onUpdateNode: (next: CanvasNode, prev: CanvasNode) => void
   onUpdateEdge: (next: CanvasEdge, prev: CanvasEdge) => void
+  onUpdateBackground?: (next: CanvasBackground | null, prev: CanvasBackground | null) => void
+  onCloseDocInspector?: () => void
 }
 
-export function Inspector({ node, edge, onUpdateNode, onUpdateEdge }: Props) {
+export function Inspector({
+  node,
+  edge,
+  docBackground,
+  showDocInspector,
+  onUpdateNode,
+  onUpdateEdge,
+  onUpdateBackground,
+  onCloseDocInspector,
+}: Props) {
   return (
-    <aside style={drawerStyle}>
+    <aside data-canvas-export-exclude="true" style={drawerStyle}>
       {node && <NodeInspector node={node} onUpdate={onUpdateNode} />}
       {edge && <EdgeInspector edge={edge} onUpdate={onUpdateEdge} />}
+      {!node && !edge && showDocInspector && onUpdateBackground && (
+        <DocInspector
+          background={docBackground ?? null}
+          onUpdate={onUpdateBackground}
+          onClose={onCloseDocInspector}
+        />
+      )}
     </aside>
+  )
+}
+
+function DocInspector({
+  background,
+  onUpdate,
+  onClose,
+}: {
+  background: CanvasBackground | null
+  onUpdate: (next: CanvasBackground | null, prev: CanvasBackground | null) => void
+  onClose?: () => void
+}) {
+  const [color, setColor] = useState(background?.color ?? '#1f1f23')
+  const [pattern, setPattern] = useState<string>(background?.pattern ?? '')
+  useEffect(() => {
+    setColor(background?.color ?? '#1f1f23')
+    setPattern(background?.pattern ?? '')
+  }, [background?.color, background?.pattern])
+
+  const commit = (nextColor: string, nextPattern: string) => {
+    const next: CanvasBackground | null = nextColor
+      ? { color: nextColor, ...(nextPattern ? { pattern: nextPattern } : {}) }
+      : null
+    const a = JSON.stringify(next)
+    const b = JSON.stringify(background)
+    if (a === b) return
+    onUpdate(next, background)
+  }
+
+  const clear = () => {
+    if (!background) return
+    onUpdate(null, background)
+  }
+
+  return (
+    <div>
+      <Header type="CANVAS" onClose={onClose} />
+      <Row label="Color">
+        <input
+          type="color"
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+          onBlur={() => commit(color, pattern)}
+          style={{ ...inputStyle, padding: 0, height: 26, width: 60 }}
+        />
+        <input
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+          onBlur={() => commit(color, pattern)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          }}
+          style={{ ...inputStyle, marginLeft: 6 }}
+        />
+      </Row>
+      <Row label="Pattern">
+        <select
+          value={pattern}
+          onChange={(e) => {
+            const next = e.target.value
+            setPattern(next)
+            commit(color, next)
+          }}
+          style={inputStyle}
+        >
+          <option value="">None</option>
+          <option value="dots">Dots</option>
+          <option value="grid">Grid</option>
+          <option value="lines">Horizontal lines</option>
+        </select>
+      </Row>
+      <Row label=" ">
+        <button type="button" onClick={clear} style={clearBtnStyle}>
+          Reset to theme
+        </button>
+      </Row>
+    </div>
   )
 }
 
@@ -168,10 +273,12 @@ function EdgeInspector({
   )
 }
 
-function Header({ type }: { type: string }) {
+function Header({ type, onClose }: { type: string; onClose?: () => void }) {
   return (
     <div
       style={{
+        display: 'flex',
+        alignItems: 'center',
         fontSize: 10,
         letterSpacing: 0.8,
         color: 'var(--fg-muted, #9ca3af)',
@@ -179,7 +286,25 @@ function Header({ type }: { type: string }) {
         marginBottom: 12,
       }}
     >
-      {type}
+      <span style={{ flex: 1 }}>{type}</span>
+      {onClose && (
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--fg-muted, #9ca3af)',
+            fontSize: 14,
+            cursor: 'pointer',
+            lineHeight: 1,
+            padding: 0,
+          }}
+          aria-label="Close"
+        >
+          ×
+        </button>
+      )}
     </div>
   )
 }
@@ -300,4 +425,15 @@ const inputStyle: React.CSSProperties = {
   color: 'var(--fg, #e5e7eb)',
   fontSize: 12,
   boxSizing: 'border-box',
+}
+
+const clearBtnStyle: React.CSSProperties = {
+  padding: '3px 10px',
+  background: 'var(--bg-muted, #1e1e1e)',
+  color: 'var(--fg, #e5e7eb)',
+  border: '1px solid var(--divider-color, #3f3f46)',
+  borderRadius: 4,
+  fontSize: 11,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
 }

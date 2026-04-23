@@ -53,39 +53,29 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
   views still can't save as named views until the wire `ViewType`
   enum grows past `table/kanban/calendar/gallery`; record
   soft-delete still waits on a `deleted_at` slot on `BaseRecord`.
-- [ ] **`.canvas` board renderer in the shell (PRD-06 §4).** Storage
-  layer parses/serializes/indexes canvas files; CLI shipped; kernel
-  IPC surface landed 2026-04-22 (`canvas_read` / `canvas_write` /
-  `canvas_patch` / `canvas_nodes` / `canvas_edges` on
-  `com.nexus.storage`, handler ids 35–39). Shell Phases 1–3 landed 2026-04-22: view + extension registration,
-  canvas-element renderer (RAF, DPR-aware, typed node cards +
-  bezier/solid/dashed/dotted edges + arrow heads + dot grid +
-  zoom-to-fit), wheel-zoom (10%–400%) anchored on pointer, pan
-  (middle-click drag or wheel scroll), shift-click multi-select,
-  left-drag-marquee select (additive with shift), drag-to-move
-  single or grouped selection with one batched `canvas_patch` on
-  mouseup, Delete/Backspace to remove a selection (incident edges
-  drop with the nodes via apply_patch), double-click empty →
-  new text node. Resize handles: single-selected non-group nodes draw 8 screen-
-  space-sized handles; pointer-over updates the cursor (nwse /
-  nesw / ns / ew); drag resizes with the opposite corner fixed,
-  40-unit minimum, shift locks aspect on corner drags; flush is a
-  single `node_update` patch on mouseup. Undo/redo: per-tab LIFO
-  stacks of `{forward, inverse}` op lists (capped at 200). Every
-  flush (move / add / remove / resize) records a matching inverse
-  —  delete captures every incident edge so undo restores them.
-  Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y redo; drives
-  the same `canvas_patch` path as a fresh edit, so kernel state
-  stays the source of truth. Drag-from-edge-to-create landed too:
-  hovering a non-group node shows four small accent circles
-  offset from each side midpoint; dragging from one shows a
-  dashed preview bezier that tracks the cursor; release over
-  empty space creates a new text node + connecting edge; release
-  over another node creates only the edge; release over the
-  source cancels. All history-tracked. Phase 3 complete. Plan:
-  [docs/canvas-shell-plan.md](../canvas-shell-plan.md) —
-  remaining phases 4–6 (edges + inspector → rich node embeds →
-  polish).
+- [ ] **`.canvas` board renderer in the shell (PRD-06 §4).** Phases
+  1–6 complete 2026-04-22 — every deferred Phase-6 item closed in
+  the same session. Kernel surface:
+  `com.nexus.storage::canvas_read` / `canvas_write` /
+  `canvas_patch` / `canvas_nodes` / `canvas_edges` (handler ids
+  35–39), with `SetBackground` added to `CanvasPatchOp`. Shell
+  code under `shell/src/plugins/nexus/canvas/` covers the full
+  editing loop (selection / marquee / resize / drag / delete /
+  undo-redo / edge drag / inspector) plus the Phase-5 DOM overlay
+  (`CanvasOverlay` — markdown, file embeds, OG cards, `.bases`
+  mini-grid, terminal sessions) and the Phase-6 polish tier
+  (minimap, Tidy auto-layout, grid toggle, zoom-to-fit / zoom-to-
+  selection, help overlay). Phase-6 closers (2026-04-22):
+  `exportFormats.ts` uses `html-to-image` + `jspdf` to produce
+  overlay-inclusive PNG / SVG / PDF (the Export control-strip
+  button opens a 3-option popover); a new optional
+  `CanvasBackground { color, pattern? }` field on `CanvasFile`
+  drives per-canvas background color + dots/grid/lines pattern,
+  edited from the Inspector's `CANVAS` section behind a `BG`
+  control-strip button; canvas shortcuts now route through the
+  shell `KeybindingRegistry` via manifest contributions with a
+  `canvas.focused` context-key gate, and every shortcut is also
+  a palette-accessible `canvas.*` command.
 - [ ] **Notion-style block UX on top of the existing block-tree engine
   (PRD-08).** Block tree + transactions + annotations are shipped
   (3.7k LoC in `nexus-editor`); what's missing is the UI layer —

@@ -215,6 +215,8 @@ export function applyPatchOp(doc: CanvasDoc, op: CanvasPatchOp): CanvasDoc {
         ...doc,
         edges: doc.edges.map((e) => (e.id === op.edge.id ? op.edge : e)),
       }
+    case 'set_background':
+      return { ...doc, background: op.background }
   }
 }
 
