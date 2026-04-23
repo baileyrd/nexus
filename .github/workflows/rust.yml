@@ -31,4 +31,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run scripts/test_all.sh
+        env:
+          # ubuntu-latest only has 7 GB RAM; linking tauri/webkit with
+          # full parallelism OOM-kills the linker (ld bus error).
+          CARGO_BUILD_JOBS: "2"
         run: bash scripts/test_all.sh
