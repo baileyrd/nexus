@@ -14,6 +14,19 @@ interface FilesTreeProps {
 const INDENT_PX = 14
 const ROOT_RELPATH = ''
 
+/** Directory extensions that should behave like documents in the
+ *  tree: one click opens them as a leaf instead of expanding their
+ *  contents. Currently just `.bases` (PRD-10 database bundle); add
+ *  more here when other bundle formats land (`.excalidraw`, etc.). */
+const BUNDLE_DIR_EXTS = new Set(['bases'])
+
+function isBundleDir(entry: FilesDirEntry): boolean {
+  if (!entry.isDir) return false
+  const dot = entry.name.lastIndexOf('.')
+  if (dot < 0) return false
+  return BUNDLE_DIR_EXTS.has(entry.name.slice(dot + 1).toLowerCase())
+}
+
 /** Sort entries in-place by the user's chosen mode. Directories always
  *  come first (VSCode / Obsidian convention); the mode only orders
  *  within each bucket. Missing timestamps sink to the bottom. */
@@ -475,8 +488,10 @@ function TreeNode({
     }
   }, [selected])
 
+  const bundle = isBundleDir(entry)
+
   const handleClick = () => {
-    if (entry.isDir) {
+    if (entry.isDir && !bundle) {
       toggleExpanded(entry.relpath)
       if (!children) {
         loadChildren(entry.relpath).then((entries) =>
@@ -491,7 +506,9 @@ function TreeNode({
 
   const tooltip = entry.relpath ? `${rootPath}/${entry.relpath}` : rootPath
 
-  const wrapperClass = entry.isDir ? 'nav-folder' : 'nav-file'
+  // Bundle dirs render with the file wrapper so they don't get the
+  // folder-expand affordance and their children are never listed.
+  const wrapperClass = entry.isDir && !bundle ? 'nav-folder' : 'nav-file'
   return (
     <div className={wrapperClass}>
       <Row
@@ -503,7 +520,7 @@ function TreeNode({
         onClick={handleClick}
         buttonRef={rowRef}
       />
-      {entry.isDir && expanded && children && (
+      {entry.isDir && !bundle && expanded && children && (
         <div className="nav-folder-children tree-item-children">
           {sortEntries(children, sortMode).map((child) => (
             <TreeNode
@@ -538,11 +555,13 @@ function Row({
   onClick: () => void
   buttonRef: React.RefObject<HTMLButtonElement>
 }) {
-  const titleClass = entry.isDir ? 'nav-folder-title' : 'nav-file-title'
-  const contentClass = entry.isDir ? 'nav-folder-title-content' : 'nav-file-title-content'
+  const bundle = isBundleDir(entry)
+  const showAsDir = entry.isDir && !bundle
+  const titleClass = showAsDir ? 'nav-folder-title' : 'nav-file-title'
+  const contentClass = showAsDir ? 'nav-folder-title-content' : 'nav-file-title-content'
   const selfClass =
     `tree-item-self ${titleClass} is-clickable` +
-    (entry.isDir ? ' mod-collapsible' : '') +
+    (showAsDir ? ' mod-collapsible' : '') +
     (selected ? ' is-active' : '')
   return (
     <button
@@ -578,10 +597,10 @@ function Row({
           color: 'var(--icon-color)',
         }}
       >
-        {entry.isDir ? (expanded ? <Icon name="chev" size={10} style={{ transform: 'rotate(90deg)' }} /> : <Icon name="chev" size={10} />) : null}
+        {showAsDir ? (expanded ? <Icon name="chev" size={10} style={{ transform: 'rotate(90deg)' }} /> : <Icon name="chev" size={10} />) : null}
       </span>
-      <span aria-hidden className={entry.isDir ? '' : 'nav-file-icon'} style={{ display: 'inline-flex', alignItems: 'center', position: 'static', margin: 0 }}>
-        {entry.isDir ? (
+      <span aria-hidden className={showAsDir ? '' : 'nav-file-icon'} style={{ display: 'inline-flex', alignItems: 'center', position: 'static', margin: 0 }}>
+        {showAsDir ? (
           <Icon name={expanded ? 'folderOpen' : 'folder'} size={14} />
         ) : (
           <Icon name="doc" size={14} />
