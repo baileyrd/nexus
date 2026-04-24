@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn empty_blocks_skipped() {
         let blocks = vec![
-            (1, "paragraph".into(), "".into(), None),
+            (1, "paragraph".into(), String::new(), None),
             (2, "paragraph".into(), "   ".into(), None),
             (3, "paragraph".into(), "Real content.".into(), None),
         ];

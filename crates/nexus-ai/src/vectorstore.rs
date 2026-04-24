@@ -17,7 +17,7 @@ use crate::error::AiError;
 const STORAGE_PLUGIN: &str = "com.nexus.storage";
 
 /// Timeout applied to every nested storage `ipc_call` from the AI plugin.
-/// These are local SQLite queries — 30s is an extreme upper bound.
+/// These are local `SQLite` queries — 30s is an extreme upper bound.
 const STORAGE_IPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A chunk together with its embedding vector, ready for storage.

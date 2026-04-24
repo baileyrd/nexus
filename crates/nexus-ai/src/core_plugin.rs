@@ -307,8 +307,7 @@ async fn handle_stream_chat(
     let session_id = args
         .get("session_id")
         .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        .map_or_else(|| uuid::Uuid::new_v4().to_string(), str::to_string);
 
     let ai_cfg = ai_cfg.ok_or_else(|| exec_err("stream_chat: no AI chat provider configured"))?;
     let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
@@ -366,8 +365,7 @@ async fn handle_stream_ask(
     let session_id = args
         .get("session_id")
         .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        .map_or_else(|| uuid::Uuid::new_v4().to_string(), str::to_string);
     let limit = args
         .get("limit")
         .and_then(serde_json::Value::as_u64)
@@ -528,9 +526,8 @@ async fn handle_session_list(
     ctx: &KernelPluginContext,
 ) -> Result<serde_json::Value, PluginError> {
     let dir = std::path::Path::new(SESSIONS_DIR);
-    let entries = match ctx.list_files(dir).await {
-        Ok(v) => v,
-        Err(_) => return Ok(serde_json::Value::Array(Vec::new())),
+    let Ok(entries) = ctx.list_files(dir).await else {
+        return Ok(serde_json::Value::Array(Vec::new()));
     };
     let mut out: Vec<serde_json::Value> = Vec::new();
     for path in entries {
@@ -541,9 +538,8 @@ async fn handle_session_list(
         else {
             continue;
         };
-        let bytes = match ctx.read_file(&path).await {
-            Ok(b) => b,
-            Err(_) => continue,
+        let Ok(bytes) = ctx.read_file(&path).await else {
+            continue;
         };
         let parsed: serde_json::Value = match serde_json::from_slice(&bytes) {
             Ok(v) => v,
