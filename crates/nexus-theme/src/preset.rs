@@ -282,7 +282,7 @@ impl PresetRegistry {
             .sources
             .get(id)
             .ok_or_else(|| ThemeError::PresetNotFound(id.to_string()))?;
-        let preset = self.load(source)?;
+        let preset = Self::load(source)?;
         Ok(preset.instantiate())
     }
 
@@ -297,7 +297,7 @@ impl PresetRegistry {
         self.sources
             .iter()
             .filter_map(|(id, source)| {
-                let preset = self.load(source).ok()?;
+                let preset = Self::load(source).ok()?;
                 Some(PresetInfo {
                     id: id.clone(),
                     name: preset.name,
@@ -308,7 +308,7 @@ impl PresetRegistry {
             .collect()
     }
 
-    fn load(&self, source: &PresetSource) -> Result<LayoutPreset> {
+    fn load(source: &PresetSource) -> Result<LayoutPreset> {
         match source {
             PresetSource::Embedded { id, toml } => parse_preset(toml, format!("<embedded:{id}>")),
             PresetSource::File { path, .. } => {
@@ -328,9 +328,8 @@ fn is_preset_file(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
-    let name = match path.file_name().and_then(|n| n.to_str()) {
-        Some(n) => n,
-        None => return false,
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
     };
     name.ends_with(".layout.toml")
 }

@@ -105,10 +105,9 @@ fn print_summary_table(response: &Value) {
         .unwrap_or(4)
         .max(4);
     println!(
-        "{:<id_w$}  {:<name_w$}  {}",
+        "{:<id_w$}  {:<name_w$}  TAGS",
         "ID",
         "NAME",
-        "TAGS",
         id_w = id_w,
         name_w = name_w,
     );

@@ -49,24 +49,23 @@ pub enum SubstitutionError {
 ///   with no supplied value and no default.
 /// - [`SubstitutionError::EnumMismatch`] — enum parameter supplied a
 ///   value outside its `values:` list.
-pub fn render(
+pub fn render<S: std::hash::BuildHasher>(
     skill: &Skill,
-    values: &HashMap<String, serde_yaml::Value>,
+    values: &HashMap<String, serde_yaml::Value, S>,
 ) -> Result<String, SubstitutionError> {
     let resolved = resolve(skill, values)?;
     Ok(replace_tokens(&skill.body, &resolved))
 }
 
-fn resolve(
+fn resolve<S: std::hash::BuildHasher>(
     skill: &Skill,
-    values: &HashMap<String, serde_yaml::Value>,
+    values: &HashMap<String, serde_yaml::Value, S>,
 ) -> Result<HashMap<String, String>, SubstitutionError> {
     let mut out = HashMap::with_capacity(skill.meta.parameters.len());
     for param in &skill.meta.parameters {
         let supplied = values.get(&param.name);
-        let chosen = match supplied.or(param.default.as_ref()) {
-            Some(v) => v,
-            None => return Err(SubstitutionError::MissingParameter(param.name.clone())),
+        let Some(chosen) = supplied.or(param.default.as_ref()) else {
+            return Err(SubstitutionError::MissingParameter(param.name.clone()));
         };
         if param.param_type == "enum" && !param.values.is_empty() {
             let matches = param
@@ -161,7 +160,7 @@ mod tests {
                 restrictions: None,
                 output_format: None,
                 visibility: None,
-                extra: Default::default(),
+                extra: std::collections::BTreeMap::default(),
             },
             body: body.into(),
         }
@@ -243,7 +242,7 @@ mod tests {
                 assert_eq!(name, "tone");
                 assert_eq!(got, "angry");
             }
-            _ => panic!("wrong error"),
+            SubstitutionError::MissingParameter(_) => panic!("wrong error"),
         }
     }
 

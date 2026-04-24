@@ -159,10 +159,9 @@ fn print_summary_table(response: &Value) {
         .unwrap_or(7)
         .max(7);
     println!(
-        "{:<name_w$}  {:<trig_w$}  {}",
+        "{:<name_w$}  {:<trig_w$}  STEPS",
         "NAME",
         "TRIGGER",
-        "STEPS",
         name_w = name_w,
         trig_w = trig_w,
     );

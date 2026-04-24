@@ -174,6 +174,7 @@ impl ThemeCorePlugin {
 }
 
 impl CorePlugin for ThemeCorePlugin {
+    #[allow(clippy::too_many_lines)]
     fn dispatch(&mut self, handler_id: u32, args: &Value) -> Result<Value, PluginError> {
         match handler_id {
             HANDLER_GET_AVAILABLE_THEMES => {

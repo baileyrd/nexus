@@ -1,6 +1,6 @@
 //! On-disk SQLite-backed [`nexus_kernel::KvStore`] backend.
 //!
-//! `nexus-kernel` itself has no SQLite dependency; bootstrap picks a backend
+//! `nexus-kernel` itself has no `SQLite` dependency; bootstrap picks a backend
 //! and passes it to [`nexus_kernel::Kernel::new`]. Use [`SqliteKvStore`] for
 //! the real runtime; for tests, use
 //! [`nexus_kernel::InMemoryKvStore`](../nexus_kernel/struct.InMemoryKvStore.html).
@@ -59,7 +59,7 @@ impl SqliteKvStore {
         })
     }
 
-    /// Open an in-memory SQLite-backed KV store (for testing the SQLite
+    /// Open an in-memory SQLite-backed KV store (for testing the `SQLite`
     /// path specifically). Prefer [`InMemoryKvStore`] when you only need a
     /// fast fake.
     ///

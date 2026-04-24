@@ -201,7 +201,7 @@ impl SkillsCorePlugin {
                     // parsed cleanly.
                     SkillRegistry::load(&self.root).unwrap_or_else(|_| SkillRegistry::empty())
                 }
-                _ => SkillRegistry::empty(),
+                SkillRegistryError::Io(_) => SkillRegistry::empty(),
             }
         });
         let len = reloaded.len();
@@ -326,7 +326,7 @@ body A
 
     #[test]
     fn render_substitutes_declared_parameters() {
-        const SKILL_WITH_PARAM: &str = r#"---
+        const SKILL_WITH_PARAM: &str = r"---
 name: P
 id: skill-p
 description: d
@@ -339,7 +339,7 @@ parameters:
     default: friendly
 ---
 Write in a {{ tone }} style.
-"#;
+";
         let tmp = TempDir::new().unwrap();
         write_skill(tmp.path(), "p.skill.md", SKILL_WITH_PARAM);
         let mut plugin = SkillsCorePlugin::open(tmp.path().to_path_buf());

@@ -68,6 +68,7 @@ pub fn embed(app: &mut App, file: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 fn fetch_blocks(app: &mut App, path: &str) -> Result<Vec<(u64, String, String, Option<i32>)>> {
     let (runtime, rt) = app.runtime()?;
     let blocks = storage_ipc::query_blocks(runtime, rt, path)?;

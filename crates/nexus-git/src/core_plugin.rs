@@ -131,6 +131,7 @@ impl CorePlugin for GitCorePlugin {
         tracing::info!(plugin_id = PLUGIN_ID, "git state poller stopped");
     }
 
+    #[allow(clippy::too_many_lines)]
     fn dispatch(
         &mut self,
         handler_id: u32,
@@ -157,8 +158,9 @@ impl CorePlugin for GitCorePlugin {
             HANDLER_LOG => {
                 let limit = args
                     .get("limit")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(20) as usize;
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|v| usize::try_from(v).ok())
+                    .unwrap_or(20);
                 let entries = h.with(move |e| e.log(limit)).map_err(map_err)?;
                 let arr: Vec<_> = entries
                     .iter()
@@ -261,6 +263,9 @@ fn path_arg(args: &serde_json::Value) -> Result<PathBuf, PluginError> {
         })
 }
 
+// Passed as a function pointer to `.map_err(map_err)`; wrapping in a
+// closure would re-trip `redundant_closure`.
+#[allow(clippy::needless_pass_by_value)]
 fn map_err(e: GitError) -> PluginError {
     PluginError::ExecutionFailed {
         plugin_id: PLUGIN_ID.to_string(),
@@ -268,6 +273,11 @@ fn map_err(e: GitError) -> PluginError {
     }
 }
 
+// `run_poller` is spawned as a thread and takes ownership of handle,
+// bus, and stop for the thread's lifetime — the lint fires because the
+// body only needs &handle / &bus / &stop, but hoisting the moves into
+// the caller would duplicate the thread::spawn boilerplate.
+#[allow(clippy::needless_pass_by_value)]
 fn run_poller(handle: GitWorkerHandle, bus: Option<Arc<EventBus>>, stop: Arc<AtomicBool>) {
     let mut prev: Option<GitState> = None;
 
@@ -279,7 +289,7 @@ fn run_poller(handle: GitWorkerHandle, bus: Option<Arc<EventBus>>, stop: Arc<Ato
         match handle.with(|e| e.state()) {
             Ok(state) => {
                 if let Some(ref bus) = bus {
-                    publish_changes(bus, &prev, &state);
+                    publish_changes(bus, prev.as_ref(), &state);
                 }
                 prev = Some(state);
             }
@@ -299,7 +309,7 @@ fn run_poller(handle: GitWorkerHandle, bus: Option<Arc<EventBus>>, stop: Arc<Ato
     }
 }
 
-fn publish_changes(bus: &EventBus, prev: &Option<GitState>, curr: &GitState) {
+fn publish_changes(bus: &EventBus, prev: Option<&GitState>, curr: &GitState) {
     let Some(prev) = prev else {
         let _ = bus.publish_plugin(
             PLUGIN_ID,
@@ -395,7 +405,7 @@ mod tests {
         let mut plugin = GitCorePlugin::new(dir.path().to_path_buf(), None);
         plugin.on_init().unwrap();
         let result = plugin.dispatch(HANDLER_STATUS, &json!({}));
-        assert!(result.is_ok(), "status dispatch failed: {:?}", result);
+        assert!(result.is_ok(), "status dispatch failed: {result:?}");
         let v = result.unwrap();
         assert!(v.get("head").is_some());
         assert!(v.get("is_dirty").is_some());
@@ -444,7 +454,7 @@ mod tests {
             is_dirty: false,
             repo_state: crate::RepoState::Clean,
         };
-        publish_changes(&bus, &None, &state);
+        publish_changes(&bus, None, &state);
         let ev = sub.try_recv().unwrap().unwrap();
         match &ev.event {
             nexus_kernel::NexusEvent::Custom { type_id, .. } => {
@@ -472,7 +482,7 @@ mod tests {
             is_dirty: false,
             repo_state: crate::RepoState::Clean,
         };
-        publish_changes(&bus, &Some(prev), &curr);
+        publish_changes(&bus, Some(&prev), &curr);
         let ev = sub.try_recv().unwrap().unwrap();
         match &ev.event {
             nexus_kernel::NexusEvent::Custom { type_id, payload, .. } => {

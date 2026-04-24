@@ -257,11 +257,11 @@ impl CorePlugin for EditorCorePlugin {
 /// into the session map. Shared tail of the sync + async `open` paths.
 fn finish_open(
     sessions: &Mutex<HashMap<String, Session>>,
-    relpath: String,
+    relpath: &str,
     source: &str,
 ) -> Result<Value, PluginError> {
     let parser = MarkdownParser::new(ParseOptions {
-        file_path: relpath.clone(),
+        file_path: relpath.to_string(),
         ..ParseOptions::default()
     });
     let tree = parser
@@ -271,12 +271,12 @@ fn finish_open(
     let session = Session {
         tree,
         undo: UndoTree::new(),
-        relpath: relpath.clone(),
+        relpath: relpath.to_string(),
         revision: 0,
     };
     let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    guard.insert(relpath.clone(), session);
-    let s = guard.get(&relpath).expect("just inserted");
+    guard.insert(relpath.to_string(), session);
+    let s = guard.get(relpath).expect("just inserted");
     snapshot_to_value(&snapshot_of(s), "open")
 }
 
@@ -289,7 +289,7 @@ fn handle_open_sync(
     let abs = resolve_within(forge_root, &relpath).map_err(|e| exec_err(format!("open: {e}")))?;
     let source = fs::read_to_string(&abs)
         .map_err(|e| exec_err(format!("open: read '{}': {e}", abs.display())))?;
-    finish_open(sessions, relpath, &source)
+    finish_open(sessions, &relpath, &source)
 }
 
 async fn handle_open_async(
@@ -330,7 +330,7 @@ async fn handle_open_async(
             .map_err(|e| exec_err(format!("open: read '{}': {e}", abs.display())))?
     };
 
-    finish_open(&sessions, relpath, &source)
+    finish_open(&sessions, &relpath, &source)
 }
 
 fn handle_close(

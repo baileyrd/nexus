@@ -361,7 +361,7 @@ mod tests {
         KernelPluginContext::new(
             "com.test.plugin",
             "1.0.0",
-            CapabilitySet::from_iter(caps.iter().copied()),
+            caps.iter().copied().collect::<CapabilitySet>(),
             kv,
             bus,
             dir,

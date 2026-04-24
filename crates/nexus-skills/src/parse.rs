@@ -74,8 +74,7 @@ fn split_frontmatter(source: &str) -> Result<(&str, &str), SkillParseError> {
     while cursor < rest.len() {
         let next_nl = rest[cursor..]
             .find('\n')
-            .map(|n| cursor + n + 1)
-            .unwrap_or(rest.len());
+            .map_or(rest.len(), |n| cursor + n + 1);
         let line = rest[cursor..next_nl].trim_end_matches(['\r', '\n']);
         if line.trim() == "---" {
             let frontmatter = &rest[..cursor];
@@ -91,7 +90,7 @@ fn split_frontmatter(source: &str) -> Result<(&str, &str), SkillParseError> {
 mod tests {
     use super::*;
 
-    const MIN_VALID: &str = r#"---
+    const MIN_VALID: &str = r"---
 name: Code Review
 id: code-review
 description: Structured code reviews.
@@ -104,7 +103,7 @@ output_format: structured
 ---
 # Body
 Review with care.
-"#;
+";
 
     #[test]
     fn parses_minimal_valid_skill() {
@@ -118,7 +117,7 @@ Review with care.
 
     #[test]
     fn preserves_unknown_frontmatter_keys_in_extra() {
-        let src = r#"---
+        let src = r"---
 name: X
 id: x
 description: y
@@ -128,7 +127,7 @@ created: 2026-04-01
 futurefield: [a, b]
 ---
 body
-"#;
+";
         let skill = parse_skill_text(src).unwrap();
         assert!(skill.meta.extra.contains_key("futurefield"));
     }
@@ -147,7 +146,7 @@ body
 
     #[test]
     fn parses_parameters_list() {
-        let src = r#"---
+        let src = r"---
 name: X
 id: x
 description: y
@@ -166,7 +165,7 @@ parameters:
     default: [security, performance]
 ---
 body
-"#;
+";
         let skill = parse_skill_text(src).unwrap();
         assert_eq!(skill.meta.parameters.len(), 2);
         assert_eq!(skill.meta.parameters[0].name, "strictness");

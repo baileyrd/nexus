@@ -170,9 +170,8 @@ impl SkillRegistry {
 }
 
 fn is_skill_file(path: &Path) -> bool {
-    let name = match path.file_name().and_then(|n| n.to_str()) {
-        Some(n) => n,
-        None => return false,
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
     };
     name.ends_with(".skill.md")
 }
@@ -216,7 +215,7 @@ triggers: ["do A", "alpha"]
 body A
 "#;
 
-    const SKILL_B: &str = r#"---
+    const SKILL_B: &str = r"---
 name: B
 id: skill-b
 description: second
@@ -227,7 +226,7 @@ tags: [beta]
 applicable_contexts: [editor]
 ---
 body B
-"#;
+";
 
     fn write_skill(dir: &Path, filename: &str, contents: &str) {
         std::fs::write(dir.join(filename), contents).unwrap();
@@ -271,7 +270,7 @@ body B
                 assert_eq!(count, 1);
                 assert!(first.contains("duplicate"));
             }
-            other => panic!("expected duplicate failure, got {other:?}"),
+            SkillRegistryError::Io(_) => panic!("expected duplicate failure, got Io error"),
         }
     }
 

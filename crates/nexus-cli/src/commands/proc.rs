@@ -124,10 +124,9 @@ fn print_list(response: &Value) {
         .unwrap_or(4)
         .max(4);
     println!(
-        "{:<slug_w$}  {:<name_w$}  {}",
+        "{:<slug_w$}  {:<name_w$}  COMMAND",
         "SLUG",
         "NAME",
-        "COMMAND",
         slug_w = slug_w,
         name_w = name_w,
     );

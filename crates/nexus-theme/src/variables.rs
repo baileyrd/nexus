@@ -712,7 +712,7 @@ mod tests {
         // Every var(...) reference in the defaults must resolve or remain
         // a literal unknown. A cycle would have the resolver bail out.
         let vars = default_variables();
-        for (name, value) in vars.iter() {
+        for (name, value) in &vars {
             if value.contains("var(") {
                 substitute(value, &vars).unwrap_or_else(|e| {
                     panic!("failed to resolve {name} = {value}: {e:?}")

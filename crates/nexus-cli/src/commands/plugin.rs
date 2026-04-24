@@ -309,7 +309,7 @@ pub fn list_shell_plugins() -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<28} {:<32} {}", "ID", "Name", "Version");
+    println!("{:<28} {:<32} Version", "ID", "Name");
     println!("{}", "-".repeat(78));
     for (id, name, version) in rows {
         println!("{id:<28} {name:<32} {version}");
