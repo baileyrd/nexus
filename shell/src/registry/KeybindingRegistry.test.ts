@@ -7,13 +7,9 @@
 //     loadOverrides) restores the override
 //   - normalizeChord canonicalises modifier aliases (cmd → meta, etc.)
 //
-// The test runner is `node --import tsx --test`. The shell tsconfig
-// doesn't include `@types/node`, so we silence the missing-builtin
-// import errors with `// @ts-expect-error` (matches aiStore.test.ts).
+// The test runner is `node --import tsx --test`.
 
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 import {
   KeybindingRegistry,

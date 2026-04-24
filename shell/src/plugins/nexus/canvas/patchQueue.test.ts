@@ -28,9 +28,7 @@
 import type { CanvasPatchOp } from './kernelClient.ts'
 import { createPatchQueue } from './patchQueue.ts'
 
-// @ts-expect-error — shell tsconfig omits @types/node; the test runner has it
 import { test } from 'node:test'
-// @ts-expect-error
 import assert from 'node:assert/strict'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

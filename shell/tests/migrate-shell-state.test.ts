@@ -22,19 +22,10 @@
  *   - dedupe + cap on recentForgePaths.
  */
 
-// node:test / node:assert aren't in the shell tsconfig's lib set
-// (no `@types/node` here). Other shell tests dodge typecheck the same
-// way — see `tests/ai-store.test.ts`.
-//
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
-// @ts-expect-error tsc lib doesn't include node builtins
 import { mkdtempSync, readFileSync, writeFileSync, statSync, existsSync } from 'node:fs'
-// @ts-expect-error tsc lib doesn't include node builtins
 import { join } from 'node:path'
-// @ts-expect-error tsc lib doesn't include node builtins
 import { tmpdir } from 'node:os'
 
 import {

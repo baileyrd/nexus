@@ -18,9 +18,7 @@
 //     (no throw, returns undefined) so the behaviour of manifest-only
 //     stubs doesn't regress.
 
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 import { CommandRegistry } from './CommandRegistry.ts'
 import { eventBus } from '../host/EventBus.ts'

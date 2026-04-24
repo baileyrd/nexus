@@ -16,9 +16,7 @@
 import type { TransactionId } from './types.ts'
 import { isDirty, useEditorStore, type EditorTab } from './editorStore.ts'
 
-// @ts-expect-error — shell tsconfig omits @types/node; the test runner has it
 import { test } from 'node:test'
-// @ts-expect-error
 import assert from 'node:assert/strict'
 
 function resetStore(): void {

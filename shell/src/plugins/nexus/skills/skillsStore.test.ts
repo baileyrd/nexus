@@ -8,14 +8,8 @@
 // Run from the shell/ package with:
 //   node --import tsx --test \
 //     shell/src/plugins/nexus/skills/skillsStore.test.ts
-//
-// Same node:test pattern as terminal/savedCommandsStore.test.ts —
-// `@ts-expect-error` keeps tsc quiet without depending on
-// `@types/node` (not in the shell tsconfig lib set).
 
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 import {
   useSkillsStore,

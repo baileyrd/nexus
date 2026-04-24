@@ -36,9 +36,7 @@ import {
   type InMemoryStore,
 } from './testKernel.ts'
 
-// @ts-expect-error — shell tsconfig omits @types/node; the test runner has it
 import { test } from 'node:test'
-// @ts-expect-error
 import assert from 'node:assert/strict'
 
 // ── helpers ─────────────────────────────────────────────────────────────────

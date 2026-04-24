@@ -20,9 +20,7 @@
 //   - dispatch swallows handler errors (sync + async) so a buggy
 //     plugin can't break the dispatch loop
 
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 import {
   UriHandlerRegistry,

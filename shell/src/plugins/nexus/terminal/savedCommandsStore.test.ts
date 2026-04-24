@@ -8,13 +8,7 @@
 //   node --import tsx --test \
 //     shell/src/plugins/nexus/terminal/savedCommandsStore.test.ts
 
-// node:test + node:assert/strict aren't in the shell tsconfig's `lib`
-// set (no `@types/node`). Use `@ts-expect-error` to keep tsc quiet
-// without depending on a typings pkg — same pattern as aiStore.test.ts.
-//
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 import {
   useSavedCommandsStore,

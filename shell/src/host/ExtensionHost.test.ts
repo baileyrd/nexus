@@ -17,9 +17,7 @@
 //     subsequent fires are no-ops (no infinite retry).
 //   - dependsOn on a lazy plugin promotes it eager (dep-graph wins).
 
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test, beforeEach } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 import { ExtensionHost } from './ExtensionHost.ts'
 import { PluginRegistry } from './PluginRegistry.ts'

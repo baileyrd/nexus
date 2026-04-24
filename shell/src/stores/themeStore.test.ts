@@ -13,9 +13,7 @@
 // regression that motivated the tracking; live :root verification
 // happens in e2e (Part 3 settings UI).
 
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 import {
   useThemeStore,

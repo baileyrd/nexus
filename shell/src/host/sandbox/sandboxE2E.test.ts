@@ -59,9 +59,7 @@
 //     stall a response, or throw. Lets one test simulate several
 //     plugin personalities without shipping real guest bundles.
 
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 
 import {

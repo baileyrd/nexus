@@ -11,15 +11,8 @@
 // Run from the shell/ package with:
 //   node --import tsx --test \
 //     shell/src/plugins/nexus/agent/agent.test.ts
-//
-// Same node:test pattern as ai/aiStore.test.ts and skills/skillsStore.test.ts —
-// `// @ts-expect-error` keeps tsc quiet without depending on @types/node
-// being in the test runner's lib set (top-level await dynamic imports
-// trip esbuild's CJS transform when loaded via the tests/*.test.ts glob).
 
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 
 import {

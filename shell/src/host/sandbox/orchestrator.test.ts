@@ -27,9 +27,7 @@
 //  14. PanelNode renderer: button click dispatches api.commands.execute.
 //  15. buildSandboxSrcDoc embeds runtime + bundle URLs safely.
 
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 
 import {

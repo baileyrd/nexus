@@ -9,12 +9,7 @@
 //   node --import tsx --test \
 //     shell/src/plugins/nexus/workflow/workflowStore.test.ts
 
-// node:test + node:assert/strict aren't in the shell tsconfig's `lib`
-// set; same `@ts-expect-error` pattern used by sibling store tests.
-//
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 import { useWorkflowStore } from './workflowStore.ts'
 

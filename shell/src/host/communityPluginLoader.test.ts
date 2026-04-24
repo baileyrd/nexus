@@ -18,9 +18,7 @@
 // is dynamic-imported — has its own coverage without depending on the
 // Rust test harness.
 
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test, beforeEach } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 import { PLUGIN_API_VERSION } from '@nexus/extension-api'
 import {

@@ -8,19 +8,7 @@
 //   node --import tsx --test \
 //     shell/src/plugins/nexus/ai/aiStore.test.ts
 
-// `node:test` and `node:assert/strict` aren't in the shell tsconfig's
-// `lib` set (no `@types/node`), so importing them directly would fail
-// `pnpm typecheck`. The other shell sibling tests (editorStore.test.ts)
-// dodge this with `(await import(...))`, but top-level await trips
-// esbuild's CJS transform when the file is loaded via the
-// `tests/*.test.ts` runner glob.
-//
-// `// @ts-expect-error` keeps tsc quiet without changing the runtime
-// shape — node:test resolves at run time under `node --import tsx`.
-//
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 import { useAiStore, type AiTurn } from './aiStore.ts'
 
