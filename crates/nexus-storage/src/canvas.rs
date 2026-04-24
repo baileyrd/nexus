@@ -396,7 +396,7 @@ pub fn apply_patch(
                 }
             }
             CanvasPatchOp::SetBackground { background } => {
-                canvas.background = background.clone();
+                canvas.background.clone_from(background);
             }
         }
     }
@@ -560,7 +560,7 @@ mod tests {
             [],
         )
         .unwrap();
-        let file_id = conn.last_insert_rowid() as i64;
+        let file_id = conn.last_insert_rowid();
 
         let canvas = CanvasFile {
             nodes: vec![
@@ -618,7 +618,7 @@ mod tests {
             [],
         )
         .unwrap();
-        let file_id = conn.last_insert_rowid() as i64;
+        let file_id = conn.last_insert_rowid();
 
         let canvas = CanvasFile {
             nodes: vec![CanvasNode {

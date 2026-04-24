@@ -10,7 +10,7 @@
 //! engine (migrations, SELECT execution, relation resolution, rollup
 //! aggregation). They were previously in `nexus-database`; moving them here
 //! consolidates all `rusqlite` access into this crate — there is one owner
-//! of the forge's SQLite database, and it's `nexus-storage`. Pure-logic
+//! of the forge's `SQLite` database, and it's `nexus-storage`. Pure-logic
 //! types, validators, formulas, and CSV import/export remain in
 //! `nexus-database` as a no-rusqlite library.
 

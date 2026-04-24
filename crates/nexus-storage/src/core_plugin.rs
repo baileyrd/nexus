@@ -106,7 +106,7 @@ pub const HANDLER_DELETE_ENTRY: u32 = 31;
 /// path to a `.bases` directory. Returns the full
 /// [`nexus_types::bases::Base`] (schema + records + views + relations +
 /// metadata) parsed straight from disk. Unlike [`HANDLER_BASE_INDEX`]
-/// this is read-only and doesn't touch the SQLite index — a UI that
+/// this is read-only and doesn't touch the `SQLite` index — a UI that
 /// just wants to render a base in a view panel can skip the index
 /// roundtrip.
 pub const HANDLER_BASE_LOAD: u32 = 32;
@@ -126,7 +126,7 @@ pub const HANDLER_CANVAS_READ: u32 = 35;
 /// Handler id for `canvas_write`. Args:
 /// `{ "path": String, "canvas": CanvasFile }`. Serializes `canvas` and
 /// writes it through [`crate::StorageEngine::write_file`] so the canvas
-/// SQLite index + knowledge graph stay in sync. Returns
+/// `SQLite` index + knowledge graph stay in sync. Returns
 /// [`crate::FileMetadata`].
 pub const HANDLER_CANVAS_WRITE: u32 = 36;
 /// Handler id for `canvas_patch`. Args:
@@ -336,6 +336,7 @@ impl CorePlugin for StorageCorePlugin {
     /// Handler ids are defined as `HANDLER_*` constants at the top of this
     /// module; the [`nexus_plugins::PluginManifest`] registered by the
     /// bootstrap maps each command id to one of those numbers.
+    #[allow(clippy::too_many_lines)]
     fn dispatch(
         &mut self,
         handler_id: u32,
@@ -621,7 +622,7 @@ impl CorePlugin for StorageCorePlugin {
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
                 engine
-                    .base_property_update(&path, &name, definition, migrate_values)
+                    .base_property_update(&path, &name, &definition, migrate_values)
                     .map_err(|e| exec_err(format!("base_property_update: {e}")))?;
                 Ok(serde_json::json!({}))
             }
@@ -691,7 +692,7 @@ impl CorePlugin for StorageCorePlugin {
                     .transpose()?
                     .unwrap_or_default();
                 let base = engine
-                    .base_create(&path, schema, seed_records)
+                    .base_create(&path, &schema, seed_records)
                     .map_err(|e| exec_err(format!("base_create: {e}")))?;
                 to_value(&base, "base_create")
             }

@@ -75,7 +75,7 @@ pub enum ScopeFilter {
         /// The typed operation against that key.
         op: PropertyOp,
     },
-    /// Filter to search hits whose block has the given block_type
+    /// Filter to search hits whose block has the given `block_type`
     /// (`heading`, `paragraph`, `list_item`, etc.). Matched directly
     /// against the result's `block_type` — no DB lookup needed.
     Type(String),
@@ -606,7 +606,7 @@ mod tests {
     // ── typed prop: filter_results tests ─────────────────────────────────
 
     /// Build an in-memory DB with a single file whose properties include
-    /// numeric, date, and boolean values. Returns (conn, file_path).
+    /// numeric, date, and boolean values. Returns (conn, `file_path`).
     fn setup_typed_props_db() -> (Connection, String) {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::schema::configure_pragmas(&conn).unwrap();

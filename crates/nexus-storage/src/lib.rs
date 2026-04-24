@@ -396,7 +396,7 @@ impl StorageEngine {
     }
 
     /// Serialize `canvas` and write it through [`Self::write_file`] so the
-    /// SQLite canvas index + knowledge graph stay in sync.
+    /// `SQLite` canvas index + knowledge graph stay in sync.
     ///
     /// # Errors
     ///
@@ -473,7 +473,7 @@ impl StorageEngine {
     pub fn base_create(
         &self,
         path: &str,
-        schema: nexus_types::bases::BaseSchema,
+        schema: &nexus_types::bases::BaseSchema,
         seed_records: Vec<nexus_types::bases::BaseRecord>,
     ) -> Result<nexus_types::bases::Base, StorageError> {
         let abs_dir = self.forge.root().join(path);
@@ -488,7 +488,7 @@ impl StorageEngine {
             .and_then(|s| s.to_str())
             .unwrap_or("Untitled")
             .to_string();
-        let mut base = nexus_types::bases::init_base(&abs_dir, &name, &schema)?;
+        let mut base = nexus_types::bases::init_base(&abs_dir, &name, schema)?;
         for mut record in seed_records {
             if record.id.is_empty() {
                 record.id = uuid::Uuid::new_v4().to_string();
@@ -622,7 +622,7 @@ impl StorageEngine {
         &self,
         path: &str,
         name: &str,
-        definition: serde_json::Value,
+        definition: &serde_json::Value,
         migrate_values: bool,
     ) -> Result<(), StorageError> {
         let abs_dir = self.forge.root().join(path);
@@ -633,7 +633,7 @@ impl StorageEngine {
         base.schema.fields.insert(name.to_string(), definition.clone());
         if migrate_values {
             let old_type = property_type(&old_def);
-            let new_type = property_type(&definition);
+            let new_type = property_type(definition);
             if old_type.as_deref() != new_type.as_deref() {
                 for record in &mut base.records {
                     if let Some(v) = record.fields.get(name).cloned() {
@@ -953,7 +953,7 @@ impl StorageEngine {
     /// List entries under `relpath` within the forge.
     ///
     /// Returns both files and directories. Reads from disk, so newly-created
-    /// entries not yet in the SQLite index are included. The `.forge/`
+    /// entries not yet in the `SQLite` index are included. The `.forge/`
     /// internal directory is hidden from the root listing.
     ///
     /// Path confinement: rejects absolute paths, parent traversal, and any
@@ -1002,7 +1002,7 @@ impl StorageEngine {
 
     /// Create a new empty file at `relpath`. Refuses to overwrite.
     ///
-    /// Does not update the SQLite index; the storage watcher reconcile pass
+    /// Does not update the `SQLite` index; the storage watcher reconcile pass
     /// picks up the new empty file on its next sweep.
     ///
     /// # Errors
@@ -1811,7 +1811,7 @@ fn coerce_property_value(
                         .map_or(Value::Null, Value::Number)
                 }
             }
-            Value::Bool(b) => Value::Number((*b as i64).into()),
+            Value::Bool(b) => Value::Number(i64::from(*b).into()),
             _ => Value::Null,
         },
         "checkbox" => match value {
@@ -1847,7 +1847,7 @@ fn coerce_property_value(
                     .collect::<Vec<_>>()
                     .join(", "),
             ),
-            other => Value::String(other.to_string()),
+            other @ Value::Object(_) => Value::String(other.to_string()),
         },
         _ => value.clone(),
     }
@@ -2282,7 +2282,7 @@ mod tests {
 
         // Update.
         engine
-            .base_property_update(base_rel, "title", serde_json::json!({ "type": "text", "required": true }), false)
+            .base_property_update(base_rel, "title", &serde_json::json!({ "type": "text", "required": true }), false)
             .expect("update");
         let loaded = nexus_types::bases::load_base(&abs).expect("load2");
         assert_eq!(
@@ -2292,7 +2292,7 @@ mod tests {
 
         // Update unknown → error.
         let err = engine
-            .base_property_update(base_rel, "nope", serde_json::json!({}), false)
+            .base_property_update(base_rel, "nope", &serde_json::json!({}), false)
             .expect_err("unknown");
         assert!(matches!(err, StorageError::FileNotFound(_)));
 
@@ -2327,7 +2327,7 @@ mod tests {
             },
         };
         engine
-            .base_create(base_rel, schema, Vec::new())
+            .base_create(base_rel, &schema, Vec::new())
             .expect("create");
 
         let record = nexus_types::bases::BaseRecord {
@@ -2396,7 +2396,7 @@ mod tests {
 
         // base_create — empty.
         let created = engine
-            .base_create(base_rel, schema.clone(), Vec::new())
+            .base_create(base_rel, &schema, Vec::new())
             .expect("create");
         assert_eq!(created.name, "new");
         assert_eq!(created.records.len(), 0);
@@ -2420,7 +2420,7 @@ mod tests {
             .base_property_update(
                 base_rel,
                 "count",
-                serde_json::json!({ "type": "text" }),
+                &serde_json::json!({ "type": "text" }),
                 true,
             )
             .expect("retype with migrate");
@@ -2446,7 +2446,7 @@ mod tests {
 
         // base_create on existing path → error.
         let err = engine
-            .base_create(base_rel, schema, Vec::new())
+            .base_create(base_rel, &schema, Vec::new())
             .expect_err("exists");
         assert!(matches!(err, StorageError::CorruptFile { .. }));
     }

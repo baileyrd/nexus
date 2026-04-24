@@ -148,9 +148,11 @@ fn config_persist_and_reload() {
     nexus_storage::config::save_app_config(dir.path(), &cfg).unwrap();
 
     // Save custom workspace state.
-    let mut ws = nexus_storage::config::WorkspaceState::default();
-    ws.active_file = Some("notes/index.md".to_string());
-    ws.theme = "light".to_string();
+    let ws = nexus_storage::config::WorkspaceState {
+        active_file: Some("notes/index.md".to_string()),
+        theme: "light".to_string(),
+        ..Default::default()
+    };
     nexus_storage::config::save_workspace_state(dir.path(), &ws).unwrap();
 
     // Reload and verify.
@@ -167,13 +169,17 @@ fn config_persist_and_reload() {
 fn config_ai_and_mcp_round_trip() {
     let (dir, _engine) = engine();
 
-    let mut ai = nexus_storage::config::AiConfig::default();
-    ai.model = "claude-opus-4-6".to_string();
-    ai.temperature = 0.3;
+    let ai = nexus_storage::config::AiConfig {
+        model: "claude-opus-4-6".to_string(),
+        temperature: 0.3,
+        ..Default::default()
+    };
     nexus_storage::config::save_ai_config(dir.path(), &ai).unwrap();
 
-    let mut mcp = nexus_storage::config::McpConfig::default();
-    mcp.allowed_tools = vec!["search".to_string(), "read_file".to_string()];
+    let mcp = nexus_storage::config::McpConfig {
+        allowed_tools: vec!["search".to_string(), "read_file".to_string()],
+        ..Default::default()
+    };
     nexus_storage::config::save_mcp_config(dir.path(), &mcp).unwrap();
 
     let ai2 = nexus_storage::config::load_ai_config(dir.path()).unwrap();

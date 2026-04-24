@@ -291,6 +291,9 @@ mod tests {
 
     // ── StorageEvent ───────────────────────────────────────────────────────
 
+    // a..g pair up the variants (a==b, c differs, d==e, f==g) — the
+    // single-char names are appropriate for a pure equality table.
+    #[allow(clippy::many_single_char_names)]
     #[test]
     fn storage_event_variants_are_eq() {
         let a = StorageEvent::FileCreated {

@@ -145,7 +145,7 @@ mod tests {
 
         let leftovers: Vec<_> = fs::read_dir(&temp_dir)
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(Result::ok)
             .collect();
         assert!(leftovers.is_empty(), "temp files left behind: {leftovers:?}");
     }
