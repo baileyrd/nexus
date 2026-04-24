@@ -539,3 +539,169 @@ test('sendEvent is a no-op after dispose', () => {
   ctx.router.sendEvent('kernel.on', 'sub-dead', { noise: true })
   assert.equal(ctx.host.sent.length, 0)
 })
+
+test('commands.register bridges api.commands.execute through dispatch.command with the guest handlerSub (WI-30e)', async () => {
+  // Capture whatever handler the router installs so the test can
+  // drive `api.commands.execute(id)` without going through a second
+  // PluginAPI instance. The bridged handler should issue a host→plugin
+  // `dispatch.command` request carrying the guest's UUID handlerSub
+  // and forward the guest's return value back to the caller.
+  type CmdHandler = (...args: unknown[]) => unknown | Promise<unknown>
+  const registered = new Map<string, CmdHandler>()
+  const ctx = buildRouter({
+    api: makeApi({
+      commands: {
+        register: (id: string, handler: CmdHandler) => {
+          registered.set(id, handler)
+        },
+        execute: async (id: string, ...args: unknown[]) => {
+          const h = registered.get(id)
+          if (!h) throw new Error(`no handler for ${id}`)
+          return await h(...args)
+        },
+        all: () => [...registered.keys()].map((id) => ({ id, title: id })),
+      } as unknown as PluginAPI['commands'],
+    }),
+  })
+  await completeHandshake(ctx)
+  ctx.host.sent.length = 0
+
+  // Guest registers a command with its own UUID handlerSub.
+  const guestSub = 'guest-uuid-abc-123'
+  ctx.guest.postMessage(
+    makeRequest('req-reg', 'commands.register', {
+      id: 'hello.greet',
+      handlerSub: guestSub,
+    }),
+  )
+  await tick(4)
+  // Router acked the registration.
+  const regResp = latest<RpcEnvelope>(ctx.host)
+  assert.equal(regResp.kind, 'response')
+  assert.equal(regResp.id, 'req-reg')
+  assert.equal(regResp.error, undefined)
+  assert.deepEqual(ctx.router.registeredCommandIds, ['hello.greet'])
+
+  // Drive `api.commands.execute('hello.greet', 'World')` — this hits
+  // the bridged handler the router installed, which should post a
+  // host→plugin request on `dispatch.command` carrying the guest's
+  // real handlerSub (NOT a synthetic `cmd:` form).
+  ctx.host.sent.length = 0
+  const executePromise = ctx.router['api'].commands.execute('hello.greet', 'World')
+
+  // The router drains the call asynchronously via `queueMicrotask` on
+  // the mock port; let the envelope propagate.
+  await tick(4)
+  const dispatchFrame = ctx.host.sent.find(
+    (m): m is RpcEnvelope =>
+      !!m && typeof m === 'object' && (m as RpcEnvelope).kind === 'request',
+  )
+  assert.ok(dispatchFrame, 'router should have posted a host→plugin request')
+  assert.equal(dispatchFrame!.direction, 'host-to-plugin')
+  assert.equal(dispatchFrame!.method, 'dispatch.command')
+  const dispatchPayload = dispatchFrame!.payload as {
+    handlerSub: string
+    args: unknown[]
+  }
+  assert.equal(
+    dispatchPayload.handlerSub,
+    guestSub,
+    'bridged handler must forward the guest UUID handlerSub, not a synthetic id',
+  )
+  assert.deepEqual(dispatchPayload.args, ['World'])
+
+  // Guest responds with the handler's return value; the router must
+  // resolve the bridged handler's promise with it so the host-side
+  // `api.commands.execute` call resolves cleanly.
+  ctx.guest.postMessage({
+    id: dispatchFrame!.id,
+    direction: 'plugin-to-host',
+    kind: 'response',
+    method: 'dispatch.command',
+    payload: 'hi World',
+  })
+  const result = await executePromise
+  assert.equal(result, 'hi World')
+  ctx.router.dispose()
+})
+
+test('commands.register dispatch errors propagate to the host api caller (WI-30e)', async () => {
+  type CmdHandler = (...args: unknown[]) => unknown | Promise<unknown>
+  const registered = new Map<string, CmdHandler>()
+  const ctx = buildRouter({
+    api: makeApi({
+      commands: {
+        register: (id: string, handler: CmdHandler) => {
+          registered.set(id, handler)
+        },
+        execute: async (id: string, ...args: unknown[]) => {
+          const h = registered.get(id)
+          if (!h) throw new Error(`no handler for ${id}`)
+          return await h(...args)
+        },
+        all: () => [],
+      } as unknown as PluginAPI['commands'],
+    }),
+  })
+  await completeHandshake(ctx)
+  ctx.guest.postMessage(
+    makeRequest('req-reg', 'commands.register', {
+      id: 'boom',
+      handlerSub: 'guest-sub-boom',
+    }),
+  )
+  await tick(4)
+  ctx.host.sent.length = 0
+
+  const executePromise = ctx.router['api'].commands.execute('boom')
+  await tick(4)
+  const dispatchFrame = ctx.host.sent.find(
+    (m): m is RpcEnvelope =>
+      !!m && typeof m === 'object' && (m as RpcEnvelope).kind === 'request',
+  )
+  assert.ok(dispatchFrame)
+  // Guest errors.
+  ctx.guest.postMessage({
+    id: dispatchFrame!.id,
+    direction: 'plugin-to-host',
+    kind: 'response',
+    method: 'dispatch.command',
+    error: {
+      kind: 'dispatch_failed',
+      message: 'handler threw',
+      retryable: false,
+    },
+  })
+  await assert.rejects(executePromise, (err: unknown) => {
+    const e = err as { kind?: string; message?: string }
+    return e.kind === 'dispatch_failed' && /handler threw/.test(e.message ?? '')
+  })
+  ctx.router.dispose()
+})
+
+test('sendRequest rejects in-flight host requests on dispose (WI-30e)', async () => {
+  const ctx = buildRouter()
+  await completeHandshake(ctx)
+  const pending = ctx.router.sendRequest('dispatch.command', {
+    handlerSub: 'never',
+    args: [],
+  })
+  ctx.router.dispose()
+  await assert.rejects(pending, (err: unknown) => {
+    const e = err as { kind?: string }
+    return e.kind === 'plugin_disposed'
+  })
+})
+
+test('sendRequest times out if the guest never responds (WI-30e)', async () => {
+  const ctx = buildRouter()
+  await completeHandshake(ctx)
+  await assert.rejects(
+    ctx.router.sendRequest('dispatch.command', { handlerSub: 'x', args: [] }, 10),
+    (err: unknown) => {
+      const e = err as { kind?: string }
+      return e.kind === 'timeout'
+    },
+  )
+  ctx.router.dispose()
+})

@@ -37,6 +37,7 @@ import {
   makeEvent,
   makeHandshakeAccept,
   makeHandshakeReject,
+  makeRequest,
   makeResponse,
   type HandshakeHello,
   type RpcEnvelope,
@@ -131,6 +132,27 @@ interface TrackedSubscription {
   method: string
 }
 
+/**
+ * Pending host→plugin request awaiting a response. Used by
+ * `sendRequest` to correlate the guest's response envelope back to the
+ * promise we handed to the host-side caller (e.g. a bridged command
+ * handler invoked via `api.commands.execute`).
+ */
+interface PendingHostRequest {
+  resolve: (value: unknown) => void
+  reject: (reason: unknown) => void
+  timer: ReturnType<typeof setTimeout> | null
+  method: string
+}
+
+/**
+ * Default timeout for host→plugin requests (WI-30e). Mirrors the
+ * request-timeout window used for plugin→host requests; a sandboxed
+ * handler that exceeds it is reported as a `timeout` error to the host
+ * caller so `api.commands.execute(id)` doesn't dangle.
+ */
+const HOST_REQUEST_TIMEOUT_MS = 30_000
+
 export class SandboxRouter {
   private readonly pluginId: string
   private readonly api: PluginAPI
@@ -143,6 +165,27 @@ export class SandboxRouter {
 
   private readonly subscriptions = new Map<string, TrackedSubscription>()
   private readonly pendingTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /**
+   * Host→plugin requests that are awaiting a response. Populated by
+   * `sendRequest`; drained in `handle` when a `response` envelope with
+   * `direction: plugin-to-host` lands with a matching id.
+   */
+  private readonly pendingHostRequests = new Map<string, PendingHostRequest>()
+  /**
+   * Map from guest-registered command id to the guest's UUID
+   * `handlerSub`. The router uses this to route `dispatch.command`
+   * host→plugin requests back to the right handler in the guest's
+   * `commandHandlers` map (see `runtime.ts:445`). Replaces the
+   * synthetic `cmd:${pluginId}:${id}` form the orchestrator used to
+   * mint before WI-30e.
+   */
+  private readonly commandHandlerSubs = new Map<string, string>()
+  /**
+   * Counter used to mint unique host→plugin request ids. Collision
+   * with guest-minted ids is impossible because guest ids are UUIDs
+   * and host ids are prefixed `host-req-`.
+   */
+  private hostRequestCounter = 0
 
   private disposed = false
   private handshakeComplete = false
@@ -205,11 +248,82 @@ export class SandboxRouter {
       case 'dispose':
         this.handleDispose(envelope)
         return
-      case 'event':
       case 'response':
+        // Guest-originated response to a host→plugin request (WI-30e).
+        // Only expected for `dispatch.command`, `dispatch.uri`, and
+        // `views.render`; any response without a matching pending id
+        // is still logged as unexpected (could signal a misbehaving
+        // guest that fabricated a response).
+        this.handleHostResponse(envelope)
+        return
+      case 'event':
         // Plugin shouldn't be sending these; ignore to stay robust.
         this.warn('unexpected frame from guest', envelope.kind, envelope.method)
         return
+    }
+  }
+
+  /**
+   * Send a host→plugin request and await the guest's response. Used by
+   * the `commands.register` bridge to round-trip `dispatch.command` to
+   * the guest's UUID-keyed handler, and by callers (e.g. the
+   * orchestrator's `renderPanel`) that need a host-initiated RPC with
+   * a return value.
+   */
+  sendRequest(
+    method: string,
+    payload: unknown,
+    timeoutMs: number = HOST_REQUEST_TIMEOUT_MS,
+  ): Promise<unknown> {
+    if (this.disposed) {
+      return Promise.reject(
+        Object.assign(new Error('sandbox router disposed'), {
+          kind: 'plugin_disposed',
+          pluginId: this.pluginId,
+          method,
+        }),
+      )
+    }
+    return new Promise((resolve, reject) => {
+      this.hostRequestCounter += 1
+      const id = `host-req-${this.hostRequestCounter}-${Date.now()}`
+      const timer =
+        timeoutMs > 0
+          ? setTimeout(() => {
+              const entry = this.pendingHostRequests.get(id)
+              if (!entry) return
+              this.pendingHostRequests.delete(id)
+              entry.reject({
+                kind: 'timeout',
+                message: `host request ${method} exceeded ${timeoutMs}ms`,
+                retryable: true,
+                pluginId: this.pluginId,
+                method,
+              } satisfies RpcErrorEnvelope)
+            }, timeoutMs)
+          : null
+      this.pendingHostRequests.set(id, {
+        resolve,
+        reject,
+        timer,
+        method,
+      })
+      this.port.postMessage(makeRequest(id, method, payload, 'host-to-plugin'))
+    })
+  }
+
+  private handleHostResponse(envelope: RpcEnvelope): void {
+    const entry = this.pendingHostRequests.get(envelope.id)
+    if (!entry) {
+      this.warn('unexpected response frame from guest', envelope.id, envelope.method)
+      return
+    }
+    this.pendingHostRequests.delete(envelope.id)
+    if (entry.timer) clearTimeout(entry.timer)
+    if (envelope.error) {
+      entry.reject(envelope.error)
+    } else {
+      entry.resolve(envelope.payload)
     }
   }
 
@@ -237,8 +351,22 @@ export class SandboxRouter {
       }
     }
     this.subscriptions.clear()
+    this.commandHandlerSubs.clear()
     for (const timer of this.pendingTimers.values()) clearTimeout(timer)
     this.pendingTimers.clear()
+    // Reject any in-flight host→plugin requests so the host-side
+    // callers (bridged command handlers, renderPanel, etc.) unblock.
+    for (const [, entry] of this.pendingHostRequests) {
+      if (entry.timer) clearTimeout(entry.timer)
+      entry.reject({
+        kind: 'plugin_disposed',
+        message: `sandbox router disposed while ${entry.method} was in flight`,
+        retryable: false,
+        pluginId: this.pluginId,
+        method: entry.method,
+      } satisfies RpcErrorEnvelope)
+    }
+    this.pendingHostRequests.clear()
     try { this.port.close?.() } catch { /* best-effort */ }
   }
 
@@ -249,6 +377,16 @@ export class SandboxRouter {
 
   get isDisposed(): boolean {
     return this.disposed
+  }
+
+  /**
+   * Command ids the guest has registered through `commands.register`.
+   * The orchestrator reads this on teardown to remove the host-side
+   * `CommandRegistry` entries (WI-30e). Snapshot — mutating the
+   * returned array is safe and does not affect the router's state.
+   */
+  get registeredCommandIds(): string[] {
+    return [...this.commandHandlerSubs.keys()]
   }
 
   // ─── Internal ──────────────────────────────────────────────────────────
@@ -452,17 +590,32 @@ export class SandboxRouter {
       case 'commands.register': {
         const cmdId = String(args.id)
         const handlerSub = String(args.handlerSub)
-        // Bridge: host-side handler invokes the guest via an event frame
-        // and awaits a correlated response. For Phase 3c the simpler
-        // one-way dispatch suffices — command execution routes back to
-        // the guest over an `event` frame; return value propagation
-        // lives in WI-30d when the full round-trip is exercised.
-        this.api.commands.register(cmdId, (...handlerArgs: unknown[]) => {
-          this.sendEvent('commands.register', handlerSub, { args: handlerArgs })
+        // WI-30e: the guest's `commands.register` call carries the
+        // UUID `handlerSub` it minted and stored in its own
+        // `commandHandlers` map (runtime.ts:217). Record that sub
+        // keyed by command id, then register a host-side handler that
+        // round-trips to the guest via `dispatch.command` + the real
+        // sub. This way `api.commands.execute(id)` yields the guest
+        // handler's return value, which the previous `sendEvent`-based
+        // bridge couldn't deliver because events carry no response.
+        this.commandHandlerSubs.set(cmdId, handlerSub)
+        this.api.commands.register(cmdId, async (...handlerArgs: unknown[]) => {
+          const sub = this.commandHandlerSubs.get(cmdId)
+          if (!sub) {
+            throw new Error(
+              `sandboxed plugin '${this.pluginId}' lost handlerSub for command '${cmdId}'`,
+            )
+          }
+          return await this.sendRequest('dispatch.command', {
+            handlerSub: sub,
+            args: handlerArgs,
+          })
         })
         this.trackSub(handlerSub, 'commands.register', () => {
-          // Commands have no native per-handler disposer; best-effort
-          // cleanup happens on plugin unload via `registry.unregisterAll`.
+          // Drop the id→sub mapping so a late-arriving command
+          // execute resolves via the error path above instead of
+          // stalling on a dispatch.command to a dead guest.
+          this.commandHandlerSubs.delete(cmdId)
         })
         return undefined
       }

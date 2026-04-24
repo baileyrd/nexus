@@ -11,6 +11,8 @@ import { invoke }        from '@tauri-apps/api/core'
 import { readTextFile }  from '@tauri-apps/plugin-fs'
 import { PLUGIN_API_VERSION } from '@nexus/extension-api'
 import type { Plugin }   from '../types/plugin'
+import type { SandboxOrchestrator } from './sandbox/SandboxOrchestrator'
+import { parseManifestCapabilities } from '../plugins/nexus/pluginsMgmt/capabilityInfo'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -199,28 +201,71 @@ export async function scanCommunityPlugins(): Promise<CommunityPluginManifest[]>
 }
 
 /**
+ * Options for `loadEnabledCommunityPlugins`. `orchestrator` is optional
+ * because the unsandboxed legacy path does not require it; callers that
+ * intend to load sandboxed plugins MUST pass one or the sandboxed
+ * manifests will be skipped with a warning.
+ */
+export interface LoadCommunityPluginsOptions {
+  /**
+   * Iframe orchestrator for sandboxed plugins (WI-30e). When a
+   * manifest sets `sandboxed: true`, the loader calls
+   * `orchestrator.load(...)` instead of dynamic-importing the bundle
+   * into the shell realm. Omit when the caller is operating in a
+   * non-UI context (tests, scans, …); sandboxed manifests are then
+   * filtered out with a console warning.
+   */
+  orchestrator?: SandboxOrchestrator
+  /**
+   * Factory that produces a blob URL for the guest runtime bootstrap.
+   * Allowing the caller to inject this keeps the loader decoupled
+   * from how the shell ships the compiled
+   * `bootstrapSandboxedPlugin` — in dev the caller can hand back a
+   * live `new URL('.../sandbox/runtime.ts', import.meta.url)`; in
+   * production it will be a precompiled ESM bundle shipped alongside
+   * the shell. Required when `orchestrator` is set.
+   */
+  getRuntimeUrl?: () => Promise<string>
+}
+
+/**
  * Load all *enabled* community plugins.
- * Reads each JS bundle via the fs plugin (so the file doesn't need to be
- * served), wraps it in a Blob URL, then dynamic-imports it.
  *
- * The JS bundle must export a Plugin as default:
+ * Routing (WI-30e):
+ *   - `manifest.sandboxed === true` — forward to
+ *     `orchestrator.load(...)`. The plugin runs in a null-origin
+ *     iframe; its host-side effects (commands, panels, notifications)
+ *     are installed via the router's RPC bridge. The loader does NOT
+ *     return a `Plugin` for sandboxed entries because the shell's
+ *     `ExtensionHost` lifecycle does not apply — the orchestrator
+ *     owns load/unload.
+ *   - `manifest.sandboxed` unset/false — legacy dynamic-import path.
+ *     Reads the bundle via the fs plugin, wraps it in a Blob URL,
+ *     imports it, and returns the default-exported `Plugin` to the
+ *     caller for `ExtensionHost.loadAll`.
+ *
+ * The JS bundle in the legacy path must export a Plugin as default:
  *   export default { manifest, activate, deactivate }
  */
 export async function loadEnabledCommunityPlugins(
-  manifests: CommunityPluginManifest[]
+  manifests: CommunityPluginManifest[],
+  options: LoadCommunityPluginsOptions = {},
 ): Promise<Plugin[]> {
   const enabled = manifests.filter(m => m.enabled)
   if (enabled.length === 0) return []
 
   const results = await Promise.allSettled(
-    enabled.map(m => loadOnePlugin(m))
+    enabled.map(m => loadOnePlugin(m, options))
   )
 
   const plugins: Plugin[] = []
   for (const [i, result] of results.entries()) {
-    if (result.status === 'fulfilled' && result.value) {
-      plugins.push(result.value)
-    } else if (result.status === 'rejected') {
+    if (result.status === 'fulfilled') {
+      // Sandboxed entries resolve to `null` — they've been loaded
+      // through the orchestrator and don't participate in the
+      // ExtensionHost's in-realm plugin list.
+      if (result.value) plugins.push(result.value)
+    } else {
       console.error(
         `[CommunityLoader] ✗ ${enabled[i].id}:`,
         result.reason
@@ -234,7 +279,8 @@ export async function loadEnabledCommunityPlugins(
 // ── Internal ──────────────────────────────────────────────────────────────────
 
 async function loadOnePlugin(
-  manifest: CommunityPluginManifest
+  manifest: CommunityPluginManifest,
+  options: LoadCommunityPluginsOptions,
 ): Promise<Plugin | null> {
   // WI-33: reject incompatible plugins BEFORE touching their JS bundle.
   // Throwing here surfaces as a rejected Promise in
@@ -244,6 +290,18 @@ async function loadOnePlugin(
   // into the dev console.
   const verdict = checkApiVersion(manifest.id, manifest.apiVersion)
   if (!verdict.ok) throw verdict.error
+
+  // WI-30e: sandboxed plugins route through the iframe orchestrator
+  // instead of the shell-realm dynamic-import path. The orchestrator
+  // spawns a null-origin iframe carrying the plugin bundle + the
+  // `bootstrapSandboxedPlugin` runtime, completes the protocol
+  // handshake, and installs host-side effects (commands, panels,
+  // notifications) via the SandboxRouter. No `Plugin` is returned
+  // because the ExtensionHost lifecycle doesn't apply to sandboxed
+  // instances — the orchestrator owns load/unload.
+  if (manifest.sandboxed === true) {
+    return await loadSandboxedPlugin(manifest, options)
+  }
 
   const mainPath = `${manifest.dir}/${manifest.main}`.replace(/\\/g, '/')
 
@@ -283,4 +341,58 @@ async function loadOnePlugin(
   } finally {
     URL.revokeObjectURL(url)
   }
+}
+
+async function loadSandboxedPlugin(
+  manifest: CommunityPluginManifest,
+  options: LoadCommunityPluginsOptions,
+): Promise<null> {
+  if (!options.orchestrator || !options.getRuntimeUrl) {
+    console.warn(
+      `[CommunityLoader] skipping sandboxed plugin '${manifest.id}' — ` +
+      `caller did not provide a SandboxOrchestrator + getRuntimeUrl factory`,
+    )
+    return null
+  }
+
+  const mainPath = `${manifest.dir}/${manifest.main}`.replace(/\\/g, '/')
+
+  // Read the bundle and wrap it in a blob: URL so the iframe's srcdoc
+  // can dynamic-import it. The iframe runs at a null origin, so the
+  // blob URL is reachable under the iframe's CSP (which explicitly
+  // allows `blob:` for script-src — see buildSandboxSrcDoc).
+  let source: string
+  try {
+    source = await readTextFile(mainPath)
+  } catch (err) {
+    throw new Error(`Cannot read ${mainPath}: ${err}`)
+  }
+  const blob = new Blob([source], { type: 'application/javascript' })
+  const bundleUrl = URL.createObjectURL(blob)
+
+  // The runtime bootstrap is shared across every sandboxed plugin. We
+  // ask the caller to cache it and hand us back a URL — the default
+  // wiring in main.tsx builds a blob URL once on boot and reuses it.
+  const runtimeUrl = await options.getRuntimeUrl()
+
+  const caps = parseManifestCapabilities(manifest.capabilities) ?? []
+
+  try {
+    await options.orchestrator.load({
+      pluginId: manifest.id,
+      bundleUrl,
+      runtimeUrl,
+      capabilities: new Set<string>(caps),
+      manifestApiVersion: manifest.apiVersion,
+    })
+    console.info(`[CommunityLoader] ✓ loaded (sandboxed) ${manifest.id}`)
+  } catch (err) {
+    // Revoke the blob URL so the iframe's failure doesn't leak the
+    // Blob reference. (The orchestrator revokes on successful load
+    // via the srcdoc lifecycle — but a handshake failure shortcuts
+    // that path.)
+    try { URL.revokeObjectURL(bundleUrl) } catch { /* swallow */ }
+    throw err
+  }
+  return null
 }

@@ -33,7 +33,6 @@
 import {
   SANDBOX_PROTOCOL_VERSION,
   isRpcEnvelope,
-  makeRequest,
   type PanelNode,
   type RpcEnvelope,
 } from '@nexus/extension-api'
@@ -281,7 +280,6 @@ class SandboxInstanceImpl implements SandboxInstance {
   private readonly handshakeTimeoutMs: number
   private readonly warn: (...args: unknown[]) => void
   private readonly windowRef: Window & typeof globalThis
-  private readonly registerdCommands = new Set<string>()
 
   constructor(
     private readonly spec: SandboxSpec,
@@ -361,14 +359,12 @@ class SandboxInstanceImpl implements SandboxInstance {
       warn: (...args) => this.warn(...args),
     })
 
-    // Hook into the router so that when the guest calls
-    // `commands.register`, we proxy the host-side command handler
-    // through an RPC round-trip instead of the fire-and-forget event
-    // the Wave 1 router emits. The simplest way: override the
-    // `commands.register` handler in the API itself, so the router's
-    // internal dispatch still runs but the handler stored in the
-    // CommandRegistry goes through our bridge.
-    this.installCommandBridge()
+    // WI-30e: the router now owns the `commands.register` bridge.
+    // When the guest calls `ctx.commands.register(id, handler)` the
+    // router stores the guest's UUID `handlerSub` keyed by command id
+    // and registers a host-side handler that round-trips via
+    // `router.sendRequest('dispatch.command', { handlerSub, args })`.
+    // The orchestrator no longer monkey-patches `api.commands.register`.
 
     // Wait for handshake. The router emits a handshake-accept frame
     // via `port.postMessage`; we listen for that by snooping the
@@ -391,114 +387,10 @@ class SandboxInstanceImpl implements SandboxInstance {
     this.startWatchdog()
   }
 
-  /**
-   * Install a bridge on the PluginAPI's `commands.register` so that
-   * when the guest calls it, the host-side registry stores a handler
-   * that round-trips to the iframe via a `request` envelope.
-   *
-   * We do this by monkey-wrapping `api.commands.register` *for this
-   * orchestrator only*. The router's own case handler still runs (it
-   * tracks the subscription for dispose), but the handler it passes
-   * into `commands.register` is replaced with our request-issuing
-   * closure so the caller of `api.commands.execute(id)` receives the
-   * plugin's return value.
-   *
-   * The cleaner long-term solution is to expose a "sandbox command
-   * dispatch" hook on the router — tracked but out of scope for WI-30d.
-   */
-  private installCommandBridge(): void {
-    const originalRegister = this.orchOpts.api.commands.register.bind(
-      this.orchOpts.api.commands,
-    )
-    const bridged: PluginAPI['commands']['register'] = (
-      id: string,
-      _handler: (...args: unknown[]) => unknown,
-    ) => {
-      // Replace the guest's event-pumping handler with a request-issuing
-      // handler. We have to pick the handlerSub ourselves because the
-      // router generates an anonymous closure per call. Use the command
-      // id itself as the stable sub — plugins can't register the same
-      // command id twice.
-      const handlerSub = `cmd:${this.pluginId}:${id}`
-      const bridgedHandler = async (...args: unknown[]): Promise<unknown> => {
-        if (this._state !== 'active') {
-          throw new Error(
-            `[SandboxOrchestrator] plugin '${this.pluginId}' not active for command '${id}'`,
-          )
-        }
-        // Round-trip via the guest's `handleRequest` (runtime.ts:413),
-        // which matches on `method === 'dispatch.command'` and looks
-        // up `handlerSub` in its commandHandlers map. The guest built
-        // the handlerSub from its own uuid — we can't see that from
-        // here, so we ask the guest to dispatch by id-plus-sub through
-        // a host-initiated request. In practice the runtime only knows
-        // its own handlerSub; we use the same envelope the router
-        // would have pushed as an event.
-        //
-        // NOTE: the guest's `commands.register` dispatch path stores
-        // `handlerSub` keyed on the SUB the guest generated, so we
-        // need to forward the same sub the guest registered. We track
-        // that via the ID-keyed map populated by the router's
-        // `commands.register` case; for now the simplest match is to
-        // forward the RPC as a host-initiated request with the
-        // plugin-local `commands.register` subscription id.
-        const res = await this.requestGuest('dispatch.command', {
-          id,
-          handlerSub,
-          args,
-        })
-        return res
-      }
-      originalRegister(id, bridgedHandler as (...a: unknown[]) => unknown)
-      this.registerdCommands.add(id)
-    }
-    // Monkey-wrap is scoped to the API object this orchestrator owns.
-    // If a single PluginAPI instance is shared across many plugins, the
-    // caller should build per-plugin APIs (which `buildPluginAPI`
-    // already does in production).
-    this.orchOpts.api.commands.register = bridged
-  }
-
-  /**
-   * Send a request to the guest and await its response. Uses the port
-   * directly because the router's `port.postMessage` surface is
-   * host→plugin for responses; we need a host→plugin REQUEST, which
-   * the guest handles in its `handleRequest` branch.
-   */
-  private async requestGuest(
-    method: string,
-    payload: unknown,
-    timeoutMs = 10_000,
-  ): Promise<unknown> {
-    return await new Promise((resolve, reject) => {
-      const id = `host-req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-      const envelope = makeRequest(id, method, payload, 'host-to-plugin')
-      const listener = (ev: MessageEvent) => {
-        if (ev.source !== this.iframe.contentWindow) return
-        if (!isRpcEnvelope(ev.data)) return
-        const env = ev.data as RpcEnvelope
-        if (env.kind !== 'response' || env.id !== id) return
-        this.windowRef.removeEventListener('message', listener)
-        clearTimeout(timer)
-        if (env.error) {
-          reject(env.error)
-        } else {
-          resolve(env.payload)
-        }
-      }
-      const timer = setTimeout(() => {
-        this.windowRef.removeEventListener('message', listener)
-        reject(new Error(`request ${method} timed out after ${timeoutMs}ms`))
-      }, timeoutMs)
-      this.windowRef.addEventListener('message', listener)
-      this.port.postMessage(envelope)
-    })
-  }
-
   async renderPanel(renderSub: string): Promise<PanelNode | null> {
     if (this._state !== 'active') return null
     try {
-      const result = await this.requestGuest(
+      const result = await this.router.sendRequest(
         'views.render',
         { renderSub },
         5_000,
@@ -632,15 +524,20 @@ class SandboxInstanceImpl implements SandboxInstance {
     if (markDisposed) this._state = 'disposed'
     this.stopWatchdog()
 
-    // Unregister host-side commands the guest registered.
-    for (const id of this.registerdCommands) {
-      try {
-        this.orchOpts.registry.commands.unregister(id)
-      } catch {
-        /* swallow */
+    // Unregister host-side commands the guest registered. The router
+    // populated these on every successful `commands.register` dispatch;
+    // we pull the ids now (before `router.dispose()` clears them) and
+    // sweep the CommandRegistry so the shell palette / executor don't
+    // keep a dead handler that would throw on the next invocation.
+    if (this.router) {
+      for (const id of this.router.registeredCommandIds) {
+        try {
+          this.orchOpts.registry.commands.unregister(id)
+        } catch {
+          /* swallow */
+        }
       }
     }
-    this.registerdCommands.clear()
 
     // Send dispose frame best-effort; the router will send a real one
     // if the guest still responds. Timeout is short — we don't block

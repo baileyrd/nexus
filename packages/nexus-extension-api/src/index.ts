@@ -487,10 +487,18 @@ export interface UriAPI {
 // Types for community plugins that run inside a null-origin iframe
 // sandbox. The protocol types live here (not shell-side) so the host
 // orchestrator (WI-30b) and the plugin bootstrap runtime consume the
-// same declarations. The runtime entry itself is intentionally NOT
-// re-exported — plugin bundles import it directly from
-// `@nexus/extension-api/sandbox/runtime`, and it has no use host-side.
+// same declarations.
+//
+// WI-30e: `bootstrapSandboxedPlugin` is also re-exported from the
+// barrel so plugin authors can write
+//   `import { bootstrapSandboxedPlugin } from '@nexus/extension-api'`
+// in their source file. The runtime code itself is only *executed*
+// inside the iframe (the host side will never call it), but exporting
+// the symbol from the public barrel keeps the author DX a single
+// import. Tree-shaking removes it from any host bundle that doesn't
+// reference it.
 
 export * from './sandbox/context';
 export * from './sandbox/plugin';
 export * from './sandbox/protocol';
+export { bootstrapSandboxedPlugin } from './sandbox/runtime';
