@@ -103,8 +103,7 @@ impl CorePlugin for McpHostPlugin {
         let server_count = self
             .config
             .as_ref()
-            .map(|c| c.servers.len())
-            .unwrap_or(0);
+            .map_or(0, |c| c.servers.len());
 
         if let Some(bus) = &self.event_bus {
             let _ = bus.publish_plugin(
@@ -181,6 +180,7 @@ impl CorePlugin for McpHostPlugin {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn dispatch_async(
         &mut self,
         handler_id: u32,
@@ -193,7 +193,7 @@ impl CorePlugin for McpHostPlugin {
             HANDLER_CONNECT => {
                 let server = str_arg(args, "server")?;
                 Some(Box::pin(async move {
-                    let cfg = config_or_err(&config)?;
+                    let cfg = config_or_err(config.as_ref())?;
                     connect_server(&server, &cfg, &clients).await?;
                     Ok(json!({"ok": true, "server": server}))
                 }))
@@ -214,10 +214,10 @@ impl CorePlugin for McpHostPlugin {
             HANDLER_LIST_TOOLS => {
                 let server = str_arg(args, "server")?;
                 Some(Box::pin(async move {
-                    let cfg = config_or_err(&config)?;
+                    let cfg = config_or_err(config.as_ref())?;
                     let client = get_or_connect(&server, &cfg, &clients).await?;
                     let lock = client.lock().await;
-                    let tools = lock.list_tools().await.map_err(|e| map_client_err(e))?;
+                    let tools = lock.list_tools().await.map_err(map_client_err)?;
                     let arr = tools
                         .iter()
                         .map(|t| {
@@ -234,13 +234,13 @@ impl CorePlugin for McpHostPlugin {
             HANDLER_LIST_RESOURCES => {
                 let server = str_arg(args, "server")?;
                 Some(Box::pin(async move {
-                    let cfg = config_or_err(&config)?;
+                    let cfg = config_or_err(config.as_ref())?;
                     let client = get_or_connect(&server, &cfg, &clients).await?;
                     let lock = client.lock().await;
                     let resources = lock
                         .list_resources()
                         .await
-                        .map_err(|e| map_client_err(e))?;
+                        .map_err(map_client_err)?;
                     let arr = resources
                         .iter()
                         .map(|r| {
@@ -259,10 +259,10 @@ impl CorePlugin for McpHostPlugin {
             HANDLER_LIST_PROMPTS => {
                 let server = str_arg(args, "server")?;
                 Some(Box::pin(async move {
-                    let cfg = config_or_err(&config)?;
+                    let cfg = config_or_err(config.as_ref())?;
                     let client = get_or_connect(&server, &cfg, &clients).await?;
                     let lock = client.lock().await;
-                    let prompts = lock.list_prompts().await.map_err(|e| map_client_err(e))?;
+                    let prompts = lock.list_prompts().await.map_err(map_client_err)?;
                     let arr = prompts
                         .iter()
                         .map(|p| {
@@ -284,13 +284,13 @@ impl CorePlugin for McpHostPlugin {
                     .and_then(|v| v.as_object())
                     .cloned();
                 Some(Box::pin(async move {
-                    let cfg = config_or_err(&config)?;
+                    let cfg = config_or_err(config.as_ref())?;
                     let client = get_or_connect(&server, &cfg, &clients).await?;
                     let lock = client.lock().await;
                     let result = lock
                         .call_tool(tool, tool_args)
                         .await
-                        .map_err(|e| map_client_err(e))?;
+                        .map_err(map_client_err)?;
                     let content: Vec<_> = result
                         .content
                         .iter()
@@ -310,17 +310,25 @@ impl CorePlugin for McpHostPlugin {
 
 fn str_arg(args: &serde_json::Value, key: &str) -> Option<String> {
     args.get(key)
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string)
 }
 
-fn config_or_err(config: &Option<Arc<McpHostConfig>>) -> Result<Arc<McpHostConfig>, PluginError> {
-    config.clone().ok_or_else(|| PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason: "MCP host config not loaded".to_string(),
-    })
+fn config_or_err(
+    config: Option<&Arc<McpHostConfig>>,
+) -> Result<Arc<McpHostConfig>, PluginError> {
+    config
+        .cloned()
+        .ok_or_else(|| PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "MCP host config not loaded".to_string(),
+        })
 }
 
+// Used as a function pointer by `Result::map_err`, which forces the
+// by-value signature; wrapping in a closure would re-trip
+// `redundant_closure`.
+#[allow(clippy::needless_pass_by_value)]
 fn map_client_err(e: McpClientError) -> PluginError {
     PluginError::ExecutionFailed {
         plugin_id: PLUGIN_ID.to_string(),
@@ -345,7 +353,7 @@ async fn connect_server(
     }
     let client = McpClient::connect(name, spec)
         .await
-        .map_err(|e| map_client_err(e))?;
+        .map_err(map_client_err)?;
     clients
         .write()
         .await

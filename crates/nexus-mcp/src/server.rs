@@ -430,18 +430,18 @@ impl NexusMcpServer {
         description = "Full-text search across notes. Rebuilds the search index before querying."
     )]
     async fn search_notes(&self, Parameters(input): Parameters<SearchInput>) -> Json<SearchOutput> {
-        if let Err(e) = self
-            .storage_call::<serde_json::Value>("rebuild_search_index", serde_json::json!({}))
-            .await
-        {
-            tracing::warn!("Failed to rebuild search index: {e}");
-        }
         #[derive(Deserialize)]
         struct Hit {
             file_path: String,
             block_type: String,
             excerpt: String,
             score: f32,
+        }
+        if let Err(e) = self
+            .storage_call::<serde_json::Value>("rebuild_search_index", serde_json::json!({}))
+            .await
+        {
+            tracing::warn!("Failed to rebuild search index: {e}");
         }
         let limit = input.limit.unwrap_or(20);
         match self
@@ -518,7 +518,9 @@ impl NexusMcpServer {
         &self,
         Parameters(input): Parameters<OutgoingLinksInput>,
     ) -> Json<OutgoingLinksOutput> {
+        // Fields match the JSON shape returned by storage's `outgoing_links`.
         #[derive(Deserialize)]
+        #[allow(clippy::struct_field_names)]
         struct Link {
             target_path: String,
             link_text: String,
@@ -562,7 +564,9 @@ impl NexusMcpServer {
         &self,
         Parameters(_input): Parameters<GraphStatusInput>,
     ) -> Json<GraphStatusOutput> {
+        // Fields match the JSON shape returned by storage's `graph_stats`.
         #[derive(Deserialize)]
+        #[allow(clippy::struct_field_names)]
         struct Stats {
             node_count: usize,
             edge_count: usize,
@@ -744,7 +748,7 @@ impl NexusMcpServer {
         }
     }
 
-    /// Shared write_file implementation for create_note + update_note.
+    /// Shared `write_file` implementation for `create_note` + `update_note`.
     async fn do_write_file(&self, path: &str, content: &str) -> Json<WriteNoteOutput> {
         #[derive(Deserialize)]
         struct Meta {
