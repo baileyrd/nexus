@@ -116,9 +116,9 @@ const REGISTRY_SIDE_EFFECT_RE = /import\s+['"](?:\.\.\/)+registry\/|import\s+['"
 
 /** Recursively yield .ts/.tsx files under `dir`, skipping dotfiles and node_modules. */
 function* walk(dir: string): Generator<string> {
-  let entries: ReturnType<typeof readdirSync> = []
+  let entries: import('node:fs').Dirent[] = []
   try {
-    entries = readdirSync(dir, { withFileTypes: true })
+    entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' })
   } catch {
     return
   }

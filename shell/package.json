@@ -12,6 +12,7 @@
     "lint": "eslint src --ext .ts,.tsx",
     "test": "node --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json",
     "e2e:build": "cross-env VITE_E2E=true pnpm build && cd src-tauri && cargo build --features custom-protocol",
     "e2e": "wdio run e2e/wdio.conf.ts"

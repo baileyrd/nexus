@@ -28,9 +28,7 @@
 //  16. Request before handshake is rejected with `dispatch_failed`.
 //  17. Pre-handshake dispatch is safe; capability check isn't reached.
 
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 
 import {
@@ -380,7 +378,8 @@ test('kernel.on subscription delivers events under the guest subscriptionId', as
   // carrying the subscriptionId so the guest can demux by id.
   ctx.host.sent.length = 0
   assert.ok(kernelCallback, 'kernel.on handler must have been captured')
-  kernelCallback!('cool.update', { hello: 'world' })
+  const cb = kernelCallback as (topic: string, payload: unknown) => void
+  cb('cool.update', { hello: 'world' })
   await tick(2)
 
   const evt = latest<RpcEnvelope>(ctx.host)

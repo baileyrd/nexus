@@ -16,14 +16,7 @@
 //   node --import tsx --test \
 //     shell/src/plugins/nexus/terminal/terminalStore.test.ts
 
-// node:test + node:assert/strict aren't in the shell tsconfig's `lib`
-// set (no `@types/node`). Use `@ts-expect-error` to keep tsc quiet
-// without depending on a typings pkg — same pattern as
-// savedCommandsStore.test.ts and aiStore.test.ts.
-//
-// @ts-expect-error tsc lib doesn't include node builtins
 import { test } from 'node:test'
-// @ts-expect-error tsc lib doesn't include node builtins
 import assert from 'node:assert/strict'
 import {
   useTerminalStore,
@@ -257,12 +250,13 @@ test('api.kernel.on prefix forwarder: routes per-session chunks into the store',
     useTerminalStore.getState().handleStreamChunk(sessionId, payload)
   })
   assert.ok(installed, 'subscription must be installed')
-  assert.equal(installed!.prefix, STREAM_TOPIC_PREFIX)
+  const sub = installed as { prefix: string; handler: Handler }
+  assert.equal(sub.prefix, STREAM_TOPIC_PREFIX)
 
   // Drive two sessions through the same forwarder.
-  installed!.handler('com.nexus.terminal.output.a', chunk(1, [1, 2]))
-  installed!.handler('com.nexus.terminal.output.b', chunk(1, [9, 8]))
-  installed!.handler('com.nexus.terminal.output.a', chunk(2, [3]))
+  sub.handler('com.nexus.terminal.output.a', chunk(1, [1, 2]))
+  sub.handler('com.nexus.terminal.output.b', chunk(1, [9, 8]))
+  sub.handler('com.nexus.terminal.output.a', chunk(2, [3]))
 
   assert.deepEqual(captured.a, [[1, 2], [3]])
   assert.deepEqual(captured.b, [[9, 8]])
