@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import type { Capability } from '@nexus/extension-api'
+import { PLUGIN_API_VERSION, type Capability } from '@nexus/extension-api'
 import { getRegistry } from '../../../host/shellRegistry'
 import { useContextKey, useContextKeyStore } from '../../../host/ContextKeyService'
 import { useConfigStore, useConfigValue } from '../../../stores/configStore'
@@ -1079,7 +1079,21 @@ function CommunityPluginRow({
     [manifest],
   )
 
+  // WI-33: surface apiVersion mismatch with a red chip and disable the
+  // toggle so the user can't try to enable a plugin the host can't load.
+  const incompatible = useMemo(() => {
+    const declared = manifest.apiVersion
+    if (typeof declared !== 'number') return undefined
+    if (declared === PLUGIN_API_VERSION) return undefined
+    return { requested: declared, supported: PLUGIN_API_VERSION }
+  }, [manifest])
+  const incompatTitle = incompatible
+    ? `Incompatible — requires apiVersion ${incompatible.requested}, ` +
+      `shell supports ${incompatible.supported}`
+    : undefined
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (incompatible) return
     const next = e.target.checked
     setEnabled(next)
     onToggle(manifest.id, next)
@@ -1087,7 +1101,10 @@ function CommunityPluginRow({
 
   return (
     <div className="plugin-row">
-      <div className="plugin-row__dot" data-state={enabled ? 'active' : 'inactive'} />
+      <div
+        className="plugin-row__dot"
+        data-state={incompatible ? 'error' : enabled ? 'active' : 'inactive'}
+      />
       <div className="plugin-row__body">
         <div className="plugin-row__header">
           <span className="plugin-row__name">{manifest.name}</span>
@@ -1096,14 +1113,35 @@ function CommunityPluginRow({
             <span className="plugin-row__author">{manifest.author}</span>
           )}
           <span className="plugin-row__version">v{manifest.version}</span>
+          {incompatible && (
+            <span
+              className="plugin-row__restart-pill"
+              title={incompatTitle}
+              style={{
+                color: 'var(--risk)',
+                borderColor: 'var(--risk)',
+              }}
+            >
+              incompatible
+            </span>
+          )}
           {changed && (
             <span className="plugin-row__restart-pill">restart needed</span>
           )}
-          <label className="plugin-row__toggle" title={enabled ? 'Disable' : 'Enable'}>
+          <label
+            className="plugin-row__toggle"
+            title={
+              incompatible
+                ? incompatTitle
+                : enabled
+                  ? 'Disable'
+                  : 'Enable'
+            }
+          >
             <input
               type="checkbox"
               checked={enabled}
-              disabled={saving}
+              disabled={saving || !!incompatible}
               onChange={handleChange}
             />
             <span className="plugin-row__toggle-track" />
@@ -1111,6 +1149,16 @@ function CommunityPluginRow({
         </div>
         {manifest.description && (
           <div className="plugin-row__description">{manifest.description}</div>
+        )}
+        {incompatible && (
+          <div
+            className="plugin-row__description"
+            style={{ color: 'var(--risk)' }}
+          >
+            Requires plugin API version {incompatible.requested}; this shell
+            supports {incompatible.supported}. Update the plugin or the shell
+            to match.
+          </div>
         )}
         <CapabilityChipsRow capabilities={capabilities} />
       </div>

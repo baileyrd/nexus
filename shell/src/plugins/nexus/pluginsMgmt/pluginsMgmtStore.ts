@@ -40,6 +40,15 @@ export interface CommunityPluginRow {
   dir: string
   manifestPath: string
   capabilities: Capability[] | null
+  /**
+   * WI-33 — populated when the plugin's declared `apiVersion` does not
+   * match the shell's `PLUGIN_API_VERSION`. When present, the row
+   * renders an "Incompatible" badge and the enable-toggle is disabled.
+   */
+  incompatible?: {
+    requested: number
+    supported: number
+  }
 }
 
 export type PluginRow = BuiltInPluginRow | CommunityPluginRow

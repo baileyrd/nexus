@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { PLUGIN_API_VERSION } from '@nexus/extension-api'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import type { CommunityPluginManifest } from '../../../host/communityPluginLoader'
 import { PluginsMgmtView } from './PluginsMgmtView'
@@ -77,24 +78,35 @@ function readRows(api: PluginAPI): PluginRow[] {
       SERVICE_COMMUNITY_MANIFESTS,
     )
     community = raw.map(
-      (m): CommunityPluginRow => ({
-        kind: 'community',
-        id: m.id,
-        name: m.name,
-        version: m.version,
-        enabled: m.enabled,
-        description: m.description,
-        author: m.author,
-        dir: m.dir,
-        manifestPath: m.manifestPath,
-        // CommunityPluginManifest doesn't yet expose `capabilities`
-        // (the Rust scanner in `src-tauri/src/lib.rs` doesn't
-        // deserialise that field), but read it defensively so we
-        // surface declared caps the moment that plumbing arrives.
-        capabilities: parseManifestCapabilities(
-          (m as unknown as { capabilities?: unknown }).capabilities,
-        ),
-      }),
+      (m): CommunityPluginRow => {
+        // WI-33: flag plugins whose declared apiVersion mismatches the
+        // shell constant. Undefined passes through silently — that's the
+        // legacy-plugin path (warn-continue handled by the loader).
+        const declared = m.apiVersion
+        const incompatible =
+          typeof declared === 'number' && declared !== PLUGIN_API_VERSION
+            ? { requested: declared, supported: PLUGIN_API_VERSION }
+            : undefined
+        return {
+          kind: 'community',
+          id: m.id,
+          name: m.name,
+          version: m.version,
+          enabled: m.enabled,
+          description: m.description,
+          author: m.author,
+          dir: m.dir,
+          manifestPath: m.manifestPath,
+          // CommunityPluginManifest doesn't yet expose `capabilities`
+          // (the Rust scanner in `src-tauri/src/lib.rs` doesn't
+          // deserialise that field), but read it defensively so we
+          // surface declared caps the moment that plumbing arrives.
+          capabilities: parseManifestCapabilities(
+            (m as unknown as { capabilities?: unknown }).capabilities,
+          ),
+          incompatible,
+        }
+      },
     )
   } catch (err) {
     console.warn('[nexus.pluginsMgmt] communityPluginManifests service missing:', err)

@@ -81,6 +81,13 @@ export interface PluginManifest {
   version: string
   core: boolean
   activationEvents: string[]
+  /**
+   * Plugin API version the plugin targets. Omit for legacy plugins —
+   * the shell logs a one-shot warn and loads them anyway. Mismatched
+   * values are rejected with a `PluginApiVersionError` before activation.
+   * Mirrors `PLUGIN_API_VERSION` from `@nexus/extension-api` (WI-33).
+   */
+  apiVersion?: number
   dependsOn?: string[]
   contributes?: PluginContributions
 }

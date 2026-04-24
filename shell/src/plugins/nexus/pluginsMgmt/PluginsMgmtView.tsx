@@ -277,8 +277,15 @@ interface CommunityRowProps {
 
 function CommunityRow({ row }: CommunityRowProps) {
   const onToggle = () => {
+    if (row.incompatible) return
     void getApi().commands.execute(COMMAND_TOGGLE_COMMUNITY, row.id)
   }
+
+  const incompat = row.incompatible
+  const incompatTitle = incompat
+    ? `Incompatible — requires apiVersion ${incompat.requested}, ` +
+      `shell supports ${incompat.supported}`
+    : undefined
 
   return (
     <div style={rowOuterStyle}>
@@ -322,8 +329,26 @@ function CommunityRow({ row }: CommunityRowProps) {
               {row.description}
             </div>
           )}
+          {incompat && (
+            <div
+              title={incompatTitle}
+              style={{
+                color: 'var(--risk)',
+                fontFamily: 'var(--f-ui)',
+                fontSize: 11,
+                marginTop: 4,
+              }}
+            >
+              Incompatible — requires apiVersion {incompat.requested},{' '}
+              shell supports {incompat.supported}.
+            </div>
+          )}
         </div>
-        <StateBadge state={row.enabled ? 'active' : 'inactive'} />
+        <StateBadge
+          state={incompat ? 'error' : row.enabled ? 'active' : 'inactive'}
+          error={incompatTitle}
+          labelOverride={incompat ? 'incompatible' : undefined}
+        />
         <div
           style={{
             color: 'var(--fg-muted)',
@@ -335,7 +360,11 @@ function CommunityRow({ row }: CommunityRowProps) {
         >
           v{row.version}
         </div>
-        <Toggle enabled={row.enabled} onToggle={onToggle} />
+        <Toggle
+          enabled={row.enabled}
+          onToggle={onToggle}
+          disabled={!!incompat}
+        />
       </div>
       <CapabilityChips capabilities={row.capabilities} />
     </div>
@@ -344,7 +373,16 @@ function CommunityRow({ row }: CommunityRowProps) {
 
 // ── Badges + toggle ─────────────────────────────────────────────────────────
 
-function StateBadge({ state, error }: { state: string; error?: string }) {
+function StateBadge({
+  state,
+  error,
+  labelOverride,
+}: {
+  state: string
+  error?: string
+  /** WI-33: override the rendered label without changing the colour bucket. */
+  labelOverride?: string
+}) {
   const { bg, fg, label } = badgeColours(state)
   return (
     <div
@@ -362,7 +400,7 @@ function StateBadge({ state, error }: { state: string; error?: string }) {
         textAlign: 'center',
       }}
     >
-      {label}
+      {labelOverride ?? label}
     </div>
   )
 }
@@ -389,11 +427,21 @@ function badgeColours(state: string): { bg: string; fg: string; label: string } 
   }
 }
 
-function Toggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) {
+function Toggle({
+  enabled,
+  onToggle,
+  disabled = false,
+}: {
+  enabled: boolean
+  onToggle: () => void
+  disabled?: boolean
+}) {
   return (
     <button
       onClick={onToggle}
       aria-pressed={enabled}
+      aria-disabled={disabled || undefined}
+      disabled={disabled}
       style={{
         width: 36,
         height: 18,
@@ -402,9 +450,10 @@ function Toggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void 
         background: enabled ? 'var(--accent)' : 'var(--bg)',
         padding: 0,
         position: 'relative',
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
         transition: 'background 120ms ease',
         flexShrink: 0,
+        opacity: disabled ? 0.4 : 1,
       }}
     >
       <span

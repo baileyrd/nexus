@@ -9,6 +9,7 @@
 
 import { invoke }        from '@tauri-apps/api/core'
 import { readTextFile }  from '@tauri-apps/plugin-fs'
+import { PLUGIN_API_VERSION } from '@nexus/extension-api'
 import type { Plugin }   from '../types/plugin'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -21,10 +22,99 @@ export interface CommunityPluginManifest {
   enabled:     boolean
   description?: string
   author?:      string
+  /**
+   * Plugin API version the plugin targets. When absent ("legacy plugin"),
+   * the shell logs a warn and continues; when present and != the shell's
+   * `PLUGIN_API_VERSION`, the plugin is rejected with a
+   * `PluginApiVersionError` before activation (WI-33).
+   */
+  apiVersion?: number
   /** Absolute path to the plugin's directory — injected by the Rust scanner */
   dir:          string
   /** Absolute path to plugin.json — injected by the Rust scanner */
   manifestPath: string
+}
+
+// ── API-version error (WI-33) ────────────────────────────────────────────────
+
+/**
+ * Thrown when a community plugin declares an `apiVersion` that differs
+ * from the shell's `PLUGIN_API_VERSION`. The loader catches this and
+ * records the plugin as unloadable so the PluginsMgmt + Settings views
+ * can surface a clear "Incompatible" chip instead of a silent failure.
+ *
+ * Mirrors the kernel-side `PluginError::IncompatibleApiVersion` at
+ * `crates/nexus-plugins/src/loader.rs:1539` — shell check is an
+ * early-rejection mirror, not a replacement (kernel still gates WASM
+ * plugins on the Rust side).
+ */
+export class PluginApiVersionError extends Error {
+  readonly kind = 'api_version_mismatch' as const
+  readonly pluginId: string
+  readonly requested: number
+  readonly supported: number
+
+  constructor(pluginId: string, requested: number, supported: number) {
+    super(
+      `Plugin '${pluginId}' requires apiVersion ${requested}, ` +
+      `but the shell supports ${supported}`,
+    )
+    this.name = 'PluginApiVersionError'
+    this.pluginId = pluginId
+    this.requested = requested
+    this.supported = supported
+    // Restore prototype chain under ES5-targeted transpilation.
+    Object.setPrototypeOf(this, PluginApiVersionError.prototype)
+  }
+}
+
+// Set of plugin ids we have already warned about for missing apiVersion,
+// so a legacy plugin doesn't spam the console on every re-scan.
+const warnedLegacyPlugins = new Set<string>()
+
+/**
+ * Compare a manifest's declared `apiVersion` against the shell's
+ * `PLUGIN_API_VERSION`. Returns `{ ok: true }` when the plugin may be
+ * loaded, otherwise an error the caller should propagate.
+ *
+ * Rules (mirroring the kernel at loader.rs:1534-1545):
+ *   - Absent / undefined   → ok, with a one-shot console.warn (legacy).
+ *   - Equal to shell const → ok.
+ *   - Anything else        → error; caller should record the plugin as
+ *                            unloadable with a typed
+ *                            `PluginApiVersionError`.
+ */
+export function checkApiVersion(
+  pluginId: string,
+  apiVersion: number | undefined,
+  supported: number = PLUGIN_API_VERSION,
+): { ok: true } | { ok: false; error: PluginApiVersionError } {
+  if (apiVersion === undefined || apiVersion === null) {
+    if (!warnedLegacyPlugins.has(pluginId)) {
+      warnedLegacyPlugins.add(pluginId)
+      console.warn(
+        `[CommunityLoader] '${pluginId}' declares no apiVersion — ` +
+        `treating as legacy plugin. Add \`"apiVersion": ${supported}\` ` +
+        `to plugin.json to opt in to the stable ABI.`,
+      )
+    }
+    return { ok: true }
+  }
+  if (apiVersion === supported) return { ok: true }
+  return {
+    ok: false,
+    error: new PluginApiVersionError(pluginId, apiVersion, supported),
+  }
+}
+
+/**
+ * Test-only: reset the one-shot "legacy plugin" warn memo so unit tests
+ * can assert console output without cross-test bleed-through. Not part
+ * of the public shell API; exported because the test file is a sibling
+ * of the implementation.
+ */
+export function __resetLegacyWarnMemoForTests() {
+  warnedLegacyPlugins.clear()
 }
 
 // Injected by vite.config.ts — absolute path to src/plugins/community/.
@@ -118,6 +208,15 @@ export async function loadEnabledCommunityPlugins(
 async function loadOnePlugin(
   manifest: CommunityPluginManifest
 ): Promise<Plugin | null> {
+  // WI-33: reject incompatible plugins BEFORE touching their JS bundle.
+  // Throwing here surfaces as a rejected Promise in
+  // `loadEnabledCommunityPlugins`, which already logs + skips the plugin.
+  // The Rust scanner surfaces the same `apiVersion` field to the settings
+  // UI so the user sees an "Incompatible" chip without needing to dig
+  // into the dev console.
+  const verdict = checkApiVersion(manifest.id, manifest.apiVersion)
+  if (!verdict.ok) throw verdict.error
+
   const mainPath = `${manifest.dir}/${manifest.main}`.replace(/\\/g, '/')
 
   // Read the JS source via the Tauri fs plugin

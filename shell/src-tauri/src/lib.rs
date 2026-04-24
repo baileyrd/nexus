@@ -20,6 +20,13 @@ pub struct CommunityPluginManifest {
     pub enabled:     bool,
     pub description: Option<String>,
     pub author:      Option<String>,
+    /// Plugin API version the plugin targets. WI-33 / Phase 3a — surfaces
+    /// the kernel-side `check_api_version` result to the shell UI. Absent
+    /// means "legacy plugin"; the shell logs a warn and loads it anyway
+    /// (see `communityPluginLoader.ts`). Mismatched values are rejected
+    /// before activation with a typed `PluginApiVersionError`.
+    #[serde(default)]
+    pub api_version: Option<u32>,
     // Injected by scan — not present in plugin.json on disk
     #[serde(skip_deserializing, default)]
     pub dir:         String,
