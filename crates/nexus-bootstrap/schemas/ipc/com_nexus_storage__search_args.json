@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageSearchArgs",
+  "description": "Args for `com.nexus.storage::search` (handler id `7`).",
+  "type": "object",
+  "properties": {
+    "limit": {
+      "description": "Maximum number of results to return. Omit for the default of 50.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "query": {
+      "description": "Full-text query string (Tantivy syntax).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ]
+}

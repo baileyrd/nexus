@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageSearchHit",
+  "description": "One hit in [`StorageSearchResult::results`]. Mirror of\n[`crate::SearchResult`] — kept in sync manually; compared via\n`cargo test -p nexus-bootstrap --test ipc_schema_emit`.",
+  "type": "object",
+  "properties": {
+    "block_id": {
+      "description": "Unique ID of the matching block.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "block_type": {
+      "description": "Type of the matching block (e.g. `\"paragraph\"`, `\"heading\"`).",
+      "type": "string"
+    },
+    "excerpt": {
+      "description": "Excerpt of the matching content (may be empty).",
+      "type": "string"
+    },
+    "file_path": {
+      "description": "Path to the file containing the matching block.",
+      "type": "string"
+    },
+    "score": {
+      "description": "BM25 relevance score.",
+      "type": "number",
+      "format": "float"
+    }
+  },
+  "required": [
+    "file_path",
+    "block_id",
+    "block_type",
+    "excerpt",
+    "score"
+  ]
+}

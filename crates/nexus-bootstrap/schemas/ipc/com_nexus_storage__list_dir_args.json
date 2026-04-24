@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageListDirArgs",
+  "description": "Args for `com.nexus.storage::list_dir` (handler id `27`).",
+  "type": "object",
+  "properties": {
+    "relpath": {
+      "description": "Forge-relative path of the directory to list. Empty string means the\nforge root.",
+      "type": "string",
+      "default": ""
+    }
+  }
+}

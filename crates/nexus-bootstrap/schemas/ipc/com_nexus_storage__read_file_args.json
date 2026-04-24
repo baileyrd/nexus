@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageReadFileArgs",
+  "description": "Args for `com.nexus.storage::read_file` (handler id `2`).",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Forge-relative path of the file to read.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ]
+}

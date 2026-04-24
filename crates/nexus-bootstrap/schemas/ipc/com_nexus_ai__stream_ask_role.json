@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiStreamAskRole",
+  "description": "Role of a participant in a chat conversation. Mirror of\n[`crate::provider::Role`] for schema emission.",
+  "oneOf": [
+    {
+      "description": "System-level instructions.",
+      "type": "string",
+      "const": "system"
+    },
+    {
+      "description": "User input.",
+      "type": "string",
+      "const": "user"
+    },
+    {
+      "description": "Assistant response.",
+      "type": "string",
+      "const": "assistant"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiStreamAskArgs",
+  "description": "Args for `com.nexus.ai::stream_ask` (handler id `7`).",
+  "type": "object",
+  "properties": {
+    "limit": {
+      "description": "Maximum number of RAG source chunks to retrieve. Omit for the default\nof 5.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "messages": {
+      "description": "Conversation history. The handler extracts the last `user` message as\nthe retrieval question; system and assistant turns are forwarded to\nthe chat provider verbatim.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AiStreamAskMessage"
+      }
+    },
+    "session_id": {
+      "description": "Optional caller-provided session identifier. When `None` the handler\ngenerates a UUID v4. The id is echoed back in every\n`com.nexus.ai.stream_*` bus event so callers can demux concurrent\nstreams.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "messages"
+  ],
+  "$defs": {
+    "AiStreamAskMessage": {
+      "description": "One message in a chat conversation. Mirror of\n[`crate::provider::ChatMessage`].",
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "Text content of the message.",
+          "type": "string"
+        },
+        "role": {
+          "description": "The role of the message sender.",
+          "$ref": "#/$defs/AiStreamAskRole"
+        }
+      },
+      "required": [
+        "role",
+        "content"
+      ]
+    },
+    "AiStreamAskRole": {
+      "description": "Role of a participant in a chat conversation. Mirror of\n[`crate::provider::Role`] for schema emission.",
+      "oneOf": [
+        {
+          "description": "System-level instructions.",
+          "type": "string",
+          "const": "system"
+        },
+        {
+          "description": "User input.",
+          "type": "string",
+          "const": "user"
+        },
+        {
+          "description": "Assistant response.",
+          "type": "string",
+          "const": "assistant"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiStreamAskSource",
+  "description": "One retrieved source chunk used to ground the answer. Mirror of\n[`crate::vectorstore::ChunkMatch`].",
+  "type": "object",
+  "properties": {
+    "block_id": {
+      "description": "Identifier of the originating block.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "chunk_text": {
+      "description": "Textual content of the chunk.",
+      "type": "string"
+    },
+    "file_path": {
+      "description": "Path of the source file.",
+      "type": "string"
+    },
+    "score": {
+      "description": "Cosine similarity score (higher is more relevant).",
+      "type": "number",
+      "format": "float"
+    }
+  },
+  "required": [
+    "file_path",
+    "block_id",
+    "chunk_text",
+    "score"
+  ]
+}

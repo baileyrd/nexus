@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageWriteFileArgs",
+  "description": "Args for `com.nexus.storage::write_file` (handler id `8`).\n\nSecurity posture: Phase 3 WI-32 hardened this handler. Writes are confined\nto the forge root; path traversal attempts are rejected at the engine\nboundary.",
+  "type": "object",
+  "properties": {
+    "bytes": {
+      "description": "Raw bytes to write. Atomic write semantics apply per\n[`crate::atomic_write`].",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0
+      }
+    },
+    "path": {
+      "description": "Forge-relative path of the file to write.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "bytes"
+  ]
+}

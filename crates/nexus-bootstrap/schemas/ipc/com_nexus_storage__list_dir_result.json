@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageListDirResult",
+  "description": "Return type for `com.nexus.storage::list_dir`.",
+  "type": "object",
+  "properties": {
+    "entries": {
+      "description": "Entries in the requested directory. Order is filesystem-dependent.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/StorageListDirEntry"
+      }
+    }
+  },
+  "required": [
+    "entries"
+  ],
+  "$defs": {
+    "StorageListDirEntry": {
+      "description": "One entry in [`StorageListDirResult::entries`]. Mirror of\n[`crate::TreeEntry`].",
+      "type": "object",
+      "properties": {
+        "createdMs": {
+          "description": "Created time, unix millis. `None` when the filesystem / platform\ndoes not expose it.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "isDir": {
+          "description": "`true` if this entry is a directory.",
+          "type": "boolean"
+        },
+        "modifiedMs": {
+          "description": "Last-modified time, unix millis. `None` when the filesystem /\nplatform does not expose it.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "name": {
+          "description": "File or directory name (no path separators).",
+          "type": "string"
+        },
+        "relpath": {
+          "description": "Path relative to the forge root, using forward slashes.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "relpath",
+        "isDir"
+      ]
+    }
+  }
+}
