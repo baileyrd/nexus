@@ -10,21 +10,17 @@
 
 import type { ComponentType } from 'react'
 import { create } from 'zustand'
+import type { SlotId } from '@nexus/extension-api'
 
-/**
- * Chrome-only slot identifiers. The former pane slots (`sidebar`,
- * `editorArea`, `editorTabs`, `panelArea`, `rightPanel`, `sidebarContent`,
- * `panelAreaContent`, `rightPanelContent`) were removed in Phase 7 of the
- * leaf migration — use `viewRegistry.register(type, creator)` plus
- * `workspace.ensureLeafOfType(type, side)` instead.
- */
-export type SlotId =
-  | 'overlay'
-  | 'titleBar'
-  | 'activityBar'
-  | 'statusBarLeft'
-  | 'statusBarRight'
-  | 'paneMode'
+// OI-04 — `SlotId` is declared in `@nexus/extension-api` so native and
+// community plugins see identical slot names at the contract boundary.
+// Re-exported here so in-tree imports of `SlotId` from this module keep
+// working; the former pane slots (`sidebar`, `editorArea`, `editorTabs`,
+// `panelArea`, `rightPanel`, `sidebarContent`, `panelAreaContent`,
+// `rightPanelContent`) were removed in Phase 7 of the leaf migration —
+// use `viewRegistry.register(type, creator)` plus
+// `workspace.ensureLeafOfType(type, side)` instead.
+export type { SlotId }
 
 export interface SlotEntry {
   id: string

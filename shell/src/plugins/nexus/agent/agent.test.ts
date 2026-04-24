@@ -18,12 +18,13 @@ import assert from 'node:assert/strict'
 import {
   AGENT_PLUGIN_ID,
   createAgentRuntime,
+  decodeArchetypes,
   decodeHistoryList,
   decodePlan,
   decodeObservation,
   type AgentRuntimeDeps,
 } from './index.ts'
-import { useAgentStore } from './agentStore.ts'
+import { FALLBACK_ARCHETYPES, useAgentStore } from './agentStore.ts'
 
 // ── Test helpers ──────────────────────────────────────────────────────────
 
@@ -113,6 +114,14 @@ function makeKernel(): StubKernel {
 
 function resetStore(): void {
   useAgentStore.getState().reset()
+  // `reset()` deliberately preserves the archetype catalogue across
+  // workspace close/open (the catalogue is kernel-wide, not
+  // per-workspace). Tests need a fresh slate per case, so roll it
+  // back to the fallback + unloaded flag explicitly here.
+  useAgentStore.setState({
+    archetypes: [...FALLBACK_ARCHETYPES],
+    archetypesLoaded: false,
+  })
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -568,4 +577,85 @@ test('history: handleDeleteHistory failure surfaces a notification', async () =>
 // Sanity: AGENT_PLUGIN_ID export is the const the tests assume.
 test('AGENT_PLUGIN_ID is the kernel agent plugin id', () => {
   assert.equal(AGENT_PLUGIN_ID, 'com.nexus.agent')
+})
+
+// ─── OI-04 — list_archetypes ─────────────────────────────────────────────────
+
+test('decodeArchetypes: array of ids → ArchetypeInfo[] with known labels', () => {
+  const list = decodeArchetypes(['writer', 'researcher'])
+  assert.equal(list.length, 2)
+  assert.equal(list[0].id, 'writer')
+  assert.equal(list[0].label, 'Writer')
+  assert.equal(list[1].id, 'researcher')
+  assert.equal(list[1].label, 'Researcher')
+})
+
+test('decodeArchetypes: unknown id gets a titlecased fallback label', () => {
+  const list = decodeArchetypes(['curator'])
+  assert.equal(list.length, 1)
+  assert.equal(list[0].id, 'curator')
+  assert.equal(list[0].label, 'Curator')
+  assert.ok(list[0].description.length > 0)
+})
+
+test('decodeArchetypes: non-array input returns the fallback catalogue', () => {
+  assert.deepEqual(decodeArchetypes(null), [...FALLBACK_ARCHETYPES])
+  assert.deepEqual(decodeArchetypes(undefined), [...FALLBACK_ARCHETYPES])
+  assert.deepEqual(decodeArchetypes({}), [...FALLBACK_ARCHETYPES])
+})
+
+test('decodeArchetypes: empty array returns the fallback catalogue', () => {
+  assert.deepEqual(decodeArchetypes([]), [...FALLBACK_ARCHETYPES])
+})
+
+test('decodeArchetypes: drops non-string entries and dedupes', () => {
+  const list = decodeArchetypes(['writer', 42, 'writer', null, 'coder'])
+  assert.deepEqual(
+    list.map((a) => a.id),
+    ['writer', 'coder'],
+  )
+})
+
+test('loadArchetypes: populates the store from the kernel and flips archetypesLoaded', async () => {
+  resetStore()
+  const k = makeKernel()
+  const rt = createAgentRuntime(k.deps)
+  k.queue('list_archetypes', ['writer', 'coder', 'researcher'])
+
+  await rt.loadArchetypes()
+  const s = useAgentStore.getState()
+  assert.equal(s.archetypesLoaded, true)
+  assert.deepEqual(
+    s.archetypes.map((a) => a.id),
+    ['writer', 'coder', 'researcher'],
+  )
+})
+
+test('loadArchetypes: kernel failure leaves the fallback catalogue in place', async () => {
+  resetStore()
+  const k = makeKernel()
+  const rt = createAgentRuntime(k.deps)
+  k.queue('list_archetypes', new Error('kernel offline'))
+
+  await rt.loadArchetypes()
+  const s = useAgentStore.getState()
+  // Flag stays false so a subsequent workspace-open re-attempts.
+  assert.equal(s.archetypesLoaded, false)
+  assert.deepEqual(s.archetypes, [...FALLBACK_ARCHETYPES])
+})
+
+test('loadArchetypes: second call is a no-op once archetypesLoaded is true', async () => {
+  resetStore()
+  const k = makeKernel()
+  const rt = createAgentRuntime(k.deps)
+  k.queue('list_archetypes', ['writer'])
+
+  await rt.loadArchetypes()
+  const callsAfterFirst = k.invokeCalls.filter((c) => c.command === 'list_archetypes').length
+  assert.equal(callsAfterFirst, 1)
+
+  // Second call must not issue another IPC.
+  await rt.loadArchetypes()
+  const callsAfterSecond = k.invokeCalls.filter((c) => c.command === 'list_archetypes').length
+  assert.equal(callsAfterSecond, 1)
 })

@@ -22,7 +22,6 @@
 //      (slot ids: WI-24 / Phase 7).
 
 import type { ComponentType } from 'react'
-import type { SlotId } from '../registry/SlotRegistry'
 import type { workspace, viewRegistry } from '../workspace'
 
 // Re-export portable contribution / config / kernel-envelope shapes
@@ -39,6 +38,8 @@ export type {
   StatusBarContribution,
   ContextKeyContribution,
   SettingsTabContribution,
+  SlotId,
+  ViewContribution,
   ConfigSection,
   ConfigSchema,
   KernelEventEnvelope,
@@ -63,6 +64,8 @@ import type {
   StatusBarContribution,
   ContextKeyContribution,
   SettingsTabContribution,
+  SlotId,
+  ViewContribution,
   ConfigSection,
   FileEntry,
   FsEvent,
@@ -72,10 +75,10 @@ import type {
 
 // ─── Shell-coupled manifest + contributions ─────────────────────────────────
 //
-// `ViewContribution` references `SlotId`, which is a shell-internal
-// type from `registry/SlotRegistry`. TODO: promote to kernel contract
-// (WI-24 / Phase 7) and move into the extension-api package; at that
-// point `PluginContributions` and `PluginManifest` follow it.
+// `PluginManifest` + `PluginContributions` remain shell-side because
+// they aggregate portable contribution DTOs with the `ViewContribution`
+// shape; `ViewContribution` and `SlotId` themselves are portable (OI-04)
+// and live in `@nexus/extension-api`.
 
 export interface PluginManifest {
   id: string
@@ -92,13 +95,6 @@ export interface PluginManifest {
   apiVersion?: number
   dependsOn?: string[]
   contributes?: PluginContributions
-}
-
-export interface ViewContribution {
-  id: string
-  slot: SlotId
-  title: string
-  priority?: number
 }
 
 /**

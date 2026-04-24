@@ -343,6 +343,39 @@ export interface SettingsTabContribution {
   group?: 'options' | 'core-plugins' | 'community-plugins';
 }
 
+/**
+ * Chrome-only slot identifiers (OI-04 — promoted from
+ * `shell/src/registry/SlotRegistry.ts`). Slots are fixed-position
+ * regions of the shell (title bar, activity bar, status bar, overlay
+ * root) that host plugin-contributed components outside the movable
+ * pane model. Movable panes use the Leaf / ViewRegistry surface
+ * instead (see `docs/leaf-architecture.md`).
+ *
+ * This type lives in the extension-api package so native (Rust) and
+ * community (JS) plugins see identical slot names at the contract
+ * boundary. The shell-side `SlotRegistry` imports from here rather
+ * than re-defining the union.
+ */
+export type SlotId =
+  | 'overlay'
+  | 'titleBar'
+  | 'activityBar'
+  | 'statusBarLeft'
+  | 'statusBarRight'
+  | 'paneMode';
+
+/**
+ * Plugin-contributed view registration (OI-04 — promoted from
+ * `shell/src/types/plugin.ts`). `slot` picks one of the chrome slot
+ * ids; `priority` orders entries within the slot (lower first).
+ */
+export interface ViewContribution {
+  id: string;
+  slot: SlotId;
+  title: string;
+  priority?: number;
+}
+
 // ─── Configuration (moved from shell/src/types/plugin.ts) ────────────────────
 
 export interface ConfigSection {

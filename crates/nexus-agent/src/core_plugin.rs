@@ -17,11 +17,16 @@
 //!
 //! # Handlers
 //!
-//! | Handler id | Command    | Purpose                            |
-//! |-----------:|------------|------------------------------------|
-//! | 1          | `plan`     | Produce a [`Plan`] from a goal     |
-//! | 2          | `run`      | Plan + execute; return Observation |
-//! | 3          | `run_plan` | Execute a preset [`Plan`]          |
+//! | Handler id | Command             | Purpose                               |
+//! |-----------:|---------------------|---------------------------------------|
+//! | 1          | `plan`              | Produce a [`Plan`] from a goal        |
+//! | 2          | `run`               | Plan + execute; return Observation    |
+//! | 3          | `run_plan`          | Execute a preset [`Plan`]             |
+//! | 4          | `execute_step`      | Execute a single preset-plan step     |
+//! | 5          | `history_list`      | List persisted plan histories         |
+//! | 6          | `history_get`       | Load one persisted history entry      |
+//! | 7          | `history_delete`    | Remove one persisted history entry    |
+//! | 8          | `list_archetypes`   | Return the catalogue of archetype ids |
 //!
 //! Ids are append-only.
 
@@ -38,6 +43,12 @@ use crate::{
     build_archetype, Agent, AgentError, ChatDriver, LlmAgent, Plan, PlanExecutor, ToolCall,
     ToolDispatcher, DEFAULT_SYSTEM_PROMPT,
 };
+
+/// Short archetype names accepted by [`crate::archetypes::resolve_prompt`].
+/// Exposed via the `list_archetypes` handler so the shell's picker can
+/// send any of these back as the `archetype` arg to `plan` / `run`
+/// without guessing the expected case or prefix.
+const ARCHETYPE_NAMES: &[&str] = &["writer", "coder", "researcher"];
 
 /// Reverse-DNS identifier.
 pub const PLUGIN_ID: &str = "com.nexus.agent";
@@ -59,6 +70,12 @@ pub const HANDLER_HISTORY_LIST: u32 = 5;
 pub const HANDLER_HISTORY_GET: u32 = 6;
 /// `history_delete` handler id — remove one persisted history entry.
 pub const HANDLER_HISTORY_DELETE: u32 = 7;
+/// `list_archetypes` handler id — return the catalogue of archetype
+/// ids the agent library knows about (OI-04). Payload: `[]`. Result:
+/// `Vec<String>` — fully-qualified archetype ids (e.g.
+/// `com.nexus.agent.writer`). The shell uses this to populate the
+/// archetype picker without a hardcoded catalogue.
+pub const HANDLER_LIST_ARCHETYPES: u32 = 8;
 
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
@@ -94,6 +111,13 @@ impl CorePlugin for AgentCorePlugin {
         handler_id: u32,
         _args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
+        // `list_archetypes` is the one sync handler on this plugin — it
+        // reads only from compile-time `archetypes.rs` constants so
+        // there's no reason to burn an async hop. Every other handler
+        // is kernel-context-dependent and lives in `dispatch_async`.
+        if handler_id == HANDLER_LIST_ARCHETYPES {
+            return Ok(serde_json::json!(ARCHETYPE_NAMES));
+        }
         Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: format!(
@@ -107,6 +131,13 @@ impl CorePlugin for AgentCorePlugin {
         handler_id: u32,
         args: &serde_json::Value,
     ) -> Option<CorePluginFuture> {
+        // Let the sync path handle `list_archetypes` — the kernel's
+        // `ipc_call` prefers `dispatch_async` when Some is returned,
+        // and we don't want to hop an unnecessary async frame for a
+        // pure compile-time constant read.
+        if handler_id == HANDLER_LIST_ARCHETYPES {
+            return None;
+        }
         let ctx = self.context.clone();
         let args = args.clone();
         Some(Box::pin(async move {
@@ -726,4 +757,37 @@ fn to_value<T: serde::Serialize>(
     command: &str,
 ) -> Result<serde_json::Value, PluginError> {
     serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize: {e}")))
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// OI-04 — `list_archetypes` returns the short-name catalogue
+    /// (`"writer"`, `"coder"`, `"researcher"`) via the sync dispatch
+    /// path without needing a wired kernel context. These are the
+    /// strings [`crate::archetypes::resolve_prompt`] accepts back as
+    /// the `archetype` arg to `plan` / `run`, so the shell's picker
+    /// can round-trip them verbatim.
+    #[test]
+    fn list_archetypes_returns_short_names() {
+        let mut plugin = AgentCorePlugin::new();
+        let v = plugin
+            .dispatch(HANDLER_LIST_ARCHETYPES, &serde_json::Value::Null)
+            .expect("list_archetypes dispatch");
+        let names: Vec<String> = serde_json::from_value(v).expect("decode");
+        assert_eq!(names, vec!["writer", "coder", "researcher"]);
+    }
+
+    /// OI-04 — `dispatch_async` returns `None` for
+    /// `list_archetypes` so the kernel falls back to the sync path
+    /// and avoids burning a tokio frame on a pure constant read.
+    #[test]
+    fn dispatch_async_yields_to_sync_for_list_archetypes() {
+        let mut plugin = AgentCorePlugin::new();
+        let fut = plugin.dispatch_async(HANDLER_LIST_ARCHETYPES, &serde_json::Value::Null);
+        assert!(fut.is_none(), "list_archetypes must not return an async future");
+    }
 }

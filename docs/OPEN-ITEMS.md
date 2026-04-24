@@ -68,20 +68,28 @@ Leftover open follow-up: consider flipping CI on with `-D warnings` now that the
 
 **Severity:** Design debt (type duplication)
 **Surfaced by:** audit 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-24. Both TODOs cleared.
 
-### Gap
-Two TODOs in the shell type layer note that types used by plugin manifests should move into the kernel contract so native and community plugins see the same shape:
+### Outcome
 
-- `shell/src/types/plugin.ts:74` — slot-registration types should be "promoted to kernel contract" rather than duplicated between `SlotRegistry` and `plugin.ts`.
-- `shell/src/plugins/nexus/agent/agentStore.ts:104` — `RESEARCHER_ID` and related agent-identity constants "TODO(WI-07 follow-up): replace with a kernel" contract.
+**TODO 1 — `SlotId` promotion** (`shell/src/types/plugin.ts:75`). `SlotId` and `ViewContribution` moved from the shell registry layer into `packages/nexus-extension-api/src/index.ts`. The shell-side `SlotRegistry.ts` now imports + re-exports `SlotId` so in-tree consumers keep their existing paths. `shell/src/types/plugin.ts` re-exports both types from the package alongside the other portable contribution DTOs (`CommandContribution`, `SettingsTabContribution`, etc.). Native (Rust) and community (JS) plugins see identical slot names at the contract boundary.
 
-These aren't bugs — they're incomplete migrations from earlier WIs. Leaving them means two sources of truth for plugin-visible types, which will bite during the next kernel-API evolution.
+**TODO 2 — `list_archetypes` IPC** (`shell/src/plugins/nexus/agent/agentStore.ts:104`). New `HANDLER_LIST_ARCHETYPES` (id 8) on `com.nexus.agent` returns the short-name catalogue (`["writer", "coder", "researcher"]`) — the exact strings `resolve_prompt` accepts back as the `archetype` arg, so the shell picker round-trips them verbatim. Served by the sync `dispatch` path; `dispatch_async` returns `None` for this handler so the kernel's `ipc_call` drops straight to the blocking-pool shortcut (no tokio frame for a compile-time constant). Bootstrap manifest registers the new command.
 
-### Scope
-- Inventory types that are declared shell-side but conceptually belong to the kernel contract (start with the two TODOs, then widen the sweep).
-- Move them into `packages/nexus-extension-api/src/` or equivalent so they ship to both host and sandbox.
-- Update the TODO sites to import from the canonical location.
+Shell side:
+- `KNOWN_ARCHETYPES` hardcoded catalogue deleted; replaced by `FALLBACK_ARCHETYPES` (same three entries, installed at store init so the picker renders on first paint) plus `describeArchetype(id)` which joins ids to a shell-side label/description lookup.
+- `ArchetypeId` widened from `'writer' | 'coder' | 'researcher'` to `string` so a new Rust-side archetype surfaces without a shell release.
+- `loadArchetypes()` runtime helper fires on workspace open, calls the IPC, overwrites the fallback. Idempotent via `archetypesLoaded`; `reset()` deliberately preserves the catalogue across workspace close/open since it's kernel-global.
+- `AgentView.ArchetypeSelect` reads `useAgentStore(s => s.archetypes)` rather than the deleted const.
+
+### Acceptance
+- Native and community plugins now share `SlotId` / `ViewContribution` shapes through `@nexus/extension-api`.
+- The agent archetype picker is driven by the kernel; a Rust-side addition to `ARCHETYPE_NAMES` + `resolve_prompt` shows up in the shell without touching the frontend.
+- Per-target label strings remain shell-side (path c), mapped via `ARCHETYPE_DISPLAY`; unknown ids get a titlecased fallback so new Rust entries don't vanish from the dropdown.
+
+### Coverage
+- Rust: 2 new unit tests (`list_archetypes_returns_short_names`, `dispatch_async_yields_to_sync_for_list_archetypes`). `cargo clippy --workspace -- -D warnings` still exits 0.
+- Shell: 8 new unit tests covering `decodeArchetypes` (happy path, unknown ids, non-array, empty, dedupe) and `loadArchetypes` (success, failure-keeps-fallback, idempotency). Full suite: 284 tests green; typecheck clean; production build succeeds.
 
 ---
 

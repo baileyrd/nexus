@@ -763,6 +763,7 @@ fn register_core_plugins(
                     ("history_list", nexus_agent::HANDLER_HISTORY_LIST),
                     ("history_get", nexus_agent::HANDLER_HISTORY_GET),
                     ("history_delete", nexus_agent::HANDLER_HISTORY_DELETE),
+                    ("list_archetypes", nexus_agent::HANDLER_LIST_ARCHETYPES),
                 ],
             ),
             forge_root,

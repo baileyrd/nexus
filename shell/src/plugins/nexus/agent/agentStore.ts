@@ -91,37 +91,76 @@ export type RunMode = 'auto' | 'step'
  * case-insensitively and falls back to the default planner when
  * unknown — see crates/nexus-agent/src/archetypes.rs::resolve_prompt.
  *
- * `null` means "default" (omit `archetype` from the IPC args). The
- * known archetype ids ship in `KNOWN_ARCHETYPES` below; once the
- * kernel exposes a `list_archetypes` IPC we can drop the hardcoded
- * list and fetch at startup.
+ * Values are the short names returned by
+ * `com.nexus.agent::list_archetypes` (OI-04). Kept as `string` rather
+ * than a literal union so a new archetype added on the Rust side
+ * surfaces automatically without a shell release.
+ *
+ * `null` means "default" (omit `archetype` from the IPC args).
  */
-export type ArchetypeId = 'writer' | 'coder' | 'researcher'
+export type ArchetypeId = string
 
 /**
- * Hardcoded archetype catalogue mirrors
- * crates/nexus-agent/src/archetypes.rs (WRITER_ID / CODER_ID /
- * RESEARCHER_ID). TODO(WI-07 follow-up): replace with a kernel
- * `list_archetypes` IPC so the dropdown stays in sync if the set
- * grows.
+ * Display metadata for an archetype, joined locally from the picker.
+ * The label/description lookup lives shell-side by design (Rust
+ * carries only the ids; UI strings belong with the UI).
  */
-export const KNOWN_ARCHETYPES: ReadonlyArray<{ id: ArchetypeId; label: string; description: string }> = [
-  {
-    id: 'writer',
+export interface ArchetypeInfo {
+  id: ArchetypeId
+  label: string
+  description: string
+}
+
+/**
+ * Shell-side label/description lookup keyed by the short ids the
+ * kernel's `list_archetypes` returns. Ids that are not in this table
+ * still surface — they get a label derived from the id itself — so a
+ * fresh Rust-side archetype is usable before the shell picks up the
+ * new strings in a follow-up commit.
+ */
+const ARCHETYPE_DISPLAY: Record<string, { label: string; description: string }> = {
+  writer: {
     label: 'Writer',
     description: 'Markdown-authoring bias; prefers storage writes over shell.',
   },
-  {
-    id: 'coder',
+  coder: {
     label: 'Coder',
     description: 'Code edits + git + builds; small reversible steps.',
   },
-  {
-    id: 'researcher',
+  researcher: {
     label: 'Researcher',
     description: 'RAG + storage search; reads over writes.',
   },
+}
+
+/**
+ * Fallback catalogue used when the kernel hasn't answered yet (first
+ * render) or the IPC call failed (agent plugin not loaded in a test
+ * runtime). Keeping the three-entry shape means the UI never flickers
+ * between empty and populated during startup.
+ */
+export const FALLBACK_ARCHETYPES: ReadonlyArray<ArchetypeInfo> = [
+  { id: 'writer', ...ARCHETYPE_DISPLAY.writer },
+  { id: 'coder', ...ARCHETYPE_DISPLAY.coder },
+  { id: 'researcher', ...ARCHETYPE_DISPLAY.researcher },
 ]
+
+/**
+ * Project a kernel-returned id into an `ArchetypeInfo`. Unknown ids
+ * get a titlecased-from-slug label and the generic description so a
+ * Rust-side addition doesn't vanish from the picker before the shell
+ * catches up.
+ */
+export function describeArchetype(id: ArchetypeId): ArchetypeInfo {
+  const known = ARCHETYPE_DISPLAY[id]
+  if (known) return { id, ...known }
+  const label = id.charAt(0).toUpperCase() + id.slice(1)
+  return {
+    id,
+    label,
+    description: `Archetype '${id}' (no shell-side description; kernel-registered).`,
+  }
+}
 
 interface AgentStoreState {
   // ── Composer ──
@@ -150,9 +189,20 @@ interface AgentStoreState {
   historyError: string | null
   history: HistoryRow[]
 
+  // ── Archetype catalogue (OI-04) ──
+  /**
+   * Archetypes fetched via `com.nexus.agent::list_archetypes`.
+   * Starts as the fallback so the picker renders immediately on
+   * first mount; overwritten once the IPC answers.
+   */
+  archetypes: ArchetypeInfo[]
+  archetypesLoaded: boolean
+
   setGoal(g: string): void
   setRunMode(m: RunMode): void
   setArchetype(a: ArchetypeId | null): void
+  /** Replace the archetype catalogue (OI-04). */
+  setArchetypes(list: ArchetypeInfo[]): void
 
   setPhase(p: RunPhase): void
   setPlan(p: Plan | null): void
@@ -191,8 +241,12 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   historyError: null,
   history: [],
 
+  archetypes: [...FALLBACK_ARCHETYPES],
+  archetypesLoaded: false,
+
   setGoal: (goal) => set({ goal }),
   setRunMode: (runMode) => set({ runMode }),
+  setArchetypes: (list) => set({ archetypes: list, archetypesLoaded: true }),
   setArchetype: (archetype) => set({ archetype }),
 
   setPhase: (phase) => set({ phase }),

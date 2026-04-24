@@ -4,6 +4,9 @@ import { usePaneModeStore } from '../../../stores/paneModeStore'
 import { AgentView } from './AgentView'
 import {
   useAgentStore,
+  describeArchetype,
+  FALLBACK_ARCHETYPES,
+  type ArchetypeInfo,
   type HistoryRow,
   type Observation,
   type Plan,
@@ -37,6 +40,7 @@ const HISTORY_LIST_COMMAND = 'history_list'
 const HISTORY_GET_COMMAND = 'history_get'
 const HISTORY_DELETE_COMMAND = 'history_delete'
 const EXECUTE_STEP_COMMAND = 'execute_step'
+const LIST_ARCHETYPES_COMMAND = 'list_archetypes'
 
 // Topic prefix covers run_start / step_start / step_done / run_done.
 // Matches crates/nexus-agent/src/core_plugin.rs::EVENT_RUN_START etc.
@@ -104,6 +108,24 @@ export function decodeObservation(raw: unknown): Observation | null {
     })
     .filter((x): x is Observation['steps'][number] => x !== null)
   return { plan_id: r.plan_id, steps, success: r.success === true }
+}
+
+/**
+ * Decode the `list_archetypes` response (OI-04). Accepts a JSON array
+ * of short archetype name strings; unknown ids still surface (with a
+ * derived label) via `describeArchetype`. Returns the fallback set on
+ * a malformed response so the picker stays populated.
+ */
+export function decodeArchetypes(raw: unknown): ArchetypeInfo[] {
+  if (!Array.isArray(raw)) return [...FALLBACK_ARCHETYPES]
+  const ids: string[] = []
+  for (const item of raw) {
+    if (typeof item === 'string' && item.length > 0 && !ids.includes(item)) {
+      ids.push(item)
+    }
+  }
+  if (ids.length === 0) return [...FALLBACK_ARCHETYPES]
+  return ids.map(describeArchetype)
 }
 
 export function decodeHistoryList(raw: unknown): HistoryRow[] {
@@ -174,6 +196,39 @@ export interface AgentRuntimeDeps {
  * `views.register` + workspace-lifecycle machinery.
  */
 export function createAgentRuntime(api: AgentRuntimeDeps) {
+    /**
+     * OI-04 — fetch the archetype catalogue from the kernel. Fire-and-
+     * forget on first workspace open: the store is seeded with the
+     * fallback set at init, so a failed fetch leaves the picker
+     * usable. Idempotent — the `archetypesLoaded` flag blocks
+     * re-fetches once we've heard a successful answer.
+     */
+    const loadArchetypes = async () => {
+      const store = useAgentStore.getState()
+      if (store.archetypesLoaded) return
+      let available = false
+      try {
+        available = await api.kernel.available()
+      } catch {
+        available = false
+      }
+      if (!available) return
+      try {
+        const raw = await api.kernel.invoke<unknown>(
+          AGENT_PLUGIN_ID,
+          LIST_ARCHETYPES_COMMAND,
+          {},
+        )
+        const list = decodeArchetypes(raw)
+        useAgentStore.getState().setArchetypes(list)
+      } catch (err) {
+        // Swallow — the fallback catalogue is already installed and
+        // the picker still works. Logged at warn so a regression in
+        // the IPC wiring surfaces.
+        console.warn('[nexus.agent] list_archetypes failed:', err)
+      }
+    }
+
   const refreshHistory = async () => {
       const store = useAgentStore.getState()
       let available = false
@@ -556,6 +611,7 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
 
     return {
       refreshHistory,
+      loadArchetypes,
       planOnly,
       planAndRun,
       planThenAwaitApproval,
@@ -589,6 +645,7 @@ export const agentPlugin: Plugin = {
     const runtime = createAgentRuntime(api)
     const {
       refreshHistory,
+      loadArchetypes,
       planOnly,
       planAndRun,
       handleApproveStep,
@@ -648,6 +705,7 @@ export const agentPlugin: Plugin = {
     api.events.on(EVENT_WORKSPACE_OPENED, () => {
       void refreshHistory()
       void subscribeAgentTopics()
+      void loadArchetypes()
     })
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
       useAgentStore.getState().reset()
@@ -656,6 +714,7 @@ export const agentPlugin: Plugin = {
     if (await api.kernel.available()) {
       void refreshHistory()
       void subscribeAgentTopics()
+      void loadArchetypes()
     }
   },
 }

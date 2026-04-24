@@ -1,7 +1,5 @@
 import {
-  KNOWN_ARCHETYPES,
   useAgentStore,
-  type ArchetypeId,
   type HistoryRow,
   type Plan,
   type PlanStep,
@@ -421,25 +419,31 @@ function ModeToggle({
 }
 
 /**
- * Tiny archetype dropdown — forwards to `com.nexus.agent::{plan,run}`
- * as the optional `archetype` arg. The kernel resolves the string
- * case-insensitively (see crates/nexus-agent/src/archetypes.rs); an
- * unknown value falls back to the default planner. The list is
- * hardcoded against `KNOWN_ARCHETYPES`; once the kernel exposes a
- * `list_archetypes` IPC the catalogue should be fetched at startup.
+ * Tiny archetype dropdown — forwards the selected id to
+ * `com.nexus.agent::{plan,run}` as the optional `archetype` arg. The
+ * kernel resolves the string case-insensitively and falls back to the
+ * default planner on unknown values (see
+ * `crates/nexus-agent/src/archetypes.rs::resolve_prompt`).
+ *
+ * The catalogue is sourced from `com.nexus.agent::list_archetypes`
+ * (OI-04) so adding a new archetype on the Rust side surfaces here
+ * without a shell release. The store seeds a fallback catalogue at
+ * init and overwrites it once the kernel answers — the dropdown
+ * never flickers between empty and populated.
  */
 function ArchetypeSelect({ disabled }: { disabled: boolean }) {
   const archetype = useAgentStore((s) => s.archetype)
+  const archetypes = useAgentStore((s) => s.archetypes)
   const setArchetype = useAgentStore((s) => s.setArchetype)
   return (
     <select
       aria-label="Planner archetype"
-      title="Pick a planner archetype to bias the LLM toward a domain (writer, coder, researcher) — Default uses the general planner."
+      title="Pick a planner archetype to bias the LLM toward a domain. Default uses the general planner."
       value={archetype ?? ''}
       disabled={disabled}
       onChange={(e) => {
         const v = e.target.value
-        setArchetype(v === '' ? null : (v as ArchetypeId))
+        setArchetype(v === '' ? null : v)
       }}
       style={{
         padding: '4px 6px',
@@ -454,7 +458,7 @@ function ArchetypeSelect({ disabled }: { disabled: boolean }) {
       }}
     >
       <option value="">Default</option>
-      {KNOWN_ARCHETYPES.map((a) => (
+      {archetypes.map((a) => (
         <option key={a.id} value={a.id} title={a.description}>
           {a.label}
         </option>
