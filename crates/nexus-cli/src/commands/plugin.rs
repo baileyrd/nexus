@@ -137,16 +137,29 @@ pub fn settings(app: &mut App, plugin_id: &str, set_json: Option<&str>) -> Resul
 }
 
 /// Scaffold a new plugin project.
+///
+/// `template_str` selects the output shape: `script` (sandboxed JS/TS — the
+/// modern path per Phase 4 §4.2), `core` (WASM, maximum trust), or
+/// `community` (WASM, capability-gated). Unknown / empty values fall back to
+/// `script` so `nexus plugin scaffold` with no flags produces the default
+/// shape. The legacy `--type <core|community>` invocation still routes here
+/// — clap forwards whichever of `--template` / `--type` the user passed.
 pub fn scaffold(
-    type_str: &str,
+    template_str: &str,
     id: Option<&str>,
     name: Option<&str>,
     author: Option<&str>,
     output: Option<&Path>,
 ) -> Result<()> {
-    let template = match type_str.to_lowercase().as_str() {
+    let template = match template_str.to_lowercase().as_str() {
         "core" => PluginTemplate::Core,
-        _ => PluginTemplate::Community,
+        "community" => PluginTemplate::Community,
+        "script" | "" => PluginTemplate::Script,
+        other => {
+            return Err(anyhow!(
+                "unknown plugin template '{other}'; expected one of: script, core, community"
+            ));
+        }
     };
 
     let plugin_id = id.unwrap_or("com.example.my-plugin").to_string();
@@ -168,9 +181,22 @@ pub fn scaffold(
     nexus_scaffold(&output_dir, template, &config)?;
 
     println!("Scaffolded plugin '{plugin_name}' at '{}':", output_dir.display());
-    println!("  {}", output_dir.join("Cargo.toml").display());
-    println!("  {}", output_dir.join("manifest.toml").display());
-    println!("  {}", output_dir.join("src").join("lib.rs").display());
+    match template {
+        PluginTemplate::Script => {
+            for f in ["plugin.json", "index.ts", "README.md", "package.json", "tsconfig.json"] {
+                println!("  {}", output_dir.join(f).display());
+            }
+            println!();
+            println!("Next steps:");
+            println!("  cd {} && pnpm install && pnpm build", output_dir.display());
+            println!("  cp index.js plugin.json ~/.nexus-shell/plugins/{}/", plugin_id);
+        }
+        PluginTemplate::Core | PluginTemplate::Community => {
+            println!("  {}", output_dir.join("Cargo.toml").display());
+            println!("  {}", output_dir.join("manifest.toml").display());
+            println!("  {}", output_dir.join("src").join("lib.rs").display());
+        }
+    }
 
     Ok(())
 }

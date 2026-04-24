@@ -148,6 +148,47 @@ fn plugin_scaffold_generates_project() {
     assert!(out.join("src/lib.rs").is_file());
 }
 
+/// WI-39: scaffold the modern script (sandboxed JS/TS) template and verify
+/// the 5-file layout matches what the shell's plugin loader expects (mirror
+/// of `shell/src/plugins/community/hello-world/`). We don't run `pnpm install
+/// && pnpm build` inline — @nexus/extension-api isn't published to npm yet
+/// (Phase 5 WI-44), and the sandbox for test runs shouldn't depend on the
+/// network. The live-build check is documented in the WI-39 commit message
+/// and was exercised manually against a local tarball.
+#[test]
+fn plugin_scaffold_script_template_matches_shell_layout() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("com.example.hello");
+    let config = nexus_plugins::ScaffoldConfig {
+        plugin_id: "com.example.hello".to_string(),
+        plugin_name: "Hello".to_string(),
+        author: "Tester".to_string(),
+        description: "Hello — Nexus plugin.".to_string(),
+    };
+    nexus_plugins::scaffold(&out, nexus_plugins::PluginTemplate::Script, &config).unwrap();
+
+    // Author-facing files.
+    assert!(out.join("plugin.json").is_file(), "plugin.json missing");
+    assert!(out.join("index.ts").is_file(), "index.ts missing");
+    assert!(out.join("package.json").is_file(), "package.json missing");
+    assert!(out.join("tsconfig.json").is_file(), "tsconfig.json missing");
+    assert!(out.join("README.md").is_file(), "README.md missing");
+
+    // No WASM-template leakage.
+    assert!(!out.join("Cargo.toml").exists());
+    assert!(!out.join("manifest.toml").exists());
+    assert!(!out.join("src").exists());
+
+    // Sanity check the manifest matches the sandboxed-plugin contract.
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out.join("plugin.json")).unwrap())
+            .expect("plugin.json must be valid JSON");
+    assert_eq!(manifest["sandboxed"], true);
+    assert_eq!(manifest["apiVersion"], 1);
+    assert_eq!(manifest["main"], "index.js");
+    assert_eq!(manifest["id"], "com.example.hello");
+}
+
 #[test]
 fn plugin_load_and_dispatch() {
     // Copy WASM fixture from nexus-plugins test fixtures

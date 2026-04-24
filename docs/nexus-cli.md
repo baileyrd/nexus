@@ -58,8 +58,10 @@ Source: `crates/nexus-cli/src/commands/desktop.rs`.
 
 ## `nexus plugin` (Phase 4 additions)
 
-The existing `plugin scaffold|call|enable|disable|reset|settings|uninstall`
-subcommands are unchanged. Phase 4 adds three capabilities:
+Phase 4 WI-39 updates `plugin scaffold` to emit sandboxed JS/TS projects
+by default (see [writing-your-first-plugin.md](./writing-your-first-plugin.md)
+for the full tutorial). `plugin call|enable|disable|reset|settings|uninstall`
+are unchanged. Phase 4 also adds three new capabilities:
 
 ### `nexus plugin install <plugin>`
 
@@ -99,6 +101,39 @@ error if no such plugin is installed.
 This is distinct from `nexus plugin uninstall` (kernel plugins) — the two
 live in separate worlds with different storage locations.
 
+### `nexus plugin scaffold --template <script|core|community>` (WI-39)
+
+Generates a new plugin project from a built-in template. The default —
+`script` — emits a sandboxed JS/TS project consuming
+`@nexus/extension-api`; it's the recommended path for community plugins
+after Phase 3c WI-30e.
+
+```
+nexus plugin scaffold --template script --id com.example.hello --name "Hello"
+```
+
+Output layout (script):
+
+```
+com.example.hello/
+├── plugin.json    # sandboxed manifest (apiVersion 1)
+├── index.ts       # SandboxedPlugin source (one command + one panel)
+├── package.json   # pnpm scripts + pinned @nexus/extension-api
+├── tsconfig.json
+└── README.md
+```
+
+`cd` into the directory, run `pnpm install && pnpm build` to produce
+`index.js`, then drop `index.js` + `plugin.json` into
+`~/.nexus-shell/plugins/<id>/`. See
+[writing-your-first-plugin.md](./writing-your-first-plugin.md) for the
+end-to-end tutorial.
+
+The `--type` long-form is still accepted as an alias (preserves
+pre-WI-39 invocations). `core` and `community` continue to emit the
+legacy WASM project shape (`Cargo.toml` + `manifest.toml` +
+`src/lib.rs`).
+
 ## See also
 
 - `crates/nexus-cli/src/main.rs` — clap subcommand definitions.
@@ -106,4 +141,6 @@ live in separate worlds with different storage locations.
 - `crates/nexus-cli/src/commands/desktop.rs` — shell-binary resolution.
 - `crates/nexus-cli/src/commands/plugin.rs` — plugin handlers.
 - `docs/PHASE-4-IMPLEMENTATION-PLAN.md` §4.1 — the WI-38 spec.
+- `docs/PHASE-4-IMPLEMENTATION-PLAN.md` §4.2 — the WI-39 scaffold spec.
+- `docs/writing-your-first-plugin.md` — plugin-authoring tutorial.
 - `docs/PHASE-5-IMPLEMENTATION-PLAN.md` — marketplace (WI-44) plans.

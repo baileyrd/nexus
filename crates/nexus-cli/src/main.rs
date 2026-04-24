@@ -571,21 +571,30 @@ enum PluginCommand {
         /// Plugin identifier
         plugin_id: String,
     },
-    /// Scaffold a new plugin
+    /// Scaffold a new plugin project from a built-in template.
+    ///
+    /// Templates:
+    ///   script     — sandboxed JS/TS community plugin (default, modern path).
+    ///                Emits plugin.json, index.ts, package.json, tsconfig.json,
+    ///                README.md. Run `pnpm install && pnpm build` inside the
+    ///                output directory to produce `index.js`.
+    ///   core       — WASM plugin, maximum trust, no capability gates (legacy).
+    ///   community  — WASM plugin, capability-gated (legacy).
     Scaffold {
-        /// Plugin type (e.g. wasm, native)
-        #[arg(long = "type")]
+        /// Template to scaffold from: `script` (default), `core`, or
+        /// `community`. `--type` is accepted as an alias for back-compat.
+        #[arg(long = "template", alias = "type", default_value = "script")]
         plugin_type: String,
-        /// Plugin identifier
+        /// Plugin identifier (reverse-DNS form, e.g. `com.example.hello`).
         #[arg(long)]
         id: String,
-        /// Human-readable plugin name
+        /// Human-readable plugin name.
         #[arg(long)]
         name: String,
-        /// Author name
-        #[arg(long)]
+        /// Author name or e-mail.
+        #[arg(long, default_value = "Unknown")]
         author: String,
-        /// Output directory
+        /// Output directory (defaults to `./<id>/`).
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
