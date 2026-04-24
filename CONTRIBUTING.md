@@ -19,53 +19,28 @@ Every frontend funnels through that one path. It is the API.
 
 ---
 
-## Desktop shell freeze — 2026-04-23
+## Desktop shell — single target
 
-The repo currently carries two Tauri desktop shells:
-
-| Directory / crate | Role | Status |
-|---|---|---|
-| `shell/` + `shell/src-tauri/` (crate `nexus-shell`) | **Active**. Plugin-first, VS-Code-style. 32 `nexus.*` plugins registered. | All new desktop work lands here. |
-| `app/` + `crates/nexus-app` | **Deprecated**. Legacy tri-pane layout, ~95 bespoke Tauri commands. | Frozen. Bug fixes and security patches only. |
-
-Per [ADR 0011](docs/adr/0011-adopt-plugin-first-shell.md) (Accepted
-2026-04-23), the plugin-first shell is the single desktop target. The
-legacy shell is preserved only until feature parity is reached, then
-deleted.
+The plugin-first shell at `shell/` + `shell/src-tauri/` (crate
+`nexus-shell`) is the single Tauri desktop target, per
+[ADR 0011](docs/adr/0011-adopt-plugin-first-shell.md). The legacy
+tri-pane shell (`app/` + `crates/nexus-app`) was retired in v0.4.0 —
+see [`docs/legacy-shell-retirement.md`](docs/legacy-shell-retirement.md).
+History remains recoverable via git (`v0.1.0-legacy-shell` tag).
 
 ### What this means day-to-day
 
-**Do:**
-
 - Add new IPC handlers to the appropriate `nexus-*` service crate so
-  they are reachable from CLI, TUI, MCP, and the new shell through
+  they are reachable from CLI, TUI, MCP, and the desktop shell through
   `context.ipc_call(...)`.
-- Add new UI as a plugin in `shell/src/plugins/nexus/<feature>/`.
-- Fix bugs in `app/` + `crates/nexus-app` if they're blocking users
-  today. Mark the fix `legacy-only` in the commit message.
-
-**Do not:**
-
-- Add new `#[tauri::command]` handlers to `crates/nexus-app/src/*.rs`.
-  If you think you need one, the same capability needs to exist in the
-  new shell, and the right answer is a service-crate IPC handler, not a
-  Tauri command.
-- Add new React components, stores, or plugin extension points in
-  `app/src/`. Those go into `shell/src/` instead.
-- Copy-paste `app/` code into `shell/`. Port the *behaviour*, not the
-  implementation — the architectures are different enough that rewriting
-  against the new shell's primitives is the right move.
-
-### How to know you're in scope
-
-Before touching `app/` or `crates/nexus-app`, ask:
-
-1. Is this a bug fix for something shipping users depend on today?
-2. Is this a security patch that can't wait for new-shell parity?
-
-If neither, open an issue describing the capability and it'll be
-scheduled against the parity checklist
-([`docs/Shell-Capability-Comparison.xlsx`](docs/Shell-Capability-Comparison.xlsx)).
+- Add new UI as a plugin in `shell/src/plugins/nexus/<feature>/`. The
+  shell itself starts empty — every visible element is a plugin
+  contribution.
+- Do **not** reintroduce bespoke `#[tauri::command]` handlers in
+  `shell/src-tauri/`. The bridge is deliberately minimal (`init_forge`,
+  `boot_kernel`, `kernel_invoke`, `kernel_subscribe`,
+  `kernel_unsubscribe`, `kernel_is_booted`, `shutdown_kernel`);
+  capability belongs in a service crate behind IPC.
 
 ---
 
@@ -93,8 +68,6 @@ scheduled against the parity checklist
 - `packages/nexus-extension-api/` — the stable TypeScript contract for
   shell plugin authors (`@nexus/extension-api`). Scaffolded; wire-in
   pending.
-- `app/` + `crates/nexus-app/` — **deprecated legacy shell**. See the
-  freeze policy above.
 
 Architectural decisions live in `docs/adr/`. Feature plans live in
 `docs/` (e.g. `leaf-architecture.md`, `shell-kernel-bridge-plan.md`,

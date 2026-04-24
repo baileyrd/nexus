@@ -14,8 +14,9 @@
 # initialised forge (`forge init` no-ops when `.forge/` exists).
 #
 # After seeding, open the forge by either:
-#   NEXUS_FORGE_DIR=<forge-root> cargo run -p nexus-app
 #   cargo run -p nexus-tui -- <forge-root>
+#   # or launch the desktop shell:
+#   (cd shell && pnpm tauri:dev)  # then pick <forge-root> in the picker
 
 set -euo pipefail
 
@@ -155,6 +156,6 @@ done
 
 echo ""
 echo "done. next:"
-echo "  NEXUS_FORGE_DIR=\"$FORGE_ROOT\" cargo run -p nexus-app"
-echo "  # or"
 echo "  cargo run -p nexus-tui -- \"$FORGE_ROOT\""
+echo "  # or launch the desktop shell:"
+echo "  (cd shell && pnpm tauri:dev)  # then pick $FORGE_ROOT in the picker"

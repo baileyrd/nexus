@@ -4,17 +4,17 @@ An AI-native, plugin-extensible knowledge environment built in Rust. Nexus combi
 
 > **Status:** Alpha (v0.1.0) — Phase 1 foundation is solid, Phase 4-5 features (AI, MCP) are functional. Not yet production-ready.
 
-> **⚠️ Desktop shell freeze (2026-04-23):** The plugin-first shell at
-> [`shell/`](shell/) + [`shell/src-tauri/`](shell/src-tauri/) (crate
-> `nexus-shell`) is the **single active** desktop target per
+> **Desktop shell retirement (v0.4.0, 2026-04-24):** The plugin-first
+> shell at [`shell/`](shell/) + [`shell/src-tauri/`](shell/src-tauri/)
+> (crate `nexus-shell`) is the **single** desktop target per
 > [ADR 0011](docs/adr/0011-adopt-plugin-first-shell.md). The legacy
-> shell at [`app/`](app/) + [`crates/nexus-app`](crates/nexus-app/) is
-> deprecated and frozen — bug fixes and security patches only.
-> New desktop work lands as a service-crate IPC handler plus a plugin
-> in `shell/src/plugins/nexus/`. See [`CONTRIBUTING.md`](CONTRIBUTING.md),
-> [`docs/INTEGRATION-REVIEW.md`](docs/INTEGRATION-REVIEW.md), and the
-> per-handler parity checklist in
-> [`docs/Shell-Capability-Comparison.xlsx`](docs/Shell-Capability-Comparison.xlsx).
+> tri-pane shell (`app/` + `crates/nexus-app`) has been **removed** in
+> Phase 4 — see [`docs/legacy-shell-retirement.md`](docs/legacy-shell-retirement.md)
+> for the migration story, or recover the code from git history via the
+> `v0.1.0-legacy-shell` tag. New desktop work lands as a service-crate
+> IPC handler plus a plugin in `shell/src/plugins/nexus/`. See
+> [`CONTRIBUTING.md`](CONTRIBUTING.md) and
+> [`docs/INTEGRATION-REVIEW.md`](docs/INTEGRATION-REVIEW.md).
 
 ## Architecture
 
@@ -30,7 +30,7 @@ nexus-mcp           MCP server over stdio — 13 tools for forge operations
 nexus-cli           `nexus` binary — headless CLI with full subcommands
 nexus-tui           `nexus-tui` binary — ratatui-based terminal interface
 nexus-theme         Theming engine: CSS variables, theme packages, layout, snippet cascade
-nexus-app           Tauri 2 desktop shell — hosts the React frontend (see `app/`)
+nexus-shell         Tauri 2 desktop shell (at `shell/`) — plugin-first, hosts `@nexus/extension-api`
 nexus-types         Shared type definitions
 ```
 
@@ -92,19 +92,20 @@ nexus graph neighbors projects/nexus.md --depth 2
 
 ### Desktop (Tauri) shell
 
-Early scaffold — currently just renders a theme picker against the
-live `nexus-theme` engine. Needs Node.js and the Linux webview libs
+The plugin-first shell at [`shell/`](shell/) is the single active
+desktop target. Needs Node.js + pnpm and the Linux webview libs
 (`webkit2gtk-4.1`, `libsoup-3.0`) on top of the Rust toolchain.
 
 ```bash
-cd app
-npm install
-npm run tauri:dev    # launches the Rust shell + Vite + webview
+cd shell
+pnpm install
+pnpm tauri:dev    # launches the Rust shell + Vite + webview
 ```
 
-The shell's pane / tab model is the Leaf + `ViewRegistry` primitives from
-[`docs/leaf-architecture.md`](docs/leaf-architecture.md) — read that before
-writing a plugin View.
+Every visible UI element is a plugin contribution loaded by
+`ExtensionHost` from `shell/src/plugins/{core,nexus,community}/`. See
+[`shell/README.md`](shell/README.md) and the stable contract at
+[`packages/nexus-extension-api/`](packages/nexus-extension-api/).
 
 ### MCP Server
 
