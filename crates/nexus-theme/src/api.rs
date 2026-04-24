@@ -20,7 +20,6 @@ use crate::{Platform, ResolvedTheme, Result, ThemeError, ThemeMode};
 /// Response shape for [`ThemeEngine::apply_theme`] — matches PRD §10.1
 /// `AppliedTheme`.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct AppliedTheme {
     /// Theme id that was applied.
     pub id: String,
@@ -32,7 +31,6 @@ pub struct AppliedTheme {
 
 /// Listing-friendly snippet description.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct SnippetMetadata {
     /// Snippet id (filename stem).
     pub id: String,
@@ -50,7 +48,6 @@ pub struct SnippetMetadata {
 
 /// Config snapshot persisted to disk (see PRD §3.2 step 6).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct ThemeConfig {
     /// Selected theme id.
     pub theme_id: String,

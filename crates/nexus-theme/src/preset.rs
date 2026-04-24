@@ -143,7 +143,6 @@ pub fn parse_preset(toml_text: &str, path: impl Into<PathBuf>) -> Result<LayoutP
 /// file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct PresetInfo {
     /// Stable id for lookup.
     pub id: String,
@@ -158,7 +157,6 @@ pub struct PresetInfo {
 /// Origin tag for a registered preset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub enum PresetSourceKind {
     /// Shipped with the binary via `include_str!`.
     Embedded,

@@ -33,7 +33,6 @@ use crate::{Result, ThemeError};
 /// Branded identifier for a pane (split or leaf). Serializes as a bare string.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(transparent)]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct PaneId(pub String);
 
 impl PaneId {
@@ -71,7 +70,6 @@ impl From<&str> for PaneId {
 /// Branded identifier for a tab. Serializes as a bare string.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(transparent)]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct TabId(pub String);
 
 impl TabId {
@@ -109,7 +107,6 @@ impl From<&str> for TabId {
 /// Orientation of a split node — horizontal (`Row`) or vertical (`Column`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub enum Direction {
     /// Horizontal split: children laid left-to-right.
     Row,
@@ -120,7 +117,6 @@ pub enum Direction {
 /// Which kind of content a tab shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub enum Surface {
     /// Code / markdown editor.
     Editor,
@@ -137,7 +133,6 @@ pub enum Surface {
 /// A single tab inside a leaf pane or bottom panel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct Tab {
     /// Stable tab id.
     pub id: TabId,
@@ -162,7 +157,6 @@ pub struct Tab {
 /// in PRD §5.1 (`"split"` or `"leaf"`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "lowercase", rename_all_fields = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub enum LayoutNode {
     /// Internal node: two or more children arranged in [`Direction`].
     Split {
@@ -207,7 +201,6 @@ pub type PaneNode = LayoutNode;
 /// Which side of the window a side panel docks to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub enum SidePanelSide {
     /// Left side of the window.
     Left,
@@ -232,7 +225,6 @@ pub enum SidePanelSide {
 /// components at runtime.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct Panel {
     /// Panel id (`"explorer"`, `"search"`, …).
     pub id: String,
@@ -264,7 +256,6 @@ pub struct Panel {
 /// "toggle a sub-panel", "invoke a command", or "open a view".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct PanelToolbarItem {
     /// Stable id (`"outline.collapse-all"`, `"tags.sort-asc"`, …).
     pub id: String,
@@ -283,7 +274,6 @@ pub struct PanelToolbarItem {
 /// help, settings, plugin-contributed actions).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct FooterAction {
     /// Stable id (`"workspace.help"`, `"workspace.settings"`, …).
     pub id: String,
@@ -303,7 +293,6 @@ pub struct FooterAction {
 /// `action`), and combined items.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct StatusBarItem {
     /// Stable id (`"editor.word-count"`, `"sync.status"`, …).
     pub id: String,
@@ -325,7 +314,6 @@ pub struct StatusBarItem {
 /// left side panel carries one (forge switcher + help + settings).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct SidePanelFooter {
     /// Show the forge / workspace switcher on the left of the footer
     /// row. The active forge name is filled in at runtime — the preset
@@ -346,7 +334,6 @@ pub struct SidePanelFooter {
 /// show.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub enum RibbonAction {
     /// Toggle the panel with this id inside the side panel whose
     /// selector toolbar (or the top-level ribbon) dispatched this action.
@@ -377,7 +364,6 @@ pub enum RibbonAction {
 /// UI contribution registry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct RibbonItem {
     /// Stable id of this ribbon entry (`"explorer"`, `"git.status"`, …).
     pub id: String,
@@ -406,7 +392,6 @@ pub struct RibbonItem {
 /// [`WorkspaceLayout::ribbon`] as a workspace-level concern.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct SidePanel {
     /// Which side this side panel lives on.
     pub side: SidePanelSide,
@@ -446,7 +431,6 @@ impl SidePanel {
 /// Bottom panel (terminal, process manager, diagnostics).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct BottomPanel {
     /// Height in pixels.
     pub height: u32,
@@ -469,7 +453,6 @@ impl Default for BottomPanel {
 /// Discovery metadata for the layout file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct LayoutMetadata {
     /// ISO 8601 creation timestamp.
     pub created_at: String,
@@ -498,7 +481,6 @@ impl LayoutMetadata {
 /// Top-level workspace layout: root tree + side panels + bottom panel + ribbon + metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct WorkspaceLayout {
     /// Layout id (stable across saves).
     pub id: String,

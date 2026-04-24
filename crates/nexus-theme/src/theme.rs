@@ -53,7 +53,6 @@ pub struct Theme {
 /// whether a [`crate::CssSnippet`] applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub enum ThemeMode {
     /// Force light mode.
     Light,
@@ -168,7 +167,6 @@ impl Theme {
 /// Compact theme description returned by listing APIs — matches PRD §10.1
 /// `ThemeMetadata`.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../app/src/bindings/")]
 pub struct ThemeMetadata {
     /// Theme id (directory stem / built-in constant).
     pub id: String,
