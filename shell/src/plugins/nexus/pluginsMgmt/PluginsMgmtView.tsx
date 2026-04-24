@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Capability } from '@nexus/extension-api'
 import {
   usePluginsMgmtStore,
+  type AvailablePluginRow,
   type BuiltInPluginRow,
   type CommunityPluginRow,
   type PluginRow,
@@ -17,6 +18,7 @@ import {
 
 const COMMAND_TOGGLE_COMMUNITY = 'nexus.plugins.toggleCommunity'
 const COMMAND_REVIEW_CAPS = 'nexus.plugins.reviewCapabilities'
+const COMMAND_ENABLE_BUILTIN = 'nexus.plugins.enableBuiltin'
 
 /**
  * Modal listing every plugin the shell has loaded — built-in (nexus.* /
@@ -38,7 +40,12 @@ export function PluginsMgmtView() {
     const q = query.trim().toLowerCase()
     let next = rows
     if (highRiskOnly) {
-      next = next.filter((r) => r.capabilities && hasHighRisk(r.capabilities))
+      next = next.filter(
+        (r) =>
+          r.kind !== 'available' &&
+          r.capabilities &&
+          hasHighRisk(r.capabilities),
+      )
     }
     if (!q) return next
     return next.filter((r) => {
@@ -194,13 +201,7 @@ export function PluginsMgmtView() {
               No plugins match
             </div>
           ) : (
-            filtered.map((r) =>
-              r.kind === 'builtin' ? (
-                <BuiltInRow key={`builtin:${r.id}`} row={r} />
-              ) : (
-                <CommunityRow key={`community:${r.id}`} row={r} />
-              ),
-            )
+            <SectionedRows rows={filtered} />
           )}
         </div>
 
@@ -218,6 +219,73 @@ export function PluginsMgmtView() {
           Drop plugin folders into ~/.nexus-shell/plugins/ and restart.
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Section renderer ────────────────────────────────────────────────────────
+
+/**
+ * WI-43: three buckets — Installed (built-in, loaded), Community (drop-folder),
+ * and Available (default-off, shipped-but-dormant). Section headers are
+ * suppressed when a bucket is empty so the modal stays terse.
+ */
+function SectionedRows({ rows }: { rows: PluginRow[] }) {
+  const installed = rows.filter((r): r is BuiltInPluginRow => r.kind === 'builtin')
+  const community = rows.filter((r): r is CommunityPluginRow => r.kind === 'community')
+  const available = rows.filter((r): r is AvailablePluginRow => r.kind === 'available')
+
+  return (
+    <>
+      {installed.length > 0 && (
+        <>
+          <SectionHeader label={`Installed (${installed.length})`} />
+          {installed.map((r) => (
+            <BuiltInRow key={`builtin:${r.id}`} row={r} />
+          ))}
+        </>
+      )}
+      {community.length > 0 && (
+        <>
+          <SectionHeader label={`Community (${community.length})`} />
+          {community.map((r) => (
+            <CommunityRow key={`community:${r.id}`} row={r} />
+          ))}
+        </>
+      )}
+      {available.length > 0 && (
+        <>
+          <SectionHeader
+            label={`Available — disabled (${available.length})`}
+          />
+          {available.map((r) => (
+            <AvailableRow key={`available:${r.id}`} row={r} />
+          ))}
+        </>
+      )}
+    </>
+  )
+}
+
+function SectionHeader({ label }: { label: string }) {
+  return (
+    <div
+      style={{
+        padding: '8px 16px 6px 16px',
+        background: 'var(--bg)',
+        color: 'var(--fg-muted)',
+        fontFamily: 'var(--f-ui)',
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        borderBottom: '1px solid var(--line-soft)',
+        position: 'sticky',
+        top: 0,
+        zIndex: 1,
+      }}
+    >
+      {label}
     </div>
   )
 }
@@ -426,6 +494,95 @@ function CommunityRow({ row }: CommunityRowProps) {
         />
       </div>
       <CapabilityChips capabilities={row.capabilities} />
+    </div>
+  )
+}
+
+// ── Available (default-off) row ─────────────────────────────────────────────
+
+interface AvailableRowProps {
+  row: AvailablePluginRow
+}
+
+/**
+ * WI-43: a dormant built-in plugin. One-click Enable writes the id into
+ * the `plugins.enabled` config key; the modal surfaces a toast saying a
+ * reload is needed (no in-session hot-activate yet).
+ */
+function AvailableRow({ row }: AvailableRowProps) {
+  const onEnable = () => {
+    void getApi().commands.execute(COMMAND_ENABLE_BUILTIN, row.id)
+  }
+  return (
+    <div style={rowOuterStyle}>
+      <div style={rowStyle}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              color: 'var(--fg)',
+              fontFamily: 'var(--f-ui)',
+              fontSize: 13,
+              fontWeight: 500,
+            }}
+          >
+            {row.name}
+          </div>
+          <div
+            style={{
+              color: 'var(--fg-dim)',
+              fontFamily: 'var(--f-mono)',
+              fontSize: 11,
+              marginTop: 2,
+            }}
+          >
+            {row.id}
+          </div>
+        </div>
+        <div
+          style={{
+            padding: '2px 8px',
+            borderRadius: 'var(--r)',
+            background: 'color-mix(in oklch, var(--fg-muted) 15%, transparent)',
+            color: 'var(--fg-muted)',
+            fontFamily: 'var(--f-ui)',
+            fontSize: 11,
+            fontWeight: 500,
+            minWidth: 60,
+            textAlign: 'center',
+          }}
+        >
+          disabled
+        </div>
+        <div
+          style={{
+            color: 'var(--fg-muted)',
+            fontFamily: 'var(--f-mono)',
+            fontSize: 11,
+            minWidth: 48,
+            textAlign: 'right',
+          }}
+        >
+          v{row.version}
+        </div>
+        <button
+          type="button"
+          onClick={onEnable}
+          title="Add to plugins.enabled and reload to activate"
+          style={{
+            padding: '4px 12px',
+            background: 'var(--accent)',
+            color: 'var(--accent-ink)',
+            border: '1px solid var(--line)',
+            borderRadius: 'var(--r)',
+            fontFamily: 'var(--f-ui)',
+            fontSize: 11,
+            fontWeight: 500,
+            cursor: 'pointer',
+          }}
+        >
+          Enable
+        </button>
+      </div>
     </div>
   )
 }

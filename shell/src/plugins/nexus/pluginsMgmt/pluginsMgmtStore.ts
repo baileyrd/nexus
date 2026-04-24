@@ -75,7 +75,25 @@ export interface CommunityPluginRow {
   pluginDir?: string
 }
 
-export type PluginRow = BuiltInPluginRow | CommunityPluginRow
+/**
+ * WI-43: a plugin shipped in the shell binary but default-off. Rendered
+ * in a dedicated "Available (disabled)" section with a one-click
+ * Enable button. Enabling writes the id into the `plugins.enabled`
+ * config key and (since there is no in-session activate path yet)
+ * prompts the user to reload to pick up the new registration.
+ */
+export interface AvailablePluginRow {
+  kind: 'available'
+  id: string
+  name: string
+  version: string
+  core: boolean
+}
+
+export type PluginRow =
+  | BuiltInPluginRow
+  | CommunityPluginRow
+  | AvailablePluginRow
 
 export interface PluginsMgmtState {
   visible: boolean

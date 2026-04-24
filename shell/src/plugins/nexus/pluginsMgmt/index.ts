@@ -6,10 +6,12 @@ import type { CommunityPluginManifest } from '../../../host/communityPluginLoade
 import { PluginsMgmtView } from './PluginsMgmtView'
 import {
   usePluginsMgmtStore,
+  type AvailablePluginRow,
   type BuiltInPluginRow,
   type CommunityPluginRow,
   type PluginRow,
 } from './pluginsMgmtStore'
+import { PLUGINS_ENABLED_CONFIG_KEY } from '../../catalog'
 import { setApi } from './pluginsMgmtRuntime'
 import { CAPABILITY_INFO, parseManifestCapabilities } from './capabilityInfo'
 import {
@@ -24,11 +26,23 @@ const COMMAND_OPEN = 'nexus.plugins.open'
 const COMMAND_CLOSE = 'nexus.plugins.close'
 const COMMAND_TOGGLE_COMMUNITY = 'nexus.plugins.toggleCommunity'
 const COMMAND_REVIEW_CAPS = 'nexus.plugins.reviewCapabilities'
+// WI-43: enable a default-off built-in plugin. Writes the id into the
+// `plugins.enabled` config key and notifies the user to reload.
+const COMMAND_ENABLE_BUILTIN = 'nexus.plugins.enableBuiltin'
 const CONTEXT_KEY_VISIBLE = 'nexus.plugins.visible'
 
 const SERVICE_PLUGIN_LIST = 'pluginList'
 const SERVICE_COMMUNITY_MANIFESTS = 'communityPluginManifests'
 const SERVICE_COMMUNITY_DENIED = 'communityPluginDenied'
+const SERVICE_AVAILABLE_PLUGINS = 'availablePlugins'
+
+/** Shape registered by main.tsx for each dormant default-off plugin. */
+interface AvailablePluginEntry {
+  id: string
+  name: string
+  version: string
+  core: boolean
+}
 
 /**
  * Shape registered onto the registry by main.tsx at the end of boot().
@@ -168,7 +182,29 @@ function readRows(api: PluginAPI): PluginRow[] {
     console.warn('[nexus.pluginsMgmt] communityPluginManifests service missing:', err)
   }
 
-  return [...builtins, ...community]
+  // WI-43: dormant default-off catalog entries — shipped but not loaded
+  // this session. Rendered in a dedicated "Available (disabled)" section
+  // with a one-click Enable button.
+  let available: AvailablePluginRow[] = []
+  try {
+    const raw = internal.getInternalService<AvailablePluginEntry[]>(
+      SERVICE_AVAILABLE_PLUGINS,
+    )
+    available = raw.map(
+      (p): AvailablePluginRow => ({
+        kind: 'available',
+        id: p.id,
+        name: p.name,
+        version: p.version,
+        core: p.core,
+      }),
+    )
+  } catch {
+    // Service not registered (older boot path) — render without an
+    // Available section rather than erroring the whole modal.
+  }
+
+  return [...builtins, ...community, ...available]
 }
 
 export const pluginsMgmtPlugin: Plugin = {
@@ -195,6 +231,11 @@ export const pluginsMgmtPlugin: Plugin = {
         {
           id: COMMAND_REVIEW_CAPS,
           title: 'Review Plugin Capabilities',
+          category: 'View',
+        },
+        {
+          id: COMMAND_ENABLE_BUILTIN,
+          title: 'Enable Built-in Plugin',
           category: 'View',
         },
       ],
@@ -309,6 +350,49 @@ export const pluginsMgmtPlugin: Plugin = {
 
     api.commands.register(COMMAND_CLOSE, () => {
       usePluginsMgmtStore.getState().close()
+    })
+
+    // WI-43: flip a dormant default-off plugin's id into the persisted
+    // enabled list. There is no in-session hot-activate path — new
+    // registrations run through main.tsx's boot sequence — so we prompt
+    // the user to reload. Re-enabling is idempotent (Set dedupes).
+    api.commands.register(COMMAND_ENABLE_BUILTIN, async (...args: unknown[]) => {
+      const pluginId = args[0]
+      if (typeof pluginId !== 'string') {
+        console.warn('[nexus.pluginsMgmt] enableBuiltin requires a pluginId')
+        return
+      }
+      const current = api.configuration.getValue<string[]>(
+        PLUGINS_ENABLED_CONFIG_KEY,
+        [],
+      )
+      if (current.includes(pluginId)) {
+        // Already enabled — nothing to do. User probably needs a reload.
+        api.notifications.show({
+          type: 'info',
+          message: `${pluginId} is already enabled. Reload the window to activate it.`,
+        })
+        return
+      }
+      const next = [...current, pluginId]
+      api.configuration.setValue(PLUGINS_ENABLED_CONFIG_KEY, next)
+
+      // Optimistically drop the row from the Available section so the UI
+      // reflects the write without waiting for a rescan. A reload will
+      // rebuild the full list from the fresh config value.
+      const rows = usePluginsMgmtStore.getState().rows
+      usePluginsMgmtStore
+        .getState()
+        .setRows(
+          rows.filter(
+            (r) => !(r.kind === 'available' && r.id === pluginId),
+          ),
+        )
+
+      api.notifications.show({
+        type: 'success',
+        message: `${pluginId} enabled. Reload the window to activate it.`,
+      })
     })
 
     api.commands.register(COMMAND_TOGGLE_COMMUNITY, async (...args: unknown[]) => {
