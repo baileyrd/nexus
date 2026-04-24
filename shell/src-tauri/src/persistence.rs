@@ -1,9 +1,9 @@
 //! Shell-side persisted state.
 //!
 //! Single JSON file at `<app_config_dir>/shell-state.json`, read once at
-//! startup and atomically rewritten (tmp → rename). Mirrors the pattern
-//! in `crates/nexus-app/src/persistence.rs` so when `nexus-app` is
-//! retired the file format and helpers carry over cleanly.
+//! startup and atomically rewritten (tmp → rename). Ported from the
+//! legacy shell's `persistence.rs` (retired under Phase 4 WI-37); the
+//! file format and helpers carried over 1:1.
 //!
 //! Grows over time: today it just tracks the most-recently-opened forge
 //! paths so the launcher can show a recents list; per-forge UI state

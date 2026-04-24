@@ -1,8 +1,8 @@
 //! Regression test for `HANDLER_READ_FILE` on a non-existent path.
 //!
 //! Before this fix, the storage plugin propagated `StorageError::FileNotFound`
-//! as a `PluginError::ExecutionFailed`, which the Tauri IPC dispatcher in
-//! `crates/nexus-app/src/plugins.rs` collapses into
+//! as a `PluginError::ExecutionFailed`, which the legacy Tauri IPC dispatcher
+//! (since retired under Phase 4 WI-37) collapsed into
 //! `IpcError::PluginCrashedDuringCall`. The shell's workspace-persistence
 //! layer then logged a scary "plugin crashed" warning during a normal boot
 //! (the `.forge/workspace.json` file doesn't exist on first run).

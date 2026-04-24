@@ -225,9 +225,9 @@ async fn run_plan_internal(
     });
 
     // Drive the plan step-by-step so we can publish kernel-bus events
-    // around each dispatch. The UI subscribes via the Tauri forwarder
-    // in `nexus-app` and updates the pending-plan card live instead of
-    // blocking until the whole plan completes.
+    // around each dispatch. The UI subscribes via `ctx.kernel.on` in the
+    // shell's agent plugin and updates the pending-plan card live instead
+    // of blocking until the whole plan completes.
     let _ = ctx.publish(
         EVENT_RUN_START,
         serde_json::json!({
@@ -318,9 +318,11 @@ async fn run_plan_internal(
     to_value(&observation, "run")
 }
 
-/// Kernel-bus topics emitted while a plan runs. Mirrored by the
-/// Tauri event forwarder in `nexus-app` as `agent:run_start` /
-/// `agent:step_start` / `agent:step_done` / `agent:run_done`.
+/// Kernel-bus topics emitted while a plan runs. Consumed by the shell's
+/// agent plugin via `ctx.kernel.on("com.nexus.agent.")` for live
+/// pending-plan updates (historically mirrored as `agent:run_start` /
+/// `agent:step_start` / `agent:step_done` / `agent:run_done` Tauri events
+/// by the legacy shell, which has since been retired).
 pub const EVENT_RUN_START: &str = "com.nexus.agent.run_start";
 /// See [`EVENT_RUN_START`].
 pub const EVENT_STEP_START: &str = "com.nexus.agent.step_start";

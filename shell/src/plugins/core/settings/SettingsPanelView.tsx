@@ -398,8 +398,8 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
 
   // Render snippets in two groups: enabled (in cascade order, with
   // up/down controls) followed by disabled (alphabetical, just a
-  // checkbox). This mirrors the legacy `app/src/components/settings`
-  // layout intent — a cascading order needs visible hierarchy.
+  // checkbox). Mirrors the legacy shell's settings layout intent —
+  // a cascading order needs visible hierarchy.
   const enabledList = useMemo(
     () =>
       enabledSnippets

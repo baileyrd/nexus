@@ -382,8 +382,8 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
         )
         // Capture both the per-step status AND the raw `response`
         // payload so the StepRow can render the tool-call output
-        // (mirrors legacy app/src/components/panels/AgentHistoryPanel.tsx
-        // which renders the same field via a truncated <pre>).
+        // (mirrors the legacy shell's AgentHistoryPanel.tsx, which
+        // rendered the same field via a truncated <pre>).
         const result = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
         const status = result?.status === 'ok' || result?.status === 'failed' || result?.status === 'skipped'
           ? result.status

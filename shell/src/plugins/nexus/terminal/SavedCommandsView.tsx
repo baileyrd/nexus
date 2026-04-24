@@ -2,7 +2,7 @@
 //
 // WI-05 — sub-view of nexus.terminal that lists user-saved shell
 // commands with CRUD + reorder + click-to-execute. Mirrors the legacy
-// SavedCommandsPanel UX (app/src/components/panels/SavedCommandsPanel.tsx)
+// SavedCommandsPanel UX (from the legacy shell's SavedCommandsPanel.tsx, retired Phase 4 WI-37)
 // without copying the implementation.
 //
 // Lives as a sidebar leaf (side: 'left') alongside the terminal so the

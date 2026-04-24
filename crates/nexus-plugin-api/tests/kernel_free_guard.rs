@@ -10,6 +10,9 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+// Note: `nexus-app` is listed historically — the crate was deleted under
+// Phase 4 WI-37 (2026-04-24). Keeping the literal in the allowlist is cheap
+// and guards against the name being reused by an unrelated crate.
 const FORBIDDEN: &[&str] = &[
     "nexus-kernel",
     "nexus-plugins",

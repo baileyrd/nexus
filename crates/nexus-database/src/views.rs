@@ -26,7 +26,7 @@
 //!
 //! # What this is NOT
 //!
-//! - A UI. Rendering lives in `nexus-app` / `nexus-tui`.
+//! - A UI. Rendering lives in `shell/` / `nexus-tui`.
 //! - A SQL layer. Filters and sorts operate on in-memory
 //!   [`BaseRecord`]s; callers that want index-accelerated scans go
 //!   through `com.nexus.storage`'s `base_query` instead.

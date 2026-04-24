@@ -220,9 +220,9 @@ impl Default for KernelRuntime {
 #[tauri::command]
 pub async fn init_forge(path: String) -> Result<(), String> {
     let root = PathBuf::from(&path);
-    // Mirrors `crates/nexus-app/src/forge.rs::init_layout` ordering: create
-    // the top-level skeleton first so `init_forge` below never trips over
-    // a missing `.forge/` parent.
+    // Mirrors the legacy shell's `forge.rs::init_layout` ordering
+    // (retired Phase 4 WI-37): create the top-level skeleton first so
+    // `init_forge` below never trips over a missing `.forge/` parent.
     for sub in ["notes", "attachments", ".forge"] {
         let dir = root.join(sub);
         std::fs::create_dir_all(&dir)

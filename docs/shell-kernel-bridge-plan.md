@@ -4,7 +4,7 @@ Living document. Each phase commit updates the relevant section in-place; finish
 
 ## Status
 
-Branch: `feat/ui-shell-rebuild`. Pushed through `1ef3d81`; local commits ahead through `f7ad739` plus pending. Phase 0 (bridge infra) and Phase 1 (retire standalone commands) shipped. Phase 2 is 15 plugins deep — editor (read-only → markdown → tabs → edit/save), command palette, search, outline (+ scroll-spy), backlinks, graph, terminal, AI chat, pane-mode infra, plugins-mgmt, processes, workflows, skills, MCP, agent. Phase 3 polish underway: design-bundle layout widths + statusbar height aligned, typed icon module ported. Tree is clean; the React plugin layer now talks to the kernel via `api.kernel.invoke` / `api.kernel.on` for every backend call except the pre-kernel `path_exists` (workspace verification during launcher restore).
+Branch: `feat/ui-shell-rebuild` (merged; legacy `crates/nexus-app` deleted under Phase 4 WI-37 on 2026-04-24). Pushed through `1ef3d81`; local commits ahead through `f7ad739` plus pending. Phase 0 (bridge infra) and Phase 1 (retire standalone commands) shipped. Phase 2 is 15 plugins deep — editor (read-only → markdown → tabs → edit/save), command palette, search, outline (+ scroll-spy), backlinks, graph, terminal, AI chat, pane-mode infra, plugins-mgmt, processes, workflows, skills, MCP, agent. Phase 3 polish underway: design-bundle layout widths + statusbar height aligned, typed icon module ported. Tree is clean; the React plugin layer now talks to the kernel via `api.kernel.invoke` / `api.kernel.on` for every backend call except the pre-kernel `path_exists` (workspace verification during launcher restore).
 
 See the **Delivered** section at the bottom for the full commit list. Queued items for the next session:
 
@@ -29,8 +29,8 @@ Upstream dependencies (not blocking shell work):
 | # | Question | Answer |
 |---|---|---|
 | 1 | First launch UX | Obsidian-style launcher modal (recents list + Create / Open / Clone actions). Shell boots with no kernel; kernel boots on workspace pick. |
-| 2 | Storage backend | **Option D — match `crates/nexus-app`**: single JSON file at `<app_config_dir>/shell-state.json`, read once at startup, atomic write (tmp → rename). Per-forge UI state keyed by absolute path. Kernel KV stays for kernel-plugin state only. localStorage + zustand-persist phased out as plugins migrate. |
-| 3 | Fate of `crates/nexus-app` | **3c — keep during transition, delete at parity.** No user disruption; shell proves itself before cutover. |
+| 2 | Storage backend | **Option D — match the legacy `crates/nexus-app`**: single JSON file at `<app_config_dir>/shell-state.json`, read once at startup, atomic write (tmp → rename). Per-forge UI state keyed by absolute path. Kernel KV stays for kernel-plugin state only. localStorage + zustand-persist phased out as plugins migrate. |
+| 3 | Fate of `crates/nexus-app` | **3c — keep during transition, delete at parity.** Shipped: deleted under Phase 4 WI-37 on 2026-04-24. |
 | 4 | Plan as doc | **Yes** — this file. Updated in the same commit whenever a phase lands. |
 
 ## Architecture
@@ -71,7 +71,7 @@ Landed across `21509d0` (launcher + persistence) → `2581e8e` (path deps + empt
 
 **Steps:**
 
-1. **Persistence** — port [crates/nexus-app/src/persistence.rs](../crates/nexus-app/src/persistence.rs) into `shell/src-tauri/src/persistence.rs`. Expose Tauri commands `get_shell_state()`, `save_shell_state(state)`, `write_last_forge_path(path)`, `read_last_forge_path()`. Shell-side wrapper: load once at startup into a Zustand store; writes debounced ~500ms to `save_shell_state`.
+1. **Persistence** — ported from the legacy shell's `persistence.rs` (now deleted) into [`shell/src-tauri/src/persistence.rs`](../shell/src-tauri/src/persistence.rs). Expose Tauri commands `get_shell_state()`, `save_shell_state(state)`, `write_last_forge_path(path)`, `read_last_forge_path()`. Shell-side wrapper: load once at startup into a Zustand store; writes debounced ~500ms to `save_shell_state`.
 2. **`init_forge` Tauri command** — thin wrapper around `nexus_bootstrap::init_forge(path)`. Called on Create / Open when `.forge/` is absent.
 3. **`nexus.launcher` plugin** — pre-kernel UI, rendered when `nexus.workspace.rootPath` is empty. Left column: recents list (from persistence). Right column: Create / Open actions (Clone stubbed). On pick: `init_forge` → persist → set workspace → shell renders over the launcher.
 4. **Bridge scaffold** — `shell/src-tauri/src/bridge.rs` with `KernelRuntime` managed state (`Arc<Mutex<Option<Runtime>>>`). Starts empty. All kernel-facing commands return `"no workspace open"` until `boot_kernel` fires.
@@ -141,7 +141,7 @@ Each is a self-contained plugin. Order by dependency + value. `Status` column tr
 
 Pane-mode plugins (terminal/processes, ai/agent, templates) mirror the design's `pane === 'ai' | 'terminal' | 'templates'` flag — when their activity icon is active the tri-pane is replaced with a full-window workspace view.
 
-**Acceptance per plugin:** observable feature parity with `crates/nexus-app`'s equivalent panel, end-to-end data real, no hardcoded content, tokens via CSS vars.
+**Acceptance per plugin:** observable feature parity with the legacy `crates/nexus-app`'s equivalent panel (now deleted — see service-crate `core_plugin.rs` IPC handlers), end-to-end data real, no hardcoded content, tokens via CSS vars.
 
 ---
 
@@ -156,12 +156,12 @@ Remaining:
 
 ---
 
-## Phase 4 — Retire the template, delete `crates/nexus-app`
+## Phase 4 — Retire the template, delete `crates/nexus-app` · **Delivered**
 
 - Delete `shell/src/plugins/core/*.tsx` once `nexus.*` counterparts replace them (kept during transition as reference).
 - Delete `shell/src-tauri`'s community-plugin scan if `nexus.plugins-mgmt` replaces it.
 - Merge `feat/ui-shell-rebuild` to `main`.
-- Delete `crates/nexus-app` per decision 3c.
+- Delete `crates/nexus-app` per decision 3c — shipped under Phase 4 WI-37 on 2026-04-24.
 
 ---
 

@@ -2,8 +2,9 @@ import { create } from 'zustand'
 
 /**
  * One entry in a forge directory listing. Mirrors the Rust
- * `nexus_storage::TreeEntry` / `nexus_app::forge::ForgeDirEntry` shape
- * (both serialize `#[serde(rename_all = "camelCase")]`).
+ * `nexus_storage::TreeEntry` shape (serialized
+ * `#[serde(rename_all = "camelCase")]`). The legacy shell's
+ * `nexus_app::forge::ForgeDirEntry` twin was retired under Phase 4 WI-37.
  *
  * Paths are forge-relative, forward-slash separated. The empty string
  * is the forge root sentinel.

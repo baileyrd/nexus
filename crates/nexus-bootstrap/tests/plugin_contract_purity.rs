@@ -36,10 +36,11 @@ const CONTRACT_CRATE: &str = "nexus-plugin-api";
 /// is meant to be the only surface plugin authors link.
 ///
 /// Keep this list in sync with `crates/` whenever a new service crate
-/// lands. Host / bootstrap / invoker crates (nexus-app, nexus-bootstrap,
-/// nexus-cli, nexus-tui, nexus-plugins, nexus-types, nexus-formats,
-/// nexus-git, nexus-linkpreview) are intentionally *not* listed — they are
-/// Tier 0/1 and may depend on engine internals.
+/// lands. Host / bootstrap / invoker crates (nexus-bootstrap, nexus-cli,
+/// nexus-tui, nexus-plugins, nexus-types, nexus-formats, nexus-git,
+/// nexus-linkpreview) are intentionally *not* listed — they are Tier 0/1
+/// and may depend on engine internals. The legacy `nexus-app` host crate
+/// was retired under Phase 4 WI-37 (2026-04-24).
 const FORBIDDEN_IMPL_DEPS: &[&str] = &[
     "nexus-kernel",
     "nexus-storage",

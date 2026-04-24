@@ -158,10 +158,11 @@
 <header>
   <h1>Nexus Full-App Integration Architecture</h1>
   <p class="sub">Deep audit deliverable · 2026-04-23 · Companion to <code>docs/planning/INTEGRATION-REVIEW.md</code> and <code>docs/adr/0011-adopt-plugin-first-shell.md</code></p>
+  <p class="sub"><strong>Update (2026-04-24):</strong> Phase 4 WI-37 deleted the legacy <code>app/</code> + <code>crates/nexus-app/</code> tree. The diagram below's "deprecated" node is now removed; status rows were updated in place. Historical roadmap prose preserved for the record.</p>
 </header>
 
 <h2>Target Architecture</h2>
-<p class="sub">Four-tier crate DAG. Frontends attach to services only through <code>context.ipc_call(plugin_id, cmd, args)</code> backed by the kernel event bus. The new plugin-first shell is the single desktop target; legacy <code>app/</code> + <code>crates/nexus-app</code> are deprecated.</p>
+<p class="sub">Four-tier crate DAG. Frontends attach to services only through <code>context.ipc_call(plugin_id, cmd, args)</code> backed by the kernel event bus. The new plugin-first shell is the single desktop target; the legacy <code>app/</code> + <code>crates/nexus-app</code> tree was deleted on 2026-04-24 (Phase 4 WI-37).</p>
 
 <div class="legend">
   <span><span class="swatch" style="background:var(--accent)"></span>Kernel tier</span>
@@ -222,8 +223,7 @@
     <div class="node">nexus-cli<div class="sub-n">headless CLI (12 subcmds)</div></div>
     <div class="node">nexus-tui<div class="sub-n">ratatui explorer</div></div>
     <div class="node">nexus-mcp<div class="sub-n">stdio · 13 tools</div></div>
-    <div class="node target">nexus-shell<div class="sub-n">✓ plugin-first desktop (target)</div></div>
-    <div class="node deprecated">nexus-app<div class="sub-n">legacy tauri shell</div></div>
+    <div class="node target">nexus-shell<div class="sub-n">✓ plugin-first desktop (shipped)</div></div>
   </div>
 </div>
 
@@ -272,8 +272,8 @@
     <tr><td>MCP server (stdio)</td><td><span class="pill ok">Shipped</span></td><td>13 tools, external AI client compatible</td></tr>
     <tr><td>CLI binary</td><td><span class="pill ok">Shipped</span></td><td>12 subcommands, all routed via IPC</td></tr>
     <tr><td>TUI binary</td><td><span class="pill ok">Shipped</span></td><td>ratatui-based, parity with CLI commands</td></tr>
-    <tr><td>Desktop shell — legacy (app/)</td><td><span class="pill partial">Deprecated</span></td><td>Feature-rich but hardcoded layout; retire after parity</td></tr>
-    <tr><td>Desktop shell — plugin-first (shell/)</td><td><span class="pill partial">In progress</span></td><td>Substrate + 32 plugins registered; parity pending</td></tr>
+    <tr><td>Desktop shell — legacy (app/)</td><td><span class="pill none">Removed</span></td><td>Deleted 2026-04-24 under Phase 4 WI-37; see <code>docs/legacy-shell-retirement.md</code></td></tr>
+    <tr><td>Desktop shell — plugin-first (shell/)</td><td><span class="pill ok">Shipped</span></td><td>Substrate + all service-crate IPC handlers wired; sole desktop target</td></tr>
     <tr><td>Leaf / ViewRegistry</td><td><span class="pill partial">Designed</span></td><td>Phases 0–7 mapped; foundation scaffolded</td></tr>
     <tr><td>Shell-kernel bridge</td><td><span class="pill partial">Phases 0–3 done</span></td><td>Phase 4 polish in flight</td></tr>
     <tr><td>Editor transaction model</td><td><span class="pill partial">Designed</span></td><td>Phases 0–8 mapped; CM6 integration pending</td></tr>
@@ -301,8 +301,8 @@
       <ul>
         <li>Accept ADR 0011 — <code>shell/</code> is the single desktop target</li>
         <li>Tag legacy at <code>v0.1.0-legacy-shell</code>, add <code>DEPRECATED</code> banner</li>
-        <li>Freeze new capability work on <code>app/</code> + <code>crates/nexus-app</code></li>
-        <li>Derive the ~95-handler parity checklist from <code>crates/nexus-app/src/*.rs</code></li>
+        <li>Freeze new capability work on the legacy <code>app/</code> + <code>crates/nexus-app</code> tree (since deleted 2026-04-24)</li>
+        <li>Derive the ~95-handler parity checklist from the then-legacy <code>crates/nexus-app</code> per-module surface (now ported to service-crate <code>core_plugin.rs</code> IPC handlers)</li>
       </ul>
       <div class="accept">Accept: checklist published, freeze in effect.</div>
     </div>
@@ -359,7 +359,7 @@
       <div class="title">Frontend Unification Polish</div>
       <ul>
         <li>Normalize command taxonomy across CLI / TUI / MCP / desktop</li>
-        <li>Retire <code>crates/nexus-app</code>; delete <code>app/</code></li>
+        <li>Retire <code>crates/nexus-app</code>; delete <code>app/</code> — shipped 2026-04-24 under WI-37</li>
         <li>Single <code>nexus</code> binary: <code>nexus desktop</code>, <code>nexus tui</code>, <code>nexus mcp</code>, headless subcmds</li>
         <li><code>nexus plugin scaffold</code> emits manifest + TS + WASM stubs together</li>
         <li>MCP parity: every MCP tool has a shell command and CLI subcommand</li>

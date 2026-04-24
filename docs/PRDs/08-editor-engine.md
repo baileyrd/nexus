@@ -676,7 +676,7 @@ The parser and serializer ensure:
 
 ### 4.1 Editor Instance Architecture
 
-The editor UI is a CodeMirror 6 instance running in a Tauri WebView (`app/src/editor/EditorSurface.tsx`). **CM6 is the canonical owner of character-level text state**; the Rust layer maintains an in-memory block tree updated via debounced IPC rather than per-keystroke round-trips.
+The editor UI is a CodeMirror 6 instance running in a Tauri WebView (`shell/src/plugins/nexus/editor/EditorView.tsx`; CM extensions live under `shell/src/plugins/nexus/editor/cm/`). **CM6 is the canonical owner of character-level text state**; the Rust layer maintains an in-memory block tree updated via debounced IPC rather than per-keystroke round-trips.
 
 **Document model ownership:**
 

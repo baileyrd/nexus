@@ -3,8 +3,8 @@
 // deep links like `nexus://note/some-path` route to the right plugin.
 //
 // WI-13 / Phase 2 §5.3 — port of the legacy `dispatch_uri` +
-// `list_plugin_uri_handlers` pattern. The legacy contribution registry
-// (app/src/contributions/registry.ts) used first-match-wins semantics
+// `list_plugin_uri_handlers` pattern. The legacy shell's contribution
+// registry used first-match-wins semantics
 // keyed by handler id; we follow the same rule, keyed by `(scheme,
 // pluginId)` so a plugin can re-register its own handler idempotently
 // during hot-reload but two distinct plugins cannot silently shadow

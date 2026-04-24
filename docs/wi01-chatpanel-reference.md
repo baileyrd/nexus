@@ -1,6 +1,8 @@
 # WI-01 Reference — Legacy ChatPanel extraction
 
-**Source:** `app/src/components/panels/ChatPanel.tsx` (~1275 LOC)
+> **Historical reference** — Describes the pre-migration the legacy shell's `ChatPanel.tsx` (deleted under Phase 4 WI-37, 2026-04-24). Post-migration the equivalent lives at `shell/src/plugins/nexus/ai/ChatView.tsx` (also `AiChatView.tsx`). Line numbers below refer to the historical source.
+
+**Source:** legacy the legacy shell's `ChatPanel.tsx` (~1275 LOC, now deleted) — ported to `shell/src/plugins/nexus/ai/ChatView.tsx` (also `AiChatView.tsx`)
 **Audience:** WI-01 Slice A/B/C implementation agents
 **Style:** descriptive only — no proposed redesigns
 
@@ -34,7 +36,7 @@ ChatPanel  (default export, ChatPanel.tsx:196)
 
 `PendingPlanCard` and `stepBadge` are local closures in the same file
 (:1146, :1262). All other helpers (`aiSessionLoad`, `agentRun`, etc.)
-are imported from `app/src/ipc/ai.ts` and `app/src/ipc/agent.ts`. No
+were imported from the legacy shell's `ipc/ai.ts` and `ipc/agent.ts` (both removed — post-migration call `ctx.ipc_call("com.nexus.ai", ...)` via `shell/src/plugins/nexus/ai/aiRuntime.ts` and `ctx.ipc_call("com.nexus.agent", ...)` via `shell/src/plugins/nexus/agent/agentStore.ts`). No
 nested route components, no portals.
 
 ## 2. State shape

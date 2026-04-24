@@ -18,8 +18,8 @@ import { useWorkspaceStore } from '../workspace/workspaceStore'
 const VIEW_ID = 'nexus.files.tree'
 const COMMAND_FOCUS = 'nexus.files.focus'
 // WI-21: context-menu / shortcut commands. Surface the same actions
-// the legacy app/src/components/panels/FileTree.tsx exposed via
-// right-click; bind Del + F2 to delete/rename for keyboard parity.
+// the legacy shell's FileTree.tsx exposed via right-click; bind
+// Del + F2 to delete/rename for keyboard parity.
 const COMMAND_CREATE_FILE = 'nexus.files.create.file'
 const COMMAND_CREATE_FOLDER = 'nexus.files.create.folder'
 const COMMAND_RENAME = 'nexus.files.rename'
