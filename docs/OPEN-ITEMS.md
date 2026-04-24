@@ -61,28 +61,14 @@ Pane-splitter positions are not persisted across reloads. Users drag a sidebar w
 
 **Severity:** Tech debt (blocks strict-CI adoption)
 **Surfaced by:** audit 2026-04-24
-**Status:** Partial — `nexus-plugin-api`, `nexus-formats`, `nexus-storage::vectorstore` fixed this session (commits `59a45ad`, `0f34f3f`, `4fe993d`). Remaining crates untouched.
+**Status:** Resolved 2026-04-24. `cargo clippy --workspace --no-deps --all-targets -- -D warnings` exits 0; all tests pass.
 
-### Gap
-`cargo clippy --workspace --no-deps --all-targets -- -D warnings` still fails. Remaining blockers:
-- **`nexus-plugins`** — 33 errors (bool_assert_comparison, map_or(false, …) → is_some_and, others).
-- **`nexus-terminal`** — 42 non-strict warnings (heaviest crate).
-- **`nexus-bootstrap`** — 37 warnings.
-- **`nexus-mcp`** — 17 warnings.
-- **`nexus-database`** — 14 warnings.
-- **`nexus-workflow`** — 13 warnings.
-- Smaller counts in `nexus-storage`, `nexus-ai`, `nexus-security`, `nexus-agent`.
+### Outcome
+Swept every crate — `nexus-security`, `nexus-ai`, `nexus-agent`, `nexus-workflow`, `nexus-mcp`, `nexus-storage`, `nexus-database`, `nexus-plugins`, `nexus-bootstrap`, `nexus-terminal`, plus follow-ons in `nexus-git`, `nexus-kv`, `nexus-theme`, `nexus-editor`, `nexus-skills`, `nexus-kernel`, `nexus-cli`.
 
-Total across workspace: ~230 unique clippy complaints under `-D warnings`. Categories: `uninlined_format_args`, `needless_pass_by_value`, `match_wildcard_for_single_variants`, `field_reassign_with_default`, `map_unwrap_or`, `must_use_candidate`, `doc_markdown`.
+Suppressions added carry a one-line justification; they're concentrated on deserialization helpers (`struct_field_names` for fields that mirror JSON/TOML keys), `needless_pass_by_value` on functions used as `map_err` function pointers, `too_many_lines` on single-jump-table `dispatch` methods, and `missing_errors_doc` at the `nexus-bootstrap` crate level (27 pass-through wrappers with identical failure modes).
 
-### Scope
-- Per-crate cleanup sweeps. Smaller crates first to build momentum.
-- Consider a root `.cargo/config.toml` or workspace-level `#![warn(clippy::pedantic)]` opt-in once the floor is clean, rather than enabling `-D warnings` in CI before the workspace is ready.
-
-### Acceptance
-- `cargo clippy --workspace --no-deps --all-targets -- -D warnings` exits 0.
-- All tests still pass.
-- No `#[allow(clippy::*)]` suppressions added without a one-line justification comment.
+Leftover open follow-up: consider flipping CI on with `-D warnings` now that the floor is clean.
 
 ---
 
@@ -111,25 +97,18 @@ These aren't bugs — they're incomplete migrations from earlier WIs. Leaving th
 
 **Severity:** Build debt (compile time + binary size)
 **Surfaced by:** audit 2026-04-24
-**Status:** Not started
+**Status:** Blocked on upstream. Every duplicate identified on 2026-04-24 traces back to a transitive dependency we don't own.
 
-### Gap
-`cargo tree --duplicates` reports 34 crates with duplicated versions. Cross-major splits that suggest upgrade laggards:
-- `thiserror` 1.0.69 vs 2.0.18
-- `digest` 0.10 vs 0.11, `sha2` 0.10 vs 0.11, `rand_core` 0.6 vs 0.10
-- `hashbrown` 0.15 / 0.16 / 0.17 (three versions)
-- `nix` 0.28 vs 0.31, `rustix` 0.38 vs 1.1
-- `reqwest` 0.12 vs 0.13, `toml` 0.9 vs 1.1
-- `petgraph` 0.6 vs 0.7, `itertools` 0.13 vs 0.14, `wasm-encoder` 0.244 vs 0.246
+### Upstream blockers
+Reverse-tree walk via `cargo tree -i`:
+- **`wasmtime` 42.0.2** (pulled via `nexus-plugins`) pins `toml 0.9`, `sha2 0.10`, `digest 0.10`, `rand_core 0.6`, `reqwest 0.13`, `rustix 0.38`, `nix 0.28`, `hashbrown 0.15/0.16/0.17`, plus wasmtime-internal crates (`pulley-interpreter`, `wasmtime-internal-core`, `cranelift-bitset`) and `wasm-encoder`/`wasmparser` 0.244. Resolving any of these requires a wasmtime point release that itself upgrades them.
+- **`portable-pty`** (via `nexus-terminal`) pulls `filedescriptor` which pins `thiserror 1.0`. Upgrading portable-pty or switching PTY crates is a feature-level decision, not a drop-in bump.
+- The "identical version twice" rows (`bitflags 2.11.1`, `semver 1.0.28`, `libc 0.2.185`, etc.) are feature-flag splits inside wasmtime/Tauri — same version, two feature configurations.
 
-### Scope
-- One upgrade pass per family: identify the laggard direct dep, upgrade it, re-run `cargo tree --duplicates`.
-- Track pending upstream releases for any dep we can't unify yet (e.g., if a transitive dep we don't own pins the older version).
-- Some of these come from Tauri ecosystem crates — those may need to wait for Tauri point releases.
-
-### Acceptance
-- Duplicate crate count is monotonically decreasing session-to-session.
-- `cargo check --workspace` and `cargo test --workspace` stay green through every unification.
+### When to revisit
+- Next wasmtime major release — re-run `cargo tree --duplicates` and sweep anything that unified as a side effect.
+- If the editor/terminal stack picks up a new PTY crate that doesn't depend on `filedescriptor`, `thiserror` 1.0 goes away.
+- Any direct dependency we add that pulls the older version of one of these families should be resisted — keep the forge on the newer half so the cleanup lands automatically when upstream moves.
 
 ---
 
