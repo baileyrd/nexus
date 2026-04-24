@@ -59,3 +59,71 @@ This package follows semver. A `1.x` tag means every exported shape is
 frozen for the life of the major; new surfaces are additive. Breaking
 changes land in a new major and are paired with a migration note in
 `DEPRECATED.md` at the repo root.
+
+## Sandboxed Community Plugins
+
+Community plugins run inside a null-origin iframe sandbox (WI-30). They
+import a **different** context shape — `SandboxedPluginContext` —
+because every method has to cross `postMessage`. Key differences from
+first-party `NexusPluginContext`:
+
+- Several sync methods become `async` (`storage.*`, `notifications.show`,
+  `context.*`, `statusBar.createItem`, …).
+- UI contributions are **declarative** — `views.registerPanel` takes a
+  `render()` that returns a `PanelNode` tree. No React components
+  (they can't be structured-cloned).
+- No `workspace` / `viewRegistry` singletons, no service-plugin `fs`
+  surface (use `ctx.platform.fs.*`), no `configuration` yet (use
+  `ctx.storage` until the configuration bridge lands), no `internal`.
+
+### Hello world
+
+```ts
+import { bootstrapSandboxedPlugin } from '@nexus/extension-api/sandbox/runtime';
+import type { SandboxedPlugin } from '@nexus/extension-api';
+
+const plugin: SandboxedPlugin = {
+  async activate(ctx) {
+    await ctx.notifications.show({
+      message: 'Hello from the sandbox!',
+      type: 'info',
+    });
+
+    ctx.commands.register('hello.greet', async () => {
+      const name = await ctx.input.prompt('Your name?');
+      if (name) await ctx.notifications.show({ message: `Hi ${name}!` });
+    });
+
+    ctx.views.registerPanel('hello.panel', () => ({
+      type: 'vstack',
+      gap: 8,
+      children: [
+        { type: 'heading', value: 'Hello', level: 2 },
+        { type: 'button', label: 'Greet', commandId: 'hello.greet' },
+      ],
+    }));
+  },
+
+  deactivate() {
+    // Host auto-sweeps subscriptions registered via `ctx.*.register`
+    // and `ctx.*.on`. Free plugin-owned state (timers, buffers) here.
+  },
+};
+
+bootstrapSandboxedPlugin(plugin);
+```
+
+### Runtime import path
+
+`bootstrapSandboxedPlugin` lives in the sandbox runtime module and is
+**not** re-exported from the top-level barrel — it's only useful
+inside a sandboxed plugin bundle (it runs top-level side effects on
+import). Bring it in directly:
+
+```ts
+import { bootstrapSandboxedPlugin } from '@nexus/extension-api/sandbox/runtime';
+import type { SandboxedPlugin } from '@nexus/extension-api';
+```
+
+Types (`SandboxedPlugin`, `SandboxedPluginContext`, `PanelNode`, …)
+come from the root barrel and are safe to import anywhere.

@@ -481,3 +481,16 @@ export interface UriAPI {
    */
   register(scheme: string, handler: (url: URL) => void | Promise<void>): () => void;
 }
+
+// ─── Sandboxed community plugin surface (WI-30) ───────────────────────
+//
+// Types for community plugins that run inside a null-origin iframe
+// sandbox. The protocol types live here (not shell-side) so the host
+// orchestrator (WI-30b) and the plugin bootstrap runtime consume the
+// same declarations. The runtime entry itself is intentionally NOT
+// re-exported — plugin bundles import it directly from
+// `@nexus/extension-api/sandbox/runtime`, and it has no use host-side.
+
+export * from './sandbox/context';
+export * from './sandbox/plugin';
+export * from './sandbox/protocol';
