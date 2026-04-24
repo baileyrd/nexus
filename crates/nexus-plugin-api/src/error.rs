@@ -139,6 +139,7 @@ impl IpcErrorEnvelope {
     /// strings for those fields. Use
     /// [`IpcErrorEnvelope::from_ipc_error_in_context`] when the caller has
     /// fallback identifiers (e.g. the args passed to `kernel_invoke`).
+    #[must_use]
     pub fn from_ipc_error(err: &IpcError) -> Self {
         let message = format!("{err}");
         match err {
@@ -158,13 +159,6 @@ impl IpcErrorEnvelope {
                 message,
                 retryable: false,
             },
-            IpcError::CommandNotFound { plugin_id, command } => Self {
-                kind: IpcErrorKind::DispatchFailed,
-                plugin_id: plugin_id.clone(),
-                command: command.clone(),
-                message,
-                retryable: false,
-            },
             IpcError::CapabilityDenied { plugin_id } => Self {
                 kind: IpcErrorKind::CapabilityDenied,
                 plugin_id: plugin_id.clone(),
@@ -179,14 +173,7 @@ impl IpcErrorEnvelope {
                 message,
                 retryable: false,
             },
-            IpcError::SerializationFailed { .. } => Self {
-                kind: IpcErrorKind::Serialization,
-                plugin_id: String::new(),
-                command: String::new(),
-                message,
-                retryable: false,
-            },
-            IpcError::DeserializationFailed { .. } => Self {
+            IpcError::SerializationFailed { .. } | IpcError::DeserializationFailed { .. } => Self {
                 kind: IpcErrorKind::Serialization,
                 plugin_id: String::new(),
                 command: String::new(),
@@ -200,7 +187,8 @@ impl IpcErrorEnvelope {
                 message,
                 retryable: false,
             },
-            IpcError::ReentrantCall { plugin_id, command } => Self {
+            IpcError::CommandNotFound { plugin_id, command }
+            | IpcError::ReentrantCall { plugin_id, command } => Self {
                 kind: IpcErrorKind::DispatchFailed,
                 plugin_id: plugin_id.clone(),
                 command: command.clone(),
@@ -217,6 +205,7 @@ impl IpcErrorEnvelope {
     /// plugin and command the caller addressed even when the kernel's
     /// `IpcError` variant doesn't carry that context (e.g.
     /// `SerializationFailed`, `DispatcherUnavailable`).
+    #[must_use]
     pub fn from_ipc_error_in_context(
         err: &IpcError,
         fallback_plugin_id: &str,

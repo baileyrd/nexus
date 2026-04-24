@@ -203,7 +203,7 @@ mod tests {
         for &cap in Capability::ALL {
             let s = cap.as_str();
             let parsed = Capability::from_str(s).unwrap();
-            assert_eq!(cap, parsed, "round-trip failed for {:?}", cap);
+            assert_eq!(cap, parsed, "round-trip failed for {cap:?}");
         }
     }
 
