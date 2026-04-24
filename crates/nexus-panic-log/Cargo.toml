@@ -1,0 +1,14 @@
+[package]
+name = "nexus-panic-log"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Local panic hook that appends to ~/.nexus-shell/logs/panic.log with 1 MB rotation."
+
+[dependencies]
+chrono = { workspace = true }
+dirs = "5"
+
+[dev-dependencies]
+tempfile = { workspace = true }

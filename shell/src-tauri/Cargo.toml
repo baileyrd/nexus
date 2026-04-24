@@ -37,6 +37,7 @@ nexus-kernel     = { path = "../../crates/nexus-kernel" }
 nexus-bootstrap  = { path = "../../crates/nexus-bootstrap" }
 nexus-plugin-api = { path = "../../crates/nexus-plugin-api" }
 nexus-plugins    = { path = "../../crates/nexus-plugins" }
+nexus-panic-log  = { path = "../../crates/nexus-panic-log" }
 
 [dev-dependencies]
 tempfile            = "3"

@@ -24,6 +24,7 @@ members = [
     "crates/nexus-skills",
     "crates/nexus-workflow",
     "crates/nexus-linkpreview",
+    "crates/nexus-panic-log",
 ]
 
 [workspace.package]

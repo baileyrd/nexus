@@ -1035,6 +1035,11 @@ fn default_forge_path(override_path: Option<PathBuf>) -> PathBuf {
 }
 
 fn main() {
+    // Install the local panic hook before anything that could panic
+    // (argument parsing, tracing setup). Entries land in
+    // ~/.nexus-shell/logs/panic.log. See docs/planning/PHASE-5-IMPLEMENTATION-PLAN.md §4.
+    nexus_panic_log::install("nexus");
+
     let cli = Cli::parse();
 
     let format = output::OutputFormat::from_str(&cli.format);
