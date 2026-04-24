@@ -7,18 +7,27 @@
  * `bootstrapSandboxedPlugin` from `@nexus/extension-api`, hands in its
  * default-exported {@link SandboxedPlugin}, and control flow proceeds:
  *
- *   1. Listen for an inbound `handshake/accept` from `window.parent`.
- *   2. Build a {@link SandboxedPluginContext} proxy whose methods
- *      marshal arguments into `req` envelopes and await correlated
- *      `res` envelopes.
- *   3. Call `plugin.activate(ctx)`.
- *   4. Dispatch inbound `evt` envelopes to subscribed handlers.
- *   5. On `unload` signal (host `sys:unload` or window `beforeunload`),
- *      invoke `plugin.deactivate?()` and respond `sys:unload` ack.
+ *   1. Post a `handshake` frame to `window.parent` (plugin-to-host).
+ *   2. Wait for the host's `handshake` reply (host-to-plugin). A non-
+ *      empty `error` on that frame means the host refused us; we bail.
+ *   3. Build a {@link SandboxedPluginContext} proxy whose methods
+ *      marshal arguments into `request` envelopes and await correlated
+ *      `response` envelopes.
+ *   4. Call `plugin.activate(ctx)`.
+ *   5. Dispatch inbound `event` envelopes to subscribed handlers.
+ *   6. On host `dispose` frame (or `beforeunload`), invoke
+ *      `plugin.deactivate?()` and post a `dispose` ack.
  *
  * The runtime is deliberately small: registrations live on the host,
  * which auto-disposes them on teardown (see design §5.5). The guest's
  * only persistent state is the correlation map + subscription map.
+ *
+ * Phase 3c Wave 1 reconciliation note:
+ *   Envelope shape matches `./protocol.ts` exactly (WI-30b canonical).
+ *   `handshake` / `request` / `response` / `event` / `dispose` are the
+ *   only `kind`s on the wire. Ping/pong (if ever needed) rides on
+ *   `event` with method `sandbox.ping` — there is no dedicated `sys`
+ *   kind anymore.
  */
 
 import type { Disposable, PanelNode, PlatformAPI } from '../index';
@@ -32,14 +41,9 @@ import type { SandboxedPlugin } from './plugin';
 import {
   SANDBOX_PROTOCOL_VERSION,
   isRpcEnvelope,
-  type HandshakeAcceptData,
-  type HandshakeHelloData,
+  type HandshakeAccept,
+  type HandshakeHello,
   type RpcEnvelope,
-  type RpcEventEnvelope,
-  type RpcRequestEnvelope,
-  type RpcResponseErrEnvelope,
-  type RpcResponseOkEnvelope,
-  type RpcSystemEnvelope,
 } from './protocol';
 
 // Node-ish environments (tests) won't have `crypto.randomUUID`; fall back
@@ -97,8 +101,9 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
   >();
   const panelRenderers = new Map<string, () => PanelNode>();
 
-  let accepted: HandshakeAcceptData | null = null;
+  let accepted: HandshakeAccept | null = null;
   let deactivated = false;
+  const handshakeNonce = uuidv4();
 
   // ── wire primitives ───────────────────────────────────────────────────
 
@@ -109,17 +114,35 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
     win.parent.postMessage(env, '*');
   };
 
-  const request = (method: string, args: unknown): Promise<unknown> => {
+  const request = (method: string, payload: unknown): Promise<unknown> => {
     return new Promise((resolve, reject) => {
       const id = uuidv4();
       pending.set(id, { resolve, reject });
-      post({ id, dir: 'g2h', kind: 'req', method, args });
+      post({
+        id,
+        direction: 'plugin-to-host',
+        kind: 'request',
+        method,
+        payload,
+      });
+    });
+  };
+
+  /** Fire-and-forget request variant — caller does not await a response. */
+  const fireAndForget = (method: string, payload: unknown): void => {
+    const id = uuidv4();
+    post({
+      id,
+      direction: 'plugin-to-host',
+      kind: 'request',
+      method,
+      payload,
     });
   };
 
   // ── context proxy ─────────────────────────────────────────────────────
 
-  const buildContext = (accept: HandshakeAcceptData): SandboxedPluginContext => {
+  const buildContext = (accept: HandshakeAccept): SandboxedPluginContext => {
     // Helper: register a cleanup that fires once — mirrors the
     // idempotent-unsub pattern in `shell/src/host/PluginAPI.ts:253-287`.
     const onceDispose = (fn: () => void): Disposable => {
@@ -135,11 +158,6 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
       };
     };
 
-    const fireAndForget = (method: string, args: unknown): void => {
-      const id = uuidv4();
-      post({ id, dir: 'g2h', kind: 'req', method, args });
-    };
-
     const platform: PlatformAPI = {
       fs: {
         readText: (path) => request('platform.fs.readText', { path }) as Promise<string>,
@@ -151,7 +169,10 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
           >,
         exists: (path) => request('platform.fs.exists', { path }) as Promise<boolean>,
         mkdir: (path, options) =>
-          request('platform.fs.mkdir', { path, options }) as Promise<void>,
+          request('platform.fs.mkdir', {
+            path,
+            recursive: options?.recursive,
+          }) as Promise<void>,
         remove: (path) => request('platform.fs.remove', { path }) as Promise<void>,
         rename: (from, to) =>
           request('platform.fs.rename', { from, to }) as Promise<void>,
@@ -173,12 +194,12 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
         isMaximized: () =>
           request('platform.window.isMaximized', {}) as Promise<boolean>,
         onResize: async (handler) => {
-          const subscriptionId = uuidv4();
-          eventSubscriptions.set(subscriptionId, () => handler());
-          await request('platform.window.onResize', { subscriptionId });
+          const handlerSub = uuidv4();
+          eventSubscriptions.set(handlerSub, () => handler());
+          await request('platform.window.onResize', { handlerSub });
           return onceDispose(() => {
-            eventSubscriptions.delete(subscriptionId);
-            fireAndForget('unsubscribe', { subscriptionId });
+            eventSubscriptions.delete(handlerSub);
+            postDispose(handlerSub);
           });
         },
       },
@@ -189,16 +210,16 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
     };
 
     const ctx: SandboxedPluginContext = {
-      pluginId: accept.pluginId,
+      pluginId: accept.pluginInstanceId.split('#')[0] ?? accept.pluginInstanceId,
 
       commands: {
         register: (id, handler) => {
-          const handlerId = uuidv4();
-          commandHandlers.set(handlerId, handler);
-          fireAndForget('commands.register', { id, handlerId });
+          const handlerSub = uuidv4();
+          commandHandlers.set(handlerSub, handler);
+          fireAndForget('commands.register', { id, handlerSub });
           return onceDispose(() => {
-            commandHandlers.delete(handlerId);
-            fireAndForget('commands.unregister', { id, handlerId });
+            commandHandlers.delete(handlerSub);
+            postDispose(handlerSub);
           });
         },
         execute: (id, ...args) =>
@@ -213,8 +234,8 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
           timeoutMs?: number,
         ) =>
           request('kernel.invoke', {
-            targetId: pluginId,
-            cmd: commandId,
+            pluginId,
+            commandId,
             args,
             timeoutMs,
           }) as Promise<T>,
@@ -222,14 +243,14 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
           topicPrefix: string,
           handler: (topic: string, payload: T) => void,
         ) => {
-          const subscriptionId = uuidv4();
-          eventSubscriptions.set(subscriptionId, (topic, payload) =>
+          const handlerSub = uuidv4();
+          eventSubscriptions.set(handlerSub, (topic, payload) =>
             handler(topic, payload as T),
           );
-          await request('kernel.on', { topicPrefix, subscriptionId });
+          await request('kernel.on', { topicPrefix, handlerSub });
           return onceDispose(() => {
-            eventSubscriptions.delete(subscriptionId);
-            fireAndForget('unsubscribe', { subscriptionId });
+            eventSubscriptions.delete(handlerSub);
+            postDispose(handlerSub);
           });
         },
       },
@@ -238,17 +259,17 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
 
       events: {
         on: <T = unknown>(event: string, handler: (payload: T) => void) => {
-          const subscriptionId = uuidv4();
-          eventSubscriptions.set(subscriptionId, (_topic, payload) =>
+          const handlerSub = uuidv4();
+          eventSubscriptions.set(handlerSub, (_topic, payload) =>
             handler(payload as T),
           );
           // Fire-and-forget subscribe: the host's subscription-id is the
           // one we just generated; the ack is advisory. The returned
           // Disposable is sync to match the type contract.
-          fireAndForget('events.on', { event, subscriptionId });
+          fireAndForget('events.on', { event, handlerSub });
           return onceDispose(() => {
-            eventSubscriptions.delete(subscriptionId);
-            fireAndForget('unsubscribe', { subscriptionId });
+            eventSubscriptions.delete(handlerSub);
+            postDispose(handlerSub);
           });
         },
         emit: (event, payload) =>
@@ -275,11 +296,18 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
 
       views: {
         registerPanel: (viewId, render) => {
-          panelRenderers.set(viewId, render);
-          fireAndForget('views.registerPanel', { viewId });
+          const renderSub = uuidv4();
+          panelRenderers.set(renderSub, render);
+          fireAndForget('views.registerPanel', {
+            viewId,
+            // Slot resolution is host-side today; the guest defaults to
+            // the plugin's declared viewId slot. WI-30d refines this.
+            slot: viewId,
+            renderSub,
+          });
           return onceDispose(() => {
-            panelRenderers.delete(viewId);
-            fireAndForget('views.unregisterPanel', { viewId });
+            panelRenderers.delete(renderSub);
+            postDispose(renderSub);
           });
         },
       },
@@ -292,12 +320,12 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
 
       uri: {
         register: (scheme, handler) => {
-          const handlerId = uuidv4();
-          uriHandlers.set(handlerId, handler);
-          fireAndForget('uri.register', { scheme, handlerId });
+          const handlerSub = uuidv4();
+          uriHandlers.set(handlerSub, handler);
+          fireAndForget('uri.register', { scheme, handlerSub });
           return onceDispose(() => {
-            uriHandlers.delete(handlerId);
-            fireAndForget('uri.unregister', { scheme, handlerId });
+            uriHandlers.delete(handlerSub);
+            postDispose(handlerSub);
           });
         },
       },
@@ -332,73 +360,106 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
 
   // ── message dispatch ──────────────────────────────────────────────────
 
-  const handleResponse = (
-    env: RpcResponseOkEnvelope | RpcResponseErrEnvelope,
-  ): void => {
+  const postDispose = (subscriptionId: string): void => {
+    post({
+      id: subscriptionId,
+      direction: 'plugin-to-host',
+      kind: 'dispose',
+      payload: { subscriptionId },
+    });
+  };
+
+  const handleResponse = (env: RpcEnvelope): void => {
     const entry = pending.get(env.id);
     if (!entry) return;
     pending.delete(env.id);
-    if (env.ok) entry.resolve(env.result);
-    else entry.reject(env.error);
+    if (env.error) {
+      entry.reject(env.error);
+    } else {
+      entry.resolve(env.payload);
+    }
   };
 
-  const handleEvent = (env: RpcEventEnvelope): void => {
-    const handler = eventSubscriptions.get(env.subscriptionId);
+  const handleEvent = (env: RpcEnvelope): void => {
+    // Events correlate via `id` (= the host's echo of our handlerSub).
+    const subId = env.id;
+    const handler = eventSubscriptions.get(subId);
     if (!handler) return;
+    // The host-side event envelope carries `{ topic, payload }` for
+    // kernel.on-style subscriptions, or the bare payload for
+    // events.on / window.onResize. Duck-type the payload shape.
+    const payload = env.payload;
+    if (
+      payload &&
+      typeof payload === 'object' &&
+      'topic' in (payload as Record<string, unknown>)
+    ) {
+      const wrapped = payload as { topic?: unknown; payload?: unknown };
+      const topic = typeof wrapped.topic === 'string' ? wrapped.topic : env.method ?? '';
+      try {
+        handler(topic, wrapped.payload);
+      } catch (err) {
+        console?.error?.('[sandbox] subscription handler threw', err);
+      }
+      return;
+    }
     try {
-      handler(env.topic, env.payload);
+      handler(env.method ?? '', payload);
     } catch (err) {
-      // Swallow — plugin handler errors must not propagate into the
-      // runtime. The host will see them via heartbeat misses if they
-      // jam the loop.
       console?.error?.('[sandbox] subscription handler threw', err);
     }
   };
 
-  const handleRequest = (env: RpcRequestEnvelope): void => {
+  const handleRequest = (env: RpcEnvelope): void => {
     // Host → guest dispatch. Only a few methods flow this way:
     // command-handler invocation, uri-handler invocation, and
     // panel-render requests. Everything else is guest-initiated.
     const respondOk = (result: unknown): void => {
-      post({ id: env.id, dir: 'g2h', kind: 'res', ok: true, result });
+      post({
+        id: env.id,
+        direction: 'plugin-to-host',
+        kind: 'response',
+        method: env.method,
+        payload: result,
+      });
     };
     const respondErr = (message: string): void => {
       post({
         id: env.id,
-        dir: 'g2h',
-        kind: 'res',
-        ok: false,
+        direction: 'plugin-to-host',
+        kind: 'response',
+        method: env.method,
         error: {
           kind: 'dispatch_failed',
-          plugin_id: accepted?.pluginId ?? '',
-          command: env.method,
           message,
           retryable: false,
+          pluginId: accepted?.pluginInstanceId,
+          method: env.method,
         },
       });
     };
 
+    const args = (env.payload ?? {}) as Record<string, unknown>;
+
     try {
       if (env.method === 'dispatch.command') {
-        const { handlerId, args } = (env.args ?? {}) as {
-          handlerId?: string;
-          args?: unknown[];
-        };
-        const handler = handlerId ? commandHandlers.get(handlerId) : undefined;
-        if (!handler) return respondErr('unknown handlerId');
-        Promise.resolve(handler(...(args ?? []))).then(respondOk, (err) =>
+        const handlerSub =
+          typeof args.handlerSub === 'string' ? args.handlerSub : undefined;
+        const rawArgs = Array.isArray(args.args) ? (args.args as unknown[]) : [];
+        const handler = handlerSub ? commandHandlers.get(handlerSub) : undefined;
+        if (!handler) return respondErr('unknown handlerSub');
+        Promise.resolve(handler(...rawArgs)).then(respondOk, (err) =>
           respondErr(String(err)),
         );
         return;
       }
 
       if (env.method === 'dispatch.uri') {
-        const { handlerId, url } = (env.args ?? {}) as {
-          handlerId?: string;
-          url?: string;
-        };
-        const handler = handlerId ? uriHandlers.get(handlerId) : undefined;
-        if (!handler || typeof url !== 'string') {
+        const handlerSub =
+          typeof args.handlerSub === 'string' ? args.handlerSub : undefined;
+        const url = typeof args.url === 'string' ? args.url : undefined;
+        const handler = handlerSub ? uriHandlers.get(handlerSub) : undefined;
+        if (!handler || !url) {
           return respondErr('unknown uri handler');
         }
         Promise.resolve(handler(new URL(url))).then(
@@ -409,64 +470,69 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
       }
 
       if (env.method === 'views.render') {
-        const { viewId } = (env.args ?? {}) as { viewId?: string };
-        const render = viewId ? panelRenderers.get(viewId) : undefined;
-        if (!render) return respondErr('unknown viewId');
+        const renderSub =
+          typeof args.renderSub === 'string' ? args.renderSub : undefined;
+        const render = renderSub ? panelRenderers.get(renderSub) : undefined;
+        if (!render) return respondErr('unknown renderSub');
         respondOk(render());
         return;
       }
 
-      respondErr(`unsupported host-initiated method: ${env.method}`);
+      respondErr(`unsupported host-initiated method: ${env.method ?? '<none>'}`);
     } catch (err) {
       respondErr(String(err));
     }
   };
 
-  const handleSystem = (env: RpcSystemEnvelope): void => {
-    switch (env.system) {
-      case 'handshake/accept': {
-        if (accepted) return;
-        accepted = env.data as HandshakeAcceptData;
-        const ctx = buildContext(accepted);
-        Promise.resolve()
-          .then(() => plugin.activate(ctx))
-          .catch((err) => {
-            post({
-              id: uuidv4(),
-              dir: 'g2h',
-              kind: 'sys',
-              system: 'handshake/reject',
-              data: {
-                error: {
-                  kind: 'plugin_crashed',
-                  plugin_id: accepted?.pluginId ?? '',
-                  command: 'activate',
-                  message: String(err),
-                  retryable: false,
-                },
-              },
-            });
-          });
-        return;
-      }
-      case 'handshake/reject': {
-        // Host refused us. Nothing to do — iframe will be torn down.
-        return;
-      }
-      case 'ping': {
-        post({ id: env.id, dir: 'g2h', kind: 'sys', system: 'pong' });
-        return;
-      }
-      case 'unload': {
-        runDeactivate().finally(() => {
-          post({ id: env.id, dir: 'g2h', kind: 'sys', system: 'unload' });
-        });
-        return;
-      }
-      default:
-        // suspend/resume/pong/hello are not meaningful to receive guest-side.
-        return;
+  const handleHandshake = (env: RpcEnvelope): void => {
+    if (accepted) return;
+    if (env.error) {
+      // Host refused us. Nothing to do — iframe will be torn down.
+      return;
     }
+    const payload = env.payload as Partial<HandshakeAccept> | undefined;
+    if (
+      !payload ||
+      typeof payload.pluginInstanceId !== 'string' ||
+      !Array.isArray(payload.methods)
+    ) {
+      return;
+    }
+    accepted = {
+      protocolVersion: SANDBOX_PROTOCOL_VERSION,
+      pluginInstanceId: payload.pluginInstanceId,
+      methods: payload.methods as ReadonlyArray<string>,
+      nonce: typeof payload.nonce === 'string' ? payload.nonce : handshakeNonce,
+    };
+    const ctx = buildContext(accepted);
+    Promise.resolve()
+      .then(() => plugin.activate(ctx))
+      .catch((err) => {
+        // Surface activation failures as a dispose frame rather than a
+        // handshake reject — the host has already accepted us.
+        post({
+          id: uuidv4(),
+          direction: 'plugin-to-host',
+          kind: 'dispose',
+          error: {
+            kind: 'dispatch_failed',
+            message: `plugin activate threw: ${String(err)}`,
+            retryable: false,
+            pluginId: accepted?.pluginInstanceId,
+          },
+        });
+      });
+  };
+
+  const handleDispose = (env: RpcEnvelope): void => {
+    // Host signalled teardown. Run deactivate and ack.
+    runDeactivate().finally(() => {
+      post({
+        id: env.id,
+        direction: 'plugin-to-host',
+        kind: 'dispose',
+      });
+    });
   };
 
   const runDeactivate = async (): Promise<void> => {
@@ -491,18 +557,23 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
   const messageListener = (ev: unknown): void => {
     const data = (ev as { data?: unknown }).data;
     if (!isRpcEnvelope(data)) return;
+    // Ignore our own echoes and any frames not destined for the guest.
+    if (data.direction !== 'host-to-plugin') return;
     switch (data.kind) {
-      case 'res':
+      case 'handshake':
+        handleHandshake(data);
+        return;
+      case 'response':
         handleResponse(data);
         return;
-      case 'evt':
+      case 'event':
         handleEvent(data);
         return;
-      case 'req':
+      case 'request':
         handleRequest(data);
         return;
-      case 'sys':
-        handleSystem(data);
+      case 'dispose':
+        handleDispose(data);
         return;
     }
   };
@@ -513,16 +584,18 @@ export function bootstrapSandboxedPlugin(plugin: SandboxedPlugin): void {
   });
 
   // Kick off the handshake. The host is listening on a single global
-  // `message` handler (design §5.1) and will respond with
-  // `handshake/accept` on success.
-  const helloData: HandshakeHelloData = {
+  // `message` handler (design §5.1) and will reply with an accept
+  // (kind=handshake, direction=host-to-plugin) or reject (same, with
+  // `error` populated).
+  const hello: HandshakeHello = {
     protocolVersion: SANDBOX_PROTOCOL_VERSION,
+    apiVersion: 1,
+    nonce: handshakeNonce,
   };
   post({
-    id: uuidv4(),
-    dir: 'g2h',
-    kind: 'sys',
-    system: 'handshake/hello',
-    data: helloData,
+    id: handshakeNonce,
+    direction: 'plugin-to-host',
+    kind: 'handshake',
+    payload: hello,
   });
 }

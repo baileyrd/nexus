@@ -1,139 +1,251 @@
-/**
- * Wire protocol for the community-plugin sandbox (WI-30).
- *
- * Shared between:
- *   - the host-side `SandboxOrchestrator` (shell/src/host/sandbox/, WI-30b)
- *   - the guest-side bootstrap runtime (`./runtime.ts`, WI-30c)
- *
- * The envelope and handshake are deliberately tiny and JSON-cloneable so
- * `postMessage`'s `structuredClone` can carry them across the null-origin
- * iframe boundary without gymnastics.
- *
- * Keep this file importable from both realms — no React, no DOM types,
- * no Node globals. Pure value/type-level declarations only.
- */
+// packages/nexus-extension-api/src/sandbox/protocol.ts
+//
+// WI-30b — wire-level types for the community-plugin sandbox RPC.
+// (Reconciled in Phase 3c Wave 1: this is the canonical shape.
+//  Shell-side host and guest-side bootstrap both import from here
+//  so a single definition crosses the postMessage boundary.)
+//
+// Per docs/wi30-sandbox-design.md §5.1. The sandbox iframe is a
+// null-origin realm; every call between host and plugin crosses
+// `postMessage` and therefore crosses structured-clone. Functions do
+// not clone — plugin handlers cross the boundary as subscription ids
+// (§5.6). This file is protocol-only: no imports from DOM, React, or
+// Tauri. That keeps it safe to consume from both the host side AND
+// the guest bridge shipped inside the sandbox's srcdoc.
+//
+// The envelope shape is intentionally richer than the design doc's
+// historical sketch: the design doc pairs `{ok, result|error}` for
+// responses; this implementation flattens `kind: 'response'` and lets
+// `error` be absent for success. The two forms are equivalent and the
+// flat form round-trips through a single `RpcEnvelope` type which is
+// simpler for the router to switch on.
+//
+// Not in scope here:
+//   - The iframe itself (WI-30d).
+//   - Capability → method map (lives in `shell/src/host/sandbox/capabilityGuard.ts`).
+//   - Method argument/return types (lives in `shell/src/host/sandbox/methodCatalog.ts`).
+//   - Author-facing plugin context (lives in `./context.ts`).
 
 import type { IpcErrorEnvelope } from '../generated/IpcErrorEnvelope';
 
 /**
- * Sandbox-protocol version. Bumped when the envelope shape or the
- * handshake semantics change in a non-additive way. The ABI version
- * plugins see (`PLUGIN_API_VERSION`) is versioned separately — see
- * docs/wi30-sandbox-design.md §5.4.
+ * Protocol version for the sandbox RPC wire. Bumped whenever the
+ * envelope shape or method dispatch semantics change in a way guest
+ * bootstraps from older hosts would misread. `PLUGIN_API_VERSION` is
+ * orthogonal — see design doc §5.4.
  */
 export const SANDBOX_PROTOCOL_VERSION = 1 as const;
 
-/** Direction tag on every envelope. Advisory — routing uses `event.source`. */
-export type RpcDirection = 'g2h' | 'h2g';
+export type SandboxProtocolVersion = typeof SANDBOX_PROTOCOL_VERSION;
 
-/** Request envelope — plugin calls a host method, or host dispatches to a guest handler. */
-export interface RpcRequestEnvelope {
-  id: string;
-  dir: RpcDirection;
-  kind: 'req';
-  /** Dotted method name. Matches `SandboxedPluginContext` shape: `"commands.register"`, `"platform.fs.readText"`, etc. */
-  method: string;
-  args: unknown;
-}
+export type RpcDirection = 'host-to-plugin' | 'plugin-to-host';
 
-/** Successful response to a prior `req`. Correlated by `id`. */
-export interface RpcResponseOkEnvelope {
-  id: string;
-  dir: RpcDirection;
-  kind: 'res';
-  ok: true;
-  result: unknown;
-}
+export type RpcKind =
+  | 'handshake'   // initial version negotiation (direction carries the sub-step)
+  | 'request'     // RPC method call expecting a response
+  | 'response'    // reply to a request (ok when `error` is undefined, err otherwise)
+  | 'event'       // fire-and-forget notification; used for kernel/event subscription delivery
+  | 'dispose';    // teardown signal — host→plugin to unload, plugin→host as ack / sub teardown
 
-/** Failure response — reuses {@link IpcErrorEnvelope} so sandbox errors match kernel errors. */
-export interface RpcResponseErrEnvelope {
-  id: string;
-  dir: RpcDirection;
-  kind: 'res';
-  ok: false;
-  error: IpcErrorEnvelope;
-}
+/**
+ * RPC-specific error kinds. `IpcErrorEnvelope.kind` is the authoritative
+ * vocabulary for errors that originate from the kernel (timeout,
+ * plugin_crashed, capability_denied, dispatch_failed, serialization,
+ * unknown); the sandbox reuses those verbatim when it proxies a kernel
+ * failure. The extra kinds below cover failures that can only happen at
+ * the RPC layer itself, before the call reaches any Tauri bridge.
+ */
+export type RpcErrorKind =
+  | 'unknown_method'         // method name not in the catalog
+  | 'capability_denied'      // host-side cap check failed (also aliased by kernel IpcErrorKind)
+  | 'protocol_mismatch'      // handshake sandbox-protocol version not supported
+  | 'api_version_mismatch'   // handshake PLUGIN_API_VERSION not supported
+  | 'timeout'                // RPC exceeded its response window (also aliased by kernel IpcErrorKind)
+  | 'serialization_failed'   // argument or result could not survive structured-clone
+  | 'plugin_disposed'        // router was torn down while the request was in flight
+  | 'dispatch_failed';       // generic routing failure (matches IpcErrorKind)
 
-/** Event envelope — host → guest only, not correlated to any request. */
-export interface RpcEventEnvelope {
-  id: string;
-  dir: 'h2g';
-  kind: 'evt';
-  topic: string;
-  subscriptionId: string;
-  payload: unknown;
-}
-
-/** System messages carry lifecycle signals, not application calls. */
-export type RpcSystemKind =
-  | 'handshake/hello'
-  | 'handshake/accept'
-  | 'handshake/reject'
-  | 'ping'
-  | 'pong'
-  | 'suspend'
-  | 'resume'
-  | 'unload';
-
-export interface RpcSystemEnvelope {
-  id: string;
-  dir: RpcDirection;
-  kind: 'sys';
-  system: RpcSystemKind;
-  data?: unknown;
-}
-
-/** Every frame on the wire is one of these. Discriminant is `kind`. */
-export type RpcEnvelope =
-  | RpcRequestEnvelope
-  | RpcResponseOkEnvelope
-  | RpcResponseErrEnvelope
-  | RpcEventEnvelope
-  | RpcSystemEnvelope;
-
-// ─── Handshake payloads ─────────────────────────────────────────────────────
-
-/** Body of the guest's opening `handshake/hello`. */
-export interface HandshakeHelloData {
-  protocolVersion: number;
+export interface RpcErrorEnvelope {
+  kind: RpcErrorKind;
+  message: string;
+  /** Mirrors `IpcErrorEnvelope.retryable`; only `timeout` is retryable today. */
+  retryable: boolean;
+  /** Optional, for parity with `IpcErrorEnvelope.plugin_id` / `.command`. */
+  pluginId?: string;
+  method?: string;
 }
 
 /**
- * Body of the host's `handshake/accept`. Carries the plugin-instance id
- * the guest will quote on every subsequent envelope, plus the method
- * catalog the guest uses to generate the client-side proxy.
+ * The union of error shapes the sandbox may return on a `response`.
+ * When a request is proxied through `kernel.invoke`, the kernel's
+ * authoritative `IpcErrorEnvelope` is returned verbatim; RPC-layer
+ * failures use the local `RpcErrorEnvelope`. Callers must branch on
+ * shape: `IpcErrorEnvelope` carries `plugin_id` + `command` as
+ * snake_case fields (wire-stable from ts-rs), whereas `RpcErrorEnvelope`
+ * uses camelCase.
  */
-export interface HandshakeAcceptData {
-  pluginInstanceId: string;
-  /** Plugin id from the manifest (stable across runs). */
-  pluginId: string;
-  /** Plugin-author ABI version — what the plugin code was compiled against. */
-  apiVersion: number;
-  /** Negotiated wire protocol version (host ∩ guest). */
-  protocolVersion: number;
-  /** Dotted method names the host exposes. Guest builds a proxy from this list. */
-  methods: ReadonlyArray<string>;
+export type RpcResponseError = RpcErrorEnvelope | IpcErrorEnvelope;
+
+/**
+ * Message envelope shared by every frame in both directions.
+ *
+ * Fields:
+ *   - `id` — correlation id for request/response; also used on events
+ *     to carry the `subscriptionId` when delivering a kernel/event
+ *     notification. May be omitted on unilateral `dispose` frames.
+ *   - `direction` — advisory. Routing uses `event.source` identity
+ *     on the host side; direction lets crash dumps self-describe.
+ *   - `kind` — see RpcKind.
+ *   - `method` — dotted name from the method catalog. Required on
+ *     request and event; optional on handshake (absent), response
+ *     (echoes the request's method for diagnostic logging),
+ *     dispose (the method that owned the subscription).
+ *   - `payload` — method-specific body. Round-trips via
+ *     structured-clone, so Date / Map / Set / ArrayBuffer survive.
+ *   - `error` — present on failed responses and on dispose frames
+ *     that want to signal a teardown reason.
+ */
+export interface RpcEnvelope {
+  id: string;
+  direction: RpcDirection;
+  kind: RpcKind;
+  method?: string;
+  payload?: unknown;
+  error?: RpcResponseError;
 }
 
-/** Body of a `handshake/reject` — host refused to activate the plugin. */
-export interface HandshakeRejectData {
-  error: IpcErrorEnvelope;
-}
-
-// ─── Type guards ────────────────────────────────────────────────────────────
+// ─── Handshake sub-payloads ──────────────────────────────────────────────────
 //
-// These are kept here (not in runtime.ts) so WI-30b can reuse them
-// host-side without pulling the plugin bootstrap module.
+// Handshake is intentionally its own `RpcKind` rather than a method.
+// The guest does not have a method catalog until the host answers the
+// hello — method names would be unresolvable at that point.
 
-export function isRpcEnvelope(value: unknown): value is RpcEnvelope {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as { id?: unknown; kind?: unknown };
-  if (typeof v.id !== 'string') return false;
-  return (
-    v.kind === 'req' || v.kind === 'res' || v.kind === 'evt' || v.kind === 'sys'
-  );
+export interface HandshakeHello {
+  /** Protocol version the guest stub was built against. */
+  protocolVersion: number;
+  /** Bundle-author ABI marker, from `@nexus/extension-api.PLUGIN_API_VERSION`. */
+  apiVersion: number;
+  /** Guest-assigned nonce so the accept can be correlated. */
+  nonce: string;
 }
 
-export function isRpcSystem(env: RpcEnvelope): env is RpcSystemEnvelope {
-  return env.kind === 'sys';
+export interface HandshakeAccept {
+  protocolVersion: SandboxProtocolVersion;
+  /** Host-assigned identity for the plugin instance; echoed on every frame. */
+  pluginInstanceId: string;
+  /** Method names the host will honor; guest proxy is generated from this. */
+  methods: ReadonlyArray<string>;
+  /** Nonce from the corresponding hello. */
+  nonce: string;
+}
+
+export interface HandshakeReject {
+  nonce: string;
+  reason: 'protocol_mismatch' | 'api_version_mismatch' | 'dispatch_failed';
+  message: string;
+}
+
+export type HandshakePayload = HandshakeHello | HandshakeAccept | HandshakeReject;
+
+// ─── Construction helpers ────────────────────────────────────────────────────
+//
+// Kept dep-free on purpose — the guest bridge (WI-30d) will ship the
+// same file via srcdoc and must run without pulling in @nexus/*.
+
+export function makeRequest(
+  id: string,
+  method: string,
+  payload: unknown,
+  direction: RpcDirection = 'plugin-to-host',
+): RpcEnvelope {
+  return { id, direction, kind: 'request', method, payload };
+}
+
+export function makeResponse(
+  id: string,
+  payload: unknown,
+  direction: RpcDirection = 'host-to-plugin',
+  method?: string,
+): RpcEnvelope {
+  return { id, direction, kind: 'response', method, payload };
+}
+
+export function makeErrorResponse(
+  id: string,
+  error: RpcResponseError,
+  direction: RpcDirection = 'host-to-plugin',
+  method?: string,
+): RpcEnvelope {
+  return { id, direction, kind: 'response', method, error };
+}
+
+export function makeEvent(
+  subscriptionId: string,
+  method: string,
+  payload: unknown,
+  direction: RpcDirection = 'host-to-plugin',
+): RpcEnvelope {
+  return { id: subscriptionId, direction, kind: 'event', method, payload };
+}
+
+export function makeHandshakeHello(hello: HandshakeHello): RpcEnvelope {
+  return {
+    id: hello.nonce,
+    direction: 'plugin-to-host',
+    kind: 'handshake',
+    payload: hello,
+  };
+}
+
+export function makeHandshakeAccept(accept: HandshakeAccept): RpcEnvelope {
+  return {
+    id: accept.nonce,
+    direction: 'host-to-plugin',
+    kind: 'handshake',
+    payload: accept,
+  };
+}
+
+export function makeHandshakeReject(reject: HandshakeReject): RpcEnvelope {
+  return {
+    id: reject.nonce,
+    direction: 'host-to-plugin',
+    kind: 'handshake',
+    payload: reject,
+    error: {
+      kind: reject.reason,
+      message: reject.message,
+      retryable: false,
+    },
+  };
+}
+
+/**
+ * Type-narrow a value received over `postMessage`. Protects the router
+ * from malformed frames (non-object, missing fields, unknown `kind`).
+ */
+export function isRpcEnvelope(value: unknown): value is RpcEnvelope {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.id !== 'string') return false;
+  if (v.direction !== 'host-to-plugin' && v.direction !== 'plugin-to-host') return false;
+  switch (v.kind) {
+    case 'handshake':
+    case 'request':
+    case 'response':
+    case 'event':
+    case 'dispose':
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Duck-type discriminator between RpcErrorEnvelope and IpcErrorEnvelope.
+ * The kernel envelope ships `plugin_id` + `command` as snake_case keys;
+ * the RPC envelope uses camelCase `pluginId` / `method`.
+ */
+export function isIpcErrorEnvelope(error: RpcResponseError): error is IpcErrorEnvelope {
+  return 'plugin_id' in error && 'command' in error;
 }

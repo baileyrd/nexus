@@ -41,7 +41,7 @@ import {
   type HandshakeHello,
   type RpcEnvelope,
   type RpcErrorEnvelope,
-} from './protocol'
+} from '@nexus/extension-api'
 import {
   SANDBOX_METHOD_NAMES,
   SANDBOX_REJECTED_METHODS,

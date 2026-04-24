@@ -27,7 +27,7 @@ export {
   type RpcKind,
   type RpcResponseError,
   type SandboxProtocolVersion,
-} from './protocol'
+} from '@nexus/extension-api'
 
 export {
   SANDBOX_METHOD_NAMES,

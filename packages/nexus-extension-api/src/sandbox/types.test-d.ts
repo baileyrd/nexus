@@ -9,6 +9,11 @@
  *
  * If/when Vitest-style type assertions land in the workspace, swap the
  * hand-rolled `expectType` for the canonical helper.
+ *
+ * Phase 3c Wave 1 reconciliation note:
+ *   Envelope shape switched to the WI-30b canonical discriminants
+ *   (handshake / request / response / event / dispose). The
+ *   previously-abbreviated three-letter kinds are gone.
  */
 
 import type { Disposable, PanelNode, PlatformAPI } from '../index';
@@ -20,14 +25,12 @@ import type {
 } from './context';
 import type { SandboxedPlugin } from './plugin';
 import type {
-  HandshakeAcceptData,
-  HandshakeHelloData,
+  HandshakeAccept,
+  HandshakeHello,
+  RpcDirection,
   RpcEnvelope,
-  RpcEventEnvelope,
-  RpcRequestEnvelope,
-  RpcResponseErrEnvelope,
-  RpcResponseOkEnvelope,
-  RpcSystemEnvelope,
+  RpcErrorEnvelope,
+  RpcKind,
 } from './protocol';
 import { SANDBOX_PROTOCOL_VERSION, isRpcEnvelope } from './protocol';
 import { bootstrapSandboxedPlugin } from './runtime';
@@ -42,31 +45,43 @@ expectType<1>(SANDBOX_PROTOCOL_VERSION);
 // ─── Envelope discriminants ─────────────────────────────────────────────────
 
 declare const env: RpcEnvelope;
+expectType<string>(env.id);
+expectType<RpcDirection>(env.direction);
+expectType<RpcKind>(env.kind);
+
 switch (env.kind) {
-  case 'req':
-    expectType<RpcRequestEnvelope>(env);
-    expectType<string>(env.method);
+  case 'handshake':
+  case 'request':
+  case 'response':
+  case 'event':
+  case 'dispose':
+    expectType<RpcEnvelope>(env);
     break;
-  case 'res':
-    if (env.ok) expectType<RpcResponseOkEnvelope>(env);
-    else expectType<RpcResponseErrEnvelope>(env);
-    break;
-  case 'evt':
-    expectType<RpcEventEnvelope>(env);
-    expectType<'h2g'>(env.dir);
-    break;
-  case 'sys':
-    expectType<RpcSystemEnvelope>(env);
-    break;
+}
+
+// `error` is a union of RpcErrorEnvelope | IpcErrorEnvelope; at the
+// RpcEnvelope surface it's just `RpcResponseError | undefined`.
+if (env.error) {
+  // Narrow: at minimum both branches carry `kind` + `message`.
+  expectType<string>(env.error.kind);
+  expectType<string>(env.error.message);
 }
 
 // ─── Handshake payloads ─────────────────────────────────────────────────────
 
-declare const hello: HandshakeHelloData;
-declare const accept: HandshakeAcceptData;
+declare const hello: HandshakeHello;
+declare const accept: HandshakeAccept;
 expectType<number>(hello.protocolVersion);
+expectType<number>(hello.apiVersion);
+expectType<string>(hello.nonce);
 expectType<string>(accept.pluginInstanceId);
 expectType<ReadonlyArray<string>>(accept.methods);
+
+// ─── Error envelope ─────────────────────────────────────────────────────────
+
+declare const rpcErr: RpcErrorEnvelope;
+expectType<RpcErrorEnvelope['kind']>(rpcErr.kind);
+expectType<boolean>(rpcErr.retryable);
 
 // ─── Type guards ────────────────────────────────────────────────────────────
 

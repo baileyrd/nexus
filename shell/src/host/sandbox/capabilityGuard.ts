@@ -27,6 +27,11 @@
 import type { Capability } from '@nexus/extension-api'
 import type { SandboxMethodName } from './methodCatalog'
 
+// Note: sandbox protocol types (`RpcEnvelope`, `SANDBOX_PROTOCOL_VERSION`, …)
+// are re-exported alongside `Capability` from `@nexus/extension-api`.
+// This file does not need them directly but the shared import path
+// guarantees host and guest see identical declarations.
+
 /**
  * Placeholder for methods that don't map cleanly to an existing capability
  * but still warrant some form of gate before a richer capability vocabulary
