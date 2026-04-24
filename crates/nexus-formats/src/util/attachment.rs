@@ -76,7 +76,11 @@ mod tests {
         let parts: Vec<&str> = name.splitn(3, '-').collect();
         assert_eq!(parts[0], "image");
         assert_eq!(parts[1], "1000000");
-        assert!(parts[2].ends_with(".png"));
+        assert!(
+            std::path::Path::new(parts[2])
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+        );
     }
 
     #[test]

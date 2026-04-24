@@ -249,9 +249,11 @@ mod tests {
     fn save_and_load_workspace_state() {
         let dir = tmp();
         forge_dir(dir.path());
-        let mut s = WorkspaceState::default();
-        s.active_file = Some("README.md".into());
-        s.theme = "light".into();
+        let s = WorkspaceState {
+            active_file: Some("README.md".into()),
+            theme: "light".into(),
+            ..Default::default()
+        };
         save_workspace_state(dir.path(), &s).unwrap();
         let loaded = load_workspace_state(dir.path()).unwrap();
         assert_eq!(loaded.active_file.as_deref(), Some("README.md"));
@@ -264,8 +266,10 @@ mod tests {
     fn save_and_load_mcp_config() {
         let dir = tmp();
         forge_dir(dir.path());
-        let mut cfg = McpConfig::default();
-        cfg.allowed_tools = vec!["search".into(), "read".into()];
+        let cfg = McpConfig {
+            allowed_tools: vec!["search".into(), "read".into()],
+            ..Default::default()
+        };
         save_mcp_config(dir.path(), &cfg).unwrap();
         let loaded = load_mcp_config(dir.path()).unwrap();
         assert_eq!(loaded.allowed_tools.len(), 2);
@@ -277,9 +281,11 @@ mod tests {
     fn save_and_load_ai_config() {
         let dir = tmp();
         forge_dir(dir.path());
-        let mut cfg = AiConfig::default();
-        cfg.model = "claude-opus-4-6".into();
-        cfg.temperature = 0.3;
+        let cfg = AiConfig {
+            model: "claude-opus-4-6".into(),
+            temperature: 0.3,
+            ..Default::default()
+        };
         save_ai_config(dir.path(), &cfg).unwrap();
         let loaded = load_ai_config(dir.path()).unwrap();
         assert_eq!(loaded.model, "claude-opus-4-6");

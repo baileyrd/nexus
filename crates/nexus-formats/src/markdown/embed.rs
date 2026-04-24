@@ -119,10 +119,10 @@ mod tests {
 
     fn make_reader(files: HashMap<PathBuf, &'static str>) -> impl Fn(&Path) -> std::io::Result<String> {
         move |p: &Path| {
-            files
-                .get(p)
-                .map(|s| Ok((*s).to_string()))
-                .unwrap_or_else(|| Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not found")))
+            files.get(p).map_or_else(
+                || Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not found")),
+                |s| Ok((*s).to_string()),
+            )
         }
     }
 
