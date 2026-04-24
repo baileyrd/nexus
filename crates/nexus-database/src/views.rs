@@ -5,7 +5,7 @@
 //! Takes a [`BaseView`] definition plus a [`BaseRecord`] slice and
 //! returns an [`AppliedView`] — records filtered, sorted, and (for
 //! kanban / calendar) grouped according to the view's rules. Pure
-//! logic; does not touch SQLite or any UI layer.
+//! logic; does not touch `SQLite` or any UI layer.
 //!
 //! # Microkernel fit
 //!
@@ -108,7 +108,11 @@ pub fn apply_view(records: &[BaseRecord], _schema: &BaseSchema, view: &BaseView)
 
     // 3. Group (if applicable)
     let layout = match view.view_type {
-        ViewType::Kanban => {
+        // Kanban groups on `group_field`. List / Timeline behave the
+        // same way (swimlanes keyed on `group_field`; the shell pairs
+        // Timeline with `date_field` / `end_field` for bar spans).
+        // All three fall back to Flat when the grouping field is absent.
+        ViewType::Kanban | ViewType::List | ViewType::Timeline => {
             if let Some(field) = view.group_field.as_deref() {
                 ViewLayout::Grouped {
                     groups: group_by_field(&sorted, field),
@@ -127,19 +131,6 @@ pub fn apply_view(records: &[BaseRecord], _schema: &BaseSchema, view: &BaseView)
             }
         }
         ViewType::Table | ViewType::Gallery => ViewLayout::Flat { records: sorted },
-        // List groups by `group_field` when set; Timeline produces
-        // swimlanes keyed on `group_field` (shell pairs this with
-        // `date_field` / `end_field` for bar spans). Both fall back
-        // to a flat layout when the grouping field is absent.
-        ViewType::List | ViewType::Timeline => {
-            if let Some(field) = view.group_field.as_deref() {
-                ViewLayout::Grouped {
-                    groups: group_by_field(&sorted, field),
-                }
-            } else {
-                ViewLayout::Flat { records: sorted }
-            }
-        }
     };
 
     AppliedView {
@@ -160,10 +151,10 @@ fn matches_filter(record: &BaseRecord, rule: &FilterRule) -> bool {
     match rule.operator.as_str() {
         "eq" | "=" => json_eq(value, &rule.value),
         "neq" | "!=" => !json_eq(value, &rule.value),
-        "gt" | ">" => json_cmp(value, &rule.value).map(|o| o.is_gt()).unwrap_or(false),
-        "gte" | ">=" => json_cmp(value, &rule.value).map(|o| o.is_ge()).unwrap_or(false),
-        "lt" | "<" => json_cmp(value, &rule.value).map(|o| o.is_lt()).unwrap_or(false),
-        "lte" | "<=" => json_cmp(value, &rule.value).map(|o| o.is_le()).unwrap_or(false),
+        "gt" | ">" => json_cmp(value, &rule.value).is_some_and(std::cmp::Ordering::is_gt),
+        "gte" | ">=" => json_cmp(value, &rule.value).is_some_and(std::cmp::Ordering::is_ge),
+        "lt" | "<" => json_cmp(value, &rule.value).is_some_and(std::cmp::Ordering::is_lt),
+        "lte" | "<=" => json_cmp(value, &rule.value).is_some_and(std::cmp::Ordering::is_le),
         "contains" => str_contains(value, &rule.value, false),
         "icontains" => str_contains(value, &rule.value, true),
         "starts_with" => str_starts_with(value, &rule.value, false),
@@ -315,8 +306,8 @@ fn compare_non_null(a: &Value, b: &Value) -> std::cmp::Ordering {
     if let (Some(x), Some(y)) = (a.as_bool(), b.as_bool()) {
         return x.cmp(&y);
     }
-    let sa = a.as_str().map(str::to_owned).unwrap_or_else(|| a.to_string());
-    let sb = b.as_str().map(str::to_owned).unwrap_or_else(|| b.to_string());
+    let sa = a.as_str().map_or_else(|| a.to_string(), str::to_owned);
+    let sb = b.as_str().map_or_else(|| b.to_string(), str::to_owned);
     sa.cmp(&sb)
 }
 
@@ -390,6 +381,9 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    // Test helper — Value callers match the ergonomics of `json!(...)`
+    // literals at each test site.
+    #[allow(clippy::needless_pass_by_value)]
     fn record(id: &str, fields: serde_json::Value) -> BaseRecord {
         let map = fields.as_object().cloned().unwrap_or_default();
         BaseRecord {
@@ -434,7 +428,7 @@ mod tests {
                 assert_eq!(records[0].id, "a");
                 assert_eq!(records[1].id, "b");
             }
-            other => panic!("expected Flat, got {other:?}"),
+            ViewLayout::Grouped { .. } => panic!("expected Flat, got Grouped"),
         }
     }
 

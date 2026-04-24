@@ -393,6 +393,8 @@ mod tests {
     }
 
     #[test]
+    // 3.14 is an arbitrary non-zero test value, not an approximation of PI.
+    #[allow(clippy::approx_constant)]
     fn property_value_roundtrip() {
         let original = PropertyValue::Number(3.14);
         let json = original.to_json();

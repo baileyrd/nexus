@@ -332,9 +332,15 @@ fn require_date_str(
 use chrono::Datelike;
 
 #[cfg(test)]
+// 3.14 / 3.14159 in these tests are arbitrary non-zero doubles,
+// not intended as approximations of PI — silence approx_constant.
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
 
+    // Test helper — Vec callers match the ergonomics of `vec![...]`
+    // literals at each test site.
+    #[allow(clippy::needless_pass_by_value)]
     fn call_ok(name: &str, args: Vec<FormulaValue>) -> FormulaValue {
         call(name, &args).unwrap()
     }

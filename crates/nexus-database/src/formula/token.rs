@@ -329,6 +329,8 @@ mod tests {
     }
 
     #[test]
+    // 3.14 here is the literal we're lexing, not an approximation of PI.
+    #[allow(clippy::approx_constant)]
     fn decimal_number() {
         let tokens = tok_types("3.14");
         assert_eq!(tokens[0], Token::NumberLit(3.14));

@@ -2,7 +2,7 @@
 //!
 //! Registers as `com.nexus.database`. The SQL-backed query engine for bases
 //! lives in `nexus-storage` (the sole `rusqlite` owner); this plugin exposes
-//! only the pure in-memory operations that don't touch SQLite:
+//! only the pure in-memory operations that don't touch `SQLite`:
 //!
 //! | Command        | Handler id | Description                                   |
 //! |----------------|------------|-----------------------------------------------|

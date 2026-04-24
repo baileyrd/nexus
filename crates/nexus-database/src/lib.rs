@@ -5,7 +5,7 @@
 //! SQL-backed query engine, schema migrations, and relation/rollup
 //! resolution that previously lived here moved into `nexus-storage`
 //! (`nexus_storage::bases::{schema, query, relation}`) so that
-//! `nexus-storage` is the sole owner of the forge's SQLite database.
+//! `nexus-storage` is the sole owner of the forge's `SQLite` database.
 //!
 //! The crate also exposes a thin [`core_plugin::DatabaseCorePlugin`] that
 //! surfaces its pure helpers (CSV import/export, formula evaluation) over
