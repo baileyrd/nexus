@@ -49,6 +49,30 @@ export interface CommunityPluginRow {
     requested: number
     supported: number
   }
+  /**
+   * WI-31 — summary of install-time capability grants.
+   *
+   *   - `declared` : total caps declared in plugin.json (PascalCase,
+   *                  after `parseManifestCapabilities` filtering).
+   *                  Null when the manifest omits `capabilities`.
+   *   - `granted`  : count of HIGH-risk caps the user has consented to
+   *                  (from `<plugin_dir>/granted_caps.json`). Low /
+   *                  medium caps are auto-granted and aren't part of
+   *                  the "granted" tally.
+   *   - `denied`   : user denied this plugin's consent prompt this
+   *                  session; the plugin is skipped at activation.
+   *
+   * Used to render the "Granted N/M" subtitle and the "Review
+   * capabilities" button in both the PluginsMgmt modal and the
+   * Settings > Plugins tab.
+   */
+  grantSummary?: {
+    declared: number | null
+    granted: number
+    denied: boolean
+  }
+  /** Absolute path to the plugin's directory (for consent write-back). */
+  pluginDir?: string
 }
 
 export type PluginRow = BuiltInPluginRow | CommunityPluginRow

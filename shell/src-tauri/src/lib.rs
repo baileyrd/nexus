@@ -27,6 +27,14 @@ pub struct CommunityPluginManifest {
     /// before activation with a typed `PluginApiVersionError`.
     #[serde(default)]
     pub api_version: Option<u32>,
+    /// Declared capabilities (WI-31 / Phase 3 §4.1). Raw PascalCase strings
+    /// matching the `Capability` ts-rs union (e.g. `["FsRead", "NetHttp"]`).
+    /// Forwarded verbatim to the shell so `parseManifestCapabilities` can
+    /// filter unknown variants and the capability-prompt plugin can drive
+    /// the consent flow. `None` when the manifest omits the field entirely,
+    /// distinguishing "legacy plugin" from "declared empty".
+    #[serde(default)]
+    pub capabilities: Option<Vec<String>>,
     // Injected by scan — not present in plugin.json on disk
     #[serde(skip_deserializing, default)]
     pub dir:         String,
@@ -178,6 +186,129 @@ fn set_plugin_enabled(plugin_id: String, enabled: bool) -> Result<(), String> {
     Err(format!("Plugin '{plugin_id}' not found"))
 }
 
+// ── Granted capabilities (WI-31 — install-time consent) ─────────────────────
+//
+// The kernel persists HIGH-risk user consents in `<plugin_dir>/granted_caps.json`,
+// keyed to the plugin's version string. On every plugin load the kernel reads
+// this file and filters the declared capability set accordingly (see
+// `crates/nexus-plugins/src/loader.rs::load_granted_high_risk_caps`).
+//
+// This shell-internal bridge writes the same file from the consent UI —
+// consistent with the `set_plugin_enabled` precedent of bypassing the kernel
+// runtime for file-backed state that the kernel only reads at boot. We do
+// NOT touch the kernel's in-memory grant state; grants take effect on the
+// next plugin load (or the next forge boot, which is where this file is
+// normally consulted).
+//
+// Capability strings on the wire use the dotted kernel form (`"fs.read"`,
+// `"process.spawn"`) — that's what `Capability::from_str` accepts. The TS
+// side owns the PascalCase↔dotted mapping; this Rust layer is a pure
+// pass-through of whatever strings the caller sends.
+
+const GRANTED_CAPS_FILENAME: &str = "granted_caps.json";
+
+/// Persisted shape mirrors the kernel's `GrantedCapsFile` at
+/// `crates/nexus-plugins/src/loader.rs:1581`. Not imported from the
+/// kernel crate on purpose — the shell doesn't link `nexus-plugins` and
+/// this struct is trivially small. If the kernel shape evolves, update
+/// both sides.
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct GrantedCapsFile {
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    granted: Vec<String>,
+}
+
+/// A single plugin's grant entry as seen by the shell UI.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GrantedCapabilityEntry {
+    /// Plugin version the grant was pinned to. Empty string when the file
+    /// is missing — the TS side treats that as "no prior grant".
+    pub version: String,
+    /// Dotted capability strings the user has granted (e.g. `"fs.read"`).
+    pub capabilities: Vec<String>,
+}
+
+fn read_granted_entry(plugin_dir: &std::path::Path) -> GrantedCapabilityEntry {
+    let path = plugin_dir.join(GRANTED_CAPS_FILENAME);
+    let Ok(contents) = fs::read_to_string(&path) else {
+        return GrantedCapabilityEntry { version: String::new(), capabilities: Vec::new() };
+    };
+    match serde_json::from_str::<GrantedCapsFile>(&contents) {
+        Ok(f) => GrantedCapabilityEntry {
+            version: f.version,
+            capabilities: f.granted,
+        },
+        Err(_) => GrantedCapabilityEntry { version: String::new(), capabilities: Vec::new() },
+    }
+}
+
+fn write_granted_entry(
+    plugin_dir: &std::path::Path,
+    entry: &GrantedCapabilityEntry,
+) -> Result<(), String> {
+    let path = plugin_dir.join(GRANTED_CAPS_FILENAME);
+    let mut file = GrantedCapsFile {
+        version: entry.version.clone(),
+        granted: entry.capabilities.clone(),
+    };
+    file.granted.sort();
+    file.granted.dedup();
+    let json = serde_json::to_string_pretty(&file)
+        .map_err(|e| format!("serialize granted_caps.json: {e}"))?;
+    // Atomic write: tmp + rename so a crash mid-write can't produce a
+    // half-written file the kernel will parse as "deny-all".
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, json).map_err(|e| format!("write tmp: {e}"))?;
+    fs::rename(&tmp, &path).map_err(|e| format!("rename tmp: {e}"))?;
+    Ok(())
+}
+
+/// Return the granted-caps snapshot for every plugin the scanner can see.
+/// Keyed by plugin id. Plugins with no `granted_caps.json` still appear
+/// with `version: ""` and `capabilities: []` so the TS side can treat
+/// "unknown prior grant" and "all denied" uniformly.
+///
+/// Both the user's drop folder and (in dev) the repo-side
+/// `shell/src/plugins/community` tree are walked — matching
+/// `scan_plugin_directory` / `scan_plugin_directory_at`.
+#[tauri::command]
+fn get_plugin_granted_capabilities(
+    plugin_dirs: std::collections::HashMap<String, String>,
+) -> std::collections::HashMap<String, GrantedCapabilityEntry> {
+    let mut out = std::collections::HashMap::new();
+    for (plugin_id, dir) in plugin_dirs {
+        let p = std::path::Path::new(&dir);
+        out.insert(plugin_id, read_granted_entry(p));
+    }
+    out
+}
+
+/// Overwrite the granted capability set for a single plugin. The entry
+/// version is pinned to `version` (should be the manifest version at
+/// consent time) — a subsequent version bump will make the kernel reset
+/// grants on next load (re-prompt). Passing an empty `capabilities`
+/// vector clears all prior grants.
+///
+/// Capability strings MUST be in the dotted kernel form (`"fs.read"`,
+/// `"process.spawn"`, …) — the TS consent plugin does the
+/// PascalCase→dotted translation before invoking.
+#[tauri::command]
+fn set_plugin_granted_capabilities(
+    plugin_dir: String,
+    version: String,
+    capabilities: Vec<String>,
+) -> Result<(), String> {
+    let p = std::path::Path::new(&plugin_dir);
+    if !p.exists() {
+        return Err(format!("plugin_dir does not exist: {plugin_dir}"));
+    }
+    let entry = GrantedCapabilityEntry { version, capabilities };
+    write_granted_entry(p, &entry)
+}
+
 /// Unscoped path existence check. tauri-plugin-fs scopes paths to a
 /// configured allowlist, which rejects arbitrary user-picked folders
 /// before we ever see them. This bypass uses std::path directly so the
@@ -277,6 +408,8 @@ pub fn run() {
             scan_plugin_directory,
             scan_plugin_directory_at,
             set_plugin_enabled,
+            get_plugin_granted_capabilities,
+            set_plugin_granted_capabilities,
             path_exists,
             persistence::get_shell_state,
             persistence::save_shell_state,
@@ -292,4 +425,107 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn granted_caps_round_trip_to_kernel_format() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let entry = GrantedCapabilityEntry {
+            version: "1.2.3".into(),
+            capabilities: vec!["fs.read".into(), "net.http".into()],
+        };
+        write_granted_entry(dir.path(), &entry).unwrap();
+
+        // File on disk must use the kernel's `GrantedCapsFile` shape
+        // (`version` + `granted` array, NOT `capabilities`).
+        let raw = std::fs::read_to_string(dir.path().join(GRANTED_CAPS_FILENAME)).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["version"], "1.2.3");
+        assert!(parsed["granted"].is_array());
+        // Round-trip back through our reader.
+        let read = read_granted_entry(dir.path());
+        assert_eq!(read.version, "1.2.3");
+        assert_eq!(read.capabilities.len(), 2);
+        assert!(read.capabilities.contains(&"fs.read".to_string()));
+        assert!(read.capabilities.contains(&"net.http".to_string()));
+    }
+
+    #[test]
+    fn granted_caps_missing_file_yields_empty_entry() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let read = read_granted_entry(dir.path());
+        assert_eq!(read.version, "");
+        assert!(read.capabilities.is_empty());
+    }
+
+    #[test]
+    fn granted_caps_corrupt_file_yields_empty_entry() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join(GRANTED_CAPS_FILENAME), b"{ not json").unwrap();
+        let read = read_granted_entry(dir.path());
+        assert_eq!(read.version, "");
+        assert!(read.capabilities.is_empty());
+    }
+
+    #[test]
+    fn write_granted_entry_dedupes_and_sorts() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let entry = GrantedCapabilityEntry {
+            version: "0.1.0".into(),
+            capabilities: vec![
+                "process.spawn".into(),
+                "fs.read".into(),
+                "process.spawn".into(), // dupe
+                "fs.read.external".into(),
+            ],
+        };
+        write_granted_entry(dir.path(), &entry).unwrap();
+        let read = read_granted_entry(dir.path());
+        assert_eq!(
+            read.capabilities,
+            vec!["fs.read".to_string(), "fs.read.external".into(), "process.spawn".into()]
+        );
+    }
+
+    #[test]
+    fn set_plugin_granted_capabilities_rejects_missing_dir() {
+        let err = set_plugin_granted_capabilities(
+            "/no/such/path/definitely".into(),
+            "1.0.0".into(),
+            vec!["fs.read".into()],
+        )
+        .unwrap_err();
+        assert!(err.contains("plugin_dir"));
+    }
+
+    #[test]
+    fn community_manifest_deserialises_capabilities_field() {
+        let json = r#"{
+            "id": "com.example.thing",
+            "name": "Thing",
+            "version": "1.0.0",
+            "main": "index.js",
+            "apiVersion": 1,
+            "capabilities": ["FsRead", "NetHttp"]
+        }"#;
+        let m: CommunityPluginManifest = serde_json::from_str(json).unwrap();
+        let caps = m.capabilities.expect("capabilities missing");
+        assert_eq!(caps, vec!["FsRead".to_string(), "NetHttp".into()]);
+    }
+
+    #[test]
+    fn community_manifest_capabilities_optional() {
+        let json = r#"{
+            "id": "com.example.thing",
+            "name": "Thing",
+            "version": "1.0.0",
+            "main": "index.js"
+        }"#;
+        let m: CommunityPluginManifest = serde_json::from_str(json).unwrap();
+        assert!(m.capabilities.is_none());
+    }
 }

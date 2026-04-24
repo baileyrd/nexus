@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import type { Capability } from '@nexus/extension-api'
 import { PLUGIN_API_VERSION } from '@nexus/extension-api'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import type { CommunityPluginManifest } from '../../../host/communityPluginLoader'
@@ -10,17 +11,24 @@ import {
   type PluginRow,
 } from './pluginsMgmtStore'
 import { setApi } from './pluginsMgmtRuntime'
-import { parseManifestCapabilities } from './capabilityInfo'
+import { CAPABILITY_INFO, parseManifestCapabilities } from './capabilityInfo'
+import {
+  requestModalConsent,
+  kernelStringsToCaps,
+  type PriorGrant,
+} from '../../core/capabilityPrompt'
 
 const VIEW_ID = 'nexus.pluginsMgmt.overlay'
 
 const COMMAND_OPEN = 'nexus.plugins.open'
 const COMMAND_CLOSE = 'nexus.plugins.close'
 const COMMAND_TOGGLE_COMMUNITY = 'nexus.plugins.toggleCommunity'
+const COMMAND_REVIEW_CAPS = 'nexus.plugins.reviewCapabilities'
 const CONTEXT_KEY_VISIBLE = 'nexus.plugins.visible'
 
 const SERVICE_PLUGIN_LIST = 'pluginList'
 const SERVICE_COMMUNITY_MANIFESTS = 'communityPluginManifests'
+const SERVICE_COMMUNITY_DENIED = 'communityPluginDenied'
 
 /**
  * Shape registered onto the registry by main.tsx at the end of boot().
@@ -42,6 +50,35 @@ interface RegistryPluginEntry {
    * back through the manifest plumbing today.
    */
   capabilities?: unknown
+}
+
+/**
+ * Cache of per-plugin HIGH-risk grant counts. Seeded on plugin open
+ * (async Tauri call) and consulted synchronously by `readRows`. A stale
+ * cache renders a stale subtitle until the next `refreshGrants` call —
+ * acceptable trade-off vs. making row reads async.
+ */
+const grantCache = new Map<string, { granted: number; version: string }>()
+
+async function refreshGrants(manifests: CommunityPluginManifest[]) {
+  const dirs: Record<string, string> = {}
+  for (const m of manifests) dirs[m.id] = m.dir
+  try {
+    const raw = await invoke<Record<string, PriorGrant>>(
+      'get_plugin_granted_capabilities',
+      { pluginDirs: dirs },
+    )
+    grantCache.clear()
+    for (const [pluginId, entry] of Object.entries(raw)) {
+      const caps = kernelStringsToCaps(entry.capabilities ?? [])
+      grantCache.set(pluginId, {
+        granted: caps.length,
+        version: entry.version,
+      })
+    }
+  } catch (err) {
+    console.warn('[nexus.pluginsMgmt] refreshGrants failed:', err)
+  }
 }
 
 /**
@@ -73,6 +110,12 @@ function readRows(api: PluginAPI): PluginRow[] {
   }
 
   let community: CommunityPluginRow[] = []
+  let deniedSet: Set<string> = new Set()
+  try {
+    deniedSet = internal.getInternalService<Set<string>>(SERVICE_COMMUNITY_DENIED)
+  } catch {
+    // No prompt has run yet (or no denials) — treat as empty.
+  }
   try {
     const raw = internal.getInternalService<CommunityPluginManifest[]>(
       SERVICE_COMMUNITY_MANIFESTS,
@@ -87,6 +130,23 @@ function readRows(api: PluginAPI): PluginRow[] {
           typeof declared === 'number' && declared !== PLUGIN_API_VERSION
             ? { requested: declared, supported: PLUGIN_API_VERSION }
             : undefined
+        // WI-31: the Rust scanner now forwards `capabilities` from
+        // plugin.json. `parseManifestCapabilities` filters to known
+        // `Capability` variants and distinguishes "absent" (null) from
+        // "declared empty" ([]) — see capabilityInfo.ts.
+        const parsedCaps = parseManifestCapabilities(m.capabilities)
+        const declaredHighRiskCount =
+          parsedCaps === null
+            ? null
+            : parsedCaps.filter(
+                (c) => CAPABILITY_INFO[c]?.risk === 'high',
+              ).length
+        const cached = grantCache.get(m.id)
+        const grantSummary = {
+          declared: declaredHighRiskCount,
+          granted: cached?.granted ?? 0,
+          denied: deniedSet.has(m.id),
+        }
         return {
           kind: 'community',
           id: m.id,
@@ -97,14 +157,10 @@ function readRows(api: PluginAPI): PluginRow[] {
           author: m.author,
           dir: m.dir,
           manifestPath: m.manifestPath,
-          // CommunityPluginManifest doesn't yet expose `capabilities`
-          // (the Rust scanner in `src-tauri/src/lib.rs` doesn't
-          // deserialise that field), but read it defensively so we
-          // surface declared caps the moment that plumbing arrives.
-          capabilities: parseManifestCapabilities(
-            (m as unknown as { capabilities?: unknown }).capabilities,
-          ),
+          capabilities: parsedCaps,
           incompatible,
+          grantSummary,
+          pluginDir: m.dir,
         }
       },
     )
@@ -136,6 +192,11 @@ export const pluginsMgmtPlugin: Plugin = {
           title: 'Toggle Community Plugin',
           category: 'View',
         },
+        {
+          id: COMMAND_REVIEW_CAPS,
+          title: 'Review Plugin Capabilities',
+          category: 'View',
+        },
       ],
       keybindings: [
         // VSCode's Extensions view shortcut — free in our shell.
@@ -160,7 +221,19 @@ export const pluginsMgmtPlugin: Plugin = {
     // plugin-state transitions since boot show up without a manual action.
     usePluginsMgmtStore.getState().setRows(readRows(api))
 
-    api.commands.register(COMMAND_OPEN, () => {
+    api.commands.register(COMMAND_OPEN, async () => {
+      // WI-31: refresh grant cache before we render rows so the
+      // "Granted N/M" subtitle reflects the current state of each
+      // plugin's `granted_caps.json` (a prior consent-prompt run or
+      // manual edit could have changed it since boot).
+      try {
+        const manifests = api.internal!.getInternalService<
+          CommunityPluginManifest[]
+        >(SERVICE_COMMUNITY_MANIFESTS)
+        await refreshGrants(manifests)
+      } catch {
+        // Service missing → no grants to refresh.
+      }
       // Re-read from the registry so rows are fresh. `pluginList` is
       // a snapshot taken by main.tsx at boot — state transitions after
       // that don't update the array, but in practice nothing mutates
@@ -168,6 +241,70 @@ export const pluginsMgmtPlugin: Plugin = {
       // future-proofs the view.
       usePluginsMgmtStore.getState().setRows(readRows(api))
       usePluginsMgmtStore.getState().open()
+    })
+
+    api.commands.register(COMMAND_REVIEW_CAPS, async (...args: unknown[]) => {
+      const pluginId = args[0]
+      if (typeof pluginId !== 'string') {
+        console.warn('[nexus.pluginsMgmt] reviewCapabilities requires a pluginId')
+        return
+      }
+      const rows = usePluginsMgmtStore.getState().rows
+      const row = rows.find(
+        (r): r is CommunityPluginRow => r.kind === 'community' && r.id === pluginId,
+      )
+      if (!row || !row.capabilities || row.capabilities.length === 0) return
+
+      // Read the live prior grant from disk (the cache may be stale).
+      let prior: Capability[] = []
+      try {
+        const raw = await invoke<Record<string, PriorGrant>>(
+          'get_plugin_granted_capabilities',
+          { pluginDirs: { [pluginId]: row.dir } },
+        )
+        prior = kernelStringsToCaps(raw[pluginId]?.capabilities ?? [])
+      } catch (err) {
+        console.warn('[nexus.pluginsMgmt] get_granted failed:', err)
+      }
+
+      const result = await requestModalConsent({
+        pluginId: row.id,
+        pluginName: row.name,
+        version: row.version,
+        pluginDir: row.dir,
+        caps: row.capabilities,
+        previouslyGranted: prior,
+        // Manual review-after-the-fact — use capability-change copy.
+        reason: 'capability-change',
+      })
+
+      // Translate Capability[] back to kernel strings and persist.
+      const { capsToKernelStrings } = await import(
+        '../../core/capabilityPrompt'
+      )
+      try {
+        await invoke('set_plugin_granted_capabilities', {
+          pluginDir: row.dir,
+          version: row.version,
+          capabilities: result === null ? [] : capsToKernelStrings(result),
+        })
+      } catch (err) {
+        console.warn(
+          `[nexus.pluginsMgmt] set_granted failed for ${pluginId}:`,
+          err,
+        )
+      }
+
+      // Refresh so the subtitle reflects the new grant count.
+      try {
+        const manifests = api.internal!.getInternalService<
+          CommunityPluginManifest[]
+        >(SERVICE_COMMUNITY_MANIFESTS)
+        await refreshGrants(manifests)
+        usePluginsMgmtStore.getState().setRows(readRows(api))
+      } catch {
+        // best-effort
+      }
     })
 
     api.commands.register(COMMAND_CLOSE, () => {

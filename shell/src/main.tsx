@@ -34,6 +34,10 @@ import { configurationServicePlugin } from './plugins/core/configurationService'
 import { notificationServicePlugin }  from './plugins/core/notificationService'
 import { fileSystemServicePlugin }    from './plugins/core/fileSystemService'
 import { settingsPlugin }             from './plugins/core/settings'
+import {
+  capabilityPromptPlugin,
+  runInstallTimeConsent,
+} from './plugins/core/capabilityPrompt'
 // WI-02 part 2: themeServicePlugin is now a kernel-sync bridge, not the
 // old in-process palette holder. It hydrates `useThemeStore` from the
 // `com.nexus.theme` kernel plugin and subscribes to
@@ -166,6 +170,7 @@ async function boot() {
     notificationServicePlugin,
     fileSystemServicePlugin,
     settingsPlugin,
+    capabilityPromptPlugin,
     themeServicePlugin,
     workspacePlugin,
     gitStatusPlugin,
@@ -230,7 +235,32 @@ async function boot() {
   // Register all discovered manifests (enabled + disabled) for the settings UI
   reg.registerService('communityPluginManifests', communityManifests)
 
-  const communityPlugins = await loadEnabledCommunityPlugins(communityManifests)
+  // WI-31: run the install-time consent prompt BEFORE activation. This
+  // awaits any blocking modals (high-risk capabilities) and persists
+  // the user's choices to each plugin's `granted_caps.json` — which is
+  // what the kernel reads on the next forge boot. The returned
+  // `denied` set filters plugins out of activation this session so a
+  // denied plugin doesn't run with partial caps.
+  let deniedCommunityIds: Set<string> = new Set()
+  try {
+    const consent = await runInstallTimeConsent(communityManifests)
+    deniedCommunityIds = consent.denied
+    if (deniedCommunityIds.size > 0) {
+      console.info(
+        `[Boot] ${deniedCommunityIds.size} community plugin(s) denied ` +
+        `by consent prompt: ${[...deniedCommunityIds].join(', ')}`,
+      )
+    }
+  } catch (err) {
+    console.warn('[Boot] capability consent flow failed; continuing:', err)
+  }
+  // Expose the denied set so PluginsMgmt can render "denied" rows.
+  reg.registerService('communityPluginDenied', deniedCommunityIds)
+
+  const approvedManifests = communityManifests.filter(
+    (m) => !deniedCommunityIds.has(m.id),
+  )
+  const communityPlugins = await loadEnabledCommunityPlugins(approvedManifests)
   if (communityPlugins.length > 0) {
     console.info(`[Boot] Loading ${communityPlugins.length} community plugin(s)...`)
     await host.loadAll(communityPlugins)

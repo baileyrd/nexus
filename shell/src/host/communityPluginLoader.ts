@@ -29,6 +29,19 @@ export interface CommunityPluginManifest {
    * `PluginApiVersionError` before activation (WI-33).
    */
   apiVersion?: number
+  /**
+   * Declared capabilities (WI-31). Raw PascalCase strings matching the
+   * ts-rs `Capability` union (`"FsRead"`, `"NetHttp"`, …). The Rust
+   * scanner forwards this field verbatim from plugin.json; the TS side
+   * filters unknown variants via `parseManifestCapabilities`.
+   *
+   *   - `undefined` — manifest did not declare a capabilities list
+   *     (legacy plugin; treated as "(unknown)" in the UI, no consent
+   *     prompt fires because we don't know what to ask about).
+   *   - `[]`        — declared empty (runs with zero capabilities).
+   *   - non-empty   — drives the install-time consent prompt.
+   */
+  capabilities?: string[]
   /** Absolute path to the plugin's directory — injected by the Rust scanner */
   dir:          string
   /** Absolute path to plugin.json — injected by the Rust scanner */

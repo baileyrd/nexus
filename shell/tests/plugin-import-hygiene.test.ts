@@ -56,6 +56,7 @@ const TAURI_IMPORT_ALLOWLIST: ReadonlySet<string> = new Set([
   // kernel equivalent. Plan §10 risk row anticipates this: "If something
   // truly needs a bespoke Tauri command, allow it in `shell/src/src-tauri/`
   // and document." A future WI may migrate some of these to kernel IPC.
+  'shell/src/plugins/core/capabilityPrompt/requestConsent.ts',     // shell-internal (WI-31): get/set_plugin_granted_capabilities
   'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // shell-internal: set_plugin_enabled
   'shell/src/plugins/nexus/launcher/launcherState.ts',             // shell-internal: get/write/forget shell_state (recents)
   'shell/src/plugins/nexus/pluginsMgmt/index.ts',                  // shell-internal: set_plugin_enabled
@@ -76,6 +77,7 @@ const TAURI_IMPORT_ALLOWLIST: ReadonlySet<string> = new Set([
  */
 const HOST_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/core/activityBar/ActivityBarView.tsx',        // host/shellRegistry
+  'shell/src/plugins/core/capabilityPrompt/requestConsent.ts',     // WI-31: host/communityPluginLoader (manifest type)
   'shell/src/plugins/core/commandPalette/CommandPaletteView.tsx',  // host/ContextKeyService + shellRegistry
   'shell/src/plugins/core/editorArea/EditorAreaView.tsx',          // host/ContextKeyService
   'shell/src/plugins/core/fileExplorer/FileExplorerView.tsx',      // host/ContextKeyService

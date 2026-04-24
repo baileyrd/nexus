@@ -16,6 +16,7 @@ import {
 } from './capabilityInfo'
 
 const COMMAND_TOGGLE_COMMUNITY = 'nexus.plugins.toggleCommunity'
+const COMMAND_REVIEW_CAPS = 'nexus.plugins.reviewCapabilities'
 
 /**
  * Modal listing every plugin the shell has loaded — built-in (nexus.* /
@@ -280,12 +281,29 @@ function CommunityRow({ row }: CommunityRowProps) {
     if (row.incompatible) return
     void getApi().commands.execute(COMMAND_TOGGLE_COMMUNITY, row.id)
   }
+  const onReview = () => {
+    void getApi().commands.execute(COMMAND_REVIEW_CAPS, row.id)
+  }
 
   const incompat = row.incompatible
   const incompatTitle = incompat
     ? `Incompatible — requires apiVersion ${incompat.requested}, ` +
       `shell supports ${incompat.supported}`
     : undefined
+
+  const summary = row.grantSummary
+  const showReview =
+    !incompat &&
+    row.capabilities !== null &&
+    row.capabilities.length > 0
+  // "Granted N/M" subtitle only makes sense when the plugin declares at
+  // least one HIGH-risk capability (low/medium are auto-granted and the
+  // tally would always read 0/0). `declared === null` means the manifest
+  // omitted the field — no subtitle at all.
+  const showGrantSubtitle =
+    summary !== undefined &&
+    summary.declared !== null &&
+    summary.declared > 0
 
   return (
     <div style={rowOuterStyle}>
@@ -329,6 +347,28 @@ function CommunityRow({ row }: CommunityRowProps) {
               {row.description}
             </div>
           )}
+          {showGrantSubtitle && summary && (
+            <div
+              style={{
+                color: summary.denied
+                  ? 'var(--risk)'
+                  : 'var(--fg-muted)',
+                fontFamily: 'var(--f-ui)',
+                fontSize: 11,
+                marginTop: 4,
+              }}
+              title={
+                summary.denied
+                  ? 'You denied this plugin — click Review to re-approve.'
+                  : `${summary.granted} of ${summary.declared} high-risk ` +
+                    `capabilities granted`
+              }
+            >
+              {summary.denied
+                ? 'denied — click Review to re-approve'
+                : `Granted ${summary.granted}/${summary.declared} high-risk`}
+            </div>
+          )}
           {incompat && (
             <div
               title={incompatTitle}
@@ -344,6 +384,25 @@ function CommunityRow({ row }: CommunityRowProps) {
             </div>
           )}
         </div>
+        {showReview && (
+          <button
+            type="button"
+            onClick={onReview}
+            title="Review declared capabilities and grants"
+            style={{
+              padding: '2px 8px',
+              background: 'transparent',
+              color: 'var(--fg-dim)',
+              border: '1px solid var(--line-soft)',
+              borderRadius: 'var(--r)',
+              fontFamily: 'var(--f-ui)',
+              fontSize: 11,
+              cursor: 'pointer',
+            }}
+          >
+            Review
+          </button>
+        )}
         <StateBadge
           state={incompat ? 'error' : row.enabled ? 'active' : 'inactive'}
           error={incompatTitle}

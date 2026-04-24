@@ -29,6 +29,12 @@ import {
   parseManifestCapabilities,
   type RiskLevel,
 } from '../../nexus/pluginsMgmt/capabilityInfo'
+import {
+  requestModalConsent,
+  capsToKernelStrings,
+  kernelStringsToCaps,
+  type PriorGrant,
+} from '../capabilityPrompt'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -919,9 +925,7 @@ function PluginsTab({
   const filteredCommunity = useMemo(() => {
     if (!highRiskOnly) return community
     return community.filter(m => {
-      const caps = parseManifestCapabilities(
-        (m as unknown as { capabilities?: unknown }).capabilities,
-      )
+      const caps = parseManifestCapabilities(m.capabilities)
       return caps !== null && hasHighRisk(caps)
     })
   }, [community, highRiskOnly])
@@ -1067,17 +1071,76 @@ function CommunityPluginRow({
   // Optimistic local state
   const [enabled, setEnabled] = useState(manifest.enabled)
 
-  // Read capabilities defensively — `CommunityPluginManifest` doesn't
-  // declare a `capabilities` field today, but the Rust scanner may
-  // grow one (matching the Rust-side `PluginManifest`); when it does,
-  // chips appear without further UI changes.
+  // WI-31 wired `CommunityPluginManifest.capabilities` through the Rust
+  // scanner, so this is now a real optional field rather than a
+  // defensive read.
   const capabilities = useMemo(
-    () =>
-      parseManifestCapabilities(
-        (manifest as unknown as { capabilities?: unknown }).capabilities,
-      ),
+    () => parseManifestCapabilities(manifest.capabilities),
     [manifest],
   )
+
+  // WI-31: track HIGH-risk grant count for the subtitle + "Review"
+  // button. Loaded lazy on first render; refreshed after a consent
+  // modal resolves. A `null` declared count means the manifest omits
+  // the capabilities field (no subtitle).
+  const declaredHighRiskCount = useMemo(() => {
+    if (capabilities === null) return null
+    return capabilities.filter(c => CAPABILITY_INFO[c]?.risk === 'high').length
+  }, [capabilities])
+  const [grantedCount, setGrantedCount] = useState<number>(0)
+  const [nonce, setNonce] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    async function fetch() {
+      try {
+        const raw = await invoke<Record<string, PriorGrant>>(
+          'get_plugin_granted_capabilities',
+          { pluginDirs: { [manifest.id]: manifest.dir } },
+        )
+        if (cancelled) return
+        const caps = kernelStringsToCaps(raw[manifest.id]?.capabilities ?? [])
+        setGrantedCount(caps.length)
+      } catch {
+        // best-effort — leave at 0
+      }
+    }
+    void fetch()
+    return () => { cancelled = true }
+  }, [manifest.id, manifest.dir, nonce])
+
+  const handleReview = async () => {
+    if (!capabilities || capabilities.length === 0) return
+    let prior: ReturnType<typeof kernelStringsToCaps> = []
+    try {
+      const raw = await invoke<Record<string, PriorGrant>>(
+        'get_plugin_granted_capabilities',
+        { pluginDirs: { [manifest.id]: manifest.dir } },
+      )
+      prior = kernelStringsToCaps(raw[manifest.id]?.capabilities ?? [])
+    } catch {
+      /* best-effort */
+    }
+    const result = await requestModalConsent({
+      pluginId: manifest.id,
+      pluginName: manifest.name,
+      version: manifest.version,
+      pluginDir: manifest.dir,
+      caps: capabilities,
+      previouslyGranted: prior,
+      reason: 'capability-change',
+    })
+    try {
+      await invoke('set_plugin_granted_capabilities', {
+        pluginDir: manifest.dir,
+        version: manifest.version,
+        capabilities: result === null ? [] : capsToKernelStrings(result),
+      })
+    } catch (err) {
+      console.warn('[settings] set_granted failed:', err)
+    }
+    setNonce(n => n + 1)
+  }
 
   // WI-33: surface apiVersion mismatch with a red chip and disable the
   // toggle so the user can't try to enable a plugin the host can't load.
@@ -1128,6 +1191,24 @@ function CommunityPluginRow({
           {changed && (
             <span className="plugin-row__restart-pill">restart needed</span>
           )}
+          {capabilities && capabilities.length > 0 && !incompatible && (
+            <button
+              type="button"
+              onClick={() => { void handleReview() }}
+              title="Review declared capabilities and grants"
+              style={{
+                padding: '2px 8px',
+                background: 'transparent',
+                color: 'var(--fg-dim, #888)',
+                border: '1px solid var(--color-border, #e0e0e0)',
+                borderRadius: 3,
+                fontSize: '0.82em',
+                cursor: 'pointer',
+              }}
+            >
+              Review
+            </button>
+          )}
           <label
             className="plugin-row__toggle"
             title={
@@ -1149,6 +1230,18 @@ function CommunityPluginRow({
         </div>
         {manifest.description && (
           <div className="plugin-row__description">{manifest.description}</div>
+        )}
+        {declaredHighRiskCount !== null && declaredHighRiskCount > 0 && (
+          <div
+            className="plugin-row__description"
+            style={{ fontSize: '0.8em', opacity: 0.7 }}
+            title={
+              `${grantedCount} of ${declaredHighRiskCount} ` +
+              'high-risk capabilities granted'
+            }
+          >
+            Granted {grantedCount}/{declaredHighRiskCount} high-risk
+          </div>
         )}
         {incompatible && (
           <div
