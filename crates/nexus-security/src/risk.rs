@@ -41,6 +41,10 @@ impl std::fmt::Display for RiskLevel {
 /// to the kernel will cause a compile error here, forcing the risk mapping
 /// to be updated.
 #[must_use]
+// EventsPublish and UiNotify are kept as separate arms (rather than folded
+// into the Medium/Low groups above) so their per-capability rationale
+// comments remain attached to the capability they justify.
+#[allow(clippy::match_same_arms)]
 pub fn risk_level(cap: Capability) -> RiskLevel {
     match cap {
         Capability::FsRead
