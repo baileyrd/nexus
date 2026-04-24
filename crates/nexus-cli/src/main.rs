@@ -69,6 +69,8 @@ enum Commands {
 
     /// Knowledge graph operations
     Graph(GraphArgs),
+    /// Tag operations
+    Tags(TagsArgs),
 
     // -----------------------------------------------------------------------
     // Stub commands — implemented in later milestones
@@ -158,6 +160,23 @@ enum ContentCommand {
         /// Read body from stdin
         #[arg(long)]
         stdin: bool,
+    },
+    /// Update (overwrite) an existing content node
+    Update {
+        /// Path of the node to update
+        path: String,
+        /// Inline content body
+        #[arg(long)]
+        content: Option<String>,
+        /// Read body from stdin
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// List content nodes (optionally filtered by path prefix)
+    List {
+        /// Only include paths that start with this prefix
+        #[arg(long)]
+        prefix: Option<String>,
     },
     /// Read a content node
     Read {
@@ -249,6 +268,26 @@ enum GraphCommand {
         /// Maximum traversal depth
         #[arg(short, long, default_value_t = 1)]
         depth: usize,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct TagsArgs {
+    #[command(subcommand)]
+    command: TagsCommand,
+}
+
+#[derive(Subcommand)]
+enum TagsCommand {
+    /// List tag occurrences across the forge (optionally filtered by name)
+    List {
+        /// Filter to a specific tag name (omit to list every tag occurrence)
+        #[arg(long)]
+        name: Option<String>,
     },
 }
 
@@ -1001,6 +1040,12 @@ fn main() {
             ContentCommand::Create { path, content, stdin } => {
                 commands::content::create(&mut app, &path, content.as_deref(), stdin)
             }
+            ContentCommand::Update { path, content, stdin } => {
+                commands::content::update(&mut app, &path, content.as_deref(), stdin)
+            }
+            ContentCommand::List { prefix } => {
+                commands::content::list(&mut app, prefix.as_deref())
+            }
             ContentCommand::Read { path, raw } => commands::content::read(&mut app, &path, raw),
             ContentCommand::Delete { path, force } => {
                 commands::content::delete(&mut app, &path, force)
@@ -1073,6 +1118,10 @@ fn main() {
             GraphCommand::Neighbors { path, depth } => {
                 commands::graph::neighbors(&mut app, &path, depth)
             }
+        },
+
+        Commands::Tags(args) => match args.command {
+            TagsCommand::List { name } => commands::tags::list(&mut app, name.as_deref()),
         },
 
         Commands::Canvas(args) => match args.command {
@@ -1248,5 +1297,127 @@ fn main() {
     if let Err(err) = result {
         eprintln!("Error: {err:#}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Argument-parsing tests for the MCP-parity subcommands (WI-40).
+    //!
+    //! These exercise only `clap` wiring — they do not invoke a runtime.
+    use super::*;
+
+    #[test]
+    fn parse_content_update_with_stdin_flag() {
+        let cli = Cli::try_parse_from(["nexus", "content", "update", "foo.md", "--stdin"])
+            .expect("parse content update --stdin");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Update { path, content, stdin } => {
+                    assert_eq!(path, "foo.md");
+                    assert!(content.is_none());
+                    assert!(stdin);
+                }
+                other => panic!("expected Update, got {:?}", std::mem::discriminant(&other)),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_content_update_with_content_flag() {
+        let cli = Cli::try_parse_from([
+            "nexus", "content", "update", "notes/a.md", "--content", "hello",
+        ])
+        .expect("parse content update --content");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::Update { path, content, stdin } => {
+                    assert_eq!(path, "notes/a.md");
+                    assert_eq!(content.as_deref(), Some("hello"));
+                    assert!(!stdin);
+                }
+                _ => panic!("expected Update"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_content_list_default_prefix_is_none() {
+        let cli = Cli::try_parse_from(["nexus", "content", "list"]).expect("parse content list");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::List { prefix } => assert!(prefix.is_none()),
+                _ => panic!("expected List"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_content_list_with_prefix() {
+        let cli = Cli::try_parse_from(["nexus", "content", "list", "--prefix", "notes/"])
+            .expect("parse content list --prefix");
+        match cli.command {
+            Commands::Content(args) => match args.command {
+                ContentCommand::List { prefix } => assert_eq!(prefix.as_deref(), Some("notes/")),
+                _ => panic!("expected List"),
+            },
+            _ => panic!("expected Content subcommand"),
+        }
+    }
+
+    #[test]
+    fn parse_tags_list_without_filter() {
+        let cli = Cli::try_parse_from(["nexus", "tags", "list"]).expect("parse tags list");
+        match cli.command {
+            Commands::Tags(args) => match args.command {
+                TagsCommand::List { name } => assert!(name.is_none()),
+            },
+            _ => panic!("expected Tags subcommand"),
+        }
+    }
+
+    #[test]
+    fn help_lists_new_mcp_parity_subcommands() {
+        // Smoke check that the three new subcommands (WI-40) are discoverable
+        // through `--help`. We inspect the rendered help strings instead of
+        // spawning the binary because integration tests run inside a sandbox
+        // that forbids `./target/debug/nexus`.
+        let mut cmd = Cli::command();
+
+        // Top-level: `nexus tags` subtree must exist.
+        let top = cmd.render_long_help().to_string();
+        assert!(top.contains("tags"), "top-level help missing 'tags':\n{top}");
+
+        // `nexus content --help` must list Update and List.
+        let content = cmd
+            .find_subcommand_mut("content")
+            .expect("content subcommand registered")
+            .render_long_help()
+            .to_string();
+        assert!(content.contains("update"), "content help missing 'update':\n{content}");
+        assert!(content.contains("list"), "content help missing 'list':\n{content}");
+
+        // `nexus tags --help` must list list.
+        let tags = cmd
+            .find_subcommand_mut("tags")
+            .expect("tags subcommand registered")
+            .render_long_help()
+            .to_string();
+        assert!(tags.contains("list"), "tags help missing 'list':\n{tags}");
+    }
+
+    #[test]
+    fn parse_tags_list_with_name_filter() {
+        let cli = Cli::try_parse_from(["nexus", "tags", "list", "--name", "project"])
+            .expect("parse tags list --name");
+        match cli.command {
+            Commands::Tags(args) => match args.command {
+                TagsCommand::List { name } => assert_eq!(name.as_deref(), Some("project")),
+            },
+            _ => panic!("expected Tags subcommand"),
+        }
     }
 }

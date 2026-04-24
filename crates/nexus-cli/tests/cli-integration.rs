@@ -39,6 +39,99 @@ fn storage_delete_removes_file() {
     assert!(!engine.file_exists("notes/delete-me.md").unwrap());
 }
 
+// ---------------------------------------------------------------------------
+// WI-40 — MCP parity CLI subcommand smoke tests
+//
+// Exercise the kernel IPC helpers behind `nexus content update`,
+// `nexus content list`, and `nexus tags list`. The CLI handlers are
+// thin wrappers over these helpers — end-to-end binary coverage would
+// require spawning a child process, which is not how this file rolls.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn content_update_overwrites_existing_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    nexus_bootstrap::init_forge(tmp.path()).unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let runtime = nexus_bootstrap::build_cli_runtime(tmp.path().to_path_buf()).unwrap();
+
+    // Create then update — mirrors `nexus content create` followed by
+    // `nexus content update`.
+    nexus_bootstrap::storage::write_file(&runtime, &rt, "notes/a.md", b"first").unwrap();
+    let meta =
+        nexus_bootstrap::storage::write_file(&runtime, &rt, "notes/a.md", b"second").unwrap();
+    assert_eq!(meta.path, "notes/a.md");
+
+    let bytes = nexus_bootstrap::storage::read_file(&runtime, &rt, "notes/a.md").unwrap();
+    assert_eq!(bytes, b"second");
+}
+
+#[test]
+fn content_list_with_prefix_filters() {
+    let tmp = tempfile::tempdir().unwrap();
+    nexus_bootstrap::init_forge(tmp.path()).unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let runtime = nexus_bootstrap::build_cli_runtime(tmp.path().to_path_buf()).unwrap();
+
+    nexus_bootstrap::storage::write_file(&runtime, &rt, "notes/one.md", b"1").unwrap();
+    nexus_bootstrap::storage::write_file(&runtime, &rt, "notes/two.md", b"2").unwrap();
+    nexus_bootstrap::storage::write_file(&runtime, &rt, "other/three.md", b"3").unwrap();
+
+    let all = nexus_bootstrap::storage::query_files_with_prefix(&runtime, &rt, "").unwrap();
+    assert!(all.len() >= 3);
+
+    let filtered =
+        nexus_bootstrap::storage::query_files_with_prefix(&runtime, &rt, "notes/").unwrap();
+    let paths: Vec<&str> = filtered.iter().map(|r| r.path.as_str()).collect();
+    assert!(paths.iter().all(|p| p.starts_with("notes/")));
+    assert!(paths.contains(&"notes/one.md"));
+    assert!(paths.contains(&"notes/two.md"));
+    assert!(!paths.contains(&"other/three.md"));
+}
+
+#[test]
+fn tags_list_returns_tag_occurrences() {
+    let tmp = tempfile::tempdir().unwrap();
+    nexus_bootstrap::init_forge(tmp.path()).unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let runtime = nexus_bootstrap::build_cli_runtime(tmp.path().to_path_buf()).unwrap();
+
+    // An inline-tagged note and a frontmatter-tagged note.
+    nexus_bootstrap::storage::write_file(
+        &runtime,
+        &rt,
+        "notes/inline.md",
+        b"# Inline\n\nA #project tagged line.\n",
+    )
+    .unwrap();
+    nexus_bootstrap::storage::write_file(
+        &runtime,
+        &rt,
+        "notes/front.md",
+        b"---\ntags: [project]\n---\n# Front\n",
+    )
+    .unwrap();
+
+    let hits = nexus_bootstrap::storage::query_tags(&runtime, &rt, "project").unwrap();
+    assert!(
+        !hits.is_empty(),
+        "expected at least one occurrence of #project"
+    );
+    assert!(hits.iter().all(|t| t.name == "project"));
+}
+
 #[test]
 fn plugin_scaffold_generates_project() {
     let tmp = tempfile::tempdir().unwrap();

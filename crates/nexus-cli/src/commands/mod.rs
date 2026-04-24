@@ -12,6 +12,7 @@ pub mod mcp;
 pub mod plugin;
 pub mod proc;
 pub mod skill;
+pub mod tags;
 pub mod term;
 pub mod watch;
 pub mod workflow;

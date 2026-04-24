@@ -364,19 +364,21 @@ Single-agent because it's all in `nexus-plugins` + `nexus-cli` — no cross-cutt
 |---|---|---|---|---|
 | 1 | `nexus_read_note` (:322) | `storage::read_file` | `nexus content read` ✓ | `api.kernel.invoke` ✓ |
 | 2 | `nexus_create_note` (:349) | `storage::write_file` | `nexus content create` ✓ | editor save ✓ |
-| 3 | `nexus_update_note` (:357) | `storage::write_file` | **missing** ✗ | editor save ✓ |
+| 3 | `nexus_update_note` (:357) | `storage::write_file` | `nexus content update` ✓ | editor save ✓ |
 | 4 | `nexus_delete_note` (:365) | `storage::delete_file` | `nexus content delete` ✓ | context menu ✓ |
-| 5 | `nexus_list_notes` (:385) | `storage::query_files` | **missing** ✗ | file explorer ✓ |
+| 5 | `nexus_list_notes` (:385) | `storage::query_files` | `nexus content list` ✓ | file explorer ✓ |
 | 6 | `nexus_search` (:429) | `storage::search` | `nexus content search` ✓ | search plugin ✓ |
 | 7 | `nexus_backlinks` (:479) | `storage::backlinks` | `nexus graph backlinks` ✓ | backlinks plugin ✓ |
 | 8 | `nexus_outgoing_links` (:516) | `storage::outgoing_links` | `nexus graph outgoing` ✓ | outgoing plugin ✓ |
 | 9 | `nexus_graph_status` (:560) | `storage::graph_stats` | `nexus graph status` ✓ | graph plugin ✓ |
-| 10 | `nexus_list_tags` (:591) | `storage::query_tags` | **missing** ✗ | tags plugin ✓ |
+| 10 | `nexus_list_tags` (:591) | `storage::query_tags` | `nexus tags list` ✓ | tags plugin ✓ |
 | 11 | `nexus_list_tasks` (:628) | `storage::query_tasks` | `nexus tasks list` ✓ | tasks view ✓ |
 | 12 | `nexus_toggle_task` (:674) | `storage::toggle_task` | `nexus tasks toggle` ✓ | editor checkbox ✓ |
 | 13 | `nexus_ask` (:706) | `ai::ask` | `nexus ai ask` ✓ | AI plugin ✓ |
 
 **Gaps:** 3 CLI subcommands missing (`update-note`, `list-notes`, `list-tags`). Shell coverage is 13/13. No backward-direction gaps (no shell/CLI feature lacks an MCP tool).
+
+**Status:** Closed — all three subcommands landed in WI-40; CLI coverage is now 13/13.
 
 **Design sketch.**
 

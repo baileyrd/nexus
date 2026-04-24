@@ -49,6 +49,98 @@ pub fn create(app: &mut App, path: &str, content: Option<&str>, stdin: bool) -> 
     Ok(())
 }
 
+/// Update an existing content node at `path`, overwriting its contents.
+///
+/// Mirrors the `nexus_update_note` MCP tool: under the hood the kernel IPC
+/// (`storage::write_file`) is the same as `create`, but the subcommand is
+/// exposed separately so the CLI surface maps 1:1 to the MCP tool set.
+pub fn update(app: &mut App, path: &str, content: Option<&str>, stdin: bool) -> Result<()> {
+    let body: String = if let Some(text) = content {
+        // Interpret escape sequences so users can pass newlines via --content "line1\nline2"
+        text.replace("\\n", "\n").replace("\\t", "\t")
+    } else if stdin {
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| anyhow::anyhow!("failed to read stdin: {e}"))?;
+        buf
+    } else {
+        String::new()
+    };
+
+    let format = app.format();
+    let (runtime, rt) = app.runtime()?;
+    let meta = ipc::write_file(runtime, rt, path, body.as_bytes())
+        .map_err(|e| anyhow::anyhow!("failed to update file '{path}': {e}"))?;
+
+    match format {
+        OutputFormat::Json | OutputFormat::Jsonl => {
+            print_success(
+                format,
+                &format!("updated '{path}'"),
+                &serde_json::json!({
+                    "path": meta.path,
+                    "size_bytes": meta.size_bytes,
+                    "content_hash": meta.content_hash,
+                    "modified_at": meta.modified_at,
+                }),
+            );
+        }
+        _ => {
+            println!("Updated: {}", meta.path);
+            println!("Size   : {} bytes", meta.size_bytes);
+            println!("Hash   : {}", meta.content_hash);
+        }
+    }
+
+    Ok(())
+}
+
+/// List every content node, optionally filtered by a path prefix.
+///
+/// Mirrors the `nexus_list_notes` MCP tool (kernel IPC `storage::query_files`).
+pub fn list(app: &mut App, prefix: Option<&str>) -> Result<()> {
+    let format = app.format();
+    let (runtime, rt) = app.runtime()?;
+    let records = ipc::query_files_with_prefix(runtime, rt, prefix.unwrap_or(""))
+        .map_err(|e| anyhow::anyhow!("failed to list files: {e}"))?;
+
+    if records.is_empty() {
+        if matches!(format, OutputFormat::Text) {
+            println!("No files found.");
+        } else {
+            print_list(format, &["Path", "Size", "Modified"], &[]);
+        }
+        return Ok(());
+    }
+
+    match format {
+        OutputFormat::Text => {
+            // One path per line is the most script-friendly representation for
+            // the default output mode (matches e.g. `ls` style listings).
+            for r in &records {
+                println!("{}", r.path);
+            }
+        }
+        _ => {
+            let headers = &["Path", "Size", "Modified"];
+            let rows: Vec<Vec<String>> = records
+                .iter()
+                .map(|r| {
+                    vec![
+                        r.path.clone(),
+                        r.size_bytes.to_string(),
+                        r.modified_at.to_string(),
+                    ]
+                })
+                .collect();
+            print_list(format, headers, &rows);
+        }
+    }
+
+    Ok(())
+}
+
 /// Read the content node at `path`.
 pub fn read(app: &mut App, path: &str, raw: bool) -> Result<()> {
     let (runtime, rt) = app.runtime()?;
