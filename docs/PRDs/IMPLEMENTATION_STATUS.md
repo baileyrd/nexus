@@ -1,6 +1,6 @@
 # Nexus PRD Implementation Status
 
-> **Snapshot date:** 2026-04-18 (end of session — includes cron trigger engine; PRD-16 Workflow promoted to 🟢. Every PRD 01–16 now ✅ or 🟢; PRD-17 is 🟢 desktop only with web + mobile deferred.)
+> **Snapshot date:** 2026-04-24 (refreshed after Phase 4 `app/` + `crates/nexus-app/` retirement and Phase 5 personal-tool polish — WI-37 legacy-shell retirement, WI-38 unified `nexus` binary, WI-39 plugin scaffold, WI-40 MCP parity, WI-43 default-on/off plugin catalog, WI-45-lite docs reconcile, WI-47 local panic log. Evidence links now point at `shell/src/` and service-crate IPC. Phase 5 formal-release items (WI-41 auto-updater, WI-42 Sentry, WI-44 marketplace, WI-46 beta→GA) are deferred to [REQUIRED-FOR-FORMAL-RELEASE.md](../REQUIRED-FOR-FORMAL-RELEASE.md) per personal-tool scope.)
 > **Scope:** PRDs 01–17 in this directory, audited against `crates/**` and `shell/src/**`.
 > **Update cadence:** refresh when a PRD's status tier changes, or at minimum at every minor release.
 >

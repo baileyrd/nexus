@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn embedding_blob_round_trip() {
-        let original = vec![1.0_f32, -2.5, 3.14, 0.0, f32::MAX];
+        let original = vec![1.0_f32, -2.5, 3.15, 0.0, f32::MAX];
         let blob = embedding_to_blob(&original);
         let restored = blob_to_embedding(&blob);
         assert_eq!(original, restored);

@@ -198,11 +198,17 @@ C4Container
 |---|---|---|---|
 | `nexus` (CLI) | Binary | Rust + clap | Headless CLI; also hosts MCP server |
 | `nexus-tui` | Binary | Rust + ratatui + crossterm | Interactive terminal UI |
-| `nexus-app` | Binary | Tauri 2 + Vite + React | Desktop shell; theme + layout |
 | `nexus-bootstrap` | Library | Rust | Runtime assembler |
 | `nexus-kernel` | Library | Rust + tokio | Event bus, IPC, capabilities, lifecycle |
+| `nexus-plugin-api` | Library | Rust | CorePlugin trait, IPC envelope types, capability taxonomy |
 | `nexus-storage` | Core plugin | rusqlite, tantivy, comrak, notify | File-as-truth, index, graph, **bases engine** (schema/query/relation) |
 | `nexus-ai` | Core plugin | reqwest, async-trait | Providers, embeddings, RAG |
+| `nexus-agent` | Core plugin | Rust | Agent mode orchestration + history |
+| `nexus-editor` | Core plugin | Rust | Editor session + buffer management |
+| `nexus-skills` | Core plugin | Rust | Skill packs / templates |
+| `nexus-workflow` | Core plugin | Rust | Workflow automation engine |
+| `nexus-terminal` | Core plugin | portable-pty, rusqlite | PTY sessions + saved commands |
+| `nexus-linkpreview` | Core plugin | reqwest, scraper | URL metadata fetch for previews |
 | `nexus-database` | Core plugin | csv, regex-lite | Bases support: property types, validation, formulas, CSV import/export (no SQL). IPC: `csv_import`, `csv_export`, `formula_eval` |
 | `nexus-security` | Core plugin | keyring | Vault, audit, path validation |
 | `nexus-plugins` | Library | wasmtime, notify, jsonschema | WASM sandbox + loader + hot-reload |
@@ -211,7 +217,10 @@ C4Container
 | `nexus-git` | Library | git2 | Git read ops |
 | `nexus-formats` | Library | comrak, serde_yaml | Markdown/YAML/TOML/canvas parsing |
 | `nexus-kv` | Library | rusqlite | SQLite KV backend |
+| `nexus-panic-log` | Library | Rust (stdlib only + dirs) | Local panic hook → `~/.nexus-shell/logs/panic.log` |
 | `nexus-types` | Library | serde | Shared types (leaf) |
+
+The desktop shell (`shell/src-tauri/`, crate name `nexus-shell`) is workspace-excluded — it's the Tauri 2 + Vite + React plugin-first UI. It consumes the above crates through `nexus-bootstrap`.
 
 ---
 
