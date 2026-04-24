@@ -14,7 +14,7 @@
 //! `nexus-bootstrap` harness) a JSON Schema into
 //! `crates/nexus-bootstrap/schemas/ipc/`.
 //!
-//! See `docs/PHASE-4-IMPLEMENTATION-PLAN.md` §3.1 and
+//! See `docs/planning/PHASE-4-IMPLEMENTATION-PLAN.md` §3.1 and
 //! `docs/ipc-schemas.md` for the generator design.
 
 use serde::{Deserialize, Serialize};

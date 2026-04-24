@@ -34,7 +34,7 @@ import { runInstallTimeConsent } from './plugins/core/capabilityPrompt'
 // WI-43: built-in plugin registrations live in `plugins/catalog.ts` split
 // into default-on (loaded unconditionally) and default-off (opt-in via
 // Settings > Plugins, persisted under the `plugins.enabled` config key).
-// See docs/PHASE-5-IMPLEMENTATION-PLAN.md §2.
+// See docs/planning/PHASE-5-IMPLEMENTATION-PLAN.md §2.
 import {
   DEFAULT_ON_PLUGINS,
   DEFAULT_OFF_PLUGINS,

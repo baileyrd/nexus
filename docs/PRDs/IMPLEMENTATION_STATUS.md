@@ -212,5 +212,5 @@
 
 - When a BACKLOG.md item moves to BACKLOG_COMPLETED.md, check whether its PRD's status tier should bump.
 - When a PRD's gaps list shrinks to zero, mark ✅ and note the commit that closed the last gap.
-- When a new audit (`docs/UI-AUDIT.md`, `docs/MICROKERNEL-AUDIT.md`) discovers a finding, add it to the affected PRD's Gaps line with the finding id.
+- When a new audit (`docs/planning/UI-AUDIT.md`, `docs/planning/MICROKERNEL-AUDIT.md`) discovers a finding, add it to the affected PRD's Gaps line with the finding id.
 - Avoid re-describing the PRD here — link to it. This doc is the state-of-the-build, not a second copy of the spec.

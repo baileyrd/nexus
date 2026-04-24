@@ -3,7 +3,7 @@
 **Audit date:** 2026-04-16
 **Auditor:** Editor-Shell Auditor (v1), per `editor-shell-auditor.md`
 **Scope:** `app/src/**` (React/Vite frontend), plus the shell-side Tauri surface in `crates/nexus-app/src/` that directly shapes the UI contract.
-**Companion audit:** `docs/MICROKERNEL-AUDIT.md` (microkernel / kernel-bus / loader; 2026-04-16). This report inherits some findings from that audit where the UI is the user-visible manifestation — those are cross-referenced, not re-discovered.
+**Companion audit:** `docs/planning/MICROKERNEL-AUDIT.md` (microkernel / kernel-bus / loader; 2026-04-16). This report inherits some findings from that audit where the UI is the user-visible manifestation — those are cross-referenced, not re-discovered.
 
 ---
 
@@ -349,7 +349,7 @@ These are things the code base shape suggests are problems, but I did not have t
 
 ## 7. Methodology Appendix
 
-**Procedure.** The audit followed the 10-dimension walkthrough prescribed in `editor-shell-auditor.md`. Shell inspiration and trust model were confirmed from `README.md` + the prior microkernel audit (`docs/MICROKERNEL-AUDIT.md`, 2026-04-16) as "VS Code + Obsidian hybrid, third-party untrusted". Each dimension was walked independently by:
+**Procedure.** The audit followed the 10-dimension walkthrough prescribed in `editor-shell-auditor.md`. Shell inspiration and trust model were confirmed from `README.md` + the prior microkernel audit (`docs/planning/MICROKERNEL-AUDIT.md`, 2026-04-16) as "VS Code + Obsidian hybrid, third-party untrusted". Each dimension was walked independently by:
 
 1. Listing the files in scope for the dimension.
 2. Reading them end-to-end (not excerpted) — the main targets being `app/src/contributions/registry.ts`, `app/src/contributions/plugins.ts`, `app/src/contributions/builtins.ts`, `app/src/plugins/scriptRuntime.ts`, `app/src/plugins/nexusContext.ts`, `app/src/plugins/events.ts`, `app/src/keybindings/*`, `app/src/stores/layout.ts`, `app/src/components/layout/WorkspaceView.tsx`, `app/src/components/palette/CommandPalette.tsx`, `app/src/components/surfaces/EditorSurface.tsx`, `app/src/components/panels/PluginPanel.tsx`, `app/src/ipc/plugins.ts`, `crates/nexus-app/src/lib.rs`, `crates/nexus-app/src/plugins.rs`, `crates/nexus-app/tauri.conf.json`, `crates/nexus-app/capabilities/default.json`, `plugins/hello-nexus/manifest.toml`, `plugins/hello-js/manifest.toml`.

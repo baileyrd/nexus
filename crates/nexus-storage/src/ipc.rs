@@ -14,7 +14,7 @@
 //! `crates/nexus-bootstrap/schemas/ipc/`.
 //!
 //! Remaining 47+ handlers migrate to this pattern opportunistically in v1.1
-//! per `docs/PHASE-4-IMPLEMENTATION-PLAN.md` §3.1.
+//! per `docs/planning/PHASE-4-IMPLEMENTATION-PLAN.md` §3.1.
 //!
 //! # Why mirror types instead of deriving on existing types?
 //!

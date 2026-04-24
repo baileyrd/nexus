@@ -1,7 +1,7 @@
 // src/types/plugin.ts
 //
 // Compat re-export shim — phased move to `@nexus/extension-api` per
-// WI-20 / docs/PHASE-1-IMPLEMENTATION-PLAN.md §5.
+// WI-20 / docs/planning/PHASE-1-IMPLEMENTATION-PLAN.md §5.
 //
 // Existing shell imports continue to work unchanged; new code should
 // import directly from `@nexus/extension-api` once the package is

@@ -266,7 +266,7 @@ pub fn install_dispatch(app: &mut App, plugin: &str) -> Result<()> {
 
     eprintln!(
         "Plugin install requires the marketplace (Phase 5 WI-44). \
-         See docs/PHASE-5-IMPLEMENTATION-PLAN.md.\n\
+         See docs/planning/PHASE-5-IMPLEMENTATION-PLAN.md.\n\
          \n\
          To install a local plugin directory, pass a path that exists on disk:\n    \
          nexus plugin install ./path/to/plugin"

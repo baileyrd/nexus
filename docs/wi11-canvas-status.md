@@ -1,6 +1,6 @@
 # WI-11 Canvas — Validation Audit
 
-**Source plan:** docs/PHASE-2-IMPLEMENTATION-PLAN.md §4.3
+**Source plan:** docs/planning/PHASE-2-IMPLEMENTATION-PLAN.md §4.3
 **Sub-plan:** docs/canvas-shell-plan.md
 **Audited against:** shell/src/plugins/nexus/canvas/, crates/nexus-storage/src/{core_plugin.rs,canvas.rs,lib.rs}
 **Date:** 2026-04-23

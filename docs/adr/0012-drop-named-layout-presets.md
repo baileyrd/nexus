@@ -72,7 +72,7 @@ kernel, no preset picker in the settings panel, and no
 
 ## References
 
-- `docs/PHASE-2-IMPLEMENTATION-PLAN.md` §5.5 (WI-15)
+- `docs/planning/PHASE-2-IMPLEMENTATION-PLAN.md` §5.5 (WI-15)
 - `docs/leaf-architecture.md` — the freeform pane tree that obsoletes
   preset rigidity
 - ADR 0011 — adoption of the plugin-first shell

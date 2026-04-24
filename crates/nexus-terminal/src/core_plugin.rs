@@ -84,7 +84,7 @@ pub const PLUGIN_ID: &str = "com.nexus.terminal";
 /// so a TS subscriber can filter by prefix
 /// (via [`nexus_kernel::EventFilter::CustomPrefix`]) and still see which
 /// session produced the chunk. Payload shape: [`OutputStreamPayload`].
-/// See `docs/PHASE-2-IMPLEMENTATION-PLAN.md` §4.4 (WI-12).
+/// See `docs/planning/PHASE-2-IMPLEMENTATION-PLAN.md` §4.4 (WI-12).
 pub const EVENT_OUTPUT_PREFIX: &str = "com.nexus.terminal.output.";
 
 /// `create_session` handler id.

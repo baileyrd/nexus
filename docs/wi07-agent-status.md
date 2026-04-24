@@ -1,6 +1,6 @@
 # WI-07 Agent Panel — State Audit
 
-**Source plan:** docs/PHASE-2-IMPLEMENTATION-PLAN.md §4.1
+**Source plan:** docs/planning/PHASE-2-IMPLEMENTATION-PLAN.md §4.1
 **Audited against:** shell/src/plugins/nexus/agent/, app/src/components/panels/AgentHistoryPanel.tsx, crates/nexus-agent/src/core_plugin.rs
 **Date:** 2026-04-23
 

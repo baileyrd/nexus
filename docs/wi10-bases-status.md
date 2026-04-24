@@ -1,6 +1,6 @@
 # WI-10 Bases — Validation Audit
 
-**Source plan:** docs/PHASE-2-IMPLEMENTATION-PLAN.md §4.2
+**Source plan:** docs/planning/PHASE-2-IMPLEMENTATION-PLAN.md §4.2
 **Sub-plan:** docs/bases-shell-plan.md
 **Audited against:** shell/src/plugins/nexus/bases/, crates/nexus-storage/src/core_plugin.rs (base_*)
 **Date:** 2026-04-23

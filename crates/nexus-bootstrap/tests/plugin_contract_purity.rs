@@ -16,7 +16,7 @@
 //! 3. Every crate listed in `PLUGIN_PURITY_CRATES` (the opt-in roster of
 //!    community-tier crates) has no direct dependency on any impl crate.
 //!    The list is empty today — no community-tier crates ship in-tree yet
-//!    per `docs/PHASE-3-IMPLEMENTATION-PLAN.md` §3.3 and INTEGRATION-REVIEW
+//!    per `docs/planning/PHASE-3-IMPLEMENTATION-PLAN.md` §3.3 and INTEGRATION-REVIEW
 //!    §6. A stand-alone validator self-test (see `self_test_*`) still
 //!    exercises the positive and negative paths so the guardrail is proven
 //!    to work before the first community plugin lands.
@@ -84,7 +84,7 @@ fn contract_crate_does_not_depend_on_impl_crates() {
          The contract crate is the stable surface community plugins pin.\n\
          Pulling engine internals into it defeats the purpose — route any\n\
          new type through a trait or data-class defined in nexus-plugin-api\n\
-         itself. See docs/PHASE-3-IMPLEMENTATION-PLAN.md §3.3."
+         itself. See docs/planning/PHASE-3-IMPLEMENTATION-PLAN.md §3.3."
     );
 }
 
@@ -144,7 +144,7 @@ fn community_plugin_crates_do_not_depend_on_impl_crates() {
         violations.is_empty(),
         "plugin-contract purity violated:\n{}\n\n\
          Community-tier crates must reach the engine through nexus-plugin-api \
-         / ipc_call only. See docs/PHASE-3-IMPLEMENTATION-PLAN.md §3.3.",
+         / ipc_call only. See docs/planning/PHASE-3-IMPLEMENTATION-PLAN.md §3.3.",
         violations.join("\n"),
     );
 }

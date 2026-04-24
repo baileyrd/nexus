@@ -71,6 +71,6 @@ copying legacy patterns.
 
 ## References
 
-- `docs/PHASE-2-IMPLEMENTATION-PLAN.md` §5.5 (WI-17)
+- `docs/planning/PHASE-2-IMPLEMENTATION-PLAN.md` §5.5 (WI-17)
 - `packages/nexus-extension-api/README.md` — canonical API surface
 - ADR 0011 — plugin-first shell adoption

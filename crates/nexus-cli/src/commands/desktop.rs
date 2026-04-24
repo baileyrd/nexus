@@ -6,7 +6,7 @@
 //! binary at runtime and spawns it, forwarding any extra arguments and
 //! propagating the exit code.
 //!
-//! Resolution order (§7 default iii of docs/PHASE-4-IMPLEMENTATION-PLAN.md):
+//! Resolution order (§7 default iii of docs/planning/PHASE-4-IMPLEMENTATION-PLAN.md):
 //!
 //! 1. `$NEXUS_SHELL_BIN` env var, if set.
 //! 2. Sibling of the current executable

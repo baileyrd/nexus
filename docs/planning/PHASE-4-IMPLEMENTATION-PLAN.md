@@ -37,7 +37,7 @@ Phase 4 cleans the frontend surface so CLI/TUI/MCP/Desktop all speak one languag
 3. `grep -r "nexus-app\|crates/nexus-app\|app/" README.md CONTRIBUTING.md scripts/ .github/` returns zero matches outside historical / changelog-style text.
 4. `nexus --help` shows `desktop`, `tui`, `plugin scaffold`, `plugin install` (if WI-44 lands from Phase 5), `content search`, and any other commands without the `app/` path being required.
 5. `nexus plugin scaffold --template script my.example` produces a compilable sandboxed plugin that loads into the shell via `~/.nexus-shell/plugins/`.
-6. MCP parity matrix at the bottom of `docs/PHASE-4-IMPLEMENTATION-PLAN.md` is all ✓ (or documents the legitimate exceptions).
+6. MCP parity matrix at the bottom of `docs/planning/PHASE-4-IMPLEMENTATION-PLAN.md` is all ✓ (or documents the legitimate exceptions).
 
 ---
 
@@ -465,7 +465,7 @@ WI-36 pilot is the only item needing serious design; agents handle it cleanly vi
 | WI-37 deletion breaks a dev-loop someone was using | Medium | Announce in v0.4.0-pre; give forks a month to rebase. Keep a historical tag. |
 | WI-38 `nexus-shell` binary resolution breaks for users who built from source (no installer) | High | Document `$NEXUS_SHELL_BIN` env var. Provide a `justfile`/`make` target that symlinks the built Tauri binary into PATH for dev. |
 | WI-39 scaffold produces code that drifts from the shipping `@nexus/extension-api` version | Medium | Templates pin to a concrete version; CI includes a scaffold-and-typecheck smoke. |
-| MCP tool shape changes post-Phase 4 (Phase 5 marketplace or docs work adds a new MCP tool) → parity gap re-opens | Low | `WI-40` matrix lives in `docs/PHASE-4-IMPLEMENTATION-PLAN.md` + is auto-regenerable from the MCP source; re-run in Phase 5 CI. |
+| MCP tool shape changes post-Phase 4 (Phase 5 marketplace or docs work adds a new MCP tool) → parity gap re-opens | Low | `WI-40` matrix lives in `docs/planning/PHASE-4-IMPLEMENTATION-PLAN.md` + is auto-regenerable from the MCP source; re-run in Phase 5 CI. |
 | WI-38 TUI-as-library refactor accidentally breaks standalone TUI binary users | Low | Keep the standalone binary with a thin `fn main() { lib::run_tui().unwrap() }` wrapper. |
 
 ---

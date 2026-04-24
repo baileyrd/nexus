@@ -4,7 +4,7 @@
 //! invoke `com.nexus.storage::list_dir` → receive kernel bus event →
 //! shut down cleanly" Phase 1 §2 #5 acceptance criterion.
 //!
-//! Per `docs/PHASE-1-IMPLEMENTATION-PLAN.md` §11 question 2, the full Tauri
+//! Per `docs/planning/PHASE-1-IMPLEMENTATION-PLAN.md` §11 question 2, the full Tauri
 //! window E2E (the "mount as View via Leaf" half) is deferred to Phase 4
 //! polish. Phase 1 acceptance is satisfied by a unit-test harness on each
 //! side of the bridge:

@@ -164,7 +164,7 @@ const HELP_FOOTER = `
 See:
   - CONTRIBUTING.md (plugin authoring guide)
   - packages/nexus-extension-api/README.md (the supported surface)
-  - docs/PHASE-1-IMPLEMENTATION-PLAN.md §4 (this guardrail) and §8 (WI-25 drain)
+  - docs/planning/PHASE-1-IMPLEMENTATION-PLAN.md §4 (this guardrail) and §8 (WI-25 drain)
 
 If a primitive truly has no @nexus/extension-api equivalent, add the file to
 the corresponding allowlist in shell/tests/plugin-import-hygiene.test.ts and

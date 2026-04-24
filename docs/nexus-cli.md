@@ -74,7 +74,7 @@ Dispatches on the argument:
 
   ```
   Plugin install requires the marketplace (Phase 5 WI-44).
-  See docs/PHASE-5-IMPLEMENTATION-PLAN.md.
+  See docs/planning/PHASE-5-IMPLEMENTATION-PLAN.md.
   ```
 
   Marketplace fetch-and-unpack lands in Phase 5 WI-44.
@@ -140,7 +140,7 @@ legacy WASM project shape (`Cargo.toml` + `manifest.toml` +
 - `crates/nexus-cli/src/commands/tui.rs` — TUI dispatcher.
 - `crates/nexus-cli/src/commands/desktop.rs` — shell-binary resolution.
 - `crates/nexus-cli/src/commands/plugin.rs` — plugin handlers.
-- `docs/PHASE-4-IMPLEMENTATION-PLAN.md` §4.1 — the WI-38 spec.
-- `docs/PHASE-4-IMPLEMENTATION-PLAN.md` §4.2 — the WI-39 scaffold spec.
+- `docs/planning/PHASE-4-IMPLEMENTATION-PLAN.md` §4.1 — the WI-38 spec.
+- `docs/planning/PHASE-4-IMPLEMENTATION-PLAN.md` §4.2 — the WI-39 scaffold spec.
 - `docs/writing-your-first-plugin.md` — plugin-authoring tutorial.
-- `docs/PHASE-5-IMPLEMENTATION-PLAN.md` — marketplace (WI-44) plans.
+- `docs/planning/PHASE-5-IMPLEMENTATION-PLAN.md` — marketplace (WI-44) plans.

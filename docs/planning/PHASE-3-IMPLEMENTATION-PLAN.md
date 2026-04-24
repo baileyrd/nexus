@@ -159,7 +159,7 @@ In `crates/nexus-plugins/tests/` (new or extending an existing file): a symlink-
 - `cargo test -p nexus-kernel` — green, including the new `write_file_rejects_symlinked_parent` test.
 - `cargo test -p nexus-plugins --test toctou_regression` — green on Unix (skipped on Windows).
 - `grep -rn "canonicalize" crates/nexus-plugins/src/host_fns.rs` — only matches lie in `read_file` paths, not `write_file`.
-- MK F-5.3.1 and F-5.3.2 are marked closed in `docs/MICROKERNEL-AUDIT.md` (status column update).
+- MK F-5.3.1 and F-5.3.2 are marked closed in `docs/planning/MICROKERNEL-AUDIT.md` (status column update).
 
 #### 3.1.7 Risks
 
@@ -231,7 +231,7 @@ Two commits (both atomic, reviewable):
 - A community plugin with `"apiVersion": "2"` in its `plugin.json` fails to load with a user-visible notification, not just a console error.
 - A community plugin with no `apiVersion` field still loads (back-compat).
 - `IncompatibleApiVersionError` is a named error class with `pluginId`, `requestedVersion`, `supportedVersion` fields.
-- UI F-9.1.1 marked closed in `docs/UI-AUDIT.md`.
+- UI F-9.1.1 marked closed in `docs/planning/UI-AUDIT.md`.
 
 #### 3.2.7 Risks
 
@@ -866,4 +866,4 @@ These decisions materially shape the implementation. Surface at Phase 3 kickoff;
 5. **Start Phase 3c with Agent 0 design review.** Don't commit implementation code until the CSP research + sandbox architecture doc is accepted.
 6. **Checkpoint at the 3a → 3b boundary** against this plan's estimates; reforecast before Phase 3c which is where the real variance lives.
 
-Each WI's commit plan is self-contained (§3-§5); land them incrementally per the Phase 0 workflow. Update `docs/MICROKERNEL-AUDIT.md` and `docs/UI-AUDIT.md` in the same commit that closes each finding — don't leave the audit docs stale.
+Each WI's commit plan is self-contained (§3-§5); land them incrementally per the Phase 0 workflow. Update `docs/planning/MICROKERNEL-AUDIT.md` and `docs/planning/UI-AUDIT.md` in the same commit that closes each finding — don't leave the audit docs stale.

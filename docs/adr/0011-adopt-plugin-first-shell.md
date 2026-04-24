@@ -50,7 +50,7 @@ overlapping IPC adapters over a shared kernel (`nexus-bootstrap`).
 desktop shell for Nexus going forward. Retire `app/` + `crates/nexus-app`
 once feature parity is reached.**
 
-The migration is phased (see `docs/INTEGRATION-REVIEW.md` §5):
+The migration is phased (see `docs/planning/INTEGRATION-REVIEW.md` §5):
 
 1. **Freeze** new capability work on the legacy shell. All new Tauri
    commands land as IPC handlers in the relevant service crate (reachable
@@ -174,14 +174,14 @@ valuable regardless.
 
 ## References
 
-- `docs/INTEGRATION-REVIEW.md` — full audit informing this decision
+- `docs/planning/INTEGRATION-REVIEW.md` — full audit informing this decision
 - `docs/shell-kernel-bridge-plan.md` — bridge contract (Phases 0–3
   delivered)
 - `docs/leaf-architecture.md` / `docs/leaf-migration-plan.md` — Leaf
   foundation
-- `docs/MICROKERNEL-AUDIT.md` — security findings that apply across both
+- `docs/planning/MICROKERNEL-AUDIT.md` — security findings that apply across both
   shells
-- `docs/UI-AUDIT.md` — UI-specific security findings
+- `docs/planning/UI-AUDIT.md` — UI-specific security findings
 - `shell/README.md` — plugin-first shell philosophy
 - `DEPRECATED.md` — existing deprecation policy; extended here to cover
   the legacy shell
