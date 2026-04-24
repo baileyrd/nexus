@@ -1,5 +1,7 @@
 # Nexus Micro-Kernel Architecture Audit
 
+> **Historical document** — Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). Paths below reference the legacy `app/` and `crates/nexus-app/` tree that has since been deleted. For current locations see `docs/legacy-shell-retirement.md`.
+
 **Auditor:** Micro-Kernel Architecture Auditor (per `microkernel-auditor.md`)
 **Date:** 2026-04-16
 **Trust model assumed:** Third-party, untrusted community plugins

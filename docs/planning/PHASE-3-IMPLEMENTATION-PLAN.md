@@ -1,5 +1,7 @@
 # Phase 3 Implementation Plan — Security Hardening
 
+> **Historical document** — Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). Paths below reference the legacy `app/` and `crates/nexus-app/` tree that has since been deleted. For current locations see `docs/legacy-shell-retirement.md`.
+
 **Status:** Plan only (no code changes yet)
 **Date:** 2026-04-23
 **Author:** Claude (audit + planning run)

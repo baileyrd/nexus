@@ -1,5 +1,7 @@
 # Phase 2 Parity Checklist
 
+> **Historical document** — Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). Paths below reference the legacy `app/` and `crates/nexus-app/` tree that has since been deleted. For current locations see `docs/legacy-shell-retirement.md`.
+
 **Created:** 2026-04-23
 **Companion artifact:** [`Parity-Checklist.xlsx`](./Parity-Checklist.xlsx) — 23 work items, filterable/sortable with dropdowns for size/priority/phase/status.
 

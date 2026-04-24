@@ -1,5 +1,7 @@
 # Nexus Full-App Integration Review
 
+> **Historical document** — Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). Paths below reference the legacy `app/` and `crates/nexus-app/` tree that has since been deleted. For current locations see `docs/legacy-shell-retirement.md`.
+
 **Date:** 2026-04-23
 **Author:** Claude (audit run)
 **Scope:** Full-repo deep audit of Nexus (Rust microkernel + Tauri desktop shell + CLI/TUI/MCP frontends + WASM plugin system), assessing the path to a unified, ship-ready v1 desktop product.

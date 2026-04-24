@@ -1,5 +1,7 @@
 # App vs. Shell: Capability Comparison
 
+> **Historical document** — Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). Paths below reference the legacy `app/` and `crates/nexus-app/` tree that has since been deleted. For current locations see `docs/legacy-shell-retirement.md`.
+
 **Date:** 2026-04-23
 **Scope:** Detailed per-command / per-plugin comparison between the two coexisting Tauri desktop shells in the Nexus repo — legacy `app/` + `crates/nexus-app` vs. new plugin-first `shell/` + `shell/src-tauri`.
 **Companion artifact:** [`Shell-Capability-Comparison.xlsx`](./Shell-Capability-Comparison.xlsx) — 115-row matrix, sortable/filterable by category and parity status.

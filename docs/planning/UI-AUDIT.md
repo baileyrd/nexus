@@ -1,5 +1,7 @@
 # Nexus — Editor-Shell Architecture Audit (UI)
 
+> **Historical document** — Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). Paths below reference the legacy `app/` and `crates/nexus-app/` tree that has since been deleted. For current locations see `docs/legacy-shell-retirement.md`.
+
 **Audit date:** 2026-04-16
 **Auditor:** Editor-Shell Auditor (v1), per `editor-shell-auditor.md`
 **Scope:** `app/src/**` (React/Vite frontend), plus the shell-side Tauri surface in `crates/nexus-app/src/` that directly shapes the UI contract.
