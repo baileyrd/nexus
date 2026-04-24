@@ -121,30 +121,37 @@ fn is_executable(_p: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    //! We deliberately avoid mutating process-wide env here — in a parallel
+    //! test runner that leaks into unrelated crates (observed: the term
+    //! tests panicking when HOME was moved out from under them). The
+    //! platform helpers are pure functions and test fine directly.
     use super::*;
 
     #[test]
-    fn resolves_from_env_var() {
-        // `/bin/true` exists on every Unix CI image we care about.
-        #[cfg(unix)]
-        {
-            // SAFETY: set_var is safe in single-threaded test context.
-            unsafe { std::env::set_var("NEXUS_SHELL_BIN", "/bin/true"); }
-            let path = resolve_shell_binary().expect("env-var resolution");
-            assert_eq!(path, PathBuf::from("/bin/true"));
-            unsafe { std::env::remove_var("NEXUS_SHELL_BIN"); }
+    fn shell_bin_filename_matches_platform() {
+        let name = shell_bin_filename();
+        if cfg!(windows) {
+            assert!(name.ends_with(".exe"));
+        } else {
+            assert_eq!(name, "nexus-shell");
         }
     }
 
     #[test]
-    fn env_var_nonexistent_errors() {
+    fn search_path_finds_common_binary() {
+        // `sh` is on PATH in every Unix CI image we care about.
         #[cfg(unix)]
         {
-            unsafe { std::env::set_var("NEXUS_SHELL_BIN", "/definitely/not/here/nexus-shell"); }
-            let err = resolve_shell_binary().expect_err("should fail");
-            let msg = format!("{err}");
-            assert!(msg.contains("NEXUS_SHELL_BIN"), "got: {msg}");
-            unsafe { std::env::remove_var("NEXUS_SHELL_BIN"); }
+            let found = search_path("sh");
+            assert!(found.is_some(), "expected to find `sh` on PATH");
+            let path = found.unwrap();
+            assert!(path.is_file(), "result is not a regular file: {path:?}");
         }
+    }
+
+    #[test]
+    fn search_path_missing_returns_none() {
+        let found = search_path("definitely-not-a-real-binary-xyz-123");
+        assert!(found.is_none());
     }
 }

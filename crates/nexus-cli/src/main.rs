@@ -530,13 +530,32 @@ struct PluginArgs {
 
 #[derive(Subcommand)]
 enum PluginCommand {
-    /// Install a plugin from a directory
+    /// Install a plugin. If `plugin` is an existing local directory, the
+    /// kernel loads it from disk (legacy behavior). Otherwise the argument
+    /// is treated as a marketplace plugin id and the command prints a stub
+    /// message pointing at Phase 5 WI-44.
     Install {
-        /// Path to the plugin directory
-        dir: PathBuf,
+        /// Local plugin directory path, or marketplace plugin id
+        /// (e.g. `community.hello-world`).
+        plugin: String,
     },
-    /// List installed plugins
-    List,
+    /// List installed plugins. Default lists kernel plugins from the forge;
+    /// with `--shell`, enumerates shell plugins under `~/.nexus-shell/plugins/`.
+    List {
+        /// List shell plugins from `~/.nexus-shell/plugins/` instead of
+        /// kernel plugins.
+        #[arg(long)]
+        shell: bool,
+    },
+    /// Remove a shell plugin by id — deletes `~/.nexus-shell/plugins/<id>/`.
+    /// For kernel plugins, use `plugin uninstall`.
+    Remove {
+        /// Plugin id (directory name under `~/.nexus-shell/plugins/`).
+        id: String,
+        /// Skip confirmation prompt.
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
     /// Call a plugin command
     Call {
         /// Plugin identifier
@@ -1086,8 +1105,19 @@ fn main() {
         },
 
         Commands::Plugin(args) => match args.command {
-            PluginCommand::Install { dir } => commands::plugin::install(&mut app, &dir),
-            PluginCommand::List => commands::plugin::list(&mut app),
+            PluginCommand::Install { plugin } => {
+                commands::plugin::install_dispatch(&mut app, &plugin)
+            }
+            PluginCommand::List { shell } => {
+                if shell {
+                    commands::plugin::list_shell_plugins()
+                } else {
+                    commands::plugin::list(&mut app)
+                }
+            }
+            PluginCommand::Remove { id, yes } => {
+                commands::plugin::remove_shell_plugin(&id, yes)
+            }
             PluginCommand::Call { plugin_id, command, args } => {
                 let args_json = args.as_deref().unwrap_or("{}");
                 commands::plugin::call(&mut app, &plugin_id, &command, args_json)
