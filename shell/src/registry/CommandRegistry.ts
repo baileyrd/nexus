@@ -4,6 +4,7 @@
 
 import type { CommandContribution, CommandEntry } from '../types/plugin'
 import { activationTriggers } from '../host/ActivationTriggers'
+import { eventBus } from '../host/EventBus'
 
 export class CommandRegistry {
   private commands = new Map<string, CommandEntry & { handler?: (...args: unknown[]) => unknown }>()
@@ -50,7 +51,33 @@ export class CommandRegistry {
       console.warn(`[CommandRegistry] No handler for command '${id}'`)
       return
     }
-    return cmd.handler(...args)
+    // WI-35 — per-plugin crash quarantine (Q3 default: re-throw).
+    // A handler that panics must not leave the registry in an
+    // inconsistent state: the map entry stays, sibling commands stay
+    // callable, and the error is surfaced on the event bus as
+    // `command:error` so UI layers (notification service, status bar)
+    // can react without the caller having to catch. We still re-throw
+    // so the awaiter — typically the command palette / keybinding
+    // dispatcher — can decide whether to show a modal, retry, etc.
+    // (Unlike EventBus.emit, which swallows per-listener failures
+    // because event dispatch has no single point to catch.)
+    try {
+      return await cmd.handler(...args)
+    } catch (err) {
+      console.error(`[CommandRegistry] Command '${id}' threw:`, err)
+      try {
+        eventBus.emit('command:error', {
+          commandId: id,
+          pluginId: cmd.pluginId,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      } catch {
+        // eventBus.emit already swallows per-listener errors; the
+        // outer catch is belt-and-braces for the extraordinarily
+        // unlikely case that the map lookup itself throws.
+      }
+      throw err
+    }
   }
 
   all(): CommandEntry[] {

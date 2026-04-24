@@ -24,6 +24,7 @@ import assert from 'node:assert/strict'
 import { ExtensionHost } from './ExtensionHost.ts'
 import { PluginRegistry } from './PluginRegistry.ts'
 import { activationTriggers } from './ActivationTriggers.ts'
+import { eventBus } from './EventBus.ts'
 import type { Plugin, PluginAPI } from '../types/plugin.ts'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -243,4 +244,81 @@ test('two plugins gated on the same trigger both wake on a single fire', async (
   await activationTriggers.fire('onView:shared')
   assert.deepEqual(seen.sort(), ['a', 'b'])
   assert.equal(activationTriggers.hasPending('onView:shared'), false)
+})
+
+// ── WI-35 — per-plugin crash quarantine ─────────────────────────────────────
+
+test('WI-35 — a plugin whose activate() throws does not abort sibling eager loads', async () => {
+  const { host } = freshHost()
+  const order: string[] = []
+  const bad = makePlugin({
+    id: 'wi35.bad',
+    activationEvents: ['onStartup'],
+    onActivate: () => {
+      order.push('bad')
+      throw new Error('boom')
+    },
+  })
+  const good = makePlugin({
+    id: 'wi35.good',
+    activationEvents: ['onStartup'],
+    onActivate: () => { order.push('good') },
+  })
+  // `bad` first so a naïve propagating activate() would kill `good`.
+  await host.loadAll([bad, good])
+  assert.equal(host.getState('wi35.bad'), 'error')
+  assert.equal(host.getState('wi35.good'), 'active')
+  assert.deepEqual(order, ['bad', 'good'])
+})
+
+test('WI-35 — activate() failure cleans up contributions and fires plugin:error', async () => {
+  const { host, registry } = freshHost()
+  const errors: Array<{ pluginId: string; error: Error }> = []
+  const unsub = eventBus.on<{ pluginId: string; error: Error }>(
+    'plugin:error',
+    (e) => { errors.push(e) },
+  )
+  try {
+    const p: Plugin = {
+      manifest: {
+        id: 'wi35.contribs',
+        name: 'wi35.contribs',
+        version: '0.0.0',
+        core: false,
+        activationEvents: ['onStartup'],
+        contributes: {
+          commands: [{ id: 'wi35.contribs.hello', title: 'Hello' }],
+        },
+      },
+      activate: () => { throw new Error('halfway') },
+    }
+    await host.loadAll([p])
+    assert.equal(host.getState('wi35.contribs'), 'error')
+    // Contributions swept — the manifest-registered command is gone,
+    // so a later retry (e.g. user reload) can re-register cleanly.
+    assert.equal(registry.commands.has('wi35.contribs.hello'), false)
+    assert.equal(errors.length, 1)
+    assert.equal(errors[0].pluginId, 'wi35.contribs')
+    assert.match(errors[0].error.message, /halfway/)
+  } finally {
+    unsub()
+  }
+})
+
+test('WI-35 — EventBus.emit: a throwing listener does not stop sibling listeners', () => {
+  const seen: string[] = []
+  const unsubA = eventBus.on('wi35.topic', () => {
+    seen.push('a')
+    throw new Error('listener-a-boom')
+  })
+  const unsubB = eventBus.on('wi35.topic', () => { seen.push('b') })
+  try {
+    // Must not throw — EventBus swallows per-listener failures.
+    eventBus.emit('wi35.topic', {})
+    // Order is insertion order; both fired even though 'a' panicked.
+    assert.deepEqual(seen, ['a', 'b'])
+  } finally {
+    unsubA()
+    unsubB()
+  }
 })

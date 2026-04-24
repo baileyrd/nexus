@@ -102,6 +102,13 @@ export interface ShellEvents {
   'plugin:deactivated':       { pluginId: string }
   'plugin:error':             { pluginId: string; error: Error }
 
+  // Command lifecycle (WI-35 — per-plugin crash quarantine).
+  // CommandRegistry.execute emits this after a handler throws, just
+  // before re-throwing to the caller. `pluginId` is the one that
+  // registered the handler (may be undefined for manifest-only entries
+  // that never got a handler wired).
+  'command:error':            { commandId: string; pluginId?: string; error: string }
+
   // Shell
   'shell:ready':              Record<string, never>
   'shell:themeChanged':       { themeId: string }
