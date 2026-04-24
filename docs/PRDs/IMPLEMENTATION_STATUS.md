@@ -180,7 +180,7 @@
 ### PRD-17 — Cross-Platform Strategy 🟢
 **Shipped:** Tauri 2.x desktop shell with React/Zustand frontend, strict CSP, sandboxed webview panels, Rust core platform-agnostic, deep-link scheme dispatch plumbing.
 **Gaps:** Web target — no OPFS read/write, no IndexedDB vector store, no service-worker sync. Mobile — no UniFFI Kotlin/Swift FFI, no iOS/Android shell. Platform chrome (vibrancy/Mica) CSS-only. Multi-window (detachable panels) not wired. Tauri updater signature verification deferred.
-**Evidence:** [shell/src-tauri/](../../shell/src-tauri/), [shell/src/](../../shell/src/), [packages/nexus-extension-api/](../../packages/nexus-extension-api/). ⚠ Gap: shell binary has no tracing subscriber as of 2026-04-24 (the legacy shell's tracing-init site was retired with Phase 4 WI-37, and `shell/src-tauri/src/lib.rs` has no replacement). ⚠ Gap: frontend `UriHandlerRegistry` is complete; Tauri-side deep-link bridge (WI-13) deferred — OS-level `nexus://` URLs do not currently route to the shell. ⚠ Gap: no filesystem event forwarder in `shell/src-tauri/` as of 2026-04-24 — external file changes are not reflected in the UI until re-read.
+**Evidence:** [shell/src-tauri/](../../shell/src-tauri/), [shell/src/](../../shell/src/), [packages/nexus-extension-api/](../../packages/nexus-extension-api/). Tracing subscriber installed in shell binary (2026-04-24, commit `5b7b937`). OS deep-link bridge wired via `tauri-plugin-deep-link` (2026-04-24, commit `204fcf7` — resolves WI-13 deferral). Filesystem event forwarder active — `shell/src/plugins/nexus/files/index.ts:377-470` subscribes to `com.nexus.storage.file_{created,modified,deleted,renamed}` via `api.kernel.on`.
 
 ## Cross-cutting observations
 
