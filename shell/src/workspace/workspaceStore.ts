@@ -336,6 +336,77 @@ function setSidedockSize(
   emitInternal('layout-change')
 }
 
+/**
+ * OI-02 — drag-to-resize an internal `Split`. Finds the split by id,
+ * validates arity (array length must match children count — a mismatch
+ * from a stale drag after a split mutation is ignored), enforces a
+ * minimum proportional size per child (treats each entry as a flex
+ * weight and floors it so a child can never collapse to zero), and
+ * emits `layout-change` which `installAutoSave` already persists via
+ * `.forge/workspace.json`. No-op when the split isn't found or the
+ * proposed sizes equal the current ones (avoids a redundant save).
+ *
+ * Proportional sizes (not pixels): `SplitNode` maps them to
+ * `flex: <weight> <weight> 0`, so relative ratios are all that
+ * matters. We still clamp each weight to `MIN_SPLIT_WEIGHT` to keep a
+ * small-but-visible child lane when the user drags near the edge —
+ * the rendered pixel floor is not enforced here because it depends
+ * on viewport size, but drag code converts from pixel rects before
+ * calling in so the clamped weight preserves the same proportional
+ * visibility across window resizes.
+ */
+const MIN_SPLIT_WEIGHT = 0.1
+
+function setSplitSizes(splitId: string, sizes: number[]): void {
+  const roots: WorkspaceParent[] = [
+    state().rootSplit,
+    state().leftSplit,
+    state().rightSplit,
+    state().bottomSplit,
+    ...state().floating,
+  ]
+  const split = findSplitById(splitId, roots)
+  if (!split) return
+  if (sizes.length !== split.children.length) return
+  const clamped = sizes.map((s) => Math.max(MIN_SPLIT_WEIGHT, s))
+  if (split.sizes && arraysEqual(split.sizes, clamped)) return
+  split.sizes = clamped
+  emitInternal('layout-change')
+}
+
+function arraysEqual(a: readonly number[], b: readonly number[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (Math.abs(a[i] - b[i]) > 1e-6) return false
+  }
+  return true
+}
+
+function findSplitById(id: string, roots: WorkspaceParent[]): Split | null {
+  for (const root of roots) {
+    const hit = findSplitRec(id, root)
+    if (hit) return hit
+  }
+  return null
+}
+
+function findSplitRec(id: string, node: WorkspaceParent): Split | null {
+  if (node.kind === 'split') {
+    if (node.id === id) return node
+    for (const child of node.children) {
+      const hit = findSplitRec(id, child)
+      if (hit) return hit
+    }
+  }
+  if (node.kind === 'root') {
+    return findSplitRec(id, (node as { child: WorkspaceParent }).child)
+  }
+  if (node.kind === 'floating') {
+    return findSplitRec(id, (node as { child: WorkspaceParent }).child)
+  }
+  return null
+}
+
 /** Set `dock.collapsed`; emit `layout-change`. */
 function setSidedockCollapsed(
   side: 'left' | 'right' | 'bottom',
@@ -780,6 +851,7 @@ export const workspace = {
   setActiveLeaf,
   setSidedockSize,
   setSidedockCollapsed,
+  setSplitSizes,
   setTabActiveIndex,
   detachLeaf,
   emit: emitInternal,

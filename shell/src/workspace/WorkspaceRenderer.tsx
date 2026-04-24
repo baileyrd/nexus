@@ -11,7 +11,7 @@
 //   switching back is instant (plan line 134).
 // - Floating windows are rendered inline with `data-floating="true"` for
 //   Phase 4 scope. Tauri multi-window comes later.
-import {
+import React, {
   memo,
   useEffect,
   useReducer,
@@ -383,34 +383,160 @@ function RenderNode({ node, isMainDock = false, sideDock, hideTabStrip }: Render
 }
 
 function SplitNode({ node, isMainDock, sideDock, hideTabStrip }: { node: Split; isMainDock: boolean; sideDock?: 'left' | 'right'; hideTabStrip?: boolean }): JSX.Element {
+  // OI-02 — per-split child DOM refs so the resize handle can measure
+  // the live rects at drag start (first-drag initialisation snaps the
+  // current flex proportions into concrete numbers, after which the
+  // store carries the sizes on every subsequent drag + reload).
+  const childRefs = useRef<(HTMLDivElement | null)[]>([])
+
+  const horizontal = node.direction === 'horizontal'
   const style: CSSProperties = {
     display: 'flex',
-    flexDirection: node.direction === 'horizontal' ? 'row' : 'column',
+    flexDirection: horizontal ? 'row' : 'column',
     flex: '1 1 auto',
     minWidth: 0,
     minHeight: 0,
     width: '100%',
     height: '100%',
   }
+
   return (
     <div className="workspace-split" style={style}>
       {node.children.map((child, i) => {
         const childFlex = node.sizes?.[i] ?? 1
         return (
-          <div
-            key={childKey(child)}
-            style={{
-              flex: `${childFlex} ${childFlex} 0`,
-              minWidth: 0,
-              minHeight: 0,
-              display: 'flex',
-            }}
-          >
-            <RenderNode node={child} isMainDock={isMainDock} sideDock={sideDock} hideTabStrip={hideTabStrip} />
-          </div>
+          <React.Fragment key={childKey(child)}>
+            <div
+              ref={(el) => {
+                childRefs.current[i] = el
+              }}
+              style={{
+                flex: `${childFlex} ${childFlex} 0`,
+                minWidth: 0,
+                minHeight: 0,
+                display: 'flex',
+              }}
+            >
+              <RenderNode node={child} isMainDock={isMainDock} sideDock={sideDock} hideTabStrip={hideTabStrip} />
+            </div>
+            {i < node.children.length - 1 && (
+              <SplitResizeHandle
+                splitId={node.id}
+                boundaryIndex={i}
+                horizontal={horizontal}
+                childRefs={childRefs}
+                currentSizes={node.sizes}
+              />
+            )}
+          </React.Fragment>
         )
       })}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// <SplitResizeHandle> (OI-02) — drag divider between two SplitNode children.
+//
+// Drag math:
+//   1. On mousedown, measure each child's pixel size via getBoundingClientRect.
+//   2. Redistribute the boundary delta between the two adjacent children
+//      only — siblings outside the drag stay fixed. Preserves total size.
+//   3. Convert to proportional weights (divide by the sum); the store
+//      clamps each weight to MIN_SPLIT_WEIGHT so a child never vanishes.
+//   4. Apply via workspace.setSplitSizes, which persists through the
+//      existing installAutoSave → saveWorkspace pipeline.
+//
+// The handle renders a 4px gutter between children (matching DockResizeHandle
+// styling). No-op when the split has fewer than 2 live child DOM nodes —
+// defensive against a ref race on hydrate.
+// ---------------------------------------------------------------------------
+
+function SplitResizeHandle({
+  splitId,
+  boundaryIndex,
+  horizontal,
+  childRefs,
+  currentSizes,
+}: {
+  splitId: string
+  boundaryIndex: number
+  horizontal: boolean
+  childRefs: React.MutableRefObject<(HTMLDivElement | null)[]>
+  currentSizes: number[] | undefined
+}): JSX.Element {
+  const startPos = useRef(0)
+  const startPixels = useRef<number[]>([])
+
+  const onMouseDown = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    startPos.current = horizontal ? e.clientX : e.clientY
+    const refs = childRefs.current
+    startPixels.current = refs.map((el) => {
+      if (!el) return 0
+      const rect = el.getBoundingClientRect()
+      return horizontal ? rect.width : rect.height
+    })
+    // If we never wired all children (component re-renders can leave
+    // stale slots), bail silently — dragging the handle in that state
+    // does nothing rather than corrupt the sizes array.
+    if (startPixels.current.some((px) => px <= 0)) return
+
+    const onMouseMove = (ev: MouseEvent): void => {
+      const cur = horizontal ? ev.clientX : ev.clientY
+      const delta = cur - startPos.current
+      const pixels = [...startPixels.current]
+      // Transfer the delta from boundaryIndex+1 into boundaryIndex.
+      // Positive delta (drag right / down) shrinks the right/bottom
+      // child and grows the left/top child by the same amount.
+      pixels[boundaryIndex] += delta
+      pixels[boundaryIndex + 1] -= delta
+      // Normalise to proportional weights so the result is resolution-
+      // independent (window resize rescales all children together).
+      const total = pixels.reduce((sum, p) => sum + p, 0)
+      if (total <= 0) return
+      const weights = pixels.map((p) => p / total)
+      workspace.setSplitSizes(splitId, weights)
+    }
+
+    const cleanup = (): void => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', cleanup)
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', cleanup)
+  }
+
+  // `currentSizes` is read so the handle re-mounts when the split
+  // arity changes — a dangling drag that started before an adjacent
+  // pane closed would otherwise write a mismatched array to the store,
+  // which `setSplitSizes` rejects but still burns a no-op event.
+  void currentSizes
+
+  return (
+    <div
+      className="workspace-split-resize-handle"
+      onMouseDown={onMouseDown}
+      style={
+        horizontal
+          ? {
+              flex: '0 0 4px',
+              width: 4,
+              cursor: 'col-resize',
+              background: 'transparent',
+              zIndex: 1,
+            }
+          : {
+              flex: '0 0 4px',
+              height: 4,
+              width: '100%',
+              cursor: 'row-resize',
+              background: 'transparent',
+              zIndex: 1,
+            }
+      }
+    />
   )
 }
 

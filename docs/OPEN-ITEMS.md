@@ -29,24 +29,23 @@
 
 **Severity:** Should-fix (UX regression)
 **Surfaced by:** `docs/superpowers/specs/2026-04-17-split-size-persistence-design.md`
-**Status:** Not started — the design spec was written before `app/` retirement and never implemented in `shell/`.
+**Status:** Resolved 2026-04-24. The editor-split gap is closed; sidedock persistence was already landed post-migration but mis-attributed here.
 
-### Gap
-Pane-splitter positions are not persisted across reloads. Users drag a sidebar wider, reload, and the split reverts.
+### Audit correction
+When I went to implement the scope from the original OI-02 text, I found that two of the three claims had already been fixed:
 
-- `shell/src-tauri/src/persistence.rs` `get_shell_state`/`save_shell_state` has no `split_sizes` field.
-- `shell/src/stores/workspaceStore` / `shell/src/workspace/` — zero hits for `splitSizes` or `split_sizes`.
-- Frontend splitter components (sidebar, right panel, bottom panel, editor splits) do not report drag-end to a persistence layer.
+- **Sidedock resize + persistence already works.** `WorkspaceRenderer.DockResizeHandle` drives `workspace.setSidedockSize`, which emits `layout-change` → `installAutoSave` debounces a write through `workspace.serialize()` → `<vault>/.forge/workspace.json`. Hydrate reads it back via `hydrateNode`. So "sidebar / right panel / bottom panel do not report drag-end" is stale — those three do.
+- **Sizes schema already exists.** `SerializedSplit.sizes?: number[]` is serialised per node in the workspace JSON. No rust-side `split_sizes` shell-state field was needed — the design doc predates the `.forge/workspace.json` persistence channel.
+- **Genuine remaining gap:** editor internal splits (`SplitNode` at `shell/src/workspace/WorkspaceRenderer.tsx`) render children with flex weights but had **no drag handle** — so `node.sizes` was never mutated by user interaction, meaning a user couldn't actually resize an editor split at all.
 
-### Scope
-- Extend the shell-state schema with a `split_sizes: Record<string, number[]>` keyed by split ID.
-- Emit a debounced save from splitter components on drag-end.
-- Hydrate on boot, fall back to defaults if the key is missing.
-- See the original design doc (now bannered as historical) for the proposed schema; reconfirm before implementing since naming conventions may have drifted.
+### Outcome
+- **`workspace.setSplitSizes(splitId, sizes)`** mutator in `workspaceStore.ts` — walks the tree for the named split, guards arity, clamps per-child weight to `MIN_SPLIT_WEIGHT` (0.1) so a lane can't vanish, dedupes identical writes, emits `layout-change`.
+- **`SplitResizeHandle`** in `WorkspaceRenderer.tsx` between each pair of `SplitNode` children. Drag math: capture pixel rects of all children at mousedown, transfer the delta between the two adjacent lanes on move, normalise to proportional weights, call `setSplitSizes`. Matches `DockResizeHandle` styling (4px gutter).
+- Persistence path is unchanged — writes flow through the existing `installAutoSave` → `saveWorkspace` pipeline, and hydrate reads `split.sizes` back.
+- Five unit tests cover: write + event, arity-mismatch rejection, weight clamp, unknown-id no-op, idempotent re-write.
 
-### Acceptance
-- Drag any pane splitter, reload — position restored.
-- Clean uninstall (`~/.nexus-shell/` deleted) falls back to default layout without error.
+### Clean-uninstall behavior (AC #2)
+`.forge/workspace.json` missing → `loadWorkspace` returns null → `buildDefaultLayout` creates a fresh tree without `sizes`, so `SplitNode` falls back to equal-flex (weight 1 per child). No errors, no panics. Also verified for the separate shell-state path: `get_shell_state` returns default on missing file (unchanged from prior behaviour).
 
 ---
 
