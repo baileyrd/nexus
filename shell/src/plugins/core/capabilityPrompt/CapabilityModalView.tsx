@@ -248,8 +248,11 @@ function CapBucketSection({
   onToggle,
   checkable,
 }: BucketSectionProps) {
-  if (caps.length === 0) return null
+  // Hook must run unconditionally — moved above the early return to
+  // satisfy react-hooks/rules-of-hooks (was a real bug: conditional
+  // hook invocation depending on `caps.length`).
   const colours = useMemo(() => chipColours(risk), [risk])
+  if (caps.length === 0) return null
   return (
     <section style={{ marginTop: 14 }}>
       <div

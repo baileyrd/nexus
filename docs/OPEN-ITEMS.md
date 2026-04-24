@@ -116,22 +116,21 @@ Reverse-tree walk via `cargo tree -i`:
 
 **Severity:** Tooling debt (ESLint 8 is EOL)
 **Surfaced by:** audit 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-24. `pnpm lint` exits 0; all three ACs met.
 
-### Gap
-`shell/package.json` pins `eslint ^8.57` (the deprecated 8.x line) and `@typescript-eslint/* ^7`. ESLint 8 is end-of-life; upstream no longer publishes security fixes. typescript-eslint 7 pairs with ESLint 8 and will not track new rule additions from ESLint 9.
-
-Also, the audit noted the user's global `~/.eslintrc.json` breaks the shell's `pnpm lint` by referencing plugins that aren't resolvable in the shell workspace — the personal config shadows the workspace config. A project-level `.eslintrc` that explicitly forbids global fallback would fix the environment issue.
-
-### Scope
-- Joint upgrade: ESLint 9 + `@typescript-eslint/*` 8. The flat-config migration is non-trivial but well-documented.
-- Pin a project-level `.eslintrc` (or equivalent flat-config file) so the global personal config never shadows it.
-- Also evaluate: `xterm` / `xterm-addon-fit` use the deprecated pre-scoped npm names; `@xterm/xterm` is the current package name. Worth migrating while the package.json is open.
+### Outcome
+- **ESLint 8.57 → 9.39** + **typescript-eslint 7 → 8.59** in `shell/package.json`. Added `typescript-eslint` (the flat-config meta package) + `eslint-plugin-react-hooks ^5.2` for React correctness.
+- **`shell/eslint.config.js`** pins the config at the package root. ESLint 9 flat-config search stops at the nearest `eslint.config.{js,ts,mjs}`, so the personal `~/.eslintrc.json` that was shadowing `pnpm lint` is no longer reachable — the shadowing bug is structurally gone. Presets: `tseslint.configs.recommended` + `react-hooks/recommended`. `no-explicit-any` and `exhaustive-deps` set to `warn` so they surface without blocking CI; `no-unused-vars` honours the underscore-prefix convention already used in the codebase.
+- **`lint` script** updated to drop the `--ext` flag (flat config reads file patterns from the config itself).
+- **xterm → @xterm**: `xterm 5.3.0` + `xterm-addon-fit 0.8.0` replaced with `@xterm/xterm ^5.5` + `@xterm/addon-fit ^0.10`. Three imports in `TerminalView.tsx` updated to the scoped names (including the CSS import).
+- **One real bug surfaced + fixed**: `CapabilityModalView.CapBucketSection` called `useMemo` after an early `return null`, a rules-of-hooks violation under `react-hooks/rules-of-hooks`. Hook moved above the guard.
 
 ### Acceptance
-- `pnpm lint` runs to completion without environment errors and reports whatever the new-ruleset floor is.
-- ESLint and typescript-eslint are off the deprecated major lines.
-- xterm packages migrated to `@xterm/*` scoped names.
+- `pnpm lint` exits 0 (0 errors, 46 advisory warnings — long-standing unused-var / explicit-any sites that pre-date this session).
+- ESLint + typescript-eslint off the deprecated 8.x / 7.x lines.
+- xterm packages on the `@xterm/*` scoped names.
+
+Typecheck clean; 289 tests pass (unchanged); production build succeeds.
 
 ---
 

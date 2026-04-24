@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
-import { Terminal } from 'xterm'
-import { FitAddon } from 'xterm-addon-fit'
-import 'xterm/css/xterm.css'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
 import type { KernelAPI, EventsAPI } from '../../../types/plugin'
 import { useTerminalStore } from './terminalStore'
@@ -285,7 +285,6 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     }
     // Plugin api refs are stable for the life of the app — safe to
     // hold across renders without re-running the effect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return <div ref={containerRef} className="nexus-terminal-root" />
