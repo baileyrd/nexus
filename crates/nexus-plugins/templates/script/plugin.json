@@ -1,0 +1,12 @@
+{
+  "id": "{{plugin-id}}",
+  "name": "{{plugin-name}}",
+  "version": "0.1.0",
+  "main": "index.js",
+  "enabled": true,
+  "description": "{{description}}",
+  "author": "{{author}}",
+  "apiVersion": 1,
+  "sandboxed": true,
+  "capabilities": []
+}

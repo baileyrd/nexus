@@ -21,9 +21,15 @@ pub enum PluginTemplate {
     /// Core plugin template: maximum trust, zero fuel limit, no capability
     /// declarations required.
     Core,
-    /// Community plugin template: sandboxed trust level with a fuel cap and
-    /// explicit `kv.read` / `kv.write` capability declarations.
+    /// Community plugin template: sandboxed WASM trust level with a fuel cap
+    /// and explicit `kv.read` / `kv.write` capability declarations.
     Community,
+    /// Script plugin template: sandboxed JS/TS community plugin that runs
+    /// inside a null-origin iframe and consumes `@nexus/extension-api`.
+    /// Emits `plugin.json`, `index.ts`, `package.json`, `tsconfig.json`, and
+    /// `README.md`. This is the modern authoring path for Phase 3c+ sandboxed
+    /// community plugins.
+    Script,
 }
 
 /// Input configuration consumed by [`scaffold`].
@@ -38,6 +44,17 @@ pub struct ScaffoldConfig {
     /// Short description of what the plugin does.
     pub description: String,
 }
+
+// ─── `@nexus/extension-api` pin ───────────────────────────────────────────────
+
+/// Version of `@nexus/extension-api` that scaffolded `script` projects pin to.
+///
+/// Scaffolded plugins live *outside* the pnpm workspace, so we can't use
+/// `workspace:*` — the version is baked into the template at scaffold time.
+/// Bump this in lockstep with `packages/nexus-extension-api/package.json`;
+/// the unit test `scaffold_script_package_pins_extension_api` guards against
+/// stale pins by requiring it to parse as a semver caret range.
+const EXTENSION_API_VERSION: &str = "^1.0.0";
 
 // ─── Templates ────────────────────────────────────────────────────────────────
 
@@ -100,6 +117,14 @@ on_start = true
 on_stop = true
 on_unload = true
 "#;
+
+// ─── Script template (sandboxed JS/TS community plugin) ──────────────────────
+
+const SCRIPT_PLUGIN_JSON: &str = include_str!("../templates/script/plugin.json");
+const SCRIPT_INDEX_TS: &str = include_str!("../templates/script/index.ts");
+const SCRIPT_README_MD: &str = include_str!("../templates/script/README.md");
+const SCRIPT_PACKAGE_JSON: &str = include_str!("../templates/script/package.json");
+const SCRIPT_TSCONFIG_JSON: &str = include_str!("../templates/script/tsconfig.json");
 
 const SRC_LIB_RS_TEMPLATE: &str = r#"//! {{plugin-name}} — Nexus plugin.
 
@@ -254,11 +279,27 @@ pub fn scaffold(
         }
     }
 
-    // 3. Create directory layout.
+    // 3. Dispatch per-template. `Script` produces a JS/TS project; the two
+    //    WASM variants (Core / Community) share a Cargo + manifest + lib.rs
+    //    layout.
+    match template {
+        PluginTemplate::Script => scaffold_script(output_dir, config),
+        PluginTemplate::Core | PluginTemplate::Community => {
+            scaffold_wasm(output_dir, template, config)
+        }
+    }
+}
+
+/// Emit the WASM-flavored project (Core / Community): Cargo.toml, manifest.toml,
+/// src/lib.rs.
+fn scaffold_wasm(
+    output_dir: &Path,
+    template: PluginTemplate,
+    config: &ScaffoldConfig,
+) -> Result<(), PluginError> {
     let src_dir = output_dir.join("src");
     std::fs::create_dir_all(&src_dir)?;
 
-    // 4. Render and write files.
     write_file(
         &output_dir.join("Cargo.toml"),
         apply_substitutions(CARGO_TOML_TEMPLATE, config),
@@ -267,6 +308,7 @@ pub fn scaffold(
     let manifest_template = match template {
         PluginTemplate::Core => MANIFEST_TOML_CORE,
         PluginTemplate::Community => MANIFEST_TOML_COMMUNITY,
+        PluginTemplate::Script => unreachable!("script handled by scaffold_script"),
     };
     write_file(
         &output_dir.join("manifest.toml"),
@@ -281,6 +323,39 @@ pub fn scaffold(
     Ok(())
 }
 
+/// Emit the script (sandboxed JS/TS) project: plugin.json, index.ts, README.md,
+/// package.json, tsconfig.json. No `src/` subdirectory — authors edit
+/// `index.ts` at the project root.
+fn scaffold_script(
+    output_dir: &Path,
+    config: &ScaffoldConfig,
+) -> Result<(), PluginError> {
+    std::fs::create_dir_all(output_dir)?;
+
+    write_file(
+        &output_dir.join("plugin.json"),
+        apply_substitutions(SCRIPT_PLUGIN_JSON, config),
+    )?;
+    write_file(
+        &output_dir.join("index.ts"),
+        apply_substitutions(SCRIPT_INDEX_TS, config),
+    )?;
+    write_file(
+        &output_dir.join("README.md"),
+        apply_substitutions(SCRIPT_README_MD, config),
+    )?;
+    write_file(
+        &output_dir.join("package.json"),
+        apply_substitutions(SCRIPT_PACKAGE_JSON, config),
+    )?;
+    write_file(
+        &output_dir.join("tsconfig.json"),
+        apply_substitutions(SCRIPT_TSCONFIG_JSON, config),
+    )?;
+
+    Ok(())
+}
+
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
 fn apply_substitutions(template: &str, config: &ScaffoldConfig) -> String {
@@ -289,6 +364,7 @@ fn apply_substitutions(template: &str, config: &ScaffoldConfig) -> String {
         .replace("{{plugin-name}}", &config.plugin_name)
         .replace("{{author}}", &config.author)
         .replace("{{description}}", &config.description)
+        .replace("{{extension-api-version}}", EXTENSION_API_VERSION)
 }
 
 fn write_file(path: &Path, contents: String) -> Result<(), PluginError> {
@@ -398,6 +474,134 @@ mod tests {
             !cargo.contains("{{author}}"),
             "unreplaced author placeholder found in Cargo.toml"
         );
+    }
+
+    #[test]
+    fn scaffold_script_creates_expected_file_tree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("script-plugin");
+        scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
+
+        for f in ["plugin.json", "index.ts", "README.md", "package.json", "tsconfig.json"] {
+            assert!(
+                out.join(f).exists(),
+                "script template missing file: {f}"
+            );
+        }
+        // Script projects do not have a `src/` subdirectory — authors edit
+        // `index.ts` at the project root.
+        assert!(
+            !out.join("src").exists(),
+            "script template should not emit src/ directory"
+        );
+        // And none of the WASM-template outputs.
+        assert!(!out.join("Cargo.toml").exists(), "Cargo.toml leaked into script scaffold");
+        assert!(!out.join("manifest.toml").exists(), "manifest.toml leaked into script scaffold");
+    }
+
+    #[test]
+    fn scaffold_script_manifest_is_sandboxed_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("script-manifest");
+        scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
+
+        let manifest = std::fs::read_to_string(out.join("plugin.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&manifest)
+            .expect("plugin.json must parse as JSON");
+        assert_eq!(parsed["id"], "com.example.my-plugin");
+        assert_eq!(parsed["name"], "My Plugin");
+        assert_eq!(parsed["apiVersion"], 1);
+        assert_eq!(parsed["sandboxed"], true);
+        assert_eq!(parsed["main"], "index.js");
+        assert!(parsed["capabilities"].is_array());
+    }
+
+    #[test]
+    fn scaffold_script_index_ts_wires_bootstrap_and_registers_one_command_one_panel() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("script-src");
+        scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
+
+        let src = std::fs::read_to_string(out.join("index.ts")).unwrap();
+        assert!(
+            src.contains("from '@nexus/extension-api'"),
+            "index.ts must import from @nexus/extension-api"
+        );
+        assert!(
+            src.contains("bootstrapSandboxedPlugin(plugin)"),
+            "index.ts must call bootstrapSandboxedPlugin"
+        );
+        assert_eq!(
+            src.matches("ctx.commands.register").count(),
+            1,
+            "script template should register exactly one command"
+        );
+        assert_eq!(
+            src.matches("ctx.views.registerPanel").count(),
+            1,
+            "script template should register exactly one panel"
+        );
+        assert!(
+            !src.contains("{{plugin-id}}") && !src.contains("{{plugin-name}}"),
+            "unreplaced placeholder in index.ts"
+        );
+    }
+
+    #[test]
+    fn scaffold_script_package_pins_extension_api() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("script-pkg");
+        scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
+
+        let pkg_str = std::fs::read_to_string(out.join("package.json")).unwrap();
+        let pkg: serde_json::Value = serde_json::from_str(&pkg_str)
+            .expect("package.json must parse as JSON");
+
+        assert_eq!(pkg["name"], "com.example.my-plugin");
+        let api_pin = pkg["devDependencies"]["@nexus/extension-api"]
+            .as_str()
+            .expect("extension-api pin must be a string");
+        // Accept any caret/tilde/exact semver — but reject `workspace:*`
+        // (scaffolded projects live outside the workspace).
+        assert!(
+            !api_pin.contains("workspace:"),
+            "extension-api must not be pinned to workspace:* in scaffold; got {api_pin}"
+        );
+        assert!(
+            api_pin.starts_with('^')
+                || api_pin.starts_with('~')
+                || api_pin.chars().next().map_or(false, |c| c.is_ascii_digit()),
+            "extension-api pin must be a concrete semver, got {api_pin}"
+        );
+        // esbuild + typescript must be present for `pnpm build`.
+        assert!(pkg["devDependencies"]["esbuild"].is_string());
+        assert!(pkg["devDependencies"]["typescript"].is_string());
+        assert_eq!(pkg["scripts"]["build"].as_str().unwrap().contains("esbuild"), true);
+    }
+
+    #[test]
+    fn scaffold_script_tsconfig_parses_and_targets_es2020() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("script-tsconfig");
+        scaffold(&out, PluginTemplate::Script, &test_config()).unwrap();
+
+        let raw = std::fs::read_to_string(out.join("tsconfig.json")).unwrap();
+        let cfg: serde_json::Value = serde_json::from_str(&raw)
+            .expect("tsconfig.json must parse as JSON");
+        assert_eq!(cfg["compilerOptions"]["target"], "ES2020");
+        assert_eq!(cfg["compilerOptions"]["module"], "esnext");
+        assert_eq!(cfg["compilerOptions"]["strict"], true);
+    }
+
+    #[test]
+    fn scaffold_script_does_not_break_wasm_templates() {
+        // Regression guard: the Script branch must not regress Core/Community.
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("legacy-wasm");
+        scaffold(&out, PluginTemplate::Community, &test_config()).unwrap();
+        assert!(out.join("Cargo.toml").exists());
+        assert!(out.join("manifest.toml").exists());
+        assert!(out.join("src").join("lib.rs").exists());
     }
 
     #[test]
