@@ -1,0 +1,47 @@
+# Phase 4 WI-36 — CI drift-check for regenerable IPC schemas.
+#
+# Regenerates:
+#   * TS bindings  — `packages/nexus-extension-api/src/generated/**`
+#   * JSON Schemas — `crates/nexus-bootstrap/schemas/ipc/*.json`
+# …and fails if `git diff --exit-code` reports a diff. A PR that
+# mutates a pilot IPC type without running `scripts/check_ipc_drift.sh`
+# will fail here.
+#
+# This workflow is the first GitHub Actions job in the repo. When
+# additional drift / lint workflows land they can share the same
+# `setup` section — it's intentionally minimal.
+name: IPC schema drift-check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/nexus-storage/src/ipc.rs'
+      - 'crates/nexus-storage/Cargo.toml'
+      - 'crates/nexus-ai/src/ipc.rs'
+      - 'crates/nexus-ai/Cargo.toml'
+      - 'crates/nexus-bootstrap/tests/ipc_schema_emit.rs'
+      - 'crates/nexus-bootstrap/Cargo.toml'
+      - 'crates/nexus-bootstrap/schemas/ipc/**'
+      - 'crates/nexus-plugin-api/**'
+      - 'packages/nexus-extension-api/src/generated/**'
+      - 'scripts/check_ipc_drift.sh'
+      - '.github/workflows/ipc-drift-check.yml'
+  push:
+    branches: [main]
+
+jobs:
+  drift:
+    name: Regenerate + diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run IPC drift-check
+        run: bash scripts/check_ipc_drift.sh
