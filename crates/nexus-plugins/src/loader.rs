@@ -67,8 +67,8 @@ impl Drop for DispatchGuard {
 }
 
 use nexus_kernel::{
-    Capability, CapabilitySet, EventBus, EventFilter, EventSubscription, IpcDispatcher, IpcError,
-    IpcFuture, KernelPluginContext, PluginInfo, PluginStatus, TrustLevel,
+    audit, Capability, CapabilitySet, EventBus, EventFilter, EventSubscription, IpcDispatcher,
+    IpcError, IpcFuture, KernelPluginContext, PluginInfo, PluginStatus, TrustLevel,
 };
 
 use crate::manifest::{self, PluginManifest};
@@ -1663,7 +1663,12 @@ fn write_grant(
 /// exercise it with an isolated `tempfile` directory.
 fn build_capabilities(manifest: &PluginManifest, plugin_dir: &Path) -> CapabilitySet {
     match manifest.trust_level {
-        TrustLevel::Core => Capability::ALL.iter().copied().collect::<CapabilitySet>(),
+        TrustLevel::Core => {
+            for cap in Capability::ALL {
+                audit::log_capability_granted(&manifest.id, cap.as_str());
+            }
+            Capability::ALL.iter().copied().collect::<CapabilitySet>()
+        }
         TrustLevel::Community => {
             let granted = load_granted_high_risk_caps(plugin_dir, &manifest.version);
             let mut denied: Vec<Capability> = Vec::new();
@@ -1682,6 +1687,9 @@ fn build_capabilities(manifest: &PluginManifest, plugin_dir: &Path) -> Capabilit
                     }
                 })
                 .collect();
+            for cap in &caps {
+                audit::log_capability_granted(&manifest.id, cap.as_str());
+            }
             if !denied.is_empty() {
                 let denied_strs: Vec<&str> = denied.iter().map(|c| c.as_str()).collect();
                 tracing::warn!(

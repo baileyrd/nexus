@@ -8,7 +8,11 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
-pub mod audit;
+/// Structured audit event helpers. Re-exported from `nexus-kernel` so call
+/// sites in the kernel and plugin host can emit events without inducing a
+/// dep cycle through `nexus-security`.
+pub use nexus_kernel::audit;
+
 mod core_plugin;
 mod credential;
 mod error;

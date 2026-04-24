@@ -7,7 +7,7 @@ use std::path::Path;
 
 use wasmtime::{Caller, Linker};
 
-use nexus_kernel::Capability;
+use nexus_kernel::{audit, Capability};
 use nexus_types::PathValidationError;
 
 use crate::{sandbox::PluginData, PluginError};
@@ -26,27 +26,15 @@ pub const HOST_CAPABILITY_DENIED: i32 = -1001;
 /// Returned when the output buffer supplied by the plugin is too small.
 pub const HOST_BUFFER_OVERFLOW: i32 = -1002;
 
-// ─── Audit helpers ────────────────────────────────────────────────────────────
+// ─── Audit-helper shims ───────────────────────────────────────────────────────
 
 fn deny_capability(plugin_id: &str, capability: &str) -> i32 {
-    tracing::warn!(
-        audit = true,
-        plugin_id,
-        capability,
-        result = "denied",
-        "capability denied"
-    );
+    audit::log_capability_denied(plugin_id, capability);
     HOST_CAPABILITY_DENIED
 }
 
 fn deny_path_traversal(plugin_id: &str, requested_path: &Path, forge_root: &Path) -> i32 {
-    tracing::warn!(
-        audit = true,
-        plugin_id,
-        requested_path = %requested_path.display(),
-        forge_root = %forge_root.display(),
-        "path traversal denied"
-    );
+    audit::log_path_traversal_denied(plugin_id, requested_path, forge_root);
     HOST_CAPABILITY_DENIED
 }
 

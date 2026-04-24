@@ -13,6 +13,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nexus_types::{ForgePathValidator, PathValidationError};
 
+use crate::audit;
 use crate::capability::{Capability, CapabilitySet};
 use crate::context::PluginContext;
 use crate::error::{BusError, CapabilityError, Error, IpcError, Result};
@@ -87,13 +88,7 @@ impl KernelPluginContext {
         if self.capabilities.contains(cap) {
             return Ok(());
         }
-        tracing::warn!(
-            audit = true,
-            plugin_id = %self.plugin_id,
-            capability = %cap,
-            result = "denied",
-            "capability denied"
-        );
+        audit::log_capability_denied(&self.plugin_id, cap.as_str());
         Err(CapabilityError::Denied {
             plugin_id: self.plugin_id.clone(),
             cap,
@@ -121,12 +116,10 @@ impl KernelPluginContext {
         })?;
 
         if !canonical.starts_with(&self.forge_root_canonical) {
-            tracing::warn!(
-                audit = true,
-                plugin_id = %self.plugin_id,
-                requested_path = %canonical.display(),
-                forge_root = %self.forge_root_canonical.display(),
-                "path traversal denied"
+            audit::log_path_traversal_denied(
+                &self.plugin_id,
+                &canonical,
+                &self.forge_root_canonical,
             );
             return Err(Error::Io(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
@@ -194,13 +187,10 @@ impl PluginContext for KernelPluginContext {
         let target = self.path_validator.validate_for_write(relative_view).map_err(|e| {
             match e {
                 PathValidationError::PathTraversal(ref bad) => {
-                    tracing::warn!(
-                        audit = true,
-                        plugin_id = %self.plugin_id,
-                        requested_path = %path.display(),
-                        canonical_path = %bad.display(),
-                        forge_root = %self.forge_root_canonical.display(),
-                        "path traversal denied"
+                    audit::log_path_traversal_denied(
+                        &self.plugin_id,
+                        bad,
+                        &self.forge_root_canonical,
                     );
                     Error::Io(std::io::Error::new(
                         std::io::ErrorKind::PermissionDenied,
@@ -287,6 +277,7 @@ impl PluginContext for KernelPluginContext {
         timeout: Duration,
     ) -> std::result::Result<serde_json::Value, IpcError> {
         if !self.capabilities.contains(Capability::IpcCall) {
+            audit::log_capability_denied(&self.plugin_id, Capability::IpcCall.as_str());
             return Err(IpcError::CapabilityDenied {
                 plugin_id: self.plugin_id.clone(),
             });
@@ -434,6 +425,41 @@ mod tests {
         let ctx = make_context(dir.path(), &[]);
         let result = ctx.read_file(&dir.path().join("test.txt")).await;
         assert!(result.is_err());
+    }
+
+    /// Coverage for OI-07: a denied capability gate routes through
+    /// `audit::log_capability_denied`, not an ad-hoc `tracing::warn!`. Asserts
+    /// the structured `audit=true` field reaches the tracing channel so a
+    /// security-stream filter can pick it up.
+    #[test]
+    fn capability_denial_emits_audit_event_through_gate() {
+        let events = audit::test_support::with_captured_events_async(|| async {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = make_context(dir.path(), &[]);
+            let _ = ctx.kv_get("anything").await;
+        });
+        let denial = events
+            .iter()
+            .find(|e| e.contains("audit=true") && e.contains("result=denied"))
+            .unwrap_or_else(|| panic!("no audit denial event emitted; got: {events:?}"));
+        assert!(denial.contains("plugin_id=com.test.plugin"), "{denial}");
+        assert!(denial.contains("capability=kv.read"), "{denial}");
+    }
+
+    /// Coverage for OI-07: a path-traversal rejection routes through
+    /// `audit::log_path_traversal_denied` and reaches the structured channel.
+    #[test]
+    fn path_traversal_emits_audit_event_through_gate() {
+        let events = audit::test_support::with_captured_events_async(|| async {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = make_context(dir.path(), &[Capability::FsRead]);
+            let _ = ctx.read_file(Path::new("/etc/passwd")).await;
+        });
+        let traversal = events
+            .iter()
+            .find(|e| e.contains("audit=true") && e.contains("path traversal denied"))
+            .unwrap_or_else(|| panic!("no audit traversal event emitted; got: {events:?}"));
+        assert!(traversal.contains("plugin_id=com.test.plugin"), "{traversal}");
     }
 
     #[tokio::test]

@@ -13,6 +13,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod audit;
 mod capability;
 mod config;
 mod context;

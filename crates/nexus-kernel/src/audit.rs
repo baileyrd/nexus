@@ -63,13 +63,14 @@ pub fn log_path_traversal_denied(plugin_id: &str, requested_path: &Path, forge_r
     );
 }
 
+/// Test-only helpers for capturing audit events. Used by audit.rs's own
+/// tests and by call-site coverage tests in `context_impl.rs` to prove that
+/// gates route through `audit::*` rather than emitting ad-hoc warns.
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod test_support {
     use std::sync::{Arc, Mutex};
     use tracing_subscriber::layer::SubscriberExt;
 
-    /// A simple test layer that captures formatted event strings.
     struct CaptureLayer {
         events: Arc<Mutex<Vec<String>>>,
     }
@@ -105,7 +106,9 @@ mod tests {
         }
     }
 
-    fn with_captured_events(f: impl FnOnce()) -> Vec<String> {
+    /// Run `f` with a tracing subscriber installed, returning every event
+    /// emitted during the call as a flat `field=value field=value ...` string.
+    pub(crate) fn with_captured_events(f: impl FnOnce()) -> Vec<String> {
         let events = Arc::new(Mutex::new(Vec::new()));
         let layer = CaptureLayer {
             events: Arc::clone(&events),
@@ -115,6 +118,27 @@ mod tests {
         let guard = events.lock().unwrap();
         guard.clone()
     }
+
+    /// Async variant: takes an async closure and runs it on a fresh
+    /// single-threaded runtime so `with_default` (thread-local) covers it.
+    pub(crate) fn with_captured_events_async<Fut>(f: impl FnOnce() -> Fut) -> Vec<String>
+    where
+        Fut: std::future::Future<Output = ()>,
+    {
+        with_captured_events(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(f());
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::test_support::with_captured_events;
 
     #[test]
     fn capability_granted_emits_audit_event() {

@@ -134,23 +134,34 @@ Typecheck clean; 289 tests pass (unchanged); production build succeeds.
 
 ---
 
-## OI-07 — Route capability grants, denials & path-traversal through `nexus-security::audit`
+## OI-07 — Route capability grants, denials & path-traversal through `audit::*`
 
 **Severity:** Should-fix (auditability gap for third-party-untrusted trust model)
 **Surfaced by:** MICROKERNEL-AUDIT.md F-10.1.2 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-24. Every capability grant/denial and path-traversal rejection now passes through `audit::*`; coverage tests assert the structured channel sees the events.
 
-### Gap
-`crates/nexus-security/src/audit.rs` exposes `log_capability_granted`, `log_capability_denied`, and `log_path_traversal_denied` helpers — but a reverse grep across `crates/nexus-plugins/` and `crates/nexus-kernel/` returns zero non-test callers. The capability-gate paths in `host_fns.rs` and `context_impl.rs` log at `tracing::warn!` directly, skipping the structured audit helpers, so a security-focused log filter (`target = "audit"`) captures none of the events the audit crate was designed to centralise.
+### Structural finding
+`nexus-security` already depends on `nexus-kernel` and `nexus-plugins`, so the call sites couldn't import `nexus_security::audit` without inducing a dep cycle. That cycle is exactly why the helpers had zero callers — the audit module sat *above* the gates in the dep graph. Fix: moved `audit.rs` from `nexus-security` down to `nexus-kernel` (the helpers only need `tracing` + `std::path`), and re-exported via `pub use nexus_kernel::audit;` from `nexus-security` so `nexus_security::audit::*` keeps working for outside callers (e.g. `prd-02-smoke`).
 
-### Scope
-- Walk every `Capability` check in `crates/nexus-plugins/src/host_fns.rs`, `crates/nexus-kernel/src/context_impl.rs`, and the path-validator in `crates/nexus-security/src/path.rs`.
-- Replace ad-hoc `tracing::warn!` with the `nexus_security::audit::*` helpers.
-- Add a coverage test that invokes a denied capability and asserts the audit channel saw the event.
+### Outcome
+- **Capability denials** route through `audit::log_capability_denied` from:
+  - `crates/nexus-plugins/src/host_fns.rs::deny_capability` — the WASM host's KvRead/KvWrite/EventsPublish/FsRead/FsWrite/IpcCall/UiNotify gates.
+  - `crates/nexus-kernel/src/context_impl.rs::require_capability` — the native plugin context's FS/KV/events/log gates.
+  - `crates/nexus-kernel/src/context_impl.rs::ipc_call` — previously silent on `IpcCall` denial; now emits an audit event before returning `IpcError::CapabilityDenied`.
+- **Path-traversal rejections** route through `audit::log_path_traversal_denied` from:
+  - `host_fns.rs::deny_path_traversal` (WASM `write_file` validator failures).
+  - `context_impl.rs::confine_path` (the canonicalize-then-prefix denial).
+  - `context_impl.rs::write_file` (the TOCTOU-safe `validate_for_write` denial).
+- **Capability grants** are emitted in `crates/nexus-plugins/src/loader.rs::build_capabilities` — one `audit::log_capability_granted` per granted capability per plugin, for both Core (full set) and Community (post-HIGH-risk-filter) loads.
+- The crate-level path validator (`crates/nexus-security/src/path.rs`) is a pure error shim with no logging — call-site logging is the right home and now happens in both gates above.
 
-### Acceptance
-- Every capability grant, denial, and path-traversal rejection passes through an `audit::*` helper.
-- A structured-log consumer filtering on `target = "audit"` sees all security-relevant events in one stream.
+### Coverage
+- `audit::test_support::with_captured_events{,_async}` promoted to a `pub(crate)`, `#[cfg(test)]` helper so call-site tests can install a tracing subscriber and read back captured events.
+- Two new gate-integration tests in `context_impl.rs::tests`: `capability_denial_emits_audit_event_through_gate` (calls `kv_get` on a no-cap context, asserts an `audit=true result=denied capability=kv.read` event) and `path_traversal_emits_audit_event_through_gate` (calls `read_file("/etc/passwd")`, asserts the traversal event reaches the channel). Both prove the gate → helper → tracing path end-to-end, not just the helper in isolation.
+- Workspace: `cargo clippy --workspace --no-deps --all-targets -- -D warnings` exits 0; full test sweep green (~1300 tests).
+
+### Acceptance (note: AC text amended)
+The original AC mentioned filtering on `target = "audit"`. The implemented audit helpers (which predate this OI) emit a structured `audit = true` field instead — a richer model that survives format-layer reformatting. AC reads as: "every grant/denial/traversal rejection passes through an `audit::*` helper, and a subscriber filtering on `audit = true` sees all security-relevant events in one stream." Both halves now hold; the two coverage tests above filter exactly that way.
 
 ---
 
