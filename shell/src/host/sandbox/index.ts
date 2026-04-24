@@ -50,3 +50,27 @@ export {
   type SandboxPort,
   type SandboxRouterOptions,
 } from './router'
+
+// WI-30d — iframe orchestrator, port adapter, and panel renderer.
+export {
+  IframePort,
+  type ContentWindowLike,
+  type IframeLike,
+  type IframePortOptions,
+  type WindowLike,
+} from './IframePort'
+
+export {
+  SandboxOrchestrator,
+  buildSandboxSrcDoc,
+  type SandboxInstance,
+  type SandboxOrchestratorOptions,
+  type SandboxSpec,
+  type SandboxState,
+} from './SandboxOrchestrator'
+
+export {
+  SandboxPanelView,
+  renderPanelNode,
+  type SandboxPanelViewProps,
+} from './SandboxPanelView'

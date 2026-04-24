@@ -42,6 +42,21 @@ export interface CommunityPluginManifest {
    *   - non-empty   — drives the install-time consent prompt.
    */
   capabilities?: string[]
+  /**
+   * Opt-in to iframe sandbox isolation (WI-30d). When `true` the
+   * ExtensionHost routes this plugin through `SandboxOrchestrator`
+   * instead of the dynamic-import path — the bundle runs in a
+   * null-origin iframe and communicates with the host via the
+   * postMessage RPC protocol defined in
+   * `@nexus/extension-api/sandbox/protocol`.
+   *
+   * Default `false` for back-compat. Hello-world's migration to
+   * `sandboxed: true` is tracked as WI-30e.
+   *
+   * First-party plugins (from `shell/src/plugins/{core,nexus}/`) are
+   * never sandboxed — they run in the shell realm with full access.
+   */
+  sandboxed?: boolean
   /** Absolute path to the plugin's directory — injected by the Rust scanner */
   dir:          string
   /** Absolute path to plugin.json — injected by the Rust scanner */
