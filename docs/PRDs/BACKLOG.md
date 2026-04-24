@@ -21,6 +21,15 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
 
 ---
 
+## Post-migration carryover gaps (2026-04-24)
+
+Capabilities described in legacy `app/` documentation that were not carried over to `shell/` during the Phase 4 WI-37 retirement. Full descriptions and acceptance criteria in [../OPEN-ITEMS.md](../OPEN-ITEMS.md).
+
+- [ ] **OI-01: Settings modal + `registerSettingsTab` API.** Tabbed settings modal with plugin-extensible tab contribution point. Currently `shell/src/plugins/core/settings/` has a single-panel view only.
+- [ ] **OI-02: Split-size persistence.** Pane-splitter positions not restored across reloads — no `split_sizes` field in `shell-state.json`, no drag-end persistence from splitter components.
+
+---
+
 ## Architecture review (2026-04-16) — microkernel adherence
 
 ## UI architecture review (2026-04-16) — editor-shell pattern
