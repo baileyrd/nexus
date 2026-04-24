@@ -243,6 +243,9 @@ impl MemoryMonitor {
     /// Test-only entrypoint: inject a sample without touching the
     /// platform reader. Exposed so tests can exercise the history +
     /// limit evaluation paths without a real subprocess.
+    ///
+    /// # Errors
+    /// Returns [`TerminalError::NotRunning`] if `pid` was never tracked.
     pub fn record_sample(
         &mut self,
         pid: u32,
@@ -334,7 +337,7 @@ mod platform {
                 let trimmed = rest.trim();
                 let num_part: String = trimmed
                     .chars()
-                    .take_while(|c| c.is_ascii_digit())
+                    .take_while(char::is_ascii_digit)
                     .collect();
                 if num_part.is_empty() {
                     return Err(TerminalError::Io(io::Error::other(format!(

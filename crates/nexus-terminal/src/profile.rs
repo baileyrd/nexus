@@ -36,7 +36,7 @@ use crate::shell::ShellSpec;
 
 /// Which rc file to source for a given shell. Returns `None` for shells
 /// we do not know how to configure interactively (e.g. `cmd.exe`,
-/// `pwsh` — PowerShell's profile system is different and lives in a
+/// `pwsh` — `PowerShell`'s profile system is different and lives in a
 /// follow-up).
 #[must_use]
 pub fn profile_path_for_shell(shell: &ShellSpec) -> Option<&'static str> {

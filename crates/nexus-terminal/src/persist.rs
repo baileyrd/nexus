@@ -2,7 +2,7 @@
 //!
 //! # Scope
 //!
-//! A SQLite-backed store for session metadata plus on-disk scrollback
+//! A `SQLite`-backed store for session metadata plus on-disk scrollback
 //! blobs, and the LRU eviction policy that backs the `max_sessions` cap
 //! in [`crate::SessionManager`].
 //!
@@ -12,7 +12,7 @@
 //! a future `com.nexus.terminal` core plugin will own a
 //! `Mutex<SessionManager>` + [`SqliteSessionStore`] and expose
 //! `spawn` / `list` / `restore` over IPC. Keeping the persistence concerns
-//! in this crate means no plugin boundary has to know about SQLite.
+//! in this crate means no plugin boundary has to know about `SQLite`.
 //!
 //! # Schema
 //!
@@ -23,7 +23,7 @@
 //! # Scrollback on disk
 //!
 //! Scrollback (§2.2) is stored as a raw-bytes blob at
-//! `{base_dir}/{session_id}/scrollback.bin`. SQLite holds only the path
+//! `{base_dir}/{session_id}/scrollback.bin`. `SQLite` holds only the path
 //! and byte length — blobs stay out of the database to keep queries
 //! cheap and avoid rewriting a 10 MiB BLOB on every update.
 
@@ -88,7 +88,7 @@ impl SessionMetadata {
     }
 }
 
-/// SQLite-backed implementation of PRD-09 §2.2 session persistence. Owns
+/// `SQLite`-backed implementation of PRD-09 §2.2 session persistence. Owns
 /// the DB connection plus the scrollback base directory where blobs live.
 pub struct SqliteSessionStore {
     conn: Connection,
@@ -101,7 +101,7 @@ impl SqliteSessionStore {
     ///
     /// # Errors
     /// Propagates [`TerminalError::Io`] on I/O failures and wraps
-    /// SQLite errors in [`TerminalError::Persist`].
+    /// `SQLite` errors in [`TerminalError::Persist`].
     pub fn open(
         db_path: impl AsRef<Path>,
         scrollback_dir: impl Into<PathBuf>,
@@ -121,7 +121,7 @@ impl SqliteSessionStore {
     /// on drop.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn in_memory(scrollback_dir: impl Into<PathBuf>) -> Result<Self, TerminalError> {
         let scrollback_dir = scrollback_dir.into();
         std::fs::create_dir_all(&scrollback_dir)?;
@@ -159,7 +159,7 @@ impl SqliteSessionStore {
     /// overwrite the existing row.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn save_metadata(&self, meta: &SessionMetadata) -> Result<(), TerminalError> {
         self.conn
             .execute(
@@ -194,7 +194,7 @@ impl SqliteSessionStore {
     /// Load a metadata row by session id, or `None` if missing.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn load_metadata(&self, id: &str) -> Result<Option<SessionMetadata>, TerminalError> {
         self.conn
             .query_row(
@@ -211,7 +211,7 @@ impl SqliteSessionStore {
     /// List every persisted session, most recently accessed first.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn list_metadata(&self) -> Result<Vec<SessionMetadata>, TerminalError> {
         let mut stmt = self
             .conn
@@ -236,7 +236,7 @@ impl SqliteSessionStore {
     /// the id is unknown.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`]; file errors
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`]; file errors
     /// in [`TerminalError::Io`].
     pub fn delete(&self, id: &str) -> Result<(), TerminalError> {
         self.conn

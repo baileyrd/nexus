@@ -35,7 +35,7 @@ pub enum TerminalError {
         reason: String,
     },
 
-    /// Persistence (SQLite, scrollback file) failed (PRD-09 §2.2).
+    /// Persistence (`SQLite`, scrollback file) failed (PRD-09 §2.2).
     #[error("persist: {0}")]
     Persist(String),
 }

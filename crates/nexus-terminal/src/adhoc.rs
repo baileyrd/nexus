@@ -2,7 +2,7 @@
 //!
 //! # Scope
 //!
-//! A SQLite-backed journal of one-off commands the user ran outside the
+//! A `SQLite`-backed journal of one-off commands the user ran outside the
 //! saved-command sidebar: what was typed, where it ran, when, how long,
 //! and how many times this exact `(command, working_dir)` pair has been
 //! executed. Dedup happens by that pair — rerunning the same command in
@@ -100,7 +100,7 @@ pub struct AdHocRecord {
     pub status: AdHocStatus,
 }
 
-/// SQLite-backed ad-hoc history store.
+/// `SQLite`-backed ad-hoc history store.
 pub struct SqliteAdHocStore {
     conn: Connection,
 }
@@ -109,7 +109,7 @@ impl SqliteAdHocStore {
     /// Open or create the store at `db_path`.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn open(db_path: impl AsRef<Path>) -> Result<Self, TerminalError> {
         let conn = Connection::open(db_path.as_ref())
             .map_err(|e| TerminalError::Persist(e.to_string()))?;
@@ -120,7 +120,7 @@ impl SqliteAdHocStore {
     /// Convenience for tests: open a memory-only instance.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn in_memory() -> Result<Self, TerminalError> {
         let conn = Connection::open_in_memory()
             .map_err(|e| TerminalError::Persist(e.to_string()))?;
@@ -160,7 +160,7 @@ impl SqliteAdHocStore {
     /// Returns the id of the upserted row (stable across repeated runs).
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn record(
         &self,
         command: &str,
@@ -231,7 +231,7 @@ impl SqliteAdHocStore {
     /// Return the most-recent `limit` rows, sorted by `executed_at` desc.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn recent(&self, limit: usize) -> Result<Vec<AdHocRecord>, TerminalError> {
         let mut stmt = self
             .conn
@@ -256,7 +256,7 @@ impl SqliteAdHocStore {
     /// Look up a row by id.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn get(&self, id: &str) -> Result<Option<AdHocRecord>, TerminalError> {
         self.conn
             .query_row(
@@ -273,7 +273,7 @@ impl SqliteAdHocStore {
     /// Remove a row by id. Silent no-op if unknown.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn delete(&self, id: &str) -> Result<(), TerminalError> {
         self.conn
             .execute("DELETE FROM procmgr_adhoc_history WHERE id = ?1", params![id])

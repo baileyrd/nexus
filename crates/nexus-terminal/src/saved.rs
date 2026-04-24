@@ -108,7 +108,7 @@ impl SavedCommand {
     }
 }
 
-/// SQLite-backed `procmgr_commands` store.
+/// `SQLite`-backed `procmgr_commands` store.
 pub struct SqliteSavedCommandStore {
     conn: Connection,
 }
@@ -117,7 +117,7 @@ impl SqliteSavedCommandStore {
     /// Open or create the store at `db_path`.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn open(db_path: impl AsRef<Path>) -> Result<Self, TerminalError> {
         let conn = Connection::open(db_path.as_ref())
             .map_err(|e| TerminalError::Persist(e.to_string()))?;
@@ -128,7 +128,7 @@ impl SqliteSavedCommandStore {
     /// Open an in-memory store for tests.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn in_memory() -> Result<Self, TerminalError> {
         let conn = Connection::open_in_memory()
             .map_err(|e| TerminalError::Persist(e.to_string()))?;
@@ -166,7 +166,7 @@ impl SqliteSavedCommandStore {
     /// Insert a fresh row. Fails if the slug already exists.
     ///
     /// # Errors
-    /// - [`TerminalError::Persist`] on duplicate slug / SQLite failures.
+    /// - [`TerminalError::Persist`] on duplicate slug / `SQLite` failures.
     pub fn create(&self, cmd: &SavedCommand) -> Result<(), TerminalError> {
         self.conn
             .execute(
@@ -206,7 +206,7 @@ impl SqliteSavedCommandStore {
     /// is bumped to now. Unknown slug is a persist error.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn update(&self, cmd: &SavedCommand) -> Result<(), TerminalError> {
         let changed = self
             .conn
@@ -258,7 +258,7 @@ impl SqliteSavedCommandStore {
     /// Load a saved command by slug, or `None` if missing.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn get(&self, slug: &str) -> Result<Option<SavedCommand>, TerminalError> {
         self.conn
             .query_row(
@@ -279,7 +279,7 @@ impl SqliteSavedCommandStore {
     /// then by `name`. This is the shape the sidebar reads directly.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn list(&self) -> Result<Vec<SavedCommand>, TerminalError> {
         let mut stmt = self
             .conn
@@ -310,7 +310,7 @@ impl SqliteSavedCommandStore {
     /// `None` drops the slug back to "unordered" bucket.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn reorder(&self, slug: &str, sidebar_order: Option<i32>) -> Result<(), TerminalError> {
         let changed = self
             .conn
@@ -332,7 +332,7 @@ impl SqliteSavedCommandStore {
     /// — destructive idempotence keeps UI flows simple.
     ///
     /// # Errors
-    /// Wraps SQLite errors in [`TerminalError::Persist`].
+    /// Wraps `SQLite` errors in [`TerminalError::Persist`].
     pub fn delete(&self, slug: &str) -> Result<(), TerminalError> {
         self.conn
             .execute(
@@ -445,7 +445,7 @@ pub struct PromoteOptions {
 ///
 /// # Errors
 /// - [`TerminalError::Persist`] if the adhoc id is unknown or if
-///   either SQLite call fails (e.g. slug collision).
+///   either `SQLite` call fails (e.g. slug collision).
 pub fn promote_adhoc_to_saved(
     adhoc: &SqliteAdHocStore,
     saved: &SqliteSavedCommandStore,

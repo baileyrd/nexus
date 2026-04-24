@@ -262,7 +262,7 @@ impl Session {
         // path. Thread exits on EOF / error / channel disconnect.
         let (tx, output_rx) = mpsc::channel::<std::io::Result<Vec<u8>>>();
         let reader_thread = thread::Builder::new()
-            .name(format!("nexus-terminal-reader/{}", shell_display))
+            .name(format!("nexus-terminal-reader/{shell_display}"))
             .spawn(move || {
                 let mut scratch = [0u8; 8192];
                 loop {
@@ -358,9 +358,9 @@ impl Session {
                 Ok(n)
             }
             Ok(Err(e)) => Err(TerminalError::Io(e)),
-            Err(RecvTimeoutError::Timeout) => Ok(0),
-            // Reader thread exited — treat as EOF.
-            Err(RecvTimeoutError::Disconnected) => Ok(0),
+            // Reader thread exited — treat Disconnected as EOF, same as
+            // a 0-byte read.
+            Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => Ok(0),
         }
     }
 

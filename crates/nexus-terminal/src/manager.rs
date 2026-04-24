@@ -274,6 +274,7 @@ impl SessionManager {
     ///
     /// # Errors
     /// Propagates any error from [`Session::spawn`].
+    #[allow(clippy::type_complexity)]
     pub fn spawn_or_evict(
         &mut self,
         config: SessionConfig,
@@ -417,7 +418,7 @@ impl SessionManager {
         let start_offset = if cursor < dropped {
             0usize
         } else {
-            (cursor - dropped) as usize
+            usize::try_from(cursor - dropped).unwrap_or(usize::MAX)
         };
         let (head, tail) = buf.slices();
         let total = head.len() + tail.len();

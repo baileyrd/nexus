@@ -207,7 +207,7 @@ impl ManagedProcess {
     }
 
     /// Enter [`ManagedState::PreCommand`] for `step`. Legal only from
-    /// Stopped (starting the chain) or from a prior PreCommand step
+    /// Stopped (starting the chain) or from a prior `PreCommand` step
     /// that has just completed (advancing the chain).
     ///
     /// # Errors
@@ -235,12 +235,12 @@ impl ManagedProcess {
     }
 
     /// Transition into [`ManagedState::Starting`]. Legal from Stopped
-    /// (no pre-commands configured), the last PreCommand step (pre-chain
+    /// (no pre-commands configured), the last `PreCommand` step (pre-chain
     /// finished), or Restarting (backoff elapsed).
     ///
     /// # Errors
     /// [`TransitionError::Illegal`] if called from Running / Crashed or
-    /// from a non-final PreCommand step.
+    /// from a non-final `PreCommand` step.
     pub fn mark_starting(&mut self) -> Result<(), TransitionError> {
         let legal = match &self.state {
             ManagedState::Stopped => self.config.pre_commands.is_empty(),
@@ -286,7 +286,7 @@ impl ManagedProcess {
     /// `config.max_restart_attempts`.
     ///
     /// # Errors
-    /// [`TransitionError::Illegal`] from Stopped / Crashed / PreCommand /
+    /// [`TransitionError::Illegal`] from Stopped / Crashed / `PreCommand` /
     /// Restarting.
     pub fn mark_crashed(&mut self, exit_code: Option<i32>) -> Result<bool, TransitionError> {
         if !matches!(self.state, ManagedState::Starting | ManagedState::Running) {

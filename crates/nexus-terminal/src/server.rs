@@ -139,7 +139,7 @@ pub struct SessionInfo {
 
 /// PRD-09 §11.2 events published to subscribers. Variants cover the
 /// minimum the AI / UI layer needs to react to session lifecycle and
-/// output flow; richer ProcessEvents (memory, crash reason) belong to
+/// output flow; richer `ProcessEvents` (memory, crash reason) belong to
 /// the §7 / §4 layers and land as they come online.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -356,7 +356,7 @@ impl InMemoryTerminalServer {
 
     /// Broadcast `event` to every live subscriber, pruning senders
     /// whose receivers have dropped.
-    fn emit(&mut self, event: TerminalEvent) {
+    fn emit(&mut self, event: &TerminalEvent) {
         // retain keeps only subscribers whose send succeeds. A
         // `SendError` means the receiver was dropped — safe to reap.
         self.subscribers.retain(|tx| tx.send(event.clone()).is_ok());
@@ -371,8 +371,7 @@ impl InMemoryTerminalServer {
         let name = self
             .manager
             .name(id)
-            .map(std::string::ToString::to_string)
-            .unwrap_or_else(|| id.as_str().to_string());
+            .map_or_else(|| id.as_str().to_string(), std::string::ToString::to_string);
         // `SessionManager` doesn't expose the shell string for an
         // existing session yet — future work; pass through an empty
         // string so the field stays honest rather than being guessed.
@@ -408,7 +407,7 @@ impl TerminalServer for InMemoryTerminalServer {
             let _ = self.manager.set_name(&id, name.clone());
         }
         self.emitted_lines.insert(id.clone(), 0);
-        self.emit(TerminalEvent::SessionCreated {
+        self.emit(&TerminalEvent::SessionCreated {
             id: id.as_str().to_string(),
             name: cfg.name,
         });
@@ -431,7 +430,7 @@ impl TerminalServer for InMemoryTerminalServer {
             signal = finisher.name(),
             "server closed session",
         );
-        self.emit(TerminalEvent::SessionClosed {
+        self.emit(&TerminalEvent::SessionClosed {
             id: id.as_str().to_string(),
             exit_code,
         });
@@ -467,7 +466,7 @@ impl TerminalServer for InMemoryTerminalServer {
             .lines_snapshot(id, Some(already), Some(new_lines))
             .unwrap_or_default();
         for line in slice {
-            self.emit(TerminalEvent::OutputReceived {
+            self.emit(&TerminalEvent::OutputReceived {
                 id: id.as_str().to_string(),
                 line: OutputLine::from(&line),
             });
@@ -540,7 +539,7 @@ impl TerminalServer for InMemoryTerminalServer {
             // caller may have pumped before calling us.
             if let Some(indices) = self.manager.lines_search(id, pattern, is_regex) {
                 if let Some(idx) = indices.first().copied() {
-                    self.emit(TerminalEvent::PatternMatched {
+                    self.emit(&TerminalEvent::PatternMatched {
                         id: id.as_str().to_string(),
                         pattern: pattern.to_string(),
                         line_index: idx,

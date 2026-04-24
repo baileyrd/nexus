@@ -147,7 +147,7 @@ pub fn run_pre_commands<S: TerminalServer>(
         server.send_raw_input(session_id, wrapped.as_bytes())?;
 
         match wait_for_sentinel(server, session_id, &sentinel, options)? {
-            Some(0) => continue,
+            Some(0) => {}
             Some(code) => {
                 process.mark_stopped();
                 return Ok(PreCommandOutcome::StepFailed {
@@ -218,6 +218,9 @@ fn parse_sentinel_exit_code(line: &str, sentinel: &str) -> Option<i32> {
     tail.split_whitespace().next().and_then(|s| s.parse().ok())
 }
 
+// Passed as a function pointer to `.map_err(transition_err)`; wrapping
+// in a closure would re-trip `redundant_closure`.
+#[allow(clippy::needless_pass_by_value)]
 fn transition_err(e: TransitionError) -> TerminalError {
     TerminalError::Persist(format!("pre-command FSM: {e}"))
 }

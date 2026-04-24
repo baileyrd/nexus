@@ -624,9 +624,7 @@ impl TerminalCorePlugin {
         server: &InMemoryTerminalServer,
         id: &SessionId,
     ) -> Option<(u64, Vec<u8>)> {
-        if self.event_bus.is_none() {
-            return None;
-        }
+        self.event_bus.as_ref()?;
         let mut emitters = self.emitters.lock().ok()?;
         let entry = emitters.entry(id.clone()).or_default();
         let cursor = entry.cursor;
@@ -777,6 +775,9 @@ fn poisoned<T>(_e: std::sync::PoisonError<T>) -> PluginError {
     exec_err("server mutex poisoned — prior handler panicked".into())
 }
 
+// Used as a function pointer by `.map_err(crate_err)`; wrapping in a
+// closure would re-trip `redundant_closure`.
+#[allow(clippy::needless_pass_by_value)]
 fn crate_err(e: crate::TerminalError) -> PluginError {
     exec_err(e.to_string())
 }
@@ -879,9 +880,10 @@ mod tests {
             if texts.contains(&"alpha") && texts.contains(&"beta") {
                 return;
             }
-            if std::time::Instant::now() >= deadline {
-                panic!("never saw both lines; last snapshot: {texts:?}");
-            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "never saw both lines; last snapshot: {texts:?}"
+            );
         }
     }
 
@@ -914,9 +916,10 @@ mod tests {
             if lines.len() >= 3 {
                 break;
             }
-            if std::time::Instant::now() >= deadline {
-                panic!("buffer never reached 3 lines");
-            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "buffer never reached 3 lines"
+            );
         }
         let hits_v = p
             .dispatch(
@@ -957,10 +960,11 @@ mod tests {
 
     #[test]
     fn pump_publishes_output_event_with_monotonic_seq() {
+        use nexus_kernel::{EventFilter, NexusEvent};
+
         if !unix_only("pump_publishes_output_event_with_monotonic_seq") {
             return;
         }
-        use nexus_kernel::{EventFilter, NexusEvent};
 
         let bus = Arc::new(EventBus::new(64));
         let mut sub =
@@ -991,13 +995,13 @@ mod tests {
                     &serde_json::json!({ "id": id, "timeout_ms": 100 }),
                 )
                 .expect("pump");
-            match sub.try_recv().expect("bus alive") {
-                Some(evt) => break evt,
-                None => {}
+            if let Some(evt) = sub.try_recv().expect("bus alive") {
+                break evt;
             }
-            if std::time::Instant::now() >= deadline {
-                panic!("never received first output event");
-            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "never received first output event"
+            );
         };
         let (type_id, payload) = match &first.event {
             NexusEvent::Custom { type_id, payload, .. } => (type_id.clone(), payload.clone()),
@@ -1039,9 +1043,10 @@ mod tests {
             if last_seq >= 2 {
                 break;
             }
-            if std::time::Instant::now() >= deadline {
-                panic!("second emission never produced seq >= 2 (last={last_seq})");
-            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "second emission never produced seq >= 2 (last={last_seq})"
+            );
         }
     }
 
