@@ -17,7 +17,6 @@ members = [
     "crates/nexus-formats",
     "crates/nexus-database",
     "crates/nexus-theme",
-    "crates/nexus-app",
     "crates/nexus-bootstrap",
     "crates/nexus-editor",
     "crates/nexus-terminal",
