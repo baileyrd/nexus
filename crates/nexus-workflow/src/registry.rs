@@ -206,7 +206,7 @@ schedule = "0 9 * * *"
             WorkflowRegistryError::PartialParseFailure { count, .. } => {
                 assert_eq!(count, 1);
             }
-            other => panic!("unexpected error: {other:?}"),
+            WorkflowRegistryError::Io(_) => panic!("unexpected error: {err:?}"),
         }
     }
 

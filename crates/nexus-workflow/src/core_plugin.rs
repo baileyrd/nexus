@@ -22,7 +22,7 @@
 //! The plugin drives workflow triggers from `wire_context`:
 //! - **cron** — `spawn_cron_schedulers` ([`cron.rs`](crate::cron))
 //!   parses each `trigger.schedule` and fires via `run`.
-//! - **file_event** — `spawn_file_event_triggers` subscribes to
+//! - **`file_event`** — `spawn_file_event_triggers` subscribes to
 //!   `com.nexus.storage.file_*` on the kernel bus, filters against
 //!   the trigger's `watch_dir` / `pattern` / `events`, and fires
 //!   `run` with `trigger.{path,event_type,content_hash}` variables.
@@ -123,15 +123,12 @@ impl WorkflowCorePlugin {
     /// Called from `wire_context` once the kernel context is
     /// available. Handles are retained so the plugin can cancel them
     /// on drop.
-    fn spawn_cron_schedulers(&self, ctx: Arc<KernelPluginContext>) {
-        let runtime = match tokio::runtime::Handle::try_current() {
-            Ok(h) => h,
-            Err(_) => {
-                tracing::warn!(
-                    "workflow scheduler: no tokio runtime available; cron triggers disabled"
-                );
-                return;
-            }
+    fn spawn_cron_schedulers(&self, ctx: &Arc<KernelPluginContext>) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!(
+                "workflow scheduler: no tokio runtime available; cron triggers disabled"
+            );
+            return;
         };
         let workflows: Vec<(String, String)> = match self.registry.lock() {
             Ok(reg) => reg
@@ -151,9 +148,8 @@ impl WorkflowCorePlugin {
                 .collect(),
             Err(_) => return,
         };
-        let mut handles = match self.scheduler_handles.lock() {
-            Ok(h) => h,
-            Err(_) => return,
+        let Ok(mut handles) = self.scheduler_handles.lock() else {
+            return;
         };
         for (name, expr) in workflows {
             let schedule = match CronSchedule::parse(&expr) {
@@ -163,7 +159,7 @@ impl WorkflowCorePlugin {
                     continue;
                 }
             };
-            let ctx = Arc::clone(&ctx);
+            let ctx = Arc::clone(ctx);
             let wf_name = name.clone();
             tracing::info!(workflow = %wf_name, expr = %expr, "cron scheduler armed");
             let handle = runtime.spawn(async move {
@@ -184,15 +180,12 @@ impl WorkflowCorePlugin {
     /// workflow; other workflows keep their subscriptions. Handles
     /// are retained so the plugin can cancel them on drop (alongside
     /// cron-scheduler handles).
-    fn spawn_file_event_triggers(&self, ctx: Arc<KernelPluginContext>) {
-        let runtime = match tokio::runtime::Handle::try_current() {
-            Ok(h) => h,
-            Err(_) => {
-                tracing::warn!(
-                    "workflow scheduler: no tokio runtime available; file_event triggers disabled"
-                );
-                return;
-            }
+    fn spawn_file_event_triggers(&self, ctx: &Arc<KernelPluginContext>) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!(
+                "workflow scheduler: no tokio runtime available; file_event triggers disabled"
+            );
+            return;
         };
         let specs: Vec<FileEventSpec> = match self.registry.lock() {
             Ok(reg) => reg
@@ -208,12 +201,11 @@ impl WorkflowCorePlugin {
                 .collect(),
             Err(_) => return,
         };
-        let mut handles = match self.scheduler_handles.lock() {
-            Ok(h) => h,
-            Err(_) => return,
+        let Ok(mut handles) = self.scheduler_handles.lock() else {
+            return;
         };
         for spec in specs {
-            let ctx = Arc::clone(&ctx);
+            let ctx = Arc::clone(ctx);
             tracing::info!(
                 workflow = %spec.workflow_name,
                 watch_dir = ?spec.watch_dir,
@@ -535,8 +527,8 @@ impl CorePlugin for WorkflowCorePlugin {
 
     fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
         self.context = Some(Arc::clone(&ctx));
-        self.spawn_cron_schedulers(Arc::clone(&ctx));
-        self.spawn_file_event_triggers(ctx);
+        self.spawn_cron_schedulers(&ctx);
+        self.spawn_file_event_triggers(&ctx);
     }
 }
 
@@ -647,7 +639,7 @@ impl ActionDispatcher for KernelActionDispatcher {
                     .get("args")
                     .cloned()
                     .and_then(|v| serde_json::to_value(v).ok())
-                    .unwrap_or(serde_json::Value::Object(Default::default()));
+                    .unwrap_or(serde_json::Value::Object(serde_json::Map::default()));
                 self.ctx
                     .ipc_call(target, command, call_args, DEFAULT_STEP_TIMEOUT)
                     .await
@@ -936,11 +928,11 @@ pattern = "\\.md$"
             Some("a.md")
         );
         assert_eq!(
-            vars.get("trigger.lines").and_then(|v| v.as_integer()),
+            vars.get("trigger.lines").and_then(toml::Value::as_integer),
             Some(42)
         );
         assert_eq!(
-            vars.get("inputs.enabled").and_then(|v| v.as_bool()),
+            vars.get("inputs.enabled").and_then(toml::Value::as_bool),
             Some(true)
         );
     }

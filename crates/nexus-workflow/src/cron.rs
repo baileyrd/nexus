@@ -83,6 +83,9 @@ impl CronSchedule {
         None
     }
 
+    // dom / dow (day-of-month / day-of-week) are standard cron
+    // abbreviations; similar_names is a false positive here.
+    #[allow(clippy::similar_names)]
     fn matches(&self, dt: DateTime<Utc>) -> bool {
         let minute = dt.minute();
         let hour = dt.hour();
@@ -115,7 +118,7 @@ impl CronSchedule {
 }
 
 fn is_full_range(set: &BTreeSet<u32>, lo: u32, hi: u32) -> bool {
-    set.len() as u32 == hi - lo + 1
+    u32::try_from(set.len()).is_ok_and(|len| len == hi - lo + 1)
 }
 
 fn parse_field(
