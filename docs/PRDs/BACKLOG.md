@@ -27,6 +27,10 @@ Capabilities described in legacy `app/` documentation that were not carried over
 
 - [ ] **OI-01: Settings modal + `registerSettingsTab` API.** Tabbed settings modal with plugin-extensible tab contribution point. Currently `shell/src/plugins/core/settings/` has a single-panel view only.
 - [ ] **OI-02: Split-size persistence.** Pane-splitter positions not restored across reloads — no `split_sizes` field in `shell-state.json`, no drag-end persistence from splitter components.
+- [ ] **OI-03: Workspace-wide clippy `-D warnings` sweep.** Partial — 3 crates done this session; `nexus-plugins` (33 strict errors), `nexus-terminal` (42 warnings), `nexus-bootstrap` (37), and 5 others still block strict-CI adoption.
+- [ ] **OI-04: Kernel-contract promotion TODOs.** Two shell-side types (`plugin.ts:74` slot types, `agentStore.ts:104` WI-07 agent identity) should move into the kernel contract to avoid host/sandbox type drift.
+- [ ] **OI-05: Rust dep duplication.** 34 crates with duplicated versions — `thiserror` 1/2, `digest`/`sha2`/`rand_core` 1/2, `hashbrown` 3-way, `nix`/`rustix`/`reqwest`/`toml` etc.
+- [ ] **OI-06: ESLint 8 → 9 + typescript-eslint 7 → 8.** ESLint 8 is EOL; flat-config migration needed. Also pin a project-level `.eslintrc` so the global personal config stops shadowing the workspace, and migrate xterm to `@xterm/*` scoped names.
 
 ---
 
