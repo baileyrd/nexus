@@ -49,6 +49,13 @@
       }
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["nexus"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

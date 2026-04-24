@@ -26,6 +26,7 @@
     "fs:allow-mkdir",
     "fs:allow-remove",
     "fs:allow-rename",
-    "fs:allow-watch"
+    "fs:allow-watch",
+    "deep-link:default"
   ]
 }

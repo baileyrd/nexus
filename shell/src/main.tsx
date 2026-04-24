@@ -17,6 +17,8 @@ import { setRegistry } from './host/shellRegistry'
 import { installBodyClasses } from './host/bodyClasses'
 import { eventBus } from './host/EventBus'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { uriHandlerRegistry } from './registry/UriHandlerRegistry'
 import App from './shell/App'
 import './shell/shell.css'
 // Importing the store triggers persist rehydration, which sets
@@ -284,6 +286,22 @@ async function boot() {
     .map(([k, v]) => `${k}:${(v as any[]).length}`)
     .join(' ')
   console.info(`[Boot] Slots: ${slotSummary}`)
+
+  // WI-13 follow-up: receive OS-level `nexus://…` deep-links from the
+  // Rust side (see `shell/src-tauri/src/lib.rs` — `on_open_url`) and
+  // dispatch through the shared registry. Fire-and-forget: a bad URL
+  // string or a missing handler is logged, never thrown, so the deep
+  // link pipe can't take down the shell.
+  listen<string>('nexus:url-opened', (event) => {
+    try {
+      const url = new URL(event.payload)
+      uriHandlerRegistry.dispatch(url)
+    } catch (err) {
+      console.warn('[Boot] deep-link payload not parseable:', event.payload, err)
+    }
+  }).catch((err) => {
+    console.warn('[Boot] failed to register deep-link listener:', err)
+  })
 
   contextKeyService.set('shellReady', true)
 }

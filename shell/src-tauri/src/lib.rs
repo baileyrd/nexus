@@ -5,7 +5,15 @@ mod persistence;
 
 use std::fs;
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+use tauri_plugin_deep_link::DeepLinkExt;
+
+/// Tauri event channel used to forward OS deep-link URLs to the frontend.
+/// The frontend's bootstrap code listens on this channel and forwards
+/// each URL string to `uriHandlerRegistry.dispatch(new URL(url))`. See
+/// `shell/src/registry/UriHandlerRegistry.ts` header (WI-13) for the
+/// contract. This is the Tauri-side bridge referenced in that header.
+const DEEP_LINK_EVENT: &str = "nexus:url-opened";
 
 // ── Community plugin manifest ─────────────────────────────────────────────────
 
@@ -337,6 +345,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(bridge::KernelRuntime::new())
         // E2E-only: if NEXUS_E2E_VAULT is set, init + boot the kernel here
         // directly (bypassing the webview IPC path). Webdriver-injected
@@ -345,6 +354,22 @@ pub fn run() {
         // Rust. We also write the vault into shell-state's last_forge_path
         // so the launcher's recents / frontend restore paths see it too.
         .setup(|app| {
+            // WI-13 follow-up: bridge OS-level `nexus://…` deep-links into
+            // the frontend's `uriHandlerRegistry`. The plugin delivers one
+            // event per OS open — we emit each URL as a string payload on
+            // `nexus:url-opened` and let the frontend construct the `URL`
+            // and call `dispatch()`. Errors in emit are logged but do not
+            // fail startup.
+            let app_handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    let s = url.to_string();
+                    if let Err(e) = app_handle.emit(DEEP_LINK_EVENT, s.clone()) {
+                        eprintln!("[deep-link] emit({DEEP_LINK_EVENT}) failed for {s}: {e}");
+                    }
+                }
+            });
+
             let vault = match std::env::var("NEXUS_E2E_VAULT") {
                 Ok(v) if !v.is_empty() => v,
                 _ => return Ok(()),
