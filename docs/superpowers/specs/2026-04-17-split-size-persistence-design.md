@@ -1,5 +1,9 @@
 # Split-size persistence — design
 
+> **Historical document** — Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). See `docs/legacy-shell-retirement.md`. The schema touchpoints below (`crates/nexus-app/src/persistence.rs`, `app/src/ipc/persistence.ts`, `app/src/stores/layout.ts`) no longer exist.
+>
+> ⚠ **Gap (2026-04-24):** the feature this spec describes is not yet implemented in the new shell. `shell/src-tauri/src/persistence.rs` persists `get_shell_state` / `save_shell_state` / `read_last_forge_path` / `write_last_forge_path` / `forget_forge_path`, but has no `split_sizes` field; `shell/src/workspace/persistence.ts` likewise has no split-size channel. Porting this design into the plugin-first shell remains open work — needs user confirmation on whether to keep this spec as the target design or redesign against the new `WorkspaceRenderer` / `workspaceStore` tree.
+
 **Context:** PRD-07 "Layout persistence" gap. Tab list persistence landed in a prior wave, but split-pane proportional sizes are held in-memory only. `app/src/stores/layout.ts` has the comment: *"cross-session persistence of split sizes is a separate binding-schema change."* This spec closes that gap.
 
 ## Goal

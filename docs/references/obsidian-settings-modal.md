@@ -108,6 +108,11 @@ Goal: prove the modal shell and make one tab per surface useful.
      `PluginManager::list()`.
 3. Wire the existing `workspace.settings` command (currently a stub
    `alert()` in `app/src/contributions/builtins.ts`) to open the modal.
+   ⚠ **Gap (2026-04-24):** after the `app/` → `shell/` migration (Phase 4
+   WI-37) neither the `SettingsModal` component nor a `workspace.settings`
+   command exists in the new plugin-first shell. A Settings surface —
+   either a dedicated plugin or a built-in contribution — still needs to
+   be designed and built against the `@nexus/extension-api` contract.
 
 Explicitly out of scope for the first slice:
 
