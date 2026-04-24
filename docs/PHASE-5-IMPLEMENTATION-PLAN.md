@@ -4,9 +4,9 @@
 **Date:** 2026-04-24
 **Author:** Claude (audit + planning run)
 **Phase:** 5 of 6 in the shell-migration roadmap (per [`INTEGRATION-REVIEW.md`](./INTEGRATION-REVIEW.md) §5)
-**Prerequisite:** Phases 1+2+3 complete and pushed to `main`. Phase 4 plan drafted (execution in flight under a parallel agent; see §8 sequencing discussion — Phase 5 does not strictly block on Phase 4 landing, but several WIs are easier once WI-38 `nexus` binary unification and WI-39 plugin scaffold from Phase 4 exist).
+**Prerequisite:** Phases 1+2+3+**4** complete and pushed to `main`. Phase 4 shipped 2026-04-24 as commits `38a1e82`…`36d1f06` plus the `74b098f` WI-37 follow-up; the WI-38 unified `nexus` binary, WI-39 `--template script` plugin scaffold, and WI-40 MCP-parity subcommands are all live, and WI-37 retired `crates/nexus-app` + `app/`. The `74b098f` follow-up cleaned up 28 orphan `app/src/bindings/*.ts` files that WI-37 missed and stripped the `nexus-theme` `#[ts(export, export_to="../../../app/src/bindings/")]` attributes that were regenerating the directory.
 **Source outline:** [`INTEGRATION-REVIEW.md`](./INTEGRATION-REVIEW.md) §5 "Phase 5 — v1 Polish & Ship (3–4 weeks)" — six items.
-**Backing audits:** fresh audit of `shell/src-tauri/{Cargo.toml, tauri.conf.json, src/lib.rs}`, `shell/src/main.tsx`, `crates/**/Cargo.toml`, `scripts/`, top-level `README.md`, `app/README.md`, `shell/README.md`, `shell/docs/`, `packages/nexus-extension-api/README.md`, top-level directory structure.
+**Backing audits:** fresh audit of `shell/src-tauri/{Cargo.toml, tauri.conf.json, src/lib.rs}`, `shell/src/main.tsx`, `crates/**/Cargo.toml`, `scripts/`, top-level `README.md`, `shell/README.md`, `shell/docs/`, `packages/nexus-extension-api/README.md`, `docs/writing-your-first-plugin.md`, top-level directory structure. (`app/README.md` no longer exists — retired by Phase 4 WI-37.)
 
 ---
 
@@ -21,10 +21,10 @@ The audit finds almost everything in this phase is **greenfield** — none of th
 | WI | INTEGRATION-REVIEW estimate | Audit finding | Audit-corrected |
 |---|---|---|---|
 | **WI-41** Auto-update | Implied S–M in the "3–4 weeks" total | **Greenfield + long-lead.** `shell/src-tauri/Cargo.toml` has no `tauri-plugin-updater` dep; `shell/src-tauri/tauri.conf.json` has no `updater` key; there is no CI workflow to build or sign release artifacts (`.github/` absent); there is no code-signing certificate procurement happening today. The engineering is **M** (~1 week wiring + sign/verify) but the **calendar is blocked on certs**: Apple Developer ID + notarization takes 1–5 business days, Windows EV certs are a 3–7 day process with token shipment. | **M engineering + 1–3 week calendar lead for certs.** Flag as critical-path; start procurement before any code lands. |
-| **WI-42** Crash reporting & telemetry | Implied M | **Greenfield + policy decision.** No `panic::set_hook` or `catch_unwind` anywhere in `crates/` or `shell/src-tauri/src/`. Shared tracing exists in `crates/nexus-app/src/lib.rs:108-113` and `crates/nexus-cli/src/main.rs:981`, `crates/nexus-tui/src/main.rs:86` (`tracing_subscriber::fmt` stderr sinks only). `reqwest` is in workspace deps at `Cargo.toml:126` (present). No Sentry, no telemetry HTTP client, no opt-in UI. File-as-truth rule from PRD 01 demands **zero note-content** in any submitted report — scoping is the hard part. | **M engineering, but depends on the §6 Q2 scope decision.** Conservative scope = Sentry free tier + stack-trace-only + env fingerprint ≈ 1 week. Broader scope (anon analytics, feature-use counts) = multi-week. |
+| **WI-42** Crash reporting & telemetry | Implied M | **Greenfield + policy decision.** No `panic::set_hook` or `catch_unwind` anywhere in `crates/` or `shell/src-tauri/src/`. Shared tracing exists in `crates/nexus-cli/src/main.rs:981` and `crates/nexus-tui/src/main.rs:86` (`tracing_subscriber::fmt` stderr sinks only); the legacy `crates/nexus-app` tracing-init site was retired by Phase 4 WI-37. `reqwest` is in workspace deps at `Cargo.toml:126` (present). No Sentry, no telemetry HTTP client, no opt-in UI. File-as-truth rule from PRD 01 demands **zero note-content** in any submitted report — scoping is the hard part. | **M engineering, but depends on the §6 Q2 scope decision.** Conservative scope = Sentry free tier + stack-trace-only + env fingerprint ≈ 1 week. Broader scope (anon analytics, feature-use counts) = multi-week. |
 | **WI-43** Bundled core plugin set | Implied S | **Curation task, not code.** `shell/src/main.tsx:155-196` registers exactly **38 plugins at boot**: 6 core services + 32 nexus feature plugins. Some are clearly load-bearing (activity bar, status bar, editor, files, workspace, files, search, command palette, settings); some are niche or incomplete (skills, workflow, mcp, processes, global graph, bases, canvas). No split today between "ship by default" and "opt-in." | **S (~3 days)** to do the curation, document the policy, and add a gate that surfaces non-default plugins as "available but disabled" in the settings UI. |
-| **WI-44** Marketplace (minimal) | Implied M | **Greenfield.** No `nexus plugin install` command exists in `crates/nexus-cli/src/`. Community plugins today install by being dropped into `~/.nexus-shell/plugins/` (`shell/src-tauri/src/lib.rs:54-112` is the scanner). No JSON index hosted anywhere. Phase 3 WI-30 iframe sandbox, WI-31 consent, WI-33 `api_version` surfacing all landed — the plumbing a marketplace needs is already there; only the "discover + fetch + unpack" layer is missing. | **M (~1 week)** for the minimum: one `nexus-plugins.json` in the main repo, a shell-side Marketplace tab rendering it, one Tauri command to download+unpack a tarball to `~/.nexus-shell/plugins/`. |
-| **WI-45** Documentation pass | Implied S–M | **Partial.** Several existing docs: top-level `README.md` (242 lines, references "Phase 4–5 features as functional" — stale language from pre-migration era), `app/README.md` (73 lines, already correctly marked DEPRECATED as of 2026-04-23), `shell/README.md` (107 lines, current), `shell/docs/writing-a-plugin.md` (**290 lines, already exists and covers word-count example tutorial** — Phase 5's "Writing your first Nexus plugin" deliverable is 70% shipped). 22 other `shell/docs/*.md` files exist. 13+ `docs/*.md` design docs reference Phase 1–3 state, some stale. No published docs website today. | **S (~4 days) for a bounded deliverables checklist.** Scope control is the risk; pin to 5 deliverables max. |
+| **WI-44** Marketplace (minimal) | Implied M | **Greenfield-minus-stubs.** Phase 4 WI-38 landed `nexus plugin {install,list,remove}` subcommand stubs — `install` prints the "requires marketplace (Phase 5 WI-44)" message and exits 2, while `list --shell` and `remove <id>` already do real work against `~/.nexus-shell/plugins/` (`crates/nexus-cli/src/commands/plugin.rs`). Community plugins today still arrive by being dropped into that directory (`shell/src-tauri/src/lib.rs:54-112` is the scanner). No JSON index hosted anywhere. Phase 3 WI-30 iframe sandbox, WI-31 consent, WI-33 `api_version` surfacing, and Phase 4 WI-39 `--template script` scaffold all landed — plumbing is there; only the "discover + fetch + unpack" layer is missing. | **M (~1 week)** for the minimum: one `nexus-plugins.json` in the main repo, a shell-side Marketplace tab rendering it, one Tauri command to download+unpack a tarball to `~/.nexus-shell/plugins/`, and replacing the `install` stub with a real implementation that hits the same code path. |
+| **WI-45** Documentation pass | Implied S–M | **Partial.** Several existing docs: top-level `README.md` (references "Phase 4–5 features as functional" — stale language from pre-migration era; should read post-v1), `shell/README.md` (107 lines, current), `shell/docs/writing-a-plugin.md` (~290 lines, word-count example tutorial — pre-dates Phase 3 sandbox + Phase 4 scaffold), and **a second tutorial shipped by Phase 4 WI-39 at `docs/writing-your-first-plugin.md`** (164 lines, built around `nexus plugin scaffold --template script`). `app/README.md` is gone (retired by Phase 4 WI-37 together with the `app/` directory and `crates/nexus-app/`). 22 other `shell/docs/*.md` files exist. 13+ `docs/*.md` design docs reference Phase 1–3 state, some stale. No published docs website today. | **S (~4 days) for a bounded deliverables checklist.** Scope control is the risk; pin to 5 deliverables max. Reconcile the two plugin tutorials (`shell/docs/writing-a-plugin.md` and `docs/writing-your-first-plugin.md`) — either merge or make their audiences distinct. |
 | **WI-46** Beta → GA | Implied 2 weeks calendar (explicitly in the review) | **Ops-only.** No release tag beyond `v0.1.0-legacy-shell`. No `CHANGELOG.md`, no beta channel, no triage rubric, no v1.0.0 criteria artifact, no downloader page. Everything in this WI is logistics: procure beta testers, define a triage SLA, set a go/no-go rubric, execute the 2-week window, cut `v1.0.0`. | **2 weeks calendar + ~3 engineer-days of setup** (CHANGELOG bootstrapping, release-branch process doc, bug-triage board). Not shippable without the prior five WIs. |
 
 **Net effect.** INTEGRATION-REVIEW §5 estimated "3–4 weeks" for all six WIs. The audit-corrected aggregate is:
@@ -46,7 +46,7 @@ This plan treats them differently: WI-41/42/44 get full design sketches; WI-43/4
 2. A plugin panic or shell panic produces a Sentry-delivered report (scrubbed per §3.2 policy) if and only if the user has opted in via settings. Default is **opt-out** at first launch.
 3. `shell/src/main.tsx` registers only the **curated default set** (count TBD in WI-43 — current floor suggested ≈16–18 plugins); non-default nexus plugins ship on disk but load lazily via the marketplace/enable path.
 4. `nexus plugin install <id>` fetches a plugin from the repo-hosted `nexus-plugins.json` index, unpacks it to `~/.nexus-shell/plugins/`, and the shell surfaces it on next boot. The Settings > Plugins UI gains a "Marketplace" tab.
-5. Top-level `README.md` reflects post-migration reality. `app/README.md` is merged into the root DEPRECATED section and the directory is marked for v1.1 removal. `shell/docs/writing-a-plugin.md` is updated to reference the Phase 4 WI-39 scaffold command. `CHANGELOG.md` exists and covers v0.1.0 → v1.0.0.
+5. Top-level `README.md` reflects post-migration reality (legacy `app/` is gone; no DEPRECATED section left to merge). `shell/docs/writing-a-plugin.md` either incorporates or is superseded by Phase 4's `docs/writing-your-first-plugin.md` (which already references the WI-39 `--template script` scaffold command). `CHANGELOG.md` exists and covers v0.1.0 → v1.0.0.
 6. Beta phase has run its two-week cycle with a triage SLA met; a go/no-go review happens on Day 14; `v1.0.0` is tagged and published on the updater channel.
 
 ---
@@ -261,7 +261,7 @@ It explicitly **does not** capture:
 #### 3.2.2 Current state
 
 - **No panic handler anywhere.** `grep -rn "set_hook\|panic::catch\|PanicInfo" crates/ shell/src-tauri/src/` returns only a comment in `shell/src-tauri/src/lib.rs:261` ("Atomic write: tmp + rename so a crash mid-write can't produce a …" — unrelated to this WI). A Rust panic in the shell today unwinds, rolls back, and exits the process.
-- **Tracing is set up per-binary.** `crates/nexus-cli/src/main.rs:981`, `crates/nexus-tui/src/main.rs:86`, `crates/nexus-app/src/lib.rs:108` each call `tracing_subscriber::fmt()...init()` to stderr. Shell has no tracing init today — `shell/src-tauri/src/lib.rs` has zero `tracing` references.
+- **Tracing is set up per-binary.** `crates/nexus-cli/src/main.rs:981` and `crates/nexus-tui/src/main.rs:86` each call `tracing_subscriber::fmt()...init()` to stderr. The legacy `crates/nexus-app/src/lib.rs:108` init site was retired by Phase 4 WI-37. Shell has no tracing init today — `shell/src-tauri/src/lib.rs` has zero `tracing` references.
 - **No HTTP client wired for telemetry.** `reqwest` is in workspace deps (`Cargo.toml:126`), used by `nexus-ai` and `nexus-mcp`; never from the shell.
 - **No Sentry deps.** Not in `Cargo.toml`, not in `shell/package.json`.
 - **No opt-in UI.** No `settings.json` schema key for telemetry, no toggle in the settings plugin.
@@ -601,7 +601,7 @@ nexus plugin uninstall <id>  # rm -rf ~/.nexus-shell/plugins/<id>
 nexus plugin enabled         # list installed (scan the dir)
 ```
 
-Implementation lives in `crates/nexus-cli/src/plugin.rs` (new file). Uses `reqwest` + a tar-extraction crate (`tar` + `flate2`). The operation is identical to the shell-side Tauri command — factor out to `crates/nexus-shell-lib-marketplace` or keep duplicated for v1; lean on the WI-38 Phase 4 unified binary when it lands for the shared path.
+Implementation lives in `crates/nexus-cli/src/commands/plugin.rs` (already exists — Phase 4 WI-38 added the `install|list|remove` subcommand stubs that WI-44 fleshes out). Uses `reqwest` + a tar-extraction crate (`tar` + `flate2`). The operation is identical to the shell-side Tauri command — factor out to `crates/nexus-shell-lib-marketplace` or keep duplicated for v1; the Phase 4 WI-38 unified binary is the shared shell entry.
 
 **Part 4 — Tarball publishing process (0.5 day).**
 
@@ -683,9 +683,9 @@ The WI is deliberately bounded: **5 deliverables max**. Scope drift here is the 
 #### 5.1.2 Current state — audit
 
 - **`README.md` (top-level, 242 lines):** Last audited 2026-04-23. Says "Alpha (v0.1.0) — Phase 1 foundation is solid, Phase 4-5 features (AI, MCP) are functional. Not yet production-ready." The "Phase N" numbering here refers to the **PRD** phase numbering (Phase 4 = AI, Phase 5 = MCP) which *completely conflicts* with the migration-roadmap phase numbering (Phase 5 = v1 polish). This is a known source of confusion. The readme also has a `⚠️ Desktop shell freeze` block referencing the correct migration state. **Stale: yes — the "Phase 4-5 features functional" line reads as pre-release in a post-release context.**
-- **`app/README.md` (73 lines):** Already correctly marked DEPRECATED as of 2026-04-23. Freeze policy stated. No further changes needed in Phase 5 other than maybe a "scheduled for removal in v1.1" line.
+- **`app/README.md`:** Gone. Phase 4 WI-37 retired the `app/` directory and `crates/nexus-app/` on 2026-04-24; the `74b098f` follow-up cleaned up the 28 orphan `app/src/bindings/*.ts` files. No Phase 5 action needed. Historical context (freeze rationale, migration outcome) lives in `docs/legacy-shell-retirement.md`.
 - **`shell/README.md` (107 lines):** Current. Describes the plugin-first shell. Links to `shell/docs/`. **Needs a "Plugins that ship by default" section** once WI-43 curates the list.
-- **`shell/docs/writing-a-plugin.md` (290 lines):** ALREADY EXISTS. Covers a word-count plugin example end-to-end. Phase 5's "Writing your first Nexus plugin" tutorial is **already ~70% done**. Gaps: references pre-WI-19 activation events; doesn't mention `@nexus/extension-api` workspace path; pre-dates the WI-30 sandbox model. Update, don't rewrite.
+- **Two plugin tutorials now exist.** `shell/docs/writing-a-plugin.md` (~290 lines, word-count plugin, pre-dates Phase 3 sandbox + Phase 4 scaffold) is the older one; `docs/writing-your-first-plugin.md` (164 lines, shipped by Phase 4 WI-39, built around `nexus plugin scaffold --template script`) is the newer one. WI-45 must reconcile them — candidate split: `docs/writing-your-first-plugin.md` = quickstart tutorial (the scaffold path), `shell/docs/writing-a-plugin.md` = in-depth guide (activation events, sandbox model, capability declaration, slot system). Or fold both into one file and redirect.
 - **`shell/docs/*` (22 files):** Architecture, plugin-system, extension-host, context-keys, slot-system, etc. Mostly current. Audit for "Phase N" references.
 - **`docs/*.md` (30+ files):** Many are design-phase documents from the migration planning era. Phase 5 should **not** rewrite these — they are historical planning artifacts, not user docs. They can move to `docs/planning/` or `docs/archive/` to signal "reference only."
 - **`packages/nexus-extension-api/README.md`:** Current per Phase 1 + 3 updates. Lists API surface. Could use a "Quick start" section.
@@ -697,7 +697,7 @@ The WI is deliberately bounded: **5 deliverables max**. Scope drift here is the 
 
 #### 5.1.3 Design sketch — the 5 deliverables
 
-1. **`README.md` rewrite (top-level).** Retarget to "v1 is out, here's what this is." Remove "Phase 4-5 features" language (PRD phases — conflicting numbering). Lead with a screenshot (or ASCII-art equivalent). Three-sentence pitch. Install link (installers from GitHub Releases). Link to: docs overview, plugin marketplace, release runbook, changelog. Remove the `⚠️ Desktop shell freeze` block — at v1.0, the freeze is resolved (legacy shell deleted, per Phase 4 WI-37 the anticipated work). ~150 lines. **Target: 1 hour to read cover-to-cover.**
+1. **`README.md` rewrite (top-level).** Retarget to "v1 is out, here's what this is." Remove "Phase 4-5 features" language (PRD phases — conflicting numbering). Lead with a screenshot (or ASCII-art equivalent). Three-sentence pitch. Install link (installers from GitHub Releases). Link to: docs overview, plugin marketplace, release runbook, changelog. Remove the `⚠️ Desktop shell freeze` block — the freeze is already resolved (legacy shell deleted in Phase 4 WI-37). ~150 lines. **Target: 1 hour to read cover-to-cover.**
 
 2. **`docs/README.md` (new): docs landing page.** One-page navigation hub that links to the most important docs by audience:
    - *New user:* "Install", "First note", "Writing your first plugin."
@@ -706,9 +706,9 @@ The WI is deliberately bounded: **5 deliverables max**. Scope drift here is the 
    - *Release engineer:* `docs/RELEASE-RUNBOOK.md`, `docs/TELEMETRY-POLICY.md`.
    ~80 lines.
 
-3. **`shell/docs/writing-a-plugin.md` audit & update.** Bring it current with Phase 1–4 reality: activation events, `@nexus/extension-api` path, sandbox model (when to use `sandboxed: true`), capability declaration, new WI-39 plugin-scaffold command (if WI-39 lands in Phase 4 — branch on it). Add one new section: "publishing your plugin to the marketplace" linking to `docs/PUBLISHING-A-PLUGIN.md`. ~50 lines added, ~20 revised.
+3. **Plugin tutorials — reconcile the two that now exist.** `docs/writing-your-first-plugin.md` (Phase 4 WI-39, 164 lines, script-template scaffold path) and `shell/docs/writing-a-plugin.md` (~290 lines, pre-Phase-3 word-count example). Bring both current with Phase 1–4 reality — activation events, `@nexus/extension-api` path, sandbox model (`sandboxed: true`), capability declaration, the `nexus plugin scaffold --template script` command. Recommended split: keep the WI-39 tutorial as the quickstart, rework `shell/docs/writing-a-plugin.md` into an in-depth reference, cross-link both. Add "publishing your plugin to the marketplace" section linking to `docs/PUBLISHING-A-PLUGIN.md`. ~80 lines added across both, ~40 revised.
 
-4. **`docs/ARCHITECTURE.md` audit.** Currently exists (file present); verify it reflects post-migration reality (shell is the sole desktop target, `crates/nexus-app` is deleted or deprecated, kernel crate DAG is the one in INTEGRATION-REVIEW §2.1). Light edit, not a rewrite. ~50 edits.
+4. **`docs/ARCHITECTURE.md` audit.** Currently exists (file present); verify it reflects post-migration reality (shell is the sole desktop target, `crates/nexus-app` is deleted, kernel crate DAG is the one in INTEGRATION-REVIEW §2.1). Light edit, not a rewrite. ~50 edits.
 
 5. **`docs/planning/` archive move.** Mechanical: move `PHASE-1..5-IMPLEMENTATION-PLAN.md`, `INTEGRATION-REVIEW.md`, `UI-AUDIT.md`, `MICROKERNEL-AUDIT.md`, `SHELL-COMPARISON.md`, `PARITY-CHECKLIST.md`, etc. — everything that is a *planning artifact* — to `docs/planning/`. Leave design docs that describe current architecture (`ARCHITECTURE.md`, `leaf-architecture.md`) in place. Add a `docs/planning/README.md` pointer explaining what this directory is. ~30 lines.
 
@@ -724,7 +724,7 @@ The WI is deliberately bounded: **5 deliverables max**. Scope drift here is the 
 
 **Agent 2 (docs landing).** Prompt: *"Create `docs/README.md` as an audience-indexed navigation hub. Four audience sections (new user, plugin author, contributor, release). Link to existing docs; don't duplicate content. ~80 lines."*
 
-**Agent 3 (writing-a-plugin update).** Prompt: *"Update `shell/docs/writing-a-plugin.md` to reflect post-Phase-3 shell reality. Mention: activation events, @nexus/extension-api import path, sandbox model, capability declaration, publishing to marketplace. Preserve the existing word-count example structure. Diff only."*
+**Agent 3 (plugin tutorial reconciliation).** Prompt: *"Two plugin tutorials exist: `docs/writing-your-first-plugin.md` (quickstart, scaffold-driven) and `shell/docs/writing-a-plugin.md` (in-depth, word-count example). Reconcile: make the first a true quickstart that ends by pointing at the second; make the second a reference that assumes the reader scaffolded via `nexus plugin scaffold --template script`. Mention activation events, @nexus/extension-api import path, sandbox model, capability declaration, publishing to marketplace. Diff only."*
 
 Main-thread: do the archive move manually (it's 8 `git mv` commands), do the top-level README final pass.
 
@@ -732,7 +732,7 @@ Main-thread: do the archive move manually (it's 8 `git mv` commands), do the top
 
 1. `docs: rewrite top-level README for v1 launch` — README.md.
 2. `docs: add docs landing page with audience-indexed navigation` — docs/README.md.
-3. `docs: update writing-a-plugin tutorial for Phase 3 shell` — shell/docs/writing-a-plugin.md.
+3. `docs: reconcile plugin tutorials (quickstart + in-depth)` — docs/writing-your-first-plugin.md + shell/docs/writing-a-plugin.md.
 4. `docs: audit ARCHITECTURE.md post-migration` — docs/ARCHITECTURE.md.
 5. `docs: move planning artifacts to docs/planning/` — `git mv` + planning/README.md.
 
@@ -741,10 +741,10 @@ Main-thread: do the archive move manually (it's 8 `git mv` commands), do the top
 - `docs/README.md` — new.
 - `docs/planning/README.md` — new.
 - `docs/planning/*` — moves (8+ files).
-- `shell/docs/writing-a-plugin.md` — edit.
+- `docs/writing-your-first-plugin.md` — edit (quickstart).
+- `shell/docs/writing-a-plugin.md` — edit (in-depth guide).
 - `docs/ARCHITECTURE.md` — edit.
 - `shell/README.md` — small additions.
-- `app/README.md` — small addition ("scheduled for removal in v1.1").
 
 #### 5.1.6 Acceptance
 
@@ -781,7 +781,7 @@ Run a structured 2-week beta with a test group. Triage what comes in. Fix ship-b
 - **One release tag exists** (`v0.1.0-legacy-shell`).
 - **No `CHANGELOG.md`.** (WI-41 scaffolds an empty one.)
 - **No public download page.** (WI-41 lands GitHub Releases as the distribution path.)
-- **Phase 4 WI-37** (anticipated) deletes `crates/nexus-app`. If that hasn't landed when Phase 5 starts, v1 ships with the legacy shell on disk — ugly but not a blocker. Flag as a coordination point.
+- **Phase 4 WI-37** (landed 2026-04-24) deleted `crates/nexus-app` + `app/`. No pre-release coordination needed on this axis.
 
 #### 5.2.3 Design sketch — the ship plan
 
@@ -862,7 +862,7 @@ Non-rubric ship criteria:
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| No testers recruited | High | Start recruitment in Phase 4. Don't wait for Phase 5. |
+| No testers recruited | High | Start recruitment immediately (Phase 4 shipped 2026-04-24); don't wait for Phase 5 engineering to finish. |
 | Testers file feature requests instead of bugs; rubric blurs | Medium | Explicit onboarding doc section: "what we're testing vs. what we're not." |
 | Critical bug found in Week 2, fix requires cert re-issue (e.g., bundle ID conflict) | Critical | Cert-related debugging happens in Week 0 during `v1.0.0-beta.1`. Don't wait for bugs. |
 | Beta test group is too small (<5 active testers) — no real signal | High | Aim for 20–50. If under 10 active by Week 1 Day 3, extend recruitment, delay the ship date. |
@@ -926,10 +926,10 @@ Phase 5 critical path — left-to-right, time flows right
 
 **Two-engineer:** ~3 weeks. Engineer A on WI-41 + WI-46 triage; Engineer B on WI-42 + WI-44 + WI-43 + WI-45. WI-46 go/no-go stays a single decision-maker.
 
-**Phase 4 coordination:**
-- WI-38 (Phase 4) unified `nexus` binary simplifies WI-44 CLI subcommand landing. If WI-38 isn't done when WI-44 starts, WI-44 ships as a `nexus-cli` subcommand only; shell integration is independent. Not blocking.
-- WI-39 (Phase 4) plugin-scaffold command is referenced by WI-45 writing-a-plugin tutorial. Branch the doc: if WI-39 exists, cite it; otherwise defer to manual scaffolding.
-- WI-37 (Phase 4) retire `crates/nexus-app` ideally lands before WI-45 so the top-level README doesn't reference a deleted crate. If not, WI-45 README still points to the freeze-notice + planned-removal state. Soft dependency.
+**Phase 4 coordination (resolved — Phase 4 shipped 2026-04-24):**
+- WI-38 (Phase 4, commits `d22b5b6`/`99e9bc8`/`1a7649d`) unified `nexus` binary + added `plugin install|list|remove` subcommand stubs. WI-44 turns the `install` stub into a real marketplace fetcher.
+- WI-39 (Phase 4, commits `b83d37f`/`ebe1ee2`) shipped `--template script` scaffold + `docs/writing-your-first-plugin.md` tutorial. WI-45 reconciles that tutorial with the older `shell/docs/writing-a-plugin.md` (see §5.1.3).
+- WI-37 (Phase 4, commits `38a1e82`/`e7c6c5a` + `74b098f` follow-up) retired `crates/nexus-app` and `app/`. WI-45 README rewrite simply removes the freeze-notice block; nothing to point at.
 
 ---
 
@@ -1038,7 +1038,7 @@ Options:
 
 ## 9. What this plan does NOT cover
 
-- **Anything in Phase 4** — frontend unification, `crates/nexus-app` retirement, nexus binary unification, plugin scaffold command, MCP parity. Separate plan, anticipated WI-36 through WI-40.
+- **Anything in Phase 4** — frontend unification, `crates/nexus-app` retirement, nexus binary unification, plugin scaffold command, MCP parity. Separate plan, shipped WI-36 through WI-40 on 2026-04-24.
 - **A public docs website.** §6 Q5 defers to v1.x.
 - **Plugin-signing / trusted-publisher model.** Phase 6.
 - **Auto-update for community plugins.** WI-44 plan has this as an explicit non-goal for v1.
@@ -1060,8 +1060,8 @@ Options:
 2. **Resolve §8 Q2 (telemetry scope).** This shapes WI-42 design day one.
 3. **Start WI-42 and WI-45 engineering in parallel** — both are independent of the cert lead.
 4. **Start WI-41 engineering as soon as the Apple/Microsoft enrollment is confirmed or provisional.** The code can land unsigned, signing is a configuration step later.
-5. **Schedule beta tester recruitment** (WI-46 Week 0 step 1) during Phase 4 so outreach is underway before Phase 5 ends.
-6. **Coordinate with Phase 4 agent** on the WI-37 (`crates/nexus-app` retirement) and WI-38 (unified nexus binary) landing dates — WI-45 README + WI-44 CLI benefit from both.
+5. **Schedule beta tester recruitment** (WI-46 Week 0 step 1) immediately so outreach is underway before Phase 5a engineering wraps.
+6. ~~Coordinate with Phase 4 agent~~ — Phase 4 shipped 2026-04-24; WI-37, WI-38, WI-39, WI-40 are all live and informing WI-44 (marketplace stubs to fill in) and WI-45 (two plugin tutorials to reconcile).
 7. **Draft `docs/TRIAGE-RUBRIC.md`** in Phase 5 Week 0. It's cheap and it anchors the go/no-go decision in WI-46.
 8. **Decide §8 Q7 (`@nexus/extension-api` npm publish) before WI-41 lands** so the release workflow knows whether to do `npm publish`.
 9. **Land the `CHANGELOG.md` scaffold** in the WI-41 first commit. Populating it is then a habit, not a last-minute rush.
