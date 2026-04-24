@@ -103,7 +103,9 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
 
             // Hash differs → modified (or resurrected with new content).
             let abs_path = forge_root.join(rel_path);
-            let content = std::fs::read_to_string(&abs_path)?;
+            let Some(content) = read_utf8_or_skip(&abs_path, rel_path) else {
+                continue;
+            };
             let parsed = parse_markdown(&content)?;
             // Clean up orphaned FTS rows before hard-deleting the file row.
             conn.execute(
@@ -151,7 +153,9 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
             } else {
                 // Brand-new file.
                 let abs_path = forge_root.join(rel_path);
-                let content = std::fs::read_to_string(&abs_path)?;
+                let Some(content) = read_utf8_or_skip(&abs_path, rel_path) else {
+                    continue;
+                };
                 let parsed = parse_markdown(&content)?;
                 let file_type = infer_file_type(rel_path);
                 insert_file(conn, rel_path, &file_type, *size_bytes, &parsed)?;
@@ -223,6 +227,29 @@ fn scan_dir_recursive(
     }
 
     Ok(())
+}
+
+/// Read `abs_path` as UTF-8, returning `None` (with a warning) if the file
+/// is not valid UTF-8 or the read fails for any other reason.
+///
+/// Reconcile walks every non-ignored file under the forge root, but not every
+/// file in a user's folder is a text note — binary attachments, images, PDFs,
+/// and random stray files are common. A single non-UTF-8 file must not brick
+/// the entire kernel boot, which is what a `?` on `read_to_string` would do.
+/// Caller skips the file (it stays on disk, just unindexed); next reconcile
+/// pass will retry.
+fn read_utf8_or_skip(abs_path: &Path, rel_path: &str) -> Option<String> {
+    match std::fs::read_to_string(abs_path) {
+        Ok(content) => Some(content),
+        Err(err) => {
+            tracing::warn!(
+                path = %rel_path,
+                error = %err,
+                "skipping file during reconcile (not valid UTF-8 or unreadable)",
+            );
+            None
+        }
+    }
 }
 
 /// Infer a file type string from the relative path.
