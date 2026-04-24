@@ -12,4 +12,7 @@
 #![warn(clippy::pedantic)]
 
 pub mod bases;
+pub mod path_validator;
 pub mod paths;
+
+pub use path_validator::{ForgePathValidator, PathValidationError};

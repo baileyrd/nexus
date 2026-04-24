@@ -8,6 +8,7 @@ use std::path::Path;
 use wasmtime::{Caller, Linker};
 
 use nexus_kernel::Capability;
+use nexus_types::PathValidationError;
 
 use crate::{sandbox::PluginData, PluginError};
 
@@ -419,53 +420,72 @@ fn register_host_write_file(linker: &mut Linker<PluginData>) -> Result<(), Plugi
                     return HOST_ERROR;
                 };
 
-                // Confine path to forge root. The TOCTOU-safe pattern:
-                // canonicalize the parent (resolving any symlinks), verify
-                // it is inside forge_root, then write to
-                // `canon_parent.join(filename)` — NOT to the original
-                // non-canonical `absolute` path. Writing to the canonical
-                // target closes the symlink-swap race between canonicalize
-                // and open.
                 let requested = Path::new(&path_str);
-                let absolute = if requested.is_absolute() {
-                    requested.to_path_buf()
-                } else {
-                    forge_root.join(requested)
-                };
 
+                // Confine path to forge root via `ForgePathValidator::
+                // validate_for_write`. The validator walks up to the
+                // deepest existing ancestor, canonicalizes *that*
+                // (resolving symlinks in one syscall), prefix-checks the
+                // canonical ancestor against the canonical forge root,
+                // and rejoins the remaining tail. This closes the
+                // canonicalize-parent-then-open TOCTOU race the prior
+                // inline pattern was vulnerable to (MK audit finding
+                // F-5.3.1). Test sandboxes with an empty `forge_root`
+                // and no validator skip the check — they operate on an
+                // out-of-tree scratch path chosen by the test.
                 let target = if forge_root.as_os_str().is_empty() {
-                    absolute
+                    if requested.is_absolute() {
+                        requested.to_path_buf()
+                    } else {
+                        forge_root.join(requested)
+                    }
                 } else {
-                    let Some(parent) = absolute.parent() else {
-                        tracing::warn!(plugin_id = %plugin_id, "host::write_file: path has no parent");
+                    let Some(validator) = caller.data().path_validator.as_ref() else {
+                        tracing::warn!(
+                            plugin_id = %plugin_id,
+                            "host::write_file: no path validator configured for plugin — denying"
+                        );
                         return HOST_ERROR;
                     };
-                    let Some(file_name) = absolute.file_name() else {
-                        tracing::warn!(plugin_id = %plugin_id, "host::write_file: path has no file name");
-                        return HOST_ERROR;
-                    };
-
-                    // Create parent chain only if it's (by prefix) within
-                    // forge_root, so a malicious `..`-laced path can't
-                    // mkdir outside the sandbox.
-                    if !parent.exists() && parent.starts_with(&forge_root) {
-                        if let Err(e) = std::fs::create_dir_all(parent) {
-                            tracing::warn!(plugin_id = %plugin_id, "host::write_file: mkdir failed: {e}");
+                    // Ensure the target's (normalized) parent directory
+                    // exists before validation — `validate_for_write`
+                    // only accepts paths whose deepest existing ancestor
+                    // lies inside the forge root, but it handles the
+                    // case where intermediate directories don't exist
+                    // by canonicalizing the deepest real ancestor.
+                    // However, the writer (`std::fs::write`) will not
+                    // mkdir, so if any non-existing intermediate
+                    // directory is present we must create it first —
+                    // and only under the canonical target chain so a
+                    // symlinked segment cannot steer mkdir outside the
+                    // sandbox.
+                    match validator.validate_for_write(requested) {
+                        Ok(canonical_target) => {
+                            if let Some(parent) = canonical_target.parent() {
+                                if !parent.exists() {
+                                    if let Err(e) = std::fs::create_dir_all(parent) {
+                                        tracing::warn!(
+                                            plugin_id = %plugin_id,
+                                            "host::write_file: mkdir failed: {e}"
+                                        );
+                                        return HOST_ERROR;
+                                    }
+                                }
+                            }
+                            canonical_target
+                        }
+                        Err(PathValidationError::PathTraversal(_)) => {
+                            return deny_path_traversal(&plugin_id, requested, &forge_root);
+                        }
+                        Err(PathValidationError::InvalidPath(msg)) => {
+                            tracing::warn!(
+                                plugin_id = %plugin_id,
+                                "host::write_file: invalid path '{}': {msg}",
+                                requested.display()
+                            );
                             return HOST_ERROR;
                         }
                     }
-
-                    let canon_parent = match parent.canonicalize() {
-                        Ok(p) => p,
-                        Err(e) => {
-                            tracing::warn!(plugin_id = %plugin_id, "host::write_file: canonicalize parent failed: {e}");
-                            return HOST_ERROR;
-                        }
-                    };
-                    if !canon_parent.starts_with(&forge_root) {
-                        return deny_path_traversal(&plugin_id, &absolute, &forge_root);
-                    }
-                    canon_parent.join(file_name)
                 };
 
                 match std::fs::write(&target, &data) {

@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use nexus_types::{ForgePathValidator, PathValidationError};
 
 use crate::capability::{Capability, CapabilitySet};
 use crate::context::PluginContext;
@@ -33,6 +34,10 @@ pub struct KernelPluginContext {
     event_bus: Arc<EventBus>,
     /// Canonical form of the forge root, used for path confinement.
     forge_root_canonical: PathBuf,
+    /// Path validator scoped to the forge root. Used by the write path to
+    /// close the canonicalize-parent-then-open TOCTOU race (MK audit
+    /// findings F-5.3.1 / F-5.3.2). Constructed once at context creation.
+    path_validator: ForgePathValidator,
     /// Optional dispatcher for plugin-to-plugin IPC. `None` means this context
     /// was built without a plugin loader (e.g. in unit tests) and `ipc_call`
     /// will return [`IpcError::DispatcherUnavailable`].
@@ -58,6 +63,12 @@ impl KernelPluginContext {
         ipc_dispatcher: Option<Arc<dyn IpcDispatcher>>,
     ) -> Result<Self> {
         let forge_root_canonical = forge_root.canonicalize()?;
+        let path_validator = ForgePathValidator::new(forge_root).map_err(|e| {
+            Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("forge root '{}': {e}", forge_root.display()),
+            ))
+        })?;
         Ok(Self {
             plugin_id: plugin_id.into(),
             plugin_version: plugin_version.into(),
@@ -65,6 +76,7 @@ impl KernelPluginContext {
             kv,
             event_bus,
             forge_root_canonical,
+            path_validator,
             ipc_dispatcher,
         })
     }
@@ -163,52 +175,47 @@ impl PluginContext for KernelPluginContext {
     async fn write_file(&self, path: &Path, contents: &[u8]) -> Result<()> {
         self.require_capability(Capability::FsWrite)?;
 
-        // TOCTOU-safe write: canonicalize the parent dir (resolving any
-        // symlinks), verify it is inside forge_root, then write to the
-        // path formed by `canon_parent.join(filename)` — never the
-        // original non-canonical `absolute` path. Writing via the
-        // canonical parent closes the symlink-swap race between parent
-        // canonicalize and open.
-        let absolute = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            self.forge_root_canonical.join(path)
-        };
-        let parent = absolute.parent().ok_or_else(|| {
-            Error::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("path '{}' has no parent", absolute.display()),
-            ))
+        // TOCTOU-safe write via `ForgePathValidator::validate_for_write`:
+        // walks up to the deepest existing ancestor, canonicalizes *that*
+        // (resolving symlinks), prefix-checks against the canonical forge
+        // root, and rebuilds the target as `canonical_ancestor + tail`.
+        // This closes the symlink-swap race between canonicalize and
+        // open that the prior inline pattern was vulnerable to (MK audit
+        // finding F-5.3.2).
+        //
+        // The validator treats absolute inputs as relative to the forge
+        // root (strips the leading `/`). Callers that pass an absolute
+        // path inside `forge_root_canonical` (e.g. tests joining on
+        // `dir.path()`) therefore need their input rewritten to the
+        // forge-root-relative form before validation.
+        let relative_view = path
+            .strip_prefix(&self.forge_root_canonical)
+            .unwrap_or(path);
+        let target = self.path_validator.validate_for_write(relative_view).map_err(|e| {
+            match e {
+                PathValidationError::PathTraversal(ref bad) => {
+                    tracing::warn!(
+                        audit = true,
+                        plugin_id = %self.plugin_id,
+                        requested_path = %path.display(),
+                        canonical_path = %bad.display(),
+                        forge_root = %self.forge_root_canonical.display(),
+                        "path traversal denied"
+                    );
+                    Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        format!(
+                            "path traversal denied: '{}' is outside forge root",
+                            path.display()
+                        ),
+                    ))
+                }
+                PathValidationError::InvalidPath(msg) => Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    msg,
+                )),
+            }
         })?;
-        let file_name = absolute.file_name().ok_or_else(|| {
-            Error::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("path '{}' has no file name", absolute.display()),
-            ))
-        })?;
-        let canon_parent = parent.canonicalize().map_err(|e| {
-            Error::Io(std::io::Error::new(
-                e.kind(),
-                format!("parent '{}': {e}", parent.display()),
-            ))
-        })?;
-        if !canon_parent.starts_with(&self.forge_root_canonical) {
-            tracing::warn!(
-                audit = true,
-                plugin_id = %self.plugin_id,
-                requested_path = %absolute.display(),
-                forge_root = %self.forge_root_canonical.display(),
-                "path traversal denied"
-            );
-            return Err(Error::Io(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                format!(
-                    "path traversal denied: '{}' is outside forge root",
-                    absolute.display()
-                ),
-            )));
-        }
-        let target = canon_parent.join(file_name);
         tokio::fs::write(&target, contents).await.map_err(Error::Io)
     }
 
@@ -446,5 +453,25 @@ mod tests {
         // Try to read /etc/passwd via traversal
         let result = ctx.read_file(Path::new("/etc/passwd")).await;
         assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_file_rejects_symlinked_parent() {
+        // Regression for MK F-5.3.2: a symlinked parent directory must not
+        // let a plugin write outside the forge root. `validate_for_write`
+        // canonicalizes the deepest existing ancestor (the symlink target)
+        // and the prefix check rejects it.
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("escape")).unwrap();
+
+        let ctx = make_context(dir.path(), &[Capability::FsWrite]);
+        let result = ctx
+            .write_file(&dir.path().join("escape/victim.txt"), b"pwned")
+            .await;
+        assert!(result.is_err(), "write through symlinked parent must fail");
+        // The file must not have been created outside the sandbox.
+        assert!(!outside.path().join("victim.txt").exists());
     }
 }

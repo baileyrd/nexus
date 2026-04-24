@@ -595,10 +595,18 @@ impl PluginLoader {
             })?;
             let wasm_path = plugin_dir.join(&wasm_cfg.module);
             let wasm_bytes = std::fs::read(&wasm_path)?;
+            // Build a ForgePathValidator scoped to the plugin's forge root
+            // so the write host function can close the symlink-swap
+            // TOCTOU race (MK audit finding F-5.3.1). If construction
+            // fails (non-existent or non-canonicalizable root), the
+            // validator stays `None` and the host write path falls back
+            // to denying every write — safer than silently degrading.
+            let path_validator = nexus_types::ForgePathValidator::new(plugin_dir).ok();
             let plugin_data = PluginData {
                 plugin_id: plugin_id.clone(),
                 capabilities: capabilities.clone(),
                 forge_root: plugin_dir.to_path_buf(),
+                path_validator,
                 settings_json: Some(settings_cache.clone()),
                 ..Default::default()
             };

@@ -9,6 +9,7 @@ use std::time::Instant;
 use wasmtime::{Engine, Instance, Linker, Module, Store, StoreLimitsBuilder, Trap};
 
 use nexus_kernel::{CapabilitySet, EventBus, IpcDispatcher, KvStore};
+use nexus_types::ForgePathValidator;
 
 use crate::{PluginError, WasmConfig};
 
@@ -44,6 +45,12 @@ pub struct PluginData {
     pub event_bus: Option<Arc<EventBus>>,
     /// Forge root path used to confine file I/O from host functions.
     pub forge_root: PathBuf,
+    /// Path validator rooted at `forge_root`. Used by the write host
+    /// function to close the canonicalize-parent-then-open TOCTOU race
+    /// (MK audit finding F-5.3.1). `None` in test sandboxes that never
+    /// exercise the write path or that construct a `PluginData` with an
+    /// empty forge root.
+    pub path_validator: Option<ForgePathValidator>,
     /// Live cache of the plugin's settings JSON. The loader initialises
     /// this with the validated settings at load time (or `"{}"` when no
     /// schema is declared) and overwrites the contents in-place whenever
@@ -123,6 +130,7 @@ impl Default for PluginData {
             kv: None,
             event_bus: None,
             forge_root: PathBuf::new(),
+            path_validator: None,
             settings_json: None,
             limits: StoreLimitsBuilder::new().build(),
             ipc_dispatch: None,
