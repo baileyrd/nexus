@@ -407,3 +407,18 @@ export const terminalPlugin: Plugin = {
   }
 }
 ```
+
+---
+
+## Curated Default-On Set (WI-43)
+
+The shell binary ships 38 built-in plugins but the boot path does not register them all unconditionally. `shell/src/plugins/catalog.ts` splits them into two buckets:
+
+- **`DEFAULT_ON_PLUGINS`** (19) — loaded at every boot. Core services, workspace + git, chrome slots, files/editor/outline, command palette, confirm, pane mode, search, and `pluginsMgmt` (which you need to enable the rest).
+- **`DEFAULT_OFF_PLUGINS`** (17) — shipped but dormant. AI, agent, MCP, workflow, skills, terminal, processes, graph (+ global index), canvas, bases, backlinks, bookmarks, outgoing links, file properties, tags, all properties.
+
+The user opts into a default-off plugin via **Settings > Plugins**: the "Available (disabled)" section renders one row per dormant plugin with an Enable button. Enable writes the plugin's id into the persisted `plugins.enabled: string[]` config value (via `api.configuration.setValue`, backed by the same `configStore` pathway every other config key uses) and notifies the user to reload the window. On next boot, `main.tsx` composes the registered set as `[...DEFAULT_ON_PLUGINS, ...DEFAULT_OFF_PLUGINS.filter(p => enabledIds.has(p.manifest.id))]`.
+
+Rationale: this is a personal tool. The full 38-plugin boot set was noisy and most feature surfaces (AI, agents, graph, canvas, bases) are occasional-use. Curating default-on to the note-taking core reduces own-dogfood friction without removing any capability — every default-off plugin is one click + one reload away.
+
+No plugin is ever deleted by disablement. The grep acceptance guard (`grep -c "^import.*Plugin" shell/src/plugins/catalog.ts` == 38) ensures every built-in stays on disk even when the default-on list shrinks.
