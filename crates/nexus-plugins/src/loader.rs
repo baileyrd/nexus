@@ -179,7 +179,7 @@ pub enum PluginBackend {
     Core(Box<dyn CorePlugin>),
     /// WASM-sandboxed plugin; capability-gated, fuel-metered.
     Community(WasmSandbox),
-    /// JS plugin executed in the Tauri WebView. No backend runtime state —
+    /// JS plugin executed in the Tauri `WebView`. No backend runtime state —
     /// dispatch is handled entirely by the frontend. Backend only tracks
     /// manifest, settings, and event subscriptions.
     Script,
@@ -189,7 +189,12 @@ impl PluginBackend {
     /// Dispatch a call to the handler identified by `handler_id`.
     ///
     /// Script plugins return [`PluginError::ScriptDispatchFrontend`] —
-    /// their handlers execute in the Tauri WebView, not on the backend.
+    /// their handlers execute in the Tauri `WebView`, not on the backend.
+    ///
+    /// # Errors
+    ///
+    /// Propagates whatever [`PluginError`] the inner backend returns, plus
+    /// [`PluginError::ScriptDispatchFrontend`] for script plugins.
     pub fn dispatch(
         &mut self,
         handler_id: u32,
@@ -1099,12 +1104,13 @@ impl PluginLoader {
         // failures are logged; the file on disk is already authoritative.
         let serialized = serde_json::to_string_pretty(settings)
             .unwrap_or_else(|_| "{}".to_string());
-        match lp.settings_cache.write() {
-            Ok(mut guard) => *guard = serialized,
-            Err(_) => tracing::warn!(
+        if let Ok(mut guard) = lp.settings_cache.write() {
+            *guard = serialized;
+        } else {
+            tracing::warn!(
                 plugin_id = %plugin_id,
                 "update_settings: settings cache lock poisoned; skipping in-memory refresh"
-            ),
+            );
         }
         if lp.manifest.lifecycle.on_settings_changed {
             lp.backend
@@ -1368,7 +1374,7 @@ impl PluginLoader {
     /// Must be called **after** all plugins are loaded and the dispatcher is
     /// constructed. Newly loaded plugins (e.g. via hot-reload) must be
     /// injected individually via [`inject_ipc_dispatcher_for`].
-    pub fn inject_ipc_dispatcher(&mut self, dispatcher: Arc<dyn IpcDispatcher>) {
+    pub fn inject_ipc_dispatcher(&mut self, dispatcher: &Arc<dyn IpcDispatcher>) {
         for lp in self.loaded.values() {
             if let Ok(mut backend) = lp.backend.lock() {
                 if let PluginBackend::Community(sandbox) = &mut *backend {
@@ -1398,7 +1404,7 @@ impl PluginLoader {
     /// Inject a [`PluginEventForwarder`] into every loaded community
     /// plugin so `host::emit_event` calls are also surfaced to the
     /// application layer (e.g. Tauri frontend).
-    pub fn inject_event_forwarder(&mut self, forwarder: Arc<dyn PluginEventForwarder>) {
+    pub fn inject_event_forwarder(&mut self, forwarder: &Arc<dyn PluginEventForwarder>) {
         for lp in self.loaded.values() {
             if let Ok(mut backend) = lp.backend.lock() {
                 if let PluginBackend::Community(sandbox) = &mut *backend {
@@ -1657,7 +1663,7 @@ fn write_grant(
 /// exercise it with an isolated `tempfile` directory.
 fn build_capabilities(manifest: &PluginManifest, plugin_dir: &Path) -> CapabilitySet {
     match manifest.trust_level {
-        TrustLevel::Core => CapabilitySet::from_iter(Capability::ALL.iter().copied()),
+        TrustLevel::Core => Capability::ALL.iter().copied().collect::<CapabilitySet>(),
         TrustLevel::Community => {
             let granted = load_granted_high_risk_caps(plugin_dir, &manifest.version);
             let mut denied: Vec<Capability> = Vec::new();
@@ -1705,15 +1711,15 @@ const SUBSCRIPTIONS_FILE: &str = "subscriptions.json";
 /// re-enabled. The empty-set return keeps the plugin loadable rather than
 /// bricking it on a disk hiccup.
 fn load_disabled_subscriptions(plugin_dir: &Path) -> std::collections::HashSet<String> {
-    let path = plugin_dir.join(SUBSCRIPTIONS_FILE);
-    let Ok(contents) = std::fs::read_to_string(&path) else {
-        return std::collections::HashSet::new();
-    };
     #[derive(serde::Deserialize)]
     struct SubscriptionState {
         #[serde(default)]
         disabled: Vec<String>,
     }
+    let path = plugin_dir.join(SUBSCRIPTIONS_FILE);
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return std::collections::HashSet::new();
+    };
     match serde_json::from_str::<SubscriptionState>(&contents) {
         Ok(s) => s.disabled.into_iter().collect(),
         Err(err) => {
@@ -2418,7 +2424,7 @@ module = "test.wasm"
     }
 
     /// Writes a plugin dir whose manifest declares a `ui_command` bound to
-    /// the echo handler (id 100) instead of a cli_subcommand.
+    /// the echo handler (id 100) instead of a `cli_subcommand`.
     fn setup_ui_plugin_dir(plugin_id: &str) -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
         let plugin_dir = tmp.path().join(plugin_id);

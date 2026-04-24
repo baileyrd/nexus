@@ -72,7 +72,7 @@ pub struct PluginManifest {
     ///
     /// `None` for core and WASM community plugins. Mutually exclusive with
     /// [`wasm`](Self::wasm). When present, the plugin's handlers execute in
-    /// the Tauri WebView rather than a WASM sandbox.
+    /// the Tauri `WebView` rather than a WASM sandbox.
     pub script: Option<ScriptConfig>,
     /// Optional settings schema reference.
     pub settings: Option<SettingsConfig>,
@@ -129,7 +129,7 @@ pub struct WasmConfig {
 
 /// Script (JS) module configuration declared in the manifest.
 ///
-/// Script plugins execute in the Tauri WebView as ES modules, loaded
+/// Script plugins execute in the Tauri `WebView` as ES modules, loaded
 /// via the `nexus-plugin://` custom protocol.
 #[derive(Debug, Clone)]
 pub struct ScriptConfig {
@@ -172,19 +172,14 @@ pub struct Registrations {
 }
 
 /// Which side of the workspace a plugin-contributed panel docks to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PanelSide {
     /// Dock on the left side panel (default when `side` is omitted).
+    #[default]
     Left,
     /// Dock on the right side panel.
     Right,
-}
-
-impl Default for PanelSide {
-    fn default() -> Self {
-        Self::Left
-    }
 }
 
 /// A single CLI subcommand registration.
@@ -279,7 +274,7 @@ pub struct UiSettingsTabReg {
 /// A single workspace-ribbon icon registration. The item delegates to
 /// one of the plugin's own `ui_command` ids — clicking the ribbon icon
 /// invokes that command through the contribution registry, so ribbon
-/// entries don't need their own handler_id.
+/// entries don't need their own `handler_id`.
 #[derive(Debug, Clone)]
 pub struct UiRibbonItemReg {
     /// Unique ribbon-entry identifier within the plugin.
@@ -312,7 +307,7 @@ pub struct UiStatusItemReg {
 }
 
 /// A single editor slash-command registration — a plugin-contributed
-/// entry that appears in the `/` trigger overlay in the CodeMirror
+/// entry that appears in the `/` trigger overlay in the `CodeMirror`
 /// editor. Selecting the entry inserts [`Self::template`] at the
 /// cursor, with a `\0` byte in the template marking the final cursor
 /// position. Purely declarative (no handler dispatch) in this
@@ -337,7 +332,7 @@ pub struct UiSlashCommandReg {
 }
 
 /// A single application menu-bar item registration. The item delegates
-/// to one of the plugin's own `ui_command` ids; no direct handler_id is
+/// to one of the plugin's own `ui_command` ids; no direct `handler_id` is
 /// needed (same model as ribbon items).
 #[derive(Debug, Clone)]
 pub struct MenuItemReg {
@@ -449,6 +444,10 @@ struct TomlManifest {
     dependencies: std::collections::BTreeMap<String, String>,
 }
 
+// `on_*` fields mirror the manifest TOML keys `on_command`,
+// `on_content_type`, `on_uri_scheme`; renaming them here would require
+// matching `#[serde(rename)]` on every field for no behavioral gain.
+#[allow(clippy::struct_field_names)]
 #[derive(Deserialize, Default)]
 struct TomlActivation {
     #[serde(default)]
@@ -666,6 +665,7 @@ fn parse_trust_level(s: &str, path: &str) -> Result<TrustLevel, PluginError> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError> {
     let trust_level = parse_trust_level(&raw.plugin.trust_level, path)?;
 
@@ -676,10 +676,12 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
     // caught here at parse time because `validate` only sees the resolved
     // enum variant.
     let inferred = match (raw.wasm.is_some(), raw.script.is_some()) {
-        (true, false) => PluginRuntime::Wasm,
+        // (true, true) is rejected by validate (rule 5) but falls into
+        // the Wasm arm here so convert can return a well-formed manifest
+        // for the validator to complain about.
+        (true, _) => PluginRuntime::Wasm,
         (false, true) => PluginRuntime::Script,
         (false, false) => PluginRuntime::Native,
-        (true, true) => PluginRuntime::Wasm, // rule 5 rejects this in validate
     };
     let runtime = if let Some(ref r) = raw.plugin.runtime {
         let explicit = PluginRuntime::parse(r).ok_or_else(|| PluginError::ManifestInvalid {
@@ -1312,6 +1314,8 @@ icon = "hand"
 
     #[test]
     fn parse_slash_command_registration() {
+        // Body contains `"#` inside the template literal, so this raw
+        // string needs two hashes to keep the terminator unique.
         let toml = r##"
 [plugin]
 id = "com.example.test"
@@ -1344,7 +1348,7 @@ template = "# Summary\n\u0000"
 
     #[test]
     fn parse_slash_command_aliases_default_to_empty() {
-        let toml = r##"
+        let toml = r#"
 [plugin]
 id = "com.example.test"
 name = "Test"
@@ -1361,7 +1365,7 @@ label = "Divider"
 description = "Insert a divider"
 badge = "—"
 template = "---\n\u0000"
-"##;
+"#;
         let m = parse_manifest(toml, "manifest.toml").unwrap();
         assert_eq!(m.registrations.slash_commands[0].aliases, Vec::<String>::new());
     }

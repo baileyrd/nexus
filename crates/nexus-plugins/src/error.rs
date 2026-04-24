@@ -138,7 +138,7 @@ pub enum PluginError {
     /// are tolerated with a runtime warning but may surface behavioural gaps.
     #[error("incompatible api_version for {plugin_id}: requested {requested}, host supports {supported}")]
     IncompatibleApiVersion {
-        /// The plugin identifier whose api_version was rejected.
+        /// The plugin identifier whose `api_version` was rejected.
         plugin_id: String,
         /// The `api_version` string from the plugin's manifest.
         requested: String,

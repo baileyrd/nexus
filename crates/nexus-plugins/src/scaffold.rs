@@ -570,13 +570,13 @@ mod tests {
         assert!(
             api_pin.starts_with('^')
                 || api_pin.starts_with('~')
-                || api_pin.chars().next().map_or(false, |c| c.is_ascii_digit()),
+                || api_pin.chars().next().is_some_and(|c| c.is_ascii_digit()),
             "extension-api pin must be a concrete semver, got {api_pin}"
         );
         // esbuild + typescript must be present for `pnpm build`.
         assert!(pkg["devDependencies"]["esbuild"].is_string());
         assert!(pkg["devDependencies"]["typescript"].is_string());
-        assert_eq!(pkg["scripts"]["build"].as_str().unwrap().contains("esbuild"), true);
+        assert!(pkg["scripts"]["build"].as_str().unwrap().contains("esbuild"));
     }
 
     #[test]

@@ -122,12 +122,13 @@ impl SettingsManager {
             // required fields would fail validation on first load and
             // the plugin would appear broken until the user manually
             // wrote a file.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                self.schemas
-                    .get(plugin_id)
-                    .map(defaults_from_schema)
-                    .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()))
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => self
+                .schemas
+                .get(plugin_id)
+                .map_or_else(
+                    || serde_json::Value::Object(serde_json::Map::new()),
+                    defaults_from_schema,
+                ),
             Err(e) => return Err(PluginError::Io(e)),
         };
 
@@ -307,7 +308,6 @@ mod tests {
     // 8b. load_missing_seeds_defaults_from_schema
     #[test]
     fn load_missing_seeds_defaults_from_schema() {
-        let dir = TempDir::new().unwrap();
         const SCHEMA_WITH_DEFAULTS: &str = r#"{
             "type": "object",
             "properties": {
@@ -316,6 +316,7 @@ mod tests {
             },
             "required": ["name"]
         }"#;
+        let dir = TempDir::new().unwrap();
         let mut m = SettingsManager::new();
         m.register_schema(PLUGIN_ID, SCHEMA_WITH_DEFAULTS).unwrap();
 

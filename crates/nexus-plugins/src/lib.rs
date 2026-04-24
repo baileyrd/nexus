@@ -241,7 +241,7 @@ pub struct PluginManagerConfig {
     /// Default: `500`.
     pub debounce_ms: u64,
     /// Safe mode (F-8.2.2). When `true`, [`PluginManager::load_all`]
-    /// skips every plugin whose trust_level is `Community`. Core plugins
+    /// skips every plugin whose `trust_level` is `Community`. Core plugins
     /// still load so the shell remains functional. Default: `false`.
     pub safe_mode: bool,
     /// Auto-quarantine threshold (F-8.2.1). A plugin that crashes this
@@ -306,8 +306,6 @@ fn reset_crash_count_at(
 /// Read the `id` field out of a plugin's `manifest.toml` without a full
 /// parse. Returns `None` if the manifest is missing or malformed.
 fn peek_manifest_id(plugin_dir: &std::path::Path) -> Option<String> {
-    let path = plugin_dir.join("manifest.toml");
-    let contents = std::fs::read_to_string(path).ok()?;
     #[derive(serde::Deserialize)]
     struct Shell {
         plugin: ShellPlugin,
@@ -316,6 +314,8 @@ fn peek_manifest_id(plugin_dir: &std::path::Path) -> Option<String> {
     struct ShellPlugin {
         id: String,
     }
+    let path = plugin_dir.join("manifest.toml");
+    let contents = std::fs::read_to_string(path).ok()?;
     toml::from_str::<Shell>(&contents).ok().map(|s| s.plugin.id)
 }
 
@@ -755,8 +755,12 @@ impl PluginManager {
     }
 
     /// Resolve a plugin IPC target without dispatching. Returns the
-    /// backend handle and handler_id so callers can release locks before
+    /// backend handle and `handler_id` so callers can release locks before
     /// executing.
+    ///
+    /// # Errors
+    ///
+    /// See [`PluginLoader::resolve_ipc`].
     pub fn resolve_ipc(
         &self,
         plugin_id: &str,
@@ -766,14 +770,14 @@ impl PluginManager {
     }
 
     /// Inject an [`IpcDispatcher`] into all loaded community plugins.
-    pub fn inject_ipc_dispatcher(&mut self, dispatcher: Arc<dyn nexus_kernel::IpcDispatcher>) {
+    pub fn inject_ipc_dispatcher(&mut self, dispatcher: &Arc<dyn nexus_kernel::IpcDispatcher>) {
         self.loader.inject_ipc_dispatcher(dispatcher);
     }
 
     /// Inject a [`PluginEventForwarder`] into all loaded community
     /// plugins so `host::emit_event` calls are surfaced to the
     /// application layer.
-    pub fn inject_event_forwarder(&mut self, forwarder: Arc<dyn sandbox::PluginEventForwarder>) {
+    pub fn inject_event_forwarder(&mut self, forwarder: &Arc<dyn sandbox::PluginEventForwarder>) {
         self.loader.inject_event_forwarder(forwarder);
     }
 
@@ -812,9 +816,7 @@ impl PluginManager {
         plugin_id: &str,
     ) -> Option<(Vec<String>, Vec<String>, Vec<String>)> {
         let m = self.loader.manifest(plugin_id)?;
-        if m.script.is_none() {
-            return None;
-        }
+        m.script.as_ref()?;
         Some((
             m.activation.on_command.clone(),
             m.activation.on_content_type.clone(),
@@ -964,13 +966,6 @@ impl PluginManager {
     fn reload_plugin(&mut self, plugin_id: &str, wasm_path: &std::path::Path) -> Result<(), PluginError> {
         use std::sync::atomic::Ordering;
 
-        // Set the reloading flag so concurrent IPC calls return
-        // `PluginReloading` instead of racing the backend mutex.
-        let reloading_flag = self.loader.reloading_flag(plugin_id);
-        if let Some(ref flag) = reloading_flag {
-            flag.store(true, Ordering::Release);
-        }
-
         // RAII guard so the flag is always cleared, even on early return.
         struct ReloadGuard(Option<std::sync::Arc<std::sync::atomic::AtomicBool>>);
         impl Drop for ReloadGuard {
@@ -979,6 +974,13 @@ impl PluginManager {
                     flag.store(false, Ordering::Release);
                 }
             }
+        }
+
+        // Set the reloading flag so concurrent IPC calls return
+        // `PluginReloading` instead of racing the backend mutex.
+        let reloading_flag = self.loader.reloading_flag(plugin_id);
+        if let Some(ref flag) = reloading_flag {
+            flag.store(true, Ordering::Release);
         }
         let _guard = ReloadGuard(reloading_flag);
 

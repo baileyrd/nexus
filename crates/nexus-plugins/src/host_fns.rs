@@ -569,15 +569,12 @@ fn register_host_invoke_command(linker: &mut Linker<PluginData>) -> Result<(), P
                 };
 
                 // Get the injected IPC dispatcher.
-                let dispatcher = match caller.data().ipc_dispatch.clone() {
-                    Some(d) => d,
-                    None => {
-                        tracing::warn!(
-                            plugin_id = %caller_plugin_id,
-                            "host::invoke_command: IPC dispatcher not injected"
-                        );
-                        return HOST_ERROR;
-                    }
+                let Some(dispatcher) = caller.data().ipc_dispatch.clone() else {
+                    tracing::warn!(
+                        plugin_id = %caller_plugin_id,
+                        "host::invoke_command: IPC dispatcher not injected"
+                    );
+                    return HOST_ERROR;
                 };
 
                 // Dispatch to target plugin.
