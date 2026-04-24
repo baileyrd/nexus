@@ -16,6 +16,12 @@
 #![deny(missing_docs)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+// The `database::*`, `storage::*`, `terminal::*`, `agent::*` modules are
+// thin pass-through wrappers over `ipc_call(...)` and all fail for the
+// same reasons (kernel IPC dispatch failure, plugin not loaded, response
+// decode error). Documenting each individually would be 27 copies of the
+// same paragraph.
+#![allow(clippy::missing_errors_doc)]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -36,7 +42,7 @@ pub mod terminal;
 
 /// Render a markdown note to a standalone HTML string.
 ///
-/// Re-exported from `nexus-formats` (pure format library, no SQLite).
+/// Re-exported from `nexus-formats` (pure format library, no `SQLite`).
 pub use nexus_formats::export_to_html;
 
 /// Canvas data types and pure (de)serialization helpers, re-exported from
@@ -74,8 +80,12 @@ pub struct Runtime {
 /// # Errors
 /// Returns an error if the forge cannot be opened, the kernel config cannot
 /// be loaded, or any core plugin fails to register or initialize.
+// Accepts an owned PathBuf for ergonomic continuity with its ~60 callsites
+// (CLI/TUI binaries + integration test suites). Switching to &Path would
+// be a cross-crate API break without changing the implementation.
+#[allow(clippy::needless_pass_by_value)]
 pub fn build_cli_runtime(forge_root: PathBuf) -> Result<Runtime> {
-    build(forge_root, CLI_PLUGIN_ID, "Nexus CLI")
+    build(&forge_root, CLI_PLUGIN_ID, "Nexus CLI")
 }
 
 /// Create an empty forge at `forge_root`.
@@ -98,12 +108,14 @@ pub fn init_forge(forge_root: &std::path::Path) -> Result<()> {
 ///
 /// # Errors
 /// See [`build_cli_runtime`].
+// See `build_cli_runtime` for the rationale on keeping PathBuf.
+#[allow(clippy::needless_pass_by_value)]
 pub fn build_tui_runtime(forge_root: PathBuf) -> Result<Runtime> {
-    build(forge_root, TUI_PLUGIN_ID, "Nexus TUI")
+    build(&forge_root, TUI_PLUGIN_ID, "Nexus TUI")
 }
 
-fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> Result<Runtime> {
-    let config = KernelConfig::load(&forge_root)
+fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &str) -> Result<Runtime> {
+    let config = KernelConfig::load(forge_root)
         .with_context(|| format!("failed to load kernel config at '{}'", forge_root.display()))?;
 
     // The KV store lives under `.forge/kv.sqlite3`. Create the dir here —
@@ -131,7 +143,7 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
     // Register every in-tree core plugin. Order matters where lifecycle hooks
     // of later plugins rely on earlier ones publishing events; in practice
     // each plugin is independent today.
-    register_core_plugins(&mut loader, &forge_root, &event_bus)?;
+    register_core_plugins(&mut loader, forge_root, &event_bus)?;
 
     // Register the invoker (CLI or TUI) as a Core plugin so it holds a real
     // plugin identity with Capability::ALL.
@@ -139,7 +151,7 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
     loader
         .register_core(
             invoker_manifest,
-            &forge_root,
+            forge_root,
             Box::new(InvokerPlugin {
                 id: invoker_id.to_string(),
             }),
@@ -155,10 +167,10 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
     let ai_ctx = KernelPluginContext::new(
         "com.nexus.ai",
         env!("CARGO_PKG_VERSION"),
-        CapabilitySet::from_iter(Capability::ALL.iter().copied()),
+        Capability::ALL.iter().copied().collect::<CapabilitySet>(),
         Arc::clone(&kv_store),
         Arc::clone(&event_bus),
-        &forge_root,
+        forge_root,
         Some(Arc::clone(&dispatcher)),
     )
     .context("failed to build kernel plugin context for com.nexus.ai")?;
@@ -173,10 +185,10 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
     let agent_ctx = KernelPluginContext::new(
         "com.nexus.agent",
         env!("CARGO_PKG_VERSION"),
-        CapabilitySet::from_iter(Capability::ALL.iter().copied()),
+        Capability::ALL.iter().copied().collect::<CapabilitySet>(),
         Arc::clone(&kv_store),
         Arc::clone(&event_bus),
-        &forge_root,
+        forge_root,
         Some(Arc::clone(&dispatcher)),
     )
     .context("failed to build kernel plugin context for com.nexus.agent")?;
@@ -190,10 +202,10 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
     let editor_ctx = KernelPluginContext::new(
         "com.nexus.editor",
         env!("CARGO_PKG_VERSION"),
-        CapabilitySet::from_iter(Capability::ALL.iter().copied()),
+        Capability::ALL.iter().copied().collect::<CapabilitySet>(),
         Arc::clone(&kv_store),
         Arc::clone(&event_bus),
-        &forge_root,
+        forge_root,
         Some(Arc::clone(&dispatcher)),
     )
     .context("failed to build kernel plugin context for com.nexus.editor")?;
@@ -206,10 +218,10 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
     let workflow_ctx = KernelPluginContext::new(
         "com.nexus.workflow",
         env!("CARGO_PKG_VERSION"),
-        CapabilitySet::from_iter(Capability::ALL.iter().copied()),
+        Capability::ALL.iter().copied().collect::<CapabilitySet>(),
         Arc::clone(&kv_store),
         Arc::clone(&event_bus),
-        &forge_root,
+        forge_root,
         Some(Arc::clone(&dispatcher)),
     )
     .context("failed to build kernel plugin context for com.nexus.workflow")?;
@@ -220,10 +232,10 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
     let context = KernelPluginContext::new(
         invoker_id,
         env!("CARGO_PKG_VERSION"),
-        CapabilitySet::from_iter(Capability::ALL.iter().copied()),
+        Capability::ALL.iter().copied().collect::<CapabilitySet>(),
         kv_store,
         event_bus,
-        &forge_root,
+        forge_root,
         Some(dispatcher),
     )
     .context("failed to build kernel plugin context for invoker")?;
@@ -235,6 +247,7 @@ fn build(forge_root: PathBuf, invoker_id: &'static str, invoker_name: &str) -> R
     })
 }
 
+#[allow(clippy::too_many_lines)]
 fn register_core_plugins(
     loader: &mut PluginLoader,
     forge_root: &std::path::Path,
@@ -973,9 +986,11 @@ on_stop = {stop}
         stop = lc.on_stop,
     );
     for (cmd_id, handler_id) in ipc_commands {
-        toml.push_str(&format!(
+        use std::fmt::Write as _;
+        let _ = write!(
+            toml,
             "\n[[registrations.ipc_command]]\nid = \"{cmd_id}\"\nhandler_id = {handler_id}\n"
-        ));
+        );
     }
     parse_manifest(&toml, "bootstrap.toml")
         .unwrap_or_else(|e| panic!("bootstrap manifest for {id} failed to parse: {e}"))
@@ -985,7 +1000,7 @@ fn invoker_manifest(id: &str, name: &str) -> PluginManifest {
     core_manifest(id, name, LifecycleFlags::NONE)
 }
 
-/// Placeholder CorePlugin for the CLI/TUI invoker. Neither invoker receives
+/// Placeholder `CorePlugin` for the CLI/TUI invoker. Neither invoker receives
 /// IPC calls (they only originate them), so `dispatch` is never expected to
 /// be called; we return an error if it somehow is.
 struct InvokerPlugin {
