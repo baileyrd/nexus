@@ -28,6 +28,8 @@ pub mod bases;
 pub mod core_plugin;
 pub mod vectorstore;
 
+pub mod ipc;
+
 pub use atomic::atomic_write;
 pub use core_plugin::StorageCorePlugin;
 pub use error::StorageError;

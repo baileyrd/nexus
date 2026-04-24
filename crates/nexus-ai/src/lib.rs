@@ -9,6 +9,8 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod ipc;
+
 mod anthropic;
 mod chunker;
 mod config;

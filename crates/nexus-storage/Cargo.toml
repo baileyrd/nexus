@@ -31,6 +31,15 @@ libc = { workspace = true }
 fs4 = "0.9"
 petgraph = { workspace = true }
 chrono = { workspace = true }
+ts-rs = { workspace = true, optional = true, features = ["chrono-impl", "uuid-impl"] }
+schemars = { workspace = true, optional = true }
+
+[features]
+# Emit TypeScript + JSON Schema bindings for the Phase 4 WI-36 pilot IPC
+# handler types. Off by default so normal Rust builds don't pull ts-rs or
+# schemars. Enable with `cargo test -p nexus-storage --features ts-export`
+# when regenerating bindings.
+ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
