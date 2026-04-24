@@ -38,6 +38,8 @@ pub struct SearchIndex {
     block_id_field: Field,
     block_type_field: Field,
     content_field: Field,
+    // Indexed + stored on the schema (see build_schema) so future mtime-sort
+    // / mtime-filter queries can use it without a reindex. No reader today.
     #[allow(dead_code)]
     mtime_field: Field,
 }

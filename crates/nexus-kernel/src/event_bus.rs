@@ -213,7 +213,6 @@ fn variant_name(event: &NexusEvent) -> &'static str {
 }
 
 /// Get the current `tracing` span id, if any.
-#[allow(dead_code)] // used by publish_kernel (see above)
 fn current_span_id() -> Option<String> {
     // tracing::Span::current() always returns a span, but it's the None span
     // when no actual span is active. We use its metadata or None.

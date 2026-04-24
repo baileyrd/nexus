@@ -299,8 +299,6 @@ impl PluginBackend {
 
 struct PluginRegistrations {
     cli_subcommands: Vec<String>,
-    #[allow(dead_code)]
-    ipc_commands: Vec<String>,
 }
 
 /// A live event subscription wired to a plugin handler.
@@ -722,13 +720,6 @@ impl PluginLoader {
             registered_cli.push(sub.id.clone());
         }
 
-        let registered_ipc: Vec<String> = manifest
-            .registrations
-            .ipc_commands
-            .iter()
-            .map(|r| r.id.clone())
-            .collect();
-
         // Load persisted subscription overrides (disabled IDs).
         let disabled_subs = load_disabled_subscriptions(plugin_dir);
 
@@ -767,7 +758,6 @@ impl PluginLoader {
                 plugin_dir: plugin_dir.to_path_buf(),
                 registrations: PluginRegistrations {
                     cli_subcommands: registered_cli,
-                    ipc_commands: registered_ipc,
                 },
                 event_subs,
                 settings_cache,
@@ -1033,7 +1023,6 @@ impl PluginLoader {
     }
 
     /// Return the hot-reload flag for `plugin_id`, or `None` if not loaded.
-    #[allow(dead_code)]
     pub(crate) fn reloading_flag(&self, plugin_id: &str) -> Option<Arc<AtomicBool>> {
         self.loaded.get(plugin_id).map(|lp| lp.reloading.clone())
     }
@@ -1274,13 +1263,11 @@ impl PluginLoader {
     ///
     /// Returns `None` if the plugin is not loaded or is a core (native) plugin.
     /// Hot-reload only applies to community WASM plugins.
-    #[allow(dead_code)]
     pub(crate) fn backend_arc(&self, plugin_id: &str) -> Option<Arc<Mutex<PluginBackend>>> {
         self.loaded.get(plugin_id).map(|lp| lp.backend.clone())
     }
 
     /// Return a reference to the [`PluginManifest`] for `plugin_id`.
-    #[allow(dead_code)]
     pub(crate) fn manifest(&self, plugin_id: &str) -> Option<&PluginManifest> {
         self.loaded.get(plugin_id).map(|lp| &lp.manifest)
     }
@@ -1338,13 +1325,11 @@ impl PluginLoader {
     /// Clone the shared settings cache for `plugin_id`. Used by hot-reload
     /// to hand the new sandbox the same `Arc` the old one saw, so user
     /// edits that happened before the reload remain visible afterwards.
-    #[allow(dead_code)]
     pub(crate) fn settings_cache(&self, plugin_id: &str) -> Option<Arc<RwLock<String>>> {
         self.loaded.get(plugin_id).map(|lp| lp.settings_cache.clone())
     }
 
     /// Update the [`PluginStatus`] for `plugin_id`.
-    #[allow(dead_code)]
     pub(crate) fn set_status(&mut self, plugin_id: &str, status: PluginStatus) {
         if let Some(lp) = self.loaded.get_mut(plugin_id) {
             lp.status = status;
@@ -1355,7 +1340,6 @@ impl PluginLoader {
     ///
     /// Only valid for community WASM plugins. Returns `None` if the plugin
     /// is not loaded or is a core plugin.
-    #[allow(dead_code)]
     pub(crate) fn replace_sandbox(
         &mut self,
         plugin_id: &str,
