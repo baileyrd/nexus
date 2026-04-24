@@ -29,65 +29,19 @@ import {
 } from './host/communityPluginLoader'
 import { SandboxOrchestrator } from './host/sandbox/SandboxOrchestrator'
 import { buildPluginAPI } from './host/PluginAPI'
+import { runInstallTimeConsent } from './plugins/core/capabilityPrompt'
 
-// ── Service plugins ───────────────────────────────────────────────────────────
-// Infrastructure only — no UI, no hardcoded product content.
-import { configurationServicePlugin } from './plugins/core/configurationService'
-import { notificationServicePlugin }  from './plugins/core/notificationService'
-import { fileSystemServicePlugin }    from './plugins/core/fileSystemService'
-import { settingsPlugin }             from './plugins/core/settings'
+// WI-43: built-in plugin registrations live in `plugins/catalog.ts` split
+// into default-on (loaded unconditionally) and default-off (opt-in via
+// Settings > Plugins, persisted under the `plugins.enabled` config key).
+// See docs/PHASE-5-IMPLEMENTATION-PLAN.md §2.
 import {
-  capabilityPromptPlugin,
-  runInstallTimeConsent,
-} from './plugins/core/capabilityPrompt'
-// WI-02 part 2: themeServicePlugin is now a kernel-sync bridge, not the
-// old in-process palette holder. It hydrates `useThemeStore` from the
-// `com.nexus.theme` kernel plugin and subscribes to
-// `com.nexus.theme.changed` so palette swaps from any source flow
-// through the store and onto :root. The shell.css :root defaults
-// remain in place so there's no flash if hydrate is slow.
-import { themeServicePlugin }         from './plugins/core/themeService'
-
-// ── UI & feature plugins (DISABLED) ───────────────────────────────────────────
-// The template's plugins/core/* UI files ship with hardcoded Nexus product
-// content ("Forge", "Tantivy · 0 docs", stub SHAs, placeholder file counts).
-// They are retained on disk as reference only and must NOT be loaded. Real
-// UI will be rebuilt piece-by-piece as nexus.* plugins consuming real backend
-// data. See memory: feedback_no_hardcoded_ui.md.
-
-// ── Nexus plugins ─────────────────────────────────────────────────────────────
-import { workspacePlugin } from './plugins/nexus/workspace'
-import { gitStatusPlugin } from './plugins/nexus/gitStatus'
-import { activityBarPlugin } from './plugins/nexus/activityBar'
-import { sidebarPlugin } from './plugins/nexus/sidebar'
-import { rightPanelPlugin } from './plugins/nexus/rightPanel'
-import { launcherPlugin } from './plugins/nexus/launcher'
-import { filesPlugin } from './plugins/nexus/files'
-import { editorPlugin } from './plugins/nexus/editor'
-import { outlinePlugin } from './plugins/nexus/outline'
-import { backlinksPlugin } from './plugins/nexus/backlinks'
-import { bookmarksPlugin } from './plugins/nexus/bookmarks'
-import { outgoingLinksPlugin } from './plugins/nexus/outgoingLinks'
-import { filePropertiesPlugin } from './plugins/nexus/fileProperties'
-import { tagsPlugin } from './plugins/nexus/tags'
-import { allPropertiesPlugin } from './plugins/nexus/allProperties'
-import { graphPlugin } from './plugins/nexus/graph'
-import { graphGlobalPlugin } from './plugins/nexus/graph/globalIndex'
-import { searchPlugin } from './plugins/nexus/search'
-import { workflowPlugin } from './plugins/nexus/workflow'
-import { skillsPlugin } from './plugins/nexus/skills'
-import { mcpPlugin } from './plugins/nexus/mcp'
-import { agentPlugin } from './plugins/nexus/agent'
-import { confirmPlugin } from './plugins/nexus/confirm'
-import { commandPalettePlugin } from './plugins/nexus/commandPalette'
-import { paneModePlugin } from './plugins/nexus/paneMode'
-import { terminalPlugin } from './plugins/nexus/terminal'
-import { canvasPlugin } from './plugins/nexus/canvas'
-import { basesPlugin } from './plugins/nexus/bases'
-import { aiPlugin } from './plugins/nexus/ai'
-import { pluginsMgmtPlugin } from './plugins/nexus/pluginsMgmt'
-import { processesPlugin } from './plugins/nexus/processes'
-import { statusBarPlugin } from './plugins/nexus/statusBar'
+  DEFAULT_ON_PLUGINS,
+  DEFAULT_OFF_PLUGINS,
+  ALL_PLUGINS,
+  PLUGINS_ENABLED_CONFIG_KEY,
+} from './plugins/catalog'
+import { useConfigStore } from './stores/configStore'
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -167,46 +121,25 @@ async function boot() {
   // terminal activity-bar item; there is no boot-time force-hide since
   // the persisted workspace tree is authoritative.
 
-  const plugins: Plugin[] = [
-    configurationServicePlugin,
-    notificationServicePlugin,
-    fileSystemServicePlugin,
-    settingsPlugin,
-    capabilityPromptPlugin,
-    themeServicePlugin,
-    workspacePlugin,
-    gitStatusPlugin,
-    activityBarPlugin,
-    sidebarPlugin,
-    rightPanelPlugin,
-    launcherPlugin,
-    filesPlugin,
-    editorPlugin,
-    outlinePlugin,
-    backlinksPlugin,
-    bookmarksPlugin,
-    outgoingLinksPlugin,
-    filePropertiesPlugin,
-    tagsPlugin,
-    allPropertiesPlugin,
-    graphPlugin,
-    graphGlobalPlugin,
-    searchPlugin,
-    workflowPlugin,
-    skillsPlugin,
-    mcpPlugin,
-    agentPlugin,
-    confirmPlugin,
-    commandPalettePlugin,
-    paneModePlugin,
-    terminalPlugin,
-    canvasPlugin,
-    basesPlugin,
-    aiPlugin,
-    pluginsMgmtPlugin,
-    processesPlugin,
-    statusBarPlugin,
-  ]
+  // WI-43: compose the registered set from the default-on list plus any
+  // default-off plugins the user has explicitly enabled. The enabled
+  // id list is persisted via the `configStore` (zustand + localStorage,
+  // key `shell-config`) — the same pathway `api.configuration.setValue`
+  // writes through. Reads are synchronous because the store rehydrates
+  // on module import, before `boot()` runs.
+  const enabledIds = new Set(
+    useConfigStore.getState().get<string[]>(PLUGINS_ENABLED_CONFIG_KEY, []),
+  )
+  const optInPlugins = DEFAULT_OFF_PLUGINS.filter((p) =>
+    enabledIds.has(p.manifest.id),
+  )
+  const plugins: Plugin[] = [...DEFAULT_ON_PLUGINS, ...optInPlugins]
+  if (optInPlugins.length > 0) {
+    console.info(
+      `[Boot] ${optInPlugins.length} opt-in plugin(s) enabled: ` +
+        optInPlugins.map((p) => p.manifest.id).join(', '),
+    )
+  }
 
   // Validate that all imports resolved to real plugins
   const missing = plugins
@@ -327,6 +260,24 @@ async function boot() {
     state:   host.getState(p.manifest.id) ?? 'unknown',
     error:   host.getError(p.manifest.id)?.message,
   })))
+
+  // WI-43: expose the default-off catalog entries that are NOT currently
+  // enabled so the PluginsMgmt UI can render an "Available (disabled)"
+  // section with per-row Enable buttons. The button writes the id into
+  // `plugins.enabled` via the configuration service and prompts for a
+  // reload — there is no in-session hot-activate path yet.
+  const availablePlugins = DEFAULT_OFF_PLUGINS
+    .filter((p) => !enabledIds.has(p.manifest.id))
+    .map((p) => ({
+      id:      p.manifest.id,
+      name:    p.manifest.name,
+      version: p.manifest.version,
+      core:    p.manifest.core,
+    }))
+  reg.registerService('availablePlugins', availablePlugins)
+  // Side-channel for the UI to announce how many total built-ins exist,
+  // even when some are disabled — useful for the Plugins modal footer.
+  reg.registerService('builtinPluginTotal', ALL_PLUGINS.length)
 
   const { useSlotStore } = await import('./registry/SlotRegistry')
   const slotSummary = Object.entries(useSlotStore.getState().slots)
