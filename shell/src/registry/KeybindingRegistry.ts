@@ -98,6 +98,41 @@ export class KeybindingRegistry {
     return [...this.bindings]
   }
 
+  /**
+   * Return the first binding registered for `commandId`, or `undefined`
+   * when no plugin has declared one. The returned `chord` is the active
+   * binding (user override if present, otherwise manifest default), so
+   * callers rendering a hint — e.g. the editor's empty-state shortcut
+   * pills — can pipe it straight through `formatChord` without a
+   * second override lookup.
+   *
+   * When multiple plugins contribute the same commandId (rare but well
+   * defined — see the override-matching note at the top of this file),
+   * the first registered wins. Callers that need every contributor
+   * should use `getAllBindings` / `all` instead.
+   */
+  findByCommand(commandId: string): KeybindingEntry | undefined {
+    return this.bindings.find((b) => b.commandId === commandId)
+  }
+
+  /**
+   * Shortcut for UI labels — resolve the active chord for `commandId`
+   * and return it in the display shape `formatChord` produces (e.g.
+   * `"Ctrl+N"`). Returns `undefined` when no binding matches so
+   * callers can fall back to a documented default.
+   *
+   * Exposed as a method so UI consumers that already hold the
+   * registry (via `getRegistry()`) don't need to import `formatChord`
+   * from `shell/src/registry/*` — that path is gated by the plugin
+   * import-hygiene guardrail (WI-23). Keeping the formatter adjacent
+   * to the registry also means a future chord-style change lands in
+   * one place.
+   */
+  formattedChordFor(commandId: string): string | undefined {
+    const hit = this.findByCommand(commandId)
+    return hit ? formatChord(hit.chord) : undefined
+  }
+
   // ─── Overrides API (WI-04) ─────────────────────────────────────────────────
 
   /**

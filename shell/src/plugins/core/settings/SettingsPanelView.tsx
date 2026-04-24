@@ -47,11 +47,14 @@ interface PluginInfo {
   state:   string
   error?:  string
   /**
-   * Optional declared capability list (WI-18). The shell-side
-   * `pluginList` service does not currently populate this field — see
-   * the FIXME in `usePluginList()` — but the row code path reads it
-   * defensively so the manifest plumbing can land in a follow-up
-   * without further UI churn.
+   * Optional declared capability list (WI-18). Core plugins registered
+   * via `main.tsx` legitimately leave this absent — they inherit
+   * `Capability::ALL` from bootstrap and don't carry a per-plugin
+   * manifest-declared capability set. The row code path renders an
+   * "(unknown)" chip group when `capabilities` is undefined, which is
+   * the correct "not applicable" signal for core rows. Community
+   * plugins surface their declared caps via
+   * `CommunityPluginManifest.capabilities` on the sibling list.
    */
   capabilities?: unknown
 }

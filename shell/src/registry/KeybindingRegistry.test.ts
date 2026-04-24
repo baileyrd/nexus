@@ -180,3 +180,40 @@ test('setOverride normalises chord input before persisting', async () => {
   assert.equal(storage.state['cmd.alpha'], 'shift+meta+a')
   assert.equal(reg.getOverride('cmd.alpha'), 'shift+meta+a')
 })
+
+// ─── findByCommand ───────────────────────────────────────────────────────────
+
+test('findByCommand — returns the active (default) chord for a registered command', () => {
+  const reg = freshRegistry()
+  const hit = reg.findByCommand('cmd.alpha')
+  assert.ok(hit)
+  assert.equal(hit?.commandId, 'cmd.alpha')
+  assert.equal(hit?.chord, 'ctrl+a')
+  assert.equal(hit?.defaultChord, 'ctrl+a')
+})
+
+test('findByCommand — returns undefined for an unknown command', () => {
+  const reg = freshRegistry()
+  assert.equal(reg.findByCommand('cmd.unknown'), undefined)
+})
+
+test('findByCommand — surfaces the user override as the active chord', async () => {
+  const reg = freshRegistry()
+  await reg.setOverride(memoryStorage(), 'cmd.alpha', 'Ctrl+Shift+A')
+  const hit = reg.findByCommand('cmd.alpha')
+  assert.equal(hit?.chord, 'ctrl+shift+a', 'override wins as the active chord')
+  assert.equal(hit?.defaultChord, 'ctrl+a', 'default remains for revert')
+})
+
+// ─── formattedChordFor ───────────────────────────────────────────────────────
+
+test('formattedChordFor — returns display form of the active chord', () => {
+  const reg = freshRegistry()
+  // Canonical form is ctrl+a; formatted form is Title-Case parts joined by +.
+  assert.equal(reg.formattedChordFor('cmd.alpha'), 'Ctrl+A')
+})
+
+test('formattedChordFor — returns undefined for an unknown command', () => {
+  const reg = freshRegistry()
+  assert.equal(reg.formattedChordFor('cmd.missing'), undefined)
+})

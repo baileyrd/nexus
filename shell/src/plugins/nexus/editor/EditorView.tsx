@@ -516,13 +516,21 @@ function BreadcrumbSegments({ activeTab }: { activeTab: EditorTab | null }) {
  * nothing to close and the link would be a dead end.
  *
  * Each link is styled as an inline text-button using existing CSS
- * tokens (no new colours). Keybinding hints use documented defaults;
- * the KeybindingRegistry doesn't expose a lookup-by-command helper
- * today, so we can't resolve the live binding at render time.
- * TODO: source keybinding hints from the KeybindingRegistry once it
- * gains a `findByCommand` method.
+ * tokens (no new colours). Keybinding hints are resolved from the
+ * live `KeybindingRegistry` via `findByCommand`, so a user override
+ * flows through to the pill text without a reload; a missing binding
+ * falls back to the documented default so the hint still appears on
+ * a minimal plugin set.
  */
 export function EmptyStateActions({ hasAnyTab }: { hasAnyTab: boolean }) {
+  // `getRegistry()` is a synchronous reference read — if the shell
+  // finishes booting after this component mounts (unlikely; the empty
+  // state only renders once the workspace has hydrated), the fallback
+  // strings cover the gap until the next render.
+  const chordFor = (commandId: string, fallback: string): string => {
+    const reg = getRegistry()
+    return reg?.keybindings.formattedChordFor(commandId) ?? fallback
+  }
   const linkStyle: React.CSSProperties = {
     background: 'transparent',
     border: 0,
@@ -565,7 +573,7 @@ export function EmptyStateActions({ hasAnyTab }: { hasAnyTab: boolean }) {
         }}
         onClick={() => runCommand('nexus.editor.newUntitled')}
       >
-        Create new note<span style={hintStyle}>(Ctrl + N)</span>
+        Create new note<span style={hintStyle}>({chordFor('nexus.editor.newUntitled', 'Ctrl + N')})</span>
       </button>
       <button
         type="button"
@@ -578,7 +586,7 @@ export function EmptyStateActions({ hasAnyTab }: { hasAnyTab: boolean }) {
         }}
         onClick={() => runCommand('nexus.commandPalette.open')}
       >
-        Go to file<span style={hintStyle}>(Ctrl + O)</span>
+        Go to file<span style={hintStyle}>({chordFor('nexus.commandPalette.open', 'Ctrl + O')})</span>
       </button>
       {hasAnyTab && (
         <button
