@@ -1,14 +1,17 @@
 # Writing your first Nexus plugin
 
 Sandboxed JS/TS community plugins are the modern path for extending the
-Nexus shell. This tutorial walks through scaffolding, building, and
-installing a minimal "Hello" plugin using the `script` template introduced
-in Phase 4 WI-39.
+Nexus shell. This tutorial is the quickstart: scaffold, build, install,
+run. For the in-depth reference (activation events, capabilities, slot
+system, sandbox model) see
+[`shell/docs/writing-a-plugin.md`](../shell/docs/writing-a-plugin.md)
+once you have a scaffold in hand.
 
 > **Audience.** You know a little TypeScript and want a command + a panel
 > view in the shell. For a pure-Rust WASM plugin (maximum-trust or
 > capability-gated), see the `core` / `community` templates instead —
-> covered at the end of this doc.
+> covered at the end of this doc. For deeper API coverage see the
+> [reference tutorial](../shell/docs/writing-a-plugin.md).
 
 ## Prerequisites
 
@@ -162,3 +165,10 @@ kernel-side WASM loader rather than the shell's sandboxed iframe runtime.
 Use them when you need `wasmtime` fuel semantics or direct access to
 kernel host functions that aren't exposed across the `postMessage`
 boundary.
+
+## Next steps
+
+Once the hello scaffold runs, head to
+[`shell/docs/writing-a-plugin.md`](../shell/docs/writing-a-plugin.md)
+for the reference on activation events, capability declarations, slot
+surfaces, and the sandbox contract.
