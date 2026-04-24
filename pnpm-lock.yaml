@@ -8,7 +8,11 @@ importers:
 
   .: {}
 
-  packages/nexus-extension-api: {}
+  packages/nexus-extension-api:
+    devDependencies:
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
 
   shell:
     dependencies:
