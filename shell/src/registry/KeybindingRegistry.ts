@@ -16,6 +16,7 @@
 //     same command ID; rare in practice but well defined).
 
 import type { KeybindingContribution } from '../types/plugin'
+import { evaluateWhen } from '../host/ContextKeyService'
 
 interface KeybindingEntry {
   id: string
@@ -261,31 +262,10 @@ function eventToChord(event: KeyboardEvent): string {
   return parts.join('+')
 }
 
-/**
- * Simple when-clause evaluator.
- * Supports: &&, ||, !, ==, !=, bare key names, parentheses.
- */
-function evaluateWhen(expression: string, keys: Record<string, unknown>): boolean {
-  if (!expression?.trim()) return true
-
-  try {
-    // Replace key references with their values
-    // This is a simple approach — for production, use a proper expression parser
-    const normalized = expression
-      .replace(/(\w+(?:\.\w+)*)/g, (match) => {
-        // Skip operators
-        if (['true', 'false', 'null', 'undefined'].includes(match)) return match
-        const val = keys[match]
-        if (val === undefined) return 'false'
-        if (typeof val === 'boolean') return val.toString()
-        if (typeof val === 'string') return JSON.stringify(val)
-        return String(val)
-      })
-
-    // Evaluate — note: in production replace with a proper safe evaluator
-    // eslint-disable-next-line no-new-func
-    return Boolean(new Function(`return (${normalized})`)())
-  } catch {
-    return false
-  }
-}
+// When-clause evaluation is delegated to `evaluateWhen` in
+// `../host/ContextKeyService` (see the import at the top of this file).
+// That implementation is a hand-rolled recursive-descent parser that
+// evaluates the same grammar (&&, ||, !, ==, !=, parens, string/boolean
+// literals, context-key lookups) without `new Function()` / `eval`, so
+// the host webview can ship with CSP `script-src 'self'` (no
+// `'unsafe-eval'`). WI-30a §4.2 + §10 Q1.
