@@ -5,7 +5,7 @@
 **Status:** Plan only (no code changes yet)
 **Date:** 2026-04-23
 **Author:** Claude (audit + planning run)
-**Phase:** 1 of 6 in the shell-migration roadmap (per [`INTEGRATION-REVIEW.md`](./INTEGRATION-REVIEW.md) §5 and [ADR 0011](./adr/0011-adopt-plugin-first-shell.md))
+**Phase:** 1 of 6 in the shell-migration roadmap (per [`INTEGRATION-REVIEW.md`](./INTEGRATION-REVIEW.md) §5 and [ADR 0011](../adr/0011-adopt-plugin-first-shell.md))
 **Sibling plan:** [`PARITY-CHECKLIST.md`](./PARITY-CHECKLIST.md) — Phase 2 work items (some P0s from that list live here in Phase 1: WI-06, WI-20, WI-22, WI-23).
 
 ---

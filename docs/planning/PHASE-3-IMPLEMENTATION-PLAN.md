@@ -5,7 +5,7 @@
 **Status:** Plan only (no code changes yet)
 **Date:** 2026-04-23
 **Author:** Claude (audit + planning run)
-**Phase:** 3 of 6 in the shell-migration roadmap (per [`INTEGRATION-REVIEW.md`](./INTEGRATION-REVIEW.md) §5 and [ADR 0011](./adr/0011-adopt-plugin-first-shell.md))
+**Phase:** 3 of 6 in the shell-migration roadmap (per [`INTEGRATION-REVIEW.md`](./INTEGRATION-REVIEW.md) §5 and [ADR 0011](../adr/0011-adopt-plugin-first-shell.md))
 **Prerequisite:** [Phase 1](./PHASE-1-IMPLEMENTATION-PLAN.md) complete (shipped to main); [Phase 2](./PHASE-2-IMPLEMENTATION-PLAN.md) complete (shipped to main).
 **Source outline:** [`INTEGRATION-REVIEW.md`](./INTEGRATION-REVIEW.md) §5 "Phase 3 — Security Hardening (3–4 weeks)".
 **Backing audits:** [`MICROKERNEL-AUDIT.md`](./MICROKERNEL-AUDIT.md) findings F-5.1.1, F-5.3.1, F-5.3.2, F-2.1.1, F-9.2.1 / [`UI-AUDIT.md`](./UI-AUDIT.md) findings F-8.1.1, F-9.1.1.

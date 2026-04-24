@@ -1214,11 +1214,11 @@ requires_approval = false
 
 ## 27. References and Related Docs
 
-- [PRD-01: Core Architecture](01-core-architecture.md)
-- [PRD-02: Process Manager](02-process-manager.md)
-- [PRD-08: AI Engine](08-ai-engine.md)
-- [PRD-11: Database & Knowledge Store](11-database-knowledge-store.md)
-- [Nexus CLI Spec](../specs/cli.md)
+- [PRD-01: Kernel & Event System](01-kernel-event-system.md)
+- [PRD-09: Terminal & Process Manager](09-terminal-process-manager.md)
+- [PRD-12: AI Engine](12-ai-engine.md)
+- [PRD-10: Database Engine](10-database-engine.md)
+- [Nexus CLI Spec](05-cli.md)
 - [TOML Format Reference](https://toml.io/en/v1.0.0)
 
 ---
