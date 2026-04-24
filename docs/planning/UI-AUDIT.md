@@ -1,11 +1,54 @@
 # Nexus — Editor-Shell Architecture Audit (UI)
 
-> **Historical document** — Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). Paths below reference the legacy `app/` and `crates/nexus-app/` tree that has since been deleted. For current locations see `docs/legacy-shell-retirement.md`.
+> **Historical document — reconciled 2026-04-24.** Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). Paths below reference the legacy `app/` and `crates/nexus-app/` tree that has since been deleted. For current locations see `docs/legacy-shell-retirement.md`.
+>
+> A per-finding status pass against the current tree was completed on 2026-04-24 and is summarised in the **Reconciliation status** section below. Remaining genuinely-open items graduated to `docs/OPEN-ITEMS.md` as entries OI-07..OI-18 where impact warranted a tracked follow-up; smaller tail items are listed here as OPEN without a separate OI entry.
 
 **Audit date:** 2026-04-16
+**Reconciled:** 2026-04-24
 **Auditor:** Editor-Shell Auditor (v1), per `editor-shell-auditor.md`
 **Scope:** `app/src/**` (React/Vite frontend), plus the shell-side Tauri surface in `crates/nexus-app/src/` that directly shapes the UI contract.
 **Companion audit:** `docs/planning/MICROKERNEL-AUDIT.md` (microkernel / kernel-bus / loader; 2026-04-16). This report inherits some findings from that audit where the UI is the user-visible manifestation — those are cross-referenced, not re-discovered.
+
+---
+
+## Reconciliation status (2026-04-24)
+
+A per-item status pass against the current tree after the `app/` → `shell/` migration. Counts: 12 RESOLVED, 18 OPEN (3 PARTIAL), 1 STALE. `F-X.X.X` ids reference the **Findings by Dimension** section; `SI-*` rows reference **Suspected Issues Requiring Investigation**.
+
+| Id | Tier | Status | Evidence |
+|----|------|--------|----------|
+| F-2.1.1 / F-9.2.1 | T1 | RESOLVED | `packages/nexus-extension-api/package.json` v1.0.0; types ship `Disposable`, `DisposableStore`, `DeclaredCapabilities`. |
+| F-2.2.1 | T1 | STALE | `nexusContext.ts` is gone; capability enforcement moved to sandbox boundary (`shell/src/host/sandbox/router.ts:475` + `capabilityGuard.ts:152`). |
+| F-2.3.1 | T3 | RESOLVED | `packages/nexus-extension-api/src/index.ts:63-65,250` — `DisposableStore` + `ctx.disposables`. |
+| F-4.1.1 | T1 | OPEN | No keybinding-conflict detection in `KeybindingRegistry.ts`; no Settings UI. Tracked as OI-10. |
+| F-4.1.2 | T2 | RESOLVED | `ContextKeyService.evaluateWhen` + `KeybindingRegistry.ts:70,90`. |
+| F-4.3.1 | T2 | OPEN | No built-in-vs-plugin menu separator grouping. |
+| F-5.1.1 | T0 | RESOLVED | `shell/src/host/sandbox/SandboxOrchestrator.ts:306-310` — `sandbox="allow-scripts"` only (no `allow-same-origin`); `IframePort.ts:13-14` notes null-origin. |
+| F-5.1.2 | T0 | RESOLVED | `shell/src-tauri/tauri.conf.json:25-49` — strict CSP (`default-src 'self'`, `script-src 'self'`); devCsp adds `unsafe-eval` for Vite HMR only. |
+| F-5.2.1 | T1 | PARTIAL | `PanelRenderFn` exists in `packages/nexus-extension-api/src/index.ts:235`; declarative fixed-vocabulary renderer not yet audited. |
+| F-6.1.1 | T2 | OPEN | Plugins still use raw `api.kernel.invoke`; `ctx.workspace` / `ctx.editor.active` not exposed through extension-api. Tracked as OI-14. |
+| F-6.3.1 | T2 | OPEN | Multi-root workspace decision not revisited. |
+| F-7.2.1 | T1 | PARTIAL | `ExtensionHost.ts:151-165` wraps `activate()` in try/catch and marks `'error'`; no `plugins:status` store + Settings surface. Tracked as OI-09. |
+| F-7.3.1 | T2 | OPEN | No `beforeunload` hook → `onStop` path. Tracked as OI-16. |
+| F-8.1.1 | T0 | RESOLVED | Iframe-sandbox script runtime in `shell/src/host/sandbox/SandboxOrchestrator.ts`; `manifest.sandboxed === true` path routes to null-origin iframe with postMessage protocol. |
+| F-8.1.2 | T0 | RESOLVED | `shell/src/host/sandbox/router.ts:159,198,475` — `grantedCaps` / `pluginId` bound host-side. |
+| F-8.2.1 | T1 | OPEN | No UI-thread time budget on `invokeCommand` with warn/cancel thresholds. Tracked as OI-11. |
+| F-8.3.1 | T1 | OPEN | No `measureUserAgentSpecificMemory` plumbing for per-script-plugin accounting. |
+| F-9.1.1 | T0 | RESOLVED | `shell/src/host/communityPluginLoader.ts:82,89,106-127` — `PluginApiVersionError`. |
+| F-9.2.1 (UI) / F-9.3.1 | T2 | OPEN | No `@deprecated` JSDoc on contribution DTOs; no deprecation policy doc. Tracked as OI-17. |
+| F-10.1.1 | T1 | PARTIAL | `shell/src/plugins/nexus/processes/ProcessesView.tsx` shows plugins + events but is a pane, not a Settings tab, and lacks per-plugin error surfacing. Tracked as OI-08. |
+| F-10.3.1 (UI) | T2 | OPEN | No `performance.mark` / `measure` around plugin lifecycle. |
+| F-1.1.1 (UI) | T2 | OPEN | Editor still hosted directly by `shell/src/workspace/`, not via content-type contribution. |
+| F-3.2.1 (UI) | T2 | PARTIAL/OPEN | `shell/src/host/ActivationTriggers.ts` provides `onView:`/`onCommand:` trigger plumbing; script-tier eager activation still default. |
+| F-3.3.1 (UI) | T2 | OPEN | `runtime` field not in manifest schema; still inferred from `[wasm]`/`[script]` presence. |
+| SI-1 | — | RESOLVED | Blob-URL import now confined to the null-origin iframe (by F-8.1.1). |
+| SI-2 | — | RESOLVED | `shell/src/registry/UriHandlerRegistry.ts:43-45,70,101` — one-entry-per-scheme, first-match-wins, warn on re-register. |
+| SI-3 | — | RESOLVED | `ExtensionHost.ts:180-187` → `registry.unregisterAll(id)` drains on deactivate (not only on reload). |
+| SI-4 | — | OPEN | Tree-data-provider cache-on-forge-change not verified. |
+| SI-5 | — | OPEN | CommandPalette modal-overlap visual check outstanding. |
+| SI-6 | — | OPEN | PluginManager mutex contention under heavy plugin-plugin IPC not load-tested. |
+| SI-7 | — | OPEN | Snippet trigger collisions — no collision-check mechanism present. Tracked as OI-18. |
 
 ---
 

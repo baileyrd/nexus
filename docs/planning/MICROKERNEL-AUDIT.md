@@ -1,11 +1,61 @@
 # Nexus Micro-Kernel Architecture Audit
 
-> **Historical document** — Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). Paths below reference the legacy `app/` and `crates/nexus-app/` tree that has since been deleted. For current locations see `docs/legacy-shell-retirement.md`.
+> **Historical document — reconciled 2026-04-24.** Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). Paths below reference the legacy `app/` and `crates/nexus-app/` tree that has since been deleted. For current locations see `docs/legacy-shell-retirement.md`.
+>
+> A per-finding status pass against the current tree was completed on 2026-04-24 and is summarised in the **Reconciliation status** section below. Remaining genuinely-open items graduated to `docs/OPEN-ITEMS.md` as entries OI-07..OI-15 where impact warranted a tracked follow-up; smaller tail items are listed here as OPEN without a separate OI entry.
 
 **Auditor:** Micro-Kernel Architecture Auditor (per `microkernel-auditor.md`)
 **Date:** 2026-04-16
+**Reconciled:** 2026-04-24
 **Trust model assumed:** Third-party, untrusted community plugins
 **Scope:** Full 10-dimension audit
+
+---
+
+## Reconciliation status (2026-04-24)
+
+A per-item status pass against the current tree after the `app/` → `shell/` migration. Counts: 16 RESOLVED, 16 OPEN (3 PARTIAL), 4 STALE. `F-X.X.X` ids reference the **Findings** section below; `SI-*` rows reference **Suspected Issues (Not Fully Investigated)**.
+
+| Id | Status | Evidence |
+|----|--------|----------|
+| F-1.1.1 | OPEN | `crates/nexus-kernel/src/kernel.rs` — `start()` is still a logging hook; lifecycle consolidation is doc-only. |
+| F-1.2.1 | OPEN | `crates/nexus-kernel/src/plugin_registry.rs` + `kernel.rs:139` — kernel-side registry still parallel to `PluginLoader::loaded`. Tracked as OI-13. |
+| F-1.3.1 | PARTIAL/OPEN | `crates/nexus-plugin-api/` exists but `nexus-plugins` still depends on `nexus-kernel` directly. |
+| F-1.4.1 | STALE | Referenced `crates/nexus-app/` which was deleted during migration. |
+| F-2.1.1 | RESOLVED | `crates/nexus-plugin-api/` crate exists and re-exports `PLUGIN_API_VERSION`, `IpcDispatcher`, `EventFilter`. |
+| F-2.2.1 | OPEN | `crates/nexus-kernel/src/context.rs` still mixes sync/async on one trait. |
+| F-2.2.2 | RESOLVED | `crates/nexus-plugin-api/src/ipc.rs:16` — `IpcDispatcher: Send + Sync`. |
+| F-3.2.1 | RESOLVED | `crates/nexus-plugins/src/manifest.rs:1494-1500` — `uri_handlers` chained into handler_id uniqueness check. |
+| F-3.2.2 | OPEN | No manifest-signature verification. Tracked as OI-15. |
+| F-3.3.1 | OPEN | `crates/nexus-bootstrap/src/lib.rs` hardcodes `.forge/plugins`; `plugin_search_paths` from kernel config not honoured. |
+| F-4.2.2 | OPEN | Shutdown iterates `HashMap` order, not reverse registration. |
+| F-4.3.1 | OPEN | No retry/backoff in `reload_plugin`. |
+| F-4.4.1 | OPEN | No `reloading: AtomicBool` per plugin; `PluginReloading` variant remains test-only. |
+| F-5.1.1 | RESOLVED | `crates/nexus-plugins/src/loader.rs:1568,1658-1693` — `GRANTED_CAPS_FILE` + deny-by-default HIGH-risk grant flow. |
+| F-5.1.2 | OPEN | No `TrustLevel::Invoker` variant; CLI still runs as Core. |
+| F-5.2.1 | RESOLVED | `crates/nexus-plugins/src/error.rs:122` — `IpcError::ReentrantCall` introduced. |
+| F-5.3.1 | RESOLVED | `crates/nexus-plugins/src/host_fns.rs:425-443` — `host::write_file` routes through `caller.data().path_validator`. |
+| F-5.3.2 | RESOLVED | `crates/nexus-kernel/src/context_impl.rs:178-194` — `KernelPluginContext::write_file` calls `path_validator.validate_for_write`. |
+| F-5.5.1 | STALE | Script tier concern addressed by the iframe-sandbox capability boundary (see UI F-8.1.1). |
+| F-5.5.2 | STALE | Dispatch path reshaped by sandbox orchestrator; original backend-dispatch claim no longer applies. |
+| F-6.2.1 | OPEN | `host_fns.rs::get_settings` still ungated by a `settings.read` capability. |
+| F-6.2.2 | RESOLVED | `crates/nexus-plugins/src/sandbox.rs:81-96,141` — `TokenBucket(2000, 1000)` around `host::log`. |
+| F-6.3.1 | OPEN | `crates/nexus-kernel/src/context_impl.rs:142-154` — absolute-path auto-promotion to `*External` still silent. Tracked as OI-12. |
+| F-7.2.1 | RESOLVED | `crates/nexus-plugin-api/src/event.rs:101-105` — `EventFilter::Variant(String)` (owned). |
+| F-8.2.1 | RESOLVED | `crates/nexus-plugins/src/lib.rs:279-295,414-444` + `loader.rs:354,427-434` — persistent crash counter + quarantine flag. |
+| F-8.2.2 | RESOLVED | `crates/nexus-cli/src/main.rs:44-47` — `--safe-mode` CLI flag skipping community plugins. |
+| F-8.4.1 | RESOLVED | `crates/nexus-plugins/src/sandbox.rs:304` — `set_epoch_deadline` wired. |
+| F-9.2.1 | RESOLVED | `crates/nexus-plugins/src/loader.rs:553-554,661-664,1527-1536` — `check_api_version` + `IncompatibleApiVersion` error. |
+| F-9.4.1 | OPEN | No capability alias map in `crates/nexus-kernel/src/capability.rs`. |
+| F-10.1.2 | OPEN | `log_capability_granted/denied/path_traversal_denied` helpers have zero non-test callers in `crates/nexus-plugins/` or `crates/nexus-kernel/`. Tracked as OI-07. |
+| F-10.3.1 | OPEN | No `metrics`/`opentelemetry` dependency in the workspace. |
+| SI-subs | RESOLVED | `crates/nexus-plugins/src/loader.rs:1709-1738` — corrupt `subscriptions.json` renamed to `subscriptions.json.corrupt-<unix>` + audit warn. |
+| SI-fuel | RESOLVED | `crates/nexus-plugins/src/sandbox.rs:246,290-295` — `fuel_per_call` reset every dispatch. |
+| SI-mcp | RESOLVED | `crates/nexus-mcp/src/server.rs:296-297` — stdio-only transport, no network listener. |
+| SI-tauri-xss | OPEN | Tooltip / plugin-supplied string sanitisation in the contribution bridge not re-audited post-migration. |
+| SI-hotreload | OPEN | Cross-platform `notify-debouncer-mini` reliability pass still outstanding. |
+
+---
 
 ---
 

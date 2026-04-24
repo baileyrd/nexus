@@ -134,6 +134,265 @@ Typecheck clean; 289 tests pass (unchanged); production build succeeds.
 
 ---
 
+## OI-07 — Route capability grants, denials & path-traversal through `nexus-security::audit`
+
+**Severity:** Should-fix (auditability gap for third-party-untrusted trust model)
+**Surfaced by:** MICROKERNEL-AUDIT.md F-10.1.2 reconciliation 2026-04-24
+**Status:** Not started
+
+### Gap
+`crates/nexus-security/src/audit.rs` exposes `log_capability_granted`, `log_capability_denied`, and `log_path_traversal_denied` helpers — but a reverse grep across `crates/nexus-plugins/` and `crates/nexus-kernel/` returns zero non-test callers. The capability-gate paths in `host_fns.rs` and `context_impl.rs` log at `tracing::warn!` directly, skipping the structured audit helpers, so a security-focused log filter (`target = "audit"`) captures none of the events the audit crate was designed to centralise.
+
+### Scope
+- Walk every `Capability` check in `crates/nexus-plugins/src/host_fns.rs`, `crates/nexus-kernel/src/context_impl.rs`, and the path-validator in `crates/nexus-security/src/path.rs`.
+- Replace ad-hoc `tracing::warn!` with the `nexus_security::audit::*` helpers.
+- Add a coverage test that invokes a denied capability and asserts the audit channel saw the event.
+
+### Acceptance
+- Every capability grant, denial, and path-traversal rejection passes through an `audit::*` helper.
+- A structured-log consumer filtering on `target = "audit"` sees all security-relevant events in one stream.
+
+---
+
+## OI-08 — "Running Extensions" Settings tab
+
+**Severity:** Should-fix (observability)
+**Surfaced by:** UI-AUDIT.md F-10.1.1 reconciliation 2026-04-24
+**Status:** Partial
+
+### Gap
+`shell/src/plugins/nexus/processes/ProcessesView.tsx` surfaces plugin + event state in a pane, but it isn't a Settings tab and doesn't show per-plugin error messages, slowest-command observations, or a disable action.
+
+### Scope
+- Register a Settings tab via `api.settings.registerTab` (shipping as of OI-01) titled "Extensions".
+- Show: plugin id, state (`active`/`error`/`inactive`), last error if any, declared capabilities, a Disable button, and the last N command durations.
+- Surface the same `ExtensionHost.getError(id)` data `ProcessesView` already has, plus a `performance.measure` read once OI-17's instrumentation lands (or inline a minimal duration cache).
+
+### Acceptance
+- Settings → Extensions tab lists every loaded plugin with state + last error.
+- A failing plugin shows its error message inline; clicking Disable flips `plugin enabled`.
+
+---
+
+## OI-09 — `plugins:status` store + per-plugin error surface
+
+**Severity:** Should-fix (crash-failure observability)
+**Surfaced by:** UI-AUDIT.md F-7.2.1 reconciliation 2026-04-24
+**Status:** Partial — `ExtensionHost` already marks `'error'` state but no UI consumer
+
+### Gap
+`shell/src/host/ExtensionHost.ts:151-165` wraps each plugin's `activate()` in try/catch and stores the thrown error via `fail(id, error)`. The error is event-emitted (`plugin:error`), but no shell-side store aggregates it and no UI tab lists the failed plugins. Users currently hit a silent broken plugin that surfaces only in the dev console.
+
+### Scope
+- Zustand store `pluginsStatusStore` that subscribes to `plugin:error` / `plugin:activated` / `plugin:deactivated` and keeps a per-plugin `{ state, lastError }` map.
+- Consumed by OI-08's Settings tab to render failed plugins with a Disable action.
+
+### Acceptance
+- A plugin that throws in `activate()` appears in the Extensions tab with its error message.
+- Disabling the plugin removes it from the failed list and marks it `inactive` on next boot.
+
+---
+
+## OI-10 — Keybinding-conflict detection + UI
+
+**Severity:** Should-fix (user-invisible collision hazard)
+**Surfaced by:** UI-AUDIT.md F-4.1.1 reconciliation 2026-04-24
+**Status:** Not started
+
+### Gap
+`KeybindingRegistry.registerFromManifest` pushes bindings unconditionally; two plugins that declare the same chord both land in the map and `match()` returns whichever was registered first. No event is emitted and the user has no way to see the collision.
+
+### Scope
+- `KeybindingRegistry.register{FromManifest,Override}` should detect a chord collision and emit a `plugins:keybindings-conflict` event with `{ chord, commands: [ids] }`.
+- Settings → Keybindings (already exists as a built-in tab) shows a warning row per conflict with a "pick one" dropdown that records a user override on the losing command.
+
+### Acceptance
+- Install two plugins that share `Ctrl+K Ctrl+S`; the Keybindings tab shows a conflict row with both command titles.
+- Picking one writes a user override on the other (unbound or re-bound) and the event clears.
+
+---
+
+## OI-11 — UI-thread time budget on plugin command dispatch
+
+**Severity:** Should-fix (UX hazard from slow plugins)
+**Surfaced by:** UI-AUDIT.md F-8.2.1 reconciliation 2026-04-24
+**Status:** Not started
+
+### Gap
+`api.commands.execute(id)` awaits a plugin's command handler indefinitely. A community plugin with a slow synchronous body stalls the shell until it resolves. Kernel dispatches already enforce a `timeout_ms` (30 s default); shell-side command dispatch does not.
+
+### Scope
+- Wrap `CommandRegistry.execute` in an await-with-timeout (soft warn at 250 ms, hard cancel at 5 s configurable via the existing configuration registry).
+- On cancel, publish `command:cancelled` with the command id so the palette can dismiss the in-flight state.
+
+### Acceptance
+- A command handler that sleeps 6 s is cancelled with a user-visible notification; the shell stays responsive.
+
+---
+
+## OI-12 — Document or remove absolute-path auto-promotion
+
+**Severity:** Should-fix (silent capability escalation)
+**Surfaced by:** MICROKERNEL-AUDIT.md F-6.3.1 reconciliation 2026-04-24
+**Status:** Not started
+
+### Gap
+`crates/nexus-kernel/src/context_impl.rs:142-154` silently auto-promotes an absolute path in `read_file` / `write_file` to the corresponding `FsReadExternal` / `FsWriteExternal` capability check — behaviour not documented on the plugin-API contract. A plugin whose author thinks `FsRead` is enough can unexpectedly hit `CapabilityDenied`, or worse, if the plugin declares `FsReadExternal`, can silently escape the forge root.
+
+### Scope
+- Pick one: (a) keep auto-promotion but document it in `@nexus/extension-api` JSDoc on `PlatformFsAPI.read/write`, OR (b) remove auto-promotion and require plugins to pick their capability explicitly.
+- If (a), add an audit-log line per auto-promotion (fits with OI-07).
+
+### Acceptance
+- A plugin author reading the extension-api docs knows whether an absolute path escalates to `*External` silently or fails loudly.
+- If (b): `read_file("/abs/path")` without `FsReadExternal` returns a typed error, not a silent denial.
+
+---
+
+## OI-13 — Reconcile kernel-side `PluginRegistry` with `PluginLoader::loaded`
+
+**Severity:** Tech debt (dead code path + two sources of truth)
+**Surfaced by:** MICROKERNEL-AUDIT.md F-1.2.1 reconciliation 2026-04-24
+**Status:** Not started
+
+### Gap
+`crates/nexus-kernel/src/plugin_registry.rs` still exists and `Kernel::plugins()` (`kernel.rs:139`) returns it — but nothing populates it at runtime; `PluginLoader::loaded` in `nexus-plugins` is the authoritative map. Callers that reach for `kernel.plugins()` get an empty view.
+
+### Scope
+- Either delete `kernel-side PluginRegistry` + `Kernel::plugins()` (preferred; zero callers today), OR delegate `Kernel::plugins()` to `PluginLoader::loaded`.
+- Update the microkernel ADR if deletion is chosen.
+
+### Acceptance
+- Zero references to `nexus_kernel::PluginRegistry` outside `plugin_registry.rs` itself (already true) — plus the module itself is gone.
+
+---
+
+## OI-14 — Expose `ctx.workspace` / `ctx.editor.active` through extension-api
+
+**Severity:** Should-fix (forces plugins to use raw `invoke`)
+**Surfaced by:** UI-AUDIT.md F-6.1.1 reconciliation 2026-04-24
+**Status:** Not started
+
+### Gap
+Plugins that want the active editor or workspace state reach through `api.kernel.invoke("com.nexus.editor", "open", …)` — a raw command-id path that breaks when the command id changes. No `api.workspace.activeEditor()` accessor exists.
+
+### Scope
+- Add `WorkspaceAPI` and `EditorAPI` sub-surfaces to `@nexus/extension-api`:
+  - `api.workspace.forgeRoot(): string | null`
+  - `api.editor.active(): { relpath, revision } | null`
+  - `api.editor.onChange(handler): () => void`
+- Back with the existing `useEditorStore` / forge-path sources.
+
+### Acceptance
+- A plugin reads the active file's relpath without knowing about the editor plugin's handler ids.
+
+---
+
+## OI-15 — Manifest signature / provenance
+
+**Severity:** Should-fix (marketplace prerequisite)
+**Surfaced by:** MICROKERNEL-AUDIT.md F-3.2.2 reconciliation 2026-04-24
+**Status:** Not started
+
+### Gap
+`crates/nexus-plugins/src/manifest.rs::parse_manifest` accepts any valid TOML. For a marketplace that ships community plugins, there's no way to verify who signed a given `manifest.toml` — install-time users depend on file-system trust alone.
+
+### Scope
+- Optional `manifest.toml.sig` Ed25519 signature over the manifest bytes, verified against a trusted-publisher keyring bundled with the shell.
+- Unsigned manifests still load (backward compatible) but the `Plugins` tab shows an "Unverified" badge.
+- This is a blocker for opening a community registry.
+
+### Acceptance
+- A plugin signed by a trusted key shows "Verified" in Plugins tab; unsigned shows "Unverified"; signed-but-untrusted is rejected with a clear error.
+
+---
+
+## OI-16 — `beforeunload` → `onStop` for script plugins
+
+**Severity:** Nice-to-have (cleanup on window close)
+**Surfaced by:** UI-AUDIT.md F-7.3.1 reconciliation 2026-04-24
+**Status:** Not started
+
+### Gap
+Script plugins register `onStop` handlers that run on explicit deactivation but never on window close — a graceful shutdown hook is missing. Plugins that flush state to disk (cache, preferences) lose last-edit data on quit.
+
+### Scope
+- `shell/src/shell/App.tsx` `beforeunload` listener dispatches `window:closing` event.
+- `ExtensionHost` subscribes; for each active plugin, await `deactivate()` with a 1 s per-plugin soft cap so a misbehaving plugin can't stall the close.
+
+### Acceptance
+- A plugin with a flush-on-stop hook writes its state when the user hits ⌘Q.
+
+---
+
+## OI-17 — Deprecation policy + `@deprecated` JSDoc on contribution DTOs
+
+**Severity:** Should-fix (API evolution hygiene)
+**Surfaced by:** UI-AUDIT.md F-9.3.1 reconciliation 2026-04-24
+**Status:** Not started
+
+### Gap
+`@nexus/extension-api` is stamped `1.0.0` but there is no deprecation channel. Removing a DTO field mid-1.x would silently break plugins.
+
+### Scope
+- `packages/nexus-extension-api/DEPRECATED.md` lists deprecated surfaces with a target removal version.
+- `@deprecated` JSDoc tag on each deprecated field in `src/index.ts`.
+- ESLint rule `no-restricted-syntax` (or `import/no-deprecated` via the typescript-eslint plugin) fails the shell lint when it imports a deprecated name.
+
+### Acceptance
+- A plugin author gets a TS compile-time warning when they use a deprecated DTO.
+
+---
+
+## OI-18 — Snippet trigger collision detection
+
+**Severity:** Nice-to-have (silent overwrite hazard)
+**Surfaced by:** UI-AUDIT.md SI-7 reconciliation 2026-04-24
+**Status:** Not started
+
+### Gap
+Two plugins that register snippets with the same trigger string silently overwrite each other — the same hazard OI-10 describes for keybindings but for snippets.
+
+### Scope
+- The snippet-registration path (in the appearance/theme snippet store today) checks for duplicate triggers and emits `plugins:snippet-conflict`.
+- Settings → Appearance (or a new Snippets section) surfaces the conflict with a per-trigger "which plugin wins" control.
+
+### Acceptance
+- Install two plugins with the same snippet trigger; the conflict is visible and resolvable before the user types the trigger.
+
+---
+
+## Audit-tail OPEN items without a separate OI entry
+
+Low-impact items from the 2026-04-24 audit reconciliation that are tracked only in `MICROKERNEL-AUDIT.md` / `UI-AUDIT.md` rather than here. Adding an OI entry is warranted if impact justifies the tracking cost:
+
+- **MK F-1.1.1** — `Kernel::start` / `shutdown` consolidation (doc-only today).
+- **MK F-1.3.1** — narrow `nexus-plugins` → `nexus-kernel` dep surface.
+- **MK F-2.2.1** — split `PluginContext` sync / async traits.
+- **MK F-3.3.1** — honour `plugin_search_paths` from kernel config in bootstrap.
+- **MK F-4.2.2** — deterministic reverse-registration shutdown order.
+- **MK F-4.3.1** — `reload_plugin` retry / backoff.
+- **MK F-4.4.1** — `PluginReloading` state exposed to dispatch.
+- **MK F-5.1.2** — `TrustLevel::Invoker` with reduced caps.
+- **MK F-6.2.1** — `settings.read` capability gate on `get_settings`.
+- **MK F-9.4.1** — capability alias map for renames.
+- **MK F-10.3.1** — metrics / OpenTelemetry integration.
+- **MK SI-tauri-xss** — re-audit plugin-supplied string sanitisation in the contribution bridge.
+- **MK SI-hotreload** — cross-platform `notify-debouncer-mini` reliability pass.
+- **UI F-1.1.1** — editor as a content-type contribution.
+- **UI F-3.2.1** — activation events default for script plugins.
+- **UI F-3.3.1** — explicit `runtime` field in manifest schema.
+- **UI F-4.3.1** — menu-item ordering groups.
+- **UI F-5.2.1** — declarative plugin-panel primitives (fixed vocabulary).
+- **UI F-6.3.1** — multi-root workspace decision.
+- **UI F-8.3.1** — per-script-plugin memory accounting.
+- **UI F-10.3.1** — `performance.measure` around plugin lifecycle.
+- **UI SI-4** — tree-data-provider cache-on-forge-change.
+- **UI SI-5** — CommandPalette modal-overlap visual check.
+- **UI SI-6** — PluginManager mutex contention load test.
+
+---
+
 ## Relation to BACKLOG.md
 
 These items are cross-listed in [PRDs/BACKLOG.md](PRDs/BACKLOG.md) under "Post-migration carryover gaps (2026-04-24)" with pointers back here. This file is the authoritative description; BACKLOG.md is the index.
