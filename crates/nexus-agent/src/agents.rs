@@ -1,6 +1,6 @@
 //! Bundled agent impls. Currently just [`EchoAgent`] for scaffolding
 //! + tests; real archetypes (Writer / Coder / Researcher) land in
-//! their own modules once the LLM-driven planner surface settles.
+//!   their own modules once the LLM-driven planner surface settles.
 
 use async_trait::async_trait;
 

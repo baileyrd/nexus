@@ -25,6 +25,7 @@
 //!
 //! Ids are append-only.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -150,7 +151,7 @@ async fn handle_plan(
 ) -> Result<serde_json::Value, PluginError> {
     let a: GoalArgs = parse(args, "plan")?;
     let agent = build_planner(Arc::clone(&ctx), &a).await;
-    let plan = agent.plan(&a.goal).await.map_err(agent_err)?;
+    let plan = agent.plan(&a.goal).await.map_err(|e| agent_err(&e))?;
     to_value(&plan, "plan")
 }
 
@@ -160,7 +161,7 @@ async fn handle_run(
 ) -> Result<serde_json::Value, PluginError> {
     let a: GoalArgs = parse(args, "run")?;
     let agent = build_planner(Arc::clone(&ctx), &a).await;
-    let plan = agent.plan(&a.goal).await.map_err(agent_err)?;
+    let plan = agent.plan(&a.goal).await.map_err(|e| agent_err(&e))?;
     run_plan_internal(ctx, plan, Some(a.goal)).await
 }
 
@@ -210,7 +211,7 @@ async fn handle_execute_step(
     let result = executor
         .execute_step_at(&a.plan, a.index)
         .await
-        .map_err(agent_err)?;
+        .map_err(|e| agent_err(&e))?;
     to_value(&result, "execute_step")
 }
 
@@ -409,9 +410,8 @@ async fn handle_history_list(
     ctx: Arc<KernelPluginContext>,
 ) -> Result<serde_json::Value, PluginError> {
     let dir = std::path::Path::new(HISTORY_DIR);
-    let entries = match ctx.list_files(dir).await {
-        Ok(v) => v,
-        Err(_) => return Ok(serde_json::Value::Array(Vec::new())),
+    let Ok(entries) = ctx.list_files(dir).await else {
+        return Ok(serde_json::Value::Array(Vec::new()));
     };
     let mut out: Vec<serde_json::Value> = Vec::new();
     for path in entries {
@@ -423,13 +423,11 @@ async fn handle_history_list(
         else {
             continue;
         };
-        let bytes = match ctx.read_file(&path).await {
-            Ok(b) => b,
-            Err(_) => continue,
+        let Ok(bytes) = ctx.read_file(&path).await else {
+            continue;
         };
-        let record: serde_json::Value = match serde_json::from_slice(&bytes) {
-            Ok(v) => v,
-            Err(_) => continue,
+        let Ok(record) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            continue;
         };
         let goal = record
             .get("goal")
@@ -442,7 +440,7 @@ async fn handle_history_list(
         let success = record
             .get("observation")
             .and_then(|o| o.get("success"))
-            .and_then(|v| v.as_bool());
+            .and_then(serde_json::Value::as_bool);
         let step_count = record
             .get("observation")
             .and_then(|o| o.get("steps"))
@@ -547,7 +545,7 @@ async fn system_prompt_with_skills(
         let body = render_skill_body(ctx, id)
             .await
             .unwrap_or_else(|| fallback_body.to_string());
-        prompt.push_str(&format!("\n## Skill: {name} [{id}]\n{body}\n"));
+        let _ = write!(prompt, "\n## Skill: {name} [{id}]\n{body}\n");
     }
     prompt
 }
@@ -581,7 +579,7 @@ async fn append_mcp_hint(ctx: &KernelPluginContext, prompt: &mut String) {
             let name = s.get("name").and_then(|v| v.as_str())?;
             let disabled = s
                 .get("disabled")
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
             if disabled {
                 return None;
@@ -603,7 +601,7 @@ async fn append_mcp_hint(ctx: &KernelPluginContext, prompt: &mut String) {
          `{ server, tool, arguments }`. Servers:\n",
     );
     for (name, _args) in &active {
-        prompt.push_str(&format!("- {name}"));
+        let _ = write!(prompt, "- {name}");
         // Optional: fetch tool names when the server responds quickly.
         // Keep this light — a slow server shouldn't hold up planning.
         let tools_value = ctx
@@ -622,9 +620,9 @@ async fn append_mcp_hint(ctx: &KernelPluginContext, prompt: &mut String) {
                     .take(8)
                     .collect();
                 if !names.is_empty() {
-                    prompt.push_str(&format!(" — tools: {}", names.join(", ")));
+                                let _ = write!(prompt, " — tools: {}", names.join(", "));
                     if arr.len() > names.len() {
-                        prompt.push_str(&format!(" (+{} more)", arr.len() - names.len()));
+                        let _ = write!(prompt, " (+{} more)", arr.len() - names.len());
                     }
                 }
             }
@@ -711,7 +709,7 @@ fn exec_err(reason: String) -> PluginError {
     }
 }
 
-fn agent_err(e: AgentError) -> PluginError {
+fn agent_err(e: &AgentError) -> PluginError {
     exec_err(e.to_string())
 }
 
