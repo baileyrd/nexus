@@ -1,20 +1,8 @@
 # Nexus
 
-An AI-native, plugin-extensible knowledge environment built in Rust. Nexus combines file-based note management with full-text search, a knowledge graph, AI-powered RAG, and a WASM plugin system — accessible via CLI, terminal UI, or MCP server.
+A personal, plugin-extensible knowledge environment built in Rust. Nexus combines file-based note management with full-text search, a knowledge graph, AI-powered RAG, and a plugin system — accessible via CLI, terminal UI, desktop shell, or MCP server.
 
-> **Status:** Alpha (v0.1.0) — Phase 1 foundation is solid, Phase 4-5 features (AI, MCP) are functional. Not yet production-ready.
-
-> **Desktop shell retirement (v0.4.0, 2026-04-24):** The plugin-first
-> shell at [`shell/`](shell/) + [`shell/src-tauri/`](shell/src-tauri/)
-> (crate `nexus-shell`) is the **single** desktop target per
-> [ADR 0011](docs/adr/0011-adopt-plugin-first-shell.md). The legacy
-> tri-pane shell (`app/` + `crates/nexus-app`) has been **removed** in
-> Phase 4 — see [`docs/legacy-shell-retirement.md`](docs/legacy-shell-retirement.md)
-> for the migration story, or recover the code from git history via the
-> `v0.1.0-legacy-shell` tag. New desktop work lands as a service-crate
-> IPC handler plus a plugin in `shell/src/plugins/nexus/`. See
-> [`CONTRIBUTING.md`](CONTRIBUTING.md) and
-> [`docs/INTEGRATION-REVIEW.md`](docs/INTEGRATION-REVIEW.md).
+The plugin-first desktop shell at [`shell/`](shell/) + [`shell/src-tauri/`](shell/src-tauri/) (crate `nexus-shell`) is the single desktop target per [ADR 0011](docs/adr/0011-adopt-plugin-first-shell.md). The legacy tri-pane shell was removed in 2026-04 — see [`docs/legacy-shell-retirement.md`](docs/legacy-shell-retirement.md) for the migration story, or recover the code via the `v0.1.0-legacy-shell` git tag.
 
 ## Architecture
 
@@ -225,18 +213,14 @@ cargo build -p nexus-cli        # Build just the CLI
 cargo build -p nexus-tui        # Build just the TUI
 ```
 
-### Crate Dependency Graph
+### Key Docs
 
-```
-Phase 1: Kernel → Security → Storage → Plugins → CLI
-Phase 2: File Formats → Theming/UI → Editor
-Phase 3: Terminal, Database, Git (parallel)
-Phase 4: AI Engine → Skills → MCP
-Phase 5: Agents → Workflows
-Phase 6: Cross-Platform (Tauri, WASM, Mobile)
-```
-
-Full design docs live in [`docs/PRDs/`](docs/PRDs/00-index.md) (17 implementation-ready PRDs) and [`docs/adr/`](docs/adr/) (10 architecture decision records).
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — current architecture overview
+- [`docs/adr/`](docs/adr/) — architecture decision records
+- [`docs/PRDs/`](docs/PRDs/00-index.md) — product requirements (see `IMPLEMENTATION_STATUS.md` for current state)
+- [`docs/writing-your-first-plugin.md`](docs/writing-your-first-plugin.md) — plugin quickstart
+- [`shell/docs/writing-a-plugin.md`](shell/docs/writing-a-plugin.md) — plugin author reference
+- [`docs/planning/`](docs/planning/) — historical phase plans and audits
 
 ## License
 
