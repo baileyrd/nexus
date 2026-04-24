@@ -19,6 +19,7 @@ nexus-types = { path = "../nexus-types" }
 nexus-mcp = { path = "../nexus-mcp" }
 nexus-git = { path = "../nexus-git" }
 nexus-terminal = { path = "../nexus-terminal" }
+nexus-tui = { path = "../nexus-tui" }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }

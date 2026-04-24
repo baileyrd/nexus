@@ -56,6 +56,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Launch the terminal UI
+    Tui,
+    /// Launch the desktop shell (nexus-shell). Any arguments after `desktop`
+    /// are forwarded to the shell binary.
+    Desktop {
+        /// Passthrough args forwarded to `nexus-shell`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Manage the forge (workspace)
     Forge(ForgeArgs),
     /// Manage content nodes
@@ -1030,6 +1039,13 @@ fn main() {
     }
 
     let result = match cli.command {
+        Commands::Tui => commands::tui::run(),
+
+        Commands::Desktop { args } => match commands::desktop::launch(&args) {
+            Ok(code) => std::process::exit(code),
+            Err(e) => Err(e),
+        },
+
         Commands::Forge(args) => match args.command {
             ForgeCommand::Init { dir } => commands::forge::init(&app, dir),
             ForgeCommand::Status => commands::forge::status(&mut app),
