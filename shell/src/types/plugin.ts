@@ -38,6 +38,7 @@ export type {
   KeybindingContribution,
   StatusBarContribution,
   ContextKeyContribution,
+  SettingsTabContribution,
   ConfigSection,
   ConfigSchema,
   KernelEventEnvelope,
@@ -61,6 +62,7 @@ import type {
   KeybindingContribution,
   StatusBarContribution,
   ContextKeyContribution,
+  SettingsTabContribution,
   ConfigSection,
   FileEntry,
   FsEvent,
@@ -99,6 +101,15 @@ export interface ViewContribution {
   priority?: number
 }
 
+/**
+ * Shell-side tab record. Adds `pluginId` (filled by the registry) to
+ * the portable contribution shape so the UI can tag rail entries with
+ * their owning plugin for the Obsidian-style grouping.
+ */
+export interface SettingsTabEntry extends SettingsTabContribution {
+  pluginId: string
+}
+
 export interface PluginContributions {
   commands?: CommandContribution[]
   views?: ViewContribution[]
@@ -107,6 +118,7 @@ export interface PluginContributions {
   statusBarItems?: StatusBarContribution[]
   configuration?: ConfigSection
   contextKeys?: ContextKeyContribution[]
+  settingsTabs?: SettingsTabContribution[]
 }
 
 // ─── Plugin contract ──────────────────────────────────────────────────────────
@@ -157,6 +169,15 @@ export interface PluginAPI {
   platform: PlatformAPI
   activityBar: ActivityBarAPI
   input: InputAPI
+  /**
+   * Settings modal extension point (OI-01). Plugins register a
+   * tab renderer; the shell draws the rail entry and calls the
+   * renderer when the user selects that tab. Metadata (title, icon,
+   * group, priority) can be declared in the manifest via
+   * `settings_tabs`, in which case the rail entry appears even before
+   * the plugin activates.
+   */
+  settings: SettingsAPI
   /**
    * Custom URI scheme registry — `api.uri.register('nexus', handler)`
    * routes deep links of the form `nexus://...` to the handler. Auto-
@@ -289,6 +310,30 @@ export interface KernelAPI {
   ): Promise<() => void>
   /** True once `boot_kernel` has succeeded and no shutdown has happened since. */
   available(): Promise<boolean>
+}
+
+export interface SettingsAPI {
+  /**
+   * Register a React component that draws the right-pane content
+   * when the user selects the tab identified by `id`. Optional
+   * `meta` overrides or fills in the manifest-declared metadata
+   * — useful when the plugin wants to attach a tab without a
+   * manifest entry.
+   *
+   * Calling `registerTab` for a manifest-declared id attaches the
+   * renderer to the existing entry; calling it for a fresh id
+   * synthesises an entry on the fly.
+   */
+  registerTab(
+    id: string,
+    renderer: import('react').ComponentType<Record<string, never>>,
+    meta?: Partial<{
+      title: string
+      icon: string
+      priority: number
+      group: 'options' | 'core-plugins' | 'community-plugins'
+    }>,
+  ): void
 }
 
 export interface ActivityBarAPI {

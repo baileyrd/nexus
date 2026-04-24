@@ -317,6 +317,32 @@ export interface ContextKeyContribution {
   type: 'boolean' | 'string' | 'number';
 }
 
+/**
+ * A plugin-contributed tab in the Settings modal (OI-01).
+ *
+ * Plugins declare metadata here; the renderer is wired from
+ * `activate()` via `api.settings.registerTab(id, Component)`. Tabs
+ * without a renderer attached are hidden — a plugin that declares
+ * settings tabs must activate on startup (or another trigger that
+ * fires before the user opens settings) for the tab to appear.
+ *
+ * `group` places the tab in one of three rail sections:
+ *   - `options` — bundled app surfaces (Appearance, Hotkeys, …).
+ *   - `core-plugins` — in-tree nexus plugins with their own settings.
+ *   - `community-plugins` — installed community plugins with settings.
+ *
+ * When `group` is omitted, community plugins default to
+ * `community-plugins`, core plugins to `core-plugins`, and everything
+ * else to `options`. `priority` orders within a group (lower first).
+ */
+export interface SettingsTabContribution {
+  id: string;
+  title: string;
+  icon?: string;
+  priority?: number;
+  group?: 'options' | 'core-plugins' | 'community-plugins';
+}
+
 // ─── Configuration (moved from shell/src/types/plugin.ts) ────────────────────
 
 export interface ConfigSection {

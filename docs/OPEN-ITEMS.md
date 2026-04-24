@@ -10,25 +10,18 @@
 
 **Severity:** Should-fix (user-visible parity gap)
 **Surfaced by:** `docs/references/obsidian-settings-modal.md`
-**Status:** Not started
+**Status:** Resolved 2026-04-24. Extension point landed; built-in tabs preserved; typecheck + 271 tests green.
 
-### Gap
-The Obsidian-style tabbed settings modal with a plugin-extensible `registerSettingsTab` API is entirely absent in `shell/`.
+### Outcome
+- **`SettingsTabRegistry`** in `shell/src/registry/`, following the `CommandRegistry` two-phase pattern (`registerFromManifest` → `register` → `all`). Six unit tests cover the sort order, manifest-then-register sequence, and `unregister`.
+- **`SettingsTabContribution`** DTO in `@nexus/extension-api`; **`SettingsTabEntry`** shell-side shape. `PluginContributions.settingsTabs` accepts the declarative form; `ExtensionHost.registerManifestContributions` calls `registerFromManifest` so the rail entry appears before the plugin activates.
+- **`api.settings.registerTab(id, renderer, meta?)`** on `PluginAPI`, tracked by `PluginRegistry` so unloads sweep the tab automatically (`settingsTab:<id>` ownership key).
+- **`SettingsPanelView`** renders three classes of tabs: the four existing built-ins (Settings / Appearance / Keybindings / Plugins), plugin-contributed tabs (from the registry), and **auto-tabs** for any plugin that declared a `configuration` schema without an explicit `settings_tabs` entry — matches the Obsidian "one tab per plugin with settings" convention. Plugins with both paths get the explicit tab only.
+- **Last-open tab persisted** to `plugin:core.settings:last-tab` in `localStorage` (same namespacing as keybinding overrides), hydrated on the next open. `Ctrl/Cmd+,` continues to route through `workbench.action.openSettings`.
 
-- `shell/src/plugins/core/settings/SettingsPanelView.tsx` exists but is a single-panel view, not a tabbed modal with a plugin extension point.
-- Zero hits for `SettingsModal`, `registerSettingsTab`, or `workspace.settings` across `shell/src/`.
-- Legacy `app/src/contributions/builtins.ts` registered settings tabs declaratively; no equivalent contribution registry entry exists.
-
-### Scope
-- Design an extension-point contribution (`settings.tabs` or similar) aligned with the existing contribution-registry pattern (see `shell/src/registry/`).
-- Build a tabbed modal view. Register a default set of tabs for bundled plugins (appearance, keybindings, file-system, AI providers, etc.).
-- Expose `api.settings.registerTab(...)` on the plugin API surface.
-- Persist last-open tab in shell state.
-
-### Acceptance
-- A plugin can declare `contributions.settings` in its manifest and have a tab appear in the settings modal.
-- Default bundled tabs cover appearance, keybindings, and any plugin-level settings that existed in the legacy shell.
-- `Ctrl/Cmd+,` opens the modal to the last-viewed tab.
+### Follow-up (not blocking)
+- The header still uses a horizontal tab bar. The Obsidian spec's vertical left rail with uppercase section headers (`OPTIONS` / `CORE PLUGINS` / `COMMUNITY PLUGINS`) is visual polish; the grouping metadata already exists in the registry so the rail-style layout is a styling-only follow-up.
+- Auto-tab `core` vs `community` classification currently uses a `com.nexus.` / `core.` prefix heuristic. A richer split would join on `pluginList` which surfaces the real `core: boolean`.
 
 ---
 

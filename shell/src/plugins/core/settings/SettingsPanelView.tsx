@@ -2,12 +2,13 @@
 // Auto-generates settings UI from registered config schemas.
 // Plugins tab: lists core plugins + discovered community plugins with toggles.
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, createElement } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { PLUGIN_API_VERSION, type Capability } from '@nexus/extension-api'
 import { getRegistry } from '../../../host/shellRegistry'
 import { useContextKey, useContextKeyStore } from '../../../host/ContextKeyService'
 import { useConfigStore, useConfigValue } from '../../../stores/configStore'
+import type { SettingsTabEntry } from '../../../types/plugin'
 import {
   useThemeStore,
   type AvailableSnippet,
@@ -107,7 +108,61 @@ function useCommunityManifests(): CommunityPluginManifest[] {
 
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
-type NavTab = 'settings' | 'appearance' | 'keybindings' | 'plugins'
+// Built-in tab ids; plugin-contributed tab ids are opaque strings.
+const BUILT_IN_TABS = ['settings', 'appearance', 'keybindings', 'plugins'] as const
+type BuiltInTab = (typeof BUILT_IN_TABS)[number]
+type NavTab = BuiltInTab | string
+
+// Storage key for the last-opened tab. `api.storage.set` namespaces
+// writes under `plugin:<id>:...` so this key resolves to
+// `plugin:core.settings:last-tab` — same scheme as keybinding overrides.
+const LAST_TAB_STORAGE_KEY = 'plugin:core.settings:last-tab'
+
+// Re-read plugin-contributed settings tabs from the registry. Tabs
+// without a wired renderer are filtered by `all()` already, so the
+// nav rail never shows a dead entry. The nonce lets callers force a
+// refresh after a new plugin activates mid-session.
+function useSettingsTabs(nonce: number): SettingsTabEntry[] {
+  void nonce
+  const reg = getRegistry()
+  return reg ? reg.settingsTabs.all() : []
+}
+
+// Synthetic tab prefix for per-plugin auto-tabs sourced from
+// `ConfigurationRegistry`. Any plugin that declares a `configuration`
+// schema gets its own tab, matching the Obsidian convention of
+// "one rail entry per plugin with settings" — without that plugin
+// having to register an explicit `settings_tabs` entry.
+const AUTO_TAB_PREFIX = 'auto:'
+
+/**
+ * Derive auto-tabs from `ConfigurationRegistry.all()`, skipping any
+ * plugin that already owns an explicit contributed tab for the same
+ * id so the two paths don't produce duplicate rail entries.
+ */
+function buildAutoTabs(
+  sections: ConfigSection[],
+  contributed: SettingsTabEntry[],
+): SettingsTabEntry[] {
+  const claimedPlugins = new Set(contributed.map((t) => t.pluginId))
+  return sections
+    .filter((s) => !claimedPlugins.has(s.pluginId))
+    .map((s) => ({
+      id: `${AUTO_TAB_PREFIX}${s.pluginId}`,
+      title: s.title,
+      pluginId: s.pluginId,
+      priority: s.order,
+      // Group into options (core plugins) vs community. The settings
+      // plugin is core; the `core` attribute of each plugin is
+      // surfaced via `pluginList` — we don't have that list in scope
+      // here, so we classify heuristically on pluginId prefix instead
+      // (core plugins start with `core.` or `com.nexus.`). A richer
+      // split would join on `pluginList` in a follow-up.
+      group: s.pluginId.startsWith('core.') || s.pluginId.startsWith('com.nexus.')
+        ? 'core-plugins'
+        : 'community-plugins',
+    }))
+}
 
 // ─── Override storage (shared with the plugin's activate() hydrator) ─────────
 // Lives at the same `plugin:core.settings:keybinding-overrides` localStorage
@@ -154,10 +209,37 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
   const plugins    = usePluginList()
   const community  = useCommunityManifests()
 
+  // Re-read the tab registry whenever the panel opens so tabs
+  // registered after shell boot (e.g. a lazy-activated plugin)
+  // show up on the next open without a reload.
+  const [tabNonce, setTabNonce] = useState(0)
+  const contributedTabs = useSettingsTabs(tabNonce)
+  const autoTabs = useMemo(
+    () => buildAutoTabs(sections, contributedTabs),
+    [sections, contributedTabs],
+  )
+
   const [navTab,        setNavTab]        = useState<NavTab>('settings')
   const [query,         setQuery]         = useState('')
   const [activeSection, setActiveSection] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Hydrate the last-opened tab the first time the panel opens. The
+  // panel mounts with the overlay at boot (hidden until `visible`
+  // flips), so reading from storage inside a one-shot effect tied to
+  // `visible` keeps the read off the hot path.
+  const hydratedRef = useRef(false)
+  useEffect(() => {
+    if (!visible || hydratedRef.current) return
+    hydratedRef.current = true
+    try {
+      const stored = localStorage.getItem(LAST_TAB_STORAGE_KEY)
+      if (stored && typeof stored === 'string') setNavTab(stored)
+    } catch {
+      // localStorage may be unavailable in headless tests — swallow.
+    }
+    setTabNonce((n) => n + 1)
+  }, [visible])
 
   // Honour `settingsActiveTab` context key set by openKeybindings command.
   useEffect(() => {
@@ -167,6 +249,15 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
       useContextKeyStore.getState().set('settingsActiveTab', undefined)
     }
   }, [visible, requestedTab])
+
+  // Persist the active tab so the next open lands on the same page.
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAST_TAB_STORAGE_KEY, navTab)
+    } catch {
+      // See comment above — storage failures are non-fatal.
+    }
+  }, [navTab])
 
   const close = () => {
     useContextKeyStore.getState().set('settingsPanelVisible', false)
@@ -211,7 +302,7 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
       >
         {/* Header */}
         <div className="settings-header">
-          <div style={{ display: 'flex', gap: 0, flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 0, flexShrink: 0, flexWrap: 'wrap' }}>
             <button
               className={`settings-nav-tab ${navTab === 'settings' ? 'settings-nav-tab--active' : ''}`}
               onClick={() => setNavTab('settings')}
@@ -236,6 +327,32 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             >
               Plugins
             </button>
+            {/* Plugin-contributed tabs (OI-01). Each registered tab
+                surfaces as a nav button after the built-in bar. The
+                registry already filters tabs without a wired renderer. */}
+            {contributedTabs.map((t) => (
+              <button
+                key={t.id}
+                className={`settings-nav-tab ${navTab === t.id ? 'settings-nav-tab--active' : ''}`}
+                onClick={() => setNavTab(t.id)}
+                title={t.pluginId}
+              >
+                {t.title}
+              </button>
+            ))}
+            {/* Auto-tabs: any plugin that declared a `configuration`
+                schema but no explicit `settings_tabs` entry. The
+                body for these is a filtered SettingsSection. */}
+            {autoTabs.map((t) => (
+              <button
+                key={t.id}
+                className={`settings-nav-tab ${navTab === t.id ? 'settings-nav-tab--active' : ''}`}
+                onClick={() => setNavTab(t.id)}
+                title={t.pluginId}
+              >
+                {t.title}
+              </button>
+            ))}
           </div>
 
           {navTab === 'settings' && (
@@ -301,9 +418,72 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             </div>
           </div>
         )}
+        {/* Plugin-contributed / auto tab body. Only fires for tab
+            ids that don't match a built-in; keeps the built-ins'
+            rendering untouched. Auto-tabs (those with the
+            `auto:` prefix) render the plugin's own config schema
+            inline — no plugin-side renderer is involved. */}
+        {!BUILT_IN_TABS.includes(navTab as BuiltInTab) && (
+          <div className="settings-body">
+            <div className="settings-content" style={{ padding: '16px 24px' }}>
+              {navTab.startsWith(AUTO_TAB_PREFIX) ? (
+                <AutoSettingsTabBody
+                  pluginId={navTab.slice(AUTO_TAB_PREFIX.length)}
+                  sections={sections}
+                />
+              ) : (
+                <ContributedTabBody tabId={navTab} />
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
+}
+
+// ─── Auto-tab body ────────────────────────────────────────────────────────────
+//
+// Renders the matching `ConfigSection` for an auto-tab (the user
+// selected a plugin from the rail that only declared a `configuration`
+// schema — no custom renderer). Reuses the same `SettingsSection`
+// component the aggregate overview tab uses.
+
+function AutoSettingsTabBody({
+  pluginId,
+  sections,
+}: {
+  pluginId: string
+  sections: ConfigSection[]
+}) {
+  const section = sections.find((s) => s.pluginId === pluginId)
+  if (!section) {
+    return (
+      <div className="settings-empty">
+        Plugin <code>{pluginId}</code> has no registered settings.
+      </div>
+    )
+  }
+  return <SettingsSection section={section} />
+}
+
+// ─── Plugin-contributed tab host ──────────────────────────────────────────────
+//
+// Looks the active tab id up in the registry and renders its wired
+// component. A missing renderer (e.g. the tab was unregistered between
+// clicks) falls back to a placeholder so the panel stays usable.
+
+function ContributedTabBody({ tabId }: { tabId: string }) {
+  const reg = getRegistry()
+  const Renderer = reg?.settingsTabs.getRenderer(tabId)
+  if (!Renderer) {
+    return (
+      <div className="settings-empty">
+        Settings tab <code>{tabId}</code> is not registered.
+      </div>
+    )
+  }
+  return createElement(Renderer)
 }
 
 // ─── Appearance tab ───────────────────────────────────────────────────────────

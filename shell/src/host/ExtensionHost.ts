@@ -250,6 +250,11 @@ export class ExtensionHost {
       this.registry.track(id, `keybinding:${id}:${k.command}`)
     })
 
+    contributes.settingsTabs?.forEach(t => {
+      this.registry.settingsTabs.registerFromManifest(id, t)
+      this.registry.track(id, `settingsTab:${t.id}`)
+    })
+
     // Views and config schema are registered in activate() when the
     // component/schema is available — not from the manifest alone
   }

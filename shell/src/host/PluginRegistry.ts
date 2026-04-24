@@ -5,15 +5,17 @@
 import { CommandRegistry } from '../registry/CommandRegistry'
 import { ConfigurationRegistry } from '../registry/ConfigurationRegistry'
 import { KeybindingRegistry } from '../registry/KeybindingRegistry'
+import { SettingsTabRegistry } from '../registry/SettingsTabRegistry'
 import { StatusBarRegistry } from '../registry/StatusBarRegistry'
 import { slotRegistry } from '../registry/SlotRegistry'
 import { uriHandlerRegistry } from '../registry/UriHandlerRegistry'
 
 export class PluginRegistry {
-  readonly commands    = new CommandRegistry()
-  readonly config      = new ConfigurationRegistry()
-  readonly keybindings = new KeybindingRegistry()
-  readonly statusBar   = new StatusBarRegistry()
+  readonly commands     = new CommandRegistry()
+  readonly config       = new ConfigurationRegistry()
+  readonly keybindings  = new KeybindingRegistry()
+  readonly settingsTabs = new SettingsTabRegistry()
+  readonly statusBar    = new StatusBarRegistry()
 
   // Internal services registered by core service plugins
   private services = new Map<string, unknown>()
@@ -65,11 +67,12 @@ export class PluginRegistry {
         const id   = key.slice(colonIdx + 1)
 
         switch (type) {
-          case 'command':    this.commands.unregister(id);    break
-          case 'slot':       slotRegistry.unregister(id);     break
-          case 'statusBar':  this.statusBar.unregister(id);   break
-          case 'config':     this.config.unregister(id);      break
-          case 'keybinding': this.keybindings.unregister(id); break
+          case 'command':     this.commands.unregister(id);     break
+          case 'slot':        slotRegistry.unregister(id);      break
+          case 'statusBar':   this.statusBar.unregister(id);    break
+          case 'config':      this.config.unregister(id);       break
+          case 'keybinding':  this.keybindings.unregister(id);  break
+          case 'settingsTab': this.settingsTabs.unregister(id); break
           default:
             console.warn(`[PluginRegistry] Unknown contribution type: '${type}'`)
         }

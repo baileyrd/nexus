@@ -136,6 +136,18 @@ export function buildPluginAPI(
       },
     },
 
+    // ─── Settings tabs (OI-01) ─────────────────────────────────────────────
+    // Plugins register a renderer for a tab id; the shell's settings
+    // modal draws the rail entry using metadata from the manifest (or
+    // from `meta` when no manifest entry exists) and invokes the
+    // renderer when the user selects the tab.
+    settings: {
+      registerTab(id, renderer, meta) {
+        registry.settingsTabs.register(pluginId, id, renderer, meta)
+        registry.track(pluginId, `settingsTab:${id}`)
+      },
+    },
+
     // ─── Configuration ─────────────────────────────────────────────────────
     // Available after core.configuration-service has loaded
     configuration: {
