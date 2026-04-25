@@ -12,11 +12,12 @@ import { toPng, toSvg } from 'html-to-image'
 import jsPDF from 'jspdf'
 import type { CanvasDoc } from './kernelClient'
 import { contentBounds } from './renderer'
+import { configStore } from '../../../stores/configStore'
 
 /** Max pixel dimension per edge to keep exports manageable. Mirrors
  *  exportPng.ts. */
-const MAX_EDGE_PX = 8192
-const MARGIN_UNITS = 48
+const MAX_EXPORT_EDGE_PX = 8192
+const EXPORT_MARGIN_UNITS = 48
 
 /** Shared bbox / clip math. Produces the container-relative rectangle
  *  we want to capture plus the device-pixel dimensions for the
@@ -27,15 +28,17 @@ function captureGeometry(
 ): { width: number; height: number; scale: number; bbox: ReturnType<typeof contentBounds> } | null {
   const bbox = contentBounds(doc)
   if (!bbox) return null
-  const w = bbox.width + MARGIN_UNITS * 2
-  const h = bbox.height + MARGIN_UNITS * 2
+  const marginUnits = configStore.get('canvas.exportMarginUnits', EXPORT_MARGIN_UNITS) ?? EXPORT_MARGIN_UNITS
+  const maxEdgePx = configStore.get('canvas.maxExportEdge', MAX_EXPORT_EDGE_PX) ?? MAX_EXPORT_EDGE_PX
+  const w = bbox.width + marginUnits * 2
+  const h = bbox.height + marginUnits * 2
   const rect = container.getBoundingClientRect()
   // Base scale: map world units to CSS px at the leaf's current size.
   const fit = Math.min(rect.width / w, rect.height / h) || 1
   let pixelW = Math.round(w * fit)
   let pixelH = Math.round(h * fit)
-  if (pixelW > MAX_EDGE_PX || pixelH > MAX_EDGE_PX) {
-    const k = Math.min(MAX_EDGE_PX / pixelW, MAX_EDGE_PX / pixelH)
+  if (pixelW > maxEdgePx || pixelH > maxEdgePx) {
+    const k = Math.min(maxEdgePx / pixelW, maxEdgePx / pixelH)
     pixelW = Math.round(pixelW * k)
     pixelH = Math.round(pixelH * k)
   }

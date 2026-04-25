@@ -65,6 +65,44 @@ export const canvasPlugin: Plugin = {
         { command: CANVAS_COMMANDS.toggleHelp, key: 'shift+/', when: 'canvas.focused' },
         { command: CANVAS_COMMANDS.closeHelp, key: 'escape', when: 'canvas.focused && canvas.helpOpen' },
       ],
+      configuration: {
+        pluginId: 'nexus.canvas',
+        title: 'Canvas',
+        order: 30,
+        schema: [
+          {
+            key: 'canvas.exportMarginUnits',
+            title: 'Export margin (units)',
+            description: 'Margin around content in world units when exporting canvas (PNG/SVG/PDF).',
+            type: 'number',
+            default: 48,
+          },
+          {
+            key: 'canvas.exportMarginPx',
+            title: 'Export margin (px)',
+            description: 'Margin around content in pixels when exporting via the 2D renderer.',
+            type: 'number',
+            default: 48,
+          },
+          {
+            key: 'canvas.maxExportEdge',
+            title: 'Max export edge (px)',
+            description: 'Hard cap on the longest pixel edge of an exported canvas image.',
+            type: 'number',
+            default: 8192,
+          },
+          {
+            key: 'canvas.colorSwatches',
+            title: 'Color swatches',
+            description: 'Hex color strings shown in the node/edge color picker.',
+            // 'array' is not yet in the ConfigSchema union; cast so the
+            // settings registry stores it correctly when the type is
+            // eventually added.
+            type: 'array' as 'string',
+            default: ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899'],
+          },
+        ],
+      },
     },
   },
 

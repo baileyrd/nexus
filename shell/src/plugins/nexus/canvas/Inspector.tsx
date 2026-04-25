@@ -16,6 +16,9 @@ import type {
   CanvasEdgeType,
   CanvasNode,
 } from './kernelClient'
+import { useConfigValue } from '../../../stores/configStore'
+
+const DEFAULT_COLOR_SWATCHES = ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899']
 
 interface Props {
   node: CanvasNode | null
@@ -343,7 +346,7 @@ function ColorPicker({
   value: string | undefined
   onChange: (next: string) => void
 }) {
-  const swatches = ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899']
+  const swatches = useConfigValue('canvas.colorSwatches', DEFAULT_COLOR_SWATCHES) as string[]
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
       {swatches.map((c) => (

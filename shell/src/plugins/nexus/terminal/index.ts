@@ -111,6 +111,20 @@ export const terminalPlugin: Plugin = {
           type: 'boolean',
         },
       ],
+      configuration: {
+        pluginId: 'nexus.terminal',
+        title: 'Terminal',
+        order: 20,
+        schema: [
+          {
+            key: 'terminal.autoRestartDelayMs',
+            title: 'Auto-restart delay',
+            description: 'Delay in ms before a saved command auto-restarts.',
+            type: 'number',
+            default: 2000,
+          },
+        ],
+      },
     },
   },
 

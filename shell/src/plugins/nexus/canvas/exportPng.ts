@@ -11,10 +11,11 @@
 
 import { render, readTheme, contentBounds } from './renderer'
 import type { CanvasDoc } from './kernelClient'
+import { configStore } from '../../../stores/configStore'
 
 /** Margin around the content bbox in the exported image, in world
  *  units. A little breathing room so nodes don't kiss the edge. */
-const EXPORT_MARGIN = 48
+const EXPORT_MARGIN_PX = 48
 /** Hard cap on the rendered image edge so a 50 000 × 50 000 canvas
  *  doesn't OOM the browser. Pixels scale down uniformly past this. */
 const MAX_EXPORT_EDGE = 8192
@@ -34,17 +35,19 @@ export async function exportCanvasPng(
   if (!bounds) return null
 
   const theme = readTheme(hostEl)
+  const exportMarginPx = configStore.get('canvas.exportMarginPx', EXPORT_MARGIN_PX) ?? EXPORT_MARGIN_PX
+  const maxExportEdge = configStore.get('canvas.maxExportEdge', MAX_EXPORT_EDGE) ?? MAX_EXPORT_EDGE
   // Pad the bbox so nodes don't sit flush against the edge.
   const padded = {
-    x: bounds.x - EXPORT_MARGIN,
-    y: bounds.y - EXPORT_MARGIN,
-    width: bounds.width + EXPORT_MARGIN * 2,
-    height: bounds.height + EXPORT_MARGIN * 2,
+    x: bounds.x - exportMarginPx,
+    y: bounds.y - exportMarginPx,
+    width: bounds.width + exportMarginPx * 2,
+    height: bounds.height + exportMarginPx * 2,
   }
-  // Cap the longest edge to MAX_EXPORT_EDGE; uniform scale everywhere else.
+  // Cap the longest edge to maxExportEdge; uniform scale everywhere else.
   const scale = Math.min(
     1,
-    MAX_EXPORT_EDGE / Math.max(padded.width, padded.height),
+    maxExportEdge / Math.max(padded.width, padded.height),
   )
   const widthPx = Math.max(1, Math.round(padded.width * scale))
   const heightPx = Math.max(1, Math.round(padded.height * scale))

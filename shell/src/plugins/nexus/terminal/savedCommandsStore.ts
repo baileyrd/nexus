@@ -17,6 +17,7 @@
 // "patch in place" path can land later if it becomes a perf concern.
 
 import { create } from 'zustand'
+import { configStore } from '../../../stores/configStore'
 
 /**
  * Mirror of `crates/nexus-terminal/src/saved.rs::SavedCommand`.
@@ -82,7 +83,7 @@ const CMD_UPDATE = 'saved_update'
 const CMD_DELETE = 'saved_delete'
 const CMD_REORDER = 'saved_reorder'
 
-const DEFAULT_AUTO_RESTART_DELAY_MS = 2_000
+const AUTO_RESTART_DELAY_MS = 2_000
 const DEFAULT_ICON = 'terminal'
 
 interface SavedCommandsState {
@@ -127,7 +128,7 @@ function draftToRow(draft: SavedCommandDraft): SavedCommand {
     env_file: null,
     icon: draft.icon || DEFAULT_ICON,
     auto_restart: false,
-    auto_restart_delay_ms: DEFAULT_AUTO_RESTART_DELAY_MS,
+    auto_restart_delay_ms: configStore.get('terminal.autoRestartDelayMs', AUTO_RESTART_DELAY_MS) ?? AUTO_RESTART_DELAY_MS,
     memory_limit_mb: null,
     sidebar_order: null,
     pre_commands: [],
