@@ -1063,16 +1063,31 @@ function KeybindingsTab() {
           <thead>
             <tr>
               <th style={cellStyle}>Command</th>
-              <th style={cellStyle}>Current</th>
-              <th style={cellStyle}>Default</th>
-              <th style={{ ...cellStyle, width: 140 }}>Actions</th>
+              <th style={cellStyle}>Shortcut</th>
+              <th style={{ ...cellStyle, width: 120 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map(row => (
               <tr key={row.commandId}>
                 <td style={cellStyle}>
-                  <div style={{ fontWeight: 500 }}>{row.title}</div>
+                  <div style={{ fontWeight: 500 }}>
+                    {row.title}
+                    {row.overridden && (
+                      <span
+                        title="Override active"
+                        style={{
+                          display: 'inline-block',
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          background: 'var(--interactive-accent)',
+                          marginLeft: 5,
+                          verticalAlign: 'middle',
+                        }}
+                      />
+                    )}
+                  </div>
                   <div style={{ fontSize: '0.85em', opacity: 0.6 }}>{row.commandId}</div>
                 </td>
                 <td style={cellStyle}>
@@ -1082,24 +1097,27 @@ function KeybindingsTab() {
                       onCancel={() => setEditing(null)}
                     />
                   ) : (
-                    <code style={{
-                      background: row.overridden
-                        ? 'var(--color-accent-bg, #e7f0ff)'
-                        : 'var(--color-bg-alt, #f3f3f3)',
-                      padding: '2px 6px',
-                      borderRadius: 3,
-                      fontSize: '0.9em',
-                    }}>
-                      {formatChord(row.current) || '—'}
-                    </code>
+                    <div>
+                      <code style={{
+                        background: row.overridden
+                          ? 'var(--interactive-accent-soft, rgba(0,0,0,0.09))'
+                          : 'var(--background-modifier-hover, rgba(0,0,0,0.05))',
+                        padding: '2px 6px',
+                        borderRadius: 3,
+                        fontSize: '0.9em',
+                        fontWeight: row.overridden ? 600 : undefined,
+                      }}>
+                        {formatChord(row.current) || '—'}
+                      </code>
+                      {row.overridden && (
+                        <div style={{ marginTop: 3, fontSize: '0.78em', opacity: 0.55 }}>
+                          {'← '}{formatChord(row.default) || '—'}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </td>
-                <td style={cellStyle}>
-                  <code style={{ opacity: 0.6, fontSize: '0.9em' }}>
-                    {formatChord(row.default) || '—'}
-                  </code>
-                </td>
-                <td style={cellStyle}>
+                <td style={{ ...cellStyle, width: 120 }}>
                   {editing === row.commandId ? null : (
                     <>
                       <button
