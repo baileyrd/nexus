@@ -74,10 +74,17 @@ export const Minimap = forwardRef<MinimapHandle, Props>(function Minimap(
 
       // Background
       const styles = window.getComputedStyle(canvas)
-      const bg = styles.getPropertyValue('--bg-muted').trim() || '#1e1e1e'
-      const fg = styles.getPropertyValue('--fg-muted').trim() || '#9ca3af'
-      const accent = styles.getPropertyValue('--accent').trim() || '#3b82f6'
-      const nodeFill = styles.getPropertyValue('--bg-raised').trim() || '#2d2d2d'
+      const read = (...names: string[]) => {
+        for (const n of names) {
+          const v = styles.getPropertyValue(n).trim()
+          if (v) return v
+        }
+        return ''
+      }
+      const bg       = read('--background-primary',        '--bg-muted')
+      const fg       = read('--text-muted',                '--fg-muted')
+      const accent   = read('--interactive-accent',        '--accent')
+      const nodeFill = read('--background-secondary',      '--bg-raised')
       ctx.fillStyle = bg
       ctx.fillRect(0, 0, MINIMAP_WIDTH, MINIMAP_HEIGHT)
 
@@ -200,7 +207,7 @@ export const Minimap = forwardRef<MinimapHandle, Props>(function Minimap(
         width: MINIMAP_WIDTH,
         height: MINIMAP_HEIGHT,
         borderRadius: 6,
-        border: '1px solid var(--divider-color, #3f3f46)',
+        border: '1px solid var(--divider-color, var(--background-modifier-border))',
         boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
         cursor: 'crosshair',
         // Minimap is interactive, unlike the passive overlay layer.

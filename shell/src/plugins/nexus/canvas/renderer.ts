@@ -14,17 +14,18 @@ interface Theme {
   border: string
 }
 
-/** Fallback theme tokens — the shell's CSS vars aren't queryable from
- *  <canvas>, so we read them via getComputedStyle on the canvas element
- *  and cache the result. Values here match the dark-theme defaults in
- *  the existing shell. */
+/** Last-resort fallback theme tokens, only used when getComputedStyle
+ *  returns nothing (e.g. during SSR or very early mount before the
+ *  <style> block registers). Values are the dark-mode computed results
+ *  of the tokens in :root — readable as a safe single-theme baseline.
+ *  Normal runtime always resolves via getComputedStyle below. */
 const FALLBACK_THEME: Theme = {
-  bgMuted: '#1e1e1e',
-  bgRaised: '#2d2d2d',
-  fg: '#e5e7eb',
-  fgMuted: '#9ca3af',
-  accent: '#3b82f6',
-  border: '#3f3f46',
+  bgMuted:  'oklch(0.185 0.008 260)',   // --background-primary dark default
+  bgRaised: 'oklch(0.215 0.008 260)',   // --background-secondary dark default
+  fg:       'oklch(0.94 0.005 80)',     // --text-normal dark default
+  fgMuted:  'oklch(0.72 0.008 80)',     // --text-muted dark default
+  accent:   'oklch(0.78 0.14 70)',      // --interactive-accent dark default
+  border:   'rgba(255, 255, 255, 0.10)', // --background-modifier-border dark default
 }
 
 /** Default rectangle for freshly-created text nodes — matches Obsidian's
@@ -201,17 +202,24 @@ function rectContains(n: CanvasNode, x: number, y: number): boolean {
 
 export function readTheme(el: HTMLElement): Theme {
   const styles = window.getComputedStyle(el)
-  const read = (name: string, fallback: string) => {
-    const v = styles.getPropertyValue(name).trim()
-    return v || fallback
+  // Read one or more CSS custom property names in priority order,
+  // returning the first non-empty resolved value, or `fallback`.
+  const read = (...namesAndFallback: string[]) => {
+    const fallback = namesAndFallback[namesAndFallback.length - 1]
+    for (let i = 0; i < namesAndFallback.length - 1; i++) {
+      const v = styles.getPropertyValue(namesAndFallback[i]).trim()
+      if (v) return v
+    }
+    return fallback
   }
   return {
-    bgMuted: read('--bg-muted', FALLBACK_THEME.bgMuted),
-    bgRaised: read('--bg-raised', FALLBACK_THEME.bgRaised),
-    fg: read('--fg', FALLBACK_THEME.fg),
-    fgMuted: read('--fg-muted', FALLBACK_THEME.fgMuted),
-    accent: read('--accent', FALLBACK_THEME.accent),
-    border: read('--divider-color', FALLBACK_THEME.border),
+    // Read canonical Obsidian tokens first; legacy aliases as backup.
+    bgMuted:  read('--background-primary',         '--bg-muted',  FALLBACK_THEME.bgMuted),
+    bgRaised: read('--background-secondary',        '--bg-raised', FALLBACK_THEME.bgRaised),
+    fg:       read('--text-normal',                 '--fg',        FALLBACK_THEME.fg),
+    fgMuted:  read('--text-muted',                  '--fg-muted',  FALLBACK_THEME.fgMuted),
+    accent:   read('--interactive-accent',          '--accent',    FALLBACK_THEME.accent),
+    border:   read('--background-modifier-border',  '--divider-color', FALLBACK_THEME.border),
   }
 }
 
