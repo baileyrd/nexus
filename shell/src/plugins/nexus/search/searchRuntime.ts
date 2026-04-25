@@ -75,7 +75,7 @@ export function requestFocus() {
 // response that arrives after the user has typed further never
 // clobbers newer results.
 
-const DEBOUNCE_MS = 150
+const SEARCH_DEBOUNCE_MS = 150
 let currentRequestId = 0
 let pendingTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -140,7 +140,7 @@ export function scheduleSearch(query: string) {
   pendingTimer = setTimeout(() => {
     pendingTimer = null
     void runSearch(trimmed)
-  }, DEBOUNCE_MS)
+  }, SEARCH_DEBOUNCE_MS)
 }
 
 async function runSearch(query: string) {

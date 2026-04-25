@@ -10,7 +10,7 @@ import { useEffect } from 'react'
 import { useCapabilityPromptStore, type Banner } from './capabilityPromptStore'
 import { highestRisk } from '../../nexus/pluginsMgmt/capabilityInfo'
 
-const AUTO_DISMISS_MS = 10_000
+const BANNER_AUTO_DISMISS_MS = 10_000
 
 export function CapabilityBannerView() {
   const banners = useCapabilityPromptStore((s) => s.banners)
@@ -25,7 +25,7 @@ export function CapabilityBannerView() {
     for (const b of banners) {
       const remaining = Math.max(
         0,
-        AUTO_DISMISS_MS - (Date.now() - b.raisedAt),
+        BANNER_AUTO_DISMISS_MS - (Date.now() - b.raisedAt),
       )
       timers.push(setTimeout(() => dismiss(b.id), remaining))
     }

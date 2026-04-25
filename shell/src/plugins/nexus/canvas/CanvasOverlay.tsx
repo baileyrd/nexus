@@ -66,12 +66,12 @@ export const CanvasOverlay = forwardRef<HTMLDivElement, Props>(function CanvasOv
 /** How much output we keep around per terminal node. Plenty for a
  *  visible transcript without letting a chatty command balloon
  *  the doc's memory. */
-const TERMINAL_BUFFER_CAP = 32 * 1024
+const TERMINAL_NODE_BUFFER_CAP = 32 * 1024
 /** Polling interval for PTY drains. Slower than the main terminal
  *  (which runs at ~30 ms) because a canvas node is a summary, not
  *  an interactive surface — 250 ms lag is fine and keeps CPU cost
  *  low when many terminal nodes are on-screen. */
-const TERMINAL_POLL_MS = 250
+const TERMINAL_NODE_POLL_MS = 250
 
 /** Strip ANSI escape sequences + cursor/control codes so the raw
  *  PTY bytes render cleanly inside a `<pre>`. Matches CSI / OSC /
@@ -123,8 +123,8 @@ function TerminalNodeOverlay({
     if (!chunk) return
     const next = outputRef.current + chunk
     const trimmed =
-      next.length > TERMINAL_BUFFER_CAP
-        ? next.slice(next.length - TERMINAL_BUFFER_CAP)
+      next.length > TERMINAL_NODE_BUFFER_CAP
+        ? next.slice(next.length - TERMINAL_NODE_BUFFER_CAP)
         : next
     outputRef.current = trimmed
     setOutput(trimmed)
@@ -156,7 +156,7 @@ function TerminalNodeOverlay({
       return
     }
     if (sessionRef.current) {
-      pollTimerRef.current = window.setTimeout(() => void tick(), TERMINAL_POLL_MS)
+      pollTimerRef.current = window.setTimeout(() => void tick(), TERMINAL_NODE_POLL_MS)
     }
   }
 

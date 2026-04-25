@@ -33,7 +33,7 @@ export interface HistoryEntry {
 /** History cap per tab. 200 entries is plenty for a single editing
  *  session without letting a pathological drag+undo loop balloon
  *  memory. */
-const HISTORY_CAP = 200
+const UNDO_HISTORY_CAP = 200
 
 export interface CanvasTabState {
   doc: CanvasDoc | null
@@ -166,7 +166,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     set((s) => {
       const prev = s.tabs.get(relpath) ?? emptyState
       const undo = [...prev.undo, entry]
-      if (undo.length > HISTORY_CAP) undo.splice(0, undo.length - HISTORY_CAP)
+      if (undo.length > UNDO_HISTORY_CAP) undo.splice(0, undo.length - UNDO_HISTORY_CAP)
       return { tabs: produce(s.tabs, relpath, { undo, redo: [] }) }
     }),
   popUndo: (relpath) => {

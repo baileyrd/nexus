@@ -86,7 +86,7 @@ export interface HistoryEntry {
   inverse(): Promise<void>
 }
 
-const HISTORY_CAP = 200
+const UNDO_HISTORY_CAP = 200
 
 interface BasesStore {
   /** Keyed by the leaf's relpath — one tab per open base. */
@@ -128,7 +128,7 @@ interface BasesStore {
    *  mutation has already been committed to the kernel). */
   setViews(relpath: string, views: BaseView[]): void
   /** Record a fresh edit that was just applied via `entry.forward`.
-   *  Clears the redo stack and caps the undo stack at HISTORY_CAP. */
+   *  Clears the redo stack and caps the undo stack at UNDO_HISTORY_CAP. */
   pushHistory(relpath: string, entry: HistoryEntry): void
   /** Pop the top undo entry and run its `inverse`. Returns true if an
    *  entry was available, false on empty stack. */
@@ -339,7 +339,7 @@ export const useBasesStore = create<BasesStore>((set) => ({
     set((s) => {
       const t = s.tabs[relpath] ?? { ...EMPTY }
       const next = [...t.undoStack, entry]
-      if (next.length > HISTORY_CAP) next.splice(0, next.length - HISTORY_CAP)
+      if (next.length > UNDO_HISTORY_CAP) next.splice(0, next.length - UNDO_HISTORY_CAP)
       return {
         tabs: { ...s.tabs, [relpath]: { ...t, undoStack: next, redoStack: [] } },
       }
