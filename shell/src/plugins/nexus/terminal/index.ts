@@ -67,6 +67,27 @@ export const terminalPlugin: Plugin = {
     activationEvents: ['onStartup'],
     dependsOn: ['nexus.workspace', 'nexus.activityBar'],
     contributes: {
+      configuration: {
+        pluginId: 'nexus.terminal',
+        title: 'Terminal',
+        order: 40,
+        schema: [
+          {
+            key: 'ui.commandSaveNotificationMs',
+            title: 'Command save notification duration',
+            description: 'Auto-dismiss duration for "opening terminal" notifications in milliseconds',
+            type: 'number' as const,
+            default: 3000,
+          },
+          {
+            key: 'ui.commandCopiedNotificationMs',
+            title: 'Command sent notification duration',
+            description: 'Auto-dismiss duration for "sent to terminal" notifications in milliseconds',
+            type: 'number' as const,
+            default: 1800,
+          },
+        ],
+      },
       commands: [
         { id: COMMAND_TOGGLE, title: 'Toggle Terminal', category: 'Terminal' },
         { id: COMMAND_FOCUS, title: 'Focus Terminal', category: 'Terminal' },
@@ -94,6 +115,8 @@ export const terminalPlugin: Plugin = {
   },
 
   async activate(api: PluginAPI) {
+    api.configuration.register(terminalPlugin.manifest.contributes!.configuration!)
+
     // Phase 7: legacy SlotRegistry slot:'panelArea' entry removed.
     // TerminalView now mounts exclusively through the Leaf/View pipeline.
     viewRegistry.register(

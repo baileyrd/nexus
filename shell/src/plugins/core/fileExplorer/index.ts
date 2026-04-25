@@ -1,6 +1,9 @@
 // src/plugins/core/fileExplorer/index.ts
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 
+const FILE_CREATION_NOTIFICATION_MS = 2000
+const CONFIG_KEY_FILE_CREATION = 'ui.fileCreationNotificationMs'
+
 export const fileExplorerPlugin: Plugin = {
   manifest: {
     id: 'core.file-explorer',
@@ -39,6 +42,13 @@ export const fileExplorerPlugin: Plugin = {
             default: 'name',
             description: 'How to sort files in the tree',
           },
+          {
+            key: CONFIG_KEY_FILE_CREATION,
+            title: 'File creation notification duration',
+            description: 'Auto-dismiss duration for file creation notifications in milliseconds',
+            type: 'number' as const,
+            default: FILE_CREATION_NOTIFICATION_MS,
+          },
         ],
       },
     },
@@ -58,7 +68,7 @@ export const fileExplorerPlugin: Plugin = {
     api.commands.register('fileExplorer.newFile', async () => {
       const name = await api.input.prompt('File name:')
       if (!name) return
-      api.notifications.show({ message: `Created: ${name}`, type: 'success', duration: 2000 })
+      api.notifications.show({ message: `Created: ${name}`, type: 'success', duration: api.configuration.getValue<number>(CONFIG_KEY_FILE_CREATION, FILE_CREATION_NOTIFICATION_MS) ?? FILE_CREATION_NOTIFICATION_MS })
     })
 
     api.commands.register('fileExplorer.refresh', () => {

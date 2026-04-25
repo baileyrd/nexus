@@ -24,7 +24,10 @@
 // to the markdown editor preview.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useConfigValue } from '../../../stores/configStore'
 import { useAiStore, type AiSessionMeta, type AiSource, type AiTurn } from './aiStore'
+
+const COPIED_NOTIFICATION_MS = 1200
 import { registerFocuser } from './aiRuntime'
 import { renderMarkdown } from '../editor/markdownRender'
 import './chat.css'
@@ -471,13 +474,14 @@ function MarkdownBody({ source }: { source: string }) {
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
+  const copiedMs = useConfigValue('ui.copiedNotificationMs', COPIED_NOTIFICATION_MS)
   const onClick = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.clipboard) return
     void navigator.clipboard.writeText(text).then(() => {
       setCopied(true)
-      setTimeout(() => setCopied(false), 1200)
+      setTimeout(() => setCopied(false), copiedMs ?? COPIED_NOTIFICATION_MS)
     })
-  }, [text])
+  }, [text, copiedMs])
   return (
     <button
       type="button"

@@ -11,12 +11,14 @@
 //     is mounted, so we gate on that).
 
 import type { KernelAPI } from '../../../types/plugin'
+import { configStore } from '../../../stores/configStore'
 import type { SearchHit } from './searchStore'
 import { useSearchStore } from './searchStore'
 
 const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 const SEARCH_COMMAND = 'search'
-const DEFAULT_LIMIT = 50
+const MAX_SEARCH_RESULTS = 50
+const CONFIG_KEY_SEARCH_LIMIT = 'search.maxResultsLimit'
 
 let kernel: KernelAPI | null = null
 
@@ -174,7 +176,7 @@ async function runSearch(query: string) {
   try {
     const raw = await k.invoke(STORAGE_PLUGIN_ID, SEARCH_COMMAND, {
       query,
-      limit: DEFAULT_LIMIT,
+      limit: configStore.get<number>(CONFIG_KEY_SEARCH_LIMIT, MAX_SEARCH_RESULTS) ?? MAX_SEARCH_RESULTS,
     })
     if (requestId !== currentRequestId) return
     const hits = decode(raw)

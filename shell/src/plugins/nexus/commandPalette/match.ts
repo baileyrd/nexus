@@ -1,4 +1,5 @@
 import type { CommandEntry } from '../../../types/plugin'
+import { configStore } from '../../../stores/configStore'
 
 export interface ScoredCommand {
   command: CommandEntry
@@ -6,7 +7,8 @@ export interface ScoredCommand {
 }
 
 /** Cap; long lists are noise in a palette. */
-const MAX_RESULTS = 50
+const MAX_PALETTE_RESULTS = 50
+const CONFIG_KEY_PALETTE_LIMIT = 'commandPalette.maxResultsLimit'
 
 /**
  * Subsequence fuzzy match over `<category> <title>`. Lower score is
@@ -24,13 +26,14 @@ export function filterCommands(
   commands: CommandEntry[],
   query: string,
 ): ScoredCommand[] {
+  const limit = configStore.get<number>(CONFIG_KEY_PALETTE_LIMIT, MAX_PALETTE_RESULTS) ?? MAX_PALETTE_RESULTS
   const q = query.toLowerCase().trim()
 
   if (q.length === 0) {
     return commands
       .slice()
       .sort((a, b) => a.title.localeCompare(b.title))
-      .slice(0, MAX_RESULTS)
+      .slice(0, limit)
       .map((command) => ({ command, score: 0 }))
   }
 
@@ -55,5 +58,5 @@ export function filterCommands(
     return a.command.title.localeCompare(b.command.title)
   })
 
-  return scored.slice(0, MAX_RESULTS)
+  return scored.slice(0, limit)
 }

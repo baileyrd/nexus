@@ -31,6 +31,20 @@ export const searchPlugin: Plugin = {
     activationEvents: ['onStartup'],
     dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar'],
     contributes: {
+      configuration: {
+        pluginId: 'nexus.search',
+        title: 'Search',
+        order: 30,
+        schema: [
+          {
+            key: 'search.maxResultsLimit',
+            title: 'Max search results',
+            description: 'Maximum number of results returned by a workspace search query',
+            type: 'number' as const,
+            default: 50,
+          },
+        ],
+      },
       commands: [
         {
           id: COMMAND_FOCUS,
@@ -45,6 +59,7 @@ export const searchPlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
+    api.configuration.register(searchPlugin.manifest.contributes!.configuration!)
     setKernel(api.kernel)
 
     const handleHitActivate = (hit: SearchHit) => {

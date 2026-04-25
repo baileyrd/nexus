@@ -18,7 +18,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { KernelAPI, NotificationsAPI } from '../../../types/plugin'
+import { useConfigValue } from '../../../stores/configStore'
 import { useTerminalStore } from './terminalStore'
+
+const CMD_SAVE_NOTIFICATION_MS = 3000
+const CMD_COPIED_NOTIFICATION_MS = 1800
 import {
   useSavedCommandsStore,
   type SavedCommand,
@@ -68,6 +72,8 @@ function slugify(name: string): string {
 
 export function SavedCommandsView(props: SavedCommandsViewProps) {
   const { kernel, notifications, focusTerminal } = props
+  const cmdSaveMs = useConfigValue('ui.commandSaveNotificationMs', CMD_SAVE_NOTIFICATION_MS)
+  const cmdCopiedMs = useConfigValue('ui.commandCopiedNotificationMs', CMD_COPIED_NOTIFICATION_MS)
   const commands = useSavedCommandsStore((s) => s.commands)
   const loaded = useSavedCommandsStore((s) => s.loaded)
   const error = useSavedCommandsStore((s) => s.error)
@@ -119,7 +125,7 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
         notifications.show({
           message: 'Opening terminal — click the command again to run it.',
           type: 'info',
-          duration: 3000,
+          duration: cmdSaveMs ?? CMD_SAVE_NOTIFICATION_MS,
         })
         return
       }
@@ -132,13 +138,13 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
         notifications.show({
           message: `Sent "${cmd.name}" to terminal`,
           type: 'success',
-          duration: 1800,
+          duration: cmdCopiedMs ?? CMD_COPIED_NOTIFICATION_MS,
         })
       } catch (err) {
         setLocalError(String(err))
       }
     },
-    [kernel, notifications, focusTerminal],
+    [kernel, notifications, focusTerminal, cmdSaveMs, cmdCopiedMs],
   )
 
   const handleSubmit = useCallback(async () => {

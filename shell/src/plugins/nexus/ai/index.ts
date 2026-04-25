@@ -63,6 +63,20 @@ export const aiPlugin: Plugin = {
     activationEvents: ['onStartup'],
     dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar'],
     contributes: {
+      configuration: {
+        pluginId: 'nexus.ai',
+        title: 'AI Chat',
+        order: 50,
+        schema: [
+          {
+            key: 'ui.copiedNotificationMs',
+            title: 'Copy notification duration',
+            description: 'Auto-dismiss duration for "Copied" button feedback in milliseconds',
+            type: 'number' as const,
+            default: 1200,
+          },
+        ],
+      },
       commands: [
         { id: COMMAND_FOCUS, title: 'Focus Chat', category: 'AI' },
         { id: COMMAND_CLEAR, title: 'Clear Chat', category: 'AI' },
@@ -74,6 +88,7 @@ export const aiPlugin: Plugin = {
   },
 
   async activate(api: PluginAPI) {
+    api.configuration.register(aiPlugin.manifest.contributes!.configuration!)
     setKernel(api.kernel)
 
     // Bind runtime functions to this plugin's PluginAPI handle so the

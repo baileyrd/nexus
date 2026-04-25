@@ -14,6 +14,20 @@ export const commandPalettePlugin: Plugin = {
     core: true,
     activationEvents: ['onStartup'],
     contributes: {
+      configuration: {
+        pluginId: 'core.command-palette',
+        title: 'Command Palette',
+        order: 15,
+        schema: [
+          {
+            key: 'commandPalette.maxResultsLimit',
+            title: 'Max palette results',
+            description: 'Maximum number of commands shown in the command palette',
+            type: 'number' as const,
+            default: 50,
+          },
+        ],
+      },
       commands: [
         {
           id: 'workbench.action.showCommandPalette',
@@ -32,6 +46,8 @@ export const commandPalettePlugin: Plugin = {
   },
 
   activate(api: PluginAPI) {
+    api.configuration.register(commandPalettePlugin.manifest.contributes!.configuration!)
+
     // Register the palette UI into the overlay slot
     api.views.register('commandPalette', {
       slot: 'overlay',

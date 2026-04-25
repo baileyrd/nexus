@@ -3,6 +3,10 @@
 // After this activates, api.notifications.show() is available.
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { configStore } from '../../../stores/configStore'
+
+const DEFAULT_NOTIFICATION_DURATION_MS = 4000
+const CONFIG_KEY_DURATION = 'ui.notificationDurationMs'
 
 export interface Notification {
   id: string
@@ -23,7 +27,7 @@ export class NotificationQueue {
   push(n: Partial<Omit<Notification, 'id' | 'timestamp'>> & { message: string }) {
     const item: Notification = {
       type: 'info',
-      duration: 4000,
+      duration: configStore.get<number>(CONFIG_KEY_DURATION, DEFAULT_NOTIFICATION_DURATION_MS) ?? DEFAULT_NOTIFICATION_DURATION_MS,
       ...n,
       id: `notif-${++this.counter}`,
       timestamp: Date.now(),
@@ -60,11 +64,27 @@ export const notificationServicePlugin: Plugin = {
     version: '1.0.0',
     core: true,
     activationEvents: ['onStartup'],
-    contributes: {},
+    contributes: {
+      configuration: {
+        pluginId: 'core.notification-service',
+        title: 'Notifications',
+        order: 20,
+        schema: [
+          {
+            key: CONFIG_KEY_DURATION,
+            title: 'Notification duration',
+            description: 'Auto-dismiss duration for notifications in milliseconds',
+            type: 'number' as const,
+            default: DEFAULT_NOTIFICATION_DURATION_MS,
+          },
+        ],
+      },
+    },
   },
 
   activate(api: PluginAPI) {
     api.internal!.registerInternalService('notificationQueue', new NotificationQueue())
+    api.configuration.register(notificationServicePlugin.manifest.contributes!.configuration!)
     console.info('[core.notification-service] ready')
   },
 }
