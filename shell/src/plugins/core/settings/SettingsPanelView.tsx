@@ -20,7 +20,6 @@ import {
   formatChord,
   normalizeChord,
   type BindingRow,
-  type OverrideStorage,
 } from '../../../registry/KeybindingRegistry'
 import {
   CAPABILITY_INFO,
@@ -138,6 +137,13 @@ function useSettingsTabs(nonce: number): SettingsTabEntry[] {
 // having to register an explicit `settings_tabs` entry.
 const AUTO_TAB_PREFIX = 'auto:'
 
+// Synthetic prefix for stub rail entries — plugins that have neither a
+// contributed settings tab nor a `configuration` schema. Matches Obsidian's
+// convention of listing every active plugin in the rail; the stub body
+// surfaces version + (when known) description so the user has a place to
+// land before deciding to disable it.
+const STUB_TAB_PREFIX = 'stub:'
+
 /**
  * Derive auto-tabs from `ConfigurationRegistry.all()`, skipping any
  * plugin that already owns an explicit contributed tab for the same
@@ -146,6 +152,7 @@ const AUTO_TAB_PREFIX = 'auto:'
 function buildAutoTabs(
   sections: ConfigSection[],
   contributed: SettingsTabEntry[],
+  pluginList: PluginInfo[],
 ): SettingsTabEntry[] {
   const claimedPlugins = new Set(contributed.map((t) => t.pluginId))
   return sections
@@ -155,43 +162,75 @@ function buildAutoTabs(
       title: s.title,
       pluginId: s.pluginId,
       priority: s.order,
-      // Group into options (core plugins) vs community. The settings
-      // plugin is core; the `core` attribute of each plugin is
-      // surfaced via `pluginList` — we don't have that list in scope
-      // here, so we classify heuristically on pluginId prefix instead
-      // (core plugins start with `core.` or `com.nexus.`). A richer
-      // split would join on `pluginList` in a follow-up.
-      group: s.pluginId.startsWith('core.') || s.pluginId.startsWith('com.nexus.')
-        ? 'core-plugins'
-        : 'community-plugins',
+      group: classifyByPluginList(s.pluginId, pluginList),
     }))
 }
 
-// ─── Override storage (shared with the plugin's activate() hydrator) ─────────
-// Lives at the same `plugin:core.settings:keybinding-overrides` localStorage
-// key the settings plugin writes through `api.storage`. The settings panel
-// can't import @nexus/extension-api (no api in scope), so we re-implement
-// the same key/serialisation here. Both sides round-trip identical JSON.
+/**
+ * Decide which rail group a plugin-owned tab belongs to. Any plugin
+ * appearing in `pluginList` is a shipped/built-in plugin → core-plugins;
+ * everything else came from the community loader → community-plugins.
+ * Falls back to the legacy id-prefix heuristic when `pluginList` hasn't
+ * hydrated yet (early-paint window before `shellReady`).
+ */
+function classifyByPluginList(
+  pluginId: string,
+  pluginList: PluginInfo[],
+): 'core-plugins' | 'community-plugins' {
+  if (pluginList.length > 0) {
+    return pluginList.some((p) => p.id === pluginId)
+      ? 'core-plugins'
+      : 'community-plugins'
+  }
+  return pluginId.startsWith('core.') || pluginId.startsWith('com.nexus.') ||
+    pluginId.startsWith('nexus.')
+    ? 'core-plugins'
+    : 'community-plugins'
+}
 
-const OVERRIDES_STORAGE_KEY = 'plugin:core.settings:keybinding-overrides'
+/**
+ * Phase B — synthesize a rail entry for every active plugin that has
+ * neither a contributed `settings_tab` nor an auto-tab from a
+ * `configuration` schema. The body is a stub explaining the plugin has
+ * no settings, with version + description for context. Skips plugins
+ * already represented by a contributed/auto tab so the rail never
+ * double-lists a plugin.
+ */
+function buildStubTabs(
+  pluginList: PluginInfo[],
+  community: CommunityPluginManifest[],
+  contributed: SettingsTabEntry[],
+  autoTabs: SettingsTabEntry[],
+): SettingsTabEntry[] {
+  const covered = new Set([
+    ...contributed.map((t) => t.pluginId),
+    ...autoTabs.map((t) => t.pluginId),
+  ])
+  const stubs: SettingsTabEntry[] = []
 
-export const keybindingOverrideStorage: OverrideStorage = {
-  async read() {
-    try {
-      const raw = localStorage.getItem(OVERRIDES_STORAGE_KEY)
-      if (!raw) return {}
-      const parsed = JSON.parse(raw) as unknown
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as Record<string, string>
-      }
-      return {}
-    } catch {
-      return {}
-    }
-  },
-  async write(overrides) {
-    localStorage.setItem(OVERRIDES_STORAGE_KEY, JSON.stringify(overrides))
-  },
+  for (const p of pluginList) {
+    if (covered.has(p.id)) continue
+    if (p.state === 'error') continue // hide rows that failed to activate
+    stubs.push({
+      id: `${STUB_TAB_PREFIX}${p.id}`,
+      title: p.name,
+      pluginId: p.id,
+      group: 'core-plugins',
+    })
+  }
+
+  for (const m of community) {
+    if (!m.enabled) continue
+    if (covered.has(m.id)) continue
+    stubs.push({
+      id: `${STUB_TAB_PREFIX}${m.id}`,
+      title: m.name,
+      pluginId: m.id,
+      group: 'community-plugins',
+    })
+  }
+
+  return stubs
 }
 
 // `api` is supplied by the settings plugin's `views.register()` wrapper
@@ -218,9 +257,39 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
   const [tabNonce, setTabNonce] = useState(0)
   const contributedTabs = useSettingsTabs(tabNonce)
   const autoTabs = useMemo(
-    () => buildAutoTabs(sections, contributedTabs),
-    [sections, contributedTabs],
+    () => buildAutoTabs(sections, contributedTabs, plugins),
+    [sections, contributedTabs, plugins],
   )
+
+  // Phase B: stub rail entries for any plugin not already represented
+  // by a contributed or auto tab.
+  const stubTabs = useMemo(
+    () => buildStubTabs(plugins, community, contributedTabs, autoTabs),
+    [plugins, community, contributedTabs, autoTabs],
+  )
+
+  // Combined rail buckets. Built-in tabs always live under "Options".
+  // Contributed + auto + stub tabs fall into `core-plugins` /
+  // `community-plugins` based on their `group` field.
+  const railGroups = useMemo(() => {
+    const pluginTabs = [...contributedTabs, ...autoTabs, ...stubTabs].sort(
+      (a, b) => {
+        const ga = (a.priority ?? 0) - (b.priority ?? 0)
+        if (ga !== 0) return ga
+        return a.title.localeCompare(b.title)
+      },
+    )
+    const byGroup = (g: 'options' | 'core-plugins' | 'community-plugins') =>
+      pluginTabs.filter((t) => {
+        const resolved = t.group ?? classifyByPluginList(t.pluginId, plugins)
+        return resolved === g
+      })
+    return {
+      options: byGroup('options'),
+      core: byGroup('core-plugins'),
+      community: byGroup('community-plugins'),
+    }
+  }, [contributedTabs, autoTabs, stubTabs, plugins])
 
   const [navTab,        setNavTab]        = useState<NavTab>('settings')
   const [query,         setQuery]         = useState('')
@@ -303,62 +372,72 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
         onClick={e => e.stopPropagation()}
         onKeyDown={e => e.key === 'Escape' && close()}
       >
-        {/* Header */}
-        <div className="settings-header">
-          <div style={{ display: 'flex', gap: 0, flexShrink: 0, flexWrap: 'wrap' }}>
-            <button
-              className={`settings-nav-tab ${navTab === 'settings' ? 'settings-nav-tab--active' : ''}`}
-              onClick={() => setNavTab('settings')}
-            >
-              Settings
-            </button>
-            <button
-              className={`settings-nav-tab ${navTab === 'appearance' ? 'settings-nav-tab--active' : ''}`}
-              onClick={() => setNavTab('appearance')}
-            >
-              Appearance
-            </button>
-            <button
-              className={`settings-nav-tab ${navTab === 'keybindings' ? 'settings-nav-tab--active' : ''}`}
-              onClick={() => setNavTab('keybindings')}
-            >
-              Keybindings
-            </button>
-            <button
-              className={`settings-nav-tab ${navTab === 'plugins' ? 'settings-nav-tab--active' : ''}`}
-              onClick={() => setNavTab('plugins')}
-            >
-              Plugins
-            </button>
-            {/* Plugin-contributed tabs (OI-01). Each registered tab
-                surfaces as a nav button after the built-in bar. The
-                registry already filters tabs without a wired renderer. */}
-            {contributedTabs.map((t) => (
-              <button
-                key={t.id}
-                className={`settings-nav-tab ${navTab === t.id ? 'settings-nav-tab--active' : ''}`}
-                onClick={() => setNavTab(t.id)}
-                title={t.pluginId}
-              >
-                {t.title}
-              </button>
-            ))}
-            {/* Auto-tabs: any plugin that declared a `configuration`
-                schema but no explicit `settings_tabs` entry. The
-                body for these is a filtered SettingsSection. */}
-            {autoTabs.map((t) => (
-              <button
-                key={t.id}
-                className={`settings-nav-tab ${navTab === t.id ? 'settings-nav-tab--active' : ''}`}
-                onClick={() => setNavTab(t.id)}
-                title={t.pluginId}
-              >
-                {t.title}
-              </button>
-            ))}
-          </div>
+        {/* Left rail — Obsidian-style grouped nav. */}
+        <nav className="settings-rail">
+          <div className="settings-rail-group-header">Options</div>
+          <RailItem
+            label="Settings"
+            active={navTab === 'settings'}
+            onClick={() => setNavTab('settings')}
+          />
+          <RailItem
+            label="Appearance"
+            active={navTab === 'appearance'}
+            onClick={() => setNavTab('appearance')}
+          />
+          <RailItem
+            label="Keybindings"
+            active={navTab === 'keybindings'}
+            onClick={() => setNavTab('keybindings')}
+          />
+          <RailItem
+            label="Plugins"
+            active={navTab === 'plugins'}
+            onClick={() => setNavTab('plugins')}
+          />
+          {railGroups.options.map((t) => (
+            <RailItem
+              key={t.id}
+              label={t.title}
+              title={t.pluginId}
+              active={navTab === t.id}
+              onClick={() => setNavTab(t.id)}
+            />
+          ))}
 
-          {navTab === 'settings' && (
+          {railGroups.core.length > 0 && (
+            <div className="settings-rail-group-header">Core plugins</div>
+          )}
+          {railGroups.core.map((t) => (
+            <RailItem
+              key={t.id}
+              label={t.title}
+              title={t.pluginId}
+              active={navTab === t.id}
+              onClick={() => setNavTab(t.id)}
+            />
+          ))}
+
+          {railGroups.community.length > 0 && (
+            <div className="settings-rail-group-header">Community plugins</div>
+          )}
+          {railGroups.community.map((t) => (
+            <RailItem
+              key={t.id}
+              label={t.title}
+              title={t.pluginId}
+              active={navTab === t.id}
+              onClick={() => setNavTab(t.id)}
+            />
+          ))}
+        </nav>
+
+        {/* Right pane — topbar + content for the selected rail entry.
+            Search lives in the topbar regardless of tab; an active query
+            overrides the tab body with cross-plugin search results
+            (Phase C). */}
+        <div className="settings-main">
+          <div className="settings-topbar">
             <input
               ref={inputRef}
               className="settings-search"
@@ -366,82 +445,117 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
               value={query}
               onChange={e => setQuery(e.target.value)}
             />
-          )}
+            <button className="settings-close" onClick={close}>✕</button>
+          </div>
 
-          <button className="settings-close" onClick={close}>✕</button>
-        </div>
-
-        {/* Body */}
-        {navTab === 'settings' && (
-          <div className="settings-body">
-            {!query && (
-              <nav className="settings-nav">
-                {sections.map(s => (
-                  <button
-                    key={s.pluginId}
-                    className={`settings-nav-item ${activeSection === s.pluginId ? 'settings-nav-item--active' : ''}`}
-                    onClick={() => setActiveSection(s.pluginId)}
-                  >
-                    {s.title}
-                  </button>
+          {query ? (
+            <div className="settings-body">
+              <div className="settings-content">
+                {displayedSections.length === 0 && (
+                  <p className="settings-empty">
+                    No settings found for &ldquo;{query}&rdquo;
+                  </p>
+                )}
+                {displayedSections.map(section => (
+                  <SettingsSection key={section.pluginId} section={section} />
                 ))}
-              </nav>
-            )}
-
-            <div className="settings-content">
-              {displayedSections.length === 0 && (
-                <p className="settings-empty">
-                  {query ? `No settings found for "${query}"` : 'No settings registered.'}
-                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              {navTab === 'settings' && (
+                <div className="settings-body">
+                  <nav className="settings-nav">
+                    {sections.map(s => (
+                      <button
+                        key={s.pluginId}
+                        className={`settings-nav-item ${activeSection === s.pluginId ? 'settings-nav-item--active' : ''}`}
+                        onClick={() => setActiveSection(s.pluginId)}
+                      >
+                        {s.title}
+                      </button>
+                    ))}
+                  </nav>
+                  <div className="settings-content">
+                    {displayedSections.length === 0 && (
+                      <p className="settings-empty">No settings registered.</p>
+                    )}
+                    {displayedSections.map(section => (
+                      <SettingsSection key={section.pluginId} section={section} />
+                    ))}
+                  </div>
+                </div>
               )}
-              {displayedSections.map(section => (
-                <SettingsSection key={section.pluginId} section={section} />
-              ))}
-            </div>
-          </div>
-        )}
-        {navTab === 'appearance' && (
-          <div className="settings-body">
-            <div className="settings-content" style={{ padding: '16px 24px' }}>
-              <AppearanceTab api={api} />
-            </div>
-          </div>
-        )}
-        {navTab === 'keybindings' && (
-          <div className="settings-body">
-            <div className="settings-content" style={{ padding: '16px 24px' }}>
-              <KeybindingsTab />
-            </div>
-          </div>
-        )}
-        {navTab === 'plugins' && (
-          <div className="settings-body">
-            <div className="settings-content" style={{ padding: '16px 24px' }}>
-              <PluginsTab corePlugins={plugins} community={community} />
-            </div>
-          </div>
-        )}
-        {/* Plugin-contributed / auto tab body. Only fires for tab
-            ids that don't match a built-in; keeps the built-ins'
-            rendering untouched. Auto-tabs (those with the
-            `auto:` prefix) render the plugin's own config schema
-            inline — no plugin-side renderer is involved. */}
-        {!BUILT_IN_TABS.includes(navTab as BuiltInTab) && (
-          <div className="settings-body">
-            <div className="settings-content" style={{ padding: '16px 24px' }}>
-              {navTab.startsWith(AUTO_TAB_PREFIX) ? (
-                <AutoSettingsTabBody
-                  pluginId={navTab.slice(AUTO_TAB_PREFIX.length)}
-                  sections={sections}
-                />
-              ) : (
-                <ContributedTabBody tabId={navTab} />
+              {navTab === 'appearance' && (
+                <div className="settings-body">
+                  <div className="settings-content">
+                    <AppearanceTab api={api} />
+                  </div>
+                </div>
               )}
-            </div>
-          </div>
-        )}
+              {navTab === 'keybindings' && (
+                <div className="settings-body">
+                  <div className="settings-content">
+                    <KeybindingsTab />
+                  </div>
+                </div>
+              )}
+              {navTab === 'plugins' && (
+                <div className="settings-body">
+                  <div className="settings-content">
+                    <PluginsTab corePlugins={plugins} community={community} />
+                  </div>
+                </div>
+              )}
+              {!BUILT_IN_TABS.includes(navTab as BuiltInTab) && (
+                <div className="settings-body">
+                  <div className="settings-content">
+                    {navTab.startsWith(AUTO_TAB_PREFIX) ? (
+                      <AutoSettingsTabBody
+                        pluginId={navTab.slice(AUTO_TAB_PREFIX.length)}
+                        sections={sections}
+                      />
+                    ) : navTab.startsWith(STUB_TAB_PREFIX) ? (
+                      <StubTabBody
+                        pluginId={navTab.slice(STUB_TAB_PREFIX.length)}
+                        plugins={plugins}
+                        community={community}
+                      />
+                    ) : (
+                      <ContributedTabBody tabId={navTab} />
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
+  )
+}
+
+// ─── Rail item ────────────────────────────────────────────────────────────────
+
+function RailItem({
+  label,
+  active,
+  onClick,
+  title,
+}: {
+  label: string
+  active: boolean
+  onClick: () => void
+  title?: string
+}) {
+  return (
+    <button
+      className={`settings-rail-item ${active ? 'settings-rail-item--active' : ''}`}
+      onClick={onClick}
+      title={title}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -468,6 +582,43 @@ function AutoSettingsTabBody({
     )
   }
   return <SettingsSection section={section} />
+}
+
+// ─── Stub-tab body ────────────────────────────────────────────────────────────
+//
+// Phase B — body for plugins with no settings of their own. Shows the
+// plugin's name + version (and description, when supplied by the
+// community manifest) so the rail entry has somewhere meaningful to land.
+
+function StubTabBody({
+  pluginId,
+  plugins,
+  community,
+}: {
+  pluginId: string
+  plugins: PluginInfo[]
+  community: CommunityPluginManifest[]
+}) {
+  const core = plugins.find((p) => p.id === pluginId)
+  const com  = community.find((m) => m.id === pluginId)
+  const name    = core?.name ?? com?.name ?? pluginId
+  const version = core?.version ?? com?.version
+  const desc    = com?.description
+  return (
+    <section className="settings-section">
+      <h3 className="settings-section-title">{name}</h3>
+      <p className="settings-field-description" style={{ marginBottom: 8 }}>
+        <code>{pluginId}</code>
+        {version ? ` · v${version}` : ''}
+      </p>
+      {desc && (
+        <p className="settings-field-description" style={{ marginBottom: 16 }}>
+          {desc}
+        </p>
+      )}
+      <p className="settings-empty">This plugin has no settings.</p>
+    </section>
+  )
 }
 
 // ─── Plugin-contributed tab host ──────────────────────────────────────────────
@@ -852,7 +1003,7 @@ function KeybindingsTab() {
     const reg = getRegistry()
     if (!reg) return
     try {
-      await reg.keybindings.setOverride(keybindingOverrideStorage, commandId, chord)
+      await reg.keybindings.setOverride(commandId, chord)
       setEditing(null)
       setNonce(n => n + 1)
     } catch (err) {
@@ -865,7 +1016,7 @@ function KeybindingsTab() {
     const reg = getRegistry()
     if (!reg) return
     try {
-      await reg.keybindings.clearOverride(keybindingOverrideStorage, commandId)
+      await reg.keybindings.clearOverride(commandId)
       setNonce(n => n + 1)
     } catch (err) {
       setError(`Failed to reset override: ${err instanceof Error ? err.message : String(err)}`)

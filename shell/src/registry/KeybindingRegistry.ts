@@ -53,6 +53,20 @@ export interface BindingRow {
 export class KeybindingRegistry {
   private bindings: KeybindingEntry[] = []
   private overrides = new Map<string, string>()
+  private storage: OverrideStorage | null = null
+
+  /**
+   * Bind a storage backend for override persistence. Must be called
+   * before `loadOverrides()` / `setOverride()` / `clearOverride()`.
+   * Calling twice is a no-op with a console warning (double-wire guard).
+   */
+  bindStorage(storage: OverrideStorage): void {
+    if (this.storage !== null) {
+      console.warn('[KeybindingRegistry] bindStorage called more than once — ignoring')
+      return
+    }
+    this.storage = storage
+  }
 
   registerFromManifest(pluginId: string, contribution: KeybindingContribution) {
     const isMac = typeof navigator !== 'undefined' &&
@@ -136,14 +150,19 @@ export class KeybindingRegistry {
   // ─── Overrides API (WI-04) ─────────────────────────────────────────────────
 
   /**
-   * Hydrate the override map from `storage` and re-apply each entry to
-   * any already-registered bindings. Idempotent — calling twice with the
-   * same backing store leaves the registry in the same shape.
+   * Hydrate the override map from the bound storage and re-apply each
+   * entry to any already-registered bindings. Idempotent — calling
+   * twice with the same backing store leaves the registry in the same
+   * shape. No-ops (with a warning) if no storage has been bound.
    */
-  async loadOverrides(storage: OverrideStorage): Promise<void> {
+  async loadOverrides(): Promise<void> {
+    if (!this.storage) {
+      console.warn('[KeybindingRegistry] loadOverrides called before bindStorage — no-op')
+      return
+    }
     let loaded: Record<string, string> = {}
     try {
-      loaded = await storage.read()
+      loaded = await this.storage.read()
     } catch (err) {
       console.warn('[KeybindingRegistry] loadOverrides failed:', err)
       return
@@ -155,24 +174,33 @@ export class KeybindingRegistry {
   /**
    * Set or replace the override for `commandId` and persist. The new
    * chord is normalised before storage so on-disk shapes are stable
-   * regardless of how the UI captured them.
+   * regardless of how the UI captured them. No-ops (with a warning) if
+   * no storage has been bound.
    */
   async setOverride(
-    storage: OverrideStorage,
     commandId: string,
     chord: string,
   ): Promise<void> {
+    if (!this.storage) {
+      console.warn('[KeybindingRegistry] setOverride called before bindStorage — no-op')
+      return
+    }
     const normalized = normalizeChord(chord)
     this.overrides.set(commandId, normalized)
     this.applyOverridesToBindings()
-    await this.persist(storage)
+    await this.persist()
   }
 
-  /** Clear an override and revert affected bindings to their default chord. */
-  async clearOverride(storage: OverrideStorage, commandId: string): Promise<void> {
+  /** Clear an override and revert affected bindings to their default chord.
+   *  No-ops (with a warning) if no storage has been bound. */
+  async clearOverride(commandId: string): Promise<void> {
+    if (!this.storage) {
+      console.warn('[KeybindingRegistry] clearOverride called before bindStorage — no-op')
+      return
+    }
     if (!this.overrides.delete(commandId)) return
     this.applyOverridesToBindings()
-    await this.persist(storage)
+    await this.persist()
   }
 
   /** Synchronous read of the in-memory override map for a single command. */
@@ -218,9 +246,9 @@ export class KeybindingRegistry {
     }
   }
 
-  private async persist(storage: OverrideStorage): Promise<void> {
+  private async persist(): Promise<void> {
     try {
-      await storage.write(Object.fromEntries(this.overrides))
+      await this.storage!.write(Object.fromEntries(this.overrides))
     } catch (err) {
       console.error('[KeybindingRegistry] persist failed:', err)
       throw err

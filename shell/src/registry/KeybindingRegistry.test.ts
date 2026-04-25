@@ -45,6 +45,14 @@ function freshRegistry(): KeybindingRegistry {
   return reg
 }
 
+function freshRegistryWithStorage(
+  storage: ReturnType<typeof memoryStorage>,
+): KeybindingRegistry {
+  const reg = freshRegistry()
+  reg.bindStorage(storage)
+  return reg
+}
+
 test('normalizeChord folds modifier aliases and orders modifiers', () => {
   // Canonical modifier order: ctrl, shift, alt, meta, then key.
   assert.equal(normalizeChord('Cmd+Shift+K'), 'shift+meta+k')
@@ -60,10 +68,10 @@ test('formatChord: Title-Cases each part', () => {
 })
 
 test('setOverride is reflected by getAllBindings + getOverride', async () => {
-  const reg = freshRegistry()
   const storage = memoryStorage()
+  const reg = freshRegistryWithStorage(storage)
 
-  await reg.setOverride(storage, 'cmd.alpha', 'ctrl+shift+a')
+  await reg.setOverride('cmd.alpha', 'ctrl+shift+a')
 
   assert.equal(reg.getOverride('cmd.alpha'), 'ctrl+shift+a')
 
@@ -81,11 +89,11 @@ test('setOverride is reflected by getAllBindings + getOverride', async () => {
 })
 
 test('clearOverride reverts to the manifest default', async () => {
-  const reg = freshRegistry()
   const storage = memoryStorage()
+  const reg = freshRegistryWithStorage(storage)
 
-  await reg.setOverride(storage, 'cmd.alpha', 'ctrl+shift+a')
-  await reg.clearOverride(storage, 'cmd.alpha')
+  await reg.setOverride('cmd.alpha', 'ctrl+shift+a')
+  await reg.clearOverride('cmd.alpha')
 
   assert.equal(reg.getOverride('cmd.alpha'), undefined)
 
@@ -96,8 +104,8 @@ test('clearOverride reverts to the manifest default', async () => {
 })
 
 test('match() honours overrides over the manifest default', async () => {
-  const reg = freshRegistry()
   const storage = memoryStorage()
+  const reg = freshRegistryWithStorage(storage)
 
   // node:test runs in plain Node; KeyboardEvent isn't defined there
   // (jsdom only loads in browser-target builds). Construct a minimal
@@ -122,7 +130,7 @@ test('match() honours overrides over the manifest default', async () => {
   assert.equal(reg.match(fakeEvent({ key: 'a', ctrlKey: true }), {}), 'cmd.alpha')
 
   // After overriding to Ctrl+Shift+A, plain Ctrl+A no longer matches…
-  await reg.setOverride(storage, 'cmd.alpha', 'ctrl+shift+a')
+  await reg.setOverride('cmd.alpha', 'ctrl+shift+a')
   assert.equal(reg.match(fakeEvent({ key: 'a', ctrlKey: true }), {}), null)
 
   // …but the new chord does.
@@ -136,14 +144,14 @@ test('persistence round-trip: setOverride → fresh registry → loadOverrides',
   const storage = memoryStorage()
 
   // Session 1: user sets an override via the live registry.
-  const session1 = freshRegistry()
-  await session1.setOverride(storage, 'cmd.alpha', 'ctrl+alt+a')
+  const session1 = freshRegistryWithStorage(storage)
+  await session1.setOverride('cmd.alpha', 'ctrl+alt+a')
   assert.equal(storage.state['cmd.alpha'], 'ctrl+alt+a')
 
   // Session 2: app restarts. A new registry instance gets the same
   // bindings registered from manifests, then hydrates from storage.
-  const session2 = freshRegistry()
-  await session2.loadOverrides(storage)
+  const session2 = freshRegistryWithStorage(storage)
+  await session2.loadOverrides()
 
   const alpha = session2.getAllBindings().find(r => r.commandId === 'cmd.alpha')
   assert.ok(alpha)
@@ -156,7 +164,8 @@ test('loadOverrides applied before manifest registration also takes effect', asy
   const storage = memoryStorage({ 'cmd.late': 'ctrl+l' })
 
   const reg = new KeybindingRegistry()
-  await reg.loadOverrides(storage)
+  reg.bindStorage(storage)
+  await reg.loadOverrides()
 
   // Register a binding *after* the override was loaded — the registry
   // must consult `overrides` on registration, not just on apply.
@@ -170,10 +179,10 @@ test('loadOverrides applied before manifest registration also takes effect', asy
 })
 
 test('setOverride normalises chord input before persisting', async () => {
-  const reg = freshRegistry()
   const storage = memoryStorage()
+  const reg = freshRegistryWithStorage(storage)
 
-  await reg.setOverride(storage, 'cmd.alpha', 'Cmd+Shift+A')
+  await reg.setOverride('cmd.alpha', 'Cmd+Shift+A')
 
   // ctrl/shift/alt/meta is the canonical modifier order, so cmd
   // (alias of meta) sorts after shift.

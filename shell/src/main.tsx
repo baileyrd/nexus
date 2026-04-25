@@ -44,6 +44,7 @@ import {
   PLUGINS_ENABLED_CONFIG_KEY,
 } from './plugins/catalog'
 import { useConfigStore } from './stores/configStore'
+import { keybindingOverrideStorage } from './registry/keybindingOverrideStorage'
 
 function showFatal(message: string) {
   const root = document.getElementById('root')
@@ -59,6 +60,11 @@ function showFatal(message: string) {
 async function boot() {
   const reg  = new PluginRegistry()
   const host = new ExtensionHost(reg)
+
+  // Bind override storage before any plugin activates so keybinding
+  // overrides are hydrated before the first key dispatch.
+  reg.keybindings.bindStorage(keybindingOverrideStorage)
+  void reg.keybindings.loadOverrides()
 
   // Expose via singleton — no circular import
   setRegistry(reg)
