@@ -31,7 +31,7 @@ const HANDLER_READ_RAW_SINCE = 'read_raw_since'
 // Recovery snapshot deadline. Long enough to drain a sizeable backlog
 // (~MB of stdout from a build) but well below the user-visible "the
 // terminal froze" threshold.
-const RECOVERY_TIMEOUT_MS = 250
+const TERMINAL_RECOVERY_TIMEOUT_MS = 250
 
 const VIEW_ID = 'nexus.terminal.panelView'
 const ACTIVITY_ITEM_ID = 'nexus.terminal.activityItem'
@@ -129,7 +129,7 @@ export const terminalPlugin: Plugin = {
         }>(
           PLUGIN_ID,
           HANDLER_READ_RAW_SINCE,
-          { id: sessionId, cursor: lastCursor, timeout_ms: RECOVERY_TIMEOUT_MS },
+          { id: sessionId, cursor: lastCursor, timeout_ms: TERMINAL_RECOVERY_TIMEOUT_MS },
         )
         const cursorN = Number(resp.cursor)
         return {

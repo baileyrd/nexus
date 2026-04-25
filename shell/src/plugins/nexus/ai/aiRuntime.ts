@@ -48,11 +48,11 @@ const TOPIC_DONE = 'com.nexus.ai.stream_done'
 // rendering chips beside a still-empty bubble feels jarring.
 
 /** Top-k RAG sources fetched per question. Match nexus-ai's default. */
-const DEFAULT_LIMIT = 5
+const RAG_TOP_K = 5
 
 /** Wall-clock budget for a single Q&A. Closes legacy ChatPanel.tsx
  *  reference §6 "no client-side timeout, no abort button" gap. */
-const REQUEST_TIMEOUT_MS = 60_000
+const AI_REQUEST_TIMEOUT_MS = 60_000
 
 let kernel: KernelAPI | null = null
 
@@ -95,12 +95,12 @@ function armWatchdog(requestId: string): void {
     if (state.currentRequestId !== requestId) return
     state.setError(
       new Error(
-        `AI request timed out after ${REQUEST_TIMEOUT_MS / 1000}s with no stream_done`,
+        `AI request timed out after ${AI_REQUEST_TIMEOUT_MS / 1000}s with no stream_done`,
       ),
     )
     watchdogTimer = null
     watchdogRequestId = null
-  }, REQUEST_TIMEOUT_MS)
+  }, AI_REQUEST_TIMEOUT_MS)
 }
 
 function clearWatchdog(): void {
@@ -275,9 +275,9 @@ export async function submitQuestion(
       {
         messages,
         session_id: requestId,
-        limit: DEFAULT_LIMIT,
+        limit: RAG_TOP_K,
       },
-      REQUEST_TIMEOUT_MS,
+      AI_REQUEST_TIMEOUT_MS,
     )
     // The invoke promise resolves on the same path that fires
     // stream_done. The event handler usually populated the turn
@@ -355,7 +355,7 @@ export async function retryLast(api: PluginAPI): Promise<void> {
 const AUTOSAVE_DEBOUNCE_MS = 1000
 
 /** Title cap mirrors legacy ChatPanel.tsx:101 (48 chars + ellipsis). */
-const TITLE_MAX = 48
+const AI_TITLE_MAX_CHARS = 48
 
 /** Generated id format mirrors legacy makeSessionId (ChatPanel.tsx:158)
  *  with `s-` prefix to keep it short on disk. The kernel validates
@@ -370,7 +370,7 @@ function newSessionId(): string {
 }
 
 /** Auto-derive a session title from the first user turn. Whitespace
- *  collapsed, trimmed, capped at TITLE_MAX. Returns the empty string
+ *  collapsed, trimmed, capped at AI_TITLE_MAX_CHARS. Returns the empty string
  *  if no user turn exists yet (caller decides what to do). Mirrors
  *  legacy ChatPanel.tsx:101–106 verbatim. */
 function deriveTitle(turns: AiTurn[]): string {
@@ -378,7 +378,7 @@ function deriveTitle(turns: AiTurn[]): string {
     if (t.kind === 'user') {
       const trimmed = t.question.trim().replace(/\s+/g, ' ')
       if (trimmed.length === 0) return ''
-      return trimmed.length > TITLE_MAX ? `${trimmed.slice(0, TITLE_MAX)}…` : trimmed
+      return trimmed.length > AI_TITLE_MAX_CHARS ? `${trimmed.slice(0, AI_TITLE_MAX_CHARS)}…` : trimmed
     }
   }
   return ''

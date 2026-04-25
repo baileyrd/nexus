@@ -4,6 +4,7 @@ import { viewRegistry, workspace } from '../../../workspace'
 import { WorkflowView } from './WorkflowView'
 import { workflowPaneViewCreator } from './WorkflowPaneView'
 import { useWorkflowStore, type WorkflowEntry } from './workflowStore'
+import { LONG_RUNNING_OP_TIMEOUT_MS } from '../constants'
 
 const VIEW_ID = 'nexus.workflow.view'
 
@@ -27,12 +28,12 @@ const VALIDATE_COMMAND = 'validate'
 // Validate is a synchronous TOML parse on the kernel side. Five
 // seconds is plenty of headroom even for very large definitions and
 // keeps the UI from hanging if the bridge ever gets wedged.
-const VALIDATE_TIMEOUT_MS = 5_000
+const WORKFLOW_VALIDATE_TIMEOUT_MS = 5_000
 
 // Long-running runs would otherwise hit the 30s default timeout in the
 // kernel bridge. Pick a generous ceiling — workflows can spawn agent
 // runs, terminal commands, AI calls.
-const RUN_TIMEOUT_MS = 5 * 60_000
+const RUN_TIMEOUT_MS = LONG_RUNNING_OP_TIMEOUT_MS
 
 /**
  * Decode `Workflow[]` from the kernel into the sidebar's `WorkflowEntry`
@@ -175,7 +176,7 @@ export const workflowPlugin: Plugin = {
           WORKFLOW_PLUGIN_ID,
           VALIDATE_COMMAND,
           { text },
-          VALIDATE_TIMEOUT_MS,
+          WORKFLOW_VALIDATE_TIMEOUT_MS,
         )
         const name = extractWorkflowName(result)
         useWorkflowStore.getState().setValidateStatus('ok', { validatedName: name })

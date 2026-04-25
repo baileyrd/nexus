@@ -11,6 +11,7 @@ import {
   type McpServerEntry,
   type McpToolRow,
 } from './mcpStore'
+import { SERVICE_CONNECT_TIMEOUT_MS } from '../constants'
 
 const VIEW_ID = 'nexus.mcp.view'
 const TOOL_MODAL_VIEW_ID = 'nexus.mcp.toolCallModal'
@@ -41,7 +42,7 @@ const CALL_TOOL = 'call_tool'
 // MCP servers spawn a subprocess on connect — pick a generous ceiling
 // over the 30s default timeout. Capability listing is auto-connected
 // on first call (`get_or_connect`), so the cold path can stretch.
-const CONNECT_TIMEOUT_MS = 60_000
+const CONNECT_TIMEOUT_MS = SERVICE_CONNECT_TIMEOUT_MS
 
 function decodeServers(raw: unknown): McpServerEntry[] {
   if (!Array.isArray(raw)) return []

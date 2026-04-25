@@ -29,12 +29,12 @@ const CMD_READ_RAW_SINCE = 'read_raw_since'
 // channel ever drops chunks (RecvError::Lagged). 5s is slow enough to
 // be invisible cost on an idle session yet fast enough to mask a
 // dropped subscription before the user notices typing lag.
-const POLL_INTERVAL_MS = 5000
+const PTY_POLL_INTERVAL_MS = 5000
 // PTY-read deadline folded into each `read_raw_since` call. Kept
 // short so each tick releases the server Mutex long enough for
 // concurrent send_raw_input calls (typing) to acquire it —
 // std::sync::Mutex is unfair and would otherwise starve input.
-const PUMP_TIMEOUT_MS = 30
+const PTY_PUMP_TIMEOUT_MS = 30
 
 interface TerminalViewProps {
   kernel: KernelAPI
@@ -186,7 +186,7 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
         resp = await kernel.invoke<ReadRawSinceResponse>(
           PLUGIN_ID,
           CMD_READ_RAW_SINCE,
-          { id, cursor, timeout_ms: PUMP_TIMEOUT_MS },
+          { id, cursor, timeout_ms: PTY_PUMP_TIMEOUT_MS },
         )
       } catch {
         // PTY may be closed mid-tick (workspace close race). Swallow;
@@ -216,7 +216,7 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     void tick()
     pollTimer = window.setInterval(() => {
       void tick()
-    }, POLL_INTERVAL_MS)
+    }, PTY_POLL_INTERVAL_MS)
 
     // ── Input: keystrokes go straight to the PTY via send_raw_input
     // so xterm-generated control sequences (arrow keys, Ctrl-C,

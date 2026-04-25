@@ -12,6 +12,7 @@ import {
   type Plan,
   type PlanStep,
 } from './agentStore'
+import { LONG_RUNNING_OP_TIMEOUT_MS } from '../constants'
 
 const PLUGIN_ID = 'nexus.agent'
 const VIEW_ID = 'nexus.agent.view'
@@ -49,7 +50,7 @@ const AGENT_TOPIC_PREFIX = 'com.nexus.agent.'
 // Plans + runs are LLM-bound and may stretch — pick a 5-minute ceiling.
 // `dispatch_async` already enforces its own 60s chat / tool timeouts
 // per-call inside the kernel; this is the bridge-side cap.
-const RUN_TIMEOUT_MS = 5 * 60_000
+const RUN_TIMEOUT_MS = LONG_RUNNING_OP_TIMEOUT_MS
 
 interface StepEventPayload {
   plan_id?: string
