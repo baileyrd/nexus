@@ -31,7 +31,7 @@ export interface ForceParams {
   height: number
 }
 
-const DAMPING = 0.82
+const DAMPING_FACTOR = 0.82
 const MAX_VELOCITY = 40
 // Above this many nodes we stride pairwise iteration to keep tick budget sane.
 const PAIRWISE_FULL_LIMIT = 600
@@ -130,8 +130,8 @@ export function step(
     }
     node.vx += (cx - node.x) * g
     node.vy += (cy - node.y) * g
-    node.vx *= DAMPING
-    node.vy *= DAMPING
+    node.vx *= DAMPING_FACTOR
+    node.vy *= DAMPING_FACTOR
     if (node.vx > MAX_VELOCITY) node.vx = MAX_VELOCITY
     else if (node.vx < -MAX_VELOCITY) node.vx = -MAX_VELOCITY
     if (node.vy > MAX_VELOCITY) node.vy = MAX_VELOCITY

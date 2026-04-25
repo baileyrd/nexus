@@ -19,6 +19,9 @@
 
 import type { CanvasDoc } from './kernelClient'
 
+/** Fixed iteration budget for the auto-layout force pass. */
+const AUTO_LAYOUT_ITERATIONS = 250
+
 /** Result of a layout pass — only the nodes that actually moved. */
 export interface LayoutMove {
   id: string
@@ -53,7 +56,7 @@ export function autoLayout(
   doc: CanvasDoc,
   options: AutoLayoutOptions = {},
 ): LayoutMove[] {
-  const iterations = options.iterations ?? 250
+  const iterations = options.iterations ?? AUTO_LAYOUT_ITERATIONS
   const edgeLength = options.edgeLength ?? 220
   const minDistSq = options.minDistSq ?? 0.5
 

@@ -87,6 +87,8 @@ export interface HistoryEntry {
 }
 
 const UNDO_HISTORY_CAP = 200
+const TIMELINE_DAY_PX_MIN = 2
+const TIMELINE_DAY_PX_MAX = 80
 
 interface BasesStore {
   /** Keyed by the leaf's relpath — one tab per open base. */
@@ -269,7 +271,7 @@ export const useBasesStore = create<BasesStore>((set) => ({
   setTimelineDayPx(relpath, px) {
     set((s) => {
       const t = s.tabs[relpath] ?? { ...EMPTY }
-      const clamped = Math.max(2, Math.min(80, px))
+      const clamped = Math.max(TIMELINE_DAY_PX_MIN, Math.min(TIMELINE_DAY_PX_MAX, px))
       return { tabs: { ...s.tabs, [relpath]: { ...t, timelineDayPx: clamped } } }
     })
   },

@@ -286,6 +286,12 @@ export function sideCentre(node: CanvasNode, side: NodeSide): { x: number; y: nu
   }
 }
 
+/** Number of cubic-bezier samples used when hit-testing edges.
+ *  16 is the smallest count that keeps a smoothly curving edge
+ *  reliably clickable at 1× zoom without being too generous on
+ *  orthogonal-ish edges. */
+const EDGE_HIT_TEST_SAMPLES = 16
+
 /** How far (in CSS pixels) the edge-create affordance sits outside the
  *  node's border — far enough to clear the mid-edge resize handle when
  *  the node happens to be single-selected. */
@@ -358,9 +364,8 @@ export function hitTestEdge(
     const midX = (start.x + end.x) / 2
     // Sample the same bezier drawEdge emits.
     let prev = start
-    const steps = 16
-    for (let s = 1; s <= steps; s++) {
-      const t = s / steps
+    for (let s = 1; s <= EDGE_HIT_TEST_SAMPLES; s++) {
+      const t = s / EDGE_HIT_TEST_SAMPLES
       const p = cubicBezier(start, { x: midX, y: start.y }, { x: midX, y: end.y }, end, t)
       if (pointSegmentDist2(worldX, worldY, prev, p) <= tol2) return edge.id
       prev = p
