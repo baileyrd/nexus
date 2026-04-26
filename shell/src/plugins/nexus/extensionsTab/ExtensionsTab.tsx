@@ -9,20 +9,12 @@
 // `set_plugin_enabled` Tauri command the Plugins tab uses.
 
 import { useMemo } from 'react'
-import { invoke } from '@tauri-apps/api/core'
 import { usePluginsStatusStore } from '../../../stores/pluginsStatusStore'
 
-// NB: deliberately no catalog import. An earlier draft imported
-// `{ ALL_PLUGINS, DEFAULT_OFF_PLUGINS }` from `../../catalog` to gate
-// the Disable button on default-off plugins. That created a cycle
-// (`catalog.ts → extensionsTab/index.ts → ExtensionsTab.tsx →
-// catalog.ts`), and even after rewriting the cycle's hot path to
-// `useMemo` the import still dragged the entire plugin graph into
-// this module, slowing first paint AND keeping the regression
-// surface alive. The Disable button now shows on every row; the
-// existing `set_plugin_enabled` Tauri command is the source of
-// truth for what's actually disable-able (built-ins still respawn
-// on next boot via DEFAULT_ON_PLUGINS).
+// `disableBuiltinPlugin` is dynamic-imported in the click handler, not
+// at module top level — see comment on the click handler below for
+// why. (Short version: catalog cycles + node-test compat + the
+// hygiene rule that keeps plugins from reaching into shell host/.)
 
 const STATE_BADGES: Record<string, { label: string; color: string }> = {
   active: { label: 'active', color: 'var(--nexus-color-success, #22c55e)' },
@@ -100,21 +92,33 @@ interface ExtensionRowProps {
 
 function ExtensionRow({ row }: ExtensionRowProps) {
   const badge = STATE_BADGES[row.state] ?? { label: row.state, color: 'var(--nexus-color-muted, #9ca3af)' }
-  // Show Disable for any active plugin. The existing `set_plugin_enabled`
-  // Tauri command is the source of truth for what's actually
-  // disable-able — DEFAULT_ON built-ins respawn on next boot, which is
-  // the documented behaviour from the Plugins tab.
+  // Show Disable for any active plugin. `disableBuiltinPlugin` itself
+  // gates the operation: it returns `{ ok: false, error: '...required
+  // built-in...' }` for DEFAULT_ON plugins, so we let the host be the
+  // source of truth rather than duplicating the catalog check here.
   const canDisable = row.state === 'active' || row.state === 'activating'
 
   const onDisable = async () => {
-    try {
-      await invoke('set_plugin_enabled', { pluginId: row.id, enabled: false })
-      // The ExtensionHost will fire `plugin:deactivated`, which the
-      // store catches and reflects on the next render — no manual
-      // refresh here.
-    } catch (err) {
-      console.error(`[extensions-tab] disable failed for ${row.id}`, err)
+    // Mid-session disable: unload the plugin AND persist the disabled
+    // state so it stays off across restarts. Mirrors the Plugins tab's
+    // built-in toggle (`SettingsPanelView.handleBuiltinToggle`). The
+    // `invoke('set_plugin_enabled')` path that the community-plugin
+    // toggle uses ONLY persists — it does not call `host.unload(id)`,
+    // which is why the earlier draft of this button appeared to do
+    // nothing on click.
+    //
+    // Dynamic-imported here so this module's top-level imports stay
+    // clean: a static `import` of `host/pluginActivation` would
+    // transitively pull in the catalog (cycle, slows first paint)
+    // and would need an entry in the import-hygiene allowlist.
+    const { disableBuiltinPlugin } = await import('../../../host/pluginActivation')
+    const result = await disableBuiltinPlugin(row.id)
+    if (!result.ok) {
+      console.error(`[extensions-tab] disable failed for ${row.id}: ${result.error}`)
     }
+    // Success: ExtensionHost emits `plugin:deactivated`, the store
+    // catches it, the row updates on the next render — no manual
+    // refresh here.
   }
 
   return (
