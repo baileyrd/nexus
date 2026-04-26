@@ -26,7 +26,6 @@ mod kernel;
 mod kv_store;
 mod log;
 mod plugin;
-mod plugin_registry;
 
 // Stable plugin-api types (defined in nexus-plugin-api, shim-re-exported via
 // the local module files above so `crate::*` imports inside this crate work).
@@ -50,4 +49,3 @@ pub use error::{ConfigError, Error, KvError, PluginError, RecvError, Result};
 pub use event_bus::{EventBus, EventSubscription};
 pub use kernel::Kernel;
 pub use kv_store::{InMemoryKvStore, KvStore};
-pub use plugin_registry::PluginRegistry;
