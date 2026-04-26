@@ -6,7 +6,10 @@ Cargo.lock
 # LibreOffice lockfiles
 .~lock.*#
 .superpowers/
-.claude/
+.claude/*
+!.claude/hooks/
+!.claude/settings.json
+.claude/settings.local.json
 **/SESSION_SUMMARIES.md
 # Per-install plugin settings written by the Settings modal.
 plugins/*/settings.json
