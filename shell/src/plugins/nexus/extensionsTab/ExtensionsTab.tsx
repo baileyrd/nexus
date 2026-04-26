@@ -14,8 +14,14 @@ import { invoke } from '@tauri-apps/api/core'
 import { usePluginsStatusStore } from '../../../stores/pluginsStatusStore'
 import { ALL_PLUGINS, DEFAULT_OFF_PLUGINS } from '../../catalog'
 
-const DEFAULT_OFF_IDS = new Set(DEFAULT_OFF_PLUGINS.map((p) => p.manifest.id))
-const BUILTIN_IDS = new Set(ALL_PLUGINS.map((p) => p.manifest.id))
+// IMPORTANT: do NOT compute `Set`s from the catalog imports at module
+// top-level. There is a circular import here —
+// `catalog.ts → extensionsTab/index.ts → ExtensionsTab.tsx → catalog.ts`
+// — and ESM live bindings are `undefined` for re-entrant lookups
+// during the cycle. Reading at module-load time would crash the shell
+// boot (root cause of the missing-Extensions-tab regression). By the
+// time React renders this component the catalog has finished
+// evaluating, so deriving the sets inside `useMemo` is safe.
 
 const STATE_BADGES: Record<string, { label: string; color: string }> = {
   active: { label: 'active', color: 'var(--nexus-color-success, #22c55e)' },
@@ -36,13 +42,23 @@ interface Row {
 
 function useRows(): Row[] {
   const byId = usePluginsStatusStore((s) => s.byId)
+  // Derive id sets at render time (not module-load time) — see the
+  // circular-import note at the top of this file. `useMemo` keeps the
+  // sets stable across renders that don't change `byId`.
+  const { defaultOff: defaultOffIds, builtin: builtinIds } = useMemo(
+    () => ({
+      defaultOff: new Set(DEFAULT_OFF_PLUGINS.map((p) => p.manifest.id)),
+      builtin: new Set(ALL_PLUGINS.map((p) => p.manifest.id)),
+    }),
+    [],
+  )
   return useMemo(() => {
     const rows: Row[] = Object.entries(byId).map(([id, status]) => ({
       id,
       state: status.state,
       lastError: status.lastError,
-      isBuiltin: BUILTIN_IDS.has(id),
-      isDefaultOff: DEFAULT_OFF_IDS.has(id),
+      isBuiltin: builtinIds.has(id),
+      isDefaultOff: defaultOffIds.has(id),
     }))
     rows.sort((a, b) => {
       const aErr = a.state === 'error' ? 0 : 1
@@ -51,7 +67,7 @@ function useRows(): Row[] {
       return a.id.localeCompare(b.id)
     })
     return rows
-  }, [byId])
+  }, [byId, builtinIds, defaultOffIds])
 }
 
 export function ExtensionsTab() {
