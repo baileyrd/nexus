@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-density="cozy">
+<html lang="en" data-density="cozy">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -18,42 +18,41 @@
          documentElement in some browsers/tauri configurations. This
          guarantees tokens resolve before the React tree mounts.
 
-         Task A (no-titlebar-test) renamed the shell's internal token
-         taxonomy to Obsidian's. Every hex/oklch VALUE below is the same
-         as before — only the variable NAMES changed. The legacy `--bg`,
-         `--fg`, `--line`, `--r`, `--f-ui`, etc. names are preserved via
-         the alias block at the bottom of :root so existing consumers
-         keep working until each is migrated. */
+         The kernel `com.nexus.theme` plugin is the single source of
+         truth for color tokens. Themes ship `--nx-*` variables (see
+         crates/nexus-theme/themes/*); the block below bridges them
+         into the consumer token names shell.css and plugin .tsx
+         inline styles use. The hex fallbacks match the old hardcoded
+         dark palette so we don't FOUC if the kernel is slow to
+         hydrate. The previous [data-theme="light"] block has been
+         removed — picking a theme in Settings > Appearance is now the
+         only way to switch palettes. */
       :root {
-        /* ── Obsidian background tokens ───────────────────────────── */
-        --background-primary:            oklch(0.185 0.008 260);
-        --background-secondary:          oklch(0.215 0.008 260);
-        --background-secondary-alt:      oklch(0.235 0.009 60);
-        /* Hover / active / border use translucent white overlays so they
-           tint whatever surface they sit on, matching Obsidian's
-           rgba(var(--mono-rgb-100), …) approach (app.css:2827). This keeps
-           active-tab / hovered-row highlights subtle instead of looking
-           like discrete solid rectangles on deep backgrounds. */
-        --background-modifier-hover:     rgba(255, 255, 255, 0.067);
-        --background-modifier-active:    rgba(255, 255, 255, 0.12);
-        --background-modifier-border:    rgba(255, 255, 255, 0.10);
+        /* ── Bridge: kernel --nx-* → consumer token names ─────────── */
+        --background-primary:            var(--nx-bg-primary, #1a1a1a);
+        --background-secondary:          var(--nx-bg-secondary, #242424);
+        --background-secondary-alt:      var(--nx-bg-tertiary, #2f2f2f);
+        --background-modifier-hover:     var(--nx-interactive-hover, rgba(255, 255, 255, 0.067));
+        --background-modifier-active:    var(--nx-interactive-active, rgba(255, 255, 255, 0.12));
+        --background-modifier-border:    var(--nx-border, rgba(255, 255, 255, 0.10));
 
-        /* ── Obsidian text tokens ─────────────────────────────────── */
-        --text-normal:                   oklch(0.94  0.005 80);
-        --text-muted:                    oklch(0.72  0.008 80);
-        --text-faint:                    oklch(0.55  0.008 80);
+        --text-normal:                   var(--nx-text-primary, #f5f5f5);
+        --text-muted:                    var(--nx-text-tertiary, #a0a0a0);
+        --text-faint:                    var(--nx-text-muted, #737373);
 
-        /* ── Obsidian interactive / accent ────────────────────────── */
-        --interactive-accent:            oklch(0.78  0.14  70);
-        --interactive-accent-soft:       oklch(0.78  0.14  70 / 0.16);
-        --interactive-accent-ink:        oklch(0.22  0.05  70);
+        --interactive-accent:            var(--nx-color-primary, #6ba3ff);
+        --interactive-accent-soft:       var(--nx-color-primary-soft, rgba(107, 163, 255, 0.16));
+        --interactive-accent-ink:        var(--nx-text-inverted, #0f0f0f);
 
         /* ── Semantic status colors (Forge palette — Obsidian has no
               direct equivalents; kept under their original names per
               design-bundle feedback) ─────────────────────────────── */
         --ok:                            oklch(0.78  0.12  165);
+        --ok-soft:                       oklch(0.78  0.12  165 / 0.14);
         --warn:                          oklch(0.82  0.14  85);
+        --warn-soft:                     oklch(0.82  0.14  85 / 0.14);
         --risk:                          oklch(0.72  0.17  25);
+        --risk-soft:                     oklch(0.72  0.17  25 / 0.14);
         --cool:                          oklch(0.76  0.09  230);
 
         /* ── Typography tokens ────────────────────────────────────── */
@@ -104,7 +103,7 @@
         --file-header-border:            var(--divider-width) solid var(--divider-color);
 
         /* ── Shadow (unchanged) ───────────────────────────────────── */
-        --shadow: 0 1px 0 oklch(1 0 0 / 0.03) inset, 0 10px 30px oklch(0 0 0 / 0.35);
+        --shadow: var(--nx-shadow-lg, 0 1px 0 oklch(1 0 0 / 0.03) inset, 0 10px 30px oklch(0 0 0 / 0.35));
 
         /* ──────────────────────────────────────────────────────────
            Backwards-compat aliases — legacy Forge names that existing
@@ -150,33 +149,27 @@
         --input-bg:       var(--background-primary);
         --font-ui:        var(--font-interface);
         --font-mono:      var(--font-monospace);
-      }
 
-      [data-theme="light"] {
-        /* Light-theme palette — same values as before, but under the
-           new Obsidian token names. Aliases above cascade through. */
-        --background-primary:            oklch(0.985 0.004 80);
-        --background-secondary:          oklch(0.965 0.004 80);
-        --background-secondary-alt:      oklch(0.975 0.008 80);
-        /* Light-theme variants of Obsidian's mono-rgb tinting —
-           translucent black over the panel surface keeps hover/active
-           highlights calibrated to whatever surface they overlay. */
-        --background-modifier-hover:     rgba(0, 0, 0, 0.05);
-        --background-modifier-active:    rgba(0, 0, 0, 0.09);
-        --background-modifier-border:    rgba(0, 0, 0, 0.12);
-        /* Light theme's soft divider is a touch lighter than the
-           hard border. Expose it as --divider-color override. */
-        --divider-color:                 oklch(0.92  0.005 80);
+        /* `--color-*` aliases — referenced by SettingsPanelView and a
+           few other components. Bridged to themed tokens so they
+           inherit the active palette instead of falling through to
+           hardcoded #e0e0e0/#fdd/#900 fallbacks. */
+        --color-border:   var(--background-modifier-border);
+        --color-bg:       var(--background-primary);
+        --color-accent:   var(--interactive-accent);
+        --color-error:    var(--risk);
+        --color-error-bg: var(--risk-soft);
 
-        --text-normal:                   oklch(0.22  0.012 260);
-        --text-muted:                    oklch(0.42  0.012 260);
-        --text-faint:                    oklch(0.58  0.012 260);
-
-        --interactive-accent:            oklch(0.62  0.15  45);
-        --interactive-accent-soft:       oklch(0.62  0.15  45 / 0.14);
-        --interactive-accent-ink:        oklch(0.98  0.01  60);
-
-        --shadow: 0 1px 0 oklch(0 0 0 / 0.03) inset, 0 10px 30px oklch(0 0 0 / 0.06);
+        /* Bases plugin aliases — bases/* .tsx files use these names
+           rather than the canonical Obsidian/--bg/--fg ones. Bridged
+           so picking any kernel theme repaints the bases UI too. */
+        --bg-primary:     var(--background-primary);
+        --bg-raised-dim:  var(--background-secondary-alt);
+        --bg-input:       var(--background-primary);
+        --bg-selection:   var(--interactive-accent-soft);
+        --border-subtle:  var(--background-modifier-border);
+        --fg-primary:     var(--text-normal);
+        --fg-on-accent:   var(--interactive-accent-ink);
       }
 
       :root,

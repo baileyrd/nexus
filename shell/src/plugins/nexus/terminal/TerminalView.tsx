@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
 import type { KernelAPI, EventsAPI } from '../../../types/plugin'
 import { useTerminalStore } from './terminalStore'
+import { useThemeStore } from '../../../stores/themeStore'
 
 const PLUGIN_ID = 'com.nexus.terminal'
 // Handler ids verified in crates/nexus-terminal/src/core_plugin.rs.
@@ -20,20 +21,20 @@ const CMD_SEND_RAW_INPUT = 'send_raw_input'
 // LineBuffer.pending until a newline arrives.
 const CMD_READ_RAW_SINCE = 'read_raw_since'
 
-// WI-12: output is now event-driven via the
+// WI-12: output is event-driven via the
 // `com.nexus.terminal.output.<session_id>` topic — bytes land in xterm
 // through `useTerminalStore.handleStreamChunk` (subscription wired in
-// index.ts::activate). The pump path below is kept as a defensive 5s
-// heartbeat: it bootstraps any output that landed before the session
-// was wired, AND it acts as a catch-up channel if the broadcast
-// channel ever drops chunks (RecvError::Lagged). 5s is slow enough to
-// be invisible cost on an idle session yet fast enough to mask a
-// dropped subscription before the user notices typing lag.
+// index.ts::activate). Dropped chunks are handled by the store's
+// `recoverFn` via `read_raw_since` snapshots.
+//
+// The kernel only emits stream events inside `pump` /
+// `read_raw_since` handlers (see core_plugin.rs:43) — there's no
+// autonomous PTY reader on the Rust side. So we still need a slow
+// heartbeat to keep the PTY draining; without it, input gets sent
+// but no output ever comes back and the terminal looks frozen.
+// 5s is slow enough to be invisible cost, fast enough that the user
+// doesn't perceive lag if a stream chunk is ever dropped.
 const PTY_POLL_INTERVAL_MS = 5000
-// PTY-read deadline folded into each `read_raw_since` call. Kept
-// short so each tick releases the server Mutex long enough for
-// concurrent send_raw_input calls (typing) to acquire it —
-// std::sync::Mutex is unfair and would otherwise starve input.
 const PTY_PUMP_TIMEOUT_MS = 30
 
 interface TerminalViewProps {
@@ -78,7 +79,7 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     // ── Theme: resolve CSS tokens against the root element. xterm
     // needs concrete values because the viewport is a canvas, not a
     // DOM tree that participates in CSS variable cascade.
-    const theme = {
+    const buildTheme = () => ({
       // Transparent so panel background (--bg-raised via CSS) wins —
       // xterm blends ANSI bg colours on top of this.
       background: '#00000000',
@@ -86,7 +87,8 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       cursor: readCssVar('--accent', '#7aa2f7'),
       cursorAccent: readCssVar('--bg-raised', '#1a1a1a'),
       selectionBackground: readCssVar('--accent-soft', '#3a3a5a'),
-    }
+    })
+    const theme = buildTheme()
 
     const fontFamily =
       readCssVar('--f-mono', 'ui-monospace, SFMono-Regular, Menlo, monospace')
@@ -104,6 +106,21 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     term.loadAddon(fit)
     term.open(container)
     term.focus()
+
+    // Re-apply theme + font when the kernel theme switches. Subscribed
+    // to themeStore.resolvedVariables — that field flips after every
+    // hydrate, which fires both on mount and on `THEME_CHANGED_EVENT`.
+    // xterm's `options.theme` and `options.fontFamily` setters trigger
+    // a full canvas repaint, so the terminal repaints in lock-step
+    // with the rest of the chrome.
+    const unsubTheme = useThemeStore.subscribe((s, prev) => {
+      if (s.resolvedVariables === prev.resolvedVariables) return
+      term.options.theme = buildTheme()
+      term.options.fontFamily = readCssVar(
+        '--f-mono',
+        'ui-monospace, SFMono-Regular, Menlo, monospace',
+      )
+    })
     const focusTerm = () => {
       term.textarea?.focus()
     }
@@ -116,12 +133,11 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       // ResizeObserver below will retry on the next frame.
     }
 
-    // Monotonic byte offset of the last PTY byte we've written into
-    // xterm via the *pump* path. Advanced by each tick's response
-    // cursor. WI-12: the event-stream path manages its own cursor
-    // inside terminalStore — the two coexist; pump is now a 5s
-    // defensive heartbeat. Number (not BigInt) is sufficient for any
-    // realistic session lifetime — 2^53 bytes is ~9 PB.
+    // Local cursor used by both the on-mount drain and the 5s
+    // heartbeat. The store's `streams[id].lastCursor` is the
+    // authoritative position the event-stream path has reached;
+    // `tick()` syncs from it before each kernel call so the pump
+    // never re-fetches bytes the stream already delivered.
     let cursor = 0
     let disposed = false
     let pollTimer: number | null = null
@@ -169,18 +185,25 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     })
 
     /**
-     * One poll tick — defensive only post-WI-12. `read_raw_since`
-     * returns whatever bytes the pump path hasn't yet acknowledged;
-     * if the event stream is healthy `resp.data` will normally be
-     * empty. When it's NOT empty (boot-time backlog, or a dropped
-     * stream chunk) we write the bytes and advance both cursors so
-     * the store and the pump stay in coordinate-lockstep — see
-     * `advanceCursor`.
+     * One pump tick. Two jobs:
+     *   1. Read any PTY bytes the shell-side stream subscriber hasn't
+     *      already covered (boot backlog, dropped broadcast chunks).
+     *   2. Keep the kernel's PTY draining — the kernel publishes
+     *      stream events only inside this handler, so without
+     *      periodic ticks the shell would never see output past the
+     *      first tick.
+     *
+     * `cursor` is synced up from the store's `lastCursor` (advanced
+     * by the event-stream path) so we never re-fetch bytes the
+     * stream already delivered.
      */
     const tick = async () => {
       if (disposed) return
       const id = useTerminalStore.getState().sessionId
       if (!id) return
+      const streamCursor =
+        useTerminalStore.getState().streams[id]?.lastCursor ?? 0
+      if (streamCursor > cursor) cursor = streamCursor
       let resp: ReadRawSinceResponse
       try {
         resp = await kernel.invoke<ReadRawSinceResponse>(
@@ -189,30 +212,18 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
           { id, cursor, timeout_ms: PTY_PUMP_TIMEOUT_MS },
         )
       } catch {
-        // PTY may be closed mid-tick (workspace close race). Swallow;
-        // the outer close handler will clear the session id.
         return
       }
-      // Cursor arrives as number or string depending on the IPC
-      // encoder; Number() handles both (string → parse, number →
-      // identity). NaN would reset us to 0, which is safe.
       const nextCursor = Number(resp.cursor)
       cursor = Number.isFinite(nextCursor) ? nextCursor : cursor
-      if (resp.data.length === 0) {
-        // Still publish the cursor so the store knows we're caught
-        // up — useful when the stream subscriber's seq baselines
-        // after a recovery.
-        useTerminalStore.getState().advanceCursor(id, cursor)
-        return
+      if (resp.data.length > 0) {
+        term.write(new Uint8Array(resp.data))
       }
-      term.write(new Uint8Array(resp.data))
       useTerminalStore.getState().advanceCursor(id, cursor)
     }
 
-    // Kick off the first pump immediately to drain anything that
-    // landed before this view mounted (the kernel-side pump emits a
-    // stream event too, but the store may not have a sink registered
-    // yet at that instant). Subsequent pumps run on the heartbeat.
+    // Drain immediately to cover anything that landed before mount,
+    // then tick on the heartbeat.
     void tick()
     pollTimer = window.setInterval(() => {
       void tick()
@@ -278,6 +289,9 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       } catch {}
       try {
         sinkUnsub?.()
+      } catch {}
+      try {
+        unsubTheme()
       } catch {}
       try {
         term.dispose()

@@ -22,6 +22,24 @@ pub const BUILTIN_DARK_TOML: &str = include_str!("../themes/nexus-dark/NEXUS.tom
 /// Bundled high-contrast theme manifest — see `themes/nexus-forge/NEXUS.toml`.
 pub const BUILTIN_FORGE_TOML: &str = include_str!("../themes/nexus-forge/NEXUS.toml");
 
+/// Bundled Solarized Dark theme manifest.
+pub const BUILTIN_SOLARIZED_DARK_TOML: &str =
+    include_str!("../themes/nexus-solarized-dark/NEXUS.toml");
+
+/// Bundled Solarized Light theme manifest.
+pub const BUILTIN_SOLARIZED_LIGHT_TOML: &str =
+    include_str!("../themes/nexus-solarized-light/NEXUS.toml");
+
+/// Bundled Nord theme manifest.
+pub const BUILTIN_NORD_TOML: &str = include_str!("../themes/nexus-nord/NEXUS.toml");
+
+/// Bundled Dracula theme manifest.
+pub const BUILTIN_DRACULA_TOML: &str = include_str!("../themes/nexus-dracula/NEXUS.toml");
+
+/// Bundled Tomorrow Night theme manifest.
+pub const BUILTIN_TOMORROW_NIGHT_TOML: &str =
+    include_str!("../themes/nexus-tomorrow-night/NEXUS.toml");
+
 /// Identifier for the bundled light theme.
 pub const BUILTIN_LIGHT_ID: &str = "nexus-light";
 
@@ -30,6 +48,21 @@ pub const BUILTIN_DARK_ID: &str = "nexus-dark";
 
 /// Identifier for the bundled high-contrast theme.
 pub const BUILTIN_FORGE_ID: &str = "nexus-forge";
+
+/// Identifier for the bundled Solarized Dark theme.
+pub const BUILTIN_SOLARIZED_DARK_ID: &str = "nexus-solarized-dark";
+
+/// Identifier for the bundled Solarized Light theme.
+pub const BUILTIN_SOLARIZED_LIGHT_ID: &str = "nexus-solarized-light";
+
+/// Identifier for the bundled Nord theme.
+pub const BUILTIN_NORD_ID: &str = "nexus-nord";
+
+/// Identifier for the bundled Dracula theme.
+pub const BUILTIN_DRACULA_ID: &str = "nexus-dracula";
+
+/// Identifier for the bundled Tomorrow Night theme.
+pub const BUILTIN_TOMORROW_NIGHT_ID: &str = "nexus-tomorrow-night";
 
 /// A loaded theme package — identifier + parsed manifest + source path if any.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +168,11 @@ impl Theme {
             Self::builtin(BUILTIN_LIGHT_ID, BUILTIN_LIGHT_TOML),
             Self::builtin(BUILTIN_DARK_ID, BUILTIN_DARK_TOML),
             Self::builtin(BUILTIN_FORGE_ID, BUILTIN_FORGE_TOML),
+            Self::builtin(BUILTIN_SOLARIZED_DARK_ID, BUILTIN_SOLARIZED_DARK_TOML),
+            Self::builtin(BUILTIN_SOLARIZED_LIGHT_ID, BUILTIN_SOLARIZED_LIGHT_TOML),
+            Self::builtin(BUILTIN_NORD_ID, BUILTIN_NORD_TOML),
+            Self::builtin(BUILTIN_DRACULA_ID, BUILTIN_DRACULA_TOML),
+            Self::builtin(BUILTIN_TOMORROW_NIGHT_ID, BUILTIN_TOMORROW_NIGHT_TOML),
         ]
     }
 

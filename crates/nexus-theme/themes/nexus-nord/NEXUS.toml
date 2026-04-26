@@ -1,0 +1,48 @@
+[theme]
+name = "Nord"
+version = "1.0.0"
+author = "Arctic Ice Studio (palette) · Nexus (port)"
+description = "Nord — arctic, north-bluish color palette"
+license = "MIT"
+nexus_min_version = "0.1.0"
+nexus_max_version = "*"
+display_name = "Nord"
+category = "dark"
+supports = ["dark"]
+
+[variables]
+"--nx-color-primary" = "#88c0d0"
+"--nx-color-primary-light" = "#a3d4e0"
+"--nx-color-primary-dark" = "#5e81ac"
+"--nx-color-primary-soft" = "rgba(136, 192, 208, 0.16)"
+"--nx-bg-primary" = "#2e3440"
+"--nx-bg-secondary" = "#3b4252"
+"--nx-bg-tertiary" = "#434c5e"
+"--nx-bg-overlay" = "rgba(46, 52, 64, 0.75)"
+"--nx-bg-elevated" = "#4c566a"
+"--nx-text-primary" = "#eceff4"
+"--nx-text-secondary" = "#e5e9f0"
+"--nx-text-tertiary" = "#d8dee9"
+"--nx-text-muted" = "#7b8497"
+"--nx-text-inverted" = "#2e3440"
+"--nx-interactive-hover" = "rgba(216, 222, 233, 0.08)"
+"--nx-interactive-active" = "rgba(216, 222, 233, 0.16)"
+"--nx-border" = "rgba(216, 222, 233, 0.14)"
+"--nx-syntax-keyword" = "#81a1c1"
+"--nx-syntax-string" = "#a3be8c"
+"--nx-syntax-comment" = "#616e88"
+"--nx-syntax-number" = "#b48ead"
+"--nx-syntax-function" = "#88c0d0"
+"--nx-shadow-sm" = "0 1px 2px rgba(0, 0, 0, 0.30)"
+"--nx-shadow-md" = "0 4px 6px rgba(0, 0, 0, 0.40)"
+"--nx-shadow-lg" = "0 10px 15px rgba(0, 0, 0, 0.50)"
+"--nx-graph-grid" = "rgba(216, 222, 233, 0.05)"
+
+[tags]
+keywords = ["nord", "arctic", "blue", "dark"]
+color_temperature = "cool"
+contrast_level = "aa"
+use_case = ["coding", "writing"]
+
+[version_history]
+"1.0.0" = "Initial release"

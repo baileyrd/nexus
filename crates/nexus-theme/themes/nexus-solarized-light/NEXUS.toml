@@ -1,0 +1,48 @@
+[theme]
+name = "Solarized Light"
+version = "1.0.0"
+author = "Ethan Schoonover (palette) · Nexus (port)"
+description = "Solarized Light — warm parchment tones for daylight reading"
+license = "MIT"
+nexus_min_version = "0.1.0"
+nexus_max_version = "*"
+display_name = "Solarized Light"
+category = "light"
+supports = ["light"]
+
+[variables]
+"--nx-color-primary" = "#268bd2"
+"--nx-color-primary-light" = "#5fb3e7"
+"--nx-color-primary-dark" = "#1f6f9f"
+"--nx-color-primary-soft" = "rgba(38, 139, 210, 0.14)"
+"--nx-bg-primary" = "#fdf6e3"
+"--nx-bg-secondary" = "#eee8d5"
+"--nx-bg-tertiary" = "#e3dcc3"
+"--nx-bg-overlay" = "rgba(7, 54, 66, 0.45)"
+"--nx-bg-elevated" = "#fdf6e3"
+"--nx-text-primary" = "#073642"
+"--nx-text-secondary" = "#586e75"
+"--nx-text-tertiary" = "#657b83"
+"--nx-text-muted" = "#93a1a1"
+"--nx-text-inverted" = "#fdf6e3"
+"--nx-interactive-hover" = "rgba(7, 54, 66, 0.05)"
+"--nx-interactive-active" = "rgba(7, 54, 66, 0.10)"
+"--nx-border" = "rgba(7, 54, 66, 0.14)"
+"--nx-syntax-keyword" = "#cb4b16"
+"--nx-syntax-string" = "#859900"
+"--nx-syntax-comment" = "#93a1a1"
+"--nx-syntax-number" = "#d33682"
+"--nx-syntax-function" = "#268bd2"
+"--nx-shadow-sm" = "0 1px 2px rgba(0, 0, 0, 0.06)"
+"--nx-shadow-md" = "0 4px 6px rgba(0, 0, 0, 0.08)"
+"--nx-shadow-lg" = "0 10px 15px rgba(0, 0, 0, 0.10)"
+"--nx-graph-grid" = "rgba(7, 54, 66, 0.06)"
+
+[tags]
+keywords = ["solarized", "light", "low-contrast", "classic"]
+color_temperature = "warm"
+contrast_level = "aa"
+use_case = ["writing", "reviewing"]
+
+[version_history]
+"1.0.0" = "Initial release"

@@ -2,7 +2,7 @@
 //
 // WI-43: Plugin curation catalog.
 //
-// Single source of truth for the shell's 38 built-in plugin registrations,
+// Single source of truth for the shell's 39 built-in plugin registrations,
 // split into a default-on set (loaded at boot) and a default-off set
 // (shipped but dormant, opt-in via Settings > Plugins).
 //
@@ -11,7 +11,7 @@
 // to the persisted `plugins.enabled: string[]` config value.
 //
 // Acceptance guard: `grep -c "^import.*Plugin" shell/src/plugins/catalog.ts`
-// must equal 38.
+// must equal 39.
 
 // Plugin contract type. The `import type` is split across two lines so
 // the WI-43 acceptance grep (`grep -c "^import.*Plugin" catalog.ts` == 38)
@@ -27,6 +27,7 @@ import { fileSystemServicePlugin }    from './core/fileSystemService'
 import { settingsPlugin }             from './core/settings'
 import { capabilityPromptPlugin }     from './core/capabilityPrompt'
 import { themeServicePlugin }         from './core/themeService'
+import { zoomPlugin }                 from './core/zoom'
 
 // ── Nexus plugins ─────────────────────────────────────────────────────────────
 import { workspacePlugin } from './nexus/workspace'
@@ -63,7 +64,7 @@ import { processesPlugin } from './nexus/processes'
 import { statusBarPlugin } from './nexus/statusBar'
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Default-on set (19) — loaded unconditionally at boot.
+// Default-on set (22) — loaded unconditionally at boot.
 //
 // Six core services, plus the baseline shell chrome + editing surface a
 // personal note-taking workflow can't live without.
@@ -76,6 +77,7 @@ export const DEFAULT_ON_PLUGINS: Registered[] = [
   settingsPlugin,
   capabilityPromptPlugin,
   themeServicePlugin,
+  zoomPlugin,
   // Workspace + git
   workspacePlugin,
   gitStatusPlugin,
@@ -95,12 +97,18 @@ export const DEFAULT_ON_PLUGINS: Registered[] = [
   paneModePlugin,
   // Search
   searchPlugin,
+  // Canvas (claims `.canvas` extension; otherwise files render as JSON)
+  canvasPlugin,
+  // Bases (claims `.bases` directories; otherwise the editor tries to
+  // `read_file` on a directory and the IPC bridge surfaces the EISDIR
+  // as a spurious "plugin crashed during IPC call".)
+  basesPlugin,
   // Plugin management (required to turn the rest on)
   pluginsMgmtPlugin,
 ]
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Default-off set (17) — shipped but dormant. Enable per-row from
+// Default-off set (15) — shipped but dormant. Enable per-row from
 // Settings > Plugins; enabled ids are persisted into the
 // `plugins.enabled: string[]` config value and picked up on next boot.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -114,8 +122,6 @@ export const DEFAULT_OFF_PLUGINS: Registered[] = [
   processesPlugin,
   graphPlugin,
   graphGlobalPlugin,
-  canvasPlugin,
-  basesPlugin,
   backlinksPlugin,
   bookmarksPlugin,
   outgoingLinksPlugin,

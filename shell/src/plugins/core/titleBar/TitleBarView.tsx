@@ -6,6 +6,8 @@
 import { useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Ic } from '../../../shell/icons'
+import { getRegistry } from '../../../host/shellRegistry'
+import { useContextKey } from '../../../host/ContextKeyService'
 
 export function TitleBarView() {
   const [isMaximized, setIsMaximized] = useState(false)
@@ -20,6 +22,15 @@ export function TitleBarView() {
   }, [])
 
   const win = getCurrentWindow()
+  // `nexus.rightPanel.toggle` keeps the visible context key in sync via
+  // workspace.on('layout-change'), so the button's pressed state mirrors
+  // the dock without us having to read the workspace tree directly.
+  const rightPanelVisible = useContextKey('nexus.rightPanel.visible') as
+    | boolean
+    | undefined
+  const exec = (commandId: string) => {
+    getRegistry()?.commands.execute(commandId)
+  }
 
   return (
     <div className="forge-topbar" data-tauri-drag-region>
@@ -39,7 +50,14 @@ export function TitleBarView() {
       <div className="win-controls">
         <button className="icon-btn" title="Tweaks"><Ic.sliders /></button>
         <button className="icon-btn" title="Backlinks"><Ic.link /></button>
-        <button className="icon-btn" title="Right panel"><Ic.panel /></button>
+        <button
+          className="icon-btn"
+          onClick={() => exec('nexus.rightPanel.toggle')}
+          title={rightPanelVisible ? 'Hide right panel' : 'Show right panel'}
+          aria-pressed={rightPanelVisible ?? false}
+        >
+          <Ic.panel />
+        </button>
         <div style={{ width: 14 }} />
         <button className="icon-btn" onClick={() => win.minimize()} title="Minimize"><Ic.min /></button>
         <button

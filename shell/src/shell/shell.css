@@ -204,12 +204,64 @@ body {
   background: var(--panel-bg, #252526);
   border: 1px solid var(--border, #454545);
   border-radius: 6px;
-  width: min(800px, 90vw);
-  height: min(600px, 85vh);
+  width: min(1000px, 92vw);
+  height: min(680px, 88vh);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.settings-rail {
+  flex-shrink: 0;
+  width: 220px;
+  border-right: 1px solid var(--border, #454545);
+  overflow-y: auto;
+  padding: 12px 0;
+  background: var(--panel-bg-alt, #1f1f20);
+}
+
+.settings-rail-group-header {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted, #9a9a9a);
+  padding: 14px 16px 6px;
+  user-select: none;
+  text-transform: uppercase;
+}
+
+.settings-rail-item {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--shell-fg, #cccccc);
+  text-align: left;
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.settings-rail-item:hover { background: var(--list-hover, #2a2d2e); }
+.settings-rail-item--active { background: var(--list-active, #37373d); }
+
+.settings-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.settings-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border, #454545);
+  flex-shrink: 0;
 }
 
 .settings-header {
@@ -1535,7 +1587,8 @@ body {
   border-radius: 4px;
   color: oklch(0.88 0.04 80);
 }
-[data-theme="light"] .doc code { color: oklch(0.3 0.05 30); }
+/* `.doc code` color is driven by the active kernel theme via
+   `--text-normal`; no per-mode override needed. */
 .doc pre {
   font-family: var(--f-mono);
   background: var(--bg-raised);

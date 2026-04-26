@@ -24,6 +24,16 @@ platform_specific = ["macos", "windows"]
 "--nx-text-tertiary" = "#7A7A7A"
 "--nx-text-muted" = "#A0A0A0"
 "--nx-text-inverted" = "#FFFFFF"
+# Translucent overlays — black tints for hover/active so they
+# read against any light surface without baking in a fill color.
+"--nx-interactive-hover" = "rgba(0, 0, 0, 0.05)"
+"--nx-interactive-active" = "rgba(0, 0, 0, 0.09)"
+"--nx-border" = "rgba(0, 0, 0, 0.12)"
+"--nx-bg-overlay" = "rgba(0, 0, 0, 0.5)"
+"--nx-color-primary-soft" = "rgba(74, 144, 226, 0.14)"
+"--nx-shadow-sm" = "0 1px 2px rgba(0, 0, 0, 0.06)"
+"--nx-shadow-md" = "0 4px 6px rgba(0, 0, 0, 0.08)"
+"--nx-shadow-lg" = "0 10px 15px rgba(0, 0, 0, 0.10)"
 
 [typography]
 sans_font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"

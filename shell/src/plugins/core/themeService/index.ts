@@ -31,16 +31,27 @@ export const themeServicePlugin: Plugin = {
   },
 
   async activate(api: PluginAPI) {
-    // Hydrate before subscribing so the first event echo (if it
-    // arrives mid-hydrate) doesn't race against an empty store.
-    try {
-      await useThemeStore.getState().hydrate(api)
-    } catch (err) {
-      console.warn(
-        '[core.theme-service] hydrate failed; using shell.css defaults',
-        err,
-      )
+    // The kernel only finishes booting after `nexus.workspace` opens a
+    // forge. This plugin runs eagerly at startup, so we hydrate iff
+    // the kernel is already up (e.g. persisted-workspace path where
+    // `workspace:opened` fired before our listener registered) and
+    // also subscribe to `workspace:opened` for the cold-start path.
+    const tryHydrate = async () => {
+      if (!(await api.kernel.available())) return
+      try {
+        await useThemeStore.getState().hydrate(api)
+      } catch (err) {
+        console.warn(
+          '[core.theme-service] hydrate failed; using shell.css defaults',
+          err,
+        )
+      }
     }
+    await tryHydrate()
+
+    api.events.on('workspace:opened', () => {
+      void tryHydrate()
+    })
 
     // Subscribe with the prefix — handler routes by topic. The
     // payload IS the ThemeConfig snapshot (theme_id, mode,

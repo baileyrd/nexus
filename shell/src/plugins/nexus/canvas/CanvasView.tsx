@@ -154,7 +154,11 @@ export function CanvasView({ relpath, client }: Props) {
     let lastWidth = 0
     let lastHeight = 0
     let dpr = window.devicePixelRatio || 1
-    const theme = readTheme(container)
+    // Re-read on every frame so theme switches are visible without a
+    // remount. `getComputedStyle` is cheap (browser caches the
+    // computed values) and only the few specific custom properties
+    // listed in `readTheme` are queried.
+    let theme = readTheme(container)
 
     const resize = () => {
       const rect = container.getBoundingClientRect()
@@ -174,6 +178,7 @@ export function CanvasView({ relpath, client }: Props) {
     const tick = () => {
       if (stopped) return
       resize()
+      theme = readTheme(container)
       render(
         {
           ctx,

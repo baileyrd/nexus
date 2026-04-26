@@ -1,0 +1,48 @@
+[theme]
+name = "Tomorrow Night"
+version = "1.0.0"
+author = "Chris Kempson (palette) · Nexus (port)"
+description = "Tomorrow Night — soft pastel dark theme"
+license = "MIT"
+nexus_min_version = "0.1.0"
+nexus_max_version = "*"
+display_name = "Tomorrow Night"
+category = "dark"
+supports = ["dark"]
+
+[variables]
+"--nx-color-primary" = "#81a2be"
+"--nx-color-primary-light" = "#a3bdd2"
+"--nx-color-primary-dark" = "#5f7d97"
+"--nx-color-primary-soft" = "rgba(129, 162, 190, 0.16)"
+"--nx-bg-primary" = "#1d1f21"
+"--nx-bg-secondary" = "#282a2e"
+"--nx-bg-tertiary" = "#373b41"
+"--nx-bg-overlay" = "rgba(0, 0, 0, 0.65)"
+"--nx-bg-elevated" = "#373b41"
+"--nx-text-primary" = "#c5c8c6"
+"--nx-text-secondary" = "#b4b7b4"
+"--nx-text-tertiary" = "#969896"
+"--nx-text-muted" = "#707880"
+"--nx-text-inverted" = "#1d1f21"
+"--nx-interactive-hover" = "rgba(197, 200, 198, 0.06)"
+"--nx-interactive-active" = "rgba(197, 200, 198, 0.12)"
+"--nx-border" = "rgba(197, 200, 198, 0.10)"
+"--nx-syntax-keyword" = "#b294bb"
+"--nx-syntax-string" = "#b5bd68"
+"--nx-syntax-comment" = "#969896"
+"--nx-syntax-number" = "#de935f"
+"--nx-syntax-function" = "#81a2be"
+"--nx-shadow-sm" = "0 1px 2px rgba(0, 0, 0, 0.30)"
+"--nx-shadow-md" = "0 4px 6px rgba(0, 0, 0, 0.40)"
+"--nx-shadow-lg" = "0 10px 15px rgba(0, 0, 0, 0.50)"
+"--nx-graph-grid" = "rgba(197, 200, 198, 0.05)"
+
+[tags]
+keywords = ["tomorrow", "pastel", "dark", "soft"]
+color_temperature = "neutral"
+contrast_level = "aa"
+use_case = ["coding", "writing"]
+
+[version_history]
+"1.0.0" = "Initial release"

@@ -1,12 +1,7 @@
 // src/main.tsx
 
-// Wipe any persisted themeStore state before the store imports itself
-// and rehydrates. Earlier runs with core.theme-service loaded flipped
-// data-theme='light' via the DOM and, on some paths, seeded this key
-// with 'light'. Until we ship a theme-switcher UI, force dark on every
-// boot. Runs before any module import so nothing reads stale values.
-try { localStorage.removeItem('shell-theme') } catch {}
-document.documentElement.dataset.theme = 'dark'
+// Color tokens come from the kernel theme via the `--nx-*` bridge in
+// index.html. The legacy `data-theme` attribute is no longer used.
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
@@ -14,6 +9,7 @@ import { PluginRegistry } from './host/PluginRegistry'
 import { ExtensionHost } from './host/ExtensionHost'
 import { contextKeyService } from './host/ContextKeyService'
 import { setRegistry } from './host/shellRegistry'
+import { setHost } from './host/shellHost'
 import { installBodyClasses } from './host/bodyClasses'
 import { eventBus } from './host/EventBus'
 import { invoke } from '@tauri-apps/api/core'
@@ -66,8 +62,9 @@ async function boot() {
   reg.keybindings.bindStorage(keybindingOverrideStorage)
   void reg.keybindings.loadOverrides()
 
-  // Expose via singleton — no circular import
+  // Expose via singletons — no circular import
   setRegistry(reg)
+  setHost(host)
 
   // ── E2E test hook ─────────────────────────────────────────────────────────
   // Gated on VITE_E2E alone. The e2e build step (`pnpm e2e:build`) sets
@@ -117,12 +114,6 @@ async function boot() {
     }
     console.info('[Boot] __nexusShellApi attached (VITE_E2E=true)')
   }
-
-  // Force dark theme on boot. themeStore may have 'light' persisted
-  // from when core.theme-service was auto-flipping based on OS
-  // preference, and we have no theme-switcher UI to correct it yet.
-  // Applies data-theme="dark" to <html> so shell.css :root tokens win.
-  useThemeStore.getState().setTheme('dark')
 
   // Terminal visibility on boot: it is a Leaf inside the right sidedock
   // (see nexus.terminal). The user toggles it via Ctrl+Backquote or the

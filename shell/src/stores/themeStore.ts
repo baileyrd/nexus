@@ -109,15 +109,14 @@ interface ThemeStore {
 // fresh from the engine on every boot).
 type PersistedShape = Pick<ThemeStore, 'theme' | 'density'>
 
-function applyToDom(theme: ThemeMode, density: Density) {
-  // No-op in non-DOM environments (node:test). The kernel-sync
-  // path is unit-tested separately; live DOM application is e2e.
+function applyToDom(_theme: ThemeMode, density: Density) {
+  // The legacy `data-theme` attribute is no longer written — the
+  // kernel theme drives all color tokens via the `--nx-*` bridge in
+  // index.html. We still write `data-density` because the density
+  // scale (compact/cozy/spacious) lives in index.html, not the
+  // kernel theme registry.
   if (typeof document === 'undefined') return
-  const root = document.documentElement
-  // 'system' has no concrete CSS attr — fall back to the resolver's
-  // last decision (data-theme is overwritten by kernel hydrate too).
-  if (theme !== 'system') root.dataset.theme = theme
-  root.dataset.density = density
+  document.documentElement.dataset.density = density
 }
 
 // Push the resolved variable cascade onto :root. Cheap; Chromium
@@ -168,20 +167,22 @@ export const useThemeStore = create<ThemeStore>()(
       appliedVariableNames: [],
 
       hydrate: async (api: PluginAPI) => {
-        // Three parallel round-trips: the config snapshot (cheap), the
-        // list of available themes, and the list of available snippets
-        // (Part 3 settings UI consumes both). The `compute_variables`
-        // call below resolves the cascade for the currently-active
-        // theme + snippets; this is what actually populates the :root
-        // variable map. Snippet listing is best-effort — if the kernel
-        // plugin isn't installed we degrade to an empty list rather
-        // than failing the whole hydrate.
+        // Three parallel round-trips: the config snapshot, the list of
+        // available themes, and the list of snippets. Each one is
+        // best-effort — if the `com.nexus.theme` kernel plugin isn't
+        // loaded (or returns an error) we degrade to defaults rather
+        // than throwing, which would leave `loaded: false` forever and
+        // strand the Appearance UI on "Loading…".
         const [config, availableThemes, availableSnippets] = await Promise.all([
-          api.kernel.invoke<KernelThemeConfig>(
-            THEME_PLUGIN_ID,
-            'get_theme_config',
-            {},
-          ),
+          api.kernel
+            .invoke<KernelThemeConfig>(THEME_PLUGIN_ID, 'get_theme_config', {})
+            .catch((err) => {
+              console.warn(
+                '[themeStore] get_theme_config failed; using defaults',
+                err,
+              )
+              return null
+            }),
           api.kernel
             .invoke<ThemeManifestEntry[]>(
               THEME_PLUGIN_ID,
@@ -198,16 +199,23 @@ export const useThemeStore = create<ThemeStore>()(
             .catch(() => [] as AvailableSnippet[]),
         ])
 
-        const variables = await api.kernel
-          .invoke<Record<string, string>>(THEME_PLUGIN_ID, 'compute_variables', {
-            theme_id: config.theme_id,
-            enabled_snippets: config.enabled_snippets,
-          })
-          .catch(() => ({} as Record<string, string>))
+        const variables =
+          config !== null
+            ? await api.kernel
+                .invoke<Record<string, string>>(
+                  THEME_PLUGIN_ID,
+                  'compute_variables',
+                  {
+                    theme_id: config.theme_id,
+                    enabled_snippets: config.enabled_snippets,
+                  },
+                )
+                .catch(() => ({} as Record<string, string>))
+            : ({} as Record<string, string>)
 
         set({
-          activeThemeId: config.theme_id,
-          enabledSnippets: config.enabled_snippets,
+          activeThemeId: config?.theme_id ?? null,
+          enabledSnippets: config?.enabled_snippets ?? [],
           availableThemes,
           availableSnippets,
           resolvedVariables: variables,
@@ -235,14 +243,29 @@ export const useThemeStore = create<ThemeStore>()(
 
       setMode: async (api: PluginAPI, mode: ThemeMode) => {
         await api.kernel.invoke(THEME_PLUGIN_ID, 'set_mode', { mode })
-        // No echo body to apply directly — wait for the .changed event
-        // to re-hydrate, but also nudge the legacy local field so the
-        // existing data-theme attr cascade behaves sensibly in the
-        // meantime.
-        if (mode !== 'system') {
-          applyToDom(mode, get().density)
-          set({ theme: mode })
-        }
+        // The kernel records the mode preference but doesn't auto-pick
+        // a theme — the chrome only repaints when the active theme
+        // changes. Find the first available theme whose category
+        // matches the requested mode and apply it. 'system' resolves
+        // via matchMedia. Caller's UI may reflect mode in radio state
+        // independently; we only persist the local `theme` slot for
+        // backwards-compat with code that still reads it.
+        set({ theme: mode })
+        if (typeof document === 'undefined') return
+        const desired: 'light' | 'dark' =
+          mode === 'system'
+            ? (typeof window !== 'undefined' &&
+              window.matchMedia?.('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light')
+            : mode
+        const themes = get().availableThemes
+        const active = themes.find((t) => t.id === get().activeThemeId)
+        const activeCat =
+          typeof active?.category === 'string' ? active.category : undefined
+        if (activeCat === desired) return
+        const match = themes.find((t) => t.category === desired)
+        if (match) await get().setActiveTheme(api, match.id)
       },
 
       toggleSnippet: async (api: PluginAPI, snippetId: string) => {
