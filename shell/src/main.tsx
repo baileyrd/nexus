@@ -151,6 +151,7 @@ async function boot() {
   }
 
   console.info(`[Boot] Loading ${plugins.length} plugins...`)
+  console.info(`[Boot] plugin ids: ${plugins.map((p) => p.manifest.id).join(', ')}`)
   await host.loadAll(plugins)
 
   const all = host.listAll()
