@@ -1,5 +1,7 @@
 # Nexus as a Personal AI Memory Layer
 
+> **Status: exploratory.** Indexed in [PRDs/BACKLOG.md → "Future directions"](PRDs/BACKLOG.md#future-directions-exploratory-not-phased). This file is the design rationale; promote a piece into a scoped backlog item when work begins.
+
 > Direction inspired by [Pieces.app](https://pieces.app) — make Nexus
 > a personal AI memory layer with capture from everywhere, contextual
 > recall, and a copilot that has access to your full history. Captured

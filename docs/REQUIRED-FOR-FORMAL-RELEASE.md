@@ -1,5 +1,7 @@
 # Required for Formal Release
 
+> **Tracked in** [PRDs/BACKLOG.md → "Formal release scope (deferred)"](PRDs/BACKLOG.md#formal-release-scope-deferred). This file holds the full design / effort detail for WI-41, WI-42, WI-44, WI-46; BACKLOG.md indexes them.
+
 **Status:** Deferred — not needed for personal-tool use
 **Date:** 2026-04-24
 **Context:** Nexus is currently a personal tool. The work items captured here are extracted from the original Phase 5 plan and apply only if/when Nexus is prepared for external distribution.

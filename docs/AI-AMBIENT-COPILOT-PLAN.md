@@ -1,5 +1,7 @@
 # Ambient Copilot — UX Integration Plan
 
+> **Status: exploratory.** Indexed in [PRDs/BACKLOG.md → "Future directions"](PRDs/BACKLOG.md#future-directions-exploratory-not-phased). This file is the design rationale; promote a pattern into a scoped backlog item when work begins.
+
 > The *feel* of how AI is woven into Pieces.app, mapped onto Nexus.
 > Captured 2026-04-26.
 >

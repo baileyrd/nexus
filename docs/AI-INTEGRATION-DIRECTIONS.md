@@ -1,5 +1,7 @@
 # AI Integration Directions
 
+> **Status: exploratory.** Indexed in [PRDs/BACKLOG.md → "Future directions"](PRDs/BACKLOG.md#future-directions-exploratory-not-phased). This file is the design rationale; promote a direction into a scoped backlog item when work begins.
+
 > Scratch document: directions for deeper AI integration into Nexus,
 > beyond the existing right‑panel chat. Captured 2026‑04‑26.
 
