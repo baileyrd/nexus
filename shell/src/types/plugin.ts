@@ -181,8 +181,42 @@ export interface PluginAPI {
    * See WI-13 / Phase 2 §5.3.
    */
   uri: UriAPI
+  /**
+   * Active-editor accessor surface (OI-14). `editor.active()` returns
+   * the currently focused tab's `{ relpath, revision }` snapshot, or
+   * `null` when no tab is open. `editor.onChange(handler)` subscribes
+   * to changes in the active tab or its `sessionRevision`; the
+   * returned disposer is auto-swept on plugin unload via
+   * `PluginRegistry.trackSubscription`. Lets plugins read the live
+   * editor state without `kernel.invoke('com.nexus.editor', ...)`.
+   */
+  editor: EditorAPI
   /** Only available to core plugins (core: true) */
   internal?: InternalAPI
+}
+
+export interface ActiveEditor {
+  /** Forge-relative path of the active tab. */
+  relpath: string
+  /**
+   * Opaque version token. Increments on every local or remote edit
+   * to the active buffer (sourced from `useEditorStore.sessionRevision`).
+   * Plugins should treat it as a cache-invalidation handle, not a byte
+   * count.
+   */
+  revision: number
+}
+
+export interface EditorAPI {
+  /** Snapshot of the active editor tab, or `null` when none is open. */
+  active(): ActiveEditor | null
+  /**
+   * Subscribe to changes in the active tab. Fires when the user
+   * switches tabs, when the active buffer's revision advances, or
+   * when there is no longer an active tab. The returned disposer is
+   * idempotent and auto-swept on plugin unload.
+   */
+  onChange(handler: (active: ActiveEditor | null) => void): () => void
 }
 
 export interface CommandsAPI {

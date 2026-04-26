@@ -282,20 +282,22 @@ The original AC mentioned filtering on `target = "audit"`. The implemented audit
 
 **Severity:** Should-fix (forces plugins to use raw `invoke`)
 **Surfaced by:** UI-AUDIT.md F-6.1.1 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-26.
 
-### Gap
-Plugins that want the active editor or workspace state reach through `api.kernel.invoke("com.nexus.editor", "open", …)` — a raw command-id path that breaks when the command id changes. No `api.workspace.activeEditor()` accessor exists.
+### Outcome
+- **`api.workspace.forgeRoot(): string | null`** added to the leaf workspace facade in [`shell/src/workspace/workspaceStore.ts`](../shell/src/workspace/workspaceStore.ts) — reads the active forge root from `useWorkspaceStore` (the `nexus.workspace` plugin store) so plugins don't have to import shell-internal stores. Returns null between `workspace:closed` and the next `workspace:opened`.
+- **`api.editor.active(): { relpath, revision } | null`** + **`api.editor.onChange(handler): () => void`** wired in [`shell/src/host/PluginAPI.ts`](../shell/src/host/PluginAPI.ts). `active()` projects `useEditorStore.{activeRelpath, sessionRevision}` into the public shape; `onChange` subscribes via `useEditorStore.subscribe` and dedupes redundant fires through `activeEditorEquals` so handlers only run on a real switch or revision advance. The returned disposer is idempotent and tracked through `PluginRegistry.trackSubscription` so plugin unload sweeps it (mirrors `kernel.on`).
+- **Pure projection helpers** extracted to [`shell/src/host/activeEditor.ts`](../shell/src/host/activeEditor.ts) (`computeActiveEditor`, `activeEditorEquals`) so unit tests don't need to drag in `@tauri-apps/*` imports through PluginAPI.ts.
+- **Type contract** in [`packages/nexus-extension-api/src/index.ts`](../packages/nexus-extension-api/src/index.ts) — new exported `ActiveEditor`, `EditorAPI`, `WorkspaceAPI` interfaces. The previous aspirational `editorActive` / `workspace.{root,name}` shape (never wired) is replaced; both had zero consumers.
 
-### Scope
-- Add `WorkspaceAPI` and `EditorAPI` sub-surfaces to `@nexus/extension-api`:
-  - `api.workspace.forgeRoot(): string | null`
-  - `api.editor.active(): { relpath, revision } | null`
-  - `api.editor.onChange(handler): () => void`
-- Back with the existing `useEditorStore` / forge-path sources.
+### Coverage
+- 10 new unit tests in [`shell/src/host/PluginAPI.editor.test.ts`](../shell/src/host/PluginAPI.editor.test.ts) — projection helpers (3), equality predicate (5), end-to-end dedupe over `useEditorStore` mutations (1), idempotent-disposer pattern (1). All pass.
+- No new typecheck or lint errors. Subscription cleanup behaviour is already covered by [`shell/tests/subscription-cleanup.test.ts`](../shell/tests/subscription-cleanup.test.ts) since the disposer flows through the same `PluginRegistry.trackSubscription` path.
 
 ### Acceptance
-- A plugin reads the active file's relpath without knowing about the editor plugin's handler ids.
+- A plugin reads `api.editor.active()` to get `{ relpath, revision }` without knowing about `com.nexus.editor`'s handler ids.
+- A plugin subscribes via `api.editor.onChange(handler)` and is auto-unsubscribed on deactivate; redundant store mutations don't trigger redundant handler fires.
+- A plugin reads `api.workspace.forgeRoot()` to get the current forge path without importing shell stores.
 
 ---
 

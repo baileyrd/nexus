@@ -26,6 +26,7 @@ import type {
   WorkspaceParent,
 } from './types.ts'
 import { LeafImpl } from './Leaf.ts'
+import { useWorkspaceStore as useForgeStore } from '../plugins/nexus/workspace/workspaceStore.ts'
 
 type Listener = (payload?: unknown) => void
 type EmitFn = (event: string, payload?: unknown) => void
@@ -881,5 +882,11 @@ export const workspace = {
   },
   get leaves(): Map<string, Leaf> {
     return state().leaves
+  },
+  // OI-14 — typed accessor for the active forge root, so plugins don't
+  // need to reach into the forge zustand store directly. Returns null
+  // between `workspace:closed` and the next `workspace:opened`.
+  forgeRoot(): string | null {
+    return useForgeStore.getState().rootPath
   },
 }
