@@ -1,8 +1,14 @@
 # Nexus Feature Backlog
 
-> Features identified in the [Growth Plan](Nexus_Growth_Plan.md) that are not fully covered by existing PRDs 01–17. Items are categorized by coverage gap and listed in suggested implementation order.
+> **Single source of truth for unfinished work.** This file is the index every other planning doc points to.
 >
-> **Only unfinished work lives here.** Completed items are archived verbatim (with their original section context) in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Section headings with no listed items are preserved as structural placeholders — consult the archive for what landed under each, and add new follow-ups directly below the heading.
+> - **Per-PRD status** lives in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+> - **Completed items** are archived verbatim in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
+> - **Full descriptions of OI-\*** items live in [../OPEN-ITEMS.md](../OPEN-ITEMS.md); this file cross-lists by ID.
+> - **Formal-release work** (auto-updater, telemetry, marketplace, beta→GA) is deferred to [../REQUIRED-FOR-FORMAL-RELEASE.md](../REQUIRED-FOR-FORMAL-RELEASE.md); the WI-IDs are indexed below for completeness.
+> - **Exploratory / unscoped design docs** (AI directions, ambient copilot, memory layer, settings extraction inventory) are linked under "Future directions" — they do not have committed timelines.
+>
+> Section headings with no listed items are preserved as structural placeholders — consult the archive for what landed under each, and add new follow-ups directly below the heading.
 
 ---
 
@@ -23,14 +29,65 @@ Serialize Nexus CRDT state (rich text buffer) as JSON in `.nexus/crdt-state.json
 
 ## Post-migration carryover gaps (2026-04-24)
 
-Capabilities described in legacy `app/` documentation that were not carried over to `shell/` during the Phase 4 WI-37 retirement. Full descriptions and acceptance criteria in [../OPEN-ITEMS.md](../OPEN-ITEMS.md).
+Capabilities described in legacy `app/` documentation that were not carried over to `shell/` during the Phase 4 WI-37 retirement. Full descriptions and acceptance criteria in [../OPEN-ITEMS.md](../OPEN-ITEMS.md). Resolved entries are archived in [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
-- [ ] **OI-01: Settings modal + `registerSettingsTab` API.** Tabbed settings modal with plugin-extensible tab contribution point. Currently `shell/src/plugins/core/settings/` has a single-panel view only.
-- [ ] **OI-02: Split-size persistence.** Pane-splitter positions not restored across reloads — no `split_sizes` field in `shell-state.json`, no drag-end persistence from splitter components.
-- [ ] **OI-03: Workspace-wide clippy `-D warnings` sweep.** Partial — 3 crates done this session; `nexus-plugins` (33 strict errors), `nexus-terminal` (42 warnings), `nexus-bootstrap` (37), and 5 others still block strict-CI adoption.
-- [ ] **OI-04: Kernel-contract promotion TODOs.** Two shell-side types (`plugin.ts:74` slot types, `agentStore.ts:104` WI-07 agent identity) should move into the kernel contract to avoid host/sandbox type drift.
-- [ ] **OI-05: Rust dep duplication.** 34 crates with duplicated versions — `thiserror` 1/2, `digest`/`sha2`/`rand_core` 1/2, `hashbrown` 3-way, `nix`/`rustix`/`reqwest`/`toml` etc.
-- [ ] **OI-06: ESLint 8 → 9 + typescript-eslint 7 → 8.** ESLint 8 is EOL; flat-config migration needed. Also pin a project-level `.eslintrc` so the global personal config stops shadowing the workspace, and migrate xterm to `@xterm/*` scoped names.
+### Open
+
+- [ ] **OI-05: Rust dep duplication** — Blocked on upstream. 34 crates with duplicated versions all trace through `wasmtime 42` (toml/sha2/digest/rand_core/reqwest/rustix/nix/hashbrown) or `portable-pty → filedescriptor` (`thiserror 1`). Revisit after the next wasmtime major release.
+- [ ] **OI-08: "Running Extensions" Settings tab** — Partial. Surface plugin id/state/lastError/capabilities/duration via `api.settings.registerTab` (shipped in OI-01). Depends on OI-09.
+- [ ] **OI-09: `plugins:status` zustand store** — Partial. Aggregate `plugin:error` / `plugin:activated` / `plugin:deactivated` events for OI-08 to consume.
+- [ ] **OI-10: Keybinding-conflict detection + UI** — Detect chord collisions in `KeybindingRegistry.register{FromManifest,Override}`, emit `plugins:keybindings-conflict`, show conflict rows in Settings → Keybindings.
+- [ ] **OI-11: UI-thread time budget on plugin command dispatch** — Wrap `CommandRegistry.execute` in await-with-timeout (warn @250ms, hard cancel @5s, configurable), publish `command:cancelled`.
+- [ ] **OI-12: Document or remove absolute-path auto-promotion** — `read_file`/`write_file` silently escalate absolute paths to `FsReadExternal` / `FsWriteExternal`. Either document on `PlatformFsAPI` JSDoc + audit-log it, or remove and fail loudly.
+- [ ] **OI-13: Reconcile kernel-side `PluginRegistry` with `PluginLoader::loaded`** — Delete the dead `crates/nexus-kernel/src/plugin_registry.rs` + `Kernel::plugins()` (zero callers); update microkernel ADR.
+- [ ] **OI-14: Expose `ctx.workspace` / `ctx.editor.active`** — Add `WorkspaceAPI` + `EditorAPI` to `@nexus/extension-api` so plugins stop using raw `api.kernel.invoke("com.nexus.editor", "open", …)`.
+- [ ] **OI-15: Manifest signature / provenance** — Optional `manifest.toml.sig` Ed25519 over manifest bytes, verified against trusted-publisher keyring. Marketplace prerequisite (paired with WI-44).
+- [ ] **OI-16: `beforeunload` → `onStop` for script plugins** — Window-close hook with 1s per-plugin soft cap so flush-on-stop handlers run on ⌘Q.
+- [ ] **OI-17: Deprecation policy + `@deprecated` JSDoc** — `packages/nexus-extension-api/DEPRECATED.md` + JSDoc tags + ESLint rule failing imports of deprecated names.
+- [ ] **OI-18: Snippet trigger collision detection** — Same hazard as OI-10 but for snippets; emit `plugins:snippet-conflict` and surface a "which plugin wins" control.
+
+### Resolved 2026-04-24 (preserved here for cross-reference; full notes in [../OPEN-ITEMS.md](../OPEN-ITEMS.md))
+
+- [x] OI-01 — Settings modal + `registerSettingsTab` API
+- [x] OI-02 — Split-size persistence (editor splits gained drag handles + `setSplitSizes` mutator)
+- [x] OI-03 — Workspace-wide clippy `-D warnings` sweep
+- [x] OI-04 — Kernel-contract promotion TODOs (`SlotId` and `list_archetypes` IPC)
+- [x] OI-06 — ESLint 8 → 9 + typescript-eslint 7 → 8 + xterm → `@xterm/*` scoped
+- [x] OI-07 — Capability grants/denials/path-traversal routed through `audit::*`
+
+---
+
+## Formal release scope (deferred)
+
+Tracked in full in [../REQUIRED-FOR-FORMAL-RELEASE.md](../REQUIRED-FOR-FORMAL-RELEASE.md). Out of scope for personal-tool use; surface here so the IDs are findable.
+
+- [ ] **WI-41: Tauri auto-updater + code-signing + release channel.** ~5–7 eng-days plus 1–3 weeks calendar for signing-cert procurement.
+- [ ] **WI-42: Crash reporting & telemetry.** ~5 eng-days, opt-in via Settings.
+- [ ] **WI-44: Minimal marketplace.** ~5 eng-days; index schema + shell UI + CLI install + tarball publishing. Paired with **OI-15** (manifest signing) and **F-8.1.1 / F-8.1.2** (iframe sandbox + boundary-bound `pluginId`) before opening to untrusted plugins.
+- [ ] **WI-46: Beta → GA logistics.** Triage rubric, test-group recruitment, ship criteria. ~3 eng-days plus 2-week calendar.
+
+---
+
+## Future directions (exploratory, not phased)
+
+Design-only docs without committed timelines. Treat as inspiration / option pool, not as work in flight. If any of these get scoped into a phase, mint an ID here and link the doc as the design rationale.
+
+- [ ] **AI integration directions** — 8 ordered directions (inline rewrite/summarize, auto-link suggestions, semantic search, per-surface chat, skills as prompts, agent loops, MCP exposure, background indexing). See [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md).
+- [ ] **Ambient copilot UX patterns** — 10 patterns (Cmd+I overlay, context chips, model switcher, ghost suggestions, right-click AI actions, margin suggestions, activity timeline, citations, inline correction, capture → AI). See [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md).
+- [ ] **AI memory layer (Pieces.app-style)** — 6-piece build plan (quick-capture hotkey, auto-enrichment on save, recall hotkey, implicit chat context, code-aware capture, scheduled digests). See [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md).
+- [ ] **Notion-style block UX — out-of-scope follow-ups.** Phases 1–6 of the plan landed 2026-04-22 (see "Spec'd in a PRD, not yet implemented" below for the entry). The plan itself enumerates explicit out-of-scope items: drag-to-embed into canvas, block-links navigator (`[[…#^block-id]]`), side-margin comments subsystem, block AI actions via `com.nexus.ai`, multi-cursor from multi-block selection. See `docs/notion-block-ux-plan.md`.
+
+---
+
+## Settings extraction queue
+
+Inventory of named-constant / hardcoded settings candidates lives in [../../shell/HARDCODED_SETTINGS_AUDIT.md](../../shell/HARDCODED_SETTINGS_AUDIT.md). Pickable in any order; each is a 1–2 hour change.
+
+- [ ] **Zoom settings schema** — `ui.zoomStep`, `ui.zoomMin`, `ui.zoomMax`, `ui.zoomDefault`. Constants already named in `shell/src/plugins/core/zoom/index.ts:15–18`.
+- [ ] **Notification durations schema** — 5 hardcoded ms values in `notificationService` + ChatView + SavedCommandsView.
+- [ ] **Search / palette result limits** — `search.maxResultsLimit`, `commandPalette.maxResultsLimit`.
+- [ ] **Long-running operation timeout consolidation** — 3 independent `5 * 60_000` literals in AI / agent / workflow crates; consolidate into `LONG_RUNNING_OP_TIMEOUT_MS`.
+- [ ] **Buffer / event caps** — Name `PROCESS_EVENTS_CAP`, `BASES_HISTORY_CAP`, `CANVAS_HISTORY_CAP`, etc.; consider a shared `UNDO_HISTORY_CAP`.
 
 ---
 

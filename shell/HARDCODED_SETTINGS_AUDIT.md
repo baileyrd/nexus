@@ -1,5 +1,7 @@
 # Hardcoded Settings Audit
 
+> **Inventory only.** Live extractions are tracked in [../docs/PRDs/BACKLOG.md → "Settings extraction queue"](../docs/PRDs/BACKLOG.md#settings-extraction-queue). This file is the source-of-truth catalogue of named-constant candidates; pick from BACKLOG.md when scheduling work.
+
 **Date:** 2026-04-25 (revised 2026-04-25)
 **Scope:** `shell/src/plugins/` and `shell/src/shell/`
 
