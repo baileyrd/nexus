@@ -28,7 +28,7 @@
 ## OI-02 — Split-size persistence
 
 **Severity:** Should-fix (UX regression)
-**Surfaced by:** `docs/superpowers/specs/2026-04-17-split-size-persistence-design.md`
+**Surfaced by:** `docs/archive/superpowers/specs/2026-04-17-split-size-persistence-design.md`
 **Status:** Resolved 2026-04-24. The editor-split gap is closed; sidedock persistence was already landed post-migration but mis-attributed here.
 
 ### Audit correction

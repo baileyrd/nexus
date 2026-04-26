@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Pre-shell-migration UI plan. The legacy `app/` frontend it targets was retired 2026-04-24 (see [`docs/legacy-shell-retirement.md`](../legacy-shell-retirement.md)). All stages shipped against the now-deleted `app/`; equivalent surfaces in the current shell live under `shell/src/shell/`, `shell/src/workspace/`, and `shell/src/plugins/core/titleBar/`.
+
 # Nexus Forge — UI Implementation Plan
 
 > **Historical document** — Written before the `app/` → `shell/` migration (Phase 4 WI-37, 2026-04-24). See `docs/legacy-shell-retirement.md`. All stages in this plan shipped against the retired `app/` frontend; the `app/src/…` paths below are preserved verbatim as a record of state at time of commit. Equivalent surfaces in the current plugin-first shell live under `shell/src/shell/`, `shell/src/workspace/`, and `shell/src/plugins/core/titleBar/`.

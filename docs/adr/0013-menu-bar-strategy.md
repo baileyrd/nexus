@@ -81,6 +81,6 @@ itself; menu items are not user-extensible in v1.
 
 ## References
 
-- `docs/planning/PHASE-2-IMPLEMENTATION-PLAN.md` §5.5 (WI-16)
+- `docs/archive/planning/PHASE-2-IMPLEMENTATION-PLAN.md` §5.5 (WI-16)
 - ADR 0011 — plugin-first shell
 - ADR 0008 — tech-stack defaults (Tauri)

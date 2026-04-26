@@ -1,5 +1,9 @@
 # Planning Archive
 
+> **Archived 2026-04-26** — Folder relocated from `docs/planning/` to
+> `docs/archive/planning/` as part of the docs-cleanup pass.
+> Contents unchanged; refs updated.
+
 These are historical planning and audit artifacts — phase
 implementation plans that have been substantially completed, and
 point-in-time audits of the shell / microkernel / legacy tri-pane.
@@ -10,7 +14,7 @@ PHASE-3-IMPLEMENTATION-PLAN.md §5"), and because the raw findings
 in the audits are useful history even when the specific remediation
 has shipped.
 
-**Current architecture docs live in the parent directory**
+**Current architecture docs live two levels up**
 (`docs/ARCHITECTURE.md`, `docs/leaf-architecture.md`,
 `docs/legacy-shell-retirement.md`) and in `docs/adr/` (architecture
 decision records). Go there first for anything load-bearing.

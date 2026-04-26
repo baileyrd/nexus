@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Implementation plan for the global graph view. Shipped — see `shell/src/plugins/nexus/graph/GraphGlobalView.tsx`.
+
 # Global graph view — development plan
 
 Replace the current local-neighborhood graph with an Obsidian-style

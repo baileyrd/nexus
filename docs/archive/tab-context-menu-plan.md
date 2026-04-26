@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Implementation plan for the tab / leaf "⋯" context menu. Shipped — see `shell/src/shell/ContextMenu.tsx` and `shell/src/plugins/nexus/editor/EditorView.tsx`.
+
 # Tab / note context-menu — development plan
 
 Replicate Obsidian's per-note "⋯" menu (screenshot reference: the menu

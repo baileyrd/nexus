@@ -2,7 +2,7 @@
 
 Quick reference for how a single keystroke travels from CodeMirror
 through the kernel and back. Companion to
-[`editor-transaction-wiring-plan.md`](./editor-transaction-wiring-plan.md)
+[`editor-transaction-wiring-plan.md`](./archive/editor-transaction-wiring-plan.md)
 (the phased build-out) and
 [`PRDs/08-editor-engine.md`](./PRDs/08-editor-engine.md) (the product
 contract). For the surrounding `Leaf` / `View` plumbing see
@@ -175,7 +175,7 @@ kernel `UndoTree` starts fresh.
 
 ## See also
 
-- [`editor-transaction-wiring-plan.md`](./editor-transaction-wiring-plan.md)
+- [`editor-transaction-wiring-plan.md`](./archive/editor-transaction-wiring-plan.md)
   — phased rollout notes, change-to-op heuristics, risks.
 - [`PRDs/08-editor-engine.md`](./PRDs/08-editor-engine.md) — product
   contract for the editor engine.

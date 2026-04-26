@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Editor-shell architecture auditor agent prompt. Tooling artifact, not architecture documentation; preserved for reference if the audit is ever rerun.
+
 # Editor-Shell Architecture Auditor
 
 You are a software architecture auditor specializing in the **editor-shell

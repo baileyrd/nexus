@@ -38,7 +38,7 @@ If you were building on top of `crates/nexus-app` or `app/`:
 
 - The `#[tauri::command]` handler set in `crates/nexus-app/src/lib.rs`
   was the legacy UI contract. Its capabilities now live as IPC commands
-  on the service crates. `docs/planning/SHELL-COMPARISON.md` (retained as a
+  on the service crates. `docs/archive/planning/SHELL-COMPARISON.md` (retained as a
   historical map) documents the per-command correspondence between the
   two shells.
 - Persisted state migrates one-shot with
@@ -69,7 +69,7 @@ If you were building on top of `crates/nexus-app` or `app/`:
 ## References
 
 - [ADR 0011 — Adopt plugin-first shell](adr/0011-adopt-plugin-first-shell.md)
-- `docs/planning/SHELL-COMPARISON.md` — per-command legacy-vs-new map (historical)
-- `docs/planning/PHASE-4-IMPLEMENTATION-PLAN.md` §3.2 — the retirement plan
-- `docs/planning/PHASE-1-IMPLEMENTATION-PLAN.md` WI-22 — the freeze guardrail
+- `docs/archive/planning/SHELL-COMPARISON.md` — per-command legacy-vs-new map (historical)
+- `docs/archive/planning/PHASE-4-IMPLEMENTATION-PLAN.md` §3.2 — the retirement plan
+- `docs/archive/planning/PHASE-1-IMPLEMENTATION-PLAN.md` WI-22 — the freeze guardrail
   that preceded this retirement

@@ -6,7 +6,7 @@ Panes are modelled on Obsidian's `WorkspaceLeaf` / `ViewRegistry`
 primitives; chrome still goes through the narrow `SlotRegistry`. This
 document is the quick reference for plugin authors and shell
 contributors. The full rationale lives in
-[`docs/leaf-migration-plan.md`](./leaf-migration-plan.md).
+[`docs/archive/leaf-migration-plan.md`](./archive/leaf-migration-plan.md).
 
 ## Primitives
 
@@ -134,7 +134,7 @@ Plugins can reach the workspace facade via `api.workspace` /
 
 `MarkdownView` owns a kernel session lifecycle — `onOpen` acquires a
 refcount against the `SessionManager`, `onClose` releases it (see
-[editor-transaction-wiring-plan](./editor-transaction-wiring-plan.md)
+[editor-transaction-wiring-plan](./archive/editor-transaction-wiring-plan.md)
 Phase 3, and [editor-transaction-architecture](./editor-transaction-architecture.md)
 for the full edit-flow reference).
 

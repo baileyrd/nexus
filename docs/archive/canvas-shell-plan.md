@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Implementation plan for bringing `.canvas` boards to the shell UI. The Canvas plugin has shipped (see `shell/src/plugins/nexus/canvas/`).
+
 # Canvas (`.canvas` boards) — shell implementation plan
 
 Bring `.canvas` file support to the current shell UI. The format spec

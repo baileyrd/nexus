@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Living implementation plan for the shell ↔ kernel bridge (Phase 0–4). Phases shipped; the legacy `crates/nexus-app` was deleted under Phase 4 WI-37.
+
 # Shell ↔ Kernel Bridge — Implementation Plan
 
 Living document. Each phase commit updates the relevant section in-place; finished phases move to the _Delivered_ section at the bottom.

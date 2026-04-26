@@ -26,7 +26,7 @@ architectural generations:
    "The shell starts completely empty. There is no sidebar, no title bar,
    no editor, no status bar until plugins load them." Implements the
    contribution/slot/registry model described in `shell/docs/architecture.md`
-   and the kernel bridge in `docs/shell-kernel-bridge-plan.md`. Already
+   and the kernel bridge in `docs/archive/shell-kernel-bridge-plan.md`. Already
    registers 32 `nexus.*` plugins covering editor, canvas, bases, graph,
    outline, backlinks, search, AI, agent, workflow, skills, MCP, terminal,
    processes, command palette, status bar, activity bar, title bar, pane
@@ -52,7 +52,7 @@ overlapping IPC adapters over a shared kernel (`nexus-bootstrap`).
 desktop shell for Nexus going forward. Retire `app/` + `crates/nexus-app`
 once feature parity is reached.**
 
-The migration is phased (see `docs/planning/INTEGRATION-REVIEW.md` §5):
+The migration is phased (see `docs/archive/planning/INTEGRATION-REVIEW.md` §5):
 
 1. **Freeze** new capability work on the legacy shell. All new Tauri
    commands land as IPC handlers in the relevant service crate (reachable
@@ -176,14 +176,14 @@ valuable regardless.
 
 ## References
 
-- `docs/planning/INTEGRATION-REVIEW.md` — full audit informing this decision
-- `docs/shell-kernel-bridge-plan.md` — bridge contract (Phases 0–3
+- `docs/archive/planning/INTEGRATION-REVIEW.md` — full audit informing this decision
+- `docs/archive/shell-kernel-bridge-plan.md` — bridge contract (Phases 0–3
   delivered)
-- `docs/leaf-architecture.md` / `docs/leaf-migration-plan.md` — Leaf
+- `docs/leaf-architecture.md` / `docs/archive/leaf-migration-plan.md` — Leaf
   foundation
-- `docs/planning/MICROKERNEL-AUDIT.md` — security findings that apply across both
+- `docs/archive/planning/MICROKERNEL-AUDIT.md` — security findings that apply across both
   shells
-- `docs/planning/UI-AUDIT.md` — UI-specific security findings
+- `docs/archive/planning/UI-AUDIT.md` — UI-specific security findings
 - `shell/README.md` — plugin-first shell philosophy
 - `DEPRECATED.md` — existing deprecation policy; extended here to cover
   the legacy shell

@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Reference capture of the deleted legacy `ChatPanel.tsx` produced for the WI-01 port. Current chat lives at `shell/src/plugins/nexus/ai/ChatView.tsx`.
+
 # WI-01 Reference — Legacy ChatPanel extraction
 
 > **Historical reference** — Describes the pre-migration the legacy shell's `ChatPanel.tsx` (deleted under Phase 4 WI-37, 2026-04-24). Post-migration the equivalent lives at `shell/src/plugins/nexus/ai/ChatView.tsx` (also `AiChatView.tsx`). Line numbers below refer to the historical source.

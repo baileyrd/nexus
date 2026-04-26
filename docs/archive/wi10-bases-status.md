@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Point-in-time validation audit (2026-04-23) of the `nexus.bases` plugin. Useful as history; the live Bases plugin has evolved past this snapshot.
+
 # WI-10 Bases — Validation Audit
 
 **Source plan:** docs/planning/PHASE-2-IMPLEMENTATION-PLAN.md §4.2

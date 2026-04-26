@@ -17,7 +17,7 @@ renderer's direct `invoke()` handle with the host. Before this decision the
 shell loaded JS plugins via a plain `<script>` module in the host renderer,
 which gave every community plugin ambient access to the Tauri `invoke`
 bridge, the full DOM, and shell React state. That escape path is enumerated
-in `docs/planning/UI-AUDIT.md` and is the precondition for every capability
+in `docs/archive/planning/UI-AUDIT.md` and is the precondition for every capability
 bypass in the plugin model.
 
 We need a browser-native isolation boundary that:

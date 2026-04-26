@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Migration plan that introduced Obsidian-style `WorkspaceLeaf` + `ViewRegistry` to the shell. Migration shipped; the current architecture reference is [`leaf-architecture.md`](../leaf-architecture.md).
+
 # Leaf + ViewRegistry Migration Plan
 
 Port Obsidian's `WorkspaceLeaf` / `ViewRegistry` / `setViewState` semantics into the Nexus shell. Replace the current `SlotRegistry`-based pane model for movable panes; keep `SlotRegistry` for fixed chrome only.

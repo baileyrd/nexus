@@ -220,7 +220,7 @@ cargo build -p nexus-tui        # Build just the TUI
 - [`docs/PRDs/`](docs/PRDs/00-index.md) — product requirements (see `IMPLEMENTATION_STATUS.md` for current state)
 - [`docs/writing-your-first-plugin.md`](docs/writing-your-first-plugin.md) — plugin quickstart
 - [`shell/docs/writing-a-plugin.md`](shell/docs/writing-a-plugin.md) — plugin author reference
-- [`docs/planning/`](docs/planning/) — historical phase plans and audits
+- [`docs/archive/planning/`](docs/archive/planning/) — historical phase plans and audits
 
 ## License
 

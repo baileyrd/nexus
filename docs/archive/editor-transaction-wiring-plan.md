@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Phased build-out plan for routing editor transactions through the kernel. Phases shipped; the current architecture reference is [`editor-transaction-architecture.md`](../editor-transaction-architecture.md).
+
 # Editor Transaction Wiring Plan
 
 Replace the shell's `<textarea>` editor with CodeMirror 6 and route every edit

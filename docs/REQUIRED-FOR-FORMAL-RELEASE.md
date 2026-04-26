@@ -539,7 +539,7 @@ Weekly rhythm:
 3. Announcement goes out.
 4. Update the updater `latest.json` manifest so `v1.0.0-beta.N` users get auto-prompted to update to `v1.0.0`.
 5. `CHANGELOG.md` final v1.0.0 entry lands.
-6. Roadmap for v1.1 goes into `docs/planning/ROADMAP.md`. Closes Phase 5.
+6. Roadmap for v1.1 goes into `docs/archive/planning/ROADMAP.md`. Closes Phase 5.
 
 #### 5.2.4 Subagent pattern
 

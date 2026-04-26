@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Design document for the community-plugin iframe sandbox. The sandbox has shipped — see [ADR 0015](../adr/0015-iframe-sandbox-plugin-runtime.md) and `shell/src/host/sandbox/`.
+
 # WI-30 — Community Plugin Sandbox Design
 
 **Status:** Draft, ready for review

@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Static-teardown research artifact for an external macOS app (Command Book 1.0.46). Reference material; not load-bearing for current Nexus architecture.
+
 # Command Book 1.0.46 — Reverse-Engineering Report
 
 > **Scope & intent.** Static teardown of the shipping macOS app `CommandBook-1.0.46.dmg` for personal learning. No binary patching, no network replay, no live runtime analysis. Everything below is evidenced by artifacts inside the bundle (Info.plist, Mach-O load commands, embedded entitlements, Mach-O cstring/CStrings sections, Assets.car asset list, GRDB migration identifiers, and Sparkle framework layout).

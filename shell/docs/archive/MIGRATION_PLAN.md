@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Tauri Shell → Nexus Forge pixel-match migration plan. Migration completed (companion to [`docs/archive/FORGE-UI-PLAN.md`](../../../docs/archive/FORGE-UI-PLAN.md)).
+
 # Tauri Shell → Nexus Forge Pixel-Match Migration Plan
 
 Reference design: [docs/test/](test/) (Nexus Forge prototype)

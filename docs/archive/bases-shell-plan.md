@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Implementation plan for bringing `.bases` databases to the shell UI. The Bases plugin has shipped (see `shell/src/plugins/nexus/bases/`).
+
 # Bases (`.bases` databases) — shell implementation plan
 
 Bring the existing Database Engine (PRD-10) to the current shell UI. The

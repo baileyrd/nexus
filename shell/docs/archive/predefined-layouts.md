@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Documents the named-layout-presets feature, which was rejected in v1 per [ADR 0012](../../../docs/adr/0012-drop-named-layout-presets.md). The feature is not implemented; this doc is kept as a record of the original design intent.
+
 # Predefined Layouts
 
 Predefined layouts are named snapshots of the shell's spatial state. They let users (and plugins) switch between complete panel arrangements instantly.

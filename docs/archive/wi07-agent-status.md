@@ -1,3 +1,5 @@
+> **Archived 2026-04-26** — Point-in-time validation audit (2026-04-23) of the `nexus.agent` plugin slices. Useful as history; the live agent plugin has evolved past this snapshot.
+
 # WI-07 Agent Panel — State Audit
 
 **Source plan:** docs/planning/PHASE-2-IMPLEMENTATION-PLAN.md §4.1
