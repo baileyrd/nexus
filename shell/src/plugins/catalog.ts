@@ -62,6 +62,7 @@ import { aiPlugin } from './nexus/ai'
 import { pluginsMgmtPlugin } from './nexus/pluginsMgmt'
 import { processesPlugin } from './nexus/processes'
 import { statusBarPlugin } from './nexus/statusBar'
+import { extensionsTabPlugin } from './nexus/extensionsTab'
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Default-on set (22) — loaded unconditionally at boot.
@@ -105,6 +106,10 @@ export const DEFAULT_ON_PLUGINS: Registered[] = [
   basesPlugin,
   // Plugin management (required to turn the rest on)
   pluginsMgmtPlugin,
+  // Plugin observability — Settings > Extensions tab (OI-08).
+  // Default-on so plugin activation errors surface immediately rather
+  // than only in the dev console.
+  extensionsTabPlugin,
 ]
 
 // ──────────────────────────────────────────────────────────────────────────────

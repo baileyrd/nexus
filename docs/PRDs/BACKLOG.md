@@ -34,8 +34,6 @@ Capabilities described in legacy `app/` documentation that were not carried over
 ### Open
 
 - [ ] **OI-05: Rust dep duplication** — Blocked on upstream. 34 crates with duplicated versions all trace through `wasmtime 42` (toml/sha2/digest/rand_core/reqwest/rustix/nix/hashbrown) or `portable-pty → filedescriptor` (`thiserror 1`). Revisit after the next wasmtime major release.
-- [ ] **OI-08: "Running Extensions" Settings tab** — Partial. Surface plugin id/state/lastError/capabilities/duration via `api.settings.registerTab` (shipped in OI-01). Depends on OI-09.
-- [ ] **OI-09: `plugins:status` zustand store** — Partial. Aggregate `plugin:error` / `plugin:activated` / `plugin:deactivated` events for OI-08 to consume.
 - [ ] **OI-10: Keybinding-conflict detection + UI** — Detect chord collisions in `KeybindingRegistry.register{FromManifest,Override}`, emit `plugins:keybindings-conflict`, show conflict rows in Settings → Keybindings.
 - [ ] **OI-11: UI-thread time budget on plugin command dispatch** — Wrap `CommandRegistry.execute` in await-with-timeout (warn @250ms, hard cancel @5s, configurable), publish `command:cancelled`.
 - [ ] **OI-12: Document or remove absolute-path auto-promotion** — `read_file`/`write_file` silently escalate absolute paths to `FsReadExternal` / `FsWriteExternal`. Either document on `PlatformFsAPI` JSDoc + audit-log it, or remove and fail loudly.
@@ -53,6 +51,8 @@ Capabilities described in legacy `app/` documentation that were not carried over
 - [x] OI-04 — Kernel-contract promotion TODOs (`SlotId` and `list_archetypes` IPC) _(2026-04-24)_
 - [x] OI-06 — ESLint 8 → 9 + typescript-eslint 7 → 8 + xterm → `@xterm/*` scoped _(2026-04-24)_
 - [x] OI-07 — Capability grants/denials/path-traversal routed through `audit::*` _(2026-04-24)_
+- [x] OI-08 — "Running Extensions" Settings tab (live plugin state + errors + Disable) _(2026-04-26)_
+- [x] OI-09 — `pluginsStatusStore` aggregates plugin lifecycle events into a per-plugin `{ state, lastError }` map _(2026-04-26)_
 - [x] OI-14 — `api.workspace.forgeRoot()` + `api.editor.active()/onChange()` exposed via `@nexus/extension-api` _(2026-04-26)_
 
 ---

@@ -2,7 +2,7 @@
 // Auto-generates settings UI from registered config schemas.
 // Plugins tab: lists core plugins + discovered community plugins with toggles.
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, createElement } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { PLUGIN_API_VERSION, type Capability } from '@nexus/extension-api'
 import { getRegistry } from '../../../host/shellRegistry'
@@ -13,7 +13,7 @@ import {
   type AvailableSnippet,
   type ThemeMode,
 } from '../../../stores/themeStore'
-import type { ConfigSection, ConfigSchema, PluginAPI } from '../../../types/plugin'
+import type { ConfigSection, ConfigSchema, PluginAPI, SettingsTabEntry } from '../../../types/plugin'
 import type { CommunityPluginManifest } from '../../../host/communityPluginLoader'
 import {
   enableBuiltinPlugin,
@@ -153,6 +153,31 @@ function useCommunityManifests(): CommunityPluginManifest[] {
   return list
 }
 
+// Plugin-contributed Settings tabs (OI-01 + OI-08). Reads
+// `SettingsTabRegistry.all()` (only tabs whose plugin has called
+// `api.settings.registerTab` are returned, sorted by group/priority/id)
+// and re-reads on every plugin activate/deactivate so a hot-enabled
+// plugin's tab appears without a reload.
+function useContributedSettingsTabs(): SettingsTabEntry[] {
+  const [tabs, setTabs] = useState<SettingsTabEntry[]>([])
+  const shellReady = useContextKey('shellReady')
+
+  useEffect(() => {
+    const reg = getRegistry()
+    if (!reg) return
+    const read = () => setTabs(reg.settingsTabs.all())
+    read()
+    const offActivated = eventBus.on('plugin:activated', read)
+    const offDeactivated = eventBus.on('plugin:deactivated', read)
+    return () => {
+      offActivated()
+      offDeactivated()
+    }
+  }, [shellReady])
+
+  return tabs
+}
+
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
 // Built-in tab ids; plugin-contributed tab ids are opaque strings.
@@ -183,6 +208,7 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
   const plugins    = usePluginList()
   const community  = useCommunityManifests()
   const available  = useAvailablePlugins()
+  const contributedTabs = useContributedSettingsTabs()
 
   const [navTab,        setNavTab]        = useState<NavTab>('settings')
   const [query,         setQuery]         = useState('')
@@ -305,6 +331,20 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             active={navTab === 'plugins'}
             onClick={() => setNavTab('plugins')}
           />
+          {/* Plugin-contributed tabs (OI-01 + OI-08). Filter by group so
+              we can give core/community plugin tabs their own rail
+              groups in a follow-up; for now show 'options' inline with
+              the built-ins and skip non-options groups. */}
+          {contributedTabs
+            .filter((t) => (t.group ?? 'options') === 'options')
+            .map((t) => (
+              <RailItem
+                key={t.id}
+                label={t.title}
+                active={navTab === t.id}
+                onClick={() => setNavTab(t.id)}
+              />
+            ))}
         </nav>
 
         {/* Right pane — topbar + content for the selected rail entry.
@@ -387,17 +427,37 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
                 </div>
               )}
               {!BUILT_IN_TABS.includes(navTab as BuiltInTab) && (
-                <div className="settings-body">
-                  <div className="settings-content">
-                    <p className="settings-empty">
-                      Unknown tab. Pick one from the left rail.
-                    </p>
-                  </div>
-                </div>
+                <ContributedTabBody navTab={navTab} />
               )}
             </>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Plugin-contributed tab body ──────────────────────────────────────────────
+//
+// OI-01 + OI-08: when the user selects a tab whose id was registered
+// via `api.settings.registerTab`, we look up the renderer in the
+// SettingsTabRegistry and render it inside the standard panel
+// chrome. Falls back to the "Unknown tab" empty state if the renderer
+// hasn't been wired (manifest-declared but plugin not yet activated).
+
+function ContributedTabBody({ navTab }: { navTab: NavTab }) {
+  const reg = getRegistry()
+  const Renderer = reg?.settingsTabs.getRenderer(navTab as string)
+  return (
+    <div className="settings-body">
+      <div className="settings-content">
+        {Renderer ? (
+          createElement(Renderer, {})
+        ) : (
+          <p className="settings-empty">
+            Unknown tab. Pick one from the left rail.
+          </p>
+        )}
       </div>
     </div>
   )
