@@ -320,16 +320,16 @@ function DockResizeHandle({ side, initialSize }: DockResizeHandleProps): JSX.Ele
       style={
         horizontal
           ? {
-              flex: '0 0 4px',
-              height: 4,
+              flex: '0 0 2px',
+              height: 2,
               width: '100%',
               cursor: 'row-resize',
               background: 'transparent',
               zIndex: 1,
             }
           : {
-              flex: '0 0 4px',
-              width: 4,
+              flex: '0 0 2px',
+              width: 2,
               cursor: 'col-resize',
               background: 'transparent',
               zIndex: 1,
@@ -521,15 +521,15 @@ function SplitResizeHandle({
       style={
         horizontal
           ? {
-              flex: '0 0 4px',
-              width: 4,
+              flex: '0 0 2px',
+              width: 2,
               cursor: 'col-resize',
               background: 'transparent',
               zIndex: 1,
             }
           : {
-              flex: '0 0 4px',
-              height: 4,
+              flex: '0 0 2px',
+              height: 2,
               width: '100%',
               cursor: 'row-resize',
               background: 'transparent',
@@ -644,6 +644,10 @@ function TabStrip({
         flex: '0 0 auto',
         background: 'var(--tab-container-background, var(--bg-soft, #2d2d2d))',
         borderBottom: '1px solid var(--divider-color, var(--line, #333))',
+        // 36px matches the SidebarToggleButton + activity-bar items'
+        // top-row baseline so the center tab row, the right sidedock
+        // tab row, and the left activity bar's first icon row all
+        // sit on the same horizontal line.
         minHeight: 36,
         // Sidedocks are narrow (default 280px) and hold many icon tabs;
         // let them scroll horizontally instead of clipping tabs past the
@@ -662,6 +666,11 @@ function TabStrip({
       }}
     >
       {tabs.leaves.map((leaf, i) => {
+        // Hide placeholder `empty` leaves from sidedock tab strips —
+        // they have no icon to render, and the fallback (first letter
+        // of viewType) would surface as a row of "E" buttons. Main
+        // dock keeps the tab so the user can reassign the leaf.
+        if (sideDock && leaf.view?.viewType === 'empty') return null
         const isActive = i === tabs.activeIndex
         return (
           <TabButton
@@ -1001,12 +1010,21 @@ function TabButton({
         {iconName ? (
           <Icon name={iconName as never} size={16} />
         ) : (
-          // Final fallback: first letter of the viewType if we have no
-          // icon mapping. Keeps the row non-empty for unknown views
-          // during development.
-          <span style={{ fontSize: 11, textTransform: 'uppercase' }}>
-            {(leaf.view?.viewType ?? '?').slice(0, 1)}
-          </span>
+          // Final fallback: a neutral dot for views with no icon
+          // mapping. Earlier this rendered the first letter of the
+          // viewType uppercase, which surfaced as bare "E"/"X"/etc.
+          // letters in the chrome — visually noisy and easy to mistake
+          // for broken UI.
+          <span
+            aria-hidden
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: 'currentColor',
+              opacity: 0.5,
+            }}
+          />
         )}
       </button>
     )
@@ -1018,11 +1036,12 @@ function TabButton({
       aria-selected={active}
       onClick={onActivate}
       className={`workspace-tab${active ? ' is-active' : ''}`}
+      title={label}
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
-        padding: '4px 10px',
+        gap: 4,
+        padding: '2px 6px',
         cursor: 'pointer',
         background: active
           ? 'var(--background-primary, var(--bg, #1e1e1e))'
@@ -1031,8 +1050,15 @@ function TabButton({
           ? 'var(--text-normal, var(--fg, #ccc))'
           : 'var(--text-muted, var(--fg-muted, #888))',
         borderRight: '1px solid var(--divider-color, var(--line, #333))',
-        fontSize: 12,
+        fontSize: 11,
         whiteSpace: 'nowrap',
+        // Each tab prefers ~180px but can shrink to ~50px when the
+        // strip gets crowded. Won't grow past the basis even when
+        // there are only 1-2 tabs (so a single tab doesn't stretch
+        // across the whole strip).
+        flex: '0 1 180px',
+        minWidth: 50,
+        maxWidth: 180,
       }}
     >
       {leaf.pinned && (
@@ -1040,7 +1066,16 @@ function TabButton({
           ●
         </span>
       )}
-      <span>{label}</span>
+      <span
+        style={{
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          minWidth: 0,
+          flex: '1 1 auto',
+        }}
+      >
+        {label}
+      </span>
       {closable && (
         <button
           type="button"

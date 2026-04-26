@@ -654,6 +654,10 @@ fn register_core_plugins(
                         "session_delete",
                         nexus_ai::core_plugin::HANDLER_SESSION_DELETE,
                     ),
+                    (
+                        "set_config",
+                        nexus_ai::core_plugin::HANDLER_SET_CONFIG,
+                    ),
                 ],
             ),
             forge_root,

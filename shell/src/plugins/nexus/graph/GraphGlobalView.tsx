@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useGlobalGraphStore, type GlobalGraphSettings } from './graphGlobalStore'
-import { makeNodes, step, type SimEdge, type SimNode } from './forceLayout'
+import {
+  ALPHA_DECAY,
+  ALPHA_MIN,
+  ALPHA_REHEAT,
+  makeNodes,
+  step,
+  type SimEdge,
+  type SimNode,
+} from './forceLayout'
 import { GraphGlobalGearDrawer } from './GraphGlobalGearDrawer'
 import { Icon } from '../../../icons'
 import { eventBus } from '../../../host/EventBus'
@@ -113,6 +121,9 @@ export function GraphGlobalView() {
   const simNodesRef = useRef<SimNode[]>([])
   const simEdgesRef = useRef<SimEdge[]>([])
   const lastIdSetRef = useRef<string>('')
+  // Alpha cools the simulation toward rest. Re-heated whenever the
+  // input changes (new nodes, edge churn, force-knob tweak, drag end).
+  const alphaRef = useRef<number>(ALPHA_REHEAT)
 
   const idSetKey = useMemo(
     () => filtered.nodes.map((n) => n.path).sort().join('|'),
@@ -125,6 +136,9 @@ export function GraphGlobalView() {
         source: e.source,
         target: e.target,
       }))
+      // Edge churn alone — give the sim a small kick rather than a
+      // full re-heat so existing positions don't fly apart.
+      alphaRef.current = Math.max(alphaRef.current, 0.3)
       return
     }
     const previous = new Map(simNodesRef.current.map((n) => [n.id, n]))
@@ -144,7 +158,20 @@ export function GraphGlobalView() {
       target: e.target,
     }))
     lastIdSetRef.current = idSetKey
+    alphaRef.current = ALPHA_REHEAT
   }, [idSetKey, filtered.edges, filtered.nodes, size.w, size.h])
+
+  // Force-knob changes (link distance/strength, repulsion, gravity)
+  // need a re-heat too — the equilibrium position shifts under new
+  // params and the sim is otherwise too cool to find it.
+  useEffect(() => {
+    alphaRef.current = ALPHA_REHEAT
+  }, [
+    settings.linkDistance,
+    settings.linkStrength,
+    settings.repulsion,
+    settings.centerGravity,
+  ])
 
   const transformRef = useRef<ViewTransform>({ ...IDENTITY })
   const [, forceRedraw] = useState(0)
@@ -180,15 +207,31 @@ export function GraphGlobalView() {
     const loop = () => {
       if (cancelled) return
       const sim = simNodesRef.current
-      if (sim.length > 0 && !settings.freeze) {
-        step(sim, simEdgesRef.current, {
-          linkDistance: settings.linkDistance,
-          linkStrength: settings.linkStrength,
-          repulsion: settings.repulsion,
-          centerGravity: settings.centerGravity,
-          width: size.w,
-          height: size.h,
-        })
+      // Skip the physics step once alpha has cooled below threshold —
+      // velocities damp out and positions stop drifting. The redraw
+      // path still runs so hover/selection updates render.
+      const alpha = alphaRef.current
+      const shouldStep =
+        sim.length > 0 && !settings.freeze && alpha > ALPHA_MIN
+      if (shouldStep) {
+        step(
+          sim,
+          simEdgesRef.current,
+          {
+            linkDistance: settings.linkDistance,
+            linkStrength: settings.linkStrength,
+            repulsion: settings.repulsion,
+            centerGravity: settings.centerGravity,
+            width: size.w,
+            height: size.h,
+          },
+          alpha,
+        )
+        // Cool toward 0. Same shape as d3-force: alpha += (target -
+        // alpha) * decay. Snap to exactly 0 once below the floor so
+        // the next tick short-circuits cleanly.
+        const next = alpha + (0 - alpha) * ALPHA_DECAY
+        alphaRef.current = next < ALPHA_MIN ? 0 : next
       }
       draw()
       raf = requestAnimationFrame(loop)
@@ -338,6 +381,8 @@ export function GraphGlobalView() {
       hit.fx = hit.x
       hit.fy = hit.y
       dragRef.current = { kind: 'node', node: hit }
+      // Wake the sim so neighbours respond as the node is dragged.
+      alphaRef.current = Math.max(alphaRef.current, 0.3)
     } else {
       dragRef.current = { kind: 'pan', lastX: ev.clientX, lastY: ev.clientY }
     }
@@ -359,6 +404,8 @@ export function GraphGlobalView() {
     } else if (drag?.kind === 'node') {
       drag.node.fx = w.x
       drag.node.fy = w.y
+      // Keep the sim warm while the user is actively dragging.
+      alphaRef.current = Math.max(alphaRef.current, 0.3)
     } else {
       const hit = nodeAt(w.x, w.y)
       const id = hit?.id ?? null

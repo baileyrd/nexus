@@ -2,13 +2,12 @@
 // Auto-generates settings UI from registered config schemas.
 // Plugins tab: lists core plugins + discovered community plugins with toggles.
 
-import { useState, useEffect, useRef, useCallback, useMemo, createElement } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { PLUGIN_API_VERSION, type Capability } from '@nexus/extension-api'
 import { getRegistry } from '../../../host/shellRegistry'
 import { useContextKey, useContextKeyStore } from '../../../host/ContextKeyService'
 import { useConfigStore, useConfigValue } from '../../../stores/configStore'
-import type { SettingsTabEntry } from '../../../types/plugin'
 import {
   useThemeStore,
   type AvailableSnippet,
@@ -16,6 +15,13 @@ import {
 } from '../../../stores/themeStore'
 import type { ConfigSection, ConfigSchema, PluginAPI } from '../../../types/plugin'
 import type { CommunityPluginManifest } from '../../../host/communityPluginLoader'
+import {
+  enableBuiltinPlugin,
+  disableBuiltinPlugin,
+  PLUGIN_LIST_CHANGED_EVENT,
+} from '../../../host/pluginActivation'
+import { eventBus } from '../../../host/EventBus'
+import { DEFAULT_OFF_PLUGINS } from '../../catalog'
 import {
   formatChord,
   normalizeChord,
@@ -58,6 +64,14 @@ interface PluginInfo {
   capabilities?: unknown
 }
 
+/** Dormant default-off built-in plugin (shipped, not loaded this session). */
+interface AvailablePluginInfo {
+  id:      string
+  name:    string
+  version: string
+  core:    boolean
+}
+
 // ─── Data hooks ───────────────────────────────────────────────────────────────
 
 function useConfigSections(): ConfigSection[] {
@@ -81,11 +95,42 @@ function usePluginList(): PluginInfo[] {
   useEffect(() => {
     const reg = getRegistry()
     if (!reg) return
-    try {
-      setList(reg.getService<PluginInfo[]>('pluginList'))
-    } catch {
-      // not registered yet
+    const read = () => {
+      try {
+        setList(reg.getService<PluginInfo[]>('pluginList'))
+      } catch {
+        // not registered yet
+      }
     }
+    read()
+    // Re-read whenever a plugin transitions to active mid-session so a
+    // hot-enabled built-in shows up under "Core plugins" without a reload.
+    return eventBus.on(PLUGIN_LIST_CHANGED_EVENT, read)
+  }, [shellReady])
+
+  return list
+}
+
+// Default-off built-ins exposed by main.tsx as the `availablePlugins` service.
+// Empty list when every default-off plugin has already been opted-in.
+function useAvailablePlugins(): AvailablePluginInfo[] {
+  const [list, setList] = useState<AvailablePluginInfo[]>([])
+  const shellReady = useContextKey('shellReady')
+
+  useEffect(() => {
+    const reg = getRegistry()
+    if (!reg) return
+    const read = () => {
+      try {
+        setList(reg.getService<AvailablePluginInfo[]>('availablePlugins'))
+      } catch {
+        // service not registered (older boot path) — leave empty
+      }
+    }
+    read()
+    // Drop the just-enabled row from "Available (disabled)" the moment
+    // the host marks the plugin active.
+    return eventBus.on(PLUGIN_LIST_CHANGED_EVENT, read)
   }, [shellReady])
 
   return list
@@ -120,119 +165,6 @@ type NavTab = BuiltInTab | string
 // `plugin:core.settings:last-tab` — same scheme as keybinding overrides.
 const LAST_TAB_STORAGE_KEY = 'plugin:core.settings:last-tab'
 
-// Re-read plugin-contributed settings tabs from the registry. Tabs
-// without a wired renderer are filtered by `all()` already, so the
-// nav rail never shows a dead entry. The nonce lets callers force a
-// refresh after a new plugin activates mid-session.
-function useSettingsTabs(nonce: number): SettingsTabEntry[] {
-  void nonce
-  const reg = getRegistry()
-  return reg ? reg.settingsTabs.all() : []
-}
-
-// Synthetic tab prefix for per-plugin auto-tabs sourced from
-// `ConfigurationRegistry`. Any plugin that declares a `configuration`
-// schema gets its own tab, matching the Obsidian convention of
-// "one rail entry per plugin with settings" — without that plugin
-// having to register an explicit `settings_tabs` entry.
-const AUTO_TAB_PREFIX = 'auto:'
-
-// Synthetic prefix for stub rail entries — plugins that have neither a
-// contributed settings tab nor a `configuration` schema. Matches Obsidian's
-// convention of listing every active plugin in the rail; the stub body
-// surfaces version + (when known) description so the user has a place to
-// land before deciding to disable it.
-const STUB_TAB_PREFIX = 'stub:'
-
-/**
- * Derive auto-tabs from `ConfigurationRegistry.all()`, skipping any
- * plugin that already owns an explicit contributed tab for the same
- * id so the two paths don't produce duplicate rail entries.
- */
-function buildAutoTabs(
-  sections: ConfigSection[],
-  contributed: SettingsTabEntry[],
-  pluginList: PluginInfo[],
-): SettingsTabEntry[] {
-  const claimedPlugins = new Set(contributed.map((t) => t.pluginId))
-  return sections
-    .filter((s) => !claimedPlugins.has(s.pluginId))
-    .map((s) => ({
-      id: `${AUTO_TAB_PREFIX}${s.pluginId}`,
-      title: s.title,
-      pluginId: s.pluginId,
-      priority: s.order,
-      group: classifyByPluginList(s.pluginId, pluginList),
-    }))
-}
-
-/**
- * Decide which rail group a plugin-owned tab belongs to. Any plugin
- * appearing in `pluginList` is a shipped/built-in plugin → core-plugins;
- * everything else came from the community loader → community-plugins.
- * Falls back to the legacy id-prefix heuristic when `pluginList` hasn't
- * hydrated yet (early-paint window before `shellReady`).
- */
-function classifyByPluginList(
-  pluginId: string,
-  pluginList: PluginInfo[],
-): 'core-plugins' | 'community-plugins' {
-  if (pluginList.length > 0) {
-    return pluginList.some((p) => p.id === pluginId)
-      ? 'core-plugins'
-      : 'community-plugins'
-  }
-  return pluginId.startsWith('core.') || pluginId.startsWith('com.nexus.') ||
-    pluginId.startsWith('nexus.')
-    ? 'core-plugins'
-    : 'community-plugins'
-}
-
-/**
- * Phase B — synthesize a rail entry for every active plugin that has
- * neither a contributed `settings_tab` nor an auto-tab from a
- * `configuration` schema. The body is a stub explaining the plugin has
- * no settings, with version + description for context. Skips plugins
- * already represented by a contributed/auto tab so the rail never
- * double-lists a plugin.
- */
-function buildStubTabs(
-  pluginList: PluginInfo[],
-  community: CommunityPluginManifest[],
-  contributed: SettingsTabEntry[],
-  autoTabs: SettingsTabEntry[],
-): SettingsTabEntry[] {
-  const covered = new Set([
-    ...contributed.map((t) => t.pluginId),
-    ...autoTabs.map((t) => t.pluginId),
-  ])
-  const stubs: SettingsTabEntry[] = []
-
-  for (const p of pluginList) {
-    if (covered.has(p.id)) continue
-    if (p.state === 'error') continue // hide rows that failed to activate
-    stubs.push({
-      id: `${STUB_TAB_PREFIX}${p.id}`,
-      title: p.name,
-      pluginId: p.id,
-      group: 'core-plugins',
-    })
-  }
-
-  for (const m of community) {
-    if (!m.enabled) continue
-    if (covered.has(m.id)) continue
-    stubs.push({
-      id: `${STUB_TAB_PREFIX}${m.id}`,
-      title: m.name,
-      pluginId: m.id,
-      group: 'community-plugins',
-    })
-  }
-
-  return stubs
-}
-
 // `api` is supplied by the settings plugin's `views.register()` wrapper
 // in `index.ts` — the slot system itself doesn't pass props, so we
 // inject it via a closure component there. Optional here because the
@@ -250,46 +182,7 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
   const sections   = useConfigSections()
   const plugins    = usePluginList()
   const community  = useCommunityManifests()
-
-  // Re-read the tab registry whenever the panel opens so tabs
-  // registered after shell boot (e.g. a lazy-activated plugin)
-  // show up on the next open without a reload.
-  const [tabNonce, setTabNonce] = useState(0)
-  const contributedTabs = useSettingsTabs(tabNonce)
-  const autoTabs = useMemo(
-    () => buildAutoTabs(sections, contributedTabs, plugins),
-    [sections, contributedTabs, plugins],
-  )
-
-  // Phase B: stub rail entries for any plugin not already represented
-  // by a contributed or auto tab.
-  const stubTabs = useMemo(
-    () => buildStubTabs(plugins, community, contributedTabs, autoTabs),
-    [plugins, community, contributedTabs, autoTabs],
-  )
-
-  // Combined rail buckets. Built-in tabs always live under "Options".
-  // Contributed + auto + stub tabs fall into `core-plugins` /
-  // `community-plugins` based on their `group` field.
-  const railGroups = useMemo(() => {
-    const pluginTabs = [...contributedTabs, ...autoTabs, ...stubTabs].sort(
-      (a, b) => {
-        const ga = (a.priority ?? 0) - (b.priority ?? 0)
-        if (ga !== 0) return ga
-        return a.title.localeCompare(b.title)
-      },
-    )
-    const byGroup = (g: 'options' | 'core-plugins' | 'community-plugins') =>
-      pluginTabs.filter((t) => {
-        const resolved = t.group ?? classifyByPluginList(t.pluginId, plugins)
-        return resolved === g
-      })
-    return {
-      options: byGroup('options'),
-      core: byGroup('core-plugins'),
-      community: byGroup('community-plugins'),
-    }
-  }, [contributedTabs, autoTabs, stubTabs, plugins])
+  const available  = useAvailablePlugins()
 
   const [navTab,        setNavTab]        = useState<NavTab>('settings')
   const [query,         setQuery]         = useState('')
@@ -306,11 +199,16 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
     hydratedRef.current = true
     try {
       const stored = localStorage.getItem(LAST_TAB_STORAGE_KEY)
-      if (stored && typeof stored === 'string') setNavTab(stored)
+      // Reject anything that isn't one of the four built-in tabs.
+      // Older sessions may have persisted an `auto:` / `stub:` plugin
+      // tab id; those rail entries no longer exist, so fall back to
+      // 'settings' rather than landing on an empty "Unknown tab" body.
+      if (stored && BUILT_IN_TABS.includes(stored as BuiltInTab)) {
+        setNavTab(stored)
+      }
     } catch {
       // localStorage may be unavailable in headless tests — swallow.
     }
-    setTabNonce((n) => n + 1)
   }, [visible])
 
   // Honour `settingsActiveTab` context key set by openKeybindings command.
@@ -321,6 +219,17 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
       useContextKeyStore.getState().set('settingsActiveTab', undefined)
     }
   }, [visible, requestedTab])
+
+  // External "jump to plugin section" hook — used by AI chat's
+  // empty-state CTA to land the user directly in nexus.ai's settings
+  // group rather than whichever section was last open.
+  useEffect(() => {
+    return eventBus.on('settings:focusSection', (pluginId: unknown) => {
+      if (typeof pluginId !== 'string') return
+      setNavTab('settings')
+      setActiveSection(pluginId)
+    })
+  }, [])
 
   // Persist the active tab so the next open lands on the same page.
   useEffect(() => {
@@ -372,7 +281,8 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
         onClick={e => e.stopPropagation()}
         onKeyDown={e => e.key === 'Escape' && close()}
       >
-        {/* Left rail — Obsidian-style grouped nav. */}
+        {/* Left rail — built-in tabs only. Per-plugin entries are
+            managed from the Plugins tab on the right. */}
         <nav className="settings-rail">
           <div className="settings-rail-group-header">Options</div>
           <RailItem
@@ -395,41 +305,6 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             active={navTab === 'plugins'}
             onClick={() => setNavTab('plugins')}
           />
-          {railGroups.options.map((t) => (
-            <RailItem
-              key={t.id}
-              label={t.title}
-              title={t.pluginId}
-              active={navTab === t.id}
-              onClick={() => setNavTab(t.id)}
-            />
-          ))}
-
-          {railGroups.core.length > 0 && (
-            <div className="settings-rail-group-header">Core plugins</div>
-          )}
-          {railGroups.core.map((t) => (
-            <RailItem
-              key={t.id}
-              label={t.title}
-              title={t.pluginId}
-              active={navTab === t.id}
-              onClick={() => setNavTab(t.id)}
-            />
-          ))}
-
-          {railGroups.community.length > 0 && (
-            <div className="settings-rail-group-header">Community plugins</div>
-          )}
-          {railGroups.community.map((t) => (
-            <RailItem
-              key={t.id}
-              label={t.title}
-              title={t.pluginId}
-              active={navTab === t.id}
-              onClick={() => setNavTab(t.id)}
-            />
-          ))}
         </nav>
 
         {/* Right pane — topbar + content for the selected rail entry.
@@ -503,27 +378,20 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
               {navTab === 'plugins' && (
                 <div className="settings-body">
                   <div className="settings-content">
-                    <PluginsTab corePlugins={plugins} community={community} />
+                    <PluginsTab
+                      corePlugins={plugins}
+                      community={community}
+                      available={available}
+                    />
                   </div>
                 </div>
               )}
               {!BUILT_IN_TABS.includes(navTab as BuiltInTab) && (
                 <div className="settings-body">
                   <div className="settings-content">
-                    {navTab.startsWith(AUTO_TAB_PREFIX) ? (
-                      <AutoSettingsTabBody
-                        pluginId={navTab.slice(AUTO_TAB_PREFIX.length)}
-                        sections={sections}
-                      />
-                    ) : navTab.startsWith(STUB_TAB_PREFIX) ? (
-                      <StubTabBody
-                        pluginId={navTab.slice(STUB_TAB_PREFIX.length)}
-                        plugins={plugins}
-                        community={community}
-                      />
-                    ) : (
-                      <ContributedTabBody tabId={navTab} />
-                    )}
+                    <p className="settings-empty">
+                      Unknown tab. Pick one from the left rail.
+                    </p>
                   </div>
                 </div>
               )}
@@ -557,87 +425,6 @@ function RailItem({
       {label}
     </button>
   )
-}
-
-// ─── Auto-tab body ────────────────────────────────────────────────────────────
-//
-// Renders the matching `ConfigSection` for an auto-tab (the user
-// selected a plugin from the rail that only declared a `configuration`
-// schema — no custom renderer). Reuses the same `SettingsSection`
-// component the aggregate overview tab uses.
-
-function AutoSettingsTabBody({
-  pluginId,
-  sections,
-}: {
-  pluginId: string
-  sections: ConfigSection[]
-}) {
-  const section = sections.find((s) => s.pluginId === pluginId)
-  if (!section) {
-    return (
-      <div className="settings-empty">
-        Plugin <code>{pluginId}</code> has no registered settings.
-      </div>
-    )
-  }
-  return <SettingsSection section={section} />
-}
-
-// ─── Stub-tab body ────────────────────────────────────────────────────────────
-//
-// Phase B — body for plugins with no settings of their own. Shows the
-// plugin's name + version (and description, when supplied by the
-// community manifest) so the rail entry has somewhere meaningful to land.
-
-function StubTabBody({
-  pluginId,
-  plugins,
-  community,
-}: {
-  pluginId: string
-  plugins: PluginInfo[]
-  community: CommunityPluginManifest[]
-}) {
-  const core = plugins.find((p) => p.id === pluginId)
-  const com  = community.find((m) => m.id === pluginId)
-  const name    = core?.name ?? com?.name ?? pluginId
-  const version = core?.version ?? com?.version
-  const desc    = com?.description
-  return (
-    <section className="settings-section">
-      <h3 className="settings-section-title">{name}</h3>
-      <p className="settings-field-description" style={{ marginBottom: 8 }}>
-        <code>{pluginId}</code>
-        {version ? ` · v${version}` : ''}
-      </p>
-      {desc && (
-        <p className="settings-field-description" style={{ marginBottom: 16 }}>
-          {desc}
-        </p>
-      )}
-      <p className="settings-empty">This plugin has no settings.</p>
-    </section>
-  )
-}
-
-// ─── Plugin-contributed tab host ──────────────────────────────────────────────
-//
-// Looks the active tab id up in the registry and renders its wired
-// component. A missing renderer (e.g. the tab was unregistered between
-// clicks) falls back to a placeholder so the panel stays usable.
-
-function ContributedTabBody({ tabId }: { tabId: string }) {
-  const reg = getRegistry()
-  const Renderer = reg?.settingsTabs.getRenderer(tabId)
-  if (!Renderer) {
-    return (
-      <div className="settings-empty">
-        Settings tab <code>{tabId}</code> is not registered.
-      </div>
-    )
-  }
-  return createElement(Renderer)
 }
 
 // ─── Appearance tab ───────────────────────────────────────────────────────────
@@ -705,6 +492,9 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
   }
 
   const handleModeChange = (next: ThemeMode) => {
+    // setMode in themeStore handles the kernel call and then auto-
+    // applies a theme of the matching category — no extra coupling
+    // needed here.
     void run('Set mode', () => useThemeStore.getState().setMode(api!, next))
   }
 
@@ -781,21 +571,62 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
           Pick a base palette. Variables apply to :root immediately.
         </p>
         <div className="settings-field-control" style={{ marginTop: 8 }}>
-          <select
-            value={activeThemeId ?? ''}
-            disabled={busy || !loaded || availableThemes.length === 0}
-            onChange={e => handleThemeChange(e.target.value)}
-            style={{ minWidth: 240 }}
-          >
-            {availableThemes.length === 0 && (
-              <option value="">{loaded ? 'No themes installed' : 'Loading...'}</option>
-            )}
-            {availableThemes.map(t => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
+          {(() => {
+            // Native <option> elements use OS-rendered chrome; CSS on
+            // the parent select doesn't reach them. `color-scheme` is
+            // the one hint Chromium honors — set it to match the
+            // active theme's category so the popup list renders with
+            // the right contrast. Falls back to the user's Mode pick
+            // when the active theme has no category metadata, and
+            // finally to 'dark' so we never render light-on-light.
+            const activeMeta = availableThemes.find((t) => t.id === activeThemeId)
+            const activeCategory =
+              typeof activeMeta?.category === 'string' ? activeMeta.category : undefined
+            const scheme: 'light' | 'dark' =
+              activeCategory === 'light'
+                ? 'light'
+                : activeCategory === 'dark'
+                ? 'dark'
+                : mode === 'light'
+                ? 'light'
+                : 'dark'
+            return (
+              <select
+                value={activeThemeId ?? ''}
+                disabled={busy || !loaded || availableThemes.length === 0}
+                onChange={e => handleThemeChange(e.target.value)}
+                style={{
+                  minWidth: 240,
+                  padding: '4px 8px',
+                  background: 'var(--background-primary)',
+                  color: 'var(--text-normal)',
+                  border: '1px solid var(--background-modifier-border)',
+                  borderRadius: 3,
+                  fontSize: 13,
+                  colorScheme: scheme,
+                }}
+              >
+                {availableThemes.length === 0 && (
+                  <option value="">{loaded ? 'No themes installed' : 'Loading...'}</option>
+                )}
+                {availableThemes.map(t => (
+                  <option
+                    key={t.id}
+                    value={t.id}
+                    // Belt-and-braces: also style each option directly.
+                    // Chromium honors these on Linux/Windows even when
+                    // the popup is OS-native.
+                    style={{
+                      background: scheme === 'dark' ? '#1f1f1f' : '#ffffff',
+                      color: scheme === 'dark' ? '#e5e5e5' : '#1a1a1a',
+                    }}
+                  >
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            )
+          })()}
         </div>
       </section>
 
@@ -1238,13 +1069,53 @@ function ChordCaptureInput({
 function PluginsTab({
   corePlugins,
   community,
+  available,
 }: {
   corePlugins: PluginInfo[]
   community:   CommunityPluginManifest[]
+  available:   AvailablePluginInfo[]
 }) {
   const [pendingChanges, setPendingChanges] = useState<Record<string, boolean>>({})
   const [saving,         setSaving]         = useState<string | null>(null)
   const [highRiskOnly,   setHighRiskOnly]   = useState(false)
+  // Per-row state for the hot enable/disable flow. `pendingBuiltin`
+  // shows a spinner; `builtinErrors` surfaces the failure inline.
+  const [pendingBuiltin, setPendingBuiltin] = useState<Set<string>>(new Set())
+  const [builtinErrors, setBuiltinErrors] = useState<Record<string, string>>({})
+
+  // The set of built-in plugin ids that ship as default-off — these
+  // are the ones that get a toggle in the Core plugins list.
+  const optionalIds = useMemo(
+    () => new Set(DEFAULT_OFF_PLUGINS.map((p) => p.manifest.id)),
+    [],
+  )
+
+  const handleToggleBuiltin = async (pluginId: string, nextEnabled: boolean) => {
+    setPendingBuiltin(prev => {
+      const next = new Set(prev)
+      next.add(pluginId)
+      return next
+    })
+    setBuiltinErrors(prev => {
+      if (!(pluginId in prev)) return prev
+      const { [pluginId]: _, ...rest } = prev
+      return rest
+    })
+    const result = nextEnabled
+      ? await enableBuiltinPlugin(pluginId)
+      : await disableBuiltinPlugin(pluginId)
+    setPendingBuiltin(prev => {
+      const next = new Set(prev)
+      next.delete(pluginId)
+      return next
+    })
+    if (!result.ok) {
+      setBuiltinErrors(prev => ({ ...prev, [pluginId]: result.error }))
+    }
+    // Success: pluginActivation refreshes the `pluginList` /
+    // `availablePlugins` services and emits PLUGIN_LIST_CHANGED_EVENT,
+    // which the parent hooks subscribe to — the row updates itself.
+  }
 
   const handleToggle = async (pluginId: string, enabled: boolean) => {
     setSaving(pluginId)
@@ -1323,26 +1194,54 @@ function PluginsTab({
         </label>
       </div>
 
-      {/* ── Core plugins ── */}
-      <div className="plugins-tab__section-header">
-        Core plugins
-        <span className="plugins-tab__section-count">{filteredCore.length}</span>
-        {errorCount > 0 && (
-          <span className="plugins-tab__error-badge">{errorCount} error{errorCount > 1 ? 's' : ''}</span>
-        )}
-      </div>
+      {/* ── Core plugins ── unified list of loaded built-ins plus the
+          dormant default-off ones. Required (default-on) plugins have
+          no toggle; optional (default-off) plugins toggle live. */}
+      {(() => {
+        const optionalDisabled = highRiskOnly ? [] : available
+        const totalCore = filteredCore.length + optionalDisabled.length
+        return (
+          <>
+            <div className="plugins-tab__section-header">
+              Core plugins
+              <span className="plugins-tab__section-count">{totalCore}</span>
+              {errorCount > 0 && (
+                <span className="plugins-tab__error-badge">{errorCount} error{errorCount > 1 ? 's' : ''}</span>
+              )}
+            </div>
 
-      <div className="plugins-tab__list">
-        {filteredCore.length === 0 ? (
-          <p className="settings-empty">
-            {highRiskOnly ? 'No core plugins with high-risk capabilities.' : 'No core plugins loaded.'}
-          </p>
-        ) : (
-          filteredCore.map(p => (
-            <CorePluginRow key={p.id} plugin={p} />
-          ))
-        )}
-      </div>
+            <div className="plugins-tab__list">
+              {totalCore === 0 ? (
+                <p className="settings-empty">
+                  {highRiskOnly ? 'No core plugins with high-risk capabilities.' : 'No core plugins loaded.'}
+                </p>
+              ) : (
+                <>
+                  {filteredCore.map(p => (
+                    <CorePluginRow
+                      key={p.id}
+                      plugin={p}
+                      optional={optionalIds.has(p.id)}
+                      busy={pendingBuiltin.has(p.id)}
+                      error={builtinErrors[p.id]}
+                      onToggle={(next) => { void handleToggleBuiltin(p.id, next) }}
+                    />
+                  ))}
+                  {optionalDisabled.map(p => (
+                    <DisabledOptionalRow
+                      key={p.id}
+                      plugin={p}
+                      busy={pendingBuiltin.has(p.id)}
+                      error={builtinErrors[p.id]}
+                      onToggle={(next) => { void handleToggleBuiltin(p.id, next) }}
+                    />
+                  ))}
+                </>
+              )}
+            </div>
+          </>
+        )
+      })()}
 
       {/* ── Community plugins ── */}
       <div className="plugins-tab__section-header" style={{ marginTop: 24 }}>
@@ -1377,19 +1276,37 @@ function PluginsTab({
           ))
         )}
       </div>
+
     </div>
   )
 }
 
-// ─── Core plugin row (read-only — always enabled) ─────────────────────────────
+// ─── Core plugin row ─────────────────────────────────────────────────────────
+//
+// Loaded built-ins. `optional=true` (i.e. shipped via DEFAULT_OFF and
+// the user opted-in) gets a toggle in the same style as community
+// plugins, so disabling is a single click. Required core plugins
+// (DEFAULT_ON) render without a toggle since they're load-bearing.
 
-function CorePluginRow({ plugin }: { plugin: PluginInfo }) {
+function CorePluginRow({
+  plugin,
+  optional,
+  busy,
+  error,
+  onToggle,
+}: {
+  plugin:   PluginInfo
+  optional: boolean
+  busy:     boolean
+  error?:   string
+  onToggle: (next: boolean) => void
+}) {
   const capabilities = useMemo(
     () => parseManifestCapabilities(plugin.capabilities),
     [plugin.capabilities],
   )
   return (
-    <div className={`plugin-row ${plugin.state === 'error' ? 'plugin-row--error' : ''}`}>
+    <div className={`plugin-row ${plugin.state === 'error' || error ? 'plugin-row--error' : ''}`}>
       <div className="plugin-row__dot" data-state={plugin.state} />
       <div className="plugin-row__body">
         <div className="plugin-row__header">
@@ -1400,11 +1317,81 @@ function CorePluginRow({ plugin }: { plugin: PluginInfo }) {
           <span className={`plugin-row__state plugin-row__state--${plugin.state}`}>
             {plugin.state}
           </span>
+          {optional && (() => {
+            // `pluginList` no longer surfaces 'inactive' rows (they
+            // route through DisabledOptionalRow), so anything reaching
+            // CorePluginRow is enabled — but bind explicitly rather
+            // than hardcoding `checked` so a future regression in the
+            // service refresh can't desync the toggle from reality.
+            const isEnabled = plugin.state !== 'inactive'
+            return (
+              <label
+                className="plugin-row__toggle"
+                title={busy ? 'Working…' : isEnabled ? 'Disable' : 'Enable'}
+              >
+                <input
+                  type="checkbox"
+                  checked={isEnabled}
+                  disabled={busy}
+                  onChange={() => onToggle(!isEnabled)}
+                />
+                <span className="plugin-row__toggle-track" />
+              </label>
+            )
+          })()}
         </div>
         {plugin.state === 'error' && plugin.error && (
           <div className="plugin-row__error">{plugin.error}</div>
         )}
+        {error && <div className="plugin-row__error">{error}</div>}
         <CapabilityChipsRow capabilities={capabilities} />
+      </div>
+    </div>
+  )
+}
+
+// ─── Disabled-optional row ───────────────────────────────────────────────────
+//
+// Default-off built-ins the user hasn't opted into. Renders alongside
+// CorePluginRow inside the Core plugins section so the user sees one
+// list with toggles in both states (Hello-World style).
+
+function DisabledOptionalRow({
+  plugin,
+  busy,
+  error,
+  onToggle,
+}: {
+  plugin:   AvailablePluginInfo
+  busy:     boolean
+  error?:   string
+  onToggle: (next: boolean) => void
+}) {
+  return (
+    <div className={`plugin-row ${error ? 'plugin-row--error' : ''}`}>
+      <div className="plugin-row__dot" data-state={error ? 'error' : 'inactive'} />
+      <div className="plugin-row__body">
+        <div className="plugin-row__header">
+          <span className="plugin-row__name">{plugin.name}</span>
+          <span className="plugin-row__id">{plugin.id}</span>
+          {plugin.core && (
+            <span className="plugin-row__badge plugin-row__badge--core">core</span>
+          )}
+          <span className="plugin-row__version">v{plugin.version}</span>
+          <label
+            className="plugin-row__toggle"
+            title={busy ? 'Working…' : 'Enable'}
+          >
+            <input
+              type="checkbox"
+              checked={false}
+              disabled={busy}
+              onChange={() => onToggle(true)}
+            />
+            <span className="plugin-row__toggle-track" />
+          </label>
+        </div>
+        {error && <div className="plugin-row__error">{error}</div>}
       </div>
     </div>
   )
@@ -1743,6 +1730,23 @@ function SettingsField({ field }: { field: ConfigSchema }) {
             type="number"
             value={value as number}
             onChange={e => setValue(field.key, Number(e.target.value))}
+          />
+        )
+      case 'password':
+        // Same shape as 'string' but masked. Used for API keys —
+        // browser never auto-fills these (autoComplete=new-password)
+        // and `spellCheck` off avoids dictionary squiggles on the
+        // gibberish.
+        return (
+          <input
+            id={field.key}
+            type="password"
+            value={(value as string) ?? ''}
+            autoComplete="new-password"
+            spellCheck={false}
+            placeholder={field.default ? String(field.default) : '••••••••'}
+            onChange={e => setValue(field.key, e.target.value)}
+            style={{ minWidth: 280 }}
           />
         )
       case 'string':

@@ -62,9 +62,12 @@ export function BasesView({ relpath, client }: Props) {
   }, [relpath, client, ensureTab, setLoading, setBase, setError])
 
   const wrapperStyle: React.CSSProperties = {
+    width: '100%',
     height: '100%',
+    minWidth: 0,
     display: 'flex',
     flexDirection: 'column',
+    overflow: 'hidden',
     background: 'var(--bg-primary, #1e1e1e)',
     color: 'var(--fg-primary, #e4e4e7)',
     fontSize: 13,
@@ -74,6 +77,12 @@ export function BasesView({ relpath, client }: Props) {
     borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
     display: 'flex',
     alignItems: 'center',
+    // Allow the toolbar to reflow onto a second row when the leaf is
+    // narrowed by the right sidedock — otherwise the trailing buttons
+    // (Trash/Schema/view-mode picker) get clipped at the dock edge and
+    // look like they're hiding under the right panel.
+    flexWrap: 'wrap',
+    rowGap: 6,
     gap: 8,
     fontSize: 12,
     color: 'var(--fg-muted, #9ca3af)',

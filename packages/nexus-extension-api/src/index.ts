@@ -389,7 +389,7 @@ export interface ConfigSchema {
   key: string;
   title: string;
   description: string;
-  type: 'boolean' | 'string' | 'number' | 'select' | 'keybinding';
+  type: 'boolean' | 'string' | 'password' | 'number' | 'select' | 'keybinding';
   default: unknown;
   options?: string[];
   when?: string;

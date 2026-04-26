@@ -168,26 +168,36 @@ export class ExtensionHost {
     }
   }
 
-  /** Unload a plugin — cleans up all contributions automatically */
+  /** Unload a plugin — cleans up all contributions automatically.
+   *  Handles both `active` (run deactivate + sweep) and `registered`
+   *  (lazy plugin that never activated — just sweep its pre-registered
+   *  manifest contributions and drop its activation triggers). */
   async unload(id: string) {
-    if (this.states.get(id) !== 'active') return
+    const state = this.states.get(id)
+    if (state !== 'active' && state !== 'registered') return
 
     const plugin = this.plugins.get(id)
     if (!plugin) return
 
-    this.states.set(id, 'deactivating')
-
-    try {
-      await plugin.deactivate?.()
-    } catch (err) {
-      console.error(`[ExtensionHost] deactivate() threw for '${id}':`, err)
+    if (state === 'active') {
+      this.states.set(id, 'deactivating')
+      try {
+        await plugin.deactivate?.()
+      } catch (err) {
+        console.error(`[ExtensionHost] deactivate() threw for '${id}':`, err)
+      }
     }
 
-    // Sweep all registry contributions this plugin made
+    // Sweep all registry contributions this plugin made (covers the
+    // lazy pre-registration done in loadAll Pass 1 as well as anything
+    // an active plugin added during activate()).
     this.registry.unregisterAll(id)
     // Forget the dedupe marker so a future re-activation re-registers
     // manifest contributions.
     this.contribsRegistered.delete(id)
+    // Drop any deferred activation triggers this plugin owned — the
+    // plugin is going inactive, firing its trigger shouldn't wake it.
+    activationTriggers.evict(id)
 
     this.states.set(id, 'inactive')
     eventBus.emit('plugin:deactivated', { pluginId: id })

@@ -53,6 +53,10 @@ export interface ChatViewProps {
   /** Manual save — used by the explicit "Save" button. Auto-save runs
    *  on assistant-done debounced, but power users want a button too. */
   onSaveSession?: () => void | Promise<void>
+  /** Open Settings → AI provider section. Wired by the plugin so the
+   *  empty-state CTA (and any "no provider" banner) can route the user
+   *  to where they configure credentials, no env-var ritual. */
+  onOpenSettings?: () => void
 }
 
 export function ChatView({
@@ -65,6 +69,7 @@ export function ChatView({
   onDeleteSession,
   onRenameSession,
   onSaveSession,
+  onOpenSettings,
 }: ChatViewProps) {
   const status = useAiStore((s) => s.status)
   const turns = useAiStore((s) => s.turns)
@@ -171,7 +176,7 @@ export function ChatView({
         fontSize: 13,
       }}
     >
-      <ConfigBanner config={config} />
+      <ConfigBanner config={config} onOpenSettings={onOpenSettings} />
 
       {onNewChat || onLoadSession || onDeleteSession || onRenameSession ? (
         <SessionBar
@@ -203,7 +208,10 @@ export function ChatView({
         }}
       >
         {turns.length === 0 && status !== 'asking' && !lastError ? (
-          <EmptyState />
+          <EmptyState
+            configured={!!config?.ai}
+            onOpenSettings={onOpenSettings}
+          />
         ) : null}
 
         {turns.map((t) =>
@@ -555,21 +563,53 @@ function SourceChipRow({
 
 // ── Chrome ────────────────────────────────────────────────────────────────
 
-function ConfigBanner({ config }: { config: ReturnType<typeof useAiStore.getState>['config'] }) {
+function ConfigBanner({
+  config,
+  onOpenSettings,
+}: {
+  config: ReturnType<typeof useAiStore.getState>['config']
+  onOpenSettings?: () => void
+}) {
   if (!config) return null
   const ai = config.ai
   if (!ai) {
+    // Empty / mis-configured. Render a CTA row instead of the old
+    // red error: most users land here on first run and the actionable
+    // path is "open Settings → AI", not "edit env vars and restart".
     return (
       <div
         style={{
-          padding: '6px 12px',
-          fontSize: 11,
-          color: 'var(--risk)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          padding: '8px 12px',
+          fontSize: 12,
+          color: 'var(--fg-muted)',
           background: 'var(--bg-raised)',
           borderBottom: '1px solid var(--line-soft)',
         }}
       >
-        No AI provider configured. Set NEXUS_AI_PROVIDER (anthropic, openai, ollama) and restart.
+        <span>No AI provider configured.</span>
+        {onOpenSettings && (
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            style={{
+              padding: '3px 10px',
+              background: 'var(--accent)',
+              color: 'var(--fg-on-accent, #fff)',
+              border: '1px solid var(--accent)',
+              borderRadius: 'var(--r)',
+              fontSize: 11,
+              fontFamily: 'var(--f-ui)',
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Configure
+          </button>
+        )}
       </div>
     )
   }
@@ -606,7 +646,13 @@ function PendingRow() {
   )
 }
 
-function EmptyState() {
+function EmptyState({
+  configured,
+  onOpenSettings,
+}: {
+  configured: boolean
+  onOpenSettings?: () => void
+}) {
   return (
     <div
       style={{
@@ -615,13 +661,42 @@ function EmptyState() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
+        gap: 12,
         padding: '20px 18px',
         color: 'var(--fg-dim)',
         fontSize: 13,
         textAlign: 'center',
       }}
     >
-      Ask about your workspace.
+      {configured ? (
+        <span>Ask about your workspace.</span>
+      ) : (
+        <>
+          <span style={{ maxWidth: 260, lineHeight: 1.5 }}>
+            Connect an AI provider to start chatting. Anthropic, OpenAI,
+            or a local Ollama server all work.
+          </span>
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              style={{
+                padding: '6px 14px',
+                background: 'var(--accent)',
+                color: 'var(--fg-on-accent, #fff)',
+                border: '1px solid var(--accent)',
+                borderRadius: 'var(--r)',
+                fontSize: 12,
+                fontFamily: 'var(--f-ui)',
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+            >
+              Configure AI provider
+            </button>
+          )}
+        </>
+      )}
     </div>
   )
 }

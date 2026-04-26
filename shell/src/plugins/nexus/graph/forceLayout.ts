@@ -36,6 +36,16 @@ const MAX_VELOCITY = 40
 // Above this many nodes we stride pairwise iteration to keep tick budget sane.
 const PAIRWISE_FULL_LIMIT = 600
 
+// Alpha cooling — same shape d3-force uses. `alpha` scales every applied
+// force; on each tick the caller relaxes it toward 0 (`alpha += (0 -
+// alpha) * ALPHA_DECAY`) and stops driving the loop once it crosses
+// `ALPHA_MIN`. This is what makes the simulation actually settle —
+// without it, residual jitter from the inverse-square repulsion plus
+// the random kick on coincident nodes keeps injecting energy forever.
+export const ALPHA_DECAY = 0.0228
+export const ALPHA_MIN = 0.001
+export const ALPHA_REHEAT = 1
+
 export function makeNodes(ids: string[], width: number, height: number): SimNode[] {
   const out: SimNode[] = []
   const cx = width / 2
@@ -61,6 +71,7 @@ export function step(
   nodes: SimNode[],
   edges: SimEdge[],
   params: ForceParams,
+  alpha: number = 1,
 ): void {
   const cx = params.width / 2
   const cy = params.height / 2
@@ -72,7 +83,7 @@ export function step(
 
   // Pairwise repulsion. For very large graphs we stride to keep this O(n)-ish.
   const stride = n > PAIRWISE_FULL_LIMIT ? Math.ceil(n / PAIRWISE_FULL_LIMIT) : 1
-  const repulsionConst = params.repulsion
+  const repulsionConst = params.repulsion * alpha
   for (let i = 0; i < n; i++) {
     const a = nodes[i]!
     for (let j = i + 1; j < n; j += stride) {
@@ -98,7 +109,7 @@ export function step(
   }
 
   // Spring forces along edges.
-  const k = params.linkStrength
+  const k = params.linkStrength * alpha
   const rest = params.linkDistance
   for (const e of edges) {
     const i = idx.get(e.source)
@@ -119,7 +130,7 @@ export function step(
   }
 
   // Gravity toward centre + integrate.
-  const g = params.centerGravity
+  const g = params.centerGravity * alpha
   for (const node of nodes) {
     if (node.fx !== null && node.fy !== null) {
       node.x = node.fx

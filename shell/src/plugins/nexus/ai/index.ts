@@ -21,6 +21,9 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { viewRegistry, workspace } from '../../../workspace'
+import { useConfigStore } from '../../../stores/configStore'
+import { useContextKeyStore } from '../../../host/ContextKeyService'
+import { eventBus } from '../../../host/EventBus'
 import { ChatView } from './ChatView'
 import { aiChatViewCreator } from './AiChatView'
 import { useAiStore } from './aiStore'
@@ -28,6 +31,8 @@ import {
   setKernel,
   requestFocus,
   hydrateConfig,
+  pushUserConfig,
+  type AiUserConfig,
   subscribeStream,
   submitQuestion,
   cancelInFlight,
@@ -45,6 +50,7 @@ import {
 const VIEW_ID = 'nexus.ai.view'
 const COMMAND_FOCUS = 'nexus.ai.focus'
 const COMMAND_CLEAR = 'nexus.ai.clear'
+const COMMAND_OPEN_SETTINGS = 'nexus.ai.openSettings'
 
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
@@ -67,7 +73,69 @@ export const aiPlugin: Plugin = {
         pluginId: 'nexus.ai',
         title: 'AI Chat',
         order: 50,
+        // Provider settings live in the same section so the existing
+        // settings panel auto-renders them. The shell pushes these
+        // values to the kernel via `set_config` on activate and on
+        // every change — no restart needed.
         schema: [
+          {
+            key: 'ai.provider',
+            title: 'Chat provider',
+            description:
+              'AI provider used for chat. Leave blank to fall back to environment variables (ANTHROPIC_API_KEY / OPENAI_API_KEY / OLLAMA_BASE_URL).',
+            type: 'select' as const,
+            default: '',
+            options: ['', 'anthropic', 'openai', 'ollama'],
+          },
+          {
+            key: 'ai.model',
+            title: 'Chat model',
+            description:
+              'Optional model override (e.g. claude-sonnet-4-5, gpt-4o-mini, llama3.1). Leave blank for the provider default.',
+            type: 'string' as const,
+            default: '',
+          },
+          {
+            key: 'ai.apiKey',
+            title: 'API key',
+            description:
+              'Required for Anthropic and OpenAI. Stored locally in this workspace; never sent anywhere except the provider you choose.',
+            type: 'password' as const,
+            default: '',
+          },
+          {
+            key: 'ai.baseUrl',
+            title: 'Base URL',
+            description:
+              'Override the provider endpoint. For Ollama this points at your local server (default http://localhost:11434).',
+            type: 'string' as const,
+            default: '',
+          },
+          {
+            key: 'ai.embedProvider',
+            title: 'Embedding provider',
+            description:
+              'Provider for the RAG retrieval embeddings. OpenAI gives higher quality; Ollama runs locally. Leave blank to share the chat provider where supported.',
+            type: 'select' as const,
+            default: '',
+            options: ['', 'openai', 'ollama'],
+          },
+          {
+            key: 'ai.embedApiKey',
+            title: 'Embedding API key',
+            description:
+              'Only required when the embedding provider differs from the chat provider. Otherwise the chat key is reused.',
+            type: 'password' as const,
+            default: '',
+          },
+          {
+            key: 'ai.embedBaseUrl',
+            title: 'Embedding base URL',
+            description:
+              'Override the embedding endpoint (used for self-hosted Ollama or OpenAI-compatible proxies).',
+            type: 'string' as const,
+            default: '',
+          },
           {
             key: 'ui.copiedNotificationMs',
             title: 'Copy notification duration',
@@ -80,6 +148,7 @@ export const aiPlugin: Plugin = {
       commands: [
         { id: COMMAND_FOCUS, title: 'Focus Chat', category: 'AI' },
         { id: COMMAND_CLEAR, title: 'Clear Chat', category: 'AI' },
+        { id: COMMAND_OPEN_SETTINGS, title: 'Configure AI provider', category: 'AI' },
       ],
       keybindings: [
         { command: COMMAND_FOCUS, key: 'ctrl+alt+a', mac: 'cmd+alt+a' },
@@ -112,6 +181,9 @@ export const aiPlugin: Plugin = {
     const onRenameSession = (id: string, title: string) =>
       renameSession(api, id, title)
     const onSaveSession = () => saveCurrentSession(api).then(() => undefined)
+    const onOpenSettings = () => {
+      void api.commands.execute(COMMAND_OPEN_SETTINGS)
+    }
 
     viewRegistry.register(
       'ai-chat',
@@ -126,6 +198,7 @@ export const aiPlugin: Plugin = {
           onDeleteSession,
           onRenameSession,
           onSaveSession,
+          onOpenSettings,
         }),
       ),
     )
@@ -194,10 +267,61 @@ export const aiPlugin: Plugin = {
       lastDoneCount = doneCount
     })
 
-    // Fan out three awaits: subscription must be live before any
-    // submit could fire (otherwise we'd miss the first chunks);
-    // config + sessions hydration are best-effort and non-blocking.
+    // ── AI provider settings ─────────────────────────────────────────────
+    //
+    // Read user-saved provider settings out of the shell config store
+    // and push them to the kernel. The kernel falls back to env-var
+    // detection if every field is blank, so a fresh install with
+    // ANTHROPIC_API_KEY set keeps working.
+    const readUserConfig = (): AiUserConfig => {
+      const cfg = useConfigStore.getState()
+      return {
+        provider: cfg.get<string>('ai.provider', ''),
+        model: cfg.get<string>('ai.model', ''),
+        apiKey: cfg.get<string>('ai.apiKey', ''),
+        baseUrl: cfg.get<string>('ai.baseUrl', ''),
+        embedProvider: cfg.get<string>('ai.embedProvider', ''),
+        embedApiKey: cfg.get<string>('ai.embedApiKey', ''),
+        embedBaseUrl: cfg.get<string>('ai.embedBaseUrl', ''),
+      }
+    }
+
+    // Open the settings panel and route directly to the AI section.
+    // Wired into the chat view's empty state so a fresh user with no
+    // provider lands one click from a working chat.
+    api.commands.register(COMMAND_OPEN_SETTINGS, () => {
+      const cks = useContextKeyStore.getState()
+      cks.set('settingsPanelVisible', true)
+      cks.set('settingsActiveTab', 'settings')
+      // SettingsPanelView reads activeSection from local component
+      // state — emit a separate event the panel listens for, so the
+      // user lands in the AI section instead of whatever was open.
+      eventBus.emit('settings:focusSection', 'nexus.ai')
+    })
+
+    // Re-push whenever any of the seven keys change. EventBus emits
+    // `config:changed:<key>` from the configStore set() action.
+    const aiKeys = [
+      'ai.provider',
+      'ai.model',
+      'ai.apiKey',
+      'ai.baseUrl',
+      'ai.embedProvider',
+      'ai.embedApiKey',
+      'ai.embedBaseUrl',
+    ]
+    for (const key of aiKeys) {
+      api.events.on(`config:changed:${key}`, () => {
+        void pushUserConfig(api, readUserConfig())
+      })
+    }
+
+    // Fan out four awaits: subscription must be live before any submit
+    // could fire (otherwise we'd miss the first chunks); the config
+    // push lands the user's saved provider before hydrate reads it
+    // back; sessions hydration is best-effort and non-blocking.
     await subscribeStream(api)
+    await pushUserConfig(api, readUserConfig())
     void hydrateConfig(api)
     void loadSessions(api)
   },

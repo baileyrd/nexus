@@ -16,7 +16,7 @@
 //! for vector ops and HTTP requests to the provider APIs.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use nexus_kernel::{KernelPluginContext, PluginContext};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
@@ -63,11 +63,25 @@ pub const HANDLER_SESSION_LIST: u32 = 10;
 /// id. Legacy single-session lives outside this tree and isn't
 /// affected.
 pub const HANDLER_SESSION_DELETE: u32 = 11;
+/// Handler id for `set_config` — replace the in-memory `AiConfig` (and
+/// optionally the embedding `AiConfig`) at runtime. Persistence lives
+/// in the shell's config store; this handler only mutates the live
+/// process so the next chat call uses the new credentials without a
+/// restart. Args:
+///
+///   { ai?:        { provider, model?, api_key?, base_url? } | null,
+///     embedding?: { provider, model?, api_key?, base_url? } | null }
+///
+/// A `null` clears that side; an absent key leaves it untouched.
+pub const HANDLER_SET_CONFIG: u32 = 12;
 
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
-    ai_config: Option<AiConfig>,
-    embed_config: Option<AiConfig>,
+    /// Live config — wrapped in `Arc<RwLock<>>` so async handlers can
+    /// hold cheap clones of the handle and pick up runtime updates
+    /// pushed via [`HANDLER_SET_CONFIG`] without rebuilding the plugin.
+    ai_config: Arc<RwLock<Option<AiConfig>>>,
+    embed_config: Arc<RwLock<Option<AiConfig>>>,
     /// Plugin-facing kernel context, installed via [`CorePlugin::wire_context`]
     /// after the shared plugin loader + dispatcher are assembled. Handlers
     /// clone the `Arc` into their spawned futures. `None` if a handler fires
@@ -80,16 +94,17 @@ impl AiCorePlugin {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            ai_config: None,
-            embed_config: None,
+            ai_config: Arc::new(RwLock::new(None)),
+            embed_config: Arc::new(RwLock::new(None)),
             context: None,
         }
     }
 
     /// Return the detected AI chat-provider configuration, if any.
+    /// Returned by clone since the lock is internal to the plugin.
     #[must_use]
-    pub fn config(&self) -> Option<&AiConfig> {
-        self.ai_config.as_ref()
+    pub fn config(&self) -> Option<AiConfig> {
+        self.ai_config.read().ok().and_then(|g| g.clone())
     }
 }
 
@@ -101,13 +116,22 @@ impl Default for AiCorePlugin {
 
 impl CorePlugin for AiCorePlugin {
     /// Detect AI and embedding providers from environment variables.
+    /// The shell pushes user-saved config via [`HANDLER_SET_CONFIG`] on
+    /// boot, so env detection is the floor — anything the user has set
+    /// in Settings → AI overrides this once `set_config` lands.
     fn on_init(&mut self) -> Result<(), PluginError> {
-        self.ai_config = detect_provider();
-        self.embed_config = detect_embedding_provider();
-        if let Some(cfg) = &self.ai_config {
+        let ai = detect_provider();
+        let embed = detect_embedding_provider();
+        if let Some(cfg) = &ai {
             tracing::debug!(plugin_id = PLUGIN_ID, provider = %cfg.provider, "AI provider detected");
         } else {
             tracing::debug!(plugin_id = PLUGIN_ID, "no AI provider detected; AI features disabled");
+        }
+        if let Ok(mut g) = self.ai_config.write() {
+            *g = ai;
+        }
+        if let Ok(mut g) = self.embed_config.write() {
+            *g = embed;
         }
         Ok(())
     }
@@ -121,7 +145,9 @@ impl CorePlugin for AiCorePlugin {
         _args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         if handler_id == HANDLER_CONFIG {
-            return Ok(config_snapshot(self.ai_config.as_ref(), self.embed_config.as_ref()));
+            let ai = self.ai_config.read().ok().and_then(|g| g.clone());
+            let embed = self.embed_config.read().ok().and_then(|g| g.clone());
+            return Ok(config_snapshot(ai.as_ref(), embed.as_ref()));
         }
         Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
@@ -141,13 +167,28 @@ impl CorePlugin for AiCorePlugin {
         // Fall through to sync for the no-I/O handler so the caller can use
         // either path without surprises.
         if handler_id == HANDLER_CONFIG {
-            let response = config_snapshot(self.ai_config.as_ref(), self.embed_config.as_ref());
+            let ai = self.ai_config.read().ok().and_then(|g| g.clone());
+            let embed = self.embed_config.read().ok().and_then(|g| g.clone());
+            let response = config_snapshot(ai.as_ref(), embed.as_ref());
             return Some(Box::pin(async move { Ok(response) }));
         }
 
+        // set_config: in-memory only, no I/O — but we model it as async
+        // for symmetry with the rest of the surface and so the shell
+        // can `await` confirmation that the new credentials are live
+        // before emitting a "configured" UI event.
+        if handler_id == HANDLER_SET_CONFIG {
+            let ai_handle = Arc::clone(&self.ai_config);
+            let embed_handle = Arc::clone(&self.embed_config);
+            let args = args.clone();
+            return Some(Box::pin(async move {
+                handle_set_config(ai_handle, embed_handle, &args)
+            }));
+        }
+
         let ctx = self.context.clone();
-        let ai_cfg = self.ai_config.clone();
-        let embed_cfg = self.embed_config.clone();
+        let ai_cfg = self.ai_config.read().ok().and_then(|g| g.clone());
+        let embed_cfg = self.embed_config.read().ok().and_then(|g| g.clone());
         let args = args.clone();
 
         Some(Box::pin(async move {
@@ -259,6 +300,103 @@ async fn handle_status(
         "ai_model": ai_cfg.as_ref().and_then(|c| c.model.clone()),
         "embedding_provider": embed_cfg.as_ref().map(|c| c.provider.clone()),
         "indexed_chunks": count,
+    }))
+}
+
+/// Live-update the in-memory `AiConfig` for chat and/or embedding.
+///
+/// Args shape:
+///
+/// ```json
+/// {
+///   "ai":        { "provider": "anthropic", "api_key": "...", "model": null, "base_url": null } | null,
+///   "embedding": { "provider": "openai",    "api_key": "...", "model": null, "base_url": null } | null
+/// }
+/// ```
+///
+/// Field-level rules:
+///   - `provider` is required when the side is present and non-null.
+///     An empty string clears that side (same as passing `null`).
+///   - `api_key` / `model` / `base_url` are optional; absent → `None`.
+///   - An absent top-level key (no `"ai"` field at all) leaves that
+///     side untouched.
+///
+/// The shell pushes this on every boot from its persisted config
+/// store, so a user who set `provider=ollama` once gets it back on
+/// the next launch without re-typing.
+fn handle_set_config(
+    ai_handle: Arc<RwLock<Option<AiConfig>>>,
+    embed_handle: Arc<RwLock<Option<AiConfig>>>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let obj = args
+        .as_object()
+        .ok_or_else(|| exec_err("set_config: expected JSON object"))?;
+
+    if obj.contains_key("ai") {
+        let next = parse_config_field(obj.get("ai").unwrap_or(&serde_json::Value::Null))?;
+        let mut g = ai_handle
+            .write()
+            .map_err(|_| exec_err("set_config: ai config lock poisoned"))?;
+        *g = next;
+    }
+    if obj.contains_key("embedding") {
+        let next = parse_config_field(obj.get("embedding").unwrap_or(&serde_json::Value::Null))?;
+        let mut g = embed_handle
+            .write()
+            .map_err(|_| exec_err("set_config: embedding config lock poisoned"))?;
+        *g = next;
+    }
+
+    let ai_view = ai_handle.read().ok().and_then(|g| g.clone());
+    let embed_view = embed_handle.read().ok().and_then(|g| g.clone());
+    Ok(config_snapshot(ai_view.as_ref(), embed_view.as_ref()))
+}
+
+/// Decode one side of the `set_config` payload. `Null` and a missing /
+/// empty `provider` both mean "clear this side" — that's the path the
+/// shell uses when the user blanks out the provider dropdown in
+/// Settings → AI.
+fn parse_config_field(value: &serde_json::Value) -> Result<Option<AiConfig>, PluginError> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    let obj = value
+        .as_object()
+        .ok_or_else(|| exec_err("set_config: provider config must be object or null"))?;
+    let provider = obj
+        .get("provider")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if provider.is_empty() {
+        return Ok(None);
+    }
+    let model = obj
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string);
+    let api_key = obj
+        .get("api_key")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string);
+    let base_url = obj
+        .get("base_url")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string);
+    Ok(Some(AiConfig {
+        provider,
+        model,
+        api_key,
+        base_url,
+        max_tokens: AiConfig::default().max_tokens,
     }))
 }
 

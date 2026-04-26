@@ -30,6 +30,7 @@ import { useAiStore, type AiConfig, type AiSessionMeta, type AiSource, type AiTu
 
 const AI_PLUGIN_ID = 'com.nexus.ai'
 const HANDLER_CONFIG = 'config'
+const HANDLER_SET_CONFIG = 'set_config'
 const HANDLER_STREAM_ASK = 'stream_ask'
 // Slice C session handlers — verified against
 // `crates/nexus-ai/src/core_plugin.rs` (HANDLER_SESSION_LOAD = 8 etc.,
@@ -230,6 +231,107 @@ export async function hydrateConfig(api: PluginAPI): Promise<void> {
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn('[nexus.ai] hydrateConfig failed', err)
+  }
+}
+
+/** Shape of the user-saved AI provider settings, read out of the
+ *  shell's config store (`useConfigStore`). All fields optional —
+ *  blank values fall back to environment-variable detection on the
+ *  kernel side. */
+export interface AiUserConfig {
+  /** Chat provider id: 'anthropic' | 'openai' | 'ollama' | '' (=clear). */
+  provider?: string
+  /** Optional model override. */
+  model?: string
+  /** API key for authenticated providers (Anthropic, OpenAI). */
+  apiKey?: string
+  /** Optional endpoint override (Ollama URL or OpenAI-compatible proxy). */
+  baseUrl?: string
+  /** Embedding provider for RAG. Defaults to chat provider when blank
+   *  and the chat provider supports embeddings (currently OpenAI). */
+  embedProvider?: string
+  embedApiKey?: string
+  embedBaseUrl?: string
+}
+
+/** Build the kernel-side `set_config` payload from a user config. An
+ *  empty `provider` clears that side (kernel falls back to env). */
+function buildSetConfigPayload(user: AiUserConfig): Record<string, unknown> {
+  const payload: Record<string, unknown> = {}
+  const ai = (user.provider ?? '').trim()
+  if (ai.length === 0) {
+    payload.ai = null
+  } else {
+    payload.ai = {
+      provider: ai,
+      model: (user.model ?? '').trim() || null,
+      api_key: (user.apiKey ?? '').trim() || null,
+      base_url: (user.baseUrl ?? '').trim() || null,
+    }
+  }
+  // Embedding side: explicit provider always wins; otherwise mirror
+  // the chat provider when it supports embeddings (OpenAI/Ollama),
+  // reusing the chat key/url so the user only fills one form.
+  const explicitEmbed = (user.embedProvider ?? '').trim()
+  if (explicitEmbed.length > 0) {
+    payload.embedding = {
+      provider: explicitEmbed,
+      model: null,
+      api_key: (user.embedApiKey ?? '').trim() || null,
+      base_url: (user.embedBaseUrl ?? '').trim() || null,
+    }
+  } else if (ai === 'openai' || ai === 'ollama') {
+    payload.embedding = {
+      provider: ai,
+      model: null,
+      api_key: (user.apiKey ?? '').trim() || null,
+      base_url: (user.baseUrl ?? '').trim() || null,
+    }
+  } else {
+    // Anthropic doesn't ship embeddings — clear so the kernel either
+    // falls back to env (OPENAI_API_KEY) or surfaces the missing
+    // provider error instead of silently using stale state.
+    payload.embedding = null
+  }
+  return payload
+}
+
+/**
+ * Push user-saved provider settings into the kernel via `set_config`,
+ * then re-hydrate the snapshot so the chat view renders the new
+ * provider/model labels. No-op when every field is blank — the kernel
+ * keeps whatever it picked up from env vars on init.
+ */
+export async function pushUserConfig(
+  api: PluginAPI,
+  user: AiUserConfig,
+): Promise<void> {
+  const allBlank =
+    !user.provider &&
+    !user.model &&
+    !user.apiKey &&
+    !user.baseUrl &&
+    !user.embedProvider &&
+    !user.embedApiKey &&
+    !user.embedBaseUrl
+  if (allBlank) {
+    // First-run / user blanked everything: don't override env-detected
+    // config with a clear, just refresh the snapshot in case anything
+    // upstream changed.
+    await hydrateConfig(api)
+    return
+  }
+  try {
+    const payload = buildSetConfigPayload(user)
+    const cfg = await api.kernel.invoke<AiConfig>(
+      AI_PLUGIN_ID,
+      HANDLER_SET_CONFIG,
+      payload,
+    )
+    useAiStore.getState().setConfig(cfg)
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[nexus.ai] pushUserConfig failed', err)
   }
 }
 
