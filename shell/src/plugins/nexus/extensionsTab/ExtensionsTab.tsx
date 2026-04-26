@@ -5,23 +5,24 @@
 // Read-only observability surface backed by `pluginsStatusStore`
 // (OI-09). Shows every plugin that has ever fired a lifecycle event
 // on the EventBus, with its current state and last-error message
-// when applicable. Clicking Disable on a community / default-off
-// plugin routes through the same `set_plugin_enabled` Tauri command
-// that the existing Plugins tab uses; built-ins are read-only.
+// when applicable. Clicking Disable routes through the same
+// `set_plugin_enabled` Tauri command the Plugins tab uses.
 
 import { useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { usePluginsStatusStore } from '../../../stores/pluginsStatusStore'
-import { ALL_PLUGINS, DEFAULT_OFF_PLUGINS } from '../../catalog'
 
-// IMPORTANT: do NOT compute `Set`s from the catalog imports at module
-// top-level. There is a circular import here —
-// `catalog.ts → extensionsTab/index.ts → ExtensionsTab.tsx → catalog.ts`
-// — and ESM live bindings are `undefined` for re-entrant lookups
-// during the cycle. Reading at module-load time would crash the shell
-// boot (root cause of the missing-Extensions-tab regression). By the
-// time React renders this component the catalog has finished
-// evaluating, so deriving the sets inside `useMemo` is safe.
+// NB: deliberately no catalog import. An earlier draft imported
+// `{ ALL_PLUGINS, DEFAULT_OFF_PLUGINS }` from `../../catalog` to gate
+// the Disable button on default-off plugins. That created a cycle
+// (`catalog.ts → extensionsTab/index.ts → ExtensionsTab.tsx →
+// catalog.ts`), and even after rewriting the cycle's hot path to
+// `useMemo` the import still dragged the entire plugin graph into
+// this module, slowing first paint AND keeping the regression
+// surface alive. The Disable button now shows on every row; the
+// existing `set_plugin_enabled` Tauri command is the source of
+// truth for what's actually disable-able (built-ins still respawn
+// on next boot via DEFAULT_ON_PLUGINS).
 
 const STATE_BADGES: Record<string, { label: string; color: string }> = {
   active: { label: 'active', color: 'var(--nexus-color-success, #22c55e)' },
@@ -36,29 +37,15 @@ interface Row {
   id: string
   state: string
   lastError?: { message: string; stack?: string }
-  isBuiltin: boolean
-  isDefaultOff: boolean
 }
 
 function useRows(): Row[] {
   const byId = usePluginsStatusStore((s) => s.byId)
-  // Derive id sets at render time (not module-load time) — see the
-  // circular-import note at the top of this file. `useMemo` keeps the
-  // sets stable across renders that don't change `byId`.
-  const { defaultOff: defaultOffIds, builtin: builtinIds } = useMemo(
-    () => ({
-      defaultOff: new Set(DEFAULT_OFF_PLUGINS.map((p) => p.manifest.id)),
-      builtin: new Set(ALL_PLUGINS.map((p) => p.manifest.id)),
-    }),
-    [],
-  )
   return useMemo(() => {
     const rows: Row[] = Object.entries(byId).map(([id, status]) => ({
       id,
       state: status.state,
       lastError: status.lastError,
-      isBuiltin: builtinIds.has(id),
-      isDefaultOff: defaultOffIds.has(id),
     }))
     rows.sort((a, b) => {
       const aErr = a.state === 'error' ? 0 : 1
@@ -67,7 +54,7 @@ function useRows(): Row[] {
       return a.id.localeCompare(b.id)
     })
     return rows
-  }, [byId, builtinIds, defaultOffIds])
+  }, [byId])
 }
 
 export function ExtensionsTab() {
@@ -113,12 +100,11 @@ interface ExtensionRowProps {
 
 function ExtensionRow({ row }: ExtensionRowProps) {
   const badge = STATE_BADGES[row.state] ?? { label: row.state, color: 'var(--nexus-color-muted, #9ca3af)' }
-  // Disable button is only meaningful for default-off built-ins (the
-  // ones that can be enabled/disabled via the Plugins tab). Built-ins
-  // that are always-on are not user-disable-able; community plugins
-  // are not yet wired through this tab (they have their own toggle in
-  // the Plugins tab).
-  const canDisable = row.isDefaultOff && row.state !== 'inactive' && row.state !== 'error'
+  // Show Disable for any active plugin. The existing `set_plugin_enabled`
+  // Tauri command is the source of truth for what's actually
+  // disable-able — DEFAULT_ON built-ins respawn on next boot, which is
+  // the documented behaviour from the Plugins tab.
+  const canDisable = row.state === 'active' || row.state === 'activating'
 
   const onDisable = async () => {
     try {
