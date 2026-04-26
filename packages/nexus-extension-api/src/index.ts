@@ -209,7 +209,7 @@ export interface NexusPluginContext {
     ): Promise<unknown>;
   };
 
-  editor: {
+  editor: EditorAPI & {
     registerBlockType(type: EditorBlockType): Disposable;
     registerDecorationProvider(provider: EditorDecorationProvider): Disposable;
     registerKeybinding(binding: EditorKeybinding): Disposable;
@@ -235,19 +235,50 @@ export interface NexusPluginContext {
     registerPanelView(viewId: string, render: PanelRenderFn): Disposable;
   };
 
-  workspace: {
-    root(): string | null;
-    name(): string | null;
-  };
-
-  editorActive: {
-    relpath(): string | null;
-    content(): string | null;
-    isDirty(): boolean;
-    open(relpath: string): Promise<void>;
-  };
+  workspace: WorkspaceAPI;
 
   disposables: DisposableStore;
+}
+
+/**
+ * Snapshot of the active editor tab returned by {@link EditorAPI.active}.
+ *
+ * `revision` is an opaque cache-key — it advances on every edit but its
+ * absolute value is meaningless. Compare for equality only.
+ */
+export interface ActiveEditor {
+  relpath: string;
+  revision: number;
+}
+
+/**
+ * Active-editor accessors (OI-14). Lets a plugin read what the user is
+ * currently looking at without reaching for `kernel.invoke('com.nexus.editor', ...)`
+ * or knowing about the editor plugin's command ids.
+ */
+export interface EditorAPI {
+  /** Snapshot of the active editor tab, or `null` when none is open. */
+  active(): ActiveEditor | null;
+  /**
+   * Subscribe to changes in the active editor. Fires when the user
+   * switches tabs, when the active buffer's revision advances, or when
+   * the active tab is closed. The returned disposer is idempotent and
+   * is auto-swept on plugin unload.
+   */
+  onChange(handler: (active: ActiveEditor | null) => void): () => void;
+}
+
+/**
+ * Workspace-level accessors (OI-14). Plugins read forge-relative
+ * configuration without reaching for the shell's internal stores.
+ */
+export interface WorkspaceAPI {
+  /**
+   * Absolute path of the current forge root, or `null` when no
+   * forge is open (between `workspace:closed` and the next
+   * `workspace:opened`).
+   */
+  forgeRoot(): string | null;
 }
 
 // ─── Plugin entry point ──────────────────────────────────────────────────────

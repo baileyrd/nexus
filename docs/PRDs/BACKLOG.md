@@ -40,20 +40,20 @@ Capabilities described in legacy `app/` documentation that were not carried over
 - [ ] **OI-11: UI-thread time budget on plugin command dispatch** — Wrap `CommandRegistry.execute` in await-with-timeout (warn @250ms, hard cancel @5s, configurable), publish `command:cancelled`.
 - [ ] **OI-12: Document or remove absolute-path auto-promotion** — `read_file`/`write_file` silently escalate absolute paths to `FsReadExternal` / `FsWriteExternal`. Either document on `PlatformFsAPI` JSDoc + audit-log it, or remove and fail loudly.
 - [ ] **OI-13: Reconcile kernel-side `PluginRegistry` with `PluginLoader::loaded`** — Delete the dead `crates/nexus-kernel/src/plugin_registry.rs` + `Kernel::plugins()` (zero callers); update microkernel ADR.
-- [ ] **OI-14: Expose `ctx.workspace` / `ctx.editor.active`** — Add `WorkspaceAPI` + `EditorAPI` to `@nexus/extension-api` so plugins stop using raw `api.kernel.invoke("com.nexus.editor", "open", …)`.
 - [ ] **OI-15: Manifest signature / provenance** — Optional `manifest.toml.sig` Ed25519 over manifest bytes, verified against trusted-publisher keyring. Marketplace prerequisite (paired with WI-44).
 - [ ] **OI-16: `beforeunload` → `onStop` for script plugins** — Window-close hook with 1s per-plugin soft cap so flush-on-stop handlers run on ⌘Q.
 - [ ] **OI-17: Deprecation policy + `@deprecated` JSDoc** — `packages/nexus-extension-api/DEPRECATED.md` + JSDoc tags + ESLint rule failing imports of deprecated names.
 - [ ] **OI-18: Snippet trigger collision detection** — Same hazard as OI-10 but for snippets; emit `plugins:snippet-conflict` and surface a "which plugin wins" control.
 
-### Resolved 2026-04-24 (preserved here for cross-reference; full notes in [../OPEN-ITEMS.md](../OPEN-ITEMS.md))
+### Resolved (preserved here for cross-reference; full notes in [../OPEN-ITEMS.md](../OPEN-ITEMS.md))
 
-- [x] OI-01 — Settings modal + `registerSettingsTab` API
-- [x] OI-02 — Split-size persistence (editor splits gained drag handles + `setSplitSizes` mutator)
-- [x] OI-03 — Workspace-wide clippy `-D warnings` sweep
-- [x] OI-04 — Kernel-contract promotion TODOs (`SlotId` and `list_archetypes` IPC)
-- [x] OI-06 — ESLint 8 → 9 + typescript-eslint 7 → 8 + xterm → `@xterm/*` scoped
-- [x] OI-07 — Capability grants/denials/path-traversal routed through `audit::*`
+- [x] OI-01 — Settings modal + `registerSettingsTab` API _(2026-04-24)_
+- [x] OI-02 — Split-size persistence (editor splits gained drag handles + `setSplitSizes` mutator) _(2026-04-24)_
+- [x] OI-03 — Workspace-wide clippy `-D warnings` sweep _(2026-04-24)_
+- [x] OI-04 — Kernel-contract promotion TODOs (`SlotId` and `list_archetypes` IPC) _(2026-04-24)_
+- [x] OI-06 — ESLint 8 → 9 + typescript-eslint 7 → 8 + xterm → `@xterm/*` scoped _(2026-04-24)_
+- [x] OI-07 — Capability grants/denials/path-traversal routed through `audit::*` _(2026-04-24)_
+- [x] OI-14 — `api.workspace.forgeRoot()` + `api.editor.active()/onChange()` exposed via `@nexus/extension-api` _(2026-04-26)_
 
 ---
 

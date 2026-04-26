@@ -2,13 +2,15 @@
 // Constructs the PluginAPI object handed to each plugin's activate() function.
 // Core plugins get api.internal; community plugins do not.
 
-import type { PluginAPI, ConfigSection, KernelEventEnvelope } from '../types/plugin'
+import type { PluginAPI, ActiveEditor, ConfigSection, KernelEventEnvelope } from '../types/plugin'
 import type { PluginRegistry } from './PluginRegistry'
 import { useSlotStore, type SlotId } from '../registry/SlotRegistry'
 import { uriHandlerRegistry } from '../registry/UriHandlerRegistry'
 import { contextKeyService } from './ContextKeyService'
 import { eventBus } from './EventBus'
 import { workspace, viewRegistry } from '../workspace'
+import { useEditorStore } from '../plugins/nexus/editor/editorStore'
+import { computeActiveEditor, activeEditorEquals } from './activeEditor'
 import { KernelIpcError } from './KernelIpcError'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -416,6 +418,42 @@ export function buildPluginAPI(
     uri: {
       register(scheme, handler) {
         const unsub = uriHandlerRegistry.register(scheme, pluginId, handler)
+        registry.trackSubscription(pluginId, unsub)
+        return unsub
+      },
+    },
+
+    // ─── Active editor (OI-14) ─────────────────────────────────────────────
+    // Typed read-only surface over `useEditorStore` so plugins don't reach
+    // into the editor's internal command ids (`com.nexus.editor::open` etc.)
+    // for the most basic question — "what's the user looking at?". The
+    // `revision` field is sourced from the kernel's `sessionRevision` and
+    // is opaque (a cache key, not a byte count). `onChange` fires when the
+    // active tab changes OR the active buffer's revision advances; the
+    // returned disposer is idempotent and tracked so plugin unload sweeps
+    // it (mirrors `kernel.on`'s subscription handling).
+    editor: {
+      active(): ActiveEditor | null {
+        return computeActiveEditor(useEditorStore.getState())
+      },
+      onChange(handler: (active: ActiveEditor | null) => void): () => void {
+        let lastSnapshot = computeActiveEditor(useEditorStore.getState())
+        const unsubInner = useEditorStore.subscribe((state) => {
+          const next = computeActiveEditor(state)
+          if (activeEditorEquals(next, lastSnapshot)) return
+          lastSnapshot = next
+          try {
+            handler(next)
+          } catch (err) {
+            console.warn(`[api.editor.onChange] handler for ${pluginId} threw`, err)
+          }
+        })
+        let disposed = false
+        const unsub = () => {
+          if (disposed) return
+          disposed = true
+          unsubInner()
+        }
         registry.trackSubscription(pluginId, unsub)
         return unsub
       },
