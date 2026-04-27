@@ -75,7 +75,15 @@ function SidebarToggleButton() {
         position: 'relative',
         height: 36,
         background: hover ? 'var(--bg-hover)' : 'transparent',
+        // WebKit's default <button> appearance paints a subtle inset
+        // background that bleeds through when the button is focused
+        // (e.g. after a click) — visible as a faint darker square
+        // around the icon. Reset all three appearance hooks so the
+        // button background is purely the inline `background` above.
+        appearance: 'none',
+        WebkitAppearance: 'none',
         border: 'none',
+        outline: 'none',
         color: 'var(--fg-muted)',
         cursor: 'pointer',
         display: 'flex',
@@ -117,7 +125,13 @@ function ActivityBarButton({
         position: 'relative',
         height: 44,
         background: showHover ? 'var(--bg-hover)' : 'transparent',
+        // Match SidebarToggleButton — neutralise the WebKit-default
+        // <button> background and focus outline so the visual state is
+        // controlled purely by `background` / `color` above.
+        appearance: 'none',
+        WebkitAppearance: 'none',
         border: 'none',
+        outline: 'none',
         color: active ? 'var(--fg)' : 'var(--fg-muted)',
         cursor: 'pointer',
         display: 'flex',
