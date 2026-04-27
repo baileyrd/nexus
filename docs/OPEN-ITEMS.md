@@ -375,6 +375,31 @@ Two plugins that register snippets with the same trigger string silently overwri
 
 ---
 
+## OI-19 — Defer createRoot/unmount in pane views
+
+**Severity:** Nice-to-have (warnings only — no functional breakage today, but a real concurrency hazard)
+**Surfaced by:** Manual smoke test 2026-04-27 — collapsing/reopening the bottom drawer with the terminal mounted prints two React warnings per re-home.
+**Status:** Not started
+
+### Gap
+`Leaf.attachContainer` re-homes a view to a fresh container via `await view.onClose(); await view.onOpen(el)` (see `shell/src/workspace/Leaf.ts:186-189`). Both `TerminalPaneView` (`shell/src/plugins/nexus/terminal/TerminalPaneView.tsx:28-31`) and `EmptyView` invoke `root.unmount()` and `createRoot(el)` synchronously inside those calls. Because `attachContainer` runs from a `LeafHostInner` `useEffect` whose work overlaps with React 18's commit phase elsewhere in the tree, this trips two warnings:
+- "Attempted to synchronously unmount a root while React was already rendering."
+- "You are calling ReactDOMClient.createRoot() on a container that has already been passed to createRoot() before."
+
+The warnings fire on every sidedock collapse/reopen and every leaf move; xterm currently survives because it re-mounts cleanly, but the race is real and will eventually drop input or duplicate roots under heavier workspace churn.
+
+### Scope
+- Wrap `root.unmount()` in `queueMicrotask(() => root.unmount())` inside `TerminalPaneView.onClose` and `EmptyView.onClose` (or whatever the cleanest defer primitive is for these views).
+- Re-create the root only after the deferred unmount has actually run — either by chaining the microtask or by storing the new root creation in the same microtask.
+- Audit the rest of `shell/src/plugins/**` for other `ViewBase` implementations doing imperative `createRoot` and apply the same pattern.
+
+### Acceptance
+- Collapse and reopen the bottom drawer with the terminal panel mounted; no React warnings in the console.
+- Drag the terminal leaf between sidedock and main split; no warnings.
+- xterm session state (scrollback, cursor) still survives the round-trip.
+
+---
+
 ## Audit-tail OPEN items without a separate OI entry
 
 Low-impact items from the 2026-04-24 audit reconciliation that are tracked only in `MICROKERNEL-AUDIT.md` / `UI-AUDIT.md` rather than here. Adding an OI entry is warranted if impact justifies the tracking cost:
