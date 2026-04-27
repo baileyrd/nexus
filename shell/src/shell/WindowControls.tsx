@@ -124,7 +124,19 @@ export function WindowControls() {
   const close = () => getCurrentWindow().close()
 
   return (
-    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'stretch', zIndex: 1 }}>
+    <div
+      style={{
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'stretch',
+        zIndex: 1,
+        // Match the tab-strip background underneath so the absolutely-
+        // positioned cluster reads as continuous chrome with the trailing
+        // tab controls (chevron, right-sidedock toggle) sitting just to
+        // its left, instead of a floating cluster on top of the strip.
+        background: 'var(--tab-container-background, var(--bg-soft, #2d2d2d))',
+      }}
+    >
       <ControlButton onClick={minimize} label="Minimize">
         <MinimizeIcon />
       </ControlButton>

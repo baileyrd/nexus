@@ -620,7 +620,13 @@ function TabStrip({
     workspace.emit('layout-change')
   }
 
+  // Trailing buttons (chevron, right-sidedock toggle) match WindowControls'
+  // 40×36 footprint so the cluster of icons running across the top-right
+  // — chevron, panel-toggle, min, max, close — reads as a single tidy
+  // row instead of a ragged mix of 28/34/40-px buttons.
   const collapseButtonStyle: CSSProperties = {
+    width: 40,
+    height: 36,
     background: 'transparent',
     border: 'none',
     color: 'var(--text-muted, var(--fg-muted, #888))',
@@ -628,7 +634,7 @@ function TabStrip({
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '0 8px',
+    padding: 0,
     fontSize: 14,
     lineHeight: 1,
     flex: '0 0 auto',
@@ -664,9 +670,11 @@ function TabStrip({
         overflow: 'hidden',
         // Reserve horizontal space at the trailing edge for the absolute
         // WindowControls cluster (3 × 40px = 120px) when this tab strip is
-        // the rightmost visible column. That's the right sidedock when
-        // expanded, or the main dock when the right sidedock is collapsed.
-        ...(reservesWindowControls ? { paddingRight: 120 } : {}),
+        // the rightmost visible column — plus an 8px gap so the trailing
+        // tab controls (chevron + sidedock toggle) don't butt directly up
+        // against min/max/close. That's the right sidedock when expanded,
+        // or the main dock when the right sidedock is collapsed.
+        ...(reservesWindowControls ? { paddingRight: 128 } : {}),
       }}
     >
       <div
@@ -832,6 +840,8 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         style={{
+          width: 40,
+          height: 36,
           background: 'transparent',
           border: 'none',
           color: 'var(--text-muted, var(--fg-muted, #888))',
@@ -839,7 +849,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '0 8px',
+          padding: 0,
           fontSize: 12,
           lineHeight: 1,
           flex: '0 0 auto',
