@@ -28,13 +28,14 @@ const CMD_READ_RAW_SINCE = 'read_raw_since'
 // index.ts::activate). Dropped chunks are handled by the store's
 // `recoverFn` via `read_raw_since` snapshots.
 //
-// The kernel only emits stream events inside `pump` /
-// `read_raw_since` handlers (see core_plugin.rs:43) — there's no
-// autonomous PTY reader on the Rust side. So we still need a slow
-// heartbeat to keep the PTY draining; without it, input gets sent
-// but no output ever comes back and the terminal looks frozen.
-// 5s is slow enough to be invisible cost, fast enough that the user
-// doesn't perceive lag if a stream chunk is ever dropped.
+// The kernel runs an autonomous drainer thread (see
+// crates/nexus-terminal/src/core_plugin.rs::drainer_loop) that pumps
+// every active session and publishes stream events without any client
+// poll. The 5s tick below is now a defensive backstop: it covers a
+// hypothetical drainer stall and keeps `read_raw_since` cursors fresh
+// for the seq-gap recovery path. 5s is invisible cost in the steady
+// state and small enough that any drop is masked before the user
+// notices.
 const PTY_POLL_INTERVAL_MS = 5000
 const PTY_PUMP_TIMEOUT_MS = 30
 
@@ -202,13 +203,10 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     })
 
     /**
-     * One pump tick. Two jobs:
-     *   1. Read any PTY bytes the shell-side stream subscriber hasn't
-     *      already covered (boot backlog, dropped broadcast chunks).
-     *   2. Keep the kernel's PTY draining — the kernel publishes
-     *      stream events only inside this handler, so without
-     *      periodic ticks the shell would never see output past the
-     *      first tick.
+     * One pump tick. Reads any PTY bytes the shell-side stream
+     * subscriber hasn't already covered — boot backlog, plus a safety
+     * net for the (rare) case where a chunk goes missing or the
+     * kernel's autonomous drainer is briefly stalled.
      *
      * `cursor` is synced up from the store's `lastCursor` (advanced
      * by the event-stream path) so we never re-fetch bytes the
