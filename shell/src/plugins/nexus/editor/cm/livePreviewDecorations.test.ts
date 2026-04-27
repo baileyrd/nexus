@@ -12,8 +12,10 @@
 
 import { EditorState, EditorSelection } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
+import { Table } from '@lezer/markdown'
+import { syntaxTree } from '@codemirror/language'
 import type { DecorationSet } from '@codemirror/view'
-import { buildLivePreviewDecorations } from './livePreviewDecorations.ts'
+import { buildLivePreviewDecorations, TableWidget } from './livePreviewDecorations.ts'
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -39,7 +41,10 @@ function decosFor(doc: string, selection?: EditorSelection): Item[] {
     selection: selection ?? EditorSelection.cursor(0),
     // Multi-cursor tests rely on the facet being on; the default is
     // off so EditorState.create collapses extra ranges otherwise.
-    extensions: [EditorState.allowMultipleSelections.of(true), markdown()],
+    extensions: [
+      EditorState.allowMultipleSelections.of(true),
+      markdown({ extensions: [Table] }),
+    ],
   })
   const set: DecorationSet = buildLivePreviewDecorations(state)
   const items: Item[] = []
@@ -366,4 +371,70 @@ test('livePreviewDecorations: multi-cursor reveals each cursor line, hides other
     false,
     'line 3 leading ** stays visible',
   )
+})
+
+// ── GFM Table: off-cursor → block-replace TableWidget ─────────────────────
+
+const TABLE_DOC = [
+  'before',
+  '',
+  '| h1 | h2 |',
+  '| --- | --- |',
+  '| a | b |',
+  '',
+  'after',
+].join('\n')
+
+// Sanity: the GFM Table extension must actually wire into the syntax tree,
+// otherwise the decoration walker has nothing to match on. Confirm this
+// before asserting decoration shapes.
+test('livePreviewDecorations: syntax tree contains Table node when GFM is enabled', () => {
+  const state = EditorState.create({
+    doc: TABLE_DOC,
+    extensions: [markdown({ extensions: [Table] })],
+  })
+  let found = false
+  syntaxTree(state).iterate({
+    enter(n) {
+      if (n.name === 'Table') found = true
+    },
+  })
+  assert.ok(found, 'Table node present in tree')
+})
+
+test('livePreviewDecorations: GFM table off-cursor emits block-replace TableWidget', () => {
+  const items = decosFor(TABLE_DOC, EditorSelection.cursor(0))
+  // Table spans lines 3..5 (1-indexed); compute byte offsets from doc.
+  const before = 'before\n\n'
+  const tableSrc = '| h1 | h2 |\n| --- | --- |\n| a | b |'
+  const tableFrom = before.length
+  const tableTo = tableFrom + tableSrc.length
+  const tw = items.find(
+    (i) =>
+      i.replace &&
+      i.widget === 'TableWidget' &&
+      i.from === tableFrom &&
+      i.to === tableTo,
+  )
+  assert.ok(tw, 'block-replace TableWidget over the table line range')
+  assert.equal(tw?.block, true, 'table replace is a block decoration')
+})
+
+test('livePreviewDecorations: GFM table on-cursor leaves raw pipes visible', () => {
+  // Cursor inside the second table row.
+  const cursor = 'before\n\n| h1 | h2 |\n'.length + 2
+  const items = decosFor(TABLE_DOC, EditorSelection.cursor(cursor))
+  assert.equal(
+    items.some((i) => i.widget === 'TableWidget'),
+    false,
+    'no TableWidget when cursor is inside the table',
+  )
+})
+
+test('TableWidget.eq: same source ⇒ true; different source ⇒ false', () => {
+  const a = new TableWidget('| x | y |\n| - | - |\n| 1 | 2 |')
+  const b = new TableWidget('| x | y |\n| - | - |\n| 1 | 2 |')
+  const c = new TableWidget('| x | y |\n| - | - |\n| 3 | 4 |')
+  assert.equal(a.eq(b), true)
+  assert.equal(a.eq(c), false)
 })

@@ -1,6 +1,7 @@
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
+import { Table } from '@lezer/markdown'
 // Phase 5 ripped out `@codemirror/commands` `history()` + `historyKeymap`.
 // The kernel's UndoTree owns history now — see
 // docs/editor-transaction-wiring-plan.md §Phase 5 / resolved decision #3.
@@ -94,7 +95,7 @@ export function baselineExtensions(
   }
 
   const exts: Extension[] = [
-    markdown(),
+    markdown({ extensions: [Table] }),
     search({ top: true }),
     keymap.of([...searchKeymap, ...keys]),
     EditorView.lineWrapping,

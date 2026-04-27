@@ -1,6 +1,7 @@
 import { syntaxTree } from '@codemirror/language'
 import type { EditorState } from '@codemirror/state'
 import { Decoration, type DecorationSet, WidgetType } from '@codemirror/view'
+import { renderMarkdown } from '../markdownRender'
 
 class HrWidget extends WidgetType {
   eq(_other: HrWidget): boolean {
@@ -10,6 +11,24 @@ class HrWidget extends WidgetType {
     const hr = document.createElement('hr')
     hr.className = 'cm-md-hr-widget'
     return hr
+  }
+  ignoreEvent(): boolean {
+    return true
+  }
+}
+
+export class TableWidget extends WidgetType {
+  constructor(readonly source: string) {
+    super()
+  }
+  eq(other: TableWidget): boolean {
+    return this.source === other.source
+  }
+  toDOM(): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-md-table-widget nexus-markdown-body'
+    wrap.innerHTML = renderMarkdown(this.source)
+    return wrap
   }
   ignoreEvent(): boolean {
     return true
@@ -189,6 +208,34 @@ function visit(
     pushMark(items, node.from, node.to, 'cm-md-html')
     return
   }
+  if (name === 'Table') {
+    handleTable(node.node, doc, active, state, items)
+    return
+  }
+}
+
+function handleTable(
+  node: SyntaxNode,
+  doc: EditorState['doc'],
+  active: Set<number>,
+  state: EditorState,
+  items: DecorationItem[],
+): void {
+  const startLine = doc.lineAt(node.from)
+  const endLine = doc.lineAt(node.to)
+  for (let l = startLine.number; l <= endLine.number; l++) {
+    if (active.has(l)) return
+  }
+  const source = state.doc.sliceString(startLine.from, endLine.to)
+  items.push({
+    from: startLine.from,
+    to: endLine.to,
+    deco: Decoration.replace({
+      widget: new TableWidget(source),
+      block: true,
+      inclusive: false,
+    }),
+  })
 }
 
 function handleEmphasis(

@@ -54,3 +54,10 @@
 .cm-content .cm-md-fence { color: var(--fg-faint); }
 
 .cm-content .cm-md-html { color: var(--fg-muted); }
+
+.cm-content .cm-md-table-widget {
+  margin: 0.4em 0;
+}
+.cm-content .cm-md-table-widget table {
+  margin: 0;
+}
