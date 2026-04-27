@@ -495,8 +495,23 @@ function Toolbar({
   const sortBtnRef = useRef<HTMLButtonElement>(null)
 
   return (
-    <NavHeader style={{ position: 'relative' }}>
-      <NavButtonsContainer hasSeparator>
+    // The toolbar row matches the main-dock view-header height
+    // (`--header-height`) and carries the 1px divider at the bottom
+    // edge itself — that way the file-tree toolbar buttons and the
+    // breadcrumb back/forward buttons share the same y-center across
+    // the dock divider, and both bottom borders land on the same row.
+    <NavHeader
+      style={{
+        position: 'relative',
+        padding: '0 var(--size-4-2)',
+        height: 'var(--header-height)',
+        flexShrink: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderBottom: '1px solid var(--divider-color, var(--line-soft))',
+      }}
+    >
+      <NavButtonsContainer>
         <NavActionButton
           label="New note"
           icon={<Icon name="filePlus" size={14} />}

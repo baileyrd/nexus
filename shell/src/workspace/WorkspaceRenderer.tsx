@@ -1031,7 +1031,9 @@ function TabButton({
         }}
       >
         {iconName ? (
-          <Icon name={iconName as never} size={16} />
+          // Match the activity-bar icon size so a sidebar tab and the
+          // adjacent ribbon button line up at the same visual scale.
+          <Icon name={iconName as never} size={18} />
         ) : (
           // Final fallback: a neutral dot for views with no icon
           // mapping. Earlier this rendered the first letter of the
