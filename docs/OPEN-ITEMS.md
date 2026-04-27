@@ -337,17 +337,20 @@ No ADR needed updating — none of the 16 ADRs reference `PluginRegistry`.
 
 **Severity:** Nice-to-have (cleanup on window close)
 **Surfaced by:** UI-AUDIT.md F-7.3.1 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-27.
 
-### Gap
-Script plugins register `onStop` handlers that run on explicit deactivation but never on window close — a graceful shutdown hook is missing. Plugins that flush state to disk (cache, preferences) lose last-edit data on quit.
+### Outcome
+- New [`ExtensionHost.deactivateAllForShutdown(perPluginCapMs = 1000)`](../shell/src/host/ExtensionHost.ts) — fans out `deactivate()` across every active plugin in parallel via `Promise.all`, gating each one with a `Promise.race` against a `setTimeout`-driven soft cap. A misbehaving plugin therefore can't stall the close, and the timer is `clearTimeout`'d in `finally` so the fast path doesn't leak. Per-plugin failures (timeout or thrown error) are caught and logged — they don't break siblings. Each processed plugin moves to `inactive` and emits `plugin:deactivated`, which keeps `pluginsStatusStore` consistent for the brief window between `beforeunload` and the WebView going away.
+- Wired from [`main.tsx`](../shell/src/main.tsx) right after `setHost(host)`: `window.addEventListener('beforeunload', () => { void host.deactivateAllForShutdown(1000) })`. Placed in `main.tsx` rather than `App.tsx` (per the original spec) because `App` is subject to React StrictMode double-mount and HMR remount; `main` owns the host's lifetime, so the listener installs once.
+- Diverged from spec on the eventBus indirection — the spec called for an intermediate `window:closing` event that ExtensionHost subscribes to. Skipped: `main.tsx` already has the host instance in scope, so calling `host.deactivateAllForShutdown(...)` directly is one fewer moving part with no testability cost (the method is exported and unit-tested).
+- Skipped the registry contribution sweep that `unload()` normally runs — the page is tearing down, and keeping the shutdown fan-out as fast / parallel as possible is more important than leaving the in-memory registries pristine.
 
-### Scope
-- `shell/src/shell/App.tsx` `beforeunload` listener dispatches `window:closing` event.
-- `ExtensionHost` subscribes; for each active plugin, await `deactivate()` with a 1 s per-plugin soft cap so a misbehaving plugin can't stall the close.
+### Coverage
+- 5 new tests in [`shell/src/host/ExtensionHost.test.ts`](../shell/src/host/ExtensionHost.test.ts): every active plugin's `deactivate()` runs and state moves to `inactive`; a hanging deactivate is capped at `perPluginCapMs` without stalling siblings (parallel verification); a throwing deactivate is caught and the sibling still flushes; `plugin:deactivated` fires for every processed plugin; non-active plugins (state `error` or `registered`) are skipped (`listActive()` filter).
 
 ### Acceptance
-- A plugin with a flush-on-stop hook writes its state when the user hits ⌘Q.
+- ✅ A plugin with a flush-on-stop hook writes its state when the user hits ⌘Q (best-effort — `beforeunload` doesn't reliably await async work past page-tear-down, but synchronous writes and fire-and-forget IPC calls land).
+- ✅ One misbehaving plugin can't stall the close — soft cap defaults to 1s per plugin and fan-out is parallel.
 
 ---
 
@@ -374,16 +377,25 @@ Script plugins register `onStop` handlers that run on explicit deactivation but 
 
 **Severity:** Nice-to-have (silent overwrite hazard)
 **Surfaced by:** UI-AUDIT.md SI-7 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Blocked — investigated 2026-04-27.
 
-### Gap
+### Block
+The original ticket framed this as the snippet-side mirror of OI-10 (keybinding conflict detection), but on inspection the prerequisite registry doesn't exist. The `Snippet` interface and `editor.registerSnippet(snippet): Disposable` contract are declared in [`packages/nexus-extension-api/src/index.ts`](../packages/nexus-extension-api/src/index.ts) (lines 101–107 / 216) but `registerSnippet` is **never implemented in the shell** — `grep -rn "registerSnippet" shell/src` returns zero hits. The CSS-theme snippet system in `nexus-theme` is unrelated (no triggers, kernel-side, BTreeMap of `CssSnippet` keyed by id).
+
+Doing OI-18 properly therefore means:
+1. Build the script-plugin code-snippet registry (TS-side `SnippetRegistry`, manifest contribution shape, lifecycle wiring through `ExtensionHost`) — this is the bulk of the work and is closer in scope to OI-15 than to OI-10.
+2. Layer trigger-conflict detection on top — which is the OI-10-shaped piece this ticket originally described.
+
+Reopen once step 1 lands or once an actual user-visible snippet system gets prioritised. Until then, "two plugins overwriting each other" is hypothetical: there's no path through the shell that calls `registerSnippet`, so no silent overwrite can occur today.
+
+### Original gap (preserved for context)
 Two plugins that register snippets with the same trigger string silently overwrite each other — the same hazard OI-10 describes for keybindings but for snippets.
 
-### Scope
+### Original scope
 - The snippet-registration path (in the appearance/theme snippet store today) checks for duplicate triggers and emits `plugins:snippet-conflict`.
 - Settings → Appearance (or a new Snippets section) surfaces the conflict with a per-trigger "which plugin wins" control.
 
-### Acceptance
+### Original acceptance
 - Install two plugins with the same snippet trigger; the conflict is visible and resolvable before the user types the trigger.
 
 ---

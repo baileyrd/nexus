@@ -66,6 +66,20 @@ async function boot() {
   setRegistry(reg)
   setHost(host)
 
+  // OI-16 — graceful shutdown hook for script plugins. `beforeunload`
+  // fires on Cmd+Q (when Tauri delegates to the WebView), Ctrl+R, HMR
+  // reload, and any other navigation that tears down the page. The
+  // deactivate fan-out is gated by a 1s per-plugin soft cap so a single
+  // misbehaving plugin can't appear to hang the close. Plugins that
+  // need a guaranteed flush should write synchronously — the browser
+  // doesn't reliably await async work past `beforeunload` — but
+  // fire-and-forget cleanup gets a fighting chance, and the path runs
+  // to completion under programmatic / HMR reload where the WebView
+  // isn't actually disposed.
+  window.addEventListener('beforeunload', () => {
+    void host.deactivateAllForShutdown(1000)
+  })
+
   // ── E2E test hook ─────────────────────────────────────────────────────────
   // Gated on VITE_E2E alone. The e2e build step (`pnpm e2e:build`) sets
   // VITE_E2E=true before `vite build`, so the flag is inlined at build time
