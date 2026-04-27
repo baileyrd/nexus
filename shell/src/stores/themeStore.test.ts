@@ -78,6 +78,7 @@ function reset(): void {
     availableThemes: [],
     availableSnippets: [],
     activeThemeId: null,
+    kernelMode: 'system',
     resolvedVariables: {},
     enabledSnippets: [],
     loaded: false,
@@ -322,6 +323,123 @@ test('setSnippetOrder: invokes reorder_snippets with `ids` arg key', async () =>
   const reorder = invocations.find((i) => i.commandId === 'reorder_snippets')
   assert.ok(reorder)
   assert.equal(reorder!.pluginId, THEME_PLUGIN_ID)
+})
+
+test('hydrate: pushes persisted selection back to kernel via apply_config', async () => {
+  // Regression for the "theme selection doesn't persist" bug: the
+  // kernel theme plugin only holds in-memory state, so on every boot
+  // the engine starts at its built-in default. The store's persist
+  // middleware restores `activeThemeId` / `kernelMode` /
+  // `enabledSnippets` into memory; `hydrate()` must then push that
+  // snapshot to the kernel via `apply_config` BEFORE reading state
+  // back, otherwise `get_theme_config` returns the engine default
+  // and the user's selection is silently dropped.
+  reset()
+
+  // Simulate persist-rehydrate having populated the kernel-mirrored
+  // selection from localStorage on a prior session.
+  useThemeStore.setState({
+    activeThemeId: 'nexus-light',
+    kernelMode: 'light',
+    enabledSnippets: ['snip-a', 'snip-b'],
+  })
+
+  // The mock returns whatever `apply_config` last set, so the test
+  // exercises the full restore-then-read loop the production flow
+  // depends on.
+  let kernelTheme: string = 'nexus-dark'
+  let kernelMode: 'light' | 'dark' | 'system' = 'system'
+  let kernelSnippets: string[] = []
+
+  const { api, invocations } = makeMockApi(async (_p, cmd, args) => {
+    if (cmd === 'apply_config') {
+      const a = args as { config: KernelThemeConfig }
+      kernelTheme = a.config.theme_id
+      kernelMode = a.config.mode
+      kernelSnippets = a.config.enabled_snippets
+      return { ok: true }
+    }
+    if (cmd === 'get_theme_config') {
+      return {
+        theme_id: kernelTheme,
+        mode: kernelMode,
+        enabled_snippets: kernelSnippets,
+      }
+    }
+    if (cmd === 'get_available_themes') return []
+    if (cmd === 'get_available_snippets') return []
+    if (cmd === 'compute_variables') return {}
+    throw new Error(`unexpected: ${cmd}`)
+  })
+
+  await useThemeStore.getState().hydrate(api)
+
+  // The persisted selection round-trips through the kernel, proving
+  // both that `apply_config` was sent with the persisted snapshot and
+  // that the subsequent `get_theme_config` reflects it.
+  const after = useThemeStore.getState()
+  assert.equal(after.activeThemeId, 'nexus-light')
+  assert.equal(after.kernelMode, 'light')
+  assert.deepEqual(after.enabledSnippets, ['snip-a', 'snip-b'])
+
+  // apply_config was issued before get_theme_config — invocations
+  // are appended in call order.
+  const cmds = invocations
+    .filter((i) => i.pluginId === THEME_PLUGIN_ID)
+    .map((i) => i.commandId)
+  const applyIdx = cmds.indexOf('apply_config')
+  const getIdx = cmds.indexOf('get_theme_config')
+  assert.notEqual(applyIdx, -1, 'apply_config must be invoked')
+  assert.notEqual(getIdx, -1, 'get_theme_config must be invoked')
+  assert.ok(applyIdx < getIdx, 'apply_config must run before get_theme_config')
+
+  const apply = invocations.find((i) => i.commandId === 'apply_config')
+  assert.deepEqual(apply!.args, {
+    config: {
+      theme_id: 'nexus-light',
+      mode: 'light',
+      enabled_snippets: ['snip-a', 'snip-b'],
+    },
+  })
+})
+
+test('hydrate: skips apply_config when no theme has been persisted yet', async () => {
+  // Fresh-install path: `activeThemeId` is null, so we must not
+  // overwrite the kernel's built-in default with an empty snapshot.
+  reset()
+
+  const { api, invocations } = makeMockApi(async (_p, cmd) => {
+    if (cmd === 'get_theme_config') {
+      return { theme_id: 'nexus-light', mode: 'system', enabled_snippets: [] }
+    }
+    if (cmd === 'get_available_themes') return []
+    if (cmd === 'get_available_snippets') return []
+    if (cmd === 'compute_variables') return {}
+    throw new Error(`unexpected: ${cmd}`)
+  })
+
+  await useThemeStore.getState().hydrate(api)
+
+  const cmds = invocations.map((i) => i.commandId)
+  assert.ok(!cmds.includes('apply_config'))
+})
+
+test('setMode: tracks kernelMode so the choice persists across restart', async () => {
+  // The legacy `theme` field can't represent `'system'` — without a
+  // separate `kernelMode` slot, persisting only `theme` would lose
+  // the user's choice when they pick "Match system".
+  reset()
+
+  const { api } = makeMockApi(async (_p, cmd) => {
+    if (cmd === 'set_mode') return null
+    throw new Error(`unexpected: ${cmd}`)
+  })
+
+  await useThemeStore.getState().setMode(api, 'system')
+  assert.equal(useThemeStore.getState().kernelMode, 'system')
+
+  await useThemeStore.getState().setMode(api, 'dark')
+  assert.equal(useThemeStore.getState().kernelMode, 'dark')
 })
 
 test('event constants are stable wire identifiers', () => {
