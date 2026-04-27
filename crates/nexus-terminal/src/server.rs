@@ -304,6 +304,15 @@ pub trait TerminalServer {
     /// List every session the server knows about. Order is arbitrary;
     /// sort by `created_at` on the caller side if needed.
     fn list_sessions(&self) -> Vec<SessionInfo>;
+
+    /// Update the PTY's reported window size, propagating SIGWINCH to
+    /// the child so applications like `vim` / `less` reflow in lockstep
+    /// with the UI viewport (PRD-09 §1.1).
+    ///
+    /// # Errors
+    /// - [`TerminalError::NotRunning`] if `id` is not tracked.
+    /// - [`TerminalError::Io`] from the underlying ioctl (rare).
+    fn resize(&mut self, id: &SessionId, cols: u16, rows: u16) -> Result<(), TerminalError>;
 }
 
 /// Default [`TerminalServer`] implementation: wraps a
@@ -571,6 +580,10 @@ impl TerminalServer for InMemoryTerminalServer {
             .into_iter()
             .filter_map(|id| self.session_info(&id).ok())
             .collect()
+    }
+
+    fn resize(&mut self, id: &SessionId, cols: u16, rows: u16) -> Result<(), TerminalError> {
+        self.manager.resize(id, cols, rows)
     }
 }
 

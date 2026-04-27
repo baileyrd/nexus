@@ -33,6 +33,7 @@
 //! | 9          | `get_session_info`   | Metadata for one session                |
 //! | 10         | `list_sessions`      | Metadata for every session              |
 //! | 16         | `read_raw_since`     | Pump + return raw bytes past a cursor   |
+//! | 17         | `resize`             | Update PTY size (cols × rows), SIGWINCH |
 //!
 //! Ids are **append-only** — never reused after retirement — because
 //! manifest registrations in loaded plugins bake them in.
@@ -128,6 +129,9 @@ pub const HANDLER_SAVED_REORDER: u32 = 15;
 /// read into one call for xterm-style frontends that just want the PTY
 /// byte stream. See [`ReadRawSinceArgs`].
 pub const HANDLER_READ_RAW_SINCE: u32 = 16;
+/// `resize` handler id. Updates the PTY's reported window size so the
+/// child process receives SIGWINCH and reflows. See [`ResizeArgs`].
+pub const HANDLER_RESIZE: u32 = 17;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -233,6 +237,21 @@ pub struct ReadRawSinceArgs {
     /// `send_raw_input` calls.
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+}
+
+/// Arguments for `resize`. `cols` / `rows` are character cells, matching
+/// the unit `Terminal.resize(cols, rows)` uses on the xterm.js side and
+/// `MasterPty::resize` uses inside `portable-pty`. Zero values are
+/// rejected by the underlying ioctl on most platforms; callers should
+/// clamp to at least `1 × 1`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResizeArgs {
+    /// Target session id.
+    pub id: String,
+    /// New column count (character cells).
+    pub cols: u16,
+    /// New row count (character cells).
+    pub rows: u16,
 }
 
 /// Response from `read_raw_since`.
@@ -612,6 +631,7 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_SAVED_DELETE => self.dispatch_saved_delete(args),
             HANDLER_SAVED_REORDER => self.dispatch_saved_reorder(args),
             HANDLER_READ_RAW_SINCE => self.dispatch_read_raw_since(args),
+            HANDLER_RESIZE => self.dispatch_resize(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -757,6 +777,25 @@ impl TerminalCorePlugin {
             self.publish_output(&id, next_cursor, bytes);
         }
         to_value(&ReadRawSinceResponse { cursor, data }, "read_raw_since")
+    }
+
+    fn dispatch_resize(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: ResizeArgs = parse_args(args, "resize")?;
+        let id = SessionId::from_string(a.id);
+        // Clamp zero dimensions — most tty ioctls reject them and the
+        // resulting error would be opaque to the caller. xterm's fit
+        // addon can occasionally propose zero before layout settles.
+        let cols = a.cols.max(1);
+        let rows = a.rows.max(1);
+        self.server
+            .lock()
+            .map_err(poisoned)?
+            .resize(&id, cols, rows)
+            .map_err(crate_err)?;
+        Ok(serde_json::Value::Null)
     }
 
     fn dispatch_search_output(
@@ -1291,6 +1330,59 @@ mod tests {
         // about here is that the response shape is unchanged and the
         // call doesn't panic on a missing bus.
         let _ = r.bytes;
+    }
+
+    #[test]
+    fn resize_dispatches_through_to_session_and_clamps_zero_dims() {
+        if !unix_only("resize_dispatches_through_to_session_and_clamps_zero_dims") {
+            return;
+        }
+        let mut p = TerminalCorePlugin::new();
+        let CreateSessionResponse { id } = serde_json::from_value(
+            p.dispatch(HANDLER_CREATE_SESSION, &create_args("sleep 1"))
+                .expect("create"),
+        )
+        .expect("decode");
+
+        // Normal resize succeeds (returns Null per the dispatch contract).
+        let resp = p
+            .dispatch(
+                HANDLER_RESIZE,
+                &serde_json::json!({ "id": id, "cols": 120, "rows": 40 }),
+            )
+            .expect("resize");
+        assert_eq!(resp, serde_json::Value::Null);
+
+        // Zero dimensions are clamped to 1×1 — the underlying ioctl
+        // rejects zero on Linux/macOS, so the call must not surface
+        // that error to the caller.
+        let resp = p
+            .dispatch(
+                HANDLER_RESIZE,
+                &serde_json::json!({ "id": id, "cols": 0, "rows": 0 }),
+            )
+            .expect("resize zero clamps");
+        assert_eq!(resp, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn resize_unknown_session_surfaces_not_running() {
+        let mut p = TerminalCorePlugin::new();
+        let err = p
+            .dispatch(
+                HANDLER_RESIZE,
+                &serde_json::json!({ "id": "ghost", "cols": 80, "rows": 24 }),
+            )
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(
+                    reason.contains("not running") || reason.contains("ghost"),
+                    "unexpected reason: {reason}"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]

@@ -21,6 +21,10 @@ const CMD_SEND_RAW_INPUT = 'send_raw_input'
 // never surfaces pre-Enter keystrokes because they sit in
 // LineBuffer.pending until a newline arrives.
 const CMD_READ_RAW_SINCE = 'read_raw_since'
+// `resize` propagates xterm's grid size to the PTY so SIGWINCH reaches
+// the child shell — without it, `vim` / `less` / progress bars wrap
+// against the original 80×24 even after the panel is resized.
+const CMD_RESIZE = 'resize'
 
 // WI-12: output is event-driven via the
 // `com.nexus.terminal.output.<session_id>` topic — bytes land in xterm
@@ -260,19 +264,32 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
         })
     })
 
-    // ── Resize: refit whenever the container changes, then tell the
-    // PTY. NOTE: the kernel does not yet expose a resize handler (see
-    // crates/nexus-terminal/src/core_plugin.rs — handler ids 1-15, no
-    // resize). We still call fit() so xterm reflows its own grid; the
-    // PTY keeps its initial 80×24 until a resize handler lands. This
-    // is visible as wrap weirdness on very wide panels and should be
-    // revisited when the kernel surface grows.
+    // ── Resize: refit xterm's local grid, then propagate cols/rows to
+    // the PTY so the child receives SIGWINCH. We dedupe identical
+    // dimensions because ResizeObserver fires for every layout pass
+    // (theme switch, font change, parent reflow) — a no-op resize
+    // would still land an IPC roundtrip.
+    let lastCols = -1
+    let lastRows = -1
     const resizeObs = new ResizeObserver(() => {
       try {
         fit.fit()
       } catch {
         // Size wasn't ready yet; next observation will retry.
+        return
       }
+      const cols = term.cols
+      const rows = term.rows
+      if (cols === lastCols && rows === lastRows) return
+      lastCols = cols
+      lastRows = rows
+      const id = useTerminalStore.getState().sessionId
+      if (!id) return
+      void kernel
+        .invoke(PLUGIN_ID, CMD_RESIZE, { id, cols, rows })
+        .catch(() => {
+          // Session may have closed between fit() and invoke; ignore.
+        })
     })
     resizeObs.observe(container)
 
