@@ -654,8 +654,13 @@ function TabStrip({
         // 36px matches the SidebarToggleButton + activity-bar items'
         // top-row baseline so the center tab row, the right sidedock
         // tab row, and the left activity bar's first icon row all
-        // sit on the same horizontal line.
-        minHeight: 36,
+        // sit on the same horizontal line. Use a fixed `height`
+        // (not `min-height`) so the strip stays exactly 36px even
+        // when a child like a 36-tall sidebar-tab would otherwise
+        // push the box to 37 with the 1px border-bottom — that
+        // would slip the next row (file-tree toolbar) 1px below the
+        // main dock's view-header.
+        height: 36,
         overflow: 'hidden',
         // Reserve horizontal space at the trailing edge for the absolute
         // WindowControls cluster (3 × 40px = 120px) when this tab strip is
