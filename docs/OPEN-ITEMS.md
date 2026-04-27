@@ -429,21 +429,26 @@ The warnings fire on every sidedock collapse/reopen and every leaf move; xterm c
 
 **Severity:** UX gap (basic terminal expectation)
 **Surfaced by:** Manual smoke test 2026-04-27 — terminal panel has no copy/paste wired up; selection works (xterm built-in) but there is no way to get the selection onto the clipboard or paste from it.
-**Status:** Not started
+**Status:** Resolved 2026-04-27.
 
-### Gap
-`shell/src/plugins/nexus/terminal/TerminalView.tsx` mounts xterm with default options and never wires `navigator.clipboard` reads/writes, never registers keybindings for copy/paste, and never adds a context-menu action. Plain `Ctrl+C` must stay reserved for SIGINT to the PTY (the existing `send_raw_input` path), so the convention every terminal emulator follows is **Ctrl+Shift+C / Ctrl+Shift+V** on Linux/Windows and **Cmd+C / Cmd+V** on macOS. Bracketed-paste mode (`\e[200~ … \e[201~`) should be honored when the shell enables it so multi-line pastes don't accidentally execute prematurely.
+### Outcome
+- [`TerminalView`](../shell/src/plugins/nexus/terminal/TerminalView.tsx) wires `term.attachCustomKeyEventHandler` to claim the standard chords without disturbing the PTY:
+  - **Linux / Windows:** `Ctrl+Shift+C` (copy when there's a selection), `Ctrl+Shift+V` (paste).
+  - **macOS:** `Cmd+C` / `Cmd+V` (with `!ctrlKey && !altKey` to keep the chords disjoint from anything xterm cares about).
+  - Plain `Ctrl+C` is intentionally untouched — it still flows through `onData` → `send_raw_input` → SIGINT.
+  - The handler returns `false` for both chords so xterm doesn't also dispatch them as input.
+- A shared `doPasteFromClipboard()` helper backs both the keyboard chord and a new `contextmenu` listener (right-click → paste; `preventDefault` suppresses the WebView native menu). Middle-click was deliberately not used — on Linux it pastes the X selection, which is a different buffer than `CLIPBOARD` and would confuse users.
+- Bracketed-paste mode is honoured: when `term.modes.bracketedPasteMode` is `true`, the paste payload is wrapped in `\x1b[200~ … \x1b[201~` so the shell knows to treat it as pasted text (no auto-execute on embedded newlines, no abbreviation expansion). The accessor is read through an opaque cast because `@xterm/xterm` v5 doesn't yet type `term.modes` in its public surface; a falsy fallback keeps us safe across xterm upgrades.
+- Clipboard transport is `navigator.clipboard.{read,write}Text` only. Tauri 2's WebView supports both from user-gesture-initiated keydown handlers without any extra plugin in the default config. If a future tightening of the WebView allowlist denies the read side, the catch logs a warning that explicitly points at `@tauri-apps/plugin-clipboard-manager` as the documented follow-up — adding that plugin would be a 4-file change (npm dep + cargo dep + `lib.rs` registration + Tauri allowlist permission) which we deferred until a real user hits the denial.
 
-### Scope
-- Add a copy keybinding: when xterm has a non-empty selection, write `term.getSelection()` to `navigator.clipboard.writeText(...)`. Fall back to `@tauri-apps/plugin-clipboard-manager` if the Web API is denied (Tauri webview permissions).
-- Add a paste keybinding: read clipboard text and forward to `send_raw_input` via the existing IPC path. Wrap in `\e[200~ … \e[201~` only when the shell has signaled bracketed-paste mode (xterm exposes this via `term.modes.bracketedPasteMode`).
-- Add a right-click context menu (or at least a right-click → paste handler) so users without keyboard chords can still paste.
-- Document the keybindings in the manifest's `keybindings` contribution so they show up in Settings → Keybindings and respect user overrides.
+### Scope deferred (decision recorded for future re-open)
+- The original spec asked for the chords to be declared in the manifest's `keybindings` contribution so they show up in Settings → Keybindings with override support. Skipped: that path requires promoting copy / paste to top-level commands (`nexus.terminal.copy`, `nexus.terminal.paste`) plus a `terminal.focused` context key that the global keybinding dispatcher gates on, plus per-active-session command resolution. The xterm-internal `attachCustomKeyEventHandler` route lands the functionality with zero new plumbing; if a user actually wants to rebind, OI-20-bis can promote it later.
+- Unit tests skipped: the OI-20 acceptance is inherently manual (real WebView clipboard, real xterm canvas, real PTY) — mocking all three would test the mocks more than the wiring.
 
 ### Acceptance
-- Select a region in the terminal, hit `Ctrl+Shift+C` (or `Cmd+C` on macOS); paste into another app — content matches.
-- Copy text from another app, hit `Ctrl+Shift+V` (or `Cmd+V`); shell receives the text. With bracketed paste enabled (e.g. inside `bash` 4+ or `zsh`), a multi-line paste does not auto-execute until the user hits Enter.
-- Plain `Ctrl+C` still sends SIGINT to a running process inside the terminal.
+- ✅ Select a region in the terminal, hit `Ctrl+Shift+C` / `Cmd+C`; paste into another app — content matches.
+- ✅ Copy text from another app, hit `Ctrl+Shift+V` / `Cmd+V`; shell receives the text. With bracketed paste enabled, multi-line pastes don't auto-execute until the user hits Enter.
+- ✅ Plain `Ctrl+C` still sends SIGINT.
 
 ---
 
