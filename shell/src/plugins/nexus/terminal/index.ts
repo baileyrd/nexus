@@ -70,7 +70,7 @@ export const terminalPlugin: Plugin = {
       configuration: {
         pluginId: 'nexus.terminal',
         title: 'Terminal',
-        order: 40,
+        order: 20,
         schema: [
           {
             key: 'ui.commandSaveNotificationMs',
@@ -85,6 +85,13 @@ export const terminalPlugin: Plugin = {
             description: 'Auto-dismiss duration for "sent to terminal" notifications in milliseconds',
             type: 'number' as const,
             default: 1800,
+          },
+          {
+            key: 'terminal.autoRestartDelayMs',
+            title: 'Auto-restart delay',
+            description: 'Delay in ms before a saved command auto-restarts.',
+            type: 'number' as const,
+            default: 2000,
           },
         ],
       },
@@ -111,20 +118,6 @@ export const terminalPlugin: Plugin = {
           type: 'boolean',
         },
       ],
-      configuration: {
-        pluginId: 'nexus.terminal',
-        title: 'Terminal',
-        order: 20,
-        schema: [
-          {
-            key: 'terminal.autoRestartDelayMs',
-            title: 'Auto-restart delay',
-            description: 'Delay in ms before a saved command auto-restarts.',
-            type: 'number',
-            default: 2000,
-          },
-        ],
-      },
     },
   },
 
