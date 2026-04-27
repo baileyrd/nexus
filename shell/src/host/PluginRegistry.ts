@@ -9,6 +9,7 @@ import { SettingsTabRegistry } from '../registry/SettingsTabRegistry'
 import { StatusBarRegistry } from '../registry/StatusBarRegistry'
 import { slotRegistry } from '../registry/SlotRegistry'
 import { uriHandlerRegistry } from '../registry/UriHandlerRegistry'
+import { eventBus } from './EventBus'
 
 export class PluginRegistry {
   readonly commands     = new CommandRegistry()
@@ -73,6 +74,11 @@ export class PluginRegistry {
           case 'config':      this.config.unregister(id);       break
           case 'keybinding':  this.keybindings.unregister(id);  break
           case 'settingsTab': this.settingsTabs.unregister(id); break
+          // Activity-bar items live in a Zustand store fed by the
+          // event bus; emitting `itemRemoved` is the supported way to
+          // drop them. Without this case, disabling a plugin leaves
+          // its rail icons visible until reload.
+          case 'activityBar': eventBus.emit('activityBar:itemRemoved', { id }); break
           default:
             console.warn(`[PluginRegistry] Unknown contribution type: '${type}'`)
         }

@@ -407,9 +407,13 @@ export function buildPluginAPI(
     },
 
     // ─── Activity bar ──────────────────────────────────────────────────────
+    // Items are tracked by plugin id so `PluginRegistry.unregisterAll`
+    // can sweep them on plugin unload — without this, disabling a plugin
+    // (e.g. via Settings → Plugins) leaves its rail icons visible.
     activityBar: {
       addItem(config) {
         eventBus.emit('activityBar:itemAdded', { ...config, pluginId })
+        registry.track(pluginId, `activityBar:${config.id}`)
       },
       removeItem(id) {
         eventBus.emit('activityBar:itemRemoved', { id })
