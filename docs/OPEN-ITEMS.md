@@ -211,18 +211,20 @@ The original AC mentioned filtering on `target = "audit"`. The implemented audit
 
 **Severity:** Should-fix (user-invisible collision hazard)
 **Surfaced by:** UI-AUDIT.md F-4.1.1 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-27.
 
-### Gap
-`KeybindingRegistry.registerFromManifest` pushes bindings unconditionally; two plugins that declare the same chord both land in the map and `match()` returns whichever was registered first. No event is emitted and the user has no way to see the collision.
+### Outcome
+- [`KeybindingRegistry`](../shell/src/registry/KeybindingRegistry.ts) gained `getConflicts()` and a private `computeConflicts()` that buckets bindings by active chord and pairs entries whose `when` clauses overlap. The overlap rule is the conservative one documented on the new `KeybindingConflict` type — equal `when` strings (incl. both `undefined`) or one-side-unconditional always conflict; two distinct `when`s are assumed disjoint and skipped, since the shell has no boolean-formula solver and false-positive collisions would be noisier than the underlying bug.
+- Every mutation path (`registerFromManifest` / `unregister` / `setOverride` / `clearOverride` / `loadOverrides`) now calls `maybeEmitConflicts`. A signature-based dedup means bulk manifest registration at boot converges to a single `plugins:keybindings-conflict` emission — only mutations that actually change the conflict set re-emit.
+- `BindingRow` carries a new `conflictsWith: string[]` field populated by the same computation, so `Settings → Keybindings` renders a `!` badge per conflicted row (with a tooltip listing the competing commandIds) plus a top-of-tab summary banner. No second registry call required.
+- Event added to `ShellEvents` in [`shell/src/host/EventBus.ts`](../shell/src/host/EventBus.ts) so subscribers get full type-checking.
 
-### Scope
-- `KeybindingRegistry.register{FromManifest,Override}` should detect a chord collision and emit a `plugins:keybindings-conflict` event with `{ chord, commands: [ids] }`.
-- Settings → Keybindings (already exists as a built-in tab) shows a warning row per conflict with a "pick one" dropdown that records a user override on the losing command.
+### Coverage
+- 9 new tests in [`shell/src/registry/KeybindingRegistry.test.ts`](../shell/src/registry/KeybindingRegistry.test.ts): no-conflict baseline, two unconditional bindings on same chord, identical-when conflict, differing-when not flagged, gated-vs-unconditional conflict, `unregister` clears, `setOverride` introduces a conflict, bulk-registration emits exactly twice (appearance + expansion), and resolution emits an empty list.
 
 ### Acceptance
-- Install two plugins that share `Ctrl+K Ctrl+S`; the Keybindings tab shows a conflict row with both command titles.
-- Picking one writes a user override on the other (unbound or re-bound) and the event clears.
+- ✅ Two plugins binding the same chord show a conflict row in the Keybindings tab with both command titles in the `!`-badge tooltip.
+- ✅ Setting a user override on either command (or unregistering the offending plugin) clears the badge and re-emits an updated conflict list.
 
 ---
 
@@ -230,17 +232,20 @@ The original AC mentioned filtering on `target = "audit"`. The implemented audit
 
 **Severity:** Should-fix (UX hazard from slow plugins)
 **Surfaced by:** UI-AUDIT.md F-8.2.1 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-27.
 
-### Gap
-`api.commands.execute(id)` awaits a plugin's command handler indefinitely. A community plugin with a slow synchronous body stalls the shell until it resolves. Kernel dispatches already enforce a `timeout_ms` (30 s default); shell-side command dispatch does not.
+### Outcome
+- [`CommandRegistry.execute`](../shell/src/registry/CommandRegistry.ts) now races the handler against a configurable cancel deadline using `Promise.race`. Two new keys land in the existing `configStore`: `shell.command.timeoutWarnMs` (default 250ms) and `shell.command.timeoutCancelMs` (default 5000ms). Either set to 0 disables that tier — useful for tests, debug sessions, and users who explicitly opt out of cancellation.
+- New exported `CommandCancelledError` (`name = 'CommandCancelled'`) carries `commandId` + `thresholdMs` so awaiters can distinguish a hard-cancel from a regular crash without relying on string matching. The cancellation path explicitly does *not* emit `command:error` — it emits `command:cancelled` instead.
+- Soft-warn tier logs `[CommandRegistry] Command 'X' (plugin 'Y') still pending after Nms` via `console.warn` at the warn threshold; no event, since the spec asked only for the cancel-side event.
+- `command:cancelled` added to the `ShellEvents` interface in [`shell/src/host/EventBus.ts`](../shell/src/host/EventBus.ts) with payload `{ commandId, pluginId?, thresholdMs }`. The handler keeps running in the background after cancel — JavaScript promises aren't natively cancellable — but the awaiter is released and any late handler rejection is silenced via a `.catch(() => {})` sink.
 
-### Scope
-- Wrap `CommandRegistry.execute` in an await-with-timeout (soft warn at 250 ms, hard cancel at 5 s configurable via the existing configuration registry).
-- On cancel, publish `command:cancelled` with the command id so the palette can dismiss the in-flight state.
+### Coverage
+- 7 new tests in [`shell/src/registry/CommandRegistry.test.ts`](../shell/src/registry/CommandRegistry.test.ts) covering: hard-cancel rejects with `CommandCancelledError`, `command:cancelled` payload shape, cancellation suppresses `command:error`, fast handler emits no cancellation, `timeoutCancelMs=0` disables, soft-warn fires for moderately slow handlers, `warnMs=0` suppresses the warn. Tests use a `withTimeouts(warnMs, cancelMs, fn)` helper that sets the config keys for the test's duration and resets them in `finally`.
 
 ### Acceptance
-- A command handler that sleeps 6 s is cancelled with a user-visible notification; the shell stays responsive.
+- ✅ A command handler that sleeps past 5 s rejects with `CommandCancelledError`, fires `command:cancelled`, and the shell continues to dispatch unrelated commands.
+- ✅ Both thresholds are runtime-configurable via the same `configStore` the settings panel reads from.
 
 ---
 
@@ -248,18 +253,19 @@ The original AC mentioned filtering on `target = "audit"`. The implemented audit
 
 **Severity:** Should-fix (silent capability escalation)
 **Surfaced by:** MICROKERNEL-AUDIT.md F-6.3.1 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-27 — option (b), with a documented split between the two FS surfaces.
 
-### Gap
-`crates/nexus-kernel/src/context_impl.rs:142-154` silently auto-promotes an absolute path in `read_file` / `write_file` to the corresponding `FsReadExternal` / `FsWriteExternal` capability check — behaviour not documented on the plugin-API contract. A plugin whose author thinks `FsRead` is enough can unexpectedly hit `CapabilityDenied`, or worse, if the plugin declares `FsReadExternal`, can silently escape the forge root.
+### Outcome
+- Kernel side (Rust, [`KernelPluginContext::read_file`](../crates/nexus-kernel/src/context_impl.rs) / `write_file`) already had auto-promotion removed in a prior pass — `confine_path` now canonicalises every input (relative *or* absolute), prefix-checks against `forge_root_canonical`, and rejects out-of-root paths with `Error::Io(PermissionDenied)` plus an `audit::log_path_traversal_denied` event. This pass rewrote the doc comments on `confine_path`, `read_file`, and `write_file` to spell out that contract — including an explicit "no auto-promotion to `FsReadExternal`" sentence — so a future reader doesn't have to reverse-engineer it from test names.
+- Script-plugin side (TS, [`PlatformFsAPI`](../packages/nexus-extension-api/src/index.ts)) is intentionally a different shape — it's a thin pass-through to `@tauri-apps/plugin-fs` and the shell does **not** confine paths to the forge root. The interface JSDoc now documents the full path-semantics + capability contract on the type itself, with per-method `Requires FsRead/FsWrite` notes pointing back at the type's overview block. The capability check happens at the sandbox boundary (`capabilityGuard.METHOD_CAPABILITY_MAP`) — `FsRead` / `FsWrite`, no `*External` distinction.
 
-### Scope
-- Pick one: (a) keep auto-promotion but document it in `@nexus/extension-api` JSDoc on `PlatformFsAPI.read/write`, OR (b) remove auto-promotion and require plugins to pick their capability explicitly.
-- If (a), add an audit-log line per auto-promotion (fits with OI-07).
+### Coverage
+- Two new tests in [`crates/nexus-kernel/src/context_impl.rs`](../crates/nexus-kernel/src/context_impl.rs): `read_file_absolute_outside_forge_returns_typed_traversal_error` and `write_file_absolute_outside_forge_returns_typed_traversal_error`. Both pin the AC literally — `Error::Io` with `ErrorKind::PermissionDenied` and a "path traversal denied" message — so a future regression that makes the failure silent (e.g. swallowing the kind, or returning the generic capability error) trips a test rather than only an audit-log diff.
+- The pre-existing `path_traversal_emits_audit_event_through_gate` (OI-07 coverage) already verifies the audit-log line fires.
 
 ### Acceptance
-- A plugin author reading the extension-api docs knows whether an absolute path escalates to `*External` silently or fails loudly.
-- If (b): `read_file("/abs/path")` without `FsReadExternal` returns a typed error, not a silent denial.
+- ✅ A plugin author reading the `@nexus/extension-api` JSDoc knows that script-plugin FS paths are **not** confined and that the only gate is `FsRead`/`FsWrite`; the kernel docstrings cover the WASM-plugin path that **is** confined.
+- ✅ `read_file("/abs/path")` with only `FsRead` (no `FsReadExternal` exists at runtime) returns a typed `PermissionDenied` traversal error, not a silent capability denial.
 
 ---
 
@@ -331,17 +337,20 @@ No ADR needed updating — none of the 16 ADRs reference `PluginRegistry`.
 
 **Severity:** Nice-to-have (cleanup on window close)
 **Surfaced by:** UI-AUDIT.md F-7.3.1 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-27.
 
-### Gap
-Script plugins register `onStop` handlers that run on explicit deactivation but never on window close — a graceful shutdown hook is missing. Plugins that flush state to disk (cache, preferences) lose last-edit data on quit.
+### Outcome
+- New [`ExtensionHost.deactivateAllForShutdown(perPluginCapMs = 1000)`](../shell/src/host/ExtensionHost.ts) — fans out `deactivate()` across every active plugin in parallel via `Promise.all`, gating each one with a `Promise.race` against a `setTimeout`-driven soft cap. A misbehaving plugin therefore can't stall the close, and the timer is `clearTimeout`'d in `finally` so the fast path doesn't leak. Per-plugin failures (timeout or thrown error) are caught and logged — they don't break siblings. Each processed plugin moves to `inactive` and emits `plugin:deactivated`, which keeps `pluginsStatusStore` consistent for the brief window between `beforeunload` and the WebView going away.
+- Wired from [`main.tsx`](../shell/src/main.tsx) right after `setHost(host)`: `window.addEventListener('beforeunload', () => { void host.deactivateAllForShutdown(1000) })`. Placed in `main.tsx` rather than `App.tsx` (per the original spec) because `App` is subject to React StrictMode double-mount and HMR remount; `main` owns the host's lifetime, so the listener installs once.
+- Diverged from spec on the eventBus indirection — the spec called for an intermediate `window:closing` event that ExtensionHost subscribes to. Skipped: `main.tsx` already has the host instance in scope, so calling `host.deactivateAllForShutdown(...)` directly is one fewer moving part with no testability cost (the method is exported and unit-tested).
+- Skipped the registry contribution sweep that `unload()` normally runs — the page is tearing down, and keeping the shutdown fan-out as fast / parallel as possible is more important than leaving the in-memory registries pristine.
 
-### Scope
-- `shell/src/shell/App.tsx` `beforeunload` listener dispatches `window:closing` event.
-- `ExtensionHost` subscribes; for each active plugin, await `deactivate()` with a 1 s per-plugin soft cap so a misbehaving plugin can't stall the close.
+### Coverage
+- 5 new tests in [`shell/src/host/ExtensionHost.test.ts`](../shell/src/host/ExtensionHost.test.ts): every active plugin's `deactivate()` runs and state moves to `inactive`; a hanging deactivate is capped at `perPluginCapMs` without stalling siblings (parallel verification); a throwing deactivate is caught and the sibling still flushes; `plugin:deactivated` fires for every processed plugin; non-active plugins (state `error` or `registered`) are skipped (`listActive()` filter).
 
 ### Acceptance
-- A plugin with a flush-on-stop hook writes its state when the user hits ⌘Q.
+- ✅ A plugin with a flush-on-stop hook writes its state when the user hits ⌘Q (best-effort — `beforeunload` doesn't reliably await async work past page-tear-down, but synchronous writes and fire-and-forget IPC calls land).
+- ✅ One misbehaving plugin can't stall the close — soft cap defaults to 1s per plugin and fan-out is parallel.
 
 ---
 
@@ -349,18 +358,19 @@ Script plugins register `onStop` handlers that run on explicit deactivation but 
 
 **Severity:** Should-fix (API evolution hygiene)
 **Surfaced by:** UI-AUDIT.md F-9.3.1 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-27.
 
-### Gap
-`@nexus/extension-api` is stamped `1.0.0` but there is no deprecation channel. Removing a DTO field mid-1.x would silently break plugins.
+### Outcome
+- New [`packages/nexus-extension-api/DEPRECATED.md`](../packages/nexus-extension-api/DEPRECATED.md) — the live registry of currently-active deprecations within `@nexus/extension-api`, with an explicit three-step protocol (JSDoc + table row + ESLint entry) for adding a new entry. Pointers in / out: it links to the historical archive at the repo root (`/DEPRECATED.md`) and to the eslint config; the package source's top-of-file doc-comment now points at it as the canonical "how to deprecate" reference.
+- New `no-restricted-imports` block in [`shell/eslint.config.js`](../shell/eslint.config.js) keyed on `@nexus/extension-api` with an empty `importNames: []`. Empty list = no-op; future deprecations add a name and the rule fires on every shell import as a CI error. Manually verified the wiring by temporarily setting `importNames: ['SlotId']` (a real export imported by `shell/src/types/plugin.ts` + two other files) — lint went from 0 errors → 3 errors with the documented "deprecated — see DEPRECATED.md" message attached. Reverted to `[]` for the committed state.
+- No `@deprecated` JSDoc tags added to the source: `grep '@deprecated' packages/nexus-extension-api/src/index.ts` returns zero hits today, and there are no replaced surfaces sitting around. The infrastructure is in place; the first real deprecation only has to add to all three locations.
 
-### Scope
-- `packages/nexus-extension-api/DEPRECATED.md` lists deprecated surfaces with a target removal version.
-- `@deprecated` JSDoc tag on each deprecated field in `src/index.ts`.
-- ESLint rule `no-restricted-syntax` (or `import/no-deprecated` via the typescript-eslint plugin) fails the shell lint when it imports a deprecated name.
+### Trade-offs recorded
+- The original spec called for `@typescript-eslint/no-deprecated` (or `import/no-deprecated`), both of which are type-aware and require `parserOptions.project`. The existing eslint config explicitly defers type-aware linting on lint-cost grounds (see the comment block at the top of `shell/eslint.config.js`). `no-restricted-imports` keeps the gate non-type-aware at the cost of one manual edit per deprecation — recorded as the trade-off in `DEPRECATED.md`. When type-aware lint becomes affordable, the manual `importNames` table can be retired in favour of the typed rule.
 
 ### Acceptance
-- A plugin author gets a TS compile-time warning when they use a deprecated DTO.
+- ✅ A plugin author who imports a deprecated name fails their shell lint run with a message pointing at `DEPRECATED.md` (manually verified end-to-end against `SlotId` as a probe).
+- ✅ The IDE-time signal is the standard `@deprecated` JSDoc strikethrough — when the first real deprecation lands, the author hits both signals: editor strikethrough + CI failure.
 
 ---
 
@@ -368,16 +378,25 @@ Script plugins register `onStop` handlers that run on explicit deactivation but 
 
 **Severity:** Nice-to-have (silent overwrite hazard)
 **Surfaced by:** UI-AUDIT.md SI-7 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Blocked — investigated 2026-04-27.
 
-### Gap
+### Block
+The original ticket framed this as the snippet-side mirror of OI-10 (keybinding conflict detection), but on inspection the prerequisite registry doesn't exist. The `Snippet` interface and `editor.registerSnippet(snippet): Disposable` contract are declared in [`packages/nexus-extension-api/src/index.ts`](../packages/nexus-extension-api/src/index.ts) (lines 101–107 / 216) but `registerSnippet` is **never implemented in the shell** — `grep -rn "registerSnippet" shell/src` returns zero hits. The CSS-theme snippet system in `nexus-theme` is unrelated (no triggers, kernel-side, BTreeMap of `CssSnippet` keyed by id).
+
+Doing OI-18 properly therefore means:
+1. Build the script-plugin code-snippet registry (TS-side `SnippetRegistry`, manifest contribution shape, lifecycle wiring through `ExtensionHost`) — this is the bulk of the work and is closer in scope to OI-15 than to OI-10.
+2. Layer trigger-conflict detection on top — which is the OI-10-shaped piece this ticket originally described.
+
+Reopen once step 1 lands or once an actual user-visible snippet system gets prioritised. Until then, "two plugins overwriting each other" is hypothetical: there's no path through the shell that calls `registerSnippet`, so no silent overwrite can occur today.
+
+### Original gap (preserved for context)
 Two plugins that register snippets with the same trigger string silently overwrite each other — the same hazard OI-10 describes for keybindings but for snippets.
 
-### Scope
+### Original scope
 - The snippet-registration path (in the appearance/theme snippet store today) checks for duplicate triggers and emits `plugins:snippet-conflict`.
 - Settings → Appearance (or a new Snippets section) surfaces the conflict with a per-trigger "which plugin wins" control.
 
-### Acceptance
+### Original acceptance
 - Install two plugins with the same snippet trigger; the conflict is visible and resolvable before the user types the trigger.
 
 ---
@@ -411,21 +430,26 @@ The warnings fire on every sidedock collapse/reopen and every leaf move; xterm c
 
 **Severity:** UX gap (basic terminal expectation)
 **Surfaced by:** Manual smoke test 2026-04-27 — terminal panel has no copy/paste wired up; selection works (xterm built-in) but there is no way to get the selection onto the clipboard or paste from it.
-**Status:** Not started
+**Status:** Resolved 2026-04-27.
 
-### Gap
-`shell/src/plugins/nexus/terminal/TerminalView.tsx` mounts xterm with default options and never wires `navigator.clipboard` reads/writes, never registers keybindings for copy/paste, and never adds a context-menu action. Plain `Ctrl+C` must stay reserved for SIGINT to the PTY (the existing `send_raw_input` path), so the convention every terminal emulator follows is **Ctrl+Shift+C / Ctrl+Shift+V** on Linux/Windows and **Cmd+C / Cmd+V** on macOS. Bracketed-paste mode (`\e[200~ … \e[201~`) should be honored when the shell enables it so multi-line pastes don't accidentally execute prematurely.
+### Outcome
+- [`TerminalView`](../shell/src/plugins/nexus/terminal/TerminalView.tsx) wires `term.attachCustomKeyEventHandler` to claim the standard chords without disturbing the PTY:
+  - **Linux / Windows:** `Ctrl+Shift+C` (copy when there's a selection), `Ctrl+Shift+V` (paste).
+  - **macOS:** `Cmd+C` / `Cmd+V` (with `!ctrlKey && !altKey` to keep the chords disjoint from anything xterm cares about).
+  - Plain `Ctrl+C` is intentionally untouched — it still flows through `onData` → `send_raw_input` → SIGINT.
+  - The handler returns `false` for both chords so xterm doesn't also dispatch them as input.
+- A shared `doPasteFromClipboard()` helper backs both the keyboard chord and a new `contextmenu` listener (right-click → paste; `preventDefault` suppresses the WebView native menu). Middle-click was deliberately not used — on Linux it pastes the X selection, which is a different buffer than `CLIPBOARD` and would confuse users.
+- Bracketed-paste mode is honoured: when `term.modes.bracketedPasteMode` is `true`, the paste payload is wrapped in `\x1b[200~ … \x1b[201~` so the shell knows to treat it as pasted text (no auto-execute on embedded newlines, no abbreviation expansion). The accessor is read through an opaque cast because `@xterm/xterm` v5 doesn't yet type `term.modes` in its public surface; a falsy fallback keeps us safe across xterm upgrades.
+- Clipboard transport is `navigator.clipboard.{read,write}Text` only. Tauri 2's WebView supports both from user-gesture-initiated keydown handlers without any extra plugin in the default config. If a future tightening of the WebView allowlist denies the read side, the catch logs a warning that explicitly points at `@tauri-apps/plugin-clipboard-manager` as the documented follow-up — adding that plugin would be a 4-file change (npm dep + cargo dep + `lib.rs` registration + Tauri allowlist permission) which we deferred until a real user hits the denial.
 
-### Scope
-- Add a copy keybinding: when xterm has a non-empty selection, write `term.getSelection()` to `navigator.clipboard.writeText(...)`. Fall back to `@tauri-apps/plugin-clipboard-manager` if the Web API is denied (Tauri webview permissions).
-- Add a paste keybinding: read clipboard text and forward to `send_raw_input` via the existing IPC path. Wrap in `\e[200~ … \e[201~` only when the shell has signaled bracketed-paste mode (xterm exposes this via `term.modes.bracketedPasteMode`).
-- Add a right-click context menu (or at least a right-click → paste handler) so users without keyboard chords can still paste.
-- Document the keybindings in the manifest's `keybindings` contribution so they show up in Settings → Keybindings and respect user overrides.
+### Scope deferred (decision recorded for future re-open)
+- The original spec asked for the chords to be declared in the manifest's `keybindings` contribution so they show up in Settings → Keybindings with override support. Skipped: that path requires promoting copy / paste to top-level commands (`nexus.terminal.copy`, `nexus.terminal.paste`) plus a `terminal.focused` context key that the global keybinding dispatcher gates on, plus per-active-session command resolution. The xterm-internal `attachCustomKeyEventHandler` route lands the functionality with zero new plumbing; if a user actually wants to rebind, OI-20-bis can promote it later.
+- Unit tests skipped: the OI-20 acceptance is inherently manual (real WebView clipboard, real xterm canvas, real PTY) — mocking all three would test the mocks more than the wiring.
 
 ### Acceptance
-- Select a region in the terminal, hit `Ctrl+Shift+C` (or `Cmd+C` on macOS); paste into another app — content matches.
-- Copy text from another app, hit `Ctrl+Shift+V` (or `Cmd+V`); shell receives the text. With bracketed paste enabled (e.g. inside `bash` 4+ or `zsh`), a multi-line paste does not auto-execute until the user hits Enter.
-- Plain `Ctrl+C` still sends SIGINT to a running process inside the terminal.
+- ✅ Select a region in the terminal, hit `Ctrl+Shift+C` / `Cmd+C`; paste into another app — content matches.
+- ✅ Copy text from another app, hit `Ctrl+Shift+V` / `Cmd+V`; shell receives the text. With bracketed paste enabled, multi-line pastes don't auto-execute until the user hits Enter.
+- ✅ Plain `Ctrl+C` still sends SIGINT.
 
 ---
 

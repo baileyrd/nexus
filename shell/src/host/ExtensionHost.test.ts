@@ -32,6 +32,7 @@ function makePlugin(opts: {
   activationEvents?: string[]
   dependsOn?: string[]
   onActivate?: (api: PluginAPI) => void | Promise<void>
+  onDeactivate?: () => void | Promise<void>
 }): Plugin {
   return {
     manifest: {
@@ -43,6 +44,7 @@ function makePlugin(opts: {
       dependsOn: opts.dependsOn,
     },
     activate: opts.onActivate ?? (() => {}),
+    deactivate: opts.onDeactivate,
   }
 }
 
@@ -319,4 +321,112 @@ test('WI-35 — EventBus.emit: a throwing listener does not stop sibling listene
     unsubA()
     unsubB()
   }
+})
+
+// ─── OI-16 — beforeunload → deactivateAllForShutdown ─────────────────────────
+
+test('OI-16 — deactivateAllForShutdown calls deactivate on every active plugin', async () => {
+  const { host } = freshHost()
+  const flushed: string[] = []
+  const a = makePlugin({
+    id: 'shutdown.a',
+    onDeactivate: () => { flushed.push('a') },
+  })
+  const b = makePlugin({
+    id: 'shutdown.b',
+    onDeactivate: async () => { flushed.push('b') },
+  })
+  await host.loadAll([a, b])
+
+  await host.deactivateAllForShutdown(1000)
+
+  assert.deepEqual(flushed.sort(), ['a', 'b'])
+  assert.equal(host.getState('shutdown.a'), 'inactive')
+  assert.equal(host.getState('shutdown.b'), 'inactive')
+})
+
+test('OI-16 — a hanging deactivate is capped at perPluginCapMs and does not stall siblings', async () => {
+  const { host } = freshHost()
+  const fast = makePlugin({
+    id: 'shutdown.fast',
+    onDeactivate: () => { /* sync — completes immediately */ },
+  })
+  const slow = makePlugin({
+    id: 'shutdown.slow',
+    onDeactivate: () => new Promise<void>(() => { /* never resolves */ }),
+  })
+  await host.loadAll([fast, slow])
+
+  const start = Date.now()
+  await host.deactivateAllForShutdown(40)
+  const elapsed = Date.now() - start
+
+  // Both plugins move on within the soft-cap window — the slow one
+  // gets timed out, the fast one resolves immediately. We allow some
+  // headroom for CI scheduling jitter.
+  assert.ok(
+    elapsed < 200,
+    `deactivateAllForShutdown should cap fast (got ${elapsed}ms)`,
+  )
+  assert.equal(host.getState('shutdown.fast'), 'inactive')
+  assert.equal(host.getState('shutdown.slow'), 'inactive')
+})
+
+test('OI-16 — deactivate that throws is caught; sibling still flushes; states still update', async () => {
+  const { host } = freshHost()
+  let bFlushed = false
+  const errPlugin = makePlugin({
+    id: 'shutdown.err',
+    onDeactivate: () => { throw new Error('hostile-flush') },
+  })
+  const okPlugin = makePlugin({
+    id: 'shutdown.ok',
+    onDeactivate: async () => { bFlushed = true },
+  })
+  await host.loadAll([errPlugin, okPlugin])
+
+  await host.deactivateAllForShutdown(100)
+
+  assert.equal(bFlushed, true, 'sibling deactivate must still run')
+  assert.equal(host.getState('shutdown.err'), 'inactive')
+  assert.equal(host.getState('shutdown.ok'), 'inactive')
+})
+
+test('OI-16 — emits plugin:deactivated for every plugin processed', async () => {
+  const { host } = freshHost()
+  const seen: string[] = []
+  const off = eventBus.on<{ pluginId: string }>(
+    'plugin:deactivated',
+    (e) => { seen.push(e.pluginId) },
+  )
+  try {
+    const a = makePlugin({ id: 'shutdown.evt.a' })
+    const b = makePlugin({ id: 'shutdown.evt.b' })
+    await host.loadAll([a, b])
+    await host.deactivateAllForShutdown(100)
+  } finally {
+    off()
+  }
+  assert.deepEqual(seen.sort(), ['shutdown.evt.a', 'shutdown.evt.b'])
+})
+
+test('OI-16 — a plugin already inactive (registered/error) is skipped, not re-deactivated', async () => {
+  const { host } = freshHost()
+  let activeCount = 0
+  // A plugin that fails activation lands in `error` state; another that
+  // never activates stays `registered`. Neither should have deactivate
+  // run on it — the listActive() filter is the gate.
+  const errPlugin = makePlugin({
+    id: 'shutdown.skip.err',
+    onActivate: () => { throw new Error('boom') },
+    onDeactivate: () => { activeCount++ },
+  })
+  const lazyPlugin = makePlugin({
+    id: 'shutdown.skip.lazy',
+    activationEvents: ['onView:never'],
+    onDeactivate: () => { activeCount++ },
+  })
+  await host.loadAll([errPlugin, lazyPlugin])
+  await host.deactivateAllForShutdown(50)
+  assert.equal(activeCount, 0, 'non-active plugins must not be deactivated')
 })

@@ -168,6 +168,65 @@ export class ExtensionHost {
     }
   }
 
+  /**
+   * Best-effort `deactivate()` sweep on window close (OI-16).
+   *
+   * Calls every active plugin's `deactivate()` hook in parallel, each
+   * gated by a `perPluginCapMs` soft cap so a misbehaving plugin can't
+   * stall the close. The registry contribution sweep that `unload()`
+   * normally runs is skipped — the page is tearing down anyway, and
+   * keeping this fast (single async-await fan-out) is more important
+   * than leaving the in-memory registries pristine.
+   *
+   * Per-plugin failures (timeout or thrown error) are logged and
+   * swallowed so one bad plugin can't prevent siblings from flushing.
+   * Each successfully or unsuccessfully drained plugin is moved to
+   * `inactive` and emits `plugin:deactivated`, which keeps `pluginsStatusStore`
+   * + the Extensions tab consistent for the brief window between
+   * beforeunload and the WebView going away.
+   *
+   * Note: `beforeunload` doesn't reliably await async work, so plugins
+   * that need a guaranteed flush should write synchronously
+   * (localStorage, `requestIdleCallback`-flushed buffers). This hook
+   * gives fire-and-forget cleanup a fighting chance and reliably runs
+   * to completion under HMR / programmatic reload, where the page
+   * isn't actually torn down.
+   */
+  async deactivateAllForShutdown(perPluginCapMs = 1000): Promise<void> {
+    const activeIds = this.listActive()
+    await Promise.all(
+      activeIds.map(async (id) => {
+        const plugin = this.plugins.get(id)
+        if (!plugin) return
+        this.states.set(id, 'deactivating')
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          const deactivatePromise = Promise.resolve()
+            .then(() => plugin.deactivate?.())
+            // The page is going away — silence late rejections that the
+            // race is no longer waiting on, the same belt-and-braces
+            // pattern OI-11 uses for the cancel side.
+            .catch((err) => {
+              console.error(`[ExtensionHost] shutdown deactivate failed for '${id}':`, err)
+            })
+          const timeoutPromise = new Promise<void>((resolve) => {
+            timer = setTimeout(() => {
+              console.warn(
+                `[ExtensionHost] shutdown deactivate hit ${perPluginCapMs}ms cap for '${id}'`,
+              )
+              resolve()
+            }, perPluginCapMs)
+          })
+          await Promise.race([deactivatePromise, timeoutPromise])
+        } finally {
+          if (timer !== undefined) clearTimeout(timer)
+        }
+        this.states.set(id, 'inactive')
+        eventBus.emit('plugin:deactivated', { pluginId: id })
+      }),
+    )
+  }
+
   /** Unload a plugin — cleans up all contributions automatically.
    *  Handles both `active` (run deactivate + sweep) and `registered`
    *  (lazy plugin that never activated — just sweep its pre-registered

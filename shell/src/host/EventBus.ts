@@ -102,12 +102,36 @@ export interface ShellEvents {
   'plugin:deactivated':       { pluginId: string }
   'plugin:error':             { pluginId: string; error: Error }
 
+  // Keybinding conflicts (OI-10).
+  // Emitted by KeybindingRegistry whenever the set of detected chord
+  // conflicts changes — boot-time bulk registration converges to a
+  // single event. Payload is the full current conflict set so the
+  // settings UI can render or clear without a separate registry call.
+  // `conflicts` is empty when the most recent mutation resolved every
+  // outstanding conflict.
+  'plugins:keybindings-conflict': {
+    conflicts: Array<{
+      chord: string
+      entries: Array<{ pluginId: string; commandId: string; when?: string }>
+    }>
+  }
+
   // Command lifecycle (WI-35 — per-plugin crash quarantine).
   // CommandRegistry.execute emits this after a handler throws, just
   // before re-throwing to the caller. `pluginId` is the one that
   // registered the handler (may be undefined for manifest-only entries
   // that never got a handler wired).
   'command:error':            { commandId: string; pluginId?: string; error: string }
+
+  // Command dispatch hard-cancel (OI-11).
+  // Emitted by CommandRegistry.execute when a handler is still pending
+  // after `shell.command.timeoutCancelMs` (default 5000ms). The caller
+  // also receives a thrown `Error` with name `CommandCancelled` so
+  // awaiters can distinguish cancellation from a regular failure.
+  // The handler keeps executing in the background — JavaScript
+  // promises aren't natively cancellable, so this is "stop awaiting,
+  // restore UI responsiveness" rather than "kill the task".
+  'command:cancelled':        { commandId: string; pluginId?: string; thresholdMs: number }
 
   // Shell
   'shell:ready':              Record<string, never>

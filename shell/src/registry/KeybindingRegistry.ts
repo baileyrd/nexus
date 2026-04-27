@@ -17,6 +17,7 @@
 
 import type { KeybindingContribution } from '../types/plugin'
 import { evaluateWhen } from '../host/ContextKeyService'
+import { eventBus } from '../host/EventBus'
 
 interface KeybindingEntry {
   id: string
@@ -27,6 +28,36 @@ interface KeybindingEntry {
   defaultChord: string
   commandId: string
   when?: string
+}
+
+/**
+ * A chord whose active binding is registered against more than one
+ * commandId in a way `match()` would treat as ambiguous (OI-10).
+ *
+ * Two bindings conflict when they share a normalised chord *and* their
+ * `when` clauses overlap. We don't have a real boolean-formula solver,
+ * so the conservative rule we apply is:
+ *
+ *   1. exactly equal `when` strings (incl. both `undefined`) → conflict
+ *   2. at least one side has no `when` (matches everywhere)        → conflict
+ *   3. both sides have differing `when` strings                    → not flagged
+ *
+ * Case 3 might be a real conflict (e.g. `editorFocus` vs `!terminalFocus`
+ * can overlap) but flagging it without analysis would generate too many
+ * false positives. Plugin authors who rely on disjoint contexts get the
+ * benefit of the doubt; users who hit a real ambiguity in case 3 will
+ * still see it as a "shortcut doesn't work" bug rather than a phantom
+ * collision warning.
+ */
+export interface KeybindingConflict {
+  /** The normalised chord that more than one binding is bound to. */
+  chord: string
+  /** Every entry sharing the chord — usually 2, occasionally more. */
+  entries: Array<{
+    pluginId: string
+    commandId: string
+    when?: string
+  }>
 }
 
 /**
@@ -48,12 +79,26 @@ export interface BindingRow {
   default: string
   /** True iff `current !== default` *and* an override is present. */
   overridden: boolean
+  /**
+   * Other commandIds whose active chord matches `current` and whose
+   * `when` clause overlaps this row's. Empty when there's no conflict.
+   * Populated by `getAllBindings()` so the UI can render a warning
+   * without a second registry call.
+   */
+  conflictsWith: string[]
 }
 
 export class KeybindingRegistry {
   private bindings: KeybindingEntry[] = []
   private overrides = new Map<string, string>()
   private storage: OverrideStorage | null = null
+  /**
+   * JSON of the last conflict set we emitted. Lets bulk manifest
+   * registration converge to a single `plugins:keybindings-conflict`
+   * event at boot — only mutations that actually change the conflict
+   * set re-emit.
+   */
+  private lastConflictSignature: string = '[]'
 
   /**
    * Bind a storage backend for override persistence. Must be called
@@ -83,10 +128,12 @@ export class KeybindingRegistry {
       commandId: contribution.command,
       when: contribution.when,
     })
+    this.maybeEmitConflicts()
   }
 
   unregister(id: string) {
     this.bindings = this.bindings.filter(b => b.id !== id)
+    this.maybeEmitConflicts()
   }
 
   /**
@@ -169,6 +216,7 @@ export class KeybindingRegistry {
     }
     this.overrides = new Map(Object.entries(loaded))
     this.applyOverridesToBindings()
+    this.maybeEmitConflicts()
   }
 
   /**
@@ -188,6 +236,7 @@ export class KeybindingRegistry {
     const normalized = normalizeChord(chord)
     this.overrides.set(commandId, normalized)
     this.applyOverridesToBindings()
+    this.maybeEmitConflicts()
     await this.persist()
   }
 
@@ -200,6 +249,7 @@ export class KeybindingRegistry {
     }
     if (!this.overrides.delete(commandId)) return
     this.applyOverridesToBindings()
+    this.maybeEmitConflicts()
     await this.persist()
   }
 
@@ -218,8 +268,22 @@ export class KeybindingRegistry {
    * settings UI to render the keybindings table. Commands with no
    * binding contribution are not included; the settings UI can layer
    * those in from the CommandRegistry separately if needed.
+   *
+   * Each row's `conflictsWith` is populated from the same conflict
+   * computation that drives the `plugins:keybindings-conflict` event,
+   * so the UI never has to call `getConflicts()` separately.
    */
   getAllBindings(): BindingRow[] {
+    const conflictsByCommandId = new Map<string, string[]>()
+    for (const c of this.computeConflicts()) {
+      const ids = c.entries.map(e => e.commandId)
+      for (const id of ids) {
+        const others = ids.filter(o => o !== id)
+        const acc = conflictsByCommandId.get(id) ?? []
+        for (const o of others) if (!acc.includes(o)) acc.push(o)
+        conflictsByCommandId.set(id, acc)
+      }
+    }
     const seen = new Set<string>()
     const out: BindingRow[] = []
     for (const b of this.bindings) {
@@ -231,12 +295,89 @@ export class KeybindingRegistry {
         current: override ?? b.defaultChord,
         default: b.defaultChord,
         overridden: override !== undefined && override !== b.defaultChord,
+        conflictsWith: conflictsByCommandId.get(b.commandId) ?? [],
       })
     }
     return out
   }
 
+  /**
+   * All currently-detected chord conflicts, one entry per chord with
+   * the full set of competing bindings. Returns an empty array when
+   * nothing collides. See {@link KeybindingConflict} for the conflict
+   * definition.
+   */
+  getConflicts(): KeybindingConflict[] {
+    return this.computeConflicts()
+  }
+
   // ─── Internal helpers ──────────────────────────────────────────────────────
+
+  /**
+   * Walk the binding list and group anything that shares an active
+   * chord *and* an overlapping `when` clause. The overlap rule is the
+   * conservative one documented on {@link KeybindingConflict} — we'd
+   * rather miss a real conflict (case 3, both sides have differing
+   * `when`s) than spam the UI with phantom collisions.
+   */
+  private computeConflicts(): KeybindingConflict[] {
+    // Bucket bindings by active chord. A conflict needs at least two
+    // entries in the same bucket, so chords with one binding short-
+    // circuit before we look at `when` clauses at all.
+    const byChord = new Map<string, KeybindingEntry[]>()
+    for (const b of this.bindings) {
+      const list = byChord.get(b.chord)
+      if (list) list.push(b)
+      else byChord.set(b.chord, [b])
+    }
+
+    const conflicts: KeybindingConflict[] = []
+    for (const [chord, group] of byChord) {
+      if (group.length < 2) continue
+
+      // Walk the bucket once and collect every entry that overlaps any
+      // earlier entry. Using a Set keyed by `id` so the same entry isn't
+      // pushed twice when it overlaps multiple earlier ones.
+      const colliding = new Map<string, KeybindingEntry>()
+      for (let i = 0; i < group.length; i++) {
+        for (let j = i + 1; j < group.length; j++) {
+          if (whenOverlaps(group[i].when, group[j].when)) {
+            colliding.set(group[i].id, group[i])
+            colliding.set(group[j].id, group[j])
+          }
+        }
+      }
+      if (colliding.size === 0) continue
+
+      conflicts.push({
+        chord,
+        entries: [...colliding.values()].map(e => ({
+          pluginId: e.pluginId,
+          commandId: e.commandId,
+          when: e.when,
+        })),
+      })
+    }
+    // Stable order — alphabetical by chord — so the signature dedup and
+    // the UI both see a deterministic shape.
+    conflicts.sort((a, b) => a.chord.localeCompare(b.chord))
+    return conflicts
+  }
+
+  /**
+   * Recompute conflicts and emit `plugins:keybindings-conflict` if the
+   * set changed since the last emission. Bulk manifest registration at
+   * boot therefore converges to a single event (or zero, when no
+   * conflicts exist) — we only fire when listeners would actually see
+   * a different payload.
+   */
+  private maybeEmitConflicts(): void {
+    const conflicts = this.computeConflicts()
+    const sig = JSON.stringify(conflicts)
+    if (sig === this.lastConflictSignature) return
+    this.lastConflictSignature = sig
+    eventBus.emit('plugins:keybindings-conflict', { conflicts })
+  }
 
   /** Re-apply the override map to every registered binding's `chord` field. */
   private applyOverridesToBindings() {
@@ -308,6 +449,24 @@ export function formatChord(chord: string): string {
         : part.charAt(0).toUpperCase() + part.slice(1),
     )
     .join('+')
+}
+
+/**
+ * Conservative `when`-clause overlap test used for conflict detection.
+ * Returns `true` when two clauses are guaranteed to overlap (and so a
+ * shared chord is a real ambiguity), `false` when they *might* be
+ * disjoint. See {@link KeybindingConflict} for the full table.
+ */
+function whenOverlaps(a: string | undefined, b: string | undefined): boolean {
+  // Both unconditional, or both gated by the same expression — always
+  // overlap.
+  if (a === b) return true
+  // Exactly one side is unconditional — that side matches in every
+  // context, so any shared chord with a gated sibling is a conflict.
+  if (a === undefined || b === undefined) return true
+  // Both gated by differing expressions: we don't have a solver and
+  // would rather miss a real conflict than over-warn.
+  return false
 }
 
 function eventToChord(event: KeyboardEvent): string {

@@ -34,6 +34,19 @@
  * - CM6 extension types. Plugins that contribute editor decorations
  *   still depend on `@codemirror/*` directly — we re-export only the
  *   host-facing `Extension` opaque reference.
+ *
+ * ## Deprecating an export (OI-17)
+ *
+ * Three coordinated edits in one PR:
+ *   1. `@deprecated` JSDoc on the symbol below — TypeScript's language
+ *      service surfaces the strikethrough + warning at author time.
+ *   2. A row in `DEPRECATED.md` (next to this file) describing the
+ *      replacement and the target removal version.
+ *   3. An `importNames` entry in `shell/eslint.config.js`'s
+ *      `no-restricted-imports` block — the CI gate.
+ *
+ * See `DEPRECATED.md` for the full protocol. Removed surfaces graduate
+ * to the historical archive in `/DEPRECATED.md` at the repo root.
  */
 
 // Re-export ts-rs–generated Rust contract types (Capability, IpcError,
@@ -491,20 +504,53 @@ export interface PlatformSaveFileOptions {
   filters?: ReadonlyArray<{ name: string; extensions: ReadonlyArray<string> }>;
 }
 
+/**
+ * Filesystem operations for script (JS) plugins.
+ *
+ * **Capability model.** Read methods (`readText`, `readDir`, `exists`)
+ * gate on `FsRead`; mutating methods (`writeText`, `mkdir`, `remove`,
+ * `rename`) gate on `FsWrite`. Both are checked at the sandbox boundary
+ * by `capabilityGuard.METHOD_CAPABILITY_MAP`.
+ *
+ * **Path semantics.** This surface is a thin adapter over Tauri's
+ * `@tauri-apps/plugin-fs`; the shell does **not** confine paths to the
+ * active forge root. Whatever the Tauri plugin-fs allowlist permits is
+ * what an `FsRead`/`FsWrite`-granted plugin can reach — including
+ * absolute paths outside the forge, on platforms / configurations
+ * where the allowlist is wide. Plugins that intend to operate only
+ * inside the forge should resolve every path against
+ * `api.workspace.forgeRoot()` themselves. There is no separate
+ * `FsReadExternal` / `FsWriteExternal` distinction at the script-
+ * plugin layer (those capabilities exist for WASM plugins that go
+ * through the kernel `com.nexus.storage::read_file` /
+ * `write_file` IPC, which **is** confined to the forge root and
+ * audit-logs traversal attempts — see OI-12 / MICROKERNEL-AUDIT
+ * F-6.3.1). Absolute paths are taken at face value here; nothing is
+ * silently auto-promoted.
+ */
 export interface PlatformFsAPI {
-  /** Read the file at `path` as UTF-8 text. */
+  /**
+   * Read the file at `path` as UTF-8 text. Requires `FsRead`. The path
+   * is **not** confined to the forge — see {@link PlatformFsAPI} for
+   * the full path-semantics contract.
+   */
   readText(path: string): Promise<string>;
-  /** Write UTF-8 `content` to the file at `path`, replacing any existing file. */
+  /**
+   * Write UTF-8 `content` to the file at `path`, replacing any
+   * existing file. Requires `FsWrite`. The path is **not** confined
+   * to the forge — see {@link PlatformFsAPI} for the full
+   * path-semantics contract.
+   */
   writeText(path: string, content: string): Promise<void>;
-  /** List the immediate entries (files + directories) inside `path`. */
+  /** List the immediate entries (files + directories) inside `path`. Requires `FsRead`. */
   readDir(path: string): Promise<PlatformDirEntry[]>;
-  /** Test whether a file or directory exists at `path`. */
+  /** Test whether a file or directory exists at `path`. Requires `FsRead`. */
   exists(path: string): Promise<boolean>;
-  /** Create a directory; recursive by default. */
+  /** Create a directory; recursive by default. Requires `FsWrite`. */
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
-  /** Delete the file or empty directory at `path`. */
+  /** Delete the file or empty directory at `path`. Requires `FsWrite`. */
   remove(path: string): Promise<void>;
-  /** Rename or move `from` → `to`. */
+  /** Rename or move `from` → `to`. Requires `FsWrite`. */
   rename(from: string, to: string): Promise<void>;
 }
 

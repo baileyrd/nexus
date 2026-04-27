@@ -905,6 +905,11 @@ function KeybindingsTab() {
     )
   }, [rows, query])
 
+  const conflictCount = useMemo(
+    () => rows.reduce((n, r) => n + (r.conflictsWith.length > 0 ? 1 : 0), 0),
+    [rows],
+  )
+
   const handleCommit = useCallback(async (commandId: string, chord: string) => {
     setError(null)
     const reg = getRegistry()
@@ -963,6 +968,25 @@ function KeybindingsTab() {
         </div>
       )}
 
+      {conflictCount > 0 && (
+        <div
+          role="status"
+          style={{
+            padding: 8,
+            marginBottom: 12,
+            background: 'var(--color-warning-bg, #fff7d6)',
+            color: 'var(--color-warning, #8a6d00)',
+            borderRadius: 4,
+            fontSize: '0.9em',
+          }}
+        >
+          {conflictCount === 1
+            ? '1 command is bound to a chord that another command also claims.'
+            : `${conflictCount} commands are bound to chords that other commands also claim.`}
+          {' Override one of them to resolve the conflict.'}
+        </div>
+      )}
+
       {filtered.length === 0 ? (
         <p className="settings-empty">No keybindings match.</p>
       ) : (
@@ -993,6 +1017,27 @@ function KeybindingsTab() {
                           verticalAlign: 'middle',
                         }}
                       />
+                    )}
+                    {row.conflictsWith.length > 0 && (
+                      <span
+                        title={`Chord conflict — also bound to: ${row.conflictsWith.join(', ')}`}
+                        aria-label="Keybinding conflict"
+                        style={{
+                          display: 'inline-block',
+                          marginLeft: 6,
+                          padding: '0 5px',
+                          fontSize: '0.7em',
+                          fontWeight: 600,
+                          lineHeight: '14px',
+                          color: 'var(--color-warning, #8a6d00)',
+                          background: 'var(--color-warning-bg, #fff7d6)',
+                          border: '1px solid var(--color-warning, #8a6d00)',
+                          borderRadius: 3,
+                          verticalAlign: 'middle',
+                        }}
+                      >
+                        {'!'}
+                      </span>
                     )}
                   </div>
                   <div style={{ fontSize: '0.85em', opacity: 0.6 }}>{row.commandId}</div>

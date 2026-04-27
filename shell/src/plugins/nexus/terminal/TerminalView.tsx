@@ -108,6 +108,48 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       convertEol: false,
       scrollback: 5000,
     })
+
+    // OI-20 — copy/paste keyboard chords. Convention every emulator
+    // follows: Cmd+C/V on macOS, Ctrl+Shift+C/V on Linux/Windows. Plain
+    // Ctrl+C must keep flowing through to the PTY as SIGINT, so we
+    // never claim it. We return `false` from the custom handler to tell
+    // xterm "I handled this, do not treat it as input"; returning
+    // `true` would dispatch the chord to onData and the PTY would see
+    // a literal ``, etc.
+    const isMac = typeof navigator !== 'undefined' &&
+      navigator.platform.toLowerCase().includes('mac')
+    term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== 'keydown') return true
+      const isCopyChord = isMac
+        ? ev.metaKey && !ev.ctrlKey && !ev.altKey && ev.key.toLowerCase() === 'c'
+        : ev.ctrlKey && ev.shiftKey && !ev.metaKey && ev.key.toLowerCase() === 'c'
+      const isPasteChord = isMac
+        ? ev.metaKey && !ev.ctrlKey && !ev.altKey && ev.key.toLowerCase() === 'v'
+        : ev.ctrlKey && ev.shiftKey && !ev.metaKey && ev.key.toLowerCase() === 'v'
+      if (isCopyChord) {
+        const sel = term.getSelection()
+        if (sel.length > 0) {
+          // Best-effort: navigator.clipboard.writeText is available in
+          // the Tauri 2 WebView from user-gesture-initiated keydowns.
+          // If permissions deny it (rare), there's nothing we can do
+          // from a sandboxed JS context — log so the user can see why
+          // their copy didn't take.
+          void navigator.clipboard.writeText(sel).catch((err) => {
+            console.warn('[Terminal] clipboard write failed:', err)
+          })
+        }
+        ev.preventDefault()
+        ev.stopPropagation()
+        return false
+      }
+      if (isPasteChord) {
+        void doPasteFromClipboard()
+        ev.preventDefault()
+        ev.stopPropagation()
+        return false
+      }
+      return true
+    })
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(container)
@@ -252,17 +294,81 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     // so xterm-generated control sequences (arrow keys, Ctrl-C,
     // tab-completion) reach the shell verbatim. send_input appends a
     // newline which would be wrong for arbitrary keystrokes.
-    const onDataSub = term.onData((data) => {
+    const sendBytesToPty = (bytes: Uint8Array | number[]) => {
       const id = useTerminalStore.getState().sessionId
       if (!id) return
-      const bytes = Array.from(new TextEncoder().encode(data))
+      const arr = Array.isArray(bytes) ? bytes : Array.from(bytes)
       void kernel
-        .invoke(PLUGIN_ID, CMD_SEND_RAW_INPUT, { id, data: bytes })
+        .invoke(PLUGIN_ID, CMD_SEND_RAW_INPUT, { id, data: arr })
         .catch(() => {
           // PTY closed — ignore. Session lifecycle is driven by the
           // workspace open/close events in index.ts.
         })
+    }
+    const onDataSub = term.onData((data) => {
+      sendBytesToPty(new TextEncoder().encode(data))
     })
+
+    /**
+     * Paste handler shared by the keyboard chord and right-click. Reads
+     * the clipboard via the Web API, then forwards as raw PTY input.
+     * If the running shell has bracketed-paste mode enabled
+     * (`set -o paste`-equivalent in bash 4+ / zsh, surfaced via xterm's
+     * `term.modes.bracketedPasteMode`), wrap the payload in
+     * `\e[200~ … \e[201~` so the shell knows to treat the lump as
+     * pasted text (no auto-execute on embedded newlines, no
+     * abbreviation expansion).
+     *
+     * `navigator.clipboard.readText()` requires a user gesture and the
+     * Tauri WebView's clipboard permission. If it throws — usually
+     * `NotAllowedError` from a denied permission prompt — surface a
+     * warning so users can install `@tauri-apps/plugin-clipboard-manager`
+     * as the documented follow-up.
+     */
+    async function doPasteFromClipboard(): Promise<void> {
+      let text: string
+      try {
+        text = await navigator.clipboard.readText()
+      } catch (err) {
+        console.warn(
+          '[Terminal] clipboard read denied — install @tauri-apps/plugin-clipboard-manager if this persists:',
+          err,
+        )
+        return
+      }
+      if (text.length === 0) return
+      // Bracketed-paste mode is exposed under `term.modes` in xterm.js.
+      // The shape isn't typed in @xterm/xterm public types as of v5, so
+      // we read it through an opaque cast. Falsy fallback when the
+      // accessor is missing keeps us safe on future xterm versions.
+      const bracketed = (term as unknown as {
+        modes?: { bracketedPasteMode?: boolean }
+      }).modes?.bracketedPasteMode === true
+      const enc = new TextEncoder()
+      if (bracketed) {
+        const start = enc.encode('\x1b[200~')
+        const body = enc.encode(text)
+        const end = enc.encode('\x1b[201~')
+        const out = new Uint8Array(start.length + body.length + end.length)
+        out.set(start, 0)
+        out.set(body, start.length)
+        out.set(end, start.length + body.length)
+        sendBytesToPty(out)
+      } else {
+        sendBytesToPty(enc.encode(text))
+      }
+    }
+
+    // Right-click → paste. Most terminal emulators expose paste via
+    // a context menu or a middle-click; we use right-click here because
+    // middle-click on Linux already pastes the X selection (which is
+    // separate from CLIPBOARD and not what most users expect from a
+    // GUI app). preventDefault stops the WebView's native menu.
+    const onContextMenu = (ev: MouseEvent) => {
+      ev.preventDefault()
+      void doPasteFromClipboard()
+    }
+    container.addEventListener('contextmenu', onContextMenu)
 
     // ── Resize: refit xterm's local grid, then propagate cols/rows to
     // the PTY so the child receives SIGWINCH. We dedupe identical
@@ -307,6 +413,7 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       }
       container.removeEventListener('click', focusTerm)
       container.removeEventListener('pointerdown', focusTerm)
+      container.removeEventListener('contextmenu', onContextMenu)
       try {
         onDataSub.dispose()
       } catch {}
