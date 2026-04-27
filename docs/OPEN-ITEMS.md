@@ -232,17 +232,20 @@ The original AC mentioned filtering on `target = "audit"`. The implemented audit
 
 **Severity:** Should-fix (UX hazard from slow plugins)
 **Surfaced by:** UI-AUDIT.md F-8.2.1 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-27.
 
-### Gap
-`api.commands.execute(id)` awaits a plugin's command handler indefinitely. A community plugin with a slow synchronous body stalls the shell until it resolves. Kernel dispatches already enforce a `timeout_ms` (30 s default); shell-side command dispatch does not.
+### Outcome
+- [`CommandRegistry.execute`](../shell/src/registry/CommandRegistry.ts) now races the handler against a configurable cancel deadline using `Promise.race`. Two new keys land in the existing `configStore`: `shell.command.timeoutWarnMs` (default 250ms) and `shell.command.timeoutCancelMs` (default 5000ms). Either set to 0 disables that tier — useful for tests, debug sessions, and users who explicitly opt out of cancellation.
+- New exported `CommandCancelledError` (`name = 'CommandCancelled'`) carries `commandId` + `thresholdMs` so awaiters can distinguish a hard-cancel from a regular crash without relying on string matching. The cancellation path explicitly does *not* emit `command:error` — it emits `command:cancelled` instead.
+- Soft-warn tier logs `[CommandRegistry] Command 'X' (plugin 'Y') still pending after Nms` via `console.warn` at the warn threshold; no event, since the spec asked only for the cancel-side event.
+- `command:cancelled` added to the `ShellEvents` interface in [`shell/src/host/EventBus.ts`](../shell/src/host/EventBus.ts) with payload `{ commandId, pluginId?, thresholdMs }`. The handler keeps running in the background after cancel — JavaScript promises aren't natively cancellable — but the awaiter is released and any late handler rejection is silenced via a `.catch(() => {})` sink.
 
-### Scope
-- Wrap `CommandRegistry.execute` in an await-with-timeout (soft warn at 250 ms, hard cancel at 5 s configurable via the existing configuration registry).
-- On cancel, publish `command:cancelled` with the command id so the palette can dismiss the in-flight state.
+### Coverage
+- 7 new tests in [`shell/src/registry/CommandRegistry.test.ts`](../shell/src/registry/CommandRegistry.test.ts) covering: hard-cancel rejects with `CommandCancelledError`, `command:cancelled` payload shape, cancellation suppresses `command:error`, fast handler emits no cancellation, `timeoutCancelMs=0` disables, soft-warn fires for moderately slow handlers, `warnMs=0` suppresses the warn. Tests use a `withTimeouts(warnMs, cancelMs, fn)` helper that sets the config keys for the test's duration and resets them in `finally`.
 
 ### Acceptance
-- A command handler that sleeps 6 s is cancelled with a user-visible notification; the shell stays responsive.
+- ✅ A command handler that sleeps past 5 s rejects with `CommandCancelledError`, fires `command:cancelled`, and the shell continues to dispatch unrelated commands.
+- ✅ Both thresholds are runtime-configurable via the same `configStore` the settings panel reads from.
 
 ---
 

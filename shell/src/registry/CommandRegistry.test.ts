@@ -20,8 +20,31 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { CommandRegistry } from './CommandRegistry.ts'
+import { CommandRegistry, CommandCancelledError } from './CommandRegistry.ts'
 import { eventBus } from '../host/EventBus.ts'
+import { useConfigStore } from '../stores/configStore.ts'
+
+/**
+ * OI-11 — temporarily lower the dispatch timeouts for a single test
+ * and roll them back in a finally block. The persist middleware on
+ * `useConfigStore` writes to localStorage when present, but in
+ * node:test there's no localStorage so the mutation is in-memory only.
+ */
+function withTimeouts<T>(
+  warnMs: number,
+  cancelMs: number,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const store = useConfigStore.getState()
+  store.set('shell.command.timeoutWarnMs', warnMs)
+  store.set('shell.command.timeoutCancelMs', cancelMs)
+  return fn().finally(() => {
+    useConfigStore.getState().reset('shell.command.timeoutWarnMs')
+    useConfigStore.getState().reset('shell.command.timeoutCancelMs')
+  })
+}
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 test('WI-35 — sync handler that throws re-throws to caller', async () => {
   const reg = new CommandRegistry()
@@ -90,4 +113,136 @@ test('WI-35 — unknown command: warn + undefined, no throw (regression guard)',
   // the crash-quarantine try/catch must not change that contract.
   const r = await reg.execute('cmd.unknown')
   assert.equal(r, undefined)
+})
+
+// ─── OI-11 — UI-thread time budget on dispatch ───────────────────────────────
+
+test('OI-11 — slow handler is hard-cancelled past the cancel threshold', async () => {
+  const reg = new CommandRegistry()
+  reg.register('p.slow', 'cmd.slow', async () => {
+    await sleep(200)
+    return 'done'
+  })
+
+  await withTimeouts(0, 30, async () => {
+    await assert.rejects(
+      () => reg.execute('cmd.slow'),
+      (err: unknown) => err instanceof CommandCancelledError,
+    )
+  })
+})
+
+test('OI-11 — hard cancel emits command:cancelled with commandId + threshold', async () => {
+  const reg = new CommandRegistry()
+  reg.register('p.slow', 'cmd.slow2', async () => { await sleep(200) })
+
+  const seen: Array<{ commandId: string; pluginId?: string; thresholdMs: number }> = []
+  const off = eventBus.on<{ commandId: string; pluginId?: string; thresholdMs: number }>(
+    'command:cancelled',
+    (e) => { seen.push(e) },
+  )
+  try {
+    await withTimeouts(0, 30, async () => {
+      await assert.rejects(() => reg.execute('cmd.slow2'))
+    })
+  } finally {
+    off()
+  }
+
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].commandId, 'cmd.slow2')
+  assert.equal(seen[0].pluginId, 'p.slow')
+  assert.equal(seen[0].thresholdMs, 30)
+})
+
+test('OI-11 — hard cancel does NOT emit command:error (cancellation is not a crash)', async () => {
+  const reg = new CommandRegistry()
+  reg.register('p.slow', 'cmd.slow3', async () => { await sleep(200) })
+
+  const errors: unknown[] = []
+  const off = eventBus.on('command:error', (e) => { errors.push(e) })
+  try {
+    await withTimeouts(0, 20, async () => {
+      await assert.rejects(() => reg.execute('cmd.slow3'))
+    })
+  } finally {
+    off()
+  }
+  assert.equal(errors.length, 0, 'cancelled commands should not surface as errors')
+})
+
+test('OI-11 — fast handler completes normally and emits no cancellation', async () => {
+  const reg = new CommandRegistry()
+  reg.register('p.fast', 'cmd.fast', () => 7)
+
+  const cancellations: unknown[] = []
+  const off = eventBus.on('command:cancelled', (e) => { cancellations.push(e) })
+  try {
+    const r = await withTimeouts(0, 1000, () => reg.execute('cmd.fast'))
+    assert.equal(r, 7)
+  } finally {
+    off()
+  }
+  assert.equal(cancellations.length, 0)
+})
+
+test('OI-11 — timeoutCancelMs=0 disables cancellation entirely', async () => {
+  const reg = new CommandRegistry()
+  reg.register('p.slow', 'cmd.slow4', async () => {
+    await sleep(40)
+    return 'still-here'
+  })
+
+  // 30 ms would normally cancel a 40 ms handler, but 0 means "off".
+  await withTimeouts(0, 0, async () => {
+    const r = await reg.execute('cmd.slow4')
+    assert.equal(r, 'still-here')
+  })
+})
+
+test('OI-11 — soft warn fires before cancel for a moderately slow handler', async () => {
+  const reg = new CommandRegistry()
+  reg.register('p.warn', 'cmd.warn', async () => {
+    await sleep(40)
+    return 'ok'
+  })
+
+  // Capture warns; the registry's warn message includes the command id.
+  const warnings: string[] = []
+  const orig = console.warn
+  console.warn = (...args: unknown[]) => { warnings.push(args.join(' ')) }
+  try {
+    await withTimeouts(15, 200, async () => {
+      const r = await reg.execute('cmd.warn')
+      assert.equal(r, 'ok')
+    })
+  } finally {
+    console.warn = orig
+  }
+
+  assert.ok(
+    warnings.some(w => w.includes('cmd.warn') && w.includes('still pending')),
+    `expected a soft-warn entry, got: ${JSON.stringify(warnings)}`,
+  )
+})
+
+test('OI-11 — warnMs=0 disables the soft-warn path', async () => {
+  const reg = new CommandRegistry()
+  reg.register('p.silent', 'cmd.silent', async () => {
+    await sleep(30)
+  })
+
+  const warnings: string[] = []
+  const orig = console.warn
+  console.warn = (...args: unknown[]) => { warnings.push(args.join(' ')) }
+  try {
+    await withTimeouts(0, 500, () => reg.execute('cmd.silent'))
+  } finally {
+    console.warn = orig
+  }
+  assert.equal(
+    warnings.filter(w => w.includes('still pending')).length,
+    0,
+    'warnMs=0 should suppress the still-pending warn',
+  )
 })
