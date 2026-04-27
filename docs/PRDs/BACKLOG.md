@@ -14,6 +14,15 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-008: Mermaid Diagram Plugin
+
+**Source**: live-preview implementation discussion (2026-04-27)
+**Effort**: Medium (~2–3 days)
+**Crate / Package**: new community plugin (TypeScript) under `shell/src/plugins/community/mermaid/`
+**Related**: editor live-preview (`shell/src/plugins/nexus/editor/cm/livePreview*.ts`)
+
+Render fenced code blocks with `info === 'mermaid'` as SVG diagrams in the editor's live and preview modes. Implemented as a separate plugin so the ~150 KB gzipped `mermaid` library is opt-in — users who never read diagrams don't pay for it. Prerequisite: the editor needs a contribution point for fenced-code renderers (e.g. a registry keyed by language tag, value = `(source) =&gt; HTMLElement | Promise&lt;HTMLElement&gt;`); the editor's live-preview decoration set then consults the registry when emitting the `FencedCode` widget. The mermaid plugin registers `'mermaid'` with an async render and a per-source cache so selection changes don't re-render. On-cursor, raw source is shown for editing. The same extension point unlocks future diagram libraries (PlantUML, vis.js, DOT) without bloating the editor.
+
 ## Partially New Features (concept exists in PRDs but design is unspecified)
 
 ### BL-007: CRDT-over-Git Transport
