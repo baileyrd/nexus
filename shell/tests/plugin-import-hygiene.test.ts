@@ -83,6 +83,8 @@ const HOST_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/core/fileExplorer/FileExplorerView.tsx',      // host/ContextKeyService
   'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // host/shellRegistry + ContextKeyService + communityPluginLoader
   'shell/src/plugins/core/statusBar/StatusBarView.tsx',            // host/shellRegistry
+  'shell/src/plugins/core/titleBar/TitleBarView.tsx',              // host/shellRegistry + ContextKeyService — same React-component pattern as the other *View.tsx entries (no `api` in scope)
+  'shell/src/plugins/nexus/ai/index.ts',                           // host/ContextKeyService + EventBus — predates @nexus/extension-api context-keys / event surface; track under WI-25 drain
   'shell/src/plugins/nexus/backlinks/BacklinksView.tsx',           // host/EventBus
   'shell/src/plugins/nexus/canvas/CanvasView.tsx',                 // host/ContextKeyService
   'shell/src/plugins/nexus/editor/EditorView.tsx',                 // host/EventBus + shellRegistry
