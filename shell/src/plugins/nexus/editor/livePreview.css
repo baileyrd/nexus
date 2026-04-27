@@ -40,10 +40,11 @@
 .cm-content .cm-md-list-marker { color: var(--fg-muted); }
 .cm-content .cm-md-task { color: var(--fg-muted); }
 
-.cm-content .cm-md-hr-line {
+.cm-content .cm-md-hr-widget {
+  border: 0;
   border-top: 1px solid var(--line-soft);
-  padding: 0;
-  margin: 0.4em 0;
+  margin: 0.6em 0;
+  height: 0;
 }
 
 .cm-content .cm-md-codeblock {

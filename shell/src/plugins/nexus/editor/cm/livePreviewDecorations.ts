@@ -1,6 +1,20 @@
 import { syntaxTree } from '@codemirror/language'
 import type { EditorState } from '@codemirror/state'
-import { Decoration, type DecorationSet } from '@codemirror/view'
+import { Decoration, type DecorationSet, WidgetType } from '@codemirror/view'
+
+class HrWidget extends WidgetType {
+  eq(_other: HrWidget): boolean {
+    return true
+  }
+  toDOM(): HTMLElement {
+    const hr = document.createElement('hr')
+    hr.className = 'cm-md-hr-widget'
+    return hr
+  }
+  ignoreEvent(): boolean {
+    return true
+  }
+}
 
 // Minimal shape of the @lezer/common nodes we touch — re-declared
 // locally so we don't take a direct dependency on the transitive
@@ -145,8 +159,7 @@ function visit(
     return
   }
   if (name === 'HorizontalRule') {
-    const line = doc.lineAt(node.from)
-    pushLine(items, line.from, 'cm-md-hr-line')
+    handleHorizontalRule(node.node, reveal, doc, items)
     return
   }
   if (name === 'Blockquote') {
@@ -164,7 +177,11 @@ function visit(
     pushMark(items, node.from, node.to, 'cm-md-task')
     return
   }
-  if (name === 'FencedCode' || name === 'CodeBlock') {
+  if (name === 'FencedCode') {
+    handleFencedCode(node.node, doc, active, state, items)
+    return
+  }
+  if (name === 'CodeBlock') {
     handleCodeBlock(node.node, doc, items)
     return
   }
@@ -381,6 +398,49 @@ function handleCodeBlock(
     }
     cur = cur.nextSibling
   }
+}
+
+function handleFencedCode(
+  node: SyntaxNode,
+  doc: EditorState['doc'],
+  active: Set<number>,
+  state: EditorState,
+  items: DecorationItem[],
+): void {
+  const startLine = doc.lineAt(node.from)
+  const endLine = doc.lineAt(node.to)
+  for (let l = startLine.number; l <= endLine.number; l++) {
+    pushLine(items, doc.line(l).from, 'cm-md-codeblock')
+  }
+  let cur: SyntaxNode | null = node.firstChild
+  while (cur) {
+    if (cur.name === 'CodeMark') {
+      pushMark(items, cur.from, cur.to, 'cm-md-fence')
+    }
+    cur = cur.nextSibling
+  }
+  const fenceLines = new Set<number>([startLine.number])
+  if (endLine.number !== startLine.number) fenceLines.add(endLine.number)
+  for (const lineNo of fenceLines) {
+    if (nodeIntersectsActiveLines(state, doc.line(lineNo).from, doc.line(lineNo).to, active)) continue
+    const line = doc.line(lineNo)
+    if (line.to > line.from) pushReplace(items, line.from, line.to)
+  }
+}
+
+function handleHorizontalRule(
+  node: SyntaxNode,
+  reveal: boolean,
+  doc: EditorState['doc'],
+  items: DecorationItem[],
+): void {
+  if (reveal) return
+  const line = doc.lineAt(node.from)
+  items.push({
+    from: line.from,
+    to: line.to,
+    deco: Decoration.replace({ widget: new HrWidget(), block: true, inclusive: false }),
+  })
 }
 
 /**

@@ -27,6 +27,10 @@ interface Item {
   replace?: boolean
   /** present for `Decoration.line` — class on the wrapping line. */
   line?: string
+  /** name of the widget constructor when the replace carries one. */
+  widget?: string
+  /** `true` when the replace is a block-replace covering full line(s). */
+  block?: boolean
 }
 
 function decosFor(doc: string, selection?: EditorSelection): Item[] {
@@ -41,7 +45,7 @@ function decosFor(doc: string, selection?: EditorSelection): Item[] {
   const items: Item[] = []
   const cur = set.iter()
   while (cur.value) {
-    const spec = cur.value.spec as { class?: string; widget?: unknown }
+    const spec = cur.value.spec as { class?: string; widget?: unknown; block?: boolean }
     const startSide = (cur.value as unknown as { startSide?: number }).startSide
     // Heuristics over CM internals (no public `kind` field):
     //   - Decoration.line sets startSide < 0 and a class spec
@@ -55,11 +59,29 @@ function decosFor(doc: string, selection?: EditorSelection): Item[] {
     if (isLine) {
       items.push({ from: cur.from, to: cur.to, line: spec.class })
     } else if (isReplace && cur.from !== cur.to) {
-      items.push({ from: cur.from, to: cur.to, replace: true })
+      const widgetName = spec.widget
+        ? (spec.widget as { constructor: { name: string } }).constructor.name
+        : undefined
+      items.push({
+        from: cur.from,
+        to: cur.to,
+        replace: true,
+        widget: widgetName,
+        block: spec.block === true,
+      })
     } else if (spec.class !== undefined) {
       items.push({ from: cur.from, to: cur.to, cls: spec.class })
     } else {
-      items.push({ from: cur.from, to: cur.to, replace: true })
+      const widgetName = spec.widget
+        ? (spec.widget as { constructor: { name: string } }).constructor.name
+        : undefined
+      items.push({
+        from: cur.from,
+        to: cur.to,
+        replace: true,
+        widget: widgetName,
+        block: spec.block === true,
+      })
     }
     cur.next()
   }
@@ -194,6 +216,116 @@ test('livePreviewDecorations: setext h1 cursor-on-title reveals both rows', () =
   // "row" stays visually consistent with the rendered heading.
   assert.ok(hasLine(items, 'cm-md-h1', 0), 'title line gets cm-md-h1')
   assert.ok(hasLine(items, 'cm-md-h1', 8), 'underline line gets cm-md-h1 too')
+})
+
+// ── HR widget: off-cursor → block-replace with HrWidget ───────────────────
+
+test('livePreviewDecorations: HR off-cursor emits a block-replace HrWidget', () => {
+  const doc = 'para\n\n---\n\nmore'
+  // cursor on line 1 ("para")
+  const items = decosFor(doc, EditorSelection.cursor(0))
+  // `---` line spans offsets 6..9 (after "para\n\n").
+  const hr = items.find(
+    (i) => i.replace && i.from === 6 && i.to === 9 && i.widget === 'HrWidget',
+  )
+  assert.ok(hr, 'HR replace with HrWidget over the dash line')
+  assert.equal(hr?.block, true, 'HR replace is a block decoration')
+})
+
+test('livePreviewDecorations: HR on-cursor leaves the dash line raw', () => {
+  const doc = 'para\n\n---\n\nmore'
+  // cursor on the `---` line (offset 6 = line start).
+  const items = decosFor(doc, EditorSelection.cursor(7))
+  assert.equal(
+    items.some((i) => i.widget === 'HrWidget'),
+    false,
+    'no HrWidget when the HR line is active',
+  )
+  assert.equal(
+    items.some((i) => i.replace && i.from === 6 && i.to === 9),
+    false,
+    'no replace covering the HR line on-cursor',
+  )
+})
+
+// ── Fenced code: fence lines hidden off-cursor, inner kept ────────────────
+
+test('livePreviewDecorations: fenced code off-cursor hides both fence lines', () => {
+  const doc = '```js\nconst x = 1\n```'
+  // Place cursor at the very end (last fence) — but we want fence-lines
+  // hidden, so move cursor outside the block by appending a paragraph
+  // and parking the cursor there.
+  const docWithPara = `${doc}\npara`
+  const items = decosFor(
+    docWithPara,
+    EditorSelection.cursor(docWithPara.length),
+  )
+  const opener = '```js'
+  const inner = 'const x = 1'
+  const openerFrom = 0
+  const openerTo = opener.length // 5
+  const innerFrom = openerTo + 1 // after \n
+  const innerTo = innerFrom + inner.length
+  const closerFrom = innerTo + 1 // after \n
+  const closerTo = closerFrom + 3 // ```
+  // Opener line replaced.
+  assert.ok(
+    hasReplace(items, openerFrom, openerTo),
+    'opener fence line replaced',
+  )
+  // Closer line replaced.
+  assert.ok(
+    hasReplace(items, closerFrom, closerTo),
+    'closer fence line replaced',
+  )
+  // Inner line NOT replaced.
+  assert.equal(
+    items.some((i) => i.replace && i.from === innerFrom && i.to === innerTo),
+    false,
+    'inner line not replaced',
+  )
+  // Line decoration `cm-md-codeblock` on all three lines.
+  assert.ok(hasLine(items, 'cm-md-codeblock', openerFrom), 'opener line decoration')
+  assert.ok(hasLine(items, 'cm-md-codeblock', innerFrom), 'inner line decoration')
+  assert.ok(hasLine(items, 'cm-md-codeblock', closerFrom), 'closer line decoration')
+})
+
+test('livePreviewDecorations: fenced code with cursor on opener keeps opener raw', () => {
+  const doc = '```js\nconst x = 1\n```'
+  // Cursor on the opener line.
+  const items = decosFor(doc, EditorSelection.cursor(2))
+  const openerTo = '```js'.length
+  const innerFrom = openerTo + 1
+  const innerTo = innerFrom + 'const x = 1'.length
+  const closerFrom = innerTo + 1
+  const closerTo = closerFrom + 3
+  // Opener NOT replaced.
+  assert.equal(
+    items.some((i) => i.replace && i.from === 0 && i.to === openerTo),
+    false,
+    'opener stays visible when cursor is on it',
+  )
+  // Closer still replaced.
+  assert.ok(
+    hasReplace(items, closerFrom, closerTo),
+    'closer fence line still replaced',
+  )
+})
+
+test('livePreviewDecorations: fenced code cursor on inner line replaces both fences', () => {
+  const doc = '```js\nconst x = 1\n```'
+  const openerTo = '```js'.length
+  const innerFrom = openerTo + 1
+  // Cursor on the inner line.
+  const items = decosFor(doc, EditorSelection.cursor(innerFrom + 2))
+  const innerTo = innerFrom + 'const x = 1'.length
+  const closerFrom = innerTo + 1
+  const closerTo = closerFrom + 3
+  assert.ok(hasReplace(items, 0, openerTo), 'opener replaced when cursor on inner')
+  assert.ok(
+    hasReplace(items, closerFrom, closerTo),
+    'closer replaced when cursor on inner',
+  )
 })
 
 // ── 8. Multi-cursor: only intersected lines get revealed ──────────────────
