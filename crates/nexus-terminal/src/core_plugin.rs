@@ -33,22 +33,27 @@
 //! | 9          | `get_session_info`   | Metadata for one session                |
 //! | 10         | `list_sessions`      | Metadata for every session              |
 //! | 16         | `read_raw_since`     | Pump + return raw bytes past a cursor   |
+//! | 17         | `resize`             | Update PTY size (cols × rows), SIGWINCH |
 //!
 //! Ids are **append-only** — never reused after retirement — because
 //! manifest registrations in loaded plugins bake them in.
 //!
 //! # Output streaming (Phase 2 WI-12)
 //!
-//! When the plugin is built via [`TerminalCorePlugin::with_event_bus`] the
-//! `pump` and `read_raw_since` handlers additionally publish a
-//! `com.nexus.terminal.output.<session_id>` `NexusEvent::Custom` whenever
-//! they observe new bytes for a session. The payload is
-//! `{ data: Vec<u8>, seq: u64, ts_ms: i64 }` — `data` matches the byte
-//! shape of `read_raw_since` so a single TS subscriber can union the two
-//! paths, and `seq` is a per-session monotonic counter so the subscriber
-//! can detect drops/reorders. The legacy poll-style `pump` handler still
-//! returns its byte count unchanged; subscribers that miss events can
-//! always fall back to a `read_raw_since` snapshot.
+//! When the plugin is built via [`TerminalCorePlugin::with_event_bus`] a
+//! background **drainer thread** is spawned that iterates every active
+//! session each cycle, pumps the PTY, and publishes any new bytes on
+//! `com.nexus.terminal.output.<session_id>` as a `NexusEvent::Custom`.
+//! The payload is `{ data: Vec<u8>, seq: u64, ts_ms: i64 }` — `data`
+//! matches the byte shape of `read_raw_since` so a single TS subscriber
+//! can union the two paths, and `seq` is a per-session monotonic counter
+//! so the subscriber can detect drops/reorders. The `pump` and
+//! `read_raw_since` handlers also still publish on demand for any
+//! caller-driven reads, sharing the same per-session cursor + seq state
+//! so the autonomous and pull paths can't double-publish the same bytes.
+//! The legacy poll-style `pump` handler still returns its byte count
+//! unchanged; subscribers that miss events can always fall back to a
+//! `read_raw_since` snapshot.
 //!
 //! # What this is NOT (yet)
 //!
@@ -63,7 +68,9 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use nexus_kernel::EventBus;
@@ -122,6 +129,9 @@ pub const HANDLER_SAVED_REORDER: u32 = 15;
 /// read into one call for xterm-style frontends that just want the PTY
 /// byte stream. See [`ReadRawSinceArgs`].
 pub const HANDLER_READ_RAW_SINCE: u32 = 16;
+/// `resize` handler id. Updates the PTY's reported window size so the
+/// child process receives SIGWINCH and reflows. See [`ResizeArgs`].
+pub const HANDLER_RESIZE: u32 = 17;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -229,6 +239,21 @@ pub struct ReadRawSinceArgs {
     pub timeout_ms: Option<u64>,
 }
 
+/// Arguments for `resize`. `cols` / `rows` are character cells, matching
+/// the unit `Terminal.resize(cols, rows)` uses on the xterm.js side and
+/// `MasterPty::resize` uses inside `portable-pty`. Zero values are
+/// rejected by the underlying ioctl on most platforms; callers should
+/// clamp to at least `1 × 1`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResizeArgs {
+    /// Target session id.
+    pub id: String,
+    /// New column count (character cells).
+    pub cols: u16,
+    /// New row count (character cells).
+    pub rows: u16,
+}
+
 /// Response from `read_raw_since`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadRawSinceResponse {
@@ -296,30 +321,74 @@ pub struct WaitForPatternResponse {
 
 // ── The plugin ───────────────────────────────────────────────────────────────
 
-/// Core plugin instance. Holds the server behind a [`Mutex`] so the
-/// `CorePlugin: Send + Sync` bound is satisfied even though the
-/// underlying PTY handles are `Send`-only. Kernel dispatches already
-/// arrive single-threaded, so the lock is never contended in practice
-/// — `Mutex` keeps the bound honest without adding latency.
+/// Core plugin instance. Holds the server behind an [`Arc<Mutex<_>>`]
+/// so the `CorePlugin: Send + Sync` bound is satisfied (PTY handles are
+/// `Send`-only) **and** so the autonomous drainer thread can hold its
+/// own clone of the lock. IPC dispatches arrive single-threaded; the
+/// drainer competes for the same lock with short-blocking pumps. See
+/// [`spawn_drainer`] for the cadence + contention model.
 pub struct TerminalCorePlugin {
-    server: Mutex<InMemoryTerminalServer>,
+    server: Arc<Mutex<InMemoryTerminalServer>>,
     /// SQLite-backed saved-commands store. `None` when the plugin is
     /// instantiated without a forge path (tests, embedded runtimes) —
     /// the saved-command handlers return a clear error in that case.
     saved: Option<Mutex<SqliteSavedCommandStore>>,
-    /// Optional kernel event bus. When `Some`, every `pump` /
-    /// `read_raw_since` dispatch that observes new bytes publishes a
-    /// `com.nexus.terminal.output.<session_id>` event (Phase 2 WI-12).
-    /// `None` keeps the plugin a pure poll surface — used by the
-    /// in-crate unit tests that drive the plugin without a kernel.
+    /// Optional kernel event bus. When `Some`, the constructor spawns
+    /// the autonomous drainer (see [`Self::drainer`]) and `pump` /
+    /// `read_raw_since` dispatches additionally publish on demand for
+    /// any bytes the drainer hasn't already shipped.
     event_bus: Option<Arc<EventBus>>,
     /// Per-session emitter state — tracks the internal byte cursor we
     /// last published from and the next sequence number to assign.
-    /// Independent of the caller-supplied cursor in `read_raw_since`
-    /// so a fast `read_raw_since` consumer doesn't starve the slower
-    /// `pump` event subscriber (and vice-versa).
-    emitters: Mutex<HashMap<SessionId, EmitterState>>,
+    /// Shared between the dispatch path and the drainer thread; both
+    /// take the same lock, so the cursor advance + seq assignment is
+    /// atomic per chunk and neither path can publish the same bytes
+    /// twice. Independent of the caller-supplied cursor in
+    /// `read_raw_since`.
+    emitters: Arc<Mutex<HashMap<SessionId, EmitterState>>>,
+    /// Background drainer that pumps every active session and publishes
+    /// new bytes onto the event bus without waiting for IPC clients to
+    /// poll. Spawned by [`Self::with_event_bus`] and stopped on drop —
+    /// `DrainerHandle::drop` joins the thread so by the time the rest
+    /// of the plugin's `Arc`s release their data, the drainer has
+    /// already let go of its clones. `None` when no event bus is wired
+    /// (tests / embedded runtimes that don't need streaming).
+    drainer: Option<DrainerHandle>,
 }
+
+/// Owns the drainer thread + the stop flag. The flag is checked at the
+/// top of every drainer cycle and after each pumped session so a Drop
+/// signal during a long round still exits within one pump timeout. The
+/// `Option<JoinHandle>` lets `Drop` move the handle out for the join.
+struct DrainerHandle {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Drop for DrainerHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            // Worst case the join blocks for one drainer cycle
+            // (~DRAINER_PUMP_TIMEOUT_MS × n_sessions + DRAINER_SLEEP_MS).
+            // With 50 sessions × 5ms + 10ms ≈ 260 ms — acceptable on
+            // shutdown, and the alternative (detach) would leak Arc
+            // references to the server / bus / emitters past plugin
+            // drop and could outlive the kernel runtime.
+            let _ = t.join();
+        }
+    }
+}
+
+/// Cadence for the autonomous drainer. Each cycle pumps every active
+/// session with a short blocking timeout, then sleeps to yield. With
+/// both timers in single digits and the 50-session cap enforced by
+/// `SessionManager`, worst-case latency for an active chunk to surface
+/// is `n_sessions × DRAINER_PUMP_TIMEOUT_MS + DRAINER_SLEEP_MS` ≈ 260 ms
+/// at full saturation, typically much less because idle sessions return
+/// from `pump` immediately when the channel is empty.
+const DRAINER_PUMP_TIMEOUT_MS: u64 = 5;
+const DRAINER_SLEEP_MS: u64 = 10;
 
 /// Per-session bookkeeping for the output event stream. Mutated under
 /// the [`TerminalCorePlugin::emitters`] mutex.
@@ -342,10 +411,11 @@ impl TerminalCorePlugin {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            server: Mutex::new(InMemoryTerminalServer::new()),
+            server: Arc::new(Mutex::new(InMemoryTerminalServer::new())),
             saved: None,
             event_bus: None,
-            emitters: Mutex::new(HashMap::new()),
+            emitters: Arc::new(Mutex::new(HashMap::new())),
+            drainer: None,
         }
     }
 
@@ -354,10 +424,11 @@ impl TerminalCorePlugin {
     #[must_use]
     pub fn with_server(server: InMemoryTerminalServer) -> Self {
         Self {
-            server: Mutex::new(server),
+            server: Arc::new(Mutex::new(server)),
             saved: None,
             event_bus: None,
-            emitters: Mutex::new(HashMap::new()),
+            emitters: Arc::new(Mutex::new(HashMap::new())),
+            drainer: None,
         }
     }
 
@@ -370,15 +441,164 @@ impl TerminalCorePlugin {
         self
     }
 
-    /// Wire the plugin to a kernel event bus. After this call, `pump`
-    /// and `read_raw_since` dispatches that observe new bytes publish
-    /// a `com.nexus.terminal.output.<session_id>` custom event with
-    /// payload [`OutputStreamPayload`] — the streaming half of WI-12.
-    /// The legacy poll path keeps working unchanged.
+    /// Wire the plugin to a kernel event bus and spawn the autonomous
+    /// drainer. After this call, sessions stream their output onto
+    /// `com.nexus.terminal.output.<session_id>` without any caller
+    /// having to call `pump` or `read_raw_since` — the drainer pumps
+    /// every active session every [`DRAINER_SLEEP_MS`] ms and publishes
+    /// new bytes as [`OutputStreamPayload`] (the streaming half of
+    /// WI-12). On-demand publishes from the dispatch handlers still
+    /// happen and share state with the drainer, so neither path can
+    /// double-publish.
     #[must_use]
     pub fn with_event_bus(mut self, bus: Arc<EventBus>) -> Self {
+        self.drainer = Some(spawn_drainer(
+            Arc::clone(&self.server),
+            Arc::clone(&self.emitters),
+            Arc::clone(&bus),
+        ));
         self.event_bus = Some(bus);
         self
+    }
+}
+
+/// Spawn the autonomous drainer thread. Captures `Arc` clones of the
+/// server, emitter map, and bus so the thread can outlive any single
+/// dispatch call but still gets cleaned up when the plugin drops (the
+/// returned [`DrainerHandle`]'s Drop signals stop and joins).
+fn spawn_drainer(
+    server: Arc<Mutex<InMemoryTerminalServer>>,
+    emitters: Arc<Mutex<HashMap<SessionId, EmitterState>>>,
+    bus: Arc<EventBus>,
+) -> DrainerHandle {
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_clone = Arc::clone(&stop);
+    let thread = thread::Builder::new()
+        .name("nexus-terminal-drainer".into())
+        // The closure owns the Arc clones (move) so they outlive every
+        // `drainer_loop` borrow; loop / round helpers take `&Arc` to
+        // avoid needless ref-count traffic.
+        .spawn(move || drainer_loop(&server, &emitters, &bus, &stop_clone))
+        .expect("spawn nexus-terminal drainer thread");
+    DrainerHandle {
+        stop,
+        thread: Some(thread),
+    }
+}
+
+/// Pump every active session in a tight round-robin and publish any
+/// new bytes onto the event bus. Holds the server lock only for the
+/// duration of one round of pumps; releases it before publishing so
+/// subscribers can't backpressure concurrent IPC dispatches.
+///
+/// Termination conditions:
+/// - `stop` flag set (Drop / shutdown).
+/// - Either lock poisoned (a prior handler panicked) — we bail rather
+///   than risk corrupted state.
+fn drainer_loop(
+    server: &Arc<Mutex<InMemoryTerminalServer>>,
+    emitters: &Arc<Mutex<HashMap<SessionId, EmitterState>>>,
+    bus: &Arc<EventBus>,
+    stop: &Arc<AtomicBool>,
+) {
+    let pump_timeout = Duration::from_millis(DRAINER_PUMP_TIMEOUT_MS);
+    while !stop.load(Ordering::Relaxed) {
+        let chunks = drainer_round(server, emitters, stop, pump_timeout);
+        let Some(chunks) = chunks else {
+            return; // poisoned lock
+        };
+        for (id, data) in chunks {
+            publish_chunk(bus, emitters, &id, data);
+        }
+        thread::sleep(Duration::from_millis(DRAINER_SLEEP_MS));
+    }
+}
+
+/// One drainer round: list sessions, pump each, collect any new bytes
+/// past the per-session emitter cursor. Returns `None` only on a
+/// poisoned lock — in which case the drainer caller should exit.
+fn drainer_round(
+    server: &Arc<Mutex<InMemoryTerminalServer>>,
+    emitters: &Arc<Mutex<HashMap<SessionId, EmitterState>>>,
+    stop: &Arc<AtomicBool>,
+    pump_timeout: Duration,
+) -> Option<Vec<(SessionId, Vec<u8>)>> {
+    let mut server_guard = server.lock().ok()?;
+    let ids: Vec<SessionId> = server_guard
+        .list_sessions()
+        .into_iter()
+        .map(|info| SessionId::from_string(info.id))
+        .collect();
+    let mut found: Vec<(SessionId, Vec<u8>)> = Vec::new();
+    for id in ids {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        // Session may close between list and pump (race with
+        // dispatch_close_session) — skip silently.
+        if server_guard.pump(&id, pump_timeout).is_err() {
+            continue;
+        }
+        let mut em = emitters.lock().ok()?;
+        let entry = em.entry(id.clone()).or_default();
+        let cursor = entry.cursor;
+        if let Some((next_cursor, bytes)) =
+            server_guard.manager().buffer_read_since(&id, cursor)
+        {
+            entry.cursor = next_cursor;
+            if !bytes.is_empty() {
+                found.push((id, bytes));
+            }
+        }
+    }
+    Some(found)
+}
+
+/// Free-function publish path used by both the drainer and the on-
+/// demand dispatch handlers. Assigns the next per-session sequence
+/// number under the emitters lock so both paths share monotonic seq.
+fn publish_chunk(
+    bus: &EventBus,
+    emitters: &Arc<Mutex<HashMap<SessionId, EmitterState>>>,
+    id: &SessionId,
+    data: Vec<u8>,
+) {
+    let seq = match emitters.lock() {
+        Ok(mut em) => {
+            let entry = em.entry(id.clone()).or_default();
+            entry.next_seq = entry.next_seq.saturating_add(1);
+            if entry.next_seq == 0 {
+                entry.next_seq = 1;
+            }
+            entry.next_seq
+        }
+        Err(_) => return,
+    };
+    let type_id = format!("{EVENT_OUTPUT_PREFIX}{}", id.as_str());
+    let payload = OutputStreamPayload {
+        data,
+        seq,
+        ts_ms: chrono::Utc::now().timestamp_millis(),
+    };
+    let payload_value = match serde_json::to_value(&payload) {
+        Ok(v) => v,
+        Err(err) => {
+            tracing::warn!(
+                plugin = PLUGIN_ID,
+                %err,
+                session = id.as_str(),
+                "failed to serialize output stream payload",
+            );
+            return;
+        }
+    };
+    if let Err(err) = bus.publish_plugin(PLUGIN_ID, &type_id, payload_value) {
+        tracing::warn!(
+            plugin = PLUGIN_ID,
+            %err,
+            session = id.as_str(),
+            "failed to publish terminal output event",
+        );
     }
 }
 
@@ -411,6 +631,7 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_SAVED_DELETE => self.dispatch_saved_delete(args),
             HANDLER_SAVED_REORDER => self.dispatch_saved_reorder(args),
             HANDLER_READ_RAW_SINCE => self.dispatch_read_raw_since(args),
+            HANDLER_RESIZE => self.dispatch_resize(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -459,6 +680,13 @@ impl TerminalCorePlugin {
             .map_err(poisoned)?
             .close_session(&id)
             .map_err(crate_err)?;
+        // Drop the per-session emitter state so the map doesn't grow
+        // unboundedly across long-running plugin instances. The drainer's
+        // next round won't see this id from `list_sessions`, so the
+        // entry is unreachable anyway.
+        if let Ok(mut em) = self.emitters.lock() {
+            em.remove(&id);
+        }
         Ok(serde_json::Value::Null)
     }
 
@@ -551,6 +779,25 @@ impl TerminalCorePlugin {
         to_value(&ReadRawSinceResponse { cursor, data }, "read_raw_since")
     }
 
+    fn dispatch_resize(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: ResizeArgs = parse_args(args, "resize")?;
+        let id = SessionId::from_string(a.id);
+        // Clamp zero dimensions — most tty ioctls reject them and the
+        // resulting error would be opaque to the caller. xterm's fit
+        // addon can occasionally propose zero before layout settles.
+        let cols = a.cols.max(1);
+        let rows = a.rows.max(1);
+        self.server
+            .lock()
+            .map_err(poisoned)?
+            .resize(&id, cols, rows)
+            .map_err(crate_err)?;
+        Ok(serde_json::Value::Null)
+    }
+
     fn dispatch_search_output(
         &self,
         args: &serde_json::Value,
@@ -641,58 +888,15 @@ impl TerminalCorePlugin {
     }
 
     /// Publish a `com.nexus.terminal.output.<session_id>` event with
-    /// the freshly-drained bytes, assigning the next per-session
-    /// sequence number under the emitters lock. `next_cursor` is the
-    /// caller-side cursor that comes after this chunk and is
-    /// informational only — it's already been recorded by
-    /// [`Self::fetch_new_bytes`].
+    /// the freshly-drained bytes. `next_cursor` is the caller-side
+    /// cursor that comes after this chunk and is informational only —
+    /// it's already been recorded by [`Self::fetch_new_bytes`]. Shares
+    /// seq state with the autonomous drainer via [`publish_chunk`].
     fn publish_output(&self, id: &SessionId, _next_cursor: u64, data: Vec<u8>) {
         let Some(bus) = self.event_bus.as_ref() else {
             return;
         };
-        let seq = match self.emitters.lock() {
-            Ok(mut emitters) => {
-                let entry = emitters.entry(id.clone()).or_default();
-                entry.next_seq = entry.next_seq.saturating_add(1);
-                if entry.next_seq == 0 {
-                    // saturating_add into u64::MAX would have set it to MAX,
-                    // not 0; the explicit check is defensive only.
-                    entry.next_seq = 1;
-                }
-                entry.next_seq
-            }
-            Err(_) => {
-                // Lock poisoned — skip publish rather than panic; the
-                // pump return value is still correct for the caller.
-                return;
-            }
-        };
-        let type_id = format!("{EVENT_OUTPUT_PREFIX}{}", id.as_str());
-        let payload = OutputStreamPayload {
-            data,
-            seq,
-            ts_ms: chrono::Utc::now().timestamp_millis(),
-        };
-        let payload_value = match serde_json::to_value(&payload) {
-            Ok(v) => v,
-            Err(err) => {
-                tracing::warn!(
-                    plugin = PLUGIN_ID,
-                    %err,
-                    session = id.as_str(),
-                    "failed to serialize output stream payload"
-                );
-                return;
-            }
-        };
-        if let Err(err) = bus.publish_plugin(PLUGIN_ID, &type_id, payload_value) {
-            tracing::warn!(
-                plugin = PLUGIN_ID,
-                %err,
-                session = id.as_str(),
-                "failed to publish terminal output event"
-            );
-        }
+        publish_chunk(bus, &self.emitters, id, data);
     }
 
     fn saved_store(&self) -> Result<&Mutex<SqliteSavedCommandStore>, PluginError> {
@@ -1051,6 +1255,57 @@ mod tests {
     }
 
     #[test]
+    fn drainer_publishes_output_without_manual_pump() {
+        use nexus_kernel::{EventFilter, NexusEvent};
+
+        if !unix_only("drainer_publishes_output_without_manual_pump") {
+            return;
+        }
+
+        let bus = Arc::new(EventBus::new(64));
+        let mut sub =
+            bus.subscribe(EventFilter::CustomPrefix(EVENT_OUTPUT_PREFIX.to_string()));
+
+        // `with_event_bus` spawns the drainer thread.
+        let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
+        let create = serde_json::json!({
+            "name": "drainer-test",
+            "shell": "/bin/sh",
+            "shell_args": ["-c", "printf 'autonomous\\n'; sleep 1"],
+        });
+        let CreateSessionResponse { id } = serde_json::from_value(
+            p.dispatch(HANDLER_CREATE_SESSION, &create).expect("create"),
+        )
+        .expect("decode");
+
+        // No manual pump — wait for the drainer to publish on its own.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(evt) = sub.try_recv().expect("bus alive") {
+                let (type_id, payload) = match &evt.event {
+                    NexusEvent::Custom { type_id, payload, .. } => {
+                        (type_id.clone(), payload.clone())
+                    }
+                    other => panic!("expected Custom, got {other:?}"),
+                };
+                assert_eq!(type_id, format!("{EVENT_OUTPUT_PREFIX}{id}"));
+                let payload: OutputStreamPayload =
+                    serde_json::from_value(payload).expect("payload decodes");
+                assert!(
+                    !payload.data.is_empty(),
+                    "drainer chunk should not be empty"
+                );
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "drainer never published output autonomously"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
     fn pump_without_event_bus_remains_silent_publish_path() {
         if !unix_only("pump_without_event_bus_remains_silent_publish_path") {
             return;
@@ -1075,6 +1330,59 @@ mod tests {
         // about here is that the response shape is unchanged and the
         // call doesn't panic on a missing bus.
         let _ = r.bytes;
+    }
+
+    #[test]
+    fn resize_dispatches_through_to_session_and_clamps_zero_dims() {
+        if !unix_only("resize_dispatches_through_to_session_and_clamps_zero_dims") {
+            return;
+        }
+        let mut p = TerminalCorePlugin::new();
+        let CreateSessionResponse { id } = serde_json::from_value(
+            p.dispatch(HANDLER_CREATE_SESSION, &create_args("sleep 1"))
+                .expect("create"),
+        )
+        .expect("decode");
+
+        // Normal resize succeeds (returns Null per the dispatch contract).
+        let resp = p
+            .dispatch(
+                HANDLER_RESIZE,
+                &serde_json::json!({ "id": id, "cols": 120, "rows": 40 }),
+            )
+            .expect("resize");
+        assert_eq!(resp, serde_json::Value::Null);
+
+        // Zero dimensions are clamped to 1×1 — the underlying ioctl
+        // rejects zero on Linux/macOS, so the call must not surface
+        // that error to the caller.
+        let resp = p
+            .dispatch(
+                HANDLER_RESIZE,
+                &serde_json::json!({ "id": id, "cols": 0, "rows": 0 }),
+            )
+            .expect("resize zero clamps");
+        assert_eq!(resp, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn resize_unknown_session_surfaces_not_running() {
+        let mut p = TerminalCorePlugin::new();
+        let err = p
+            .dispatch(
+                HANDLER_RESIZE,
+                &serde_json::json!({ "id": "ghost", "cols": 80, "rows": 24 }),
+            )
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(
+                    reason.contains("not running") || reason.contains("ghost"),
+                    "unexpected reason: {reason}"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]

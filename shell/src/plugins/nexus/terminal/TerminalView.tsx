@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
 import type { KernelAPI, EventsAPI } from '../../../types/plugin'
@@ -20,6 +21,10 @@ const CMD_SEND_RAW_INPUT = 'send_raw_input'
 // never surfaces pre-Enter keystrokes because they sit in
 // LineBuffer.pending until a newline arrives.
 const CMD_READ_RAW_SINCE = 'read_raw_since'
+// `resize` propagates xterm's grid size to the PTY so SIGWINCH reaches
+// the child shell — without it, `vim` / `less` / progress bars wrap
+// against the original 80×24 even after the panel is resized.
+const CMD_RESIZE = 'resize'
 
 // WI-12: output is event-driven via the
 // `com.nexus.terminal.output.<session_id>` topic — bytes land in xterm
@@ -27,13 +32,14 @@ const CMD_READ_RAW_SINCE = 'read_raw_since'
 // index.ts::activate). Dropped chunks are handled by the store's
 // `recoverFn` via `read_raw_since` snapshots.
 //
-// The kernel only emits stream events inside `pump` /
-// `read_raw_since` handlers (see core_plugin.rs:43) — there's no
-// autonomous PTY reader on the Rust side. So we still need a slow
-// heartbeat to keep the PTY draining; without it, input gets sent
-// but no output ever comes back and the terminal looks frozen.
-// 5s is slow enough to be invisible cost, fast enough that the user
-// doesn't perceive lag if a stream chunk is ever dropped.
+// The kernel runs an autonomous drainer thread (see
+// crates/nexus-terminal/src/core_plugin.rs::drainer_loop) that pumps
+// every active session and publishes stream events without any client
+// poll. The 5s tick below is now a defensive backstop: it covers a
+// hypothetical drainer stall and keeps `read_raw_since` cursors fresh
+// for the seq-gap recovery path. 5s is invisible cost in the steady
+// state and small enough that any drop is masked before the user
+// notices.
 const PTY_POLL_INTERVAL_MS = 5000
 const PTY_PUMP_TIMEOUT_MS = 30
 
@@ -105,6 +111,22 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(container)
+    // WebGL renderer must be loaded after open() so the canvas exists.
+    // On context loss (GPU reset, tab suspended too long) dispose the
+    // addon — xterm falls back to its DOM renderer automatically and
+    // the next mount will re-attach a fresh WebGL context.
+    let webgl: WebglAddon | null = new WebglAddon()
+    webgl.onContextLoss(() => {
+      webgl?.dispose()
+      webgl = null
+    })
+    try {
+      term.loadAddon(webgl)
+    } catch {
+      // No WebGL support (headless tests, ancient GPU) — fall back to
+      // the default DOM renderer silently.
+      webgl = null
+    }
     term.focus()
 
     // Re-apply theme + font when the kernel theme switches. Subscribed
@@ -185,13 +207,10 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     })
 
     /**
-     * One pump tick. Two jobs:
-     *   1. Read any PTY bytes the shell-side stream subscriber hasn't
-     *      already covered (boot backlog, dropped broadcast chunks).
-     *   2. Keep the kernel's PTY draining — the kernel publishes
-     *      stream events only inside this handler, so without
-     *      periodic ticks the shell would never see output past the
-     *      first tick.
+     * One pump tick. Reads any PTY bytes the shell-side stream
+     * subscriber hasn't already covered — boot backlog, plus a safety
+     * net for the (rare) case where a chunk goes missing or the
+     * kernel's autonomous drainer is briefly stalled.
      *
      * `cursor` is synced up from the store's `lastCursor` (advanced
      * by the event-stream path) so we never re-fetch bytes the
@@ -245,19 +264,32 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
         })
     })
 
-    // ── Resize: refit whenever the container changes, then tell the
-    // PTY. NOTE: the kernel does not yet expose a resize handler (see
-    // crates/nexus-terminal/src/core_plugin.rs — handler ids 1-15, no
-    // resize). We still call fit() so xterm reflows its own grid; the
-    // PTY keeps its initial 80×24 until a resize handler lands. This
-    // is visible as wrap weirdness on very wide panels and should be
-    // revisited when the kernel surface grows.
+    // ── Resize: refit xterm's local grid, then propagate cols/rows to
+    // the PTY so the child receives SIGWINCH. We dedupe identical
+    // dimensions because ResizeObserver fires for every layout pass
+    // (theme switch, font change, parent reflow) — a no-op resize
+    // would still land an IPC roundtrip.
+    let lastCols = -1
+    let lastRows = -1
     const resizeObs = new ResizeObserver(() => {
       try {
         fit.fit()
       } catch {
         // Size wasn't ready yet; next observation will retry.
+        return
       }
+      const cols = term.cols
+      const rows = term.rows
+      if (cols === lastCols && rows === lastRows) return
+      lastCols = cols
+      lastRows = rows
+      const id = useTerminalStore.getState().sessionId
+      if (!id) return
+      void kernel
+        .invoke(PLUGIN_ID, CMD_RESIZE, { id, cols, rows })
+        .catch(() => {
+          // Session may have closed between fit() and invoke; ignore.
+        })
     })
     resizeObs.observe(container)
 
@@ -292,6 +324,9 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       } catch {}
       try {
         unsubTheme()
+      } catch {}
+      try {
+        webgl?.dispose()
       } catch {}
       try {
         term.dispose()
