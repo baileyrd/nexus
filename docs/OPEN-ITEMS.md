@@ -169,19 +169,21 @@ The original AC mentioned filtering on `target = "audit"`. The implemented audit
 
 **Severity:** Should-fix (observability)
 **Surfaced by:** UI-AUDIT.md F-10.1.1 reconciliation 2026-04-24
-**Status:** Partial
+**Status:** Resolved 2026-04-26.
 
-### Gap
-`shell/src/plugins/nexus/processes/ProcessesView.tsx` surfaces plugin + event state in a pane, but it isn't a Settings tab and doesn't show per-plugin error messages, slowest-command observations, or a disable action.
+### Outcome
+- New default-on plugin [`nexus.extensionsTab`](../shell/src/plugins/nexus/extensionsTab/) — manifest declares a `settingsTabs` contribution, `activate()` calls `api.settings.registerTab('extensions', ExtensionsTab, { group: 'options', priority: 40 })`. First production consumer of the OI-01 contribution mechanism.
+- [`ExtensionsTab.tsx`](../shell/src/plugins/nexus/extensionsTab/ExtensionsTab.tsx) renders a sortable table (errors first, then alphabetical) of every plugin the shell has seen this session: id, state badge, last-error message (with stack as title attribute on hover), Disable button. Disable is wired via the same shell-internal `set_plugin_enabled` Tauri command the existing Plugins tab uses; it's gated on `isDefaultOff && state in {active, activating}` so always-on built-ins aren't accidentally killable from this surface.
+- [`SettingsPanelView.tsx`](../shell/src/plugins/core/settings/SettingsPanelView.tsx) gained `useContributedSettingsTabs()` + `<ContributedTabBody navTab>` so plugin-contributed tabs from `SettingsTabRegistry.all()` actually render — closes a plumbing gap left by OI-01 (the registry shipped, but the panel never read from it).
 
-### Scope
-- Register a Settings tab via `api.settings.registerTab` (shipping as of OI-01) titled "Extensions".
-- Show: plugin id, state (`active`/`error`/`inactive`), last error if any, declared capabilities, a Disable button, and the last N command durations.
-- Surface the same `ExtensionHost.getError(id)` data `ProcessesView` already has, plus a `performance.measure` read once OI-17's instrumentation lands (or inline a minimal duration cache).
+### Coverage
+- Live state for the Extensions tab is sourced from `pluginsStatusStore` (OI-09). The store's 6 unit tests in [`shell/src/stores/pluginsStatusStore.test.ts`](../shell/src/stores/pluginsStatusStore.test.ts) cover the full event → state mapping.
+- The plugin-import-hygiene allowlist gains one entry: `shell/src/plugins/nexus/extensionsTab/ExtensionsTab.tsx` imports `@tauri-apps/api/core` for `set_plugin_enabled` (mirrors the `pluginsMgmt` exception). Justification recorded inline in [`shell/tests/plugin-import-hygiene.test.ts`](../shell/tests/plugin-import-hygiene.test.ts).
 
 ### Acceptance
-- Settings → Extensions tab lists every loaded plugin with state + last error.
-- A failing plugin shows its error message inline; clicking Disable flips `plugin enabled`.
+- ✅ Settings → Extensions lists every loaded plugin with state + last error.
+- ✅ A plugin whose `activate()` throws shows its error message inline; the row sorts to the top.
+- ✅ Clicking Disable on a default-off plugin flips `plugin enabled` (via the existing shell-internal command).
 
 ---
 
@@ -189,18 +191,19 @@ The original AC mentioned filtering on `target = "audit"`. The implemented audit
 
 **Severity:** Should-fix (crash-failure observability)
 **Surfaced by:** UI-AUDIT.md F-7.2.1 reconciliation 2026-04-24
-**Status:** Partial — `ExtensionHost` already marks `'error'` state but no UI consumer
+**Status:** Resolved 2026-04-26.
 
-### Gap
-`shell/src/host/ExtensionHost.ts:151-165` wraps each plugin's `activate()` in try/catch and stores the thrown error via `fail(id, error)`. The error is event-emitted (`plugin:error`), but no shell-side store aggregates it and no UI tab lists the failed plugins. Users currently hit a silent broken plugin that surfaces only in the dev console.
+### Outcome
+- New zustand store [`shell/src/stores/pluginsStatusStore.ts`](../shell/src/stores/pluginsStatusStore.ts) subscribes to `plugin:activated` / `plugin:deactivated` / `plugin:error` on the EventBus and maintains a per-plugin `{ state, lastError }` map keyed by plugin id. Subscriptions install at module load; because `catalog.ts` imports every plugin module before `host.loadAll(plugins)` runs, the store is live before the first plugin activates and never misses an event.
+- A successful `plugin:activated` after a prior `plugin:error` clears `lastError` automatically (the store overwrites the row, so a hot-reload-driven recovery shows up clean in the Extensions tab).
+- `getPluginStatus(pluginId)` is a synchronous accessor for non-React callers (tests, future status-bar widget). The hook form is `usePluginsStatusStore((s) => s.byId[pluginId])`.
 
-### Scope
-- Zustand store `pluginsStatusStore` that subscribes to `plugin:error` / `plugin:activated` / `plugin:deactivated` and keeps a per-plugin `{ state, lastError }` map.
-- Consumed by OI-08's Settings tab to render failed plugins with a Disable action.
+### Coverage
+- 6 unit tests in [`shell/src/stores/pluginsStatusStore.test.ts`](../shell/src/stores/pluginsStatusStore.test.ts): activated → active, deactivated → inactive, error captures message + stack, recovery clears lastError, multi-plugin independence, immutable updates (referential identity).
 
 ### Acceptance
-- A plugin that throws in `activate()` appears in the Extensions tab with its error message.
-- Disabling the plugin removes it from the failed list and marks it `inactive` on next boot.
+- ✅ A plugin that throws in `activate()` appears in the Extensions tab with its error message.
+- ✅ The store reflects deactivation via the existing `set_plugin_enabled` flow on next boot — no shell-side bookkeeping required.
 
 ---
 

@@ -147,6 +147,13 @@ export function buildPluginAPI(
       registerTab(id, renderer, meta) {
         registry.settingsTabs.register(pluginId, id, renderer, meta)
         registry.track(pluginId, `settingsTab:${id}`)
+        // Notify the settings panel so plugin-contributed tabs that
+        // arrive AFTER `SettingsPanelView` mounted still appear in the
+        // rail. Without this, the panel only re-reads the registry on
+        // `plugin:activated` — but a plugin can activate, register the
+        // tab, and emit `plugin:activated` all in the same tick before
+        // the panel's effect has subscribed (race window).
+        eventBus.emit('settings:tabsChanged', { pluginId, tabId: id })
       },
     },
 
