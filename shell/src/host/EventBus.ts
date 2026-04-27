@@ -102,6 +102,20 @@ export interface ShellEvents {
   'plugin:deactivated':       { pluginId: string }
   'plugin:error':             { pluginId: string; error: Error }
 
+  // Keybinding conflicts (OI-10).
+  // Emitted by KeybindingRegistry whenever the set of detected chord
+  // conflicts changes — boot-time bulk registration converges to a
+  // single event. Payload is the full current conflict set so the
+  // settings UI can render or clear without a separate registry call.
+  // `conflicts` is empty when the most recent mutation resolved every
+  // outstanding conflict.
+  'plugins:keybindings-conflict': {
+    conflicts: Array<{
+      chord: string
+      entries: Array<{ pluginId: string; commandId: string; when?: string }>
+    }>
+  }
+
   // Command lifecycle (WI-35 — per-plugin crash quarantine).
   // CommandRegistry.execute emits this after a handler throws, just
   // before re-throwing to the caller. `pluginId` is the one that

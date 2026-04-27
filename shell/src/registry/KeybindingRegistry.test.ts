@@ -15,8 +15,10 @@ import {
   KeybindingRegistry,
   normalizeChord,
   formatChord,
+  type KeybindingConflict,
   type OverrideStorage,
 } from './KeybindingRegistry.ts'
+import { eventBus } from '../host/EventBus.ts'
 
 // Minimal in-memory storage adapter — mirrors the contract the
 // settings plugin's localStorage-backed adapter implements at runtime.
@@ -230,4 +232,129 @@ test('formattedChordFor — returns display form of the active chord', () => {
 test('formattedChordFor — returns undefined for an unknown command', () => {
   const reg = freshRegistry()
   assert.equal(reg.formattedChordFor('cmd.missing'), undefined)
+})
+
+// ─── Conflict detection (OI-10) ──────────────────────────────────────────────
+
+test('getConflicts — no conflicts when chords are unique', () => {
+  const reg = freshRegistry()
+  assert.deepEqual(reg.getConflicts(), [])
+  for (const row of reg.getAllBindings()) {
+    assert.deepEqual(row.conflictsWith, [], `row ${row.commandId} should be conflict-free`)
+  }
+})
+
+test('getConflicts — flags two unconditional bindings on the same chord', () => {
+  const reg = new KeybindingRegistry()
+  reg.registerFromManifest('plug.a', { command: 'cmd.foo', key: 'ctrl+k' })
+  reg.registerFromManifest('plug.b', { command: 'cmd.bar', key: 'ctrl+k' })
+
+  const conflicts = reg.getConflicts()
+  assert.equal(conflicts.length, 1)
+  assert.equal(conflicts[0].chord, 'ctrl+k')
+  const ids = conflicts[0].entries.map(e => e.commandId).sort()
+  assert.deepEqual(ids, ['cmd.bar', 'cmd.foo'])
+
+  // Both rows should report the *other* command in conflictsWith.
+  const rows = reg.getAllBindings()
+  const foo = rows.find(r => r.commandId === 'cmd.foo')
+  const bar = rows.find(r => r.commandId === 'cmd.bar')
+  assert.deepEqual(foo?.conflictsWith, ['cmd.bar'])
+  assert.deepEqual(bar?.conflictsWith, ['cmd.foo'])
+})
+
+test('getConflicts — same chord, identical when clauses → conflict', () => {
+  const reg = new KeybindingRegistry()
+  reg.registerFromManifest('plug.a', { command: 'cmd.x', key: 'ctrl+k', when: 'editorFocus' })
+  reg.registerFromManifest('plug.b', { command: 'cmd.y', key: 'ctrl+k', when: 'editorFocus' })
+
+  assert.equal(reg.getConflicts().length, 1)
+})
+
+test('getConflicts — same chord, differing when clauses → not flagged', () => {
+  const reg = new KeybindingRegistry()
+  reg.registerFromManifest('plug.a', { command: 'cmd.x', key: 'ctrl+k', when: 'editorFocus' })
+  reg.registerFromManifest('plug.b', { command: 'cmd.y', key: 'ctrl+k', when: 'terminalFocus' })
+
+  // Conservative rule — we don't have a solver, so two distinct
+  // when-clauses are assumed disjoint and skipped.
+  assert.deepEqual(reg.getConflicts(), [])
+})
+
+test('getConflicts — gated vs unconditional on same chord → conflict', () => {
+  // The unconditional binding matches in every context, so anything
+  // gated that shares its chord is genuinely ambiguous.
+  const reg = new KeybindingRegistry()
+  reg.registerFromManifest('plug.a', { command: 'cmd.x', key: 'ctrl+k' })
+  reg.registerFromManifest('plug.b', { command: 'cmd.y', key: 'ctrl+k', when: 'editorFocus' })
+
+  assert.equal(reg.getConflicts().length, 1)
+})
+
+test('unregister clears a conflict when the second binding goes away', () => {
+  const reg = new KeybindingRegistry()
+  reg.registerFromManifest('plug.a', { command: 'cmd.x', key: 'ctrl+k' })
+  reg.registerFromManifest('plug.b', { command: 'cmd.y', key: 'ctrl+k' })
+  assert.equal(reg.getConflicts().length, 1)
+
+  reg.unregister('plug.b:cmd.y')
+  assert.deepEqual(reg.getConflicts(), [])
+})
+
+test('setOverride can introduce a conflict by colliding with an existing chord', async () => {
+  const reg = new KeybindingRegistry()
+  reg.bindStorage(memoryStorage())
+  reg.registerFromManifest('plug.a', { command: 'cmd.x', key: 'ctrl+k' })
+  reg.registerFromManifest('plug.b', { command: 'cmd.y', key: 'ctrl+l' })
+  assert.deepEqual(reg.getConflicts(), [])
+
+  // User overrides cmd.y onto Ctrl+K — now ambiguous with cmd.x.
+  await reg.setOverride('cmd.y', 'ctrl+k')
+
+  const conflicts = reg.getConflicts()
+  assert.equal(conflicts.length, 1)
+  assert.equal(conflicts[0].chord, 'ctrl+k')
+})
+
+test('plugins:keybindings-conflict — emits once for bulk registration that ends in conflict', () => {
+  const reg = new KeybindingRegistry()
+  const events: KeybindingConflict[][] = []
+  const off = eventBus.on<{ conflicts: KeybindingConflict[] }>(
+    'plugins:keybindings-conflict',
+    (p) => { events.push(p.conflicts) },
+  )
+
+  // First binding — no conflict, no emit.
+  reg.registerFromManifest('plug.a', { command: 'cmd.x', key: 'ctrl+k' })
+  // Second binding — conflict appears, one emit.
+  reg.registerFromManifest('plug.b', { command: 'cmd.y', key: 'ctrl+k' })
+  // Third binding — same conflict set (still 'ctrl+k' with the same
+  // pair plus a new third entry); signature changes, one more emit.
+  reg.registerFromManifest('plug.c', { command: 'cmd.z', key: 'ctrl+k' })
+  // Unrelated binding — conflict set unchanged, no emit.
+  reg.registerFromManifest('plug.d', { command: 'cmd.q', key: 'ctrl+m' })
+
+  off()
+  // Expect emissions for: (a) appearance of the first conflict, (b)
+  // expansion to three entries. The fourth call must not emit.
+  assert.equal(events.length, 2, `unexpected emit count: ${events.length}`)
+  assert.equal(events[1][0].entries.length, 3)
+})
+
+test('plugins:keybindings-conflict — emits an empty list when conflicts resolve', () => {
+  const reg = new KeybindingRegistry()
+  reg.registerFromManifest('plug.a', { command: 'cmd.x', key: 'ctrl+k' })
+  reg.registerFromManifest('plug.b', { command: 'cmd.y', key: 'ctrl+k' })
+
+  const events: KeybindingConflict[][] = []
+  const off = eventBus.on<{ conflicts: KeybindingConflict[] }>(
+    'plugins:keybindings-conflict',
+    (p) => { events.push(p.conflicts) },
+  )
+
+  reg.unregister('plug.b:cmd.y')
+  off()
+
+  assert.equal(events.length, 1)
+  assert.deepEqual(events[0], [])
 })
