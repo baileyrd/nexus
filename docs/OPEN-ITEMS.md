@@ -211,18 +211,20 @@ The original AC mentioned filtering on `target = "audit"`. The implemented audit
 
 **Severity:** Should-fix (user-invisible collision hazard)
 **Surfaced by:** UI-AUDIT.md F-4.1.1 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-27.
 
-### Gap
-`KeybindingRegistry.registerFromManifest` pushes bindings unconditionally; two plugins that declare the same chord both land in the map and `match()` returns whichever was registered first. No event is emitted and the user has no way to see the collision.
+### Outcome
+- [`KeybindingRegistry`](../shell/src/registry/KeybindingRegistry.ts) gained `getConflicts()` and a private `computeConflicts()` that buckets bindings by active chord and pairs entries whose `when` clauses overlap. The overlap rule is the conservative one documented on the new `KeybindingConflict` type — equal `when` strings (incl. both `undefined`) or one-side-unconditional always conflict; two distinct `when`s are assumed disjoint and skipped, since the shell has no boolean-formula solver and false-positive collisions would be noisier than the underlying bug.
+- Every mutation path (`registerFromManifest` / `unregister` / `setOverride` / `clearOverride` / `loadOverrides`) now calls `maybeEmitConflicts`. A signature-based dedup means bulk manifest registration at boot converges to a single `plugins:keybindings-conflict` emission — only mutations that actually change the conflict set re-emit.
+- `BindingRow` carries a new `conflictsWith: string[]` field populated by the same computation, so `Settings → Keybindings` renders a `!` badge per conflicted row (with a tooltip listing the competing commandIds) plus a top-of-tab summary banner. No second registry call required.
+- Event added to `ShellEvents` in [`shell/src/host/EventBus.ts`](../shell/src/host/EventBus.ts) so subscribers get full type-checking.
 
-### Scope
-- `KeybindingRegistry.register{FromManifest,Override}` should detect a chord collision and emit a `plugins:keybindings-conflict` event with `{ chord, commands: [ids] }`.
-- Settings → Keybindings (already exists as a built-in tab) shows a warning row per conflict with a "pick one" dropdown that records a user override on the losing command.
+### Coverage
+- 9 new tests in [`shell/src/registry/KeybindingRegistry.test.ts`](../shell/src/registry/KeybindingRegistry.test.ts): no-conflict baseline, two unconditional bindings on same chord, identical-when conflict, differing-when not flagged, gated-vs-unconditional conflict, `unregister` clears, `setOverride` introduces a conflict, bulk-registration emits exactly twice (appearance + expansion), and resolution emits an empty list.
 
 ### Acceptance
-- Install two plugins that share `Ctrl+K Ctrl+S`; the Keybindings tab shows a conflict row with both command titles.
-- Picking one writes a user override on the other (unbound or re-bound) and the event clears.
+- ✅ Two plugins binding the same chord show a conflict row in the Keybindings tab with both command titles in the `!`-badge tooltip.
+- ✅ Setting a user override on either command (or unregistering the offending plugin) clears the badge and re-emits an updated conflict list.
 
 ---
 
