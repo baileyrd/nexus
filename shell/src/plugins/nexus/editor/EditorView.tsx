@@ -14,10 +14,12 @@ import { blockSelectionExt } from './cm/blockSelection'
 import { blockHandleExt } from './cm/blockHandle'
 import { inputRulesExt } from './cm/inputRules'
 import { inlineToolbarExt } from './cm/inlineToolbar'
+import { livePreviewExt } from './cm/livePreview'
 import { getRegistry } from '../../../host/shellRegistry'
 import { ContextMenu } from '../../../shell/ContextMenu'
 import { buildTabContextMenu } from './TabContextMenu'
 import './markdown.css'
+import './livePreview.css'
 
 /** Untitled placeholder relpaths have no kernel session; treat them
  *  locally only. Mirrors the predicate in `sessionManager.ts`. */
@@ -149,9 +151,9 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
         const target = headings[payload.index]
         if (!target) return
         target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      } else if (tab.mode === 'source') {
-        // Source: scroll the CM view so the target line lands at the top.
-        // CM's doc.line is 1-based, matching our payload.
+      } else {
+        // Source / live: scroll the CM view so the target line lands
+        // at the top. CM's doc.line is 1-based, matching our payload.
         const view = cmViewRef.current?.view ?? null
         if (!view) return
         viewToLine(view, payload.line)
@@ -237,9 +239,9 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
       raf = requestAnimationFrame(compute)
     }
     const target =
-      activeTab.mode === 'preview'
-        ? scrollWrapRef.current
-        : cmViewRef.current?.view?.scrollDOM ?? null
+      activeTab.mode === 'source' || activeTab.mode === 'live'
+        ? cmViewRef.current?.view?.scrollDOM ?? null
+        : scrollWrapRef.current
     if (!target) return
     target.addEventListener('scroll', schedule, { passive: true })
     // Initial compute after the next paint so the freshly-rendered DOM
@@ -261,10 +263,10 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
   // Publish the currently-mounted CM view to the editor runtime so
   // the Find / Replace commands (registered in index.ts) can call
   // `openSearchPanel` on the active editor without taking a React
-  // dependency. Only source mode mounts a CM host; preview mode
-  // clears the registration.
+  // dependency. Source and live modes both mount a CM host; preview
+  // is the only mode that clears the registration.
   useEffect(() => {
-    if (!activeTab || activeTab.mode !== 'source') {
+    if (!activeTab || activeTab.mode === 'preview') {
       setActiveCmView(null)
       return
     }
@@ -338,7 +340,11 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
         activeTab={activeTab}
         mode={activeTab.mode}
         onToggleMode={() => {
-          const next: EditorTabMode = activeTab.mode === 'preview' ? 'source' : 'preview'
+          // Cycle live ↔ source. Reading-view (preview) is reachable
+          // via the more-menu / command palette only — landing on
+          // preview here would feel like a dead-end on a click that
+          // the user expects to flip an editing surface.
+          const next: EditorTabMode = activeTab.mode === 'source' ? 'live' : 'source'
           setMode(activeTab.relpath, next)
         }}
       />
@@ -613,13 +619,18 @@ interface ModeToggleProps {
 }
 
 /**
- * Right-edge mode toggle. Shows the icon for the action the click
- * will perform: pencil when in preview (click to edit), eye when in
- * source (click to preview). Aria-label mirrors the action.
+ * Right-edge mode toggle.
+ *   - `live`    → pencil (click → source).
+ *   - `source`  → eye (click → live, i.e. WYSIWYG preview).
+ *   - `preview` → pencil (click → live; "back to edit").
+ * Aria-label mirrors the action.
  */
 function ModeToggle({ mode, onClick }: ModeToggleProps) {
-  const willEdit = mode === 'preview'
-  const label = willEdit ? 'Edit' : 'Preview'
+  const showPencil = mode === 'live' || mode === 'preview'
+  const label =
+    mode === 'live' ? 'Edit source'
+    : mode === 'source' ? 'Live preview'
+    : 'Edit'
 
   return (
     <button
@@ -650,8 +661,7 @@ function ModeToggle({ mode, onClick }: ModeToggleProps) {
         borderRadius: 'var(--r)',
       }}
     >
-      {willEdit ? (
-        // Pencil — click to edit (currently in preview)
+      {showPencil ? (
         <svg
           width={16}
           height={16}
@@ -665,7 +675,6 @@ function ModeToggle({ mode, onClick }: ModeToggleProps) {
           <path d="M12 20 h9 M16.5 3.5 a2.12 2.12 0 0 1 3 3 L7 19 l-4 1 1 -4 z" />
         </svg>
       ) : (
-        // Eye — click to preview (currently in source)
         <svg
           width={16}
           height={16}
@@ -732,7 +741,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
     return <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>Loading…</div>
   }
 
-  if (tab.mode === 'source') {
+  if (tab.mode === 'source' || tab.mode === 'live') {
     // Phase 5: markdown tabs with an open kernel session route their
     // edits through `com.nexus.editor::apply_transaction` via the
     // bridge — `onChange` becomes a no-op for the hot path and the
@@ -746,10 +755,15 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
       isMarkdown(tab.name) &&
       runtime.sessionManager.refcount(tab.relpath) > 0
 
+    // `key` prefix differs per-mode so toggling source ↔ live cleanly
+    // remounts CodeMirrorHost rather than trying to reconcile the
+    // extension list in place.
+    const keyPrefix = tab.mode === 'live' ? 'live' : (bridgeEligible ? 'bridge' : 'local')
+
     if (bridgeEligible && runtime) {
       return (
         <CodeMirrorHost
-          key={`bridge:${tab.relpath}`}
+          key={`${keyPrefix}:${tab.relpath}`}
           ref={cmViewRef}
           className="nexus-editor-source"
           value={tab.content}
@@ -770,19 +784,22 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
             },
             onError: runtime.reportBridgeError,
           }}
-          buildExtensions={() => [
-            transactionBridge({
-              relpath: tab.relpath,
-              kernelClient: runtime.kernelClient,
-              getSnapshot: () => runtime.sessionManager.getSnapshot(tab.relpath),
-              onError: runtime.reportBridgeError,
-            }),
-            slashCommandExt(),
-            blockSelectionExt(),
-            blockHandleExt(),
-            inputRulesExt(),
-            inlineToolbarExt(),
-          ]}
+          buildExtensions={() => {
+            const base = [
+              transactionBridge({
+                relpath: tab.relpath,
+                kernelClient: runtime.kernelClient,
+                getSnapshot: () => runtime.sessionManager.getSnapshot(tab.relpath),
+                onError: runtime.reportBridgeError,
+              }),
+              slashCommandExt(),
+              blockSelectionExt(),
+              blockHandleExt(),
+              inputRulesExt(),
+              inlineToolbarExt(),
+            ]
+            return tab.mode === 'live' ? [...base, livePreviewExt()] : base
+          }}
         />
       )
     }
@@ -790,11 +807,12 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
     // Untitled / non-markdown / pre-session fallback — Phase 2 behaviour.
     return (
       <CodeMirrorHost
-        key={`local:${tab.relpath}`}
+        key={`${keyPrefix}:${tab.relpath}`}
         ref={cmViewRef}
         className="nexus-editor-source"
         value={tab.content}
         onChange={(v) => useEditorStore.getState().setContent(tab.relpath, v)}
+        buildExtensions={tab.mode === 'live' ? () => [livePreviewExt()] : undefined}
       />
     )
   }

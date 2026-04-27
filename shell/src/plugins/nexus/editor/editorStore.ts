@@ -2,11 +2,13 @@ import { create } from 'zustand'
 import type { TransactionId } from './types.ts'
 
 /**
- * Preview vs source view mode, per tab. `preview` renders the file's
- * content (markdown → sanitised HTML, otherwise a raw <pre>).
- * `source` swaps in an editable textarea over the raw content.
+ * View mode per tab.
+ *   - `live` (default): single CM6 surface with WYSIWYG decorations —
+ *     markdown syntax marks hide on lines outside the selection.
+ *   - `source`: raw CM6 buffer with all marks visible.
+ *   - `preview`: rendered HTML (read-only).
  */
-export type EditorTabMode = 'preview' | 'source'
+export type EditorTabMode = 'live' | 'source' | 'preview'
 
 /**
  * One open file buffer in the tab collection. `relpath` is
@@ -16,7 +18,7 @@ export type EditorTabMode = 'preview' | 'source'
  * string when the bytes couldn't be decoded as UTF-8.
  *
  * `savedContent` tracks the last-known-on-disk value; equality with
- * `content` means the tab is clean. `mode` defaults to `preview` on
+ * `content` means the tab is clean. `mode` defaults to `live` on
  * open and flips per-tab via the mode-toggle button.
  *
  * Loading / error live per-tab so a failed load on tab X doesn't
@@ -28,7 +30,7 @@ export interface EditorTab {
   content: string
   /** Last-known-on-disk content. `content === savedContent` ⇒ clean. */
   savedContent: string
-  /** Per-tab preview/source mode. Defaults to `preview` on open. */
+  /** Per-tab view mode. Defaults to `live` on open. */
   mode: EditorTabMode
   loading: boolean
   error: string | null
@@ -115,7 +117,7 @@ interface EditorState {
    * Add (or raise) a tab for `relpath`. When the tab already exists
    * it simply becomes active — no refetch. Returns `true` if a new
    * tab was created so the caller knows whether to kick off the
-   * read. Newly-created tabs start in `loading: true` + `mode: 'preview'`.
+   * read. Newly-created tabs start in `loading: true` + `mode: 'live'`.
    */
   openTab: (relpath: string, name: string) => boolean
   /**
@@ -148,7 +150,7 @@ interface EditorState {
    * by the save command after the kernel confirms the write.
    */
   markSaved: (relpath: string) => void
-  /** Flip per-tab preview/source mode. */
+  /** Flip per-tab view mode. */
   setMode: (relpath: string, mode: EditorTabMode) => void
   /**
    * Remove a tab. If it was active, picks a new active tab:
@@ -211,7 +213,8 @@ export function isDirty(tab: EditorTab): boolean {
  * Multi-file editor state. A `files:open` event either raises an
  * existing tab (same relpath) or appends a new one; the active tab
  * drives the render in `EditorView`. Each tab carries its own
- * preview/source mode and a last-saved snapshot for dirty tracking.
+ * view mode (live/source/preview) and a last-saved snapshot for
+ * dirty tracking.
  */
 export const useEditorStore = create<EditorState>((set, get) => ({
   tabs: [],
@@ -314,7 +317,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       name,
       content: '',
       savedContent: '',
-      mode: 'preview',
+      mode: 'live',
       loading: true,
       error: null,
     }
@@ -413,7 +416,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       name,
       content: '',
       savedContent: '',
-      mode: 'preview',
+      mode: 'live',
       loading: false,
       error: null,
     }
