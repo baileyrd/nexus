@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
 import type { KernelAPI, EventsAPI } from '../../../types/plugin'
@@ -105,6 +106,22 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(container)
+    // WebGL renderer must be loaded after open() so the canvas exists.
+    // On context loss (GPU reset, tab suspended too long) dispose the
+    // addon — xterm falls back to its DOM renderer automatically and
+    // the next mount will re-attach a fresh WebGL context.
+    let webgl: WebglAddon | null = new WebglAddon()
+    webgl.onContextLoss(() => {
+      webgl?.dispose()
+      webgl = null
+    })
+    try {
+      term.loadAddon(webgl)
+    } catch {
+      // No WebGL support (headless tests, ancient GPU) — fall back to
+      // the default DOM renderer silently.
+      webgl = null
+    }
     term.focus()
 
     // Re-apply theme + font when the kernel theme switches. Subscribed
@@ -292,6 +309,9 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       } catch {}
       try {
         unsubTheme()
+      } catch {}
+      try {
+        webgl?.dispose()
       } catch {}
       try {
         term.dispose()
