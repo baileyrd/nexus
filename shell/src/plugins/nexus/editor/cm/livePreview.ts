@@ -1,40 +1,34 @@
-import type { Extension } from '@codemirror/state'
-import {
-  Decoration,
-  EditorView,
-  ViewPlugin,
-  type DecorationSet,
-  type ViewUpdate,
-} from '@codemirror/view'
+import { StateField, type Extension } from '@codemirror/state'
+import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
 import { buildLivePreviewDecorations } from './livePreviewDecorations'
 
 /**
- * Live-preview ViewPlugin. Recomputes the decoration set on every doc
- * change, selection change, and viewport change so syntax marks fade
- * in/out as the cursor moves between lines.
+ * Decoration source must be a `StateField` rather than a `ViewPlugin` —
+ * the HR widget is a block decoration, and CM6 disallows block decorations
+ * from plugin-provided sources (`RangeError: Block decorations may not be
+ * specified via plugins`).
  *
- * The atomic-ranges provider guarantees cursor motion can't park
- * inside a hidden replace range — left/right arrow steps over the
- * whole `**` rather than landing inside it.
+ * The field recomputes whenever the doc changes or the selection moves so
+ * syntax marks fade in/out as the cursor crosses lines. Atomic ranges keep
+ * the cursor from parking inside a hidden replace.
  */
 export function livePreviewExt(): Extension {
-  const plugin = ViewPlugin.fromClass(
-    class {
-      decorations: DecorationSet
-      constructor(view: EditorView) {
-        this.decorations = buildLivePreviewDecorations(view.state)
-      }
-      update(u: ViewUpdate): void {
-        if (u.docChanged || u.selectionSet || u.viewportChanged) {
-          this.decorations = buildLivePreviewDecorations(u.state)
-        }
-      }
+  const field = StateField.define<DecorationSet>({
+    create(state) {
+      return buildLivePreviewDecorations(state)
     },
-    {
-      decorations: (v) => v.decorations,
-      provide: (p) =>
-        EditorView.atomicRanges.of((view) => view.plugin(p)?.decorations ?? Decoration.none),
+    update(value, tr) {
+      if (tr.docChanged || tr.selection) {
+        return buildLivePreviewDecorations(tr.state)
+      }
+      return value
     },
-  )
-  return [plugin]
+    provide(f) {
+      return [
+        EditorView.decorations.from(f),
+        EditorView.atomicRanges.of((view) => view.state.field(f) ?? Decoration.none),
+      ]
+    },
+  })
+  return [field]
 }
