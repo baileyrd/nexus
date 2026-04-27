@@ -41,6 +41,8 @@ Capabilities described in legacy `app/` documentation that were not carried over
 - [ ] **OI-16: `beforeunload` → `onStop` for script plugins** — Window-close hook with 1s per-plugin soft cap so flush-on-stop handlers run on ⌘Q.
 - [ ] **OI-17: Deprecation policy + `@deprecated` JSDoc** — `packages/nexus-extension-api/DEPRECATED.md` + JSDoc tags + ESLint rule failing imports of deprecated names.
 - [ ] **OI-18: Snippet trigger collision detection** — Same hazard as OI-10 but for snippets; emit `plugins:snippet-conflict` and surface a "which plugin wins" control.
+- [ ] **OI-19: Defer createRoot/unmount in pane views** — `TerminalPaneView.onClose` and `EmptyView.onClose` call `root.unmount()` synchronously from inside `Leaf.attachContainer` (re-home path on sidedock collapse/reopen), tripping React 18 "Attempted to synchronously unmount a root while React was already rendering" + "createRoot called on a container that has already been passed to createRoot before". Defer the unmount/createRoot to a microtask so React finishes its commit first.
+- [ ] **OI-20: Terminal copy/paste** — xterm has built-in selection but no copy/paste is wired up in `TerminalView.tsx`. Need Ctrl+Shift+C / Ctrl+Shift+V (and Cmd+C / Cmd+V on macOS — note plain Ctrl+C must stay SIGINT to the PTY), right-click context menu, and routing through `navigator.clipboard` with the Tauri clipboard plugin as fallback. Bracketed-paste mode should be honored so the shell can opt into safe paste handling.
 
 ### Resolved (preserved here for cross-reference; full notes in [../OPEN-ITEMS.md](../OPEN-ITEMS.md))
 
