@@ -37,7 +37,6 @@ Capabilities described in legacy `app/` documentation that were not carried over
 - [ ] **OI-10: Keybinding-conflict detection + UI** — Detect chord collisions in `KeybindingRegistry.register{FromManifest,Override}`, emit `plugins:keybindings-conflict`, show conflict rows in Settings → Keybindings.
 - [ ] **OI-11: UI-thread time budget on plugin command dispatch** — Wrap `CommandRegistry.execute` in await-with-timeout (warn @250ms, hard cancel @5s, configurable), publish `command:cancelled`.
 - [ ] **OI-12: Document or remove absolute-path auto-promotion** — `read_file`/`write_file` silently escalate absolute paths to `FsReadExternal` / `FsWriteExternal`. Either document on `PlatformFsAPI` JSDoc + audit-log it, or remove and fail loudly.
-- [ ] **OI-13: Reconcile kernel-side `PluginRegistry` with `PluginLoader::loaded`** — Delete the dead `crates/nexus-kernel/src/plugin_registry.rs` + `Kernel::plugins()` (zero callers); update microkernel ADR.
 - [ ] **OI-15: Manifest signature / provenance** — Optional `manifest.toml.sig` Ed25519 over manifest bytes, verified against trusted-publisher keyring. Marketplace prerequisite (paired with WI-44).
 - [ ] **OI-16: `beforeunload` → `onStop` for script plugins** — Window-close hook with 1s per-plugin soft cap so flush-on-stop handlers run on ⌘Q.
 - [ ] **OI-17: Deprecation policy + `@deprecated` JSDoc** — `packages/nexus-extension-api/DEPRECATED.md` + JSDoc tags + ESLint rule failing imports of deprecated names.
@@ -53,6 +52,7 @@ Capabilities described in legacy `app/` documentation that were not carried over
 - [x] OI-07 — Capability grants/denials/path-traversal routed through `audit::*` _(2026-04-24)_
 - [x] OI-08 — "Running Extensions" Settings tab (live plugin state + errors + Disable) _(2026-04-26)_
 - [x] OI-09 — `pluginsStatusStore` aggregates plugin lifecycle events into a per-plugin `{ state, lastError }` map _(2026-04-26)_
+- [x] OI-13 — Deleted dead `nexus_kernel::PluginRegistry` + `Kernel::plugins()` (zero callers; `PluginLoader::loaded` is authoritative) _(2026-04-26)_
 - [x] OI-14 — `api.workspace.forgeRoot()` + `api.editor.active()/onChange()` exposed via `@nexus/extension-api` _(2026-04-26)_
 
 ---

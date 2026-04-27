@@ -7,9 +7,8 @@ use crate::config::KernelConfig;
 use crate::error::Result;
 use crate::event_bus::EventBus;
 use crate::kv_store::KvStore;
-use crate::plugin_registry::PluginRegistry;
 
-/// The Nexus kernel. Owns the event bus and plugin registry.
+/// The Nexus kernel. Owns the event bus, KV store, and lifecycle flag.
 ///
 /// Usage:
 /// ```ignore
@@ -21,18 +20,15 @@ use crate::plugin_registry::PluginRegistry;
 /// kernel.shutdown().await?;
 /// ```
 ///
-/// **Concurrency note:** In PRD 01 scope, the plugin registry has no
-/// runtime mutations (no plugins are ever loaded) so it's stored directly
-/// without interior mutability. When `nexus-plugins` lands and adds
-/// real plugin discovery and hot-reload, it will refactor this to wrap
-/// the registry in a `RwLock` or similar. That refactor is a local change
-/// to this file — it does not affect the public contract of `plugins()`.
+/// **Plugin tracking lives elsewhere.** The authoritative map of loaded
+/// plugins is `nexus_plugins::PluginLoader::loaded`. The kernel does not
+/// hold a parallel registry — see OI-13 for the cleanup that removed the
+/// always-empty `Kernel::plugins()` accessor.
 #[derive(Debug)]
 pub struct Kernel {
     config: KernelConfig,
     event_bus: Arc<EventBus>,
     kv_store: Arc<dyn KvStore>,
-    plugins: PluginRegistry,
     shutdown_flag: Arc<AtomicBool>,
 }
 
@@ -53,14 +49,12 @@ impl Kernel {
     /// forward compatibility with future validation.
     pub fn new(config: KernelConfig, kv_store: Arc<dyn KvStore>) -> Result<Self> {
         let event_bus = Arc::new(EventBus::new(config.event_bus_capacity));
-        let plugins = PluginRegistry::new();
         let shutdown_flag = Arc::new(AtomicBool::new(false));
 
         Ok(Self {
             config,
             event_bus,
             kv_store,
-            plugins,
             shutdown_flag,
         })
     }
@@ -129,16 +123,6 @@ impl Kernel {
         Ok(())
     }
 
-    /// Get a read-only handle to the plugin registry. Used by `nexus-cli` for
-    /// introspection commands like `nexus plugin list`.
-    ///
-    /// Synchronous accessor in PRD 01 scope. When `nexus-plugins` adds
-    /// runtime mutations, this signature may change to return a
-    /// `RwLockReadGuard` — a refactor local to this file.
-    #[must_use]
-    pub fn plugins(&self) -> &PluginRegistry {
-        &self.plugins
-    }
 }
 
 #[cfg(test)]
@@ -201,11 +185,4 @@ mod tests {
         kernel.shutdown().await.unwrap();  // no panic, no error
     }
 
-    #[test]
-    fn plugins_accessor_returns_empty_registry_before_start() {
-        let config = KernelConfig::for_testing(PathBuf::from("/tmp/nexus-plugins-accessor"));
-        let kernel = Kernel::new(config, kv()).unwrap();
-        let registry = kernel.plugins();
-        assert!(registry.is_empty());
-    }
 }

@@ -94,20 +94,6 @@ async fn smoke_multiple_shutdown_calls_are_idempotent() {
     kernel.shutdown().await.unwrap();  // must not panic or error
 }
 
-#[tokio::test]
-async fn smoke_plugin_registry_is_empty_in_prd_01_scope() {
-    let forge = TempForge::new("empty-registry");
-    let config = KernelConfig::for_testing(forge.path.clone());
-    let kernel = Kernel::new(config, kv()).unwrap();
-    kernel.start().await.unwrap();
-
-    let registry = kernel.plugins();
-    assert!(registry.is_empty(), "no plugins should be loaded in PRD 01 scope");
-    assert_eq!(registry.len(), 0);
-
-    kernel.shutdown().await.unwrap();
-}
-
 // A compile-check test: ensures every public type from the interface spec §3
 // can be named. If any of these names break, the contract has regressed.
 #[test]
@@ -116,7 +102,7 @@ fn smoke_all_public_types_importable() {
         BusError, Capability, CapabilityError, CapabilityParseError, CapabilitySet, ConfigError,
         Error, EventBus, EventFilter, EventMetadata, EventSubscription, IpcError, Kernel,
         KernelConfig, KvError, LogLevel, NexusEvent, PluginContext, PluginError, PluginInfo,
-        PluginRegistry, PluginStatus, PublishedEvent, RecvError, Result,
+        PluginStatus, PublishedEvent, RecvError, Result,
         StopReason, TrustLevel,
     };
 
@@ -150,7 +136,6 @@ fn smoke_all_public_types_importable() {
         let _: std::marker::PhantomData<Kernel>           = std::marker::PhantomData;
         let _: std::marker::PhantomData<EventBus>         = std::marker::PhantomData;
         let _: std::marker::PhantomData<EventSubscription> = std::marker::PhantomData;
-        let _: std::marker::PhantomData<PluginRegistry>   = std::marker::PhantomData;
         let _: std::marker::PhantomData<dyn PluginContext> = std::marker::PhantomData;
         type _R = Result<()>;
     }

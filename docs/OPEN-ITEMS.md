@@ -267,17 +267,21 @@ The original AC mentioned filtering on `target = "audit"`. The implemented audit
 
 **Severity:** Tech debt (dead code path + two sources of truth)
 **Surfaced by:** MICROKERNEL-AUDIT.md F-1.2.1 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-26.
 
-### Gap
-`crates/nexus-kernel/src/plugin_registry.rs` still exists and `Kernel::plugins()` (`kernel.rs:139`) returns it — but nothing populates it at runtime; `PluginLoader::loaded` in `nexus-plugins` is the authoritative map. Callers that reach for `kernel.plugins()` get an empty view.
+### Outcome
+- Deleted [`crates/nexus-kernel/src/plugin_registry.rs`](../crates/nexus-kernel/src/plugin_registry.rs) entirely.
+- Removed the `plugins: PluginRegistry` field from [`Kernel`](../crates/nexus-kernel/src/kernel.rs) along with `Kernel::plugins()` and the `pub use plugin_registry::PluginRegistry;` re-export from `lib.rs`.
+- Cleaned up the matching test in `kernel.rs::tests::plugins_accessor_returns_empty_registry_before_start` and the `smoke_plugin_registry_is_empty_in_prd_01_scope` smoke test in `tests/smoke_kernel.rs`. The "all public types importable" smoke test no longer references `PluginRegistry`.
+- Updated `Kernel`'s top-of-file doc comment to point future readers at `nexus_plugins::PluginLoader::loaded` as the authoritative live map.
+- Updated the C4 component diagram in [`docs/architecture/C4.md`](../docs/architecture/C4.md) and the kernel component table in [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) to drop the `PluginRegistry` component box and its relationships.
 
-### Scope
-- Either delete `kernel-side PluginRegistry` + `Kernel::plugins()` (preferred; zero callers today), OR delegate `Kernel::plugins()` to `PluginLoader::loaded`.
-- Update the microkernel ADR if deletion is chosen.
+No ADR needed updating — none of the 16 ADRs reference `PluginRegistry`.
 
 ### Acceptance
-- Zero references to `nexus_kernel::PluginRegistry` outside `plugin_registry.rs` itself (already true) — plus the module itself is gone.
+- ✅ Zero references to `nexus_kernel::PluginRegistry` anywhere in the workspace.
+- ✅ `cargo build --workspace` and `cargo test -p nexus-kernel` pass.
+- ✅ Pre-existing failures elsewhere (theme builtins-parse, nexus-ai clippy lints) are unrelated and unchanged.
 
 ---
 

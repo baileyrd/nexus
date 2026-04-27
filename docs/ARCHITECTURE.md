@@ -240,7 +240,6 @@ C4Component
         Component(ctx, "PluginContext (trait)", "async_trait", "read_file, write_file,<br/>ipc_call, kv_*, publish,<br/>subscribe, log")
         Component(ctximpl, "KernelPluginContext", "struct", "Concrete PluginContext<br/>wired to kernel + capabilities")
         Component(caps, "Capability / CapabilitySet", "string hierarchy", "fs.*, kv.*, ipc.*,<br/>events.*, net.*, exec.*")
-        Component(reg, "PluginRegistry", "HashMap", "PluginInfo, PluginStatus,<br/>lifecycle state")
         Component(kvtrait, "KvStore (trait)", "async", "get / set / delete /<br/>list_prefix")
         Component(events, "NexusEvent (enum)", "serde", "PluginLoaded/Started/Stopped,<br/>CapabilityGranted/Denied,<br/>Custom { type_id, payload }")
     }
@@ -265,7 +264,6 @@ C4Component
     Rel(ctx, caps, "check before op")
     Rel(ctximpl, ctx, "implements")
     Rel(eventbus, events, "carries")
-    Rel(reg, events, "emits lifecycle")
 
     Rel(loader, ipc, "implements")
     Rel(loader, core, "owns / dispatches to")
@@ -273,7 +271,6 @@ C4Component
     Rel(sandbox, comm, "instantiates")
     Rel(hostfns, ctx, "delegates to")
     Rel(hot, loader, "triggers stop/reload")
-    Rel(manifest, reg, "registers info")
     Rel(settings, kvtrait, "stores under _settings")
     Rel(kvtrait, kv, "backed by")
 ```
