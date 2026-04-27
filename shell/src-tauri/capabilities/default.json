@@ -27,6 +27,7 @@
     "fs:allow-remove",
     "fs:allow-rename",
     "fs:allow-watch",
-    "deep-link:default"
+    "deep-link:default",
+    "window-state:default"
   ]
 }

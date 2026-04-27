@@ -346,6 +346,11 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
+        // Persist window size, position, and maximized state across
+        // launches. The plugin saves on close/move/resize/maximize and
+        // restores on window creation; without it the size hard-coded
+        // in tauri.conf.json (1280x800) is reapplied every boot.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(bridge::KernelRuntime::new())
         // E2E-only: if NEXUS_E2E_VAULT is set, init + boot the kernel here
         // directly (bypassing the webview IPC path). Webdriver-injected

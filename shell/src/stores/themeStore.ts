@@ -85,6 +85,12 @@ interface ThemeStore {
   // are kept so consumers can pick whichever shape is more ergonomic.
   availableSnippets: AvailableSnippet[]
   activeThemeId: string | null
+  // Mirrors the kernel's `ThemeMode` (`'light' | 'dark' | 'system'`).
+  // Distinct from the legacy `theme` field, which excludes `'system'`
+  // and is written to the DOM density attribute path. `kernelMode` is
+  // persisted so the user's `set_mode` choice survives restart and is
+  // pushed back to the kernel via `apply_config` on hydrate.
+  kernelMode: ThemeMode
   resolvedVariables: Record<string, string>
   enabledSnippets: string[]
   loaded: boolean
@@ -105,9 +111,16 @@ interface ThemeStore {
   applyResolvedVariables: () => void
 }
 
-// Persisted half (legacy fields only — kernel state is rehydrated
-// fresh from the engine on every boot).
-type PersistedShape = Pick<ThemeStore, 'theme' | 'density'>
+// Persisted half. Includes the kernel-mirrored selection
+// (`activeThemeId`, `kernelMode`, `enabledSnippets`) so the user's
+// theme choice survives restart — the kernel theme plugin holds only
+// in-memory state, so the shell is the persistence layer. On boot,
+// `hydrate()` pushes the persisted snapshot to the kernel via
+// `apply_config` before reading back the resolved variables.
+type PersistedShape = Pick<
+  ThemeStore,
+  'theme' | 'density' | 'activeThemeId' | 'kernelMode' | 'enabledSnippets'
+>
 
 function applyToDom(_theme: ThemeMode, density: Density) {
   // The legacy `data-theme` attribute is no longer written — the
@@ -157,16 +170,45 @@ export const useThemeStore = create<ThemeStore>()(
 
       // Kernel-mirrored defaults. `loaded` flips true once hydrate()
       // has populated from the engine at least once; consumers can
-      // gate UI on it to avoid flashing empty lists.
+      // gate UI on it to avoid flashing empty lists. `kernelMode`
+      // defaults to `'system'` to match the kernel's `ThemeMode::default()`.
       availableThemes: [],
       availableSnippets: [],
       activeThemeId: null,
+      kernelMode: 'system',
       resolvedVariables: {},
       enabledSnippets: [],
       loaded: false,
       appliedVariableNames: [],
 
       hydrate: async (api: PluginAPI) => {
+        // Restore the persisted selection into the kernel before
+        // reading state back. The kernel's theme plugin only holds
+        // in-memory state (`ThemeCorePlugin::with_builtins(...)` in
+        // crates/nexus-bootstrap/src/lib.rs) — without this push the
+        // engine boots into its hard-coded default and the user's
+        // last `setActiveTheme` / `setMode` choice is lost on every
+        // restart. `apply_config` (handler 9) silently drops unknown
+        // theme/snippet ids, so a stale persist blob can't poison
+        // boot.
+        const persisted = get()
+        if (persisted.activeThemeId) {
+          try {
+            await api.kernel.invoke(THEME_PLUGIN_ID, 'apply_config', {
+              config: {
+                theme_id: persisted.activeThemeId,
+                mode: persisted.kernelMode,
+                enabled_snippets: persisted.enabledSnippets,
+              },
+            })
+          } catch (err) {
+            console.warn(
+              '[themeStore] apply_config (restore) failed; falling back to kernel default',
+              err,
+            )
+          }
+        }
+
         // Three parallel round-trips: the config snapshot, the list of
         // available themes, and the list of snippets. Each one is
         // best-effort — if the `com.nexus.theme` kernel plugin isn't
@@ -215,6 +257,7 @@ export const useThemeStore = create<ThemeStore>()(
 
         set({
           activeThemeId: config?.theme_id ?? null,
+          kernelMode: config?.mode ?? get().kernelMode,
           enabledSnippets: config?.enabled_snippets ?? [],
           availableThemes,
           availableSnippets,
@@ -243,6 +286,12 @@ export const useThemeStore = create<ThemeStore>()(
 
       setMode: async (api: PluginAPI, mode: ThemeMode) => {
         await api.kernel.invoke(THEME_PLUGIN_ID, 'set_mode', { mode })
+        // Track the kernel-side mode separately from the legacy
+        // `theme` slot — the legacy field can't represent `'system'`,
+        // so persisting it alone would lose the user's choice across
+        // restart. `kernelMode` is what `hydrate()` ships back to the
+        // kernel via `apply_config`.
+        set({ kernelMode: mode })
         // The kernel records the mode preference but doesn't auto-pick
         // a theme — the chrome only repaints when the active theme
         // changes. Find the first available theme whose category
@@ -309,14 +358,32 @@ export const useThemeStore = create<ThemeStore>()(
     }),
     {
       name: 'shell-theme',
-      version: 1,
-      // Persist only the legacy local fields. Kernel-mirrored state
-      // is fetched fresh on boot — persisting it would risk drift
-      // from the on-disk theme config.
+      version: 2,
+      // Persist the legacy local fields *and* the kernel-mirrored
+      // selection. The kernel theme plugin only holds in-memory state,
+      // so without persisting `activeThemeId` / `kernelMode` /
+      // `enabledSnippets` here the user's choice resets to the
+      // built-in default on every restart. `hydrate()` pushes this
+      // snapshot back to the kernel via `apply_config` before reading
+      // resolved variables, so the engine's runtime state matches the
+      // persisted UI selection.
       partialize: (state): PersistedShape => ({
         theme: state.theme,
         density: state.density,
+        activeThemeId: state.activeThemeId,
+        kernelMode: state.kernelMode,
+        enabledSnippets: state.enabledSnippets,
       }),
+      // v1 → v2 migration: v1 only persisted `{theme, density}`. We
+      // pass the v1 blob through unchanged — the new kernel-mirrored
+      // fields fall back to their store defaults via Zustand's
+      // shallow merge (activeThemeId: null, kernelMode: 'system',
+      // enabledSnippets: []). A null `activeThemeId` makes `hydrate()`
+      // skip the `apply_config` restore path on the first post-upgrade
+      // boot, so the kernel's built-in default is used until the user
+      // picks a theme. Without this function, a version mismatch
+      // would discard `theme`/`density` too.
+      migrate: (persisted, _version) => persisted as PersistedShape,
       onRehydrateStorage: () => (state) => {
         if (state) applyToDom(state.theme, state.density)
       },
