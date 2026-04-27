@@ -358,18 +358,19 @@ No ADR needed updating — none of the 16 ADRs reference `PluginRegistry`.
 
 **Severity:** Should-fix (API evolution hygiene)
 **Surfaced by:** UI-AUDIT.md F-9.3.1 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-27.
 
-### Gap
-`@nexus/extension-api` is stamped `1.0.0` but there is no deprecation channel. Removing a DTO field mid-1.x would silently break plugins.
+### Outcome
+- New [`packages/nexus-extension-api/DEPRECATED.md`](../packages/nexus-extension-api/DEPRECATED.md) — the live registry of currently-active deprecations within `@nexus/extension-api`, with an explicit three-step protocol (JSDoc + table row + ESLint entry) for adding a new entry. Pointers in / out: it links to the historical archive at the repo root (`/DEPRECATED.md`) and to the eslint config; the package source's top-of-file doc-comment now points at it as the canonical "how to deprecate" reference.
+- New `no-restricted-imports` block in [`shell/eslint.config.js`](../shell/eslint.config.js) keyed on `@nexus/extension-api` with an empty `importNames: []`. Empty list = no-op; future deprecations add a name and the rule fires on every shell import as a CI error. Manually verified the wiring by temporarily setting `importNames: ['SlotId']` (a real export imported by `shell/src/types/plugin.ts` + two other files) — lint went from 0 errors → 3 errors with the documented "deprecated — see DEPRECATED.md" message attached. Reverted to `[]` for the committed state.
+- No `@deprecated` JSDoc tags added to the source: `grep '@deprecated' packages/nexus-extension-api/src/index.ts` returns zero hits today, and there are no replaced surfaces sitting around. The infrastructure is in place; the first real deprecation only has to add to all three locations.
 
-### Scope
-- `packages/nexus-extension-api/DEPRECATED.md` lists deprecated surfaces with a target removal version.
-- `@deprecated` JSDoc tag on each deprecated field in `src/index.ts`.
-- ESLint rule `no-restricted-syntax` (or `import/no-deprecated` via the typescript-eslint plugin) fails the shell lint when it imports a deprecated name.
+### Trade-offs recorded
+- The original spec called for `@typescript-eslint/no-deprecated` (or `import/no-deprecated`), both of which are type-aware and require `parserOptions.project`. The existing eslint config explicitly defers type-aware linting on lint-cost grounds (see the comment block at the top of `shell/eslint.config.js`). `no-restricted-imports` keeps the gate non-type-aware at the cost of one manual edit per deprecation — recorded as the trade-off in `DEPRECATED.md`. When type-aware lint becomes affordable, the manual `importNames` table can be retired in favour of the typed rule.
 
 ### Acceptance
-- A plugin author gets a TS compile-time warning when they use a deprecated DTO.
+- ✅ A plugin author who imports a deprecated name fails their shell lint run with a message pointing at `DEPRECATED.md` (manually verified end-to-end against `SlotId` as a probe).
+- ✅ The IDE-time signal is the standard `@deprecated` JSDoc strikethrough — when the first real deprecation lands, the author hits both signals: editor strikethrough + CI failure.
 
 ---
 

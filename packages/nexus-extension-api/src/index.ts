@@ -34,6 +34,19 @@
  * - CM6 extension types. Plugins that contribute editor decorations
  *   still depend on `@codemirror/*` directly — we re-export only the
  *   host-facing `Extension` opaque reference.
+ *
+ * ## Deprecating an export (OI-17)
+ *
+ * Three coordinated edits in one PR:
+ *   1. `@deprecated` JSDoc on the symbol below — TypeScript's language
+ *      service surfaces the strikethrough + warning at author time.
+ *   2. A row in `DEPRECATED.md` (next to this file) describing the
+ *      replacement and the target removal version.
+ *   3. An `importNames` entry in `shell/eslint.config.js`'s
+ *      `no-restricted-imports` block — the CI gate.
+ *
+ * See `DEPRECATED.md` for the full protocol. Removed surfaces graduate
+ * to the historical archive in `/DEPRECATED.md` at the repo root.
  */
 
 // Re-export ts-rs–generated Rust contract types (Capability, IpcError,
