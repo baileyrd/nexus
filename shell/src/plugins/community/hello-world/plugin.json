@@ -3,7 +3,7 @@
   "name": "Hello World",
   "version": "1.0.0",
   "main": "index.js",
-  "enabled": true,
+  "enabled": false,
   "description": "Example community plugin — sandboxed. Registers a 'Say Hello' command that prompts for a name and fires a notification.",
   "author": "you",
   "apiVersion": 1,
