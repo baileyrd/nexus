@@ -386,7 +386,7 @@ Two plugins that register snippets with the same trigger string silently overwri
 
 **Severity:** Nice-to-have (warnings only — no functional breakage today, but a real concurrency hazard)
 **Surfaced by:** Manual smoke test 2026-04-27 — collapsing/reopening the bottom drawer with the terminal mounted prints two React warnings per re-home.
-**Status:** Not started
+**Status:** Resolved 2026-04-27. `TerminalPaneView.onClose` + `EmptyView.onClose` now defer `root.unmount()` (and the EmptyView host removal) to a `queueMicrotask`, and `TerminalPaneView.onOpen` treats a same-element call as a re-render so React 18 StrictMode dev double-mounts no longer trip the duplicate-`createRoot` warning. EmptyView's existing same-`el` defensive block was updated to use the same deferred-unmount pattern so its branch is symmetric.
 
 ### Gap
 `Leaf.attachContainer` re-homes a view to a fresh container via `await view.onClose(); await view.onOpen(el)` (see `shell/src/workspace/Leaf.ts:186-189`). Both `TerminalPaneView` (`shell/src/plugins/nexus/terminal/TerminalPaneView.tsx:28-31`) and `EmptyView` invoke `root.unmount()` and `createRoot(el)` synchronously inside those calls. Because `attachContainer` runs from a `LeafHostInner` `useEffect` whose work overlaps with React 18's commit phase elsewhere in the tree, this trips two warnings:

@@ -250,7 +250,14 @@ export const useThemeStore = create<ThemeStore>()(
         // via matchMedia. Caller's UI may reflect mode in radio state
         // independently; we only persist the local `theme` slot for
         // backwards-compat with code that still reads it.
-        set({ theme: mode })
+        //
+        // 'system' is intentionally NOT written to the legacy `theme`
+        // slot — older callers reading `theme` expect a concrete
+        // 'light' | 'dark' value; the kernel's matchMedia resolver
+        // determines the effective theme below.
+        if (mode !== 'system') {
+          set({ theme: mode })
+        }
         if (typeof document === 'undefined') return
         const desired: 'light' | 'dark' =
           mode === 'system'

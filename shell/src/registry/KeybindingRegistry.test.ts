@@ -207,8 +207,13 @@ test('findByCommand — returns undefined for an unknown command', () => {
 })
 
 test('findByCommand — surfaces the user override as the active chord', async () => {
-  const reg = freshRegistry()
-  await reg.setOverride(memoryStorage(), 'cmd.alpha', 'Ctrl+Shift+A')
+  // setOverride requires a bound storage adapter; without bindStorage
+  // it warns + no-ops, which is why this test originally passed
+  // memoryStorage() as a positional arg (stale signature from before
+  // bindStorage was extracted). Use freshRegistryWithStorage so the
+  // override actually lands.
+  const reg = freshRegistryWithStorage(memoryStorage())
+  await reg.setOverride('cmd.alpha', 'Ctrl+Shift+A')
   const hit = reg.findByCommand('cmd.alpha')
   assert.equal(hit?.chord, 'ctrl+shift+a', 'override wins as the active chord')
   assert.equal(hit?.defaultChord, 'ctrl+a', 'default remains for revert')
