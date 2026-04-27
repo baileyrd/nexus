@@ -1395,6 +1395,12 @@ body {
   scrollbar-width: none;
 }
 .forge-tabbar::-webkit-scrollbar { display: none; }
+
+/* Hide the horizontal scrollbar on the workspace-tab-strip's inner
+   scroll container — the strip already grows/shrinks responsively, so
+   the scrollbar would only show when the user has more tabs than fit.
+   Firefox uses `scrollbar-width: none` set inline. */
+.workspace-tab-strip-scroll::-webkit-scrollbar { display: none; }
 .forge-tab {
   display: flex; align-items: center; gap: 8px;
   padding: 0 12px;

@@ -634,6 +634,13 @@ function TabStrip({
     flex: '0 0 auto',
   }
 
+  // Trailing controls (chevron, panel-toggle) must never shrink or be
+  // clipped — at narrow window widths they would otherwise slide under
+  // the absolutely-positioned WindowControls (z-index 100). They live
+  // in a fixed-width sibling container so the tabs scroll independently.
+  const reservesWindowControls =
+    sideDock === 'right' || (isMainDock && workspace.rightSplit.collapsed)
+
   return (
     <div
       className="workspace-tab-strip"
@@ -649,103 +656,118 @@ function TabStrip({
         // tab row, and the left activity bar's first icon row all
         // sit on the same horizontal line.
         minHeight: 36,
-        // Sidedocks are narrow (default 280px) and hold many icon tabs;
-        // let them scroll horizontally instead of clipping tabs past the
-        // visible area. Main dock still hides overflow — it has the
-        // tab-list dropdown for overflow access.
-        overflowX: sideDock ? 'auto' : 'hidden',
-        overflowY: 'hidden',
+        overflow: 'hidden',
         // Reserve horizontal space at the trailing edge for the absolute
         // WindowControls cluster (3 × 40px = 120px) when this tab strip is
         // the rightmost visible column. That's the right sidedock when
         // expanded, or the main dock when the right sidedock is collapsed.
-        ...(sideDock === 'right' ||
-        (isMainDock && workspace.rightSplit.collapsed)
-          ? { paddingRight: 120 }
-          : {}),
+        ...(reservesWindowControls ? { paddingRight: 120 } : {}),
       }}
     >
-      {tabs.leaves.map((leaf, i) => {
-        // Hide placeholder `empty` leaves from sidedock tab strips —
-        // they have no icon to render, and the fallback (first letter
-        // of viewType) would surface as a row of "E" buttons. Main
-        // dock keeps the tab so the user can reassign the leaf.
-        if (sideDock && leaf.view?.viewType === 'empty') return null
-        const isActive = i === tabs.activeIndex
-        return (
-          <TabButton
-            key={leaf.id}
-            leaf={leaf}
-            active={isActive}
-            canClose={tabs.leaves.length > 1}
-            onActivate={() => workspace.setTabActiveIndex(tabs.id, i)}
-            onClose={() => {
-              void workspace.detachLeaf(leaf)
+      <div
+        className="workspace-tab-strip-scroll"
+        style={{
+          display: 'flex',
+          flexDirection: 'row',
+          flex: '1 1 auto',
+          minWidth: 0,
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          scrollbarWidth: 'none',
+        }}
+      >
+        {tabs.leaves.map((leaf, i) => {
+          // Hide placeholder `empty` leaves from sidedock tab strips —
+          // they have no icon to render, and the fallback (first letter
+          // of viewType) would surface as a row of "E" buttons. Main
+          // dock keeps the tab so the user can reassign the leaf.
+          if (sideDock && leaf.view?.viewType === 'empty') return null
+          const isActive = i === tabs.activeIndex
+          return (
+            <TabButton
+              key={leaf.id}
+              leaf={leaf}
+              active={isActive}
+              canClose={tabs.leaves.length > 1}
+              onActivate={() => workspace.setTabActiveIndex(tabs.id, i)}
+              onClose={() => {
+                void workspace.detachLeaf(leaf)
+              }}
+              sideDock={sideDock}
+            />
+          )
+        })}
+        {isMainDock && (
+          <button
+            type="button"
+            aria-label="New tab"
+            title="New tab"
+            onClick={handleNewTab}
+            className="workspace-tab-new"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted, var(--fg-muted, #888))',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 8px',
+              fontSize: 12,
+              lineHeight: 1,
+              flex: '0 0 auto',
             }}
-            sideDock={sideDock}
-          />
-        )
-      })}
+          >
+            <Icon name="plus" size={14} />
+          </button>
+        )}
+        {/* Flex spacer — drag region. Fills the unused horizontal space
+            inside the scrollable container so the empty area beside the
+            tabs remains a window-drag target. Tauri's drag region only
+            applies to elements explicitly marked, so individual tabs
+            and buttons keep their click semantics. */}
+        <div
+          style={{ flex: '1 1 auto', alignSelf: 'stretch', minWidth: 0 }}
+          data-tauri-drag-region
+        />
+      </div>
+      {/* Trailing controls — pinned to the right with flex-shrink: 0 so
+          they never collide with the WindowControls or get clipped at
+          narrow window widths. */}
       {isMainDock && (
-        <button
-          type="button"
-          aria-label="New tab"
-          title="New tab"
-          onClick={handleNewTab}
-          className="workspace-tab-new"
+        <div
           style={{
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--text-muted, var(--fg-muted, #888))',
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '0 8px',
-            fontSize: 12,
-            lineHeight: 1,
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'stretch',
+            flex: '0 0 auto',
           }}
         >
-          <Icon name="plus" size={14} />
-        </button>
-      )}
-      {/* Flex spacer — drag region. Main dock: pushes the tab-list
-          dropdown chevron and the right-sidedock collapse toggle to the
-          far right. Sidedocks: fills any space past the tabs so the
-          empty area of a sidedock's tab strip is also draggable. In all
-          cases doubles as the window drag region — no dedicated title
-          bar exists, so clicking-and-dragging empty tab-strip space
-          moves the Tauri window. */}
-      <div
-        style={{ flex: '1 1 auto', alignSelf: 'stretch', minWidth: 0 }}
-        data-tauri-drag-region
-      />
-      {isMainDock && <TabListDropdown tabs={tabs} />}
-      {/* Right-sidedock collapse / expand — lives at the far right of the
-          main dock's tab strip (mirroring the activity-bar left-panel
-          toggle). Uses the PanelRight icon so the affordance matches the
-          left toggle style. Toggles collapsed state, so it also serves
-          as the re-expand control once hidden. */}
-      {isMainDock && (
-        <button
-          type="button"
-          aria-label={
-            workspace.rightSplit.collapsed
-              ? 'Show right sidebar'
-              : 'Hide right sidebar'
-          }
-          title={
-            workspace.rightSplit.collapsed
-              ? 'Show right sidebar'
-              : 'Hide right sidebar'
-          }
-          onClick={() =>
-            workspace.setSidedockCollapsed('right', !workspace.rightSplit.collapsed)
-          }
-          style={collapseButtonStyle}
-        >
-          <Icon name="panel" size={18} />
-        </button>
+          <TabListDropdown tabs={tabs} />
+          {/* Right-sidedock collapse / expand — mirrors the activity-bar
+              left-panel toggle. Uses the PanelRight icon so the affordance
+              matches the left toggle. Toggles collapsed state, so it also
+              re-expands the dock once hidden. */}
+          <button
+            type="button"
+            aria-label={
+              workspace.rightSplit.collapsed
+                ? 'Show right sidebar'
+                : 'Hide right sidebar'
+            }
+            title={
+              workspace.rightSplit.collapsed
+                ? 'Show right sidebar'
+                : 'Hide right sidebar'
+            }
+            onClick={() =>
+              workspace.setSidedockCollapsed('right', !workspace.rightSplit.collapsed)
+            }
+            style={collapseButtonStyle}
+          >
+            <Icon name="panel" size={18} />
+          </button>
+        </div>
       )}
       {/* Left sidebar collapse lives in the activity bar (single source
           of truth); no duplicate affordance in the tab strip. */}
@@ -815,6 +837,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
           padding: '0 8px',
           fontSize: 12,
           lineHeight: 1,
+          flex: '0 0 auto',
         }}
       >
         <Icon name="chevDown" size={14} />
