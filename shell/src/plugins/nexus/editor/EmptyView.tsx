@@ -41,11 +41,21 @@ class EmptyView implements View {
     // leaf (e.g. after attachContainer was called twice by React
     // StrictMode dev-only double-mount) tear down the previous host
     // first so we never have two empty-state stacks stacked.
+    // Defer the unmount + DOM removal as a unit (see `onClose`) so
+    // React's current commit phase isn't interrupted.
     if (this.hostEl && this.hostEl.parentNode === el) {
-      this.root?.unmount()
+      const oldRoot = this.root
+      const oldHost = this.hostEl
       this.root = null
-      el.removeChild(this.hostEl)
       this.hostEl = null
+      if (oldRoot) {
+        queueMicrotask(() => {
+          oldRoot.unmount()
+          oldHost.parentNode?.removeChild(oldHost)
+        })
+      } else {
+        oldHost.parentNode?.removeChild(oldHost)
+      }
     }
 
     // Render into a dedicated child div so we never mutate the
@@ -71,12 +81,23 @@ class EmptyView implements View {
   }
 
   onClose(): void {
-    this.root?.unmount()
+    // Defer unmount + DOM removal so React's current commit phase
+    // finishes before we tear the root down. Without this, the
+    // synchronous close+open inside `Leaf.attachContainer`'s re-home
+    // path trips "Attempted to synchronously unmount a root while
+    // React was already rendering."
+    const root = this.root
+    const host = this.hostEl
     this.root = null
-    if (this.hostEl && this.hostEl.parentNode) {
-      this.hostEl.parentNode.removeChild(this.hostEl)
-    }
     this.hostEl = null
+    if (root) {
+      queueMicrotask(() => {
+        root.unmount()
+        host?.parentNode?.removeChild(host)
+      })
+    } else if (host?.parentNode) {
+      host.parentNode.removeChild(host)
+    }
   }
 
   getDisplayText(): string {
