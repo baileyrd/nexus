@@ -8,13 +8,22 @@ export function buildTabContextMenu(args: {
   isUntitled: boolean
 }): ContextMenuItem[] {
   const { mode, isUntitled } = args
+  // Two adjacent toggles:
+  //   - Source ↔ Live: edit-style flip. Label tracks the destination.
+  //   - Reading view: route into / out of rendered preview.
+  const sourceToggleLabel = mode === 'source' ? 'Live preview' : 'Edit source'
   const readingViewLabel = mode === 'preview' ? 'Edit' : 'Reading view'
 
   return [
     {
       kind: 'item',
-      label: readingViewLabel,
+      label: sourceToggleLabel,
       commandId: 'nexus.editor.toggleMode',
+    },
+    {
+      kind: 'item',
+      label: readingViewLabel,
+      commandId: 'nexus.editor.toggleReadingView',
     },
     { kind: 'separator' },
     // Deferred: needs a `workspace.splitLeaf(direction)` API on workspaceStore that doesn't exist yet; out of scope for this menu.

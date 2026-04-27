@@ -36,6 +36,7 @@ const COMMAND_SAVE = 'nexus.editor.save'
 const COMMAND_NEW_UNTITLED = 'nexus.editor.newUntitled'
 const COMMAND_CLOSE_ALL = 'nexus.editor.closeAll'
 const COMMAND_TOGGLE_MODE = 'nexus.editor.toggleMode'
+const COMMAND_TOGGLE_READING_VIEW = 'nexus.editor.toggleReadingView'
 const COMMAND_FIND = 'nexus.editor.find'
 const COMMAND_REPLACE = 'nexus.editor.replace'
 const COMMAND_COPY_REL_PATH = 'nexus.editor.copyRelativePath'
@@ -95,7 +96,8 @@ export const editorPlugin: Plugin = {
         { id: COMMAND_SAVE, title: 'Save', category: 'Editor' },
         { id: COMMAND_NEW_UNTITLED, title: 'New Untitled Tab', category: 'Editor' },
         { id: COMMAND_CLOSE_ALL, title: 'Close All Tabs', category: 'Editor' },
-        { id: COMMAND_TOGGLE_MODE, title: 'Toggle Reading View', category: 'Editor' },
+        { id: COMMAND_TOGGLE_MODE, title: 'Toggle Source / Live', category: 'Editor' },
+        { id: COMMAND_TOGGLE_READING_VIEW, title: 'Toggle reading view', category: 'Editor' },
         { id: COMMAND_FIND, title: 'Find', category: 'Editor' },
         { id: COMMAND_REPLACE, title: 'Replace', category: 'Editor' },
         { id: COMMAND_COPY_REL_PATH, title: 'Copy Path (relative)', category: 'Editor' },
@@ -309,11 +311,11 @@ export const editorPlugin: Plugin = {
       // Already-open file: openTab raised it active; no refetch.
       if (!isNew) return
 
-      // openTab seeds new tabs in 'preview' mode; honour the user's
-      // default-mode preference if they've flipped it to 'source'.
-      const defaultMode = api.configuration.getValue<string>(CONFIG_DEFAULT_MODE, 'preview')
-      if (defaultMode === 'source') {
-        useEditorStore.getState().setMode(payload.relpath, 'source')
+      // openTab seeds new tabs in 'live' mode; honour the user's
+      // default-mode preference if they've flipped it.
+      const defaultMode = api.configuration.getValue<string>(CONFIG_DEFAULT_MODE, 'live')
+      if (defaultMode === 'source' || defaultMode === 'preview') {
+        useEditorStore.getState().setMode(payload.relpath, defaultMode)
       }
 
       if (isMarkdownPath(payload.name) || isMarkdownPath(payload.relpath)) {
@@ -402,10 +404,10 @@ export const editorPlugin: Plugin = {
           key: CONFIG_DEFAULT_MODE,
           title: 'Default mode for new tabs',
           description:
-            'Whether newly-opened markdown files start in rendered preview or raw source. Read at tab-open time.',
+            'Whether newly-opened markdown files start in WYSIWYG live preview, raw source, or rendered reading view. Read at tab-open time.',
           type: 'select',
-          default: 'preview',
-          options: ['preview', 'source'],
+          default: 'live',
+          options: ['live', 'source', 'preview'],
         },
       ],
     })
@@ -471,7 +473,22 @@ export const editorPlugin: Plugin = {
       const s = useEditorStore.getState()
       const tab = s.tabs.find((t) => t.relpath === s.activeRelpath)
       if (!tab) return
-      const next: EditorTabMode = tab.mode === 'preview' ? 'source' : 'preview'
+      // Cycle live ↔ source. Preview is reachable via the reading-view
+      // command / more-menu only — a user currently in preview is
+      // routed back into live so this command always lands them on an
+      // editable surface.
+      const next: EditorTabMode = tab.mode === 'source' ? 'live' : 'source'
+      s.setMode(tab.relpath, next)
+    })
+
+    api.commands.register(COMMAND_TOGGLE_READING_VIEW, async () => {
+      const s = useEditorStore.getState()
+      const tab = s.tabs.find((t) => t.relpath === s.activeRelpath)
+      if (!tab) return
+      // Flip live ↔ preview. From source, route to preview so the user
+      // exits the raw editing surface into the rendered view as the
+      // command title implies.
+      const next: EditorTabMode = tab.mode === 'preview' ? 'live' : 'preview'
       s.setMode(tab.relpath, next)
     })
 

@@ -34,6 +34,9 @@ importers:
       '@codemirror/view':
         specifier: ^6.36.0
         version: 6.41.1
+      '@lezer/markdown':
+        specifier: ^1.6.3
+        version: 1.6.3
       '@nexus/extension-api':
         specifier: workspace:*
         version: link:../packages/nexus-extension-api
