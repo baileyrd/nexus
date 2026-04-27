@@ -100,6 +100,10 @@ function isMarkdown(name: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(name)
 }
 
+function isHtml(name: string): boolean {
+  return /\.(html?|xhtml)$/i.test(name)
+}
+
 /**
  * Editor view: tab row with per-tab dirty dot + a mode-toggle button
  * at the right end of the tab row, above a body that renders the
@@ -739,6 +743,22 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
 
   if (tab.loading) {
     return <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>Loading…</div>
+  }
+
+  // HTML files render in a sandboxed iframe in live/preview mode so the
+  // document's own styles and structure are visible. `sandbox=""` blocks
+  // scripts, forms, popups, and top navigation; the file is treated as a
+  // unique origin. Source mode falls through to CM6 for raw editing.
+  if (tab.mode !== 'source' && isHtml(tab.name)) {
+    return (
+      <iframe
+        key={`html:${tab.relpath}`}
+        title={tab.name}
+        srcDoc={tab.content}
+        sandbox=""
+        style={{ width: '100%', height: '100%', border: 0 }}
+      />
+    )
   }
 
   if (tab.mode === 'source' || tab.mode === 'live') {
