@@ -253,18 +253,19 @@ The original AC mentioned filtering on `target = "audit"`. The implemented audit
 
 **Severity:** Should-fix (silent capability escalation)
 **Surfaced by:** MICROKERNEL-AUDIT.md F-6.3.1 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-04-27 — option (b), with a documented split between the two FS surfaces.
 
-### Gap
-`crates/nexus-kernel/src/context_impl.rs:142-154` silently auto-promotes an absolute path in `read_file` / `write_file` to the corresponding `FsReadExternal` / `FsWriteExternal` capability check — behaviour not documented on the plugin-API contract. A plugin whose author thinks `FsRead` is enough can unexpectedly hit `CapabilityDenied`, or worse, if the plugin declares `FsReadExternal`, can silently escape the forge root.
+### Outcome
+- Kernel side (Rust, [`KernelPluginContext::read_file`](../crates/nexus-kernel/src/context_impl.rs) / `write_file`) already had auto-promotion removed in a prior pass — `confine_path` now canonicalises every input (relative *or* absolute), prefix-checks against `forge_root_canonical`, and rejects out-of-root paths with `Error::Io(PermissionDenied)` plus an `audit::log_path_traversal_denied` event. This pass rewrote the doc comments on `confine_path`, `read_file`, and `write_file` to spell out that contract — including an explicit "no auto-promotion to `FsReadExternal`" sentence — so a future reader doesn't have to reverse-engineer it from test names.
+- Script-plugin side (TS, [`PlatformFsAPI`](../packages/nexus-extension-api/src/index.ts)) is intentionally a different shape — it's a thin pass-through to `@tauri-apps/plugin-fs` and the shell does **not** confine paths to the forge root. The interface JSDoc now documents the full path-semantics + capability contract on the type itself, with per-method `Requires FsRead/FsWrite` notes pointing back at the type's overview block. The capability check happens at the sandbox boundary (`capabilityGuard.METHOD_CAPABILITY_MAP`) — `FsRead` / `FsWrite`, no `*External` distinction.
 
-### Scope
-- Pick one: (a) keep auto-promotion but document it in `@nexus/extension-api` JSDoc on `PlatformFsAPI.read/write`, OR (b) remove auto-promotion and require plugins to pick their capability explicitly.
-- If (a), add an audit-log line per auto-promotion (fits with OI-07).
+### Coverage
+- Two new tests in [`crates/nexus-kernel/src/context_impl.rs`](../crates/nexus-kernel/src/context_impl.rs): `read_file_absolute_outside_forge_returns_typed_traversal_error` and `write_file_absolute_outside_forge_returns_typed_traversal_error`. Both pin the AC literally — `Error::Io` with `ErrorKind::PermissionDenied` and a "path traversal denied" message — so a future regression that makes the failure silent (e.g. swallowing the kind, or returning the generic capability error) trips a test rather than only an audit-log diff.
+- The pre-existing `path_traversal_emits_audit_event_through_gate` (OI-07 coverage) already verifies the audit-log line fires.
 
 ### Acceptance
-- A plugin author reading the extension-api docs knows whether an absolute path escalates to `*External` silently or fails loudly.
-- If (b): `read_file("/abs/path")` without `FsReadExternal` returns a typed error, not a silent denial.
+- ✅ A plugin author reading the `@nexus/extension-api` JSDoc knows that script-plugin FS paths are **not** confined and that the only gate is `FsRead`/`FsWrite`; the kernel docstrings cover the WASM-plugin path that **is** confined.
+- ✅ `read_file("/abs/path")` with only `FsRead` (no `FsReadExternal` exists at runtime) returns a typed `PermissionDenied` traversal error, not a silent capability denial.
 
 ---
 
