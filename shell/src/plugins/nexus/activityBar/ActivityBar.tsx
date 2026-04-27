@@ -74,6 +74,7 @@ function SidebarToggleButton() {
       style={{
         position: 'relative',
         height: 36,
+        flexShrink: 0,
         background: hover ? 'var(--bg-hover)' : 'transparent',
         border: 'none',
         color: 'var(--fg-muted)',
