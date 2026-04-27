@@ -84,6 +84,32 @@ export default tseslint.config(
       // so those sites don't block lint; sites in implementation
       // code still get flagged for review.
       '@typescript-eslint/no-explicit-any': 'warn',
+      // OI-17 — plugin-API deprecation gate. The CI-enforced half of
+      // the deprecation policy: each `importNames` entry below is
+      // mirrored by an `@deprecated` JSDoc tag in the package source
+      // and a row in `packages/nexus-extension-api/DEPRECATED.md`.
+      // Adding one of those three without the others is a process
+      // bug — see DEPRECATED.md for the protocol. The list is empty
+      // today; the rule still loads so a future deprecation only has
+      // to add a name, not stand up the rule.
+      //
+      // We use `no-restricted-imports` rather than the type-aware
+      // `@typescript-eslint/no-deprecated` because the latter requires
+      // `parserOptions.project`, which the comment at the top of this
+      // file deliberately defers on lint-cost grounds. The trade-off
+      // is that this list is hand-maintained instead of derived from
+      // the JSDoc; it's worth the manual step until type-aware lint
+      // becomes affordable.
+      'no-restricted-imports': ['error', {
+        paths: [
+          {
+            name: '@nexus/extension-api',
+            importNames: [],
+            message:
+              'This export is deprecated — see packages/nexus-extension-api/DEPRECATED.md for the replacement.',
+          },
+        ],
+      }],
     },
   },
 )

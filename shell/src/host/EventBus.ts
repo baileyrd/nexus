@@ -123,6 +123,16 @@ export interface ShellEvents {
   // that never got a handler wired).
   'command:error':            { commandId: string; pluginId?: string; error: string }
 
+  // Command dispatch hard-cancel (OI-11).
+  // Emitted by CommandRegistry.execute when a handler is still pending
+  // after `shell.command.timeoutCancelMs` (default 5000ms). The caller
+  // also receives a thrown `Error` with name `CommandCancelled` so
+  // awaiters can distinguish cancellation from a regular failure.
+  // The handler keeps executing in the background — JavaScript
+  // promises aren't natively cancellable, so this is "stop awaiting,
+  // restore UI responsiveness" rather than "kill the task".
+  'command:cancelled':        { commandId: string; pluginId?: string; thresholdMs: number }
+
   // Shell
   'shell:ready':              Record<string, never>
   'shell:themeChanged':       { themeId: string }

@@ -98,6 +98,18 @@ impl KernelPluginContext {
 
     /// Canonicalize `path` and verify it falls within `forge_root`.
     ///
+    /// Relative paths are resolved against `forge_root_canonical`; absolute
+    /// paths are taken as-is and then run through the same canonicalize +
+    /// prefix-check. There is **no auto-promotion** from `FsRead` to
+    /// `FsReadExternal` based on absoluteness — historically the kernel
+    /// silently escalated absolute paths to the `*External` capability,
+    /// which made the contract on `PlatformFsAPI.read/write` ambiguous
+    /// (OI-12, MICROKERNEL-AUDIT F-6.3.1). The current rule is simpler:
+    /// any path that canonicalizes outside `forge_root` is rejected with
+    /// an `Error::Io(PermissionDenied)` and an `audit::*` traversal
+    /// event, regardless of whether the caller passed it as a relative
+    /// or absolute path.
+    ///
     /// Returns the canonical path on success, or an `Error::Io` wrapping
     /// a permission-denied error if the path escapes the forge root.
     fn confine_path(&self, path: &Path) -> Result<PathBuf> {
@@ -153,13 +165,21 @@ impl PluginContext for KernelPluginContext {
 
     // ---- File system -----------------------------------------------------
 
+    /// Read a file inside `forge_root`.
+    ///
+    /// Requires the `FsRead` capability. The path is canonicalized and
+    /// prefix-checked against the canonical forge root by
+    /// [`confine_path`](Self::confine_path) — absolute paths outside the
+    /// forge root return `Error::Io(PermissionDenied)` and emit an
+    /// `audit::log_path_traversal_denied` event.
+    ///
+    /// **No auto-promotion** to `FsReadExternal`: a plugin that holds
+    /// only `FsRead` and passes an absolute path outside the forge gets
+    /// a loud, audit-logged failure rather than a silent capability
+    /// escalation. Reaching outside the forge requires a dedicated
+    /// external-read IPC surface that does not yet exist (OI-12 /
+    /// MICROKERNEL-AUDIT F-6.3.1).
     async fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
-        // Unified rule: read_file is confined to forge_root. Plugins that
-        // need to reach outside must request the explicit external
-        // capability and call a dedicated external-read surface (not yet
-        // exposed). Silent auto-promotion from FsRead → FsReadExternal
-        // based on an absolute path was removed; paths outside forge_root
-        // are now rejected by `confine_path`.
         self.require_capability(Capability::FsRead)?;
         let confined = self.confine_path(path)?;
         tokio::fs::read(&confined).await.map_err(Error::Io)
@@ -479,6 +499,66 @@ mod tests {
         // Try to read /etc/passwd via traversal
         let result = ctx.read_file(Path::new("/etc/passwd")).await;
         assert!(result.is_err());
+    }
+
+    /// OI-12 acceptance: an absolute path outside the forge must produce
+    /// a *loud, typed* failure, not a silent denial — no auto-promotion
+    /// from `FsRead` to `FsReadExternal`. We assert the error is the
+    /// `PermissionDenied` traversal variant (not, say, a generic
+    /// `CapabilityDenied`) so callers can distinguish "you asked for a
+    /// file outside the forge" from "you don't hold `FsRead` at all".
+    #[tokio::test]
+    async fn read_file_absolute_outside_forge_returns_typed_traversal_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = make_context(dir.path(), &[Capability::FsRead]);
+        let err = ctx
+            .read_file(Path::new("/etc/passwd"))
+            .await
+            .expect_err("absolute outside-forge read must fail");
+        match err {
+            Error::Io(io_err) => {
+                assert_eq!(
+                    io_err.kind(),
+                    std::io::ErrorKind::PermissionDenied,
+                    "expected PermissionDenied, got {:?}",
+                    io_err.kind(),
+                );
+                assert!(
+                    io_err.to_string().contains("path traversal denied"),
+                    "expected traversal message, got: {io_err}",
+                );
+            }
+            other => panic!("expected Error::Io, got {other:?}"),
+        }
+    }
+
+    /// OI-12 mirror for the write side. `validate_for_write` strips the
+    /// leading `/` and treats absolute inputs as forge-root-relative; an
+    /// absolute path that resolves outside the forge (here via a `..`
+    /// payload) hits the same `PermissionDenied` traversal path.
+    #[tokio::test]
+    async fn write_file_absolute_outside_forge_returns_typed_traversal_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = make_context(dir.path(), &[Capability::FsWrite]);
+        let err = ctx
+            .write_file(Path::new("/../escape.txt"), b"x")
+            .await
+            .expect_err("absolute traversal write must fail");
+        match err {
+            Error::Io(io_err) => {
+                assert_eq!(
+                    io_err.kind(),
+                    std::io::ErrorKind::PermissionDenied,
+                    "expected PermissionDenied, got {:?}",
+                    io_err.kind(),
+                );
+                assert!(
+                    io_err.to_string().contains("path traversal denied"),
+                    "expected traversal message, got: {io_err}",
+                );
+            }
+            other => panic!("expected Error::Io, got {other:?}"),
+        }
     }
 
     #[cfg(unix)]

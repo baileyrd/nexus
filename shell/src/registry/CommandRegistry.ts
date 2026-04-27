@@ -5,6 +5,28 @@
 import type { CommandContribution, CommandEntry } from '../types/plugin'
 import { activationTriggers } from '../host/ActivationTriggers'
 import { eventBus } from '../host/EventBus'
+import { configStore } from '../stores/configStore'
+
+/** OI-11 — defaults, also re-used as the test override floor. */
+const DEFAULT_WARN_MS = 250
+const DEFAULT_CANCEL_MS = 5000
+
+/**
+ * Thrown by `CommandRegistry.execute` when a handler hasn't resolved
+ * within `shell.command.timeoutCancelMs`. The handler keeps running —
+ * JavaScript promises aren't cancellable — but the awaiter gets
+ * control back so the UI can move on (palette dismiss, status-bar
+ * spinner clear, etc.). Distinct from a regular error via `name`.
+ */
+export class CommandCancelledError extends Error {
+  readonly name = 'CommandCancelled'
+  constructor(
+    readonly commandId: string,
+    readonly thresholdMs: number,
+  ) {
+    super(`Command '${commandId}' did not resolve within ${thresholdMs}ms`)
+  }
+}
 
 export class CommandRegistry {
   private commands = new Map<string, CommandEntry & { handler?: (...args: unknown[]) => unknown }>()
@@ -61,9 +83,68 @@ export class CommandRegistry {
     // dispatcher — can decide whether to show a modal, retry, etc.
     // (Unlike EventBus.emit, which swallows per-listener failures
     // because event dispatch has no single point to catch.)
+    //
+    // OI-11 — UI-thread time budget. We race the handler against a
+    // configurable cancel deadline (`shell.command.timeoutCancelMs`,
+    // default 5s) and log a soft warning at the warn threshold
+    // (`shell.command.timeoutWarnMs`, default 250ms). Either timeout
+    // set to 0 or below disables that tier — useful for tests and for
+    // users who explicitly opt out of cancellation. The handler keeps
+    // running after a hard cancel; this only releases the awaiter.
+    const warnMs = configStore.get('shell.command.timeoutWarnMs', DEFAULT_WARN_MS)
+    const cancelMs = configStore.get('shell.command.timeoutCancelMs', DEFAULT_CANCEL_MS)
+    let warnTimer: ReturnType<typeof setTimeout> | undefined
+    let cancelTimer: ReturnType<typeof setTimeout> | undefined
+
+    if (warnMs > 0) {
+      warnTimer = setTimeout(() => {
+        console.warn(
+          `[CommandRegistry] Command '${id}' (plugin '${cmd.pluginId}') still pending after ${warnMs}ms`,
+        )
+      }, warnMs)
+    }
+
+    const cancelPromise = cancelMs > 0
+      ? new Promise<never>((_, reject) => {
+          cancelTimer = setTimeout(() => {
+            const err = new CommandCancelledError(id, cancelMs)
+            try {
+              eventBus.emit('command:cancelled', {
+                commandId: id,
+                pluginId: cmd.pluginId,
+                thresholdMs: cancelMs,
+              })
+            } catch {
+              // Belt-and-braces — see the matching note in the error
+              // path below.
+            }
+            reject(err)
+          }, cancelMs)
+        })
+      : null
+    // If the handler resolves first, the cancel promise stays pending
+    // forever and gets GC'd with its captured closure once `execute`
+    // returns. Attach a sink so any future rejection (which only
+    // happens if our finally-clear lost a race — it can't, because
+    // microtasks drain before macrotasks, but belt-and-braces) does
+    // not surface as an unhandled rejection.
+    cancelPromise?.catch(() => {})
+
+    const handlerPromise = (async () => cmd.handler!(...args))()
+
     try {
-      return await cmd.handler(...args)
+      return await (cancelPromise
+        ? Promise.race([handlerPromise, cancelPromise])
+        : handlerPromise)
     } catch (err) {
+      if (err instanceof CommandCancelledError) {
+        console.warn(`[CommandRegistry] Command '${id}' hard-cancelled after ${cancelMs}ms`)
+        // The handler is still running — silently swallow whatever it
+        // produces so an unhandled-rejection handler doesn't fire
+        // *and* the original cancel still surfaces to the caller.
+        handlerPromise.catch(() => {})
+        throw err
+      }
       console.error(`[CommandRegistry] Command '${id}' threw:`, err)
       try {
         eventBus.emit('command:error', {
@@ -77,6 +158,9 @@ export class CommandRegistry {
         // unlikely case that the map lookup itself throws.
       }
       throw err
+    } finally {
+      if (warnTimer !== undefined) clearTimeout(warnTimer)
+      if (cancelTimer !== undefined) clearTimeout(cancelTimer)
     }
   }
 
