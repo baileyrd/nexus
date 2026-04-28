@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiStreamChatArgs",
+  "description": "Args for `com.nexus.ai::stream_chat` (handler id `6`).\n\nMirrors the ad-hoc shape the handler decoded historically. The\nengine continues to accept the legacy raw `{ messages, system,\nsession_id }` JSON object so existing chat callers don't break;\nnew optional fields (`mode`, `tools`, `max_tokens`, `stop`, `trim`)\ndrive the BL-010/011/034 surfaces.",
+  "type": "object",
+  "properties": {
+    "max_tokens": {
+      "description": "Optional generation cap, passed through to providers that\nhonour it (Anthropic + `OpenAI`). Currently advisory: the\nengine does not enforce a hard truncation.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "messages": {
+      "description": "Conversation history. Same shape as `stream_ask` so callers can\nshare message-builder code across the two handlers.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AiStreamAskMessage"
+      }
+    },
+    "mode": {
+      "description": "Engine mode. Omit for the default `chat` (back-compat).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AiStreamChatMode"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "session_id": {
+      "description": "Optional caller-provided session identifier. When `None` the\nhandler generates a UUID v4 and echoes it on every\n`com.nexus.ai.stream_*` bus event.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stop": {
+      "description": "Stop sequences. After the provider returns, the engine\ntruncates the text at the earliest occurrence of any of these\nstrings (post-processing only — not a wire-level provider\nextension).",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
+    "system": {
+      "description": "Optional system prompt forwarded to the provider.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tools": {
+      "description": "Tool-advertisement policy. Omit for the default `auto`.\n`mode=complete` forces this to `none` regardless of the\ncaller's value.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AiToolPolicy"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "trim": {
+      "description": "When `true` and `mode=complete`, post-process the suggested\ntext: strip a leading copy of the prompt's tail (prompt-echo)\nand clip at the last natural break (newline or sentence\nboundary). Ignored for `mode=chat`.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "messages"
+  ],
+  "$defs": {
+    "AiStreamAskMessage": {
+      "description": "One message in a chat conversation. Mirror of\n[`crate::provider::ChatMessage`].",
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "Text content of the message.",
+          "type": "string"
+        },
+        "role": {
+          "description": "The role of the message sender.",
+          "$ref": "#/$defs/AiStreamAskRole"
+        }
+      },
+      "required": [
+        "role",
+        "content"
+      ]
+    },
+    "AiStreamAskRole": {
+      "description": "Role of a participant in a chat conversation. Mirror of\n[`crate::provider::Role`] for schema emission.",
+      "oneOf": [
+        {
+          "description": "System-level instructions.",
+          "type": "string",
+          "const": "system"
+        },
+        {
+          "description": "User input.",
+          "type": "string",
+          "const": "user"
+        },
+        {
+          "description": "Assistant response.",
+          "type": "string",
+          "const": "assistant"
+        }
+      ]
+    },
+    "AiStreamChatMode": {
+      "description": "Engine mode for `com.nexus.ai::stream_chat` (handler id `6`).\n\n`Chat` (the default) runs the tool-aware dispatch loop; `Complete`\nbypasses it for a single provider round-trip with no tools, suitable\nfor ghost completions and headless `complete` CLI consumers\n(BL-010, BL-011, BL-034).",
+      "oneOf": [
+        {
+          "description": "Tool-aware multi-round dispatch loop (back-compat default).",
+          "type": "string",
+          "const": "chat"
+        },
+        {
+          "description": "Single provider round-trip, no tools, post-processed.",
+          "type": "string",
+          "const": "complete"
+        }
+      ]
+    },
+    "AiToolPolicy": {
+      "description": "Tool-advertisement policy for `stream_chat`.\n\n`Auto` (default) hands the registry's full schema list to the\nprovider so the model can call tools. `None` advertises an empty\nlist — used by `mode=complete` and by ghost-completion callers that\nmust never trigger side effects.",
+      "oneOf": [
+        {
+          "description": "Advertise the full registry to the model.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Advertise no tools — the model cannot issue tool calls.",
+          "type": "string",
+          "const": "none"
+        }
+      ]
+    }
+  }
+}

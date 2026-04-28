@@ -37,3 +37,8 @@ export type { AiStreamAskMessage } from './AiStreamAskMessage';
 export type { AiStreamAskRole } from './AiStreamAskRole';
 export type { AiStreamAskResult } from './AiStreamAskResult';
 export type { AiStreamAskSource } from './AiStreamAskSource';
+
+// com.nexus.ai::stream_chat (BL-010 / BL-011 / BL-034 — shared chat/complete engine)
+export type { AiStreamChatArgs } from './AiStreamChatArgs';
+export type { AiStreamChatMode } from './AiStreamChatMode';
+export type { AiToolPolicy } from './AiToolPolicy';

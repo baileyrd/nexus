@@ -25,9 +25,12 @@ use serde::Serialize;
 use crate::anthropic::AnthropicProvider;
 use crate::config::{detect_embedding_provider, detect_provider, AiConfig};
 use crate::embedding::EmbeddingProvider;
+use crate::ipc::{
+    AiStreamAskMessage, AiStreamAskRole, AiStreamChatArgs, AiStreamChatMode, AiToolPolicy,
+};
 use crate::ollama::OllamaProvider;
 use crate::openai::OpenAiProvider;
-use crate::provider::{AiProvider, ChatTurn, ToolCall};
+use crate::provider::{AiProvider, ChatMessage, ChatTurn, ToolCall};
 use crate::tools::{register_storage_builtins, ToolError, ToolRegistry};
 use crate::{rag, vectorstore};
 
@@ -51,6 +54,10 @@ pub const HANDLER_STATUS: u32 = 4;
 /// Handler id for `config` (detected provider snapshot — sync).
 pub const HANDLER_CONFIG: u32 = 5;
 /// Handler id for `stream_chat` (direct chat with per-token bus events).
+///
+/// `mode: chat` (default) uses the tool-dispatch loop;
+/// `mode: complete` bypasses it for a single round-trip + post-processing
+/// (used by ghost completion / headless `complete` CLI — BL-010/011/034).
 pub const HANDLER_STREAM_CHAT: u32 = 6;
 /// Handler id for `stream_ask` (RAG retrieve + streaming chat).
 pub const HANDLER_STREAM_ASK: u32 = 7;
@@ -76,8 +83,8 @@ pub const HANDLER_SESSION_DELETE: u32 = 11;
 /// process so the next chat call uses the new credentials without a
 /// restart. Args:
 ///
-///   { ai?:        { provider, model?, api_key?, base_url? } | null,
-///     embedding?: { provider, model?, api_key?, base_url? } | null }
+///   { ai?:        { provider, model?, `api_key`?, `base_url`? } | null,
+///     embedding?: { provider, model?, `api_key`?, `base_url`? } | null }
 ///
 /// A `null` clears that side; an absent key leaves it untouched.
 pub const HANDLER_SET_CONFIG: u32 = 12;
@@ -199,7 +206,7 @@ impl CorePlugin for AiCorePlugin {
             let embed_handle = Arc::clone(&self.embed_config);
             let args = args.clone();
             return Some(Box::pin(async move {
-                handle_set_config(ai_handle, embed_handle, &args)
+                handle_set_config(&ai_handle, &embed_handle, &args)
             }));
         }
 
@@ -346,8 +353,8 @@ async fn handle_status(
 /// store, so a user who set `provider=ollama` once gets it back on
 /// the next launch without re-typing.
 fn handle_set_config(
-    ai_handle: Arc<RwLock<Option<AiConfig>>>,
-    embed_handle: Arc<RwLock<Option<AiConfig>>>,
+    ai_handle: &Arc<RwLock<Option<AiConfig>>>,
+    embed_handle: &Arc<RwLock<Option<AiConfig>>>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let obj = args
@@ -450,66 +457,287 @@ async fn handle_stream_chat(
     tools: Option<Arc<ToolRegistry>>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
-    let messages: Vec<crate::provider::ChatMessage> = args
-        .get("messages")
-        .ok_or_else(|| exec_err("stream_chat: missing 'messages'"))
-        .and_then(|v| {
-            serde_json::from_value(v.clone())
-                .map_err(|e| exec_err(format!("stream_chat: messages decode: {e}")))
-        })?;
-    let system = args
-        .get("system")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    let session_id = args
-        .get("session_id")
-        .and_then(serde_json::Value::as_str)
-        .map_or_else(|| uuid::Uuid::new_v4().to_string(), str::to_string);
+    // Decode through the typed `AiStreamChatArgs`. The wire shape matches
+    // the historical ad-hoc `{ messages, system, session_id }` shape
+    // exactly (same field names, same `lowercase` role tags), so existing
+    // chat callers keep working without modification — only the new
+    // optional fields (`mode`, `tools`, `max_tokens`, `stop`, `trim`)
+    // change behaviour for BL-010 / BL-011 / BL-034 callers.
+    let parsed: AiStreamChatArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("stream_chat: args decode: {e}")))?;
+    let messages = ipc_messages_to_chat(&parsed.messages);
+    let system = parsed.system.clone();
+    let session_id = parsed
+        .session_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     let ai_cfg = ai_cfg.ok_or_else(|| exec_err("stream_chat: no AI chat provider configured"))?;
-    let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
 
-    let _ = ctx.publish(
-        "com.nexus.ai.stream_start",
-        serde_json::json!({"session_id": &session_id}),
-    );
+    let mode = parsed.mode.unwrap_or_default();
+    // mode=complete forces tools=none regardless of the caller's value
+    // — the contract is "single round-trip, no side effects".
+    let tool_policy = match mode {
+        AiStreamChatMode::Complete => AiToolPolicy::None,
+        AiStreamChatMode::Chat => parsed.tools.unwrap_or_default(),
+    };
 
-    let ctx_chunk = Arc::clone(&ctx);
-    let sid_chunk = session_id.clone();
-    let chunk_idx = Arc::new(AtomicUsize::new(0));
+    let envelope = EngineEnvelope::new(Arc::clone(&ctx), session_id.clone());
+    envelope.publish_start();
 
-    let on_chunk = {
-        let chunk_idx = Arc::clone(&chunk_idx);
-        move |chunk: String| {
-            let idx = chunk_idx.fetch_add(1, Ordering::Relaxed);
-            let _ = ctx_chunk.publish(
-                "com.nexus.ai.stream_chunk",
-                serde_json::json!({
-                    "session_id": &sid_chunk,
-                    "chunk": chunk,
-                    "index": idx,
-                }),
-            );
+    let text = match mode {
+        AiStreamChatMode::Chat => {
+            let registry = tools.unwrap_or_else(|| Arc::new(ToolRegistry::new()));
+            let registry_for_loop: Arc<ToolRegistry> = match tool_policy {
+                AiToolPolicy::Auto => registry,
+                // Physically empty registry so the loop advertises no
+                // schemas and ignores any (impossible) tool_calls.
+                AiToolPolicy::None => Arc::new(ToolRegistry::new()),
+            };
+            let on_chunk = envelope.chunk_sink();
+            run_tool_dispatch_loop(
+                build_ai_provider(&ai_cfg).map_err(exec_err)?.as_ref(),
+                registry_for_loop.as_ref(),
+                messages,
+                system.as_deref(),
+                &on_chunk,
+            )
+            .await
+            .map_err(|e| exec_err(format!("stream_chat: {e}")))?
+        }
+        AiStreamChatMode::Complete => {
+            let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
+            let on_chunk = envelope.chunk_sink();
+            run_complete(ai.as_ref(), &messages, system.as_deref(), &parsed, &on_chunk)
+                .await
+                .map_err(|e| exec_err(format!("stream_chat: {e}")))?
         }
     };
 
-    let registry = tools.unwrap_or_else(|| Arc::new(ToolRegistry::new()));
-    let text = run_tool_dispatch_loop(
-        ai.as_ref(),
-        registry.as_ref(),
-        messages,
-        system.as_deref(),
-        &on_chunk,
-    )
-    .await
-    .map_err(|e| exec_err(format!("stream_chat: {e}")))?;
-
-    let _ = ctx.publish(
-        "com.nexus.ai.stream_done",
-        serde_json::json!({"session_id": &session_id, "text": &text}),
-    );
+    envelope.publish_done(&text);
 
     Ok(serde_json::json!({"session_id": session_id, "text": text}))
+}
+
+/// Translate the typed IPC message list into the provider-facing
+/// [`ChatMessage`] shape. A pure projection: same fields, same role
+/// names — both serialize as `lowercase`.
+fn ipc_messages_to_chat(messages: &[AiStreamAskMessage]) -> Vec<ChatMessage> {
+    messages
+        .iter()
+        .map(|m| ChatMessage {
+            role: match m.role {
+                AiStreamAskRole::System => crate::provider::Role::System,
+                AiStreamAskRole::User => crate::provider::Role::User,
+                AiStreamAskRole::Assistant => crate::provider::Role::Assistant,
+            },
+            content: m.content.clone(),
+        })
+        .collect()
+}
+
+/// Shared bus contract for the `stream_chat` family. Owns the
+/// `stream_start` / `stream_chunk` / `stream_done` publishes so the
+/// chat-loop and complete paths produce byte-identical event streams
+/// (modulo content). Any future surface that needs to publish on the
+/// same channels must go through this helper.
+struct EngineEnvelope {
+    ctx: Arc<KernelPluginContext>,
+    session_id: String,
+    chunk_idx: Arc<AtomicUsize>,
+}
+
+impl EngineEnvelope {
+    fn new(ctx: Arc<KernelPluginContext>, session_id: String) -> Self {
+        Self {
+            ctx,
+            session_id,
+            chunk_idx: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    fn publish_start(&self) {
+        let _ = self.ctx.publish(
+            "com.nexus.ai.stream_start",
+            serde_json::json!({"session_id": &self.session_id}),
+        );
+    }
+
+    /// Build the per-token sink. The closure is `Send + Sync` so it
+    /// can cross provider HTTP boundaries (Anthropic / `OpenAI` adapters
+    /// invoke it from inside their streaming task).
+    fn chunk_sink(&self) -> impl Fn(String) + Send + Sync + 'static {
+        let ctx = Arc::clone(&self.ctx);
+        let sid = self.session_id.clone();
+        let idx = Arc::clone(&self.chunk_idx);
+        move |chunk: String| {
+            let i = idx.fetch_add(1, Ordering::Relaxed);
+            let _ = ctx.publish(
+                "com.nexus.ai.stream_chunk",
+                serde_json::json!({
+                    "session_id": &sid,
+                    "chunk": chunk,
+                    "index": i,
+                }),
+            );
+        }
+    }
+
+    fn publish_done(&self, text: &str) {
+        let _ = self.ctx.publish(
+            "com.nexus.ai.stream_done",
+            serde_json::json!({"session_id": &self.session_id, "text": text}),
+        );
+    }
+}
+
+/// `mode=complete` path: single provider round-trip with `chat_stream_with`,
+/// no tools advertised, optional post-processing applied. The chat
+/// dispatch loop is bypassed entirely — there is no second round, so
+/// the model physically cannot trigger side effects even if the
+/// provider misbehaves.
+///
+/// Provider + chunk sink are passed in (rather than built from
+/// `AiConfig` + `EngineEnvelope`) so tests can drive this function
+/// with `ScriptedProvider` and a recording sink without standing up
+/// a kernel context. The handler is responsible for envelope
+/// `stream_start` / `stream_done` framing — this function only owns
+/// the provider call and post-processing.
+async fn run_complete(
+    ai: &dyn AiProvider,
+    messages: &[ChatMessage],
+    system: Option<&str>,
+    args: &AiStreamChatArgs,
+    on_chunk: &(dyn Fn(String) + Send + Sync),
+) -> Result<String, String> {
+    let raw = ai
+        .chat_stream_with(messages, system, on_chunk)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Post-processing — all string-level, all keyed off the typed args.
+    // We don't mutate what already streamed via `on_chunk`; only the
+    // returned text + the `stream_done` payload reflect the trim.
+    let mut text: String = raw;
+    if args.trim == Some(true) {
+        // Strip any leading echo of the prompt's tail. The "tail" is
+        // the trailing 256 chars of the last user message — long
+        // enough to catch typical paragraph echoes, short enough that
+        // a coincidental prefix collision is unlikely.
+        let prompt_tail = last_user_tail(messages, 256);
+        let stripped = strip_prompt_echo(&text, &prompt_tail).to_string();
+        // Then clip to the last natural break inside whatever's left.
+        let clipped = trim_to_natural_break(&stripped).to_string();
+        text = clipped;
+    }
+    if let Some(stops) = args.stop.as_deref() {
+        // Stops apply unconditionally when set — a stop is a hard
+        // contract, not a "nice to have". They run after `trim` so
+        // a stop sequence inside the trimmed natural-break window
+        // still wins.
+        text = apply_stop(&text, stops).to_string();
+    }
+    Ok(text)
+}
+
+/// Last `n` chars (by char count, not bytes) of the most recent user
+/// message — the heuristic for prompt-echo detection in
+/// [`strip_prompt_echo`]. Returns `""` if there is no user message.
+fn last_user_tail(messages: &[ChatMessage], n: usize) -> String {
+    let Some(last_user) = messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, crate::provider::Role::User))
+    else {
+        return String::new();
+    };
+    let chars: Vec<char> = last_user.content.chars().collect();
+    let start = chars.len().saturating_sub(n);
+    chars[start..].iter().collect()
+}
+
+/// If `suggested` begins with a copy of `prompt_tail` (the trailing
+/// chars of the user's prompt), strip it. Models — especially
+/// instruction-tuned ones — often echo the prompt before continuing;
+/// callers want only the continuation. Whitespace at the seam is
+/// trimmed too so the caller doesn't have to handle "\n" / " " glue
+/// artifacts. No-op if `prompt_tail` is empty or doesn't match.
+fn strip_prompt_echo<'a>(suggested: &'a str, prompt_tail: &str) -> &'a str {
+    if prompt_tail.is_empty() {
+        return suggested;
+    }
+    // Try the full tail first, then progressively shorter suffixes —
+    // models sometimes echo only the last sentence/word of the
+    // prompt, not the whole tail.
+    let tail_chars: Vec<char> = prompt_tail.chars().collect();
+    for start in 0..tail_chars.len() {
+        let candidate: String = tail_chars[start..].iter().collect();
+        if candidate.is_empty() {
+            break;
+        }
+        if let Some(rest) = suggested.strip_prefix(candidate.as_str()) {
+            return rest.trim_start();
+        }
+    }
+    suggested
+}
+
+/// Clip `text` at its last natural break — defined as the position
+/// right after the last sentence-ending punctuation (`.`, `!`, `?`)
+/// or, failing that, the last newline. If neither exists the input
+/// is returned unchanged. Trailing whitespace on the kept slice is
+/// trimmed.
+///
+/// Used by ghost completion to avoid mid-sentence cliffs when the
+/// model overruns the natural stopping point.
+fn trim_to_natural_break(text: &str) -> &str {
+    if text.is_empty() {
+        return text;
+    }
+    // Walk from the end; first sentence terminator wins. We compare
+    // on byte indices so we don't slice through a multi-byte char —
+    // `char_indices` gives us the byte index of each char start.
+    let mut sentence_end: Option<usize> = None;
+    let mut newline_end: Option<usize> = None;
+    for (i, c) in text.char_indices() {
+        let next = i + c.len_utf8();
+        match c {
+            '.' | '!' | '?' => sentence_end = Some(next),
+            '\n' => newline_end = Some(next),
+            _ => {}
+        }
+    }
+    let cut = sentence_end.or(newline_end);
+    match cut {
+        Some(end) => text[..end].trim_end(),
+        None => text,
+    }
+}
+
+/// Truncate `text` at the earliest occurrence of any string in
+/// `stops`. The stop sequence itself is dropped; everything before
+/// it is kept verbatim (no whitespace trim — the caller asked for
+/// an exact cut). If no stop matches, return `text` unchanged.
+///
+/// Implemented as `O(text * stops.len())` which is fine: typical stop
+/// lists are 1–4 short strings.
+fn apply_stop<'a>(text: &'a str, stops: &[String]) -> &'a str {
+    let mut earliest: Option<usize> = None;
+    for s in stops {
+        if s.is_empty() {
+            continue;
+        }
+        if let Some(pos) = text.find(s.as_str()) {
+            earliest = Some(match earliest {
+                Some(prev) => prev.min(pos),
+                None => pos,
+            });
+        }
+    }
+    match earliest {
+        Some(pos) => &text[..pos],
+        None => text,
+    }
 }
 
 /// Tool-aware streaming dispatch loop. Builds an initial set of
@@ -968,7 +1196,17 @@ mod tool_dispatch_tests {
             _messages: &[ChatMessage],
             _system: Option<&str>,
         ) -> Result<String, AiError> {
-            unimplemented!("ScriptedProvider only implements chat_turn_with_tools")
+            // Reachable when callers exercise the `mode=complete` path
+            // through the default `chat_stream_with` implementation,
+            // which falls back to `chat`. Pop the next scripted output
+            // and return its `text` (tool_calls are ignored — complete
+            // mode forbids them anyway).
+            let mut outs = self.outputs.lock().unwrap();
+            if outs.is_empty() {
+                return Err(AiError::Provider("script exhausted".to_string()));
+            }
+            let out = outs.remove(0);
+            Ok(out.text)
         }
 
         async fn chat_turn_with_tools(
@@ -1231,5 +1469,183 @@ mod tool_dispatch_tests {
             }
             _ => panic!("expected Assistant"),
         }
+    }
+
+    // ─── BL-010 / BL-011 / BL-034 — `mode=complete` engine path ─────────
+
+    fn chat_args_complete() -> AiStreamChatArgs {
+        AiStreamChatArgs {
+            messages: Vec::new(),
+            system: None,
+            session_id: None,
+            mode: Some(AiStreamChatMode::Complete),
+            tools: None,
+            max_tokens: None,
+            stop: None,
+            trim: None,
+        }
+    }
+
+    /// `mode=complete` MUST physically bypass the tool-dispatch loop.
+    /// We use a registry that contains `echo` and a script whose first
+    /// (and only consumed) output carries `tool_calls`. If the engine
+    /// were running the tool loop those calls would either execute or
+    /// surface as tool-result turns; in complete mode the calls are
+    /// silently dropped because `chat_stream_with` (default impl ->
+    /// `chat`) returns text only.
+    #[tokio::test]
+    async fn complete_mode_skips_tool_loop() {
+        let provider = ScriptedProvider::new(vec![
+            ChatTurnOutput {
+                text: "the answer is 42".to_string(),
+                // Even with a tool_call scripted, complete-mode must
+                // ignore it: the dispatch loop is the only path that
+                // would observe it, and we are intentionally
+                // bypassing it.
+                tool_calls: vec![ToolCall {
+                    id: "tc_should_not_run".to_string(),
+                    name: "echo".to_string(),
+                    input: serde_json::json!({"x": 1}),
+                }],
+            },
+            // A second scripted output exists to prove the engine
+            // never came back for round 2.
+            ChatTurnOutput {
+                text: "MUST NOT BE EMITTED".to_string(),
+                tool_calls: Vec::new(),
+            },
+        ]);
+        // Registry has `echo`, but complete mode advertises no tools
+        // and never enters the dispatch loop.
+        let mut registry = ToolRegistry::new();
+        let exec = std::sync::Arc::new(EchoExecutor::new("SIDE_EFFECT"));
+        registry.register(
+            "echo",
+            ToolSchema {
+                name: "echo".to_string(),
+                description: "echo".to_string(),
+                input_schema: serde_json::json!({"type": "object"}),
+            },
+            std::sync::Arc::clone(&exec) as std::sync::Arc<dyn ToolExecutor>,
+        );
+
+        let chunks = Mutex::new(Vec::<String>::new());
+        let on_chunk = |s: String| chunks.lock().unwrap().push(s);
+
+        let args = chat_args_complete();
+        let messages = vec![user_msg("what's the answer?")];
+        let text = run_complete(&provider, &messages, None, &args, &on_chunk)
+            .await
+            .expect("complete");
+
+        // Only the first scripted output's text reached us — the
+        // second (which tests for accidental looping) was untouched.
+        assert_eq!(text, "the answer is 42");
+
+        // Tool was never executed: complete mode does not run the
+        // dispatch loop, and the registry is irrelevant to this path.
+        assert!(exec.inputs.lock().unwrap().is_empty());
+
+        // `chat_turn_with_tools` (the loop's entry point) was never
+        // called — only the `chat`/`chat_stream_with` path consumed
+        // a scripted output.
+        assert!(provider.turns_seen.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn complete_mode_strips_prompt_echo() {
+        // Model echoes the trailing chunk of the prompt before its
+        // continuation — a common instruction-tuned-model behaviour.
+        let provider = ScriptedProvider::new(vec![ChatTurnOutput {
+            text: "The quick brown fox jumps over the lazy dog.".to_string(),
+            tool_calls: Vec::new(),
+        }]);
+        let on_chunk = |_: String| {};
+        let mut args = chat_args_complete();
+        args.trim = Some(true);
+        let messages = vec![user_msg("Continue: The quick brown")];
+        let text = run_complete(&provider, &messages, None, &args, &on_chunk)
+            .await
+            .expect("complete");
+        // Prompt-echo (the "The quick brown" prefix) is gone.
+        assert!(
+            !text.starts_with("The quick brown"),
+            "echoed prefix should be stripped, got: {text:?}"
+        );
+        // The continuation is preserved.
+        assert!(text.contains("fox jumps over the lazy dog"));
+    }
+
+    #[tokio::test]
+    async fn complete_mode_trims_to_natural_break() {
+        // Two complete sentences plus a dangling fragment — the
+        // fragment after the last `.` should be clipped.
+        let provider = ScriptedProvider::new(vec![ChatTurnOutput {
+            text: "First sentence. Second sentence. And then a half".to_string(),
+            tool_calls: Vec::new(),
+        }]);
+        let on_chunk = |_: String| {};
+        let mut args = chat_args_complete();
+        args.trim = Some(true);
+        // Different prompt → no echo to strip; we're isolating the
+        // natural-break behaviour.
+        let messages = vec![user_msg("write something")];
+        let text = run_complete(&provider, &messages, None, &args, &on_chunk)
+            .await
+            .expect("complete");
+        assert_eq!(text, "First sentence. Second sentence.");
+    }
+
+    #[test]
+    fn apply_stop_truncates() {
+        // Multiple stops — the earliest hit wins.
+        let stops = vec!["END".to_string(), "\n\n".to_string()];
+        let cut = apply_stop("hello\n\nworld END more", &stops);
+        assert_eq!(cut, "hello");
+
+        // No stop matches → return the input unchanged.
+        let untouched = apply_stop("nothing to cut here", &stops);
+        assert_eq!(untouched, "nothing to cut here");
+
+        // Empty stops list is a no-op.
+        let empty: Vec<String> = Vec::new();
+        assert_eq!(apply_stop("keep all", &empty), "keep all");
+
+        // Empty-string entries are ignored (would otherwise match at
+        // position 0 and truncate everything).
+        let with_empty = vec![String::new(), "STOP".to_string()];
+        assert_eq!(apply_stop("hello STOP world", &with_empty), "hello ");
+    }
+
+    /// Regression: with `mode` absent, the chat path is unchanged —
+    /// the dispatch loop runs and aggregates assistant text exactly
+    /// like the pre-change baseline. This is the same shape as
+    /// `dispatch_loop_returns_text_when_no_tool_calls` but exercised
+    /// via a path identical to what `handle_stream_chat` builds when
+    /// `mode` is `None`.
+    #[tokio::test]
+    async fn chat_mode_unchanged() {
+        let provider = ScriptedProvider::new(vec![ChatTurnOutput {
+            text: "hello".to_string(),
+            tool_calls: Vec::new(),
+        }]);
+        let registry = ToolRegistry::new();
+        let chunks = Mutex::new(Vec::<String>::new());
+        let on_chunk = |s: String| chunks.lock().unwrap().push(s);
+
+        let text = run_tool_dispatch_loop(
+            &provider,
+            &registry,
+            vec![user_msg("hi")],
+            None,
+            &on_chunk,
+        )
+        .await
+        .expect("dispatch");
+        assert_eq!(text, "hello");
+        assert_eq!(chunks.lock().unwrap().as_slice(), &["hello"]);
+        // The dispatch-loop path was the one that ran (turns_seen
+        // populated), proving the chat path uses tool dispatch.
+        assert_eq!(provider.turns_seen.lock().unwrap().len(), 1);
     }
 }

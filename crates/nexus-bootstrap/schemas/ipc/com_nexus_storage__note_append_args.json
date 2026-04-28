@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageNoteAppendArgs",
+  "description": "Args for `com.nexus.storage::note_append` (handler id `54`).\n\nAtomic \"read-existing + append `\\n\\n{snippet}` + write\" primitive that\nthe BL-043 quick-capture hotkey uses to grow a configurable `Inbox.md`\nwithout the shell having to read + concatenate + write (which would\nrace against the file watcher).\n\nPath confinement matches `write_file`: forge-relative paths only,\nabsolute paths and `..` traversal are rejected at the engine boundary.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Forge-relative path of the inbox file. Created on first append.",
+      "type": "string"
+    },
+    "snippet": {
+      "description": "Snippet text to append. The dispatch normalises the trailing\nnewline shape so the resulting file has exactly one blank line\nbetween snippets and exactly one trailing newline.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "snippet"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiToolPolicy",
+  "description": "Tool-advertisement policy for `stream_chat`.\n\n`Auto` (default) hands the registry's full schema list to the\nprovider so the model can call tools. `None` advertises an empty\nlist — used by `mode=complete` and by ghost-completion callers that\nmust never trigger side effects.",
+  "oneOf": [
+    {
+      "description": "Advertise the full registry to the model.",
+      "type": "string",
+      "const": "auto"
+    },
+    {
+      "description": "Advertise no tools — the model cannot issue tool calls.",
+      "type": "string",
+      "const": "none"
+    }
+  ]
+}
