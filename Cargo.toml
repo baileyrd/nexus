@@ -114,6 +114,8 @@ clap_complete = "4.5"
 anyhow = "1"
 comfy-table = "7"
 ctrlc = "3.5"
+# REPL line editing for `nexus ai chat` (BL-010)
+rustyline = "14"
 
 # TUI
 ratatui = "0.30"
