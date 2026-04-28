@@ -61,6 +61,7 @@
     "@wdio/spec-reporter": "^9.0.0",
     "@wdio/types": "^9.0.0",
     "cross-env": "^7.0.3",
+    "esbuild": "^0.21.5",
     "eslint": "^9.14.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "ts-node": "^10.9.0",

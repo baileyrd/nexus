@@ -89,7 +89,20 @@ export interface SandboxInstance {
 }
 
 export interface SandboxOrchestratorOptions {
-  api: PluginAPI
+  /**
+   * Per-plugin `PluginAPI` factory (F-8.1.2). The orchestrator calls
+   * this with the authoritative plugin id at handshake time so each
+   * sandboxed plugin gets its own `PluginAPI` instance — storage
+   * namespacing (`plugin:<id>:…`), event tagging (`activityBar:itemAdded`
+   * `pluginId`), and `PluginRegistry.track(pluginId, …)` ownership all
+   * derive from the orchestrator-set boundary id, not from anything the
+   * plugin can self-assert.
+   *
+   * Production wiring in `shell/src/main.tsx` passes
+   * `(id) => buildPluginAPI(reg, { pluginId: id, isCore: false })`.
+   * Tests inject a stub factory with the same signature.
+   */
+  apiFactory: (pluginId: string) => PluginAPI
   registry: PluginRegistry
   /**
    * Where to mount the iframe. Defaults to `document.body`; the iframe
@@ -350,9 +363,17 @@ class SandboxInstanceImpl implements SandboxInstance {
       warn: (...args) => this.warn(...args),
     })
 
+    // F-8.1.2: build a fresh `PluginAPI` for *this* plugin id so every
+    // pluginId-derived surface (storage namespace, event tagging,
+    // registry tracking) uses the orchestrator-set boundary id rather
+    // than a shared label. Pre-fix, every sandboxed plugin shared one
+    // `PluginAPI` baked with the literal string `'community-sandbox'`,
+    // which caused storage collisions and mis-attributed events.
+    const pluginApi = this.orchOpts.apiFactory(this.pluginId)
+
     this.router = new SandboxRouter({
       pluginId: this.pluginId,
-      api: this.orchOpts.api,
+      api: pluginApi,
       grantedCaps: this.spec.capabilities,
       port: this.port,
       registry: this.orchOpts.registry,

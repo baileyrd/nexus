@@ -40,11 +40,51 @@ interface BuildOptions {
   pluginId: string
 }
 
+/**
+ * Validate a `pluginId` before it is baked into a `PluginAPI` instance.
+ *
+ * The id flows into:
+ *   - `localStorage` keys as `plugin:${pluginId}:${userKey}` — colon-
+ *     bearing ids would let a plugin escape its namespace and read
+ *     another plugin's storage (e.g. `pluginId="foo:bar"` shares the
+ *     `plugin:foo:` prefix with a `foo` plugin).
+ *   - `eventBus.emit` payloads (`activityBar:itemAdded`,
+ *     `settings:tabsChanged`, …) where the field is read as the
+ *     authoritative source.
+ *   - `PluginRegistry.track(pluginId, …)` and `trackSubscription` so
+ *     `unregisterAll(pluginId)` correctly scopes per-plugin cleanup.
+ *
+ * Rejecting empty / non-string / colon-bearing ids closes the F-8.1.2
+ * "self-asserted pluginId" hole at the host's only ingress point. Real
+ * plugin ids in this codebase are dotted (e.g. `com.nexus.editor`,
+ * `community.hello-world`) and never contain colons, so this is a
+ * non-breaking constraint for shipped plugins.
+ */
+export function assertValidPluginId(pluginId: unknown): asserts pluginId is string {
+  if (typeof pluginId !== 'string') {
+    throw new TypeError(
+      `[PluginAPI] pluginId must be a string, got ${typeof pluginId}`,
+    )
+  }
+  if (pluginId.length === 0) {
+    throw new Error('[PluginAPI] pluginId must not be empty')
+  }
+  if (pluginId.includes(':')) {
+    // `:` is the namespace separator inside `plugin:<id>:<key>`
+    // localStorage keys; permitting it would let `pluginId="a:b"` collide
+    // with the `a` plugin's namespace.
+    throw new Error(
+      `[PluginAPI] pluginId must not contain ':' (got '${pluginId}')`,
+    )
+  }
+}
+
 export function buildPluginAPI(
   registry: PluginRegistry,
   opts: BuildOptions
 ): PluginAPI {
   const { pluginId, isCore } = opts
+  assertValidPluginId(pluginId)
 
   const api: PluginAPI = {
     // ─── Commands ──────────────────────────────────────────────────────────
