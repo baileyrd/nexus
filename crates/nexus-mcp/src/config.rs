@@ -39,6 +39,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::auth::McpAuth;
+
 /// Wire-level transport for one MCP server entry.
 ///
 /// **BL-023.** Default is [`McpTransport::Stdio`] for back-compat with the
@@ -111,6 +113,16 @@ pub struct McpServerSpec {
     /// `BTreeMap` preserves order across writes.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub headers: BTreeMap<String, String>,
+    /// **BL-025.** Optional auth declaration. Set on remote (`http`)
+    /// transports; ignored for stdio (which inherits credentials via
+    /// the `env` map). When set, the resolver runs at connect time
+    /// and the returned headers are merged into `auth_header` /
+    /// `headers` BEFORE the rmcp transport is constructed. Static
+    /// `auth_header` from the file still works for back-compat
+    /// (resolver output overrides it on conflict — declarative config
+    /// wins).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<McpAuth>,
     /// When `true`, the Host skips this server at connect time but leaves
     /// the entry in the file so toggling is a single-field edit.
     #[serde(default)]

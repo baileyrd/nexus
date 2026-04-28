@@ -70,6 +70,7 @@ use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::{serve_client, RoleClient};
 use tokio::process::Command;
 
+use crate::auth::{self, AuthError};
 use crate::config::{McpServerSpec, McpTransport};
 
 /// Default timeout for the MCP initialize handshake. A non-responding server
@@ -118,6 +119,12 @@ pub enum McpClientError {
         /// Human-readable explanation including a migration hint.
         reason: String,
     },
+
+    /// BL-025 — auth resolution failed before the transport could be
+    /// constructed (missing env var, OAuth token endpoint refused,
+    /// malformed token response, …).
+    #[error("auth: {0}")]
+    Auth(#[from] AuthError),
 
     /// Any runtime error from the underlying rmcp service (transport closed,
     /// protocol violation, etc.).
@@ -219,13 +226,34 @@ impl McpClient {
             });
         }
 
+        // BL-025 — resolve the optional `auth` declaration up front so
+        // any missing env-var or OAuth endpoint failure surfaces with a
+        // clear `Auth` error before we construct the transport. The
+        // resolver returns a logical `Authorization` value plus
+        // additional headers; we then merge those into the per-request
+        // header map below. A static `auth_header` from the file still
+        // works (back-compat with pre-BL-025 installs) but a present
+        // `auth` block always wins on conflict — declarative beats
+        // legacy.
+        let resolved_auth = if let Some(auth_decl) = spec.auth.as_ref() {
+            Some(auth::resolve(auth_decl).await?)
+        } else {
+            None
+        };
+
         // Parse custom headers up front so a malformed entry surfaces as a
         // clean Config error (rather than rmcp's typed-error stack at
         // runtime). Header names get the same case-insensitive treatment
         // browsers do; rmcp internally canonicalises again.
         let mut custom_headers: HashMap<HeaderName, HeaderValue> =
-            HashMap::with_capacity(spec.headers.len());
-        for (k, v) in &spec.headers {
+            HashMap::with_capacity(spec.headers.len() + resolved_auth.as_ref().map_or(0, |r| r.extra_headers.len()));
+        for (k, v) in spec.headers.iter().chain(
+            resolved_auth
+                .as_ref()
+                .map(|r| r.extra_headers.iter())
+                .into_iter()
+                .flatten(),
+        ) {
             let header_name = HeaderName::try_from(k.as_str()).map_err(|e| {
                 McpClientError::Config {
                     reason: format!("server '{name}': invalid header name '{k}': {e}"),
@@ -243,8 +271,14 @@ impl McpClient {
 
         let mut http_cfg = StreamableHttpClientTransportConfig::with_uri(Arc::<str>::from(url));
         http_cfg = http_cfg.custom_headers(custom_headers);
-        if let Some(auth) = spec.auth_header.as_deref() {
-            http_cfg = http_cfg.auth_header(auth.to_string());
+        // Resolved auth wins; otherwise fall back to the static
+        // `auth_header` field (the BL-023 path).
+        let auth_header = resolved_auth
+            .as_ref()
+            .and_then(|r| r.authorization.clone())
+            .or_else(|| spec.auth_header.clone());
+        if let Some(auth) = auth_header {
+            http_cfg = http_cfg.auth_header(auth);
         }
         // The reqwest-backed default client uses the version of reqwest
         // that ships with rmcp's `transport-streamable-http-client-reqwest`
@@ -492,6 +526,31 @@ mod tests {
             matches!(err, McpClientError::Config { .. }),
             "expected Config, got {err:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn http_transport_auth_missing_env_surfaces_as_auth_error() {
+        // BL-025: an env-indirected secret with no env value must abort
+        // connect with the typed Auth variant — not the generic Handshake
+        // — so the operator can act on it directly.
+        unsafe { std::env::remove_var("NEXUS_TEST_BL025_CONNECT_NOENV") };
+        let spec = McpServerSpec {
+            transport: McpTransport::Http,
+            url: Some("http://127.0.0.1:1/mcp".into()),
+            auth: Some(crate::auth::McpAuth::Bearer {
+                token: crate::auth::McpAuthSecret::Env {
+                    env: "NEXUS_TEST_BL025_CONNECT_NOENV".into(),
+                },
+            }),
+            ..McpServerSpec::default()
+        };
+        let err = McpClient::connect("remote", &spec).await.unwrap_err();
+        match err {
+            McpClientError::Auth(crate::auth::AuthError::MissingEnv { name }) => {
+                assert_eq!(name, "NEXUS_TEST_BL025_CONNECT_NOENV");
+            }
+            other => panic!("expected Auth(MissingEnv), got {other:?}"),
+        }
     }
 
     #[tokio::test]

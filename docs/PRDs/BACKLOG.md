@@ -287,11 +287,7 @@ Today `SkillsPanel` is read-only; mutations require editing `.skill.md` on disk 
 
 _BL-023 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-025: MCP authentication
-
-**Source**: PRD-14 §8 (API key, bearer, OAuth client-credentials).
-**Effort**: Medium. **Crate**: `nexus-mcp`.
-`McpServerSpec.env` already accepts a string map; the auth flow itself (token exchange, refresh, keychain lookup) is unbuilt. Pairs with ADR-0009 (keyring hard-fail) once that policy is enforced at bootstrap.
+_BL-025 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-027: Multi-agent orchestration / delegation (= AI-DIR "agent loops")
 
