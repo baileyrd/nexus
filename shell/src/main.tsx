@@ -28,6 +28,12 @@ import {
 import { SandboxOrchestrator } from './host/sandbox/SandboxOrchestrator'
 import { buildPluginAPI } from './host/PluginAPI'
 import { runInstallTimeConsent } from './plugins/core/capabilityPrompt'
+// F-8.1.1-fo1: virtual module emitted by `vite.sandbox-runtime-plugin.ts`
+// — a string holding the bundled `bootstrapSandboxedPlugin` runtime. We
+// blob-wrap it once at boot and hand the URL to every sandboxed plugin
+// load via `getRuntimeUrl`, so plugins no longer need to hand-roll the
+// postMessage protocol.
+import sandboxRuntimeSource from 'virtual:sandbox-runtime'
 
 // WI-43: built-in plugin registrations live in `plugins/catalog.ts` split
 // into default-on (loaded unconditionally) and default-off (opt-in via
@@ -214,43 +220,37 @@ async function boot() {
   // `orchestrator.load(spec)` call mounts an iframe + wires a router;
   // `orchestrator.disposeAll()` on shutdown tears every one down.
   //
-  // The PluginAPI we hand to the router is built with a dedicated
-  // pluginId — `community-sandbox` is a coarse label used only for
-  // the per-API tracking registry entries the router writes as a
-  // side-effect. Each router actually enforces its own pluginId when
-  // it dispatches API calls, so a single `buildPluginAPI` call is
-  // safe to share across multiple sandboxed plugins today.
-  const sandboxApi = buildPluginAPI(reg, {
-    pluginId: 'community-sandbox',
-    isCore: false,
-  })
+  // F-8.1.2: the orchestrator builds a *per-plugin* `PluginAPI` via
+  // this factory using the authoritative pluginId set at handshake
+  // time. Storage namespacing (`plugin:<id>:…`), event tagging
+  // (`activityBar:itemAdded`, `settings:tabsChanged`), and registry
+  // ownership all derive from the boundary id — there is no shared
+  // 'community-sandbox' bucket that would cross-pollute concurrent
+  // sandboxed plugins. `assertValidPluginId` inside `buildPluginAPI`
+  // is the choke point that rejects colon-bearing / empty / non-string
+  // ids before any of those derived keys can be written.
   const sandboxOrchestrator = new SandboxOrchestrator({
-    api: sandboxApi,
+    apiFactory: (sandboxedPluginId) =>
+      buildPluginAPI(reg, {
+        pluginId: sandboxedPluginId,
+        isCore: false,
+      }),
     registry: reg,
   })
   reg.registerService('sandboxOrchestrator', sandboxOrchestrator)
 
   // The guest runtime bootstrap (`bootstrapSandboxedPlugin`) is shared
-  // across every sandboxed plugin. Build the blob URL once; the
-  // loader hands it to each `orchestrator.load` call. Production will
-  // swap this for a precompiled bundle served from the shell's
-  // assets directory once the bundler lands (WI-30e §4 follow-on).
+  // across every sandboxed plugin. The runtime source is bundled at
+  // Vite build time by `vite.sandbox-runtime-plugin.ts` and imported
+  // as the virtual module `virtual:sandbox-runtime`. We Blob-wrap it
+  // once on first call; subsequent calls return the cached URL so a
+  // single iframe-import per session pays the cost.
   let cachedRuntimeUrl: string | null = null
   const getRuntimeUrl = async (): Promise<string> => {
     if (cachedRuntimeUrl) return cachedRuntimeUrl
-    // Stepping stone: for Phase 3c there is no precompiled runtime
-    // bundle, and `hello-world/index.js` hand-rolls the protocol
-    // inline (see its module header). We hand back a blob URL for a
-    // trivial no-op module so the iframe's srcdoc can import
-    // *something* at the `runtimeUrl` position without failing. Once
-    // the bundler lands, this factory returns the compiled
-    // `@nexus/extension-api/sandbox/runtime` entry.
-    const shimSource =
-      `// WI-30e runtime shim — replaced by the bundled ` +
-      `bootstrapSandboxedPlugin entry once a plugin bundler lands.\n` +
-      `export function bootstrapSandboxedPlugin(_plugin) { /* no-op: ` +
-      `hand-rolled plugins bootstrap inline */ }\n`
-    const blob = new Blob([shimSource], { type: 'application/javascript' })
+    const blob = new Blob([sandboxRuntimeSource], {
+      type: 'application/javascript',
+    })
     cachedRuntimeUrl = URL.createObjectURL(blob)
     return cachedRuntimeUrl
   }

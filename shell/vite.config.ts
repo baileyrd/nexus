@@ -2,9 +2,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import { sandboxRuntimePlugin } from './vite.sandbox-runtime-plugin'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), sandboxRuntimePlugin()],
 
   // Expose the project-local community-plugins path so the loader can
   // scan it in dev mode without hard-coding or copying to ~/.nexus-shell/plugins/.
