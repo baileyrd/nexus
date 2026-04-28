@@ -216,6 +216,19 @@ pub const HANDLER_BASE_RECORD_RESTORE: u32 = 52;
 /// rows. Read-only — see ADR 0019.
 /// Returns [`crate::obsidian_base::ObsidianBaseQueryResult`] as JSON.
 pub const HANDLER_OBSIDIAN_BASE_QUERY: u32 = 53;
+/// Handler id for `note_append`. Args:
+/// `{ "path": String, "snippet": String }`. Reads the existing file
+/// at `path` (treating a missing file as empty), then writes back the
+/// concatenation `{existing}\n\n{snippet}` (with a trailing newline)
+/// through the same atomic + indexing pipeline as
+/// [`HANDLER_WRITE_FILE`]. Forge-relative paths only — absolute paths
+/// or `..` traversal are rejected at the engine boundary, identical
+/// to `write_file`. Returns [`crate::FileMetadata`].
+///
+/// Use case: BL-043 quick-capture hotkey appends timestamped snippets
+/// to a configurable `Inbox.md` without the shell having to read +
+/// concatenate + write (which would race against the file watcher).
+pub const HANDLER_NOTE_APPEND: u32 = 54;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -439,6 +452,41 @@ impl CorePlugin for StorageCorePlugin {
                     .write_file(&path, &bytes)
                     .map_err(|e| exec_err(format!("write_file: {e}")))?;
                 to_value(&meta, "write_file")
+            }
+            HANDLER_NOTE_APPEND => {
+                let path = path_arg(args, "note_append")?;
+                let snippet = args
+                    .get("snippet")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        exec_err("note_append: missing 'snippet' string".to_string())
+                    })?;
+                // Path confinement: write_file rejects absolute paths +
+                // `..` traversal at the engine boundary; surface that
+                // rejection up front so we don't even read the existing
+                // file. resolve_within is the same primitive write_file
+                // uses internally via atomic_write -> forge.root().join.
+                if std::path::Path::new(&path).is_absolute() {
+                    return Err(exec_err(format!(
+                        "note_append: 'path' must be forge-relative, got '{path}'"
+                    )));
+                }
+                // Read existing content; treat a missing file as empty.
+                let existing = match engine.read_file(&path) {
+                    Ok(bytes) => bytes,
+                    Err(crate::StorageError::FileNotFound(_)) => Vec::new(),
+                    Err(e) => return Err(exec_err(format!("note_append: read: {e}"))),
+                };
+                let existing_text = std::str::from_utf8(&existing).map_err(|e| {
+                    exec_err(format!(
+                        "note_append: existing file is not valid UTF-8: {e}"
+                    ))
+                })?;
+                let combined = build_appended(existing_text, snippet);
+                let meta = engine
+                    .write_file(&path, combined.as_bytes())
+                    .map_err(|e| exec_err(format!("note_append: write: {e}")))?;
+                to_value(&meta, "note_append")
             }
             HANDLER_WRITE_VAULT_FILE => {
                 let path = path_arg(args, "write_vault_file")?;
@@ -1014,6 +1062,28 @@ fn to_value<T: serde::Serialize>(
     serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize failed: {e}")))
 }
 
+/// Build the post-append text for [`HANDLER_NOTE_APPEND`]. Centralised so
+/// the unit test can pin the separator + trailing-newline contract without
+/// going through the full dispatch pipeline.
+///
+/// Contract:
+///   * Empty existing → returns `"{snippet}\n"` (no leading blank line).
+///   * Non-empty existing that already ends with a blank-line gap is left
+///     as-is; otherwise exactly one `\n\n` separator is inserted.
+///   * Output always ends with a single `\n` so subsequent appends keep
+///     the same shape.
+fn build_appended(existing: &str, snippet: &str) -> String {
+    let snippet_trimmed_end = snippet.trim_end_matches('\n');
+    if existing.is_empty() {
+        return format!("{snippet_trimmed_end}\n");
+    }
+    // Strip any trailing newlines from the existing buffer; we re-insert
+    // exactly two so the snippet is preceded by one blank line regardless
+    // of how the previous write ended.
+    let base = existing.trim_end_matches('\n');
+    format!("{base}\n\n{snippet_trimmed_end}\n")
+}
+
 // ── Config handlers ──────────────────────────────────────────────────────────
 
 fn config_kind(args: &serde_json::Value) -> Result<&str, PluginError> {
@@ -1177,5 +1247,147 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
                 }),
             );
         }
+    }
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StorageEngine;
+
+    fn boot_plugin(forge: &std::path::Path) -> StorageCorePlugin {
+        // StorageCorePlugin::on_init opens its own engine handle and therefore
+        // its own lockfile; drop the initialising engine before handing over.
+        drop(StorageEngine::init(forge).expect("init forge"));
+        let bus = Arc::new(EventBus::new(16));
+        let mut plugin =
+            StorageCorePlugin::new(forge.to_path_buf(), &StorageConfig::default(), bus);
+        plugin.on_init().expect("on_init");
+        plugin
+    }
+
+    #[test]
+    fn note_append_creates_missing_file_with_snippet_and_trailing_newline() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut plugin = boot_plugin(dir.path());
+
+        let args = serde_json::json!({
+            "path": "Inbox.md",
+            "snippet": "## Captured\n\nfirst note",
+        });
+        let resp = plugin
+            .dispatch(HANDLER_NOTE_APPEND, &args)
+            .expect("note_append on missing file should create it");
+
+        // Returns FileMetadata-shaped JSON.
+        assert_eq!(resp.get("path").and_then(|v| v.as_str()), Some("Inbox.md"));
+        assert!(resp.get("size_bytes").and_then(|v| v.as_u64()).is_some());
+
+        let on_disk = std::fs::read_to_string(dir.path().join("Inbox.md")).expect("read back");
+        assert_eq!(on_disk, "## Captured\n\nfirst note\n");
+    }
+
+    #[test]
+    fn note_append_appends_to_existing_with_blank_line_separator_and_trailing_newline() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut plugin = boot_plugin(dir.path());
+
+        // Seed the file via the same handler so the on-disk layout is
+        // exactly what the production hotkey would produce.
+        plugin
+            .dispatch(
+                HANDLER_NOTE_APPEND,
+                &serde_json::json!({ "path": "Inbox.md", "snippet": "first" }),
+            )
+            .expect("seed first append");
+
+        plugin
+            .dispatch(
+                HANDLER_NOTE_APPEND,
+                &serde_json::json!({ "path": "Inbox.md", "snippet": "second" }),
+            )
+            .expect("second append");
+
+        let on_disk = std::fs::read_to_string(dir.path().join("Inbox.md")).expect("read back");
+        // Exactly one blank line between snippets, exactly one trailing
+        // newline at the end. No double-blank-line drift across appends.
+        assert_eq!(on_disk, "first\n\nsecond\n");
+    }
+
+    #[test]
+    fn note_append_rejects_absolute_paths() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut plugin = boot_plugin(dir.path());
+
+        // Use a path that is unambiguously absolute on every platform
+        // we run CI on. On Windows tempfile's tempdir() also produces an
+        // absolute path, but we keep the assertion portable by using a
+        // shape `is_absolute()` recognises everywhere.
+        let abs = if cfg!(windows) {
+            "C:\\evil\\path.md".to_string()
+        } else {
+            "/etc/evil.md".to_string()
+        };
+        let args = serde_json::json!({ "path": abs, "snippet": "x" });
+        let err = plugin
+            .dispatch(HANDLER_NOTE_APPEND, &args)
+            .expect_err("absolute paths must be rejected");
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(
+                    reason.contains("forge-relative"),
+                    "expected forge-relative rejection, got: {reason}"
+                );
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn note_append_round_trips_through_dispatch_with_documented_arg_shape() {
+        // Mirror of the StorageNoteAppendArgs contract — keys must be
+        // `path` (string) + `snippet` (string), return shape must match
+        // FileMetadata. The other tests cover the on-disk semantics; this
+        // one pins the IPC contract a frontend would consume.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut plugin = boot_plugin(dir.path());
+
+        let resp = plugin
+            .dispatch(
+                HANDLER_NOTE_APPEND,
+                &serde_json::json!({
+                    "path": "notes/quick.md",
+                    "snippet": "hello world",
+                }),
+            )
+            .expect("dispatch succeeds with documented args");
+
+        assert!(resp.is_object(), "response must be a JSON object");
+        for key in ["path", "size_bytes", "modified_at", "content_hash"] {
+            assert!(
+                resp.get(key).is_some(),
+                "FileMetadata key '{key}' missing from response: {resp}"
+            );
+        }
+        assert_eq!(
+            resp.get("path").and_then(|v| v.as_str()),
+            Some("notes/quick.md"),
+        );
+    }
+
+    #[test]
+    fn build_appended_handles_existing_trailing_newlines_idempotently() {
+        // No matter how many trailing newlines the existing buffer has,
+        // we collapse to exactly one blank-line separator + trailing nl.
+        assert_eq!(build_appended("", "a"), "a\n");
+        assert_eq!(build_appended("a", "b"), "a\n\nb\n");
+        assert_eq!(build_appended("a\n", "b"), "a\n\nb\n");
+        assert_eq!(build_appended("a\n\n", "b"), "a\n\nb\n");
+        assert_eq!(build_appended("a\n\n\n", "b"), "a\n\nb\n");
+        // Snippet trailing newlines are normalised too.
+        assert_eq!(build_appended("a", "b\n"), "a\n\nb\n");
+        assert_eq!(build_appended("a", "b\n\n"), "a\n\nb\n");
     }
 }

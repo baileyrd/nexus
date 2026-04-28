@@ -20,11 +20,12 @@ use schemars::{schema_for, JsonSchema};
 
 use nexus_ai::ipc::{
     AiStreamAskArgs, AiStreamAskMessage, AiStreamAskResult, AiStreamAskRole, AiStreamAskSource,
+    AiStreamChatArgs, AiStreamChatMode, AiToolPolicy,
 };
 use nexus_storage::ipc::{
-    StorageListDirArgs, StorageListDirEntry, StorageListDirResult, StorageReadFileArgs,
-    StorageReadFileResult, StorageSearchArgs, StorageSearchHit, StorageSearchResult,
-    StorageWriteFileArgs, StorageWriteFileResult,
+    StorageListDirArgs, StorageListDirEntry, StorageListDirResult, StorageNoteAppendArgs,
+    StorageNoteAppendResult, StorageReadFileArgs, StorageReadFileResult, StorageSearchArgs,
+    StorageSearchHit, StorageSearchResult, StorageWriteFileArgs, StorageWriteFileResult,
 };
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
@@ -64,6 +65,10 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<StorageWriteFileArgs>("com_nexus_storage__write_file", "args");
     write_schema::<StorageWriteFileResult>("com_nexus_storage__write_file", "result");
 
+    // ── com.nexus.storage::note_append (BL-043) ──────────────────────────
+    write_schema::<StorageNoteAppendArgs>("com_nexus_storage__note_append", "args");
+    write_schema::<StorageNoteAppendResult>("com_nexus_storage__note_append", "result");
+
     // ── com.nexus.storage::list_dir ──────────────────────────────────────
     write_schema::<StorageListDirArgs>("com_nexus_storage__list_dir", "args");
     write_schema::<StorageListDirEntry>("com_nexus_storage__list_dir", "entry");
@@ -75,6 +80,14 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<AiStreamAskRole>("com_nexus_ai__stream_ask", "role");
     write_schema::<AiStreamAskSource>("com_nexus_ai__stream_ask", "source");
     write_schema::<AiStreamAskResult>("com_nexus_ai__stream_ask", "result");
+
+    // ── com.nexus.ai::stream_chat ────────────────────────────────────────
+    // Reuses `AiStreamAskMessage` / `AiStreamAskRole` for the messages
+    // array; only the args envelope + mode/tool-policy enums are
+    // stream_chat-specific. BL-010/011/034 consume these.
+    write_schema::<AiStreamChatArgs>("com_nexus_ai__stream_chat", "args");
+    write_schema::<AiStreamChatMode>("com_nexus_ai__stream_chat", "mode");
+    write_schema::<AiToolPolicy>("com_nexus_ai__stream_chat", "tool_policy");
 }
 
 /// Sanity check: after emission the 5 pilot handlers each have at least

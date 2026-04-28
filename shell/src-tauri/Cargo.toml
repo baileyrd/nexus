@@ -26,6 +26,9 @@ tauri-plugin-fs           = "2"
 tauri-plugin-dialog       = "2"
 tauri-plugin-deep-link    = "2"
 tauri-plugin-window-state = "2"
+# BL-043 — global hotkey for the quick-capture overlay. Fires regardless of
+# window focus so a backgrounded Nexus stays reachable for inbox capture.
+tauri-plugin-global-shortcut = "2"
 serde               = { version = "1", features = ["derive"] }
 serde_json          = "1"
 dirs                = "5"
