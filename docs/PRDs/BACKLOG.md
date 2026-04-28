@@ -14,6 +14,15 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-009: Whole-File `.mermaid` Viewer
+
+**Source**: BL-008 follow-up (2026-04-28)
+**Effort**: Small (~0.5 day)
+**Crate / Package**: `shell/src/plugins/community/mermaid/` (extension to BL-008's plugin)
+**Related**: BL-008 (fenced-code-renderer registry)
+
+Render standalone `.mermaid` files (whole-file mermaid source, no markdown wrapper) as SVG diagrams in the editor. BL-008 only handles fenced `mermaid` code blocks inside markdown documents — it hooks into the markdown live-preview/preview pipeline, which doesn't run for non-markdown files. Implement by extending `community.mermaid`'s `activate()` to also call `viewRegistry.register('mermaid', creator)` + `viewRegistry.registerExtensions(['mermaid'], 'mermaid')` (same pattern as `nexus.canvas`'s `.canvas` claim and `nexus.bases`'s `.bases` claim — see `shell/src/plugins/nexus/canvas/index.ts:130`). The view reads the file via `api.fs`, calls the same `mermaid.render` path the fenced renderer uses, and shows the SVG with a "View Source" toggle to fall back to the raw text. Edit-in-place is out of scope for v1 — open in CodeMirror via "View Source" if the user needs to edit. Plugin stays default-off; users opt in via Settings → Plugins.
+
 ## Partially New Features (concept exists in PRDs but design is unspecified)
 
 ### BL-007: CRDT-over-Git Transport
