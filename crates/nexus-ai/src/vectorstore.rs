@@ -84,10 +84,7 @@ pub async fn search(
 ///
 /// # Errors
 /// Returns [`AiError::Provider`] on dispatcher failure.
-pub async fn delete_by_file(
-    ctx: &KernelPluginContext,
-    file_path: &str,
-) -> Result<(), AiError> {
+pub async fn delete_by_file(ctx: &KernelPluginContext, file_path: &str) -> Result<(), AiError> {
     let args = serde_json::json!({ "path": file_path });
     ctx.ipc_call(
         STORAGE_PLUGIN,

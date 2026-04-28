@@ -35,7 +35,7 @@ impl OllamaProvider {
     /// If `base_url` is `None`, defaults to `http://localhost:11434`.
     /// If `model` is `None`, defaults to `llama3.2` for chat and
     /// `nomic-embed-text` for embeddings.
-    #[must_use] 
+    #[must_use]
     pub fn new(base_url: Option<String>, model: Option<String>) -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -174,7 +174,10 @@ impl AiProvider for OllamaProvider {
     ) -> Result<String, AiError> {
         let mut api_messages: Vec<OllamaChatMessage<'_>> = Vec::new();
         if let Some(sys) = system {
-            api_messages.push(OllamaChatMessage { role: "system", content: sys });
+            api_messages.push(OllamaChatMessage {
+                role: "system",
+                content: sys,
+            });
         }
         for msg in messages {
             let role = match msg.role {
@@ -182,7 +185,10 @@ impl AiProvider for OllamaProvider {
                 Role::User => "user",
                 Role::Assistant => "assistant",
             };
-            api_messages.push(OllamaChatMessage { role, content: &msg.content });
+            api_messages.push(OllamaChatMessage {
+                role,
+                content: &msg.content,
+            });
         }
 
         let url = format!("{}/api/chat", self.base_url);

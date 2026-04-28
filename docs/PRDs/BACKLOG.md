@@ -300,12 +300,6 @@ Distinct from the agent's MCP discovery (which appends *tool descriptions* to th
 **Effort**: Medium. **Crate**: `nexus-ai` (new `privacy` module) or `nexus-security` (if scanner is reused).
 Privacy config struct exists but no filtering occurs before context assembly hits a remote provider. Minimum viable: regex set for AWS keys / private keys / common API tokens; redact-and-warn before egress when `policy.privacy = strict`.
 
-### BL-018: AI token budget enforcement
-
-**Source**: PRD-12 §12 (`TokenBudget` with allocation tracking + response reservation).
-**Effort**: Small. **Crate**: `nexus-ai`.
-Context assembly truncates by character count today; should pre-compute `max_tokens` per provider, reserve a response budget, and warn at 80 %.
-
 ### BL-019: AI local embeddings backend
 
 **Source**: PRD-12 §9.1 (`EmbeddingModel` with cache; sentence-transformer-quality offline embeddings).
