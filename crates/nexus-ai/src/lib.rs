@@ -35,7 +35,7 @@ pub use error::AiError;
 pub use ollama::OllamaProvider;
 pub use openai::OpenAiProvider;
 pub use privacy::{PrivacyPolicy, Redaction, Redactor};
-pub use provider::{AiProvider, ChatMessage, Role};
+pub use provider::{AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, ToolCall};
 pub use rag::{index_file as rag_index_file, query as rag_query, RagResponse};
 pub use tokens::{ApproxTokenCounter, BudgetWarning, ContextSourceKind, TokenBudget, TokenCounter};
 pub use tools::{

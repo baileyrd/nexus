@@ -27,8 +27,15 @@ use crate::config::{detect_embedding_provider, detect_provider, AiConfig};
 use crate::embedding::EmbeddingProvider;
 use crate::ollama::OllamaProvider;
 use crate::openai::OpenAiProvider;
-use crate::provider::AiProvider;
+use crate::provider::{AiProvider, ChatTurn, ToolCall};
+use crate::tools::{register_storage_builtins, ToolError, ToolRegistry};
 use crate::{rag, vectorstore};
+
+/// Hard cap on tool-call rounds inside a single `stream_chat`
+/// invocation. Each round = one provider call + N tool executions.
+/// 8 is enough for realistic agent flows (read a file, search,
+/// summarise, write) without letting a runaway loop pin the kernel.
+const MAX_TOOL_ROUNDS: usize = 8;
 
 /// Reverse-DNS identifier for this plugin.
 pub const PLUGIN_ID: &str = "com.nexus.ai";
@@ -87,6 +94,12 @@ pub struct AiCorePlugin {
     /// clone the `Arc` into their spawned futures. `None` if a handler fires
     /// before bootstrap finishes wiring — those handlers return a clear error.
     context: Option<Arc<KernelPluginContext>>,
+    /// Tool registry the streaming dispatch loop offers to the model.
+    /// Populated in [`CorePlugin::wire_context`] alongside `context` so
+    /// the storage-backed `read_file` / `write_file` built-ins can route
+    /// through `ipc_call`. Wrapped in `Arc` so handler futures get a
+    /// cheap clone; the registry itself is read-only after bootstrap.
+    tools: Option<Arc<ToolRegistry>>,
 }
 
 impl AiCorePlugin {
@@ -97,6 +110,7 @@ impl AiCorePlugin {
             ai_config: Arc::new(RwLock::new(None)),
             embed_config: Arc::new(RwLock::new(None)),
             context: None,
+            tools: None,
         }
     }
 
@@ -190,6 +204,7 @@ impl CorePlugin for AiCorePlugin {
         }
 
         let ctx = self.context.clone();
+        let tools = self.tools.clone();
         let ai_cfg = self.ai_config.read().ok().and_then(|g| g.clone());
         let embed_cfg = self.embed_config.read().ok().and_then(|g| g.clone());
         let args = args.clone();
@@ -202,7 +217,7 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_INDEX_FILE => handle_index_file(&ctx, embed_cfg, &args).await,
                 HANDLER_VECTORSTORE_COUNT => handle_vectorstore_count(&ctx).await,
                 HANDLER_STATUS => handle_status(&ctx, ai_cfg, embed_cfg).await,
-                HANDLER_STREAM_CHAT => handle_stream_chat(ctx, ai_cfg, &args).await,
+                HANDLER_STREAM_CHAT => handle_stream_chat(ctx, ai_cfg, tools, &args).await,
                 HANDLER_STREAM_ASK => handle_stream_ask(ctx, ai_cfg, embed_cfg, &args).await,
                 HANDLER_SESSION_LOAD => handle_session_load(&ctx, &args).await,
                 HANDLER_SESSION_SAVE => handle_session_save(&ctx, &args).await,
@@ -215,7 +230,13 @@ impl CorePlugin for AiCorePlugin {
 
     /// Capture the kernel plugin context so async handlers can issue nested
     /// `ipc_call`s into storage through the canonical plugin surface.
+    /// Also seeds the tool registry with the storage-backed built-ins
+    /// (`read_file`, `write_file`) so the streaming dispatch loop has a
+    /// non-empty toolbox without each frontend opting in.
     fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
+        let mut registry = ToolRegistry::new();
+        register_storage_builtins(&mut registry, Arc::clone(&ctx));
+        self.tools = Some(Arc::new(registry));
         self.context = Some(ctx);
     }
 }
@@ -426,6 +447,7 @@ fn config_snapshot(ai_cfg: Option<&AiConfig>, embed_cfg: Option<&AiConfig>) -> s
 async fn handle_stream_chat(
     ctx: Arc<KernelPluginContext>,
     ai_cfg: Option<AiConfig>,
+    tools: Option<Arc<ToolRegistry>>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let messages: Vec<crate::provider::ChatMessage> = args
@@ -471,10 +493,16 @@ async fn handle_stream_chat(
         }
     };
 
-    let text = ai
-        .chat_stream_with(&messages, system.as_deref(), &on_chunk)
-        .await
-        .map_err(|e| exec_err(format!("stream_chat: {e}")))?;
+    let registry = tools.unwrap_or_else(|| Arc::new(ToolRegistry::new()));
+    let text = run_tool_dispatch_loop(
+        ai.as_ref(),
+        registry.as_ref(),
+        messages,
+        system.as_deref(),
+        &on_chunk,
+    )
+    .await
+    .map_err(|e| exec_err(format!("stream_chat: {e}")))?;
 
     let _ = ctx.publish(
         "com.nexus.ai.stream_done",
@@ -482,6 +510,115 @@ async fn handle_stream_chat(
     );
 
     Ok(serde_json::json!({"session_id": session_id, "text": text}))
+}
+
+/// Tool-aware streaming dispatch loop. Builds an initial set of
+/// [`ChatTurn`]s from the incoming `messages` array, calls the
+/// provider, executes any tool calls the model requested through the
+/// registry, and re-calls the provider until the model returns no more
+/// tool calls — or [`MAX_TOOL_ROUNDS`] is hit.
+///
+/// `on_chunk` is forwarded to the provider on every iteration so the
+/// UI sees text deltas across all rounds in order.
+///
+/// Returns the concatenated text from every assistant turn (so
+/// downstream `stream_done` consumers see the full reasoning trail,
+/// not just the final summary).
+async fn run_tool_dispatch_loop(
+    ai: &dyn AiProvider,
+    registry: &ToolRegistry,
+    messages: Vec<crate::provider::ChatMessage>,
+    system: Option<&str>,
+    on_chunk: &(dyn Fn(String) + Send + Sync),
+) -> Result<String, String> {
+    let mut turns = messages_to_turns(messages);
+    let schemas = registry.schemas();
+
+    let mut aggregated = String::new();
+    let mut round: usize = 0;
+
+    loop {
+        round += 1;
+        let output = ai
+            .chat_turn_with_tools(&turns, system, &schemas, on_chunk)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !output.text.is_empty() {
+            if !aggregated.is_empty() {
+                aggregated.push('\n');
+            }
+            aggregated.push_str(&output.text);
+        }
+
+        if output.tool_calls.is_empty() {
+            // Model is done. Whether it produced text this round or
+            // not, we've reached steady state.
+            return Ok(aggregated);
+        }
+
+        // Append the assistant's tool-use turn so the next provider
+        // call sees the conversation history correctly.
+        turns.push(ChatTurn::Assistant {
+            content: output.text.clone(),
+            tool_calls: output.tool_calls.clone(),
+        });
+
+        // Execute every tool the model asked for, in order, and
+        // append a ToolResult turn for each.
+        for call in &output.tool_calls {
+            let (content, is_error) = execute_tool_call(registry, call).await;
+            turns.push(ChatTurn::ToolResult {
+                tool_use_id: call.id.clone(),
+                content,
+                is_error,
+            });
+        }
+
+        if round >= MAX_TOOL_ROUNDS {
+            // Cap reached — surface a clear error rather than silently
+            // truncate. The aggregated text so far still went out via
+            // `on_chunk` so the user sees what the model produced.
+            return Err(format!(
+                "tool dispatch exceeded {MAX_TOOL_ROUNDS} rounds without a final answer"
+            ));
+        }
+    }
+}
+
+/// Run one tool call through the registry and shape the executor's
+/// outcome into the `(content, is_error)` pair the dispatch loop feeds
+/// back to the model. Errors are surfaced verbatim so the model can
+/// adjust on the next round.
+async fn execute_tool_call(registry: &ToolRegistry, call: &ToolCall) -> (String, bool) {
+    match registry.execute(&call.name, call.input.clone()).await {
+        Ok(s) => (s, false),
+        Err(ToolError::NotFound(name)) => (
+            format!("tool '{name}' is not registered on this provider"),
+            true,
+        ),
+        Err(ToolError::InvalidInput(msg)) => (format!("invalid input: {msg}"), true),
+        Err(ToolError::ExecutionFailed(msg)) => (format!("execution failed: {msg}"), true),
+    }
+}
+
+/// Translate the legacy `messages` payload (array of `{role, content}`
+/// objects) into [`ChatTurn`]s. System messages are dropped here since
+/// the provider receives the system prompt via the dedicated `system`
+/// arg; assistant text becomes a tool-call-free assistant turn so the
+/// model can see its own prior outputs.
+fn messages_to_turns(messages: Vec<crate::provider::ChatMessage>) -> Vec<ChatTurn> {
+    messages
+        .into_iter()
+        .filter_map(|m| match m.role {
+            crate::provider::Role::User => Some(ChatTurn::User { content: m.content }),
+            crate::provider::Role::Assistant => Some(ChatTurn::Assistant {
+                content: m.content,
+                tool_calls: Vec::new(),
+            }),
+            crate::provider::Role::System => None,
+        })
+        .collect()
 }
 
 async fn handle_stream_ask(
@@ -795,5 +932,304 @@ mod session_id_tests {
     #[test]
     fn session_path_rejects_bad_id() {
         assert!(session_path(Some("../boom")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod tool_dispatch_tests {
+    use super::*;
+    use crate::error::AiError;
+    use crate::provider::{ChatMessage, ChatTurnOutput, Role};
+    use crate::tools::{ToolExecutor, ToolSchema};
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+
+    /// Stub provider that returns a scripted sequence of
+    /// `ChatTurnOutput`s, one per `chat_turn_with_tools` call. Lets us
+    /// drive the dispatch loop deterministically.
+    struct ScriptedProvider {
+        outputs: Mutex<Vec<ChatTurnOutput>>,
+        turns_seen: Mutex<Vec<Vec<ChatTurn>>>,
+    }
+
+    impl ScriptedProvider {
+        fn new(outputs: Vec<ChatTurnOutput>) -> Self {
+            Self {
+                outputs: Mutex::new(outputs),
+                turns_seen: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl AiProvider for ScriptedProvider {
+        async fn chat(
+            &self,
+            _messages: &[ChatMessage],
+            _system: Option<&str>,
+        ) -> Result<String, AiError> {
+            unimplemented!("ScriptedProvider only implements chat_turn_with_tools")
+        }
+
+        async fn chat_turn_with_tools(
+            &self,
+            turns: &[ChatTurn],
+            _system: Option<&str>,
+            _tools: &[ToolSchema],
+            on_chunk: &(dyn Fn(String) + Send + Sync),
+        ) -> Result<ChatTurnOutput, AiError> {
+            self.turns_seen.lock().unwrap().push(turns.to_vec());
+            let mut outs = self.outputs.lock().unwrap();
+            if outs.is_empty() {
+                return Err(AiError::Provider("script exhausted".to_string()));
+            }
+            let out = outs.remove(0);
+            if !out.text.is_empty() {
+                on_chunk(out.text.clone());
+            }
+            Ok(out)
+        }
+
+        #[allow(clippy::unnecessary_literal_bound)]
+        fn model_name(&self) -> &str {
+            "scripted"
+        }
+    }
+
+    /// Stub executor that records inputs and returns a fixed result.
+    struct EchoExecutor {
+        inputs: Mutex<Vec<serde_json::Value>>,
+        result: String,
+    }
+
+    impl EchoExecutor {
+        fn new(result: &str) -> Self {
+            Self {
+                inputs: Mutex::new(Vec::new()),
+                result: result.to_string(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ToolExecutor for EchoExecutor {
+        async fn execute(&self, input: serde_json::Value) -> Result<String, ToolError> {
+            self.inputs.lock().unwrap().push(input);
+            Ok(self.result.clone())
+        }
+    }
+
+    fn user_msg(content: &str) -> ChatMessage {
+        ChatMessage {
+            role: Role::User,
+            content: content.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_loop_returns_text_when_no_tool_calls() {
+        let provider = ScriptedProvider::new(vec![ChatTurnOutput {
+            text: "hello".to_string(),
+            tool_calls: Vec::new(),
+        }]);
+        let registry = ToolRegistry::new();
+        let chunks = Mutex::new(Vec::<String>::new());
+        let on_chunk = |s: String| chunks.lock().unwrap().push(s);
+
+        let text = run_tool_dispatch_loop(
+            &provider,
+            &registry,
+            vec![user_msg("hi")],
+            None,
+            &on_chunk,
+        )
+        .await
+        .expect("dispatch");
+        assert_eq!(text, "hello");
+        assert_eq!(chunks.lock().unwrap().as_slice(), &["hello"]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_loop_executes_tool_and_loops() {
+        // Round 1: model asks for `read_file`. Round 2: model wraps up.
+        let provider = ScriptedProvider::new(vec![
+            ChatTurnOutput {
+                text: "let me check".to_string(),
+                tool_calls: vec![ToolCall {
+                    id: "tc_1".to_string(),
+                    name: "echo".to_string(),
+                    input: serde_json::json!({"x": 1}),
+                }],
+            },
+            ChatTurnOutput {
+                text: "all done".to_string(),
+                tool_calls: Vec::new(),
+            },
+        ]);
+        let mut registry = ToolRegistry::new();
+        let exec = std::sync::Arc::new(EchoExecutor::new("FILE_BODY"));
+        registry.register(
+            "echo",
+            ToolSchema {
+                name: "echo".to_string(),
+                description: "echo".to_string(),
+                input_schema: serde_json::json!({"type": "object"}),
+            },
+            std::sync::Arc::clone(&exec) as std::sync::Arc<dyn ToolExecutor>,
+        );
+
+        let chunks = Mutex::new(Vec::<String>::new());
+        let on_chunk = |s: String| chunks.lock().unwrap().push(s);
+
+        let text = run_tool_dispatch_loop(
+            &provider,
+            &registry,
+            vec![user_msg("read it")],
+            None,
+            &on_chunk,
+        )
+        .await
+        .expect("dispatch");
+
+        // Aggregated text spans both rounds.
+        assert!(text.contains("let me check"));
+        assert!(text.contains("all done"));
+
+        // Tool was invoked once with the model's args.
+        let inputs = exec.inputs.lock().unwrap();
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0], serde_json::json!({"x": 1}));
+
+        // Second provider call saw the assistant + tool_result turns.
+        let seen = provider.turns_seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        let round_two = &seen[1];
+        // initial user + assistant tool-call + tool-result
+        assert_eq!(round_two.len(), 3);
+        assert!(matches!(round_two[1], ChatTurn::Assistant { .. }));
+        match &round_two[2] {
+            ChatTurn::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => {
+                assert_eq!(tool_use_id, "tc_1");
+                assert_eq!(content, "FILE_BODY");
+                assert!(!is_error);
+            }
+            _ => panic!("expected ToolResult"),
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_loop_marks_unknown_tool_as_error() {
+        let provider = ScriptedProvider::new(vec![
+            ChatTurnOutput {
+                text: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "tc_x".to_string(),
+                    name: "missing_tool".to_string(),
+                    input: serde_json::json!({}),
+                }],
+            },
+            ChatTurnOutput {
+                text: "recovered".to_string(),
+                tool_calls: Vec::new(),
+            },
+        ]);
+        let registry = ToolRegistry::new();
+        let on_chunk = |_: String| {};
+        let text = run_tool_dispatch_loop(
+            &provider,
+            &registry,
+            vec![user_msg("call something")],
+            None,
+            &on_chunk,
+        )
+        .await
+        .expect("dispatch");
+        assert!(text.contains("recovered"));
+
+        let seen = provider.turns_seen.lock().unwrap();
+        let round_two = &seen[1];
+        match &round_two[round_two.len() - 1] {
+            ChatTurn::ToolResult {
+                content, is_error, ..
+            } => {
+                assert!(*is_error);
+                assert!(content.contains("missing_tool"));
+            }
+            _ => panic!("expected ToolResult"),
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_loop_caps_at_max_rounds() {
+        // Provider keeps asking for the same tool every round.
+        let mut script = Vec::new();
+        for _ in 0..(MAX_TOOL_ROUNDS + 2) {
+            script.push(ChatTurnOutput {
+                text: "loop".to_string(),
+                tool_calls: vec![ToolCall {
+                    id: "tc".to_string(),
+                    name: "echo".to_string(),
+                    input: serde_json::json!({}),
+                }],
+            });
+        }
+        let provider = ScriptedProvider::new(script);
+        let mut registry = ToolRegistry::new();
+        registry.register(
+            "echo",
+            ToolSchema {
+                name: "echo".to_string(),
+                description: "echo".to_string(),
+                input_schema: serde_json::json!({"type": "object"}),
+            },
+            std::sync::Arc::new(EchoExecutor::new("ok")) as std::sync::Arc<dyn ToolExecutor>,
+        );
+
+        let on_chunk = |_: String| {};
+        let err = run_tool_dispatch_loop(
+            &provider,
+            &registry,
+            vec![user_msg("loop")],
+            None,
+            &on_chunk,
+        )
+        .await
+        .expect_err("must hit cap");
+        assert!(err.contains(&MAX_TOOL_ROUNDS.to_string()));
+    }
+
+    #[tokio::test]
+    async fn messages_to_turns_drops_system_keeps_user_assistant() {
+        let messages = vec![
+            ChatMessage {
+                role: Role::System,
+                content: "ignore me".to_string(),
+            },
+            ChatMessage {
+                role: Role::User,
+                content: "hi".to_string(),
+            },
+            ChatMessage {
+                role: Role::Assistant,
+                content: "hello".to_string(),
+            },
+        ];
+        let turns = messages_to_turns(messages);
+        assert_eq!(turns.len(), 2);
+        assert!(matches!(turns[0], ChatTurn::User { .. }));
+        match &turns[1] {
+            ChatTurn::Assistant {
+                content,
+                tool_calls,
+            } => {
+                assert_eq!(content, "hello");
+                assert!(tool_calls.is_empty());
+            }
+            _ => panic!("expected Assistant"),
+        }
     }
 }
