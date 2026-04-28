@@ -55,12 +55,24 @@
 //! unchanged; subscribers that miss events can always fall back to a
 //! `read_raw_since` snapshot.
 //!
+//! # Lifecycle events (BL-013)
+//!
+//! Alongside the byte stream, [`TerminalCorePlugin::with_event_bus`]
+//! also subscribes to the in-memory server's [`crate::TerminalEvent`]
+//! mpsc and forwards every event onto the kernel bus as
+//! `com.nexus.terminal.events.<session_id>`. The payload is the
+//! `TerminalEvent` itself — `serde(tag = "kind")` keeps the four
+//! variants (`session_created`, `output_received`, `pattern_matched`,
+//! `session_closed`) distinguishable on the wire, so a single
+//! [`nexus_kernel::EventFilter::CustomPrefix`] subscription gives
+//! plugins everything they need to react to session lifecycle and
+//! per-line output without re-implementing pump loops. The byte-stream
+//! topic above stays the right channel for xterm-style frontends; this
+//! topic is the right channel for AI / agent consumers that want
+//! structured lines + lifecycle.
+//!
 //! # What this is NOT (yet)
 //!
-//! - General [`crate::TerminalEvent`] broadcast (`SessionCreated`,
-//!   `SessionClosed`, `PatternMatched`). Those still travel through the
-//!   library's sync mpsc subscribers; only the high-volume output
-//!   stream is bridged onto the kernel bus today.
 //! - Saved-commands / ad-hoc CRUD. Those live in their own tables and
 //!   will get a sibling `com.nexus.terminal.commands` plugin in a
 //!   later slice — keeping the handler surface small here makes it
@@ -69,6 +81,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -78,7 +91,7 @@ use nexus_plugins::{CorePlugin, PluginError};
 use serde::{Deserialize, Serialize};
 
 use crate::saved::{SavedCommand, SqliteSavedCommandStore};
-use crate::server::{InMemoryTerminalServer, ServerSpawnConfig, TerminalServer};
+use crate::server::{InMemoryTerminalServer, ServerSpawnConfig, TerminalEvent, TerminalServer};
 use crate::session::SessionId;
 use crate::shell::ShellSpec;
 
@@ -93,6 +106,15 @@ pub const PLUGIN_ID: &str = "com.nexus.terminal";
 /// session produced the chunk. Payload shape: [`OutputStreamPayload`].
 /// See `docs/planning/PHASE-2-IMPLEMENTATION-PLAN.md` §4.4 (WI-12).
 pub const EVENT_OUTPUT_PREFIX: &str = "com.nexus.terminal.output.";
+
+/// Prefix for per-session lifecycle events
+/// (`session_created` / `output_received` / `pattern_matched` /
+/// `session_closed`). The payload is the
+/// [`TerminalEvent`](crate::TerminalEvent) itself — see BL-013 / the
+/// "Lifecycle events" section in this module's docs. Subscribe with
+/// [`nexus_kernel::EventFilter::CustomPrefix`] to receive every session,
+/// or with [`nexus_kernel::EventFilter::CustomExact`] for one session.
+pub const EVENT_LIFECYCLE_PREFIX: &str = "com.nexus.terminal.events.";
 
 /// `create_session` handler id.
 pub const HANDLER_CREATE_SESSION: u32 = 1;
@@ -354,6 +376,12 @@ pub struct TerminalCorePlugin {
     /// already let go of its clones. `None` when no event bus is wired
     /// (tests / embedded runtimes that don't need streaming).
     drainer: Option<DrainerHandle>,
+    /// Background forwarder that pulls [`TerminalEvent`]s from the
+    /// in-memory server's local mpsc and republishes them on the
+    /// kernel bus as `com.nexus.terminal.events.<session_id>` (BL-013).
+    /// `None` when no event bus is wired — the legacy mpsc subscriber
+    /// path stays the only consumer in that case.
+    lifecycle_forwarder: Option<LifecycleForwarderHandle>,
 }
 
 /// Owns the drainer thread + the stop flag. The flag is checked at the
@@ -390,6 +418,32 @@ impl Drop for DrainerHandle {
 const DRAINER_PUMP_TIMEOUT_MS: u64 = 5;
 const DRAINER_SLEEP_MS: u64 = 10;
 
+/// How long the lifecycle-forwarder thread blocks on its mpsc receiver
+/// before re-checking the stop flag. Short enough that plugin Drop
+/// returns within ~one tick; long enough to avoid burning CPU on idle
+/// servers.
+const LIFECYCLE_RECV_TIMEOUT_MS: u64 = 100;
+
+/// Owns the lifecycle-forwarder thread + its stop flag. Same shape as
+/// [`DrainerHandle`] — Drop sets the flag and joins. The thread also
+/// exits naturally when the server's mpsc senders are dropped (server
+/// destructed), so a forwarder outliving its server still terminates.
+struct LifecycleForwarderHandle {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Drop for LifecycleForwarderHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            // Worst-case wait is one `LIFECYCLE_RECV_TIMEOUT_MS` tick
+            // plus the in-flight publish — single-digit ms.
+            let _ = t.join();
+        }
+    }
+}
+
 /// Per-session bookkeeping for the output event stream. Mutated under
 /// the [`TerminalCorePlugin::emitters`] mutex.
 #[derive(Debug, Default, Clone, Copy)]
@@ -416,6 +470,7 @@ impl TerminalCorePlugin {
             event_bus: None,
             emitters: Arc::new(Mutex::new(HashMap::new())),
             drainer: None,
+            lifecycle_forwarder: None,
         }
     }
 
@@ -429,6 +484,7 @@ impl TerminalCorePlugin {
             event_bus: None,
             emitters: Arc::new(Mutex::new(HashMap::new())),
             drainer: None,
+            lifecycle_forwarder: None,
         }
     }
 
@@ -441,17 +497,48 @@ impl TerminalCorePlugin {
         self
     }
 
-    /// Wire the plugin to a kernel event bus and spawn the autonomous
-    /// drainer. After this call, sessions stream their output onto
-    /// `com.nexus.terminal.output.<session_id>` without any caller
-    /// having to call `pump` or `read_raw_since` — the drainer pumps
-    /// every active session every [`DRAINER_SLEEP_MS`] ms and publishes
-    /// new bytes as [`OutputStreamPayload`] (the streaming half of
-    /// WI-12). On-demand publishes from the dispatch handlers still
-    /// happen and share state with the drainer, so neither path can
-    /// double-publish.
+    /// Wire the plugin to a kernel event bus and spawn both background
+    /// threads:
+    ///
+    /// - The **byte-stream drainer** pumps every active session every
+    ///   [`DRAINER_SLEEP_MS`] ms and publishes new bytes as
+    ///   [`OutputStreamPayload`] on
+    ///   `com.nexus.terminal.output.<session_id>` (Phase 2 WI-12). On-
+    ///   demand publishes from `pump` / `read_raw_since` still happen
+    ///   and share state with the drainer, so neither path can
+    ///   double-publish.
+    /// - The **lifecycle forwarder** subscribes to the in-memory
+    ///   server's [`TerminalEvent`] mpsc and republishes every event
+    ///   on `com.nexus.terminal.events.<session_id>` (BL-013). Plugins
+    ///   subscribing via [`nexus_kernel::EventFilter::CustomPrefix`]
+    ///   on that prefix get `SessionCreated` / `OutputReceived` /
+    ///   `PatternMatched` / `SessionClosed` without polling `pump`.
+    ///
+    /// We subscribe to the lifecycle mpsc here — before any session
+    /// can be created via dispatch — so no `SessionCreated` event is
+    /// missed. Returning `Self` keeps the builder ergonomic for
+    /// `nexus-bootstrap`'s registration pipeline.
+    ///
+    /// # Panics
+    /// Panics if the freshly-built server mutex is somehow already
+    /// poisoned. The plugin owns the only references to `server` at
+    /// this point, so the only way to hit this is a `with_server`
+    /// caller passing in a server whose mutex was poisoned elsewhere
+    /// — which would be an upstream bug worth surfacing.
     #[must_use]
     pub fn with_event_bus(mut self, bus: Arc<EventBus>) -> Self {
+        // Subscribe to the lifecycle mpsc up front. Server lock is held
+        // only for the duration of `subscribe_events` — no I/O happens
+        // here.
+        let lifecycle_rx = self
+            .server
+            .lock()
+            .expect("freshly-built server mutex cannot be poisoned")
+            .subscribe_events();
+        self.lifecycle_forwarder = Some(spawn_lifecycle_forwarder(
+            lifecycle_rx,
+            Arc::clone(&bus),
+        ));
         self.drainer = Some(spawn_drainer(
             Arc::clone(&self.server),
             Arc::clone(&self.emitters),
@@ -552,6 +639,77 @@ fn drainer_round(
         }
     }
     Some(found)
+}
+
+/// Spawn the lifecycle forwarder thread (BL-013). The thread owns the
+/// `Receiver<TerminalEvent>` end of the in-memory server's mpsc and
+/// forwards each event onto the kernel bus. It exits when either:
+///
+/// - the stop flag is flipped (plugin Drop), or
+/// - every `Sender<TerminalEvent>` has been dropped — i.e. the
+///   in-memory server has been destructed. We use `recv_timeout` so
+///   the stop flag is checked at least once per
+///   [`LIFECYCLE_RECV_TIMEOUT_MS`] tick even on an idle server.
+fn spawn_lifecycle_forwarder(
+    rx: Receiver<TerminalEvent>,
+    bus: Arc<EventBus>,
+) -> LifecycleForwarderHandle {
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_clone = Arc::clone(&stop);
+    let thread = thread::Builder::new()
+        .name("nexus-terminal-lifecycle".into())
+        .spawn(move || lifecycle_forwarder_loop(&rx, &bus, &stop_clone))
+        .expect("spawn nexus-terminal lifecycle forwarder thread");
+    LifecycleForwarderHandle {
+        stop,
+        thread: Some(thread),
+    }
+}
+
+fn lifecycle_forwarder_loop(
+    rx: &Receiver<TerminalEvent>,
+    bus: &EventBus,
+    stop: &Arc<AtomicBool>,
+) {
+    let timeout = Duration::from_millis(LIFECYCLE_RECV_TIMEOUT_MS);
+    while !stop.load(Ordering::Relaxed) {
+        match rx.recv_timeout(timeout) {
+            Ok(event) => publish_lifecycle_event(bus, &event),
+            // Server dropped — no more senders, nothing to forward.
+            Err(RecvTimeoutError::Disconnected) => return,
+            // Loop back and re-check the stop flag.
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+    }
+}
+
+/// Publish a single lifecycle event onto
+/// `com.nexus.terminal.events.<session_id>`. Errors are logged at warn
+/// level and swallowed: a serialisation or bus failure is not worth
+/// killing the forwarder over (the next event will likely succeed).
+fn publish_lifecycle_event(bus: &EventBus, event: &TerminalEvent) {
+    let session_id = event.session_id();
+    let type_id = format!("{EVENT_LIFECYCLE_PREFIX}{session_id}");
+    let payload = match serde_json::to_value(event) {
+        Ok(v) => v,
+        Err(err) => {
+            tracing::warn!(
+                plugin = PLUGIN_ID,
+                %err,
+                session = session_id,
+                "failed to serialize terminal lifecycle event",
+            );
+            return;
+        }
+    };
+    if let Err(err) = bus.publish_plugin(PLUGIN_ID, &type_id, payload) {
+        tracing::warn!(
+            plugin = PLUGIN_ID,
+            %err,
+            session = session_id,
+            "failed to publish terminal lifecycle event",
+        );
+    }
 }
 
 /// Free-function publish path used by both the drainer and the on-
@@ -1412,5 +1570,279 @@ mod tests {
             .expect("wait");
         let r: WaitForPatternResponse = serde_json::from_value(resp).expect("decode");
         assert!(!r.matched);
+    }
+
+    /// Drain `sub` until a `Custom` event matching `predicate` is seen
+    /// or `timeout` elapses. Pumps `id` along the way so the in-memory
+    /// server makes progress without a manual loop in every test. The
+    /// pattern matches the structure of the existing
+    /// `pump_publishes_output_event_with_monotonic_seq` helper: spin
+    /// the dispatch handler, drain the subscription, fail fast on
+    /// timeout. Returns the matched payload as a `TerminalEvent`.
+    fn pump_until_lifecycle<F>(
+        plugin: &mut TerminalCorePlugin,
+        sub: &mut nexus_kernel::EventSubscription,
+        id: &str,
+        predicate: F,
+        timeout: Duration,
+    ) -> Option<crate::TerminalEvent>
+    where
+        F: Fn(&crate::TerminalEvent) -> bool,
+    {
+        use nexus_kernel::NexusEvent;
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            // Pumping is best-effort — if the session has already
+            // closed the dispatch returns an error that we ignore so
+            // the test can still observe trailing lifecycle events.
+            let _ = plugin.dispatch(
+                HANDLER_PUMP,
+                &serde_json::json!({ "id": id, "timeout_ms": 50 }),
+            );
+            while let Some(evt) = sub.try_recv().expect("bus alive") {
+                if let NexusEvent::Custom { type_id, payload, .. } = &evt.event {
+                    if !type_id.starts_with(EVENT_LIFECYCLE_PREFIX) {
+                        continue;
+                    }
+                    let term_evt: crate::TerminalEvent =
+                        serde_json::from_value(payload.clone()).expect("decode lifecycle");
+                    if predicate(&term_evt) {
+                        return Some(term_evt);
+                    }
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn lifecycle_session_created_published_on_kernel_bus() {
+        use nexus_kernel::EventFilter;
+
+        if !unix_only("lifecycle_session_created_published_on_kernel_bus") {
+            return;
+        }
+
+        let bus = Arc::new(EventBus::new(64));
+        let mut sub =
+            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+
+        let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
+        let resp = p
+            .dispatch(HANDLER_CREATE_SESSION, &create_args("sleep 1"))
+            .expect("create");
+        let CreateSessionResponse { id } = serde_json::from_value(resp).expect("decode");
+
+        let evt = pump_until_lifecycle(
+            &mut p,
+            &mut sub,
+            &id,
+            |e| matches!(e, crate::TerminalEvent::SessionCreated { .. }),
+            Duration::from_secs(2),
+        )
+        .expect("SessionCreated event never reached the kernel bus");
+
+        match evt {
+            crate::TerminalEvent::SessionCreated { id: eid, name } => {
+                assert_eq!(eid, id);
+                assert_eq!(name.as_deref(), Some("plugin-test"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lifecycle_output_received_published_on_kernel_bus() {
+        use nexus_kernel::EventFilter;
+
+        if !unix_only("lifecycle_output_received_published_on_kernel_bus") {
+            return;
+        }
+
+        let bus = Arc::new(EventBus::new(128));
+        let mut sub =
+            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+
+        let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
+        let create = serde_json::json!({
+            "name": "lifecycle-output",
+            "shell": "/bin/sh",
+            "shell_args": ["-c", "printf 'first-line\\n'; sleep 0.2; printf 'second-line\\n'"],
+        });
+        let CreateSessionResponse { id } = serde_json::from_value(
+            p.dispatch(HANDLER_CREATE_SESSION, &create).expect("create"),
+        )
+        .expect("decode");
+
+        let evt = pump_until_lifecycle(
+            &mut p,
+            &mut sub,
+            &id,
+            |e| {
+                matches!(
+                    e,
+                    crate::TerminalEvent::OutputReceived { line, .. }
+                        if line.content == "first-line"
+                )
+            },
+            Duration::from_secs(3),
+        )
+        .expect("OutputReceived event for 'first-line' never published");
+
+        match evt {
+            crate::TerminalEvent::OutputReceived { id: eid, line } => {
+                assert_eq!(eid, id);
+                assert_eq!(line.content, "first-line");
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lifecycle_pattern_matched_published_on_kernel_bus() {
+        use nexus_kernel::EventFilter;
+
+        if !unix_only("lifecycle_pattern_matched_published_on_kernel_bus") {
+            return;
+        }
+
+        let bus = Arc::new(EventBus::new(64));
+        let mut sub =
+            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+
+        let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
+        let create = serde_json::json!({
+            "name": "lifecycle-match",
+            "shell": "/bin/sh",
+            "shell_args": ["-c", "printf 'warmup\\nready-signal\\ntail\\n'"],
+        });
+        let CreateSessionResponse { id } = serde_json::from_value(
+            p.dispatch(HANDLER_CREATE_SESSION, &create).expect("create"),
+        )
+        .expect("decode");
+
+        // wait_for_pattern drives its own pump loop and emits a
+        // PatternMatched event from inside the in-memory server when
+        // the pattern lands.
+        let resp = p
+            .dispatch(
+                HANDLER_WAIT_FOR_PATTERN,
+                &serde_json::json!({
+                    "id": id,
+                    "pattern": "ready-signal",
+                    "is_regex": false,
+                    "timeout_ms": 3000,
+                }),
+            )
+            .expect("wait");
+        let r: WaitForPatternResponse = serde_json::from_value(resp).expect("decode");
+        assert!(r.matched, "pattern should have matched");
+
+        let evt = pump_until_lifecycle(
+            &mut p,
+            &mut sub,
+            &id,
+            |e| {
+                matches!(
+                    e,
+                    crate::TerminalEvent::PatternMatched { pattern, .. }
+                        if pattern == "ready-signal"
+                )
+            },
+            Duration::from_secs(2),
+        )
+        .expect("PatternMatched event never reached the kernel bus");
+
+        if let crate::TerminalEvent::PatternMatched { id: eid, pattern, .. } = evt {
+            assert_eq!(eid, id);
+            assert_eq!(pattern, "ready-signal");
+        } else {
+            panic!("expected PatternMatched");
+        }
+    }
+
+    #[test]
+    fn lifecycle_session_closed_published_on_kernel_bus() {
+        use nexus_kernel::EventFilter;
+
+        if !unix_only("lifecycle_session_closed_published_on_kernel_bus") {
+            return;
+        }
+
+        let bus = Arc::new(EventBus::new(64));
+        let mut sub =
+            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+
+        let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
+        let CreateSessionResponse { id } = serde_json::from_value(
+            p.dispatch(HANDLER_CREATE_SESSION, &create_args("sleep 1"))
+                .expect("create"),
+        )
+        .expect("decode");
+
+        let _ = p
+            .dispatch(
+                HANDLER_CLOSE_SESSION,
+                &serde_json::json!({ "id": id }),
+            )
+            .expect("close");
+
+        let evt = pump_until_lifecycle(
+            &mut p,
+            &mut sub,
+            &id,
+            |e| matches!(e, crate::TerminalEvent::SessionClosed { .. }),
+            Duration::from_secs(2),
+        )
+        .expect("SessionClosed event never reached the kernel bus");
+
+        if let crate::TerminalEvent::SessionClosed { id: eid, .. } = evt {
+            assert_eq!(eid, id);
+        } else {
+            panic!("expected SessionClosed");
+        }
+    }
+
+    #[test]
+    fn lifecycle_topic_includes_session_id_suffix() {
+        use nexus_kernel::{EventFilter, NexusEvent};
+
+        if !unix_only("lifecycle_topic_includes_session_id_suffix") {
+            return;
+        }
+
+        let bus = Arc::new(EventBus::new(64));
+        let mut sub =
+            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+
+        let mut p = TerminalCorePlugin::new().with_event_bus(Arc::clone(&bus));
+        let CreateSessionResponse { id } = serde_json::from_value(
+            p.dispatch(HANDLER_CREATE_SESSION, &create_args("sleep 1"))
+                .expect("create"),
+        )
+        .expect("decode");
+
+        // Wait for any lifecycle event for `id` to land. The
+        // SessionCreated event must arrive via the prefix subscription
+        // and its type_id must end with the session id so a per-session
+        // `EventFilter::CustomExact` subscription is also viable for
+        // remote-terminal style consumers.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(evt) = sub.try_recv().expect("bus alive") {
+                if let NexusEvent::Custom { type_id, .. } = &evt.event {
+                    assert_eq!(*type_id, format!("{EVENT_LIFECYCLE_PREFIX}{id}"));
+                    return;
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no lifecycle event landed within 2s",
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 }
