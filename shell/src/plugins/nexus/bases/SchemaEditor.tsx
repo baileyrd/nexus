@@ -22,6 +22,12 @@ import {
 } from './fieldTypes'
 import { getBasesApi } from './runtime'
 
+/** Refusal threshold for destructive schema mutations. Snapshotting
+ *  cell values for every record on a base with more rows than this
+ *  would balloon the history entry into the megabytes; we surface a
+ *  "history truncated" hint instead of silently losing data. */
+const SCHEMA_HISTORY_RECORD_LIMIT = 50_000
+
 const ALL_KINDS: FieldKind[] = [
   'text',
   'long-text',
@@ -48,6 +54,8 @@ interface Props {
 export function SchemaEditor({ relpath, base, client }: Props) {
   const setBase = useBasesStore((s) => s.setBase)
   const setOpen = useBasesStore((s) => s.setSchemaEditorOpen)
+  const pushHistory = useBasesStore((s) => s.pushHistory)
+  const setLastUndoError = useBasesStore((s) => s.setLastUndoError)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -64,12 +72,29 @@ export function SchemaEditor({ relpath, base, client }: Props) {
     setBase(relpath, fresh)
   }
 
-  const runOp = async <T,>(fn: () => Promise<T>): Promise<T | null> => {
+  /** Run a mutation, reload, then optionally record a history entry.
+   *  When `historyEntryFor` is provided, it's invoked with the kernel
+   *  result so callers can capture pre-state for the inverse and
+   *  build the entry only after the forward succeeded. Returning
+   *  `null` from it skips the push (used by destructive mutations
+   *  that exceed the snapshot threshold). */
+  const runOp = async <T,>(
+    fn: () => Promise<T>,
+    historyEntryFor?: (result: T) => {
+      label: string
+      forward(): Promise<void>
+      inverse(): Promise<void>
+    } | null,
+  ): Promise<T | null> => {
     try {
       setBusy(true)
       setErr(null)
       const r = await fn()
       await reload()
+      if (historyEntryFor) {
+        const entry = historyEntryFor(r)
+        if (entry) pushHistory(relpath, entry)
+      }
       return r
     } catch (e) {
       setErr((e as Error).message ?? String(e))
@@ -96,7 +121,21 @@ export function SchemaEditor({ relpath, base, client }: Props) {
       )
       if (!ok) return
     }
-    await runOp(() => client.renameProperty(relpath, oldName, trimmed))
+    await runOp(
+      () => client.renameProperty(relpath, oldName, trimmed),
+      () => ({
+        label: `Rename column ${oldName} → ${trimmed}`,
+        forward: async () => {
+          await client.renameProperty(relpath, oldName, trimmed)
+          await reload()
+        },
+        // Inverse renames the new name back to the old one.
+        inverse: async () => {
+          await client.renameProperty(relpath, trimmed, oldName)
+          await reload()
+        },
+      }),
+    )
   }
 
   const handleRetype = async (name: string, def: FieldDefinition, nextKind: FieldKind) => {
@@ -109,6 +148,30 @@ export function SchemaEditor({ relpath, base, client }: Props) {
       )
       if (!ok) return
     }
+    // Snapshot pre-retype cell values for every record so the
+    // inverse can restore them after the kernel coerces. We capture
+    // BEFORE the kernel call so racing events don't bleed into the
+    // snapshot.
+    if (base.records.length > SCHEMA_HISTORY_RECORD_LIMIT) {
+      setLastUndoError(
+        relpath,
+        `history truncated: retype on bases with more than ${SCHEMA_HISTORY_RECORD_LIMIT.toLocaleString()} records is not undoable`,
+      )
+      const nextDefRefuse: Record<string, unknown> = { ...def, type: nextKind }
+      if (nextKind !== 'select' && nextKind !== 'multi-select') {
+        delete nextDefRefuse.options
+      } else if (!Array.isArray(nextDefRefuse.options)) {
+        nextDefRefuse.options = []
+      }
+      if (nextKind !== 'formula') delete nextDefRefuse.expression
+      await runOp(() => client.updateProperty(relpath, name, nextDefRefuse, true))
+      return
+    }
+    const prevDef: Record<string, unknown> = { ...def }
+    const prevValues = new Map<string, unknown>()
+    for (const r of base.records) {
+      prevValues.set(r.id, r[name])
+    }
     const nextDef: Record<string, unknown> = { ...def, type: nextKind }
     if (nextKind !== 'select' && nextKind !== 'multi-select') {
       delete nextDef.options
@@ -118,12 +181,46 @@ export function SchemaEditor({ relpath, base, client }: Props) {
     if (nextKind !== 'formula') {
       delete nextDef.expression
     }
-    await runOp(() => client.updateProperty(relpath, name, nextDef, true))
+    await runOp(
+      () => client.updateProperty(relpath, name, nextDef, true),
+      () => ({
+        label: `Retype ${name} (${def.type} → ${nextKind})`,
+        forward: async () => {
+          await client.updateProperty(relpath, name, nextDef, true)
+          await reload()
+        },
+        // Inverse: restore the prior definition with migrate=true so
+        // the kernel re-coerces, then write each pre-retype value back
+        // verbatim. The second pass is what makes the round-trip
+        // lossless even when coercion silently dropped data.
+        inverse: async () => {
+          await client.updateProperty(relpath, name, prevDef, true)
+          for (const [recordId, value] of prevValues) {
+            await client.updateRecord(relpath, recordId, { [name]: value })
+          }
+          await reload()
+        },
+      }),
+    )
   }
 
   const handleToggleRequired = async (name: string, def: FieldDefinition) => {
+    const prevDef: Record<string, unknown> = { ...def }
     const nextDef: Record<string, unknown> = { ...def, required: !def.required }
-    await runOp(() => client.updateProperty(relpath, name, nextDef, false))
+    await runOp(
+      () => client.updateProperty(relpath, name, nextDef, false),
+      () => ({
+        label: `Toggle required on ${name}`,
+        forward: async () => {
+          await client.updateProperty(relpath, name, nextDef, false)
+          await reload()
+        },
+        inverse: async () => {
+          await client.updateProperty(relpath, name, prevDef, false)
+          await reload()
+        },
+      }),
+    )
   }
 
   const handleUpdateOptions = async (name: string, def: FieldDefinition, optionsCsv: string) => {
@@ -131,13 +228,41 @@ export function SchemaEditor({ relpath, base, client }: Props) {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean)
-    const nextDef = { ...def, options }
-    await runOp(() => client.updateProperty(relpath, name, nextDef, false))
+    const prevDef: Record<string, unknown> = { ...def }
+    const nextDef: Record<string, unknown> = { ...def, options }
+    await runOp(
+      () => client.updateProperty(relpath, name, nextDef, false),
+      () => ({
+        label: `Update options on ${name}`,
+        forward: async () => {
+          await client.updateProperty(relpath, name, nextDef, false)
+          await reload()
+        },
+        inverse: async () => {
+          await client.updateProperty(relpath, name, prevDef, false)
+          await reload()
+        },
+      }),
+    )
   }
 
   const handleUpdateExpression = async (name: string, def: FieldDefinition, expression: string) => {
-    const nextDef = { ...def, expression }
-    await runOp(() => client.updateProperty(relpath, name, nextDef, false))
+    const prevDef: Record<string, unknown> = { ...def }
+    const nextDef: Record<string, unknown> = { ...def, expression }
+    await runOp(
+      () => client.updateProperty(relpath, name, nextDef, false),
+      () => ({
+        label: `Update expression on ${name}`,
+        forward: async () => {
+          await client.updateProperty(relpath, name, nextDef, false)
+          await reload()
+        },
+        inverse: async () => {
+          await client.updateProperty(relpath, name, prevDef, false)
+          await reload()
+        },
+      }),
+    )
   }
 
   const handleDelete = async (name: string) => {
@@ -147,7 +272,42 @@ export function SchemaEditor({ relpath, base, client }: Props) {
       `Delete column "${name}"? Values on every record will be lost.`,
     )
     if (!ok) return
-    await runOp(() => client.deleteProperty(relpath, name))
+    // Refuse to push a destructive history entry on huge bases; the
+    // snapshot would balloon into MB. Forward still runs; the user is
+    // told via the lastUndoError banner that the action isn't undoable.
+    if (base.records.length > SCHEMA_HISTORY_RECORD_LIMIT) {
+      setLastUndoError(
+        relpath,
+        `history truncated: delete column on bases with more than ${SCHEMA_HISTORY_RECORD_LIMIT.toLocaleString()} records is not undoable`,
+      )
+      await runOp(() => client.deleteProperty(relpath, name))
+      return
+    }
+    const prevDef: Record<string, unknown> = {
+      ...(base.schema.fields[name] as Record<string, unknown>),
+    }
+    const prevValues = new Map<string, unknown>()
+    for (const r of base.records) {
+      if (name in r) prevValues.set(r.id, r[name])
+    }
+    await runOp(
+      () => client.deleteProperty(relpath, name),
+      () => ({
+        label: `Delete column ${name}`,
+        forward: async () => {
+          await client.deleteProperty(relpath, name)
+          await reload()
+        },
+        // Recreate column then restore every snapshotted value.
+        inverse: async () => {
+          await client.createProperty(relpath, name, prevDef)
+          for (const [recordId, value] of prevValues) {
+            await client.updateRecord(relpath, recordId, { [name]: value })
+          }
+          await reload()
+        },
+      }),
+    )
   }
 
   const handleAdd = async () => {
@@ -161,7 +321,21 @@ export function SchemaEditor({ relpath, base, client }: Props) {
       setErr(`"${trimmed}" is already in use.`)
       return
     }
-    await runOp(() => client.createProperty(relpath, trimmed, { type: 'text' }))
+    const newDef: Record<string, unknown> = { type: 'text' }
+    await runOp(
+      () => client.createProperty(relpath, trimmed, newDef),
+      () => ({
+        label: `Add column ${trimmed}`,
+        forward: async () => {
+          await client.createProperty(relpath, trimmed, newDef)
+          await reload()
+        },
+        inverse: async () => {
+          await client.deleteProperty(relpath, trimmed)
+          await reload()
+        },
+      }),
+    )
   }
 
   return (

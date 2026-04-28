@@ -84,6 +84,11 @@ export interface BasesTabState {
    *  Empty on the happy path; surfaced as a banner above the body
    *  when non-empty. ADR 0019. */
   unsupportedFilters: string[]
+  /** Last error from `undo` / `redo` (e.g. "history truncated" when a
+   *  destructive schema mutation refused to push). `pushHistory`
+   *  clears this on the next push so it stays scoped to the most
+   *  recent failure. Surfaced as a dismissable banner. */
+  lastUndoError: string | null
 }
 
 /** One atomic user-visible edit. `forward`/`inverse` are async
@@ -150,6 +155,10 @@ interface BasesStore {
    *  expressions reported by the kernel. Called once per tab on
    *  successful `.base` load. */
   setReadOnly(relpath: string, readOnly: boolean, unsupportedFilters: string[]): void
+  /** Set the most recent undo/redo error message (or clear it via
+   *  `null`). UI surfaces this as a dismissable banner; the next
+   *  `pushHistory` call clears it automatically. */
+  setLastUndoError(relpath: string, error: string | null): void
 }
 
 const EMPTY: BasesTabState = {
@@ -178,6 +187,7 @@ const EMPTY: BasesTabState = {
   redoStack: [],
   readOnly: false,
   unsupportedFilters: [],
+  lastUndoError: null,
 }
 
 export const useBasesStore = create<BasesStore>((set) => ({
@@ -357,7 +367,12 @@ export const useBasesStore = create<BasesStore>((set) => ({
       const next = [...t.undoStack, entry]
       if (next.length > UNDO_HISTORY_CAP) next.splice(0, next.length - UNDO_HISTORY_CAP)
       return {
-        tabs: { ...s.tabs, [relpath]: { ...t, undoStack: next, redoStack: [] } },
+        tabs: {
+          ...s.tabs,
+          // A fresh edit clears any stale undo/redo error banner —
+          // the user has moved on.
+          [relpath]: { ...t, undoStack: next, redoStack: [], lastUndoError: null },
+        },
       }
     })
   },
@@ -367,7 +382,15 @@ export const useBasesStore = create<BasesStore>((set) => ({
     const entry = t.undoStack[t.undoStack.length - 1]
     try {
       await entry.inverse()
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set((s) => {
+        const cur = s.tabs[relpath]
+        if (!cur) return s
+        return {
+          tabs: { ...s.tabs, [relpath]: { ...cur, lastUndoError: `undo failed: ${msg}` } },
+        }
+      })
       return false
     }
     set((s) => {
@@ -380,6 +403,7 @@ export const useBasesStore = create<BasesStore>((set) => ({
             ...cur,
             undoStack: cur.undoStack.slice(0, -1),
             redoStack: [...cur.redoStack, entry],
+            lastUndoError: null,
           },
         },
       }
@@ -392,7 +416,15 @@ export const useBasesStore = create<BasesStore>((set) => ({
     const entry = t.redoStack[t.redoStack.length - 1]
     try {
       await entry.forward()
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set((s) => {
+        const cur = s.tabs[relpath]
+        if (!cur) return s
+        return {
+          tabs: { ...s.tabs, [relpath]: { ...cur, lastUndoError: `redo failed: ${msg}` } },
+        }
+      })
       return false
     }
     set((s) => {
@@ -405,6 +437,7 @@ export const useBasesStore = create<BasesStore>((set) => ({
             ...cur,
             redoStack: cur.redoStack.slice(0, -1),
             undoStack: [...cur.undoStack, entry],
+            lastUndoError: null,
           },
         },
       }
@@ -450,6 +483,14 @@ export const useBasesStore = create<BasesStore>((set) => ({
           ...s.tabs,
           [relpath]: { ...t, readOnly, unsupportedFilters },
         },
+      }
+    })
+  },
+  setLastUndoError(relpath, error) {
+    set((s) => {
+      const t = s.tabs[relpath] ?? { ...EMPTY }
+      return {
+        tabs: { ...s.tabs, [relpath]: { ...t, lastUndoError: error } },
       }
     })
   },

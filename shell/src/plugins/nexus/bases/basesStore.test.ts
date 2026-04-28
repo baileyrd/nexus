@@ -21,9 +21,9 @@
 // Run via the shell test runner: `pnpm --filter nexus-shell test`
 // (picked up through the `tests/bases-store.test.ts` re-export shim).
 
-import type { Base, FilterRule } from './kernelClient.ts'
+import type { Base, BaseRecord, BaseView, FilterRule } from './kernelClient.ts'
 import { makeBasesKernelClient, STORAGE_PLUGIN_ID } from './kernelClient.ts'
-import { useBasesStore } from './basesStore.ts'
+import { useBasesStore, type HistoryEntry } from './basesStore.ts'
 import {
   applyView,
   filtersFromView,
@@ -35,6 +35,12 @@ import {
   makeMockKernel,
   type InMemoryStore,
 } from './testKernel.ts'
+import {
+  getActiveBases,
+  setActiveBases,
+  withActiveBases,
+} from './activeBases.ts'
+import { UNDO_HISTORY_CAP } from '../constants.ts'
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -383,4 +389,381 @@ test('loadObsidianBase routes to obsidian_base_query and adapts the result', asy
   // `BaseView.sort.direction` contract used by the view layer.
   assert.equal(load.base.views[0].sort?.[0].direction, 'desc')
   assert.deepEqual(load.unsupportedFilters, ['formula(x) > 1'])
+})
+
+// ── BL-030 — per-surface undo/redo history stack ────────────────────────────
+
+/** Build a no-op history entry that records its forward/inverse fires
+ *  in the supplied counter map so tests can assert ordering. */
+function counterEntry(label: string, counts: Map<string, number>): HistoryEntry {
+  return {
+    label,
+    forward: async () => {
+      counts.set(`${label}:forward`, (counts.get(`${label}:forward`) ?? 0) + 1)
+    },
+    inverse: async () => {
+      counts.set(`${label}:inverse`, (counts.get(`${label}:inverse`) ?? 0) + 1)
+    },
+  }
+}
+
+test('pushHistory caps at UNDO_HISTORY_CAP and drops the oldest entry', () => {
+  const path = 'team/cap.bases'
+  resetTab(path)
+  const counts = new Map<string, number>()
+  // Push CAP+5 entries — the first five should be evicted.
+  for (let i = 0; i < UNDO_HISTORY_CAP + 5; i += 1) {
+    useBasesStore.getState().pushHistory(path, counterEntry(`e${i}`, counts))
+  }
+  const stack = useBasesStore.getState().tabs[path].undoStack
+  assert.equal(stack.length, UNDO_HISTORY_CAP)
+  // First retained entry should be e5 (entries 0..4 were dropped).
+  assert.equal(stack[0].label, 'e5')
+  assert.equal(stack[stack.length - 1].label, `e${UNDO_HISTORY_CAP + 5 - 1}`)
+})
+
+test('undo runs inverse and moves the entry to redoStack; new edit clears redoStack', async () => {
+  const path = 'team/redo.bases'
+  resetTab(path)
+  const counts = new Map<string, number>()
+  useBasesStore.getState().pushHistory(path, counterEntry('a', counts))
+  useBasesStore.getState().pushHistory(path, counterEntry('b', counts))
+
+  // Undo the last entry; its inverse runs and it moves to redo.
+  const ok = await useBasesStore.getState().undo(path)
+  assert.equal(ok, true)
+  assert.equal(counts.get('b:inverse'), 1)
+  let t = useBasesStore.getState().tabs[path]
+  assert.equal(t.undoStack.length, 1)
+  assert.equal(t.redoStack.length, 1)
+  assert.equal(t.redoStack[0].label, 'b')
+
+  // A fresh push clears redo (LIFO undo semantics).
+  useBasesStore.getState().pushHistory(path, counterEntry('c', counts))
+  t = useBasesStore.getState().tabs[path]
+  assert.equal(t.redoStack.length, 0)
+  assert.equal(t.undoStack.length, 2)
+  assert.equal(t.undoStack[t.undoStack.length - 1].label, 'c')
+})
+
+test('cell-edit history round-trips through the mock kernel calling base_record_update with the right args', async () => {
+  const path = 'team/edit.bases'
+  const store = seededStore(path)
+  const kernel = makeMockKernel(inMemoryBaseHandlers(store))
+  const client = makeBasesKernelClient(kernel.api)
+
+  resetTab(path)
+  useBasesStore.getState().setBase(path, store.bases[path])
+
+  // Mirror BasesTable.commitEdit — capture prev, kernel write, push entry.
+  const prev = useBasesStore
+    .getState()
+    .tabs[path].base!.records.find((r) => r.id === 'r1')!.title
+  await client.updateRecord(path, 'r1', { title: 'edited' })
+  useBasesStore.getState().patchRecord(path, 'r1', { title: 'edited' })
+  useBasesStore.getState().pushHistory(path, {
+    label: 'Edit title',
+    forward: async () => {
+      await client.updateRecord(path, 'r1', { title: 'edited' })
+      useBasesStore.getState().patchRecord(path, 'r1', { title: 'edited' })
+    },
+    inverse: async () => {
+      await client.updateRecord(path, 'r1', { title: prev })
+      useBasesStore.getState().patchRecord(path, 'r1', { title: prev })
+    },
+  })
+
+  // Undo: kernel writes prev value back.
+  const ok = await useBasesStore.getState().undo(path)
+  assert.equal(ok, true)
+  const updates = kernel.callsTo('base_record_update')
+  // 1 forward + 1 inverse = 2 updates.
+  assert.equal(updates.length, 2)
+  assert.deepEqual(updates[0].args, { path, record_id: 'r1', fields: { title: 'edited' } })
+  assert.deepEqual(updates[1].args, { path, record_id: 'r1', fields: { title: 'first' } })
+  assert.equal(store.bases[path].records[0].title, 'first')
+})
+
+test('add-row history: undo deletes the row; redo recreates with the same id', async () => {
+  const path = 'team/add.bases'
+  const store = seededStore(path)
+  const kernel = makeMockKernel(inMemoryBaseHandlers(store))
+  const client = makeBasesKernelClient(kernel.api)
+
+  resetTab(path)
+  useBasesStore.getState().setBase(path, store.bases[path])
+
+  // Mirror BasesTable.handleAddRow — kernel mints id, then push entry.
+  const stored = await client.createRecord(path, { id: '', title: 'new' } as BaseRecord)
+  useBasesStore.getState().appendRecord(path, stored)
+  useBasesStore.getState().pushHistory(path, {
+    label: 'Add row',
+    forward: async () => {
+      await client.createRecord(path, stored)
+      useBasesStore.getState().appendRecord(path, stored)
+    },
+    inverse: async () => {
+      await client.deleteRecord(path, stored.id)
+      useBasesStore.getState().removeRecord(path, stored.id)
+    },
+  })
+
+  // Undo deletes through base_record_delete.
+  await useBasesStore.getState().undo(path)
+  const dels = kernel.callsTo('base_record_delete')
+  assert.equal(dels.length, 1)
+  assert.deepEqual(dels[0].args, { path, record_id: stored.id })
+  assert.equal(
+    store.bases[path].records.find((r) => r.id === stored.id),
+    undefined,
+  )
+
+  // Redo recreates with the same id (verifies the redo path replays
+  // the captured `stored` rather than minting a new one).
+  await useBasesStore.getState().redo(path)
+  const creates = kernel.callsTo('base_record_create')
+  assert.equal(creates.length, 2)
+  assert.equal((creates[1].args as { record: BaseRecord }).record.id, stored.id)
+  assert.ok(store.bases[path].records.find((r) => r.id === stored.id))
+})
+
+test('soft-delete history: undo issues base_record_restore', async () => {
+  const path = 'team/soft.bases'
+  const store = seededStore(path)
+  const kernel = makeMockKernel(inMemoryBaseHandlers(store))
+  const client = makeBasesKernelClient(kernel.api)
+
+  resetTab(path)
+  useBasesStore.getState().setBase(path, store.bases[path])
+
+  await client.softDeleteRecord(path, 'r1')
+  useBasesStore.getState().pushHistory(path, {
+    label: 'Soft-delete row',
+    forward: async () => {
+      await client.softDeleteRecord(path, 'r1')
+    },
+    inverse: async () => {
+      await client.restoreRecord(path, 'r1')
+    },
+  })
+
+  await useBasesStore.getState().undo(path)
+  const restores = kernel.callsTo('base_record_restore')
+  assert.equal(restores.length, 1)
+  assert.deepEqual(restores[0].args, { path, record_id: 'r1' })
+  assert.equal(store.bases[path].records[0].deletedAt, null)
+})
+
+test('schema-rename history: undo issues base_property_rename(new → old)', async () => {
+  const path = 'team/rename.bases'
+  const store = seededStore(path)
+  const kernel = makeMockKernel(inMemoryBaseHandlers(store))
+  const client = makeBasesKernelClient(kernel.api)
+
+  resetTab(path)
+  useBasesStore.getState().setBase(path, store.bases[path])
+
+  await client.renameProperty(path, 'title', 'heading')
+  useBasesStore.getState().pushHistory(path, {
+    label: 'Rename column title → heading',
+    forward: async () => {
+      await client.renameProperty(path, 'title', 'heading')
+    },
+    inverse: async () => {
+      await client.renameProperty(path, 'heading', 'title')
+    },
+  })
+
+  await useBasesStore.getState().undo(path)
+  const renames = kernel.callsTo('base_property_rename')
+  assert.equal(renames.length, 2)
+  assert.deepEqual(renames[1].args, { path, old_name: 'heading', new_name: 'title' })
+  // Field re-appears under the original name in the in-memory store.
+  assert.ok('title' in store.bases[path].schema.fields)
+  assert.ok(!('heading' in store.bases[path].schema.fields))
+})
+
+test('schema-delete history: undo recreates the column AND restores cell values via base_record_update for each snapshotted record', async () => {
+  const path = 'team/delcol.bases'
+  const store = seededStore(path)
+  const kernel = makeMockKernel(inMemoryBaseHandlers(store))
+  const client = makeBasesKernelClient(kernel.api)
+
+  resetTab(path)
+  useBasesStore.getState().setBase(path, store.bases[path])
+
+  // Snapshot before the destructive op (mirrors SchemaEditor.handleDelete).
+  const prevDef = { ...(store.bases[path].schema.fields.status as Record<string, unknown>) }
+  const prevValues = new Map<string, unknown>()
+  for (const r of store.bases[path].records) {
+    prevValues.set(r.id, r.status)
+  }
+
+  await client.deleteProperty(path, 'status')
+  useBasesStore.getState().pushHistory(path, {
+    label: 'Delete column status',
+    forward: async () => {
+      await client.deleteProperty(path, 'status')
+    },
+    inverse: async () => {
+      await client.createProperty(path, 'status', prevDef)
+      for (const [recordId, value] of prevValues) {
+        await client.updateRecord(path, recordId, { status: value })
+      }
+    },
+  })
+
+  // Pre-undo: column is gone.
+  assert.ok(!('status' in store.bases[path].schema.fields))
+
+  await useBasesStore.getState().undo(path)
+  const creates = kernel.callsTo('base_property_create')
+  assert.equal(creates.length, 1)
+  assert.deepEqual(creates[0].args, { path, name: 'status', definition: prevDef })
+
+  // Two cell-restore writes — one per record snapshot.
+  const updates = kernel.callsTo('base_record_update')
+  assert.equal(updates.length, 2)
+  const byId = new Map(updates.map((u) => [(u.args as { record_id: string }).record_id, u.args]))
+  assert.deepEqual(byId.get('r1'), { path, record_id: 'r1', fields: { status: 'todo' } })
+  assert.deepEqual(byId.get('r2'), { path, record_id: 'r2', fields: { status: 'doing' } })
+  // Schema regained the column.
+  assert.ok('status' in store.bases[path].schema.fields)
+})
+
+test('view-create / view-update / view-delete history round-trip via base_view_*', async () => {
+  const path = 'team/views.bases'
+  const store = seededStore(path)
+  const kernel = makeMockKernel(inMemoryBaseHandlers(store))
+  const client = makeBasesKernelClient(kernel.api)
+
+  resetTab(path)
+  useBasesStore.getState().setBase(path, store.bases[path])
+
+  const v: BaseView = { name: 'Open', type: 'table', filter: [] }
+
+  // Create + history entry.
+  await client.createView(path, v)
+  useBasesStore.getState().pushHistory(path, {
+    label: `Create view "${v.name}"`,
+    forward: async () => {
+      await client.createView(path, v)
+    },
+    inverse: async () => {
+      await client.deleteView(path, v.name)
+    },
+  })
+  // Undo deletes through base_view_delete.
+  await useBasesStore.getState().undo(path)
+  let deletes = kernel.callsTo('base_view_delete')
+  assert.equal(deletes.length, 1)
+  assert.deepEqual(deletes[0].args, { path, name: 'Open' })
+
+  // Update — re-create then snapshot a prior copy and update.
+  await client.createView(path, v)
+  const prev: BaseView = JSON.parse(JSON.stringify(v))
+  const next: BaseView = { ...v, filter: [{ field: 'status', operator: 'eq', value: 'todo' }] }
+  await client.updateView(path, next)
+  useBasesStore.getState().pushHistory(path, {
+    label: `Save view "${v.name}"`,
+    forward: async () => {
+      await client.updateView(path, next)
+    },
+    inverse: async () => {
+      await client.updateView(path, prev)
+    },
+  })
+  await useBasesStore.getState().undo(path)
+  const updates = kernel.callsTo('base_view_update')
+  assert.equal(updates.length, 2)
+  assert.deepEqual(
+    (updates[1].args as { view: BaseView }).view.filter,
+    [],
+    'expected inverse to send the prior empty-filter view',
+  )
+
+  // Delete — snapshot, delete, history; undo recreates verbatim.
+  const beforeDel: BaseView = JSON.parse(JSON.stringify(store.bases[path].views[0]))
+  await client.deleteView(path, beforeDel.name)
+  useBasesStore.getState().pushHistory(path, {
+    label: `Delete view "${beforeDel.name}"`,
+    forward: async () => {
+      await client.deleteView(path, beforeDel.name)
+    },
+    inverse: async () => {
+      await client.createView(path, beforeDel)
+    },
+  })
+  await useBasesStore.getState().undo(path)
+  // The view came back via base_view_create.
+  const creates = kernel.callsTo('base_view_create')
+  // 1 setup create + 1 setup re-create + 1 inverse re-create = 3.
+  assert.equal(creates.length, 3)
+  assert.equal(
+    (creates[creates.length - 1].args as { view: BaseView }).view.name,
+    beforeDel.name,
+  )
+  assert.equal(store.bases[path].views.length, 1)
+
+  // Sanity — base_view_delete fired during the inverse of create AND
+  // forward of delete. We exercised both.
+  deletes = kernel.callsTo('base_view_delete')
+  assert.equal(deletes.length, 2)
+})
+
+test('commandRegistry undo handler is no-op when no bases tab has focus', () => {
+  // No active handle ⇒ withActiveBases returns false and never throws.
+  setActiveBases(null)
+  assert.equal(getActiveBases(), null)
+
+  let invoked = 0
+  const ran = withActiveBases(() => {
+    invoked += 1
+  })
+  assert.equal(ran, false)
+  assert.equal(invoked, 0)
+
+  // Register a handle and confirm the same call now dispatches.
+  let undoCalls = 0
+  setActiveBases({
+    undo: () => {
+      undoCalls += 1
+    },
+    redo: () => {},
+    cut: () => {},
+    copy: () => {},
+    paste: () => {},
+  })
+  const ran2 = withActiveBases((h) => h.undo())
+  assert.equal(ran2, true)
+  assert.equal(undoCalls, 1)
+
+  // Clean up so other tests don't see a stale handle.
+  setActiveBases(null)
+})
+
+test('undo failure populates lastUndoError; pushHistory clears it', async () => {
+  const path = 'team/err.bases'
+  resetTab(path)
+  // Inverse throws so undo trips its catch arm.
+  useBasesStore.getState().pushHistory(path, {
+    label: 'Boom',
+    forward: async () => {},
+    inverse: async () => {
+      throw new Error('kernel offline')
+    },
+  })
+  const ok = await useBasesStore.getState().undo(path)
+  assert.equal(ok, false)
+  assert.match(
+    useBasesStore.getState().tabs[path].lastUndoError ?? '',
+    /undo failed: kernel offline/,
+  )
+  // Next push clears the banner.
+  useBasesStore.getState().pushHistory(path, {
+    label: 'noop',
+    forward: async () => {},
+    inverse: async () => {},
+  })
+  assert.equal(useBasesStore.getState().tabs[path].lastUndoError, null)
 })

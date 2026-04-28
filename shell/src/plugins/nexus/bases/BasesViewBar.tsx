@@ -31,6 +31,7 @@ export function BasesViewBar({ relpath, base, client }: Props) {
   const setCalendarDateField = useBasesStore((s) => s.setCalendarDateField)
   const setHiddenFields = useBasesStore((s) => s.setHiddenFields)
   const setViewFilters = useBasesStore((s) => s.setViewFilters)
+  const pushHistory = useBasesStore((s) => s.pushHistory)
 
   const [opError, setOpError] = useState<string | null>(null)
 
@@ -79,12 +80,38 @@ export function BasesViewBar({ relpath, base, client }: Props) {
       if (existing) {
         try {
           setOpError(null)
+          const prev: BaseView = JSON.parse(JSON.stringify(existing))
           const updated = snapshot(existing.name)
           await client.updateView(relpath, updated)
           setViews(
             relpath,
             base.views.map((v) => (v.name === existing.name ? updated : v)),
           )
+          pushHistory(relpath, {
+            label: `Save view "${existing.name}"`,
+            forward: async () => {
+              await client.updateView(relpath, updated)
+              setViews(
+                relpath,
+                useBasesStore
+                  .getState()
+                  .tabs[relpath]?.base?.views.map((v) =>
+                    v.name === existing.name ? updated : v,
+                  ) ?? [updated],
+              )
+            },
+            inverse: async () => {
+              await client.updateView(relpath, prev)
+              setViews(
+                relpath,
+                useBasesStore
+                  .getState()
+                  .tabs[relpath]?.base?.views.map((v) =>
+                    v.name === existing.name ? prev : v,
+                  ) ?? [prev],
+              )
+            },
+          })
           return
         } catch (err) {
           setOpError(`save failed: ${errMsg(err)}`)
@@ -106,6 +133,19 @@ export function BasesViewBar({ relpath, base, client }: Props) {
       await client.createView(relpath, view)
       setViews(relpath, [...base.views, view])
       setActiveView(relpath, name)
+      pushHistory(relpath, {
+        label: `Create view "${name}"`,
+        forward: async () => {
+          await client.createView(relpath, view)
+          const cur = useBasesStore.getState().tabs[relpath]?.base?.views ?? []
+          setViews(relpath, [...cur.filter((v) => v.name !== name), view])
+        },
+        inverse: async () => {
+          await client.deleteView(relpath, name)
+          const cur = useBasesStore.getState().tabs[relpath]?.base?.views ?? []
+          setViews(relpath, cur.filter((v) => v.name !== name))
+        },
+      })
     } catch (err) {
       setOpError(`save failed: ${errMsg(err)}`)
     }
@@ -120,9 +160,12 @@ export function BasesViewBar({ relpath, base, client }: Props) {
       setOpError(`A view named "${name}" already exists.`)
       return
     }
-    // Kernel update keys by name, so rename = delete + create.
+    // Kernel update keys by name, so rename = delete + create. We
+    // snapshot the prior view for the inverse so undo restores both
+    // the name and the wire fields exactly.
     try {
       setOpError(null)
+      const prev: BaseView = JSON.parse(JSON.stringify(view))
       const renamed: BaseView = { ...view, name }
       await client.deleteView(relpath, view.name)
       await client.createView(relpath, renamed)
@@ -131,6 +174,27 @@ export function BasesViewBar({ relpath, base, client }: Props) {
         base.views.map((v) => (v.name === view.name ? renamed : v)),
       )
       if (tab.activeView === view.name) setActiveView(relpath, name)
+      pushHistory(relpath, {
+        label: `Rename view ${view.name} → ${name}`,
+        forward: async () => {
+          await client.deleteView(relpath, prev.name)
+          await client.createView(relpath, renamed)
+          const cur = useBasesStore.getState().tabs[relpath]?.base?.views ?? []
+          setViews(
+            relpath,
+            cur.map((v) => (v.name === prev.name ? renamed : v)),
+          )
+        },
+        inverse: async () => {
+          await client.deleteView(relpath, renamed.name)
+          await client.createView(relpath, prev)
+          const cur = useBasesStore.getState().tabs[relpath]?.base?.views ?? []
+          setViews(
+            relpath,
+            cur.map((v) => (v.name === renamed.name ? prev : v)),
+          )
+        },
+      })
     } catch (err) {
       setOpError(`rename failed: ${errMsg(err)}`)
     }
@@ -143,6 +207,19 @@ export function BasesViewBar({ relpath, base, client }: Props) {
       const copy: BaseView = { ...view, name }
       await client.createView(relpath, copy)
       setViews(relpath, [...base.views, copy])
+      pushHistory(relpath, {
+        label: `Duplicate view ${view.name}`,
+        forward: async () => {
+          await client.createView(relpath, copy)
+          const cur = useBasesStore.getState().tabs[relpath]?.base?.views ?? []
+          setViews(relpath, [...cur.filter((v) => v.name !== name), copy])
+        },
+        inverse: async () => {
+          await client.deleteView(relpath, name)
+          const cur = useBasesStore.getState().tabs[relpath]?.base?.views ?? []
+          setViews(relpath, cur.filter((v) => v.name !== name))
+        },
+      })
     } catch (err) {
       setOpError(`duplicate failed: ${errMsg(err)}`)
     }
@@ -152,9 +229,23 @@ export function BasesViewBar({ relpath, base, client }: Props) {
     if (!window.confirm(`Delete view "${view.name}"?`)) return
     try {
       setOpError(null)
+      const prev: BaseView = JSON.parse(JSON.stringify(view))
       await client.deleteView(relpath, view.name)
       setViews(relpath, base.views.filter((v) => v.name !== view.name))
       if (tab.activeView === view.name) setActiveView(relpath, null)
+      pushHistory(relpath, {
+        label: `Delete view "${view.name}"`,
+        forward: async () => {
+          await client.deleteView(relpath, prev.name)
+          const cur = useBasesStore.getState().tabs[relpath]?.base?.views ?? []
+          setViews(relpath, cur.filter((v) => v.name !== prev.name))
+        },
+        inverse: async () => {
+          await client.createView(relpath, prev)
+          const cur = useBasesStore.getState().tabs[relpath]?.base?.views ?? []
+          setViews(relpath, [...cur.filter((v) => v.name !== prev.name), prev])
+        },
+      })
     } catch (err) {
       setOpError(`delete failed: ${errMsg(err)}`)
     }
