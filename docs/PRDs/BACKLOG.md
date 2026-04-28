@@ -276,12 +276,6 @@ Last functional gap in PRD-08; previously listed in IMPLEMENTATION_STATUS.md gap
 **Effort**: Medium. **Crate**: `nexus-terminal`.
 Today `InMemoryTerminalServer::subscribe_events` returns a `std::sync::mpsc::Receiver` that does not cross plugin boundaries. The Tauri panel works because it polls `pump`; the TUI does the same. Closing this gap unblocks remote terminals and lets community plugins react to terminal output without re-implementing pump loops. Probably needs a generic plugin-host stream convention first (currently no other plugin streams either).
 
-### BL-014: `nexus db` CLI subcommand group
-
-**Source**: PRD-10 §11 (referenced as the CLI surface for the database engine).
-**Effort**: Medium. **Crate**: `nexus-cli`.
-Wraps existing `com.nexus.database::{csv_import,csv_export,formula_eval,apply_view}` (ids 1–4). Suggested subcommands: `nexus db list | show <base> | import-csv | export-csv | eval-formula <expr>`. Mirrors `nexus skill` / `nexus mcp` shape — 30 s timeout, no direct `nexus-database` linkage from the CLI.
-
 ### BL-015: Soft-deleted bases — trash view UI
 
 **Source**: PRD-10 / [BACKLOG.md](#)'s `.bases` follow-up at line 137 ("a trash-view UI surfacing soft-deleted records").
