@@ -245,18 +245,9 @@ Threads from `docs/archive/planning/UI-AUDIT.md §6` not yet confirmed. Each is 
 
 > Cross-PRD docs audit ([DOCS_AUDIT_2026-04-28.md](DOCS_AUDIT_2026-04-28.md)) — items spec'd in a PRD that are not yet built and were not previously assigned a backlog ID. Each cites the PRD section, target crate, and estimated effort. Effort scale: small ≈ ½–2 days, medium ≈ 3–10 days, large ≈ 2+ weeks.
 
-### BL-010: `nexus ai chat` interactive REPL
+_BL-010 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-**Source**: PRD-05 §3.5.2, §10.2 — readline history, multi-turn session, `--context <FILE>`, `--model <MODEL>`.
-**Effort**: Medium. **Crate**: `nexus-cli` (new subcommand under existing `AiCommand` enum at `crates/nexus-cli/src/main.rs:314`).
-Wraps existing `com.nexus.ai::stream_chat` (handler id 6); persistence reuses `session_load`/`session_save` (ids 8/9). Today the CLI exposes `ask | embed | status | config` only.
-**Reshape (2026-04-28)**: merged with the AI-DIR "per-surface chat" pattern + the memory-layer "implicit chat context" piece. Implementation should land as a CLI consumer of a shared context-assembly service (forge selection rules + skill assembly + memory recall) so the same engine drives BL-032's Cmd+I overlay and BL-044's recall hotkey. Don't ship as a standalone code path. Gated on BL-032 (UX shape) and BL-016 (tool-calling).
-
-### BL-011: `nexus ai complete` CLI
-
-**Source**: PRD-05 §3.5.3, §10.3 — `nexus ai complete <FILE> [--line <N>] [--col <N>] [--context <NUM_LINES>]`.
-**Effort**: Medium. **Crate**: `nexus-cli`. Editor-side equivalent (Mod+Shift+Space) shipped per PRD-08 §9 / IMPLEMENTATION_STATUS.md line 84; the CLI surface is the headless twin and is not yet present.
-**Reshape (2026-04-28)**: paired with BL-034 (AMB ghost suggestions) — both consume one shared completion engine. BL-011 is the headless twin; BL-034 wires the same engine to the CM6 ghost-decoration. Build the engine once (prompt assembly + provider call + post-processing) and let the two surfaces differ only at the rendering boundary.
+_BL-011 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-012: Database query blocks in the editor (`[[{db:query}]]`)
 
@@ -327,11 +318,7 @@ Spec calls for per-Leaf detachment into a separate `WebviewWindow`. Today the sh
 
 _BL-030 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-031: Bases cell / row clipboard
-
-**Source**: 2026-04-28 backlog review — natural pair to BL-030.
-**Effort**: Small–medium. **Crate**: `shell/src/plugins/nexus/bases/`.
-No clipboard support today: `BasesTable` selection state exists for the row-actions menu but `Mod-C` / `Mod-V` / `Mod-X` are unbound. v1 scope: copy a rectangular cell range as TSV (clipboard text) + a Nexus-internal JSON payload (`application/x-nexus-bases-cells`) carrying field types so paste into a typed column round-trips losslessly; copy a full row as JSON; paste either fills the selected range (clamping or extending rows via `base_record_create`) or, with no selection, appends new rows. Cross-base paste honours field-type compatibility via `fieldTypes.ts` coercion rules — incompatible cells fall back to the string representation and emit a `bases:paste-coerced` notification. External-app paste (Excel / Google Sheets TSV) works via the text fallback. Pairs with BL-030 so a paste is one undo step.
+_BL-031 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
@@ -351,11 +338,7 @@ A modal overlay invocable from any focused surface (editor, bases, canvas, termi
 **Effort**: Small (bundle).
 Context chips: visible "what's in the prompt" pills inside BL-032's overlay (file, selection, skill stack) with click-to-remove. Model switcher: dropdown bound to BL-032 plus a global default in Settings. Trivial wiring around the BL-032 surface; bundle into one PR.
 
-### BL-034: AMB ghost suggestions (CM6 inline-completion decoration)
-
-**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) pattern 4 + AI-DIR "inline rewrite/summarize".
-**Effort**: Medium. **Crate**: `shell/src/plugins/nexus/editor/cm/` (new extension `ghostCompletion.ts`).
-Inline ghost-text suggestion at the caret with `Tab`-accept / `Esc`-dismiss, debounced trigger (idle + ≥N chars typed). **Pairs with BL-011** — both consume the same completion engine; BL-011 is the headless twin. Build the engine in `nexus-ai` (prompt assembly + provider call + post-processing); each surface only owns its rendering.
+_BL-034 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-035: Right-click AI actions + block AI actions (shared registry)
 
