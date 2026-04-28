@@ -180,6 +180,21 @@ pub enum TerminalEvent {
     },
 }
 
+impl TerminalEvent {
+    /// Session id every variant carries. Useful when a forwarder needs
+    /// to derive a per-session topic suffix from the event without
+    /// matching every variant inline.
+    #[must_use]
+    pub fn session_id(&self) -> &str {
+        match self {
+            TerminalEvent::SessionCreated { id, .. }
+            | TerminalEvent::OutputReceived { id, .. }
+            | TerminalEvent::PatternMatched { id, .. }
+            | TerminalEvent::SessionClosed { id, .. } => id,
+        }
+    }
+}
+
 /// PRD-09 §11.1 programmable terminal surface.
 pub trait TerminalServer {
     /// Spawn a new session with the given config. Emits

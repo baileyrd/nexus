@@ -86,7 +86,8 @@ pub use buffer::OutputBuffer;
 pub use core_plugin::{
     CreateSessionArgs, CreateSessionResponse, PumpArgs, PumpResponse, ReadOutputArgs,
     SearchOutputArgs, SendInputArgs, SendRawInputArgs, SessionIdArgs, TerminalCorePlugin,
-    WaitForPatternArgs, WaitForPatternResponse, HANDLER_CLOSE_SESSION, HANDLER_CREATE_SESSION,
+    WaitForPatternArgs, WaitForPatternResponse, EVENT_LIFECYCLE_PREFIX, EVENT_OUTPUT_PREFIX,
+    HANDLER_CLOSE_SESSION, HANDLER_CREATE_SESSION,
     HANDLER_GET_SESSION_INFO, HANDLER_LIST_SESSIONS, HANDLER_PUMP, HANDLER_READ_OUTPUT,
     HANDLER_READ_RAW_SINCE,
     HANDLER_SAVED_CREATE, HANDLER_SAVED_DELETE, HANDLER_SAVED_LIST, HANDLER_SAVED_REORDER,
