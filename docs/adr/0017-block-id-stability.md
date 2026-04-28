@@ -1,7 +1,7 @@
 # ADR 0017: Block-ID Stability via Lazy Inline Stamping
 
 **Date:** 2026-04-28
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
