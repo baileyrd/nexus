@@ -16,6 +16,7 @@
 //! | 4  | `triggered_by`     | `{ text }`         | Skills whose trigger matches `text`      |
 //! | 5  | `reload`           | `{}`               | Re-scan the `<forge>/.forge/skills` dir  |
 //! | 6  | `render`           | `{ id, values? }`  | Render a skill's body with parameter substitution |
+//! | 7  | `compose`          | `{ id }`           | BL-021 — resolve `depends_on` closure into ordered fragments + merged body |
 //!
 //! Ids are append-only.
 
@@ -42,6 +43,8 @@ pub const HANDLER_TRIGGERED_BY: u32 = 4;
 pub const HANDLER_RELOAD: u32 = 5;
 /// `render` handler id.
 pub const HANDLER_RENDER: u32 = 6;
+/// `compose` handler id (BL-021).
+pub const HANDLER_COMPOSE: u32 = 7;
 
 /// Core plugin — holds the skills root path + an in-memory registry
 /// behind a mutex so dispatches stay `Send + Sync`.
@@ -109,6 +112,7 @@ impl CorePlugin for SkillsCorePlugin {
             HANDLER_TRIGGERED_BY => self.dispatch_triggered_by(args),
             HANDLER_RELOAD => self.dispatch_reload(),
             HANDLER_RENDER => self.dispatch_render(args),
+            HANDLER_COMPOSE => self.dispatch_compose(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -191,6 +195,23 @@ impl SkillsCorePlugin {
             "name": skill.meta.name,
             "body": rendered,
         }))
+    }
+
+    /// BL-021 — resolve a skill's `depends_on` closure. Returns the
+    /// ordered fragment list, a merged body string, and any non-fatal
+    /// conflict warnings. Cycle / missing-dependency are surfaced as
+    /// `ExecutionFailed` so the planner can fall back to the raw body.
+    fn dispatch_compose(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
+        #[derive(Deserialize)]
+        struct Args {
+            id: String,
+        }
+        let a: Args = parse(args, "compose")?;
+        let reg = self.registry.lock().map_err(poisoned)?;
+        match crate::compose::compose(&reg, &a.id) {
+            Ok(composed) => to_value(&composed, "compose"),
+            Err(err) => Err(exec_err(format!("compose: {err}"))),
+        }
     }
 
     fn dispatch_reload(&self) -> Result<serde_json::Value, PluginError> {

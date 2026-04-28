@@ -273,11 +273,7 @@ Distinct from the agent's MCP discovery (which appends *tool descriptions* to th
 RAG today calls remote embedding endpoints. A local backend (e.g. fastembed-rs, candle, or sqlite-vec's bundled gguf path) would unblock fully-offline forges. Nice-to-have for personal-tool scope; medium priority.
 **Cross-references (2026-04-28)**: BL-019 has been **promoted** from "nice-to-have" to a critical-path foundation now that Future-direction tracks are in scope. Direct consumers: BL-038 citations, BL-039 auto-link suggestions, BL-040 semantic search, BL-041 background indexing daemon, BL-044 recall hotkey, BL-045 auto-enrichment on save, BL-047 scheduled digests — nine downstream tracks. A backend choice that doesn't ship cross-platform costs the schedule weeks. **Phase-0 deliverable**: an ADR comparing fastembed-rs / candle / sqlite-vec gguf on (model quality, RAM footprint, cold-start time, cross-platform binary cost, license). Split implementation: (1) backend impl, (2) `EmbeddingModel` trait + cache, (3) RAG wire-up, (4) batch indexer hook for BL-041.
 
-### BL-021: Skill `depends_on` composition resolver
-
-**Source**: PRD-13 §5 (depends-on stacking, conflict resolution rules).
-**Effort**: Large. **Crate**: `nexus-skills`.
-`SkillMeta.depends_on` parses but is never resolved or layered. Need: topological sort, cycle detection, prompt fragment merging in well-defined order, conflict warning surface. Aligns with the existing skill-aware planner prompt assembly in `nexus-agent`.
+_BL-021 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-022: Skill in-app editor UI
 
