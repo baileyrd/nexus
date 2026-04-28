@@ -2,6 +2,7 @@ import { syntaxTree } from '@codemirror/language'
 import type { EditorState } from '@codemirror/state'
 import { Decoration, type DecorationSet, WidgetType } from '@codemirror/view'
 import { renderMarkdown } from '../markdownRender'
+import { fencedCodeRegistry } from './fencedCodeRegistry'
 
 class HrWidget extends WidgetType {
   eq(_other: HrWidget): boolean {
@@ -33,6 +34,68 @@ export class TableWidget extends WidgetType {
   ignoreEvent(): boolean {
     return true
   }
+}
+
+export class FencedCodeWidget extends WidgetType {
+  constructor(
+    readonly source: string,
+    readonly language: string,
+    readonly generation: number,
+  ) {
+    super()
+  }
+  eq(other: FencedCodeWidget): boolean {
+    return (
+      this.language === other.language &&
+      this.generation === other.generation &&
+      this.source === other.source
+    )
+  }
+  toDOM(): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-md-fenced-widget'
+    wrap.dataset.language = this.language
+    const sync = fencedCodeRegistry.renderCached(this.language, this.source)
+    if (sync) {
+      wrap.appendChild(sync)
+      return wrap
+    }
+    const placeholder = document.createElement('pre')
+    placeholder.className = 'cm-md-fenced-pending'
+    const code = document.createElement('code')
+    code.textContent = this.source
+    placeholder.appendChild(code)
+    wrap.appendChild(placeholder)
+    const pending = fencedCodeRegistry.awaitPending(this.language, this.source)
+    if (pending) {
+      void pending.then((result) => {
+        if (!wrap.isConnected) return
+        wrap.replaceChildren()
+        if (result instanceof Error) {
+          wrap.appendChild(buildFencedErrorElement(this.language, result))
+        } else {
+          wrap.appendChild(result)
+        }
+      })
+    }
+    return wrap
+  }
+  ignoreEvent(): boolean {
+    return true
+  }
+}
+
+function buildFencedErrorElement(language: string, err: Error): HTMLElement {
+  const box = document.createElement('div')
+  box.className = 'cm-md-fenced-error'
+  const tag = document.createElement('span')
+  tag.className = 'cm-md-fenced-error-lang'
+  tag.textContent = language
+  const msg = document.createElement('span')
+  msg.className = 'cm-md-fenced-error-msg'
+  msg.textContent = err.message || 'render failed'
+  box.append(tag, msg)
+  return box
 }
 
 // Minimal shape of the @lezer/common nodes we touch — re-declared
@@ -456,6 +519,30 @@ function handleFencedCode(
 ): void {
   const startLine = doc.lineAt(node.from)
   const endLine = doc.lineAt(node.to)
+  const language = readFencedCodeLanguage(node, state)
+
+  if (
+    language &&
+    fencedCodeRegistry.has(language) &&
+    !nodeIntersectsActiveLines(state, startLine.from, endLine.to, active)
+  ) {
+    const innerSource = readFencedCodeBody(node, state, startLine, endLine)
+    items.push({
+      from: startLine.from,
+      to: endLine.to,
+      deco: Decoration.replace({
+        widget: new FencedCodeWidget(
+          innerSource,
+          language,
+          fencedCodeRegistry.generation(),
+        ),
+        block: true,
+        inclusive: false,
+      }),
+    })
+    return
+  }
+
   for (let l = startLine.number; l <= endLine.number; l++) {
     pushLine(items, doc.line(l).from, 'cm-md-codeblock')
   }
@@ -473,6 +560,42 @@ function handleFencedCode(
     const line = doc.line(lineNo)
     if (line.to > line.from) pushReplace(items, line.from, line.to)
   }
+}
+
+function readFencedCodeLanguage(node: SyntaxNode, state: EditorState): string | null {
+  let cur: SyntaxNode | null = node.firstChild
+  while (cur) {
+    if (cur.name === 'CodeInfo') {
+      return state.doc.sliceString(cur.from, cur.to).trim().split(/\s+/)[0] ?? null
+    }
+    cur = cur.nextSibling
+  }
+  return null
+}
+
+function readFencedCodeBody(
+  node: SyntaxNode,
+  state: EditorState,
+  startLine: ReturnType<EditorState['doc']['lineAt']>,
+  endLine: ReturnType<EditorState['doc']['lineAt']>,
+): string {
+  let cur: SyntaxNode | null = node.firstChild
+  let bodyFrom = -1
+  let bodyTo = -1
+  while (cur) {
+    if (cur.name === 'CodeText') {
+      if (bodyFrom < 0) bodyFrom = cur.from
+      bodyTo = cur.to
+    }
+    cur = cur.nextSibling
+  }
+  if (bodyFrom < 0 || bodyTo < bodyFrom) {
+    const innerStart = startLine.number < endLine.number ? startLine.to + 1 : startLine.to
+    const innerEnd = endLine.number > startLine.number ? endLine.from - 1 : endLine.to
+    if (innerEnd <= innerStart) return ''
+    return state.doc.sliceString(innerStart, innerEnd)
+  }
+  return state.doc.sliceString(bodyFrom, bodyTo)
 }
 
 function handleHorizontalRule(

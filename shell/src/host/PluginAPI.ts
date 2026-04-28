@@ -2,7 +2,14 @@
 // Constructs the PluginAPI object handed to each plugin's activate() function.
 // Core plugins get api.internal; community plugins do not.
 
-import type { PluginAPI, ActiveEditor, ConfigSection, KernelEventEnvelope } from '../types/plugin'
+import type {
+  PluginAPI,
+  ActiveEditor,
+  ConfigSection,
+  KernelEventEnvelope,
+  FencedRenderer,
+} from '../types/plugin'
+import { fencedCodeRegistry } from '../plugins/nexus/editor/cm/fencedCodeRegistry'
 import type { PluginRegistry } from './PluginRegistry'
 import { useSlotStore, type SlotId } from '../registry/SlotRegistry'
 import { uriHandlerRegistry } from '../registry/UriHandlerRegistry'
@@ -464,6 +471,17 @@ export function buildPluginAPI(
           if (disposed) return
           disposed = true
           unsubInner()
+        }
+        registry.trackSubscription(pluginId, unsub)
+        return unsub
+      },
+      registerFencedCodeRenderer(language: string, renderer: FencedRenderer): () => void {
+        const inner = fencedCodeRegistry.register(language, renderer)
+        let disposed = false
+        const unsub = () => {
+          if (disposed) return
+          disposed = true
+          inner()
         }
         registry.trackSubscription(pluginId, unsub)
         return unsub

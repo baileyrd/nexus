@@ -14,14 +14,14 @@
 
 ## New Features (not addressed in any PRD)
 
-### BL-008: Mermaid Diagram Plugin
+### BL-009: Whole-File `.mermaid` Viewer
 
-**Source**: live-preview implementation discussion (2026-04-27)
-**Effort**: Medium (~2–3 days)
-**Crate / Package**: new community plugin (TypeScript) under `shell/src/plugins/community/mermaid/`
-**Related**: editor live-preview (`shell/src/plugins/nexus/editor/cm/livePreview*.ts`)
+**Source**: BL-008 follow-up (2026-04-28)
+**Effort**: Small (~0.5 day)
+**Crate / Package**: `shell/src/plugins/community/mermaid/` (extension to BL-008's plugin)
+**Related**: BL-008 (fenced-code-renderer registry)
 
-Render fenced code blocks with `info === 'mermaid'` as SVG diagrams in the editor's live and preview modes. Implemented as a separate plugin so the ~150 KB gzipped `mermaid` library is opt-in — users who never read diagrams don't pay for it. Prerequisite: the editor needs a contribution point for fenced-code renderers (e.g. a registry keyed by language tag, value = `(source) =&gt; HTMLElement | Promise&lt;HTMLElement&gt;`); the editor's live-preview decoration set then consults the registry when emitting the `FencedCode` widget. The mermaid plugin registers `'mermaid'` with an async render and a per-source cache so selection changes don't re-render. On-cursor, raw source is shown for editing. The same extension point unlocks future diagram libraries (PlantUML, vis.js, DOT) without bloating the editor.
+Render standalone `.mermaid` files (whole-file mermaid source, no markdown wrapper) as SVG diagrams in the editor. BL-008 only handles fenced `mermaid` code blocks inside markdown documents — it hooks into the markdown live-preview/preview pipeline, which doesn't run for non-markdown files. Implement by extending `community.mermaid`'s `activate()` to also call `viewRegistry.register('mermaid', creator)` + `viewRegistry.registerExtensions(['mermaid'], 'mermaid')` (same pattern as `nexus.canvas`'s `.canvas` claim and `nexus.bases`'s `.bases` claim — see `shell/src/plugins/nexus/canvas/index.ts:130`). The view reads the file via `api.fs`, calls the same `mermaid.render` path the fenced renderer uses, and shows the SVG with a "View Source" toggle to fall back to the raw text. Edit-in-place is out of scope for v1 — open in CodeMirror via "View Source" if the user needs to edit. Plugin stays default-off; users opt in via Settings → Plugins.
 
 ## Partially New Features (concept exists in PRDs but design is unspecified)
 

@@ -279,7 +279,35 @@ export interface EditorAPI {
    * is auto-swept on plugin unload.
    */
   onChange(handler: (active: ActiveEditor | null) => void): () => void;
+  /**
+   * Register a renderer for a fenced code block language tag (BL-008).
+   * The editor's live-preview decoration walker and the preview-mode
+   * markdown pipeline both consult the registry when a fenced block's
+   * info string matches `language` and emit the renderer's output
+   * inline. The renderer may return synchronously or via Promise; the
+   * registry caches per (language, source) pair so cursor motion does
+   * not re-render. Returns a disposer; first-match-wins on duplicate
+   * languages (a console warning fires and the disposer is a no-op).
+   */
+  registerFencedCodeRenderer(
+    language: string,
+    renderer: FencedRenderer,
+  ): Disposable;
 }
+
+/** Result type for {@link FencedRenderer}. */
+export type FencedRenderResult = HTMLElement | Promise<HTMLElement>;
+
+/**
+ * Renderer signature for a fenced code block (BL-008). `source` is the
+ * raw text inside the fence (no opener/closer); `info` is the full
+ * info string (typically equal to the language tag, but a renderer may
+ * inspect trailing modifiers like `mermaid theme=dark`).
+ */
+export type FencedRenderer = (
+  source: string,
+  info: string,
+) => FencedRenderResult;
 
 /**
  * Workspace-level accessors (OI-14). Plugins read forge-relative
