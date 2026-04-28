@@ -180,6 +180,7 @@ export function BasesViewBar({ relpath, base, client }: Props) {
             key={v.name}
             view={v}
             active={active}
+            readOnly={tab.readOnly}
             onApply={() => handleApply(v)}
             onRename={() => void handleRename(v)}
             onDuplicate={() => void handleDuplicate(v)}
@@ -187,7 +188,7 @@ export function BasesViewBar({ relpath, base, client }: Props) {
           />
         )
       })}
-      <button
+      {!tab.readOnly && <button
         type="button"
         onClick={() => void handleSave()}
         title={
@@ -200,7 +201,7 @@ export function BasesViewBar({ relpath, base, client }: Props) {
         {tab.activeView && base.views.some((v) => v.name === tab.activeView)
           ? `Save "${tab.activeView}"`
           : '+ New view'}
-      </button>
+      </button>}
       {opError && (
         <span
           style={{
@@ -218,6 +219,7 @@ export function BasesViewBar({ relpath, base, client }: Props) {
 interface PillProps {
   view: BaseView
   active: boolean
+  readOnly: boolean
   onApply(): void
   onRename(): void
   onDuplicate(): void
@@ -227,6 +229,7 @@ interface PillProps {
 function ViewPill({
   view,
   active,
+  readOnly,
   onApply,
   onRename,
   onDuplicate,
@@ -253,7 +256,7 @@ function ViewPill({
       >
         {view.name}
       </button>
-      <button
+      {!readOnly && <button
         type="button"
         onClick={() => setMenuOpen((v) => !v)}
         title="Rename / Duplicate / Delete"
@@ -267,8 +270,8 @@ function ViewPill({
         }}
       >
         ⋯
-      </button>
-      {menuOpen && (
+      </button>}
+      {!readOnly && menuOpen && (
         <>
           <div
             onClick={() => setMenuOpen(false)}

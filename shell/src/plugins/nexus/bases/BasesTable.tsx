@@ -37,6 +37,7 @@ export function BasesTable({ relpath, base, client }: Props) {
   const undoLen = useBasesStore((s) => s.tabs[relpath]?.undoStack.length ?? 0)
   const redoLen = useBasesStore((s) => s.tabs[relpath]?.redoStack.length ?? 0)
   const trashOpen = useBasesStore((s) => s.tabs[relpath]?.trashOpen ?? false)
+  const readOnly = useBasesStore((s) => s.tabs[relpath]?.readOnly ?? false)
   const setSort = useBasesStore((s) => s.setSort)
   const setSelectedRecordId = useBasesStore((s) => s.setSelectedRecordId)
   const patchRecord = useBasesStore((s) => s.patchRecord)
@@ -386,7 +387,7 @@ export function BasesTable({ relpath, base, client }: Props) {
           color: 'var(--fg-muted, #9ca3af)',
         }}
       >
-        <button
+        {!readOnly && <button
           type="button"
           onClick={() => void handleAddRow()}
           disabled={trashOpen}
@@ -394,8 +395,8 @@ export function BasesTable({ relpath, base, client }: Props) {
           style={{ ...toolbarBtnStyle, opacity: trashOpen ? 0.4 : 1 }}
         >
           + New row
-        </button>
-        {selectedRecordId && !trashOpen && (
+        </button>}
+        {!readOnly && selectedRecordId && !trashOpen && (
           <button
             type="button"
             onClick={() => void handleSoftDeleteRow(selectedRecordId)}
@@ -405,7 +406,7 @@ export function BasesTable({ relpath, base, client }: Props) {
             Move to trash
           </button>
         )}
-        {selectedRecordId && trashOpen && (
+        {!readOnly && selectedRecordId && trashOpen && (
           <>
             <button
               type="button"
@@ -425,7 +426,7 @@ export function BasesTable({ relpath, base, client }: Props) {
             </button>
           </>
         )}
-        <button
+        {!readOnly && <button
           type="button"
           disabled={undoLen === 0}
           onClick={() => void undo(relpath)}
@@ -433,8 +434,8 @@ export function BasesTable({ relpath, base, client }: Props) {
           style={{ ...toolbarBtnStyle, opacity: undoLen === 0 ? 0.4 : 1 }}
         >
           Undo{undoLen > 0 ? ` (${undoLen})` : ''}
-        </button>
-        <button
+        </button>}
+        {!readOnly && <button
           type="button"
           disabled={redoLen === 0}
           onClick={() => void redo(relpath)}
@@ -442,10 +443,10 @@ export function BasesTable({ relpath, base, client }: Props) {
           style={{ ...toolbarBtnStyle, opacity: redoLen === 0 ? 0.4 : 1 }}
         >
           Redo{redoLen > 0 ? ` (${redoLen})` : ''}
-        </button>
-        <button type="button" onClick={handleImportCsv} style={toolbarBtnStyle}>
+        </button>}
+        {!readOnly && <button type="button" onClick={handleImportCsv} style={toolbarBtnStyle}>
           Import CSV
-        </button>
+        </button>}
         <button type="button" onClick={() => void handleExportCsv()} style={toolbarBtnStyle}>
           Export CSV
         </button>
@@ -521,7 +522,7 @@ export function BasesTable({ relpath, base, client }: Props) {
                     >
                       {typeGlyph(c.def.type)}
                     </span>
-                    <span style={{ color: 'var(--fg-primary, #e4e4e7)' }}>{c.name}</span>
+                    <span style={{ color: 'var(--fg-primary, #e4e4e7)' }}>{c.def.displayName ?? c.name}</span>
                     {arrow && (
                       <span style={{ marginLeft: 6, color: 'var(--accent, #60a5fa)' }}>
                         {arrow}
@@ -564,7 +565,7 @@ export function BasesTable({ relpath, base, client }: Props) {
                         onSelect={() => setSelectedRecordId(relpath, r.id)}
                         onStartEdit={(field) => {
                           setSelectedRecordId(relpath, r.id)
-                          setEditing({ id: r.id, field })
+                          if (!readOnly) setEditing({ id: r.id, field })
                         }}
                         onCancelEdit={() => setEditing(null)}
                         onCommit={(field, value) => void commitEdit(r.id, field, value)}

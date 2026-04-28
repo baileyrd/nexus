@@ -37,6 +37,10 @@ export interface FieldDefinition {
   /** Formula expression — only set when `type === 'formula'`. The
    *  kernel evaluates this per record via `formula_eval`. */
   expression?: string
+  /** Optional human-readable column header. Set when an Obsidian
+   *  `.base` `properties:` entry declares `displayName`; otherwise
+   *  the field name itself is used as the header. */
+  displayName?: string
 }
 
 const ALL_KINDS: FieldKind[] = [
@@ -79,6 +83,7 @@ export function parseFieldDef(def: unknown): FieldDefinition {
   if (typeof d.target === 'string') out.target = d.target
   if (typeof d.targetField === 'string') out.targetField = d.targetField
   if (typeof d.expression === 'string') out.expression = d.expression
+  if (typeof d.displayName === 'string') out.displayName = d.displayName
   return out
 }
 

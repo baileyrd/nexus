@@ -76,6 +76,14 @@ export interface BasesTabState {
   undoStack: HistoryEntry[]
   /** Redo stack — cleared whenever a fresh user edit is pushed. */
   redoStack: HistoryEntry[]
+  /** When true, mutation actions are not exposed in the UI. Set for
+   *  Obsidian single-file `.base` tabs (ADR 0019) — Nexus's `.bases`
+   *  directory format remains read/write. */
+  readOnly: boolean
+  /** Filter expressions that fell outside the v1 evaluator grammar.
+   *  Empty on the happy path; surfaced as a banner above the body
+   *  when non-empty. ADR 0019. */
+  unsupportedFilters: string[]
 }
 
 /** One atomic user-visible edit. `forward`/`inverse` are async
@@ -138,6 +146,10 @@ interface BasesStore {
   /** Pop the top redo entry and re-run its `forward`. */
   redo(relpath: string): Promise<boolean>
   closeTab(relpath: string): void
+  /** Mark the tab as read-only and capture any unsupported filter
+   *  expressions reported by the kernel. Called once per tab on
+   *  successful `.base` load. */
+  setReadOnly(relpath: string, readOnly: boolean, unsupportedFilters: string[]): void
 }
 
 const EMPTY: BasesTabState = {
@@ -164,6 +176,8 @@ const EMPTY: BasesTabState = {
   viewFilters: [],
   undoStack: [],
   redoStack: [],
+  readOnly: false,
+  unsupportedFilters: [],
 }
 
 export const useBasesStore = create<BasesStore>((set) => ({
@@ -426,6 +440,17 @@ export const useBasesStore = create<BasesStore>((set) => ({
       if (!s.tabs[relpath]) return s
       const { [relpath]: _gone, ...rest } = s.tabs
       return { tabs: rest }
+    })
+  },
+  setReadOnly(relpath, readOnly, unsupportedFilters) {
+    set((s) => {
+      const t = s.tabs[relpath] ?? { ...EMPTY }
+      return {
+        tabs: {
+          ...s.tabs,
+          [relpath]: { ...t, readOnly, unsupportedFilters },
+        },
+      }
     })
   },
 }))

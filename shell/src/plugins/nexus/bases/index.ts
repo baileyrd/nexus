@@ -65,7 +65,10 @@ export const basesPlugin: Plugin = {
     // clicks on `.bases` entries and emits a files:open with the
     // directory relpath, same as any file. The editor plugin routes
     // the resulting mount through viewRegistry.getTypeForExt().
-    viewRegistry.registerExtensions(['bases'], 'bases')
+    // `.bases` (directory) and `.base` (Obsidian single-file YAML —
+    // ADR 0019, read-only) both mount the same view component. The
+    // BasesView branches on extension to pick the correct loader.
+    viewRegistry.registerExtensions(['bases', 'base'], 'bases')
 
     api.views.register(DIALOG_VIEW_ID, {
       slot: 'overlay',
