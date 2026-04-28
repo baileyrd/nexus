@@ -312,12 +312,6 @@ Context assembly truncates by character count today; should pre-compute `max_tok
 **Effort**: Large. **Crate**: `nexus-ai`.
 RAG today calls remote embedding endpoints. A local backend (e.g. fastembed-rs, candle, or sqlite-vec's bundled gguf path) would unblock fully-offline forges. Nice-to-have for personal-tool scope; medium priority.
 
-### BL-020: Skill REGISTRY.json persistence
-
-**Source**: PRD-13 §3.1 (JSON index at `<forge>/.forge/skills/REGISTRY.json`).
-**Effort**: Small. **Crate**: `nexus-skills`.
-`crates/nexus-skills/src/lib.rs:25` explicitly notes this gap. In-memory registry is rebuilt on every `reload`; a persisted index would let cold-start CLIs skip the directory walk. Side benefit: lets external tooling enumerate skills without a forge open.
-
 ### BL-021: Skill `depends_on` composition resolver
 
 **Source**: PRD-13 §5 (depends-on stacking, conflict resolution rules).

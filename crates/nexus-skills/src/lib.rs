@@ -22,8 +22,6 @@
 //!   land once activation + composition land.
 //! - Dependency resolution. `depends_on` is stored verbatim; the
 //!   composer that stacks prompts ships with §5 in a follow-up.
-//! - `REGISTRY.json` persistence (§3.1). The in-memory registry is
-//!   authoritative today; a serialized index sits on top.
 
 #![deny(missing_docs)]
 #![warn(clippy::pedantic)]
@@ -33,6 +31,7 @@ pub mod builtins;
 pub mod core_plugin;
 mod parse;
 mod registry;
+pub mod registry_index;
 mod substitute;
 
 pub use builtins::{builtin_filenames, seed_builtins, SeedReport};
@@ -42,6 +41,7 @@ pub use core_plugin::{
 };
 pub use parse::{parse_skill_file, parse_skill_text, SkillParseError};
 pub use registry::{SkillRegistry, SkillRegistryError};
+pub use registry_index::{RegistryIndex, RegistryIndexEntry, RegistryIndexError};
 pub use substitute::{render, SubstitutionError};
 
 use serde::{Deserialize, Serialize};

@@ -68,10 +68,7 @@ fn resolve<S: std::hash::BuildHasher>(
             return Err(SubstitutionError::MissingParameter(param.name.clone()));
         };
         if param.param_type == "enum" && !param.values.is_empty() {
-            let matches = param
-                .values
-                .iter()
-                .any(|allowed| yaml_eq(allowed, chosen));
+            let matches = param.values.iter().any(|allowed| yaml_eq(allowed, chosen));
             if !matches {
                 return Err(SubstitutionError::EnumMismatch {
                     name: param.name.clone(),
