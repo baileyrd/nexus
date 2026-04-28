@@ -26,7 +26,12 @@ import { useContextKeyStore } from '../../../host/ContextKeyService'
 import { eventBus } from '../../../host/EventBus'
 import { ChatView } from './ChatView'
 import { aiChatViewCreator } from './AiChatView'
+import { CmdIOverlay } from './CmdIOverlay'
 import { useAiStore } from './aiStore'
+import { useCmdIStore } from './cmdIStore'
+import { setCmdIApi } from './cmdIApi'
+import { openCmdI, routeStreamEvent } from './cmdIRuntime'
+import { registerEditorContextAdapter } from './editorContextAdapter'
 import {
   setKernel,
   requestFocus,
@@ -48,9 +53,13 @@ import {
 } from './aiRuntime'
 
 const VIEW_ID = 'nexus.ai.view'
+const VIEW_ID_CMD_I_OVERLAY = 'nexus.ai.cmdI.overlay'
 const COMMAND_FOCUS = 'nexus.ai.focus'
 const COMMAND_CLEAR = 'nexus.ai.clear'
 const COMMAND_OPEN_SETTINGS = 'nexus.ai.openSettings'
+const COMMAND_CMD_I_OPEN = 'nexus.ai.cmdI.open'
+const COMMAND_CMD_I_CLOSE = 'nexus.ai.cmdI.close'
+const CONTEXT_KEY_CMD_I_VISIBLE = 'nexus.ai.cmdI.visible'
 
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
@@ -149,9 +158,32 @@ export const aiPlugin: Plugin = {
         { id: COMMAND_FOCUS, title: 'Focus Chat', category: 'AI' },
         { id: COMMAND_CLEAR, title: 'Clear Chat', category: 'AI' },
         { id: COMMAND_OPEN_SETTINGS, title: 'Configure AI provider', category: 'AI' },
+        // BL-032 — Cmd+I command-anywhere AI overlay.
+        { id: COMMAND_CMD_I_OPEN, title: 'Ask AI about current context…', category: 'AI' },
+        { id: COMMAND_CMD_I_CLOSE, title: 'Dismiss AI overlay', category: 'AI' },
       ],
       keybindings: [
         { command: COMMAND_FOCUS, key: 'ctrl+alt+a', mac: 'cmd+alt+a' },
+        // Primary BL-032 binding. Stays out of the way of the command
+        // palette (Ctrl+Shift+P) and the editor's italic shortcut by
+        // using the Pieces / VS Code "Inline Chat" convention.
+        { command: COMMAND_CMD_I_OPEN, key: 'ctrl+i', mac: 'cmd+i' },
+        // Esc inside the overlay is handled by the component itself
+        // (App.tsx short-circuits keybindings while focus is on a
+        // textarea), but registering it here makes the close action
+        // discoverable in the command palette.
+        {
+          command: COMMAND_CMD_I_CLOSE,
+          key: 'escape',
+          when: CONTEXT_KEY_CMD_I_VISIBLE,
+        },
+      ],
+      contextKeys: [
+        {
+          key: CONTEXT_KEY_CMD_I_VISIBLE,
+          description: 'True while the Cmd+I AI overlay is open.',
+          type: 'boolean',
+        },
       ],
     },
   },
@@ -316,11 +348,74 @@ export const aiPlugin: Plugin = {
       })
     }
 
+    // ── BL-032 — Cmd+I overlay ────────────────────────────────────────────
+    //
+    // Wires the command-anywhere AI overlay. Uses the same kernel-side
+    // `com.nexus.ai::stream_chat` channel as the chat view but mints a
+    // distinct `cmdi-<uuid>` session id per activation so events don't
+    // cross-contaminate the chat store. The overlay also lives in a
+    // different slot (`overlay`) so it stacks over the workspace
+    // independently of the AI chat panel.
+    setCmdIApi(api)
+
+    // Subscribe a SECOND time to the stream prefix specifically for the
+    // overlay router. The chat-side `subscribeStream` already runs and
+    // ignores `cmdi-` session ids (its store lookup misses every turn),
+    // so the two subscriptions coexist without stepping on each other.
+    // Both disposers are auto-swept on plugin unload via
+    // `registry.trackSubscription` inside `api.kernel.on`. Awaited
+    // below alongside the chat subscription so the first overlay submit
+    // can't fire before the listener is live.
+    const cmdISubPromise = api.kernel.on(
+      'com.nexus.ai.stream_',
+      (topic, payload) => {
+        routeStreamEvent(topic, payload)
+      },
+    )
+
+    api.commands.register(COMMAND_CMD_I_OPEN, async () => {
+      await openCmdI()
+    })
+    api.commands.register(COMMAND_CMD_I_CLOSE, () => {
+      useCmdIStore.getState().close()
+    })
+
+    // Mirror the overlay's `visible` flag into the context-key service
+    // so the `escape` keybinding's `when` clause resolves correctly.
+    api.context.set(
+      CONTEXT_KEY_CMD_I_VISIBLE,
+      useCmdIStore.getState().visible,
+    )
+    useCmdIStore.subscribe((state, prev) => {
+      if (state.visible !== prev.visible) {
+        api.context.set(CONTEXT_KEY_CMD_I_VISIBLE, state.visible)
+      }
+    })
+
+    api.views.register(VIEW_ID_CMD_I_OVERLAY, {
+      slot: 'overlay',
+      // Sit just below the command palette (priority 10) so a user who
+      // somehow opens both gets the palette on top — defensive only;
+      // the palette closes on Cmd+I anyway through normal focus rules.
+      priority: 20,
+      component: CmdIOverlay,
+    })
+
+    // Register the first context contributor — the editor adapter
+    // (current file + selection). The disposer is intentionally not
+    // tracked: the AI plugin has no `deactivate`, the registry is a
+    // module-scope singleton, and a hot plugin-reload at most leaves
+    // one stale duplicate (which the registry tolerates). When the
+    // PluginAPI grows a `trackSubscription` accessor (or this plugin
+    // grows a `deactivate`), thread the disposer through there.
+    registerEditorContextAdapter()
+
     // Fan out four awaits: subscription must be live before any submit
     // could fire (otherwise we'd miss the first chunks); the config
     // push lands the user's saved provider before hydrate reads it
     // back; sessions hydration is best-effort and non-blocking.
     await subscribeStream(api)
+    await cmdISubPromise
     await pushUserConfig(api, readUserConfig())
     void hydrateConfig(api)
     void loadSessions(api)
