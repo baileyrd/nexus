@@ -30,6 +30,7 @@ import { CmdIOverlay } from './CmdIOverlay'
 import { useAiStore } from './aiStore'
 import { useCmdIStore } from './cmdIStore'
 import { setCmdIApi } from './cmdIApi'
+import { setGhostApi } from './ghostApi'
 import { openCmdI, routeStreamEvent } from './cmdIRuntime'
 import { registerEditorContextAdapter } from './editorContextAdapter'
 import {
@@ -151,6 +152,44 @@ export const aiPlugin: Plugin = {
             description: 'Auto-dismiss duration for "Copied" button feedback in milliseconds',
             type: 'number' as const,
             default: 1200,
+          },
+          // BL-034 — inline ghost completion settings.
+          {
+            key: 'ai.ghost.enabled',
+            title: 'Inline ghost completions',
+            description:
+              'Show inline AI completions while typing in the editor. Tab accepts the suggestion; Esc dismisses it.',
+            type: 'boolean' as const,
+            default: true,
+          },
+          {
+            key: 'ai.ghost.debounceMs',
+            title: 'Ghost completion debounce (ms)',
+            description: 'Quiet-period after a keystroke before requesting a suggestion.',
+            type: 'number' as const,
+            default: 350,
+          },
+          {
+            key: 'ai.ghost.minChars',
+            title: 'Ghost completion minimum prefix',
+            description: 'Skip suggestions when fewer than this many characters precede the caret.',
+            type: 'number' as const,
+            default: 8,
+          },
+          {
+            key: 'ai.ghost.contextChars',
+            title: 'Ghost completion context window',
+            description:
+              'Number of characters before the caret sent to the model as context.',
+            type: 'number' as const,
+            default: 2000,
+          },
+          {
+            key: 'ai.ghost.maxTokens',
+            title: 'Ghost completion max tokens',
+            description: 'Generation cap for each ghost suggestion.',
+            type: 'number' as const,
+            default: 64,
           },
         ],
       },
@@ -357,6 +396,11 @@ export const aiPlugin: Plugin = {
     // different slot (`overlay`) so it stacks over the workspace
     // independently of the AI chat panel.
     setCmdIApi(api)
+    // BL-034 — register the same handle for the editor's inline ghost
+    // completion. Held separately so future drains of one surface
+    // (e.g. moving Cmd+I to a sandboxed plugin) don't unhook the
+    // other.
+    setGhostApi(api)
 
     // Subscribe a SECOND time to the stream prefix specifically for the
     // overlay router. The chat-side `subscribeStream` already runs and

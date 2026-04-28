@@ -334,6 +334,40 @@ enum AiCommand {
     Status,
     /// Show AI configuration
     Config,
+    /// Multi-turn streaming chat REPL (BL-010)
+    Chat {
+        /// Forge-relative file whose contents seed the conversation
+        /// as the first user message.
+        #[arg(long)]
+        context: Option<String>,
+        /// Override the model (e.g. `claude-opus-4-7`). Defaults to
+        /// whatever `ai config` resolves.
+        #[arg(long)]
+        model: Option<String>,
+        /// Resume an existing session id; new uuid is generated when
+        /// omitted.
+        #[arg(long)]
+        session: Option<String>,
+        /// System prompt prepended to the conversation.
+        #[arg(long)]
+        system: Option<String>,
+    },
+    /// Headless single-shot completion (BL-011)
+    Complete {
+        /// Forge-relative file to read. The text up to the requested
+        /// position is sent as the prompt.
+        file: String,
+        /// 1-based line number; defaults to the last line.
+        #[arg(long)]
+        line: Option<usize>,
+        /// 1-based column on the chosen line; defaults to end-of-line.
+        #[arg(long)]
+        col: Option<usize>,
+        /// Number of lines of leading context to retain. Defaults to
+        /// the whole file (use a smaller value to bound the prompt).
+        #[arg(long = "context")]
+        context_lines: Option<usize>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1248,6 +1282,24 @@ fn main() {
             AiCommand::Embed { file } => commands::ai::embed(&mut app, file.as_deref()),
             AiCommand::Status => commands::ai::status(&mut app),
             AiCommand::Config => commands::ai::config(&mut app),
+            AiCommand::Chat {
+                context,
+                model,
+                session,
+                system,
+            } => commands::ai::chat(
+                &mut app,
+                context.as_deref(),
+                model.as_deref(),
+                session.as_deref(),
+                system.as_deref(),
+            ),
+            AiCommand::Complete {
+                file,
+                line,
+                col,
+                context_lines,
+            } => commands::ai::complete(&mut app, &file, line, col, context_lines),
         },
 
         Commands::Agent(args) => match args.command {

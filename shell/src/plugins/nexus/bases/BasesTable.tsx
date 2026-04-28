@@ -17,6 +17,22 @@ import {
   type FieldKind,
 } from './fieldTypes'
 import { getBasesApi } from './runtime'
+import {
+  cellsToTsv,
+  coerceValue,
+  isPasteable,
+  normalizeRange,
+  parseTsv,
+  rangeContains,
+  readClipboardPayload,
+  rowsToTsv,
+  writeClipboardPayload,
+  type CellRange,
+  type CellsPayload,
+  type RowsPayload,
+} from './clipboard'
+import { contextKeyService } from '../../../host/ContextKeyService'
+import { setActiveTableClipboard } from './tableClipboard'
 
 interface Props {
   relpath: string
@@ -38,8 +54,10 @@ export function BasesTable({ relpath, base, client }: Props) {
   const redoLen = useBasesStore((s) => s.tabs[relpath]?.redoStack.length ?? 0)
   const trashOpen = useBasesStore((s) => s.tabs[relpath]?.trashOpen ?? false)
   const readOnly = useBasesStore((s) => s.tabs[relpath]?.readOnly ?? false)
+  const cellSelection = useBasesStore((s) => s.tabs[relpath]?.cellSelection ?? null)
   const setSort = useBasesStore((s) => s.setSort)
   const setSelectedRecordId = useBasesStore((s) => s.setSelectedRecordId)
+  const setCellSelection = useBasesStore((s) => s.setCellSelection)
   const patchRecord = useBasesStore((s) => s.patchRecord)
   const appendRecord = useBasesStore((s) => s.appendRecord)
   const removeRecord = useBasesStore((s) => s.removeRecord)
@@ -49,6 +67,21 @@ export function BasesTable({ relpath, base, client }: Props) {
 
   const [editing, setEditing] = useState<{ id: string; field: string } | null>(null)
   const [opError, setOpError] = useState<string | null>(null)
+  // Anchor for shift-click range extension. Distinct from
+  // `cellSelection` so a single-cell click after a range still has
+  // the prior anchor available for the next shift-click.
+  const anchorRef = useRef<{ row: number; col: number } | null>(null)
+
+  // Keep the global `bases.editing` context key in sync — the cell
+  // clipboard keybindings gate on `bases.focused && !bases.editing`
+  // so that Mod-V inside a CellEditor inserts text instead of
+  // triggering a paste.
+  useEffect(() => {
+    contextKeyService.set('bases.editing', !!editing)
+    return () => {
+      contextKeyService.set('bases.editing', false)
+    }
+  }, [editing])
 
   const columns = useMemo<Column[]>(() => buildColumns(base), [base])
   const records = useMemo(
@@ -67,6 +100,387 @@ export function BasesTable({ relpath, base, client }: Props) {
       setSort(relpath, null)
     }
   }
+
+  // Cell-range click handling (BL-031). A plain click anchors a
+  // single-cell selection; shift+click extends the range from the
+  // existing anchor (or the most recent click if no anchor is set).
+  const handleCellClick = useCallback(
+    (rowIndex: number, colIndex: number, shiftKey: boolean) => {
+      const anchor = anchorRef.current
+      if (shiftKey && anchor) {
+        setCellSelection(relpath, normalizeRange(anchor, { row: rowIndex, col: colIndex }))
+        return
+      }
+      anchorRef.current = { row: rowIndex, col: colIndex }
+      setCellSelection(relpath, { r1: rowIndex, c1: colIndex, r2: rowIndex, c2: colIndex })
+      // Mirror the row id onto the selection model so the row-delete
+      // / arrow-key paths still see the right record. We don't go
+      // through `setSelectedRecordId` (which would null out the
+      // cell selection); instead the table reads cell selection
+      // first and falls back to the row id only when none is set.
+    },
+    [relpath, setCellSelection],
+  )
+
+  // ── BL-031 clipboard surface ───────────────────────────────────
+  // Read records / columns / selection lazily inside each handler so
+  // they always see the latest store state — the activeTableClipboard
+  // registration lasts as long as the table is mounted, and capturing
+  // a stale closure here would copy the wrong cells after the user
+  // edits a row.
+  const handleCopy = useCallback(async () => {
+    const tab = useBasesStore.getState().tabs[relpath]
+    if (!tab?.base) return
+    const sel = tab.cellSelection
+    const cols = buildColumns(tab.base)
+    const recs = sortRecords(tab.base.records, tab.sort, cols)
+    if (sel) {
+      const cells: unknown[][] = []
+      const fields: { name: string; type: FieldKind }[] = []
+      for (let c = sel.c1; c <= sel.c2; c++) {
+        const col = cols[c]
+        if (col) fields.push({ name: col.name, type: col.def.type })
+      }
+      for (let r = sel.r1; r <= sel.r2; r++) {
+        const rec = recs[r]
+        if (!rec) continue
+        const row: unknown[] = []
+        for (let c = sel.c1; c <= sel.c2; c++) {
+          const col = cols[c]
+          row.push(col ? rec[col.name] : null)
+        }
+        cells.push(row)
+      }
+      const payload: CellsPayload = { kind: 'cells', fields, rows: cells }
+      const tsv = cellsToTsv(cells, fields)
+      try {
+        await writeClipboardPayload(payload, tsv)
+      } catch (err) {
+        setOpError(`copy failed: ${errMsg(err)}`)
+      }
+      return
+    }
+    if (tab.selectedRecordId) {
+      const rec = recs.find((r) => r.id === tab.selectedRecordId)
+      if (!rec) return
+      const fields = cols.map((c) => ({ name: c.name, type: c.def.type }))
+      const payload: RowsPayload = { kind: 'rows', fields, records: [rec] }
+      const tsv = rowsToTsv([rec], fields)
+      try {
+        await writeClipboardPayload(payload, tsv)
+      } catch (err) {
+        setOpError(`copy failed: ${errMsg(err)}`)
+      }
+    }
+  }, [relpath])
+
+  const handleCut = useCallback(async () => {
+    if (readOnly) return
+    const tab = useBasesStore.getState().tabs[relpath]
+    if (!tab?.base) return
+    const sel = tab.cellSelection
+    if (!sel) {
+      // Row cut isn't in v1 — Backspace already covers that path
+      // (and a row cut would conflict with the soft-delete confirm).
+      // Plain copy keeps the surface useful for "cut for clipboard"
+      // muscle memory; the user just needs Backspace to delete.
+      await handleCopy()
+      return
+    }
+    await handleCopy()
+    // Clear the selected cells with a single HistoryEntry. Read-only
+    // / formula columns are skipped — they're never editable, so
+    // they shouldn't take part in the cut.
+    const cols = buildColumns(tab.base)
+    const recs = sortRecords(tab.base.records, tab.sort, cols)
+    interface PriorEdit { recordId: string; field: string; prev: unknown }
+    const edits: PriorEdit[] = []
+    for (let r = sel.r1; r <= sel.r2; r++) {
+      const rec = recs[r]
+      if (!rec) continue
+      for (let c = sel.c1; c <= sel.c2; c++) {
+        const col = cols[c]
+        if (!col || !isPasteable(col.def)) continue
+        edits.push({ recordId: rec.id, field: col.name, prev: rec[col.name] ?? null })
+      }
+    }
+    if (edits.length === 0) return
+    const apply = async () => {
+      // Group by record so we issue one update per row, not one per
+      // cell — avoids N kernel round-trips for a large cut.
+      const byRecord = new Map<string, Record<string, unknown>>()
+      for (const e of edits) {
+        const m = byRecord.get(e.recordId) ?? {}
+        m[e.field] = null
+        byRecord.set(e.recordId, m)
+      }
+      for (const [recordId, fields] of byRecord) {
+        await client.updateRecord(relpath, recordId, fields)
+        patchRecord(relpath, recordId, fields)
+      }
+    }
+    const revert = async () => {
+      const byRecord = new Map<string, Record<string, unknown>>()
+      for (const e of edits) {
+        const m = byRecord.get(e.recordId) ?? {}
+        m[e.field] = e.prev
+        byRecord.set(e.recordId, m)
+      }
+      for (const [recordId, fields] of byRecord) {
+        await client.updateRecord(relpath, recordId, fields)
+        patchRecord(relpath, recordId, fields)
+      }
+    }
+    try {
+      setOpError(null)
+      await apply()
+      pushHistory(relpath, {
+        label: edits.length === 1 ? 'Cut cell' : `Cut ${edits.length} cells`,
+        forward: apply,
+        inverse: revert,
+      })
+    } catch (err) {
+      setOpError(`cut failed: ${errMsg(err)}`)
+    }
+  }, [client, handleCopy, patchRecord, pushHistory, readOnly, relpath])
+
+  const handlePaste = useCallback(async () => {
+    if (readOnly) return
+    const tab = useBasesStore.getState().tabs[relpath]
+    if (!tab?.base) return
+    const cols = buildColumns(tab.base)
+    const recs = sortRecords(tab.base.records, tab.sort, cols)
+    const sel = tab.cellSelection
+    let read: Awaited<ReturnType<typeof readClipboardPayload>>
+    try {
+      read = await readClipboardPayload()
+    } catch (err) {
+      setOpError(`paste failed: ${errMsg(err)}`)
+      return
+    }
+
+    let coercedCount = 0
+    interface PriorEdit { recordId: string; field: string; prev: unknown; next: unknown }
+    const edits: PriorEdit[] = []
+    interface CreatedRow { record: BaseRecord }
+    const created: CreatedRow[] = []
+
+    if (sel) {
+      // Range / single-cell paste. Source matrix is either the typed
+      // payload (preferred) or parsed TSV (external app fallback).
+      let matrix: unknown[][] = []
+      let sourceFields: { name: string; type: FieldKind }[] = []
+      if (read.payload?.kind === 'cells') {
+        matrix = read.payload.rows
+        sourceFields = read.payload.fields
+      } else if (read.payload?.kind === 'rows') {
+        // Pasting a `rows` payload over a cell range — flatten to
+        // the visible field order so it lands as cells.
+        sourceFields = read.payload.fields
+        matrix = read.payload.records.map((rec) =>
+          sourceFields.map((f) => rec[f.name] ?? null),
+        )
+      } else if (read.text) {
+        matrix = parseTsv(read.text)
+      }
+      if (matrix.length === 0) return
+      const rangeRows = sel.r2 - sel.r1 + 1
+      const rangeCols = sel.c2 - sel.c1 + 1
+      // Tile when the range is larger than the source. Single-cell
+      // selection (1×1) treats the source as anchor + extent.
+      const isSingleCell = rangeRows === 1 && rangeCols === 1
+      const targetRows = isSingleCell ? matrix.length : rangeRows
+      const targetCols = isSingleCell ? Math.max(...matrix.map((r) => r.length)) : rangeCols
+      for (let dr = 0; dr < targetRows; dr++) {
+        const recIdx = sel.r1 + dr
+        const rec = recs[recIdx]
+        if (!rec) break
+        for (let dc = 0; dc < targetCols; dc++) {
+          const colIdx = sel.c1 + dc
+          const col = cols[colIdx]
+          if (!col || !isPasteable(col.def)) continue
+          const srcRow = matrix[dr % matrix.length]
+          if (!srcRow) continue
+          const srcVal = srcRow[dc % Math.max(srcRow.length, 1)]
+          const sourceField = sourceFields[dc % Math.max(sourceFields.length, 1)]
+          const sourceKind = sourceField?.type
+          const [next, didCoerce] = coerceValue(col.def.type, srcVal, sourceKind)
+          if (didCoerce) coercedCount += 1
+          edits.push({ recordId: rec.id, field: col.name, prev: rec[col.name] ?? null, next })
+        }
+      }
+    } else if (tab.selectedRecordId) {
+      // Single-row paste — shallow merge field-by-field by name, with
+      // coercion. Useful for "duplicate record" workflows from the
+      // typed `rows` payload.
+      const rec = recs.find((r) => r.id === tab.selectedRecordId)
+      if (!rec) return
+      let sourceRecord: BaseRecord | null = null
+      let sourceFields: { name: string; type: FieldKind }[] = []
+      if (read.payload?.kind === 'rows' && read.payload.records[0]) {
+        sourceRecord = read.payload.records[0]
+        sourceFields = read.payload.fields
+      } else if (read.payload?.kind === 'cells' && read.payload.rows[0]) {
+        sourceFields = read.payload.fields
+        const firstRow = read.payload.rows[0]
+        const synthetic: BaseRecord = { id: rec.id }
+        for (let i = 0; i < sourceFields.length; i++) {
+          synthetic[sourceFields[i].name] = firstRow[i]
+        }
+        sourceRecord = synthetic
+      } else if (read.text) {
+        // TSV with header row — parseTsv first row treated as
+        // headers when the source has no JSON typing.
+        const parsed = parseTsv(read.text)
+        if (parsed.length >= 2) {
+          const header = parsed[0]
+          const firstRow = parsed[1]
+          sourceFields = header.map((name) => ({ name, type: 'text' as FieldKind }))
+          const synthetic: BaseRecord = { id: rec.id }
+          for (let i = 0; i < header.length; i++) {
+            synthetic[header[i]] = firstRow[i]
+          }
+          sourceRecord = synthetic
+        }
+      }
+      if (!sourceRecord) return
+      for (const col of cols) {
+        if (!isPasteable(col.def)) continue
+        const sourceField = sourceFields.find((f) => f.name === col.name)
+        const srcVal = sourceRecord[col.name]
+        if (srcVal === undefined) continue
+        const [next, didCoerce] = coerceValue(col.def.type, srcVal, sourceField?.type)
+        if (didCoerce) coercedCount += 1
+        edits.push({ recordId: rec.id, field: col.name, prev: rec[col.name] ?? null, next })
+      }
+    } else {
+      // No selection — paste creates new records. Only a typed
+      // `rows` payload or a TSV with a header row is supported here;
+      // a bare cell matrix has nowhere to land without target
+      // columns.
+      if (read.payload?.kind === 'rows') {
+        for (const rec of read.payload.records) {
+          const seed: BaseRecord = { id: '' }
+          for (const col of cols) {
+            if (!isPasteable(col.def)) continue
+            const sourceField = read.payload.fields.find((f) => f.name === col.name)
+            const srcVal = rec[col.name]
+            if (srcVal === undefined) continue
+            const [next, didCoerce] = coerceValue(col.def.type, srcVal, sourceField?.type)
+            if (didCoerce) coercedCount += 1
+            seed[col.name] = next
+          }
+          created.push({ record: seed })
+        }
+      } else if (read.text) {
+        const parsed = parseTsv(read.text)
+        if (parsed.length < 2) return
+        const header = parsed[0]
+        for (let i = 1; i < parsed.length; i++) {
+          const row = parsed[i]
+          const seed: BaseRecord = { id: '' }
+          for (let j = 0; j < header.length; j++) {
+            const col = cols.find((c) => c.name === header[j])
+            if (!col || !isPasteable(col.def)) continue
+            const [next, didCoerce] = coerceValue(col.def.type, row[j], 'text')
+            if (didCoerce) coercedCount += 1
+            seed[col.name] = next
+          }
+          created.push({ record: seed })
+        }
+      }
+    }
+
+    if (edits.length === 0 && created.length === 0) return
+
+    // Build a single HistoryEntry that captures both updated cells
+    // and any newly-created records. Forward re-applies the edits +
+    // re-creates the records (with the kernel-minted ids stable
+    // across redo); inverse reverts cells to `prev` and deletes the
+    // created rows.
+    const createdIds: string[] = []
+    const apply = async () => {
+      const byRecord = new Map<string, Record<string, unknown>>()
+      for (const e of edits) {
+        const m = byRecord.get(e.recordId) ?? {}
+        m[e.field] = e.next
+        byRecord.set(e.recordId, m)
+      }
+      for (const [recordId, fields] of byRecord) {
+        await client.updateRecord(relpath, recordId, fields)
+        patchRecord(relpath, recordId, fields)
+      }
+      // Initial run: kernel mints ids for the created rows. Redo
+      // re-uses those ids so subsequent history entries pinned to
+      // them stay valid.
+      const initial = createdIds.length === 0
+      for (let i = 0; i < created.length; i++) {
+        const seed = initial ? created[i].record : { ...created[i].record, id: createdIds[i] }
+        const stored = await client.createRecord(relpath, seed)
+        appendRecord(relpath, stored)
+        if (initial) createdIds.push(stored.id)
+      }
+    }
+    const revert = async () => {
+      const byRecord = new Map<string, Record<string, unknown>>()
+      for (const e of edits) {
+        const m = byRecord.get(e.recordId) ?? {}
+        m[e.field] = e.prev
+        byRecord.set(e.recordId, m)
+      }
+      for (const [recordId, fields] of byRecord) {
+        await client.updateRecord(relpath, recordId, fields)
+        patchRecord(relpath, recordId, fields)
+      }
+      for (const id of createdIds) {
+        await client.deleteRecord(relpath, id)
+        removeRecord(relpath, id)
+      }
+    }
+    try {
+      setOpError(null)
+      await apply()
+      const label =
+        created.length > 0
+          ? `Paste ${created.length} row${created.length === 1 ? '' : 's'}`
+          : edits.length === 1
+            ? 'Paste cell'
+            : `Paste ${edits.length} cells`
+      pushHistory(relpath, { label, forward: apply, inverse: revert })
+      if (coercedCount > 0) {
+        const api = getBasesApi()
+        api?.notifications.show({
+          type: 'info',
+          message: `bases:paste-coerced — ${coercedCount} cell${coercedCount === 1 ? '' : 's'} converted to fit destination types.`,
+        })
+      }
+    } catch (err) {
+      setOpError(`paste failed: ${errMsg(err)}`)
+    }
+  }, [
+    appendRecord,
+    client,
+    patchRecord,
+    pushHistory,
+    readOnly,
+    relpath,
+    removeRecord,
+  ])
+
+  // Register the table-clipboard handle while this component is
+  // mounted. The plugin's cut/copy/paste commands route through
+  // tableClipboard; an unmounted table de-registers itself, so
+  // palette invocations with no table focused are silent no-ops.
+  useEffect(() => {
+    setActiveTableClipboard({
+      cut: () => void handleCut(),
+      copy: () => void handleCopy(),
+      paste: () => void handlePaste(),
+    })
+    return () => {
+      setActiveTableClipboard(null)
+    }
+  }, [handleCut, handleCopy, handlePaste])
 
   const commitEdit = useCallback(
     async (recordId: string, field: string, value: unknown) => {
@@ -551,12 +965,15 @@ export function BasesTable({ relpath, base, client }: Props) {
                       <Row
                         key={r.id}
                         record={r}
+                        rowIndex={vr.index}
                         columns={columns}
                         selected={r.id === selectedRecordId}
+                        cellSelection={cellSelection}
                         editing={editing?.id === r.id ? editing.field : null}
                         client={client}
                         rowHeight={ROW_HEIGHT}
                         onSelect={() => setSelectedRecordId(relpath, r.id)}
+                        onCellClick={handleCellClick}
                         onStartEdit={(field) => {
                           setSelectedRecordId(relpath, r.id)
                           if (!readOnly) setEditing({ id: r.id, field })
@@ -597,12 +1014,15 @@ export function BasesTable({ relpath, base, client }: Props) {
 
 interface RowProps {
   record: BaseRecord
+  rowIndex: number
   columns: Column[]
   selected: boolean
+  cellSelection: CellRange | null
   editing: string | null
   client: BasesKernelClient
   rowHeight: number
   onSelect(): void
+  onCellClick(rowIndex: number, colIndex: number, shiftKey: boolean): void
   onStartEdit(field: string): void
   onCancelEdit(): void
   onCommit(field: string, value: unknown): void
@@ -610,12 +1030,15 @@ interface RowProps {
 
 function Row({
   record,
+  rowIndex,
   columns,
   selected,
+  cellSelection,
   editing,
   client,
   rowHeight,
   onSelect,
+  onCellClick,
   onStartEdit,
   onCancelEdit,
   onCommit,
@@ -629,20 +1052,26 @@ function Row({
         height: rowHeight,
       }}
     >
-      {columns.map((c) => (
-        <Cell
-          key={c.name}
-          field={c.name}
-          def={c.def}
-          value={record[c.name]}
-          record={record}
-          client={client}
-          editing={editing === c.name}
-          onStartEdit={() => onStartEdit(c.name)}
-          onCancel={onCancelEdit}
-          onCommit={(v) => onCommit(c.name, v)}
-        />
-      ))}
+      {columns.map((c, colIndex) => {
+        const cellSelected =
+          !!cellSelection && rangeContains(cellSelection, rowIndex, colIndex)
+        return (
+          <Cell
+            key={c.name}
+            field={c.name}
+            def={c.def}
+            value={record[c.name]}
+            record={record}
+            client={client}
+            editing={editing === c.name}
+            cellSelected={cellSelected}
+            onCellClick={(shiftKey) => onCellClick(rowIndex, colIndex, shiftKey)}
+            onStartEdit={() => onStartEdit(c.name)}
+            onCancel={onCancelEdit}
+            onCommit={(v) => onCommit(c.name, v)}
+          />
+        )
+      })}
     </tr>
   )
 }
@@ -654,12 +1083,26 @@ interface CellProps {
   record: BaseRecord
   client: BasesKernelClient
   editing: boolean
+  cellSelected: boolean
+  onCellClick(shiftKey: boolean): void
   onStartEdit(): void
   onCancel(): void
   onCommit(value: unknown): void
 }
 
-function Cell({ field, def, value, record, client, editing, onStartEdit, onCancel, onCommit }: CellProps) {
+function Cell({
+  field,
+  def,
+  value,
+  record,
+  client,
+  editing,
+  cellSelected,
+  onCellClick,
+  onStartEdit,
+  onCancel,
+  onCommit,
+}: CellProps) {
   const readOnly = isReadOnly(def.type)
   const base: React.CSSProperties = {
     padding: '4px 10px',
@@ -670,13 +1113,24 @@ function Cell({ field, def, value, record, client, editing, onStartEdit, onCance
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
+    // Cell-range selection lives over and above the row-selection
+    // background — it's a stronger accent so the user can see the
+    // exact rectangle while a row may also be highlighted.
+    background: cellSelected ? 'var(--bg-cell-selected, rgba(96,165,250,0.18))' : undefined,
+  }
+
+  const handleClickCapture = (e: React.MouseEvent<HTMLTableCellElement>) => {
+    // Suppress when the user is interacting with a checkbox / editor;
+    // the click handlers there call `stopPropagation` already, but
+    // we read e.target as a safety net.
+    onCellClick(e.shiftKey)
   }
 
   // Checkbox toggles without an edit mode.
   if (def.type === 'checkbox' && !readOnly) {
     const checked = value === true
     return (
-      <td style={base}>
+      <td style={base} onClick={handleClickCapture}>
         <input
           type="checkbox"
           checked={checked}
@@ -697,7 +1151,7 @@ function Cell({ field, def, value, record, client, editing, onStartEdit, onCance
 
   if (def.type === 'formula' && def.expression) {
     return (
-      <td style={base} title={`formula · ${def.expression}`}>
+      <td style={base} title={`formula · ${def.expression}`} onClick={handleClickCapture}>
         <FormulaCell
           expression={def.expression}
           record={record}
@@ -710,6 +1164,7 @@ function Cell({ field, def, value, record, client, editing, onStartEdit, onCance
   return (
     <td
       style={base}
+      onClick={handleClickCapture}
       onDoubleClick={(e) => {
         e.stopPropagation()
         if (!readOnly) onStartEdit()

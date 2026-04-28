@@ -265,11 +265,11 @@ views:
 
     #[test]
     fn no_filters_means_match_all() {
-        let yaml = r#"properties: {}
+        let yaml = r"properties: {}
 views:
   - type: table
     name: All notes
-"#;
+";
         let base = parse(yaml).unwrap();
         assert!(base.filters.is_none());
         assert_eq!(base.views.len(), 1);
@@ -303,10 +303,10 @@ views:
 
     #[test]
     fn unknown_view_type_round_trips_as_string() {
-        let yaml = r#"views:
+        let yaml = r"views:
   - type: future-view-type-we-dont-know-yet
     name: Mystery
-"#;
+";
         let base = parse(yaml).unwrap();
         assert_eq!(base.views[0].view_type, "future-view-type-we-dont-know-yet");
         let again = to_yaml(&base).unwrap();
