@@ -313,8 +313,9 @@ export function BasesTable({ relpath, base, client }: Props) {
 
   // Keyboard: Backspace / Delete on the table body removes the
   // selected row (when no cell is being edited). Arrow keys nav
-  // rows. Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes.
-  // Bind on the outer container, gated by `editing == null`.
+  // rows. Bind on the outer container, gated by `editing == null`.
+  // Undo/redo flow through the global KeybindingRegistry — see
+  // BasesView.tsx focusin handler + activeBases.ts.
   const containerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const ROW_HEIGHT = 28
@@ -329,18 +330,11 @@ export function BasesTable({ relpath, base, client }: Props) {
     if (!el) return
     const onKey = (e: KeyboardEvent) => {
       if (editing) return
-      const mod = e.ctrlKey || e.metaKey
-      if (mod && e.key.toLowerCase() === 'z') {
-        e.preventDefault()
-        if (e.shiftKey) void redo(relpath)
-        else void undo(relpath)
-        return
-      }
-      if (mod && e.key.toLowerCase() === 'y') {
-        e.preventDefault()
-        void redo(relpath)
-        return
-      }
+      // BL-030: Mod-Z / Mod-Shift-Z / Mod-Y are now handled by the
+      // global KeybindingRegistry, gated on `bases.focused`. This
+      // local handler keeps Backspace/Delete + arrow-key navigation,
+      // which are scoped to the table view's selection model and
+      // shouldn't fire from the schema editor or view bar.
       if (!selectedRecordId) return
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
@@ -362,7 +356,7 @@ export function BasesTable({ relpath, base, client }: Props) {
     }
     el.addEventListener('keydown', onKey)
     return () => el.removeEventListener('keydown', onKey)
-  }, [editing, selectedRecordId, records, relpath, setSelectedRecordId, handleDeleteRow, undo, redo])
+  }, [editing, selectedRecordId, records, relpath, setSelectedRecordId, handleDeleteRow])
 
   return (
     <div

@@ -25,6 +25,7 @@ export function BasesBoard({ relpath, base, client }: Props) {
   const setBoardGroupField = useBasesStore((s) => s.setBoardGroupField)
   const patchRecord = useBasesStore((s) => s.patchRecord)
   const setSelectedRecordId = useBasesStore((s) => s.setSelectedRecordId)
+  const pushHistory = useBasesStore((s) => s.pushHistory)
 
   const [opError, setOpError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
@@ -75,10 +76,28 @@ export function BasesBoard({ relpath, base, client }: Props) {
   const moveRecord = async (recordId: string, toKey: string) => {
     if (!active) return
     const value = toKey === UNASSIGNED ? null : toKey
+    // Mirror the BasesTable cell-edit pattern (BasesTable.tsx:71-99)
+    // — capture the pre-edit value so the inverse rolls the column
+    // back to exactly what the kernel had before the drop.
+    const fieldName = active.name
+    const prev = useBasesStore
+      .getState()
+      .tabs[relpath]?.base?.records.find((r) => r.id === recordId)?.[fieldName]
     try {
       setOpError(null)
-      await client.updateRecord(relpath, recordId, { [active.name]: value })
-      patchRecord(relpath, recordId, { [active.name]: value })
+      await client.updateRecord(relpath, recordId, { [fieldName]: value })
+      patchRecord(relpath, recordId, { [fieldName]: value })
+      pushHistory(relpath, {
+        label: `Move card to ${toKey === UNASSIGNED ? 'Unassigned' : toKey}`,
+        forward: async () => {
+          await client.updateRecord(relpath, recordId, { [fieldName]: value })
+          patchRecord(relpath, recordId, { [fieldName]: value })
+        },
+        inverse: async () => {
+          await client.updateRecord(relpath, recordId, { [fieldName]: prev })
+          patchRecord(relpath, recordId, { [fieldName]: prev })
+        },
+      })
     } catch (err) {
       setOpError(`move failed: ${errMsg(err)}`)
     }

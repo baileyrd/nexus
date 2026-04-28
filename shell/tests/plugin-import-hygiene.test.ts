@@ -59,6 +59,7 @@ const TAURI_IMPORT_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/core/capabilityPrompt/requestConsent.ts',     // shell-internal (WI-31): get/set_plugin_granted_capabilities
   'shell/src/plugins/core/settings/SettingsPanelView.tsx',         // shell-internal: set_plugin_enabled
   'shell/src/plugins/nexus/launcher/launcherState.ts',             // shell-internal: get/write/forget shell_state (recents)
+  'shell/src/plugins/nexus/memory/index.ts',                       // BL-043: tauri-plugin-global-shortcut — no @nexus/extension-api global-hotkey surface yet
   'shell/src/plugins/nexus/pluginsMgmt/index.ts',                  // shell-internal: set_plugin_enabled
   'shell/src/plugins/nexus/workspace/index.ts',                    // shell-internal: boot_kernel + init_forge + shutdown_kernel + plugin-dialog.open
   //
@@ -86,6 +87,7 @@ const HOST_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/core/titleBar/TitleBarView.tsx',              // host/shellRegistry + ContextKeyService — same React-component pattern as the other *View.tsx entries (no `api` in scope)
   'shell/src/plugins/nexus/ai/index.ts',                           // host/ContextKeyService + EventBus — predates @nexus/extension-api context-keys / event surface; track under WI-25 drain
   'shell/src/plugins/nexus/backlinks/BacklinksView.tsx',           // host/EventBus
+  'shell/src/plugins/nexus/bases/BasesView.tsx',                   // host/ContextKeyService — BL-030 mirrors the canvas active-handle pattern; @nexus/extension-api context-keys not yet wired to React components
   'shell/src/plugins/nexus/canvas/CanvasView.tsx',                 // host/ContextKeyService
   'shell/src/plugins/nexus/editor/EditorView.tsx',                 // host/EventBus + shellRegistry
   'shell/src/plugins/nexus/graph/GraphGlobalView.tsx',             // host/EventBus

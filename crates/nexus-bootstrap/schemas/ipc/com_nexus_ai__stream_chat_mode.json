@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiStreamChatMode",
+  "description": "Engine mode for `com.nexus.ai::stream_chat` (handler id `6`).\n\n`Chat` (the default) runs the tool-aware dispatch loop; `Complete`\nbypasses it for a single provider round-trip with no tools, suitable\nfor ghost completions and headless `complete` CLI consumers\n(BL-010, BL-011, BL-034).",
+  "oneOf": [
+    {
+      "description": "Tool-aware multi-round dispatch loop (back-compat default).",
+      "type": "string",
+      "const": "chat"
+    },
+    {
+      "description": "Single provider round-trip, no tools, post-processed.",
+      "type": "string",
+      "const": "complete"
+    }
+  ]
+}

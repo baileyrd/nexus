@@ -160,6 +160,52 @@ pub struct StorageWriteFileResult {
     pub content_hash: String,
 }
 
+// ── com.nexus.storage::note_append ───────────────────────────────────────────
+
+/// Args for `com.nexus.storage::note_append` (handler id `54`).
+///
+/// Atomic "read-existing + append `\n\n{snippet}` + write" primitive that
+/// the BL-043 quick-capture hotkey uses to grow a configurable `Inbox.md`
+/// without the shell having to read + concatenate + write (which would
+/// race against the file watcher).
+///
+/// Path confinement matches `write_file`: forge-relative paths only,
+/// absolute paths and `..` traversal are rejected at the engine boundary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+pub struct StorageNoteAppendArgs {
+    /// Forge-relative path of the inbox file. Created on first append.
+    pub path: String,
+    /// Snippet text to append. The dispatch normalises the trailing
+    /// newline shape so the resulting file has exactly one blank line
+    /// between snippets and exactly one trailing newline.
+    pub snippet: String,
+}
+
+/// Return type for `com.nexus.storage::note_append`. Mirror of
+/// [`crate::FileMetadata`] — same shape as `write_file`'s return so a
+/// caller can use either handler interchangeably.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+)]
+pub struct StorageNoteAppendResult {
+    /// Vault-relative path.
+    pub path: String,
+    /// File size in bytes (post-append).
+    pub size_bytes: u64,
+    /// Unix timestamp of the post-append modification.
+    pub modified_at: i64,
+    /// SHA-256 hex digest of the post-append file content.
+    pub content_hash: String,
+}
+
 // ── com.nexus.storage::list_dir ──────────────────────────────────────────────
 
 /// Args for `com.nexus.storage::list_dir` (handler id `27`).

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StorageNoteAppendResult",
+  "description": "Return type for `com.nexus.storage::note_append`. Mirror of\n[`crate::FileMetadata`] — same shape as `write_file`'s return so a\ncaller can use either handler interchangeably.",
+  "type": "object",
+  "properties": {
+    "content_hash": {
+      "description": "SHA-256 hex digest of the post-append file content.",
+      "type": "string"
+    },
+    "modified_at": {
+      "description": "Unix timestamp of the post-append modification.",
+      "type": "integer",
+      "format": "int64"
+    },
+    "path": {
+      "description": "Vault-relative path.",
+      "type": "string"
+    },
+    "size_bytes": {
+      "description": "File size in bytes (post-append).",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "path",
+    "size_bytes",
+    "modified_at",
+    "content_hash"
+  ]
+}

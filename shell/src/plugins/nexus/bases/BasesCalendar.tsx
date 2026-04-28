@@ -42,7 +42,9 @@ export function BasesCalendar({ relpath, base, client }: Props) {
   const setDateField = useBasesStore((s) => s.setCalendarDateField)
   const setMonth = useBasesStore((s) => s.setCalendarMonth)
   const appendRecord = useBasesStore((s) => s.appendRecord)
+  const removeRecord = useBasesStore((s) => s.removeRecord)
   const setSelectedRecordId = useBasesStore((s) => s.setSelectedRecordId)
+  const pushHistory = useBasesStore((s) => s.pushHistory)
 
   const [opError, setOpError] = useState<string | null>(null)
 
@@ -110,6 +112,20 @@ export function BasesCalendar({ relpath, base, client }: Props) {
       const stored = await client.createRecord(relpath, { id: '', ...seed } as BaseRecord)
       appendRecord(relpath, stored)
       setSelectedRecordId(relpath, stored.id)
+      pushHistory(relpath, {
+        label: `Add row on ${isoDate(day)}`,
+        // Redo recreates with the same id so subsequent history
+        // entries targeting `stored.id` stay valid (mirrors the
+        // BasesTable add-row pattern).
+        forward: async () => {
+          await client.createRecord(relpath, stored)
+          appendRecord(relpath, stored)
+        },
+        inverse: async () => {
+          await client.deleteRecord(relpath, stored.id)
+          removeRecord(relpath, stored.id)
+        },
+      })
     } catch (err) {
       setOpError(`create failed: ${errMsg(err)}`)
     }

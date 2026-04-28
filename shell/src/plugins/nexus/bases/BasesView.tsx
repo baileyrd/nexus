@@ -3,7 +3,7 @@
 // active view (Table / Board / List). Phase-3 addition — switcher is
 // in-memory; Phase 5 wires it through `base_view_*` persistence.
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useBasesStore, type ViewMode } from './basesStore'
 import type { BasesKernelClient } from './kernelClient'
 import { BasesTable } from './BasesTable'
@@ -14,6 +14,8 @@ import { BasesGallery } from './BasesGallery'
 import { BasesTimeline } from './BasesTimeline'
 import { BasesViewBar } from './BasesViewBar'
 import { SchemaEditor } from './SchemaEditor'
+import { setActiveBases, type BasesHandle } from './activeBases'
+import { contextKeyService } from '../../../host/ContextKeyService'
 
 interface Props {
   relpath: string
@@ -41,6 +43,17 @@ export function BasesView({ relpath, client }: Props) {
   const setSchemaEditorOpen = useBasesStore((s) => s.setSchemaEditorOpen)
   const trashOpen = useBasesStore((s) => s.tabs[relpath]?.trashOpen ?? false)
   const setTrashOpen = useBasesStore((s) => s.setTrashOpen)
+  const undoLen = useBasesStore((s) => s.tabs[relpath]?.undoStack.length ?? 0)
+  const redoLen = useBasesStore((s) => s.tabs[relpath]?.redoStack.length ?? 0)
+  const lastUndoError = useBasesStore((s) => s.tabs[relpath]?.lastUndoError ?? null)
+  const setLastUndoError = useBasesStore((s) => s.setLastUndoError)
+  const undo = useBasesStore((s) => s.undo)
+  const redo = useBasesStore((s) => s.redo)
+
+  // Container ref used both by the focus-tracking effect (publishes a
+  // BasesHandle on focusin) and as the keyboard target for the
+  // table/list views nested inside.
+  const containerRef = useRef<HTMLDivElement>(null)
 
   // Single-file Obsidian `.base` files take a different path through
   // the kernel (see ADR 0019). Detect by extension and route to the
@@ -73,6 +86,57 @@ export function BasesView({ relpath, client }: Props) {
     }
   }, [relpath, client, ensureTab, setLoading, setBase, setError, setReadOnly, isObsidianBase])
 
+  // Publish a BasesHandle whenever this leaf owns focus. Mirrors the
+  // canvas active-handle pattern (CanvasView.tsx:1054-1107). The
+  // shell's global keybinding dispatcher gates the Mod-Z / Mod-Y
+  // chords on `bases.focused`, so chords only fire when the user is
+  // actually inside a bases leaf — never when they're typing in
+  // CodeMirror or the file tree.
+  //
+  // cut/copy/paste are stubs in BL-030; BL-031 wires them up to
+  // cell-range clipboard ops.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const handle: BasesHandle = {
+      undo: () => {
+        void useBasesStore.getState().undo(relpath)
+      },
+      redo: () => {
+        void useBasesStore.getState().redo(relpath)
+      },
+      cut: () => {
+        // BL-031 fills this in; no-op for now.
+      },
+      copy: () => {
+        // BL-031 fills this in; no-op for now.
+      },
+      paste: () => {
+        // BL-031 fills this in; no-op for now.
+      },
+    }
+    const claimFocus = () => {
+      setActiveBases(handle)
+      contextKeyService.set('bases.focused', true)
+    }
+    const releaseFocus = () => {
+      setActiveBases(null)
+      contextKeyService.set('bases.focused', false)
+    }
+    container.addEventListener('focusin', claimFocus)
+    const onFocusOut = (e: FocusEvent) => {
+      const next = e.relatedTarget as Node | null
+      if (next && container.contains(next)) return
+      releaseFocus()
+    }
+    container.addEventListener('focusout', onFocusOut)
+    return () => {
+      releaseFocus()
+      container.removeEventListener('focusin', claimFocus)
+      container.removeEventListener('focusout', onFocusOut)
+    }
+  }, [relpath])
+
   const wrapperStyle: React.CSSProperties = {
     width: '100%',
     height: '100%',
@@ -83,6 +147,9 @@ export function BasesView({ relpath, client }: Props) {
     background: 'var(--bg-primary, #1e1e1e)',
     color: 'var(--fg-primary, #e4e4e7)',
     fontSize: 13,
+    // Cleared default focus ring; the global keybinding dispatcher
+    // hooks `bases.focused` off of focusin/out on this container.
+    outline: 'none',
   }
   const headerStyle: React.CSSProperties = {
     padding: '8px 12px',
@@ -107,7 +174,7 @@ export function BasesView({ relpath, client }: Props) {
 
   if (!tab || tab.loading) {
     return (
-      <div style={wrapperStyle}>
+      <div ref={containerRef} tabIndex={0} style={wrapperStyle}>
         <div style={headerStyle}>{relpath}</div>
         <div style={bodyStyle}>Loading…</div>
       </div>
@@ -115,7 +182,7 @@ export function BasesView({ relpath, client }: Props) {
   }
   if (tab.error) {
     return (
-      <div style={wrapperStyle}>
+      <div ref={containerRef} tabIndex={0} style={wrapperStyle}>
         <div style={headerStyle}>{relpath}</div>
         <div style={{ ...bodyStyle, color: 'var(--risk, #f48771)' }}>
           Failed to load base: {tab.error}
@@ -126,7 +193,7 @@ export function BasesView({ relpath, client }: Props) {
   const base = tab.base
   if (!base) {
     return (
-      <div style={wrapperStyle}>
+      <div ref={containerRef} tabIndex={0} style={wrapperStyle}>
         <div style={headerStyle}>{relpath}</div>
         <div style={bodyStyle}>No base loaded.</div>
       </div>
@@ -146,7 +213,7 @@ export function BasesView({ relpath, client }: Props) {
   const visibleBase = { ...base, records: visibleRecords }
   const trashCount = trashedRecords.length
   return (
-    <div style={wrapperStyle}>
+    <div ref={containerRef} tabIndex={0} style={wrapperStyle}>
       <div style={headerStyle}>
         <strong style={{ color: 'var(--fg-primary, #e4e4e7)' }}>{base.name}</strong>
         <span>·</span>
@@ -173,6 +240,48 @@ export function BasesView({ relpath, client }: Props) {
           </span>
         )}
         <div style={{ flex: 1 }} />
+        {!readOnly && (
+          <>
+            <button
+              type="button"
+              disabled={undoLen === 0}
+              onClick={() => void undo(relpath)}
+              title="Undo (Ctrl/Cmd+Z)"
+              style={{
+                padding: '3px 10px',
+                background: 'var(--bg-raised, #252529)',
+                color: 'var(--fg-primary, #e4e4e7)',
+                border: '1px solid var(--border-subtle, #2a2a2e)',
+                borderRadius: 3,
+                fontSize: 11,
+                cursor: undoLen === 0 ? 'not-allowed' : 'pointer',
+                opacity: undoLen === 0 ? 0.4 : 1,
+                marginRight: 4,
+              }}
+            >
+              Undo{undoLen > 0 ? ` (${undoLen})` : ''}
+            </button>
+            <button
+              type="button"
+              disabled={redoLen === 0}
+              onClick={() => void redo(relpath)}
+              title="Redo (Ctrl/Cmd+Shift+Z)"
+              style={{
+                padding: '3px 10px',
+                background: 'var(--bg-raised, #252529)',
+                color: 'var(--fg-primary, #e4e4e7)',
+                border: '1px solid var(--border-subtle, #2a2a2e)',
+                borderRadius: 3,
+                fontSize: 11,
+                cursor: redoLen === 0 ? 'not-allowed' : 'pointer',
+                opacity: redoLen === 0 ? 0.4 : 1,
+                marginRight: 8,
+              }}
+            >
+              Redo{redoLen > 0 ? ` (${redoLen})` : ''}
+            </button>
+          </>
+        )}
         {!readOnly && <button
           type="button"
           onClick={() => setTrashOpen(relpath, !trashOpen)}
@@ -237,6 +346,39 @@ export function BasesView({ relpath, client }: Props) {
           })}
         </div>
       </div>
+      {lastUndoError && (
+        <div
+          role="alert"
+          style={{
+            padding: '6px 12px',
+            borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
+            background: 'var(--bg-raised, #252529)',
+            color: 'var(--risk, #f48771)',
+            fontSize: 11,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <span style={{ flex: 1 }}>{lastUndoError}</span>
+          <button
+            type="button"
+            onClick={() => setLastUndoError(relpath, null)}
+            title="Dismiss"
+            style={{
+              padding: '2px 8px',
+              background: 'transparent',
+              color: 'var(--fg-muted, #9ca3af)',
+              border: '1px solid var(--border-subtle, #2a2a2e)',
+              borderRadius: 3,
+              fontSize: 11,
+              cursor: 'pointer',
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {unsupportedFilters.length > 0 && (
         <div
           role="alert"

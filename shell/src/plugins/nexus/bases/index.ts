@@ -13,10 +13,18 @@ import { makeBasesKernelClient } from './kernelClient'
 import { NewBaseDialog } from './NewBaseDialog'
 import { useNewBaseStore } from './newBaseStore'
 import { setRuntime } from './runtime'
+import { withActiveBases } from './activeBases'
 
 const COMMAND_NEW = 'nexus.bases.new'
 const EVENT_FILE_OPEN = 'files:open'
 const DIALOG_VIEW_ID = 'nexus.bases.newDialog'
+
+/** Command ids exported so other modules (e.g. menu/toolbar
+ *  contributions) can reference them without hard-coding strings. */
+export const BASES_COMMANDS = {
+  undo: 'nexus.bases.undo',
+  redo: 'nexus.bases.redo',
+} as const
 
 export const basesPlugin: Plugin = {
   manifest: {
@@ -33,6 +41,16 @@ export const basesPlugin: Plugin = {
           title: 'New base…',
           category: 'Bases',
         },
+        { id: BASES_COMMANDS.undo, title: 'Bases: Undo', category: 'Bases' },
+        { id: BASES_COMMANDS.redo, title: 'Bases: Redo', category: 'Bases' },
+      ],
+      // Mirror the canvas pattern (canvas.focused) — chords only fire
+      // when a `.bases` leaf actually owns focus. The activeBases
+      // handle is published on focusin from BasesView.
+      keybindings: [
+        { command: BASES_COMMANDS.undo, key: 'ctrl+z', mac: 'cmd+z', when: 'bases.focused' },
+        { command: BASES_COMMANDS.redo, key: 'ctrl+shift+z', mac: 'cmd+shift+z', when: 'bases.focused' },
+        { command: BASES_COMMANDS.redo, key: 'ctrl+y', mac: 'cmd+y', when: 'bases.focused' },
       ],
     },
   },
@@ -75,6 +93,12 @@ export const basesPlugin: Plugin = {
       component: NewBaseDialog,
       priority: 70,
     })
+
+    // Undo/redo dispatch to the currently-focused bases leaf. A
+    // missing handle is a silent no-op (e.g. palette invocation with
+    // no base open), matching the `when`-gated keybindings.
+    api.commands.register(BASES_COMMANDS.undo, () => withActiveBases((h) => h.undo()))
+    api.commands.register(BASES_COMMANDS.redo, () => withActiveBases((h) => h.redo()))
 
     api.commands.register(COMMAND_NEW, async (args?: unknown) => {
       // Caller may pass `{ parent: string }` to scope the new base to

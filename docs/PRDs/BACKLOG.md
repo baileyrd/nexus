@@ -325,11 +325,7 @@ Cron + file_event triggers + condition evaluator + variable interpolation + manu
 **Effort**: Medium. **Crate**: `shell/src-tauri/` + `shell/src/host/`.
 Spec calls for per-Leaf detachment into a separate `WebviewWindow`. Today the shell ships single-window. Not in REQUIRED-FOR-FORMAL-RELEASE.md, so it lands here. Web/mobile platform targets (also PRD-17) remain explicitly deferred and are not BL items.
 
-### BL-030: Bases per-surface undo / redo
-
-**Source**: 2026-04-28 backlog review — gap surfaced alongside the canvas / editor undo work that already shipped.
-**Effort**: Medium. **Crate**: `shell/src/plugins/nexus/bases/`.
-Bases is the only mature surface without an undo stack. Editor undo flows through CodeMirror; canvas got `undo/redo` in Phase-6; bases mutations (cell edit, row create / delete / soft-delete / restore, property create / update / delete / rename, view create / update / delete) go straight through `kernelClient.ts` to `com.nexus.storage::base_*` and are unrecoverable from the UI. Implement per-base ring-buffered undo by wrapping every mutator in `kernelClient.ts` with a paired forward/reverse op and pushing onto a `basesStore` undo stack keyed by base path; re-use the existing soft-delete IPC for row-undo so deletes round-trip cleanly. `Mod-Z` / `Mod-Shift-Z` bound via `KeybindingRegistry` with a `bases.focused` context-key gate (mirroring the canvas pattern). Schema-edit reversals need care: `base_property_delete` is destructive of cell values, so either snapshot the column before delete or refuse to undo past a destructive op (surface a "history truncated" hint). Explicit non-goal: a global cross-surface undo — see the 2026-04-28 design note below.
+_BL-030 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-031: Bases cell / row clipboard
 
@@ -409,11 +405,7 @@ A debounced indexer that subscribes to the existing file-watcher, batches change
 **Effort**: Large. **Crate**: `nexus-mcp` (server-side surfaces) + `nexus-bootstrap` (lifecycle).
 Today `nexus-mcp` is an MCP *client*. The FD direction is the inverse: expose Nexus's tools (search, read_file, write_file, run_skill, etc.) as an MCP server so external IDEs / Claude Desktop can drive a Nexus forge. Distinct files from BL-023 / BL-025 (which remain client-side). Pairs with BL-016 (the tool registry is the natural source of truth for advertised tools).
 
-### BL-043: MEM quick-capture hotkey
-
-**Source**: [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md) piece 1.
-**Effort**: Small.
-Global hotkey opens a small capture window; on confirm, the snippet is appended to a `Inbox.md` (or similar) file with a timestamp + source-app metadata. Pure file write, no AI dependency in v1 — keeps the foundation independent.
+_BL-043 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-044: MEM recall hotkey
 

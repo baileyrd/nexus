@@ -133,3 +133,186 @@ pub struct AiStreamAskResult {
     /// RAG sources that grounded the answer, in retrieval order.
     pub sources: Vec<AiStreamAskSource>,
 }
+
+/// Engine mode for `com.nexus.ai::stream_chat` (handler id `6`).
+///
+/// `Chat` (the default) runs the tool-aware dispatch loop; `Complete`
+/// bypasses it for a single provider round-trip with no tools, suitable
+/// for ghost completions and headless `complete` CLI consumers
+/// (BL-010, BL-011, BL-034).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(rename_all = "lowercase")]
+pub enum AiStreamChatMode {
+    /// Tool-aware multi-round dispatch loop (back-compat default).
+    #[default]
+    Chat,
+    /// Single provider round-trip, no tools, post-processed.
+    Complete,
+}
+
+/// Tool-advertisement policy for `stream_chat`.
+///
+/// `Auto` (default) hands the registry's full schema list to the
+/// provider so the model can call tools. `None` advertises an empty
+/// list — used by `mode=complete` and by ghost-completion callers that
+/// must never trigger side effects.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(rename_all = "lowercase")]
+pub enum AiToolPolicy {
+    /// Advertise the full registry to the model.
+    #[default]
+    Auto,
+    /// Advertise no tools — the model cannot issue tool calls.
+    None,
+}
+
+/// Args for `com.nexus.ai::stream_chat` (handler id `6`).
+///
+/// Mirrors the ad-hoc shape the handler decoded historically. The
+/// engine continues to accept the legacy raw `{ messages, system,
+/// session_id }` JSON object so existing chat callers don't break;
+/// new optional fields (`mode`, `tools`, `max_tokens`, `stop`, `trim`)
+/// drive the BL-010/011/034 surfaces.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+pub struct AiStreamChatArgs {
+    /// Conversation history. Same shape as `stream_ask` so callers can
+    /// share message-builder code across the two handlers.
+    pub messages: Vec<AiStreamAskMessage>,
+    /// Optional system prompt forwarded to the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    /// Optional caller-provided session identifier. When `None` the
+    /// handler generates a UUID v4 and echoes it on every
+    /// `com.nexus.ai.stream_*` bus event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Engine mode. Omit for the default `chat` (back-compat).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<AiStreamChatMode>,
+    /// Tool-advertisement policy. Omit for the default `auto`.
+    /// `mode=complete` forces this to `none` regardless of the
+    /// caller's value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<AiToolPolicy>,
+    /// Optional generation cap, passed through to providers that
+    /// honour it (Anthropic + `OpenAI`). Currently advisory: the
+    /// engine does not enforce a hard truncation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    /// Stop sequences. After the provider returns, the engine
+    /// truncates the text at the earliest occurrence of any of these
+    /// strings (post-processing only — not a wire-level provider
+    /// extension).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<Vec<String>>,
+    /// When `true` and `mode=complete`, post-process the suggested
+    /// text: strip a leading copy of the prompt's tail (prompt-echo)
+    /// and clip at the last natural break (newline or sentence
+    /// boundary). Ignored for `mode=chat`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trim: Option<bool>,
+}
+
+#[cfg(test)]
+mod stream_chat_serde_tests {
+    use super::*;
+
+    #[test]
+    fn chat_default_round_trip() {
+        // Default chat shape — only the legacy fields are populated.
+        let args = AiStreamChatArgs {
+            messages: vec![AiStreamAskMessage {
+                role: AiStreamAskRole::User,
+                content: "hi".to_string(),
+            }],
+            system: Some("be terse".to_string()),
+            session_id: None,
+            mode: None,
+            tools: None,
+            max_tokens: None,
+            stop: None,
+            trim: None,
+        };
+        let json = serde_json::to_value(&args).expect("ser");
+        // Optional fields with `None` must not bloat the wire.
+        let obj = json.as_object().expect("object");
+        assert!(obj.contains_key("messages"));
+        assert!(obj.contains_key("system"));
+        assert!(!obj.contains_key("session_id"));
+        assert!(!obj.contains_key("mode"));
+        assert!(!obj.contains_key("tools"));
+        assert!(!obj.contains_key("max_tokens"));
+        assert!(!obj.contains_key("stop"));
+        assert!(!obj.contains_key("trim"));
+
+        let back: AiStreamChatArgs = serde_json::from_value(json).expect("de");
+        assert_eq!(back.messages.len(), 1);
+        assert_eq!(back.system.as_deref(), Some("be terse"));
+        assert!(back.mode.is_none());
+        assert!(back.tools.is_none());
+    }
+
+    #[test]
+    fn complete_with_stop_and_trim_round_trip() {
+        let args = AiStreamChatArgs {
+            messages: vec![AiStreamAskMessage {
+                role: AiStreamAskRole::User,
+                content: "complete this: The quick".to_string(),
+            }],
+            system: None,
+            session_id: Some("sess-1".to_string()),
+            mode: Some(AiStreamChatMode::Complete),
+            tools: Some(AiToolPolicy::None),
+            max_tokens: Some(64),
+            stop: Some(vec!["\n\n".to_string(), "END".to_string()]),
+            trim: Some(true),
+        };
+        let json = serde_json::to_value(&args).expect("ser");
+        // Snake-case mode + tool policy on the wire.
+        assert_eq!(json["mode"], "complete");
+        assert_eq!(json["tools"], "none");
+        assert_eq!(json["max_tokens"], 64);
+        assert_eq!(json["session_id"], "sess-1");
+
+        let back: AiStreamChatArgs = serde_json::from_value(json).expect("de");
+        assert_eq!(back.mode, Some(AiStreamChatMode::Complete));
+        assert_eq!(back.tools, Some(AiToolPolicy::None));
+        assert_eq!(back.max_tokens, Some(64));
+        assert_eq!(back.stop.as_deref(), Some(&["\n\n".to_string(), "END".to_string()][..]));
+        assert_eq!(back.trim, Some(true));
+    }
+
+    #[test]
+    fn unknown_mode_string_errors() {
+        let raw = serde_json::json!({
+            "messages": [],
+            "mode": "freestyle"
+        });
+        let res: Result<AiStreamChatArgs, _> = serde_json::from_value(raw);
+        assert!(res.is_err(), "unknown mode must fail to deserialize");
+    }
+}
