@@ -10,8 +10,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nexus_kernel::{KernelPluginContext, PluginContext};
-use rmcp::RoleServer;
-use rmcp::ServiceExt as _;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{
@@ -21,6 +19,8 @@ use rmcp::model::{
 };
 use rmcp::schemars;
 use rmcp::service::RequestContext;
+use rmcp::RoleServer;
+use rmcp::ServiceExt as _;
 use rmcp::{tool, tool_router};
 use serde::{Deserialize, Serialize};
 
@@ -43,7 +43,11 @@ const NOTE_URI_PREFIX: &str = "mcp://nexus/notes/";
 /// the bare notes root (`mcp://nexus/notes`) which has no path component.
 pub(crate) fn parse_note_uri(uri: &str) -> Option<&str> {
     let rest = uri.strip_prefix(NOTE_URI_PREFIX)?;
-    if rest.is_empty() { None } else { Some(rest) }
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest)
+    }
 }
 
 /// Build an MCP [`Resource`] descriptor for a forge note at `path`.

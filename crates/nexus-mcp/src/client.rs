@@ -85,6 +85,17 @@ pub enum McpClientError {
     Service(String),
 }
 
+impl McpClientError {
+    /// Whether the error represents a transient runtime failure that may
+    /// succeed on retry. `Service` errors are transient (transport blip,
+    /// remote restart). `Spawn` and `Handshake` are not — both indicate
+    /// misconfiguration that retrying would just delay surfacing.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Self::Service(_))
+    }
+}
+
 /// A live connection to one external MCP server. Cheap to `Deref` through
 /// for advanced use (the rmcp `Peer<RoleClient>` is exposed via the field
 /// type), but the methods on this struct cover the common cases and are
@@ -226,11 +237,7 @@ impl McpClient {
     /// Returns [`McpClientError::Service`] if the shutdown join failed. The
     /// child is killed regardless.
     pub async fn shutdown(mut self) -> Result<(), McpClientError> {
-        match self
-            .service
-            .close_with_timeout(SHUTDOWN_TIMEOUT)
-            .await
-        {
+        match self.service.close_with_timeout(SHUTDOWN_TIMEOUT).await {
             Ok(_) => Ok(()),
             Err(e) => Err(McpClientError::Service(e.to_string())),
         }

@@ -312,12 +312,6 @@ Today `SkillsPanel` is read-only; mutations require editing `.skill.md` on disk 
 **Effort**: Medium. **Crate**: `nexus-mcp` (transport abstraction).
 Stdio is the only transport today (`McpClient` over `TokioChildProcess`). Remote MCP servers need at least one of these. WebSocket gets the lower-latency path; HTTP+SSE is the broader-compat fallback.
 
-### BL-024: MCP reconnection + connection pool
-
-**Source**: PRD-14 §4.2.4 (exponential backoff, max 10 concurrent/server, idle timeout).
-**Effort**: Medium. **Crate**: `nexus-mcp`.
-`com.nexus.mcp.host` exposes manual `connect` / `disconnect` (ids 6/7). Production-grade clients reconnect on transient errors and idle-out long-lived stale connections.
-
 ### BL-025: MCP authentication
 
 **Source**: PRD-14 §8 (API key, bearer, OAuth client-credentials).
