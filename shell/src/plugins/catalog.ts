@@ -2,7 +2,7 @@
 //
 // WI-43: Plugin curation catalog.
 //
-// Single source of truth for the shell's 41 built-in plugin registrations,
+// Single source of truth for the shell's 42 built-in plugin registrations,
 // split into a default-on set (loaded at boot) and a default-off set
 // (shipped but dormant, opt-in via Settings > Plugins).
 //
@@ -11,11 +11,11 @@
 // to the persisted `plugins.enabled: string[]` config value.
 //
 // Acceptance guard: `grep -c "^import.*Plugin" shell/src/plugins/catalog.ts`
-// must equal 41.
+// must equal 42.
 
 // Plugin contract type. The `import type` is split across two lines so
-// the WI-43 acceptance grep (`grep -c "^import.*Plugin" catalog.ts` == 41)
-// counts only the 41 real plugin registrations below, not this type shim.
+// the WI-43 acceptance grep (`grep -c "^import.*Plugin" catalog.ts` == 42)
+// counts only the 42 real plugin registrations below, not this type shim.
 import type {
   Plugin as Registered,
 } from '../types/plugin'
@@ -63,6 +63,7 @@ import { pluginsMgmtPlugin } from './nexus/pluginsMgmt'
 import { processesPlugin } from './nexus/processes'
 import { statusBarPlugin } from './nexus/statusBar'
 import { extensionsTabPlugin } from './nexus/extensionsTab'
+import { memoryPlugin } from './nexus/memory'
 
 // ── Community plugins (BL-008+) — directory location matches the
 // community-plugin layout, but registration goes through the catalog
@@ -118,6 +119,9 @@ export const DEFAULT_ON_PLUGINS: Registered[] = [
   // Default-on so plugin activation errors surface immediately rather
   // than only in the dev console.
   extensionsTabPlugin,
+  // BL-043 — Cmd+Alt+N quick-capture overlay. Default-on so the global
+  // shortcut is registered at boot without the user having to opt in.
+  memoryPlugin,
 ]
 
 // ──────────────────────────────────────────────────────────────────────────────

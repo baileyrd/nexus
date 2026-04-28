@@ -346,6 +346,11 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
+        // BL-043 — global hotkey for the quick-capture overlay. The
+        // frontend `nexus.memory` plugin registers/unregisters specific
+        // accelerators at activate/deactivate time; this just wires the
+        // plugin into the Builder so the JS bridge can talk to it.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         // Persist window size, position, and maximized state across
         // launches. The plugin saves on close/move/resize/maximize and
         // restores on window creation; without it the size hard-coded
