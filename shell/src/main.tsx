@@ -220,18 +220,21 @@ async function boot() {
   // `orchestrator.load(spec)` call mounts an iframe + wires a router;
   // `orchestrator.disposeAll()` on shutdown tears every one down.
   //
-  // The PluginAPI we hand to the router is built with a dedicated
-  // pluginId — `community-sandbox` is a coarse label used only for
-  // the per-API tracking registry entries the router writes as a
-  // side-effect. Each router actually enforces its own pluginId when
-  // it dispatches API calls, so a single `buildPluginAPI` call is
-  // safe to share across multiple sandboxed plugins today.
-  const sandboxApi = buildPluginAPI(reg, {
-    pluginId: 'community-sandbox',
-    isCore: false,
-  })
+  // F-8.1.2: the orchestrator builds a *per-plugin* `PluginAPI` via
+  // this factory using the authoritative pluginId set at handshake
+  // time. Storage namespacing (`plugin:<id>:…`), event tagging
+  // (`activityBar:itemAdded`, `settings:tabsChanged`), and registry
+  // ownership all derive from the boundary id — there is no shared
+  // 'community-sandbox' bucket that would cross-pollute concurrent
+  // sandboxed plugins. `assertValidPluginId` inside `buildPluginAPI`
+  // is the choke point that rejects colon-bearing / empty / non-string
+  // ids before any of those derived keys can be written.
   const sandboxOrchestrator = new SandboxOrchestrator({
-    api: sandboxApi,
+    apiFactory: (sandboxedPluginId) =>
+      buildPluginAPI(reg, {
+        pluginId: sandboxedPluginId,
+        isCore: false,
+      }),
     registry: reg,
   })
   reg.registerService('sandboxOrchestrator', sandboxOrchestrator)

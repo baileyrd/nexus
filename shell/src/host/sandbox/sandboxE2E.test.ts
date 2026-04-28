@@ -402,7 +402,7 @@ function makeOrchestrator(overrides: Partial<SandboxOrchestratorOptions> = {}): 
     trackSubscription: () => {},
   } as unknown as SandboxOrchestratorOptions['registry']
   const orch = new SandboxOrchestrator({
-    api,
+    apiFactory: () => api,
     registry,
     window: win as unknown as Window & typeof globalThis,
     handshakeTimeoutMs: 60,
@@ -885,4 +885,97 @@ test('E2E: slow guest handler does not block concurrent requests to the same rou
     )}) — handler stall must not serialize dispatch`,
   )
   ctx.router.dispose()
+})
+
+// ============================================================================
+// F-8.1.2 — pluginId binding at the sandbox boundary
+// ============================================================================
+
+test('F-8.1.2: orchestrator calls apiFactory with the orchestrator-set pluginId', async () => {
+  const win = new FakeWindow()
+  const factoryCalls: string[] = []
+  const registry = {
+    commands: { unregister: () => {} },
+    trackSubscription: () => {},
+  } as unknown as SandboxOrchestratorOptions['registry']
+  const orch = new SandboxOrchestrator({
+    apiFactory: (pluginId) => {
+      factoryCalls.push(pluginId)
+      return makeApi()
+    },
+    registry,
+    window: win as unknown as Window & typeof globalThis,
+    handshakeTimeoutMs: 60,
+    pingIntervalMs: 1_000_000,
+    maxMissedPongs: 100,
+    warn: () => {},
+  })
+
+  const loadA = orch.load({
+    pluginId: 'plugin.a',
+    bundleUrl: 'blob:test/a',
+    runtimeUrl: 'blob:test/runtime',
+    capabilities: new Set(),
+  })
+  await tick(2)
+  // Drive the most-recently-mounted iframe's handshake (plugin.a).
+  acceptHandshakeForLatest(win)
+  await loadA
+
+  const loadB = orch.load({
+    pluginId: 'plugin.b',
+    bundleUrl: 'blob:test/b',
+    runtimeUrl: 'blob:test/runtime',
+    capabilities: new Set(),
+  })
+  await tick(2)
+  acceptHandshakeForLatest(win)
+  await loadB
+
+  // The factory must have been called twice — once per pluginId — with
+  // the orchestrator-set ids, NOT a shared 'community-sandbox' label.
+  assert.deepEqual(factoryCalls, ['plugin.a', 'plugin.b'])
+  await orch.disposeAll()
+})
+
+test('F-8.1.2: each sandboxed plugin gets its own PluginAPI instance', async () => {
+  const win = new FakeWindow()
+  const builtApis: Array<{ pluginId: string; api: PluginAPI }> = []
+  const registry = {
+    commands: { unregister: () => {} },
+    trackSubscription: () => {},
+  } as unknown as SandboxOrchestratorOptions['registry']
+  const orch = new SandboxOrchestrator({
+    apiFactory: (pluginId) => {
+      const api = makeApi()
+      builtApis.push({ pluginId, api })
+      return api
+    },
+    registry,
+    window: win as unknown as Window & typeof globalThis,
+    handshakeTimeoutMs: 60,
+    pingIntervalMs: 1_000_000,
+    maxMissedPongs: 100,
+    warn: () => {},
+  })
+
+  for (const id of ['plugin.x', 'plugin.y']) {
+    const loaded = orch.load({
+      pluginId: id,
+      bundleUrl: 'blob:test/' + id,
+      runtimeUrl: 'blob:test/runtime',
+      capabilities: new Set(),
+    })
+    await tick(2)
+    acceptHandshakeForLatest(win)
+    await loaded
+  }
+
+  assert.equal(builtApis.length, 2)
+  assert.notEqual(
+    builtApis[0].api,
+    builtApis[1].api,
+    'both routers received the same PluginAPI instance — F-8.1.2 regression',
+  )
+  await orch.disposeAll()
 })

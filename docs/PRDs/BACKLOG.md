@@ -224,9 +224,7 @@ Findings from `docs/archive/planning/UI-AUDIT.md` not yet tracked above. IDs ref
 
 ### 🔴 Red — cannot ship to untrusted users without these
 
-_F-8.1.1 (sub-tasks 1–5: iframe scaffold + sandbox flags, postMessage protocol, `NexusPluginContext` proxy, per-plugin manifest `sandboxed` flag, CSP + tests) and **F-8.1.1-fo1** (precompiled `bootstrapSandboxedPlugin` runtime bundle + hello-world migration) shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
-
-- [ ] **Bind `pluginId` at the sandbox boundary, not in the JS context (UI F-8.1.2).** The host plugin API (`shell/src/host/PluginAPI.ts` + `shell/src/host/shellRegistry.ts`, superseding the legacy shell's `nexusContext.ts:184`) — `createNexusContext(pluginId)` trusts the string; any plugin can re-create a context claiming another plugin's id, affecting `ctx.events.emit`, `ctx.ui.notify` `source`, settings namespace, and per-plugin disposables. Fix: derive identity at the iframe/worker boundary (now unblocked — sandbox boundary lives at `shell/src/host/sandbox/router.ts` `pluginId` field, set by the orchestrator at handshake time); reject any host call whose asserted id disagrees with the boundary id.
+_F-8.1.1 (sub-tasks 1–5: iframe scaffold + sandbox flags, postMessage protocol, `NexusPluginContext` proxy, per-plugin manifest `sandboxed` flag, CSP + tests), **F-8.1.1-fo1** (precompiled `bootstrapSandboxedPlugin` runtime bundle + hello-world migration), and **F-8.1.2** (boundary-bound `pluginId` — orchestrator builds a per-plugin `PluginAPI` from the handshake-set id; `assertValidPluginId` rejects empty / colon-bearing ids) shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). All red-tier UI items now closed; remaining gating for community marketplace launch is **WI-44** (marketplace UI / index / signing) and **OI-15** (manifest signing) at the orange tier._
 
 > F-9.1.1 (validate `api_version` at load time) is the UI twin of the microkernel 🟠 item of the same ID already tracked above — no duplicate entry.
 

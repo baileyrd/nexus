@@ -334,10 +334,9 @@ function makeOrchestrator(
   orch: SandboxOrchestrator
 } {
   const win = new FakeWindow()
-  const api = makeStubApi()
   const registry = makeStubRegistry() as unknown as SandboxOrchestratorOptions['registry']
   const orch = new SandboxOrchestrator({
-    api,
+    apiFactory: () => makeStubApi(),
     registry,
     window: win as unknown as Window & typeof globalThis,
     handshakeTimeoutMs: 100,
