@@ -50,7 +50,7 @@
 
 ### PRD-02 — Security Model ✅
 **Shipped:** `Capability` + risk classification, capability gating on IPC / fs / net / events / notify, path-traversal + TOCTOU fixes, audit log helpers, install-time HIGH-risk consent via `granted_caps.json` (F-5.1.1), epoch-deadline execution timeout, fuel-per-call reset.
-**Gaps:** F-8.1.1 iframe sandbox for JS plugins (red; multi-week); F-8.1.2 boundary-bound `pluginId` (red; blocked on F-8.1.1).
+**Gaps:** F-8.1.1 sub-tasks 1–5 shipped 2026-04-28 (iframe scaffold + sandbox flags, postMessage protocol, `NexusPluginContext` proxy, per-plugin manifest `sandboxed` flag, CSP + tests — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)); follow-on F-8.1.1-fo1 (precompiled `bootstrapSandboxedPlugin` runtime bundle so plugins stop hand-rolling the protocol) tracked in BACKLOG. F-8.1.2 boundary-bound `pluginId` now unblocked.
 **Evidence:** [crates/nexus-security/src/](crates/nexus-security/src/), [crates/nexus-plugins/src/loader.rs](crates/nexus-plugins/src/loader.rs) (`build_capabilities`, grant/revoke).
 
 ### PRD-03 — Storage Engine ✅
@@ -210,7 +210,7 @@
 |------|----------------|------------|
 | MCP Host absence | Positioned as "MCP-integrated" but can't consume external MCP servers | ✅ Addressed: `com.nexus.mcp.host` core plugin (7 handlers) plus `nexus mcp servers/tools/call` CLI. Agent planner auto-discovers tools at plan time and emits them as `call_tool` steps. |
 | Git `!Send` constraint | UI-driven git ops will block the main thread | ✅ Addressed: `GitWorker` + `GitWorkerHandle` in `nexus-git` moves the `git2::Repository` to a dedicated OS thread behind a request/response channel. |
-| F-8.1.1 iframe sandbox deferred | Cannot ship community JS plugin marketplace safely | Policy recorded: script plugins are first-party-only until F-8.1.1 + F-2.2.1 land |
+| F-8.1.1 iframe sandbox | Cannot ship community JS plugin marketplace safely | ✅ Addressed: `shell/src/host/sandbox/` ships the null-origin iframe + postMessage protocol + capability-gated method catalog; `manifest.sandboxed === true` routes a plugin through `SandboxOrchestrator` (BACKLOG_COMPLETED 2026-04-28). Marketplace launch still gated on F-8.1.1-fo1 (precompiled runtime bundle) + F-8.1.2 (boundary-bound `pluginId`) per WI-44 dependency line. |
 | Database views absent | `.bases` files load but render nothing useful | ✅ Addressed: Table/Kanban/Calendar-month-grid/Gallery renderers all live in [BasesView.tsx](../../shell/src/plugins/nexus/bases/BasesView.tsx); engine returns the right shape and the UI consumes it end-to-end. |
 | Agent plans auto-approve by default | Any agent-mode chat in the GUI will run tool calls without explicit opt-in | ✅ Addressed: "Preview" chip routes through `agent_plan` + `agent_run_plan` with an Approve / Cancel card; the **Step →** button on the PendingPlanCard runs one step at a time via `agent_execute_step`, closing the loop on per-step gating. |
 | Agent memory absent | Plans + observations vanish when the run returns, so the user can't audit what happened | ✅ Addressed: every `run` / `run_plan` writes `{ goal, plan, observation, created_at }` to `<forge>/.forge/agent/history/*.json`; `AgentHistoryPanel` browses + deletes entries via `com.nexus.agent::history_*` handlers. |
