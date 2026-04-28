@@ -271,11 +271,7 @@ Last functional gap in PRD-08; previously listed in IMPLEMENTATION_STATUS.md gap
 **Effort**: Medium. **Crate**: `nexus-terminal`.
 Today `InMemoryTerminalServer::subscribe_events` returns a `std::sync::mpsc::Receiver` that does not cross plugin boundaries. The Tauri panel works because it polls `pump`; the TUI does the same. Closing this gap unblocks remote terminals and lets community plugins react to terminal output without re-implementing pump loops. Probably needs a generic plugin-host stream convention first (currently no other plugin streams either).
 
-### BL-015: Soft-deleted bases — trash view UI
-
-**Source**: PRD-10 / [BACKLOG.md](#)'s `.bases` follow-up at line 137 ("a trash-view UI surfacing soft-deleted records").
-**Effort**: Small. **Crate**: `shell/src/plugins/nexus/bases/`.
-`BaseRecord.deletedAt` is wired end-to-end (table actions at `BasesTable.tsx:153-188`, kernel filter at `BasesView.tsx`, IPC handlers `base_record_soft_delete` / `base_record_restore`). Missing piece is a **Trash** filter chip / dedicated view that shows deleted-only records with a "Restore" action.
+_BL-015 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-016: AI tool registration for LLM function-calling
 

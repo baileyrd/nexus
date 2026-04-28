@@ -209,15 +209,61 @@ export function BasesView({ relpath, client }: Props) {
       <BasesViewBar relpath={relpath} base={visibleBase} client={client} />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          {mode === 'table' && <BasesTable relpath={relpath} base={visibleBase} client={client} />}
-          {mode === 'board' && <BasesBoard relpath={relpath} base={visibleBase} client={client} />}
-          {mode === 'list' && <BasesList relpath={relpath} base={visibleBase} client={client} />}
-          {mode === 'calendar' && <BasesCalendar relpath={relpath} base={visibleBase} client={client} />}
-          {mode === 'gallery' && <BasesGallery relpath={relpath} base={visibleBase} client={client} />}
-          {mode === 'timeline' && <BasesTimeline relpath={relpath} base={visibleBase} client={client} />}
+          {trashOpen && trashCount === 0 ? (
+            <TrashEmptyState onBackToLive={() => setTrashOpen(relpath, false)} />
+          ) : (
+            <>
+              {mode === 'table' && <BasesTable relpath={relpath} base={visibleBase} client={client} />}
+              {mode === 'board' && <BasesBoard relpath={relpath} base={visibleBase} client={client} />}
+              {mode === 'list' && <BasesList relpath={relpath} base={visibleBase} client={client} />}
+              {mode === 'calendar' && <BasesCalendar relpath={relpath} base={visibleBase} client={client} />}
+              {mode === 'gallery' && <BasesGallery relpath={relpath} base={visibleBase} client={client} />}
+              {mode === 'timeline' && <BasesTimeline relpath={relpath} base={visibleBase} client={client} />}
+            </>
+          )}
         </div>
         {schemaEditorOpen && <SchemaEditor relpath={relpath} base={base} client={client} />}
       </div>
+    </div>
+  )
+}
+
+/** Empty-state placeholder shown when the trash filter is active but
+ *  no records are soft-deleted. The non-table views can render in
+ *  surprising ways with an empty record set (calendar shows empty
+ *  months, timeline shows empty lanes); this short-circuits those
+ *  before they mount. */
+function TrashEmptyState({ onBackToLive }: { onBackToLive: () => void }) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 12,
+        padding: 24,
+        color: 'var(--fg-muted, #9ca3af)',
+        fontSize: 13,
+      }}
+    >
+      <div style={{ fontSize: 13, opacity: 0.7 }}>The trash is empty.</div>
+      <button
+        type="button"
+        onClick={onBackToLive}
+        style={{
+          padding: '4px 12px',
+          background: 'var(--bg-raised, #252529)',
+          color: 'var(--fg-primary, #e4e4e7)',
+          border: '1px solid var(--border-subtle, #2a2a2e)',
+          borderRadius: 3,
+          fontSize: 11,
+          cursor: 'pointer',
+        }}
+      >
+        ← Back to live records
+      </button>
     </div>
   )
 }
