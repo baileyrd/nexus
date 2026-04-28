@@ -2,6 +2,8 @@
 
 use std::env;
 
+use crate::privacy::PrivacyPolicy;
+
 /// Configuration for an AI provider.
 #[derive(Debug, Clone)]
 pub struct AiConfig {
@@ -24,6 +26,11 @@ pub struct AiConfig {
     /// response. The budget allocator never hands these out to context
     /// sources.
     pub reserved_response_tokens: u32,
+    /// PII / secret egress filter policy. Default is
+    /// [`PrivacyPolicy::Off`] — opt in by setting this to
+    /// [`PrivacyPolicy::Redact`] (or `Strict`) and threading a
+    /// [`crate::Redactor`] into the prompt builder.
+    pub privacy: PrivacyPolicy,
 }
 
 impl Default for AiConfig {
@@ -36,6 +43,7 @@ impl Default for AiConfig {
             max_tokens: 4096,
             context_window: 8192,
             reserved_response_tokens: 1024,
+            privacy: PrivacyPolicy::Off,
         }
     }
 }

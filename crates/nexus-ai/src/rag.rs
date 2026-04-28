@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::chunker::chunks_from_blocks;
 use crate::embedding::EmbeddingProvider;
 use crate::error::AiError;
+use crate::privacy::Redactor;
 use crate::provider::{AiProvider, ChatMessage, Role};
 use crate::tokens::{BudgetWarning, ContextSourceKind, TokenBudget, TokenCounter};
 use crate::vectorstore::{self, ChunkEmbedding, ChunkMatch};
@@ -142,14 +143,18 @@ const NEAR_LIMIT_THRESHOLD: f32 = 0.80;
 /// Build the system prompt for the RAG conversation.
 ///
 /// Thin wrapper over [`build_rag_prompt_budgeted`] with an effectively
-/// unlimited budget — every source is always included and no warnings
-/// are surfaced. Streaming callers that want to enforce a model-aware
-/// context window should call [`build_rag_prompt_budgeted`] directly.
+/// unlimited budget and no redactor — every source is always included
+/// verbatim and no warnings are surfaced. Streaming callers that want
+/// to enforce a model-aware context window or redact secrets before
+/// egress should call [`build_rag_prompt_budgeted`] directly.
+///
+/// BL-018 contract: this wrapper's byte output must remain identical
+/// to its pre-BL-017 behaviour, hence the `None` redactor.
 #[must_use]
 pub fn build_rag_prompt(sources: &[ChunkMatch]) -> String {
     let mut budget = TokenBudget::new(usize::MAX, 0);
     let counter = crate::tokens::ApproxTokenCounter;
-    let (prompt, _warnings) = build_rag_prompt_budgeted(sources, &mut budget, &counter);
+    let (prompt, _warnings) = build_rag_prompt_budgeted(sources, &mut budget, &counter, None);
     prompt
 }
 
@@ -167,10 +172,18 @@ pub fn build_rag_prompt(sources: &[ChunkMatch]) -> String {
 ///
 /// When `sources` is empty the legacy fallback prompt is returned and
 /// no warnings are produced — matching [`build_rag_prompt`]'s behaviour.
+///
+/// When `redactor` is `Some(_)`, every accepted chunk's `chunk_text`
+/// is run through [`Redactor::redact_in_place`] before it's appended
+/// to the prompt body — the redacted bytes are what the budget pays
+/// for and what the model sees. Passing `None` preserves the
+/// pre-BL-017 byte-for-byte output (this is what
+/// [`build_rag_prompt`] does).
 pub fn build_rag_prompt_budgeted(
     sources: &[ChunkMatch],
     budget: &mut TokenBudget,
     counter: &dyn TokenCounter,
+    redactor: Option<&Redactor>,
 ) -> (String, Vec<BudgetWarning>) {
     if sources.is_empty() {
         return (RAG_FALLBACK_PROMPT.to_string(), Vec::new());
@@ -186,19 +199,29 @@ pub fn build_rag_prompt_budgeted(
     });
 
     let mut warnings: Vec<BudgetWarning> = Vec::new();
-    let mut accepted: Vec<&ChunkMatch> = Vec::new();
+    // Materialise an owned `chunk_text` per source so the redactor (if
+    // any) can rewrite the string before we charge it against the
+    // budget. Without redaction this is one allocation per source —
+    // not measurable next to the existing prompt assembly cost.
+    let mut accepted: Vec<(String, String)> = Vec::new();
 
     for source in ordered {
+        let mut text = source.chunk_text.clone();
+        if let Some(r) = redactor {
+            // Discard the per-match Redaction events at this layer —
+            // the budgeted-prompt API has no diagnostics channel for
+            // them today. A future caller that wants the events can
+            // call Redactor::redact directly and assemble the prompt
+            // themselves.
+            let _ = r.redact_in_place(&mut text);
+        }
         // Cost the rendered "Source N: [[path]]\n<text>\n\n" line. The
         // index isn't known until assembly, so use a stable upper-bound
         // template: "Source 99: [[<path>]]\n<text>\n\n".
-        let rendered = format!(
-            "Source 99: [[{}]]\n{}\n\n",
-            source.file_path, source.chunk_text,
-        );
+        let rendered = format!("Source 99: [[{}]]\n{}\n\n", source.file_path, text);
         let tokens = counter.count_tokens(&rendered);
         if budget.allocate(ContextSourceKind::RagChunk, tokens) {
-            accepted.push(source);
+            accepted.push((source.file_path.clone(), text));
         } else {
             warnings.push(BudgetWarning::SourceDropped {
                 kind: ContextSourceKind::RagChunk,
@@ -214,14 +237,8 @@ pub fn build_rag_prompt_budgeted(
     }
 
     let mut prompt = String::from(RAG_PROMPT_HEADER);
-    for (i, source) in accepted.iter().enumerate() {
-        let _ = write!(
-            prompt,
-            "Source {}: [[{}]]\n{}\n\n",
-            i + 1,
-            source.file_path,
-            source.chunk_text,
-        );
+    for (i, (file_path, text)) in accepted.iter().enumerate() {
+        let _ = write!(prompt, "Source {}: [[{}]]\n{}\n\n", i + 1, file_path, text,);
     }
 
     if budget.utilization() >= NEAR_LIMIT_THRESHOLD {
@@ -285,7 +302,7 @@ mod tests {
         ];
         let mut budget = TokenBudget::new(10_000, 1_000);
         let counter = ApproxTokenCounter;
-        let (prompt, warnings) = build_rag_prompt_budgeted(&sources, &mut budget, &counter);
+        let (prompt, warnings) = build_rag_prompt_budgeted(&sources, &mut budget, &counter, None);
 
         // Same shape as the legacy prompt: header + numbered sources.
         let legacy = build_rag_prompt(&sources);
@@ -339,7 +356,7 @@ mod tests {
         let fit_two = costs[0] + costs[1];
         let mut budget = TokenBudget::new(fit_two + 5, 0);
 
-        let (prompt, warnings) = build_rag_prompt_budgeted(&sources, &mut budget, &counter);
+        let (prompt, warnings) = build_rag_prompt_budgeted(&sources, &mut budget, &counter, None);
 
         assert!(prompt.contains("[[a.md]]"));
         assert!(prompt.contains("[[b.md]]"));
@@ -370,7 +387,7 @@ mod tests {
         ));
         // Available budget = cost itself => utilisation = 1.0 ≥ 0.80.
         let mut budget = TokenBudget::new(cost, 0);
-        let (_prompt, warnings) = build_rag_prompt_budgeted(&sources, &mut budget, &counter);
+        let (_prompt, warnings) = build_rag_prompt_budgeted(&sources, &mut budget, &counter, None);
         let near = warnings
             .iter()
             .find(|w| matches!(w, BudgetWarning::NearLimit { .. }));
@@ -390,9 +407,68 @@ mod tests {
     fn budgeted_prompt_with_zero_sources_returns_legacy_default() {
         let counter = ApproxTokenCounter;
         let mut budget = TokenBudget::new(1_000, 100);
-        let (prompt, warnings) = build_rag_prompt_budgeted(&[], &mut budget, &counter);
+        let (prompt, warnings) = build_rag_prompt_budgeted(&[], &mut budget, &counter, None);
         assert_eq!(prompt, build_rag_prompt(&[]));
         assert!(prompt.contains("helpful assistant"));
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn budgeted_prompt_redacts_chunk_text_when_redactor_supplied() {
+        let sources = vec![ChunkMatch {
+            file_path: "secrets.md".into(),
+            block_id: 1,
+            chunk_text: "deploy key=AKIAIOSFODNN7EXAMPLE rest of note".into(),
+            score: 0.9,
+        }];
+        let counter = ApproxTokenCounter;
+        let mut budget = TokenBudget::new(10_000, 0);
+        let redactor = crate::privacy::Redactor::with_default_patterns();
+        let (prompt, _warnings) =
+            build_rag_prompt_budgeted(&sources, &mut budget, &counter, Some(&redactor));
+        assert!(
+            prompt.contains("[REDACTED:aws-access-key]"),
+            "expected redaction placeholder in prompt: {prompt}"
+        );
+        assert!(
+            !prompt.contains("AKIAIOSFODNN7EXAMPLE"),
+            "raw secret leaked into prompt: {prompt}"
+        );
+        // Source framing still intact.
+        assert!(prompt.contains("[[secrets.md]]"));
+        assert!(prompt.contains("Source 1"));
+    }
+
+    #[test]
+    fn budgeted_prompt_passes_through_when_redactor_is_none() {
+        // BL-018 contract: with `None` redactor the output must remain
+        // byte-identical to the legacy `build_rag_prompt` wrapper, so a
+        // chunk that *contains* a secret-shaped string still passes
+        // through verbatim. We use an AWS-looking string to make the
+        // pass-through unambiguous.
+        let sources = vec![
+            ChunkMatch {
+                file_path: "a.md".into(),
+                block_id: 1,
+                chunk_text: "value=AKIAIOSFODNN7EXAMPLE".into(),
+                score: 0.9,
+            },
+            ChunkMatch {
+                file_path: "b.md".into(),
+                block_id: 2,
+                chunk_text: "ordinary content".into(),
+                score: 0.5,
+            },
+        ];
+        let counter = ApproxTokenCounter;
+        let mut budget = TokenBudget::new(10_000, 0);
+        let (prompt, _warnings) = build_rag_prompt_budgeted(&sources, &mut budget, &counter, None);
+        let legacy = build_rag_prompt(&sources);
+        assert_eq!(
+            prompt, legacy,
+            "BL-018 byte-identity broken when redactor is None"
+        );
+        // And the secret really is intact in both.
+        assert!(prompt.contains("AKIAIOSFODNN7EXAMPLE"));
     }
 }

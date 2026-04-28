@@ -288,12 +288,6 @@ Today `InMemoryTerminalServer::subscribe_events` returns a `std::sync::mpsc::Rec
 **Effort**: Medium. **Crate**: `nexus-ai`.
 Distinct from the agent's MCP discovery (which appends *tool descriptions* to the planner prompt). Native function-calling means surfacing Anthropic / OpenAI `tools` and Ollama tool-call format from `stream_chat`, dispatching the model's tool-calls back through `ipc_call`. Today providers strip tool params before the request.
 
-### BL-017: AI PII / secret egress filter
-
-**Source**: PRD-12 §15.1 (`DataClassifier`, `DataAnonymizer`, `send_file_contents_to_cloud` privacy switch).
-**Effort**: Medium. **Crate**: `nexus-ai` (new `privacy` module) or `nexus-security` (if scanner is reused).
-Privacy config struct exists but no filtering occurs before context assembly hits a remote provider. Minimum viable: regex set for AWS keys / private keys / common API tokens; redact-and-warn before egress when `policy.privacy = strict`.
-
 ### BL-019: AI local embeddings backend
 
 **Source**: PRD-12 §9.1 (`EmbeddingModel` with cache; sentence-transformer-quality offline embeddings).
