@@ -1283,7 +1283,7 @@ mod tests {
 
         // Returns FileMetadata-shaped JSON.
         assert_eq!(resp.get("path").and_then(|v| v.as_str()), Some("Inbox.md"));
-        assert!(resp.get("size_bytes").and_then(|v| v.as_u64()).is_some());
+        assert!(resp.get("size_bytes").and_then(serde_json::Value::as_u64).is_some());
 
         let on_disk = std::fs::read_to_string(dir.path().join("Inbox.md")).expect("read back");
         assert_eq!(on_disk, "## Captured\n\nfirst note\n");
