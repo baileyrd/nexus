@@ -249,4 +249,132 @@ Threads from `docs/archive/planning/UI-AUDIT.md §6` not yet confirmed. Each is 
 - [ ] **SI-1 — Blob-URL same-origin inheritance.** **Deferred — verified as expected, conclusion pending UI F-8.1.1.** The MDN spec on blob URLs is clear: a `blob:` URL inherits the origin of the page that created it, so a plugin module loaded via `URL.createObjectURL` + `import()` runs in the shell's origin and can read `window.top`, `document.cookie`, and invoke any Tauri command the allowlist exposes. This is precisely the hole the UI F-8.1.1 iframe sandbox closes. No separate mitigation is tractable without that boundary; track as duplicate of F-8.1.1 for closure.
 - [ ] **SI-6 — `PluginManager` Mutex contention.** **Deferred — requires a dedicated load-test harness that doesn't exist yet.** Measuring requires 20+ chatty plugins and wall-clock profiling while a human drives the UI, which this environment cannot replicate. Hypothesis: per-plugin dispatch already uses `try_lock` + reentrancy guard + per-plugin backend mutex, so the `PluginManager` top-level mutex is only held during scan/load/unload/reload — not during steady-state dispatch. If the hypothesis holds this is cosmetic; if not, the fix is likely `RwLock<HashMap<id, …>>` inside the loader with per-plugin reader locks. Track as an explicit Phase-3 stability task once the load-test tooling exists.
 
+## Audit findings (2026-04-28)
+
+> Cross-PRD docs audit ([DOCS_AUDIT_2026-04-28.md](DOCS_AUDIT_2026-04-28.md)) — items spec'd in a PRD that are not yet built and were not previously assigned a backlog ID. Each cites the PRD section, target crate, and estimated effort. Effort scale: small ≈ ½–2 days, medium ≈ 3–10 days, large ≈ 2+ weeks.
+
+### BL-010: `nexus ai chat` interactive REPL
+
+**Source**: PRD-05 §3.5.2, §10.2 — readline history, multi-turn session, `--context <FILE>`, `--model <MODEL>`.
+**Effort**: Medium. **Crate**: `nexus-cli` (new subcommand under existing `AiCommand` enum at `crates/nexus-cli/src/main.rs:314`).
+Wraps existing `com.nexus.ai::stream_chat` (handler id 6); persistence reuses `session_load`/`session_save` (ids 8/9). Today the CLI exposes `ask | embed | status | config` only.
+
+### BL-011: `nexus ai complete` CLI
+
+**Source**: PRD-05 §3.5.3, §10.3 — `nexus ai complete <FILE> [--line <N>] [--col <N>] [--context <NUM_LINES>]`.
+**Effort**: Medium. **Crate**: `nexus-cli`. Editor-side equivalent (Mod+Shift+Space) shipped per PRD-08 §9 / IMPLEMENTATION_STATUS.md line 84; the CLI surface is the headless twin and is not yet present.
+
+### BL-012: Database query blocks in the editor (`[[{db:query}]]`)
+
+**Source**: PRD-08 §8.1 (`Block::DatabaseView`, `DatabaseViewConfig`).
+**Effort**: Large (1–2 weeks). **Crate**: `nexus-editor` (executor) + `shell/src/plugins/nexus/editor/` (grid renderer).
+Last functional gap in PRD-08; previously listed in IMPLEMENTATION_STATUS.md gaps without a BL ID. Needs (1) query executor over `com.nexus.database::apply_view`, (2) virtualized inline grid widget, (3) decoration plumbing through CM6, (4) undo integration, (5) filter/sort UX surfaced in the block.
+
+### BL-013: Terminal event subscription over plugin IPC
+
+**Source**: PRD-09 §11 — async `subscribe_events(&self, tx) -> Result<()>`.
+**Effort**: Medium. **Crate**: `nexus-terminal`.
+Today `InMemoryTerminalServer::subscribe_events` returns a `std::sync::mpsc::Receiver` that does not cross plugin boundaries. The Tauri panel works because it polls `pump`; the TUI does the same. Closing this gap unblocks remote terminals and lets community plugins react to terminal output without re-implementing pump loops. Probably needs a generic plugin-host stream convention first (currently no other plugin streams either).
+
+### BL-014: `nexus db` CLI subcommand group
+
+**Source**: PRD-10 §11 (referenced as the CLI surface for the database engine).
+**Effort**: Medium. **Crate**: `nexus-cli`.
+Wraps existing `com.nexus.database::{csv_import,csv_export,formula_eval,apply_view}` (ids 1–4). Suggested subcommands: `nexus db list | show <base> | import-csv | export-csv | eval-formula <expr>`. Mirrors `nexus skill` / `nexus mcp` shape — 30 s timeout, no direct `nexus-database` linkage from the CLI.
+
+### BL-015: Soft-deleted bases — trash view UI
+
+**Source**: PRD-10 / [BACKLOG.md](#)'s `.bases` follow-up at line 137 ("a trash-view UI surfacing soft-deleted records").
+**Effort**: Small. **Crate**: `shell/src/plugins/nexus/bases/`.
+`BaseRecord.deletedAt` is wired end-to-end (table actions at `BasesTable.tsx:153-188`, kernel filter at `BasesView.tsx`, IPC handlers `base_record_soft_delete` / `base_record_restore`). Missing piece is a **Trash** filter chip / dedicated view that shows deleted-only records with a "Restore" action.
+
+### BL-016: AI tool registration for LLM function-calling
+
+**Source**: PRD-12 §8.1 (`ToolRegistry`, `ToolExecutor`, built-in `read_file` / `write_file` / etc.).
+**Effort**: Medium. **Crate**: `nexus-ai`.
+Distinct from the agent's MCP discovery (which appends *tool descriptions* to the planner prompt). Native function-calling means surfacing Anthropic / OpenAI `tools` and Ollama tool-call format from `stream_chat`, dispatching the model's tool-calls back through `ipc_call`. Today providers strip tool params before the request.
+
+### BL-017: AI PII / secret egress filter
+
+**Source**: PRD-12 §15.1 (`DataClassifier`, `DataAnonymizer`, `send_file_contents_to_cloud` privacy switch).
+**Effort**: Medium. **Crate**: `nexus-ai` (new `privacy` module) or `nexus-security` (if scanner is reused).
+Privacy config struct exists but no filtering occurs before context assembly hits a remote provider. Minimum viable: regex set for AWS keys / private keys / common API tokens; redact-and-warn before egress when `policy.privacy = strict`.
+
+### BL-018: AI token budget enforcement
+
+**Source**: PRD-12 §12 (`TokenBudget` with allocation tracking + response reservation).
+**Effort**: Small. **Crate**: `nexus-ai`.
+Context assembly truncates by character count today; should pre-compute `max_tokens` per provider, reserve a response budget, and warn at 80 %.
+
+### BL-019: AI local embeddings backend
+
+**Source**: PRD-12 §9.1 (`EmbeddingModel` with cache; sentence-transformer-quality offline embeddings).
+**Effort**: Large. **Crate**: `nexus-ai`.
+RAG today calls remote embedding endpoints. A local backend (e.g. fastembed-rs, candle, or sqlite-vec's bundled gguf path) would unblock fully-offline forges. Nice-to-have for personal-tool scope; medium priority.
+
+### BL-020: Skill REGISTRY.json persistence
+
+**Source**: PRD-13 §3.1 (JSON index at `<forge>/.forge/skills/REGISTRY.json`).
+**Effort**: Small. **Crate**: `nexus-skills`.
+`crates/nexus-skills/src/lib.rs:25` explicitly notes this gap. In-memory registry is rebuilt on every `reload`; a persisted index would let cold-start CLIs skip the directory walk. Side benefit: lets external tooling enumerate skills without a forge open.
+
+### BL-021: Skill `depends_on` composition resolver
+
+**Source**: PRD-13 §5 (depends-on stacking, conflict resolution rules).
+**Effort**: Large. **Crate**: `nexus-skills`.
+`SkillMeta.depends_on` parses but is never resolved or layered. Need: topological sort, cycle detection, prompt fragment merging in well-defined order, conflict warning surface. Aligns with the existing skill-aware planner prompt assembly in `nexus-agent`.
+
+### BL-022: Skill in-app editor UI
+
+**Source**: PRD-13 §16 (live-preview in-app editor with frontmatter form + body markdown editor).
+**Effort**: Medium. **Crate**: `shell/src/plugins/nexus/skills/`.
+Today `SkillsPanel` is read-only; mutations require editing `.skill.md` on disk and calling `reload`. Editor would round-trip through the existing `com.nexus.storage::write_file` + `com.nexus.skills::reload`.
+
+### BL-023: MCP WebSocket + HTTP+SSE transports
+
+**Source**: PRD-14 §4.2.2 (HTTP+SSE), §4.2.3 (WebSocket).
+**Effort**: Medium. **Crate**: `nexus-mcp` (transport abstraction).
+Stdio is the only transport today (`McpClient` over `TokioChildProcess`). Remote MCP servers need at least one of these. WebSocket gets the lower-latency path; HTTP+SSE is the broader-compat fallback.
+
+### BL-024: MCP reconnection + connection pool
+
+**Source**: PRD-14 §4.2.4 (exponential backoff, max 10 concurrent/server, idle timeout).
+**Effort**: Medium. **Crate**: `nexus-mcp`.
+`com.nexus.mcp.host` exposes manual `connect` / `disconnect` (ids 6/7). Production-grade clients reconnect on transient errors and idle-out long-lived stale connections.
+
+### BL-025: MCP authentication
+
+**Source**: PRD-14 §8 (API key, bearer, OAuth client-credentials).
+**Effort**: Medium. **Crate**: `nexus-mcp`.
+`McpServerSpec.env` already accepts a string map; the auth flow itself (token exchange, refresh, keychain lookup) is unbuilt. Pairs with ADR-0009 (keyring hard-fail) once that policy is enforced at bootstrap.
+
+### BL-026: MCP resource enumeration
+
+**Source**: PRD-14 §7 (`mcp://nexus/notes/...`, `mcp://nexus/db/...`).
+**Effort**: Small. **Crate**: `nexus-mcp` (server side).
+`list_resources` exists on the host plugin (id 4) and forwards to external servers; the **Nexus-side** server (`serve_stdio`) advertises tools but no resources. Wire up at least `mcp://nexus/notes` listing so external clients can browse the forge.
+
+### BL-027: Multi-agent orchestration / delegation
+
+**Source**: PRD-15 §10 (`AgentOrchestrator::delegate / parallel / pipeline`).
+**Effort**: Large. **Crate**: `nexus-agent`.
+Today a `LlmAgent` plans + executes solo. Spec calls for a coordinator that hands subtasks between archetypes (Researcher → Writer → Coder) with shared scratch state. PRD §6.3 reactive rules and §12 debugger/replayer are in the same neighbourhood — defer those until orchestration lands and exposes the right hooks.
+
+### BL-028: Workflow trigger expansion + control flow
+
+**Source**: PRD-16 §6 (webhook / git_event / mcp_event), §9.2-9.4 (parallel, retry/backoff, AI steps), §7 (template library).
+**Effort**: Large (umbrella — split when scoped). **Crate**: `nexus-workflow`.
+Cron + file_event triggers + condition evaluator + variable interpolation + manual executor are all live. Outstanding: webhook trigger (HTTP listener), git_event trigger (subscribe to `com.nexus.git.*` bus topics — straightforward now that those events exist), mcp_event trigger, parallel step scheduler (`Workflow.parallel: bool` parsed but ignored at executor), per-step retry with exponential backoff, AI step types (`ai_prompt`, `ai_decision`), and a built-in workflow templates library. Track as one umbrella; mint sub-IDs when prioritised.
+
+### BL-029: Multi-window / detachable panels
+
+**Source**: PRD-17 §6.
+**Effort**: Medium. **Crate**: `shell/src-tauri/` + `shell/src/host/`.
+Spec calls for per-Leaf detachment into a separate `WebviewWindow`. Today the shell ships single-window. Not in REQUIRED-FOR-FORMAL-RELEASE.md, so it lands here. Web/mobile platform targets (also PRD-17) remain explicitly deferred and are not BL items.
+
+### Verification notes (no BL ID — informational)
+
+- **ADR-0009 keyring hard-fail enforcement** — ADR mentions a `NEXUS_NO_KEYRING=1` escape hatch, but bootstrap-side enforcement was not located in this audit. Either confirm enforcement (and document the location) or file as a follow-up in OPEN-ITEMS.md if real.
+- **PRD-04a MockPluginContext / MockEventBus** — referenced in template tests as TODO but not yet exposed from `nexus-plugin-api`. Low priority; community plugin authors are not yet writing many tests, and the issue surfaces only when someone tries.
+
 ## Decisions — PRD-04 audit (2026-04-17)
