@@ -767,3 +767,132 @@ test('undo failure populates lastUndoError; pushHistory clears it', async () => 
   })
   assert.equal(useBasesStore.getState().tabs[path].lastUndoError, null)
 })
+
+// ── BL-031 — cell/row clipboard ─────────────────────────────────────────────
+
+import {
+  cellsToTsv,
+  cellToTsv,
+  coerceValue,
+  isPasteable,
+  normalizeRange,
+  parseTsv,
+  rangeContains,
+  rowsToTsv,
+} from './clipboard.ts'
+import type { FieldKind } from './fieldTypes.ts'
+
+test('normalizeRange flips a bottom-right anchor with a top-left focus', () => {
+  // Drag from row 5 col 7 down-and-back-up to row 1 col 2 — the
+  // resulting range should still be (1,2) → (5,7).
+  const r = normalizeRange({ row: 5, col: 7 }, { row: 1, col: 2 })
+  assert.deepEqual(r, { r1: 1, c1: 2, r2: 5, c2: 7 })
+})
+
+test('rangeContains is inclusive on both edges', () => {
+  const r = { r1: 2, c1: 3, r2: 4, c2: 5 }
+  assert.equal(rangeContains(r, 2, 3), true)
+  assert.equal(rangeContains(r, 4, 5), true)
+  assert.equal(rangeContains(r, 1, 4), false)
+  assert.equal(rangeContains(r, 5, 4), false)
+})
+
+test('cellToTsv strips tabs/newlines and stringifies multi-select / checkbox', () => {
+  assert.equal(cellToTsv('text', null), '')
+  assert.equal(cellToTsv('text', 'with\ttab'), 'with tab')
+  assert.equal(cellToTsv('text', 'line1\nline2'), 'line1 line2')
+  assert.equal(cellToTsv('checkbox', true), 'true')
+  assert.equal(cellToTsv('checkbox', false), 'false')
+  assert.equal(cellToTsv('multi-select', ['a', 'b']), 'a, b')
+})
+
+test('cellsToTsv renders a row-major grid with no header (positional copy)', () => {
+  const fields: { name: string; type: FieldKind }[] = [
+    { name: 'title', type: 'text' },
+    { name: 'count', type: 'number' },
+  ]
+  const tsv = cellsToTsv([['hi', 1], ['there', 2]], fields)
+  assert.equal(tsv, 'hi\t1\nthere\t2')
+})
+
+test('rowsToTsv prepends a header row', () => {
+  const fields: { name: string; type: FieldKind }[] = [
+    { name: 'title', type: 'text' },
+    { name: 'status', type: 'select' },
+  ]
+  const tsv = rowsToTsv(
+    [{ id: 'r1', title: 'first', status: 'todo' }],
+    fields,
+  )
+  assert.equal(tsv, 'title\tstatus\nfirst\ttodo')
+})
+
+test('parseTsv splits CRLF and trims a trailing newline', () => {
+  assert.deepEqual(parseTsv('a\tb\r\nc\td\n'), [['a', 'b'], ['c', 'd']])
+  assert.deepEqual(parseTsv(''), [])
+})
+
+test('coerceValue: same-type pass-through is not flagged as coerced', () => {
+  const [v, c] = coerceValue('text', 'hello', 'text')
+  assert.equal(v, 'hello')
+  assert.equal(c, false)
+})
+
+test('coerceValue: string → number strips currency/percent symbols and flags coerced', () => {
+  const [v, c] = coerceValue('number', '$1,234.50', 'text')
+  assert.equal(v, 1234.5)
+  assert.equal(c, true)
+})
+
+test('coerceValue: incompatible string → number returns null and flags coerced', () => {
+  const [v, c] = coerceValue('number', 'not-a-number', 'text')
+  assert.equal(v, null)
+  assert.equal(c, true)
+})
+
+test('coerceValue: checkbox accepts truthy/falsy strings; rejects garbage', () => {
+  assert.deepEqual(coerceValue('checkbox', 'true', 'text'), [true, true])
+  assert.deepEqual(coerceValue('checkbox', '✓', 'text'), [true, true])
+  assert.deepEqual(coerceValue('checkbox', '0', 'text'), [false, true])
+  assert.deepEqual(coerceValue('checkbox', 'maybe', 'text'), [null, true])
+})
+
+test('coerceValue: text destination joins multi-select source with ", "', () => {
+  const [v, c] = coerceValue('text', ['a', 'b'], 'multi-select')
+  assert.equal(v, 'a, b')
+  assert.equal(c, true)
+})
+
+test('coerceValue: multi-select destination splits a CSV string', () => {
+  const [v, c] = coerceValue('multi-select', 'one, two, three', 'text')
+  assert.deepEqual(v, ['one', 'two', 'three'])
+  assert.equal(c, true)
+})
+
+test('isPasteable rejects formula/uuid/rollup/lookup/relation; accepts text/number', () => {
+  assert.equal(isPasteable({ type: 'formula' }), false)
+  assert.equal(isPasteable({ type: 'uuid' }), false)
+  assert.equal(isPasteable({ type: 'relation' }), false)
+  assert.equal(isPasteable({ type: 'rollup' }), false)
+  assert.equal(isPasteable({ type: 'lookup' }), false)
+  assert.equal(isPasteable({ type: 'text' }), true)
+  assert.equal(isPasteable({ type: 'number' }), true)
+})
+
+test('setCellSelection clears selectedRecordId; setSelectedRecordId clears cellSelection', () => {
+  const path = 'team/sel.bases'
+  resetTab(path)
+  useBasesStore.getState().setSelectedRecordId(path, 'r1')
+  assert.equal(useBasesStore.getState().tabs[path].selectedRecordId, 'r1')
+  assert.equal(useBasesStore.getState().tabs[path].cellSelection, null)
+
+  useBasesStore.getState().setCellSelection(path, { r1: 0, c1: 0, r2: 1, c2: 1 })
+  let t = useBasesStore.getState().tabs[path]
+  assert.deepEqual(t.cellSelection, { r1: 0, c1: 0, r2: 1, c2: 1 })
+  assert.equal(t.selectedRecordId, null, 'cell selection clears row selection')
+
+  useBasesStore.getState().setSelectedRecordId(path, 'r2')
+  t = useBasesStore.getState().tabs[path]
+  assert.equal(t.cellSelection, null, 'row selection clears cell selection')
+  assert.equal(t.selectedRecordId, 'r2')
+})

@@ -5,6 +5,7 @@
 import { create } from 'zustand'
 import { UNDO_HISTORY_CAP } from '../constants'
 import type { Base, BaseRecord, BaseView, FilterRule } from './kernelClient'
+import type { CellRange } from './clipboard'
 
 export type ViewMode = 'table' | 'board' | 'list' | 'calendar' | 'gallery' | 'timeline'
 
@@ -29,6 +30,12 @@ export interface BasesTabState {
   /** Currently selected record id, or null. Used for keyboard
    *  navigation and the row-delete action. */
   selectedRecordId: string | null
+  /** Rectangular cell-range selection on the Table view. Drives
+   *  Mod-C / Mod-X / Mod-V (BL-031). Null when the user has only a
+   *  row selected (or nothing). Indices are into the post-sort
+   *  visible records array and the visible columns array — same
+   *  basis the table renders on. */
+  cellSelection: CellRange | null
   /** Current view mode. Phase-3 addition — in-memory only; Phase 5
    *  wires persistence via `base_view_*`. */
   viewMode: ViewMode
@@ -113,6 +120,11 @@ interface BasesStore {
   setActiveView(relpath: string, name: string | null): void
   setSort(relpath: string, sort: SortState | null): void
   setSelectedRecordId(relpath: string, id: string | null): void
+  /** Set or clear the rectangular cell-range selection. Setting a
+   *  range also clears `selectedRecordId` — they're disjoint
+   *  selection modes, since cell selection drives the cell clipboard
+   *  while row selection drives row delete + row clipboard. */
+  setCellSelection(relpath: string, range: CellRange | null): void
   setViewMode(relpath: string, mode: ViewMode): void
   setBoardGroupField(relpath: string, field: string | null): void
   setListGroupField(relpath: string, field: string | null): void
@@ -168,6 +180,7 @@ const EMPTY: BasesTabState = {
   activeView: null,
   sort: null,
   selectedRecordId: null,
+  cellSelection: null,
   viewMode: 'table',
   boardGroupField: null,
   listGroupField: null,
@@ -235,7 +248,31 @@ export const useBasesStore = create<BasesStore>((set) => ({
   setSelectedRecordId(relpath, id) {
     set((s) => {
       const t = s.tabs[relpath] ?? { ...EMPTY }
-      return { tabs: { ...s.tabs, [relpath]: { ...t, selectedRecordId: id } } }
+      // Selecting a row clears any cell-range selection — the two
+      // selection modes are disjoint (BL-031).
+      return {
+        tabs: {
+          ...s.tabs,
+          [relpath]: { ...t, selectedRecordId: id, cellSelection: null },
+        },
+      }
+    })
+  },
+  setCellSelection(relpath, range) {
+    set((s) => {
+      const t = s.tabs[relpath] ?? { ...EMPTY }
+      // Setting a cell range clears the row selection — see the
+      // mirror comment on `setSelectedRecordId`.
+      return {
+        tabs: {
+          ...s.tabs,
+          [relpath]: {
+            ...t,
+            cellSelection: range,
+            selectedRecordId: range ? null : t.selectedRecordId,
+          },
+        },
+      }
     })
   },
   setViewMode(relpath, mode) {

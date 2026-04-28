@@ -15,6 +15,7 @@ import { BasesTimeline } from './BasesTimeline'
 import { BasesViewBar } from './BasesViewBar'
 import { SchemaEditor } from './SchemaEditor'
 import { setActiveBases, type BasesHandle } from './activeBases'
+import { withActiveTableClipboard } from './tableClipboard'
 import { contextKeyService } from '../../../host/ContextKeyService'
 
 interface Props {
@@ -105,14 +106,18 @@ export function BasesView({ relpath, client }: Props) {
       redo: () => {
         void useBasesStore.getState().redo(relpath)
       },
+      // Delegate to the active table-clipboard handle (registered by
+      // BasesTable). Silent no-op when the table isn't mounted —
+      // matches the canvas/active-canvas idiom for command-palette
+      // invocations from a non-table view.
       cut: () => {
-        // BL-031 fills this in; no-op for now.
+        withActiveTableClipboard((h) => h.cut())
       },
       copy: () => {
-        // BL-031 fills this in; no-op for now.
+        withActiveTableClipboard((h) => h.copy())
       },
       paste: () => {
-        // BL-031 fills this in; no-op for now.
+        withActiveTableClipboard((h) => h.paste())
       },
     }
     const claimFocus = () => {

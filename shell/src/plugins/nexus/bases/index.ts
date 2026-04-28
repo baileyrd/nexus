@@ -24,6 +24,9 @@ const DIALOG_VIEW_ID = 'nexus.bases.newDialog'
 export const BASES_COMMANDS = {
   undo: 'nexus.bases.undo',
   redo: 'nexus.bases.redo',
+  cut: 'nexus.bases.cut',
+  copy: 'nexus.bases.copy',
+  paste: 'nexus.bases.paste',
 } as const
 
 export const basesPlugin: Plugin = {
@@ -43,14 +46,24 @@ export const basesPlugin: Plugin = {
         },
         { id: BASES_COMMANDS.undo, title: 'Bases: Undo', category: 'Bases' },
         { id: BASES_COMMANDS.redo, title: 'Bases: Redo', category: 'Bases' },
+        { id: BASES_COMMANDS.cut, title: 'Bases: Cut', category: 'Bases' },
+        { id: BASES_COMMANDS.copy, title: 'Bases: Copy', category: 'Bases' },
+        { id: BASES_COMMANDS.paste, title: 'Bases: Paste', category: 'Bases' },
       ],
       // Mirror the canvas pattern (canvas.focused) — chords only fire
       // when a `.bases` leaf actually owns focus. The activeBases
       // handle is published on focusin from BasesView.
+      //
+      // The cut/copy/paste keybindings additionally guard on
+      // `!bases.editing` so a Mod-V inside an active CellEditor
+      // textfield inserts text instead of triggering a paste.
       keybindings: [
         { command: BASES_COMMANDS.undo, key: 'ctrl+z', mac: 'cmd+z', when: 'bases.focused' },
         { command: BASES_COMMANDS.redo, key: 'ctrl+shift+z', mac: 'cmd+shift+z', when: 'bases.focused' },
         { command: BASES_COMMANDS.redo, key: 'ctrl+y', mac: 'cmd+y', when: 'bases.focused' },
+        { command: BASES_COMMANDS.cut, key: 'ctrl+x', mac: 'cmd+x', when: 'bases.focused && !bases.editing' },
+        { command: BASES_COMMANDS.copy, key: 'ctrl+c', mac: 'cmd+c', when: 'bases.focused && !bases.editing' },
+        { command: BASES_COMMANDS.paste, key: 'ctrl+v', mac: 'cmd+v', when: 'bases.focused && !bases.editing' },
       ],
     },
   },
@@ -99,6 +112,9 @@ export const basesPlugin: Plugin = {
     // no base open), matching the `when`-gated keybindings.
     api.commands.register(BASES_COMMANDS.undo, () => withActiveBases((h) => h.undo()))
     api.commands.register(BASES_COMMANDS.redo, () => withActiveBases((h) => h.redo()))
+    api.commands.register(BASES_COMMANDS.cut, () => withActiveBases((h) => h.cut()))
+    api.commands.register(BASES_COMMANDS.copy, () => withActiveBases((h) => h.copy()))
+    api.commands.register(BASES_COMMANDS.paste, () => withActiveBases((h) => h.paste()))
 
     api.commands.register(COMMAND_NEW, async (args?: unknown) => {
       // Caller may pass `{ parent: string }` to scope the new base to

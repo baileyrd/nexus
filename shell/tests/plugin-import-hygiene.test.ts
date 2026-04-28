@@ -88,6 +88,7 @@ const HOST_INTERNALS_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/nexus/ai/index.ts',                           // host/ContextKeyService + EventBus — predates @nexus/extension-api context-keys / event surface; track under WI-25 drain
   'shell/src/plugins/nexus/backlinks/BacklinksView.tsx',           // host/EventBus
   'shell/src/plugins/nexus/bases/BasesView.tsx',                   // host/ContextKeyService — BL-030 mirrors the canvas active-handle pattern; @nexus/extension-api context-keys not yet wired to React components
+  'shell/src/plugins/nexus/bases/BasesTable.tsx',                  // host/ContextKeyService — BL-031 publishes `bases.editing` for the cell-clipboard `when:` clauses; same drain plan as BasesView (WI-25)
   'shell/src/plugins/nexus/canvas/CanvasView.tsx',                 // host/ContextKeyService
   'shell/src/plugins/nexus/editor/EditorView.tsx',                 // host/EventBus + shellRegistry
   'shell/src/plugins/nexus/graph/GraphGlobalView.tsx',             // host/EventBus
