@@ -1,6 +1,7 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { CommandPalette } from './CommandPalette'
 import { useCommandPaletteStore } from './commandPaletteStore'
+import { CONFIG_KEY_PALETTE_LIMIT, DEFAULT_MAX_PALETTE_RESULTS } from './match'
 import { setApi } from './paletteRuntime'
 
 const VIEW_ID = 'nexus.commandPalette.overlay'
@@ -54,6 +55,21 @@ export const commandPalettePlugin: Plugin = {
           type: 'boolean',
         },
       ],
+      configuration: {
+        pluginId: 'nexus.commandPalette',
+        title: 'Command Palette',
+        order: 30,
+        schema: [
+          {
+            key: CONFIG_KEY_PALETTE_LIMIT,
+            title: 'Maximum results',
+            description:
+              'Cap on the number of commands shown in the palette. Long lists are noise.',
+            type: 'number',
+            default: DEFAULT_MAX_PALETTE_RESULTS,
+          },
+        ],
+      },
     },
   },
 
@@ -83,5 +99,7 @@ export const commandPalettePlugin: Plugin = {
       component: CommandPalette,
       priority: 10,
     })
+
+    api.configuration.register(commandPalettePlugin.manifest.contributes!.configuration!)
   },
 }

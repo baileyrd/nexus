@@ -14,14 +14,7 @@
 
 ## New Features (not addressed in any PRD)
 
-### BL-009: Whole-File `.mermaid` Viewer
-
-**Source**: BL-008 follow-up (2026-04-28)
-**Effort**: Small (~0.5 day)
-**Crate / Package**: `shell/src/plugins/community/mermaid/` (extension to BL-008's plugin)
-**Related**: BL-008 (fenced-code-renderer registry)
-
-Render standalone `.mermaid` files (whole-file mermaid source, no markdown wrapper) as SVG diagrams in the editor. BL-008 only handles fenced `mermaid` code blocks inside markdown documents — it hooks into the markdown live-preview/preview pipeline, which doesn't run for non-markdown files. Implement by extending `community.mermaid`'s `activate()` to also call `viewRegistry.register('mermaid', creator)` + `viewRegistry.registerExtensions(['mermaid'], 'mermaid')` (same pattern as `nexus.canvas`'s `.canvas` claim and `nexus.bases`'s `.bases` claim — see `shell/src/plugins/nexus/canvas/index.ts:130`). The view reads the file via `api.fs`, calls the same `mermaid.render` path the fenced renderer uses, and shows the SVG with a "View Source" toggle to fall back to the raw text. Edit-in-place is out of scope for v1 — open in CodeMirror via "View Source" if the user needs to edit. Plugin stays default-off; users opt in via Settings → Plugins.
+_BL-009 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ## Partially New Features (concept exists in PRDs but design is unspecified)
 
@@ -79,14 +72,14 @@ Tracked in full in [../REQUIRED-FOR-FORMAL-RELEASE.md](../REQUIRED-FOR-FORMAL-RE
 
 ---
 
-## Future directions (exploratory, not phased)
+## Future directions (scoped 2026-04-28)
 
-Design-only docs without committed timelines. Treat as inspiration / option pool, not as work in flight. If any of these get scoped into a phase, mint an ID here and link the doc as the design rationale.
+Previously: design-only docs without committed timelines. **Scoped into the implementation plan on 2026-04-28** — each FD piece now has a BL-* ID (see "Future-direction items minted into the backlog" above) and the docs themselves remain authoritative for design rationale.
 
-- [ ] **AI integration directions** — 8 ordered directions (inline rewrite/summarize, auto-link suggestions, semantic search, per-surface chat, skills as prompts, agent loops, MCP exposure, background indexing). See [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md).
-- [ ] **Ambient copilot UX patterns** — 10 patterns (Cmd+I overlay, context chips, model switcher, ghost suggestions, right-click AI actions, margin suggestions, activity timeline, citations, inline correction, capture → AI). See [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md).
-- [ ] **AI memory layer (Pieces.app-style)** — 6-piece build plan (quick-capture hotkey, auto-enrichment on save, recall hotkey, implicit chat context, code-aware capture, scheduled digests). See [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md).
-- [ ] **Notion-style block UX — out-of-scope follow-ups.** Phases 1–6 of the plan landed 2026-04-22 (see "Spec'd in a PRD, not yet implemented" below for the entry). The plan itself enumerates explicit out-of-scope items: drag-to-embed into canvas, block-links navigator (`[[…#^block-id]]`), side-margin comments subsystem, block AI actions via `com.nexus.ai`, multi-cursor from multi-block selection. See `docs/notion-block-ux-plan.md`.
+- **AI integration directions** — see [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md). Mapping: "inline rewrite/summarize" → BL-034 (engine) + BL-035 (action surface); "auto-link suggestions" → BL-039; "semantic search" → BL-040; "per-surface chat" → merged into BL-010 (reshape note); "skills as prompts" → composed via BL-021 / BL-022; "agent loops" → merged into BL-027 (same surface); "MCP exposure" (Nexus-as-server) → BL-042; "background indexing" → BL-041. Direction "tool-calling" was already BL-016.
+- **Ambient copilot UX patterns** — see [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md). Mapping: Cmd+I overlay → BL-032; context chips + model switcher → BL-033; ghost suggestions → BL-034; right-click AI actions → BL-035 (shared with NB block AI actions); margin suggestions + inline correction → BL-036; activity timeline → BL-037; citations → BL-038; capture → AI → folded into BL-043 (memory quick-capture).
+- **AI memory layer** — see [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md). Mapping: quick-capture → BL-043; auto-enrichment on save → BL-045; recall hotkey → BL-044; implicit chat context → merged into BL-010 (reshape note); code-aware capture → BL-046; scheduled digests → BL-047.
+- **Notion-style block UX out-of-scope follow-ups** — see [../notion-block-ux-plan.md](../notion-block-ux-plan.md). Mapping: drag-to-embed into canvas → BL-048; block-links navigator → BL-049 (gated on block-id stability ADR); side-margin comments → BL-050; block AI actions → merged into BL-035; multi-cursor from multi-block → BL-051.
 
 ---
 
@@ -258,11 +251,13 @@ Threads from `docs/archive/planning/UI-AUDIT.md §6` not yet confirmed. Each is 
 **Source**: PRD-05 §3.5.2, §10.2 — readline history, multi-turn session, `--context <FILE>`, `--model <MODEL>`.
 **Effort**: Medium. **Crate**: `nexus-cli` (new subcommand under existing `AiCommand` enum at `crates/nexus-cli/src/main.rs:314`).
 Wraps existing `com.nexus.ai::stream_chat` (handler id 6); persistence reuses `session_load`/`session_save` (ids 8/9). Today the CLI exposes `ask | embed | status | config` only.
+**Reshape (2026-04-28)**: merged with the AI-DIR "per-surface chat" pattern + the memory-layer "implicit chat context" piece. Implementation should land as a CLI consumer of a shared context-assembly service (forge selection rules + skill assembly + memory recall) so the same engine drives BL-032's Cmd+I overlay and BL-044's recall hotkey. Don't ship as a standalone code path. Gated on BL-032 (UX shape) and BL-016 (tool-calling).
 
 ### BL-011: `nexus ai complete` CLI
 
 **Source**: PRD-05 §3.5.3, §10.3 — `nexus ai complete <FILE> [--line <N>] [--col <N>] [--context <NUM_LINES>]`.
 **Effort**: Medium. **Crate**: `nexus-cli`. Editor-side equivalent (Mod+Shift+Space) shipped per PRD-08 §9 / IMPLEMENTATION_STATUS.md line 84; the CLI surface is the headless twin and is not yet present.
+**Reshape (2026-04-28)**: paired with BL-034 (AMB ghost suggestions) — both consume one shared completion engine. BL-011 is the headless twin; BL-034 wires the same engine to the CM6 ghost-decoration. Build the engine once (prompt assembly + provider call + post-processing) and let the two surfaces differ only at the rendering boundary.
 
 ### BL-012: Database query blocks in the editor (`[[{db:query}]]`)
 
@@ -276,23 +271,21 @@ Last functional gap in PRD-08; previously listed in IMPLEMENTATION_STATUS.md gap
 **Effort**: Medium. **Crate**: `nexus-terminal`.
 Today `InMemoryTerminalServer::subscribe_events` returns a `std::sync::mpsc::Receiver` that does not cross plugin boundaries. The Tauri panel works because it polls `pump`; the TUI does the same. Closing this gap unblocks remote terminals and lets community plugins react to terminal output without re-implementing pump loops. Probably needs a generic plugin-host stream convention first (currently no other plugin streams either).
 
-### BL-015: Soft-deleted bases — trash view UI
-
-**Source**: PRD-10 / [BACKLOG.md](#)'s `.bases` follow-up at line 137 ("a trash-view UI surfacing soft-deleted records").
-**Effort**: Small. **Crate**: `shell/src/plugins/nexus/bases/`.
-`BaseRecord.deletedAt` is wired end-to-end (table actions at `BasesTable.tsx:153-188`, kernel filter at `BasesView.tsx`, IPC handlers `base_record_soft_delete` / `base_record_restore`). Missing piece is a **Trash** filter chip / dedicated view that shows deleted-only records with a "Restore" action.
+_BL-015 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-016: AI tool registration for LLM function-calling
 
 **Source**: PRD-12 §8.1 (`ToolRegistry`, `ToolExecutor`, built-in `read_file` / `write_file` / etc.).
 **Effort**: Medium. **Crate**: `nexus-ai`.
 Distinct from the agent's MCP discovery (which appends *tool descriptions* to the planner prompt). Native function-calling means surfacing Anthropic / OpenAI `tools` and Ollama tool-call format from `stream_chat`, dispatching the model's tool-calls back through `ipc_call`. Today providers strip tool params before the request.
+**Cross-references (2026-04-28)**: prerequisite for BL-010, BL-011, BL-027, BL-035 (right-click AI actions / block AI actions), BL-036 (margin / inline correction), and the memory layer's "recall as a tool" flow (BL-044). Treat as Phase-1 foundation; downstream agents queue behind it. Split per the implementation plan: (1) `ToolRegistry` + `ToolExecutor` core, (2) Anthropic + OpenAI tool-call wire format, (3) Ollama tool-call format + dispatch loop.
 
 ### BL-019: AI local embeddings backend
 
 **Source**: PRD-12 §9.1 (`EmbeddingModel` with cache; sentence-transformer-quality offline embeddings).
 **Effort**: Large. **Crate**: `nexus-ai`.
 RAG today calls remote embedding endpoints. A local backend (e.g. fastembed-rs, candle, or sqlite-vec's bundled gguf path) would unblock fully-offline forges. Nice-to-have for personal-tool scope; medium priority.
+**Cross-references (2026-04-28)**: BL-019 has been **promoted** from "nice-to-have" to a critical-path foundation now that Future-direction tracks are in scope. Direct consumers: BL-038 citations, BL-039 auto-link suggestions, BL-040 semantic search, BL-041 background indexing daemon, BL-044 recall hotkey, BL-045 auto-enrichment on save, BL-047 scheduled digests — nine downstream tracks. A backend choice that doesn't ship cross-platform costs the schedule weeks. **Phase-0 deliverable**: an ADR comparing fastembed-rs / candle / sqlite-vec gguf on (model quality, RAM footprint, cold-start time, cross-platform binary cost, license). Split implementation: (1) backend impl, (2) `EmbeddingModel` trait + cache, (3) RAG wire-up, (4) batch indexer hook for BL-041.
 
 ### BL-021: Skill `depends_on` composition resolver
 
@@ -318,11 +311,12 @@ Stdio is the only transport today (`McpClient` over `TokioChildProcess`). Remote
 **Effort**: Medium. **Crate**: `nexus-mcp`.
 `McpServerSpec.env` already accepts a string map; the auth flow itself (token exchange, refresh, keychain lookup) is unbuilt. Pairs with ADR-0009 (keyring hard-fail) once that policy is enforced at bootstrap.
 
-### BL-027: Multi-agent orchestration / delegation
+### BL-027: Multi-agent orchestration / delegation (= AI-DIR "agent loops")
 
-**Source**: PRD-15 §10 (`AgentOrchestrator::delegate / parallel / pipeline`).
+**Source**: PRD-15 §10 (`AgentOrchestrator::delegate / parallel / pipeline`); design rationale also in [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) "agent loops".
 **Effort**: Large. **Crate**: `nexus-agent`.
 Today a `LlmAgent` plans + executes solo. Spec calls for a coordinator that hands subtasks between archetypes (Researcher → Writer → Coder) with shared scratch state. PRD §6.3 reactive rules and §12 debugger/replayer are in the same neighbourhood — defer those until orchestration lands and exposes the right hooks.
+**Merger (2026-04-28)**: AI-DIR "agent loops" is the same surface as BL-027 — collapsed to this single ID so we don't ship it twice. Split per the implementation plan: (1) orchestrator skeleton, (2) `delegate`, (3) `parallel`, (4) `pipeline`, (5) shared scratch state + replay hooks. Hard prerequisite: BL-016 tool-calling.
 
 ### BL-028: Workflow trigger expansion + control flow
 
@@ -336,9 +330,246 @@ Cron + file_event triggers + condition evaluator + variable interpolation + manu
 **Effort**: Medium. **Crate**: `shell/src-tauri/` + `shell/src/host/`.
 Spec calls for per-Leaf detachment into a separate `WebviewWindow`. Today the shell ships single-window. Not in REQUIRED-FOR-FORMAL-RELEASE.md, so it lands here. Web/mobile platform targets (also PRD-17) remain explicitly deferred and are not BL items.
 
+### BL-030: Bases per-surface undo / redo
+
+**Source**: 2026-04-28 backlog review — gap surfaced alongside the canvas / editor undo work that already shipped.
+**Effort**: Medium. **Crate**: `shell/src/plugins/nexus/bases/`.
+Bases is the only mature surface without an undo stack. Editor undo flows through CodeMirror; canvas got `undo/redo` in Phase-6; bases mutations (cell edit, row create / delete / soft-delete / restore, property create / update / delete / rename, view create / update / delete) go straight through `kernelClient.ts` to `com.nexus.storage::base_*` and are unrecoverable from the UI. Implement per-base ring-buffered undo by wrapping every mutator in `kernelClient.ts` with a paired forward/reverse op and pushing onto a `basesStore` undo stack keyed by base path; re-use the existing soft-delete IPC for row-undo so deletes round-trip cleanly. `Mod-Z` / `Mod-Shift-Z` bound via `KeybindingRegistry` with a `bases.focused` context-key gate (mirroring the canvas pattern). Schema-edit reversals need care: `base_property_delete` is destructive of cell values, so either snapshot the column before delete or refuse to undo past a destructive op (surface a "history truncated" hint). Explicit non-goal: a global cross-surface undo — see the 2026-04-28 design note below.
+
+### BL-031: Bases cell / row clipboard
+
+**Source**: 2026-04-28 backlog review — natural pair to BL-030.
+**Effort**: Small–medium. **Crate**: `shell/src/plugins/nexus/bases/`.
+No clipboard support today: `BasesTable` selection state exists for the row-actions menu but `Mod-C` / `Mod-V` / `Mod-X` are unbound. v1 scope: copy a rectangular cell range as TSV (clipboard text) + a Nexus-internal JSON payload (`application/x-nexus-bases-cells`) carrying field types so paste into a typed column round-trips losslessly; copy a full row as JSON; paste either fills the selected range (clamping or extending rows via `base_record_create`) or, with no selection, appends new rows. Cross-base paste honours field-type compatibility via `fieldTypes.ts` coercion rules — incompatible cells fall back to the string representation and emit a `bases:paste-coerced` notification. External-app paste (Excel / Google Sheets TSV) works via the text fallback. Pairs with BL-030 so a paste is one undo step.
+
+---
+
+## Future-direction items minted into the backlog (2026-04-28)
+
+> The four future-direction tracks were brought into the implementation plan on 2026-04-28. The IDs below carry their FD doc as design rationale; the original entries in the "Future directions" section now point here. Effort scale: S ≈ ½–2 days, M ≈ 3–10 days, L ≈ 2+ weeks.
+
+### BL-032: Cmd+I command-anywhere AI overlay
+
+**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) pattern 1.
+**Effort**: Medium. **Crate / Package**: `shell/src/plugins/nexus/ai/` (new) + `shell/src/host/` (registry hook).
+A modal overlay invocable from any focused surface (editor, bases, canvas, terminal, files) that takes a free-form prompt and routes through the shared context-assembly service. Surface-specific context contributors (current selection, current file, current row, current canvas node) register adapters at activation. **Gates BL-010 / BL-011 UX** — land Cmd+I before the CLI surfaces so they share UX and engine. Scope excludes citations (BL-038) and right-click actions (BL-035), which compose on top.
+
+### BL-033: AMB context chips + model switcher
+
+**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) patterns 2 + 3.
+**Effort**: Small (bundle).
+Context chips: visible "what's in the prompt" pills inside BL-032's overlay (file, selection, skill stack) with click-to-remove. Model switcher: dropdown bound to BL-032 plus a global default in Settings. Trivial wiring around the BL-032 surface; bundle into one PR.
+
+### BL-034: AMB ghost suggestions (CM6 inline-completion decoration)
+
+**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) pattern 4 + AI-DIR "inline rewrite/summarize".
+**Effort**: Medium. **Crate**: `shell/src/plugins/nexus/editor/cm/` (new extension `ghostCompletion.ts`).
+Inline ghost-text suggestion at the caret with `Tab`-accept / `Esc`-dismiss, debounced trigger (idle + ≥N chars typed). **Pairs with BL-011** — both consume the same completion engine; BL-011 is the headless twin. Build the engine in `nexus-ai` (prompt assembly + provider call + post-processing); each surface only owns its rendering.
+
+### BL-035: Right-click AI actions + block AI actions (shared registry)
+
+**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) pattern 5 + Notion-block follow-up "block AI actions via `com.nexus.ai`".
+**Effort**: Medium. **Crate / Package**: `@nexus/extension-api` (new `ai.registerAction`) + `shell/src/plugins/nexus/ai/`.
+Single `AIAction` registry exposed via `api.ai.registerAction({ id, label, surfaces: ['editor.selection' | 'block' | 'canvas.node' | ...], run })`. Two entry points: editor right-click context menu (selection-bound actions) and the block-handle menu (block-bound actions). Built-ins: summarize, rewrite, translate, explain. Hard prereq: BL-016 (actions can call tools).
+
+### BL-036: AMB margin suggestions + inline correction
+
+**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) patterns 6 + 9.
+**Effort**: Medium.
+Background pass over the active document surfaces non-blocking margin glyphs ("rephrase", "fact-check", "tighten") that expand into accept/dismiss diffs in the gutter; inline correction is the same engine for typos / grammar with squiggle decoration. Hard prereq: BL-016 tool-calling so suggestions can call domain tools (e.g. dictionary).
+
+### BL-037: AMB activity timeline
+
+**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) pattern 7.
+**Effort**: Medium.
+Per-forge log of AI interactions (prompt, model, surface, files touched, tool calls, outcome) shown as a scrollable pane. v1 reads from a JSONL log under `.forge/ai-activity.log`; later versions can index for search. **Hosted inside BL-029 multi-window** as a dedicated pane.
+
+### BL-038: AMB citations
+
+**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) pattern 8.
+**Effort**: Medium.
+When the assembled context includes retrieved snippets (RAG / memory recall), the answer view shows numbered citations linking back to the source file + line range. Hard prereq: BL-019 embeddings (citations only meaningful once retrieval is real).
+
+### BL-039: AI-DIR auto-link suggestions
+
+**Source**: [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) direction 2.
+**Effort**: Medium. **Crate**: `nexus-ai` + `shell/src/plugins/nexus/editor/`.
+Embedding-driven inline suggestion of `[[wiki-style]]` links to existing forge files when the typed phrase semantically matches an existing note title or heading. UI piggybacks on BL-034's ghost-decoration. Hard prereq: BL-019.
+
+### BL-040: AI-DIR semantic search
+
+**Source**: [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) direction 3.
+**Effort**: Medium. **Crate**: `nexus-storage` (search facade) + shell command palette.
+Adds a `?:` prefix (or dedicated "Search by meaning" palette command) that runs a vector search alongside today's Tantivy keyword search and merges results with score-aware ranking. Hard prereq: BL-019.
+
+### BL-041: AI-DIR background indexing daemon
+
+**Source**: [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) direction 8.
+**Effort**: Medium–large. **Crate**: `nexus-storage` (file-watcher hook) + `nexus-ai` (batch embedder).
+A debounced indexer that subscribes to the existing file-watcher, batches changed files, and updates an embedding store (sqlite-vec or similar) without blocking foreground work. Surfaces a status badge ("indexed N / M files"). Hard prereq: BL-019. Feeds BL-040, BL-039, BL-045.
+
+### BL-042: AI-DIR Nexus-as-MCP-server
+
+**Source**: [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) direction 7.
+**Effort**: Large. **Crate**: `nexus-mcp` (server-side surfaces) + `nexus-bootstrap` (lifecycle).
+Today `nexus-mcp` is an MCP *client*. The FD direction is the inverse: expose Nexus's tools (search, read_file, write_file, run_skill, etc.) as an MCP server so external IDEs / Claude Desktop can drive a Nexus forge. Distinct files from BL-023 / BL-025 (which remain client-side). Pairs with BL-016 (the tool registry is the natural source of truth for advertised tools).
+
+### BL-043: MEM quick-capture hotkey
+
+**Source**: [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md) piece 1.
+**Effort**: Small.
+Global hotkey opens a small capture window; on confirm, the snippet is appended to a `Inbox.md` (or similar) file with a timestamp + source-app metadata. Pure file write, no AI dependency in v1 — keeps the foundation independent.
+
+### BL-044: MEM recall hotkey
+
+**Source**: [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md) piece 3.
+**Effort**: Small. Hard prereq: BL-019.
+Global hotkey opens a search overlay backed by BL-040 semantic search scoped to capture notes; results are inserted at the current caret or copied. Effectively reuses BL-032's overlay shell with a different content adapter.
+
+### BL-045: MEM auto-enrichment on save
+
+**Source**: [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md) piece 2.
+**Effort**: Medium. Hard prereqs: BL-019 + BL-041.
+On save of an inbox-tagged file, run an enrichment pass: AI-generated tags, link suggestions (via BL-039), and a 1-line summary written to frontmatter. Idempotent — re-runs only if the body hash changed. Honours user-accept gate before frontmatter is written.
+
+### BL-046: MEM code-aware capture
+
+**Source**: [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md) piece 5.
+**Effort**: Medium.
+Extends BL-043 capture: when the source is detectably code (file path with code extension, syntax-highlightable content, IDE selection), capture preserves language fence + path + line range. Adds a "from project" filter to BL-044 recall. No AI dependency at capture time.
+
+### BL-047: MEM scheduled digests
+
+**Source**: [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md) piece 6.
+**Effort**: Medium. Hard prereq: BL-019.
+A `nexus-workflow` cron job (re-using the existing scheduler) that summarises N days of capture notes into a daily / weekly digest file. Naturally lives in the workflow templates library — implement once BL-028 templates land or as a one-off cron until then.
+
+### BL-048: NB drag-to-embed into canvas
+
+**Source**: [../notion-block-ux-plan.md](../notion-block-ux-plan.md) out-of-scope follow-up.
+**Effort**: Medium. **Crate / Package**: `shell/src/plugins/nexus/editor/` + `shell/src/plugins/nexus/canvas/`.
+Block-handle (six-dot grip) drag target accepts drops onto an open canvas, creating a markdown-embed node referencing the source block by id. Cross-plugin contract: a canvas-side drop handler reading a typed `application/x-nexus-block-ref` payload. Soft-blocked on the block-id stability ADR (see Phase-0 design notes) — string-based refs by file+visit-order break on doc edits.
+
+### BL-049: NB block-links navigator (`[[…#^block-id]]`)
+
+**Source**: [../notion-block-ux-plan.md](../notion-block-ux-plan.md) out-of-scope follow-up.
+**Effort**: Medium. **Crate / Package**: `nexus-editor` (resolver) + `shell/src/plugins/nexus/editor/` (navigation UX).
+Click-through and back-link surfacing for block-anchored links. **Hard-gated on the block-id stability ADR** — without stable cross-session ids, block links rot on every edit downstream of an insert.
+
+### BL-050: NB side-margin comments subsystem
+
+**Source**: [../notion-block-ux-plan.md](../notion-block-ux-plan.md) out-of-scope follow-up.
+**Effort**: Large.
+Persistent comment threads anchored to block ids, rendered in a side margin pane with reply / resolve / mention. Storage in `.forge/comments/<file>.json`. **Hosted inside BL-029 multi-window** when that lands. Same block-id stability dependency as BL-048 / BL-049.
+
+### BL-051: NB multi-cursor from multi-block selection
+
+**Source**: [../notion-block-ux-plan.md](../notion-block-ux-plan.md) out-of-scope follow-up.
+**Effort**: Medium. **Crate**: `shell/src/plugins/nexus/editor/cm/`.
+Promote a multi-block selection (from BL's existing `blockSelection.ts`) into a CM6 multi-cursor where each cursor sits at the same offset within its respective block. Editor-only; no kernel surface.
+
 ### Verification notes (no BL ID — informational)
 
 - **ADR-0009 keyring hard-fail enforcement** — ADR mentions a `NEXUS_NO_KEYRING=1` escape hatch, but bootstrap-side enforcement was not located in this audit. Either confirm enforcement (and document the location) or file as a follow-up in OPEN-ITEMS.md if real.
 - **PRD-04a MockPluginContext / MockEventBus** — referenced in template tests as TODO but not yet exposed from `nexus-plugin-api`. Low priority; community plugin authors are not yet writing many tests, and the issue surfaces only when someone tries.
 
 ## Decisions — PRD-04 audit (2026-04-17)
+
+## Design notes — 2026-04-28
+
+- **Global cross-surface undo is a non-goal.** Considered alongside BL-030. Per-surface undo is the idiom in VS Code / Obsidian / IntelliJ; a unified Cmd+Z spanning editor + canvas + bases + file ops creates ambiguous "what does this undo right now" behaviour and would require every mutating IPC handler to register an inverse op against the file-as-truth + IPC-only invariants. The right primitive for cross-surface time-travel in this architecture is git-based history (point-in-time restore via the existing commit graph) rather than a unified action stack. New BL items for undo should be scoped to a single surface.
+
+### Phase-0 ADRs (gating the implementation plan)
+
+Two design decisions sit on the critical path of the multi-phase rollout. Both are Phase-0 deliverables — the rest of the plan depends on the answers.
+
+- **ADR-pending: block-id stability strategy.** Today `deterministic_block_id` keys on `(file_path, visit_order, block_type)`, so an insert mid-document re-numbers every downstream block on reload. **Gates BL-048 (drag-to-embed), BL-049 (block-links navigator), BL-050 (side-margin comments)** — all rely on cross-session stable block ids. Two viable approaches were enumerated in the Notion-block-UX work: (a) HTML-comment stamping inside markdown (visible in source, survives raw-text edits, ugly), (b) out-of-band `.forge/blocks.json` sidecar (clean source, but needs reconciliation when files are edited outside Nexus). Neither has been chosen because no current feature forces the issue. Choose at Phase-0; a half-day decision unblocks three downstream tracks.
+
+- **ADR-pending: embedding backend selection.** BL-019 was previously "nice-to-have"; it now gates **nine downstream tracks** (BL-038 / BL-039 / BL-040 / BL-041 / BL-044 / BL-045 / BL-047 plus the BL-010 reshape and BL-011 / BL-034 retrieval-augmented variants). Candidates from the BL-019 entry: fastembed-rs, candle, sqlite-vec's bundled gguf path. Choosing wrong (e.g. a backend that doesn't ship cleanly cross-platform, or that bloats the binary past acceptable, or whose model quality is too low to make BL-040 useful) costs the schedule weeks. Compare on (1) model quality vs sentence-transformers baseline, (2) RAM footprint at idle and under indexing load, (3) cold-start time, (4) cross-platform binary cost (Linux/macOS/Windows; consider WebView constraints for shell), (5) license. Phase-0 deliverable.
+
+---
+
+## Implementation plan (2026-04-28)
+
+> Phased rollout for every non-deferred BL item including the future-direction items minted as BL-032..BL-051 above. Cross-references all live in those entries; this section is the schedule.
+
+### Agent-load assumptions
+
+- **One agent ≈ 1–3 days of focused work, single tractable PR.** Items rated >medium must split into multiple agent-sized chunks (splits are listed per-item below).
+- **2 concurrent foreground agents + 1 background long-runner.** The fg slots are sized so the human review queue stays drainable; the bg slot is reserved for multi-week work (F-8.1.1 in particular).
+- **Agents that overlap files waste work in merges**, so file-conflict groups must serialize within their group.
+- Retune assumptions: 1 fg + 0 bg roughly doubles the timeline; 3 fg + 1 bg lets BL-022 / BL-029 / BL-037 land earlier and compresses Phases 3–6 by ~3 weeks.
+
+### File-conflict groups (serialize within group)
+
+| Group | Items |
+|---|---|
+| Bases plugin | BL-015 → BL-030 → BL-031 |
+| nexus-cli AI subcommands | BL-010 → BL-011 |
+| nexus-mcp client | BL-023 → BL-025 |
+| nexus-mcp server | BL-042 (distinct from client group above) |
+| Skills | BL-021 → BL-022 |
+| nexus-ai (Cargo + provider mods) | BL-016, BL-019 — keep one full PR apart |
+| Shell host / sandbox | F-8.1.1 → F-8.1.2 |
+| AI overlay surface | BL-032 → BL-033 → BL-034 |
+| Memory inbox surface | BL-043 → BL-046 |
+
+### Hard dependency chain
+
+| Prereq | Unblocks |
+|---|---|
+| BL-016 tool-calling | BL-010, BL-011, BL-027, BL-035, BL-036, BL-044 |
+| BL-019 embeddings | BL-038, BL-039, BL-040, BL-041, BL-044, BL-045, BL-047, plus BL-010/11/34 retrieval variants |
+| BL-013 stream convention | future plugin streaming work |
+| BL-015 trash view | BL-030 (reuses row-restore code path) |
+| BL-030 undo stack | BL-031 (paste = one undo step) |
+| BL-032 Cmd+I overlay | BL-010 / BL-011 / BL-033 / BL-044 (shared UX) |
+| BL-041 indexing daemon | BL-045 (auto-enrichment reads the index) |
+| F-8.1.1 iframe sandbox | F-8.1.2, marketplace |
+| Block-id stability ADR | BL-048, BL-049, BL-050 |
+
+### Phased rollout
+
+| Phase | Wks | Agent A (fg) | Agent B (fg) | Agent C (bg) | Phase exit criteria |
+|---|---|---|---|---|---|
+| **0 — Quick wins + ADRs** | 1.5 | settings ×5 + BL-009 + BL-015 | (idle / pulls Phase-1 prep) | block-id ADR + embedding-backend ADR | both ADRs signed and recorded under "Decisions"; trash view live in bases; foundations clear for Phase 1 |
+| **1 — Foundations** | 6 | **BL-016** (split ×3) | **BL-013** stream convention + **BL-032** Cmd+I overlay | **F-8.1.1** kickoff (split ×5; per-plugin migration posture — see below) | BL-016 merged → unblocks AI surfaces; BL-032 lands → unblocks BL-010/11; F-8.1.1 sandbox scaffold reachable |
+| **2 — Bases + AI CLI/UI** | 4 | BL-030 → BL-031 → **BL-043** quick-capture hotkey | BL-010 + BL-034 ghost suggestions (paired engine) → BL-011 | F-8.1.1 cont. | bases polish complete; shared chat + completion engine live in CLI and editor; global capture hotkey live |
+| **3 — Skills + MCP client + small AMB** | 5 | BL-021 (split ×4) → BL-022 | BL-023 → BL-025; BL-033 chips/switcher slots in | F-8.1.1 wraps; **F-8.1.2** | skills composition lands; MCP client gains WS/SSE + auth |
+| **4 — Heavy AI core** | 8 | **BL-019** (split ×4) | **BL-027** agent loops (split ×5) | BL-035 right-click + block-AI actions | BL-019 unblocks all retrieval consumers; BL-027 unlocks orchestrated agents |
+| **5 — Retrieval consumers** | 5 | BL-040 semantic search → BL-039 auto-links → BL-038 citations | BL-041 indexing daemon → BL-045 auto-enrichment → BL-044 recall | BL-047 scheduled digests | the BL-019 dependency tail drains |
+| **6 — Heavyweights + multi-window** | 8 | BL-028 workflow umbrella (split ≥6) | BL-029 multi-window → BL-037 timeline → BL-050 side-margin comments | BL-042 Nexus-as-MCP-server | multi-window opens, panes follow; workflow gains every spec'd trigger |
+| **7 — Editor + Notion polish** | 6 | BL-012 DB query blocks (split ×5) | BL-049 block-links → BL-051 multi-cursor → BL-048 drag-to-embed | BL-046 code-aware capture; BL-036 margin / inline correction | tail polish; backlog drained to deferred-only items |
+
+Cumulative: ~44 weeks raw, ~50–55 with PR-review buffer at the assumed 2 fg + 1 bg slot budget.
+
+### Sub-task splits (items >medium)
+
+| BL | Split |
+|---|---|
+| BL-016 | (1) `ToolRegistry` + `ToolExecutor` core, (2) Anthropic + OpenAI tool-call wire format, (3) Ollama tool-call format + dispatch loop |
+| BL-019 | (1) backend impl (per ADR), (2) `EmbeddingModel` trait + cache, (3) RAG wire-up, (4) batch indexer hook for BL-041 |
+| BL-021 | (1) parse `depends_on`, (2) topo + cycle detection, (3) prompt-fragment merge order, (4) conflict-warning UX |
+| BL-027 | (1) `AgentOrchestrator` skeleton, (2) `delegate`, (3) `parallel`, (4) `pipeline`, (5) shared scratch state + replay hooks |
+| BL-028 | one agent per primitive: webhook trigger → git_event → mcp_event → parallel scheduler → retry/backoff → AI step types → templates |
+| BL-012 | (1) executor over `apply_view`, (2) CM6 widget, (3) decoration plumbing, (4) undo integration, (5) filter/sort UX |
+| F-8.1.1 | (1) iframe scaffold + sandbox flags, (2) postMessage protocol, (3) `NexusPluginContext` proxy, (4) per-plugin migration via `manifest.toml` `sandbox: "iframe" \| "legacy"` flag, (5) CSP + tests. Per-plugin migration posture (decided 2026-04-28) — community plugins keep working during the multi-week build window; cost is +1–2 wks vs hard cutover. |
+
+### Risks tracked
+
+1. **Phase-2 lock-in.** BL-010 / BL-011 / BL-034 share an engine. If BL-032 (Cmd+I) shifts after Phase-1, three tracks rework.
+2. **BL-019 is the single biggest schedule bet.** Nine tracks queue behind it; a backend mistake costs weeks. The Phase-0 ADR is non-negotiable.
+3. **BL-029 promotion** means earlier multi-window, which means earlier per-window plumbing problems for plugin lifecycle. Worth a lightweight design pass before Phase-6 begins.
+4. **F-8.1.1** runs 1–2 eng-months in the background. If it slips into Phase-4, BL-035 (right-click in iframe-sandboxed plugins) gets harder to test.
+5. **BL-022 absorbs MEM "code-aware capture" UI patterns** in Phase 3 — make sure the skill-editor surface is pluggable enough to host them rather than blocking on a separate capture UI.
+
+### Phase-0 entry / exit checklist
+
+- [ ] Block-id stability ADR drafted, reviewed, recorded under "Decisions".
+- [ ] Embedding-backend ADR drafted with the 5-axis comparison (quality / RAM / cold-start / binary cost / license), recorded under "Decisions".
+- [ ] BL-009 mermaid whole-file viewer merged.
+- [ ] BL-015 bases trash view merged.
+- [ ] Settings extraction queue (5 items) merged as one PR.
+- [ ] No outstanding regressions in `cargo test --workspace` / `pnpm --filter nexus-shell test` / `scripts/check_ipc_drift.sh`.
+
+(BL-043 quick-capture hotkey moved to Phase 2 — Tauri global-hotkey plumbing is a 1–2 day task disguised as "small" and would eat into ADR review.)

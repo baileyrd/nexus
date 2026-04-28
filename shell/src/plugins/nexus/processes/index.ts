@@ -261,7 +261,7 @@ export const processesPlugin: Plugin = {
 
     // ── Kernel event subscriptions ────────────────────────────────────
     //
-    // We accumulate events into a rolling EVENTS_CAP-capped ring even
+    // We accumulate events into a rolling PROCESS_EVENTS_CAP-capped ring even
     // while the pane is not visible, so opening it shows recent
     // activity rather than an empty log. Lifecycle ties to workspace
     // opened/closed: the kernel only exists between `boot_kernel` and

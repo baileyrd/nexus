@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { UNDO_HISTORY_CAP } from '../constants'
 import type { CanvasDoc, CanvasEdge, CanvasNode, CanvasPatchOp } from './kernelClient'
 
 export interface Camera {
@@ -29,11 +30,6 @@ export interface HistoryEntry {
   forward: CanvasPatchOp[]
   inverse: CanvasPatchOp[]
 }
-
-/** History cap per tab. 200 entries is plenty for a single editing
- *  session without letting a pathological drag+undo loop balloon
- *  memory. */
-const UNDO_HISTORY_CAP = 200
 
 export interface CanvasTabState {
   doc: CanvasDoc | null
