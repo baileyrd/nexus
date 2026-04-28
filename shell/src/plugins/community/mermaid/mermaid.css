@@ -36,3 +36,64 @@
   white-space: pre-wrap;
   font-size: 0.9em;
 }
+
+/* BL-009: whole-file .mermaid viewer */
+
+.nexus-mermaid-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: auto;
+  padding: 12px;
+  box-sizing: border-box;
+  gap: 8px;
+}
+
+.nexus-mermaid-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.nexus-mermaid-toolbar-button {
+  background: var(--bg-raised);
+  color: var(--fg);
+  border: 1px solid var(--line-soft);
+  border-radius: 3px;
+  padding: 3px 10px;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.nexus-mermaid-toolbar-button:hover {
+  background: var(--bg-hover, var(--bg-raised));
+}
+
+.nexus-mermaid-pane .nexus-mermaid-diagram {
+  flex: 1;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nexus-mermaid-source {
+  flex: 1;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-raised);
+  border-radius: 4px;
+  font-family: var(--f-mono);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+}
+
+.nexus-mermaid-placeholder {
+  padding: 16px;
+  color: var(--fg-muted, #9ca3af);
+  font-size: 0.9em;
+  text-align: center;
+}
