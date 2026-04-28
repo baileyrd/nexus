@@ -6,18 +6,12 @@
 // fence is rendered — Vite chunks the ~150 KB gzipped library into a
 // separate asset so the cost is paid by users who actually use it.
 //
-// Architecture note. The plan called for a community plugin loaded
-// via the Blob-URL community-plugin loader, with `index.js` as a
-// hand-rolled bundle. That path can't resolve bare-specifier imports
-// (`import('mermaid')` from a Blob URL has no module graph), and
-// inlining mermaid into the bundle would produce a ~5 MB hand-edited
-// JS file. The pragmatic alternative is to keep the directory under
-// `shell/src/plugins/community/mermaid/` (matching the spec's file
-// layout) but register the plugin through the shell catalog with
-// `DEFAULT_OFF_PLUGINS`. The user opts in via Settings → Plugins, and
-// the dynamic mermaid import is resolved by Vite. The plugin.json in
-// this directory is informational only — set to `enabled: false` so
-// the community-plugin loader does not also try to import index.js.
+// Architecture note. The community-plugin loader's Blob-URL path
+// can't resolve bare-specifier imports (`import('mermaid')` from a
+// Blob URL has no module graph), so this plugin is registered through
+// the shell catalog (`DEFAULT_OFF_PLUGINS`) instead. The user opts in
+// via Settings → Plugins; Vite then resolves the dynamic mermaid
+// import. `plugin.json` is informational only (`enabled: false`).
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 

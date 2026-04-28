@@ -20,12 +20,12 @@ on first render after the plugin activates.
 ## Implementation note
 
 The directory is laid out like a community plugin
-(`plugin.json` + `index.js` shim + `index.ts` source) but registration
-flows through the shell catalog as a default-off entry rather than the
-runtime community-plugin loader. The community loader's Blob-URL
-import path can't resolve bare-specifier imports like `import "mermaid"`
-without a plugin-side bundler, and inlining mermaid into a hand-rolled
-JS bundle is impractical. Treating the directory as a Vite-bundled
+(`plugin.json` + `index.ts` source) but registration flows through
+the shell catalog as a default-off entry rather than the runtime
+community-plugin loader. The community loader's Blob-URL import path
+can't resolve bare-specifier imports like `import "mermaid"` without a
+plugin-side bundler, and inlining mermaid into a hand-rolled JS
+bundle is impractical. Treating the directory as a Vite-bundled
 plugin keeps the `~150 KB opt-in` semantics intact and the user-facing
 opt-in flow identical, at the cost of a manifest entry that is
 informational only (`enabled: false` in `plugin.json`). Once a
