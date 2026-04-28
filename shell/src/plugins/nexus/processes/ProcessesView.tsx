@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import {
   useProcessesStore,
-  EVENTS_CAP,
+  PROCESS_EVENTS_CAP,
   type PluginItem,
   type SessionItem,
 } from './processesStore'
@@ -329,7 +329,7 @@ function Toolbar({ filteredCount }: { filteredCount: number }) {
         }}
       >
         {filter.length > 0 ? `${filteredCount} / ` : ''}
-        {eventsLen} / {EVENTS_CAP}
+        {eventsLen} / {PROCESS_EVENTS_CAP}
       </div>
     </div>
   )

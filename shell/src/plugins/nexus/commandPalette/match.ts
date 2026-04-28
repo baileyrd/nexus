@@ -7,8 +7,8 @@ export interface ScoredCommand {
 }
 
 /** Cap; long lists are noise in a palette. */
-const MAX_PALETTE_RESULTS = 50
-const CONFIG_KEY_PALETTE_LIMIT = 'commandPalette.maxResultsLimit'
+export const DEFAULT_MAX_PALETTE_RESULTS = 50
+export const CONFIG_KEY_PALETTE_LIMIT = 'commandPalette.maxResultsLimit'
 
 /**
  * Subsequence fuzzy match over `<category> <title>`. Lower score is
@@ -26,7 +26,7 @@ export function filterCommands(
   commands: CommandEntry[],
   query: string,
 ): ScoredCommand[] {
-  const limit = configStore.get<number>(CONFIG_KEY_PALETTE_LIMIT, MAX_PALETTE_RESULTS) ?? MAX_PALETTE_RESULTS
+  const limit = configStore.get<number>(CONFIG_KEY_PALETTE_LIMIT, DEFAULT_MAX_PALETTE_RESULTS) ?? DEFAULT_MAX_PALETTE_RESULTS
   const q = query.toLowerCase().trim()
 
   if (q.length === 0) {

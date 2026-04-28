@@ -3,6 +3,7 @@
 // selection, pending edits, and an undo stack (mirrors canvasStore).
 
 import { create } from 'zustand'
+import { UNDO_HISTORY_CAP } from '../constants'
 import type { Base, BaseRecord, BaseView, FilterRule } from './kernelClient'
 
 export type ViewMode = 'table' | 'board' | 'list' | 'calendar' | 'gallery' | 'timeline'
@@ -86,7 +87,6 @@ export interface HistoryEntry {
   inverse(): Promise<void>
 }
 
-const UNDO_HISTORY_CAP = 200
 const TIMELINE_DAY_PX_MIN = 2
 const TIMELINE_DAY_PX_MAX = 80
 

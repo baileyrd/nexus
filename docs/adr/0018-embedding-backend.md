@@ -1,7 +1,7 @@
 # ADR 0018: Local Embedding Backend — fastembed-rs
 
 **Date:** 2026-04-28
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 

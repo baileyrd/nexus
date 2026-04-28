@@ -13,7 +13,7 @@ import { create } from 'zustand'
  *   - `sessions` — runtime sessions with a lifecycle separate from
  *                  plugin load: terminal PTYs, MCP connections.
  *   - `events`   — rolling tail from `com.nexus.*` topic subscriptions.
- *                  Capped at EVENTS_CAP so the ring stays bounded on a
+ *                  Capped at PROCESS_EVENTS_CAP so the ring stays bounded on a
  *                  chatty workspace.
  */
 
@@ -42,7 +42,7 @@ export interface EventLine {
 }
 
 /** Hard cap on the event ring buffer. Oldest entries drop as new arrive. */
-export const EVENTS_CAP = 500
+export const PROCESS_EVENTS_CAP = 500
 
 interface ProcessesState {
   plugins: PluginItem[]
@@ -78,10 +78,10 @@ export const useProcessesStore = create<ProcessesState>((set) => ({
   appendEvent: (e) =>
     set((s) => {
       // Drop the oldest entry when at cap. A single-pass slice keeps
-      // this O(EVENTS_CAP) and avoids the allocation churn of an
+      // this O(PROCESS_EVENTS_CAP) and avoids the allocation churn of an
       // Array.prototype.shift() on every append.
-      const next = s.events.length >= EVENTS_CAP
-        ? [...s.events.slice(s.events.length - EVENTS_CAP + 1), e]
+      const next = s.events.length >= PROCESS_EVENTS_CAP
+        ? [...s.events.slice(s.events.length - PROCESS_EVENTS_CAP + 1), e]
         : [...s.events, e]
       return { events: next }
     }),
