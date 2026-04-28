@@ -39,12 +39,56 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// A single external MCP server entry declared in `mcp.toml`. The `command`
-/// is spawned with `args` as a child process; its stdio is used as the MCP
-/// transport.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+/// Wire-level transport for one MCP server entry.
+///
+/// **BL-023.** Default is [`McpTransport::Stdio`] for back-compat with the
+/// pre-BL-023 file format (where every entry had a `command` field and no
+/// `transport` discriminator). Remote transports must declare `transport =
+/// "..."` explicitly.
+///
+/// Naming follows the MCP spec terminology: `http` is the modern
+/// "Streamable HTTP" transport from the 2025-03-26 spec (single endpoint,
+/// HTTP+SSE under the hood); `websocket` is the older WS transport which
+/// the MCP working group has since deprecated in favour of Streamable HTTP
+/// and is not implemented in `rmcp` 1.5 (see
+/// `rmcp/src/transport/ws.rs`'s upstream comment "Maybe we don't really
+/// need a ws implementation?"). It is accepted in config so existing
+/// `mcp.toml` files declaring it parse cleanly; connect-time it returns a
+/// clear "unsupported" error pointing the operator at `http`.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum McpTransport {
+    /// Spawn a local executable; talk MCP over its stdio (the only
+    /// transport pre-BL-023, still the dominant transport in the
+    /// ecosystem).
+    #[default]
+    Stdio,
+    /// Connect to a remote MCP server over Streamable HTTP — POST for
+    /// requests, SSE for the server-pushed event stream.
+    Http,
+    /// **Reserved.** WebSocket is deprecated upstream and not currently
+    /// dispatchable; left in the schema so a future rmcp WS impl can wire
+    /// in without a breaking config change.
+    Websocket,
+}
+
+/// A single external MCP server entry declared in `mcp.toml`.
+///
+/// Per BL-023 entries can run over either a child-process stdio
+/// transport (the default) or the Streamable HTTP transport via
+/// `transport = "http"` + `url = "..."`. Stdio-only fields (`command`,
+/// `args`, `env`) are ignored on remote transports; remote-only fields
+/// (`url`, `headers`, `auth_header`) are ignored on stdio.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Default)]
 pub struct McpServerSpec {
+    /// Wire-level transport. Defaults to [`McpTransport::Stdio`] for
+    /// back-compat — entries that omit the field continue to be spawned
+    /// as child processes.
+    #[serde(default)]
+    pub transport: McpTransport,
     /// Executable to spawn (e.g. `"npx"`, `"uvx"`, an absolute path).
+    /// Required when `transport = "stdio"`; ignored otherwise.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub command: String,
     /// Arguments passed to `command`. Empty vector if omitted.
     #[serde(default)]
@@ -53,6 +97,20 @@ pub struct McpServerSpec {
     /// Ordered so config serialization stays stable across writes.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// Endpoint URL for remote transports (`http` / `websocket`).
+    /// Required when transport ≠ `stdio`; ignored otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Bearer / API-key header value (the raw header value, e.g.
+    /// `"Bearer ey..."` or just `"ey..."` for Streamable HTTP's bare-token
+    /// fast path). Set by the BL-025 auth flow at connect time; the file
+    /// can also pin it for static API-key servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_header: Option<String>,
+    /// Custom headers attached to every HTTP request (Streamable HTTP only).
+    /// `BTreeMap` preserves order across writes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
     /// When `true`, the Host skips this server at connect time but leaves
     /// the entry in the file so toggling is a single-field edit.
     #[serde(default)]
@@ -158,11 +216,26 @@ impl McpHostConfig {
 
     fn validate(&self, source: &str) -> Result<(), McpConfigError> {
         for (name, spec) in &self.servers {
-            if spec.command.trim().is_empty() {
-                return Err(McpConfigError::Invalid {
-                    path: source.to_string(),
-                    reason: format!("server '{name}' has empty command"),
-                });
+            match spec.transport {
+                McpTransport::Stdio => {
+                    if spec.command.trim().is_empty() {
+                        return Err(McpConfigError::Invalid {
+                            path: source.to_string(),
+                            reason: format!("server '{name}' has empty command"),
+                        });
+                    }
+                }
+                McpTransport::Http | McpTransport::Websocket => {
+                    let url = spec.url.as_deref().unwrap_or("").trim();
+                    if url.is_empty() {
+                        return Err(McpConfigError::Invalid {
+                            path: source.to_string(),
+                            reason: format!(
+                                "server '{name}' uses a remote transport but has no `url`"
+                            ),
+                        });
+                    }
+                }
             }
         }
         Ok(())
@@ -255,12 +328,71 @@ mod tests {
                     "-y".into(),
                     "@modelcontextprotocol/server-filesystem".into(),
                 ],
-                env: BTreeMap::new(),
-                disabled: false,
+                ..McpServerSpec::default()
             },
         );
         let text = toml::to_string_pretty(&cfg).unwrap();
         let round = McpHostConfig::from_str(&text, "roundtrip").unwrap();
         assert_eq!(cfg.servers, round.servers);
+    }
+
+    // ── BL-023 — remote transport variants ────────────────────────────────
+
+    #[test]
+    fn parses_http_transport() {
+        let toml = r#"
+            [servers.remote]
+            transport = "http"
+            url = "https://example.com/mcp"
+            auth_header = "Bearer token"
+
+            [servers.remote.headers]
+            X-Workspace = "alpha"
+        "#;
+        let cfg = McpHostConfig::from_str(toml, "inline").unwrap();
+        let spec = cfg.servers.get("remote").unwrap();
+        assert_eq!(spec.transport, McpTransport::Http);
+        assert_eq!(spec.url.as_deref(), Some("https://example.com/mcp"));
+        assert_eq!(spec.auth_header.as_deref(), Some("Bearer token"));
+        assert_eq!(spec.headers.get("X-Workspace").unwrap(), "alpha");
+        assert!(spec.command.is_empty());
+    }
+
+    #[test]
+    fn http_transport_requires_url() {
+        let toml = r#"
+            [servers.remote]
+            transport = "http"
+        "#;
+        let err = McpHostConfig::from_str(toml, "inline").unwrap_err();
+        assert!(matches!(err, McpConfigError::Invalid { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn stdio_transport_default_keeps_back_compat() {
+        // Pre-BL-023 file (no `transport` field) must still parse and
+        // dispatch as stdio.
+        let toml = r#"
+            [servers.fs]
+            command = "echo"
+        "#;
+        let cfg = McpHostConfig::from_str(toml, "inline").unwrap();
+        assert_eq!(cfg.servers.get("fs").unwrap().transport, McpTransport::Stdio);
+    }
+
+    #[test]
+    fn websocket_transport_parses_but_is_reserved() {
+        // Config-level acceptance only; connect-time will fail with a
+        // clear "unsupported" error per the McpTransport doc.
+        let toml = r#"
+            [servers.legacy]
+            transport = "websocket"
+            url = "wss://example.com/mcp"
+        "#;
+        let cfg = McpHostConfig::from_str(toml, "inline").unwrap();
+        assert_eq!(
+            cfg.servers.get("legacy").unwrap().transport,
+            McpTransport::Websocket
+        );
     }
 }

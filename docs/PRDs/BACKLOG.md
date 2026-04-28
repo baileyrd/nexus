@@ -285,11 +285,7 @@ RAG today calls remote embedding endpoints. A local backend (e.g. fastembed-rs, 
 **Effort**: Medium. **Crate**: `shell/src/plugins/nexus/skills/`.
 Today `SkillsPanel` is read-only; mutations require editing `.skill.md` on disk and calling `reload`. Editor would round-trip through the existing `com.nexus.storage::write_file` + `com.nexus.skills::reload`.
 
-### BL-023: MCP WebSocket + HTTP+SSE transports
-
-**Source**: PRD-14 §4.2.2 (HTTP+SSE), §4.2.3 (WebSocket).
-**Effort**: Medium. **Crate**: `nexus-mcp` (transport abstraction).
-Stdio is the only transport today (`McpClient` over `TokioChildProcess`). Remote MCP servers need at least one of these. WebSocket gets the lower-latency path; HTTP+SSE is the broader-compat fallback.
+_BL-023 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-025: MCP authentication
 

@@ -24,11 +24,23 @@
 //!
 //! # Transport
 //!
-//! stdio only. The MCP ecosystem's dominant transport is stdio (Claude
-//! Desktop, Cursor, Cline all use it); WebSocket / HTTP+SSE transports
-//! exist in rmcp and can be wired in as a follow-up without changing
-//! the public surface here — `McpClient::list_tools` / `call_tool` are
-//! transport-agnostic.
+//! Two transports ship today, dispatched per-entry from `mcp.toml` via the
+//! [`crate::config::McpTransport`] discriminant:
+//!
+//! - **`stdio`** (default) — spawn the configured command, talk MCP over
+//!   the child's stdin/stdout. The dominant transport in the ecosystem
+//!   (Claude Desktop, Cursor, Cline all use it) and the only pre-BL-023
+//!   option.
+//! - **`http`** — connect over the modern MCP "Streamable HTTP" transport
+//!   (POST + SSE under one endpoint, per the 2025-03-26 spec). Backed by
+//!   `rmcp::transport::StreamableHttpClientTransport`. Auth headers and
+//!   custom headers ride on the same `McpServerSpec`.
+//!
+//! WebSocket is reserved in the config schema but not currently
+//! dispatchable — rmcp 1.5 ships only a stub (`src/transport/ws.rs`
+//! comment: "Maybe we don't really need a ws implementation?") because
+//! the MCP working group folded WS into Streamable HTTP. See
+//! [`McpClient::connect`] for the explicit error path.
 //!
 //! # Lifecycle
 //!
@@ -38,16 +50,27 @@
 //! connection down via the transport's own Drop (the child process is
 //! killed after a 3-second grace window).
 
+use std::collections::HashMap;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
+use http::{HeaderName, HeaderValue};
 use rmcp::model::{CallToolRequestParams, CallToolResult, Prompt, Resource, Tool};
 use rmcp::service::RunningService;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::TokioChildProcess;
+// `from_config` is only present on `StreamableHttpClientTransport<reqwest::Client>`,
+// where `reqwest::Client` is the version rmcp itself depends on (currently
+// 0.13). We must NOT name `reqwest::Client` ourselves here — the workspace
+// pins `reqwest = "0.12"` for the AI provider crates and the two would not
+// be type-compatible. The function call below uses the rmcp re-exported
+// type implicitly through trait inference, dodging the version gap.
+use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::{serve_client, RoleClient};
 use tokio::process::Command;
 
-use crate::config::McpServerSpec;
+use crate::config::{McpServerSpec, McpTransport};
 
 /// Default timeout for the MCP initialize handshake. A non-responding server
 /// binary would otherwise hang connect for however long its stdout takes to
@@ -76,6 +99,23 @@ pub enum McpClientError {
     #[error("initialize handshake failed: {reason}")]
     Handshake {
         /// Why the handshake failed.
+        reason: String,
+    },
+
+    /// Configuration error — the spec is missing required fields for its
+    /// declared transport (e.g. `transport = "http"` with no `url`).
+    #[error("transport config: {reason}")]
+    Config {
+        /// Why the spec was rejected before any I/O happened.
+        reason: String,
+    },
+
+    /// The transport listed in the spec is recognised but not currently
+    /// dispatchable in this build (e.g. `transport = "websocket"`, which
+    /// rmcp 1.5 does not implement).
+    #[error("transport unsupported: {reason}")]
+    Unsupported {
+        /// Human-readable explanation including a migration hint.
         reason: String,
     },
 
@@ -125,6 +165,30 @@ impl McpClient {
     /// - [`McpClientError::Handshake`] if the initialize round-trip fails
     ///   or exceeds [`CONNECT_TIMEOUT`].
     pub async fn connect(name: &str, spec: &McpServerSpec) -> Result<Self, McpClientError> {
+        match spec.transport {
+            McpTransport::Stdio => Self::connect_stdio(name, spec).await,
+            McpTransport::Http => Self::connect_http(name, spec).await,
+            McpTransport::Websocket => Err(McpClientError::Unsupported {
+                reason: format!(
+                    "server '{name}': WebSocket transport is reserved in the config schema \
+                     but not implemented (rmcp 1.5 ships no WebSocket transport; the MCP \
+                     2025-03-26 spec deprecates WebSocket in favour of `transport = \"http\"`). \
+                     Switch to `transport = \"http\"` to connect to this server."
+                ),
+            }),
+        }
+    }
+
+    /// Stdio path — spawn the configured command and run the MCP
+    /// handshake over the child's stdio. Pre-BL-023 behaviour, kept
+    /// byte-identical for forward compatibility with deployed
+    /// `mcp.toml` files.
+    async fn connect_stdio(name: &str, spec: &McpServerSpec) -> Result<Self, McpClientError> {
+        if spec.command.trim().is_empty() {
+            return Err(McpClientError::Config {
+                reason: format!("server '{name}': stdio transport needs a non-empty `command`"),
+            });
+        }
         let mut command = Command::new(&spec.command);
         command
             .args(&spec.args)
@@ -138,10 +202,69 @@ impl McpClient {
             source: e,
         })?;
 
-        // Race the handshake against a wall-clock timeout so a server that
-        // writes nothing to stdout doesn't hang connect forever.
-        let serve = serve_client((), transport);
-        let service = match tokio::time::timeout(CONNECT_TIMEOUT, serve).await {
+        Self::run_handshake(name, serve_client((), transport)).await
+    }
+
+    /// Streamable HTTP path — the modern remote MCP transport (single
+    /// endpoint, POST for requests + SSE for the server stream). Auth
+    /// headers and custom HTTP headers from the spec are forwarded on
+    /// every request.
+    async fn connect_http(name: &str, spec: &McpServerSpec) -> Result<Self, McpClientError> {
+        let url = spec.url.as_deref().unwrap_or("").trim();
+        if url.is_empty() {
+            return Err(McpClientError::Config {
+                reason: format!(
+                    "server '{name}': http transport needs `url = \"https://…\"`"
+                ),
+            });
+        }
+
+        // Parse custom headers up front so a malformed entry surfaces as a
+        // clean Config error (rather than rmcp's typed-error stack at
+        // runtime). Header names get the same case-insensitive treatment
+        // browsers do; rmcp internally canonicalises again.
+        let mut custom_headers: HashMap<HeaderName, HeaderValue> =
+            HashMap::with_capacity(spec.headers.len());
+        for (k, v) in &spec.headers {
+            let header_name = HeaderName::try_from(k.as_str()).map_err(|e| {
+                McpClientError::Config {
+                    reason: format!("server '{name}': invalid header name '{k}': {e}"),
+                }
+            })?;
+            let header_value = HeaderValue::try_from(v.as_str()).map_err(|e| {
+                McpClientError::Config {
+                    reason: format!(
+                        "server '{name}': invalid header value for '{k}': {e}"
+                    ),
+                }
+            })?;
+            custom_headers.insert(header_name, header_value);
+        }
+
+        let mut http_cfg = StreamableHttpClientTransportConfig::with_uri(Arc::<str>::from(url));
+        http_cfg = http_cfg.custom_headers(custom_headers);
+        if let Some(auth) = spec.auth_header.as_deref() {
+            http_cfg = http_cfg.auth_header(auth.to_string());
+        }
+        // The reqwest-backed default client uses the version of reqwest
+        // that ships with rmcp's `transport-streamable-http-client-reqwest`
+        // feature; calling through `from_config` avoids naming the type
+        // here (see the import comment).
+        let transport = StreamableHttpClientTransport::from_config(http_cfg);
+
+        Self::run_handshake(name, serve_client((), transport)).await
+    }
+
+    /// Shared handshake driver: race the rmcp `serve_client(...)` future
+    /// against [`CONNECT_TIMEOUT`] so a non-responsive transport doesn't
+    /// hang `connect` forever. Reused by every transport branch above so
+    /// the timeout policy stays uniform.
+    async fn run_handshake<F, E>(name: &str, fut: F) -> Result<Self, McpClientError>
+    where
+        F: std::future::Future<Output = Result<RunningService<RoleClient, ()>, E>>,
+        E: std::fmt::Display,
+    {
+        let service = match tokio::time::timeout(CONNECT_TIMEOUT, fut).await {
             Ok(Ok(svc)) => svc,
             Ok(Err(e)) => {
                 return Err(McpClientError::Handshake {
@@ -256,9 +379,7 @@ mod tests {
     async fn connect_fails_for_nonexistent_command() {
         let spec = McpServerSpec {
             command: "this-binary-definitely-does-not-exist-12345".to_string(),
-            args: vec![],
-            env: std::collections::BTreeMap::new(),
-            disabled: false,
+            ..McpServerSpec::default()
         };
         let err = McpClient::connect("test", &spec).await.unwrap_err();
         assert!(
@@ -294,8 +415,7 @@ mod tests {
         let spec = McpServerSpec {
             command: "sleep".to_string(),
             args: vec!["60".to_string()],
-            env: std::collections::BTreeMap::new(),
-            disabled: false,
+            ..McpServerSpec::default()
         };
         // Directly bound the connect call below CONNECT_TIMEOUT so CI
         // completes quickly. The production timeout still applies in real
@@ -309,6 +429,89 @@ mod tests {
             Err(_elapsed) => {}
             Ok(Err(_)) => {}
             Ok(Ok(_)) => panic!("connect should not have succeeded against a non-MCP process"),
+        }
+    }
+
+    // ── BL-023 — transport dispatch ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn websocket_transport_returns_unsupported() {
+        // The transport variant is reserved (see McpTransport doc); the
+        // connect-time dispatch must surface a clear error pointing at
+        // the http alternative rather than silently falling back.
+        let spec = McpServerSpec {
+            transport: McpTransport::Websocket,
+            url: Some("wss://example.com/mcp".into()),
+            ..McpServerSpec::default()
+        };
+        let err = McpClient::connect("legacy", &spec).await.unwrap_err();
+        match err {
+            McpClientError::Unsupported { reason } => {
+                assert!(
+                    reason.contains("WebSocket"),
+                    "error should mention WebSocket: {reason}"
+                );
+                assert!(
+                    reason.contains("http"),
+                    "error should suggest http alternative: {reason}"
+                );
+            }
+            other => panic!("expected Unsupported, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn http_transport_rejects_missing_url_with_config_error() {
+        let spec = McpServerSpec {
+            transport: McpTransport::Http,
+            url: None,
+            ..McpServerSpec::default()
+        };
+        let err = McpClient::connect("remote", &spec).await.unwrap_err();
+        assert!(
+            matches!(err, McpClientError::Config { .. }),
+            "expected Config, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn http_transport_rejects_invalid_header_name() {
+        // Headers are validated up-front so malformed entries don't reach
+        // the wire (the rmcp transport would otherwise lazily error on
+        // first request, which is harder to diagnose).
+        let mut headers = std::collections::BTreeMap::new();
+        headers.insert("not a valid header".to_string(), "value".to_string());
+        let spec = McpServerSpec {
+            transport: McpTransport::Http,
+            url: Some("https://example.com/mcp".into()),
+            headers,
+            ..McpServerSpec::default()
+        };
+        let err = McpClient::connect("remote", &spec).await.unwrap_err();
+        assert!(
+            matches!(err, McpClientError::Config { .. }),
+            "expected Config, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn http_transport_handshake_times_out_against_dead_endpoint() {
+        // 127.0.0.1 with a deliberately-unused port. We don't wait for
+        // the production CONNECT_TIMEOUT (15s) — bound the test future
+        // tighter via a local timeout. The point is to prove the connect
+        // surface routes through `connect_http` without panicking.
+        let spec = McpServerSpec {
+            transport: McpTransport::Http,
+            // Port 1 is reserved; OS rejects the TCP connect immediately.
+            url: Some("http://127.0.0.1:1/mcp".into()),
+            ..McpServerSpec::default()
+        };
+        let connect = McpClient::connect("dead", &spec);
+        let short = tokio::time::timeout(Duration::from_millis(2_000), connect).await;
+        match short {
+            Err(_elapsed) => {}
+            Ok(Err(_)) => {} // surfaced as Handshake / transport error
+            Ok(Ok(_)) => panic!("connect should not have succeeded against 127.0.0.1:1"),
         }
     }
 }
