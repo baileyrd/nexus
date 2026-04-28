@@ -24,7 +24,7 @@ impl AnthropicProvider {
     /// Create a new Anthropic provider.
     ///
     /// If `model` is `None`, defaults to `claude-sonnet-4-20250514`.
-    #[must_use] 
+    #[must_use]
     pub fn new(api_key: String, model: Option<String>, max_tokens: u32) -> Self {
         Self {
             client: reqwest::Client::new(),

@@ -11,6 +11,7 @@ nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
 async-trait = { workspace = true }
 futures = "0.3"
+regex-lite = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -30,7 +30,10 @@ use ts_rs::TS;
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 #[serde(rename_all = "lowercase")]
 pub enum AiStreamAskRole {
@@ -48,7 +51,10 @@ pub enum AiStreamAskRole {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 pub struct AiStreamAskMessage {
     /// The role of the message sender.
@@ -62,7 +68,10 @@ pub struct AiStreamAskMessage {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 pub struct AiStreamAskArgs {
     /// Conversation history. The handler extracts the last `user` message as
@@ -87,7 +96,10 @@ pub struct AiStreamAskArgs {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 pub struct AiStreamAskSource {
     /// Path of the source file.
@@ -107,7 +119,10 @@ pub struct AiStreamAskSource {
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
 #[cfg_attr(
     feature = "ts-export",
-    ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
 )]
 pub struct AiStreamAskResult {
     /// Session id — matches the `session_id` on every `stream_chunk`

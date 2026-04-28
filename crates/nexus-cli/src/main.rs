@@ -91,6 +91,13 @@ enum Commands {
     Config(ConfigArgs),
     /// Bases (database) operations
     Bases(BasesArgs),
+    /// Database engine operations — wraps `com.nexus.database` IPC handlers
+    /// (PRD-10). Lower-level twin of `bases` (which works at the filesystem
+    /// layer); `db` works on raw records / formulas via `ipc_call`.
+    Db {
+        #[command(subcommand)]
+        cmd: commands::db::DbCommand,
+    },
 
     /// AI assistant operations
     Ai(AiArgs),
@@ -1233,6 +1240,8 @@ fn main() {
                 expr,
             } => commands::bases::formula(&mut app, &path, &record, &expr),
         },
+
+        Commands::Db { cmd } => commands::db::run(&mut app, cmd),
 
         Commands::Ai(args) => match args.command {
             AiCommand::Ask { question } => commands::ai::ask(&mut app, &question),

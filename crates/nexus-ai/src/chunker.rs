@@ -22,7 +22,7 @@ pub struct Chunk {
 /// standalone chunks.  Non-heading blocks have the most recent heading
 /// prepended (if any) and are split further when they exceed
 /// `max_chunk_size`.  Empty blocks are silently skipped.
-#[must_use] 
+#[must_use]
 pub fn chunks_from_blocks(
     file_path: &str,
     blocks: &[(u64, String, String, Option<i32>)],
@@ -128,7 +128,11 @@ mod tests {
         )];
         // Set max small enough to force a split.
         let chunks = chunks_from_blocks("note.md", &blocks, 30);
-        assert!(chunks.len() > 1, "expected multiple chunks, got {}", chunks.len());
+        assert!(
+            chunks.len() > 1,
+            "expected multiple chunks, got {}",
+            chunks.len()
+        );
         // All chunks should reference the same block.
         for c in &chunks {
             assert_eq!(c.block_id, 1);

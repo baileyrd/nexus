@@ -91,9 +91,8 @@ mod tests {
     #[test]
     fn every_builtin_parses() {
         for (name, body) in BUILTINS {
-            crate::parse_skill_text(body).unwrap_or_else(|e| {
-                panic!("built-in {name} failed to parse: {e}")
-            });
+            crate::parse_skill_text(body)
+                .unwrap_or_else(|e| panic!("built-in {name} failed to parse: {e}"));
         }
     }
 

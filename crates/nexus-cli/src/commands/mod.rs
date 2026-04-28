@@ -4,6 +4,7 @@ pub mod bases;
 pub mod canvas;
 pub mod config;
 pub mod content;
+pub mod db;
 pub mod desktop;
 pub mod forge;
 pub mod git;

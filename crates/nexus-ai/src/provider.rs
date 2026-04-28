@@ -36,11 +36,8 @@ pub trait AiProvider: Send + Sync {
     ///
     /// `messages` contains the conversation history. An optional `system`
     /// prompt provides high-level instructions to the model.
-    async fn chat(
-        &self,
-        messages: &[ChatMessage],
-        system: Option<&str>,
-    ) -> Result<String, AiError>;
+    async fn chat(&self, messages: &[ChatMessage], system: Option<&str>)
+        -> Result<String, AiError>;
 
     /// Stream a chat response, calling `on_chunk` with each token as it arrives.
     ///

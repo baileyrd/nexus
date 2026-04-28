@@ -37,7 +37,7 @@ impl OpenAiProvider {
     ///
     /// If `model` is `None`, defaults to `gpt-4o` for chat and
     /// `text-embedding-3-small` for embeddings.
-    #[must_use] 
+    #[must_use]
     pub fn new(api_key: String, model: Option<String>, max_tokens: u32) -> Self {
         Self {
             client: reqwest::Client::new(),

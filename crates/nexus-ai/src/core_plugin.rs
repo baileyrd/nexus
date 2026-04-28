@@ -125,7 +125,10 @@ impl CorePlugin for AiCorePlugin {
         if let Some(cfg) = &ai {
             tracing::debug!(plugin_id = PLUGIN_ID, provider = %cfg.provider, "AI provider detected");
         } else {
-            tracing::debug!(plugin_id = PLUGIN_ID, "no AI provider detected; AI features disabled");
+            tracing::debug!(
+                plugin_id = PLUGIN_ID,
+                "no AI provider detected; AI features disabled"
+            );
         }
         if let Ok(mut g) = self.ai_config.write() {
             *g = ai;
@@ -192,18 +195,15 @@ impl CorePlugin for AiCorePlugin {
         let args = args.clone();
 
         Some(Box::pin(async move {
-            let ctx = ctx.ok_or_else(|| {
-                exec_err("AI plugin context not wired (bootstrap incomplete)")
-            })?;
+            let ctx =
+                ctx.ok_or_else(|| exec_err("AI plugin context not wired (bootstrap incomplete)"))?;
             match handler_id {
                 HANDLER_ASK => handle_ask(&ctx, ai_cfg, embed_cfg, &args).await,
                 HANDLER_INDEX_FILE => handle_index_file(&ctx, embed_cfg, &args).await,
                 HANDLER_VECTORSTORE_COUNT => handle_vectorstore_count(&ctx).await,
                 HANDLER_STATUS => handle_status(&ctx, ai_cfg, embed_cfg).await,
                 HANDLER_STREAM_CHAT => handle_stream_chat(ctx, ai_cfg, &args).await,
-                HANDLER_STREAM_ASK => {
-                    handle_stream_ask(ctx, ai_cfg, embed_cfg, &args).await
-                }
+                HANDLER_STREAM_ASK => handle_stream_ask(ctx, ai_cfg, embed_cfg, &args).await,
                 HANDLER_SESSION_LOAD => handle_session_load(&ctx, &args).await,
                 HANDLER_SESSION_SAVE => handle_session_save(&ctx, &args).await,
                 HANDLER_SESSION_LIST => handle_session_list(&ctx).await,
@@ -396,15 +396,12 @@ fn parse_config_field(value: &serde_json::Value) -> Result<Option<AiConfig>, Plu
         model,
         api_key,
         base_url,
-        max_tokens: AiConfig::default().max_tokens,
+        ..AiConfig::default()
     }))
 }
 
 /// Build a detected-provider snapshot (synchronous — no I/O).
-fn config_snapshot(
-    ai_cfg: Option<&AiConfig>,
-    embed_cfg: Option<&AiConfig>,
-) -> serde_json::Value {
+fn config_snapshot(ai_cfg: Option<&AiConfig>, embed_cfg: Option<&AiConfig>) -> serde_json::Value {
     #[derive(Serialize)]
     struct ConfigView<'a> {
         provider: &'a str,
@@ -517,8 +514,8 @@ async fn handle_stream_ask(
         .ok_or_else(|| exec_err("stream_ask: no user message in 'messages'"))?;
 
     let ai_cfg = ai_cfg.ok_or_else(|| exec_err("stream_ask: no AI chat provider configured"))?;
-    let embed_cfg = embed_cfg
-        .ok_or_else(|| exec_err("stream_ask: no embedding provider configured"))?;
+    let embed_cfg =
+        embed_cfg.ok_or_else(|| exec_err("stream_ask: no embedding provider configured"))?;
     let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
     let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
 
@@ -587,17 +584,13 @@ const SESSIONS_DIR: &str = ".forge/chat/sessions";
 /// for disk + prevents path traversal.
 fn validate_session_id(id: &str) -> Result<(), PluginError> {
     if id.is_empty() || id.len() > 64 {
-        return Err(exec_err(
-            "session id must be 1..=64 chars".to_string(),
-        ));
+        return Err(exec_err("session id must be 1..=64 chars".to_string()));
     }
     let ok = id
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     if !ok {
-        return Err(exec_err(
-            "session id must match [A-Za-z0-9_-]+".to_string(),
-        ));
+        return Err(exec_err("session id must match [A-Za-z0-9_-]+".to_string()));
     }
     Ok(())
 }
@@ -626,9 +619,8 @@ async fn handle_session_load(
     let path = session_path(parsed.id.as_deref())?;
     match ctx.read_file(&path).await {
         Ok(bytes) => {
-            let parsed: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
-                exec_err(format!("session_load: invalid JSON on disk: {e}"))
-            })?;
+            let parsed: serde_json::Value = serde_json::from_slice(&bytes)
+                .map_err(|e| exec_err(format!("session_load: invalid JSON on disk: {e}")))?;
             Ok(parsed)
         }
         // No session saved yet — return null rather than erroring so
@@ -660,9 +652,7 @@ async fn handle_session_save(
     Ok(serde_json::json!({ "bytes": encoded.len(), "id": id }))
 }
 
-async fn handle_session_list(
-    ctx: &KernelPluginContext,
-) -> Result<serde_json::Value, PluginError> {
+async fn handle_session_list(ctx: &KernelPluginContext) -> Result<serde_json::Value, PluginError> {
     let dir = std::path::Path::new(SESSIONS_DIR);
     let Ok(entries) = ctx.list_files(dir).await else {
         return Ok(serde_json::Value::Array(Vec::new()));
@@ -748,10 +738,7 @@ fn build_embedding_provider(cfg: &AiConfig) -> Result<Box<dyn EmbeddingProvider>
             None,
             4096,
         ))),
-        "ollama" => Ok(Box::new(OllamaProvider::new(
-            cfg.base_url.clone(),
-            None,
-        ))),
+        "ollama" => Ok(Box::new(OllamaProvider::new(cfg.base_url.clone(), None))),
         other => Err(format!("unknown embedding provider: {other}")),
     }
 }

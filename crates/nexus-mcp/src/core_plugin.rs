@@ -22,16 +22,15 @@
 //! | 6 | `connect` | `{"server": "..."}` |
 //! | 7 | `disconnect` | `{"server": "..."}` |
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde_json::json;
-use tokio::sync::{Mutex, RwLock};
 
-use crate::{McpClient, McpClientError, McpHostConfig};
+use crate::pool::{ConnectionPool, PoolConfig};
+use crate::{McpClientError, McpHostConfig};
 
 /// Reverse-DNS identifier for this plugin.
 pub const PLUGIN_ID: &str = "com.nexus.mcp.host";
@@ -51,14 +50,12 @@ pub const HANDLER_CONNECT: u32 = 6;
 /// IPC handler (async): disconnect from a server and free its process.
 pub const HANDLER_DISCONNECT: u32 = 7;
 
-type ClientMap = Arc<RwLock<HashMap<String, Arc<Mutex<McpClient>>>>>;
-
 /// Core plugin that manages connections to external MCP servers.
 pub struct McpHostPlugin {
     forge_root: PathBuf,
     event_bus: Option<Arc<EventBus>>,
     config: Option<Arc<McpHostConfig>>,
-    clients: ClientMap,
+    pool: Arc<ConnectionPool>,
 }
 
 impl McpHostPlugin {
@@ -69,7 +66,7 @@ impl McpHostPlugin {
             forge_root,
             event_bus,
             config: None,
-            clients: Arc::new(RwLock::new(HashMap::new())),
+            pool: Arc::new(ConnectionPool::new(PoolConfig::default())),
         }
     }
 }
@@ -100,10 +97,7 @@ impl CorePlugin for McpHostPlugin {
     }
 
     fn on_start(&mut self) -> Result<(), PluginError> {
-        let server_count = self
-            .config
-            .as_ref()
-            .map_or(0, |c| c.servers.len());
+        let server_count = self.config.as_ref().map_or(0, |c| c.servers.len());
 
         if let Some(bus) = &self.event_bus {
             let _ = bus.publish_plugin(
@@ -121,16 +115,15 @@ impl CorePlugin for McpHostPlugin {
     }
 
     fn on_stop(&mut self) {
-        // Best-effort: drop client map — McpClient's Drop sends graceful close.
-        let clients = Arc::clone(&self.clients);
+        // Best-effort: drop pool — McpClient's Drop sends graceful close.
+        let pool = Arc::clone(&self.pool);
         let _ = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build();
             if let Ok(rt) = rt {
                 rt.block_on(async move {
-                    let mut map = clients.write().await;
-                    map.clear();
+                    pool.shutdown_all().await;
                 });
             }
         })
@@ -186,7 +179,7 @@ impl CorePlugin for McpHostPlugin {
         handler_id: u32,
         args: &serde_json::Value,
     ) -> Option<CorePluginFuture> {
-        let clients = Arc::clone(&self.clients);
+        let pool = Arc::clone(&self.pool);
         let config = self.config.clone();
 
         match handler_id {
@@ -194,7 +187,9 @@ impl CorePlugin for McpHostPlugin {
                 let server = str_arg(args, "server")?;
                 Some(Box::pin(async move {
                     let cfg = config_or_err(config.as_ref())?;
-                    connect_server(&server, &cfg, &clients).await?;
+                    pool.get_or_connect(&server, &cfg)
+                        .await
+                        .map_err(map_client_err)?;
                     Ok(json!({"ok": true, "server": server}))
                 }))
             }
@@ -202,8 +197,7 @@ impl CorePlugin for McpHostPlugin {
             HANDLER_DISCONNECT => {
                 let server = str_arg(args, "server")?;
                 Some(Box::pin(async move {
-                    let mut map = clients.write().await;
-                    if map.remove(&server).is_some() {
+                    if pool.disconnect(&server).await {
                         Ok(json!({"ok": true, "server": server}))
                     } else {
                         Ok(json!({"ok": false, "server": server, "reason": "not connected"}))
@@ -215,7 +209,10 @@ impl CorePlugin for McpHostPlugin {
                 let server = str_arg(args, "server")?;
                 Some(Box::pin(async move {
                     let cfg = config_or_err(config.as_ref())?;
-                    let client = get_or_connect(&server, &cfg, &clients).await?;
+                    let client = pool
+                        .get_or_connect(&server, &cfg)
+                        .await
+                        .map_err(map_client_err)?;
                     let lock = client.lock().await;
                     let tools = lock.list_tools().await.map_err(map_client_err)?;
                     let arr = tools
@@ -235,12 +232,12 @@ impl CorePlugin for McpHostPlugin {
                 let server = str_arg(args, "server")?;
                 Some(Box::pin(async move {
                     let cfg = config_or_err(config.as_ref())?;
-                    let client = get_or_connect(&server, &cfg, &clients).await?;
-                    let lock = client.lock().await;
-                    let resources = lock
-                        .list_resources()
+                    let client = pool
+                        .get_or_connect(&server, &cfg)
                         .await
                         .map_err(map_client_err)?;
+                    let lock = client.lock().await;
+                    let resources = lock.list_resources().await.map_err(map_client_err)?;
                     let arr = resources
                         .iter()
                         .map(|r| {
@@ -260,7 +257,10 @@ impl CorePlugin for McpHostPlugin {
                 let server = str_arg(args, "server")?;
                 Some(Box::pin(async move {
                     let cfg = config_or_err(config.as_ref())?;
-                    let client = get_or_connect(&server, &cfg, &clients).await?;
+                    let client = pool
+                        .get_or_connect(&server, &cfg)
+                        .await
+                        .map_err(map_client_err)?;
                     let lock = client.lock().await;
                     let prompts = lock.list_prompts().await.map_err(map_client_err)?;
                     let arr = prompts
@@ -279,13 +279,13 @@ impl CorePlugin for McpHostPlugin {
             HANDLER_CALL_TOOL => {
                 let server = str_arg(args, "server")?;
                 let tool = str_arg(args, "tool")?;
-                let tool_args = args
-                    .get("arguments")
-                    .and_then(|v| v.as_object())
-                    .cloned();
+                let tool_args = args.get("arguments").and_then(|v| v.as_object()).cloned();
                 Some(Box::pin(async move {
                     let cfg = config_or_err(config.as_ref())?;
-                    let client = get_or_connect(&server, &cfg, &clients).await?;
+                    let client = pool
+                        .get_or_connect(&server, &cfg)
+                        .await
+                        .map_err(map_client_err)?;
                     let lock = client.lock().await;
                     let result = lock
                         .call_tool(tool, tool_args)
@@ -314,15 +314,11 @@ fn str_arg(args: &serde_json::Value, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn config_or_err(
-    config: Option<&Arc<McpHostConfig>>,
-) -> Result<Arc<McpHostConfig>, PluginError> {
-    config
-        .cloned()
-        .ok_or_else(|| PluginError::ExecutionFailed {
-            plugin_id: PLUGIN_ID.to_string(),
-            reason: "MCP host config not loaded".to_string(),
-        })
+fn config_or_err(config: Option<&Arc<McpHostConfig>>) -> Result<Arc<McpHostConfig>, PluginError> {
+    config.cloned().ok_or_else(|| PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason: "MCP host config not loaded".to_string(),
+    })
 }
 
 // Used as a function pointer by `Result::map_err`, which forces the
@@ -334,51 +330,6 @@ fn map_client_err(e: McpClientError) -> PluginError {
         plugin_id: PLUGIN_ID.to_string(),
         reason: e.to_string(),
     }
-}
-
-async fn connect_server(
-    name: &str,
-    config: &McpHostConfig,
-    clients: &RwLock<HashMap<String, Arc<Mutex<McpClient>>>>,
-) -> Result<(), PluginError> {
-    let spec = config.servers.get(name).ok_or_else(|| PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason: format!("server '{name}' not found in mcp.toml"),
-    })?;
-    if spec.disabled {
-        return Err(PluginError::ExecutionFailed {
-            plugin_id: PLUGIN_ID.to_string(),
-            reason: format!("server '{name}' is disabled in mcp.toml"),
-        });
-    }
-    let client = McpClient::connect(name, spec)
-        .await
-        .map_err(map_client_err)?;
-    clients
-        .write()
-        .await
-        .insert(name.to_string(), Arc::new(Mutex::new(client)));
-    tracing::info!(plugin_id = PLUGIN_ID, server = name, "connected to MCP server");
-    Ok(())
-}
-
-async fn get_or_connect(
-    name: &str,
-    config: &McpHostConfig,
-    clients: &RwLock<HashMap<String, Arc<Mutex<McpClient>>>>,
-) -> Result<Arc<Mutex<McpClient>>, PluginError> {
-    {
-        let map = clients.read().await;
-        if let Some(c) = map.get(name) {
-            return Ok(Arc::clone(c));
-        }
-    }
-    connect_server(name, config, clients).await?;
-    let map = clients.read().await;
-    map.get(name).cloned().ok_or_else(|| PluginError::ExecutionFailed {
-        plugin_id: PLUGIN_ID.to_string(),
-        reason: format!("failed to store client for '{name}' after connect"),
-    })
 }
 
 #[cfg(test)]
@@ -461,10 +412,7 @@ disabled = true
         let result = plugin.dispatch(HANDLER_LIST_SERVERS, &json!({})).unwrap();
         let arr = result.as_array().unwrap();
         assert_eq!(arr.len(), 2);
-        let names: Vec<&str> = arr
-            .iter()
-            .map(|v| v["name"].as_str().unwrap())
-            .collect();
+        let names: Vec<&str> = arr.iter().map(|v| v["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"fs"));
         assert!(names.contains(&"gh"));
     }

@@ -251,7 +251,10 @@ mod tests {
             "fs".to_string(),
             McpServerSpec {
                 command: "npx".into(),
-                args: vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into()],
+                args: vec![
+                    "-y".into(),
+                    "@modelcontextprotocol/server-filesystem".into(),
+                ],
                 env: BTreeMap::new(),
                 disabled: false,
             },

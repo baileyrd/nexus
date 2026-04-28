@@ -25,7 +25,7 @@ use std::sync::Mutex;
 use nexus_plugins::{CorePlugin, PluginError};
 use serde::Deserialize;
 
-use crate::{SkillRegistry, SkillRegistryError};
+use crate::{registry_index, SkillRegistry, SkillRegistryError};
 
 /// Reverse-DNS identifier.
 pub const PLUGIN_ID: &str = "com.nexus.skills";
@@ -78,6 +78,17 @@ impl SkillsCorePlugin {
                 SkillRegistry::empty()
             }
         };
+        // Best-effort: persist the on-disk REGISTRY.json index so
+        // external CLIs can cold-start without a directory walk.
+        // PRD-13 §3.1. Failures must not block plugin open.
+        let index_path = skills_dir.join("REGISTRY.json");
+        if let Err(err) = registry_index::write_index(&index_path, &skills_dir, &registry) {
+            tracing::warn!(
+                path = %index_path.display(),
+                err = %err,
+                "com.nexus.skills: failed to persist REGISTRY.json on open"
+            );
+        }
         Self {
             root: skills_dir,
             registry: Mutex::new(registry),
@@ -151,10 +162,7 @@ impl SkillsCorePlugin {
         to_value(&skills, "triggered_by")
     }
 
-    fn dispatch_render(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<serde_json::Value, PluginError> {
+    fn dispatch_render(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
         #[derive(Deserialize)]
         struct Args {
             id: String,
@@ -176,8 +184,8 @@ impl SkillsCorePlugin {
                 (k, y)
             })
             .collect();
-        let rendered = crate::render(skill, &values)
-            .map_err(|e| exec_err(format!("render: {e}")))?;
+        let rendered =
+            crate::render(skill, &values).map_err(|e| exec_err(format!("render: {e}")))?;
         Ok(serde_json::json!({
             "id": skill.meta.id,
             "name": skill.meta.name,
@@ -205,6 +213,17 @@ impl SkillsCorePlugin {
             }
         });
         let len = reloaded.len();
+        // Best-effort: refresh the on-disk REGISTRY.json index so a
+        // subsequent cold-start `load_with_index` reflects the new
+        // walk. Failures log and do not abort the reload.
+        let index_path = self.root.join("REGISTRY.json");
+        if let Err(err) = registry_index::write_index(&index_path, &self.root, &reloaded) {
+            tracing::warn!(
+                path = %index_path.display(),
+                err = %err,
+                "com.nexus.skills reload: failed to refresh REGISTRY.json"
+            );
+        }
         *self.registry.lock().map_err(poisoned)? = reloaded;
         Ok(serde_json::json!({ "loaded": len }))
     }
@@ -231,10 +250,7 @@ fn parse<T: serde::de::DeserializeOwned>(
         .map_err(|e| exec_err(format!("{command}: invalid args: {e}")))
 }
 
-fn to_value<T: serde::Serialize>(
-    v: &T,
-    command: &str,
-) -> Result<serde_json::Value, PluginError> {
+fn to_value<T: serde::Serialize>(v: &T, command: &str) -> Result<serde_json::Value, PluginError> {
     serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize: {e}")))
 }
 
@@ -370,6 +386,54 @@ Write in a {{ tone }} style.
             }
             _ => panic!("unexpected error"),
         }
+    }
+
+    #[test]
+    fn open_writes_registry_json_after_load() {
+        let tmp = TempDir::new().unwrap();
+        write_skill(tmp.path(), "a.skill.md", SKILL_A);
+        let _plugin = SkillsCorePlugin::open(tmp.path().to_path_buf());
+
+        let index_path = tmp.path().join("REGISTRY.json");
+        assert!(index_path.is_file(), "open must persist REGISTRY.json");
+        let parsed = crate::registry_index::read_index(&index_path).unwrap();
+        assert_eq!(parsed.skills.len(), 1);
+        assert_eq!(parsed.skills[0].id, "skill-a");
+    }
+
+    #[test]
+    fn reload_handler_rewrites_index() {
+        const SKILL_B: &str = r"---
+name: B
+id: skill-b
+description: second
+version: 1.0.0
+author: me
+created: 2026-04-02
+---
+body B
+";
+        let tmp = TempDir::new().unwrap();
+        write_skill(tmp.path(), "a.skill.md", SKILL_A);
+        let mut plugin = SkillsCorePlugin::open(tmp.path().to_path_buf());
+
+        // After open, the index lists exactly skill-a.
+        let index_path = tmp.path().join("REGISTRY.json");
+        let initial = crate::registry_index::read_index(&index_path).unwrap();
+        assert_eq!(initial.skills.len(), 1);
+
+        // Add a second skill on disk and trigger a reload.
+        write_skill(tmp.path(), "b.skill.md", SKILL_B);
+        let v = plugin
+            .dispatch(HANDLER_RELOAD, &serde_json::json!({}))
+            .unwrap();
+        assert_eq!(v["loaded"], 2);
+
+        let after = crate::registry_index::read_index(&index_path).unwrap();
+        assert_eq!(after.skills.len(), 2);
+        let ids: Vec<&str> = after.skills.iter().map(|e| e.id.as_str()).collect();
+        assert!(ids.contains(&"skill-a"));
+        assert!(ids.contains(&"skill-b"));
     }
 
     #[test]
