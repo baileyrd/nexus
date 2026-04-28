@@ -23,6 +23,7 @@ pub mod privacy;
 mod provider;
 mod rag;
 mod tokens;
+pub mod tools;
 mod vectorstore;
 
 pub use anthropic::AnthropicProvider;
@@ -37,4 +38,8 @@ pub use privacy::{PrivacyPolicy, Redaction, Redactor};
 pub use provider::{AiProvider, ChatMessage, Role};
 pub use rag::{index_file as rag_index_file, query as rag_query, RagResponse};
 pub use tokens::{ApproxTokenCounter, BudgetWarning, ContextSourceKind, TokenBudget, TokenCounter};
+pub use tools::{
+    read_file_schema, register_storage_builtins, write_file_schema, ReadFileTool, RegisteredTool,
+    ToolError, ToolExecutor, ToolRegistry, ToolSchema, WriteFileTool,
+};
 pub use vectorstore::{ChunkEmbedding, ChunkMatch};
