@@ -66,23 +66,27 @@ export function collectEditorContext(): ContextContribution | null {
   if (!tab) return null
 
   const chips: ContextChip[] = []
-  const blocks: string[] = []
+  // BL-033 — per-chip blocks so click-to-remove on Selection doesn't
+  // drop the file chip's body (and vice versa). The combined
+  // `promptBlock` is still emitted as a fallback for callers that
+  // ignore `chipPromptBlocks`.
+  const chipPromptBlocks: Record<string, string> = {}
 
   // ── current file ──
   const { body: cappedBody, truncated } = capBody(tab.content ?? '')
   const fileChipLabel = truncated ? `${relpath} · truncated` : relpath
+  const fileChipId = `editor:file:${relpath}`
   chips.push({
-    id: `editor:file:${relpath}`,
+    id: fileChipId,
     label: fileChipLabel,
     kind: 'file',
   })
   if (cappedBody.length > 0) {
-    blocks.push(
+    chipPromptBlocks[fileChipId] =
       `### Current file: \`${relpath}\`${truncated ? ' (truncated)' : ''}\n\n` +
-        '```\n' +
-        cappedBody +
-        '\n```',
-    )
+      '```\n' +
+      cappedBody +
+      '\n```'
   }
 
   // ── current selection ──
@@ -98,26 +102,31 @@ export function collectEditorContext(): ContextContribution | null {
         Math.max(sel.from, sel.to - 1),
       )
       const lines = toLine - fromLine + 1
+      const selectionChipId = `editor:selection:${relpath}:${sel.from}-${sel.to}`
       chips.push({
-        id: `editor:selection:${relpath}:${sel.from}-${sel.to}`,
+        id: selectionChipId,
         label: `Selection · L${fromLine}–L${toLine} (${lines} ${lines === 1 ? 'line' : 'lines'})`,
         kind: 'selection',
       })
-      blocks.push(
+      chipPromptBlocks[selectionChipId] =
         `### Selection in \`${relpath}\` (lines ${fromLine}–${toLine})\n\n` +
-          '```\n' +
-          text +
-          '\n```',
-      )
+        '```\n' +
+        text +
+        '\n```'
     }
   }
 
   if (chips.length === 0) return null
 
+  const blocks = chips
+    .map((c) => chipPromptBlocks[c.id])
+    .filter((b): b is string => !!b)
+
   return {
     surfaceId: 'editor',
     chips,
     promptBlock: blocks.join('\n\n'),
+    chipPromptBlocks,
   }
 }
 

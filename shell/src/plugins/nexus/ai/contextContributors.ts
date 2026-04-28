@@ -56,6 +56,13 @@ export interface ContextContribution {
    *  Optional — a contributor may surface chips for awareness only and
    *  rely on a sibling adapter for the actual prompt body. */
   promptBlock?: string
+  /** BL-033 — per-chip sub-blocks for chip-granularity removal. When
+   *  set, `assemblePrompt` joins each kept chip's fragment instead of
+   *  using `promptBlock`. Missing/unkeyed chips fall back to having
+   *  no contribution. Adapters with multiple chips per surface
+   *  (e.g. editor's file + selection) populate this so click-to-remove
+   *  on one chip doesn't drop the other's body. */
+  chipPromptBlocks?: Record<string, string>
 }
 
 /** Async adapter the surface plugin registers. The overlay invokes
@@ -150,6 +157,12 @@ export interface AssembledPrompt {
  * Build the model-facing message from a free-form user prompt + the
  * contributions snapshot. Called by `cmdIRuntime.submit`.
  *
+ * BL-033: `removedChipIds` is consulted before assembly so chips the
+ * user clicked-to-remove drop both their visible chip AND, when the
+ * contribution provides `chipPromptBlocks`, their body fragment. When
+ * a contribution has no `chipPromptBlocks` map and ALL of its chips
+ * were removed, the whole surface's `promptBlock` is dropped.
+ *
  * Format is deliberately readable — Markdown headings the model can
  * latch onto, no JSON envelope. Avoids the Pieces "context fence"
  * shape because nexus-ai's `stream_ask` already wraps the body in its
@@ -158,12 +171,31 @@ export interface AssembledPrompt {
 export function assemblePrompt(
   userPrompt: string,
   contributions: ContextContribution[],
+  removedChipIds: ReadonlySet<string> = new Set(),
 ): AssembledPrompt {
   const trimmed = userPrompt.trim()
-  const blocks = contributions
-    .map((c) => c.promptBlock?.trim())
-    .filter((b): b is string => !!b && b.length > 0)
-  const chips = contributions.flatMap((c) => c.chips)
+  const chips: ContextChip[] = []
+  const blocks: string[] = []
+
+  for (const c of contributions) {
+    const keptChips = c.chips.filter((ch) => !removedChipIds.has(ch.id))
+    chips.push(...keptChips)
+
+    if (c.chipPromptBlocks) {
+      // Per-chip mode: every kept chip with a registered fragment
+      // contributes its own block, in chip declaration order.
+      for (const ch of keptChips) {
+        const frag = c.chipPromptBlocks[ch.id]?.trim()
+        if (frag && frag.length > 0) blocks.push(frag)
+      }
+    } else if (keptChips.length > 0 || c.chips.length === 0) {
+      // Coarse mode: keep the whole surface's block iff at least one
+      // of its chips survives (or it had no chips at all — rare
+      // contributors that inject body without a visible chip).
+      const block = c.promptBlock?.trim()
+      if (block && block.length > 0) blocks.push(block)
+    }
+  }
 
   if (blocks.length === 0) {
     return { userPrompt: trimmed, assembled: trimmed, chips }
