@@ -81,10 +81,41 @@ export interface CsvImportResult {
   errors: Array<[number, string]>
 }
 
+/** Wire shape returned by the `obsidian_base_query` IPC handler.
+ *  See ADR 0019. Records come back already projected as one object
+ *  per matched note; the shell adapts this into a synthetic `Base`
+ *  so the existing view layer renders both formats unchanged. */
+export interface ObsidianBaseQueryResult {
+  columns: string[]
+  display_names: Record<string, string>
+  rows: Array<{ id: string; fields: Record<string, unknown> }>
+  views: Array<{
+    name: string
+    type: string
+    order?: string[]
+    sort?: Array<{ property: string; direction?: 'ASC' | 'DESC' }>
+    groupBy?: string
+    limit?: number
+  }>
+  unsupported_filters: string[]
+}
+
+/** Result of loading a `.base` file: the adapted `Base` plus the
+ *  list of expressions the v1 grammar could not evaluate (surfaced
+ *  by the UI as a banner). */
+export interface ObsidianBaseLoad {
+  base: Base
+  unsupportedFilters: string[]
+}
+
 export interface BasesKernelClient {
   /** Load the full base (schema + records + views + relations) from
    *  a `.bases` directory. */
   loadBase(relpath: string): Promise<Base>
+  /** Load and evaluate an Obsidian single-file `.base` (read-only).
+   *  Adapts the query result into a `Base` shape with a synthesized
+   *  schema so existing views work unchanged. */
+  loadObsidianBase(relpath: string): Promise<ObsidianBaseLoad>
   /** Create a new `.bases` directory at `relpath` with the given
    *  schema (and optional seed records). Rejects if `relpath`
    *  already exists. Returns the freshly-created base. */
@@ -151,6 +182,14 @@ export function makeBasesKernelClient(kernel: PluginAPI['kernel']): BasesKernelC
   return {
     async loadBase(relpath) {
       return kernel.invoke<Base>(STORAGE_PLUGIN_ID, 'base_load', { path: relpath })
+    },
+    async loadObsidianBase(relpath) {
+      const resp = await kernel.invoke<ObsidianBaseQueryResult>(
+        STORAGE_PLUGIN_ID,
+        'obsidian_base_query',
+        { path: relpath },
+      )
+      return adaptObsidianBase(relpath, resp)
     },
     async createBase(relpath, schema, seedRecords = []) {
       return kernel.invoke<Base>(STORAGE_PLUGIN_ID, 'base_create', {
@@ -266,4 +305,67 @@ export function makeBasesKernelClient(kernel: PluginAPI['kernel']): BasesKernelC
       return resp.display
     },
   }
+}
+
+/** Map an Obsidian `.base` view's `type` string to the shell's
+ *  `ViewType`. Cards become a gallery view; board becomes kanban;
+ *  unknown types fall back to table so the leaf still renders. */
+function mapViewType(t: string): ViewType {
+  switch (t) {
+    case 'table':
+      return 'table'
+    case 'cards':
+    case 'gallery':
+      return 'gallery'
+    case 'board':
+    case 'kanban':
+      return 'kanban'
+    case 'list':
+      return 'list'
+    case 'calendar':
+      return 'calendar'
+    case 'timeline':
+      return 'timeline'
+    default:
+      return 'table'
+  }
+}
+
+/** Adapt the IPC response into the `Base` shape the view layer
+ *  expects. Synthesizes a schema where every column is a plain
+ *  `text` field carrying the optional `displayName` from the
+ *  `.base` file. Records are taken verbatim from `rows`. */
+function adaptObsidianBase(relpath: string, resp: ObsidianBaseQueryResult): ObsidianBaseLoad {
+  const fields: Record<string, unknown> = {}
+  for (const col of resp.columns) {
+    const def: Record<string, unknown> = { type: 'text' }
+    const dn = resp.display_names?.[col]
+    if (dn) def.displayName = dn
+    fields[col] = def
+  }
+  const records: BaseRecord[] = resp.rows.map((row) => ({
+    id: row.id,
+    deletedAt: null,
+    ...row.fields,
+  }))
+  const views: BaseView[] = resp.views.map((v) => ({
+    name: v.name,
+    type: mapViewType(v.type),
+    fields: v.order ?? [],
+    sort: (v.sort ?? []).map((s) => ({
+      field: s.property,
+      direction: (s.direction ?? 'ASC').toLowerCase(),
+    })),
+    groupField: v.groupBy,
+  }))
+  const stem = relpath.split('/').pop()?.replace(/\.base$/i, '') ?? 'Base'
+  const base: Base = {
+    name: stem,
+    schema: { version: '1.0', fields },
+    records,
+    views,
+    relations: [],
+    metadata: { version: '1.0', created_at: 0, modified_at: 0 },
+  }
+  return { base, unsupportedFilters: resp.unsupported_filters ?? [] }
 }

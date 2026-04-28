@@ -469,6 +469,10 @@ fn register_core_plugins(
                         "base_record_restore",
                         nexus_storage::core_plugin::HANDLER_BASE_RECORD_RESTORE,
                     ),
+                    (
+                        "obsidian_base_query",
+                        nexus_storage::core_plugin::HANDLER_OBSIDIAN_BASE_QUERY,
+                    ),
                 ],
             ),
             forge_root,

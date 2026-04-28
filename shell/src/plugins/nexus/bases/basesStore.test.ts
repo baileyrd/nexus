@@ -319,3 +319,68 @@ test('full round-trip — save view through base_view_update + reload preserves 
     { field: 'status', operator: 'eq', value: 'doing' },
   ])
 })
+
+// ── ADR 0019 — Obsidian `.base` read-only support ───────────────────────────
+
+test('setReadOnly stores the flag and unsupported-filter list per tab', () => {
+  const path = 'reading.base'
+  useBasesStore.setState({ tabs: {} })
+  useBasesStore.getState().ensureTab(path)
+  useBasesStore.getState().setReadOnly(path, true, ['formula(x) > 1'])
+  const tab = useBasesStore.getState().tabs[path]
+  assert.equal(tab.readOnly, true)
+  assert.deepEqual(tab.unsupportedFilters, ['formula(x) > 1'])
+})
+
+test('loadObsidianBase routes to obsidian_base_query and adapts the result', async () => {
+  // The mock kernel returns the wire shape; the adapter must build
+  // a Base whose schema columns, records, and views are all derived
+  // from the IPC response.
+  const calls: Array<{ command: string; args: unknown }> = []
+  const kernel = {
+    invoke: async (_pluginId: string, command: string, args: unknown) => {
+      calls.push({ command, args })
+      return {
+        columns: ['file.name', 'title', 'year'],
+        display_names: { title: 'Title', year: 'Year' },
+        rows: [
+          { id: 'books/dune.md', fields: { 'file.name': 'dune', title: 'Dune', year: 1965 } },
+        ],
+        views: [
+          {
+            name: 'Library',
+            type: 'table',
+            order: ['title', 'year'],
+            sort: [{ property: 'year', direction: 'DESC' }],
+          },
+        ],
+        unsupported_filters: ['formula(x) > 1'],
+      } as unknown
+    },
+    subscribe: () => () => {},
+  }
+  const client = makeBasesKernelClient(
+    kernel as unknown as Parameters<typeof makeBasesKernelClient>[0],
+  )
+  const load = await client.loadObsidianBase('books/reading.base')
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].command, 'obsidian_base_query')
+  assert.deepEqual(calls[0].args, { path: 'books/reading.base' })
+
+  assert.equal(load.base.name, 'reading')
+  assert.deepEqual(Object.keys(load.base.schema.fields), ['file.name', 'title', 'year'])
+  // displayName overrides flow into the synthesized field def so the
+  // table header can render the friendly label.
+  assert.equal(
+    (load.base.schema.fields.title as { displayName?: string }).displayName,
+    'Title',
+  )
+  assert.equal(load.base.records.length, 1)
+  assert.equal(load.base.records[0].id, 'books/dune.md')
+  assert.equal(load.base.records[0].title, 'Dune')
+  // Sort direction round-trips lower-case so it matches the existing
+  // `BaseView.sort.direction` contract used by the view layer.
+  assert.equal(load.base.views[0].sort?.[0].direction, 'desc')
+  assert.deepEqual(load.unsupportedFilters, ['formula(x) > 1'])
+})

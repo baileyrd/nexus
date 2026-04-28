@@ -36,30 +36,42 @@ export function BasesView({ relpath, client }: Props) {
   const setError = useBasesStore((s) => s.setError)
   const setBase = useBasesStore((s) => s.setBase)
   const setViewMode = useBasesStore((s) => s.setViewMode)
+  const setReadOnly = useBasesStore((s) => s.setReadOnly)
   const schemaEditorOpen = useBasesStore((s) => s.tabs[relpath]?.schemaEditorOpen ?? false)
   const setSchemaEditorOpen = useBasesStore((s) => s.setSchemaEditorOpen)
   const trashOpen = useBasesStore((s) => s.tabs[relpath]?.trashOpen ?? false)
   const setTrashOpen = useBasesStore((s) => s.setTrashOpen)
 
+  // Single-file Obsidian `.base` files take a different path through
+  // the kernel (see ADR 0019). Detect by extension and route to the
+  // read-only loader; everything else uses the existing `.bases`
+  // directory loader.
+  const isObsidianBase = relpath.toLowerCase().endsWith('.base')
+
   useEffect(() => {
     ensureTab(relpath)
     let cancelled = false
     setLoading(relpath, true)
-    client
-      .loadBase(relpath)
-      .then((base) => {
-        if (cancelled) return
-        setBase(relpath, base)
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        const msg = err instanceof Error ? err.message : String(err)
-        setError(relpath, msg)
-      })
+    const promise = isObsidianBase
+      ? client.loadObsidianBase(relpath).then((load) => {
+          if (cancelled) return
+          setBase(relpath, load.base)
+          setReadOnly(relpath, true, load.unsupportedFilters)
+        })
+      : client.loadBase(relpath).then((base) => {
+          if (cancelled) return
+          setBase(relpath, base)
+          setReadOnly(relpath, false, [])
+        })
+    promise.catch((err: unknown) => {
+      if (cancelled) return
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(relpath, msg)
+    })
     return () => {
       cancelled = true
     }
-  }, [relpath, client, ensureTab, setLoading, setBase, setError])
+  }, [relpath, client, ensureTab, setLoading, setBase, setError, setReadOnly, isObsidianBase])
 
   const wrapperStyle: React.CSSProperties = {
     width: '100%',
@@ -122,6 +134,8 @@ export function BasesView({ relpath, client }: Props) {
   }
   const fieldCount = Object.keys(base.schema.fields).length
   const mode = tab.viewMode
+  const readOnly = tab.readOnly
+  const unsupportedFilters = tab.unsupportedFilters ?? []
   // Soft-deleted records stay on disk. The default ("live") set
   // hides them; the trash filter inverts that so the user can
   // restore or permanently delete from a single view. WI-10 §4.2
@@ -141,8 +155,25 @@ export function BasesView({ relpath, client }: Props) {
         <span>{fieldCount} fields</span>
         <span>·</span>
         <span>{base.views.length} views</span>
+        {readOnly && (
+          <span
+            title="This is an Obsidian .base file — read-only (ADR 0019)"
+            style={{
+              padding: '2px 8px',
+              background: 'var(--bg-raised, #252529)',
+              border: '1px solid var(--border-subtle, #2a2a2e)',
+              borderRadius: 3,
+              fontSize: 10,
+              color: 'var(--fg-muted, #9ca3af)',
+              textTransform: 'uppercase',
+              letterSpacing: 0.5,
+            }}
+          >
+            Read-only
+          </span>
+        )}
         <div style={{ flex: 1 }} />
-        <button
+        {!readOnly && <button
           type="button"
           onClick={() => setTrashOpen(relpath, !trashOpen)}
           title={
@@ -162,8 +193,8 @@ export function BasesView({ relpath, client }: Props) {
           }}
         >
           {trashOpen ? `← Live (${liveRecords.length})` : `Trash${trashCount > 0 ? ` (${trashCount})` : ''}`}
-        </button>
-        <button
+        </button>}
+        {!readOnly && <button
           type="button"
           onClick={() => setSchemaEditorOpen(relpath, !schemaEditorOpen)}
           title="Schema editor"
@@ -179,7 +210,7 @@ export function BasesView({ relpath, client }: Props) {
           }}
         >
           Schema
-        </button>
+        </button>}
         <div style={{ display: 'flex', gap: 4 }}>
           {VIEW_OPTIONS.map((opt) => {
             const active = opt.mode === mode
@@ -206,6 +237,27 @@ export function BasesView({ relpath, client }: Props) {
           })}
         </div>
       </div>
+      {unsupportedFilters.length > 0 && (
+        <div
+          role="alert"
+          style={{
+            padding: '6px 12px',
+            borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
+            background: 'var(--bg-raised, #252529)',
+            color: 'var(--risk, #f48771)',
+            fontSize: 11,
+          }}
+        >
+          {unsupportedFilters.length === 1
+            ? '1 filter expression is unsupported and was excluded:'
+            : `${unsupportedFilters.length} filter expressions are unsupported and were excluded:`}
+          <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+            {unsupportedFilters.map((f) => (
+              <li key={f} style={{ fontFamily: 'var(--font-mono, monospace)' }}>{f}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <BasesViewBar relpath={relpath} base={visibleBase} client={client} />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>

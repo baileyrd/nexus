@@ -25,6 +25,7 @@ pub mod mdx;
 mod canvas;
 pub mod config;
 pub mod bases;
+pub mod obsidian_base;
 pub mod core_plugin;
 pub mod vectorstore;
 
@@ -1566,6 +1567,28 @@ impl StorageEngine {
         }
 
         Ok(count)
+    }
+
+    // ── Obsidian `.base` (read-only) ──────────────────────────────────────────
+
+    /// Read, parse, and evaluate an Obsidian single-file `.base`
+    /// against the indexed vault. See ADR 0019.
+    ///
+    /// `path` is the forge-relative path to the `.base` file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::CorruptFile`] when the `.base` file is
+    /// missing or malformed, or [`StorageError::Database`] on `SQLite`
+    /// failure.
+    pub fn obsidian_base_query(
+        &self,
+        path: &str,
+    ) -> Result<obsidian_base::ObsidianBaseQueryResult, StorageError> {
+        let conn = self.pool.get().map_err(|e| {
+            StorageError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        obsidian_base::query(&conn, self.forge.root(), path)
     }
 
     // ── Accessor ──────────────────────────────────────────────────────────────
