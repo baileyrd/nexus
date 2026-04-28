@@ -1,0 +1,38 @@
+.nexus-mermaid-diagram {
+  display: block;
+  margin: 0.4em 0;
+  text-align: center;
+  background: var(--bg-raised);
+  padding: 0.6em;
+  border-radius: 4px;
+}
+
+.nexus-mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.nexus-mermaid-error {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--risk, var(--line-soft));
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--risk, var(--fg));
+  font-family: var(--f-mono);
+  font-size: 0.9em;
+}
+
+.nexus-mermaid-error-tag {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.85em;
+}
+
+.nexus-mermaid-error-msg {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.9em;
+}

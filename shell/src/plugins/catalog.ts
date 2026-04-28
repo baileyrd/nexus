@@ -2,7 +2,7 @@
 //
 // WI-43: Plugin curation catalog.
 //
-// Single source of truth for the shell's 39 built-in plugin registrations,
+// Single source of truth for the shell's 41 built-in plugin registrations,
 // split into a default-on set (loaded at boot) and a default-off set
 // (shipped but dormant, opt-in via Settings > Plugins).
 //
@@ -11,11 +11,11 @@
 // to the persisted `plugins.enabled: string[]` config value.
 //
 // Acceptance guard: `grep -c "^import.*Plugin" shell/src/plugins/catalog.ts`
-// must equal 39.
+// must equal 41.
 
 // Plugin contract type. The `import type` is split across two lines so
-// the WI-43 acceptance grep (`grep -c "^import.*Plugin" catalog.ts` == 38)
-// counts only the 38 real plugin registrations below, not this type shim.
+// the WI-43 acceptance grep (`grep -c "^import.*Plugin" catalog.ts` == 41)
+// counts only the 41 real plugin registrations below, not this type shim.
 import type {
   Plugin as Registered,
 } from '../types/plugin'
@@ -63,6 +63,14 @@ import { pluginsMgmtPlugin } from './nexus/pluginsMgmt'
 import { processesPlugin } from './nexus/processes'
 import { statusBarPlugin } from './nexus/statusBar'
 import { extensionsTabPlugin } from './nexus/extensionsTab'
+
+// ── Community plugins (BL-008+) — directory location matches the
+// community-plugin layout, but registration goes through the catalog
+// because the Blob-URL community-plugin loader cannot resolve bundled
+// dependencies like `mermaid`. Plugins listed here behave identically
+// to default-off nexus plugins from the user's perspective. See
+// shell/src/plugins/community/mermaid/README.md.
+import { mermaidPlugin } from './community/mermaid'
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Default-on set (22) — loaded unconditionally at boot.
@@ -133,6 +141,7 @@ export const DEFAULT_OFF_PLUGINS: Registered[] = [
   filePropertiesPlugin,
   tagsPlugin,
   allPropertiesPlugin,
+  mermaidPlugin,
 ]
 
 /**
