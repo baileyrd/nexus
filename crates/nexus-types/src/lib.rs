@@ -12,6 +12,7 @@
 #![warn(clippy::pedantic)]
 
 pub mod bases;
+pub mod obsidian_base;
 pub mod path_validator;
 pub mod paths;
 

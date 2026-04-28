@@ -209,6 +209,13 @@ pub const HANDLER_BASE_RECORD_SOFT_DELETE: u32 = 51;
 /// a soft-deleted record. Missing ids or records with no
 /// `deleted_at` are a no-op. Returns `{}`.
 pub const HANDLER_BASE_RECORD_RESTORE: u32 = 52;
+/// Handler id for `obsidian_base_query`. Args:
+/// `{ "path": String }`. Reads the Obsidian single-file `.base` at
+/// `path`, walks the index, evaluates the filter expression against
+/// every markdown note, and projects the configured properties as
+/// rows. Read-only — see ADR 0019.
+/// Returns [`crate::obsidian_base::ObsidianBaseQueryResult`] as JSON.
+pub const HANDLER_OBSIDIAN_BASE_QUERY: u32 = 53;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -941,6 +948,13 @@ impl CorePlugin for StorageCorePlugin {
                 let result = crate::bases::query::execute(&conn, &db_query)
                     .map_err(|e| exec_err(format!("base_query: {e}")))?;
                 to_value(&result, "base_query")
+            }
+            HANDLER_OBSIDIAN_BASE_QUERY => {
+                let path = path_arg(args, "obsidian_base_query")?;
+                let result = engine
+                    .obsidian_base_query(&path)
+                    .map_err(|e| exec_err(format!("obsidian_base_query: {e}")))?;
+                to_value(&result, "obsidian_base_query")
             }
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }
