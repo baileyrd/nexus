@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { EditorView as CMEditorView } from '@codemirror/view'
 import { useEditorStore, type EditorTab, type EditorTabMode } from './editorStore'
-import { renderMarkdown } from './markdownRender'
+import { renderMarkdown, hydrateFencedCode } from './markdownRender'
 import { eventBus } from '../../../host/EventBus'
 import { useOutlineStore } from '../outline/outlineStore'
 import { Icon } from '../../../icons'
@@ -302,6 +302,14 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
     activeTab?.error,
     activeTab?.mode,
   ])
+
+  // BL-008 — swap fenced-code placeholders for rendered widgets after the
+  // sanitized markdown HTML has been mounted by React. Fired keyed on the
+  // HTML string so a content edit re-runs hydration against the new tree.
+  useEffect(() => {
+    if (!markdownHtml) return
+    hydrateFencedCode(markdownBodyRef.current)
+  }, [markdownHtml])
 
   const rootStyle: React.CSSProperties = {
     display: 'flex',

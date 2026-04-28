@@ -15,7 +15,8 @@ import { markdown } from '@codemirror/lang-markdown'
 import { Table } from '@lezer/markdown'
 import { syntaxTree } from '@codemirror/language'
 import type { DecorationSet } from '@codemirror/view'
-import { buildLivePreviewDecorations, TableWidget } from './livePreviewDecorations.ts'
+import { buildLivePreviewDecorations, TableWidget, FencedCodeWidget } from './livePreviewDecorations.ts'
+import { fencedCodeRegistry } from './fencedCodeRegistry.ts'
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -437,4 +438,68 @@ test('TableWidget.eq: same source ⇒ true; different source ⇒ false', () => {
   const c = new TableWidget('| x | y |\n| - | - |\n| 3 | 4 |')
   assert.equal(a.eq(b), true)
   assert.equal(a.eq(c), false)
+})
+
+// ── BL-008: Fenced-code renderer integration ─────────────────────────────
+
+test('livePreviewDecorations: registered language emits FencedCodeWidget when off-cursor', () => {
+  const dispose = fencedCodeRegistry.register('decoTest', () => {
+    return { nodeType: 1 } as unknown as HTMLElement
+  })
+  try {
+    const doc = '```decoTest\nfoo\n```\npara'
+    const items = decosFor(doc, EditorSelection.cursor(doc.length))
+    const widget = items.find(
+      (i) => i.replace && i.widget === 'FencedCodeWidget' && i.from === 0,
+    )
+    assert.ok(widget, 'block-replace FencedCodeWidget over the fenced block')
+    assert.equal(widget?.block, true, 'fenced widget is a block decoration')
+  } finally {
+    dispose()
+  }
+})
+
+test('livePreviewDecorations: registered language with cursor inside falls back to raw', () => {
+  const dispose = fencedCodeRegistry.register('decoCursor', () => {
+    return { nodeType: 1 } as unknown as HTMLElement
+  })
+  try {
+    const doc = '```decoCursor\nfoo\n```'
+    const innerStart = '```decoCursor\n'.length
+    const items = decosFor(doc, EditorSelection.cursor(innerStart + 1))
+    assert.equal(
+      items.some((i) => i.widget === 'FencedCodeWidget'),
+      false,
+      'no fenced widget when cursor is inside the block',
+    )
+  } finally {
+    dispose()
+  }
+})
+
+test('livePreviewDecorations: unregistered language keeps existing fence-line behaviour', () => {
+  const doc = '```nonesuch-bl008\nfoo\n```\npara'
+  const items = decosFor(doc, EditorSelection.cursor(doc.length))
+  assert.equal(
+    items.some((i) => i.widget === 'FencedCodeWidget'),
+    false,
+    'no widget when language is not registered',
+  )
+  // The opener-line replace still fires (legacy behaviour).
+  assert.ok(
+    items.some((i) => i.replace && i.from === 0 && i.to === '```nonesuch-bl008'.length),
+    'opener-line replace still emitted off-cursor for unregistered language',
+  )
+})
+
+test('FencedCodeWidget.eq: source / language / generation triple gates equality', () => {
+  const a = new FencedCodeWidget('graph TD\nA-->B', 'mermaid', 1)
+  const b = new FencedCodeWidget('graph TD\nA-->B', 'mermaid', 1)
+  const c = new FencedCodeWidget('graph TD\nA-->C', 'mermaid', 1)
+  const d = new FencedCodeWidget('graph TD\nA-->B', 'plantuml', 1)
+  const e = new FencedCodeWidget('graph TD\nA-->B', 'mermaid', 2)
+  assert.equal(a.eq(b), true)
+  assert.equal(a.eq(c), false, 'different source ⇒ not eq')
+  assert.equal(a.eq(d), false, 'different language ⇒ not eq')
+  assert.equal(a.eq(e), false, 'different generation ⇒ not eq')
 })

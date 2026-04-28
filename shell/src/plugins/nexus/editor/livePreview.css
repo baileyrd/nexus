@@ -61,3 +61,43 @@
 .cm-content .cm-md-table-widget table {
   margin: 0;
 }
+
+.cm-content .cm-md-fenced-widget {
+  margin: 0.4em 0;
+}
+.cm-content .cm-md-fenced-pending {
+  background: var(--bg-raised);
+  font-family: var(--f-mono);
+  padding: 0.4em 0.6em;
+  border-radius: 4px;
+  white-space: pre;
+  overflow-x: auto;
+}
+.cm-content .cm-md-fenced-error,
+.nexus-markdown-body .nexus-fenced-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--risk, var(--line-soft));
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--risk, var(--fg));
+  font-family: var(--f-mono);
+  font-size: 0.9em;
+}
+.cm-content .cm-md-fenced-error-lang,
+.nexus-markdown-body .nexus-fenced-error-lang {
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.nexus-markdown-body .nexus-fenced-rendered {
+  margin: 0.6em 0;
+}
+.nexus-markdown-body .nexus-fenced-pending {
+  background: var(--bg-raised);
+  font-family: var(--f-mono);
+  padding: 0.4em 0.6em;
+  border-radius: 4px;
+}
