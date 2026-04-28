@@ -217,7 +217,21 @@ export interface EditorAPI {
    * idempotent and auto-swept on plugin unload.
    */
   onChange(handler: (active: ActiveEditor | null) => void): () => void
+  /**
+   * BL-008 — register a renderer for a fenced code block language
+   * tag. See `@nexus/extension-api`'s `EditorAPI` for the full
+   * contract. The shell-side implementation forwards to
+   * `fencedCodeRegistry.register` and tracks the disposer through
+   * `PluginRegistry.trackSubscription` so plugin deactivate sweeps it.
+   */
+  registerFencedCodeRenderer(
+    language: string,
+    renderer: FencedRenderer,
+  ): () => void
 }
+
+export type FencedRenderResult = HTMLElement | Promise<HTMLElement>
+export type FencedRenderer = (source: string, info: string) => FencedRenderResult
 
 export interface CommandsAPI {
   register(id: string, handler: (...args: unknown[]) => unknown): void
