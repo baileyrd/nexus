@@ -10,13 +10,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nexus_kernel::{KernelPluginContext, PluginContext};
+use rmcp::RoleServer;
+use rmcp::ServiceExt as _;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
-use rmcp::model::{CallToolRequestParams, CallToolResult, ListToolsResult, ServerInfo};
+use rmcp::model::{
+    Annotated, CallToolRequestParams, CallToolResult, ListResourcesResult, ListToolsResult,
+    PaginatedRequestParams, RawResource, ReadResourceRequestParams, ReadResourceResult, Resource,
+    ResourceContents, ServerCapabilities, ServerInfo,
+};
 use rmcp::schemars;
 use rmcp::service::RequestContext;
-use rmcp::ServiceExt as _;
-use rmcp::RoleServer;
 use rmcp::{tool, tool_router};
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +30,40 @@ const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longer timeout for AI calls — they make outbound HTTP requests to the
 /// chat + embedding providers.
 const AI_IPC_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// URI prefix for MCP resources representing forge notes (PRD-14 §7.1/§7.2).
+///
+/// Each note is exposed as `mcp://nexus/notes/<vault-relative-path>`. The
+/// listing root (`mcp://nexus/notes`) is not itself a readable resource.
+const NOTE_URI_PREFIX: &str = "mcp://nexus/notes/";
+
+/// Parse the vault-relative path out of a `mcp://nexus/notes/...` URI.
+///
+/// Returns `None` for URIs that don't start with [`NOTE_URI_PREFIX`] and for
+/// the bare notes root (`mcp://nexus/notes`) which has no path component.
+pub(crate) fn parse_note_uri(uri: &str) -> Option<&str> {
+    let rest = uri.strip_prefix(NOTE_URI_PREFIX)?;
+    if rest.is_empty() { None } else { Some(rest) }
+}
+
+/// Build an MCP [`Resource`] descriptor for a forge note at `path`.
+///
+/// `size_bytes` is clamped to `u32::MAX` (the rmcp `RawResource::size` field
+/// is `u32`); we use `try_from` rather than `as` to avoid silent truncation.
+pub(crate) fn build_note_resource(path: &str, size_bytes: u64) -> Resource {
+    let file_name = std::path::Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string();
+    Annotated::new(
+        RawResource::new(format!("{NOTE_URI_PREFIX}{path}"), file_name)
+            .with_description("Markdown note in the Nexus forge")
+            .with_mime_type("text/markdown")
+            .with_size(u32::try_from(size_bytes).unwrap_or(u32::MAX)),
+        None,
+    )
+}
 
 // ── Input types ──────────────────────────────────────────────────────────────
 
@@ -295,8 +333,7 @@ impl NexusMcpServer {
     /// Returns an error if the transport or server fails to start.
     pub async fn serve_stdio(self) -> Result<(), Box<dyn std::error::Error>> {
         let transport = rmcp::transport::io::stdio();
-        let server: rmcp::service::RunningService<RoleServer, Self> =
-            self.serve(transport).await?;
+        let server: rmcp::service::RunningService<RoleServer, Self> = self.serve(transport).await?;
         server.waiting().await?;
         Ok(())
     }
@@ -319,8 +356,14 @@ impl NexusMcpServer {
 
 #[tool_router]
 impl NexusMcpServer {
-    #[tool(name = "nexus_read_note", description = "Read a note's content by vault-relative path")]
-    async fn read_note(&self, Parameters(input): Parameters<ReadNoteInput>) -> Json<ReadNoteOutput> {
+    #[tool(
+        name = "nexus_read_note",
+        description = "Read a note's content by vault-relative path"
+    )]
+    async fn read_note(
+        &self,
+        Parameters(input): Parameters<ReadNoteInput>,
+    ) -> Json<ReadNoteOutput> {
         #[derive(Deserialize)]
         struct Resp {
             bytes: Vec<u8>,
@@ -346,7 +389,10 @@ impl NexusMcpServer {
         }
     }
 
-    #[tool(name = "nexus_create_note", description = "Create a new note with the given path and markdown content")]
+    #[tool(
+        name = "nexus_create_note",
+        description = "Create a new note with the given path and markdown content"
+    )]
     async fn create_note(
         &self,
         Parameters(input): Parameters<CreateNoteInput>,
@@ -354,7 +400,10 @@ impl NexusMcpServer {
         self.do_write_file(&input.path, &input.content).await
     }
 
-    #[tool(name = "nexus_update_note", description = "Update an existing note's content (creates if it does not exist)")]
+    #[tool(
+        name = "nexus_update_note",
+        description = "Update an existing note's content (creates if it does not exist)"
+    )]
     async fn update_note(
         &self,
         Parameters(input): Parameters<UpdateNoteInput>,
@@ -362,7 +411,10 @@ impl NexusMcpServer {
         self.do_write_file(&input.path, &input.content).await
     }
 
-    #[tool(name = "nexus_delete_note", description = "Delete a note by vault-relative path")]
+    #[tool(
+        name = "nexus_delete_note",
+        description = "Delete a note by vault-relative path"
+    )]
     async fn delete_note(
         &self,
         Parameters(input): Parameters<DeleteNoteInput>,
@@ -382,7 +434,10 @@ impl NexusMcpServer {
         }
     }
 
-    #[tool(name = "nexus_list_notes", description = "List notes in the forge, optionally filtered by a path prefix")]
+    #[tool(
+        name = "nexus_list_notes",
+        description = "List notes in the forge, optionally filtered by a path prefix"
+    )]
     async fn list_notes(
         &self,
         Parameters(input): Parameters<ListNotesInput>,
@@ -476,7 +531,10 @@ impl NexusMcpServer {
         }
     }
 
-    #[tool(name = "nexus_backlinks", description = "Find all notes that link to the specified note (backlinks)")]
+    #[tool(
+        name = "nexus_backlinks",
+        description = "Find all notes that link to the specified note (backlinks)"
+    )]
     async fn backlinks(
         &self,
         Parameters(input): Parameters<BacklinksInput>,
@@ -513,7 +571,10 @@ impl NexusMcpServer {
         }
     }
 
-    #[tool(name = "nexus_outgoing_links", description = "Find all outgoing links from the specified note")]
+    #[tool(
+        name = "nexus_outgoing_links",
+        description = "Find all outgoing links from the specified note"
+    )]
     async fn outgoing_links(
         &self,
         Parameters(input): Parameters<OutgoingLinksInput>,
@@ -528,10 +589,7 @@ impl NexusMcpServer {
             is_resolved: bool,
         }
         match self
-            .storage_call::<Vec<Link>>(
-                "outgoing_links",
-                serde_json::json!({ "path": &input.path }),
-            )
+            .storage_call::<Vec<Link>>("outgoing_links", serde_json::json!({ "path": &input.path }))
             .await
         {
             Ok(ls) => {
@@ -559,7 +617,10 @@ impl NexusMcpServer {
         }
     }
 
-    #[tool(name = "nexus_graph_status", description = "Get knowledge graph statistics: node count, edge count, unresolved links")]
+    #[tool(
+        name = "nexus_graph_status",
+        description = "Get knowledge graph statistics: node count, edge count, unresolved links"
+    )]
     async fn graph_status(
         &self,
         Parameters(_input): Parameters<GraphStatusInput>,
@@ -592,8 +653,14 @@ impl NexusMcpServer {
         }
     }
 
-    #[tool(name = "nexus_list_tags", description = "List all occurrences of a tag by name across the forge")]
-    async fn list_tags(&self, Parameters(input): Parameters<ListTagsInput>) -> Json<ListTagsOutput> {
+    #[tool(
+        name = "nexus_list_tags",
+        description = "List all occurrences of a tag by name across the forge"
+    )]
+    async fn list_tags(
+        &self,
+        Parameters(input): Parameters<ListTagsInput>,
+    ) -> Json<ListTagsOutput> {
         #[derive(Deserialize)]
         struct Tag {
             name: String,
@@ -675,7 +742,10 @@ impl NexusMcpServer {
         }
     }
 
-    #[tool(name = "nexus_toggle_task", description = "Toggle a task's completed/incomplete state by its database ID")]
+    #[tool(
+        name = "nexus_toggle_task",
+        description = "Toggle a task's completed/incomplete state by its database ID"
+    )]
     async fn toggle_task(
         &self,
         Parameters(input): Parameters<ToggleTaskInput>,
@@ -688,7 +758,10 @@ impl NexusMcpServer {
             completed: bool,
         }
         match self
-            .storage_call::<Rec>("toggle_task", serde_json::json!({ "task_id": input.task_id }))
+            .storage_call::<Rec>(
+                "toggle_task",
+                serde_json::json!({ "task_id": input.task_id }),
+            )
             .await
         {
             Ok(r) => Json(ToggleTaskOutput {
@@ -781,18 +854,24 @@ impl NexusMcpServer {
 
 impl rmcp::ServerHandler for NexusMcpServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::default()
-            .with_instructions(
-                "Nexus MCP server: manage a personal knowledge base of markdown notes. \
-                 Use nexus_* tools to create, read, update, delete, search, and query notes.",
-            )
+        let mut info = ServerInfo::default();
+        info.capabilities = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_resources()
+            .build();
+        info.with_instructions(
+            "Nexus MCP server: manage a personal knowledge base of markdown notes. \
+             Use nexus_* tools to create, read, update, delete, search, and query notes. \
+             Forge notes are also enumerated as MCP resources under mcp://nexus/notes/.",
+        )
     }
 
     fn call_tool(
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<CallToolResult, rmcp::ErrorData>> + Send + '_ {
+    ) -> impl std::future::Future<Output = Result<CallToolResult, rmcp::ErrorData>> + Send + '_
+    {
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         self.tool_router.call(tcc)
     }
@@ -801,11 +880,100 @@ impl rmcp::ServerHandler for NexusMcpServer {
         &self,
         _request: Option<rmcp::model::PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListToolsResult, rmcp::ErrorData>> + Send + '_ {
+    ) -> impl std::future::Future<Output = Result<ListToolsResult, rmcp::ErrorData>> + Send + '_
+    {
         let items = self.tool_router.list_all();
         std::future::ready(Ok(ListToolsResult {
             tools: items,
             ..Default::default()
         }))
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, rmcp::ErrorData> {
+        // Same `query_files` shape as nexus_list_notes (server.rs ~390): the
+        // storage handler returns Vec<{ path, size_bytes, modified_at }>.
+        #[derive(Deserialize)]
+        struct Rec {
+            path: String,
+            size_bytes: u64,
+        }
+        let records: Vec<Rec> = self
+            .storage_call("query_files", serde_json::json!({}))
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(format!("query_files: {e}"), None))?;
+        let resources: Vec<Resource> = records
+            .into_iter()
+            .map(|r| build_note_resource(&r.path, r.size_bytes))
+            .collect();
+        Ok(ListResourcesResult {
+            resources,
+            ..Default::default()
+        })
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResult, rmcp::ErrorData> {
+        #[derive(Deserialize)]
+        struct ReadFileResp {
+            bytes: Vec<u8>,
+        }
+        let Some(path) = parse_note_uri(&request.uri) else {
+            return Err(rmcp::ErrorData::resource_not_found(
+                format!("unknown resource uri: {}", request.uri),
+                None,
+            ));
+        };
+        let resp: ReadFileResp = self
+            .storage_call("read_file", serde_json::json!({ "path": path }))
+            .await
+            .map_err(|e| {
+                rmcp::ErrorData::resource_not_found(
+                    format!("resource not found: {} ({e})", request.uri),
+                    None,
+                )
+            })?;
+        let text = String::from_utf8_lossy(&resp.bytes).into_owned();
+        let contents = ResourceContents::text(text, &request.uri).with_mime_type("text/markdown");
+        Ok(ReadResourceResult::new(vec![contents]))
+    }
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_note_uri_extracts_path() {
+        assert_eq!(
+            parse_note_uri("mcp://nexus/notes/foo/bar.md"),
+            Some("foo/bar.md")
+        );
+        assert_eq!(parse_note_uri("file:///x"), None);
+        // Notes root with no trailing path component.
+        assert_eq!(parse_note_uri("mcp://nexus/notes"), None);
+    }
+
+    #[test]
+    fn build_note_resource_sets_uri_mime_and_size() {
+        let r = build_note_resource("foo.md", 123);
+        assert_eq!(r.raw.uri, "mcp://nexus/notes/foo.md");
+        assert_eq!(r.raw.mime_type.as_deref(), Some("text/markdown"));
+        assert_eq!(r.raw.size, Some(123));
+        assert_eq!(r.raw.name, "foo.md");
+    }
+
+    #[test]
+    fn build_note_resource_clamps_oversize_to_u32_max() {
+        let r = build_note_resource("huge.md", u64::MAX);
+        assert_eq!(r.raw.size, Some(u32::MAX));
     }
 }

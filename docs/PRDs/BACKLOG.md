@@ -330,12 +330,6 @@ Stdio is the only transport today (`McpClient` over `TokioChildProcess`). Remote
 **Effort**: Medium. **Crate**: `nexus-mcp`.
 `McpServerSpec.env` already accepts a string map; the auth flow itself (token exchange, refresh, keychain lookup) is unbuilt. Pairs with ADR-0009 (keyring hard-fail) once that policy is enforced at bootstrap.
 
-### BL-026: MCP resource enumeration
-
-**Source**: PRD-14 §7 (`mcp://nexus/notes/...`, `mcp://nexus/db/...`).
-**Effort**: Small. **Crate**: `nexus-mcp` (server side).
-`list_resources` exists on the host plugin (id 4) and forwards to external servers; the **Nexus-side** server (`serve_stdio`) advertises tools but no resources. Wire up at least `mcp://nexus/notes` listing so external clients can browse the forge.
-
 ### BL-027: Multi-agent orchestration / delegation
 
 **Source**: PRD-15 §10 (`AgentOrchestrator::delegate / parallel / pipeline`).
