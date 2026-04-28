@@ -336,9 +336,25 @@ Cron + file_event triggers + condition evaluator + variable interpolation + manu
 **Effort**: Medium. **Crate**: `shell/src-tauri/` + `shell/src/host/`.
 Spec calls for per-Leaf detachment into a separate `WebviewWindow`. Today the shell ships single-window. Not in REQUIRED-FOR-FORMAL-RELEASE.md, so it lands here. Web/mobile platform targets (also PRD-17) remain explicitly deferred and are not BL items.
 
+### BL-030: Bases per-surface undo / redo
+
+**Source**: 2026-04-28 backlog review — gap surfaced alongside the canvas / editor undo work that already shipped.
+**Effort**: Medium. **Crate**: `shell/src/plugins/nexus/bases/`.
+Bases is the only mature surface without an undo stack. Editor undo flows through CodeMirror; canvas got `undo/redo` in Phase-6; bases mutations (cell edit, row create / delete / soft-delete / restore, property create / update / delete / rename, view create / update / delete) go straight through `kernelClient.ts` to `com.nexus.storage::base_*` and are unrecoverable from the UI. Implement per-base ring-buffered undo by wrapping every mutator in `kernelClient.ts` with a paired forward/reverse op and pushing onto a `basesStore` undo stack keyed by base path; re-use the existing soft-delete IPC for row-undo so deletes round-trip cleanly. `Mod-Z` / `Mod-Shift-Z` bound via `KeybindingRegistry` with a `bases.focused` context-key gate (mirroring the canvas pattern). Schema-edit reversals need care: `base_property_delete` is destructive of cell values, so either snapshot the column before delete or refuse to undo past a destructive op (surface a "history truncated" hint). Explicit non-goal: a global cross-surface undo — see the 2026-04-28 design note below.
+
+### BL-031: Bases cell / row clipboard
+
+**Source**: 2026-04-28 backlog review — natural pair to BL-030.
+**Effort**: Small–medium. **Crate**: `shell/src/plugins/nexus/bases/`.
+No clipboard support today: `BasesTable` selection state exists for the row-actions menu but `Mod-C` / `Mod-V` / `Mod-X` are unbound. v1 scope: copy a rectangular cell range as TSV (clipboard text) + a Nexus-internal JSON payload (`application/x-nexus-bases-cells`) carrying field types so paste into a typed column round-trips losslessly; copy a full row as JSON; paste either fills the selected range (clamping or extending rows via `base_record_create`) or, with no selection, appends new rows. Cross-base paste honours field-type compatibility via `fieldTypes.ts` coercion rules — incompatible cells fall back to the string representation and emit a `bases:paste-coerced` notification. External-app paste (Excel / Google Sheets TSV) works via the text fallback. Pairs with BL-030 so a paste is one undo step.
+
 ### Verification notes (no BL ID — informational)
 
 - **ADR-0009 keyring hard-fail enforcement** — ADR mentions a `NEXUS_NO_KEYRING=1` escape hatch, but bootstrap-side enforcement was not located in this audit. Either confirm enforcement (and document the location) or file as a follow-up in OPEN-ITEMS.md if real.
 - **PRD-04a MockPluginContext / MockEventBus** — referenced in template tests as TODO but not yet exposed from `nexus-plugin-api`. Low priority; community plugin authors are not yet writing many tests, and the issue surfaces only when someone tries.
 
 ## Decisions — PRD-04 audit (2026-04-17)
+
+## Design notes — 2026-04-28
+
+- **Global cross-surface undo is a non-goal.** Considered alongside BL-030. Per-surface undo is the idiom in VS Code / Obsidian / IntelliJ; a unified Cmd+Z spanning editor + canvas + bases + file ops creates ambiguous "what does this undo right now" behaviour and would require every mutating IPC handler to register an inverse op against the file-as-truth + IPC-only invariants. The right primitive for cross-surface time-travel in this architecture is git-based history (point-in-time restore via the existing commit graph) rather than a unified action stack. New BL items for undo should be scoped to a single surface.
