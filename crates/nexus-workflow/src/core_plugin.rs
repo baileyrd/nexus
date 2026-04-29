@@ -32,7 +32,7 @@
 //! `webhook` / `git_event` / `mcp_event` are not yet wired.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -61,6 +61,11 @@ pub const HANDLER_VALIDATE: u32 = 4;
 pub const HANDLER_RUN: u32 = 5;
 /// `run_digest` handler id (BL-047).
 pub const HANDLER_RUN_DIGEST: u32 = 6;
+/// FU-7 — `set_digest_config` handler id. Replaces the in-memory
+/// [`DigestConfig`] under the shared lock so the scheduler loop
+/// picks up enabled / cron / output-dir changes without a restart.
+/// Args: a [`DigestConfig`] JSON object.
+pub const HANDLER_SET_DIGEST_CONFIG: u32 = 7;
 
 /// Default per-step tool-call timeout. Workflow steps often span
 /// multiple plugins; give them enough headroom.
@@ -79,7 +84,10 @@ pub struct WorkflowCorePlugin {
     /// BL-047 digest configuration. Loaded from
     /// `<forge>/.forge/config.toml` `[digests]` table when present;
     /// falls back to [`DigestConfig::default`] (disabled) otherwise.
-    digest_config: DigestConfig,
+    /// FU-7 — wrapped in `Arc<RwLock<>>` so `set_digest_config`
+    /// pushes are visible to the long-running scheduler loop without
+    /// a restart.
+    digest_config: Arc<RwLock<DigestConfig>>,
 }
 
 impl WorkflowCorePlugin {
@@ -128,7 +136,7 @@ impl WorkflowCorePlugin {
             registry: Mutex::new(registry),
             context: None,
             scheduler_handles: Mutex::new(Vec::new()),
-            digest_config,
+            digest_config: Arc::new(RwLock::new(digest_config)),
         }
     }
 
@@ -248,34 +256,46 @@ impl WorkflowCorePlugin {
     /// The task is held in `scheduler_handles` alongside the cron and
     /// file-event triggers so plugin drop aborts everything together.
     fn spawn_digest_scheduler(&self, ctx: &Arc<KernelPluginContext>) {
-        if !self.digest_config.enabled {
-            tracing::debug!("digest scheduler: disabled by config; not spawning");
-            return;
-        }
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             tracing::warn!("digest scheduler: no tokio runtime available; disabled");
             return;
         };
-        let cfg = self.digest_config.clone();
+        let cfg_handle = Arc::clone(&self.digest_config);
         let ctx = Arc::clone(ctx);
         let Ok(mut handles) = self.scheduler_handles.lock() else {
             return;
         };
+        // FU-7 — always spawn the loop, even when initially disabled,
+        // so a later `set_digest_config` toggle takes effect without
+        // restarting the plugin. The loop short-circuits each tick
+        // when the live config still says disabled.
+        let initial = cfg_handle.read().ok().map(|g| g.clone()).unwrap_or_default();
         tracing::info!(
-            daily = ?cfg.daily_cron,
-            weekly = ?cfg.weekly_cron,
+            enabled = initial.enabled,
+            daily = ?initial.daily_cron,
+            weekly = ?initial.weekly_cron,
             "digest scheduler armed"
         );
         let handle = runtime.spawn(async move {
-            digest_scheduler_loop(ctx, cfg).await;
+            digest_scheduler_loop(ctx, cfg_handle).await;
         });
         handles.push(handle);
     }
 }
 
-async fn digest_scheduler_loop(ctx: Arc<KernelPluginContext>, cfg: DigestConfig) {
+async fn digest_scheduler_loop(
+    ctx: Arc<KernelPluginContext>,
+    cfg_handle: Arc<RwLock<DigestConfig>>,
+) {
     use std::time::Duration;
     loop {
+        let cfg = cfg_handle.read().ok().map(|g| g.clone()).unwrap_or_default();
+        if !cfg.enabled {
+            // Park briefly so a `set_digest_config` toggle is picked up
+            // within ~60s of being pushed.
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            continue;
+        }
         let now = chrono::Utc::now();
         let Some((kind, next)) = digests::next_fire(&cfg, now) else {
             tracing::warn!("digest scheduler: no schedules; parking");
@@ -560,6 +580,9 @@ impl CorePlugin for WorkflowCorePlugin {
             HANDLER_RUN_DIGEST => Err(exec_err(format!(
                 "handler {HANDLER_RUN_DIGEST}: run_digest is async; caller should use dispatch_async"
             ))),
+            HANDLER_SET_DIGEST_CONFIG => Err(exec_err(format!(
+                "handler {HANDLER_SET_DIGEST_CONFIG}: set_digest_config is async; caller should use dispatch_async"
+            ))),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -571,7 +594,7 @@ impl CorePlugin for WorkflowCorePlugin {
     ) -> Option<CorePluginFuture> {
         if handler_id == HANDLER_RUN_DIGEST {
             let ctx = self.context.clone();
-            let cfg = self.digest_config.clone();
+            let cfg_handle = Arc::clone(&self.digest_config);
             let args = args.clone();
             return Some(Box::pin(async move {
                 let ctx = ctx.ok_or_else(|| {
@@ -584,10 +607,33 @@ impl CorePlugin for WorkflowCorePlugin {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| exec_err("run_digest: missing 'kind'".into()))?;
                 let kind = DigestKind::from_str(kind_str).map_err(exec_err)?;
+                let cfg = cfg_handle
+                    .read()
+                    .map(|g| g.clone())
+                    .map_err(|_| exec_err("run_digest: digest config lock poisoned".to_string()))?;
                 let report = digests::run_digest(&ctx, &cfg, kind, chrono::Utc::now())
                     .await
                     .map_err(|e| exec_err(format!("run_digest: {e}")))?;
                 to_value(&report, "run_digest")
+            }));
+        }
+        // FU-7 — `set_digest_config`: replace the live config under
+        // the shared lock. The scheduler loop snapshots on every
+        // tick, so an enabled-flip is picked up within 60 s.
+        if handler_id == HANDLER_SET_DIGEST_CONFIG {
+            let cfg_handle = Arc::clone(&self.digest_config);
+            let args = args.clone();
+            return Some(Box::pin(async move {
+                let new_cfg: DigestConfig = serde_json::from_value(args).map_err(|e| {
+                    exec_err(format!("set_digest_config: decode: {e}"))
+                })?;
+                {
+                    let mut g = cfg_handle.write().map_err(|_| {
+                        exec_err("set_digest_config: digest config lock poisoned".to_string())
+                    })?;
+                    *g = new_cfg;
+                }
+                Ok(serde_json::json!({ "applied": true }))
             }));
         }
         if handler_id != HANDLER_RUN {

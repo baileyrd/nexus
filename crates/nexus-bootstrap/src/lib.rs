@@ -775,6 +775,13 @@ fn register_core_plugins(
                     ("validate", nexus_workflow::HANDLER_VALIDATE),
                     ("run", nexus_workflow::HANDLER_RUN),
                     ("run_digest", nexus_workflow::HANDLER_RUN_DIGEST),
+                    // FU-7 — live config push. Lets the shell flip
+                    // [digests].enabled / cron strings without
+                    // restarting the kernel.
+                    (
+                        "set_digest_config",
+                        nexus_workflow::HANDLER_SET_DIGEST_CONFIG,
+                    ),
                 ],
             ),
             forge_root,
