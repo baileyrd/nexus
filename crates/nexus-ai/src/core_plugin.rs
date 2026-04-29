@@ -25,6 +25,7 @@ use serde::Serialize;
 use crate::anthropic::AnthropicProvider;
 use crate::config::{detect_embedding_provider, detect_provider, AiConfig};
 use crate::embedding::EmbeddingProvider;
+use crate::indexing_daemon::{self, EmbedderFactory, IndexingDaemon, SharedStatus};
 use crate::ipc::{
     AiStreamAskMessage, AiStreamAskRole, AiStreamChatArgs, AiStreamChatMode, AiToolPolicy,
 };
@@ -89,6 +90,12 @@ pub const HANDLER_SESSION_DELETE: u32 = 11;
 /// A `null` clears that side; an absent key leaves it untouched.
 pub const HANDLER_SET_CONFIG: u32 = 12;
 
+/// BL-041 — `index_status`: snapshot of the background indexing
+/// daemon's counters. Returns the [`crate::indexing_daemon::IndexStatus`]
+/// shape: `{ indexed_files, pending_files, total_seen, last_error,
+/// running }`. Cheap — pure read of the shared `Arc<RwLock<>>` state.
+pub const HANDLER_INDEX_STATUS: u32 = 14;
+
 /// BL-040 — `semantic_search`: embed a query and return the top-N
 /// matching chunks from the vector store (no chat). Args
 /// `{ query: String, limit?: usize (default 10) }`. Returns
@@ -113,6 +120,16 @@ pub struct AiCorePlugin {
     /// through `ipc_call`. Wrapped in `Arc` so handler futures get a
     /// cheap clone; the registry itself is read-only after bootstrap.
     tools: Option<Arc<ToolRegistry>>,
+    /// BL-041 — shared snapshot of the background indexing daemon's
+    /// counters. Allocated unconditionally (cheap) so the
+    /// `HANDLER_INDEX_STATUS` IPC handler can return a meaningful
+    /// "not yet running" view even before `on_start` runs and even
+    /// when no embedding provider is configured (in which case the
+    /// daemon thread spins but never flushes).
+    index_status: SharedStatus,
+    /// BL-041 — owning handle for the daemon thread. `None` until
+    /// `on_start` runs; cleared in `on_stop` (which joins the worker).
+    indexing_daemon: Option<IndexingDaemon>,
 }
 
 impl AiCorePlugin {
@@ -124,6 +141,8 @@ impl AiCorePlugin {
             embed_config: Arc::new(RwLock::new(None)),
             context: None,
             tools: None,
+            index_status: indexing_daemon::new_status(),
+            indexing_daemon: None,
         }
     }
 
@@ -179,6 +198,11 @@ impl CorePlugin for AiCorePlugin {
             let embed = self.embed_config.read().ok().and_then(|g| g.clone());
             return Ok(config_snapshot(ai.as_ref(), embed.as_ref()));
         }
+        if handler_id == HANDLER_INDEX_STATUS {
+            let snap = indexing_daemon::snapshot(&self.index_status);
+            return serde_json::to_value(&snap)
+                .map_err(|e| exec_err(format!("index_status: serialize: {e}")));
+        }
         Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: format!(
@@ -201,6 +225,17 @@ impl CorePlugin for AiCorePlugin {
             let embed = self.embed_config.read().ok().and_then(|g| g.clone());
             let response = config_snapshot(ai.as_ref(), embed.as_ref());
             return Some(Box::pin(async move { Ok(response) }));
+        }
+
+        // BL-041 — `index_status` is a pure read of the shared status
+        // handle; no I/O, but routed through `dispatch_async` for
+        // shape symmetry with the rest of the AI surface (the shell
+        // polls it via its standard `kernel_invoke` async path).
+        if handler_id == HANDLER_INDEX_STATUS {
+            let snap = indexing_daemon::snapshot(&self.index_status);
+            let response = serde_json::to_value(&snap)
+                .map_err(|e| exec_err(format!("index_status: serialize: {e}")));
+            return Some(Box::pin(async move { response }));
         }
 
         // set_config: in-memory only, no I/O — but we model it as async
@@ -249,11 +284,52 @@ impl CorePlugin for AiCorePlugin {
     /// Also seeds the tool registry with the storage-backed built-ins
     /// (`read_file`, `write_file`) so the streaming dispatch loop has a
     /// non-empty toolbox without each frontend opting in.
+    ///
+    /// BL-041 — also spawns the background indexing daemon. We start
+    /// it here (rather than `on_start`) because `wire_context` is the
+    /// first lifecycle hook with the kernel context in hand; the
+    /// daemon needs `ctx.subscribe(...)` and `ctx.ipc_call(...)`.
     fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
         let mut registry = ToolRegistry::new();
         register_storage_builtins(&mut registry, Arc::clone(&ctx));
         self.tools = Some(Arc::new(registry));
+
+        // Build the embedder factory — captures the live `embed_config`
+        // handle so the daemon picks up runtime `set_config` updates
+        // without a restart. Returns `None` when no embedding provider
+        // is configured; the daemon then logs `last_error` and skips
+        // the touch path until the user sets one.
+        let embed_handle = Arc::clone(&self.embed_config);
+        let factory: EmbedderFactory = Arc::new(move || {
+            let cfg = embed_handle.read().ok().and_then(|g| g.clone())?;
+            build_embedding_provider(&cfg).ok()
+        });
+
+        match IndexingDaemon::start(Arc::clone(&ctx), Arc::clone(&self.index_status), factory) {
+            Ok(daemon) => {
+                self.indexing_daemon = Some(daemon);
+                tracing::debug!(plugin_id = PLUGIN_ID, "BL-041 indexing daemon started");
+            }
+            Err(e) => {
+                tracing::error!(
+                    plugin_id = PLUGIN_ID,
+                    ?e,
+                    "BL-041 indexing daemon failed to start"
+                );
+                if let Ok(mut g) = self.index_status.write() {
+                    g.last_error = Some(format!("daemon spawn failed: {e}"));
+                }
+            }
+        }
+
         self.context = Some(ctx);
+    }
+
+    /// BL-041 — gracefully stop the indexing daemon on shutdown.
+    fn on_stop(&mut self) {
+        if let Some(mut d) = self.indexing_daemon.take() {
+            d.stop();
+        }
     }
 }
 
@@ -1775,6 +1851,30 @@ mod semantic_search_dispatch_tests {
             msg.contains("no AI embedding provider configured"),
             "expected embed-cfg error, got: {msg}"
         );
+    }
+
+    #[tokio::test]
+    async fn index_status_handler_returns_default_snapshot_when_daemon_unstarted() {
+        // No `wire_context` here — the daemon has never spawned, so
+        // `running` is `false` and counters are all zero. The handler
+        // must still return a well-formed JSON object so the shell
+        // badge can render "idle".
+        let mut plugin = AiCorePlugin::new();
+        let fut = plugin
+            .dispatch_async(HANDLER_INDEX_STATUS, &serde_json::json!({}))
+            .expect("HANDLER_INDEX_STATUS must be async");
+        let value = fut.await.expect("snapshot must succeed");
+        assert_eq!(value.get("running"), Some(&serde_json::json!(false)));
+        assert_eq!(value.get("indexed_files"), Some(&serde_json::json!(0)));
+        assert_eq!(value.get("pending_files"), Some(&serde_json::json!(0)));
+        assert_eq!(value.get("total_seen"), Some(&serde_json::json!(0)));
+        assert_eq!(value.get("last_error"), Some(&serde_json::json!(null)));
+    }
+
+    #[test]
+    fn index_status_handler_id_is_fourteen() {
+        // Pin the wire id for bootstrap manifest / shell drift detection.
+        assert_eq!(HANDLER_INDEX_STATUS, 14);
     }
 
     #[test]
