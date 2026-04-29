@@ -102,6 +102,19 @@ pub const HANDLER_INDEX_STATUS: u32 = 14;
 /// `{ matches: Vec<ChunkMatch> }`.
 pub const HANDLER_SEMANTIC_SEARCH: u32 = 13;
 
+/// BL-045 — `enrich_file`: read a markdown file, run the AI provider
+/// for tags + summary, run semantic_search for related notes, return
+/// an [`crate::enrichment::EnrichmentProposal`] WITHOUT writing.
+/// Args `{ path: String }` → JSON-serialised proposal.
+pub const HANDLER_ENRICH_FILE: u32 = 15;
+
+/// BL-045 — `enrich_apply`: merge a previously-returned
+/// [`crate::enrichment::EnrichmentProposal`] back into the file's
+/// YAML frontmatter, but only if `body_hash` still matches. Args
+/// `{ proposal: EnrichmentProposal }` → `{ applied: bool, reason?:
+/// String }`.
+pub const HANDLER_ENRICH_APPLY: u32 = 16;
+
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
     /// Live config — wrapped in `Arc<RwLock<>>` so async handlers can

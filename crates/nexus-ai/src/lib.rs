@@ -16,6 +16,7 @@ mod chunker;
 mod config;
 pub mod core_plugin;
 mod embedding;
+pub mod enrichment;
 mod error;
 pub mod indexing_daemon;
 #[cfg(feature = "local-embeddings")]
@@ -34,6 +35,7 @@ pub use chunker::{chunks_from_blocks, Chunk};
 pub use config::{detect_embedding_provider, detect_local_embedding, detect_provider, AiConfig};
 pub use core_plugin::AiCorePlugin;
 pub use embedding::EmbeddingProvider;
+pub use enrichment::{body_hash, merge_frontmatter, strip_frontmatter, EnrichmentProposal};
 pub use error::AiError;
 #[cfg(feature = "local-embeddings")]
 pub use local_embedding::{
