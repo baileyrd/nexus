@@ -666,6 +666,10 @@ fn register_core_plugins(
                         "set_config",
                         nexus_ai::core_plugin::HANDLER_SET_CONFIG,
                     ),
+                    (
+                        "semantic_search",
+                        nexus_ai::core_plugin::HANDLER_SEMANTIC_SEARCH,
+                    ),
                 ],
             ),
             forge_root,
