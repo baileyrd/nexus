@@ -627,6 +627,12 @@ fn register_core_plugins(
                 "AI",
                 LifecycleFlags {
                     on_init: true,
+                    // BL-041 — gracefully tear down the background
+                    // indexing daemon on shutdown. (`on_start` stays
+                    // false; the daemon is spawned from
+                    // `wire_context` because that's the first hook
+                    // with the kernel context in hand.)
+                    on_stop: true,
                     ..LifecycleFlags::NONE
                 },
                 &[
@@ -669,6 +675,14 @@ fn register_core_plugins(
                     (
                         "semantic_search",
                         nexus_ai::core_plugin::HANDLER_SEMANTIC_SEARCH,
+                    ),
+                    // BL-041 — background indexing daemon status
+                    // snapshot. Polled by the shell status badge
+                    // (~2 s cadence) and surfaced through `nexus
+                    // status` for headless use.
+                    (
+                        "index_status",
+                        nexus_ai::core_plugin::HANDLER_INDEX_STATUS,
                     ),
                 ],
             ),
