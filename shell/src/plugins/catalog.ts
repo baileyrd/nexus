@@ -2,20 +2,17 @@
 //
 // WI-43: Plugin curation catalog.
 //
-// Single source of truth for the shell's 42 built-in plugin registrations,
+// Single source of truth for the shell's built-in plugin registrations,
 // split into a default-on set (loaded at boot) and a default-off set
 // (shipped but dormant, opt-in via Settings > Plugins).
 //
 // No plugins are deleted — every import that used to live in main.tsx is
 // preserved here. Users can enable any default-off entry by adding its id
 // to the persisted `plugins.enabled: string[]` config value.
-//
-// Acceptance guard: `grep -c "^import.*Plugin" shell/src/plugins/catalog.ts`
-// must equal 42.
 
 // Plugin contract type. The `import type` is split across two lines so
-// the WI-43 acceptance grep (`grep -c "^import.*Plugin" catalog.ts` == 42)
-// counts only the 42 real plugin registrations below, not this type shim.
+// the WI-43 acceptance grep (`grep -c "^import.*Plugin" catalog.ts`)
+// counts only the real plugin registrations below, not this type shim.
 import type {
   Plugin as Registered,
 } from '../types/plugin'

@@ -12,7 +12,10 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { splitTextOnCitations } from './citationTransform.ts'
+import {
+  splitTextOnCitations,
+  substituteCitationsInHtml,
+} from './citationTransform.ts'
 
 test('splitTextOnCitations: passes text through when no markers', () => {
   const out = splitTextOnCitations('plain answer text', new Set([1, 2]))
@@ -57,4 +60,46 @@ test('splitTextOnCitations: handles back-to-back markers without dropping spans'
 test('splitTextOnCitations: falls back to passthrough when valid set is empty', () => {
   const out = splitTextOnCitations('claims [1] and [2]', new Set())
   assert.deepEqual(out, ['claims [1] and [2]'])
+})
+
+// FU-3 regression: substitution must not touch `[N]` literals that
+// the markdown renderer placed inside `<pre>`, `<code>`, or the
+// fenced-code placeholder.
+test('substituteCitationsInHtml: leaves [N] inside <pre><code> verbatim', () => {
+  const html =
+    '<p>see [1]</p><pre><code>const arr = [1] // first\nconst x = [2]</code></pre><p>and [2]</p>'
+  const out = substituteCitationsInHtml(html, new Set([1, 2]))
+  assert.match(out, /<p>see <sup class="nexus-citation" data-cite="1"[^>]*>\[1\]<\/sup><\/p>/)
+  // Code block contents preserved verbatim.
+  assert.ok(out.includes('<pre><code>const arr = [1] // first\nconst x = [2]</code></pre>'))
+  assert.match(out, /<p>and <sup class="nexus-citation" data-cite="2"[^>]*>\[2\]<\/sup><\/p>/)
+})
+
+test('substituteCitationsInHtml: leaves [N] inside inline <code> verbatim', () => {
+  const html = '<p>cite <code>arr[1]</code> then [1] applies</p>'
+  const out = substituteCitationsInHtml(html, new Set([1]))
+  assert.ok(out.includes('<code>arr[1]</code>'))
+  assert.match(out, /then <sup class="nexus-citation" data-cite="1"[^>]*>\[1\]<\/sup> applies/)
+})
+
+test('substituteCitationsInHtml: leaves [N] inside fenced-code placeholder verbatim', () => {
+  const html =
+    '<p>opens [1]</p><div class="nexus-fenced-pending" data-nexus-fenced-lang="mermaid" data-nexus-fenced-source="encoded"></div><p>closes [2]</p>'
+  const out = substituteCitationsInHtml(html, new Set([1, 2]))
+  assert.ok(out.includes('<div class="nexus-fenced-pending" data-nexus-fenced-lang="mermaid" data-nexus-fenced-source="encoded"></div>'))
+  assert.match(out, /opens <sup class="nexus-citation" data-cite="1"[^>]*>\[1\]<\/sup>/)
+  assert.match(out, /closes <sup class="nexus-citation" data-cite="2"[^>]*>\[2\]<\/sup>/)
+})
+
+test('substituteCitationsInHtml: empty valid set is a no-op', () => {
+  const html = '<p>see [1] and [2]</p>'
+  const out = substituteCitationsInHtml(html, new Set())
+  assert.equal(out, html)
+})
+
+test('substituteCitationsInHtml: out-of-range marker stays plain text', () => {
+  const html = '<p>see [1] but not [9]</p>'
+  const out = substituteCitationsInHtml(html, new Set([1]))
+  assert.match(out, /<sup class="nexus-citation" data-cite="1"[^>]*>\[1\]<\/sup>/)
+  assert.ok(out.includes('not [9]'))
 })

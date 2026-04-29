@@ -22,6 +22,10 @@ use nexus_ai::ipc::{
     AiStreamAskArgs, AiStreamAskMessage, AiStreamAskResult, AiStreamAskRole, AiStreamAskSource,
     AiStreamChatArgs, AiStreamChatMode, AiToolPolicy,
 };
+// FU-13 — RAG response shape (BL-038). TS bindings shipped already;
+// emitting JSON Schema lets MCP / external tools consume the same
+// contract over the wire.
+use nexus_ai::{Citation, RagResponse};
 use nexus_storage::ipc::{
     StorageListDirArgs, StorageListDirEntry, StorageListDirResult, StorageNoteAppendArgs,
     StorageNoteAppendResult, StorageReadFileArgs, StorageReadFileResult, StorageSearchArgs,
@@ -88,6 +92,13 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<AiStreamChatArgs>("com_nexus_ai__stream_chat", "args");
     write_schema::<AiStreamChatMode>("com_nexus_ai__stream_chat", "mode");
     write_schema::<AiToolPolicy>("com_nexus_ai__stream_chat", "tool_policy");
+
+    // ── com.nexus.ai::ask (BL-038 RAG response) ──────────────────────────
+    // The MCP surface re-uses this shape to expose RAG answers + their
+    // citation list; emitting the JSON Schema keeps MCP-side decoders
+    // honest as `Citation` evolves.
+    write_schema::<Citation>("com_nexus_ai__ask", "citation");
+    write_schema::<RagResponse>("com_nexus_ai__ask", "result");
 }
 
 /// Sanity check: after emission the 5 pilot handlers each have at least

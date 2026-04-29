@@ -38,7 +38,7 @@ mod registry;
 pub use condition::{evaluate_condition, ConditionError, EvaluationContext};
 pub use core_plugin::{
     WorkflowCorePlugin, HANDLER_GET, HANDLER_LIST, HANDLER_RELOAD, HANDLER_RUN,
-    HANDLER_RUN_DIGEST, HANDLER_VALIDATE, PLUGIN_ID,
+    HANDLER_RUN_DIGEST, HANDLER_SET_DIGEST_CONFIG, HANDLER_VALIDATE, PLUGIN_ID,
 };
 pub use digests::{
     build_digest_prompt, digest_window, next_fire, output_path, run_digest, DigestConfig,

@@ -8,6 +8,12 @@
 // file collapse into one enrichment proposal, while saves of *other*
 // files still fire on their own clocks.
 //
+// FU-1: enrichment is gated to "inbox scope". A save is in scope iff
+// its relpath equals `memory.inboxPath` (BL-043) OR the file carries
+// an `#inbox` tag (probed via `com.nexus.storage::query_tags`). The
+// "Force enrich active file" palette command (`nexus.enrich.force`)
+// bypasses this gate.
+//
 // The successful proposal is pushed into `useEnrichStore.pending`
 // where the accept-gate UI picks it up. Failures are recorded as a
 // dismissable error rather than thrown — enrichment is an opt-in
@@ -21,6 +27,12 @@ const THROTTLE_MS = 5000
 const AI_PLUGIN = 'com.nexus.ai'
 const COMMAND_ENRICH_FILE = 'enrich_file'
 const COMMAND_ENRICH_APPLY = 'enrich_apply'
+
+const STORAGE_PLUGIN = 'com.nexus.storage'
+const COMMAND_QUERY_TAGS = 'query_tags'
+
+const CONFIG_INBOX_PATH = 'memory.inboxPath'
+const INBOX_TAG = 'inbox'
 
 interface FileSavedPayload {
   relpath: string
@@ -38,6 +50,45 @@ function isMarkdown(relpath: string): boolean {
   return /\.(md|mdx|markdown)$/i.test(relpath)
 }
 
+interface TagResult {
+  file_path?: unknown
+}
+
+/**
+ * Decide whether `relpath` is in inbox scope. Inbox scope = the
+ * configured `memory.inboxPath` OR any file currently tagged
+ * `#inbox`. Either signal is enough; we only run the cross-file tag
+ * lookup when the path-equality check misses.
+ *
+ * Failures (e.g. storage plugin not yet booted) fall back to the
+ * path-equality result so a momentarily-unavailable index doesn't
+ * silently disable enrichment for legitimately-tagged files.
+ */
+export async function isInInboxScope(api: PluginAPI, relpath: string): Promise<boolean> {
+  let inboxPath: string | null = null
+  try {
+    inboxPath = api.configuration.getValue<string | null>(CONFIG_INBOX_PATH, null)
+  } catch {
+    inboxPath = null
+  }
+  if (inboxPath && relpath === inboxPath) return true
+  try {
+    const raw = await api.kernel.invoke(STORAGE_PLUGIN, COMMAND_QUERY_TAGS, {
+      name: INBOX_TAG,
+    })
+    if (Array.isArray(raw)) {
+      for (const item of raw as TagResult[]) {
+        if (item && typeof item.file_path === 'string' && item.file_path === relpath) {
+          return true
+        }
+      }
+    }
+  } catch {
+    /* tag lookup failed — fall through to false */
+  }
+  return false
+}
+
 export function attachRuntime(api: PluginAPI): () => void {
   const off = api.events.on<FileSavedPayload>('files:saved', (payload) => {
     if (!payload || !payload.relpath) return
@@ -51,7 +102,7 @@ export function attachRuntime(api: PluginAPI): () => void {
     if (existing) clearTimeout(existing)
     const handle = setTimeout(() => {
       pending.delete(relpath)
-      void runProposal(api, relpath)
+      void runProposalIfInScope(api, relpath)
     }, THROTTLE_MS)
     pending.set(relpath, handle)
   })
@@ -59,6 +110,12 @@ export function attachRuntime(api: PluginAPI): () => void {
     off()
     cancelAllPending()
   }
+}
+
+async function runProposalIfInScope(api: PluginAPI, relpath: string): Promise<void> {
+  const inScope = await isInInboxScope(api, relpath)
+  if (!inScope) return
+  await runProposal(api, relpath)
 }
 
 async function runProposal(api: PluginAPI, relpath: string): Promise<void> {
@@ -81,10 +138,34 @@ async function runProposal(api: PluginAPI, relpath: string): Promise<void> {
   }
 }
 
-/** Apply the currently-pending proposal. UI handler. */
+/**
+ * Force an enrichment proposal for the currently-active editor tab,
+ * bypassing the inbox-scope filter. Used by the
+ * `nexus.enrich.force` palette command.
+ */
+export async function forceEnrichActiveFile(api: PluginAPI): Promise<void> {
+  const active = api.editor.active()
+  if (!active) {
+    api.notifications.show({
+      type: 'warning',
+      message: 'No active editor tab to enrich.',
+    })
+    return
+  }
+  if (!isMarkdown(active.relpath)) {
+    api.notifications.show({
+      type: 'warning',
+      message: 'Enrichment only applies to markdown files.',
+    })
+    return
+  }
+  await runProposal(api, active.relpath)
+}
+
+/** Apply the head (oldest) pending proposal. UI handler. */
 export async function applyPending(api: PluginAPI): Promise<void> {
   const state = useEnrichStore.getState()
-  const proposal = state.pending
+  const proposal = state.pending.values().next().value
   if (!proposal) return
   state.setApplying(true)
   try {
@@ -93,7 +174,7 @@ export async function applyPending(api: PluginAPI): Promise<void> {
     })
     const result = raw as { applied: boolean; reason?: string | null }
     if (result.applied) {
-      useEnrichStore.getState().dismiss()
+      useEnrichStore.getState().dismiss(proposal.path)
       api.notifications.show({
         type: 'info',
         message: `Enriched ${proposal.path}`,

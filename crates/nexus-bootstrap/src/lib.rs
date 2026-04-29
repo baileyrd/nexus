@@ -697,6 +697,15 @@ fn register_core_plugins(
                         "enrich_apply",
                         nexus_ai::core_plugin::HANDLER_ENRICH_APPLY,
                     ),
+                    // FU-2 — manual "Reindex forge" trigger. Fans
+                    // every markdown file currently in the storage
+                    // index onto the indexing daemon's queue. Used
+                    // by the shell's status badge button + palette
+                    // command.
+                    (
+                        "index_trigger",
+                        nexus_ai::core_plugin::HANDLER_INDEX_TRIGGER,
+                    ),
                 ],
             ),
             forge_root,
@@ -766,6 +775,13 @@ fn register_core_plugins(
                     ("validate", nexus_workflow::HANDLER_VALIDATE),
                     ("run", nexus_workflow::HANDLER_RUN),
                     ("run_digest", nexus_workflow::HANDLER_RUN_DIGEST),
+                    // FU-7 — live config push. Lets the shell flip
+                    // [digests].enabled / cron strings without
+                    // restarting the kernel.
+                    (
+                        "set_digest_config",
+                        nexus_workflow::HANDLER_SET_DIGEST_CONFIG,
+                    ),
                 ],
             ),
             forge_root,

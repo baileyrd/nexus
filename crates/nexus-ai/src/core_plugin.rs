@@ -25,7 +25,8 @@ use serde::Serialize;
 use crate::anthropic::AnthropicProvider;
 use crate::config::{detect_embedding_provider, detect_provider, AiConfig};
 use crate::embedding::EmbeddingProvider;
-use crate::indexing_daemon::{self, EmbedderFactory, IndexingDaemon, SharedStatus};
+use crate::indexing_daemon::{self, DaemonMsg, EmbedderFactory, IndexingDaemon, SharedStatus};
+use tokio::sync::mpsc::UnboundedSender;
 use crate::ipc::{
     AiStreamAskMessage, AiStreamAskRole, AiStreamChatArgs, AiStreamChatMode, AiToolPolicy,
 };
@@ -115,6 +116,13 @@ pub const HANDLER_ENRICH_FILE: u32 = 15;
 /// String }`.
 pub const HANDLER_ENRICH_APPLY: u32 = 16;
 
+/// FU-2 (BL-041 follow-up) — `index_trigger`: walk every markdown
+/// file currently known to `com.nexus.storage::query_files` and
+/// enqueue it onto the indexing daemon's debouncer as a `Touched`.
+/// No args. Returns `{ queued: usize }`. Idempotent — duplicate
+/// pushes coalesce in the debouncer.
+pub const HANDLER_INDEX_TRIGGER: u32 = 17;
+
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
     /// Live config — wrapped in `Arc<RwLock<>>` so async handlers can
@@ -143,6 +151,11 @@ pub struct AiCorePlugin {
     /// BL-041 — owning handle for the daemon thread. `None` until
     /// `on_start` runs; cleared in `on_stop` (which joins the worker).
     indexing_daemon: Option<IndexingDaemon>,
+    /// FU-2 — clone of the daemon's input-channel sender, populated
+    /// alongside `indexing_daemon`. Held in an `Arc<RwLock<>>` so the
+    /// async `index_trigger` handler can reach it from a future
+    /// without borrowing `&self`. Cleared on `on_stop`.
+    daemon_tx: Arc<RwLock<Option<UnboundedSender<DaemonMsg>>>>,
 }
 
 impl AiCorePlugin {
@@ -156,6 +169,7 @@ impl AiCorePlugin {
             tools: None,
             index_status: indexing_daemon::new_status(),
             indexing_daemon: None,
+            daemon_tx: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -264,6 +278,21 @@ impl CorePlugin for AiCorePlugin {
             }));
         }
 
+        // FU-2 — `index_trigger`: enumerate forge markdown via storage
+        // IPC and fan into the daemon's queue. Resolves the sender via
+        // the cloned `daemon_tx` handle so the future can outlive the
+        // dispatch borrow.
+        if handler_id == HANDLER_INDEX_TRIGGER {
+            let tx_handle = Arc::clone(&self.daemon_tx);
+            let ctx_clone = self.context.clone();
+            return Some(Box::pin(async move {
+                let ctx = ctx_clone.ok_or_else(|| {
+                    exec_err("AI plugin context not wired (bootstrap incomplete)")
+                })?;
+                handle_index_trigger(&ctx, &tx_handle).await
+            }));
+        }
+
         let ctx = self.context.clone();
         let tools = self.tools.clone();
         let ai_cfg = self.ai_config.read().ok().and_then(|g| g.clone());
@@ -322,6 +351,9 @@ impl CorePlugin for AiCorePlugin {
 
         match IndexingDaemon::start(Arc::clone(&ctx), Arc::clone(&self.index_status), factory) {
             Ok(daemon) => {
+                if let Ok(mut g) = self.daemon_tx.write() {
+                    *g = daemon.sender_handle();
+                }
                 self.indexing_daemon = Some(daemon);
                 tracing::debug!(plugin_id = PLUGIN_ID, "BL-041 indexing daemon started");
             }
@@ -342,6 +374,9 @@ impl CorePlugin for AiCorePlugin {
 
     /// BL-041 — gracefully stop the indexing daemon on shutdown.
     fn on_stop(&mut self) {
+        if let Ok(mut g) = self.daemon_tx.write() {
+            *g = None;
+        }
         if let Some(mut d) = self.indexing_daemon.take() {
             d.stop();
         }
@@ -456,6 +491,60 @@ async fn handle_enrich_apply(
         "applied": applied,
         "reason": reason,
     }))
+}
+
+/// FU-2 — fan every markdown file in the storage index into the
+/// indexing daemon as a `Touched`. Returns `{ queued: usize }`.
+///
+/// We go through `com.nexus.storage::query_files` rather than walking
+/// the filesystem because storage already owns the canonical
+/// inventory of forge files (and respects deletions, the
+/// `.forge/` quarantine, etc.). Files not yet known to storage will
+/// be picked up by the next file-watcher event — the indexing
+/// daemon's debouncer dedupes overlap.
+async fn handle_index_trigger(
+    ctx: &KernelPluginContext,
+    daemon_tx: &Arc<RwLock<Option<UnboundedSender<DaemonMsg>>>>,
+) -> Result<serde_json::Value, PluginError> {
+    let tx = daemon_tx
+        .read()
+        .ok()
+        .and_then(|g| g.clone())
+        .ok_or_else(|| exec_err("index_trigger: indexing daemon not running"))?;
+
+    let response = ctx
+        .ipc_call(
+            "com.nexus.storage",
+            "query_files",
+            serde_json::json!({}),
+            std::time::Duration::from_secs(30),
+        )
+        .await
+        .map_err(|e| exec_err(format!("index_trigger: query_files: {e}")))?;
+
+    let records = response
+        .as_array()
+        .ok_or_else(|| exec_err("index_trigger: query_files returned non-array"))?;
+
+    let mut queued: usize = 0;
+    for entry in records {
+        let Some(path) = entry.get("path").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let ext_ok = std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"));
+        if !ext_ok {
+            continue;
+        }
+        if tx.send(DaemonMsg::Touched(std::path::PathBuf::from(path))).is_ok() {
+            queued += 1;
+        }
+    }
+
+    tracing::debug!(plugin_id = PLUGIN_ID, queued, "index_trigger fanned forge");
+    Ok(serde_json::json!({ "queued": queued }))
 }
 
 async fn handle_index_file(

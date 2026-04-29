@@ -31,9 +31,15 @@ export interface IndexStatusSnapshot {
 
 interface IndexingStatusProps {
   api: PluginAPI
+  /**
+   * FU-2 — fires a `com.nexus.ai::index_trigger` round-trip. When
+   * provided, the badge becomes a button so the user can reindex the
+   * forge from the status bar without finding the palette command.
+   */
+  onReindex?: () => void
 }
 
-export function IndexingStatus({ api }: IndexingStatusProps) {
+export function IndexingStatus({ api, onReindex }: IndexingStatusProps) {
   const [status, setStatus] = useState<IndexStatusSnapshot | null>(null)
   // Latch errors so a transient kernel hiccup doesn't blank the badge.
   const lastGoodRef = useRef<IndexStatusSnapshot | null>(null)
@@ -90,33 +96,63 @@ export function IndexingStatus({ api }: IndexingStatusProps) {
       ? `indexing ${status.pending_files}`
       : `${status.indexed_files} indexed`
 
-  const tooltip = errored
+  const baseTooltip = errored
     ? `Index error: ${status.last_error}`
     : `BL-041 indexing daemon — ${status.indexed_files} files indexed, ${status.pending_files} pending, ${status.total_seen} events observed`
+  const tooltip = onReindex ? `${baseTooltip}\nClick to reindex forge.` : baseTooltip
+
+  const dot = (
+    <span
+      aria-hidden
+      style={{
+        width: 6,
+        height: 6,
+        borderRadius: '50%',
+        flexShrink: 0,
+        background: colour,
+        boxShadow: busy ? `0 0 4px ${colour}` : 'none',
+      }}
+    />
+  )
+
+  const inner = (
+    <>
+      {dot}
+      <span>{label}</span>
+    </>
+  )
+
+  const baseStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '0 2px',
+    fontVariantNumeric: 'tabular-nums',
+  }
+
+  if (onReindex) {
+    return (
+      <button
+        type="button"
+        title={tooltip}
+        onClick={onReindex}
+        style={{
+          ...baseStyle,
+          background: 'transparent',
+          border: 'none',
+          color: 'inherit',
+          font: 'inherit',
+          cursor: 'pointer',
+        }}
+      >
+        {inner}
+      </button>
+    )
+  }
 
   return (
-    <span
-      title={tooltip}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '0 2px',
-        fontVariantNumeric: 'tabular-nums',
-      }}
-    >
-      <span
-        aria-hidden
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: '50%',
-          flexShrink: 0,
-          background: colour,
-          boxShadow: busy ? `0 0 4px ${colour}` : 'none',
-        }}
-      />
-      <span>{label}</span>
+    <span title={tooltip} style={baseStyle}>
+      {inner}
     </span>
   )
 }
