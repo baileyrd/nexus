@@ -40,8 +40,8 @@ use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Deserialize;
 
 use crate::{
-    build_archetype, Agent, AgentError, ChatDriver, LlmAgent, Plan, PlanExecutor, ToolCall,
-    ToolDispatcher, DEFAULT_SYSTEM_PROMPT,
+    build_archetype, orchestrator::AgentOrchestrator, Agent, AgentError, ChatDriver, LlmAgent,
+    Plan, PlanExecutor, ToolCall, ToolDispatcher, TraceEntry, DEFAULT_SYSTEM_PROMPT,
 };
 
 /// Short archetype names accepted by [`crate::archetypes::resolve_prompt`].
@@ -76,6 +76,23 @@ pub const HANDLER_HISTORY_DELETE: u32 = 7;
 /// `com.nexus.agent.writer`). The shell uses this to populate the
 /// archetype picker without a hardcoded catalogue.
 pub const HANDLER_LIST_ARCHETYPES: u32 = 8;
+/// `delegate` handler id — orchestrator hands one goal to one
+/// archetype, plans + executes, returns an [`crate::Observation`].
+/// Args: [`DelegateArgs`]. (BL-027.)
+pub const HANDLER_DELEGATE: u32 = 9;
+/// `parallel` handler id — fan out a list of `(archetype, goal)`
+/// jobs in parallel; results come back in input order. Args:
+/// [`ParallelArgs`]. (BL-027.)
+pub const HANDLER_PARALLEL: u32 = 10;
+/// `pipeline` handler id — run stages sequentially; each stage's
+/// summary becomes `{{prev}}` in the next stage's `goal_template`.
+/// Stops on first failure and returns partial results. Args:
+/// [`PipelineArgs`]. (BL-027.)
+pub const HANDLER_PIPELINE: u32 = 11;
+/// `trace_get` handler id — return the orchestrator's trace log
+/// (one [`crate::TraceEntry`] per delegated stage). Payload: `[]`.
+/// (BL-027.)
+pub const HANDLER_TRACE_GET: u32 = 12;
 
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
@@ -87,6 +104,7 @@ const DEFAULT_CHAT_TIMEOUT: Duration = Duration::from_secs(300);
 /// Core plugin instance.
 pub struct AgentCorePlugin {
     context: Option<Arc<KernelPluginContext>>,
+    orchestrator: std::sync::Mutex<Option<Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>>>>,
 }
 
 impl AgentCorePlugin {
@@ -95,7 +113,38 @@ impl AgentCorePlugin {
     /// handler that fires before then returns a clear error.
     #[must_use]
     pub fn new() -> Self {
-        Self { context: None }
+        Self {
+            context: None,
+            orchestrator: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// Lazily build (or return the cached) orchestrator. State —
+    /// scratch + trace — persists for the plugin's lifetime so
+    /// `trace_get` can read entries appended by earlier
+    /// `delegate` / `parallel` / `pipeline` calls.
+    fn orchestrator(
+        &self,
+        ctx: &Arc<KernelPluginContext>,
+    ) -> Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>> {
+        let mut guard = self
+            .orchestrator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(existing) = guard.as_ref() {
+            return Arc::clone(existing);
+        }
+        let driver = AiChatBridge {
+            ctx: Arc::clone(ctx),
+            timeout: DEFAULT_CHAT_TIMEOUT,
+        };
+        let dispatcher = KernelToolBridge {
+            ctx: Arc::clone(ctx),
+            timeout: DEFAULT_TOOL_TIMEOUT,
+        };
+        let built = Arc::new(AgentOrchestrator::new(driver, dispatcher));
+        *guard = Some(Arc::clone(&built));
+        built
     }
 }
 
@@ -139,6 +188,7 @@ impl CorePlugin for AgentCorePlugin {
             return None;
         }
         let ctx = self.context.clone();
+        let orchestrator = ctx.as_ref().map(|c| self.orchestrator(c));
         let args = args.clone();
         Some(Box::pin(async move {
             let ctx = ctx.ok_or_else(|| {
@@ -152,6 +202,16 @@ impl CorePlugin for AgentCorePlugin {
                 HANDLER_HISTORY_LIST => handle_history_list(ctx).await,
                 HANDLER_HISTORY_GET => handle_history_get(ctx, &args).await,
                 HANDLER_HISTORY_DELETE => handle_history_delete(ctx, &args).await,
+                HANDLER_DELEGATE => {
+                    handle_delegate(orchestrator.expect("ctx present"), &args).await
+                }
+                HANDLER_PARALLEL => {
+                    handle_parallel(orchestrator.expect("ctx present"), &args).await
+                }
+                HANDLER_PIPELINE => {
+                    handle_pipeline(orchestrator.expect("ctx present"), &args).await
+                }
+                HANDLER_TRACE_GET => handle_trace_get(orchestrator.expect("ctx present")).await,
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
         }))
@@ -726,6 +786,7 @@ async fn render_skill_body(ctx: &KernelPluginContext, id: &str) -> Option<String
 
 // ── Local adapters mirroring nexus-bootstrap::agent ────────────────────────
 
+#[derive(Clone)]
 struct AiChatBridge {
     ctx: Arc<KernelPluginContext>,
     timeout: Duration,
@@ -753,6 +814,7 @@ impl ChatDriver for AiChatBridge {
     }
 }
 
+#[derive(Clone)]
 struct KernelToolBridge {
     ctx: Arc<KernelPluginContext>,
     timeout: Duration,
@@ -799,6 +861,105 @@ fn to_value<T: serde::Serialize>(
     command: &str,
 ) -> Result<serde_json::Value, PluginError> {
     serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize: {e}")))
+}
+
+// ── Orchestrator handlers (BL-027) ──────────────────────────────────────────
+
+/// Args for [`HANDLER_DELEGATE`]: pick one archetype and a goal.
+#[derive(Deserialize)]
+pub struct DelegateArgs {
+    /// Archetype short name (`"writer"`, `"coder"`, `"researcher"`).
+    pub archetype: String,
+    /// Natural-language goal forwarded to the archetype's planner.
+    pub goal: String,
+}
+
+/// One job for [`HANDLER_PARALLEL`].
+#[derive(Deserialize)]
+pub struct ParallelJob {
+    /// Archetype short name.
+    pub archetype: String,
+    /// Natural-language goal.
+    pub goal: String,
+}
+
+/// Args for [`HANDLER_PARALLEL`].
+#[derive(Deserialize)]
+pub struct ParallelArgs {
+    /// Jobs fanned out concurrently; results returned in input order.
+    pub jobs: Vec<ParallelJob>,
+}
+
+/// One stage in [`HANDLER_PIPELINE`].
+#[derive(Deserialize)]
+pub struct PipelineStage {
+    /// Archetype short name.
+    pub archetype: String,
+    /// Goal template — `{{prev}}` is substituted with the previous
+    /// stage's textual summary before planning.
+    pub goal_template: String,
+}
+
+/// Args for [`HANDLER_PIPELINE`].
+#[derive(Deserialize)]
+pub struct PipelineArgs {
+    /// Stages run sequentially; first failure stops the pipeline and
+    /// the partial observation list is returned.
+    pub stages: Vec<PipelineStage>,
+}
+
+/// Response wrapper for [`HANDLER_TRACE_GET`].
+#[derive(serde::Serialize)]
+pub struct TraceResponse {
+    /// Trace entries in append order.
+    pub entries: Vec<TraceEntry>,
+}
+
+async fn handle_delegate(
+    orch: Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: DelegateArgs = parse(args, "delegate")?;
+    let obs = orch
+        .delegate(&a.archetype, &a.goal, None)
+        .await
+        .map_err(|e| agent_err(&e))?;
+    to_value(&obs, "delegate")
+}
+
+async fn handle_parallel(
+    orch: Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: ParallelArgs = parse(args, "parallel")?;
+    let jobs: Vec<(String, String)> = a
+        .jobs
+        .into_iter()
+        .map(|j| (j.archetype, j.goal))
+        .collect();
+    let observations = orch.parallel(&jobs).await;
+    to_value(&observations, "parallel")
+}
+
+async fn handle_pipeline(
+    orch: Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: PipelineArgs = parse(args, "pipeline")?;
+    let stages: Vec<(String, String)> = a
+        .stages
+        .into_iter()
+        .map(|s| (s.archetype, s.goal_template))
+        .collect();
+    let observations = orch.pipeline(&stages).await;
+    to_value(&observations, "pipeline")
+}
+
+async fn handle_trace_get(
+    orch: Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>>,
+) -> Result<serde_json::Value, PluginError> {
+    let entries = orch.trace().await;
+    to_value(&TraceResponse { entries }, "trace_get")
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
