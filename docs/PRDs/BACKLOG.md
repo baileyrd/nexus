@@ -282,10 +282,11 @@ _BL-027 shipped 2026-04-29 — see BACKLOG_COMPLETED.md._
 
 **Source**: PRD-16 §6 (webhook / git_event / mcp_event), §9.2-9.4 (parallel, retry/backoff, AI steps), §7 (template library).
 **Effort**: Large (umbrella — split when scoped). **Crate**: `nexus-workflow`.
-Cron + file_event + git_event triggers + condition evaluator + variable interpolation + manual executor are all live. Outstanding: webhook trigger (HTTP listener), mcp_event trigger, parallel step scheduler (`Workflow.parallel: bool` parsed but ignored at executor), per-step retry with exponential backoff, AI step types (`ai_prompt`, `ai_decision`), and a built-in workflow templates library. Track as one umbrella; mint sub-IDs when prioritised.
+Cron + file_event + git_event triggers + condition evaluator + variable interpolation + manual executor + per-step retry/backoff are all live. Outstanding: webhook trigger (HTTP listener), mcp_event trigger, parallel step scheduler (`Workflow.parallel: bool` parsed but ignored at executor), AI step types (`ai_prompt`, `ai_decision`), and a built-in workflow templates library. Track as one umbrella; mint sub-IDs when prioritised.
 
 Sub-items:
 - **BL-028a — git_event trigger** _(shipped 2026-04-29)_: subscribes to `com.nexus.git.{state,commit,branch_changed,dirty_changed}` with optional `events` / `branch` / `branch_pattern` filters; defaults exclude `state` (snapshot, fires on every boot). Exposes `trigger.{event_type,branch,head,prev_head?,from?,is_dirty?}` to the workflow.
+- **BL-028b — per-step retry with exponential backoff** _(shipped 2026-04-29)_: per-step `max_retries` / `retry_backoff` (`constant|linear|exponential`) / `retry_initial_delay_ms` / `retry_max_delay_ms` / `retry_jitter` (full-jitter, default true). Step-level fields shadow workflow `error_handling` defaults. `StepOutcome.attempts` records the final attempt count. Each parallel branch will retry independently when parallel scheduling lands.
 
 ### BL-029: Multi-window / detachable panels
 

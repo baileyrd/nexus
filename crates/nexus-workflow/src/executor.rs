@@ -2,8 +2,16 @@
 //!
 //! Walks a [`Workflow`]'s `[[steps]]` in order, dispatching each via
 //! an injected [`ActionDispatcher`]. This is the deterministic path
-//! — parallel steps, condition gating, retry policies, and variable
-//! interpolation beyond `${trigger.*}` are planned follow-ups.
+//! — parallel steps and variable interpolation beyond `${trigger.*}`
+//! are planned follow-ups.
+//!
+//! Retry policy is *per step*: each step's `max_retries` /
+//! `retry_backoff` / `retry_initial_delay_ms` / `retry_max_delay_ms` /
+//! `retry_jitter` shadow the workflow-level `[error_handling]` block,
+//! which in turn falls back to built-in defaults (`max_retries = 0`,
+//! exponential backoff, 100 ms base, 30 s cap, full jitter on). When
+//! parallel scheduling lands (BL-028 #4) each branch will retry
+//! independently with this same per-step config.
 //!
 //! The executor is library-only; no kernel or IPC dependency. A core
 //! plugin wraps it with a [`KernelActionDispatcher`] equivalent that
@@ -43,6 +51,16 @@ pub struct StepOutcome {
     pub status: StepOutcomeStatus,
     /// Error message when `status == Failed`. `None` otherwise.
     pub error: Option<String>,
+    /// Number of dispatch attempts made for this step. `1` means the
+    /// first attempt succeeded (or the only attempt failed with no
+    /// retries configured). `N` means the step finished — successfully
+    /// or otherwise — on its `N`-th try.
+    #[serde(default = "default_attempts")]
+    pub attempts: u32,
+}
+
+fn default_attempts() -> u32 {
+    1
 }
 
 /// Terminal status for one step.
@@ -149,6 +167,7 @@ pub async fn run_workflow_with_variables<D: ActionDispatcher>(
                 response: None,
                 status: StepOutcomeStatus::Skipped,
                 error: None,
+                attempts: 0,
             });
             continue;
         }
@@ -157,15 +176,19 @@ pub async fn run_workflow_with_variables<D: ActionDispatcher>(
             interpolate_step(&mut resolved, variables);
         }
         let step = &resolved;
-        match dispatcher.run(step).await {
-            Ok(response) => outcomes.push(StepOutcome {
+
+        let result = dispatch_with_retry(workflow, step, dispatcher).await;
+
+        match result {
+            Ok((response, attempts)) => outcomes.push(StepOutcome {
                 step_id,
                 step_type: step.step_type.clone(),
                 response: Some(response),
                 status: StepOutcomeStatus::Ok,
                 error: None,
+                attempts,
             }),
-            Err(reason) => {
+            Err((reason, attempts)) => {
                 let policy = step.on_error.as_deref().unwrap_or("stop");
                 let continue_on_error = matches!(policy, "continue" | "log_warn");
                 outcomes.push(StepOutcome {
@@ -174,6 +197,7 @@ pub async fn run_workflow_with_variables<D: ActionDispatcher>(
                     response: None,
                     status: StepOutcomeStatus::Failed,
                     error: Some(reason),
+                    attempts,
                 });
                 if !continue_on_error {
                     abort = true;
@@ -190,6 +214,64 @@ pub async fn run_workflow_with_variables<D: ActionDispatcher>(
         success,
         condition_skipped: false,
     })
+}
+
+/// Resolve the retry config for `step` against the workflow-level
+/// `[error_handling]` block and run the dispatcher with backoff.
+///
+/// Returns `Ok((response, attempts))` if the step ultimately succeeded
+/// or `Err((reason, attempts))` if all retries were exhausted.
+async fn dispatch_with_retry<D: ActionDispatcher>(
+    workflow: &Workflow,
+    step: &Step,
+    dispatcher: &D,
+) -> Result<(serde_json::Value, u32), (String, u32)> {
+    let max_retries = step
+        .max_retries
+        .or_else(|| {
+            workflow
+                .error_handling
+                .as_ref()
+                .and_then(|eh| eh.max_retries)
+        })
+        .unwrap_or(0);
+    let backoff_kind = step
+        .retry_backoff
+        .as_deref()
+        .or_else(|| {
+            workflow
+                .error_handling
+                .as_ref()
+                .and_then(|eh| eh.retry_backoff.as_deref())
+        })
+        .unwrap_or("exponential");
+    let base_ms = step.retry_initial_delay_ms.unwrap_or(100);
+    let cap_ms = step.retry_max_delay_ms.unwrap_or(30_000);
+    let jitter = step.retry_jitter.unwrap_or(true);
+
+    let mut attempt: u32 = 0;
+    loop {
+        attempt += 1;
+        match dispatcher.run(step).await {
+            Ok(v) => return Ok((v, attempt)),
+            Err(e) if attempt > max_retries => return Err((e, attempt)),
+            Err(_) => {
+                let raw = match backoff_kind {
+                    "constant" => base_ms,
+                    "linear" => base_ms.saturating_mul(u64::from(attempt)),
+                    // exponential (default): base * 2^(attempt-1),
+                    // shift capped to avoid UB on big attempt counts.
+                    _ => {
+                        let shift = (attempt - 1).min(20);
+                        base_ms.saturating_mul(1u64 << shift)
+                    }
+                }
+                .min(cap_ms);
+                let delay = if jitter { fastrand::u64(0..=raw) } else { raw };
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+            }
+        }
+    }
 }
 
 /// Build an empty run representing a workflow whose `[condition]`
@@ -387,6 +469,231 @@ path = "${trigger.path}"
             .unwrap();
         assert!(run.success);
         assert_eq!(run.steps.len(), 3);
+    }
+
+    /// Dispatcher that fails its first `fail_count` calls, then succeeds.
+    struct FlakyDispatcher {
+        calls: Arc<AtomicUsize>,
+        fail_count: usize,
+    }
+
+    #[async_trait]
+    impl ActionDispatcher for FlakyDispatcher {
+        async fn run(&self, _step: &Step) -> Result<serde_json::Value, String> {
+            let n = self.calls.fetch_add(1, Ordering::SeqCst);
+            if n < self.fail_count {
+                Err("flake".into())
+            } else {
+                Ok(serde_json::json!({ "ok": true }))
+            }
+        }
+    }
+
+    /// Dispatcher that records each sleep delta the executor scheduled
+    /// between attempts and always fails.
+    struct AlwaysFailDispatcher {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl ActionDispatcher for AlwaysFailDispatcher {
+        async fn run(&self, _step: &Step) -> Result<serde_json::Value, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err("always".into())
+        }
+    }
+
+    fn retry_workflow(toml_src: &str) -> Workflow {
+        parse_workflow_text(toml_src).unwrap()
+    }
+
+    #[tokio::test]
+    async fn succeeds_after_two_failures_with_max_retries_3() {
+        let src = r#"
+[workflow]
+name = "R"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "noop"
+max_retries = 3
+retry_initial_delay_ms = 0
+retry_jitter = false
+"#;
+        let wf = retry_workflow(src);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let d = FlakyDispatcher {
+            calls: Arc::clone(&calls),
+            fail_count: 2,
+        };
+        let run = run_workflow(&wf, &d).await.unwrap();
+        assert!(run.success);
+        assert_eq!(run.steps.len(), 1);
+        assert_eq!(run.steps[0].status, StepOutcomeStatus::Ok);
+        assert_eq!(run.steps[0].attempts, 3);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn exhausts_retries_then_fails() {
+        let src = r#"
+[workflow]
+name = "R"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "noop"
+max_retries = 2
+retry_initial_delay_ms = 0
+retry_jitter = false
+"#;
+        let wf = retry_workflow(src);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let d = AlwaysFailDispatcher {
+            calls: Arc::clone(&calls),
+        };
+        let run = run_workflow(&wf, &d).await.unwrap();
+        assert!(!run.success);
+        assert_eq!(run.steps[0].status, StepOutcomeStatus::Failed);
+        assert_eq!(run.steps[0].attempts, 3);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn max_retries_zero_runs_once() {
+        let src = r#"
+[workflow]
+name = "R"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "noop"
+"#;
+        let wf = retry_workflow(src);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let d = AlwaysFailDispatcher {
+            calls: Arc::clone(&calls),
+        };
+        let run = run_workflow(&wf, &d).await.unwrap();
+        assert!(!run.success);
+        assert_eq!(run.steps[0].status, StepOutcomeStatus::Failed);
+        assert_eq!(run.steps[0].attempts, 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn constant_backoff_uses_base_each_attempt() {
+        let src = r#"
+[workflow]
+name = "R"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "noop"
+max_retries = 3
+retry_backoff = "constant"
+retry_initial_delay_ms = 250
+retry_jitter = false
+"#;
+        let wf = retry_workflow(src);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let d = AlwaysFailDispatcher {
+            calls: Arc::clone(&calls),
+        };
+        let start = tokio::time::Instant::now();
+        let run = run_workflow(&wf, &d).await.unwrap();
+        let elapsed = start.elapsed();
+        // 3 retries -> 3 sleeps of 250ms each = 750ms
+        assert_eq!(run.steps[0].attempts, 4);
+        assert!(
+            elapsed >= std::time::Duration::from_millis(750),
+            "expected at least 750ms of paused-time elapsed, got {elapsed:?}"
+        );
+        // Should not be wildly larger; 3 sleeps shouldn't push past
+        // 1500ms in a paused clock.
+        assert!(
+            elapsed < std::time::Duration::from_millis(1500),
+            "elapsed exceeded constant-backoff total: {elapsed:?}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn exponential_caps_at_retry_max_delay_ms() {
+        // base 1000ms, cap 1500ms. 4 retries -> raw delays would be
+        // 1000, 2000, 4000, 8000ms; capped to 1000, 1500, 1500, 1500
+        // (= 5500ms total). Without the cap it'd be 15000ms.
+        let src = r#"
+[workflow]
+name = "R"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "noop"
+max_retries = 4
+retry_backoff = "exponential"
+retry_initial_delay_ms = 1000
+retry_max_delay_ms = 1500
+retry_jitter = false
+"#;
+        let wf = retry_workflow(src);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let d = AlwaysFailDispatcher {
+            calls: Arc::clone(&calls),
+        };
+        let start = tokio::time::Instant::now();
+        run_workflow(&wf, &d).await.unwrap();
+        let elapsed = start.elapsed();
+        // Expected total = 1000 + 1500 + 1500 + 1500 = 5500ms.
+        assert!(
+            elapsed >= std::time::Duration::from_millis(5500),
+            "want >= 5500ms, got {elapsed:?}"
+        );
+        // Comfortably under the un-capped 15000ms.
+        assert!(
+            elapsed < std::time::Duration::from_millis(7000),
+            "cap not honored, got {elapsed:?}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 5);
+    }
+
+    #[tokio::test]
+    async fn workflow_level_error_handling_supplies_default() {
+        let src = r#"
+[workflow]
+name = "R"
+
+[trigger]
+type = "manual"
+
+[error_handling]
+max_retries = 2
+
+[[steps]]
+type = "noop"
+retry_initial_delay_ms = 0
+retry_jitter = false
+"#;
+        let wf = retry_workflow(src);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let d = FlakyDispatcher {
+            calls: Arc::clone(&calls),
+            fail_count: 2,
+        };
+        let run = run_workflow(&wf, &d).await.unwrap();
+        assert!(run.success);
+        assert_eq!(run.steps[0].attempts, 3);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]
