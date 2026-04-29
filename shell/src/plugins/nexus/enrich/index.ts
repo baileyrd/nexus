@@ -19,11 +19,12 @@
 // the panel but never thrown.
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
-import { attachRuntime } from './enrichRuntime'
+import { attachRuntime, forceEnrichActiveFile } from './enrichRuntime'
 import { EnrichAcceptGate } from './EnrichAcceptGate'
 import { setEnrichApi } from './enrichApi'
 
 const VIEW_ID_GATE = 'nexus.enrich.gate'
+const COMMAND_FORCE_ENRICH = 'nexus.enrich.force'
 
 export const enrichPlugin: Plugin = {
   manifest: {
@@ -39,6 +40,13 @@ export const enrichPlugin: Plugin = {
         order: 72,
         schema: [],
       },
+      commands: [
+        {
+          id: COMMAND_FORCE_ENRICH,
+          title: 'Force enrich current file',
+          category: 'AI',
+        },
+      ],
     },
   },
 
@@ -46,6 +54,9 @@ export const enrichPlugin: Plugin = {
     api.configuration.register(enrichPlugin.manifest.contributes!.configuration!)
     setEnrichApi(api)
     attachRuntime(api)
+    api.commands.register(COMMAND_FORCE_ENRICH, async () => {
+      await forceEnrichActiveFile(api)
+    })
     api.views.register(VIEW_ID_GATE, {
       slot: 'overlay',
       // Sit above the recall overlay (26) so a stacked open keeps the
