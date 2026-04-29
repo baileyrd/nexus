@@ -684,6 +684,19 @@ fn register_core_plugins(
                         "index_status",
                         nexus_ai::core_plugin::HANDLER_INDEX_STATUS,
                     ),
+                    // BL-045 — auto-enrichment on save. `enrich_file`
+                    // proposes tags + summary + related notes for a
+                    // markdown file (no write); `enrich_apply` merges
+                    // a previously-returned proposal into the file's
+                    // YAML frontmatter (with a body-hash drift guard).
+                    (
+                        "enrich_file",
+                        nexus_ai::core_plugin::HANDLER_ENRICH_FILE,
+                    ),
+                    (
+                        "enrich_apply",
+                        nexus_ai::core_plugin::HANDLER_ENRICH_APPLY,
+                    ),
                 ],
             ),
             forge_root,
