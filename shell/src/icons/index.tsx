@@ -14,6 +14,7 @@ import {
   CornerUpRight,
   Crosshair,
   Database,
+  ExternalLink,
   FilePlus2,
   FileText,
   Flame,
@@ -96,6 +97,7 @@ const ICON_MAP = {
   chevDown:    { component: ChevronDown },
   more:        { component: MoreHorizontal },
   info:        { component: Info },
+  external:    { component: ExternalLink },
 
   // Knowledge graph / links
   link:        { component: Link },

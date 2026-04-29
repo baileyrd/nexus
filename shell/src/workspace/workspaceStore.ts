@@ -462,6 +462,164 @@ function findTabsById(id: string, roots: WorkspaceParent[]): Tabs | null {
   return null
 }
 
+// ---------------------------------------------------------------------------
+// BL-029 — popout / floating window mutations.
+//
+// Splitting the OS-side window control off from the layout mutation lets us:
+//  1. Unit-test these helpers without a Tauri runtime.
+//  2. Keep the workspaceStore pure (no @tauri-apps/api import).
+// The Tauri-side bridge (`popoutWindowBridge.ts`) wraps the invoke calls
+// and is the only consumer that pairs `popoutLeaf` + `popout_window`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Move `leaf` out of its current Tabs parent and into a fresh
+ * FloatingWindow at the top of `floating[]`. Returns the new
+ * FloatingWindow id so callers can pair it with the OS-side popout
+ * window label.
+ *
+ * Layout effects:
+ *  - The leaf is removed from its current Tabs (activeIndex clamped).
+ *  - A new Tabs holding only this leaf is wrapped in a FloatingWindow
+ *    and appended to `floating`.
+ *  - The leaf's `parent` back-pointer is updated to the new Tabs.
+ *  - `layout-change` fires once.
+ *
+ * No-op (returns the existing FW id) if the leaf is already inside a
+ * FloatingWindow — calling popoutLeaf twice on the same leaf is a
+ * benign double-click.
+ *
+ * Throws if the leaf is unknown to the store. Callers should pass a
+ * `leafId` that came from `workspace.leaves.get(...)`.
+ */
+function popoutLeaf(
+  leafId: string,
+  bounds?: { x: number; y: number; w: number; h: number },
+): string {
+  const leaf = state().leaves.get(leafId)
+  if (!leaf) {
+    throw new Error(`[workspace.popoutLeaf] unknown leaf id: ${leafId}`)
+  }
+  // Already popped out — find the FW and return its id.
+  const existing = state().floating.find((fw) =>
+    findLeafAncestry(leaf, fw, []) !== null,
+  )
+  if (existing) {
+    if (bounds) existing.bounds = bounds
+    return existing.id
+  }
+
+  // Detach from current Tabs parent (without invoking view.onClose).
+  const parent = leaf.parent
+  if (parent && parent.kind === 'tabs') {
+    const idx = parent.leaves.findIndex((l) => l.id === leaf.id)
+    if (idx >= 0) {
+      parent.leaves.splice(idx, 1)
+      if (parent.activeIndex >= parent.leaves.length) {
+        parent.activeIndex = Math.max(0, parent.leaves.length - 1)
+      }
+    }
+  }
+
+  const newTabs: Tabs = {
+    kind: 'tabs',
+    id: newId(),
+    leaves: [leaf],
+    activeIndex: 0,
+  }
+  const fw: FloatingWindow = {
+    kind: 'floating',
+    id: newId(),
+    child: newTabs,
+  }
+  if (bounds) fw.bounds = bounds
+  // Reparent the leaf so subsequent `setViewState` etc. report the
+  // correct ancestry for tree walks.
+  leaf.parent = newTabs
+
+  useWorkspaceStore.setState({ floating: [...state().floating, fw] })
+  emitInternal('layout-change')
+  return fw.id
+}
+
+/**
+ * Find a FloatingWindow by id. Returns null if absent.
+ */
+function findFloatingWindow(id: string): FloatingWindow | null {
+  return state().floating.find((fw) => fw.id === id) ?? null
+}
+
+/**
+ * Update the persisted bounds for a popout. Used by the Tauri bridge
+ * after a window resize / move so the next `installAutoSave` debounce
+ * captures the new bounds. No-op when the FW doesn't exist.
+ */
+function setFloatingWindowBounds(
+  id: string,
+  bounds: { x: number; y: number; w: number; h: number },
+): void {
+  const fw = findFloatingWindow(id)
+  if (!fw) return
+  // Skip the emit + save when nothing actually changed (drag end
+  // sometimes fires a final event with the same bounds).
+  if (
+    fw.bounds &&
+    fw.bounds.x === bounds.x &&
+    fw.bounds.y === bounds.y &&
+    fw.bounds.w === bounds.w &&
+    fw.bounds.h === bounds.h
+  ) {
+    return
+  }
+  fw.bounds = { ...bounds }
+  emitInternal('layout-change')
+}
+
+/**
+ * Close a floating window. Detaches every leaf inside (running
+ * `view.onClose`) and removes the window from `floating[]`. Idempotent
+ * — closing an unknown id silently returns. The OS-side close call
+ * lives in the Tauri bridge.
+ */
+async function closeFloatingWindow(id: string): Promise<void> {
+  const fw = findFloatingWindow(id)
+  if (!fw) return
+  // Detach every leaf depth-first so views' onClose fires.
+  const collectLeaves = (node: WorkspaceParent, out: Leaf[]): void => {
+    if (node.kind === 'tabs') {
+      out.push(...node.leaves)
+      return
+    }
+    if (node.kind === 'split') {
+      for (const c of node.children) collectLeaves(c, out)
+      return
+    }
+    const withChild = node as { child?: WorkspaceParent }
+    if (withChild.child) collectLeaves(withChild.child, out)
+  }
+  const leavesToDispose: Leaf[] = []
+  collectLeaves(fw, leavesToDispose)
+  for (const leaf of leavesToDispose) {
+    await leaf.detach()
+  }
+
+  const remaining = state().floating.filter((other) => other.id !== fw.id)
+  const nextLeaves = new Map(state().leaves)
+  for (const leaf of leavesToDispose) {
+    nextLeaves.delete(leaf.id)
+  }
+  const wasActive = leavesToDispose.some(
+    (l) => state().activeLeafId === l.id,
+  )
+  useWorkspaceStore.setState({
+    floating: remaining,
+    leaves: nextLeaves,
+    ...(wasActive ? { activeLeafId: null } : {}),
+  })
+  if (wasActive) emitInternal('active-leaf-change', { leaf: null })
+  emitInternal('layout-change')
+}
+
 async function detachLeaf(leaf: Leaf): Promise<void> {
   // Plan decision #2 on order: await detach() first (triggers onClose,
   // clears the view) before tree mutation, so subscribers observing
@@ -582,11 +740,19 @@ function serializeNode(node: WorkspaceParent): SerializedNode {
 }
 
 function serialize(): WorkspaceJSON {
+  const floatingSerialized: SerializedFloating[] = state().floating.map(
+    (fw) => serializeNode(fw) as SerializedFloating,
+  )
   return {
     main: serializeNode(state().rootSplit),
     left: serializeNode(state().leftSplit),
     right: serializeNode(state().rightSplit),
     bottom: serializeNode(state().bottomSplit),
+    // Omit `floating` from the JSON when empty so the disk file stays
+    // identical to pre-BL-029 output for users who never popped out a
+    // leaf — keeps git diffs of `.forge/workspace.json` minimal in
+    // existing forges.
+    ...(floatingSerialized.length > 0 ? { floating: floatingSerialized } : {}),
     active: state().activeLeafId,
     lastOpenFiles: [], // Phase 6 will populate.
   }
@@ -737,12 +903,33 @@ async function hydrate(json?: WorkspaceJSON): Promise<void> {
     ? expectSidedock(hydrateNode(json.bottom, leaves, pending), 'bottom')
     : buildDefaultBottomDock(leaves)
 
+  // BL-029 — restore popped-out leaves. Each SerializedFloating must
+  // hydrate to a runtime FloatingWindow (not a generic node), so we
+  // reuse `hydrateNode` and assert the result. A malformed entry
+  // (anything that isn't a 'floating' node at top level) is dropped
+  // with a warn so a single corrupt entry can't take down the whole
+  // hydrate path.
+  const floating: FloatingWindow[] = []
+  if (json.floating && Array.isArray(json.floating)) {
+    for (const fwJson of json.floating) {
+      const node = hydrateNode(fwJson, leaves, pending)
+      if (node.kind === 'floating') {
+        floating.push(node)
+      } else {
+        console.warn(
+          '[workspaceStore.hydrate] floating entry is not a floating node; skipped',
+          fwJson,
+        )
+      }
+    }
+  }
+
   useWorkspaceStore.setState({
     rootSplit: main,
     leftSplit: left,
     rightSplit: right,
     bottomSplit: bottom,
-    floating: [],
+    floating,
     activeLeafId: json.active,
     leaves,
   })
@@ -855,6 +1042,11 @@ export const workspace = {
   setSplitSizes,
   setTabActiveIndex,
   detachLeaf,
+  // BL-029
+  popoutLeaf,
+  closeFloatingWindow,
+  setFloatingWindowBounds,
+  findFloatingWindow,
   emit: emitInternal,
   on,
   serialize,

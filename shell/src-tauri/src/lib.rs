@@ -2,6 +2,7 @@
 
 mod bridge;
 mod persistence;
+mod windows;
 
 use std::fs;
 use serde::{Deserialize, Serialize};
@@ -457,6 +458,11 @@ pub fn run() {
             bridge::kernel_subscribe,
             bridge::kernel_unsubscribe,
             bridge::kernel_is_booted,
+            windows::popout_window,
+            windows::close_popout_window,
+            windows::list_popout_windows,
+            windows::get_popout_window_bounds,
+            windows::set_popout_window_bounds,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

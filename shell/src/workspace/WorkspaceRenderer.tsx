@@ -31,6 +31,7 @@ import type {
   WorkspaceParent,
 } from './types.ts'
 import { workspace } from './workspaceStore.ts'
+import { popoutLeaf as popoutLeafBridge } from './popoutWindowBridge.ts'
 import { ForgeSelector } from './ForgeSelector.tsx'
 import { RightPanelFooter } from './RightPanelFooter.tsx'
 
@@ -879,43 +880,89 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
             const isActive = i === tabs.activeIndex
             const label =
               leaf.view?.getDisplayText?.() ?? leaf.view?.viewType ?? 'Empty'
+            // BL-029 — disable popout on placeholder `empty` leaves
+            // since there's nothing to host in a separate window yet.
+            const canPopout = leaf.view?.viewType !== 'empty'
             return (
-              <button
+              <div
                 key={leaf.id}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  workspace.setTabActiveIndex(tabs.id, i)
-                  setOpen(false)
-                }}
+                role="group"
                 style={{
                   display: 'flex',
-                  alignItems: 'center',
+                  alignItems: 'stretch',
                   width: '100%',
-                  padding: '6px 8px',
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--text-normal, var(--fg, #ccc))',
-                  cursor: 'pointer',
-                  textAlign: 'left',
                   borderRadius: 4,
-                  gap: 8,
                 }}
                 onMouseEnter={(e) => {
-                  ;(e.currentTarget as HTMLButtonElement).style.background =
+                  ;(e.currentTarget as HTMLDivElement).style.background =
                     'var(--background-modifier-hover, var(--bg-hover, #2a2a2a))'
                 }}
                 onMouseLeave={(e) => {
-                  ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                  ;(e.currentTarget as HTMLDivElement).style.background = 'transparent'
                 }}
               >
-                <span style={{ width: 12, display: 'inline-flex' }}>
-                  {isActive ? <Icon name="check" size={12} /> : null}
-                </span>
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {label}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    workspace.setTabActiveIndex(tabs.id, i)
+                    setOpen(false)
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    flex: '1 1 auto',
+                    padding: '6px 8px',
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-normal, var(--fg, #ccc))',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    gap: 8,
+                    minWidth: 0,
+                  }}
+                >
+                  <span style={{ width: 12, display: 'inline-flex' }}>
+                    {isActive ? <Icon name="check" size={12} /> : null}
+                  </span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {label}
+                  </span>
+                </button>
+                {/* BL-029 — pop out this tab into a separate OS
+                    window. Click is gated behind stopPropagation so
+                    the parent row's activate-tab handler doesn't
+                    fire alongside. The Tauri bridge handles the
+                    layout mutation + window creation; failure rolls
+                    the layout edit back. */}
+                <button
+                  type="button"
+                  aria-label={`Pop out ${label}`}
+                  title="Pop out tab"
+                  disabled={!canPopout}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (!canPopout) return
+                    setOpen(false)
+                    void popoutLeafBridge(leaf.id, { title: label })
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 28,
+                    flex: '0 0 auto',
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-muted, var(--fg-muted, #888))',
+                    cursor: canPopout ? 'pointer' : 'default',
+                    opacity: canPopout ? 1 : 0.3,
+                    padding: 0,
+                  }}
+                >
+                  <Icon name="external" size={12} />
+                </button>
+              </div>
             )
           })}
           <div

@@ -148,6 +148,13 @@ export interface WorkspaceJSON {
   // written before the bottom drawer landed have no `bottom` field.
   // `hydrate()` falls back to a collapsed default when absent.
   bottom?: SerializedNode
+  // BL-029 — popped-out leaves live here. Each entry is a top-level
+  // SerializedFloating whose `child` is a Tabs node holding one or
+  // more leaves. `bounds` records the OS window's last position +
+  // size so the popout can be reopened at the same place. Optional
+  // for backwards-compat: workspace.json files written before BL-029
+  // have no `floating` field; `hydrate()` treats it as empty.
+  floating?: SerializedFloating[]
   active: string | null
   lastOpenFiles: string[]
 }

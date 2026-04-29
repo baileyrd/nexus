@@ -215,6 +215,76 @@ test('createDebouncedSaver coalesces rapid calls into one save', async () => {
   }
 })
 
+// --- BL-029: floating[] schema validation ----------------------------------
+
+test('loadWorkspace accepts a workspace.json with floating[]', async () => {
+  const mock = makeMockBridge()
+  const layout = buildDefaultLayout()
+  const withFloating: WorkspaceJSON = {
+    ...layout,
+    floating: [
+      {
+        kind: 'floating',
+        id: 'fw-test',
+        bounds: { x: 0, y: 0, w: 800, h: 600 },
+        child: {
+          kind: 'tabs',
+          id: 'fw-tabs',
+          activeIndex: 0,
+          leaves: [
+            { kind: 'leaf', id: 'fw-leaf', viewState: { type: 'empty' } },
+          ],
+        },
+      },
+    ],
+  }
+  mock.setFile('.forge/workspace.json', JSON.stringify(withFloating))
+  const restore = __setKernelBridge(mock)
+  try {
+    const result = await loadWorkspace('/fake/vault')
+    assert.ok(result)
+    assert.ok(result!.floating)
+    assert.equal(result!.floating!.length, 1)
+    assert.equal(result!.floating![0]!.id, 'fw-test')
+  } finally {
+    restore()
+  }
+})
+
+test('loadWorkspace rejects floating[] entries that are not floating nodes', async () => {
+  const mock = makeMockBridge()
+  const layout = buildDefaultLayout()
+  // A tabs node where a floating node belongs is invalid for our schema.
+  const bad = {
+    ...layout,
+    floating: [
+      { kind: 'tabs', id: 't', activeIndex: 0, leaves: [] },
+    ],
+  }
+  mock.setFile('.forge/workspace.json', JSON.stringify(bad))
+  const restore = __setKernelBridge(mock)
+  try {
+    const result = await loadWorkspace('/fake/vault')
+    assert.equal(result, null, 'floating[] with non-floating entry must be rejected')
+  } finally {
+    restore()
+  }
+})
+
+test('loadWorkspace rejects non-array floating field', async () => {
+  const mock = makeMockBridge()
+  const layout = buildDefaultLayout()
+  const bad = { ...layout, floating: { not: 'an array' } }
+  mock.setFile('.forge/workspace.json', JSON.stringify(bad))
+  const restore = __setKernelBridge(mock)
+  try {
+    const result = await loadWorkspace('/fake/vault')
+    assert.equal(result, null)
+  } finally {
+    restore()
+  }
+})
+
 test('installAutoSave triggers on layout-change and debounces', async () => {
   const mock = makeMockBridge()
   const restore = __setKernelBridge(mock)
