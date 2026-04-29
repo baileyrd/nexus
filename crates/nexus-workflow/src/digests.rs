@@ -494,6 +494,8 @@ pub fn next_fire(
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use nexus_kernel::{Capability, CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, KvStore};
+    use std::sync::Mutex;
 
     fn ts(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(y, m, d, h, min, 0).unwrap()
@@ -582,6 +584,203 @@ mod tests {
         let (kind, next) = next_fire(&cfg, now).expect("some schedule");
         assert_eq!(kind, DigestKind::Daily);
         assert_eq!(next, ts(2026, 4, 26, 9, 0));
+    }
+
+    /// Stub IPC dispatcher for the integration test below. Records
+    /// every call and returns canned responses for the storage / AI
+    /// commands `run_digest` makes. Mirrors the BL-041 stub pattern.
+    struct StubDispatcher {
+        files: Vec<(String, String, i64)>, // (relpath, body, mtime_ms)
+        calls: Mutex<Vec<(String, String)>>,
+        ai_answer: String,
+    }
+
+    impl StubDispatcher {
+        fn new(files: Vec<(String, String, i64)>, ai_answer: &str) -> Arc<Self> {
+            Arc::new(Self {
+                files,
+                calls: Mutex::new(Vec::new()),
+                ai_answer: ai_answer.to_string(),
+            })
+        }
+
+        fn record(&self, target: &str, command: &str) {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((target.to_string(), command.to_string()));
+        }
+    }
+
+    impl IpcDispatcher for StubDispatcher {
+        fn dispatch(
+            &self,
+            target: &str,
+            command: &str,
+            args: &serde_json::Value,
+        ) -> Result<serde_json::Value, nexus_kernel::IpcError> {
+            self.record(target, command);
+            match (target, command) {
+                ("com.nexus.storage", "list_dir") => {
+                    let relpath = args
+                        .get("relpath")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    // Return only files at the requested level — no
+                    // nesting in the test fixture.
+                    let entries: Vec<serde_json::Value> = self
+                        .files
+                        .iter()
+                        .filter(|(p, _, _)| {
+                            if relpath.is_empty() {
+                                !p.contains('/')
+                            } else {
+                                p.starts_with(&format!("{relpath}/"))
+                                    && !p[relpath.len() + 1..].contains('/')
+                            }
+                        })
+                        .map(|(p, _, m)| {
+                            serde_json::json!({
+                                "name": p.rsplit('/').next().unwrap_or(p),
+                                "relpath": p,
+                                "isDir": false,
+                                "modifiedMs": m,
+                            })
+                        })
+                        .collect();
+                    Ok(serde_json::Value::Array(entries))
+                }
+                ("com.nexus.storage", "read_file") => {
+                    let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    let body = self
+                        .files
+                        .iter()
+                        .find(|(p, _, _)| p == path)
+                        .map(|(_, b, _)| b.clone())
+                        .unwrap_or_default();
+                    Ok(serde_json::Value::String(body))
+                }
+                ("com.nexus.storage", "create_dir")
+                | ("com.nexus.storage", "write_file") => Ok(serde_json::json!({})),
+                ("com.nexus.ai", "ask") => Ok(serde_json::json!({
+                    "answer": self.ai_answer,
+                    "model": "stub-model",
+                    "sources": [],
+                    "citations": [],
+                })),
+                _ => Err(nexus_kernel::IpcError::CommandNotFound {
+                    plugin_id: target.to_string(),
+                    command: command.to_string(),
+                }),
+            }
+        }
+    }
+
+    fn make_ctx(dispatcher: Arc<StubDispatcher>) -> Arc<KernelPluginContext> {
+        let dir = tempfile::tempdir().unwrap();
+        // Leak the tempdir so the path stays valid for the test
+        // duration; the OS reclaims on process exit.
+        let path = dir.keep();
+        let kv: Arc<dyn KvStore> = Arc::new(InMemoryKvStore::new());
+        let bus = Arc::new(EventBus::new(16));
+        let caps: CapabilitySet = Capability::ALL.iter().copied().collect();
+        let ctx = KernelPluginContext::new(
+            "com.nexus.workflow",
+            "0.0.1",
+            caps,
+            kv,
+            bus,
+            &path,
+            Some(dispatcher as Arc<dyn IpcDispatcher>),
+        )
+        .unwrap();
+        Arc::new(ctx)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_digest_walks_files_calls_ai_and_writes() {
+        // Window = last 24h centred on `now`.
+        let now = ts(2026, 4, 29, 12, 0);
+        let in_window_ms = now.timestamp_millis() - 3_600_000; // 1h ago
+        let stale_ms = now.timestamp_millis() - 5 * 86_400_000; // 5d ago
+
+        let files = vec![
+            (
+                "notes/today.md".to_string(),
+                "today body".to_string(),
+                in_window_ms,
+            ),
+            (
+                "notes/old.md".to_string(),
+                "old body".to_string(),
+                stale_ms,
+            ),
+            // Skipped — outside .md filter.
+            (
+                "notes/photo.png".to_string(),
+                "binary".to_string(),
+                in_window_ms,
+            ),
+        ];
+        let dispatcher = StubDispatcher::new(files, "## Digest\n\nKey theme: testing.");
+        let ctx = make_ctx(Arc::clone(&dispatcher));
+
+        let cfg = DigestConfig {
+            enabled: true,
+            scope_path: Some("notes".to_string()),
+            ..DigestConfig::default()
+        };
+        let report = run_digest(&ctx, &cfg, DigestKind::Daily, now)
+            .await
+            .expect("digest run");
+
+        assert_eq!(report.kind, DigestKind::Daily);
+        assert_eq!(report.source_count, 1, "only today.md is in window + .md");
+        assert!(report.written);
+        assert_eq!(report.output_path, "Digests/Daily-2026-04-29.md");
+        assert_eq!(report.model.as_deref(), Some("stub-model"));
+
+        let calls = dispatcher.calls.lock().unwrap();
+        assert!(calls
+            .iter()
+            .any(|(t, c)| t == "com.nexus.storage" && c == "list_dir"));
+        assert!(calls
+            .iter()
+            .any(|(t, c)| t == "com.nexus.storage" && c == "read_file"));
+        assert!(calls
+            .iter()
+            .any(|(t, c)| t == "com.nexus.ai" && c == "ask"));
+        assert!(calls
+            .iter()
+            .any(|(t, c)| t == "com.nexus.storage" && c == "write_file"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_digest_short_circuits_when_no_files_in_window() {
+        let now = ts(2026, 4, 29, 12, 0);
+        let stale_ms = now.timestamp_millis() - 30 * 86_400_000;
+        let files = vec![(
+            "notes/old.md".to_string(),
+            "old".to_string(),
+            stale_ms,
+        )];
+        let dispatcher = StubDispatcher::new(files, "unused");
+        let ctx = make_ctx(Arc::clone(&dispatcher));
+        let cfg = DigestConfig {
+            enabled: true,
+            scope_path: Some("notes".to_string()),
+            ..DigestConfig::default()
+        };
+        let report = run_digest(&ctx, &cfg, DigestKind::Weekly, now)
+            .await
+            .expect("digest run");
+        assert_eq!(report.source_count, 0);
+        assert!(!report.written);
+        let calls = dispatcher.calls.lock().unwrap();
+        assert!(
+            !calls.iter().any(|(_, c)| c == "ask"),
+            "AI should not be called when no sources in window"
+        );
     }
 
     #[test]
