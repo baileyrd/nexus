@@ -281,12 +281,7 @@ _BL-023 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 _BL-025 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-027: Multi-agent orchestration / delegation (= AI-DIR "agent loops")
-
-**Source**: PRD-15 §10 (`AgentOrchestrator::delegate / parallel / pipeline`); design rationale also in [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) "agent loops".
-**Effort**: Large. **Crate**: `nexus-agent`.
-Today a `LlmAgent` plans + executes solo. Spec calls for a coordinator that hands subtasks between archetypes (Researcher → Writer → Coder) with shared scratch state. PRD §6.3 reactive rules and §12 debugger/replayer are in the same neighbourhood — defer those until orchestration lands and exposes the right hooks.
-**Merger (2026-04-28)**: AI-DIR "agent loops" is the same surface as BL-027 — collapsed to this single ID so we don't ship it twice. Split per the implementation plan: (1) orchestrator skeleton, (2) `delegate`, (3) `parallel`, (4) `pipeline`, (5) shared scratch state + replay hooks. Hard prerequisite: BL-016 tool-calling.
+_BL-027 shipped 2026-04-29 — see BACKLOG_COMPLETED.md._
 
 ### BL-028: Workflow trigger expansion + control flow
 
