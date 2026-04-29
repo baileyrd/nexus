@@ -338,11 +338,7 @@ When the assembled context includes retrieved snippets (RAG / memory recall), th
 **Effort**: Medium. **Crate**: `nexus-ai` + `shell/src/plugins/nexus/editor/`.
 Embedding-driven inline suggestion of `[[wiki-style]]` links to existing forge files when the typed phrase semantically matches an existing note title or heading. UI piggybacks on BL-034's ghost-decoration. Hard prereq: BL-019.
 
-### BL-040: AI-DIR semantic search
-
-**Source**: [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) direction 3.
-**Effort**: Medium. **Crate**: `nexus-storage` (search facade) + shell command palette.
-Adds a `?:` prefix (or dedicated "Search by meaning" palette command) that runs a vector search alongside today's Tantivy keyword search and merges results with score-aware ranking. Hard prereq: BL-019.
+_BL-040 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-041: AI-DIR background indexing daemon
 
