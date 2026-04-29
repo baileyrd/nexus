@@ -1104,8 +1104,28 @@ fn build_embedding_provider(cfg: &AiConfig) -> Result<Box<dyn EmbeddingProvider>
             4096,
         ))),
         "ollama" => Ok(Box::new(OllamaProvider::new(cfg.base_url.clone(), None))),
+        "local" => build_local_embedding_provider(cfg),
         other => Err(format!("unknown embedding provider: {other}")),
     }
+}
+
+#[cfg(feature = "local-embeddings")]
+fn build_local_embedding_provider(cfg: &AiConfig) -> Result<Box<dyn EmbeddingProvider>, String> {
+    use crate::local_embedding::{LocalEmbedding, DEFAULT_LOCAL_MODEL};
+    let model = cfg
+        .local_embedding_model
+        .as_deref()
+        .unwrap_or(DEFAULT_LOCAL_MODEL);
+    let backend = LocalEmbedding::new(model)
+        .map_err(|e| format!("failed to initialize local embedding backend: {e}"))?;
+    Ok(Box::new(backend))
+}
+
+#[cfg(not(feature = "local-embeddings"))]
+fn build_local_embedding_provider(_cfg: &AiConfig) -> Result<Box<dyn EmbeddingProvider>, String> {
+    Err("provider 'local' requires the 'local-embeddings' Cargo feature; \
+         rebuild nexus-ai with --features local-embeddings to enable fastembed-rs"
+        .to_string())
 }
 
 fn exec_err<S: Into<String>>(reason: S) -> PluginError {

@@ -33,6 +33,7 @@ import { setCmdIApi } from './cmdIApi'
 import { setGhostApi } from './ghostApi'
 import { openCmdI, routeStreamEvent } from './cmdIRuntime'
 import { registerEditorContextAdapter } from './editorContextAdapter'
+import { registerBuiltinAiActions } from './actions/builtins'
 import {
   setKernel,
   requestFocus,
@@ -453,6 +454,14 @@ export const aiPlugin: Plugin = {
     // PluginAPI grows a `trackSubscription` accessor (or this plugin
     // grows a `deactivate`), thread the disposer through there.
     registerEditorContextAdapter()
+
+    // BL-035 — register the four built-in AI actions (summarize,
+    // rewrite, translate, explain) against the shared
+    // `aiActionRegistry`. Same disposer-not-tracked rationale as the
+    // editor context adapter above: module-scope singleton, no
+    // `deactivate` hook, hot-reload duplicates are tolerated by the
+    // registry.
+    registerBuiltinAiActions(api)
 
     // Fan out four awaits: subscription must be live before any submit
     // could fire (otherwise we'd miss the first chunks); the config

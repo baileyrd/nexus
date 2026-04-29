@@ -266,12 +266,7 @@ _BL-015 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 Distinct from the agent's MCP discovery (which appends *tool descriptions* to the planner prompt). Native function-calling means surfacing Anthropic / OpenAI `tools` and Ollama tool-call format from `stream_chat`, dispatching the model's tool-calls back through `ipc_call`. Today providers strip tool params before the request.
 **Cross-references (2026-04-28)**: prerequisite for BL-010, BL-011, BL-027, BL-035 (right-click AI actions / block AI actions), BL-036 (margin / inline correction), and the memory layer's "recall as a tool" flow (BL-044). Treat as Phase-1 foundation; downstream agents queue behind it. Split per the implementation plan: (1) `ToolRegistry` + `ToolExecutor` core, (2) Anthropic + OpenAI tool-call wire format, (3) Ollama tool-call format + dispatch loop.
 
-### BL-019: AI local embeddings backend
-
-**Source**: PRD-12 §9.1 (`EmbeddingModel` with cache; sentence-transformer-quality offline embeddings).
-**Effort**: Large. **Crate**: `nexus-ai`.
-RAG today calls remote embedding endpoints. A local backend (e.g. fastembed-rs, candle, or sqlite-vec's bundled gguf path) would unblock fully-offline forges. Nice-to-have for personal-tool scope; medium priority.
-**Cross-references (2026-04-28)**: BL-019 has been **promoted** from "nice-to-have" to a critical-path foundation now that Future-direction tracks are in scope. Direct consumers: BL-038 citations, BL-039 auto-link suggestions, BL-040 semantic search, BL-041 background indexing daemon, BL-044 recall hotkey, BL-045 auto-enrichment on save, BL-047 scheduled digests — nine downstream tracks. A backend choice that doesn't ship cross-platform costs the schedule weeks. **Phase-0 deliverable**: an ADR comparing fastembed-rs / candle / sqlite-vec gguf on (model quality, RAM footprint, cold-start time, cross-platform binary cost, license). Split implementation: (1) backend impl, (2) `EmbeddingModel` trait + cache, (3) RAG wire-up, (4) batch indexer hook for BL-041.
+_BL-019 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 _BL-021 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
@@ -281,12 +276,7 @@ _BL-023 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 _BL-025 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-027: Multi-agent orchestration / delegation (= AI-DIR "agent loops")
-
-**Source**: PRD-15 §10 (`AgentOrchestrator::delegate / parallel / pipeline`); design rationale also in [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) "agent loops".
-**Effort**: Large. **Crate**: `nexus-agent`.
-Today a `LlmAgent` plans + executes solo. Spec calls for a coordinator that hands subtasks between archetypes (Researcher → Writer → Coder) with shared scratch state. PRD §6.3 reactive rules and §12 debugger/replayer are in the same neighbourhood — defer those until orchestration lands and exposes the right hooks.
-**Merger (2026-04-28)**: AI-DIR "agent loops" is the same surface as BL-027 — collapsed to this single ID so we don't ship it twice. Split per the implementation plan: (1) orchestrator skeleton, (2) `delegate`, (3) `parallel`, (4) `pipeline`, (5) shared scratch state + replay hooks. Hard prerequisite: BL-016 tool-calling.
+_BL-027 shipped 2026-04-29 — see BACKLOG_COMPLETED.md._
 
 ### BL-028: Workflow trigger expansion + control flow
 
@@ -322,9 +312,7 @@ _BL-034 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 ### BL-035: Right-click AI actions + block AI actions (shared registry)
 
-**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) pattern 5 + Notion-block follow-up "block AI actions via `com.nexus.ai`".
-**Effort**: Medium. **Crate / Package**: `@nexus/extension-api` (new `ai.registerAction`) + `shell/src/plugins/nexus/ai/`.
-Single `AIAction` registry exposed via `api.ai.registerAction({ id, label, surfaces: ['editor.selection' | 'block' | 'canvas.node' | ...], run })`. Two entry points: editor right-click context menu (selection-bound actions) and the block-handle menu (block-bound actions). Built-ins: summarize, rewrite, translate, explain. Hard prereq: BL-016 (actions can call tools).
+_BL-035 shipped 2026-04-29 — see BACKLOG_COMPLETED.md._
 
 ### BL-036: AMB margin suggestions + inline correction
 

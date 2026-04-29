@@ -250,7 +250,110 @@ export interface NexusPluginContext {
 
   workspace: WorkspaceAPI;
 
+  /**
+   * AI action registry (BL-035). Plugins contribute named actions
+   * (summarize, rewrite, translate, …) bound to one or more surfaces;
+   * the shell surfaces matching actions in the editor's right-click
+   * selection menu, the block-handle menu, and (once BL-038 lands) the
+   * canvas node menu. The runtime impl is supplied by the host —
+   * extension-api ships only the contract.
+   */
+  ai: AiAPI;
+
   disposables: DisposableStore;
+}
+
+// ─── AI action surface (BL-035) ──────────────────────────────────────────────
+
+/**
+ * Surfaces an AI action can be bound to. The shell only surfaces the
+ * action where its `surfaces` list overlaps the surface that produced
+ * the menu — an action with `['block']` does not appear on the editor
+ * selection menu, and vice versa.
+ */
+export type AiActionSurface = 'editor.selection' | 'block' | 'canvas.node';
+
+/** `run(ctx)` payload when the action was invoked from the editor's
+ *  selection right-click menu. `selection` is non-empty by construction
+ *  — the shell hides the AI submenu when the selection is empty. */
+export interface AiActionEditorSelectionContext {
+  surface: 'editor.selection';
+  /** Forge-relative path of the editor tab the selection came from. */
+  relpath: string;
+  /** The selected text, exactly as the user has it highlighted. */
+  selection: string;
+  /** CodeMirror document offsets bracketing the selection. Useful for
+   *  actions that want to splice their result back into the buffer. */
+  selectionRange: { from: number; to: number };
+}
+
+/** `run(ctx)` payload when the action was invoked from the block-handle
+ *  menu. `blockText` is the markdown source of the whole block (heading
+ *  + body for a section, bullet + nested children for a list item, …). */
+export interface AiActionBlockContext {
+  surface: 'block';
+  /** Forge-relative path of the editor tab the block came from. */
+  relpath: string;
+  /** Stable id for the block within the document (the same id the
+   *  block-handle menu uses when reordering / duplicating). */
+  blockId: string;
+  /** Full markdown text of the block. */
+  blockText: string;
+}
+
+/** `run(ctx)` payload when the action was invoked from a canvas node's
+ *  context menu. Wired once BL-038 lands; included here so the
+ *  registry's surface union is complete at the contract boundary. */
+export interface AiActionCanvasNodeContext {
+  surface: 'canvas.node';
+  nodeId: string;
+  text: string;
+}
+
+/** Discriminated union of every payload an AI action can receive. The
+ *  `surface` discriminator matches the entry in `AiAction.surfaces`. */
+export type AiActionContext =
+  | AiActionEditorSelectionContext
+  | AiActionBlockContext
+  | AiActionCanvasNodeContext;
+
+/**
+ * A single contributed AI action. Plugins register one per
+ * user-visible behaviour (summarize / rewrite / translate / …). The
+ * shell labels the menu row from `label`, filters by `surfaces`, and
+ * dispatches to `run` with a payload whose `surface` discriminator
+ * matches whichever entry triggered the menu.
+ *
+ * Errors thrown from `run` are caught by the registry and logged —
+ * one bad action must not crash the menu.
+ */
+export interface AiAction {
+  /** Stable id, e.g. `nexus.ai.summarize`. Reverse-DNS prefix
+   *  recommended; collisions across plugins are first-match-wins
+   *  with a console warning. */
+  id: string;
+  /** Human-readable label rendered as the menu row. Localised by the
+   *  contributing plugin — the host does not translate. */
+  label: string;
+  /** Which surfaces this action should appear on. Order is
+   *  insignificant. An empty list registers the action without ever
+   *  surfacing it (rare; useful for deferred wire-up). */
+  surfaces: AiActionSurface[];
+  /** Invoked when the user picks the menu row. Receives the bound
+   *  surface payload. May be sync or async; the menu closes
+   *  immediately, so long-running work should stream output into the
+   *  AI chat overlay or directly into the editor rather than blocking
+   *  on the returned promise. */
+  run(ctx: AiActionContext): void | Promise<void>;
+}
+
+/** Public AI API surface (`api.ai.*`). Today exposes only the action
+ *  registry — context contributors and the chat surface graduate to
+ *  `api.ai.*` in BL-033 / BL-039. */
+export interface AiAPI {
+  /** Register an AI action. Returns a disposer; tracked via
+   *  `ctx.disposables` so plugin unload sweeps it. */
+  registerAction(action: AiAction): Disposable;
 }
 
 /**

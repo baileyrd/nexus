@@ -31,6 +31,14 @@ pub struct AiConfig {
     /// [`PrivacyPolicy::Redact`] (or `Strict`) and threading a
     /// [`crate::Redactor`] into the prompt builder.
     pub privacy: PrivacyPolicy,
+    /// Local embedding model identifier consumed by the
+    /// [`crate::LocalEmbedding`] backend (BL-019, ADR 0018). Only read
+    /// when [`Self::provider`] is `"local"`. Defaults to
+    /// `bge-small-en-v1.5-int8`; see
+    /// [`crate::local_embedding::DEFAULT_LOCAL_MODEL`] for the canonical
+    /// default and [`crate::local_embedding::map_model`] for accepted
+    /// identifiers.
+    pub local_embedding_model: Option<String>,
 }
 
 impl Default for AiConfig {
@@ -44,8 +52,32 @@ impl Default for AiConfig {
             context_window: 8192,
             reserved_response_tokens: 1024,
             privacy: PrivacyPolicy::Off,
+            local_embedding_model: None,
         }
     }
+}
+
+/// Detect a local-embedding configuration when the
+/// `NEXUS_LOCAL_EMBEDDINGS` env var is set to a truthy value
+/// (`1`/`true`/`yes`). The optional `NEXUS_LOCAL_EMBEDDING_MODEL` env
+/// var overrides the default model identifier.
+///
+/// Returned [`AiConfig`] has `provider = "local"`; `build_embedding_provider`
+/// in `core_plugin.rs` routes that to [`crate::LocalEmbedding`] when
+/// the `local-embeddings` feature is on, otherwise returns a clear
+/// error.
+#[must_use]
+pub fn detect_local_embedding() -> Option<AiConfig> {
+    let flag = env::var("NEXUS_LOCAL_EMBEDDINGS").ok()?.to_ascii_lowercase();
+    if !matches!(flag.as_str(), "1" | "true" | "yes" | "on") {
+        return None;
+    }
+    let model = env::var("NEXUS_LOCAL_EMBEDDING_MODEL").ok();
+    Some(AiConfig {
+        provider: "local".to_string(),
+        local_embedding_model: model,
+        ..AiConfig::default()
+    })
 }
 
 /// Detect the best available chat provider from environment variables.
@@ -84,11 +116,17 @@ pub fn detect_provider() -> Option<AiConfig> {
 
 /// Detect the best available embedding provider from environment variables.
 ///
-/// Prefers `OpenAI` (higher-quality embeddings), falls back to Ollama.
+/// Order of preference:
+/// 1. `NEXUS_LOCAL_EMBEDDINGS=1` -> local fastembed-rs (offline, ADR 0018)
+/// 2. `OPENAI_API_KEY`           -> `OpenAI`
+/// 3. `OLLAMA_BASE_URL`          -> Ollama
 ///
 /// Returns `None` if no embedding provider is detected.
 #[must_use]
 pub fn detect_embedding_provider() -> Option<AiConfig> {
+    if let Some(local) = detect_local_embedding() {
+        return Some(local);
+    }
     if let Ok(key) = env::var("OPENAI_API_KEY") {
         return Some(AiConfig {
             provider: "openai".to_string(),

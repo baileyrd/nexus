@@ -42,6 +42,7 @@ mod archetypes;
 pub mod core_plugin;
 mod executor;
 mod llm;
+pub mod orchestrator;
 
 pub use agents::EchoAgent;
 pub use archetypes::{
@@ -49,12 +50,14 @@ pub use archetypes::{
     WRITER_ID, WRITER_SYSTEM_PROMPT,
 };
 pub use core_plugin::{
-    AgentCorePlugin, HANDLER_EXECUTE_STEP, HANDLER_HISTORY_DELETE, HANDLER_HISTORY_GET,
-    HANDLER_HISTORY_LIST, HANDLER_LIST_ARCHETYPES, HANDLER_PLAN, HANDLER_RUN, HANDLER_RUN_PLAN,
+    AgentCorePlugin, HANDLER_DELEGATE, HANDLER_EXECUTE_STEP, HANDLER_HISTORY_DELETE,
+    HANDLER_HISTORY_GET, HANDLER_HISTORY_LIST, HANDLER_LIST_ARCHETYPES, HANDLER_PARALLEL,
+    HANDLER_PIPELINE, HANDLER_PLAN, HANDLER_RUN, HANDLER_RUN_PLAN, HANDLER_TRACE_GET,
     PLUGIN_ID,
 };
 pub use executor::{PlanExecutor, StepResult, StepStatus};
 pub use llm::{ChatDriver, LlmAgent, DEFAULT_SYSTEM_PROMPT};
+pub use orchestrator::{AgentOrchestrator, TraceEntry};
 
 /// A unit of work produced by an [`Agent`] and consumed by a
 /// [`PlanExecutor`]. Steps are deliberately simple — agents that

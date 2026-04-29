@@ -832,3 +832,84 @@ export function flushAutosave(): void {
     autosaveTimer = null
   }
 }
+
+// ── BL-035 — one-shot stream_chat for AI actions ──────────────────────────
+//
+// Direct chat path (no RAG retrieval) used by the right-click and
+// block-handle AI actions. Bypasses the chat-store turn machinery on
+// purpose: actions emit their result inline (toast / chat panel / future
+// editor splice) rather than appending to the active conversation, so
+// running "Summarize" three times in a row doesn't pollute the chat
+// transcript with three unrelated user turns.
+//
+// Backed by `com.nexus.ai::stream_chat` (handler id 6) so the BL-016
+// tool registry is reachable — `tools: 'auto'` lets the model call
+// shipped tools when relevant. The handler's invoke promise resolves
+// with the final assistant text on completion (it internally drains the
+// stream); we don't subscribe to chunk events here.
+
+const HANDLER_STREAM_CHAT = 'stream_chat'
+
+/** A single conversation message in the `stream_chat` payload shape. */
+export interface StreamChatMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+}
+
+/** Args accepted by {@link streamChat}. Mirrors `AiStreamChatArgs` in
+ *  `crates/nexus-ai/src/ipc.rs` minus the kernel-side fields the shell
+ *  doesn't need to expose (`mode` is implicit `chat`, `trim` only
+ *  applies to `complete`). */
+export interface StreamChatRequest {
+  messages: StreamChatMessage[]
+  /** Optional system prompt forwarded to the provider. */
+  system?: string
+  /** Tool-advertisement policy. Defaults to `'auto'` — actions want
+   *  the BL-016 tool registry advertised so the model can call tools
+   *  during a summarize / rewrite / explain. */
+  tools?: 'auto' | 'none'
+  /** Optional explicit session id. When omitted, a fresh `action-<uuid>`
+   *  is minted so events from concurrent actions don't cross-route. */
+  sessionId?: string
+  /** Optional generation cap forwarded to the provider. */
+  maxTokens?: number
+}
+
+/** Final text shape returned by `stream_chat` on the invoke side. */
+interface StreamChatResult {
+  session_id?: string
+  text?: string
+}
+
+/**
+ * Fire a one-shot `com.nexus.ai::stream_chat` round-trip and resolve
+ * with the final assistant text. Used by BL-035 AI actions; the chat
+ * view continues to use {@link submitQuestion} (RAG-backed `stream_ask`).
+ *
+ * Errors propagate to the caller — actions catch them and surface a
+ * toast rather than crashing the menu.
+ */
+export async function streamChat(
+  api: PluginAPI,
+  req: StreamChatRequest,
+): Promise<string> {
+  if (!kernel) {
+    throw new Error('AI plugin not activated (kernel handle missing)')
+  }
+  const sessionId = req.sessionId ?? `action-${newRequestId()}`
+  const payload: Record<string, unknown> = {
+    messages: req.messages,
+    session_id: sessionId,
+    tools: req.tools ?? 'auto',
+  }
+  if (req.system !== undefined) payload.system = req.system
+  if (req.maxTokens !== undefined) payload.max_tokens = req.maxTokens
+
+  const result = await api.kernel.invoke<StreamChatResult>(
+    AI_PLUGIN_ID,
+    HANDLER_STREAM_CHAT,
+    payload,
+    AI_REQUEST_TIMEOUT_MS,
+  )
+  return typeof result?.text === 'string' ? result.text : ''
+}
