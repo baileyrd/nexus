@@ -765,10 +765,14 @@ fn register_core_plugins(
                     ("reload", nexus_workflow::HANDLER_RELOAD),
                     ("validate", nexus_workflow::HANDLER_VALIDATE),
                     ("run", nexus_workflow::HANDLER_RUN),
+                    ("run_digest", nexus_workflow::HANDLER_RUN_DIGEST),
                 ],
             ),
             forge_root,
-            Box::new(WorkflowCorePlugin::open(workflows_dir)),
+            Box::new(WorkflowCorePlugin::open_with_digest_config(
+                workflows_dir,
+                load_digest_config(forge_root),
+            )),
         )
         .context("failed to register com.nexus.workflow")?;
 
@@ -1069,3 +1073,31 @@ impl CorePlugin for InvokerPlugin {
 const _: fn() = || {
     let _: Option<KernelPluginError> = None;
 };
+
+/// Load the BL-047 `[digests]` block from `<forge>/.forge/config.toml`.
+///
+/// Missing file, missing block, or any parse / IO error all fall back
+/// to [`nexus_workflow::DigestConfig::default`] (digests disabled).
+/// This keeps existing forges working with no config changes.
+fn load_digest_config(forge_root: &std::path::Path) -> nexus_workflow::DigestConfig {
+    #[derive(serde::Deserialize)]
+    struct Wrapper {
+        #[serde(default)]
+        digests: Option<nexus_workflow::DigestConfig>,
+    }
+    let path = forge_root.join(".forge").join("config.toml");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return nexus_workflow::DigestConfig::default();
+    };
+    match toml::from_str::<Wrapper>(&text) {
+        Ok(w) => w.digests.unwrap_or_default(),
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "config.toml: [digests] failed to parse; falling back to defaults"
+            );
+            nexus_workflow::DigestConfig::default()
+        }
+    }
+}
