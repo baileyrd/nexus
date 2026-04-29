@@ -35,6 +35,8 @@ mod executor;
 mod interpolate;
 mod parse;
 mod registry;
+pub mod templates;
+pub mod webhook;
 
 pub use ai_steps::{
     build_decision_prompt, pick_choice, AiDecisionArgs, AiPromptArgs,

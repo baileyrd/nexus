@@ -31,10 +31,18 @@
 //!   trigger's `events` / `branch` / `branch_pattern` fields, and
 //!   fires `run` with `trigger.{event_type,branch,head,...}`
 //!   variables.
+//! - **`mcp_event`** — `spawn_mcp_event_triggers` subscribes to
+//!   `com.nexus.mcp.*` on the kernel bus, filters against the
+//!   trigger's `events` field (subset of currently-known topics),
+//!   and fires `run` with `trigger.{event_type,...}` plus any payload
+//!   fields carried on the event. Available topics today:
+//!   `host_started` (one-shot snapshot at plugin boot — opt in by
+//!   listing it in `events`). More land here when `nexus-mcp` grows
+//!   them; the trigger needs no executor changes.
 //! - **manual** — no background engine; callers drive `run`
 //!   directly (CLI, UI, scheduled task, nested workflow).
 //!
-//! `webhook` / `mcp_event` are not yet wired.
+//! `webhook` is not yet wired.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
@@ -47,8 +55,9 @@ use serde::Deserialize;
 
 use crate::{
     ai_steps, condition_skipped_run, cron::CronSchedule, digests, evaluate_condition,
-    parse_workflow_text, run_workflow_with_variables, ActionDispatcher, DigestConfig, DigestKind,
-    EvaluationContext, Step, VariableMap, Workflow, WorkflowRegistry, WorkflowRegistryError,
+    parse_workflow_text, run_workflow_with_variables, templates, webhook, ActionDispatcher,
+    DigestConfig, DigestKind, EvaluationContext, Step, VariableMap, Workflow, WorkflowRegistry,
+    WorkflowRegistryError,
 };
 
 /// Reverse-DNS identifier.
@@ -71,6 +80,18 @@ pub const HANDLER_RUN_DIGEST: u32 = 6;
 /// picks up enabled / cron / output-dir changes without a restart.
 /// Args: a [`DigestConfig`] JSON object.
 pub const HANDLER_SET_DIGEST_CONFIG: u32 = 7;
+/// BL-028f — `templates_list`: enumerate built-in templates.
+/// Args: `{}`. Returns `[{ slug, description, tags, filename }]`.
+pub const HANDLER_TEMPLATES_LIST: u32 = 8;
+/// BL-028f — `templates_get`: fetch one template's TOML body.
+/// Args: `{ slug }`. Returns `{ slug, description, tags, filename, body }`.
+pub const HANDLER_TEMPLATES_GET: u32 = 9;
+/// BL-028f — `templates_init`: write a template into the forge's
+/// `.workflows/` directory so it's loaded on the next reload.
+/// Args: `{ slug, filename?, overwrite? }`. Returns
+/// `{ written: true, path }`. Refuses to clobber an existing file
+/// unless `overwrite = true`.
+pub const HANDLER_TEMPLATES_INIT: u32 = 10;
 
 /// Default per-step tool-call timeout. Workflow steps often span
 /// multiple plugins; give them enough headroom.
@@ -93,6 +114,10 @@ pub struct WorkflowCorePlugin {
     /// pushes are visible to the long-running scheduler loop without
     /// a restart.
     digest_config: Arc<RwLock<DigestConfig>>,
+    /// BL-028g — webhook listener configuration. The accept loop
+    /// only spawns when `enabled = true` and at least one workflow
+    /// declares a `webhook` trigger.
+    webhook_config: webhook::WebhookConfig,
 }
 
 impl WorkflowCorePlugin {
@@ -111,6 +136,19 @@ impl WorkflowCorePlugin {
     pub fn open_with_digest_config(
         workflows_dir: PathBuf,
         digest_config: DigestConfig,
+    ) -> Self {
+        Self::open_full(workflows_dir, digest_config, webhook::WebhookConfig::default())
+    }
+
+    /// Construct with both the digest and webhook config blocks set.
+    /// BL-028g — bootstrap calls this so the webhook listener picks
+    /// up `[webhooks].enabled` / `[webhooks].bind` from
+    /// `<forge>/.forge/config.toml` without further plumbing.
+    #[must_use]
+    pub fn open_full(
+        workflows_dir: PathBuf,
+        digest_config: DigestConfig,
+        webhook_config: webhook::WebhookConfig,
     ) -> Self {
         let registry = match WorkflowRegistry::load(&workflows_dir) {
             Ok(reg) => reg,
@@ -142,6 +180,7 @@ impl WorkflowCorePlugin {
             context: None,
             scheduler_handles: Mutex::new(Vec::new()),
             digest_config: Arc::new(RwLock::new(digest_config)),
+            webhook_config,
         }
     }
 
@@ -831,6 +870,390 @@ async fn git_event_loop(ctx: Arc<KernelPluginContext>, spec: GitEventSpec) {
     }
 }
 
+/// BL-028e — parsed `trigger.type = "mcp_event"` spec.
+///
+/// Subscribes to `com.nexus.mcp.*` on the kernel bus, filters by an
+/// optional `events: [String]` allow-list. `host_started` is a
+/// one-shot snapshot fired at MCP plugin boot — most workflows want
+/// deltas, not snapshots, so `host_started` is **excluded** by default
+/// (mirrors the git `state` topic). Opt in by listing it in `events`.
+struct McpEventSpec {
+    workflow_name: String,
+    events: McpEventSet,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct McpEventSet {
+    host_started: bool,
+}
+
+impl McpEventSet {
+    /// Default set: empty for now. `host_started` is excluded as a
+    /// snapshot. As more topics are added in `nexus-mcp`, default
+    /// inclusions land here (e.g. delta events) — opt-out behaviour
+    /// can be implemented per-topic if it matters.
+    fn defaults() -> Self {
+        Self {
+            host_started: false,
+        }
+    }
+
+    fn matches(self, event_type: &str) -> bool {
+        match event_type {
+            "host_started" => self.host_started,
+            _ => false,
+        }
+    }
+}
+
+impl McpEventSpec {
+    fn from_trigger(name: &str, wf: &Workflow) -> Result<Self, String> {
+        let events = match wf.trigger.extra.get("events") {
+            None => McpEventSet::defaults(),
+            Some(toml::Value::Array(items)) => {
+                let mut set = McpEventSet { host_started: false };
+                for item in items {
+                    match item.as_str() {
+                        Some("host_started") => set.host_started = true,
+                        Some(other) => {
+                            return Err(format!(
+                                "unknown event type `{other}` (expected host_started)"
+                            ));
+                        }
+                        None => return Err("events array must contain strings".into()),
+                    }
+                }
+                set
+            }
+            Some(_) => return Err("events must be an array of strings".into()),
+        };
+        Ok(Self {
+            workflow_name: name.to_string(),
+            events,
+        })
+    }
+}
+
+fn mcp_event_type_for_type_id(type_id: &str) -> Option<&'static str> {
+    match type_id {
+        "com.nexus.mcp.host.started" => Some("host_started"),
+        _ => None,
+    }
+}
+
+impl WorkflowCorePlugin {
+    /// Spawn one tokio task per `mcp_event`-triggered workflow. Each
+    /// task subscribes to `com.nexus.mcp.*` on the kernel bus,
+    /// filters events against the trigger's optional `events` field,
+    /// and dispatches `com.nexus.workflow::run` with `trigger.event_type`
+    /// (plus any payload keys carried on the event) when an event
+    /// matches.
+    ///
+    /// Parse failures log-and-skip that one workflow; other workflows
+    /// keep their subscriptions. Handles are retained so the plugin
+    /// can cancel them on drop alongside the cron / `file_event` /
+    /// `git_event` schedulers.
+    fn spawn_mcp_event_triggers(&self, ctx: &Arc<KernelPluginContext>) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!(
+                "workflow scheduler: no tokio runtime available; mcp_event triggers disabled"
+            );
+            return;
+        };
+        let specs: Vec<McpEventSpec> = match self.registry.lock() {
+            Ok(reg) => reg
+                .iter()
+                .filter(|(_, wf)| wf.trigger.trigger_type == "mcp_event")
+                .filter_map(|(name, wf)| match McpEventSpec::from_trigger(name, wf) {
+                    Ok(spec) => Some(spec),
+                    Err(e) => {
+                        tracing::warn!(workflow = %name, error = %e, "mcp_event trigger: spec parse failed; skipping");
+                        None
+                    }
+                })
+                .collect(),
+            Err(_) => return,
+        };
+        let Ok(mut handles) = self.scheduler_handles.lock() else {
+            return;
+        };
+        for spec in specs {
+            let ctx = Arc::clone(ctx);
+            tracing::info!(
+                workflow = %spec.workflow_name,
+                events = ?spec.events,
+                "mcp_event trigger armed"
+            );
+            let handle = runtime.spawn(async move {
+                mcp_event_loop(ctx, spec).await;
+            });
+            handles.push(handle);
+        }
+    }
+}
+
+async fn mcp_event_loop(ctx: Arc<KernelPluginContext>, spec: McpEventSpec) {
+    let mut sub = ctx.subscribe(EventFilter::CustomPrefix(
+        "com.nexus.mcp.".to_string(),
+    ));
+    loop {
+        let published = match sub.recv().await {
+            Ok(e) => e,
+            Err(RecvError::Lagged(n)) => {
+                tracing::warn!(workflow = %spec.workflow_name, n, "mcp_event trigger lagged; events lost");
+                continue;
+            }
+            Err(RecvError::Closed) => {
+                tracing::debug!(workflow = %spec.workflow_name, "mcp_event trigger: bus closed");
+                return;
+            }
+        };
+        let NexusEvent::Custom { type_id, payload, .. } = &published.event else {
+            continue;
+        };
+        let Some(event_type) = mcp_event_type_for_type_id(type_id) else {
+            continue;
+        };
+        if !spec.events.matches(event_type) {
+            continue;
+        }
+
+        let mut trigger_vars = serde_json::Map::new();
+        trigger_vars.insert(
+            "event_type".into(),
+            serde_json::Value::String(event_type.into()),
+        );
+        // Pass through every top-level payload key as `trigger.<key>`
+        // so workflows can read whatever the event carries (e.g.
+        // `configured_servers` on `host_started`).
+        if let Some(obj) = payload.as_object() {
+            for (k, v) in obj {
+                trigger_vars.entry(k.clone()).or_insert_with(|| v.clone());
+            }
+        }
+
+        let variables = serde_json::json!({ "trigger": trigger_vars });
+        let args = serde_json::json!({
+            "name": spec.workflow_name,
+            "variables": variables,
+        });
+        match ctx
+            .ipc_call(
+                PLUGIN_ID,
+                "run",
+                args,
+                std::time::Duration::from_secs(600),
+            )
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(
+                    workflow = %spec.workflow_name,
+                    event_type, "mcp_event trigger fired"
+                );
+            }
+            Err(err) => {
+                tracing::warn!(
+                    workflow = %spec.workflow_name,
+                    event_type, %err,
+                    "mcp_event trigger: run failed; continuing"
+                );
+            }
+        }
+    }
+}
+
+impl WorkflowCorePlugin {
+    /// BL-028g — spawn the webhook accept loop, when configured.
+    ///
+    /// Bails (with a `tracing::debug!`) if `[webhooks].enabled = false`
+    /// or if no workflow declares a `webhook` trigger — both states
+    /// mean there's no listener worth running. Spec parse failures
+    /// log-and-skip per workflow.
+    fn spawn_webhook_listener(&self, ctx: &Arc<KernelPluginContext>) {
+        if !self.webhook_config.enabled {
+            tracing::debug!("webhook listener: disabled in [webhooks].enabled");
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!("webhook listener: no tokio runtime available; disabled");
+            return;
+        };
+        let specs: Vec<webhook::WebhookSpec> = match self.registry.lock() {
+            Ok(reg) => reg
+                .iter()
+                .filter(|(_, wf)| wf.trigger.trigger_type == "webhook")
+                .filter_map(|(name, wf)| match webhook::WebhookSpec::from_trigger(name, wf) {
+                    Ok(spec) => Some(spec),
+                    Err(e) => {
+                        tracing::warn!(workflow = %name, error = %e, "webhook trigger: spec parse failed; skipping");
+                        None
+                    }
+                })
+                .collect(),
+            Err(_) => return,
+        };
+        if specs.is_empty() {
+            tracing::debug!("webhook listener: no webhook-trigger workflows; not binding");
+            return;
+        }
+        let bind = self.webhook_config.bind.clone();
+        let ctx = Arc::clone(ctx);
+        let specs = Arc::new(specs);
+        let Ok(mut handles) = self.scheduler_handles.lock() else {
+            return;
+        };
+        let handle = runtime.spawn(async move {
+            webhook_accept_loop(ctx, bind, specs).await;
+        });
+        handles.push(handle);
+    }
+}
+
+async fn webhook_accept_loop(
+    ctx: Arc<KernelPluginContext>,
+    bind: String,
+    specs: Arc<Vec<webhook::WebhookSpec>>,
+) {
+    let listener = match tokio::net::TcpListener::bind(&bind).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!(%bind, error = %e, "webhook listener: bind failed; aborting");
+            return;
+        }
+    };
+    tracing::info!(%bind, count = specs.len(), "webhook listener armed");
+    loop {
+        let (sock, peer) = match listener.accept().await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(error = %e, "webhook listener: accept failed; continuing");
+                continue;
+            }
+        };
+        let ctx = Arc::clone(&ctx);
+        let specs = Arc::clone(&specs);
+        tokio::spawn(async move {
+            handle_webhook_connection(ctx, sock, peer.to_string(), &specs).await;
+        });
+    }
+}
+
+async fn handle_webhook_connection(
+    ctx: Arc<KernelPluginContext>,
+    mut sock: tokio::net::TcpStream,
+    peer: String,
+    specs: &[webhook::WebhookSpec],
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let max = webhook::MAX_HEADER_BYTES + webhook::MAX_BODY_BYTES;
+    let mut buf = Vec::with_capacity(2_048);
+    let mut tmp = [0u8; 2_048];
+    let read_deadline = tokio::time::Instant::now()
+        + std::time::Duration::from_millis(webhook::READ_TIMEOUT_MS);
+    let parsed = loop {
+        if buf.len() >= max {
+            let _ = write_status(&mut sock, 413, "Payload Too Large").await;
+            return;
+        }
+        let remaining = read_deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            let _ = write_status(&mut sock, 408, "Request Timeout").await;
+            return;
+        }
+        match tokio::time::timeout(remaining, sock.read(&mut tmp)).await {
+            Ok(Ok(0)) => break webhook::parse_request(&buf),
+            Ok(Ok(n)) => {
+                buf.extend_from_slice(&tmp[..n]);
+                match webhook::parse_request(&buf) {
+                    Ok(req) => break Ok(req),
+                    // need more bytes; loop will read again
+                    Err(webhook::RequestError::Malformed) => {}
+                    Err(other) => break Err(other),
+                }
+            }
+            Ok(Err(_)) | Err(_) => {
+                let _ = write_status(&mut sock, 408, "Request Timeout").await;
+                return;
+            }
+        }
+    };
+    let req = match parsed {
+        Ok(r) => r,
+        Err(webhook::RequestError::BodyTooLarge) => {
+            let _ = write_status(&mut sock, 413, "Payload Too Large").await;
+            return;
+        }
+        Err(_) => {
+            let _ = write_status(&mut sock, 400, "Bad Request").await;
+            return;
+        }
+    };
+
+    match webhook::route_request(specs, &req) {
+        webhook::Route::NotFound => {
+            let _ = write_status(&mut sock, 404, "Not Found").await;
+        }
+        webhook::Route::MethodNotAllowed => {
+            let _ = write_status(&mut sock, 405, "Method Not Allowed").await;
+        }
+        webhook::Route::Unauthorized => {
+            let _ = write_status(&mut sock, 401, "Unauthorized").await;
+        }
+        webhook::Route::Dispatch(spec) => {
+            let variables = webhook::build_trigger_vars(&req, &peer);
+            let args = serde_json::json!({
+                "name": spec.workflow_name,
+                "variables": variables,
+            });
+            let dispatch = ctx
+                .ipc_call(
+                    PLUGIN_ID,
+                    "run",
+                    args,
+                    std::time::Duration::from_secs(600),
+                )
+                .await;
+            match dispatch {
+                Ok(_) => {
+                    tracing::info!(workflow = %spec.workflow_name, path = %spec.path, peer = %peer, "webhook fired");
+                    let _ = write_status_with_body(&mut sock, 200, "OK", b"{\"ok\":true}").await;
+                }
+                Err(err) => {
+                    tracing::warn!(workflow = %spec.workflow_name, %err, "webhook dispatch failed");
+                    let _ = write_status(&mut sock, 500, "Internal Server Error").await;
+                }
+            }
+        }
+    }
+    let _ = sock.shutdown().await;
+}
+
+async fn write_status(sock: &mut tokio::net::TcpStream, code: u16, reason: &str) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let body = format!("{code} {reason}");
+    let resp = format!(
+        "HTTP/1.1 {code} {reason}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    sock.write_all(resp.as_bytes()).await
+}
+
+async fn write_status_with_body(
+    sock: &mut tokio::net::TcpStream,
+    code: u16,
+    reason: &str,
+    body: &[u8],
+) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let header = format!(
+        "HTTP/1.1 {code} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    sock.write_all(header.as_bytes()).await?;
+    sock.write_all(body).await
+}
+
 impl Drop for WorkflowCorePlugin {
     fn drop(&mut self) {
         if let Ok(handles) = self.scheduler_handles.lock() {
@@ -898,6 +1321,9 @@ impl CorePlugin for WorkflowCorePlugin {
             HANDLER_SET_DIGEST_CONFIG => Err(exec_err(format!(
                 "handler {HANDLER_SET_DIGEST_CONFIG}: set_digest_config is async; caller should use dispatch_async"
             ))),
+            HANDLER_TEMPLATES_LIST => Self::dispatch_templates_list(),
+            HANDLER_TEMPLATES_GET => Self::dispatch_templates_get(args),
+            HANDLER_TEMPLATES_INIT => self.dispatch_templates_init(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -1007,6 +1433,8 @@ impl CorePlugin for WorkflowCorePlugin {
         self.spawn_cron_schedulers(&ctx);
         self.spawn_file_event_triggers(&ctx);
         self.spawn_git_event_triggers(&ctx);
+        self.spawn_mcp_event_triggers(&ctx);
+        self.spawn_webhook_listener(&ctx);
         self.spawn_digest_scheduler(&ctx);
     }
 }
@@ -1220,6 +1648,83 @@ impl WorkflowCorePlugin {
         Ok(serde_json::json!({ "loaded": len }))
     }
 
+    #[allow(clippy::unnecessary_wraps)] // dispatcher contract returns Result
+    fn dispatch_templates_list() -> Result<serde_json::Value, PluginError> {
+        let entries: Vec<_> = templates::CATALOG
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "slug": t.slug,
+                    "description": t.description,
+                    "tags": t.tags,
+                    "filename": t.filename,
+                })
+            })
+            .collect();
+        Ok(serde_json::Value::Array(entries))
+    }
+
+    fn dispatch_templates_get(
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        #[derive(Deserialize)]
+        struct Args {
+            slug: String,
+        }
+        let a: Args = parse(args, "templates_get")?;
+        let t = templates::find(&a.slug)
+            .ok_or_else(|| exec_err(format!("no template named '{}'", a.slug)))?;
+        Ok(serde_json::json!({
+            "slug": t.slug,
+            "description": t.description,
+            "tags": t.tags,
+            "filename": t.filename,
+            "body": t.body,
+        }))
+    }
+
+    fn dispatch_templates_init(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        #[derive(Deserialize)]
+        struct Args {
+            slug: String,
+            #[serde(default)]
+            filename: Option<String>,
+            #[serde(default)]
+            overwrite: bool,
+        }
+        let a: Args = parse(args, "templates_init")?;
+        let t = templates::find(&a.slug)
+            .ok_or_else(|| exec_err(format!("no template named '{}'", a.slug)))?;
+        let filename = a
+            .filename
+            .as_deref()
+            .map(sanitize_filename)
+            .transpose()
+            .map_err(exec_err)?
+            .unwrap_or_else(|| t.filename.to_string());
+        let target = self.root.join(&filename);
+        if target.exists() && !a.overwrite {
+            return Err(exec_err(format!(
+                "templates_init: '{}' already exists (pass overwrite=true to replace)",
+                target.display()
+            )));
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| exec_err(format!("templates_init: create_dir_all: {e}")))?;
+        }
+        std::fs::write(&target, t.body)
+            .map_err(|e| exec_err(format!("templates_init: write: {e}")))?;
+        Ok(serde_json::json!({
+            "written": true,
+            "path": target.to_string_lossy(),
+            "slug": t.slug,
+        }))
+    }
+
     fn dispatch_validate(
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
@@ -1233,6 +1738,23 @@ impl WorkflowCorePlugin {
             Err(err) => Err(exec_err(format!("invalid workflow: {err}"))),
         }
     }
+}
+
+/// Defensive filename check for `templates_init`. Rejects path
+/// separators and parent-dir hops so a malicious caller can't write
+/// outside `<forge>/.workflows/`. Empty / whitespace-only names also
+/// fail. Allowed: `<basename>` or `<basename>.workflow.toml`.
+fn sanitize_filename(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("templates_init: filename cannot be empty".into());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains("..") {
+        return Err(format!(
+            "templates_init: filename '{trimmed}' must be a bare basename (no path separators)"
+        ));
+    }
+    Ok(trimmed.to_string())
 }
 
 // ── Error / serde plumbing ──────────────────────────────────────────────────
@@ -1571,6 +2093,184 @@ branch_pattern = "[unterminated"
         for short in ["state", "commit", "branch_changed", "dirty_changed"] {
             assert!(all.matches(short), "all() should include `{short}`");
         }
+    }
+
+    #[test]
+    fn mcp_event_spec_defaults_exclude_host_started() {
+        let src = r#"
+[workflow]
+name = "M"
+
+[trigger]
+type = "mcp_event"
+"#;
+        let wf = parse_workflow_text(src).unwrap();
+        let spec = McpEventSpec::from_trigger("M", &wf).unwrap();
+        assert!(
+            !spec.events.host_started,
+            "host_started must be excluded by default (snapshot, not delta)"
+        );
+    }
+
+    #[test]
+    fn mcp_event_spec_opts_in_via_events_array() {
+        let src = r#"
+[workflow]
+name = "M"
+
+[trigger]
+type = "mcp_event"
+events = ["host_started"]
+"#;
+        let wf = parse_workflow_text(src).unwrap();
+        let spec = McpEventSpec::from_trigger("M", &wf).unwrap();
+        assert!(spec.events.host_started);
+    }
+
+    #[test]
+    fn mcp_event_spec_rejects_unknown_event_name() {
+        let src = r#"
+[workflow]
+name = "M"
+
+[trigger]
+type = "mcp_event"
+events = ["nope"]
+"#;
+        let wf = parse_workflow_text(src).unwrap();
+        assert!(McpEventSpec::from_trigger("M", &wf).is_err());
+    }
+
+    #[test]
+    fn mcp_event_type_mapping_covers_known_topics() {
+        assert_eq!(
+            mcp_event_type_for_type_id("com.nexus.mcp.host.started"),
+            Some("host_started")
+        );
+        assert!(mcp_event_type_for_type_id("com.nexus.mcp.other").is_none());
+        assert!(mcp_event_type_for_type_id("com.nexus.git.state").is_none());
+    }
+
+    #[test]
+    fn templates_list_returns_catalog() {
+        let tmp = TempDir::new().unwrap();
+        let mut plugin = WorkflowCorePlugin::open(tmp.path().to_path_buf());
+        let v = plugin
+            .dispatch(HANDLER_TEMPLATES_LIST, &serde_json::json!({}))
+            .unwrap();
+        let arr = v.as_array().unwrap();
+        assert!(arr.len() >= 5);
+        assert!(arr.iter().any(|e| e["slug"] == "daily-journal"));
+    }
+
+    #[test]
+    fn templates_get_returns_body_for_known_slug() {
+        let tmp = TempDir::new().unwrap();
+        let mut plugin = WorkflowCorePlugin::open(tmp.path().to_path_buf());
+        let v = plugin
+            .dispatch(
+                HANDLER_TEMPLATES_GET,
+                &serde_json::json!({ "slug": "daily-journal" }),
+            )
+            .unwrap();
+        assert_eq!(v["slug"], "daily-journal");
+        assert!(v["body"].as_str().unwrap().contains("Daily Journal"));
+    }
+
+    #[test]
+    fn templates_get_errors_for_unknown_slug() {
+        let tmp = TempDir::new().unwrap();
+        let mut plugin = WorkflowCorePlugin::open(tmp.path().to_path_buf());
+        let err = plugin
+            .dispatch(
+                HANDLER_TEMPLATES_GET,
+                &serde_json::json!({ "slug": "nope" }),
+            )
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("no template"));
+            }
+            _ => panic!("unexpected"),
+        }
+    }
+
+    #[test]
+    fn templates_init_writes_file_and_refuses_to_clobber() {
+        let tmp = TempDir::new().unwrap();
+        let mut plugin = WorkflowCorePlugin::open(tmp.path().to_path_buf());
+        let v = plugin
+            .dispatch(
+                HANDLER_TEMPLATES_INIT,
+                &serde_json::json!({ "slug": "daily-journal" }),
+            )
+            .unwrap();
+        assert_eq!(v["written"], true);
+        let path_str = v["path"].as_str().unwrap().to_string();
+        let written = std::fs::read_to_string(&path_str).unwrap();
+        assert!(written.contains("Daily Journal"));
+
+        // Second init without overwrite must fail.
+        let err = plugin
+            .dispatch(
+                HANDLER_TEMPLATES_INIT,
+                &serde_json::json!({ "slug": "daily-journal" }),
+            )
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("already exists"));
+            }
+            _ => panic!("unexpected"),
+        }
+
+        // With overwrite=true it succeeds.
+        let v = plugin
+            .dispatch(
+                HANDLER_TEMPLATES_INIT,
+                &serde_json::json!({ "slug": "daily-journal", "overwrite": true }),
+            )
+            .unwrap();
+        assert_eq!(v["written"], true);
+    }
+
+    #[test]
+    fn templates_init_rejects_filename_with_path_traversal() {
+        let tmp = TempDir::new().unwrap();
+        let mut plugin = WorkflowCorePlugin::open(tmp.path().to_path_buf());
+        let err = plugin
+            .dispatch(
+                HANDLER_TEMPLATES_INIT,
+                &serde_json::json!({
+                    "slug": "daily-journal",
+                    "filename": "../escape.toml"
+                }),
+            )
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("bare basename"));
+            }
+            _ => panic!("unexpected"),
+        }
+    }
+
+    #[test]
+    fn templates_init_then_reload_picks_up_new_workflow() {
+        let tmp = TempDir::new().unwrap();
+        let mut plugin = WorkflowCorePlugin::open(tmp.path().to_path_buf());
+        plugin
+            .dispatch(
+                HANDLER_TEMPLATES_INIT,
+                &serde_json::json!({ "slug": "research-prompt" }),
+            )
+            .unwrap();
+        let v = plugin.dispatch(HANDLER_RELOAD, &serde_json::json!({})).unwrap();
+        assert_eq!(v["loaded"], 1);
+        let list = plugin
+            .dispatch(HANDLER_LIST, &serde_json::json!({}))
+            .unwrap();
+        assert_eq!(list[0]["workflow"]["name"], "Research Prompt");
     }
 
     #[test]

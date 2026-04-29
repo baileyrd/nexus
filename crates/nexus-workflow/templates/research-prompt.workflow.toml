@@ -1,0 +1,27 @@
+[workflow]
+name = "Research Prompt"
+description = "Manual workflow that asks the AI a question with RAG context and writes the answer to a note."
+version = "0.1.0"
+tags = ["ai", "manual", "rag"]
+
+[inputs]
+question = { type = "string", description = "What to ask" }
+note_path = { type = "string", default = "Research/answer.md", description = "Where to save the answer" }
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "ask"
+type = "ai_prompt"
+prompt = "${inputs.question}"
+limit = 8
+
+[[steps]]
+name = "save"
+type = "ipc"
+target = "com.nexus.storage"
+command = "write_file"
+[steps.args]
+path = "${inputs.note_path}"
+content = "# ${inputs.question}\n\n${ask.answer}\n"

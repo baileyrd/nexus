@@ -1,0 +1,30 @@
+[workflow]
+name = "Parallel Fetch"
+description = "Run two storage scans in parallel, then write a combined summary."
+version = "0.1.0"
+tags = ["parallel", "ipc", "starter"]
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "scan-notes"
+type = "ipc"
+parallel = true
+target = "com.nexus.storage"
+command = "list_dir"
+[steps.args]
+path = "Notes/"
+
+[[steps]]
+name = "scan-journal"
+type = "ipc"
+parallel = true
+target = "com.nexus.storage"
+command = "list_dir"
+[steps.args]
+path = "Journal/"
+
+[[steps]]
+name = "merge"
+type = "noop"

@@ -223,6 +223,57 @@ fn print_full(wf: &Value) {
     }
 }
 
+// ── BL-028f templates ───────────────────────────────────────────────────────
+
+/// `nexus workflow template list` — every built-in template.
+pub fn template_list(app: &mut App) -> Result<()> {
+    let response = call(app, "templates_list", Value::Object(serde_json::Map::new()))?;
+    let entries = response.as_array().cloned().unwrap_or_default();
+    if entries.is_empty() {
+        println!("(no templates)");
+        return Ok(());
+    }
+    let slug_w = entries
+        .iter()
+        .filter_map(|e| e.get("slug").and_then(Value::as_str))
+        .map(str::len)
+        .max()
+        .unwrap_or(4)
+        .max(4);
+    println!("{:<slug_w$}  DESCRIPTION", "SLUG", slug_w = slug_w);
+    for e in &entries {
+        let slug = e.get("slug").and_then(Value::as_str).unwrap_or("?");
+        let desc = e.get("description").and_then(Value::as_str).unwrap_or("");
+        println!("{slug:<slug_w$}  {desc}", slug_w = slug_w);
+    }
+    Ok(())
+}
+
+/// `nexus workflow template show <slug>` — print the embedded TOML body.
+pub fn template_show(app: &mut App, slug: &str) -> Result<()> {
+    let response = call(app, "templates_get", serde_json::json!({ "slug": slug }))?;
+    let body = response.get("body").and_then(Value::as_str).unwrap_or("");
+    print!("{body}");
+    Ok(())
+}
+
+/// `nexus workflow template init <slug>` — write the template into the forge.
+pub fn template_init(
+    app: &mut App,
+    slug: &str,
+    as_file: Option<&str>,
+    overwrite: bool,
+) -> Result<()> {
+    let mut args = serde_json::json!({ "slug": slug, "overwrite": overwrite });
+    if let Some(f) = as_file {
+        args["filename"] = Value::String(f.to_string());
+    }
+    let response = call(app, "templates_init", args)?;
+    let path = response.get("path").and_then(Value::as_str).unwrap_or("?");
+    println!("Wrote template `{slug}` → {path}");
+    Ok(())
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn call(app: &mut App, command: &str, args: Value) -> Result<Value> {
