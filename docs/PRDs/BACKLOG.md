@@ -342,11 +342,7 @@ Today `nexus-mcp` is an MCP *client*. The FD direction is the inverse: expose Ne
 
 _BL-043 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-044: MEM recall hotkey
-
-**Source**: [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md) piece 3.
-**Effort**: Small. Hard prereq: BL-019.
-Global hotkey opens a search overlay backed by BL-040 semantic search scoped to capture notes; results are inserted at the current caret or copied. Effectively reuses BL-032's overlay shell with a different content adapter.
+_BL-044 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-045: MEM auto-enrichment on save
 
