@@ -332,11 +332,7 @@ Per-forge log of AI interactions (prompt, model, surface, files touched, tool ca
 **Effort**: Medium.
 When the assembled context includes retrieved snippets (RAG / memory recall), the answer view shows numbered citations linking back to the source file + line range. Hard prereq: BL-019 embeddings (citations only meaningful once retrieval is real).
 
-### BL-039: AI-DIR auto-link suggestions
-
-**Source**: [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) direction 2.
-**Effort**: Medium. **Crate**: `nexus-ai` + `shell/src/plugins/nexus/editor/`.
-Embedding-driven inline suggestion of `[[wiki-style]]` links to existing forge files when the typed phrase semantically matches an existing note title or heading. UI piggybacks on BL-034's ghost-decoration. Hard prereq: BL-019.
+_BL-039 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 _BL-040 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
