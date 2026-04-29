@@ -97,10 +97,10 @@ pub async fn propose(
     let body_owned = body.to_string();
     let hash = body_hash(&content);
 
-    let context = truncate_chars(&body_owned, MAX_BODY_CHARS);
+    let excerpt = truncate_chars(&body_owned, MAX_BODY_CHARS);
     let messages_for_tags = vec![ChatMessage {
         role: Role::User,
-        content: format!("Note content:\n\n{context}"),
+        content: format!("Note content:\n\n{excerpt}"),
     }];
     let raw_tags = ai
         .chat(&messages_for_tags, Some(TAGS_PROMPT))
@@ -110,7 +110,7 @@ pub async fn propose(
 
     let messages_for_summary = vec![ChatMessage {
         role: Role::User,
-        content: format!("Note content:\n\n{context}"),
+        content: format!("Note content:\n\n{excerpt}"),
     }];
     let raw_summary = ai
         .chat(&messages_for_summary, Some(SUMMARY_PROMPT))
@@ -215,7 +215,7 @@ fn parse_tag_response(raw: &str) -> Vec<String> {
             continue;
         }
         // Filter to single-word tags (no spaces / punctuation other than `-`/`_`).
-        if t.chars().any(|c| c.is_whitespace()) {
+        if t.chars().any(char::is_whitespace) {
             continue;
         }
         if !t.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
@@ -368,7 +368,7 @@ pub fn merge_frontmatter(original: &str, proposal: &EnrichmentProposal) -> Strin
                 // If the value is on the same line we just drop the
                 // single line; if it's a block list, drop subsequent
                 // indented lines too.
-                let after_colon = line.splitn(2, ':').nth(1).unwrap_or("").trim();
+                let after_colon = line.split_once(':').map_or("", |(_, v)| v).trim();
                 if after_colon.is_empty() {
                     skip_block = true;
                 }
@@ -436,7 +436,7 @@ fn parse_tags_field(yaml: &str) -> Vec<String> {
         }
         if let Some(key) = yaml_key(line) {
             if key == "tags" {
-                let after = line.splitn(2, ':').nth(1).unwrap_or("").trim();
+                let after = line.split_once(':').map_or("", |(_, v)| v).trim();
                 if after.is_empty() {
                     in_block = true;
                 } else if let Some(stripped) = after.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {

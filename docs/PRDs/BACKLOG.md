@@ -346,9 +346,7 @@ _BL-044 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 ### BL-045: MEM auto-enrichment on save
 
-**Source**: [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md) piece 2.
-**Effort**: Medium. Hard prereqs: BL-019 + BL-041.
-On save of an inbox-tagged file, run an enrichment pass: AI-generated tags, link suggestions (via BL-039), and a 1-line summary written to frontmatter. Idempotent — re-runs only if the body hash changed. Honours user-accept gate before frontmatter is written.
+_BL-045 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-046: MEM code-aware capture
 

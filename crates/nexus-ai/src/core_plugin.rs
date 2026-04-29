@@ -103,7 +103,7 @@ pub const HANDLER_INDEX_STATUS: u32 = 14;
 pub const HANDLER_SEMANTIC_SEARCH: u32 = 13;
 
 /// BL-045 — `enrich_file`: read a markdown file, run the AI provider
-/// for tags + summary, run semantic_search for related notes, return
+/// for tags + summary, run `semantic_search` for related notes, return
 /// an [`crate::enrichment::EnrichmentProposal`] WITHOUT writing.
 /// Args `{ path: String }` → JSON-serialised proposal.
 pub const HANDLER_ENRICH_FILE: u32 = 15;
@@ -409,7 +409,7 @@ async fn handle_semantic_search(
 }
 
 /// BL-045 — `enrich_file`: read a markdown note, ask the AI for
-/// tags + summary, run semantic_search for related notes, return
+/// tags + summary, run `semantic_search` for related notes, return
 /// an [`crate::enrichment::EnrichmentProposal`] WITHOUT writing.
 async fn handle_enrich_file(
     ctx: &KernelPluginContext,
