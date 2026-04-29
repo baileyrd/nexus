@@ -8,7 +8,7 @@ description = "Nexus skills subsystem: .skill.md parser + registry + activation 
 
 [dependencies]
 serde = { workspace = true }
-serde_yaml = { workspace = true }
+serde_yml = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

@@ -106,7 +106,7 @@ pub struct SkillMeta {
     /// compatibility. Consumers that need a not-yet-modeled field
     /// can reach into `extra`.
     #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_yaml::Value>,
+    pub extra: BTreeMap<String, serde_yml::Value>,
 }
 
 /// One entry under `parameters:` in the frontmatter. The PRD allows
@@ -126,13 +126,13 @@ pub struct SkillParameter {
     pub description: Option<String>,
     /// Allowed values when `param_type == "enum"`.
     #[serde(default)]
-    pub values: Vec<serde_yaml::Value>,
+    pub values: Vec<serde_yml::Value>,
     /// Element type when `param_type == "list"`.
     #[serde(default)]
     pub items: Option<String>,
     /// Default value (any YAML scalar or sequence).
     #[serde(default)]
-    pub default: Option<serde_yaml::Value>,
+    pub default: Option<serde_yml::Value>,
 }
 
 /// Capability + tool restrictions (§2.2). Empty defaults mean

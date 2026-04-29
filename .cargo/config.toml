@@ -1,0 +1,18 @@
+# Repo-wide cargo settings.
+#
+# Resolved relative to this file's parent directory (`/home/baileyrd/projects/nexus/`).
+# Both the root workspace and `shell/src-tauri/` (which is a separate workspace
+# but inherits this config via cargo's upward config search) write into the
+# same `target/` so that shared dependencies (tokio, serde, tauri's transitive
+# graph, etc.) compile once instead of twice.
+#
+# Override per-invocation with `--target-dir <path>` or `CARGO_TARGET_DIR=<path>`.
+
+[build]
+target-dir = "target"
+# Disable incremental compilation. The `target/debug/incremental/` cache
+# can grow several GB and rarely repays its size in this workspace
+# (full rebuilds after dep changes already invalidate most of it).
+# Re-enable per-invocation with `CARGO_INCREMENTAL=1` when iterating heavily
+# on a single crate.
+incremental = false

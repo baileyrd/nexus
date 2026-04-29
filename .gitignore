@@ -1,6 +1,8 @@
 **/target
 **/*.rs.bk
 Cargo.lock
+# cargo-sweep timestamp marker
+sweep.timestamp
 .DS_Store
 *.swp
 # LibreOffice lockfiles
