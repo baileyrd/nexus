@@ -64,6 +64,21 @@ pub const BUILTIN_DRACULA_ID: &str = "nexus-dracula";
 /// Identifier for the bundled Tomorrow Night theme.
 pub const BUILTIN_TOMORROW_NIGHT_ID: &str = "nexus-tomorrow-night";
 
+/// Canonical list of every theme bundled with the crate. Adding a new
+/// built-in theme only requires appending an `(id, toml)` tuple here —
+/// [`Theme::builtins`] and the `builtins_parse` test both read from this
+/// table.
+pub const BUILTIN_THEMES: &[(&str, &str)] = &[
+    (BUILTIN_LIGHT_ID, BUILTIN_LIGHT_TOML),
+    (BUILTIN_DARK_ID, BUILTIN_DARK_TOML),
+    (BUILTIN_FORGE_ID, BUILTIN_FORGE_TOML),
+    (BUILTIN_SOLARIZED_DARK_ID, BUILTIN_SOLARIZED_DARK_TOML),
+    (BUILTIN_SOLARIZED_LIGHT_ID, BUILTIN_SOLARIZED_LIGHT_TOML),
+    (BUILTIN_NORD_ID, BUILTIN_NORD_TOML),
+    (BUILTIN_DRACULA_ID, BUILTIN_DRACULA_TOML),
+    (BUILTIN_TOMORROW_NIGHT_ID, BUILTIN_TOMORROW_NIGHT_TOML),
+];
+
 /// A loaded theme package — identifier + parsed manifest + source path if any.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Theme {
@@ -157,23 +172,18 @@ impl Theme {
         Ok(out)
     }
 
-    /// Returns the two bundled themes: [`BUILTIN_LIGHT_ID`] and [`BUILTIN_DARK_ID`].
+    /// Returns every bundled theme. The canonical list is
+    /// [`BUILTIN_THEMES`]; new entries land there and flow through here.
     ///
     /// # Panics
     /// Panics if the bundled TOML fails to parse. This is a bug in the
     /// crate's own theme files and is caught by the `builtins_parse` test.
     #[must_use]
     pub fn builtins() -> Vec<Self> {
-        vec![
-            Self::builtin(BUILTIN_LIGHT_ID, BUILTIN_LIGHT_TOML),
-            Self::builtin(BUILTIN_DARK_ID, BUILTIN_DARK_TOML),
-            Self::builtin(BUILTIN_FORGE_ID, BUILTIN_FORGE_TOML),
-            Self::builtin(BUILTIN_SOLARIZED_DARK_ID, BUILTIN_SOLARIZED_DARK_TOML),
-            Self::builtin(BUILTIN_SOLARIZED_LIGHT_ID, BUILTIN_SOLARIZED_LIGHT_TOML),
-            Self::builtin(BUILTIN_NORD_ID, BUILTIN_NORD_TOML),
-            Self::builtin(BUILTIN_DRACULA_ID, BUILTIN_DRACULA_TOML),
-            Self::builtin(BUILTIN_TOMORROW_NIGHT_ID, BUILTIN_TOMORROW_NIGHT_TOML),
-        ]
+        BUILTIN_THEMES
+            .iter()
+            .map(|(id, toml)| Self::builtin(id, toml))
+            .collect()
     }
 
     fn builtin(id: &str, source: &str) -> Self {
@@ -229,17 +239,28 @@ mod tests {
     #[test]
     fn builtins_parse() {
         let themes = Theme::builtins();
-        assert_eq!(themes.len(), 3);
-        assert_eq!(themes[0].id, "nexus-light");
-        assert_eq!(themes[1].id, "nexus-dark");
-        assert_eq!(themes[2].id, "nexus-forge");
-        assert!(themes[0].builtin);
-        assert!(themes[2].builtin);
-        assert_eq!(themes[0].manifest.theme.category, ThemeCategory::Light);
-        assert_eq!(themes[1].manifest.theme.category, ThemeCategory::Dark);
-        assert_eq!(themes[2].manifest.theme.category, ThemeCategory::Dark);
+        assert_eq!(themes.len(), BUILTIN_THEMES.len());
+        for (theme, (expected_id, _)) in themes.iter().zip(BUILTIN_THEMES.iter()) {
+            assert_eq!(theme.id, *expected_id);
+            assert!(theme.builtin);
+            assert!(theme.path.is_none());
+        }
+        let by_id: std::collections::HashMap<_, _> =
+            themes.iter().map(|t| (t.id.as_str(), t)).collect();
+        assert_eq!(
+            by_id[BUILTIN_LIGHT_ID].manifest.theme.category,
+            ThemeCategory::Light
+        );
+        assert_eq!(
+            by_id[BUILTIN_DARK_ID].manifest.theme.category,
+            ThemeCategory::Dark
+        );
+        assert_eq!(
+            by_id[BUILTIN_FORGE_ID].manifest.theme.category,
+            ThemeCategory::Dark
+        );
         assert!(
-            themes[0]
+            by_id[BUILTIN_LIGHT_ID]
                 .manifest
                 .variables
                 .contains_key("--nx-color-primary")
