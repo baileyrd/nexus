@@ -256,34 +256,47 @@ fn parse_storage_path(payload: &serde_json::Value) -> Option<PathBuf> {
 /// it's a storage file event we care about. Returns `None` for events
 /// from other plugins (cheaper than `EventFilter::CustomPrefix` because
 /// we sidestep the per-event filter allocation).
-fn event_to_msg(event: &NexusEvent) -> Option<DaemonMsg> {
+fn event_to_msg(event: &NexusEvent) -> Vec<DaemonMsg> {
     let NexusEvent::Custom { type_id, payload, .. } = event else {
-        return None;
+        return Vec::new();
     };
     if !type_id.starts_with(STORAGE_EVENT_PREFIX) {
-        return None;
+        return Vec::new();
     }
     match type_id.as_str() {
         "com.nexus.storage.file_created" | "com.nexus.storage.file_modified" => {
-            parse_storage_path(payload).map(DaemonMsg::Touched)
+            parse_storage_path(payload)
+                .map(|p| vec![DaemonMsg::Touched(p)])
+                .unwrap_or_default()
         }
-        "com.nexus.storage.file_deleted" => parse_storage_path(payload).map(DaemonMsg::Deleted),
+        "com.nexus.storage.file_deleted" => parse_storage_path(payload)
+            .map(|p| vec![DaemonMsg::Deleted(p)])
+            .unwrap_or_default(),
         "com.nexus.storage.file_renamed" => {
-            // Treat a rename as delete-old + touch-new. The storage
-            // payload exposes both via `from` / `to`. We synthesise the
-            // touch via a separate message so the debouncer dedupes
-            // properly downstream.
-            //
-            // TODO(BL-041 follow-up): emit two messages from one event;
-            // the current single-return shape biases toward the new
-            // path. Acceptable for first cut — `file_renamed` is rare
-            // and the next `file_modified` will pick up the old path's
-            // tombstone via `vector_delete_by_file`.
-            let to = payload.get("to").cloned().unwrap_or(serde_json::Value::Null);
-            parse_storage_path(&serde_json::json!({ "path": to.as_str().unwrap_or("") }))
-                .map(DaemonMsg::Touched)
+            // FU-4 — emit delete-old + touch-new. The storage payload
+            // exposes both via `from` / `to`. Splitting at translation
+            // time means the debouncer correctly dedupes the new path
+            // against any subsequent `file_modified` and the old
+            // path's vectors are reaped via `vector_delete_by_file`
+            // without waiting for the next save on it.
+            let mut out = Vec::with_capacity(2);
+            if let Some(p) = payload
+                .get("from")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|s| parse_storage_path(&serde_json::json!({ "path": s })))
+            {
+                out.push(DaemonMsg::Deleted(p));
+            }
+            if let Some(p) = payload
+                .get("to")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|s| parse_storage_path(&serde_json::json!({ "path": s })))
+            {
+                out.push(DaemonMsg::Touched(p));
+            }
+            out
         }
-        _ => None,
+        _ => Vec::new(),
     }
 }
 
@@ -454,11 +467,14 @@ async fn worker_loop(
         loop {
             match sub.try_recv() {
                 Ok(Some(evt)) => {
-                    if let Some(msg) = event_to_msg(&evt.event) {
+                    let msgs = event_to_msg(&evt.event);
+                    if !msgs.is_empty() {
                         if let Ok(mut g) = status.write() {
                             g.total_seen = g.total_seen.saturating_add(1);
                         }
-                        debouncer.push(msg);
+                        for msg in msgs {
+                            debouncer.push(msg);
+                        }
                     }
                 }
                 Ok(None) => break,
@@ -824,9 +840,11 @@ mod tests {
             emitting_plugin: "com.nexus.storage".to_string(),
             payload: serde_json::json!({ "path": "notes/today.md" }),
         };
-        match event_to_msg(&evt) {
-            Some(DaemonMsg::Touched(p)) => assert_eq!(p, PathBuf::from("notes/today.md")),
-            other => panic!("expected Touched, got {other:?}"),
+        let out = event_to_msg(&evt);
+        assert_eq!(out.len(), 1);
+        match &out[0] {
+            DaemonMsg::Touched(p) => assert_eq!(p, &PathBuf::from("notes/today.md")),
+            DaemonMsg::Deleted(_) => panic!("expected Touched, got Deleted"),
         }
     }
 
@@ -837,7 +855,9 @@ mod tests {
             emitting_plugin: "com.nexus.storage".to_string(),
             payload: serde_json::json!({ "path": "old.md" }),
         };
-        assert!(matches!(event_to_msg(&evt), Some(DaemonMsg::Deleted(_))));
+        let out = event_to_msg(&evt);
+        assert_eq!(out.len(), 1);
+        assert!(matches!(out[0], DaemonMsg::Deleted(_)));
     }
 
     #[test]
@@ -847,7 +867,7 @@ mod tests {
             emitting_plugin: "com.nexus.storage".to_string(),
             payload: serde_json::json!({ "path": "asset.png" }),
         };
-        assert!(event_to_msg(&evt).is_none());
+        assert!(event_to_msg(&evt).is_empty());
     }
 
     #[test]
@@ -857,7 +877,49 @@ mod tests {
             emitting_plugin: "com.nexus.theme".to_string(),
             payload: serde_json::json!({}),
         };
-        assert!(event_to_msg(&evt).is_none());
+        assert!(event_to_msg(&evt).is_empty());
+    }
+
+    /// FU-4 — `file_renamed` must split into delete-old + touch-new
+    /// so the old path's vectors are reaped at the rename boundary
+    /// rather than waiting for the next save on it.
+    #[test]
+    fn event_to_msg_splits_file_renamed_into_delete_and_touch() {
+        let evt = NexusEvent::Custom {
+            type_id: "com.nexus.storage.file_renamed".to_string(),
+            emitting_plugin: "com.nexus.storage".to_string(),
+            payload: serde_json::json!({
+                "from": "drafts/a.md",
+                "to": "notes/a.md",
+            }),
+        };
+        let out = event_to_msg(&evt);
+        assert_eq!(out.len(), 2, "rename must yield two messages, got {out:?}");
+        match (&out[0], &out[1]) {
+            (DaemonMsg::Deleted(from), DaemonMsg::Touched(to)) => {
+                assert_eq!(from, &PathBuf::from("drafts/a.md"));
+                assert_eq!(to, &PathBuf::from("notes/a.md"));
+            }
+            other => panic!("expected (Deleted, Touched), got {other:?}"),
+        }
+    }
+
+    /// A rename whose `from` is non-markdown still emits the
+    /// touch-new (we want the new path indexed); the inverse holds
+    /// when `to` is non-markdown (delete the old vectors).
+    #[test]
+    fn event_to_msg_renamed_filters_non_markdown_per_side() {
+        let renamed_to_image = NexusEvent::Custom {
+            type_id: "com.nexus.storage.file_renamed".to_string(),
+            emitting_plugin: "com.nexus.storage".to_string(),
+            payload: serde_json::json!({
+                "from": "notes/old.md",
+                "to": "assets/old.png",
+            }),
+        };
+        let out = event_to_msg(&renamed_to_image);
+        assert_eq!(out.len(), 1);
+        assert!(matches!(out[0], DaemonMsg::Deleted(_)));
     }
 
     #[test]
