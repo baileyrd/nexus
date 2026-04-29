@@ -26,10 +26,15 @@
 //!   `com.nexus.storage.file_*` on the kernel bus, filters against
 //!   the trigger's `watch_dir` / `pattern` / `events`, and fires
 //!   `run` with `trigger.{path,event_type,content_hash}` variables.
+//! - **`git_event`** — `spawn_git_event_triggers` subscribes to
+//!   `com.nexus.git.*` on the kernel bus, filters against the
+//!   trigger's `events` / `branch` / `branch_pattern` fields, and
+//!   fires `run` with `trigger.{event_type,branch,head,...}`
+//!   variables.
 //! - **manual** — no background engine; callers drive `run`
 //!   directly (CLI, UI, scheduled task, nested workflow).
 //!
-//! `webhook` / `git_event` / `mcp_event` are not yet wired.
+//! `webhook` / `mcp_event` are not yet wired.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
@@ -541,6 +546,291 @@ async fn file_event_loop(ctx: Arc<KernelPluginContext>, spec: FileEventSpec) {
     }
 }
 
+/// Parsed `trigger.type = "git_event"` spec.
+///
+/// The default event set is `["commit", "branch_changed",
+/// "dirty_changed"]` — the `state` topic is **excluded** by default
+/// because `nexus-git` publishes it once on plugin start as a
+/// snapshot (not a delta), and most workflows want to react to
+/// changes only. Opt in by listing `"state"` in `events`.
+struct GitEventSpec {
+    workflow_name: String,
+    events: GitEventSet,
+    branch: Option<String>,
+    branch_pattern: Option<regex_lite::Regex>,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)]
+struct GitEventSet {
+    state: bool,
+    commit: bool,
+    branch_changed: bool,
+    dirty_changed: bool,
+}
+
+impl GitEventSet {
+    #[cfg(test)]
+    fn all() -> Self {
+        Self {
+            state: true,
+            commit: true,
+            branch_changed: true,
+            dirty_changed: true,
+        }
+    }
+
+    /// Default set: every delta topic, but **not** `state`. See
+    /// [`GitEventSpec`] for rationale.
+    fn defaults() -> Self {
+        Self {
+            state: false,
+            commit: true,
+            branch_changed: true,
+            dirty_changed: true,
+        }
+    }
+
+    fn matches(self, event_type: &str) -> bool {
+        match event_type {
+            "state" => self.state,
+            "commit" => self.commit,
+            "branch_changed" => self.branch_changed,
+            "dirty_changed" => self.dirty_changed,
+            _ => false,
+        }
+    }
+}
+
+impl GitEventSpec {
+    fn from_trigger(name: &str, wf: &Workflow) -> Result<Self, String> {
+        let events = match wf.trigger.extra.get("events") {
+            None => GitEventSet::defaults(),
+            Some(toml::Value::Array(items)) => {
+                let mut set = GitEventSet {
+                    state: false,
+                    commit: false,
+                    branch_changed: false,
+                    dirty_changed: false,
+                };
+                for item in items {
+                    match item.as_str() {
+                        Some("state") => set.state = true,
+                        Some("commit") => set.commit = true,
+                        Some("branch_changed") => set.branch_changed = true,
+                        Some("dirty_changed") => set.dirty_changed = true,
+                        Some(other) => {
+                            return Err(format!(
+                                "unknown event type `{other}` (expected state|commit|branch_changed|dirty_changed)"
+                            ));
+                        }
+                        None => {
+                            return Err("events array must contain strings".into());
+                        }
+                    }
+                }
+                set
+            }
+            Some(_) => return Err("events must be an array of strings".into()),
+        };
+
+        let branch = wf
+            .trigger
+            .extra
+            .get("branch")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string);
+
+        let branch_pattern = match wf.trigger.extra.get("branch_pattern").and_then(|v| v.as_str()) {
+            Some(p) => Some(
+                regex_lite::Regex::new(p)
+                    .map_err(|e| format!("invalid branch_pattern regex `{p}`: {e}"))?,
+            ),
+            None => None,
+        };
+
+        Ok(Self {
+            workflow_name: name.to_string(),
+            events,
+            branch,
+            branch_pattern,
+        })
+    }
+
+    fn matches_branch(&self, branch: &str) -> bool {
+        if let Some(b) = &self.branch {
+            if b != branch {
+                return false;
+            }
+        }
+        if let Some(re) = &self.branch_pattern {
+            if !re.is_match(branch) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn git_event_type_for_type_id(type_id: &str) -> Option<&'static str> {
+    match type_id {
+        "com.nexus.git.state" => Some("state"),
+        "com.nexus.git.commit" => Some("commit"),
+        "com.nexus.git.branch_changed" => Some("branch_changed"),
+        "com.nexus.git.dirty_changed" => Some("dirty_changed"),
+        _ => None,
+    }
+}
+
+impl WorkflowCorePlugin {
+    /// Spawn one tokio task per `git_event`-triggered workflow. Each
+    /// task subscribes to `com.nexus.git.*` on the kernel bus,
+    /// filters events against the trigger's optional `events` /
+    /// `branch` / `branch_pattern` fields, and dispatches
+    /// `com.nexus.workflow::run` with `trigger.{event_type,branch,
+    /// head,...}` variables when an event matches.
+    ///
+    /// Parse failures (e.g. invalid regex) log-and-skip that one
+    /// workflow; other workflows keep their subscriptions. Handles
+    /// are retained so the plugin can cancel them on drop alongside
+    /// the cron / `file_event` schedulers.
+    fn spawn_git_event_triggers(&self, ctx: &Arc<KernelPluginContext>) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!(
+                "workflow scheduler: no tokio runtime available; git_event triggers disabled"
+            );
+            return;
+        };
+        let specs: Vec<GitEventSpec> = match self.registry.lock() {
+            Ok(reg) => reg
+                .iter()
+                .filter(|(_, wf)| wf.trigger.trigger_type == "git_event")
+                .filter_map(|(name, wf)| match GitEventSpec::from_trigger(name, wf) {
+                    Ok(spec) => Some(spec),
+                    Err(e) => {
+                        tracing::warn!(workflow = %name, error = %e, "git_event trigger: spec parse failed; skipping");
+                        None
+                    }
+                })
+                .collect(),
+            Err(_) => return,
+        };
+        let Ok(mut handles) = self.scheduler_handles.lock() else {
+            return;
+        };
+        for spec in specs {
+            let ctx = Arc::clone(ctx);
+            tracing::info!(
+                workflow = %spec.workflow_name,
+                branch = ?spec.branch,
+                has_branch_pattern = spec.branch_pattern.is_some(),
+                events = ?spec.events,
+                "git_event trigger armed"
+            );
+            let handle = runtime.spawn(async move {
+                git_event_loop(ctx, spec).await;
+            });
+            handles.push(handle);
+        }
+    }
+}
+
+async fn git_event_loop(ctx: Arc<KernelPluginContext>, spec: GitEventSpec) {
+    let mut sub = ctx.subscribe(EventFilter::CustomPrefix(
+        "com.nexus.git.".to_string(),
+    ));
+    loop {
+        let published = match sub.recv().await {
+            Ok(e) => e,
+            Err(RecvError::Lagged(n)) => {
+                tracing::warn!(workflow = %spec.workflow_name, n, "git_event trigger lagged; events lost");
+                continue;
+            }
+            Err(RecvError::Closed) => {
+                tracing::debug!(workflow = %spec.workflow_name, "git_event trigger: bus closed");
+                return;
+            }
+        };
+        let NexusEvent::Custom { type_id, payload, .. } = &published.event else {
+            continue;
+        };
+        let Some(event_type) = git_event_type_for_type_id(type_id) else {
+            continue;
+        };
+        if !spec.events.matches(event_type) {
+            continue;
+        }
+        // Branch field depends on topic: `branch_changed` carries the
+        // new branch under `to`, every other topic carries it under
+        // `branch`.
+        let branch = if event_type == "branch_changed" {
+            payload.get("to").and_then(|v| v.as_str()).unwrap_or_default()
+        } else {
+            payload.get("branch").and_then(|v| v.as_str()).unwrap_or_default()
+        };
+        if !spec.matches_branch(branch) {
+            continue;
+        }
+
+        let mut trigger_vars = serde_json::Map::new();
+        trigger_vars.insert(
+            "event_type".into(),
+            serde_json::Value::String(event_type.into()),
+        );
+        trigger_vars.insert("branch".into(), serde_json::Value::String(branch.into()));
+        if let Some(head) = payload.get("head").cloned() {
+            trigger_vars.insert("head".into(), head);
+        }
+        match event_type {
+            "commit" => {
+                if let Some(prev) = payload.get("prev_head").cloned() {
+                    trigger_vars.insert("prev_head".into(), prev);
+                }
+            }
+            "branch_changed" => {
+                if let Some(from) = payload.get("from").cloned() {
+                    trigger_vars.insert("from".into(), from);
+                }
+            }
+            "state" | "dirty_changed" => {
+                if let Some(d) = payload.get("is_dirty").cloned() {
+                    trigger_vars.insert("is_dirty".into(), d);
+                }
+            }
+            _ => {}
+        }
+
+        let variables = serde_json::json!({ "trigger": trigger_vars });
+        let args = serde_json::json!({
+            "name": spec.workflow_name,
+            "variables": variables,
+        });
+        match ctx
+            .ipc_call(
+                PLUGIN_ID,
+                "run",
+                args,
+                std::time::Duration::from_secs(600),
+            )
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(
+                    workflow = %spec.workflow_name,
+                    event_type, branch, "git_event trigger fired"
+                );
+            }
+            Err(err) => {
+                tracing::warn!(
+                    workflow = %spec.workflow_name,
+                    event_type, branch, %err,
+                    "git_event trigger: run failed; continuing"
+                );
+            }
+        }
+    }
+}
+
 impl Drop for WorkflowCorePlugin {
     fn drop(&mut self) {
         if let Ok(handles) = self.scheduler_handles.lock() {
@@ -716,6 +1006,7 @@ impl CorePlugin for WorkflowCorePlugin {
         self.context = Some(Arc::clone(&ctx));
         self.spawn_cron_schedulers(&ctx);
         self.spawn_file_event_triggers(&ctx);
+        self.spawn_git_event_triggers(&ctx);
         self.spawn_digest_scheduler(&ctx);
     }
 }
@@ -1141,6 +1432,96 @@ pattern = "\\.md$"
                 assert!(reason.contains("must be an object"));
             }
             _ => panic!("unexpected"),
+        }
+    }
+
+    #[test]
+    fn git_event_spec_parses_all_fields() {
+        let src = r#"
+[workflow]
+name = "GE"
+
+[trigger]
+type = "git_event"
+events = ["commit", "branch_changed"]
+branch = "main"
+branch_pattern = "^feat/.*"
+"#;
+        let wf = parse_workflow_text(src).unwrap();
+        let spec = GitEventSpec::from_trigger("GE", &wf).unwrap();
+        assert_eq!(spec.branch.as_deref(), Some("main"));
+        assert!(spec.branch_pattern.is_some());
+        assert!(!spec.events.state);
+        assert!(spec.events.commit);
+        assert!(spec.events.branch_changed);
+        assert!(!spec.events.dirty_changed);
+    }
+
+    #[test]
+    fn git_event_spec_defaults_omit_state() {
+        let src = r#"
+[workflow]
+name = "GE"
+
+[trigger]
+type = "git_event"
+"#;
+        let wf = parse_workflow_text(src).unwrap();
+        let spec = GitEventSpec::from_trigger("GE", &wf).unwrap();
+        assert!(spec.branch.is_none());
+        assert!(spec.branch_pattern.is_none());
+        assert!(!spec.events.state, "state must be excluded by default");
+        assert!(spec.events.commit);
+        assert!(spec.events.branch_changed);
+        assert!(spec.events.dirty_changed);
+    }
+
+    #[test]
+    fn git_event_spec_rejects_invalid_event_name() {
+        let src = r#"
+[workflow]
+name = "GE"
+
+[trigger]
+type = "git_event"
+events = ["pushed"]
+"#;
+        let wf = parse_workflow_text(src).unwrap();
+        assert!(GitEventSpec::from_trigger("GE", &wf).is_err());
+    }
+
+    #[test]
+    fn git_event_spec_rejects_invalid_branch_regex() {
+        let src = r#"
+[workflow]
+name = "GE"
+
+[trigger]
+type = "git_event"
+branch_pattern = "[unterminated"
+"#;
+        let wf = parse_workflow_text(src).unwrap();
+        assert!(GitEventSpec::from_trigger("GE", &wf).is_err());
+    }
+
+    #[test]
+    fn git_event_type_mapping_covers_all_four_topics() {
+        assert_eq!(git_event_type_for_type_id("com.nexus.git.state"), Some("state"));
+        assert_eq!(git_event_type_for_type_id("com.nexus.git.commit"), Some("commit"));
+        assert_eq!(
+            git_event_type_for_type_id("com.nexus.git.branch_changed"),
+            Some("branch_changed")
+        );
+        assert_eq!(
+            git_event_type_for_type_id("com.nexus.git.dirty_changed"),
+            Some("dirty_changed")
+        );
+        assert!(git_event_type_for_type_id("com.nexus.git.other").is_none());
+        assert!(git_event_type_for_type_id("com.nexus.storage.file_created").is_none());
+        // Sanity check: GitEventSet::all matches every short name we map.
+        let all = GitEventSet::all();
+        for short in ["state", "commit", "branch_changed", "dirty_changed"] {
+            assert!(all.matches(short), "all() should include `{short}`");
         }
     }
 
