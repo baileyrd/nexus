@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Citation",
+  "description": "One numbered citation surfaced beside an assistant turn.\n\nBL-038: extends the legacy [`ChunkMatch`] by attaching a 1-based\ncitation index, optional source line range, and a truncated excerpt\nsuitable for chip tooltips. Numbering follows source order (the\norder [`vectorstore::search`] returned, descending by score) unless\nthe answer text contains parseable `[N]` markers, in which case\ncitations are renumbered by first-occurrence in the answer.",
+  "type": "object",
+  "properties": {
+    "block_id": {
+      "description": "Identifier of the originating block.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "end_line": {
+      "description": "1-based end line in the source file. `None` when `start_line` is.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "excerpt": {
+      "description": "Truncated chunk text (≤ [`CITATION_EXCERPT_MAX_CHARS`] chars).",
+      "type": "string"
+    },
+    "file_path": {
+      "description": "Forge-relative path of the source file.",
+      "type": "string"
+    },
+    "index": {
+      "description": "1-based citation index. Stable within a single [`RagResponse`].",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "score": {
+      "description": "Cosine similarity score (higher is more relevant).",
+      "type": "number",
+      "format": "float"
+    },
+    "start_line": {
+      "description": "1-based start line in the source file. `None` when storage\nreturned no matching block (file moved / index lag).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "index",
+    "file_path",
+    "block_id",
+    "excerpt",
+    "score"
+  ]
+}

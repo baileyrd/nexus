@@ -116,6 +116,23 @@ pub fn status(app: &mut App) -> Result<()> {
     println!("Embedding Provider: {embed_provider}");
     println!("Indexed Chunks    : {indexed}");
 
+    // FU-10 — surface the BL-041 indexing-daemon snapshot so a
+    // headless `nexus ai status` reads as well as the shell badge.
+    // Soft-fail: if the handler is unreachable (older bootstrap),
+    // skip the line rather than abort the command.
+    if let Ok(snap) = call(app, "index_status", serde_json::json!({})) {
+        let indexed_files = snap
+            .get("indexed_files")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let total_seen = snap.get("total_seen").and_then(Value::as_u64).unwrap_or(0);
+        let pending = snap
+            .get("pending_files")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        println!("Index Status      : {indexed_files} / {total_seen} (pending: {pending})");
+    }
+
     Ok(())
 }
 
