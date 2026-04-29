@@ -49,6 +49,7 @@ import { graphPlugin } from './nexus/graph'
 import { graphGlobalPlugin } from './nexus/graph/globalIndex'
 import { searchPlugin } from './nexus/search'
 import { semanticSearchPlugin } from './nexus/semanticSearch'
+import { linkSuggestPlugin } from './nexus/linkSuggest'
 import { workflowPlugin } from './nexus/workflow'
 import { skillsPlugin } from './nexus/skills'
 import { mcpPlugin } from './nexus/mcp'
@@ -137,6 +138,12 @@ export const DEFAULT_OFF_PLUGINS: Registered[] = [
   // configured; pairing the two enabled-states keeps the user from
   // seeing the command before the backend can answer it.
   semanticSearchPlugin,
+  // BL-039 — inline AI link suggestions. Default-off for the same
+  // reason as semanticSearchPlugin: it depends on the AI plugin's
+  // embedding provider being configured. Pairing the enabled-states
+  // keeps the user from seeing dead suggestions before the backend
+  // can answer.
+  linkSuggestPlugin,
   agentPlugin,
   mcpPlugin,
   workflowPlugin,
