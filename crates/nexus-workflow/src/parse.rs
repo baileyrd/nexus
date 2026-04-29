@@ -182,6 +182,45 @@ conditions = [
     }
 
     #[test]
+    fn step_retry_fields_round_trip() {
+        let src = r#"
+[workflow]
+name = "R"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "noop"
+max_retries = 5
+retry_backoff = "linear"
+retry_initial_delay_ms = 250
+retry_max_delay_ms = 5000
+retry_jitter = false
+"#;
+        let w = parse_workflow_text(src).unwrap();
+        let s = &w.steps[0];
+        assert_eq!(s.max_retries, Some(5));
+        assert_eq!(s.retry_backoff.as_deref(), Some("linear"));
+        assert_eq!(s.retry_initial_delay_ms, Some(250));
+        assert_eq!(s.retry_max_delay_ms, Some(5000));
+        assert_eq!(s.retry_jitter, Some(false));
+
+        // Re-serialize and re-parse to confirm the fields survive a
+        // round trip (they should not land in `extra`).
+        let out = toml::to_string(&w).unwrap();
+        let w2 = parse_workflow_text(&out).unwrap();
+        let s2 = &w2.steps[0];
+        assert_eq!(s2.max_retries, Some(5));
+        assert_eq!(s2.retry_backoff.as_deref(), Some("linear"));
+        assert_eq!(s2.retry_initial_delay_ms, Some(250));
+        assert_eq!(s2.retry_max_delay_ms, Some(5000));
+        assert_eq!(s2.retry_jitter, Some(false));
+        assert!(!s2.extra.contains_key("max_retries"));
+        assert!(!s2.extra.contains_key("retry_backoff"));
+    }
+
+    #[test]
     fn parses_error_handling_block() {
         let src = r#"
 [workflow]

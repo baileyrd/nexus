@@ -172,6 +172,27 @@ pub struct Step {
     /// `log_warn` / `branch_to_recovery`.
     #[serde(default)]
     pub on_error: Option<String>,
+    /// Max retries on failure for this step. `0` (default) means a
+    /// single attempt. Shadows workflow-level
+    /// `error_handling.max_retries` when set.
+    #[serde(default)]
+    pub max_retries: Option<u32>,
+    /// Backoff curve — `"constant"` / `"linear"` / `"exponential"`.
+    /// Defaults to `"exponential"`. Shadows workflow-level
+    /// `error_handling.retry_backoff` when set.
+    #[serde(default)]
+    pub retry_backoff: Option<String>,
+    /// Initial delay between attempts in milliseconds. Defaults to
+    /// `100`.
+    #[serde(default)]
+    pub retry_initial_delay_ms: Option<u64>,
+    /// Cap on the per-attempt delay in milliseconds. Defaults to
+    /// `30_000` (30 s).
+    #[serde(default)]
+    pub retry_max_delay_ms: Option<u64>,
+    /// Apply full-jitter to each computed delay. Defaults to `true`.
+    #[serde(default)]
+    pub retry_jitter: Option<bool>,
     /// All other per-step fields — `path`, `content`, `query`, etc.
     #[serde(flatten)]
     pub extra: BTreeMap<String, toml::Value>,

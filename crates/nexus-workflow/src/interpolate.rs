@@ -236,6 +236,11 @@ mod tests {
             step_type: "ipc".into(),
             parallel: false,
             on_error: None,
+            max_retries: None,
+            retry_backoff: None,
+            retry_initial_delay_ms: None,
+            retry_max_delay_ms: None,
+            retry_jitter: None,
             extra: BTreeMap::new(),
         };
         step.extra.insert(

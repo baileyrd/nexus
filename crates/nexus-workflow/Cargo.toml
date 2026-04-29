@@ -16,9 +16,10 @@ thiserror = { workspace = true }
 regex-lite = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+fastrand = "2"
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["full", "test-util"] }
