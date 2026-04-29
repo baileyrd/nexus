@@ -21,6 +21,9 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 ts-rs = { workspace = true, optional = true, features = ["chrono-impl", "uuid-impl"] }
 schemars = { workspace = true, optional = true }
+fastembed = { version = "5", optional = true }
+dashmap = { version = "6", optional = true }
+xxhash-rust = { version = "0.8", features = ["xxh3"], optional = true }
 
 [features]
 # Emit TypeScript + JSON Schema bindings for the Phase 4 WI-36 pilot IPC
@@ -28,3 +31,8 @@ schemars = { workspace = true, optional = true }
 # schemars. Enable with `cargo test -p nexus-ai --features ts-export` when
 # regenerating bindings.
 ts-export = ["dep:ts-rs", "dep:schemars"]
+# Enable the local fastembed-rs embedding backend (BL-019, ADR 0018).
+# Pulls in fastembed (which transitively pulls ONNX Runtime) plus the
+# DashMap-backed embedding cache. Off by default so minimal builds and
+# the WASM community-plugin tier don't compile ORT.
+local-embeddings = ["dep:fastembed", "dep:dashmap", "dep:xxhash-rust"]

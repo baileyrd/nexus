@@ -17,6 +17,8 @@ mod config;
 pub mod core_plugin;
 mod embedding;
 mod error;
+#[cfg(feature = "local-embeddings")]
+pub mod local_embedding;
 mod ollama;
 mod openai;
 pub mod privacy;
