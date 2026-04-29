@@ -573,12 +573,54 @@ async fn system_prompt_with_skills(
             .get("body")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("");
-        let body = render_skill_body(ctx, id)
-            .await
-            .unwrap_or_else(|| fallback_body.to_string());
+        // BL-021 — prefer the composed (depends_on-resolved) body so
+        // an inheritance chain like `concise → markdown-style → rust`
+        // contributes every layer's instructions in topo order. Fall
+        // back to the rendered single-skill body, then to the raw
+        // body, when compose isn't available (older registry, cycle
+        // / missing-dep, etc.).
+        let composed = compose_skill_body(ctx, id).await;
+        let body = match composed {
+            Some(merged) => merged,
+            None => render_skill_body(ctx, id)
+                .await
+                .unwrap_or_else(|| fallback_body.to_string()),
+        };
         let _ = write!(prompt, "\n## Skill: {name} [{id}]\n{body}\n");
     }
     prompt
+}
+
+/// BL-021 — call `com.nexus.skills::compose` and return the merged
+/// body string. Returns `None` for a missing handler / unknown skill /
+/// cycle / missing dependency — every error path falls back to the
+/// pre-BL-021 single-skill render so a broken dep graph never blocks
+/// planning. Also surfaces conflict warnings (if any) through `tracing`
+/// so operators can see them in logs without us having to plumb an
+/// event channel through to the UI for the planner.
+async fn compose_skill_body(ctx: &KernelPluginContext, id: &str) -> Option<String> {
+    let response = ctx
+        .ipc_call(
+            "com.nexus.skills",
+            "compose",
+            serde_json::json!({ "id": id }),
+            Duration::from_secs(5),
+        )
+        .await
+        .ok()?;
+    if let Some(arr) = response.get("conflicts").and_then(serde_json::Value::as_array) {
+        if !arr.is_empty() {
+            tracing::warn!(
+                skill_id = id,
+                conflict_count = arr.len(),
+                "com.nexus.skills::compose returned non-fatal conflicts"
+            );
+        }
+    }
+    response
+        .get("merged_body")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string)
 }
 
 /// Query `com.nexus.mcp.host::list_servers` and, for each enabled

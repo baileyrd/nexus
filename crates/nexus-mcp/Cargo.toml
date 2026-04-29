@@ -9,6 +9,18 @@ description = "Nexus MCP server (forge ops → AI clients) + Host client (extern
 [dependencies]
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
+# BL-023 — `http` for typed HeaderName/HeaderValue parsing on the
+# Streamable HTTP transport. The HTTP client itself is provided by
+# rmcp's `transport-streamable-http-client-reqwest` feature, which
+# depends on its own pinned reqwest version — we deliberately do not
+# pass a direct reqwest::Client across the rmcp boundary (the two
+# would be type-incompatible).
+http = "1"
+# BL-025 — workspace reqwest is used only by the in-house OAuth
+# client-credentials token fetcher in `auth.rs`. The token shows up
+# on the rmcp transport as a plain `Bearer …` string, so the version
+# split with rmcp's reqwest doesn't matter.
+reqwest = { workspace = true }
 rmcp = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }

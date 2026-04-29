@@ -134,7 +134,12 @@ export async function submitCmdI(api: PluginAPI): Promise<AssembledPrompt | null
   if (trimmed.length === 0) return null
 
   const contributions = await contextContributors.collect()
-  const assembled = assemblePrompt(trimmed, contributions)
+  // BL-033 — honour the user's click-to-remove on chips. The set is
+  // resolved at submit time so a chip removed mid-typing is excluded
+  // from the prompt without us having to mutate the raw contribution
+  // list. Drop the lookup into a `Set` for O(1) membership checks.
+  const removedChipIds = new Set(state.removedChipIds)
+  const assembled = assemblePrompt(trimmed, contributions, removedChipIds)
 
   const requestId = newRequestId()
   useCmdIStore.getState().beginSubmit(requestId)

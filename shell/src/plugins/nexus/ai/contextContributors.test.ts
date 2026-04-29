@@ -178,6 +178,73 @@ test('assemblePrompt: blank/whitespace promptBlocks are filtered out', () => {
   assert.equal(out.assembled, 'real block\n\n## Question\nq')
 })
 
+// ── BL-033 — chip removal threading ───────────────────────────────────────
+
+test('assemblePrompt: removed chip drops only its fragment when chipPromptBlocks is set', () => {
+  const out = assemblePrompt(
+    'q',
+    [
+      {
+        surfaceId: 'editor',
+        chips: [
+          { id: 'f', label: 'foo.md', kind: 'file' },
+          { id: 's', label: 'sel', kind: 'selection' },
+        ],
+        promptBlock: 'FILE_BLOCK\n\nSEL_BLOCK',
+        chipPromptBlocks: { f: 'FILE_BLOCK', s: 'SEL_BLOCK' },
+      },
+    ],
+    new Set(['s']),
+  )
+  // Only the file fragment survives; the visible chip rail loses 's'.
+  assert.equal(out.assembled, 'FILE_BLOCK\n\n## Question\nq')
+  assert.equal(out.chips.length, 1)
+  assert.equal(out.chips[0].id, 'f')
+})
+
+test('assemblePrompt: without chipPromptBlocks, removing all chips drops the whole surface', () => {
+  const out = assemblePrompt(
+    'q',
+    [
+      {
+        surfaceId: 'editor',
+        chips: [{ id: 'f', label: 'foo.md', kind: 'file' }],
+        promptBlock: 'FILE_BLOCK',
+      },
+      {
+        surfaceId: 'bases',
+        chips: [{ id: 'r', label: 'row', kind: 'row' }],
+        promptBlock: 'ROW_BLOCK',
+      },
+    ],
+    new Set(['f']),
+  )
+  assert.equal(out.assembled, 'ROW_BLOCK\n\n## Question\nq')
+  assert.equal(out.chips.length, 1)
+  assert.equal(out.chips[0].id, 'r')
+})
+
+test('assemblePrompt: without chipPromptBlocks, partial removal keeps the surface', () => {
+  // Coarse mode falls back to the surface's joined block — when at
+  // least one chip survives the whole block stays.
+  const out = assemblePrompt(
+    'q',
+    [
+      {
+        surfaceId: 'editor',
+        chips: [
+          { id: 'f', label: 'foo.md', kind: 'file' },
+          { id: 's', label: 'sel', kind: 'selection' },
+        ],
+        promptBlock: 'COMBINED',
+      },
+    ],
+    new Set(['s']),
+  )
+  assert.equal(out.assembled, 'COMBINED\n\n## Question\nq')
+  assert.equal(out.chips.length, 1)
+})
+
 test('assemblePrompt: a contributor that contributes only chips still surfaces them', () => {
   const out = assemblePrompt('q', [
     {

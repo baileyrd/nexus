@@ -19,14 +19,16 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+mod auth;
 mod client;
 mod config;
 pub mod core_plugin;
 pub mod pool;
 mod server;
 
+pub use auth::{AuthError, McpAuth, McpAuthSecret, ResolvedAuth};
 pub use client::{McpClient, McpClientError};
-pub use config::{McpConfigError, McpHostConfig, McpServerSpec};
+pub use config::{McpConfigError, McpHostConfig, McpServerSpec, McpTransport};
 pub use core_plugin::McpHostPlugin;
 pub use pool::{ConnectionPool, PoolConfig};
 pub use server::NexusMcpServer;

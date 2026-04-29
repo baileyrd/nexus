@@ -273,29 +273,13 @@ Distinct from the agent's MCP discovery (which appends *tool descriptions* to th
 RAG today calls remote embedding endpoints. A local backend (e.g. fastembed-rs, candle, or sqlite-vec's bundled gguf path) would unblock fully-offline forges. Nice-to-have for personal-tool scope; medium priority.
 **Cross-references (2026-04-28)**: BL-019 has been **promoted** from "nice-to-have" to a critical-path foundation now that Future-direction tracks are in scope. Direct consumers: BL-038 citations, BL-039 auto-link suggestions, BL-040 semantic search, BL-041 background indexing daemon, BL-044 recall hotkey, BL-045 auto-enrichment on save, BL-047 scheduled digests — nine downstream tracks. A backend choice that doesn't ship cross-platform costs the schedule weeks. **Phase-0 deliverable**: an ADR comparing fastembed-rs / candle / sqlite-vec gguf on (model quality, RAM footprint, cold-start time, cross-platform binary cost, license). Split implementation: (1) backend impl, (2) `EmbeddingModel` trait + cache, (3) RAG wire-up, (4) batch indexer hook for BL-041.
 
-### BL-021: Skill `depends_on` composition resolver
+_BL-021 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-**Source**: PRD-13 §5 (depends-on stacking, conflict resolution rules).
-**Effort**: Large. **Crate**: `nexus-skills`.
-`SkillMeta.depends_on` parses but is never resolved or layered. Need: topological sort, cycle detection, prompt fragment merging in well-defined order, conflict warning surface. Aligns with the existing skill-aware planner prompt assembly in `nexus-agent`.
+_BL-022 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-022: Skill in-app editor UI
+_BL-023 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-**Source**: PRD-13 §16 (live-preview in-app editor with frontmatter form + body markdown editor).
-**Effort**: Medium. **Crate**: `shell/src/plugins/nexus/skills/`.
-Today `SkillsPanel` is read-only; mutations require editing `.skill.md` on disk and calling `reload`. Editor would round-trip through the existing `com.nexus.storage::write_file` + `com.nexus.skills::reload`.
-
-### BL-023: MCP WebSocket + HTTP+SSE transports
-
-**Source**: PRD-14 §4.2.2 (HTTP+SSE), §4.2.3 (WebSocket).
-**Effort**: Medium. **Crate**: `nexus-mcp` (transport abstraction).
-Stdio is the only transport today (`McpClient` over `TokioChildProcess`). Remote MCP servers need at least one of these. WebSocket gets the lower-latency path; HTTP+SSE is the broader-compat fallback.
-
-### BL-025: MCP authentication
-
-**Source**: PRD-14 §8 (API key, bearer, OAuth client-credentials).
-**Effort**: Medium. **Crate**: `nexus-mcp`.
-`McpServerSpec.env` already accepts a string map; the auth flow itself (token exchange, refresh, keychain lookup) is unbuilt. Pairs with ADR-0009 (keyring hard-fail) once that policy is enforced at bootstrap.
+_BL-025 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-027: Multi-agent orchestration / delegation (= AI-DIR "agent loops")
 
@@ -332,11 +316,7 @@ _BL-031 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 **Effort**: Medium. **Crate / Package**: `shell/src/plugins/nexus/ai/` (new) + `shell/src/host/` (registry hook).
 A modal overlay invocable from any focused surface (editor, bases, canvas, terminal, files) that takes a free-form prompt and routes through the shared context-assembly service. Surface-specific context contributors (current selection, current file, current row, current canvas node) register adapters at activation. **Gates BL-010 / BL-011 UX** — land Cmd+I before the CLI surfaces so they share UX and engine. Scope excludes citations (BL-038) and right-click actions (BL-035), which compose on top.
 
-### BL-033: AMB context chips + model switcher
-
-**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) patterns 2 + 3.
-**Effort**: Small (bundle).
-Context chips: visible "what's in the prompt" pills inside BL-032's overlay (file, selection, skill stack) with click-to-remove. Model switcher: dropdown bound to BL-032 plus a global default in Settings. Trivial wiring around the BL-032 surface; bundle into one PR.
+_BL-033 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 _BL-034 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 

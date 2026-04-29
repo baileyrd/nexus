@@ -33,6 +33,7 @@ function reset(): void {
     visible: false,
     prompt: '',
     chips: [],
+    removedChipIds: [],
     status: 'idle',
     responseText: '',
     error: null,
@@ -178,6 +179,36 @@ test('submitCmdI: single-flight — call while submitting is a no-op', async () 
   // Drain the simulated in-flight request so the watchdog timer
   // (60s wall-clock) doesn't outlive this test and trip later ones.
   useCmdIStore.getState().finishResponse('cmdi-existing', '')
+})
+
+test('submitCmdI: removed chip is omitted from the assembled prompt (BL-033)', async () => {
+  reset()
+  contextContributors.register('editor', () => ({
+    surfaceId: 'editor',
+    chips: [
+      { id: 'editor:file:foo.md', label: 'foo.md', kind: 'file' },
+      { id: 'editor:selection:foo.md:0-5', label: 'sel', kind: 'selection' },
+    ],
+    promptBlock: 'FILE\n\nSEL',
+    chipPromptBlocks: {
+      'editor:file:foo.md': '### File\n\nfoo body',
+      'editor:selection:foo.md:0-5': '### Selection\n\nfoo()',
+    },
+  }))
+  await openCmdI()
+  useCmdIStore.getState().setPrompt('explain')
+  // User clicked-to-remove the selection chip.
+  useCmdIStore.getState().removeChip('editor:selection:foo.md:0-5')
+
+  const { api, calls } = stubApi(async () => ({ text: 'ok' }))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result = await submitCmdI(api as any)
+  assert.ok(result)
+  const sent = (calls[0].args as { messages: Array<{ content: string }> })
+    .messages[0].content
+  assert.match(sent, /### File/)
+  assert.doesNotMatch(sent, /### Selection/)
+  assert.match(sent, /## Question\nexplain/)
 })
 
 test('routeStreamEvent: only claims cmdi- session ids', () => {

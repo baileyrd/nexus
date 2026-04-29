@@ -17,6 +17,7 @@ function reset(): void {
     visible: false,
     prompt: '',
     chips: [],
+    removedChipIds: [],
     status: 'idle',
     responseText: '',
     error: null,
@@ -109,6 +110,21 @@ test('setError: errors win and clear the in-flight request id', () => {
   assert.equal(s.status, 'error')
   assert.equal(s.currentRequestId, null)
   assert.equal(s.error?.message, 'boom')
+})
+
+test('removeChip: appends chip ids; idempotent on duplicates', () => {
+  reset()
+  useCmdIStore.getState().removeChip('a')
+  useCmdIStore.getState().removeChip('b')
+  useCmdIStore.getState().removeChip('a')
+  assert.deepEqual(useCmdIStore.getState().removedChipIds, ['a', 'b'])
+})
+
+test('open(): clears removedChipIds from the previous activation', () => {
+  reset()
+  useCmdIStore.getState().removeChip('a')
+  useCmdIStore.getState().open()
+  assert.deepEqual(useCmdIStore.getState().removedChipIds, [])
 })
 
 test('close(): drops currentRequestId so a tail chunk no longer lands', () => {

@@ -39,6 +39,12 @@ export interface CmdIState {
   prompt: string
   /** Chips assembled from registered contributors at activation. */
   chips: ContextChip[]
+  /** BL-033 — chip ids the user clicked-to-remove for this activation.
+   *  Reset on each `open()`. The runtime consults this when
+   *  re-collecting contributions on submit so removed chips drop
+   *  both their visible badge and (when the contribution provides
+   *  `chipPromptBlocks`) their body fragment. */
+  removedChipIds: string[]
   /** Lifecycle of the in-flight (or last-completed) request. */
   status: CmdIStatus
   /** Streaming body — appended to as `stream_chunk` arrives. */
@@ -52,6 +58,9 @@ export interface CmdIState {
   close(): void
   setPrompt(p: string): void
   setChips(chips: ContextChip[]): void
+  /** BL-033 — drop a chip from the visible rail and from the prompt
+   *  on the next submit. Idempotent. */
+  removeChip(id: string): void
 
   beginSubmit(requestId: string): void
   appendResponseChunk(requestId: string, chunk: string): void
@@ -64,6 +73,7 @@ const INITIAL: Pick<
   | 'visible'
   | 'prompt'
   | 'chips'
+  | 'removedChipIds'
   | 'status'
   | 'responseText'
   | 'error'
@@ -72,6 +82,7 @@ const INITIAL: Pick<
   visible: false,
   prompt: '',
   chips: [],
+  removedChipIds: [],
   status: 'idle',
   responseText: '',
   error: null,
@@ -89,6 +100,7 @@ export const useCmdIStore = create<CmdIState>((set, get) => ({
       visible: true,
       prompt: '',
       chips: [],
+      removedChipIds: [],
       status: 'collecting',
       responseText: '',
       error: null,
@@ -112,6 +124,13 @@ export const useCmdIStore = create<CmdIState>((set, get) => ({
       // unless we've already moved on to a stream.
       status: s.status === 'collecting' ? 'idle' : s.status,
     })),
+
+  removeChip: (id) =>
+    set((s) =>
+      s.removedChipIds.includes(id)
+        ? s
+        : { removedChipIds: [...s.removedChipIds, id] },
+    ),
 
   beginSubmit: (requestId) =>
     set({

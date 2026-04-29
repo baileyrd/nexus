@@ -1,4 +1,5 @@
 import { useSkillsStore, type SkillEntry, type SkillParameter, type SkillsKernelAPI } from './skillsStore'
+import { SkillEditor } from './SkillEditor'
 import { Icon } from '../../../icons'
 
 interface SkillsViewProps {
@@ -21,7 +22,14 @@ export function SkillsView({ onRefresh, kernel }: SkillsViewProps) {
   const loadError = useSkillsStore((s) => s.loadError)
   const skills = useSkillsStore((s) => s.skills)
   const expandedId = useSkillsStore((s) => s.expandedId)
+  const editingId = useSkillsStore((s) => s.editingId)
   const toggleExpanded = useSkillsStore((s) => s.toggleExpanded)
+  const openNewSkill = useSkillsStore((s) => s.openNewSkill)
+
+  // BL-022 — when the editor is mounted in "new" mode there's no
+  // matching row to expand under, so we render the editor as a
+  // standalone panel pinned to the top of the listing.
+  const newSkillEditor = editingId === '__new__' ? <SkillEditor kernel={kernel} /> : null
 
   return (
     <div
@@ -35,15 +43,23 @@ export function SkillsView({ onRefresh, kernel }: SkillsViewProps) {
         fontSize: 'var(--ui-size, 13px)',
       }}
     >
-      <Header onRefresh={onRefresh} loading={loading} count={skills.length} />
+      <Header
+        onRefresh={onRefresh}
+        onNew={openNewSkill}
+        loading={loading}
+        count={skills.length}
+      />
       <div style={{ flex: '1 1 auto', overflow: 'auto' }}>
+        {newSkillEditor ? (
+          <div style={{ padding: 8 }}>{newSkillEditor}</div>
+        ) : null}
         {loadError ? (
           <Centered colour="var(--risk)">{loadError}</Centered>
         ) : loading && skills.length === 0 ? (
           <Centered colour="var(--fg-dim)">Loading…</Centered>
-        ) : skills.length === 0 ? (
+        ) : skills.length === 0 && !newSkillEditor ? (
           <Centered colour="var(--fg-dim)">
-            No skills. Add a <code>.skill.md</code> under <code>.forge/skills/</code>.
+            No skills. Add a <code>.skill.md</code> under <code>.forge/skills/</code> or click <em>New skill</em>.
           </Centered>
         ) : (
           skills.map((s) => (
@@ -63,11 +79,12 @@ export function SkillsView({ onRefresh, kernel }: SkillsViewProps) {
 
 interface HeaderProps {
   onRefresh: () => void
+  onNew: () => void
   loading: boolean
   count: number
 }
 
-function Header({ onRefresh, loading, count }: HeaderProps) {
+function Header({ onRefresh, onNew, loading, count }: HeaderProps) {
   return (
     <div
       style={{
@@ -91,6 +108,29 @@ function Header({ onRefresh, loading, count }: HeaderProps) {
       >
         Skills {count > 0 ? `(${count})` : ''}
       </span>
+      <button
+        type="button"
+        aria-label="New skill"
+        title="Create a new .skill.md"
+        onClick={onNew}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 24,
+          height: 24,
+          padding: 0,
+          border: 0,
+          background: 'transparent',
+          color: 'var(--fg-muted)',
+          cursor: 'pointer',
+          borderRadius: 'var(--r)',
+          fontSize: 14,
+          lineHeight: 1,
+        }}
+      >
+        +
+      </button>
       <button
         type="button"
         aria-label="Refresh skills"
@@ -225,7 +265,25 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
   const toggleRenderForm = useSkillsStore((s) => s.toggleRenderForm)
   const renderResult = useSkillsStore((s) => s.renderResults[skill.id])
   const renderError = useSkillsStore((s) => s.renderErrors[skill.id])
+  const editingId = useSkillsStore((s) => s.editingId)
+  const openEditor = useSkillsStore((s) => s.openEditor)
+  const deleteSkill = useSkillsStore((s) => s.deleteSkill)
   const isFormOpen = renderingId === skill.id
+  const isEditing = editingId === skill.id
+
+  // BL-022 — Edit / Delete affordances. Both are gated on `relpath`
+  // because the kernel can't write back to a skill it didn't load
+  // from disk (built-in skills bundled into the binary, hypothetical
+  // future plugin-supplied skills).
+  const canEdit = skill.relpath.length > 0
+
+  const onDelete = async () => {
+    const ok = window.confirm(
+      `Delete skill '${skill.name}'? This removes ${skill.relpath} from disk.`,
+    )
+    if (!ok) return
+    await deleteSkill(kernel, skill.id)
+  }
 
   return (
     <div
@@ -237,9 +295,13 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
         background: 'var(--bg-raised)',
       }}
     >
+      {isEditing ? (
+        <SkillEditor kernel={kernel} />
+      ) : null}
       <ChipRow label="tags" items={skill.tags} />
       <ChipRow label="contexts" items={skill.applicableContexts} />
       <ChipRow label="triggers" items={skill.triggers} muted />
+      <ChipRow label="depends_on" items={skill.dependsOn} muted />
       {skill.author ? (
         <div style={{ fontSize: 11, color: 'var(--fg-dim)' }}>by {skill.author}</div>
       ) : null}
@@ -273,6 +335,26 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
         >
           {isFormOpen ? 'Hide render form' : 'Render…'}
         </button>
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={() => openEditor(skill.id)}
+            disabled={isEditing}
+            style={chipButton(isEditing)}
+          >
+            {isEditing ? 'Editing…' : 'Edit'}
+          </button>
+        ) : null}
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={onDelete}
+            title={`Delete ${skill.relpath}`}
+            style={{ ...chipButton(false), color: 'var(--risk)' }}
+          >
+            Delete
+          </button>
+        ) : null}
         {!isFormOpen && skill.parameters.length > 0 ? (
           <span style={{ fontSize: 11, color: 'var(--fg-dim)' }}>
             {skill.parameters.length} parameter{skill.parameters.length === 1 ? '' : 's'}
