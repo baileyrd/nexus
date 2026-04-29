@@ -17,6 +17,7 @@ mod config;
 pub mod core_plugin;
 mod embedding;
 mod error;
+pub mod indexing_daemon;
 #[cfg(feature = "local-embeddings")]
 pub mod local_embedding;
 mod ollama;
