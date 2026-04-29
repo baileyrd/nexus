@@ -9,7 +9,7 @@
 // pending slot). Errors are surfaced inline; the user can dismiss
 // either way without affecting the underlying file.
 
-import { useEnrichStore } from './enrichStore'
+import { headPending, useEnrichStore } from './enrichStore'
 import { applyPending } from './enrichRuntime'
 import { getEnrichApi } from './enrichApi'
 
@@ -19,10 +19,14 @@ function basename(p: string): string {
 }
 
 export function EnrichAcceptGate() {
-  const pending = useEnrichStore((s) => s.pending)
+  const pendingMap = useEnrichStore((s) => s.pending)
   const applying = useEnrichStore((s) => s.applying)
   const error = useEnrichStore((s) => s.error)
   const dismiss = useEnrichStore((s) => s.dismiss)
+  const dismissAll = useEnrichStore((s) => s.dismissAll)
+
+  const pending = headPending({ pending: pendingMap })
+  const queueSize = pendingMap.size
 
   if (!pending && !error) return null
 
@@ -54,8 +58,22 @@ export function EnrichAcceptGate() {
     >
       {pending && (
         <>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            Enrich {basename(pending.path)}?
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              marginBottom: 6,
+            }}
+          >
+            <span style={{ fontWeight: 600 }}>
+              Enrich {basename(pending.path)}?
+            </span>
+            {queueSize > 1 && (
+              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                +{queueSize - 1} more
+              </span>
+            )}
           </div>
           {pending.summary && (
             <div style={{ marginBottom: 6, color: 'var(--fg-muted)' }}>
@@ -106,9 +124,27 @@ export function EnrichAcceptGate() {
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        {queueSize > 1 && (
+          <button
+            type="button"
+            onClick={() => dismissAll()}
+            disabled={applying}
+            style={{
+              padding: '4px 10px',
+              background: 'transparent',
+              border: '1px solid var(--line)',
+              borderRadius: 4,
+              cursor: applying ? 'not-allowed' : 'pointer',
+              color: 'var(--fg-muted)',
+              marginRight: 'auto',
+            }}
+          >
+            Dismiss all
+          </button>
+        )}
         <button
           type="button"
-          onClick={() => dismiss()}
+          onClick={() => (pending ? dismiss(pending.path) : dismissAll())}
           disabled={applying}
           style={{
             padding: '4px 10px',

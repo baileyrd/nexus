@@ -162,10 +162,10 @@ export async function forceEnrichActiveFile(api: PluginAPI): Promise<void> {
   await runProposal(api, active.relpath)
 }
 
-/** Apply the currently-pending proposal. UI handler. */
+/** Apply the head (oldest) pending proposal. UI handler. */
 export async function applyPending(api: PluginAPI): Promise<void> {
   const state = useEnrichStore.getState()
-  const proposal = state.pending
+  const proposal = state.pending.values().next().value
   if (!proposal) return
   state.setApplying(true)
   try {
@@ -174,7 +174,7 @@ export async function applyPending(api: PluginAPI): Promise<void> {
     })
     const result = raw as { applied: boolean; reason?: string | null }
     if (result.applied) {
-      useEnrichStore.getState().dismiss()
+      useEnrichStore.getState().dismiss(proposal.path)
       api.notifications.show({
         type: 'info',
         message: `Enriched ${proposal.path}`,
