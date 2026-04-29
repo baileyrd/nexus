@@ -22,7 +22,16 @@
 //! we just updated does **not** invalidate later proposals on the same
 //! body.
 
+use std::path::Path;
+
+use nexus_kernel::KernelPluginContext;
 use serde::{Deserialize, Serialize};
+
+use crate::embedding::EmbeddingProvider;
+use crate::error::AiError;
+use crate::provider::{AiProvider, ChatMessage, Role};
+use crate::rag;
+use crate::vectorstore::ChunkMatch;
 
 /// Proposed enrichment payload — the output of [`propose`] and the
 /// input to [`apply`]. JSON-serialised across the IPC boundary.
@@ -41,6 +50,232 @@ pub struct EnrichmentProposal {
     /// `[[basename]]` wikilinks to related notes, deduped, with the
     /// input file itself removed.
     pub related: Vec<String>,
+}
+
+/// Maximum body characters fed to the AI as context. Notes longer than
+/// this are truncated; the model still sees the head, which is the
+/// most representative chunk for a tag/summary task.
+const MAX_BODY_CHARS: usize = 4000;
+
+/// Maximum body characters used as the semantic-search query — keeps
+/// the embedding cheap and avoids stuffing a 10k-token note into a
+/// single vector.
+const MAX_QUERY_CHARS: usize = 1500;
+
+/// Maximum tags accepted from the model.
+const MAX_TAGS: usize = 5;
+
+/// Maximum summary characters kept from the model.
+const MAX_SUMMARY_CHARS: usize = 200;
+
+/// Maximum related notes returned in a proposal.
+const MAX_RELATED: usize = 5;
+
+const TAGS_PROMPT: &str = "Reply with up to 5 single-word tags, comma-separated, lowercase. \
+                            No explanation, no leading text. Just the comma-separated tags.";
+
+const SUMMARY_PROMPT: &str = "Reply with one sentence (≤120 chars) summarising this note. \
+                               No preface, no quotation marks. Just the sentence.";
+
+/// Build an [`EnrichmentProposal`] for `path` by reading the file via
+/// storage IPC, asking `ai` for tags + summary, and asking the vector
+/// store for related notes.
+///
+/// The returned proposal is purely advisory — apply it later via
+/// [`apply`] (the shell shows an accept-gate UI in between).
+///
+/// # Errors
+/// Returns [`AiError::Provider`] on storage / AI / embedder failures.
+pub async fn propose(
+    ctx: &KernelPluginContext,
+    ai: &dyn AiProvider,
+    embedder: &dyn EmbeddingProvider,
+    path: &str,
+) -> Result<EnrichmentProposal, AiError> {
+    let content = read_file_via_ipc(ctx, path).await?;
+    let (_fm, body) = strip_frontmatter(&content);
+    let body_owned = body.to_string();
+    let hash = body_hash(&content);
+
+    let context = truncate_chars(&body_owned, MAX_BODY_CHARS);
+    let messages_for_tags = vec![ChatMessage {
+        role: Role::User,
+        content: format!("Note content:\n\n{context}"),
+    }];
+    let raw_tags = ai
+        .chat(&messages_for_tags, Some(TAGS_PROMPT))
+        .await
+        .map_err(|e| AiError::Provider(format!("enrich: tags: {e}")))?;
+    let tags = parse_tag_response(&raw_tags);
+
+    let messages_for_summary = vec![ChatMessage {
+        role: Role::User,
+        content: format!("Note content:\n\n{context}"),
+    }];
+    let raw_summary = ai
+        .chat(&messages_for_summary, Some(SUMMARY_PROMPT))
+        .await
+        .map_err(|e| AiError::Provider(format!("enrich: summary: {e}")))?;
+    let summary = clean_summary(&raw_summary);
+
+    let related = if body_owned.trim().is_empty() {
+        Vec::new()
+    } else {
+        let query = truncate_chars(&body_owned, MAX_QUERY_CHARS);
+        // Pull a few extra in case some are filtered out (own file).
+        let matches = rag::semantic_search(ctx, embedder, &query, MAX_RELATED + 5).await?;
+        related_from_matches(&matches, path, MAX_RELATED)
+    };
+
+    Ok(EnrichmentProposal {
+        path: path.to_string(),
+        body_hash: hash,
+        tags,
+        summary,
+        related,
+    })
+}
+
+/// Apply a previously-returned [`EnrichmentProposal`] to its file. Re-
+/// reads the file, verifies `proposal.body_hash` still matches the
+/// current body, and (if so) writes the merged frontmatter back via
+/// storage IPC.
+///
+/// Returns `(applied, reason)`. `applied = false` with a reason like
+/// `"body changed"` is a soft outcome, not an error — the shell should
+/// re-propose.
+///
+/// # Errors
+/// Returns [`AiError::Provider`] on storage IPC failures (the file
+/// disappeared, write rejected, etc).
+pub async fn apply(
+    ctx: &KernelPluginContext,
+    proposal: &EnrichmentProposal,
+) -> Result<(bool, Option<String>), AiError> {
+    let current = read_file_via_ipc(ctx, &proposal.path).await?;
+    let current_hash = body_hash(&current);
+    if current_hash != proposal.body_hash {
+        return Ok((false, Some("body changed since proposal".to_string())));
+    }
+    let merged = merge_frontmatter(&current, proposal);
+    write_file_via_ipc(ctx, &proposal.path, merged.as_bytes()).await?;
+    Ok((true, None))
+}
+
+async fn read_file_via_ipc(ctx: &KernelPluginContext, path: &str) -> Result<String, AiError> {
+    use nexus_kernel::PluginContext;
+    use std::time::Duration;
+    let response = ctx
+        .ipc_call(
+            "com.nexus.storage",
+            "read_file",
+            serde_json::json!({ "path": path }),
+            Duration::from_secs(30),
+        )
+        .await
+        .map_err(|e| AiError::Provider(format!("enrich: read_file: {e}")))?;
+    let bytes_opt: Option<Vec<u8>> = response
+        .get("bytes")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .ok_or_else(|| AiError::Provider("enrich: read_file: missing 'bytes'".to_string()))?;
+    let bytes = bytes_opt
+        .ok_or_else(|| AiError::Provider(format!("enrich: read_file: {path} not found")))?;
+    String::from_utf8(bytes).map_err(|e| AiError::Provider(format!("enrich: utf8: {e}")))
+}
+
+async fn write_file_via_ipc(
+    ctx: &KernelPluginContext,
+    path: &str,
+    bytes: &[u8],
+) -> Result<(), AiError> {
+    use nexus_kernel::PluginContext;
+    use std::time::Duration;
+    ctx.ipc_call(
+        "com.nexus.storage",
+        "write_file",
+        serde_json::json!({ "path": path, "bytes": bytes }),
+        Duration::from_secs(30),
+    )
+    .await
+    .map_err(|e| AiError::Provider(format!("enrich: write_file: {e}")))?;
+    Ok(())
+}
+
+fn parse_tag_response(raw: &str) -> Vec<String> {
+    let line = raw.lines().next().unwrap_or("").trim();
+    let mut out = Vec::new();
+    for piece in line.split(',') {
+        let t = piece
+            .trim()
+            .trim_matches('#')
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_lowercase();
+        if t.is_empty() {
+            continue;
+        }
+        // Filter to single-word tags (no spaces / punctuation other than `-`/`_`).
+        if t.chars().any(|c| c.is_whitespace()) {
+            continue;
+        }
+        if !t.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            continue;
+        }
+        if !out.iter().any(|e: &String| e == &t) {
+            out.push(t);
+        }
+        if out.len() >= MAX_TAGS {
+            break;
+        }
+    }
+    out
+}
+
+fn clean_summary(raw: &str) -> String {
+    let trimmed = raw
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .to_string();
+    truncate_chars(&trimmed, MAX_SUMMARY_CHARS)
+}
+
+fn related_from_matches(matches: &[ChunkMatch], own_path: &str, limit: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let own = normalise_path(own_path);
+    for m in matches {
+        if normalise_path(&m.file_path) == own {
+            continue;
+        }
+        let basename = Path::new(&m.file_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&m.file_path)
+            .to_string();
+        if basename.is_empty() {
+            continue;
+        }
+        let link = format!("[[{basename}]]");
+        if !out.iter().any(|e| e == &link) {
+            out.push(link);
+        }
+        if out.len() >= limit {
+            break;
+        }
+    }
+    out
+}
+
+fn normalise_path(p: &str) -> String {
+    p.replace('\\', "/")
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    s.chars().take(max).collect()
 }
 
 /// Compute a SHA-256 hex digest of `body` after stripping any leading
@@ -357,6 +592,62 @@ mod tests {
         assert!(out.contains("foo: bar"));
         assert!(out.contains("tags: [old1, old2, new]"), "got: {out}");
         assert!(!out.contains("- old1"));
+    }
+
+    #[test]
+    fn parse_tag_response_extracts_clean_tags() {
+        let raw = "rust, async, IPC, kernel-dev, plugin\n\nExplanation goes here.";
+        let tags = parse_tag_response(raw);
+        assert_eq!(tags, vec!["rust", "async", "ipc", "kernel-dev", "plugin"]);
+    }
+
+    #[test]
+    fn parse_tag_response_filters_multiword_and_caps_at_five() {
+        let raw = "a, b, c d, e, f, g, h";
+        let tags = parse_tag_response(raw);
+        assert_eq!(tags.len(), 5);
+        assert!(!tags.iter().any(|t| t.contains(' ')));
+    }
+
+    #[test]
+    fn clean_summary_strips_quotes_and_truncates() {
+        let raw = "  \"A short summary.\"  ";
+        assert_eq!(clean_summary(raw), "A short summary.");
+        let long = "x".repeat(500);
+        let out = clean_summary(&long);
+        assert_eq!(out.chars().count(), MAX_SUMMARY_CHARS);
+    }
+
+    #[test]
+    fn related_from_matches_drops_self_and_dedupes() {
+        let matches = vec![
+            ChunkMatch {
+                file_path: "self.md".into(),
+                block_id: 1,
+                chunk_text: String::new(),
+                score: 0.9,
+            },
+            ChunkMatch {
+                file_path: "notes/alpha.md".into(),
+                block_id: 1,
+                chunk_text: String::new(),
+                score: 0.8,
+            },
+            ChunkMatch {
+                file_path: "notes/alpha.md".into(),
+                block_id: 2,
+                chunk_text: String::new(),
+                score: 0.75,
+            },
+            ChunkMatch {
+                file_path: "beta.md".into(),
+                block_id: 1,
+                chunk_text: String::new(),
+                score: 0.7,
+            },
+        ];
+        let out = related_from_matches(&matches, "self.md", 5);
+        assert_eq!(out, vec!["[[alpha]]", "[[beta]]"]);
     }
 
     #[test]
