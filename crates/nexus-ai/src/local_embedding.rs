@@ -236,7 +236,16 @@ where
         .collect())
 }
 
-fn map_model(name: &str) -> Result<EmbeddingModel, AiError> {
+/// Resolve a caller-supplied model identifier to fastembed's
+/// [`EmbeddingModel`] enum.
+///
+/// Empty string and the canonical default identifier both map to
+/// `BGESmallENV15Q` per ADR 0018.
+///
+/// # Errors
+///
+/// Returns [`AiError::Provider`] when the identifier is unrecognised.
+pub fn map_model(name: &str) -> Result<EmbeddingModel, AiError> {
     let normalized = name.trim().to_ascii_lowercase();
     match normalized.as_str() {
         // Default — INT8 quantized, 384-dim, 33 MB.

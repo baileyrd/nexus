@@ -30,10 +30,14 @@ mod vectorstore;
 
 pub use anthropic::AnthropicProvider;
 pub use chunker::{chunks_from_blocks, Chunk};
-pub use config::{detect_embedding_provider, detect_provider, AiConfig};
+pub use config::{detect_embedding_provider, detect_local_embedding, detect_provider, AiConfig};
 pub use core_plugin::AiCorePlugin;
 pub use embedding::EmbeddingProvider;
 pub use error::AiError;
+#[cfg(feature = "local-embeddings")]
+pub use local_embedding::{
+    LocalEmbedding, BATCH_CACHE_BYPASS_THRESHOLD, DEFAULT_CACHE_MAX_ENTRIES, DEFAULT_LOCAL_MODEL,
+};
 pub use ollama::OllamaProvider;
 pub use openai::OpenAiProvider;
 pub use privacy::{PrivacyPolicy, Redaction, Redactor};
