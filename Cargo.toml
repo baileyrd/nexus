@@ -103,8 +103,8 @@ rayon = "1.11"
 # Hashing
 sha2 = "0.11"
 
-# YAML frontmatter
-serde_yaml = "0.9"
+# YAML frontmatter (serde_yml is the maintained fork of archived serde_yaml)
+serde_yml = "0.0.12"
 
 # System interfaces
 libc = "0.2"

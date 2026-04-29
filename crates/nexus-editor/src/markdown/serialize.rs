@@ -29,24 +29,24 @@ fn serialize_frontmatter(props: &HashMap<String, PropertyValue>, out: &mut Strin
         return;
     }
     let yaml_value = properties_to_yaml(props);
-    let yaml = serde_yaml::to_string(&yaml_value).unwrap_or_default();
+    let yaml = serde_yml::to_string(&yaml_value).unwrap_or_default();
     out.push_str("---\n");
     out.push_str(yaml.trim_end_matches('\n'));
     out.push_str("\n---\n\n");
 }
 
-fn properties_to_yaml(props: &HashMap<String, PropertyValue>) -> serde_yaml::Value {
+fn properties_to_yaml(props: &HashMap<String, PropertyValue>) -> serde_yml::Value {
     // Deterministic key order: reserved keys first in a fixed order,
     // then custom keys in sorted order.
     const RESERVED: &[&str] = &[
         "title", "type", "status", "cssclass", "date", "created", "modified", "aliases", "tags",
     ];
-    let mut mapping = serde_yaml::Mapping::new();
+    let mut mapping = serde_yml::Mapping::new();
 
     for key in RESERVED {
         if let Some(v) = props.get(*key) {
             mapping.insert(
-                serde_yaml::Value::String((*key).into()),
+                serde_yml::Value::String((*key).into()),
                 property_to_yaml(v),
             );
         }
@@ -58,32 +58,32 @@ fn properties_to_yaml(props: &HashMap<String, PropertyValue>) -> serde_yaml::Val
     other_keys.sort();
     for key in other_keys {
         mapping.insert(
-            serde_yaml::Value::String(key.clone()),
+            serde_yml::Value::String(key.clone()),
             property_to_yaml(&props[key]),
         );
     }
-    serde_yaml::Value::Mapping(mapping)
+    serde_yml::Value::Mapping(mapping)
 }
 
-fn property_to_yaml(v: &PropertyValue) -> serde_yaml::Value {
+fn property_to_yaml(v: &PropertyValue) -> serde_yml::Value {
     match v {
-        PropertyValue::String(s) => serde_yaml::Value::String(s.clone()),
-        PropertyValue::Number(n) => serde_yaml::Value::Number(serde_yaml::Number::from(*n)),
-        PropertyValue::Boolean(b) => serde_yaml::Value::Bool(*b),
+        PropertyValue::String(s) => serde_yml::Value::String(s.clone()),
+        PropertyValue::Number(n) => serde_yml::Value::Number(serde_yml::Number::from(*n)),
+        PropertyValue::Boolean(b) => serde_yml::Value::Bool(*b),
         PropertyValue::List(items) => {
-            serde_yaml::Value::Sequence(items.iter().map(property_to_yaml).collect())
+            serde_yml::Value::Sequence(items.iter().map(property_to_yaml).collect())
         }
         PropertyValue::Object(map) => {
-            let mut m = serde_yaml::Mapping::new();
+            let mut m = serde_yml::Mapping::new();
             let mut keys: Vec<&String> = map.keys().collect();
             keys.sort();
             for k in keys {
                 m.insert(
-                    serde_yaml::Value::String(k.clone()),
+                    serde_yml::Value::String(k.clone()),
                     property_to_yaml(&map[k]),
                 );
             }
-            serde_yaml::Value::Mapping(m)
+            serde_yml::Value::Mapping(m)
         }
     }
 }

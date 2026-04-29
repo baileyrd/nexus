@@ -132,7 +132,7 @@ pub enum FilterNode {
 pub enum ObsidianBaseError {
     /// YAML parse failure.
     #[error("invalid .base YAML: {0}")]
-    Parse(#[from] serde_yaml::Error),
+    Parse(#[from] serde_yml::Error),
 }
 
 /// Parse the YAML contents of a `.base` file.
@@ -142,7 +142,7 @@ pub enum ObsidianBaseError {
 /// Returns [`ObsidianBaseError::Parse`] when the input is not valid YAML
 /// or does not match the `.base` shape.
 pub fn parse(contents: &str) -> Result<ObsidianBase, ObsidianBaseError> {
-    let base: ObsidianBase = serde_yaml::from_str(contents)?;
+    let base: ObsidianBase = serde_yml::from_str(contents)?;
     Ok(base)
 }
 
@@ -153,7 +153,7 @@ pub fn parse(contents: &str) -> Result<ObsidianBase, ObsidianBaseError> {
 /// Returns [`ObsidianBaseError::Parse`] if serialization fails — this
 /// is unreachable in practice because every field is serde-derived.
 pub fn to_yaml(base: &ObsidianBase) -> Result<String, ObsidianBaseError> {
-    Ok(serde_yaml::to_string(base)?)
+    Ok(serde_yml::to_string(base)?)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
