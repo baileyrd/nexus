@@ -287,6 +287,8 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_SEMANTIC_SEARCH => {
                     handle_semantic_search(&ctx, embed_cfg, &args).await
                 }
+                HANDLER_ENRICH_FILE => handle_enrich_file(&ctx, ai_cfg, embed_cfg, &args).await,
+                HANDLER_ENRICH_APPLY => handle_enrich_apply(&ctx, &args).await,
                 _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
             }
         }))
@@ -404,6 +406,56 @@ async fn handle_semantic_search(
         .await
         .map_err(|e| exec_err(format!("semantic_search: {e}")))?;
     Ok(serde_json::json!({ "matches": matches }))
+}
+
+/// BL-045 — `enrich_file`: read a markdown note, ask the AI for
+/// tags + summary, run semantic_search for related notes, return
+/// an [`crate::enrichment::EnrichmentProposal`] WITHOUT writing.
+async fn handle_enrich_file(
+    ctx: &KernelPluginContext,
+    ai_cfg: Option<AiConfig>,
+    embed_cfg: Option<AiConfig>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let path = args
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| exec_err("enrich_file: missing 'path' string"))?;
+
+    let ai_cfg = ai_cfg.ok_or_else(|| exec_err("enrich_file: no AI chat provider configured"))?;
+    let embed_cfg =
+        embed_cfg.ok_or_else(|| exec_err("enrich_file: no AI embedding provider configured"))?;
+
+    let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
+    let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
+
+    let proposal = crate::enrichment::propose(ctx, ai.as_ref(), embedder.as_ref(), path)
+        .await
+        .map_err(|e| exec_err(format!("enrich_file: {e}")))?;
+    serde_json::to_value(&proposal)
+        .map_err(|e| exec_err(format!("enrich_file: serialize: {e}")))
+}
+
+/// BL-045 — `enrich_apply`: merge a previously-returned proposal back
+/// into the file's YAML frontmatter, but only if `body_hash` still
+/// matches. Returns `{ applied: bool, reason?: String }`.
+async fn handle_enrich_apply(
+    ctx: &KernelPluginContext,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let raw_proposal = args
+        .get("proposal")
+        .ok_or_else(|| exec_err("enrich_apply: missing 'proposal'"))?;
+    let proposal: crate::enrichment::EnrichmentProposal =
+        serde_json::from_value(raw_proposal.clone())
+            .map_err(|e| exec_err(format!("enrich_apply: proposal decode: {e}")))?;
+    let (applied, reason) = crate::enrichment::apply(ctx, &proposal)
+        .await
+        .map_err(|e| exec_err(format!("enrich_apply: {e}")))?;
+    Ok(serde_json::json!({
+        "applied": applied,
+        "reason": reason,
+    }))
 }
 
 async fn handle_index_file(
@@ -1901,5 +1953,50 @@ mod semantic_search_dispatch_tests {
         // Pin the wire id so external callers (bootstrap manifest,
         // shell plugin, MCP) don't drift silently.
         assert_eq!(HANDLER_SEMANTIC_SEARCH, 13);
+    }
+
+    #[test]
+    fn enrich_handler_ids_are_pinned() {
+        // BL-045: bootstrap manifest + shell plugin both reference
+        // these constants — bumping them is a wire break.
+        assert_eq!(HANDLER_ENRICH_FILE, 15);
+        assert_eq!(HANDLER_ENRICH_APPLY, 16);
+    }
+
+    #[tokio::test]
+    async fn enrich_file_requires_path() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_ENRICH_FILE, &serde_json::json!({}))
+            .expect("HANDLER_ENRICH_FILE must be async");
+        let err = fut.await.expect_err("missing path should error");
+        assert!(format!("{err}").contains("missing 'path'"));
+    }
+
+    #[tokio::test]
+    async fn enrich_file_requires_ai_provider() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(
+                HANDLER_ENRICH_FILE,
+                &serde_json::json!({ "path": "note.md" }),
+            )
+            .expect("HANDLER_ENRICH_FILE must be async");
+        let err = fut.await.expect_err("no AI cfg should error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("no AI chat provider configured"),
+            "expected ai-cfg error, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn enrich_apply_requires_proposal() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_ENRICH_APPLY, &serde_json::json!({}))
+            .expect("HANDLER_ENRICH_APPLY must be async");
+        let err = fut.await.expect_err("missing proposal should error");
+        assert!(format!("{err}").contains("missing 'proposal'"));
     }
 }
