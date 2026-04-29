@@ -16,6 +16,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { uriHandlerRegistry } from './registry/UriHandlerRegistry'
 import App from './shell/App'
+import { PopoutShell, isPopoutMode } from './shell/PopoutShell'
 import './shell/shell.css'
 // Importing the store triggers persist rehydration, which sets
 // data-theme/data-density on <html> before the first paint.
@@ -323,16 +324,30 @@ async function boot() {
 // Tauri listeners it registers persist for the app lifetime.
 installBodyClasses()
 
-// Mount React IMMEDIATELY so the user sees SOMETHING even if boot fails mid-way.
-// App renders a "Loading plugins..." placeholder until slots populate.
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-)
+// BL-029 — popout window mode. A child WebviewWindow opened by the
+// `popout_window` Tauri command loads this same `index.html` with
+// `?popout=<fwId>&leaf=<leafId>` query params. We short-circuit the
+// full plugin-loading + workspace-render path and mount a focused
+// popout shell instead, so the popout window doesn't double-boot the
+// kernel / community plugins / sandbox orchestrator.
+if (isPopoutMode()) {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <PopoutShell />
+    </React.StrictMode>,
+  )
+} else {
+  // Mount React IMMEDIATELY so the user sees SOMETHING even if boot fails mid-way.
+  // App renders a "Loading plugins..." placeholder until slots populate.
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  )
 
-boot().catch(err => {
-  const stack = err instanceof Error ? (err.stack ?? err.message) : String(err)
-  console.error('[Boot] Fatal:', err)
-  showFatal(stack)
-})
+  boot().catch(err => {
+    const stack = err instanceof Error ? (err.stack ?? err.message) : String(err)
+    console.error('[Boot] Fatal:', err)
+    showFatal(stack)
+  })
+}

@@ -151,6 +151,18 @@ function isWorkspaceJSON(v: unknown): v is WorkspaceJSON {
   if ('bottom' in v && v.bottom !== undefined && !isSerializedNode(v.bottom)) {
     return false
   }
+  // BL-029 — `floating` is optional; when present every entry must be a
+  // SerializedFloating (kind === 'floating') so a stray Split/Tabs
+  // can't slip in. Reject the whole workspace.json on a single bad
+  // entry rather than silently dropping it; mismatched popout state is
+  // worse than a fall-back to the default layout.
+  if ('floating' in v && v.floating !== undefined) {
+    if (!Array.isArray(v.floating)) return false
+    for (const fw of v.floating as unknown[]) {
+      if (!isSerializedNode(fw)) return false
+      if (!isObj(fw) || (fw as { kind?: unknown }).kind !== 'floating') return false
+    }
+  }
   if (v.active !== null && typeof v.active !== 'string') return false
   if ('lastOpenFiles' in v && !Array.isArray(v.lastOpenFiles)) return false
   return true

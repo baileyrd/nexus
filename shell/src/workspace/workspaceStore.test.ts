@@ -358,3 +358,211 @@ test('layout-ready fires AFTER all setViewState calls complete during hydrate', 
     off()
   }
 })
+
+// --- BL-029 popout / floating window tests -------------------------------
+
+test('popoutLeaf moves leaf out of its parent Tabs into a fresh FloatingWindow', async () => {
+  freshLayout()
+  const rootTabs = firstTabs(workspace.rootSplit)
+  const leaf = workspace.createLeaf(rootTabs)
+  rootTabs.leaves.push(leaf)
+  await leaf.setViewState({ type: 'foo' })
+
+  const before = rootTabs.leaves.length
+  const fwId = workspace.popoutLeaf(leaf.id)
+
+  assert.equal(rootTabs.leaves.length, before - 1, 'leaf removed from parent tabs')
+  assert.equal(workspace.floating.length, 1, 'one floating window appended')
+  const fw = workspace.floating[0]!
+  assert.equal(fw.id, fwId)
+  assert.equal(fw.kind, 'floating')
+  assert.equal(fw.child.kind, 'tabs')
+  const fwTabs = fw.child as Tabs
+  assert.equal(fwTabs.leaves.length, 1)
+  assert.equal(fwTabs.leaves[0]!.id, leaf.id)
+  assert.equal(leaf.parent, fwTabs, 'leaf.parent reparented to FW tabs')
+})
+
+test('popoutLeaf is idempotent for an already popped-out leaf', async () => {
+  freshLayout()
+  const rootTabs = firstTabs(workspace.rootSplit)
+  const leaf = workspace.createLeaf(rootTabs)
+  rootTabs.leaves.push(leaf)
+  await leaf.setViewState({ type: 'foo' })
+
+  const fwId1 = workspace.popoutLeaf(leaf.id)
+  const fwId2 = workspace.popoutLeaf(leaf.id)
+  assert.equal(fwId1, fwId2, 'second popout returns the same FW id')
+  assert.equal(workspace.floating.length, 1, 'no duplicate FW created')
+})
+
+test('popoutLeaf with bounds attaches bounds to the FW', async () => {
+  freshLayout()
+  const rootTabs = firstTabs(workspace.rootSplit)
+  const leaf = workspace.createLeaf(rootTabs)
+  rootTabs.leaves.push(leaf)
+  await leaf.setViewState({ type: 'foo' })
+
+  const fwId = workspace.popoutLeaf(leaf.id, { x: 100, y: 200, w: 800, h: 600 })
+  const fw = workspace.findFloatingWindow(fwId)!
+  assert.deepEqual(fw.bounds, { x: 100, y: 200, w: 800, h: 600 })
+})
+
+test('popoutLeaf throws on unknown leaf id', async () => {
+  freshLayout()
+  assert.throws(
+    () => workspace.popoutLeaf('definitely-not-a-leaf-id'),
+    /unknown leaf id/,
+  )
+})
+
+test('setFloatingWindowBounds updates bounds and emits layout-change', async () => {
+  freshLayout()
+  const rootTabs = firstTabs(workspace.rootSplit)
+  const leaf = workspace.createLeaf(rootTabs)
+  rootTabs.leaves.push(leaf)
+  await leaf.setViewState({ type: 'foo' })
+
+  const fwId = workspace.popoutLeaf(leaf.id)
+  let layoutChanges = 0
+  const off = workspace.on('layout-change', () => {
+    layoutChanges++
+  })
+  try {
+    workspace.setFloatingWindowBounds(fwId, { x: 1, y: 2, w: 300, h: 400 })
+    assert.equal(layoutChanges, 1, 'first bounds change fires layout-change')
+    workspace.setFloatingWindowBounds(fwId, { x: 1, y: 2, w: 300, h: 400 })
+    assert.equal(layoutChanges, 1, 'identical bounds re-write is a no-op')
+    workspace.setFloatingWindowBounds(fwId, { x: 5, y: 6, w: 300, h: 400 })
+    assert.equal(layoutChanges, 2, 'changed bounds fires layout-change')
+
+    const fw = workspace.findFloatingWindow(fwId)!
+    assert.deepEqual(fw.bounds, { x: 5, y: 6, w: 300, h: 400 })
+  } finally {
+    off()
+  }
+})
+
+test('setFloatingWindowBounds is a no-op for unknown id', () => {
+  freshLayout()
+  // Just shouldn't throw.
+  workspace.setFloatingWindowBounds('does-not-exist', { x: 0, y: 0, w: 1, h: 1 })
+})
+
+test('closeFloatingWindow removes FW + disposes leaves', async () => {
+  freshLayout()
+  const rootTabs = firstTabs(workspace.rootSplit)
+  const leaf = workspace.createLeaf(rootTabs)
+  rootTabs.leaves.push(leaf)
+  await leaf.setViewState({ type: 'foo' })
+
+  const fwId = workspace.popoutLeaf(leaf.id)
+  assert.ok(workspace.leaves.has(leaf.id), 'leaf still tracked pre-close')
+  await workspace.closeFloatingWindow(fwId)
+  assert.equal(workspace.floating.length, 0)
+  assert.equal(workspace.leaves.has(leaf.id), false, 'leaf removed from registry')
+})
+
+test('closeFloatingWindow clears activeLeafId when active leaf was inside', async () => {
+  freshLayout()
+  const rootTabs = firstTabs(workspace.rootSplit)
+  const leaf = workspace.createLeaf(rootTabs)
+  rootTabs.leaves.push(leaf)
+  await leaf.setViewState({ type: 'foo', active: true })
+  workspace.setActiveLeaf(leaf)
+  assert.equal(workspace.activeLeafId, leaf.id)
+
+  const fwId = workspace.popoutLeaf(leaf.id)
+  await workspace.closeFloatingWindow(fwId)
+  assert.equal(workspace.activeLeafId, null, 'active id cleared')
+})
+
+test('closeFloatingWindow on unknown id is a silent no-op', async () => {
+  freshLayout()
+  await workspace.closeFloatingWindow('does-not-exist')
+  assert.equal(workspace.floating.length, 0)
+})
+
+test('serialize includes floating[] only when non-empty', async () => {
+  freshLayout()
+  const rootTabs = firstTabs(workspace.rootSplit)
+  const leaf = workspace.createLeaf(rootTabs)
+  rootTabs.leaves.push(leaf)
+  await leaf.setViewState({ type: 'foo' })
+
+  const before = workspace.serialize()
+  assert.equal(
+    'floating' in before,
+    false,
+    'empty floating[] omitted from JSON for backwards-compat',
+  )
+
+  const fwId = workspace.popoutLeaf(leaf.id, { x: 10, y: 20, w: 800, h: 600 })
+  const after = workspace.serialize()
+  assert.ok(after.floating, 'floating field present after popout')
+  assert.equal(after.floating!.length, 1)
+  assert.equal(after.floating![0]!.kind, 'floating')
+  assert.equal(after.floating![0]!.id, fwId)
+  assert.deepEqual(after.floating![0]!.bounds, { x: 10, y: 20, w: 800, h: 600 })
+})
+
+test('hydrate restores floating[] entries with bounds', async () => {
+  const fixture: WorkspaceJSON = {
+    main: {
+      kind: 'split',
+      id: 'main-split',
+      direction: 'horizontal',
+      children: [{ kind: 'tabs', id: 'main-tabs', activeIndex: 0, leaves: [] }],
+    },
+    left: {
+      kind: 'split',
+      id: 'left-dock',
+      direction: 'vertical',
+      side: 'left',
+      collapsed: false,
+      size: 300,
+      children: [{ kind: 'tabs', id: 'left-tabs', activeIndex: 0, leaves: [] }],
+    },
+    right: {
+      kind: 'split',
+      id: 'right-dock',
+      direction: 'vertical',
+      side: 'right',
+      collapsed: false,
+      size: 300,
+      children: [{ kind: 'tabs', id: 'right-tabs', activeIndex: 0, leaves: [] }],
+    },
+    floating: [
+      {
+        kind: 'floating',
+        id: 'fw-1',
+        bounds: { x: 100, y: 200, w: 600, h: 400 },
+        child: {
+          kind: 'tabs',
+          id: 'fw-tabs',
+          activeIndex: 0,
+          leaves: [
+            { kind: 'leaf', id: 'fw-leaf-1', viewState: { type: 'foo', state: {} } },
+          ],
+        },
+      },
+    ],
+    active: null,
+    lastOpenFiles: [],
+  }
+
+  await workspace.hydrate(fixture)
+  assert.equal(workspace.floating.length, 1)
+  const fw = workspace.floating[0]!
+  assert.equal(fw.id, 'fw-1')
+  assert.deepEqual(fw.bounds, { x: 100, y: 200, w: 600, h: 400 })
+  const fwTabs = fw.child as Tabs
+  assert.equal(fwTabs.leaves.length, 1)
+  assert.equal(fwTabs.leaves[0]!.id, 'fw-leaf-1')
+  assert.equal(fwTabs.leaves[0]!.view?.viewType, 'foo')
+
+  const out = workspace.serialize()
+  assert.ok(out.floating, 'serialize round-trips floating[]')
+  assert.equal(out.floating!.length, 1)
+  assert.equal(out.floating![0]!.id, 'fw-1')
+})
