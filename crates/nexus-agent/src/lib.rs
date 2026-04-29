@@ -42,6 +42,7 @@ mod archetypes;
 pub mod core_plugin;
 mod executor;
 mod llm;
+pub mod orchestrator;
 
 pub use agents::EchoAgent;
 pub use archetypes::{
@@ -55,6 +56,7 @@ pub use core_plugin::{
 };
 pub use executor::{PlanExecutor, StepResult, StepStatus};
 pub use llm::{ChatDriver, LlmAgent, DEFAULT_SYSTEM_PROMPT};
+pub use orchestrator::{AgentOrchestrator, TraceEntry};
 
 /// A unit of work produced by an [`Agent`] and consumed by a
 /// [`PlanExecutor`]. Steps are deliberately simple — agents that
