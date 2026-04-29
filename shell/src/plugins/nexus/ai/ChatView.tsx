@@ -25,11 +25,18 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useConfigValue } from '../../../stores/configStore'
-import { useAiStore, type AiSessionMeta, type AiSource, type AiTurn } from './aiStore'
+import {
+  useAiStore,
+  type AiSessionMeta,
+  type AiSource,
+  type AiCitation,
+  type AiTurn,
+} from './aiStore'
 
 const COPIED_NOTIFICATION_MS = 1200
 import { registerFocuser } from './aiRuntime'
 import { renderMarkdown } from '../editor/markdownRender'
+import { renderMarkdownWithCitations } from './citationTransform'
 import './chat.css'
 
 const EVENT_FILE_OPEN = 'files:open'
@@ -163,6 +170,22 @@ export function ChatView({
     [onEmit],
   )
 
+  const handleCitationClick = useCallback(
+    (citation: AiCitation) => {
+      if (!onEmit) return
+      // BL-038: pass `line` so listeners that support it can scroll
+      // straight to the cited block. The legacy `relpath` + `name`
+      // fields stay verbatim so older listeners ignore the extra key
+      // gracefully.
+      onEmit(EVENT_FILE_OPEN, {
+        relpath: citation.path,
+        name: basename(citation.path),
+        line: citation.startLine ?? undefined,
+      })
+    },
+    [onEmit],
+  )
+
   return (
     <div
       style={{
@@ -222,6 +245,7 @@ export function ChatView({
               key={t.id}
               turn={t}
               onSourceClick={handleSourceClick}
+              onCitationClick={handleCitationClick}
               onRetry={t.status === 'error' ? () => void onRetry() : undefined}
             />
           ),
@@ -334,10 +358,12 @@ function UserBubble({ turn }: { turn: Extract<AiTurn, { kind: 'user' }> }) {
 function AssistantBubble({
   turn,
   onSourceClick,
+  onCitationClick,
   onRetry,
 }: {
   turn: Extract<AiTurn, { kind: 'assistant' }>
   onSourceClick: (source: AiSource) => void
+  onCitationClick: (citation: AiCitation) => void
   onRetry?: () => void
 }) {
   const isStreaming = turn.status === 'streaming'
@@ -451,7 +477,15 @@ function AssistantBubble({
         // Done: parse markdown once, sanitize, render. Empty body
         // (cancelled before any chunk) gets a placeholder.
         body ? (
-          <MarkdownBody source={body} />
+          turn.citations.length > 0 ? (
+            <CitedMarkdownBody
+              source={body}
+              citations={turn.citations}
+              onCitationClick={onCitationClick}
+            />
+          ) : (
+            <MarkdownBody source={body} />
+          )
         ) : (
           <div style={{ color: 'var(--fg-muted)', fontStyle: 'italic' }}>
             (no response)
@@ -459,7 +493,9 @@ function AssistantBubble({
         )
       )}
 
-      {turn.status === 'done' && turn.sources.length > 0 ? (
+      {turn.status === 'done' && turn.citations.length > 0 ? (
+        <CitationChipRow citations={turn.citations} onCitationClick={onCitationClick} />
+      ) : turn.status === 'done' && turn.sources.length > 0 ? (
         <SourceChipRow sources={turn.sources} onSourceClick={onSourceClick} />
       ) : null}
     </div>
@@ -477,6 +513,122 @@ function MarkdownBody({ source }: { source: string }) {
       className="nexus-ai-assistant-body nexus-markdown-body"
       dangerouslySetInnerHTML={{ __html: html }}
     />
+  )
+}
+
+/**
+ * Render the answer markdown with `[N]` markers transformed into
+ * clickable superscript citation chips. BL-038.
+ *
+ * Strategy: render the full markdown with the renderer first (so code
+ * blocks / tables / etc. stay intact), then walk the resulting HTML
+ * via a DOMParser, splitting text nodes around `[N]` matches and
+ * substituting `<sup class="nexus-citation" data-cite="N">[N]</sup>`.
+ * The shell binds a click handler to that class to dispatch
+ * `onCitationClick`. Marker substitution is skipped inside `<code>`
+ * and `<pre>` so code samples that contain `[1]` literals are left
+ * verbatim.
+ */
+function CitedMarkdownBody({
+  source,
+  citations,
+  onCitationClick,
+}: {
+  source: string
+  citations: AiCitation[]
+  onCitationClick: (citation: AiCitation) => void
+}) {
+  const html = useMemo(
+    () => renderMarkdownWithCitations(source, new Set(citations.map((c) => c.index))),
+    [source, citations],
+  )
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  // Delegate clicks: cheaper than wiring a listener per chip and
+  // keeps the dangerouslySetInnerHTML render simple.
+  useEffect(() => {
+    const root = containerRef.current
+    if (!root) return undefined
+    const handler = (ev: MouseEvent) => {
+      const target = ev.target as HTMLElement | null
+      if (!target) return
+      const chip = target.closest<HTMLElement>('[data-cite]')
+      if (!chip) return
+      const idx = Number(chip.dataset.cite)
+      if (!Number.isFinite(idx)) return
+      const cit = citations.find((c) => c.index === idx)
+      if (cit) {
+        ev.preventDefault()
+        onCitationClick(cit)
+      }
+    }
+    root.addEventListener('click', handler)
+    return () => root.removeEventListener('click', handler)
+  }, [citations, onCitationClick])
+
+  return (
+    <div
+      ref={containerRef}
+      className="nexus-ai-assistant-body nexus-markdown-body"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
+}
+
+function CitationChipRow({
+  citations,
+  onCitationClick,
+}: {
+  citations: AiCitation[]
+  onCitationClick: (citation: AiCitation) => void
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 4,
+        marginTop: 6,
+      }}
+    >
+      {citations.map((c) => {
+        const lineSuffix =
+          c.startLine != null
+            ? c.endLine != null && c.endLine !== c.startLine
+              ? `:${c.startLine}-${c.endLine}`
+              : `:${c.startLine}`
+            : ''
+        return (
+          <button
+            key={`cite-${c.index}-${c.path}-${c.blockId}`}
+            type="button"
+            onClick={() => onCitationClick(c)}
+            title={
+              (c.excerpt ? `${c.excerpt}\n\n` : '') +
+              `score ${c.score.toFixed(3)}`
+            }
+            style={{
+              border: '1px solid var(--line-soft)',
+              background: 'var(--bg-raised)',
+              color: 'var(--fg-dim)',
+              borderRadius: 'var(--r)',
+              padding: '2px 8px',
+              fontFamily: 'var(--f-ui)',
+              fontSize: 11,
+              cursor: 'pointer',
+              maxWidth: 260,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <span style={{ color: 'var(--accent)', marginRight: 4 }}>[{c.index}]</span>
+            {c.path}
+            {lineSuffix}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

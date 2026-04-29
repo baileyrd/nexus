@@ -26,7 +26,14 @@
 // further chunks bounce off the matching-turn guard in the store.
 
 import type { KernelAPI, PluginAPI } from '../../../types/plugin'
-import { useAiStore, type AiConfig, type AiSessionMeta, type AiSource, type AiTurn } from './aiStore'
+import {
+  useAiStore,
+  type AiConfig,
+  type AiSessionMeta,
+  type AiSource,
+  type AiCitation,
+  type AiTurn,
+} from './aiStore'
 
 const AI_PLUGIN_ID = 'com.nexus.ai'
 const HANDLER_CONFIG = 'config'
@@ -126,16 +133,55 @@ interface RawChunkMatch {
   score?: number
 }
 
+/** Mirrors `Citation` in `crates/nexus-ai/src/rag.rs`. */
+interface RawCitation {
+  index?: number
+  file_path?: string
+  block_id?: number
+  start_line?: number | null
+  end_line?: number | null
+  excerpt?: string
+  score?: number
+}
+
 interface StreamDoneEvent {
   session_id?: string
   text?: string
   sources?: RawChunkMatch[]
+  citations?: RawCitation[]
 }
 
 interface StreamAskResult {
   session_id?: string
   text?: string
   sources?: RawChunkMatch[]
+  citations?: RawCitation[]
+}
+
+/** Coerce a raw `Citation` payload from the kernel into the store's
+ *  `AiCitation`. Drops entries without a usable `file_path` or
+ *  non-numeric index. BL-038. */
+function coerceCitations(raw: unknown): AiCitation[] {
+  if (!Array.isArray(raw)) return []
+  const out: AiCitation[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const r = item as RawCitation
+    if (typeof r.file_path !== 'string' || r.file_path.length === 0) continue
+    if (typeof r.index !== 'number') continue
+    out.push({
+      index: r.index,
+      path: r.file_path,
+      blockId: typeof r.block_id === 'number' ? r.block_id : 0,
+      startLine: typeof r.start_line === 'number' ? r.start_line : null,
+      endLine: typeof r.end_line === 'number' ? r.end_line : null,
+      excerpt: typeof r.excerpt === 'string' ? r.excerpt : '',
+      score: typeof r.score === 'number' ? r.score : 0,
+    })
+  }
+  // Sort by index for stable rendering even if the kernel order shifts.
+  out.sort((a, b) => a.index - b.index)
+  return out
 }
 
 /** Coerce a raw `ChunkMatch` payload from the kernel into the store's
@@ -181,8 +227,9 @@ export async function subscribeStream(api: PluginAPI): Promise<() => void> {
     if (topic === TOPIC_DONE) {
       const text = (payload as StreamDoneEvent).text ?? ''
       const sources = coerceSources((payload as StreamDoneEvent).sources)
+      const citations = coerceCitations((payload as StreamDoneEvent).citations)
       if (watchdogRequestId === sessionId) clearWatchdog()
-      store.finishStream(sessionId, text, sources)
+      store.finishStream(sessionId, text, sources, citations)
       return
     }
 
@@ -392,8 +439,9 @@ export async function submitQuestion(
     if (stillStreaming && result && typeof result === 'object') {
       const text = typeof result.text === 'string' ? result.text : ''
       const sources = coerceSources(result.sources)
+      const citations = coerceCitations(result.citations)
       if (watchdogRequestId === requestId) clearWatchdog()
-      useAiStore.getState().finishStream(requestId, text, sources)
+      useAiStore.getState().finishStream(requestId, text, sources, citations)
     }
   } catch (err) {
     const cur = useAiStore.getState().currentRequestId
@@ -592,6 +640,15 @@ function decodeTurn(raw: unknown): AiTurn | null {
             !!s && typeof s === 'object' && typeof (s as AiSource).path === 'string',
         )
       : []
+    const citations = Array.isArray(r.citations)
+      ? (r.citations as unknown[]).filter(
+          (c): c is AiCitation =>
+            !!c &&
+            typeof c === 'object' &&
+            typeof (c as AiCitation).index === 'number' &&
+            typeof (c as AiCitation).path === 'string',
+        )
+      : []
     // Persisted turns are never `streaming` (filtered by turnsForPersist),
     // and `error` is rehydrated as 'done' since the Error object can't
     // round-trip through JSON without losing its prototype. The persisted
@@ -604,6 +661,7 @@ function decodeTurn(raw: unknown): AiTurn | null {
       streamedText: '',
       finalText: typeof r.finalText === 'string' ? r.finalText : null,
       sources,
+      citations,
       error: null,
     }
   }

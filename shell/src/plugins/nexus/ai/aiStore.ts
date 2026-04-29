@@ -67,6 +67,28 @@ export interface AiSource {
   blockId?: number
 }
 
+/** BL-038 — numbered, line-aware citation surfaced beside an assistant
+ *  turn. Mirrors `Citation` in `crates/nexus-ai/src/rag.rs`. The shell
+ *  prefers `turn.citations` when populated; otherwise falls back to
+ *  `turn.sources` so older backends still render chips. */
+export interface AiCitation {
+  /** 1-based index. Matches `[N]` markers in the answer text when the
+   *  model emitted them; otherwise source order (descending by score). */
+  index: number
+  /** Forge-relative path of the source file. */
+  path: string
+  /** Block id from the source file. */
+  blockId: number
+  /** 1-based start line. Null when storage couldn't resolve the block. */
+  startLine: number | null
+  /** 1-based end line. Null when `startLine` is. */
+  endLine: number | null
+  /** Truncated chunk text (≤ 200 chars on the kernel side). */
+  excerpt: string
+  /** Cosine similarity score. */
+  score: number
+}
+
 export type AiTurn =
   | {
       kind: 'user'
@@ -84,6 +106,10 @@ export type AiTurn =
       /** Authoritative final body from `stream_done`. Null until done. */
       finalText: string | null
       sources: AiSource[]
+      /** BL-038 — numbered citations parallel to `sources`. Empty when
+       *  the kernel didn't ship them (older backend) or RAG returned
+       *  nothing. */
+      citations: AiCitation[]
       error: Error | null
     }
 
@@ -136,8 +162,15 @@ export interface AiState {
   startAsk: (requestId: string, question: string) => void
   /** Route a chunk to the matching assistant turn; drop if mismatched. */
   appendChunk: (requestId: string, text: string) => void
-  /** Finalize the matching assistant turn: set finalText + sources, idle. */
-  finishStream: (requestId: string, finalText: string, sources?: AiSource[]) => void
+  /** Finalize the matching assistant turn: set finalText + sources +
+   *  citations, idle. BL-038 added the optional `citations` argument
+   *  for numbered, line-aware sources. */
+  finishStream: (
+    requestId: string,
+    finalText: string,
+    sources?: AiSource[],
+    citations?: AiCitation[],
+  ) => void
   /** Mark the in-flight assistant turn as errored. Always wins. */
   setError: (err: Error) => void
   /** Shell-side cancel: preserve any partial streamedText as finalText. */
@@ -248,6 +281,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       streamedText: '',
       finalText: null,
       sources: [],
+      citations: [],
       error: null,
     }
     set((s) => ({
@@ -279,7 +313,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     })
   },
 
-  finishStream: (requestId, finalText, sources) => {
+  finishStream: (requestId, finalText, sources, citations) => {
     const state = get()
     const idx = findStreamingAssistantIdx(state.turns, requestId)
     if (idx === -1) return // stale / unknown request — drop
@@ -292,6 +326,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       status: 'done',
       finalText,
       sources: sources ?? target.sources,
+      citations: citations ?? target.citations,
       streamedText: '', // cleared so render falls through to finalText
     }
     set({
