@@ -18,6 +18,18 @@
 //! `com.nexus.ai::ask`) — the workflow crate never touches the
 //! filesystem or AI provider directly.
 
+// `Option<String>` defaults are part of the user-facing config wire
+// shape (`None` = "disabled"); we deliberately keep them wrapped.
+#![allow(clippy::unnecessary_wraps)]
+// `from_str` mirrors the JSON IPC arg name; not a `FromStr` impl.
+#![allow(clippy::should_implement_trait)]
+// Hot-path string building uses `format!` — measured cost is negligible
+// against the IPC round-trips that follow.
+#![allow(clippy::format_push_string)]
+// `read_file` returns `Vec<u8>` from JSON numbers `0..=255` by
+// construction; truncation cannot occur in practice.
+#![allow(clippy::cast_possible_truncation)]
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -660,8 +672,9 @@ mod tests {
                         .unwrap_or_default();
                     Ok(serde_json::Value::String(body))
                 }
-                ("com.nexus.storage", "create_dir")
-                | ("com.nexus.storage", "write_file") => Ok(serde_json::json!({})),
+                ("com.nexus.storage", "create_dir" | "write_file") => {
+                    Ok(serde_json::json!({}))
+                }
                 ("com.nexus.ai", "ask") => Ok(serde_json::json!({
                     "answer": self.ai_answer,
                     "model": "stub-model",
