@@ -356,9 +356,7 @@ Extends BL-043 capture: when the source is detectably code (file path with code 
 
 ### BL-047: MEM scheduled digests
 
-**Source**: [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md) piece 6.
-**Effort**: Medium. Hard prereq: BL-019.
-A `nexus-workflow` cron job (re-using the existing scheduler) that summarises N days of capture notes into a daily / weekly digest file. Naturally lives in the workflow templates library — implement once BL-028 templates land or as a one-off cron until then.
+_BL-047 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-048: NB drag-to-embed into canvas
 
