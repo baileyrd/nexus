@@ -43,3 +43,6 @@ ts-export = ["dep:ts-rs", "dep:schemars"]
 # loader path. Bundled-prebuilt-ORT users can override fastembed's
 # feature set in their downstream Cargo profile if desired.
 local-embeddings = ["dep:fastembed", "dep:dashmap", "dep:xxhash-rust"]
+
+[dev-dependencies]
+tempfile = { workspace = true }

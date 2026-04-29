@@ -89,6 +89,12 @@ pub const HANDLER_SESSION_DELETE: u32 = 11;
 /// A `null` clears that side; an absent key leaves it untouched.
 pub const HANDLER_SET_CONFIG: u32 = 12;
 
+/// BL-040 — `semantic_search`: embed a query and return the top-N
+/// matching chunks from the vector store (no chat). Args
+/// `{ query: String, limit?: usize (default 10) }`. Returns
+/// `{ matches: Vec<ChunkMatch> }`.
+pub const HANDLER_SEMANTIC_SEARCH: u32 = 13;
+
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
     /// Live config — wrapped in `Arc<RwLock<>>` so async handlers can
@@ -230,6 +236,9 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_SESSION_SAVE => handle_session_save(&ctx, &args).await,
                 HANDLER_SESSION_LIST => handle_session_list(&ctx).await,
                 HANDLER_SESSION_DELETE => handle_session_delete(&ctx, &args).await,
+                HANDLER_SEMANTIC_SEARCH => {
+                    handle_semantic_search(&ctx, embed_cfg, &args).await
+                }
                 _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
             }
         }))
@@ -277,6 +286,35 @@ async fn handle_ask(
         .await
         .map_err(|e| exec_err(format!("rag query failed: {e}")))?;
     serde_json::to_value(&response).map_err(|e| exec_err(format!("ask: serialize: {e}")))
+}
+
+/// BL-040 — embed `query` and return the top-`limit` chunks from the
+/// vector store (no chat). Mirrors the embedder build path of
+/// [`handle_ask`] but skips the chat provider entirely so callers
+/// (palette, TUI, MCP) get a fast, score-bearing list of hits.
+async fn handle_semantic_search(
+    ctx: &KernelPluginContext,
+    embed_cfg: Option<AiConfig>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let query = args
+        .get("query")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| exec_err("semantic_search: missing 'query' string"))?;
+    let limit = args
+        .get("limit")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| usize::try_from(v).ok())
+        .unwrap_or(10);
+
+    let embed_cfg = embed_cfg
+        .ok_or_else(|| exec_err("semantic_search: no AI embedding provider configured"))?;
+    let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
+
+    let matches = rag::semantic_search(ctx, embedder.as_ref(), query, limit)
+        .await
+        .map_err(|e| exec_err(format!("semantic_search: {e}")))?;
+    Ok(serde_json::json!({ "matches": matches }))
 }
 
 async fn handle_index_file(
@@ -1667,5 +1705,82 @@ mod tool_dispatch_tests {
         // The dispatch-loop path was the one that ran (turns_seen
         // populated), proving the chat path uses tool dispatch.
         assert_eq!(provider.turns_seen.lock().unwrap().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod semantic_search_dispatch_tests {
+    //! BL-040 — exercise the `HANDLER_SEMANTIC_SEARCH` arm of
+    //! [`AiCorePlugin::dispatch_async`] without making any network
+    //! calls. The handler validates `query` and `embed_cfg` before it
+    //! tries to embed, so we can drive both code paths cheaply by
+    //! arranging for one of those checks to fire.
+    use super::*;
+    use nexus_kernel::{
+        CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+    };
+    use std::sync::Arc;
+
+    fn wired_plugin() -> AiCorePlugin {
+        let mut plugin = AiCorePlugin::new();
+        let dir = tempfile::tempdir().unwrap();
+        // Leak the tempdir for the duration of the test — the context
+        // canonicalises the path at construction so we don't actually
+        // need the directory to outlive the test, but a leak keeps
+        // valgrind quiet.
+        let dir_path = dir.path().to_path_buf();
+        std::mem::forget(dir);
+        let kv: Arc<dyn KvStore> = Arc::new(InMemoryKvStore::new());
+        let bus = Arc::new(EventBus::new(16));
+        let ctx = KernelPluginContext::new(
+            "com.nexus.ai",
+            "0.0.1",
+            CapabilitySet::default(),
+            kv,
+            bus,
+            &dir_path,
+            None,
+        )
+        .unwrap();
+        plugin.wire_context(Arc::new(ctx));
+        plugin
+    }
+
+    #[tokio::test]
+    async fn semantic_search_handler_routes_through_dispatch_async() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_SEMANTIC_SEARCH, &serde_json::json!({}))
+            .expect("HANDLER_SEMANTIC_SEARCH must be async");
+        let err = fut.await.expect_err("missing query should error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("missing 'query'"),
+            "expected query-missing error, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_search_handler_requires_embed_provider() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(
+                HANDLER_SEMANTIC_SEARCH,
+                &serde_json::json!({ "query": "hello" }),
+            )
+            .expect("HANDLER_SEMANTIC_SEARCH must be async");
+        let err = fut.await.expect_err("no embed cfg should error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("no AI embedding provider configured"),
+            "expected embed-cfg error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn semantic_search_handler_id_is_thirteen() {
+        // Pin the wire id so external callers (bootstrap manifest,
+        // shell plugin, MCP) don't drift silently.
+        assert_eq!(HANDLER_SEMANTIC_SEARCH, 13);
     }
 }

@@ -127,6 +127,26 @@ pub async fn retrieve(
     vectorstore::search(ctx, &q_embedding, limit).await
 }
 
+/// BL-040: Embed `query` and return the top-`limit` matching chunks
+/// from the vector store, without invoking any chat provider.
+///
+/// This is the retrieval half of [`query`] exposed as a standalone
+/// surface so palette / TUI / MCP callers can do "search by meaning"
+/// without paying for a chat round-trip. Implementation-wise this is
+/// a thin alias for [`retrieve`] kept under a name that matches the
+/// IPC handler so it's easy to grep.
+///
+/// # Errors
+/// Returns [`AiError`] if embedding or vector search fails.
+pub async fn semantic_search(
+    ctx: &KernelPluginContext,
+    embedder: &dyn EmbeddingProvider,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<ChunkMatch>, AiError> {
+    retrieve(ctx, embedder, query, limit).await
+}
+
 /// Default fallback system prompt used when no RAG sources are available.
 const RAG_FALLBACK_PROMPT: &str =
     "You are a helpful assistant. Answer the user's question to the best of your ability.";
@@ -254,6 +274,158 @@ pub fn build_rag_prompt_budgeted(
 mod tests {
     use super::*;
     use crate::tokens::ApproxTokenCounter;
+    use async_trait::async_trait;
+    use nexus_kernel::{
+        CapabilitySet, EventBus, InMemoryKvStore, IpcDispatcher, IpcError, IpcFuture,
+        KernelPluginContext, KvStore,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// Embedder stub: returns a fixed vector regardless of input. Records
+    /// the texts it was asked to embed so tests can assert on them.
+    struct StubEmbedder {
+        vector: Vec<f32>,
+        seen: Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl EmbeddingProvider for StubEmbedder {
+        async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, AiError> {
+            self.seen.lock().unwrap().extend_from_slice(texts);
+            Ok(texts.iter().map(|_| self.vector.clone()).collect())
+        }
+        fn dimension(&self) -> usize {
+            self.vector.len()
+        }
+    }
+
+    /// IPC dispatcher stub: only knows how to answer
+    /// `com.nexus.storage::vector_query` with a canned `Vec<ChunkMatch>`,
+    /// and records the args it was called with.
+    struct StubDispatcher {
+        matches: Vec<ChunkMatch>,
+        seen: Mutex<Vec<(String, String, serde_json::Value)>>,
+    }
+
+    impl IpcDispatcher for StubDispatcher {
+        fn dispatch(
+            &self,
+            target: &str,
+            command: &str,
+            _args: &serde_json::Value,
+        ) -> Result<serde_json::Value, IpcError> {
+            Err(IpcError::CommandNotFound {
+                plugin_id: target.to_string(),
+                command: command.to_string(),
+            })
+        }
+
+        fn dispatch_async(
+            &self,
+            target: &str,
+            command: &str,
+            args: serde_json::Value,
+        ) -> Option<IpcFuture> {
+            self.seen
+                .lock()
+                .unwrap()
+                .push((target.to_string(), command.to_string(), args.clone()));
+            if target == "com.nexus.storage" && command == "vector_query" {
+                let resp = serde_json::to_value(&self.matches).unwrap();
+                Some(Box::pin(async move { Ok(resp) }))
+            } else {
+                None
+            }
+        }
+    }
+
+    fn make_ctx(dispatcher: Arc<dyn IpcDispatcher>) -> (KernelPluginContext, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let kv: Arc<dyn KvStore> = Arc::new(InMemoryKvStore::new());
+        let bus = Arc::new(EventBus::new(16));
+        let caps: CapabilitySet = [nexus_kernel::Capability::IpcCall].into_iter().collect();
+        let ctx = KernelPluginContext::new(
+            "com.nexus.ai",
+            "0.0.1",
+            caps,
+            kv,
+            bus,
+            dir.path(),
+            Some(dispatcher),
+        )
+        .unwrap();
+        (ctx, dir)
+    }
+
+    #[tokio::test]
+    async fn semantic_search_embeds_query_and_forwards_to_storage() {
+        let canned = vec![
+            ChunkMatch {
+                file_path: "notes/a.md".into(),
+                block_id: 1,
+                chunk_text: "alpha".into(),
+                score: 0.9,
+            },
+            ChunkMatch {
+                file_path: "notes/b.md".into(),
+                block_id: 2,
+                chunk_text: "beta".into(),
+                score: 0.7,
+            },
+        ];
+        let dispatcher = Arc::new(StubDispatcher {
+            matches: canned.clone(),
+            seen: Mutex::new(Vec::new()),
+        });
+        let embedder = StubEmbedder {
+            vector: vec![0.1, 0.2, 0.3],
+            seen: Mutex::new(Vec::new()),
+        };
+        let (ctx, _tmp) = make_ctx(dispatcher.clone());
+
+        let out = semantic_search(&ctx, &embedder, "find me alpha", 4)
+            .await
+            .expect("semantic_search ok");
+
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].file_path, "notes/a.md");
+        // Embedder saw the query exactly once.
+        assert_eq!(embedder.seen.lock().unwrap().as_slice(), &["find me alpha"]);
+        // Dispatcher saw a single vector_query against storage with our
+        // embedding + limit.
+        let seen = dispatcher.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, "com.nexus.storage");
+        assert_eq!(seen[0].1, "vector_query");
+        assert_eq!(seen[0].2["limit"], 4);
+        let emb = seen[0].2["embedding"].as_array().expect("embedding array");
+        assert_eq!(emb.len(), 3);
+        let nums: Vec<f64> = emb.iter().map(|v| v.as_f64().unwrap()).collect();
+        for (got, want) in nums.iter().zip([0.1f64, 0.2, 0.3]) {
+            assert!((got - want).abs() < 1e-5, "{got} ≉ {want}");
+        }
+    }
+
+    #[tokio::test]
+    async fn semantic_search_propagates_embedder_errors() {
+        struct Failing;
+        #[async_trait]
+        impl EmbeddingProvider for Failing {
+            async fn embed(&self, _: &[String]) -> Result<Vec<Vec<f32>>, AiError> {
+                Err(AiError::Provider("nope".into()))
+            }
+            fn dimension(&self) -> usize {
+                0
+            }
+        }
+        let dispatcher = Arc::new(StubDispatcher {
+            matches: Vec::new(),
+            seen: Mutex::new(Vec::new()),
+        });
+        let (ctx, _tmp) = make_ctx(dispatcher);
+        let err = semantic_search(&ctx, &Failing, "q", 5).await.unwrap_err();
+        assert!(matches!(err, AiError::Provider(_)));
+    }
 
     #[test]
     fn build_rag_prompt_with_no_sources() {
