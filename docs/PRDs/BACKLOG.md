@@ -275,11 +275,7 @@ RAG today calls remote embedding endpoints. A local backend (e.g. fastembed-rs, 
 
 _BL-021 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-022: Skill in-app editor UI
-
-**Source**: PRD-13 §16 (live-preview in-app editor with frontmatter form + body markdown editor).
-**Effort**: Medium. **Crate**: `shell/src/plugins/nexus/skills/`.
-Today `SkillsPanel` is read-only; mutations require editing `.skill.md` on disk and calling `reload`. Editor would round-trip through the existing `com.nexus.storage::write_file` + `com.nexus.skills::reload`.
+_BL-022 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 _BL-023 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 

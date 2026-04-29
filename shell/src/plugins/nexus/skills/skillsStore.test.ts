@@ -13,6 +13,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   useSkillsStore,
+  serializeDraft,
+  validateDraft,
+  type SkillDraft,
   type SkillEntry,
   type SkillParameter,
   type SkillsKernelAPI,
@@ -71,11 +74,14 @@ function skill(id: string, parameters: SkillParameter[] = []): SkillEntry {
     description: '',
     version: '',
     author: '',
+    created: '',
     tags: [],
     applicableContexts: [],
     triggers: [],
     parameters,
+    dependsOn: [],
     body: '',
+    relpath: `.forge/skills/${id}.skill.md`,
   }
 }
 
@@ -277,4 +283,139 @@ test('reset: clears all render state (workspace:closed contract)', async () => {
   assert.deepEqual(after.renderResults, {})
   assert.deepEqual(after.renderErrors, {})
   assert.equal(after.rendering, null)
+})
+
+// ── BL-022 — editor coverage ───────────────────────────────────────────────
+
+function draft(over: Partial<SkillDraft> = {}): SkillDraft {
+  return {
+    relpath: '.forge/skills/code-reviewer.skill.md',
+    isNew: false,
+    name: 'Code Reviewer',
+    id: 'code-reviewer',
+    description: 'Review code for clarity and safety.',
+    version: '1.0.0',
+    author: 'team',
+    created: '2026-04-29',
+    tags: ['review', 'safety'],
+    applicableContexts: ['ai-chat'],
+    triggers: ['review this'],
+    dependsOn: ['concise'],
+    body: '# Reviewer\n\nFocus on clarity.',
+    ...over,
+  }
+}
+
+test('BL-022 serializeDraft: round-trips frontmatter + body', () => {
+  const text = serializeDraft(draft())
+  // Frontmatter delimited by ---/---.
+  assert.match(text, /^---\n/)
+  assert.match(text, /\n---\n/)
+  // Required fields all land verbatim, in the documented order.
+  assert.match(text, /\nid: code-reviewer\n/)
+  assert.match(text, /\nname: Code Reviewer\n/)
+  assert.match(text, /\ntags: \[review, safety\]\n/)
+  assert.match(text, /\napplicable_contexts: \[ai-chat\]\n/)
+  assert.match(text, /\ndepends_on: \[concise\]\n/)
+  // Body comes after the closing fence.
+  const split = text.split('\n---\n')
+  assert.equal(split.length, 2)
+  assert.match(split[1], /# Reviewer/)
+})
+
+test('BL-022 serializeDraft: quotes scalars that look numeric or reserved', () => {
+  const d = draft({
+    name: 'true', // YAML-reserved bare word — must be quoted
+    version: '2.0', // numeric-looking → quote so it stays a string
+  })
+  const text = serializeDraft(d)
+  assert.match(text, /name: "true"/)
+  assert.match(text, /version: "2\.0"/)
+})
+
+test('BL-022 validateDraft: required fields surface a clear message', () => {
+  assert.equal(validateDraft(draft({ id: '' })), 'id is required')
+  assert.equal(validateDraft(draft({ name: '' })), 'name is required')
+  assert.match(
+    validateDraft(draft({ id: 'BadCase' })) ?? '',
+    /kebab-case/,
+  )
+  assert.equal(validateDraft(draft()), null)
+})
+
+test('BL-022 openEditor seeds the draft from the listing snapshot', () => {
+  const s = useSkillsStore.getState()
+  s.reset()
+  s.setSkills([
+    {
+      id: 'p1',
+      name: 'P1',
+      description: 'd',
+      version: '1',
+      author: 'a',
+      created: '2026-04-29',
+      tags: ['t'],
+      applicableContexts: ['ai-chat'],
+      triggers: ['hi'],
+      parameters: [],
+      dependsOn: [],
+      body: 'BODY',
+      relpath: '.forge/skills/p1.skill.md',
+    },
+  ])
+  s.openEditor('p1')
+  const d = useSkillsStore.getState().draft
+  assert.ok(d, 'draft populated')
+  assert.equal(d.id, 'p1')
+  assert.equal(d.body, 'BODY')
+  assert.equal(d.relpath, '.forge/skills/p1.skill.md')
+  assert.equal(d.isNew, false)
+})
+
+test('BL-022 saveDraft: write_file then reload, then editor closes', async () => {
+  const s = useSkillsStore.getState()
+  s.reset()
+  s.openNewSkill()
+  s.patchDraft({
+    id: 'fresh',
+    name: 'Fresh',
+    description: 'd',
+    version: '0.1.0',
+    author: 'me',
+    created: '2026-04-29',
+    body: 'B',
+  })
+  const calls: Array<{ pluginId: string; commandId: string }> = []
+  const api = {
+    invoke: async <T = unknown>(pluginId: string, commandId: string) => {
+      calls.push({ pluginId, commandId })
+      return {} as T
+    },
+  }
+  const ok = await useSkillsStore.getState().saveDraft(api)
+  assert.equal(ok, true)
+  assert.deepEqual(
+    calls.map((c) => `${c.pluginId}::${c.commandId}`),
+    ['com.nexus.storage::write_file', 'com.nexus.skills::reload'],
+  )
+  assert.equal(useSkillsStore.getState().draft, null)
+  assert.equal(useSkillsStore.getState().editingId, null)
+})
+
+test('BL-022 saveDraft: validation failure sets saveError without IPC', async () => {
+  const s = useSkillsStore.getState()
+  s.reset()
+  s.openNewSkill()
+  // Don't patch — required fields are still empty.
+  let invoked = 0
+  const api = {
+    invoke: async <T = unknown>() => {
+      invoked += 1
+      return {} as T
+    },
+  }
+  const ok = await useSkillsStore.getState().saveDraft(api)
+  assert.equal(ok, false)
+  assert.equal(invoked, 0)
+  assert.match(useSkillsStore.getState().saveError ?? '', /id is required/)
 })

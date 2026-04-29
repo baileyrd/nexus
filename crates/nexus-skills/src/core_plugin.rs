@@ -121,8 +121,21 @@ impl CorePlugin for SkillsCorePlugin {
 impl SkillsCorePlugin {
     fn dispatch_list(&self) -> Result<serde_json::Value, PluginError> {
         let reg = self.registry.lock().map_err(poisoned)?;
-        let skills: Vec<_> = reg.iter().cloned().collect();
-        to_value(&skills, "list")
+        // BL-022 — augment each entry with `relpath` (forge-relative
+        // path) so the in-app editor can call `com.nexus.storage::
+        // write_file` / `delete_file` without an extra round trip.
+        // Append-only on the wire — pre-BL-022 consumers ignore the
+        // new field.
+        let mut out = Vec::with_capacity(reg.len());
+        for (path, skill) in reg.entries() {
+            let mut value = serde_json::to_value(skill)
+                .map_err(|e| exec_err(format!("list: serialize: {e}")))?;
+            if let Some(rel) = relpath_for(&self.root, path) {
+                value["relpath"] = serde_json::Value::String(rel);
+            }
+            out.push(value);
+        }
+        Ok(serde_json::Value::Array(out))
     }
 
     fn dispatch_get(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
@@ -133,7 +146,16 @@ impl SkillsCorePlugin {
         let a: Args = parse(args, "get")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         match reg.get(&a.id) {
-            Some(skill) => to_value(skill, "get"),
+            Some(skill) => {
+                let mut value = serde_json::to_value(skill)
+                    .map_err(|e| exec_err(format!("get: serialize: {e}")))?;
+                if let Some(path) = reg.path_for(&a.id) {
+                    if let Some(rel) = relpath_for(&self.root, path) {
+                        value["relpath"] = serde_json::Value::String(rel);
+                    }
+                }
+                Ok(value)
+            }
             None => Err(exec_err(format!("no skill with id '{}'", a.id))),
         }
     }
@@ -251,6 +273,25 @@ impl SkillsCorePlugin {
 }
 
 // ── Error / serde plumbing ──────────────────────────────────────────────────
+
+/// Compute the forge-relative path for a skill's source file. The
+/// registry holds absolute paths; the shell-side editor wants the
+/// `.forge/skills/<sub>/<name>.skill.md` form that
+/// `com.nexus.storage::write_file` expects. Returns `None` when the
+/// skill lives outside the configured `root` (shouldn't happen at
+/// runtime — defensive against future asymmetry between the load
+/// and save paths). Forward slashes always — the storage handler
+/// canonicalises to the platform separator on its end.
+fn relpath_for(skills_root: &std::path::Path, abs: &std::path::Path) -> Option<String> {
+    let from_skills = abs.strip_prefix(skills_root).ok()?;
+    let mut parts: Vec<String> = Vec::new();
+    parts.push(".forge".to_string());
+    parts.push("skills".to_string());
+    for component in from_skills.components() {
+        parts.push(component.as_os_str().to_string_lossy().into_owned());
+    }
+    Some(parts.join("/"))
+}
 
 fn exec_err(reason: String) -> PluginError {
     PluginError::ExecutionFailed {

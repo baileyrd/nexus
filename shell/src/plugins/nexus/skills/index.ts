@@ -3,7 +3,12 @@ import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { viewRegistry, workspace } from '../../../workspace'
 import { SkillsView } from './SkillsView'
 import { skillsPaneViewCreator } from './SkillsPaneView'
-import { useSkillsStore, type SkillEntry, type SkillParameter } from './skillsStore'
+import {
+  subscribeSkillsChanged,
+  useSkillsStore,
+  type SkillEntry,
+  type SkillParameter,
+} from './skillsStore'
 
 const VIEW_ID = 'nexus.skills.view'
 
@@ -40,11 +45,14 @@ function decode(raw: unknown): SkillEntry[] {
       description: typeof sk.description === 'string' ? sk.description : '',
       version: typeof sk.version === 'string' ? sk.version : '',
       author: typeof sk.author === 'string' ? sk.author : '',
+      created: typeof sk.created === 'string' ? sk.created : '',
       tags: stringArray(sk.tags),
       applicableContexts: stringArray(sk.applicable_contexts),
       triggers: stringArray(sk.triggers),
       parameters: decodeParameters(sk.parameters),
+      dependsOn: stringArray(sk.depends_on),
       body: typeof sk.body === 'string' ? sk.body : '',
+      relpath: typeof sk.relpath === 'string' ? sk.relpath : '',
     })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
@@ -174,6 +182,12 @@ export const skillsPlugin: Plugin = {
     })
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
       useSkillsStore.getState().reset()
+    })
+    // BL-022 — refresh the listing whenever the in-app editor saves
+    // or deletes a skill. The store emits via a module-local
+    // subscription so we don't have to reach into the host EventBus.
+    subscribeSkillsChanged(() => {
+      void refresh()
     })
     if (await api.kernel.available()) {
       void refresh()
