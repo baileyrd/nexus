@@ -21,7 +21,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 ts-rs = { workspace = true, optional = true, features = ["chrono-impl", "uuid-impl"] }
 schemars = { workspace = true, optional = true }
-fastembed = { version = "5", optional = true }
+fastembed = { version = "5", optional = true, default-features = false, features = ["ort-load-dynamic", "hf-hub-rustls-tls"] }
 dashmap = { version = "6", optional = true }
 xxhash-rust = { version = "0.8", features = ["xxh3"], optional = true }
 
@@ -32,7 +32,14 @@ xxhash-rust = { version = "0.8", features = ["xxh3"], optional = true }
 # regenerating bindings.
 ts-export = ["dep:ts-rs", "dep:schemars"]
 # Enable the local fastembed-rs embedding backend (BL-019, ADR 0018).
-# Pulls in fastembed (which transitively pulls ONNX Runtime) plus the
-# DashMap-backed embedding cache. Off by default so minimal builds and
-# the WASM community-plugin tier don't compile ORT.
+# Pulls in fastembed plus the DashMap-backed embedding cache. Off by
+# default so minimal builds and the WASM community-plugin tier don't
+# compile fastembed.
+#
+# fastembed is configured with ort-load-dynamic, which expects
+# libonnxruntime to be available at runtime via the system loader (no
+# build-time download, no bundled binary). Set ORT_DYLIB_PATH to point
+# at a specific libonnxruntime.{so,dylib,dll}, or rely on the system
+# loader path. Bundled-prebuilt-ORT users can override fastembed's
+# feature set in their downstream Cargo profile if desired.
 local-embeddings = ["dep:fastembed", "dep:dashmap", "dep:xxhash-rust"]
