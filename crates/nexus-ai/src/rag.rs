@@ -4,10 +4,17 @@
 //! search (reached through `com.nexus.storage` IPC). The pipeline does not
 //! touch `SQLite` directly.
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::time::Duration;
 
-use nexus_kernel::KernelPluginContext;
+use nexus_kernel::{KernelPluginContext, PluginContext};
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
 
 use crate::chunker::chunks_from_blocks;
 use crate::embedding::EmbeddingProvider;
@@ -20,13 +27,76 @@ use crate::vectorstore::{self, ChunkEmbedding, ChunkMatch};
 /// Default maximum chunk size in characters.
 const DEFAULT_MAX_CHUNK_SIZE: usize = 1024;
 
+/// Maximum length (chars) of the [`Citation::excerpt`] preview surfaced
+/// to the shell. Citation chips render this in tooltips / hover-cards;
+/// longer chunk text is truncated with an ellipsis.
+const CITATION_EXCERPT_MAX_CHARS: usize = 200;
+
+/// Plugin id of the storage core plugin (used for `query_blocks` enrichment).
+const STORAGE_PLUGIN: &str = "com.nexus.storage";
+
+/// Timeout for nested storage IPC calls during citation enrichment.
+const STORAGE_IPC_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// One numbered citation surfaced beside an assistant turn.
+///
+/// BL-038: extends the legacy [`ChunkMatch`] by attaching a 1-based
+/// citation index, optional source line range, and a truncated excerpt
+/// suitable for chip tooltips. Numbering follows source order (the
+/// order [`vectorstore::search`] returned, descending by score) unless
+/// the answer text contains parseable `[N]` markers, in which case
+/// citations are renumbered by first-occurrence in the answer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+pub struct Citation {
+    /// 1-based citation index. Stable within a single [`RagResponse`].
+    pub index: u32,
+    /// Forge-relative path of the source file.
+    pub file_path: String,
+    /// Identifier of the originating block.
+    pub block_id: u64,
+    /// 1-based start line in the source file. `None` when storage
+    /// returned no matching block (file moved / index lag).
+    pub start_line: Option<u32>,
+    /// 1-based end line in the source file. `None` when `start_line` is.
+    pub end_line: Option<u32>,
+    /// Truncated chunk text (≤ [`CITATION_EXCERPT_MAX_CHARS`] chars).
+    pub excerpt: String,
+    /// Cosine similarity score (higher is more relevant).
+    pub score: f32,
+}
+
 /// The response from a RAG query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 pub struct RagResponse {
     /// Generated answer text.
     pub answer: String,
     /// Source chunks retrieved to ground the answer.
+    ///
+    /// Kept for backwards compatibility with pre-BL-038 consumers.
+    /// New callers should prefer [`Self::citations`], which carries
+    /// numbered indices + line ranges suitable for inline rendering.
     pub sources: Vec<ChunkMatch>,
+    /// BL-038: numbered, line-aware citations parallel to
+    /// [`Self::sources`]. The shell renders these as superscript chips
+    /// where `[N]` markers in [`Self::answer`] are clickable.
+    #[serde(default)]
+    pub citations: Vec<Citation>,
     /// Name of the model that generated the answer.
     pub model: String,
 }
@@ -61,11 +131,173 @@ pub async fn query(
 
     let answer = ai.chat(&messages, Some(&system)).await?;
 
+    let citations = build_citations(ctx, &sources, &answer).await;
+
     Ok(RagResponse {
         answer,
         sources,
+        citations,
         model: ai.model_name().to_string(),
     })
+}
+
+/// Truncate `text` to at most `max` chars, suffixing an ellipsis when
+/// the truncation happened. Char-boundary safe (won't split a UTF-8
+/// codepoint).
+fn truncate_excerpt(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut s: String = text.chars().take(max).collect();
+    s.push('…');
+    s
+}
+
+/// Build [`Citation`]s for a `query` response.
+///
+/// 1. Group `sources` by `file_path` and fan one `query_blocks` IPC
+///    call per unique path so we can attach `start_line` / `end_line`
+///    pulled from storage's `BlockRecord`.
+/// 2. Number the citations 1-based in source order.
+/// 3. If the model emitted parseable `[N]` markers in `answer`,
+///    renumber by first-occurrence so the chip order matches the
+///    reading order in the answer text. Falls back to source order
+///    when markers are absent or don't slot cleanly.
+///
+/// Enrichment failures (storage offline, file missing) degrade to
+/// citations with `start_line: None` rather than failing the whole
+/// query. This matches the file-as-truth invariant: the answer +
+/// chunk text remain valid even if the index lags.
+pub async fn build_citations(
+    ctx: &KernelPluginContext,
+    sources: &[ChunkMatch],
+    answer: &str,
+) -> Vec<Citation> {
+    if sources.is_empty() {
+        return Vec::new();
+    }
+
+    // 1. Fetch block lines per unique file_path.
+    let mut blocks_by_path: HashMap<String, HashMap<u64, (u32, u32)>> = HashMap::new();
+    let mut paths: Vec<&str> = sources
+        .iter()
+        .map(|s| s.file_path.as_str())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    paths.sort_unstable();
+
+    for path in paths {
+        let args = serde_json::json!({ "path": path });
+        let resp = ctx
+            .ipc_call(STORAGE_PLUGIN, "query_blocks", args, STORAGE_IPC_TIMEOUT)
+            .await;
+        let Ok(value) = resp else { continue };
+        let Ok(arr) = serde_json::from_value::<Vec<serde_json::Value>>(value) else {
+            continue;
+        };
+        let mut by_id: HashMap<u64, (u32, u32)> = HashMap::new();
+        for b in arr {
+            let id = b.get("id").and_then(serde_json::Value::as_u64);
+            let start = b.get("start_line").and_then(serde_json::Value::as_u64);
+            let end = b.get("end_line").and_then(serde_json::Value::as_u64);
+            if let (Some(id), Some(start), Some(end)) = (id, start, end) {
+                #[allow(clippy::cast_possible_truncation)]
+                by_id.insert(id, (start as u32, end as u32));
+            }
+        }
+        blocks_by_path.insert(path.to_string(), by_id);
+    }
+
+    // 2. Build citations in source order.
+    let mut citations: Vec<Citation> = sources
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let lines = blocks_by_path
+                .get(&s.file_path)
+                .and_then(|m| m.get(&s.block_id))
+                .copied();
+            #[allow(clippy::cast_possible_truncation)]
+            Citation {
+                index: (i + 1) as u32,
+                file_path: s.file_path.clone(),
+                block_id: s.block_id,
+                start_line: lines.map(|(s, _)| s),
+                end_line: lines.map(|(_, e)| e),
+                excerpt: truncate_excerpt(&s.chunk_text, CITATION_EXCERPT_MAX_CHARS),
+                score: s.score,
+            }
+        })
+        .collect();
+
+    // 3. Optional renumber by first-occurrence in `answer`.
+    renumber_citations_by_answer_order(&mut citations, answer);
+    citations
+}
+
+/// If `answer` contains `[N]` markers that fit within the existing
+/// source range (`1..=citations.len()`), renumber the citations so the
+/// 1-based output index matches first-occurrence in the answer text.
+///
+/// Skips when there are no parseable markers or any marker is out of
+/// range — source-order is acceptable for v1.
+fn renumber_citations_by_answer_order(citations: &mut [Citation], answer: &str) {
+    if citations.is_empty() {
+        return;
+    }
+    // Cheap inline parser — no regex_lite dep just for `\[(\d+)\]`.
+    let bytes = answer.as_bytes();
+    let mut order: Vec<u32> = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'[' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j > i + 1 && j < bytes.len() && bytes[j] == b']' {
+                if let Ok(n) = answer[i + 1..j].parse::<u32>() {
+                    if n >= 1 && (n as usize) <= citations.len() && !order.contains(&n) {
+                        order.push(n);
+                    }
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+
+    if order.is_empty() {
+        return;
+    }
+
+    // Map original-index -> new-index (1-based first-occurrence order).
+    // Citations not referenced in the answer keep trailing slots in
+    // their original source order.
+    let mut new_index: HashMap<u32, u32> = HashMap::new();
+    for (slot, &orig) in order.iter().enumerate() {
+        #[allow(clippy::cast_possible_truncation)]
+        new_index.insert(orig, (slot + 1) as u32);
+    }
+    let mut next_slot = u32::try_from(order.len()).unwrap_or(u32::MAX).saturating_add(1);
+    let mut originals: Vec<u32> = citations.iter().map(|c| c.index).collect();
+    originals.sort_unstable();
+    for orig in originals {
+        new_index.entry(orig).or_insert_with(|| {
+            let s = next_slot;
+            next_slot += 1;
+            s
+        });
+    }
+
+    for c in citations.iter_mut() {
+        if let Some(&new) = new_index.get(&c.index) {
+            c.index = new;
+        }
+    }
+    citations.sort_by_key(|c| c.index);
 }
 
 /// Index a file's blocks by chunking, embedding, and upserting via storage
@@ -152,9 +384,16 @@ const RAG_FALLBACK_PROMPT: &str =
     "You are a helpful assistant. Answer the user's question to the best of your ability.";
 
 /// Header prefixed onto a prompt that includes RAG context.
+///
+/// BL-038 teach-cite: also instructs the model to cite sources as `[N]`
+/// where N is the 1-based position in the SOURCES list below. The shell
+/// renders these markers as clickable superscript citation chips that
+/// link to the source file at the corresponding `start_line`.
 const RAG_PROMPT_HEADER: &str =
     "Use the following context from the user's notes to answer their question. \
-     Cite sources using [[file_path]] notation when relevant.\n\n";
+     Cite sources as [N] where N is the 1-based position in the SOURCES list \
+     below (for example, [1] or [2]). You may also reference sources by \
+     [[file_path]] when more specific.\n\n";
 
 /// Utilisation threshold (`used / available`) at which
 /// [`build_rag_prompt_budgeted`] emits a [`BudgetWarning::NearLimit`].
@@ -299,12 +538,36 @@ mod tests {
         }
     }
 
-    /// IPC dispatcher stub: only knows how to answer
+    /// IPC dispatcher stub: knows how to answer
     /// `com.nexus.storage::vector_query` with a canned `Vec<ChunkMatch>`,
-    /// and records the args it was called with.
+    /// and `com.nexus.storage::query_blocks` with a per-path canned
+    /// list of block JSON objects keyed by file path. Records the args
+    /// it was called with.
     struct StubDispatcher {
         matches: Vec<ChunkMatch>,
+        blocks_by_path: HashMap<String, Vec<serde_json::Value>>,
         seen: Mutex<Vec<(String, String, serde_json::Value)>>,
+    }
+
+    impl StubDispatcher {
+        fn new(matches: Vec<ChunkMatch>) -> Self {
+            Self {
+                matches,
+                blocks_by_path: HashMap::new(),
+                seen: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn with_blocks(
+            matches: Vec<ChunkMatch>,
+            blocks_by_path: HashMap<String, Vec<serde_json::Value>>,
+        ) -> Self {
+            Self {
+                matches,
+                blocks_by_path,
+                seen: Mutex::new(Vec::new()),
+            }
+        }
     }
 
     impl IpcDispatcher for StubDispatcher {
@@ -332,6 +595,19 @@ mod tests {
                 .push((target.to_string(), command.to_string(), args.clone()));
             if target == "com.nexus.storage" && command == "vector_query" {
                 let resp = serde_json::to_value(&self.matches).unwrap();
+                Some(Box::pin(async move { Ok(resp) }))
+            } else if target == "com.nexus.storage" && command == "query_blocks" {
+                let path = args
+                    .get("path")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let blocks = self
+                    .blocks_by_path
+                    .get(&path)
+                    .cloned()
+                    .unwrap_or_default();
+                let resp = serde_json::Value::Array(blocks);
                 Some(Box::pin(async move { Ok(resp) }))
             } else {
                 None
@@ -373,10 +649,7 @@ mod tests {
                 score: 0.7,
             },
         ];
-        let dispatcher = Arc::new(StubDispatcher {
-            matches: canned.clone(),
-            seen: Mutex::new(Vec::new()),
-        });
+        let dispatcher = Arc::new(StubDispatcher::new(canned.clone()));
         let embedder = StubEmbedder {
             vector: vec![0.1, 0.2, 0.3],
             seen: Mutex::new(Vec::new()),
@@ -418,10 +691,7 @@ mod tests {
                 0
             }
         }
-        let dispatcher = Arc::new(StubDispatcher {
-            matches: Vec::new(),
-            seen: Mutex::new(Vec::new()),
-        });
+        let dispatcher = Arc::new(StubDispatcher::new(Vec::new()));
         let (ctx, _tmp) = make_ctx(dispatcher);
         let err = semantic_search(&ctx, &Failing, "q", 5).await.unwrap_err();
         assert!(matches!(err, AiError::Provider(_)));
@@ -642,5 +912,239 @@ mod tests {
         );
         // And the secret really is intact in both.
         assert!(prompt.contains("AKIAIOSFODNN7EXAMPLE"));
+    }
+
+    // ─── BL-038: Citation enrichment + teach-cite prompt ──────────────────
+
+    #[test]
+    fn build_rag_prompt_teaches_bracket_citation() {
+        let sources = vec![ChunkMatch {
+            file_path: "notes/x.md".into(),
+            block_id: 1,
+            chunk_text: "anything".into(),
+            score: 0.9,
+        }];
+        let prompt = build_rag_prompt(&sources);
+        // BL-038 teach-cite: header now instructs the model to use [N]
+        // citations, in addition to the legacy [[file_path]] form.
+        assert!(
+            prompt.contains("[N]"),
+            "expected [N] teach-cite instruction in prompt: {prompt}"
+        );
+        assert!(prompt.contains("Source 1"));
+        assert!(prompt.contains("[[notes/x.md]]"));
+    }
+
+    /// Stub chat provider that returns a fixed answer string.
+    struct StubAi {
+        answer: String,
+    }
+
+    #[async_trait]
+    impl crate::provider::AiProvider for StubAi {
+        async fn chat(
+            &self,
+            _messages: &[crate::provider::ChatMessage],
+            _system: Option<&str>,
+        ) -> Result<String, AiError> {
+            Ok(self.answer.clone())
+        }
+        fn model_name(&self) -> &'static str {
+            "stub-1"
+        }
+    }
+
+    fn block_json(id: u64, start: u32, end: u32) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "file_id": 1,
+            "block_type": "paragraph",
+            "level": serde_json::Value::Null,
+            "content": "",
+            "start_line": start,
+            "end_line": end,
+            "block_ref_id": serde_json::Value::Null,
+            "callout_type": serde_json::Value::Null,
+        })
+    }
+
+    #[tokio::test]
+    async fn query_attaches_line_ranges_via_query_blocks() {
+        let canned = vec![
+            ChunkMatch {
+                file_path: "notes/a.md".into(),
+                block_id: 10,
+                chunk_text: "alpha is the first letter".into(),
+                score: 0.9,
+            },
+            ChunkMatch {
+                file_path: "notes/b.md".into(),
+                block_id: 20,
+                chunk_text: "beta is the second letter".into(),
+                score: 0.7,
+            },
+        ];
+        let mut blocks = HashMap::new();
+        blocks.insert(
+            "notes/a.md".to_string(),
+            vec![block_json(10, 5, 7), block_json(11, 9, 12)],
+        );
+        blocks.insert("notes/b.md".to_string(), vec![block_json(20, 1, 3)]);
+
+        let dispatcher = Arc::new(StubDispatcher::with_blocks(canned, blocks));
+        let embedder = StubEmbedder {
+            vector: vec![0.1, 0.2],
+            seen: Mutex::new(Vec::new()),
+        };
+        let ai = StubAi {
+            answer: "see notes for details".into(),
+        };
+        let (ctx, _tmp) = make_ctx(dispatcher.clone());
+
+        let resp = query(&ctx, &ai, &embedder, "tell me about letters", 5)
+            .await
+            .expect("rag::query ok");
+
+        // Sources field preserved for backwards compat.
+        assert_eq!(resp.sources.len(), 2);
+        // Citations: 1-based, source-order (no [N] in answer).
+        assert_eq!(resp.citations.len(), 2);
+        assert_eq!(resp.citations[0].index, 1);
+        assert_eq!(resp.citations[0].file_path, "notes/a.md");
+        assert_eq!(resp.citations[0].block_id, 10);
+        assert_eq!(resp.citations[0].start_line, Some(5));
+        assert_eq!(resp.citations[0].end_line, Some(7));
+        assert_eq!(resp.citations[1].index, 2);
+        assert_eq!(resp.citations[1].file_path, "notes/b.md");
+        assert_eq!(resp.citations[1].start_line, Some(1));
+        assert_eq!(resp.citations[1].end_line, Some(3));
+        // Excerpt populated from chunk_text (under the limit so verbatim).
+        assert!(resp.citations[0].excerpt.contains("alpha"));
+
+        // Dispatcher saw exactly one query_blocks per unique path
+        // (plus the vector_query) — i.e. 3 total IPC calls.
+        let seen = dispatcher.seen.lock().unwrap();
+        let qb_calls: Vec<_> = seen
+            .iter()
+            .filter(|(_, cmd, _)| cmd == "query_blocks")
+            .collect();
+        assert_eq!(qb_calls.len(), 2, "one query_blocks per unique path");
+    }
+
+    #[tokio::test]
+    async fn query_renumbers_citations_by_answer_order_when_markers_present() {
+        let canned = vec![
+            ChunkMatch {
+                file_path: "notes/a.md".into(),
+                block_id: 10,
+                chunk_text: "alpha".into(),
+                score: 0.9,
+            },
+            ChunkMatch {
+                file_path: "notes/b.md".into(),
+                block_id: 20,
+                chunk_text: "beta".into(),
+                score: 0.7,
+            },
+        ];
+        let mut blocks = HashMap::new();
+        blocks.insert("notes/a.md".to_string(), vec![block_json(10, 1, 1)]);
+        blocks.insert("notes/b.md".to_string(), vec![block_json(20, 1, 1)]);
+
+        let dispatcher = Arc::new(StubDispatcher::with_blocks(canned, blocks));
+        let embedder = StubEmbedder {
+            vector: vec![0.0],
+            seen: Mutex::new(Vec::new()),
+        };
+        // Model cites [2] before [1] — citation #1 should now be the
+        // chunk that was originally source #2 (notes/b.md).
+        let ai = StubAi {
+            answer: "B is great [2] and A is older [1]".into(),
+        };
+        let (ctx, _tmp) = make_ctx(dispatcher);
+
+        let resp = query(&ctx, &ai, &embedder, "compare", 5)
+            .await
+            .expect("rag::query ok");
+
+        assert_eq!(resp.citations.len(), 2);
+        // After renumber: index 1 = the source that was first cited
+        // (original #2 = notes/b.md), index 2 = notes/a.md.
+        let by_index: HashMap<u32, &Citation> =
+            resp.citations.iter().map(|c| (c.index, c)).collect();
+        assert_eq!(by_index[&1].file_path, "notes/b.md");
+        assert_eq!(by_index[&2].file_path, "notes/a.md");
+    }
+
+    #[tokio::test]
+    async fn query_falls_back_to_source_order_when_no_markers() {
+        let canned = vec![ChunkMatch {
+            file_path: "notes/a.md".into(),
+            block_id: 10,
+            chunk_text: "alpha".into(),
+            score: 0.9,
+        }];
+        let mut blocks = HashMap::new();
+        blocks.insert("notes/a.md".to_string(), vec![block_json(10, 2, 4)]);
+
+        let dispatcher = Arc::new(StubDispatcher::with_blocks(canned, blocks));
+        let embedder = StubEmbedder {
+            vector: vec![0.0],
+            seen: Mutex::new(Vec::new()),
+        };
+        let ai = StubAi {
+            answer: "no citations here".into(),
+        };
+        let (ctx, _tmp) = make_ctx(dispatcher);
+
+        let resp = query(&ctx, &ai, &embedder, "q", 5).await.unwrap();
+        assert_eq!(resp.citations.len(), 1);
+        assert_eq!(resp.citations[0].index, 1);
+        assert_eq!(resp.citations[0].start_line, Some(2));
+    }
+
+    #[tokio::test]
+    async fn citations_degrade_gracefully_when_storage_lacks_block() {
+        // Storage returns no matching block for the chunk's block_id —
+        // citation still surfaces, just with start_line: None.
+        let canned = vec![ChunkMatch {
+            file_path: "notes/a.md".into(),
+            block_id: 999,
+            chunk_text: "orphan".into(),
+            score: 0.5,
+        }];
+        let mut blocks = HashMap::new();
+        // Different ids, no 999.
+        blocks.insert("notes/a.md".to_string(), vec![block_json(1, 1, 2)]);
+
+        let dispatcher = Arc::new(StubDispatcher::with_blocks(canned, blocks));
+        let embedder = StubEmbedder {
+            vector: vec![0.0],
+            seen: Mutex::new(Vec::new()),
+        };
+        let ai = StubAi {
+            answer: String::new(),
+        };
+        let (ctx, _tmp) = make_ctx(dispatcher);
+
+        let resp = query(&ctx, &ai, &embedder, "q", 5).await.unwrap();
+        assert_eq!(resp.citations.len(), 1);
+        assert_eq!(resp.citations[0].start_line, None);
+        assert_eq!(resp.citations[0].end_line, None);
+        assert_eq!(resp.citations[0].file_path, "notes/a.md");
+    }
+
+    #[test]
+    fn truncate_excerpt_clips_with_ellipsis() {
+        let text = "x".repeat(300);
+        let out = truncate_excerpt(&text, CITATION_EXCERPT_MAX_CHARS);
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().count(), CITATION_EXCERPT_MAX_CHARS + 1);
+    }
+
+    #[test]
+    fn truncate_excerpt_passthrough_when_under_limit() {
+        let text = "short";
+        assert_eq!(truncate_excerpt(text, 100), "short");
     }
 }

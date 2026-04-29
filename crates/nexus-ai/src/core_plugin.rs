@@ -1034,12 +1034,17 @@ async fn handle_stream_ask(
         .await
         .map_err(|e| exec_err(format!("stream_ask: {e}")))?;
 
+    // BL-038: enrich sources with line ranges + 1-based numbering so the
+    // shell can render `[N]` markers in the answer as clickable chips.
+    let citations = crate::rag::build_citations(&ctx, &sources, &text).await;
+
     let _ = ctx.publish(
         "com.nexus.ai.stream_done",
         serde_json::json!({
             "session_id": &session_id,
             "text": &text,
             "sources": &sources,
+            "citations": &citations,
         }),
     );
 
@@ -1047,6 +1052,7 @@ async fn handle_stream_ask(
         "session_id": session_id,
         "text": text,
         "sources": sources,
+        "citations": citations,
     }))
 }
 
