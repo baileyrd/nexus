@@ -26,6 +26,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+mod ai_steps;
 mod condition;
 pub mod core_plugin;
 pub mod cron;
@@ -35,6 +36,9 @@ mod interpolate;
 mod parse;
 mod registry;
 
+pub use ai_steps::{
+    build_decision_prompt, pick_choice, AiDecisionArgs, AiPromptArgs,
+};
 pub use condition::{evaluate_condition, ConditionError, EvaluationContext};
 pub use core_plugin::{
     WorkflowCorePlugin, HANDLER_GET, HANDLER_LIST, HANDLER_RELOAD, HANDLER_RUN,

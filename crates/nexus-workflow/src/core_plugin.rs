@@ -46,9 +46,9 @@ use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Deserialize;
 
 use crate::{
-    condition_skipped_run, cron::CronSchedule, digests, evaluate_condition, parse_workflow_text,
-    run_workflow_with_variables, ActionDispatcher, DigestConfig, DigestKind, EvaluationContext,
-    Step, VariableMap, Workflow, WorkflowRegistry, WorkflowRegistryError,
+    ai_steps, condition_skipped_run, cron::CronSchedule, digests, evaluate_condition,
+    parse_workflow_text, run_workflow_with_variables, ActionDispatcher, DigestConfig, DigestKind,
+    EvaluationContext, Step, VariableMap, Workflow, WorkflowRegistry, WorkflowRegistryError,
 };
 
 /// Reverse-DNS identifier.
@@ -1125,6 +1125,54 @@ impl ActionDispatcher for KernelActionDispatcher {
                     .map_err(|e| e.to_string())
             }
             "noop" => Ok(serde_json::json!({ "noop": true })),
+            // BL-028d — AI prompt: route through `com.nexus.ai::ask`
+            // and return the full RagResponse JSON. The handler's
+            // `answer` field is the primary text output.
+            "ai_prompt" => {
+                let args = ai_steps::AiPromptArgs::from_step(step)?;
+                let mut ipc_args = serde_json::json!({ "question": args.prompt });
+                if let Some(limit) = args.limit {
+                    ipc_args["limit"] = serde_json::Value::Number(limit.into());
+                }
+                self.ctx
+                    .ipc_call("com.nexus.ai", "ask", ipc_args, DEFAULT_STEP_TIMEOUT)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+            // BL-028d — AI decision: ask the AI to pick one of a fixed
+            // set of labels. Routes through `ask` with `limit = 0` so
+            // we don't pull RAG context for a classifier call. Returns
+            // `{ choice, raw, model }`. `choice == None` means the AI
+            // response did not match any label — surfaced as Err so
+            // the step's retry/`on_error` policy applies.
+            "ai_decision" => {
+                let args = ai_steps::AiDecisionArgs::from_step(step)?;
+                let composed = ai_steps::build_decision_prompt(&args.prompt, &args.choices);
+                let resp = self
+                    .ctx
+                    .ipc_call(
+                        "com.nexus.ai",
+                        "ask",
+                        serde_json::json!({ "question": composed, "limit": 0 }),
+                        DEFAULT_STEP_TIMEOUT,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let answer = resp
+                    .get("answer")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                match ai_steps::pick_choice(answer, &args.choices) {
+                    Some(choice) => Ok(serde_json::json!({
+                        "choice": choice,
+                        "raw": answer,
+                        "model": resp.get("model").cloned().unwrap_or(serde_json::Value::Null),
+                    })),
+                    None => Err(format!(
+                        "ai_decision: AI response did not match any choice: {answer:?}"
+                    )),
+                }
+            }
             other => {
                 // Unknown action types still get a stable success so
                 // workflow authors can iterate without executor churn.
