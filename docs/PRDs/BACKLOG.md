@@ -326,11 +326,7 @@ Background pass over the active document surfaces non-blocking margin glyphs ("r
 **Effort**: Medium.
 Per-forge log of AI interactions (prompt, model, surface, files touched, tool calls, outcome) shown as a scrollable pane. v1 reads from a JSONL log under `.forge/ai-activity.log`; later versions can index for search. **Hosted inside BL-029 multi-window** as a dedicated pane.
 
-### BL-038: AMB citations
-
-**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) pattern 8.
-**Effort**: Medium.
-When the assembled context includes retrieved snippets (RAG / memory recall), the answer view shows numbered citations linking back to the source file + line range. Hard prereq: BL-019 embeddings (citations only meaningful once retrieval is real).
+_BL-038 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 _BL-039 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
