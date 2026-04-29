@@ -29,6 +29,7 @@
 mod condition;
 pub mod core_plugin;
 pub mod cron;
+pub mod digests;
 mod executor;
 mod interpolate;
 mod parse;
@@ -36,8 +37,12 @@ mod registry;
 
 pub use condition::{evaluate_condition, ConditionError, EvaluationContext};
 pub use core_plugin::{
-    WorkflowCorePlugin, HANDLER_GET, HANDLER_LIST, HANDLER_RELOAD, HANDLER_RUN, HANDLER_VALIDATE,
-    PLUGIN_ID,
+    WorkflowCorePlugin, HANDLER_GET, HANDLER_LIST, HANDLER_RELOAD, HANDLER_RUN,
+    HANDLER_RUN_DIGEST, HANDLER_VALIDATE, PLUGIN_ID,
+};
+pub use digests::{
+    build_digest_prompt, digest_window, next_fire, output_path, run_digest, DigestConfig,
+    DigestKind, DigestRunReport, DEFAULT_DAILY_CRON, DEFAULT_DIGESTS_DIR, DEFAULT_WEEKLY_CRON,
 };
 pub use cron::{next_fire_after, CronParseError, CronSchedule};
 pub use executor::{
