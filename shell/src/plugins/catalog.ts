@@ -67,6 +67,7 @@ import { statusBarPlugin } from './nexus/statusBar'
 import { extensionsTabPlugin } from './nexus/extensionsTab'
 import { memoryPlugin } from './nexus/memory'
 import { recallPlugin } from './nexus/recall'
+import { enrichPlugin } from './nexus/enrich'
 
 // ── Community plugins (BL-008+) — directory location matches the
 // community-plugin layout, but registration goes through the catalog
@@ -128,7 +129,7 @@ export const DEFAULT_ON_PLUGINS: Registered[] = [
 ]
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Default-off set (15) — shipped but dormant. Enable per-row from
+// Default-off set (16) — shipped but dormant. Enable per-row from
 // Settings > Plugins; enabled ids are persisted into the
 // `plugins.enabled: string[]` config value and picked up on next boot.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -151,6 +152,11 @@ export const DEFAULT_OFF_PLUGINS: Registered[] = [
   // with `nexus.memory` (BL-043) which owns the inbox path the
   // recall overlay scopes against.
   recallPlugin,
+  // BL-045 — auto-enrichment on save. Default-off because it issues
+  // an AI chat call + an embedding+vector lookup per saved markdown
+  // file (throttled to 5 s per-file). Requires both an AI chat
+  // provider and an embedding provider to be configured.
+  enrichPlugin,
   agentPlugin,
   mcpPlugin,
   workflowPlugin,
