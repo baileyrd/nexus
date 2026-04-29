@@ -25,6 +25,7 @@ use serde::Serialize;
 use crate::anthropic::AnthropicProvider;
 use crate::config::{detect_embedding_provider, detect_provider, AiConfig};
 use crate::embedding::EmbeddingProvider;
+use crate::indexing_daemon::{self, EmbedderFactory, IndexingDaemon, SharedStatus};
 use crate::ipc::{
     AiStreamAskMessage, AiStreamAskRole, AiStreamChatArgs, AiStreamChatMode, AiToolPolicy,
 };
@@ -89,6 +90,31 @@ pub const HANDLER_SESSION_DELETE: u32 = 11;
 /// A `null` clears that side; an absent key leaves it untouched.
 pub const HANDLER_SET_CONFIG: u32 = 12;
 
+/// BL-041 — `index_status`: snapshot of the background indexing
+/// daemon's counters. Returns the [`crate::indexing_daemon::IndexStatus`]
+/// shape: `{ indexed_files, pending_files, total_seen, last_error,
+/// running }`. Cheap — pure read of the shared `Arc<RwLock<>>` state.
+pub const HANDLER_INDEX_STATUS: u32 = 14;
+
+/// BL-040 — `semantic_search`: embed a query and return the top-N
+/// matching chunks from the vector store (no chat). Args
+/// `{ query: String, limit?: usize (default 10) }`. Returns
+/// `{ matches: Vec<ChunkMatch> }`.
+pub const HANDLER_SEMANTIC_SEARCH: u32 = 13;
+
+/// BL-045 — `enrich_file`: read a markdown file, run the AI provider
+/// for tags + summary, run `semantic_search` for related notes, return
+/// an [`crate::enrichment::EnrichmentProposal`] WITHOUT writing.
+/// Args `{ path: String }` → JSON-serialised proposal.
+pub const HANDLER_ENRICH_FILE: u32 = 15;
+
+/// BL-045 — `enrich_apply`: merge a previously-returned
+/// [`crate::enrichment::EnrichmentProposal`] back into the file's
+/// YAML frontmatter, but only if `body_hash` still matches. Args
+/// `{ proposal: EnrichmentProposal }` → `{ applied: bool, reason?:
+/// String }`.
+pub const HANDLER_ENRICH_APPLY: u32 = 16;
+
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
     /// Live config — wrapped in `Arc<RwLock<>>` so async handlers can
@@ -107,6 +133,16 @@ pub struct AiCorePlugin {
     /// through `ipc_call`. Wrapped in `Arc` so handler futures get a
     /// cheap clone; the registry itself is read-only after bootstrap.
     tools: Option<Arc<ToolRegistry>>,
+    /// BL-041 — shared snapshot of the background indexing daemon's
+    /// counters. Allocated unconditionally (cheap) so the
+    /// `HANDLER_INDEX_STATUS` IPC handler can return a meaningful
+    /// "not yet running" view even before `on_start` runs and even
+    /// when no embedding provider is configured (in which case the
+    /// daemon thread spins but never flushes).
+    index_status: SharedStatus,
+    /// BL-041 — owning handle for the daemon thread. `None` until
+    /// `on_start` runs; cleared in `on_stop` (which joins the worker).
+    indexing_daemon: Option<IndexingDaemon>,
 }
 
 impl AiCorePlugin {
@@ -118,6 +154,8 @@ impl AiCorePlugin {
             embed_config: Arc::new(RwLock::new(None)),
             context: None,
             tools: None,
+            index_status: indexing_daemon::new_status(),
+            indexing_daemon: None,
         }
     }
 
@@ -173,6 +211,11 @@ impl CorePlugin for AiCorePlugin {
             let embed = self.embed_config.read().ok().and_then(|g| g.clone());
             return Ok(config_snapshot(ai.as_ref(), embed.as_ref()));
         }
+        if handler_id == HANDLER_INDEX_STATUS {
+            let snap = indexing_daemon::snapshot(&self.index_status);
+            return serde_json::to_value(&snap)
+                .map_err(|e| exec_err(format!("index_status: serialize: {e}")));
+        }
         Err(PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: format!(
@@ -195,6 +238,17 @@ impl CorePlugin for AiCorePlugin {
             let embed = self.embed_config.read().ok().and_then(|g| g.clone());
             let response = config_snapshot(ai.as_ref(), embed.as_ref());
             return Some(Box::pin(async move { Ok(response) }));
+        }
+
+        // BL-041 — `index_status` is a pure read of the shared status
+        // handle; no I/O, but routed through `dispatch_async` for
+        // shape symmetry with the rest of the AI surface (the shell
+        // polls it via its standard `kernel_invoke` async path).
+        if handler_id == HANDLER_INDEX_STATUS {
+            let snap = indexing_daemon::snapshot(&self.index_status);
+            let response = serde_json::to_value(&snap)
+                .map_err(|e| exec_err(format!("index_status: serialize: {e}")));
+            return Some(Box::pin(async move { response }));
         }
 
         // set_config: in-memory only, no I/O — but we model it as async
@@ -230,6 +284,11 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_SESSION_SAVE => handle_session_save(&ctx, &args).await,
                 HANDLER_SESSION_LIST => handle_session_list(&ctx).await,
                 HANDLER_SESSION_DELETE => handle_session_delete(&ctx, &args).await,
+                HANDLER_SEMANTIC_SEARCH => {
+                    handle_semantic_search(&ctx, embed_cfg, &args).await
+                }
+                HANDLER_ENRICH_FILE => handle_enrich_file(&ctx, ai_cfg, embed_cfg, &args).await,
+                HANDLER_ENRICH_APPLY => handle_enrich_apply(&ctx, &args).await,
                 _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
             }
         }))
@@ -240,11 +299,52 @@ impl CorePlugin for AiCorePlugin {
     /// Also seeds the tool registry with the storage-backed built-ins
     /// (`read_file`, `write_file`) so the streaming dispatch loop has a
     /// non-empty toolbox without each frontend opting in.
+    ///
+    /// BL-041 — also spawns the background indexing daemon. We start
+    /// it here (rather than `on_start`) because `wire_context` is the
+    /// first lifecycle hook with the kernel context in hand; the
+    /// daemon needs `ctx.subscribe(...)` and `ctx.ipc_call(...)`.
     fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
         let mut registry = ToolRegistry::new();
         register_storage_builtins(&mut registry, Arc::clone(&ctx));
         self.tools = Some(Arc::new(registry));
+
+        // Build the embedder factory — captures the live `embed_config`
+        // handle so the daemon picks up runtime `set_config` updates
+        // without a restart. Returns `None` when no embedding provider
+        // is configured; the daemon then logs `last_error` and skips
+        // the touch path until the user sets one.
+        let embed_handle = Arc::clone(&self.embed_config);
+        let factory: EmbedderFactory = Arc::new(move || {
+            let cfg = embed_handle.read().ok().and_then(|g| g.clone())?;
+            build_embedding_provider(&cfg).ok()
+        });
+
+        match IndexingDaemon::start(Arc::clone(&ctx), Arc::clone(&self.index_status), factory) {
+            Ok(daemon) => {
+                self.indexing_daemon = Some(daemon);
+                tracing::debug!(plugin_id = PLUGIN_ID, "BL-041 indexing daemon started");
+            }
+            Err(e) => {
+                tracing::error!(
+                    plugin_id = PLUGIN_ID,
+                    ?e,
+                    "BL-041 indexing daemon failed to start"
+                );
+                if let Ok(mut g) = self.index_status.write() {
+                    g.last_error = Some(format!("daemon spawn failed: {e}"));
+                }
+            }
+        }
+
         self.context = Some(ctx);
+    }
+
+    /// BL-041 — gracefully stop the indexing daemon on shutdown.
+    fn on_stop(&mut self) {
+        if let Some(mut d) = self.indexing_daemon.take() {
+            d.stop();
+        }
     }
 }
 
@@ -277,6 +377,85 @@ async fn handle_ask(
         .await
         .map_err(|e| exec_err(format!("rag query failed: {e}")))?;
     serde_json::to_value(&response).map_err(|e| exec_err(format!("ask: serialize: {e}")))
+}
+
+/// BL-040 — embed `query` and return the top-`limit` chunks from the
+/// vector store (no chat). Mirrors the embedder build path of
+/// [`handle_ask`] but skips the chat provider entirely so callers
+/// (palette, TUI, MCP) get a fast, score-bearing list of hits.
+async fn handle_semantic_search(
+    ctx: &KernelPluginContext,
+    embed_cfg: Option<AiConfig>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let query = args
+        .get("query")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| exec_err("semantic_search: missing 'query' string"))?;
+    let limit = args
+        .get("limit")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| usize::try_from(v).ok())
+        .unwrap_or(10);
+
+    let embed_cfg = embed_cfg
+        .ok_or_else(|| exec_err("semantic_search: no AI embedding provider configured"))?;
+    let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
+
+    let matches = rag::semantic_search(ctx, embedder.as_ref(), query, limit)
+        .await
+        .map_err(|e| exec_err(format!("semantic_search: {e}")))?;
+    Ok(serde_json::json!({ "matches": matches }))
+}
+
+/// BL-045 — `enrich_file`: read a markdown note, ask the AI for
+/// tags + summary, run `semantic_search` for related notes, return
+/// an [`crate::enrichment::EnrichmentProposal`] WITHOUT writing.
+async fn handle_enrich_file(
+    ctx: &KernelPluginContext,
+    ai_cfg: Option<AiConfig>,
+    embed_cfg: Option<AiConfig>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let path = args
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| exec_err("enrich_file: missing 'path' string"))?;
+
+    let ai_cfg = ai_cfg.ok_or_else(|| exec_err("enrich_file: no AI chat provider configured"))?;
+    let embed_cfg =
+        embed_cfg.ok_or_else(|| exec_err("enrich_file: no AI embedding provider configured"))?;
+
+    let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
+    let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
+
+    let proposal = crate::enrichment::propose(ctx, ai.as_ref(), embedder.as_ref(), path)
+        .await
+        .map_err(|e| exec_err(format!("enrich_file: {e}")))?;
+    serde_json::to_value(&proposal)
+        .map_err(|e| exec_err(format!("enrich_file: serialize: {e}")))
+}
+
+/// BL-045 — `enrich_apply`: merge a previously-returned proposal back
+/// into the file's YAML frontmatter, but only if `body_hash` still
+/// matches. Returns `{ applied: bool, reason?: String }`.
+async fn handle_enrich_apply(
+    ctx: &KernelPluginContext,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let raw_proposal = args
+        .get("proposal")
+        .ok_or_else(|| exec_err("enrich_apply: missing 'proposal'"))?;
+    let proposal: crate::enrichment::EnrichmentProposal =
+        serde_json::from_value(raw_proposal.clone())
+            .map_err(|e| exec_err(format!("enrich_apply: proposal decode: {e}")))?;
+    let (applied, reason) = crate::enrichment::apply(ctx, &proposal)
+        .await
+        .map_err(|e| exec_err(format!("enrich_apply: {e}")))?;
+    Ok(serde_json::json!({
+        "applied": applied,
+        "reason": reason,
+    }))
 }
 
 async fn handle_index_file(
@@ -920,12 +1099,17 @@ async fn handle_stream_ask(
         .await
         .map_err(|e| exec_err(format!("stream_ask: {e}")))?;
 
+    // BL-038: enrich sources with line ranges + 1-based numbering so the
+    // shell can render `[N]` markers in the answer as clickable chips.
+    let citations = crate::rag::build_citations(&ctx, &sources, &text).await;
+
     let _ = ctx.publish(
         "com.nexus.ai.stream_done",
         serde_json::json!({
             "session_id": &session_id,
             "text": &text,
             "sources": &sources,
+            "citations": &citations,
         }),
     );
 
@@ -933,6 +1117,7 @@ async fn handle_stream_ask(
         "session_id": session_id,
         "text": text,
         "sources": sources,
+        "citations": citations,
     }))
 }
 
@@ -1667,5 +1852,151 @@ mod tool_dispatch_tests {
         // The dispatch-loop path was the one that ran (turns_seen
         // populated), proving the chat path uses tool dispatch.
         assert_eq!(provider.turns_seen.lock().unwrap().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod semantic_search_dispatch_tests {
+    //! BL-040 — exercise the `HANDLER_SEMANTIC_SEARCH` arm of
+    //! [`AiCorePlugin::dispatch_async`] without making any network
+    //! calls. The handler validates `query` and `embed_cfg` before it
+    //! tries to embed, so we can drive both code paths cheaply by
+    //! arranging for one of those checks to fire.
+    use super::*;
+    use nexus_kernel::{
+        CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+    };
+    use std::sync::Arc;
+
+    fn wired_plugin() -> AiCorePlugin {
+        let mut plugin = AiCorePlugin::new();
+        let dir = tempfile::tempdir().unwrap();
+        // Leak the tempdir for the duration of the test — the context
+        // canonicalises the path at construction so we don't actually
+        // need the directory to outlive the test, but a leak keeps
+        // valgrind quiet.
+        let dir_path = dir.path().to_path_buf();
+        std::mem::forget(dir);
+        let kv: Arc<dyn KvStore> = Arc::new(InMemoryKvStore::new());
+        let bus = Arc::new(EventBus::new(16));
+        let ctx = KernelPluginContext::new(
+            "com.nexus.ai",
+            "0.0.1",
+            CapabilitySet::default(),
+            kv,
+            bus,
+            &dir_path,
+            None,
+        )
+        .unwrap();
+        plugin.wire_context(Arc::new(ctx));
+        plugin
+    }
+
+    #[tokio::test]
+    async fn semantic_search_handler_routes_through_dispatch_async() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_SEMANTIC_SEARCH, &serde_json::json!({}))
+            .expect("HANDLER_SEMANTIC_SEARCH must be async");
+        let err = fut.await.expect_err("missing query should error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("missing 'query'"),
+            "expected query-missing error, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_search_handler_requires_embed_provider() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(
+                HANDLER_SEMANTIC_SEARCH,
+                &serde_json::json!({ "query": "hello" }),
+            )
+            .expect("HANDLER_SEMANTIC_SEARCH must be async");
+        let err = fut.await.expect_err("no embed cfg should error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("no AI embedding provider configured"),
+            "expected embed-cfg error, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn index_status_handler_returns_default_snapshot_when_daemon_unstarted() {
+        // No `wire_context` here — the daemon has never spawned, so
+        // `running` is `false` and counters are all zero. The handler
+        // must still return a well-formed JSON object so the shell
+        // badge can render "idle".
+        let mut plugin = AiCorePlugin::new();
+        let fut = plugin
+            .dispatch_async(HANDLER_INDEX_STATUS, &serde_json::json!({}))
+            .expect("HANDLER_INDEX_STATUS must be async");
+        let value = fut.await.expect("snapshot must succeed");
+        assert_eq!(value.get("running"), Some(&serde_json::json!(false)));
+        assert_eq!(value.get("indexed_files"), Some(&serde_json::json!(0)));
+        assert_eq!(value.get("pending_files"), Some(&serde_json::json!(0)));
+        assert_eq!(value.get("total_seen"), Some(&serde_json::json!(0)));
+        assert_eq!(value.get("last_error"), Some(&serde_json::json!(null)));
+    }
+
+    #[test]
+    fn index_status_handler_id_is_fourteen() {
+        // Pin the wire id for bootstrap manifest / shell drift detection.
+        assert_eq!(HANDLER_INDEX_STATUS, 14);
+    }
+
+    #[test]
+    fn semantic_search_handler_id_is_thirteen() {
+        // Pin the wire id so external callers (bootstrap manifest,
+        // shell plugin, MCP) don't drift silently.
+        assert_eq!(HANDLER_SEMANTIC_SEARCH, 13);
+    }
+
+    #[test]
+    fn enrich_handler_ids_are_pinned() {
+        // BL-045: bootstrap manifest + shell plugin both reference
+        // these constants — bumping them is a wire break.
+        assert_eq!(HANDLER_ENRICH_FILE, 15);
+        assert_eq!(HANDLER_ENRICH_APPLY, 16);
+    }
+
+    #[tokio::test]
+    async fn enrich_file_requires_path() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_ENRICH_FILE, &serde_json::json!({}))
+            .expect("HANDLER_ENRICH_FILE must be async");
+        let err = fut.await.expect_err("missing path should error");
+        assert!(format!("{err}").contains("missing 'path'"));
+    }
+
+    #[tokio::test]
+    async fn enrich_file_requires_ai_provider() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(
+                HANDLER_ENRICH_FILE,
+                &serde_json::json!({ "path": "note.md" }),
+            )
+            .expect("HANDLER_ENRICH_FILE must be async");
+        let err = fut.await.expect_err("no AI cfg should error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("no AI chat provider configured"),
+            "expected ai-cfg error, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn enrich_apply_requires_proposal() {
+        let mut plugin = wired_plugin();
+        let fut = plugin
+            .dispatch_async(HANDLER_ENRICH_APPLY, &serde_json::json!({}))
+            .expect("HANDLER_ENRICH_APPLY must be async");
+        let err = fut.await.expect_err("missing proposal should error");
+        assert!(format!("{err}").contains("missing 'proposal'"));
     }
 }

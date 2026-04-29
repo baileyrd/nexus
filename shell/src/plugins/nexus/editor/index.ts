@@ -684,6 +684,10 @@ export const editorPlugin: Plugin = {
           // (see `crates/nexus-editor/src/core_plugin.rs` ~L370).
           await editorClient.saveSession(tab.relpath)
           useEditorStore.getState().markSaved(tab.relpath)
+          // BL-045 — broadcast a save event so opt-in features
+          // (auto-enrichment, etc.) can react. Payload is intentionally
+          // tiny: just the forge-relative path of the saved file.
+          api.events.emit('files:saved', { relpath: tab.relpath })
           return
         }
 
@@ -712,6 +716,7 @@ export const editorPlugin: Plugin = {
           // transaction bridge will advance `sessionRevision` and
           // `isDirty` will flip back to true next paint.
           useEditorStore.getState().markSaved(newRelpath)
+          api.events.emit('files:saved', { relpath: newRelpath })
           try {
             await sessionManager.acquire(newRelpath)
             // acquire seeds sessionRevision + savedRevision from the
@@ -734,6 +739,7 @@ export const editorPlugin: Plugin = {
         // Non-markdown named file — same storage-write as pre-Phase-6.
         await writeStorageFile(tab.relpath, tab.content)
         useEditorStore.getState().markSaved(tab.relpath)
+        api.events.emit('files:saved', { relpath: tab.relpath })
       } catch (err) {
         api.notifications.show({
           type: 'error',

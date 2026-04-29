@@ -326,29 +326,13 @@ Background pass over the active document surfaces non-blocking margin glyphs ("r
 **Effort**: Medium.
 Per-forge log of AI interactions (prompt, model, surface, files touched, tool calls, outcome) shown as a scrollable pane. v1 reads from a JSONL log under `.forge/ai-activity.log`; later versions can index for search. **Hosted inside BL-029 multi-window** as a dedicated pane.
 
-### BL-038: AMB citations
+_BL-038 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) pattern 8.
-**Effort**: Medium.
-When the assembled context includes retrieved snippets (RAG / memory recall), the answer view shows numbered citations linking back to the source file + line range. Hard prereq: BL-019 embeddings (citations only meaningful once retrieval is real).
+_BL-039 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-039: AI-DIR auto-link suggestions
+_BL-040 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-**Source**: [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) direction 2.
-**Effort**: Medium. **Crate**: `nexus-ai` + `shell/src/plugins/nexus/editor/`.
-Embedding-driven inline suggestion of `[[wiki-style]]` links to existing forge files when the typed phrase semantically matches an existing note title or heading. UI piggybacks on BL-034's ghost-decoration. Hard prereq: BL-019.
-
-### BL-040: AI-DIR semantic search
-
-**Source**: [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) direction 3.
-**Effort**: Medium. **Crate**: `nexus-storage` (search facade) + shell command palette.
-Adds a `?:` prefix (or dedicated "Search by meaning" palette command) that runs a vector search alongside today's Tantivy keyword search and merges results with score-aware ranking. Hard prereq: BL-019.
-
-### BL-041: AI-DIR background indexing daemon
-
-**Source**: [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) direction 8.
-**Effort**: Medium–large. **Crate**: `nexus-storage` (file-watcher hook) + `nexus-ai` (batch embedder).
-A debounced indexer that subscribes to the existing file-watcher, batches changed files, and updates an embedding store (sqlite-vec or similar) without blocking foreground work. Surfaces a status badge ("indexed N / M files"). Hard prereq: BL-019. Feeds BL-040, BL-039, BL-045.
+_BL-041 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-042: AI-DIR Nexus-as-MCP-server
 
@@ -358,17 +342,11 @@ Today `nexus-mcp` is an MCP *client*. The FD direction is the inverse: expose Ne
 
 _BL-043 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-044: MEM recall hotkey
-
-**Source**: [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md) piece 3.
-**Effort**: Small. Hard prereq: BL-019.
-Global hotkey opens a search overlay backed by BL-040 semantic search scoped to capture notes; results are inserted at the current caret or copied. Effectively reuses BL-032's overlay shell with a different content adapter.
+_BL-044 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-045: MEM auto-enrichment on save
 
-**Source**: [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md) piece 2.
-**Effort**: Medium. Hard prereqs: BL-019 + BL-041.
-On save of an inbox-tagged file, run an enrichment pass: AI-generated tags, link suggestions (via BL-039), and a 1-line summary written to frontmatter. Idempotent — re-runs only if the body hash changed. Honours user-accept gate before frontmatter is written.
+_BL-045 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-046: MEM code-aware capture
 
@@ -378,9 +356,7 @@ Extends BL-043 capture: when the source is detectably code (file path with code 
 
 ### BL-047: MEM scheduled digests
 
-**Source**: [../AI-MEMORY-LAYER-PLAN.md](../AI-MEMORY-LAYER-PLAN.md) piece 6.
-**Effort**: Medium. Hard prereq: BL-019.
-A `nexus-workflow` cron job (re-using the existing scheduler) that summarises N days of capture notes into a daily / weekly digest file. Naturally lives in the workflow templates library — implement once BL-028 templates land or as a one-off cron until then.
+_BL-047 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-048: NB drag-to-embed into canvas
 

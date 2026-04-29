@@ -1,5 +1,6 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { FileStats } from './FileStats'
+import { IndexingStatus } from './IndexingStatus'
 
 export const statusBarPlugin: Plugin = {
   manifest: {
@@ -21,6 +22,15 @@ export const statusBarPlugin: Plugin = {
       slot: 'statusBarRight',
       component: FileStats,
       priority: 10,
+    })
+
+    // BL-041 — background indexing daemon status badge. Polls
+    // `com.nexus.ai::index_status` every 2 s; renders nothing when
+    // the daemon has never run.
+    api.views.register('nexus.statusBar.indexingStatus', {
+      slot: 'statusBarRight',
+      component: () => <IndexingStatus api={api} />,
+      priority: 20,
     })
   },
 }

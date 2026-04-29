@@ -16,6 +16,7 @@ import { inputRulesExt } from './cm/inputRules'
 import { inlineToolbarExt } from './cm/inlineToolbar'
 import { livePreviewExt } from './cm/livePreview'
 import { ghostCompletionExt } from './cm/ghostCompletion'
+import { linkSuggestExt } from './cm/linkSuggest'
 import { getRegistry } from '../../../host/shellRegistry'
 import { ContextMenu } from '../../../shell/ContextMenu'
 import { buildTabContextMenu } from './TabContextMenu'
@@ -827,6 +828,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
               inputRulesExt(),
               inlineToolbarExt(),
               ghostCompletionExt(),
+              linkSuggestExt(),
             ]
             return tab.mode === 'live' ? [...base, livePreviewExt()] : base
           }}

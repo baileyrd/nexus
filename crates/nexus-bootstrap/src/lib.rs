@@ -627,6 +627,12 @@ fn register_core_plugins(
                 "AI",
                 LifecycleFlags {
                     on_init: true,
+                    // BL-041 — gracefully tear down the background
+                    // indexing daemon on shutdown. (`on_start` stays
+                    // false; the daemon is spawned from
+                    // `wire_context` because that's the first hook
+                    // with the kernel context in hand.)
+                    on_stop: true,
                     ..LifecycleFlags::NONE
                 },
                 &[
@@ -665,6 +671,31 @@ fn register_core_plugins(
                     (
                         "set_config",
                         nexus_ai::core_plugin::HANDLER_SET_CONFIG,
+                    ),
+                    (
+                        "semantic_search",
+                        nexus_ai::core_plugin::HANDLER_SEMANTIC_SEARCH,
+                    ),
+                    // BL-041 — background indexing daemon status
+                    // snapshot. Polled by the shell status badge
+                    // (~2 s cadence) and surfaced through `nexus
+                    // status` for headless use.
+                    (
+                        "index_status",
+                        nexus_ai::core_plugin::HANDLER_INDEX_STATUS,
+                    ),
+                    // BL-045 — auto-enrichment on save. `enrich_file`
+                    // proposes tags + summary + related notes for a
+                    // markdown file (no write); `enrich_apply` merges
+                    // a previously-returned proposal into the file's
+                    // YAML frontmatter (with a body-hash drift guard).
+                    (
+                        "enrich_file",
+                        nexus_ai::core_plugin::HANDLER_ENRICH_FILE,
+                    ),
+                    (
+                        "enrich_apply",
+                        nexus_ai::core_plugin::HANDLER_ENRICH_APPLY,
                     ),
                 ],
             ),
@@ -734,10 +765,14 @@ fn register_core_plugins(
                     ("reload", nexus_workflow::HANDLER_RELOAD),
                     ("validate", nexus_workflow::HANDLER_VALIDATE),
                     ("run", nexus_workflow::HANDLER_RUN),
+                    ("run_digest", nexus_workflow::HANDLER_RUN_DIGEST),
                 ],
             ),
             forge_root,
-            Box::new(WorkflowCorePlugin::open(workflows_dir)),
+            Box::new(WorkflowCorePlugin::open_with_digest_config(
+                workflows_dir,
+                load_digest_config(forge_root),
+            )),
         )
         .context("failed to register com.nexus.workflow")?;
 
@@ -1038,3 +1073,31 @@ impl CorePlugin for InvokerPlugin {
 const _: fn() = || {
     let _: Option<KernelPluginError> = None;
 };
+
+/// Load the BL-047 `[digests]` block from `<forge>/.forge/config.toml`.
+///
+/// Missing file, missing block, or any parse / IO error all fall back
+/// to [`nexus_workflow::DigestConfig::default`] (digests disabled).
+/// This keeps existing forges working with no config changes.
+fn load_digest_config(forge_root: &std::path::Path) -> nexus_workflow::DigestConfig {
+    #[derive(serde::Deserialize)]
+    struct Wrapper {
+        #[serde(default)]
+        digests: Option<nexus_workflow::DigestConfig>,
+    }
+    let path = forge_root.join(".forge").join("config.toml");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return nexus_workflow::DigestConfig::default();
+    };
+    match toml::from_str::<Wrapper>(&text) {
+        Ok(w) => w.digests.unwrap_or_default(),
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "config.toml: [digests] failed to parse; falling back to defaults"
+            );
+            nexus_workflow::DigestConfig::default()
+        }
+    }
+}

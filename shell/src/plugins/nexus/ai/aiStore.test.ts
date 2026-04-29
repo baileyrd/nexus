@@ -414,6 +414,7 @@ test('Slice C: loadSession replaces turns + sets activeSessionId', async () => {
           streamedText: '',
           finalText: 'hi there',
           sources: [{ path: 'doc.md' }],
+          citations: [],
           error: null,
         },
       ],

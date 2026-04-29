@@ -15,6 +15,7 @@ regex-lite = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -43,3 +44,6 @@ ts-export = ["dep:ts-rs", "dep:schemars"]
 # loader path. Bundled-prebuilt-ORT users can override fastembed's
 # feature set in their downstream Cargo profile if desired.
 local-embeddings = ["dep:fastembed", "dep:dashmap", "dep:xxhash-rust"]
+
+[dev-dependencies]
+tempfile = { workspace = true }

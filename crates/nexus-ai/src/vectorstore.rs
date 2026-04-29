@@ -11,6 +11,11 @@ use std::time::Duration;
 use nexus_kernel::{KernelPluginContext, PluginContext};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 use crate::error::AiError;
 
 /// Plugin id of the storage core plugin.
@@ -35,6 +40,14 @@ pub struct ChunkEmbedding {
 
 /// A search hit from the vector store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 pub struct ChunkMatch {
     /// Path of the source file.
     pub file_path: String,

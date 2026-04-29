@@ -41,9 +41,9 @@ use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Deserialize;
 
 use crate::{
-    condition_skipped_run, cron::CronSchedule, evaluate_condition, parse_workflow_text,
-    run_workflow_with_variables, ActionDispatcher, EvaluationContext, Step, VariableMap, Workflow,
-    WorkflowRegistry, WorkflowRegistryError,
+    condition_skipped_run, cron::CronSchedule, digests, evaluate_condition, parse_workflow_text,
+    run_workflow_with_variables, ActionDispatcher, DigestConfig, DigestKind, EvaluationContext,
+    Step, VariableMap, Workflow, WorkflowRegistry, WorkflowRegistryError,
 };
 
 /// Reverse-DNS identifier.
@@ -59,6 +59,8 @@ pub const HANDLER_RELOAD: u32 = 3;
 pub const HANDLER_VALIDATE: u32 = 4;
 /// `run` handler id.
 pub const HANDLER_RUN: u32 = 5;
+/// `run_digest` handler id (BL-047).
+pub const HANDLER_RUN_DIGEST: u32 = 6;
 
 /// Default per-step tool-call timeout. Workflow steps often span
 /// multiple plugins; give them enough headroom.
@@ -74,6 +76,10 @@ pub struct WorkflowCorePlugin {
     /// Cancelled on plugin drop so the scheduler doesn't outlive the
     /// process.
     scheduler_handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// BL-047 digest configuration. Loaded from
+    /// `<forge>/.forge/config.toml` `[digests]` table when present;
+    /// falls back to [`DigestConfig::default`] (disabled) otherwise.
+    digest_config: DigestConfig,
 }
 
 impl WorkflowCorePlugin {
@@ -82,6 +88,17 @@ impl WorkflowCorePlugin {
     /// `warn` and the registry starts with whatever parsed cleanly.
     #[must_use]
     pub fn open(workflows_dir: PathBuf) -> Self {
+        Self::open_with_digest_config(workflows_dir, DigestConfig::default())
+    }
+
+    /// Like [`open`](Self::open) but with a caller-supplied
+    /// [`DigestConfig`]. Bootstrap loads the config from
+    /// `<forge>/.forge/config.toml` and passes it here.
+    #[must_use]
+    pub fn open_with_digest_config(
+        workflows_dir: PathBuf,
+        digest_config: DigestConfig,
+    ) -> Self {
         let registry = match WorkflowRegistry::load(&workflows_dir) {
             Ok(reg) => reg,
             Err(WorkflowRegistryError::PartialParseFailure { count, first }) => {
@@ -111,6 +128,7 @@ impl WorkflowCorePlugin {
             registry: Mutex::new(registry),
             context: None,
             scheduler_handles: Mutex::new(Vec::new()),
+            digest_config,
         }
     }
 
@@ -218,6 +236,80 @@ impl WorkflowCorePlugin {
             });
             handles.push(handle);
         }
+    }
+}
+
+impl WorkflowCorePlugin {
+    /// Spawn the BL-047 digest scheduler. Wakes every 60s, computes
+    /// the next fire across daily / weekly schedules, and dispatches
+    /// `run_digest` via the plugin's own IPC handler when it falls
+    /// due. Disabled when [`DigestConfig::enabled`] is `false`.
+    ///
+    /// The task is held in `scheduler_handles` alongside the cron and
+    /// file-event triggers so plugin drop aborts everything together.
+    fn spawn_digest_scheduler(&self, ctx: &Arc<KernelPluginContext>) {
+        if !self.digest_config.enabled {
+            tracing::debug!("digest scheduler: disabled by config; not spawning");
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!("digest scheduler: no tokio runtime available; disabled");
+            return;
+        };
+        let cfg = self.digest_config.clone();
+        let ctx = Arc::clone(ctx);
+        let Ok(mut handles) = self.scheduler_handles.lock() else {
+            return;
+        };
+        tracing::info!(
+            daily = ?cfg.daily_cron,
+            weekly = ?cfg.weekly_cron,
+            "digest scheduler armed"
+        );
+        let handle = runtime.spawn(async move {
+            digest_scheduler_loop(ctx, cfg).await;
+        });
+        handles.push(handle);
+    }
+}
+
+async fn digest_scheduler_loop(ctx: Arc<KernelPluginContext>, cfg: DigestConfig) {
+    use std::time::Duration;
+    loop {
+        let now = chrono::Utc::now();
+        let Some((kind, next)) = digests::next_fire(&cfg, now) else {
+            tracing::warn!("digest scheduler: no schedules; parking");
+            tokio::time::sleep(Duration::from_secs(86_400)).await;
+            continue;
+        };
+        let wait = (next - now).to_std().unwrap_or(Duration::ZERO);
+        // Cap to 60s so we re-evaluate (config may change, clock skew).
+        let nap = wait.min(Duration::from_secs(60));
+        tokio::time::sleep(nap).await;
+        if chrono::Utc::now() < next {
+            continue;
+        }
+        let kind_str = match kind {
+            DigestKind::Daily => "daily",
+            DigestKind::Weekly => "weekly",
+        };
+        let call = ctx
+            .ipc_call(
+                PLUGIN_ID,
+                "run_digest",
+                serde_json::json!({ "kind": kind_str }),
+                Duration::from_secs(600),
+            )
+            .await;
+        match call {
+            Ok(_) => tracing::info!(?kind, "digest scheduler fired"),
+            Err(err) => {
+                tracing::warn!(?kind, %err, "digest scheduler: run failed; continuing");
+            }
+        }
+        // Sleep a minute past the fire time so we don't re-fire the
+        // same minute boundary repeatedly.
+        tokio::time::sleep(Duration::from_secs(61)).await;
     }
 }
 
@@ -465,6 +557,9 @@ impl CorePlugin for WorkflowCorePlugin {
                     "handler {HANDLER_RUN}: run is async; caller should use dispatch_async"
                 ),
             )),
+            HANDLER_RUN_DIGEST => Err(exec_err(format!(
+                "handler {HANDLER_RUN_DIGEST}: run_digest is async; caller should use dispatch_async"
+            ))),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -474,6 +569,27 @@ impl CorePlugin for WorkflowCorePlugin {
         handler_id: u32,
         args: &serde_json::Value,
     ) -> Option<CorePluginFuture> {
+        if handler_id == HANDLER_RUN_DIGEST {
+            let ctx = self.context.clone();
+            let cfg = self.digest_config.clone();
+            let args = args.clone();
+            return Some(Box::pin(async move {
+                let ctx = ctx.ok_or_else(|| {
+                    exec_err(
+                        "workflow plugin context not wired (bootstrap incomplete)".into(),
+                    )
+                })?;
+                let kind_str = args
+                    .get("kind")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| exec_err("run_digest: missing 'kind'".into()))?;
+                let kind = DigestKind::from_str(kind_str).map_err(exec_err)?;
+                let report = digests::run_digest(&ctx, &cfg, kind, chrono::Utc::now())
+                    .await
+                    .map_err(|e| exec_err(format!("run_digest: {e}")))?;
+                to_value(&report, "run_digest")
+            }));
+        }
         if handler_id != HANDLER_RUN {
             return None;
         }
@@ -529,6 +645,7 @@ impl CorePlugin for WorkflowCorePlugin {
         self.context = Some(Arc::clone(&ctx));
         self.spawn_cron_schedulers(&ctx);
         self.spawn_file_event_triggers(&ctx);
+        self.spawn_digest_scheduler(&ctx);
     }
 }
 

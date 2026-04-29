@@ -48,6 +48,8 @@ import { allPropertiesPlugin } from './nexus/allProperties'
 import { graphPlugin } from './nexus/graph'
 import { graphGlobalPlugin } from './nexus/graph/globalIndex'
 import { searchPlugin } from './nexus/search'
+import { semanticSearchPlugin } from './nexus/semanticSearch'
+import { linkSuggestPlugin } from './nexus/linkSuggest'
 import { workflowPlugin } from './nexus/workflow'
 import { skillsPlugin } from './nexus/skills'
 import { mcpPlugin } from './nexus/mcp'
@@ -64,6 +66,8 @@ import { processesPlugin } from './nexus/processes'
 import { statusBarPlugin } from './nexus/statusBar'
 import { extensionsTabPlugin } from './nexus/extensionsTab'
 import { memoryPlugin } from './nexus/memory'
+import { recallPlugin } from './nexus/recall'
+import { enrichPlugin } from './nexus/enrich'
 
 // ── Community plugins (BL-008+) — directory location matches the
 // community-plugin layout, but registration goes through the catalog
@@ -125,12 +129,34 @@ export const DEFAULT_ON_PLUGINS: Registered[] = [
 ]
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Default-off set (15) — shipped but dormant. Enable per-row from
+// Default-off set (16) — shipped but dormant. Enable per-row from
 // Settings > Plugins; enabled ids are persisted into the
 // `plugins.enabled: string[]` config value and picked up on next boot.
 // ──────────────────────────────────────────────────────────────────────────────
 export const DEFAULT_OFF_PLUGINS: Registered[] = [
   aiPlugin,
+  // BL-040 — palette-only "Search by Meaning" surface. Default-off
+  // because it depends on the AI plugin's embedding provider being
+  // configured; pairing the two enabled-states keeps the user from
+  // seeing the command before the backend can answer it.
+  semanticSearchPlugin,
+  // BL-039 — inline AI link suggestions. Default-off for the same
+  // reason as semanticSearchPlugin: it depends on the AI plugin's
+  // embedding provider being configured. Pairing the enabled-states
+  // keeps the user from seeing dead suggestions before the backend
+  // can answer.
+  linkSuggestPlugin,
+  // BL-044 — Cmd+Shift+R recall overlay. Default-off for the same
+  // reason as semanticSearchPlugin / linkSuggestPlugin: requires the
+  // AI plugin's embedding provider to be configured. Pairs naturally
+  // with `nexus.memory` (BL-043) which owns the inbox path the
+  // recall overlay scopes against.
+  recallPlugin,
+  // BL-045 — auto-enrichment on save. Default-off because it issues
+  // an AI chat call + an embedding+vector lookup per saved markdown
+  // file (throttled to 5 s per-file). Requires both an AI chat
+  // provider and an embedding provider to be configured.
+  enrichPlugin,
   agentPlugin,
   mcpPlugin,
   workflowPlugin,
