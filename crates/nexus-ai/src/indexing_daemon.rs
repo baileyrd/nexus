@@ -396,6 +396,16 @@ impl IndexingDaemon {
         }
     }
 
+    /// Clone the queue's sender so an external caller (e.g. the
+    /// `index_trigger` IPC handler — FU-2) can fan a forge walk into
+    /// the existing debouncer without holding `&self` across an
+    /// async await. Returns `None` after [`Self::stop`] has been
+    /// called.
+    #[must_use]
+    pub fn sender_handle(&self) -> Option<mpsc::UnboundedSender<DaemonMsg>> {
+        self.msg_tx.clone()
+    }
+
     /// Signal shutdown and join the worker. Idempotent.
     pub fn stop(&mut self) {
         self.shutdown.store(true, Ordering::SeqCst);

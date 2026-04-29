@@ -697,6 +697,15 @@ fn register_core_plugins(
                         "enrich_apply",
                         nexus_ai::core_plugin::HANDLER_ENRICH_APPLY,
                     ),
+                    // FU-2 — manual "Reindex forge" trigger. Fans
+                    // every markdown file currently in the storage
+                    // index onto the indexing daemon's queue. Used
+                    // by the shell's status badge button + palette
+                    // command.
+                    (
+                        "index_trigger",
+                        nexus_ai::core_plugin::HANDLER_INDEX_TRIGGER,
+                    ),
                 ],
             ),
             forge_root,
