@@ -3,6 +3,12 @@
 // BL-038 — pure helpers for the [N] → superscript citation transform
 // used by the chat view. Split out of ChatView.tsx so node:test can
 // exercise the splitter without pulling in React + chat.css.
+//
+// FU-3: substitution runs over already-rendered HTML, skipping
+// `<pre>`, `<code>`, and the `nexus-fenced-pending` placeholder
+// regions emitted by the fenced-code renderer patch. Operating on
+// rendered HTML (rather than the raw markdown source) means
+// `[1]` literals inside fenced code blocks survive verbatim.
 
 import { renderMarkdown } from '../editor/markdownRender'
 
@@ -36,72 +42,66 @@ export function splitTextOnCitations(text: string, valid: Set<number>): Citation
   return out
 }
 
+// Regions of the rendered HTML that must be skipped during citation
+// substitution. Order matters only for the alternation; each
+// alternative is non-greedy. `marked` always emits well-formed
+// `<pre>` and `<code>` blocks, and the fenced-code renderer emits a
+// self-closing `nexus-fenced-pending` `<div>` placeholder whose
+// source is base64-encoded (so any `[N]` in the source can't
+// accidentally match here).
+const SKIP_REGION_RE =
+  /<pre\b[\s\S]*?<\/pre>|<code\b[\s\S]*?<\/code>|<div class="nexus-fenced-pending"[^>]*><\/div>/gi
+
+const CITATION_RE = /\[(\d+)\]/g
+
+function substituteOutsideSkip(html: string, valid: Set<number>): string {
+  return html.replace(CITATION_RE, (full, raw: string) => {
+    const n = Number(raw)
+    if (!valid.has(n)) return full
+    return (
+      `<sup class="nexus-citation" data-cite="${n}" ` +
+      `role="button" tabindex="0">[${n}]</sup>`
+    )
+  })
+}
+
 /**
- * Replace `[N]` markers in the rendered HTML with clickable superscript
- * chips, leaving `<code>` and `<pre>` regions untouched. The shell
- * binds a delegated click handler to `.nexus-citation` to dispatch
+ * Replace `[N]` markers in the rendered HTML with clickable
+ * superscript chips, leaving `<code>`, `<pre>`, and
+ * `nexus-fenced-pending` regions untouched. The shell binds a
+ * delegated click handler to `.nexus-citation` to dispatch
  * `onCitationClick`.
  *
- * `validIndices` is the set of citation indices the kernel attached to
- * this turn. `[N]` markers whose N isn't in the set are left as plain
- * text.
- *
- * Falls back to the unmodified rendered markdown when `DOMParser`
- * isn't available (node:test); production always has it via the
- * browser.
+ * `validIndices` is the set of citation indices the kernel attached
+ * to this turn. `[N]` markers whose N isn't in the set are left as
+ * plain text.
  */
 export function renderMarkdownWithCitations(source: string, validIndices: Set<number>): string {
   const baseHtml = renderMarkdown(source)
-  if (typeof DOMParser === 'undefined') return baseHtml
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(`<div>${baseHtml}</div>`, 'text/html')
-  const root = doc.body.firstElementChild as HTMLElement | null
-  if (!root) return baseHtml
-  walkAndReplaceCitations(root, validIndices, doc)
-  return root.innerHTML
+  if (validIndices.size === 0) return baseHtml
+  return substituteCitationsInHtml(baseHtml, validIndices)
 }
 
-function walkAndReplaceCitations(
-  node: Element,
-  valid: Set<number>,
-  doc: Document,
-): void {
-  const skip = new Set(['CODE', 'PRE'])
-  const children = Array.from(node.childNodes)
-  for (const child of children) {
-    if (child.nodeType === 3 /* TEXT */) {
-      const text = child.nodeValue ?? ''
-      if (!text.includes('[')) continue
-      const replacement = buildCitationFragment(text, valid, doc)
-      if (replacement) node.replaceChild(replacement, child)
-    } else if (child.nodeType === 1 /* ELEMENT */) {
-      const el = child as Element
-      if (skip.has(el.tagName)) continue
-      walkAndReplaceCitations(el, valid, doc)
+/**
+ * Visible-for-testing variant: takes already-rendered HTML and
+ * applies the citation substitution. Lets node:test exercise the
+ * skip-region behaviour without instantiating a DOM.
+ */
+export function substituteCitationsInHtml(html: string, valid: Set<number>): string {
+  if (valid.size === 0) return html
+  let out = ''
+  let cursor = 0
+  SKIP_REGION_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = SKIP_REGION_RE.exec(html)) !== null) {
+    if (m.index > cursor) {
+      out += substituteOutsideSkip(html.slice(cursor, m.index), valid)
     }
+    out += m[0]
+    cursor = m.index + m[0].length
   }
-}
-
-function buildCitationFragment(
-  text: string,
-  valid: Set<number>,
-  doc: Document,
-): DocumentFragment | null {
-  const segments = splitTextOnCitations(text, valid)
-  if (segments.length === 1 && typeof segments[0] === 'string') return null
-  const frag = doc.createDocumentFragment()
-  for (const seg of segments) {
-    if (typeof seg === 'string') {
-      frag.appendChild(doc.createTextNode(seg))
-    } else {
-      const sup = doc.createElement('sup')
-      sup.className = 'nexus-citation'
-      sup.dataset.cite = String(seg.cite)
-      sup.setAttribute('role', 'button')
-      sup.setAttribute('tabindex', '0')
-      sup.textContent = `[${seg.cite}]`
-      frag.appendChild(sup)
-    }
+  if (cursor < html.length) {
+    out += substituteOutsideSkip(html.slice(cursor), valid)
   }
-  return frag
+  return out
 }
