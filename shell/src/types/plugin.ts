@@ -154,6 +154,15 @@ export interface PluginAPI {
   storage: StorageAPI
   statusBar: StatusBarAPI
   configuration: ConfigurationAPI
+  /**
+   * Live-rebind keybinding overrides on behalf of the calling plugin
+   * (FU-9). Pushes are tagged with the plugin id; on plugin unload,
+   * `PluginRegistry.unregisterAll` clears any override the plugin
+   * pushed UNLESS the user has since changed it via the Settings UI.
+   * Mirrors `KeybindingRegistry.setOverride/clearOverride` (which the
+   * Settings UI continues to use directly for user-driven edits).
+   */
+  keybindings: KeybindingsAPI
   notifications: NotificationsAPI
   fs: FilesystemAPI
   kernel: KernelAPI
@@ -303,6 +312,20 @@ export interface ConfigurationAPI {
   getValue<T>(key: string, defaultValue: T): T
   setValue(key: string, value: unknown): void
   onChange(key: string, handler: (newValue: unknown) => void): () => void
+}
+
+export interface KeybindingsAPI {
+  /**
+   * Apply or replace the active chord for `commandId` at runtime. The
+   * override is normalised, persisted via the registry's storage
+   * adapter, and tagged internally so plugin deactivation can sweep it.
+   */
+  setOverride(commandId: string, chord: string): Promise<void>
+  /**
+   * Drop the override the plugin previously pushed for `commandId`,
+   * reverting to the manifest default. No-ops when nothing is set.
+   */
+  clearOverride(commandId: string): Promise<void>
 }
 
 export interface NotificationsAPI {

@@ -123,6 +123,10 @@ function makeApi(overrides: Partial<PluginAPI> = {}): PluginAPI {
       setValue: unused('configuration.setValue'),
       onChange: unused('configuration.onChange'),
     },
+    keybindings: {
+      setOverride: unused('keybindings.setOverride'),
+      clearOverride: unused('keybindings.clearOverride'),
+    },
     notifications: { show: unused('notifications.show') },
     fs: {
       read: unused('fs.read'),

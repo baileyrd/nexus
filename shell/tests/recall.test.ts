@@ -10,3 +10,4 @@
 import '../src/plugins/nexus/recall/recallStore.test.ts'
 import '../src/plugins/nexus/recall/insertFormat.test.ts'
 import '../src/plugins/nexus/recall/recallRuntime.test.ts'
+import '../src/plugins/nexus/recall/recallHotkey.test.ts'

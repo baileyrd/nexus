@@ -234,6 +234,20 @@ export function buildPluginAPI(
       },
     },
 
+    // ─── Keybindings (FU-9) ────────────────────────────────────────────────
+    // Live-rebind facade. Every push is tagged with `pluginId` inside
+    // `PluginRegistry` so plugin deactivation can sweep this plugin's
+    // overrides without disturbing user-driven overrides set via the
+    // Settings UI.
+    keybindings: {
+      setOverride(commandId, chord) {
+        return registry.setKeybindingOverride(pluginId, commandId, chord)
+      },
+      clearOverride(commandId) {
+        return registry.clearKeybindingOverride(pluginId, commandId)
+      },
+    },
+
     // ─── Notifications ─────────────────────────────────────────────────────
     // Available after core.notification-service has loaded
     notifications: {

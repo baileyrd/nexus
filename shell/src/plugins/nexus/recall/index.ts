@@ -55,7 +55,7 @@ export const recallPlugin: Plugin = {
             description:
               'In-window keybinding that opens the recall overlay. ' +
               'CodeMirror parlance, e.g. "Mod-Shift-r". ' +
-              'Reload required after editing.',
+              'Changes apply immediately; clear to revert to the default.',
             type: 'string' as const,
             default: 'Mod-Shift-r',
           },
@@ -108,6 +108,24 @@ export const recallPlugin: Plugin = {
         api.context.set(CONTEXT_KEY_VISIBLE, state.visible)
       }
     })
+
+    // FU-9 — live-rebind the open-overlay hotkey when the user edits
+    // `recall.hotkey` in settings. Apply the persisted value once at
+    // activate so a value carried over from a previous session takes
+    // effect immediately, then update on every change. A blank value
+    // clears the override and reverts to the manifest default.
+    const applyHotkey = (val: unknown) => {
+      if (typeof val === 'string' && val.trim().length > 0) {
+        void api.keybindings.setOverride(COMMAND_OPEN, val.trim())
+      } else {
+        void api.keybindings.clearOverride(COMMAND_OPEN)
+      }
+    }
+    const persisted = api.configuration.getValue<string | null>(CONFIG_HOTKEY, null)
+    if (typeof persisted === 'string' && persisted.length > 0) {
+      applyHotkey(persisted)
+    }
+    api.configuration.onChange(CONFIG_HOTKEY, applyHotkey)
 
     api.views.register(VIEW_ID_OVERLAY, {
       slot: 'overlay',

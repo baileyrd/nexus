@@ -34,6 +34,17 @@ export class PluginRegistry {
   // and the Rust-side forwarder tasks get torn down.
   private subscriptions = new Map<string, Set<() => void>>()
 
+  // Per-plugin keybinding override tags (FU-9). Records `commandId →
+  // { pluginId, chord }` for every override pushed via the
+  // `api.keybindings.setOverride` facade. On plugin deactivate we clear
+  // only those whose tag pluginId matches AND whose currently-active
+  // override still equals the chord we set — so a Settings-UI override
+  // that landed on top of a plugin override is preserved.
+  private pluginKeybindingOverrides = new Map<
+    string,
+    { pluginId: string; chord: string }
+  >()
+
   // ─── Ownership tracking ──────────────────────────────────────────────────
 
   track(pluginId: string, contributionKey: string) {
@@ -53,6 +64,43 @@ export class PluginRegistry {
       this.subscriptions.set(pluginId, new Set())
     }
     this.subscriptions.get(pluginId)!.add(unsubscribe)
+  }
+
+  /**
+   * Push a keybinding override on behalf of `pluginId` and tag it so
+   * `unregisterAll` can sweep it on plugin unload. The chord is
+   * recorded as the registry stored it (post-normalisation), so
+   * `unregisterAll` can detect when a Settings-UI override has since
+   * replaced ours and skip clearing in that case.
+   */
+  async setKeybindingOverride(
+    pluginId: string,
+    commandId: string,
+    chord: string,
+  ): Promise<void> {
+    await this.keybindings.setOverride(commandId, chord)
+    const stored = this.keybindings.getOverride(commandId)
+    if (stored !== undefined) {
+      this.pluginKeybindingOverrides.set(commandId, { pluginId, chord: stored })
+    }
+  }
+
+  /**
+   * Drop the plugin-tagged override for `commandId`. Only clears the
+   * registry entry when the tag's pluginId matches the caller — calls
+   * from a different plugin (or the Settings UI's untagged path) are
+   * a no-op for the tag side; the registry-level clear still runs so
+   * the plugin can revert its own contribution.
+   */
+  async clearKeybindingOverride(
+    pluginId: string,
+    commandId: string,
+  ): Promise<void> {
+    const tag = this.pluginKeybindingOverrides.get(commandId)
+    if (tag && tag.pluginId === pluginId) {
+      this.pluginKeybindingOverrides.delete(commandId)
+    }
+    await this.keybindings.clearOverride(commandId)
   }
 
   /**
@@ -102,6 +150,19 @@ export class PluginRegistry {
         }
       }
       this.subscriptions.delete(pluginId)
+    }
+
+    // Sweep keybinding overrides this plugin pushed (FU-9). Settings-UI
+    // overrides for the same command — recognised by the active override
+    // no longer matching the chord we recorded — are left in place.
+    for (const [commandId, tag] of [...this.pluginKeybindingOverrides]) {
+      if (tag.pluginId !== pluginId) continue
+      this.pluginKeybindingOverrides.delete(commandId)
+      if (this.keybindings.getOverride(commandId) === tag.chord) {
+        // Fire-and-forget: persistence inside `clearOverride` is async
+        // but unload is sync; errors are logged by the registry.
+        void this.keybindings.clearOverride(commandId)
+      }
     }
 
     // Belt-and-braces: sweep any URI handlers still owned by the plugin.

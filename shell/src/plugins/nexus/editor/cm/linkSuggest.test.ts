@@ -19,12 +19,25 @@ import assert from 'node:assert/strict'
 
 const {
   setSuggestion,
+  cycleSuggestion,
   suggestionField,
+  activeCandidate,
   extractPhrase,
   isInSkipZone,
   basenameNoExt,
   buildReplacement,
 } = __test__
+
+const candidate = (
+  replacement: string,
+  overrides: Partial<{ from: number; to: number; phrase: string; requestId: number }> = {},
+) => ({
+  from: overrides.from ?? 4,
+  to: overrides.to ?? 11,
+  phrase: overrides.phrase ?? 'foo bar',
+  replacement,
+  requestId: overrides.requestId ?? 1,
+})
 
 function makeState(doc: string, headPos: number = doc.length): EditorState {
   return EditorState.create({
@@ -156,27 +169,21 @@ test('setSuggestion effect populates the field', () => {
   const state = makeState('see foo bar')
   const tr = state.update({
     effects: setSuggestion.of({
-      from: 4,
-      to: 11,
-      phrase: 'foo bar',
-      replacement: '[[Foo Bar|foo bar]]',
-      requestId: 1,
+      candidates: [candidate('[[Foo Bar|foo bar]]')],
+      index: 0,
     }),
   })
   const sug = tr.state.field(suggestionField)
   assert.ok(sug)
-  assert.equal(sug?.replacement, '[[Foo Bar|foo bar]]')
+  assert.equal(activeCandidate(sug)?.replacement, '[[Foo Bar|foo bar]]')
 })
 
 test('a doc change invalidates the suggestion', () => {
   let state = makeState('see foo bar')
   state = state.update({
     effects: setSuggestion.of({
-      from: 4,
-      to: 11,
-      phrase: 'foo bar',
-      replacement: '[[Foo Bar|foo bar]]',
-      requestId: 1,
+      candidates: [candidate('[[Foo Bar|foo bar]]')],
+      index: 0,
     }),
   }).state
   state = state.update({ changes: { from: 11, to: 11, insert: 'X' } }).state
@@ -187,11 +194,8 @@ test('a selection move invalidates the suggestion', () => {
   let state = makeState('see foo bar')
   state = state.update({
     effects: setSuggestion.of({
-      from: 4,
-      to: 11,
-      phrase: 'foo bar',
-      replacement: '[[Foo Bar|foo bar]]',
-      requestId: 1,
+      candidates: [candidate('[[Foo Bar|foo bar]]')],
+      index: 0,
     }),
   }).state
   state = state.update({ selection: EditorSelection.cursor(0) }).state
@@ -202,11 +206,8 @@ test('explicit setSuggestion(null) clears the field', () => {
   let state = makeState('see foo bar')
   state = state.update({
     effects: setSuggestion.of({
-      from: 4,
-      to: 11,
-      phrase: 'foo bar',
-      replacement: '[[Foo|foo bar]]',
-      requestId: 9,
+      candidates: [candidate('[[Foo|foo bar]]', { requestId: 9 })],
+      index: 0,
     }),
   }).state
   state = state.update({ effects: setSuggestion.of(null) }).state
@@ -221,18 +222,81 @@ test('accepting a suggestion replaces the phrase with the wiki-link form', () =>
   // dispatch and assert the resulting doc / caret.
   const doc = 'see foo bar'
   let state = makeState(doc, doc.length)
-  const sug = {
-    from: 4,
-    to: 11,
-    phrase: 'foo bar',
-    replacement: '[[Foo Bar|foo bar]]',
-    requestId: 1,
-  }
-  state = state.update({ effects: setSuggestion.of(sug) }).state
+  const c = candidate('[[Foo Bar|foo bar]]')
+  state = state.update({ effects: setSuggestion.of({ candidates: [c], index: 0 }) }).state
   state = state.update({
-    changes: { from: sug.from, to: sug.to, insert: sug.replacement },
-    selection: EditorSelection.cursor(sug.from + sug.replacement.length),
+    changes: { from: c.from, to: c.to, insert: c.replacement },
+    selection: EditorSelection.cursor(c.from + c.replacement.length),
   }).state
   assert.equal(state.doc.toString(), 'see [[Foo Bar|foo bar]]')
   assert.equal(state.selection.main.head, 'see [[Foo Bar|foo bar]]'.length)
+})
+
+// ── FU-8: cycle index advance + wrap ─────────────────────────────────────────
+
+test('cycleSuggestion advances the index 0→1→2→0 with three candidates', () => {
+  let state = makeState('see foo bar')
+  const candidates = [
+    candidate('[[Alpha|foo bar]]'),
+    candidate('[[Bravo|foo bar]]'),
+    candidate('[[Charlie|foo bar]]'),
+  ]
+  state = state.update({ effects: setSuggestion.of({ candidates, index: 0 }) }).state
+  assert.equal(activeCandidate(state.field(suggestionField))?.replacement, '[[Alpha|foo bar]]')
+
+  state = state.update({ effects: cycleSuggestion.of() }).state
+  assert.equal(activeCandidate(state.field(suggestionField))?.replacement, '[[Bravo|foo bar]]')
+
+  state = state.update({ effects: cycleSuggestion.of() }).state
+  assert.equal(activeCandidate(state.field(suggestionField))?.replacement, '[[Charlie|foo bar]]')
+
+  state = state.update({ effects: cycleSuggestion.of() }).state
+  assert.equal(
+    activeCandidate(state.field(suggestionField))?.replacement,
+    '[[Alpha|foo bar]]',
+    'cycle wraps from the last candidate back to the first',
+  )
+})
+
+test('cycleSuggestion is a no-op when there is no mounted suggestion', () => {
+  let state = makeState('see foo bar')
+  state = state.update({ effects: cycleSuggestion.of() }).state
+  assert.equal(state.field(suggestionField), null)
+})
+
+test('a doc edit resets the cycle (clears the candidate list)', () => {
+  let state = makeState('see foo bar')
+  const candidates = [
+    candidate('[[Alpha|foo bar]]'),
+    candidate('[[Bravo|foo bar]]'),
+  ]
+  state = state.update({ effects: setSuggestion.of({ candidates, index: 1 }) }).state
+  assert.equal(activeCandidate(state.field(suggestionField))?.replacement, '[[Bravo|foo bar]]')
+  // Any non-cycle mutation flushes the cycle, mirroring the spec —
+  // typing pulls a fresh ranker pass.
+  state = state.update({ changes: { from: 11, to: 11, insert: 's' } }).state
+  assert.equal(state.field(suggestionField), null)
+})
+
+test('accepting picks the visible candidate, not always the top-ranked', () => {
+  const doc = 'see foo bar'
+  let state = makeState(doc, doc.length)
+  const candidates = [
+    candidate('[[Alpha|foo bar]]'),
+    candidate('[[Bravo|foo bar]]'),
+    candidate('[[Charlie|foo bar]]'),
+  ]
+  // Cycle to index 2 ("Charlie"), then mirror the splice the
+  // acceptor would dispatch — the user's choice must win over the
+  // top-ranked Alpha.
+  state = state.update({ effects: setSuggestion.of({ candidates, index: 0 }) }).state
+  state = state.update({ effects: cycleSuggestion.of() }).state
+  state = state.update({ effects: cycleSuggestion.of() }).state
+  const visible = activeCandidate(state.field(suggestionField))!
+  assert.equal(visible.replacement, '[[Charlie|foo bar]]')
+  state = state.update({
+    changes: { from: visible.from, to: visible.to, insert: visible.replacement },
+    selection: EditorSelection.cursor(visible.from + visible.replacement.length),
+  }).state
+  assert.equal(state.doc.toString(), 'see [[Charlie|foo bar]]')
 })

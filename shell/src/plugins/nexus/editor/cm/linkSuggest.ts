@@ -9,9 +9,11 @@
 //          frontmatter, render a `[[basename|phrase]]` ghost widget
 //          starting at the phrase's beginning.
 //
-// Tab accepts (replaces the typed phrase with the wiki-link form).
-// Esc dismisses. Both bindings live at `Prec.high` so they don't
-// shadow normal Tab/Esc when no link suggestion is active. To avoid
+// Tab cycles through the top-N (≤3) candidates returned by the
+// ranker, wrapping 0→1→2→0; Enter accepts the currently-visible
+// candidate; Esc dismisses. With a single candidate Tab is a visual
+// no-op. All bindings live at `Prec.high` so they don't shadow
+// normal Tab/Enter/Esc when no link suggestion is mounted. To avoid
 // stomping on BL-034's inline AI ghost, we DEFER (skip the round trip
 // entirely) when a `ghostCompletion` suggestion is currently visible
 // for the same view.
@@ -69,28 +71,61 @@ export interface LinkSuggestion {
   requestId: number
 }
 
-const setSuggestion = StateEffect.define<LinkSuggestion | null>()
+/**
+ * Cycle-aware suggestion state. The ranker returns up to three
+ * candidates with the same `from/to/phrase/requestId` and differing
+ * `replacement`s; `index` tracks which one the ghost is currently
+ * showing. `index` advances on Tab and resets to 0 on every fresh
+ * fetch.
+ */
+export interface SuggestionState {
+  candidates: LinkSuggestion[]
+  index: number
+}
 
-const suggestionField = StateField.define<LinkSuggestion | null>({
+const setSuggestion = StateEffect.define<SuggestionState | null>()
+const cycleSuggestion = StateEffect.define<void>()
+
+const suggestionField = StateField.define<SuggestionState | null>({
   create: () => null,
   update(value, tr) {
-    // Any doc edit or selection move invalidates the suggestion —
-    // unless the same transaction carries a fresh setSuggestion
-    // (the fetcher dispatch path).
-    if (tr.docChanged || tr.selection) {
-      let next: LinkSuggestion | null = null
-      for (const e of tr.effects) {
-        if (e.is(setSuggestion)) next = e.value
-      }
-      return next
-    }
+    // Cycle effects don't carry a doc/selection mutation but we still
+    // want to honour them when a fresh setSuggestion is in the same
+    // transaction (the latter wins). Apply set first so cycle moves
+    // the index of the post-set state.
     let next = value
+    let didSet = false
     for (const e of tr.effects) {
-      if (e.is(setSuggestion)) next = e.value
+      if (e.is(setSuggestion)) {
+        next = e.value
+        didSet = true
+      }
+    }
+
+    // A doc edit or caret move with no setSuggestion piggy-backed
+    // invalidates the suggestion — the user typed/clicked, so the
+    // cycle resets along with the candidate list.
+    if (!didSet && (tr.docChanged || tr.selection)) {
+      return null
+    }
+
+    for (const e of tr.effects) {
+      if (e.is(cycleSuggestion) && next && next.candidates.length > 0) {
+        next = {
+          candidates: next.candidates,
+          index: (next.index + 1) % next.candidates.length,
+        }
+      }
     }
     return next
   },
 })
+
+/** Read the visible candidate (or `null` when none is mounted). */
+function activeCandidate(state: SuggestionState | null): LinkSuggestion | null {
+  if (!state || state.candidates.length === 0) return null
+  return state.candidates[state.index] ?? null
+}
 
 class LinkGhostWidget extends WidgetType {
   constructor(readonly text: string) {
@@ -123,7 +158,8 @@ class LinkGhostWidget extends WidgetType {
 // user is actively typing.
 const linkDecorations = EditorView.decorations.compute([suggestionField], (state) => {
   const sug = state.field(suggestionField)
-  if (!sug) return Decoration.none
+  const active = activeCandidate(sug)
+  if (!sug || !active) return Decoration.none
   // Render only the trailing portion the user hasn't typed yet —
   // i.e. everything in `replacement` that follows `phrase`. If the
   // replacement happens to start with `[[` and the phrase doesn't,
@@ -131,11 +167,17 @@ const linkDecorations = EditorView.decorations.compute([suggestionField], (state
   // `from`. Implementation choice: render the WHOLE replacement as a
   // single widget at `to` (after the caret). The user's typed phrase
   // stays committed; the ghost reads as the link form they would get.
+  // When more than one candidate is queued, append a small `(1/3)`
+  // counter so the user knows Tab will cycle.
+  const counter =
+    sug.candidates.length > 1
+      ? ` (${sug.index + 1}/${sug.candidates.length})`
+      : ''
   const widget = Decoration.widget({
-    widget: new LinkGhostWidget(' → ' + sug.replacement),
+    widget: new LinkGhostWidget(' → ' + active.replacement + counter),
     side: 1,
   })
-  return Decoration.set([widget.range(sug.to)])
+  return Decoration.set([widget.range(active.to)])
 })
 
 interface LinkSuggestSettings {
@@ -381,33 +423,59 @@ const ghostFetcher = ViewPlugin.fromClass(
       const currentSel = view.state.selection.main
       if (!currentSel.empty || currentSel.head !== caret) return
 
-      const top = result?.matches?.[0]
-      if (!top || top.score < settings.scoreGate) return
+      const matches = (result?.matches ?? []).filter(
+        (m) => m && typeof m.file_path === 'string' && m.score >= settings.scoreGate,
+      )
+      if (matches.length === 0) return
 
-      const replacement = buildReplacement(top.file_path, extracted.phrase)
-      view.dispatch({
-        effects: setSuggestion.of({
+      // Cap at three — the cycle is only useful when there are
+      // genuinely distinct alternatives, and a longer queue makes
+      // Tab feel unbounded. Drop duplicate `file_path` entries so
+      // the same target doesn't appear twice when the ranker
+      // returns multiple chunks from one file.
+      const seenPaths = new Set<string>()
+      const candidates: LinkSuggestion[] = []
+      for (const m of matches) {
+        if (seenPaths.has(m.file_path)) continue
+        seenPaths.add(m.file_path)
+        candidates.push({
           from: extracted.from,
           to: caret,
           phrase: extracted.phrase,
-          replacement,
+          replacement: buildReplacement(m.file_path, extracted.phrase),
           requestId,
-        }),
+        })
+        if (candidates.length === 3) break
+      }
+      view.dispatch({
+        effects: setSuggestion.of({ candidates, index: 0 }),
       })
     }
   },
 )
 
 function acceptSuggestion(view: EditorView): boolean {
-  const sug = view.state.field(suggestionField)
-  if (!sug) return false
+  const state = view.state.field(suggestionField)
+  const active = activeCandidate(state)
+  if (!active) return false
   const sel = view.state.selection.main
-  if (!sel.empty || sel.head !== sug.to) return false
+  if (!sel.empty || sel.head !== active.to) return false
   view.dispatch({
-    changes: { from: sug.from, to: sug.to, insert: sug.replacement },
-    selection: { anchor: sug.from + sug.replacement.length },
+    changes: { from: active.from, to: active.to, insert: active.replacement },
+    selection: { anchor: active.from + active.replacement.length },
     effects: setSuggestion.of(null),
   })
+  return true
+}
+
+function cycleNextSuggestion(view: EditorView): boolean {
+  const state = view.state.field(suggestionField)
+  if (!state || state.candidates.length === 0) return false
+  // With a single candidate there's nothing to cycle to — let Tab
+  // fall through to the default tab handler so editing still feels
+  // natural in that case.
+  if (state.candidates.length < 2) return false
+  view.dispatch({ effects: cycleSuggestion.of() })
   return true
 }
 
@@ -419,7 +487,11 @@ function dismissSuggestion(view: EditorView): boolean {
 }
 
 const linkSuggestKeymap = keymap.of([
-  { key: 'Tab', run: acceptSuggestion },
+  // Tab cycles when there is more than one candidate; Enter accepts
+  // the visible one. With a single candidate Tab falls through (the
+  // user can still accept via Enter).
+  { key: 'Tab', run: cycleNextSuggestion },
+  { key: 'Enter', run: acceptSuggestion },
   { key: 'Escape', run: dismissSuggestion },
 ])
 
@@ -436,9 +508,12 @@ export function linkSuggestExt(): Extension {
 
 export const __test__ = {
   setSuggestion,
+  cycleSuggestion,
   suggestionField,
   acceptSuggestion,
+  cycleNextSuggestion,
   dismissSuggestion,
+  activeCandidate,
   extractPhrase,
   isInSkipZone,
   basenameNoExt,
