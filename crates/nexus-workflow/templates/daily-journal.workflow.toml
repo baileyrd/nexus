@@ -1,0 +1,18 @@
+[workflow]
+name = "Daily Journal"
+description = "Create today's journal note from a cron schedule."
+version = "0.1.0"
+tags = ["journal", "cron", "starter"]
+
+[trigger]
+type = "cron"
+schedule = "0 9 * * *"
+
+[[steps]]
+name = "create-journal"
+type = "ipc"
+target = "com.nexus.storage"
+command = "write_file"
+[steps.args]
+path = "Journal/$(today).md"
+content = "# Journal — $(today)\n\n## Notes\n\n## Highlights\n\n## Tomorrow\n"

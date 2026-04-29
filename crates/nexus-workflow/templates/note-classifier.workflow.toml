@@ -1,0 +1,27 @@
+[workflow]
+name = "Note Classifier"
+description = "When a markdown note is saved, ask the AI to bucket it as journal, reference, or task."
+version = "0.1.0"
+tags = ["ai", "tagging", "file_event"]
+
+[trigger]
+type = "file_event"
+watch_dir = "Notes/"
+pattern = "\\.md$"
+events = ["created", "modified"]
+
+[[steps]]
+name = "classify"
+type = "ai_decision"
+prompt = "Read the note at ${trigger.path} and classify it as one of: journal, reference, or task."
+choices = ["journal", "reference", "task"]
+on_error = "continue"
+
+[[steps]]
+name = "record"
+type = "ipc"
+target = "com.nexus.kv"
+command = "set"
+[steps.args]
+key = "note-class:${trigger.path}"
+value = "${classify.choice}"

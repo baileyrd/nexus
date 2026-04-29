@@ -557,6 +557,36 @@ enum WorkflowCommand {
         /// Path to the workflow file
         file: PathBuf,
     },
+    /// Built-in workflow templates (BL-028f)
+    Template(WorkflowTemplateArgs),
+}
+
+#[derive(Parser)]
+struct WorkflowTemplateArgs {
+    #[command(subcommand)]
+    command: WorkflowTemplateCommand,
+}
+
+#[derive(Subcommand)]
+enum WorkflowTemplateCommand {
+    /// List every built-in template
+    List,
+    /// Print one template's TOML body to stdout
+    Show {
+        /// Template slug (kebab-case, e.g. `daily-journal`)
+        slug: String,
+    },
+    /// Instantiate a template into the forge's `.workflows/` directory
+    Init {
+        /// Template slug
+        slug: String,
+        /// Optional filename override (basename only, no path separators)
+        #[arg(long)]
+        as_file: Option<String>,
+        /// Overwrite an existing file at the target path
+        #[arg(long)]
+        overwrite: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1333,6 +1363,22 @@ fn main() {
             WorkflowCommand::Validate { file } => {
                 commands::workflow::validate(&mut app, &file.to_string_lossy())
             }
+            WorkflowCommand::Template(targs) => match targs.command {
+                WorkflowTemplateCommand::List => commands::workflow::template_list(&mut app),
+                WorkflowTemplateCommand::Show { slug } => {
+                    commands::workflow::template_show(&mut app, &slug)
+                }
+                WorkflowTemplateCommand::Init {
+                    slug,
+                    as_file,
+                    overwrite,
+                } => commands::workflow::template_init(
+                    &mut app,
+                    &slug,
+                    as_file.as_deref(),
+                    overwrite,
+                ),
+            },
         },
 
         Commands::Proc(args) => match args.command {

@@ -1,0 +1,24 @@
+[workflow]
+name = "Commit Summary"
+description = "On every git commit, ask the AI to summarise the change and append it to a running log."
+version = "0.1.0"
+tags = ["git", "ai", "log"]
+
+[trigger]
+type = "git_event"
+events = ["commit"]
+
+[[steps]]
+name = "summarise"
+type = "ai_prompt"
+prompt = "Summarise commit ${trigger.head} on branch ${trigger.branch} in one sentence."
+limit = 0
+
+[[steps]]
+name = "log-entry"
+type = "ipc"
+target = "com.nexus.storage"
+command = "append_file"
+[steps.args]
+path = "Logs/commit-summaries.md"
+content = "- ${trigger.head}: ${summarise.answer}\n"

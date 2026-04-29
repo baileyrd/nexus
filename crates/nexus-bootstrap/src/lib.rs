@@ -782,12 +782,26 @@ fn register_core_plugins(
                         "set_digest_config",
                         nexus_workflow::HANDLER_SET_DIGEST_CONFIG,
                     ),
+                    // BL-028f — built-in templates library.
+                    (
+                        "templates_list",
+                        nexus_workflow::core_plugin::HANDLER_TEMPLATES_LIST,
+                    ),
+                    (
+                        "templates_get",
+                        nexus_workflow::core_plugin::HANDLER_TEMPLATES_GET,
+                    ),
+                    (
+                        "templates_init",
+                        nexus_workflow::core_plugin::HANDLER_TEMPLATES_INIT,
+                    ),
                 ],
             ),
             forge_root,
-            Box::new(WorkflowCorePlugin::open_with_digest_config(
+            Box::new(WorkflowCorePlugin::open_full(
                 workflows_dir,
                 load_digest_config(forge_root),
+                load_webhook_config(forge_root),
             )),
         )
         .context("failed to register com.nexus.workflow")?;
@@ -1114,6 +1128,31 @@ fn load_digest_config(forge_root: &std::path::Path) -> nexus_workflow::DigestCon
                 "config.toml: [digests] failed to parse; falling back to defaults"
             );
             nexus_workflow::DigestConfig::default()
+        }
+    }
+}
+
+/// BL-028g — pull `[webhooks]` out of `<forge>/.forge/config.toml`.
+/// Same fallback behaviour as [`load_digest_config`].
+fn load_webhook_config(forge_root: &std::path::Path) -> nexus_workflow::webhook::WebhookConfig {
+    #[derive(serde::Deserialize)]
+    struct Wrapper {
+        #[serde(default)]
+        webhooks: Option<nexus_workflow::webhook::WebhookConfig>,
+    }
+    let path = forge_root.join(".forge").join("config.toml");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return nexus_workflow::webhook::WebhookConfig::default();
+    };
+    match toml::from_str::<Wrapper>(&text) {
+        Ok(w) => w.webhooks.unwrap_or_default(),
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "config.toml: [webhooks] failed to parse; falling back to defaults"
+            );
+            nexus_workflow::webhook::WebhookConfig::default()
         }
     }
 }

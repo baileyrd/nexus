@@ -1,17 +1,27 @@
 //! Workflow step executor (PRD-16 §7 minimum-viable slice).
 //!
 //! Walks a [`Workflow`]'s `[[steps]]` in order, dispatching each via
-//! an injected [`ActionDispatcher`]. This is the deterministic path
-//! — parallel steps and variable interpolation beyond `${trigger.*}`
-//! are planned follow-ups.
+//! an injected [`ActionDispatcher`].
 //!
-//! Retry policy is *per step*: each step's `max_retries` /
-//! `retry_backoff` / `retry_initial_delay_ms` / `retry_max_delay_ms` /
-//! `retry_jitter` shadow the workflow-level `[error_handling]` block,
-//! which in turn falls back to built-in defaults (`max_retries = 0`,
-//! exponential backoff, 100 ms base, 30 s cap, full jitter on). When
-//! parallel scheduling lands (BL-028 #4) each branch will retry
-//! independently with this same per-step config.
+//! # Parallel groups (BL-028c)
+//!
+//! A maximal contiguous run of steps with `parallel = true` forms a
+//! *parallel group*: every branch starts at the same time, the
+//! executor awaits all of them, and only then proceeds to the next
+//! sequential step (or the next group). Branches retry independently
+//! using their own per-step retry config. If any branch fails with an
+//! `on_error` policy that does *not* allow continuation, the executor
+//! aborts after the group completes (in-flight siblings are not
+//! cancelled — they're already running). Outcomes are recorded in
+//! source order regardless of completion order.
+//!
+//! # Retry policy
+//!
+//! Per step: each step's `max_retries` / `retry_backoff` /
+//! `retry_initial_delay_ms` / `retry_max_delay_ms` / `retry_jitter`
+//! shadow the workflow-level `[error_handling]` block, which in turn
+//! falls back to built-in defaults (`max_retries = 0`, exponential
+//! backoff, 100 ms base, 30 s cap, full jitter on).
 //!
 //! The executor is library-only; no kernel or IPC dependency. A core
 //! plugin wraps it with a [`KernelActionDispatcher`] equivalent that
@@ -153,58 +163,49 @@ pub async fn run_workflow_with_variables<D: ActionDispatcher>(
             workflow.workflow.name.clone(),
         ));
     }
-    let mut outcomes: Vec<StepOutcome> = Vec::with_capacity(workflow.steps.len());
+    let n = workflow.steps.len();
+    let mut outcomes: Vec<StepOutcome> = Vec::with_capacity(n);
     let mut abort = false;
-    for (i, step) in workflow.steps.iter().enumerate() {
-        let step_id = step
-            .name
-            .clone()
-            .unwrap_or_else(|| format!("step-{i}"));
+    let mut i = 0;
+    while i < n {
         if abort {
-            outcomes.push(StepOutcome {
-                step_id,
-                step_type: step.step_type.clone(),
-                response: None,
-                status: StepOutcomeStatus::Skipped,
-                error: None,
-                attempts: 0,
-            });
+            outcomes.push(skipped_outcome(&workflow.steps[i], i));
+            i += 1;
             continue;
         }
-        let mut resolved = step.clone();
-        if !variables.is_empty() {
-            interpolate_step(&mut resolved, variables);
-        }
-        let step = &resolved;
 
-        let result = dispatch_with_retry(workflow, step, dispatcher).await;
-
-        match result {
-            Ok((response, attempts)) => outcomes.push(StepOutcome {
-                step_id,
-                step_type: step.step_type.clone(),
-                response: Some(response),
-                status: StepOutcomeStatus::Ok,
-                error: None,
-                attempts,
-            }),
-            Err((reason, attempts)) => {
-                let policy = step.on_error.as_deref().unwrap_or("stop");
-                let continue_on_error = matches!(policy, "continue" | "log_warn");
-                outcomes.push(StepOutcome {
-                    step_id,
-                    step_type: step.step_type.clone(),
-                    response: None,
-                    status: StepOutcomeStatus::Failed,
-                    error: Some(reason),
-                    attempts,
-                });
-                if !continue_on_error {
+        if workflow.steps[i].parallel {
+            let start = i;
+            let mut end = start + 1;
+            while end < n && workflow.steps[end].parallel {
+                end += 1;
+            }
+            let branches = (start..end).map(|idx| {
+                run_step(workflow, &workflow.steps[idx], idx, dispatcher, variables)
+            });
+            let group = futures::future::join_all(branches).await;
+            for (offset, outcome) in group.into_iter().enumerate() {
+                let idx = start + offset;
+                if matches!(outcome.status, StepOutcomeStatus::Failed)
+                    && !continue_on_error(&workflow.steps[idx])
+                {
                     abort = true;
                 }
+                outcomes.push(outcome);
             }
+            i = end;
+        } else {
+            let outcome = run_step(workflow, &workflow.steps[i], i, dispatcher, variables).await;
+            if matches!(outcome.status, StepOutcomeStatus::Failed)
+                && !continue_on_error(&workflow.steps[i])
+            {
+                abort = true;
+            }
+            outcomes.push(outcome);
+            i += 1;
         }
     }
+
     let success = outcomes
         .iter()
         .all(|o| o.status == StepOutcomeStatus::Ok);
@@ -214,6 +215,64 @@ pub async fn run_workflow_with_variables<D: ActionDispatcher>(
         success,
         condition_skipped: false,
     })
+}
+
+/// Resolve variables, dispatch (with retry), and build the outcome
+/// for a single step. Used by both the sequential and parallel paths.
+async fn run_step<D: ActionDispatcher>(
+    workflow: &Workflow,
+    step: &Step,
+    index: usize,
+    dispatcher: &D,
+    variables: &VariableMap,
+) -> StepOutcome {
+    let step_id = step
+        .name
+        .clone()
+        .unwrap_or_else(|| format!("step-{index}"));
+    let mut resolved = step.clone();
+    if !variables.is_empty() {
+        interpolate_step(&mut resolved, variables);
+    }
+    match dispatch_with_retry(workflow, &resolved, dispatcher).await {
+        Ok((response, attempts)) => StepOutcome {
+            step_id,
+            step_type: resolved.step_type.clone(),
+            response: Some(response),
+            status: StepOutcomeStatus::Ok,
+            error: None,
+            attempts,
+        },
+        Err((reason, attempts)) => StepOutcome {
+            step_id,
+            step_type: resolved.step_type.clone(),
+            response: None,
+            status: StepOutcomeStatus::Failed,
+            error: Some(reason),
+            attempts,
+        },
+    }
+}
+
+fn skipped_outcome(step: &Step, index: usize) -> StepOutcome {
+    StepOutcome {
+        step_id: step
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("step-{index}")),
+        step_type: step.step_type.clone(),
+        response: None,
+        status: StepOutcomeStatus::Skipped,
+        error: None,
+        attempts: 0,
+    }
+}
+
+fn continue_on_error(step: &Step) -> bool {
+    matches!(
+        step.on_error.as_deref().unwrap_or("stop"),
+        "continue" | "log_warn"
+    )
 }
 
 /// Resolve the retry config for `step` against the workflow-level
@@ -694,6 +753,364 @@ retry_jitter = false
         assert!(run.success);
         assert_eq!(run.steps[0].attempts, 3);
         assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    /// Dispatcher whose behaviour is keyed by `step.name`. Each entry
+    /// in `behaviours` says: how long to sleep before responding, and
+    /// whether to fail. Failed names succeed after `succeed_after`
+    /// attempts (so a `fail_count = 2` step succeeds on attempt 3).
+    /// Records the order in which dispatches *finish* (not start).
+    struct KeyedDispatcher {
+        behaviours: std::collections::HashMap<String, KeyedBehaviour>,
+        finish_order: std::sync::Mutex<Vec<String>>,
+        attempts: std::sync::Mutex<std::collections::HashMap<String, u32>>,
+    }
+
+    #[derive(Clone)]
+    struct KeyedBehaviour {
+        sleep_ms: u64,
+        fail_count: u32,
+    }
+
+    #[async_trait]
+    impl ActionDispatcher for KeyedDispatcher {
+        async fn run(&self, step: &Step) -> Result<serde_json::Value, String> {
+            let name = step.name.clone().unwrap_or_default();
+            let behaviour = self
+                .behaviours
+                .get(&name)
+                .cloned()
+                .unwrap_or(KeyedBehaviour {
+                    sleep_ms: 0,
+                    fail_count: 0,
+                });
+            if behaviour.sleep_ms > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(behaviour.sleep_ms)).await;
+            }
+            let mut attempts = self.attempts.lock().unwrap();
+            let n = attempts.entry(name.clone()).or_insert(0);
+            *n += 1;
+            let this_attempt = *n;
+            drop(attempts);
+            self.finish_order.lock().unwrap().push(name.clone());
+            if this_attempt <= behaviour.fail_count {
+                Err(format!("fail {name} attempt {this_attempt}"))
+            } else {
+                Ok(serde_json::json!({ "name": name, "attempt": this_attempt }))
+            }
+        }
+    }
+
+    fn keyed(behaviours: &[(&str, u64, u32)]) -> KeyedDispatcher {
+        let mut map = std::collections::HashMap::new();
+        for (n, sleep_ms, fail_count) in behaviours {
+            map.insert(
+                (*n).to_string(),
+                KeyedBehaviour {
+                    sleep_ms: *sleep_ms,
+                    fail_count: *fail_count,
+                },
+            );
+        }
+        KeyedDispatcher {
+            behaviours: map,
+            finish_order: std::sync::Mutex::new(Vec::new()),
+            attempts: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn parallel_group_runs_concurrently() {
+        // Two parallel branches each sleep 200ms. Concurrent execution
+        // means the group completes at the slower branch (~200ms),
+        // not the sum (~400ms). Paused time auto-advances when both
+        // futures are pending, so this is deterministic.
+        const WF: &str = r#"
+[workflow]
+name = "P"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "a"
+type = "noop"
+parallel = true
+
+[[steps]]
+name = "b"
+type = "noop"
+parallel = true
+"#;
+        let wf = parse_workflow_text(WF).unwrap();
+        let d = keyed(&[("a", 200, 0), ("b", 200, 0)]);
+        let start = tokio::time::Instant::now();
+        let run = run_workflow(&wf, &d).await.unwrap();
+        let elapsed = start.elapsed();
+        assert!(run.success);
+        assert_eq!(run.steps.len(), 2);
+        assert_eq!(run.steps[0].step_id, "a");
+        assert_eq!(run.steps[1].step_id, "b");
+        assert!(
+            elapsed >= std::time::Duration::from_millis(200),
+            "expected at least 200ms, got {elapsed:?}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_millis(350),
+            "expected concurrent execution (~200ms), got {elapsed:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn parallel_outcomes_preserve_source_order() {
+        // Branch "first" sleeps longer than "second" so it finishes
+        // last. Outcomes must still appear in source order.
+        const WF: &str = r#"
+[workflow]
+name = "P"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "first"
+type = "noop"
+parallel = true
+
+[[steps]]
+name = "second"
+type = "noop"
+parallel = true
+"#;
+        let wf = parse_workflow_text(WF).unwrap();
+        let d = keyed(&[("first", 100, 0), ("second", 10, 0)]);
+        let run = run_workflow(&wf, &d).await.unwrap();
+        assert_eq!(run.steps[0].step_id, "first");
+        assert_eq!(run.steps[1].step_id, "second");
+        let order = d.finish_order.lock().unwrap().clone();
+        assert_eq!(
+            order,
+            vec!["second".to_string(), "first".to_string()],
+            "fast branch finished first, slow second — outcome order is independent of finish order"
+        );
+    }
+
+    #[tokio::test]
+    async fn parallel_branch_failure_aborts_subsequent_sequential_step() {
+        const WF: &str = r#"
+[workflow]
+name = "P"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "a"
+type = "noop"
+parallel = true
+
+[[steps]]
+name = "b"
+type = "noop"
+parallel = true
+
+[[steps]]
+name = "after"
+type = "noop"
+"#;
+        let wf = parse_workflow_text(WF).unwrap();
+        let d = keyed(&[("a", 0, 0), ("b", 0, 99)]); // "b" always fails
+        let run = run_workflow(&wf, &d).await.unwrap();
+        assert!(!run.success);
+        assert_eq!(run.steps[0].status, StepOutcomeStatus::Ok);
+        assert_eq!(run.steps[1].status, StepOutcomeStatus::Failed);
+        assert_eq!(run.steps[2].status, StepOutcomeStatus::Skipped);
+    }
+
+    #[tokio::test]
+    async fn parallel_branches_run_even_when_a_sibling_fails() {
+        // Mid-flight cancellation isn't supported: if one branch fails
+        // its sibling still runs to completion. The post-group sequential
+        // step is what gets skipped.
+        const WF: &str = r#"
+[workflow]
+name = "P"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "ok"
+type = "noop"
+parallel = true
+
+[[steps]]
+name = "bad"
+type = "noop"
+parallel = true
+"#;
+        let wf = parse_workflow_text(WF).unwrap();
+        let d = keyed(&[("ok", 0, 0), ("bad", 0, 99)]);
+        let run = run_workflow(&wf, &d).await.unwrap();
+        assert_eq!(run.steps[0].status, StepOutcomeStatus::Ok);
+        assert_eq!(run.steps[1].status, StepOutcomeStatus::Failed);
+        // Both ran (no Skipped within the group).
+        assert_eq!(run.steps[0].attempts, 1);
+        assert_eq!(run.steps[1].attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn parallel_branch_failure_with_continue_does_not_abort() {
+        const WF: &str = r#"
+[workflow]
+name = "P"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "a"
+type = "noop"
+parallel = true
+
+[[steps]]
+name = "b"
+type = "noop"
+parallel = true
+on_error = "continue"
+
+[[steps]]
+name = "after"
+type = "noop"
+"#;
+        let wf = parse_workflow_text(WF).unwrap();
+        let d = keyed(&[("a", 0, 0), ("b", 0, 99)]);
+        let run = run_workflow(&wf, &d).await.unwrap();
+        assert!(!run.success); // "b" failed
+        assert_eq!(run.steps[1].status, StepOutcomeStatus::Failed);
+        // "after" still runs because "b"'s on_error = "continue".
+        assert_eq!(run.steps[2].status, StepOutcomeStatus::Ok);
+    }
+
+    #[tokio::test]
+    async fn parallel_branch_retries_independently() {
+        // Branch "flaky" fails twice then succeeds; max_retries = 3.
+        // Branch "steady" succeeds once. The flaky branch's retries
+        // must not gate the steady branch.
+        const WF: &str = r#"
+[workflow]
+name = "P"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "flaky"
+type = "noop"
+parallel = true
+max_retries = 3
+retry_initial_delay_ms = 0
+retry_jitter = false
+
+[[steps]]
+name = "steady"
+type = "noop"
+parallel = true
+"#;
+        let wf = parse_workflow_text(WF).unwrap();
+        let d = keyed(&[("flaky", 0, 2), ("steady", 0, 0)]);
+        let run = run_workflow(&wf, &d).await.unwrap();
+        assert!(run.success);
+        assert_eq!(run.steps[0].step_id, "flaky");
+        assert_eq!(run.steps[0].attempts, 3);
+        assert_eq!(run.steps[1].step_id, "steady");
+        assert_eq!(run.steps[1].attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn mixed_sequential_and_parallel_groups_walk_correctly() {
+        // [seq, par, par, seq, par, par, par] →
+        //   seq → group(par,par) → seq → group(par,par,par)
+        const WF: &str = r#"
+[workflow]
+name = "P"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "s1"
+type = "noop"
+
+[[steps]]
+name = "p1"
+type = "noop"
+parallel = true
+
+[[steps]]
+name = "p2"
+type = "noop"
+parallel = true
+
+[[steps]]
+name = "s2"
+type = "noop"
+
+[[steps]]
+name = "p3"
+type = "noop"
+parallel = true
+
+[[steps]]
+name = "p4"
+type = "noop"
+parallel = true
+
+[[steps]]
+name = "p5"
+type = "noop"
+parallel = true
+"#;
+        let wf = parse_workflow_text(WF).unwrap();
+        let d = keyed(&[]); // all default-success
+        let run = run_workflow(&wf, &d).await.unwrap();
+        assert!(run.success);
+        let ids: Vec<&str> = run.steps.iter().map(|s| s.step_id.as_str()).collect();
+        assert_eq!(ids, vec!["s1", "p1", "p2", "s2", "p3", "p4", "p5"]);
+        for s in &run.steps {
+            assert_eq!(s.status, StepOutcomeStatus::Ok);
+        }
+    }
+
+    #[tokio::test]
+    async fn sequential_step_failure_skips_subsequent_parallel_group() {
+        const WF: &str = r#"
+[workflow]
+name = "P"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+name = "boom"
+type = "noop"
+
+[[steps]]
+name = "p1"
+type = "noop"
+parallel = true
+
+[[steps]]
+name = "p2"
+type = "noop"
+parallel = true
+"#;
+        let wf = parse_workflow_text(WF).unwrap();
+        let d = keyed(&[("boom", 0, 99)]);
+        let run = run_workflow(&wf, &d).await.unwrap();
+        assert_eq!(run.steps[0].status, StepOutcomeStatus::Failed);
+        assert_eq!(run.steps[1].status, StepOutcomeStatus::Skipped);
+        assert_eq!(run.steps[2].status, StepOutcomeStatus::Skipped);
     }
 
     #[tokio::test]
