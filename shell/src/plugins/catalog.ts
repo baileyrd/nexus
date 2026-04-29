@@ -66,6 +66,7 @@ import { processesPlugin } from './nexus/processes'
 import { statusBarPlugin } from './nexus/statusBar'
 import { extensionsTabPlugin } from './nexus/extensionsTab'
 import { memoryPlugin } from './nexus/memory'
+import { recallPlugin } from './nexus/recall'
 
 // ── Community plugins (BL-008+) — directory location matches the
 // community-plugin layout, but registration goes through the catalog
@@ -144,6 +145,12 @@ export const DEFAULT_OFF_PLUGINS: Registered[] = [
   // keeps the user from seeing dead suggestions before the backend
   // can answer.
   linkSuggestPlugin,
+  // BL-044 — Cmd+Shift+R recall overlay. Default-off for the same
+  // reason as semanticSearchPlugin / linkSuggestPlugin: requires the
+  // AI plugin's embedding provider to be configured. Pairs naturally
+  // with `nexus.memory` (BL-043) which owns the inbox path the
+  // recall overlay scopes against.
+  recallPlugin,
   agentPlugin,
   mcpPlugin,
   workflowPlugin,
