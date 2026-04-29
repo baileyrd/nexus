@@ -120,6 +120,100 @@ impl DigestKind {
     }
 }
 
+// ── FU-6 last-fired watermark ──────────────────────────────────────────────
+//
+// Persisted under `<forge>/.forge/digests/last_fired.json` so a backwards
+// clock jump (NTP correction, suspend/resume, manual `date` reset) can't
+// re-fire the same minute boundary into existence by tricking the
+// in-memory scheduler. The file is keyed by [`DigestKind`] string and
+// holds the UTC timestamp of the last successful fire.
+
+const LAST_FIRED_FILE: &str = ".forge/digests/last_fired.json";
+
+/// Re-fire suppression window. We never fire the same kind twice
+/// within 30 s — that's tighter than the 60 s post-fire sleep in the
+/// scheduler loop but defends against the loop being re-entered after
+/// an unexpected restart.
+pub const FIRE_SUPPRESSION_WINDOW_SECS: i64 = 30;
+
+/// On-disk last-fired watermark per [`DigestKind`].
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct LastFired {
+    /// Last successful daily-digest fire, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daily: Option<DateTime<Utc>>,
+    /// Last successful weekly-digest fire, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weekly: Option<DateTime<Utc>>,
+}
+
+impl LastFired {
+    /// Read the watermark for `kind`, or `None` if never recorded.
+    #[must_use]
+    pub fn get(&self, kind: DigestKind) -> Option<DateTime<Utc>> {
+        match kind {
+            DigestKind::Daily => self.daily,
+            DigestKind::Weekly => self.weekly,
+        }
+    }
+
+    /// Record `ts` as the last fire for `kind`.
+    pub fn set(&mut self, kind: DigestKind, ts: DateTime<Utc>) {
+        match kind {
+            DigestKind::Daily => self.daily = Some(ts),
+            DigestKind::Weekly => self.weekly = Some(ts),
+        }
+    }
+}
+
+/// Read the watermark file. Missing / unreadable / malformed → empty.
+/// Soft-fail on every failure mode: the worst case of a lost watermark
+/// is one extra digest fire on the next minute boundary.
+#[must_use]
+pub fn read_last_fired(forge_root: &std::path::Path) -> LastFired {
+    let path = forge_root.join(LAST_FIRED_FILE);
+    let Ok(bytes) = std::fs::read(&path) else {
+        return LastFired::default();
+    };
+    serde_json::from_slice::<LastFired>(&bytes).unwrap_or_default()
+}
+
+/// Write the watermark file. Best-effort; logs at `warn` on failure.
+pub fn write_last_fired(forge_root: &std::path::Path, snapshot: &LastFired) {
+    let path = forge_root.join(LAST_FIRED_FILE);
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::warn!(?e, dir = %parent.display(), "digest last_fired: mkdir failed");
+            return;
+        }
+    }
+    let Ok(json) = serde_json::to_vec_pretty(snapshot) else {
+        return;
+    };
+    if let Err(e) = std::fs::write(&path, json) {
+        tracing::warn!(?e, file = %path.display(), "digest last_fired: write failed");
+    }
+}
+
+/// `true` iff `now` is within the suppression window of the last
+/// recorded fire for `kind`. Used by the scheduler loop to defend
+/// against backwards clock jumps re-firing the same boundary.
+#[must_use]
+pub fn within_suppression_window(
+    last: &LastFired,
+    kind: DigestKind,
+    now: DateTime<Utc>,
+) -> bool {
+    let Some(prev) = last.get(kind) else {
+        return false;
+    };
+    let delta = (now - prev).num_seconds();
+    // Suppress when |delta| < window: covers the forward case (genuine
+    // re-fire within 30 s) and the backwards case (clock jumped behind
+    // a recent fire).
+    delta.abs() < FIRE_SUPPRESSION_WINDOW_SECS
+}
+
 /// Result returned by [`run_digest`] and the IPC handler.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DigestRunReport {
@@ -511,6 +605,65 @@ mod tests {
 
     fn ts(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(y, m, d, h, min, 0).unwrap()
+    }
+
+    #[test]
+    fn within_suppression_window_skips_recent_forward_fire() {
+        let now = ts(2026, 4, 29, 9, 0);
+        let mut last = LastFired::default();
+        last.set(DigestKind::Daily, now);
+        assert!(within_suppression_window(&last, DigestKind::Daily, now));
+        // 10s later → still inside window.
+        let later = now + chrono::Duration::seconds(10);
+        assert!(within_suppression_window(&last, DigestKind::Daily, later));
+        // 31s later → window cleared.
+        let after = now + chrono::Duration::seconds(31);
+        assert!(!within_suppression_window(&last, DigestKind::Daily, after));
+    }
+
+    #[test]
+    fn within_suppression_window_handles_backwards_clock_jump() {
+        // Simulate a recent fire then a 10s clock-jump-back.
+        let fired = ts(2026, 4, 29, 9, 0);
+        let mut last = LastFired::default();
+        last.set(DigestKind::Weekly, fired);
+        let now = fired - chrono::Duration::seconds(10);
+        assert!(
+            within_suppression_window(&last, DigestKind::Weekly, now),
+            "clock jumped 10s behind a recent fire — must suppress"
+        );
+    }
+
+    #[test]
+    fn within_suppression_window_other_kind_unaffected() {
+        let now = ts(2026, 4, 29, 9, 0);
+        let mut last = LastFired::default();
+        last.set(DigestKind::Daily, now);
+        // Daily fire shouldn't suppress a weekly schedule.
+        assert!(!within_suppression_window(&last, DigestKind::Weekly, now));
+    }
+
+    #[test]
+    fn last_fired_round_trips_on_disk() {
+        let tmp = std::env::temp_dir().join(format!(
+            "nexus-fu6-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        // Empty by default.
+        assert!(read_last_fired(&tmp).get(DigestKind::Daily).is_none());
+        let mut last = LastFired::default();
+        let when = ts(2026, 4, 29, 9, 30);
+        last.set(DigestKind::Daily, when);
+        write_last_fired(&tmp, &last);
+        let round = read_last_fired(&tmp);
+        assert_eq!(round.get(DigestKind::Daily), Some(when));
+        assert_eq!(round.get(DigestKind::Weekly), None);
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]

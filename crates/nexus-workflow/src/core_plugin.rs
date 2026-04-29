@@ -262,6 +262,7 @@ impl WorkflowCorePlugin {
         };
         let cfg_handle = Arc::clone(&self.digest_config);
         let ctx = Arc::clone(ctx);
+        let forge_root = self.root.parent().map(std::path::Path::to_path_buf);
         let Ok(mut handles) = self.scheduler_handles.lock() else {
             return;
         };
@@ -277,7 +278,7 @@ impl WorkflowCorePlugin {
             "digest scheduler armed"
         );
         let handle = runtime.spawn(async move {
-            digest_scheduler_loop(ctx, cfg_handle).await;
+            digest_scheduler_loop(ctx, cfg_handle, forge_root).await;
         });
         handles.push(handle);
     }
@@ -286,6 +287,7 @@ impl WorkflowCorePlugin {
 async fn digest_scheduler_loop(
     ctx: Arc<KernelPluginContext>,
     cfg_handle: Arc<RwLock<DigestConfig>>,
+    forge_root: Option<std::path::PathBuf>,
 ) {
     use std::time::Duration;
     loop {
@@ -313,6 +315,22 @@ async fn digest_scheduler_loop(
             DigestKind::Daily => "daily",
             DigestKind::Weekly => "weekly",
         };
+        // FU-6 — suppression watermark. A backwards clock jump (NTP
+        // correction, suspend/resume) could otherwise re-fire the
+        // same minute boundary. Skip when a recent fire is recorded
+        // for this kind.
+        let now = chrono::Utc::now();
+        if let Some(root) = forge_root.as_deref() {
+            let last = digests::read_last_fired(root);
+            if digests::within_suppression_window(&last, kind, now) {
+                tracing::debug!(
+                    ?kind,
+                    "digest scheduler: within suppression window; skipping"
+                );
+                tokio::time::sleep(Duration::from_secs(61)).await;
+                continue;
+            }
+        }
         let call = ctx
             .ipc_call(
                 PLUGIN_ID,
@@ -322,7 +340,14 @@ async fn digest_scheduler_loop(
             )
             .await;
         match call {
-            Ok(_) => tracing::info!(?kind, "digest scheduler fired"),
+            Ok(_) => {
+                tracing::info!(?kind, "digest scheduler fired");
+                if let Some(root) = forge_root.as_deref() {
+                    let mut last = digests::read_last_fired(root);
+                    last.set(kind, now);
+                    digests::write_last_fired(root, &last);
+                }
+            }
             Err(err) => {
                 tracing::warn!(?kind, %err, "digest scheduler: run failed; continuing");
             }
