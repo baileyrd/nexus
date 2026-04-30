@@ -140,6 +140,39 @@ test('stampBlock routes to stamp_block with relpath + block_id and returns the w
   assert.deepEqual(result, expected)
 })
 
+test('executeDatabaseView routes to execute_database_view with snake_case args', async () => {
+  const expected = {
+    applied: {
+      view_name: 'inline',
+      view_type: 'table' as const,
+      fields: ['title', 'status'],
+      layout: { kind: 'flat' as const, records: [] },
+    },
+    schema: { version: '1.0', fields: {} },
+  }
+  const { api, calls } = makeMockApi(expected)
+  const client = makeEditorClient(api)
+
+  const config = {
+    view_type: { kind: 'table' as const },
+    filters: ['status = Done'],
+    sorts: ['title asc'],
+    group_by: null,
+    hidden_columns: [],
+  }
+  const result = await client.executeDatabaseView('Tasks.bases', config)
+
+  assert.equal(calls.length, 1)
+  const call = calls[0]
+  assert.equal(call.pluginId, EDITOR_PLUGIN_ID)
+  assert.equal(call.commandId, 'execute_database_view')
+  assert.deepEqual(call.args, {
+    database_path: 'Tasks.bases',
+    view_config: config,
+  })
+  assert.deepEqual(result, expected)
+})
+
 test('openSession / getTree / save / undo / redo / close use the documented command strings', async () => {
   const relpath = 'notes/b.md'
   const snap = emptySnapshot(relpath)
