@@ -168,6 +168,11 @@ function BacklinkRow({ link, onPick }: BacklinkRowProps) {
       >
         {link.sourceRelpath}
       </div>
+      {link.fragment && (
+        <div style={{ marginTop: 4 }}>
+          <FragmentPill fragment={link.fragment} />
+        </div>
+      )}
       {showExcerpt && (
         <div
           style={{
@@ -184,5 +189,35 @@ function BacklinkRow({ link, onPick }: BacklinkRowProps) {
         </div>
       )}
     </div>
+  )
+}
+
+/** Compact pill rendering the source link's anchor fragment. Two
+ *  visual variants — a "block" pill for `^<uuid>` BL-049 anchors
+ *  (truncated to the first 8 hex characters so the pill stays
+ *  legible) and a "heading" pill for plain heading slugs. Pure
+ *  function so the view tests can pin the rendered text without a
+ *  full DOM snapshot. */
+export function FragmentPill({ fragment }: { fragment: string }) {
+  const isBlock = fragment.startsWith('^')
+  const label = isBlock ? `^${fragment.slice(1, 9)}…` : `#${fragment}`
+  const title = isBlock ? `Block anchor ${fragment}` : `Heading anchor ${fragment}`
+  return (
+    <span
+      title={title}
+      style={{
+        display: 'inline-block',
+        padding: '0 6px',
+        borderRadius: 999,
+        border: '1px solid var(--line-soft)',
+        background: isBlock ? 'var(--accent-soft, var(--bg-raised))' : 'var(--bg-raised)',
+        color: 'var(--fg-muted)',
+        fontSize: 10,
+        fontFamily: 'var(--f-mono)',
+        lineHeight: '16px',
+      }}
+    >
+      {label}
+    </span>
   )
 }

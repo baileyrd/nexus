@@ -37,6 +37,13 @@ pub struct BacklinkResult {
     pub link_text: String,
     /// Kind of link.
     pub link_type: String,
+    /// Optional fragment carried by the link target — `^<block-id>`
+    /// for BL-049 block-anchored links, `<heading-slug>` for
+    /// heading-anchored links, `None` for plain wikilinks. Skipped
+    /// from JSON when absent so existing callers see the same wire
+    /// shape they did before BL-049 phase 3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fragment: Option<String>,
 }
 
 /// A link FROM the queried path to another file.
@@ -205,7 +212,28 @@ impl KnowledgeGraph {
                     source_path: self.graph[source_idx].path.clone(),
                     link_text: edge.weight().link_text.clone(),
                     link_type: edge.weight().link_type.clone(),
+                    fragment: edge.weight().fragment.clone(),
                 }
+            })
+            .collect()
+    }
+
+    /// Filter backlinks to those whose target fragment matches the
+    /// BL-049 block-anchored form `^<block_id>` (case-insensitive
+    /// on the UUID per the `format_stable_id_marker` convention).
+    /// Returns an empty list when `path` has no node or no inbound
+    /// link carries that anchor — callers can use the count to
+    /// decide whether to surface a "no block-link references"
+    /// empty-state vs. the full backlinks list.
+    #[must_use]
+    pub fn backlinks_to_block(&self, path: &str, block_id: &str) -> Vec<BacklinkResult> {
+        let needle = format!("^{}", block_id.to_ascii_lowercase());
+        self.backlinks(path)
+            .into_iter()
+            .filter(|b| {
+                b.fragment
+                    .as_deref()
+                    .is_some_and(|f| f.to_ascii_lowercase() == needle)
             })
             .collect()
     }
@@ -521,6 +549,78 @@ mod tests {
         kg.add_note("notes/a.md");
         let bl = kg.backlinks("notes/a.md");
         assert!(bl.is_empty());
+    }
+
+    #[test]
+    fn backlinks_carries_fragment_field() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_note("notes/source.md");
+        kg.add_note("notes/target.md");
+        kg.add_link(
+            "notes/source.md",
+            "notes/target.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "target".to_string(),
+                fragment: Some(
+                    "^d8e9f0a1-2b3c-4d5e-9f01-abcdef012345".to_string(),
+                ),
+            },
+        );
+        let bl = kg.backlinks("notes/target.md");
+        assert_eq!(bl.len(), 1);
+        assert_eq!(
+            bl[0].fragment.as_deref(),
+            Some("^d8e9f0a1-2b3c-4d5e-9f01-abcdef012345"),
+        );
+    }
+
+    #[test]
+    fn backlinks_to_block_filters_by_uuid_case_insensitive() {
+        let mut kg = KnowledgeGraph::new();
+        kg.add_note("a.md");
+        kg.add_note("b.md");
+        kg.add_note("target.md");
+        // Two block-anchored backlinks at distinct uuids; one
+        // heading-anchored that must NOT survive the filter.
+        let id_a = "d8e9f0a1-2b3c-4d5e-9f01-abcdef012345";
+        let id_b = "11111111-2222-3333-4444-555555555555";
+        kg.add_link(
+            "a.md",
+            "target.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "to A".to_string(),
+                // Source-side stored as uppercase to exercise the
+                // case-insensitive comparison in the filter.
+                fragment: Some(format!("^{}", id_a.to_uppercase())),
+            },
+        );
+        kg.add_link(
+            "b.md",
+            "target.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "to B".to_string(),
+                fragment: Some(format!("^{id_b}")),
+            },
+        );
+        kg.add_link(
+            "a.md",
+            "target.md",
+            EdgeData {
+                link_type: "wikilink".to_string(),
+                link_text: "to heading".to_string(),
+                fragment: Some("Section Title".to_string()),
+            },
+        );
+
+        let only_a = kg.backlinks_to_block("target.md", id_a);
+        assert_eq!(only_a.len(), 1);
+        assert_eq!(only_a[0].source_path, "a.md");
+
+        let none = kg.backlinks_to_block("target.md", "00000000-0000-0000-0000-000000000000");
+        assert!(none.is_empty());
     }
 
     #[test]
