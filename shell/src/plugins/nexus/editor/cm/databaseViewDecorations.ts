@@ -44,6 +44,17 @@ import type {
   EditorKernelClient,
 } from '../kernelClient'
 
+/** Minimal subset of `KernelAPI` the watcher needs — kept narrow
+ *  so unit tests can inject a fake without standing up the full
+ *  kernel. Mirrors the shape of `KernelAPI.on` (Promise of an
+ *  unsubscribe). */
+export interface KernelEventSubscriber {
+  on<T = unknown>(
+    topicPrefix: string,
+    handler: (topic: string, payload: T) => void,
+  ): Promise<() => void>
+}
+
 /** Dependencies the decoration extension needs — passed from
  *  `EditorView.tsx` so unit tests can inject mocks. */
 export interface DatabaseViewExtDeps {
@@ -53,6 +64,14 @@ export interface DatabaseViewExtDeps {
   cache?: DatabaseViewCache
   /** Error sink threaded through to the widget. */
   onError?: (message: string, err: unknown) => void
+  /** Optional kernel-event subscriber. When wired, the extension
+   *  listens to `com.nexus.storage.file_modified` /
+   *  `file_created` / `file_deleted` / `file_renamed` and calls
+   *  `cache.invalidatePath(basePath)` followed by a
+   *  `databaseViewInvalidate` dispatch when the changed path lives
+   *  inside a `.bases/` directory. Without this, the cache only
+   *  refreshes on doc edits. */
+  events?: KernelEventSubscriber
 }
 
 /** A single parsed `[[{db:…}]]` occurrence in the document. Stays
@@ -253,11 +272,98 @@ function computeActiveLines(state: EditorState): Set<number> {
   return lines
 }
 
-/** Effect that requests a decoration recompute. Split-4 will fire
- *  this from a `com.nexus.storage.bases.changed.*` event listener
- *  after invalidating the cache, so external base edits flush
- *  through to the inline grid without waiting for a doc edit. */
+/** Effect that requests a decoration recompute. Fired from the
+ *  storage-event watcher (split 4) after a `.bases` directory
+ *  changes externally, so the inline grid flushes the stale cached
+ *  layout without waiting for a doc edit. */
 export const databaseViewInvalidate = StateEffect.define<null>()
+
+/** Resolve a forge-relative path to the `.bases` directory it
+ *  belongs to, or `null` if the path doesn't live under one.
+ *  Two cases:
+ *    * the path *is* the directory — `Tasks.bases` → `Tasks.bases`
+ *    * the path is inside it — `Tasks.bases/records.json` →
+ *      `Tasks.bases`, also `nested/Board.bases/views.json` →
+ *      `nested/Board.bases`.
+ *  Anything else returns `null`. Exported so unit tests can pin
+ *  the regex; split-5 will likely reuse it. */
+export function pathToBasePath(relpath: string): string | null {
+  if (!relpath) return null
+  if (relpath.endsWith('.bases')) return relpath
+  // First `.bases/` segment wins — nested bases would be invalid in
+  // the storage layer anyway.
+  const idx = relpath.indexOf('.bases/')
+  if (idx < 0) return null
+  return relpath.slice(0, idx + '.bases'.length)
+}
+
+/** Storage-event watcher: subscribe to file mutation topics, find
+ *  the affected base path (if any), invalidate cached views for
+ *  that path, and dispatch `databaseViewInvalidate` on the editor
+ *  view so the field rebuilds.
+ *
+ *  Exported for unit tests; production wiring goes through
+ *  `databaseViewExt(deps)`. */
+export function makeBasesChangeWatcher(
+  view: EditorView,
+  deps: DatabaseViewExtDeps,
+): { destroy: () => void } {
+  const cache = deps.cache ?? databaseViewCache
+  if (!deps.events) return { destroy() {} }
+
+  let disposed = false
+  let unsubscribe: (() => void) | null = null
+  const subscribed = deps.events.on<{ path?: string; from?: string; to?: string }>(
+    'com.nexus.storage.file_',
+    (_topic, payload) => {
+      // The four topic ids — file_created / file_modified /
+      // file_deleted / file_renamed — all carry a path field.
+      // file_renamed carries `from` + `to`; both candidates are
+      // mapped to base paths so we cover the rename-into and
+      // rename-out cases.
+      const candidates = [payload.path, payload.from, payload.to].filter(
+        (p): p is string => typeof p === 'string' && p.length > 0,
+      )
+      let touched = 0
+      for (const p of candidates) {
+        const basePath = pathToBasePath(p)
+        if (!basePath) continue
+        touched += cache.invalidatePath(basePath)
+      }
+      if (touched > 0) {
+        view.dispatch({ effects: databaseViewInvalidate.of(null) })
+      }
+    },
+  )
+
+  void subscribed.then(
+    (unsub) => {
+      if (disposed) {
+        unsub()
+        return
+      }
+      unsubscribe = unsub
+    },
+    (err) => {
+      const onError =
+        deps.onError ??
+        ((m, e) => {
+          console.error(`[nexus.editor] ${m}:`, e)
+        })
+      onError('database-view watcher: subscribe failed', err)
+    },
+  )
+
+  return {
+    destroy() {
+      disposed = true
+      if (unsubscribe) {
+        unsubscribe()
+        unsubscribe = null
+      }
+    },
+  }
+}
 
 /** CM extension: state field carrying the decoration set + a
  *  matching atomic-ranges provider so the cursor doesn't park inside
@@ -285,12 +391,10 @@ export function databaseViewExt(deps: DatabaseViewExtDeps): Extension {
     },
   })
 
-  // ViewPlugin shell to expose a future cache-invalidation hook.
-  // Today's wiring is empty — split 4 will subscribe to
-  // `com.nexus.storage.bases.changed.*` and dispatch
-  // `databaseViewInvalidate.of(null)` after calling
-  // `cache.invalidate(key)` for the affected base path.
-  const watcher = ViewPlugin.define(() => ({}))
+  // ViewPlugin owns the storage-event subscription and tears it
+  // down on view destroy. When `deps.events` is absent the watcher
+  // is a no-op so untitled / event-less mounts stay quiet.
+  const watcher = ViewPlugin.define((view) => makeBasesChangeWatcher(view, deps))
 
   return [field, watcher]
 }

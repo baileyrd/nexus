@@ -29,6 +29,13 @@ export interface EditorRuntime {
    * back to `console.error`.
    */
   reportBridgeError?: (message: string, err: unknown) => void
+  /**
+   * Kernel-event subscriber threaded through to the BL-012 split-4
+   * database-view decoration watcher. `KernelAPI.on(prefix, h)` —
+   * the watcher uses the storage `file_*` topics to invalidate the
+   * inline-grid cache on external `.bases` edits.
+   */
+  kernelEvents?: import('./cm/databaseViewDecorations.ts').KernelEventSubscriber
 }
 
 let _runtime: EditorRuntime | null = null

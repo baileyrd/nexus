@@ -838,6 +838,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
                   databaseViewExt({
                     client: runtime.kernelClient,
                     onError: runtime.reportBridgeError,
+                    events: runtime.kernelEvents,
                   }),
                 ]
               : base

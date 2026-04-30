@@ -158,6 +158,37 @@ test('DatabaseViewCache.invalidate forces a re-fetch', async () => {
   assert.equal(invocations, 2)
 })
 
+test('DatabaseViewCache.invalidatePath drops every key targeting a base path', async () => {
+  const cache = new DatabaseViewCache()
+  await cache.run('Tasks.bases {"a":1}', () => Promise.resolve(flatResp([])))
+  await cache.run('Tasks.bases {"a":2}', () => Promise.resolve(flatResp([])))
+  await cache.run('Other.bases {"a":1}', () => Promise.resolve(flatResp([])))
+  assert.equal(cache.size(), 3)
+
+  const dropped = cache.invalidatePath('Tasks.bases')
+  assert.equal(dropped, 2)
+  assert.equal(cache.size(), 1)
+  assert.equal(cache.peek('Other.bases {"a":1}')?.response !== undefined, true)
+})
+
+test('DatabaseViewCache.invalidatePath returns 0 when nothing matched (no spurious recompute)', async () => {
+  const cache = new DatabaseViewCache()
+  await cache.run('Tasks.bases {}', () => Promise.resolve(flatResp([])))
+  assert.equal(cache.invalidatePath('Other.bases'), 0)
+  assert.equal(cache.size(), 1)
+})
+
+test('DatabaseViewCache.invalidatePath does not partial-match a longer base path', async () => {
+  const cache = new DatabaseViewCache()
+  await cache.run('Tasks.bases {}', () => Promise.resolve(flatResp([])))
+  await cache.run('Tasks.bases.archive {}', () => Promise.resolve(flatResp([])))
+  // Trailing-space terminator on the prefix prevents `Tasks.bases`
+  // from also dropping `Tasks.bases.archive`.
+  const dropped = cache.invalidatePath('Tasks.bases')
+  assert.equal(dropped, 1)
+  assert.equal(cache.peek('Tasks.bases.archive {}')?.response !== undefined, true)
+})
+
 test('DatabaseViewCache surfaces fetch errors via peek and rejects subsequent run() callers', async () => {
   const cache = new DatabaseViewCache()
   const boom = new Error('storage offline')
