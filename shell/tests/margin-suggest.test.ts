@@ -13,3 +13,4 @@
 import '../src/plugins/nexus/ai/marginSuggestStore.test.ts'
 import '../src/plugins/nexus/ai/marginSuggest.test.ts'
 import '../src/plugins/nexus/editor/cm/marginSuggestions.test.ts'
+import '../src/plugins/nexus/editor/cm/marginSuggestTrigger.test.ts'
