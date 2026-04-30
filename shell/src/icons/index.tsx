@@ -25,6 +25,7 @@ import {
   Info,
   Link,
   List,
+  MessageSquare,
   Minus,
   MoreHorizontal,
   PanelLeft,
@@ -107,6 +108,7 @@ const ICON_MAP = {
   tag:         { component: Tag },
   book:        { component: BookOpen },
   list:        { component: List },
+  comment:     { component: MessageSquare },
 
   // Tools
   search:      { component: Search },
