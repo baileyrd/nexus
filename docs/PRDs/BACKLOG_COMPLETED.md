@@ -354,6 +354,90 @@ Wired into `search()` in [`lib.rs:903`](../../crates/nexus-storage/src/lib.rs): 
 ### Spec'd in a PRD, not yet implemented
 
 - [x] **CLI subcommands from plugins (PRD-04 §1.1 `cli_subcommands` + PRD-05 §19.1).** Added `allow_external_subcommands = true` to `Cli` so clap captures unknown subcommands as `Commands::External(Vec<OsString>)`. `commands::plugin::dispatch_external` loads all community plugins, calls `PluginManager::dispatch_cli(subcommand, json_args)`, and prints results; on `PluginNotFound` it lists all registered plugin subcommands. `PluginLoader::list_cli_subcommands` / `PluginManager::list_cli_subcommands` added. `IpcError` gained `Clone` (needed by composite-dispatcher unit tests).
+- [x] **`.bases` database renderer in the shell (PRD-10).** Phases
+  1–6 landed 2026-04-22 along with every deferred tail item.
+  Kernel surface: `com.nexus.storage::base_*` ids 40–52
+  (including 49 `base_create`, 50 `base_property_rename`, 51
+  `base_record_soft_delete`, 52 `base_record_restore`);
+  `com.nexus.database::csv_import` / `csv_export` / `formula_eval`.
+  Wire schema grew two slots in the same pass: `ViewType` now
+  includes `List` + `Timeline`, `BaseView` gained `end_field`
+  (timeline end-date pairing with the existing `date_field` as
+  start), and `BaseRecord` gained `deleted_at: Option<i64>` to
+  carry the soft-delete state. Shell code under
+  `shell/src/plugins/nexus/bases/`. Phase-6 work: CSV + undo +
+  formula live preview, `@tanstack/react-virtual` windowing,
+  "New base" Files-toolbar action → `NewBaseDialog` template
+  picker, `SchemaEditor` side panel with rename / retype
+  (migrate_values) / formula editor, list + timeline view
+  persistence via `viewMapping.ts`, and soft-delete: `BasesView`
+  filters `deletedAt != null` out of every live view's visible
+  set but keeps them on the base for the SchemaEditor and a
+  future trash view. Only truly open follow-ups now: a trash-view
+  UI surfacing soft-deleted records and a table-virtualization
+  retest when very large (>50k) bases land.
+- [x] **`.canvas` board renderer in the shell (PRD-06 §4).** Phases
+  1–6 complete 2026-04-22 — every deferred Phase-6 item closed in
+  the same session. Kernel surface:
+  `com.nexus.storage::canvas_read` / `canvas_write` /
+  `canvas_patch` / `canvas_nodes` / `canvas_edges` (handler ids
+  35–39), with `SetBackground` added to `CanvasPatchOp`. Shell
+  code under `shell/src/plugins/nexus/canvas/` covers the full
+  editing loop (selection / marquee / resize / drag / delete /
+  undo-redo / edge drag / inspector) plus the Phase-5 DOM overlay
+  (`CanvasOverlay` — markdown, file embeds, OG cards, `.bases`
+  mini-grid, terminal sessions) and the Phase-6 polish tier
+  (minimap, Tidy auto-layout, grid toggle, zoom-to-fit / zoom-to-
+  selection, help overlay). Phase-6 closers (2026-04-22):
+  `exportFormats.ts` uses `html-to-image` + `jspdf` to produce
+  overlay-inclusive PNG / SVG / PDF (the Export control-strip
+  button opens a 3-option popover); a new optional
+  `CanvasBackground { color, pattern? }` field on `CanvasFile`
+  drives per-canvas background color + dots/grid/lines pattern,
+  edited from the Inspector's `CANVAS` section behind a `BG`
+  control-strip button; canvas shortcuts now route through the
+  shell `KeybindingRegistry` via manifest contributions with a
+  `canvas.focused` context-key gate, and every shortcut is also
+  a palette-accessible `canvas.*` command.
+- [x] **Notion-style block UX on top of the existing block-tree engine
+  (PRD-08).** Phases 1–6 of the plan landed 2026-04-22. Shell-only:
+  every mutation drives the doc through plain CM
+  `dispatch({ changes })` + the existing `editor_sync_content`
+  reparse — no new kernel IPC. Five CodeMirror extensions under
+  `shell/src/plugins/nexus/editor/cm/`: **`slashCommand.ts`** (typing
+  `/` at block start opens a categorised palette with
+  filter-as-you-type + runtime registry for plugin-contributed
+  commands); **`blockSelection.ts`** (Cmd/Ctrl+A expands caret →
+  block → document; Shift+Arrow at block edges steps by whole
+  blocks); **`blockHandle.ts`** (6-dot grip overlay per block,
+  click-menu with Turn-into submenu + Duplicate / Move up / Move
+  down / Delete, drag-to-reorder with a live drop-line indicator,
+  `Alt-ArrowUp/Down` keyboard equivalents); **`inputRules.ts`**
+  (`[]`/`[x]`/`*`/`+` space-normalization rules that fill the gap
+  where user expectation diverges from raw markdown);
+  **`inlineToolbar.ts`** (floating Bold/Italic/Code/Link toolbar
+  above non-empty single-block selections plus
+  `Mod-b/i/e/k` shortcuts with wrap/unwrap toggle).
+  Explicitly out of scope for this pass and tracked as separate
+  follow-ups: drag-to-embed into canvas (cross-plugin), block
+  links navigator (`[[…#^block-id]]`), side-margin comments
+  subsystem, block AI actions via `com.nexus.ai`, multi-cursor
+  from multi-block selection.
+  Kernel asks addressed 2026-04-22: (1) `Transaction::move_block(tree,
+  id, new_parent, new_index, metadata)` constructor landed — single
+  `ReparentBlock` op = single undo step for block-drag. Fixed an
+  incidental `ReparentBlock::reverse` bug where same-parent backward
+  moves couldn't be cleanly reversed (the existing
+  `reparent_roundtrip` test was cross-parent and missed it). (2)
+  Block-id stability over save+reopen: `deterministic_block_id` keys
+  on `(file_path, visit_order, block_type)`, so ids are stable for
+  files that round-trip unchanged. An insert mid-document shifts
+  `visit_order` for every downstream block and produces new ids on
+  reload — the plan's proposed fixes (HTML-comment stamping in
+  markdown or an out-of-band `.forge/blocks.json` sidecar) remain
+  the options. Left deferred until the Phase-6 block-link UX forces
+  a choice, since today no feature depends on cross-session block
+  id stability under edits.
 
 ### Half-specced: manifest keys exist, but no UI/wiring spec in PRD-07
 
