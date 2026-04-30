@@ -18,7 +18,7 @@ use crate::block::{now_ms, Block, BlockId, BlockType, DocumentMetadata, FileType
 use crate::error::{EditorError, Result};
 use crate::tree::BlockTree;
 
-use super::id::deterministic_block_id;
+use super::id::{deterministic_block_id, parse_stable_id_marker, strip_trailing_stable_id_marker};
 use super::inline::collect_inline;
 use super::ParseOptions;
 
@@ -52,10 +52,9 @@ pub fn parse(source: &str, options: &ParseOptions) -> Result<BlockTree> {
         tree: &mut tree,
         options,
         visit_order: 0,
+        pending_stamp: None,
     };
-    for child in root.children() {
-        walker.visit_block(child, None);
-    }
+    walker.visit_siblings(None, root.children());
 
     // 4. Populate derived metadata.
     let words = count_words(&tree);
@@ -73,6 +72,12 @@ struct Walker<'a, 't> {
     tree: &'t mut BlockTree,
     options: &'a ParseOptions,
     visit_order: usize,
+    /// Carried stamp id for the next [`Self::new_block`] call, set by
+    /// [`Self::visit_siblings`] when a sibling `<!-- ^<uuid> -->`
+    /// `HtmlBlock` is peeked ahead, or by an inline-content match arm
+    /// after [`strip_trailing_stable_id_marker`] consumes a trailing
+    /// marker out of the block's text. ADR 0017.
+    pending_stamp: Option<BlockId>,
 }
 
 impl Walker<'_, '_> {
@@ -92,11 +97,41 @@ impl Walker<'_, '_> {
     }
 
     fn new_block(&mut self, ty: BlockType) -> Block {
-        let id = deterministic_block_id(&self.options.file_path, self.visit_order, &ty);
+        let stamp = self.pending_stamp.take();
+        let id = stamp.unwrap_or_else(|| {
+            deterministic_block_id(&self.options.file_path, self.visit_order, &ty)
+        });
         self.visit_order += 1;
         let mut block = Block::new(ty);
         block.id = id;
+        block.stable_id = stamp;
         block
+    }
+
+    /// Walk a sequence of sibling AST nodes, consuming any
+    /// `<!-- ^<uuid> -->` `HtmlBlock` that follows a block as a stamp
+    /// marker for the previous block (ADR 0017 block-level form).
+    /// Inline-form markers are stripped per-block inside
+    /// [`Self::visit_block`] from the collected content.
+    fn visit_siblings<'a, I>(&mut self, parent: Option<BlockId>, children: I)
+    where
+        I: IntoIterator<Item = &'a AstNode<'a>>,
+    {
+        let nodes: Vec<&AstNode> = children.into_iter().collect();
+        let mut i = 0;
+        while i < nodes.len() {
+            // Peek next sibling for a block-level stamp marker.
+            let stamp = nodes
+                .get(i + 1)
+                .and_then(|n| extract_html_block_marker(n));
+            self.pending_stamp = stamp;
+            self.visit_block(nodes[i], parent);
+            i += if stamp.is_some() { 2 } else { 1 };
+            // Clear residual: visit_block normally consumes pending_stamp
+            // through new_block, but skipping a block (e.g. an inline node
+            // with no match arm) would leak it into the next iteration.
+            self.pending_stamp = None;
+        }
     }
 
     /// Handle a top-level (or block-context) AST node.
@@ -105,7 +140,8 @@ impl Walker<'_, '_> {
         let value = node.data.borrow().value.clone();
         match value {
             NodeValue::Heading(h) => {
-                let (content, mut anns) = collect_inline(node);
+                let (raw, mut anns) = collect_inline(node);
+                let content = self.strip_inline_stamp(raw, &mut anns);
                 let (clean, block_ref_id) = extract_block_ref(&content);
                 // Re-shift: extract_block_ref only mutates a trailing
                 // " ^id" segment. If anns reference bytes past clean.len(),
@@ -123,7 +159,8 @@ impl Walker<'_, '_> {
                 self.insert_block(block, parent);
             }
             NodeValue::Paragraph => {
-                let (content, mut anns) = collect_inline(node);
+                let (raw, mut anns) = collect_inline(node);
+                let content = self.strip_inline_stamp(raw, &mut anns);
 
                 // Promote a bare `![[target]]` paragraph to an Embed block.
                 if let Some(embed_url) = bare_embed_target(&content) {
@@ -170,6 +207,14 @@ impl Walker<'_, '_> {
             NodeValue::List(list) => {
                 // Expand each Item into a list-item block. Nested lists
                 // inside an item become children of that item.
+                //
+                // A stamp captured by `visit_siblings` on the list as a
+                // whole has no defined semantics (it could mean "stamp
+                // the last item" or "stamp the list" — neither maps
+                // cleanly today), so drop it rather than mis-attributing
+                // to the first item. Inline-form stamps inside each
+                // item still flow through `visit_list_item`.
+                self.pending_stamp = None;
                 let indent_level = parent
                     .and_then(|pid| self.tree.get(pid).map(list_indent_level))
                     .unwrap_or(0);
@@ -221,15 +266,12 @@ impl Walker<'_, '_> {
                 let (kind, callout_type, _after) = detect_callout(&inner_text);
                 if kind == "callout" {
                     let alert_type = callout_type.unwrap_or_else(|| "note".into());
-                    let mut block = self.new_block(BlockType::Callout {
-                        icon: String::new(),
-                        color: String::new(),
-                        alert_type: alert_type.clone(),
-                    });
 
                     // Steal the first paragraph's inline content onto
                     // the Callout itself (stripping the `[!type]` prefix).
                     let prefix = format!("[!{alert_type}]");
+                    let mut stolen_content = String::new();
+                    let mut stolen_anns: Vec<Annotation> = Vec::new();
                     let mut first_para_stolen = false;
                     for child in node.children() {
                         if matches!(child.data.borrow().value, NodeValue::Paragraph) {
@@ -240,7 +282,7 @@ impl Walker<'_, '_> {
                                 .trim_start()
                                 .to_string();
                             let offset = raw.len() - trimmed.len();
-                            let anns: Vec<Annotation> = raw_anns
+                            let mut anns: Vec<Annotation> = raw_anns
                                 .into_iter()
                                 .filter_map(|mut a| {
                                     if a.start >= offset {
@@ -256,32 +298,44 @@ impl Walker<'_, '_> {
                                     }
                                 })
                                 .collect();
-                            block.content = trimmed;
-                            block.annotations = anns;
+                            stolen_content = self.strip_inline_stamp(trimmed, &mut anns);
+                            stolen_anns = anns;
                             first_para_stolen = true;
                             break;
                         }
                     }
 
+                    // `new_block` consumes any inline-form stamp set above,
+                    // taking precedence over a sibling block-form stamp.
+                    let mut block = self.new_block(BlockType::Callout {
+                        icon: String::new(),
+                        color: String::new(),
+                        alert_type: alert_type.clone(),
+                    });
+                    block.content = stolen_content;
+                    block.annotations = stolen_anns;
+
                     let callout_id = self.insert_block(block, parent);
 
                     // Process remaining children, skipping the first paragraph.
                     let mut skipped_first = !first_para_stolen;
-                    for child in node.children() {
-                        if !skipped_first
-                            && matches!(child.data.borrow().value, NodeValue::Paragraph)
-                        {
-                            skipped_first = true;
-                            continue;
-                        }
-                        self.visit_block(child, Some(callout_id));
-                    }
+                    let remaining: Vec<&AstNode> = node
+                        .children()
+                        .filter(|child| {
+                            if !skipped_first
+                                && matches!(child.data.borrow().value, NodeValue::Paragraph)
+                            {
+                                skipped_first = true;
+                                return false;
+                            }
+                            true
+                        })
+                        .collect();
+                    self.visit_siblings(Some(callout_id), remaining);
                 } else {
                     let block = self.new_block(BlockType::Quote);
                     let id = self.insert_block(block, parent);
-                    for child in node.children() {
-                        self.visit_block(child, Some(id));
-                    }
+                    self.visit_siblings(Some(id), node.children());
                 }
             }
             NodeValue::Image(l) => {
@@ -352,7 +406,13 @@ impl Walker<'_, '_> {
                 break;
             }
         }
+        let content = self.strip_inline_stamp(content, &mut anns);
 
+        // `new_block` consumes any inline-form stamp captured above; the
+        // sibling-block stamp on the list item itself was already
+        // captured in `pending_stamp` by the surrounding `visit_siblings`
+        // call (or, for items inside a list, by the list arm's own
+        // sibling walk).
         let mut block = self.new_block(ty);
         block.content = content;
         block.annotations = anns;
@@ -367,13 +427,44 @@ impl Walker<'_, '_> {
         // Remaining children (nested lists, additional paragraphs, etc.)
         // become children of this list-item block.
         let mut saw_first_para = false;
-        for child in item.children() {
-            if !saw_first_para && matches!(child.data.borrow().value, NodeValue::Paragraph) {
-                saw_first_para = true;
-                continue;
-            }
-            self.visit_block(child, Some(item_id));
-        }
+        let remaining: Vec<&AstNode> = item
+            .children()
+            .filter(|child| {
+                if !saw_first_para && matches!(child.data.borrow().value, NodeValue::Paragraph) {
+                    saw_first_para = true;
+                    return false;
+                }
+                true
+            })
+            .collect();
+        self.visit_siblings(Some(item_id), remaining);
+    }
+
+    /// Strip a trailing `<!-- ^<uuid> -->` marker from inline content
+    /// and stash the parsed id in [`Self::pending_stamp`] so the next
+    /// [`Self::new_block`] call promotes it onto the resulting block.
+    /// Annotations whose end falls past the truncated content are
+    /// trimmed in place.
+    fn strip_inline_stamp(&mut self, raw: String, anns: &mut Vec<Annotation>) -> String {
+        let Some((head, id)) = strip_trailing_stable_id_marker(&raw) else {
+            return raw;
+        };
+        anns.retain(|a| a.end <= head.len());
+        // Inline-form marker takes precedence over a sibling block-form
+        // marker captured by visit_siblings — both shouldn't co-occur in
+        // serializer output, but if they do, the inline form is more
+        // authoritative.
+        self.pending_stamp = Some(id);
+        head
+    }
+}
+
+/// Return the parsed stamp id when `node` is an `HtmlBlock` whose body
+/// is exactly a `<!-- ^<uuid> -->` marker (whitespace tolerated).
+fn extract_html_block_marker<'a>(node: &'a AstNode<'a>) -> Option<BlockId> {
+    match node.data.borrow().value.clone() {
+        NodeValue::HtmlBlock(html) => parse_stable_id_marker(&html.literal),
+        _ => None,
     }
 }
 
@@ -749,5 +840,113 @@ mod tests {
         let a = parse(src, &opts).unwrap();
         let b = parse(src, &opts).unwrap();
         assert_eq!(a.root_blocks, b.root_blocks);
+    }
+
+    // ── ADR 0017: lazy block-id stamping ──
+
+    #[test]
+    fn inline_stamp_marker_promotes_paragraph_id() {
+        let id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let src = format!("Hello world <!-- ^{id} -->\n");
+        let tree = parse_default(&src);
+        assert_eq!(tree.root_blocks.len(), 1);
+        let block = tree.get(tree.root_blocks[0]).unwrap();
+        // The marker is stripped from the visible content.
+        assert_eq!(block.content, "Hello world");
+        // The id is the stamped uuid (not the positional fallback).
+        assert_eq!(block.id, id);
+        assert_eq!(block.stable_id, Some(id));
+    }
+
+    #[test]
+    fn inline_stamp_marker_promotes_heading_id() {
+        let id = uuid::Uuid::parse_str("11111111-2222-4333-8444-555555555555").unwrap();
+        let src = format!("# Title <!-- ^{id} -->\n");
+        let tree = parse_default(&src);
+        let block = tree.get(tree.root_blocks[0]).unwrap();
+        assert_eq!(block.content, "Title");
+        assert_eq!(block.stable_id, Some(id));
+    }
+
+    #[test]
+    fn block_form_stamp_attaches_to_previous_code_block() {
+        let id = uuid::Uuid::parse_str("aaaabbbb-cccc-4ddd-8eee-ffffffffffff").unwrap();
+        let src = format!("```rust\nfn main() {{}}\n```\n<!-- ^{id} -->\n");
+        let tree = parse_default(&src);
+        // Code block is the only root block; the marker is consumed.
+        assert_eq!(tree.root_blocks.len(), 1);
+        let block = tree.get(tree.root_blocks[0]).unwrap();
+        assert!(matches!(block.ty, BlockType::CodeBlock { .. }));
+        assert_eq!(block.stable_id, Some(id));
+        assert_eq!(block.id, id);
+    }
+
+    #[test]
+    fn block_form_stamp_attaches_to_previous_divider() {
+        let id = uuid::Uuid::parse_str("11111111-2222-4333-8444-aaaaaaaaaaaa").unwrap();
+        let src = format!("Before\n\n---\n<!-- ^{id} -->\n\nAfter\n");
+        let tree = parse_default(&src);
+        assert_eq!(tree.root_blocks.len(), 3);
+        let divider = tree.get(tree.root_blocks[1]).unwrap();
+        assert!(matches!(divider.ty, BlockType::Divider));
+        assert_eq!(divider.stable_id, Some(id));
+        // Surrounding blocks are not stamped.
+        assert!(tree.get(tree.root_blocks[0]).unwrap().stable_id.is_none());
+        assert!(tree.get(tree.root_blocks[2]).unwrap().stable_id.is_none());
+    }
+
+    #[test]
+    fn unstamped_blocks_use_positional_hash() {
+        let opts = ParseOptions {
+            file_path: "f.md".into(),
+            ..ParseOptions::default()
+        };
+        let tree = parse("# Hi\n\nBody\n", &opts).unwrap();
+        for id in &tree.root_blocks {
+            assert!(tree.get(*id).unwrap().stable_id.is_none());
+        }
+        // The first block's id is the positional hash for slot 0.
+        let expected = deterministic_block_id("f.md", 0, &BlockType::Heading { level: 1 });
+        assert_eq!(tree.root_blocks[0], expected);
+    }
+
+    #[test]
+    fn stamped_id_survives_upstream_insertion() {
+        // Insert a new heading above a stamped paragraph; the stamped
+        // paragraph's id must NOT change, even though its visit_order
+        // (and thus its positional id) has shifted.
+        let id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+
+        let opts = ParseOptions {
+            file_path: "f.md".into(),
+            ..ParseOptions::default()
+        };
+        let before = format!("Body <!-- ^{id} -->\n");
+        let after = format!("# New top\n\nBody <!-- ^{id} -->\n");
+        let tree_before = parse(&before, &opts).unwrap();
+        let tree_after = parse(&after, &opts).unwrap();
+
+        // Find the paragraph block in each tree (last root in `after`).
+        let para_before = tree_before.root_blocks[0];
+        let para_after = *tree_after.root_blocks.last().unwrap();
+        assert_eq!(para_before, id);
+        assert_eq!(para_after, id, "stamped id must survive upstream insert");
+
+        // Tree-after's heading is NOT stamped and uses its positional id.
+        let heading = tree_after.get(tree_after.root_blocks[0]).unwrap();
+        assert!(heading.stable_id.is_none());
+        assert!(matches!(heading.ty, BlockType::Heading { level: 1 }));
+    }
+
+    #[test]
+    fn invalid_stamp_marker_left_as_content() {
+        // A trailing comment that doesn't match the stamp pattern stays
+        // in the content (parser falls back to deterministic id).
+        let src = "Hello <!-- not-a-stamp -->\n";
+        let tree = parse_default(src);
+        let block = tree.get(tree.root_blocks[0]).unwrap();
+        assert!(block.stable_id.is_none());
+        // The HtmlInline content is preserved verbatim.
+        assert!(block.content.contains("<!-- not-a-stamp -->"));
     }
 }

@@ -14,7 +14,10 @@ mod inline;
 mod parse;
 mod serialize;
 
-pub use id::deterministic_block_id;
+pub use id::{
+    deterministic_block_id, format_stable_id_marker, parse_stable_id_marker,
+    strip_trailing_stable_id_marker,
+};
 
 /// Options that control [`MarkdownParser`] behaviour (PRD §3.2).
 #[derive(Clone, Debug)]
@@ -310,5 +313,49 @@ mod tests {
         let src =
             "# Overview\n\nThis is the intro.\n\n## Section\n\nMore detail here.\n\n- Point A\n- Point B\n";
         parse_serialize_parse_is_idempotent(src);
+    }
+
+    // ── ADR 0017: stamp marker round-trip ──
+
+    #[test]
+    fn stamped_paragraph_round_trips_through_external_editor() {
+        // Simulate the external-editor case: the marker is in the source
+        // (as if a user opened the file in vim and preserved the comment).
+        // After parse → serialize → parse, the id must remain the same.
+        let id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let src = format!("Hello world <!-- ^{id} -->\n");
+        let tree1 = parser().parse(&src).unwrap();
+        let md = MarkdownSerializer::serialize(&tree1);
+        // The serializer emits the marker too (lossless round-trip).
+        assert!(md.contains(&format!("<!-- ^{id} -->")));
+        let tree2 = parser().parse(&md).unwrap();
+        assert_eq!(tree1.root_blocks, tree2.root_blocks);
+        let para = tree2.get(tree2.root_blocks[0]).unwrap();
+        assert_eq!(para.id, id);
+        assert_eq!(para.stable_id, Some(id));
+        assert_eq!(para.content, "Hello world");
+    }
+
+    #[test]
+    fn stamped_code_block_round_trips_block_form() {
+        let id = uuid::Uuid::parse_str("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee").unwrap();
+        let src = format!("```rust\nfn main() {{}}\n```\n<!-- ^{id} -->\n");
+        let tree1 = parser().parse(&src).unwrap();
+        let md = MarkdownSerializer::serialize(&tree1);
+        let tree2 = parser().parse(&md).unwrap();
+        assert_eq!(tree1.root_blocks, tree2.root_blocks);
+        let code = tree2.get(tree2.root_blocks[0]).unwrap();
+        assert_eq!(code.stable_id, Some(id));
+        assert_eq!(code.id, id);
+    }
+
+    #[test]
+    fn unstamped_documents_emit_no_stamp_markers() {
+        // Sanity check: nothing in this body has been stamped, so the
+        // serialized form should not contain `<!-- ^` anywhere.
+        let src = "# Hi\n\nBody.\n\n- One\n- Two\n";
+        let tree = parser().parse(src).unwrap();
+        let md = MarkdownSerializer::serialize(&tree);
+        assert!(!md.contains("<!-- ^"));
     }
 }

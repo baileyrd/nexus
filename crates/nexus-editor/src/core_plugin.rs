@@ -85,6 +85,33 @@ pub const HANDLER_SYNC_CONTENT: u32 = 9;
 /// editor transaction wiring plan).
 pub const HANDLER_GET_MARKDOWN: u32 = 10;
 
+/// Handler id for `stamp_block`. Args:
+/// `{ "relpath": String, "block_id": Uuid }`; Returns:
+/// `{ "block_id": Uuid, "stable_id": Uuid, "newly_stamped": bool }`.
+///
+/// Promotes the block addressed by `block_id` to a stable id (ADR
+/// 0017). The session's in-memory tree is rekeyed onto a fresh v4
+/// uuid; that uuid is set as [`crate::Block::stable_id`] so the next
+/// [`HANDLER_SAVE`] writes a `<!-- ^<uuid> -->` marker, and
+/// subsequent re-opens key the block under the same uuid regardless
+/// of upstream insertions.
+///
+/// A fresh v4 (rather than reusing `block_id` itself) avoids the slot-
+/// collision case where an unrelated block later lands at the
+/// originally-stamped block's positional slot — the deterministic
+/// hash for that slot would otherwise duplicate the stamp.
+///
+/// Idempotent: a second call against an already-stamped block
+/// returns the existing `stable_id` with `newly_stamped: false`. The
+/// returned `block_id` is the lookup id passed in (which after the
+/// rekey equals `stable_id` for newly-stamped blocks, so callers can
+/// continue using it as the kernel-side reference).
+///
+/// Cross-session stable ids unblock BL-048 (drag-to-embed), BL-049
+/// (block-links navigator), and BL-050 (side-margin comments) — see
+/// [`docs/adr/0017-block-id-stability.md`](../../../../docs/adr/0017-block-id-stability.md).
+pub const HANDLER_STAMP_BLOCK: u32 = 11;
+
 // ── Wire types ───────────────────────────────────────────────────────────────
 
 /// Snapshot of an open editor session, suitable for IPC return.
@@ -213,6 +240,9 @@ impl CorePlugin for EditorCorePlugin {
                 handle_sync_content(&self.sessions, self.event_bus.as_ref(), args)
             }
             HANDLER_GET_MARKDOWN => handle_get_markdown(&self.sessions, args),
+            HANDLER_STAMP_BLOCK => {
+                handle_stamp_block(&self.sessions, self.event_bus.as_ref(), args)
+            }
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -551,6 +581,68 @@ fn handle_get_markdown(
         .ok_or_else(|| exec_err(format!("get_markdown: no open session for '{relpath}'")))?;
     let markdown = MarkdownSerializer::serialize(&s.tree);
     Ok(Value::String(markdown))
+}
+
+/// Stamp the addressed block with a fresh v4 stable id so the next
+/// `save` writes a `<!-- ^<uuid> -->` marker and the id survives
+/// upstream insertions on reload (ADR 0017). Idempotent: a second
+/// call against an already-stamped block returns the existing stamp
+/// without bumping the session revision or publishing a changed
+/// event.
+///
+/// The block is rekeyed via [`crate::BlockTree::rekey`] from its
+/// current positional id to the fresh stamp; references in the
+/// parent's `children` list, `root_blocks`, and child blocks'
+/// `parent_id` are all updated together. After rekey, the block's
+/// `id` and `stable_id` are equal — the lookup `block_id` arg passed
+/// in is returned as `block_id` in the response so the caller can
+/// still reference it, while `stable_id` carries the new uuid that's
+/// now the canonical key.
+fn handle_stamp_block(
+    sessions: &Mutex<HashMap<String, Session>>,
+    event_bus: Option<&Arc<EventBus>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let relpath = relpath_arg(args, "stamp_block")?;
+    let block_id_str = args
+        .get("block_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| exec_err("stamp_block: missing 'block_id' string".to_string()))?;
+    let block_id = uuid::Uuid::parse_str(block_id_str)
+        .map_err(|e| exec_err(format!("stamp_block: invalid 'block_id': {e}")))?;
+
+    let (stable_id, newly_stamped, revision) = {
+        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+        let s = guard.get_mut(&relpath).ok_or_else(|| {
+            exec_err(format!("stamp_block: no open session for '{relpath}'"))
+        })?;
+        let block = s.tree.get(block_id).ok_or_else(|| {
+            exec_err(format!(
+                "stamp_block: block '{block_id}' not present in '{relpath}'"
+            ))
+        })?;
+        if let Some(existing) = block.stable_id {
+            // Already stamped: return the existing stamp untouched.
+            (existing, false, s.revision)
+        } else {
+            let new_id = uuid::Uuid::new_v4();
+            s.tree
+                .rekey(block_id, new_id)
+                .map_err(|e| exec_err(format!("stamp_block: rekey: {e}")))?;
+            s.revision = s.revision.saturating_add(1);
+            (new_id, true, s.revision)
+        }
+    };
+
+    if newly_stamped {
+        publish_changed(event_bus, &relpath, revision, None);
+    }
+
+    Ok(serde_json::json!({
+        "block_id": block_id,
+        "stable_id": stable_id,
+        "newly_stamped": newly_stamped,
+    }))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1188,5 +1280,201 @@ mod tests {
         let mut p = new_plugin(root);
         let err = p.dispatch(999, &serde_json::json!({})).unwrap_err();
         assert!(format!("{err}").contains("unknown handler id 999"));
+    }
+
+    // ── ADR 0017: stamp_block handler ──
+
+    #[test]
+    fn stamp_block_promotes_block_id_and_persists_through_save() {
+        let (_tmp, root) = setup_forge();
+        write_note(&root, "notes/a.md", "# Hi\n\nBody\n");
+        let mut p = new_plugin(root.clone());
+        let snap: EditorSnapshot = serde_json::from_value(
+            p.dispatch(
+                HANDLER_OPEN,
+                &serde_json::json!({ "relpath": "notes/a.md" }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        // Pick the body paragraph (root_blocks[1]).
+        let para_id = snap.tree.root_blocks[1];
+
+        // Stamp it.
+        let resp = p
+            .dispatch(
+                HANDLER_STAMP_BLOCK,
+                &serde_json::json!({
+                    "relpath": "notes/a.md",
+                    "block_id": para_id.to_string(),
+                }),
+            )
+            .unwrap();
+        assert_eq!(resp["block_id"].as_str().unwrap(), para_id.to_string());
+        assert_eq!(resp["newly_stamped"], serde_json::json!(true));
+        let stamp_id = uuid::Uuid::parse_str(resp["stable_id"].as_str().unwrap()).unwrap();
+        assert_ne!(
+            stamp_id, para_id,
+            "stamp must be a fresh v4, distinct from the positional id"
+        );
+
+        // The in-memory block was rekeyed: the old positional id is
+        // gone, a new entry exists at the stamped id.
+        let snap: EditorSnapshot = serde_json::from_value(
+            p.dispatch(
+                HANDLER_GET_TREE,
+                &serde_json::json!({ "relpath": "notes/a.md" }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(!snap.tree.blocks.contains_key(&para_id));
+        let block = snap.tree.blocks.get(&stamp_id).unwrap();
+        assert_eq!(block.stable_id, Some(stamp_id));
+        assert_eq!(block.id, stamp_id);
+
+        // Save and re-read disk: the marker should be present.
+        p.dispatch(
+            HANDLER_SAVE,
+            &serde_json::json!({ "relpath": "notes/a.md" }),
+        )
+        .unwrap();
+        let on_disk = fs::read_to_string(root.join("notes/a.md")).unwrap();
+        assert!(
+            on_disk.contains(&format!("<!-- ^{stamp_id} -->")),
+            "expected stamp marker on disk, got: {on_disk}"
+        );
+    }
+
+    #[test]
+    fn stamp_block_is_idempotent() {
+        let (_tmp, root) = setup_forge();
+        write_note(&root, "notes/a.md", "Body\n");
+        let mut p = new_plugin(root);
+        let snap: EditorSnapshot = serde_json::from_value(
+            p.dispatch(
+                HANDLER_OPEN,
+                &serde_json::json!({ "relpath": "notes/a.md" }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let id = snap.tree.root_blocks[0];
+
+        let r1 = p
+            .dispatch(
+                HANDLER_STAMP_BLOCK,
+                &serde_json::json!({ "relpath": "notes/a.md", "block_id": id.to_string() }),
+            )
+            .unwrap();
+        assert_eq!(r1["newly_stamped"], serde_json::json!(true));
+        let stamp_id_str = r1["stable_id"].as_str().unwrap().to_string();
+        // Second call addresses the new (stamped) id; the rekey moved
+        // the block off its original positional id.
+        let r2 = p
+            .dispatch(
+                HANDLER_STAMP_BLOCK,
+                &serde_json::json!({ "relpath": "notes/a.md", "block_id": stamp_id_str }),
+            )
+            .unwrap();
+        assert_eq!(r2["newly_stamped"], serde_json::json!(false));
+        assert_eq!(r2["stable_id"], r1["stable_id"]);
+    }
+
+    #[test]
+    fn stamp_block_rejects_unknown_block() {
+        let (_tmp, root) = setup_forge();
+        write_note(&root, "notes/a.md", "x\n");
+        let mut p = new_plugin(root);
+        p.dispatch(
+            HANDLER_OPEN,
+            &serde_json::json!({ "relpath": "notes/a.md" }),
+        )
+        .unwrap();
+        let bogus = uuid::Uuid::nil();
+        let err = p
+            .dispatch(
+                HANDLER_STAMP_BLOCK,
+                &serde_json::json!({ "relpath": "notes/a.md", "block_id": bogus.to_string() }),
+            )
+            .unwrap_err();
+        assert!(format!("{err}").contains("not present"));
+    }
+
+    #[test]
+    fn stamp_block_rejects_missing_args() {
+        let (_tmp, root) = setup_forge();
+        let mut p = new_plugin(root);
+        let err = p
+            .dispatch(
+                HANDLER_STAMP_BLOCK,
+                &serde_json::json!({ "relpath": "notes/a.md" }),
+            )
+            .unwrap_err();
+        assert!(format!("{err}").contains("block_id"));
+    }
+
+    #[test]
+    fn stamp_block_round_trips_through_save_and_reopen() {
+        // End-to-end: stamp → save → close → re-open → confirm the
+        // re-parsed tree still keys the block under the stamped id,
+        // even after an out-of-band insertion shifts every downstream
+        // positional id.
+        let (_tmp, root) = setup_forge();
+        write_note(&root, "notes/a.md", "First\n\nSecond\n");
+        let mut p = new_plugin(root.clone());
+
+        let snap: EditorSnapshot = serde_json::from_value(
+            p.dispatch(
+                HANDLER_OPEN,
+                &serde_json::json!({ "relpath": "notes/a.md" }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let target_id = snap.tree.root_blocks[1];
+        let stamp_resp = p
+            .dispatch(
+                HANDLER_STAMP_BLOCK,
+                &serde_json::json!({
+                    "relpath": "notes/a.md",
+                    "block_id": target_id.to_string(),
+                }),
+            )
+            .unwrap();
+        let stamp_id =
+            uuid::Uuid::parse_str(stamp_resp["stable_id"].as_str().unwrap()).unwrap();
+        p.dispatch(
+            HANDLER_SAVE,
+            &serde_json::json!({ "relpath": "notes/a.md" }),
+        )
+        .unwrap();
+        p.dispatch(
+            HANDLER_CLOSE,
+            &serde_json::json!({ "relpath": "notes/a.md" }),
+        )
+        .unwrap();
+
+        // Prepend a new heading out-of-band — same kind of edit that
+        // would normally renumber every downstream positional id.
+        let body = fs::read_to_string(root.join("notes/a.md")).unwrap();
+        let edited = format!("# New top\n\n{body}");
+        write_note(&root, "notes/a.md", &edited);
+
+        let snap: EditorSnapshot = serde_json::from_value(
+            p.dispatch(
+                HANDLER_OPEN,
+                &serde_json::json!({ "relpath": "notes/a.md" }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            snap.tree.blocks.contains_key(&stamp_id),
+            "stamped id must survive upstream insertion: {:?}",
+            snap.tree.root_blocks,
+        );
+        let block = snap.tree.blocks.get(&stamp_id).unwrap();
+        assert_eq!(block.stable_id, Some(stamp_id));
     }
 }

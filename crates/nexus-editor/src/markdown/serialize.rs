@@ -9,6 +9,7 @@ use crate::annotation::AnnotationType;
 use crate::block::{Block, BlockId, BlockType, PropertyValue};
 use crate::tree::BlockTree;
 
+use super::id::format_stable_id_marker;
 use super::inline::serialize_inline;
 
 /// Serialize `tree` to a markdown string.
@@ -113,11 +114,17 @@ fn serialize_block(tree: &BlockTree, id: BlockId, out: &mut String) {
             if !formula.ends_with('\n') {
                 out.push('\n');
             }
-            out.push_str("$$\n\n");
+            out.push_str("$$\n");
+            push_block_stamp_line(block, out);
+            out.push('\n');
         }
         BlockType::Callout { alert_type, .. } => serialize_callout(tree, block, alert_type, out),
         BlockType::Quote => serialize_quote(tree, block, out),
-        BlockType::Divider => out.push_str("---\n\n"),
+        BlockType::Divider => {
+            out.push_str("---\n");
+            push_block_stamp_line(block, out);
+            out.push('\n');
+        }
         BlockType::Table { .. } => serialize_table(tree, block, out),
         BlockType::TableRow { .. } => {
             // Serialized by the parent Table; ignore here.
@@ -127,39 +134,51 @@ fn serialize_block(tree: &BlockTree, id: BlockId, out: &mut String) {
             out.push_str(alt_text);
             out.push_str("](");
             out.push_str(src);
-            out.push_str(")\n\n");
+            out.push_str(")\n");
+            push_block_stamp_line(block, out);
+            out.push('\n');
         }
-        BlockType::Embed { url, .. } => push_wiki_embed(out, url),
+        BlockType::Embed { url, .. } => push_wiki_embed(out, url, block),
         // Deferred types: emit a recognizable fallback that roundtrips
         // through the parser as a paragraph (no data loss).
-        BlockType::DatabaseView { database_path, .. } => push_wiki_embed(out, database_path),
+        BlockType::DatabaseView { database_path, .. } => {
+            push_wiki_embed(out, database_path, block);
+        }
         BlockType::Video { src, .. } | BlockType::Audio { src } | BlockType::File { src, .. } => {
-            push_wiki_embed(out, src);
+            push_wiki_embed(out, src, block);
         }
         BlockType::Bookmark { url, title, .. } => {
             out.push('[');
             out.push_str(title);
             out.push_str("](");
             out.push_str(url);
-            out.push_str(")\n\n");
+            out.push_str(")\n");
+            push_block_stamp_line(block, out);
+            out.push('\n');
         }
         BlockType::SyncedBlock { .. }
         | BlockType::ColumnLayout { .. }
         | BlockType::Column { .. }
         | BlockType::TableOfContents { .. } => {
             // No canonical markdown form yet; emit content if any.
-            if !block.content.is_empty() {
+            if block.content.is_empty() {
+                push_block_stamp_line(block, out);
+            } else {
                 out.push_str(&block.content);
-                out.push_str("\n\n");
+                out.push('\n');
+                push_block_stamp_line(block, out);
+                out.push('\n');
             }
         }
     }
 }
 
-fn push_wiki_embed(out: &mut String, target: &str) {
+fn push_wiki_embed(out: &mut String, target: &str, block: &Block) {
     out.push_str("![[");
     out.push_str(target);
-    out.push_str("]]\n\n");
+    out.push_str("]]\n");
+    push_block_stamp_line(block, out);
+    out.push('\n');
 }
 
 // ── Per-type serializers ──────────────────────────────────────────────────────
@@ -235,13 +254,19 @@ fn serialize_code_block(language: &str, block: &Block, out: &mut String) {
     if !block.content.ends_with('\n') {
         out.push('\n');
     }
-    out.push_str("```\n\n");
+    out.push_str("```\n");
+    push_block_stamp_line(block, out);
+    out.push('\n');
 }
 
 fn serialize_callout(tree: &BlockTree, block: &Block, alert_type: &str, out: &mut String) {
+    // `render_content` includes the stamp marker when set; check the
+    // rendered string rather than `block.content` so a stamped-but-
+    // empty callout still emits the marker on the header line.
     let mut body = String::new();
-    if !block.content.is_empty() {
-        body.push_str(&render_content(block));
+    let rendered = render_content(block);
+    if !rendered.is_empty() {
+        body.push_str(&rendered);
     }
     // Render children into a scratch buffer so we can prefix `> `.
     let mut child_buf = String::new();
@@ -279,8 +304,9 @@ fn serialize_callout(tree: &BlockTree, block: &Block, alert_type: &str, out: &mu
 
 fn serialize_quote(tree: &BlockTree, block: &Block, out: &mut String) {
     let mut body = String::new();
-    if !block.content.is_empty() {
-        body.push_str(&render_content(block));
+    let rendered = render_content(block);
+    if !rendered.is_empty() {
+        body.push_str(&rendered);
     }
     let mut child_buf = String::new();
     for &cid in &block.children {
@@ -366,6 +392,7 @@ fn serialize_table(tree: &BlockTree, block: &Block, out: &mut String) {
             out.push('\n');
         }
     }
+    push_block_stamp_line(block, out);
     out.push('\n');
 }
 
@@ -375,7 +402,29 @@ fn render_content(block: &Block) -> String {
         text.push_str(" ^");
         text.push_str(bref);
     }
+    // ADR 0017 inline form: trailing `<!-- ^<uuid> -->` after the
+    // visible content. The parser strips this back into
+    // `Block.stable_id` on re-read.
+    if let Some(id) = block.stable_id {
+        if !text.is_empty() {
+            text.push(' ');
+        }
+        text.push_str(&format_stable_id_marker(&id));
+    }
     text
+}
+
+/// Append a `<!-- ^<uuid> -->` marker on its own line for a stamped
+/// block whose serialization doesn't go through [`render_content`]
+/// (code blocks, dividers, images, embeds, math, tables, etc.).
+/// The caller is expected to have just emitted the block's content
+/// terminated by a single `\n`; this writes `marker\n` so the
+/// surrounding `normalize_blank_lines` collapses anything else.
+fn push_block_stamp_line(block: &Block, out: &mut String) {
+    if let Some(id) = block.stable_id {
+        out.push_str(&format_stable_id_marker(&id));
+        out.push('\n');
+    }
 }
 
 // ── Post-processing ───────────────────────────────────────────────────────────
@@ -589,5 +638,38 @@ mod tests {
         let s = "a\n\n\n\n\nb\n";
         let out = normalize_blank_lines(s);
         assert_eq!(out, "a\n\nb\n");
+    }
+
+    // ── ADR 0017: stamp emission ──
+
+    #[test]
+    fn paragraph_stamp_renders_inline() {
+        let id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let mut tree = build(vec![BlockType::Paragraph]);
+        let bid = tree.root_blocks[0];
+        let block = tree.get_mut(bid).unwrap();
+        block.content = "Hello".into();
+        block.stable_id = Some(id);
+        let out = serialize(&tree);
+        assert!(out.contains(&format!("Hello <!-- ^{id} -->")));
+    }
+
+    #[test]
+    fn divider_stamp_renders_on_separate_line() {
+        let id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let mut tree = build(vec![BlockType::Divider]);
+        let bid = tree.root_blocks[0];
+        tree.get_mut(bid).unwrap().stable_id = Some(id);
+        let out = serialize(&tree);
+        assert!(out.contains("---\n"));
+        assert!(out.contains(&format!("<!-- ^{id} -->\n")));
+    }
+
+    #[test]
+    fn unstamped_blocks_emit_no_marker() {
+        let mut tree = build(vec![BlockType::Paragraph, BlockType::Divider]);
+        tree.get_mut(tree.root_blocks[0]).unwrap().content = "x".into();
+        let out = serialize(&tree);
+        assert!(!out.contains("<!-- ^"));
     }
 }
