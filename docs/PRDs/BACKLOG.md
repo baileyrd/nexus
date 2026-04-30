@@ -343,11 +343,7 @@ _BL-040 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 _BL-041 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-042: AI-DIR Nexus-as-MCP-server
-
-**Source**: [../AI-INTEGRATION-DIRECTIONS.md](../AI-INTEGRATION-DIRECTIONS.md) direction 7.
-**Effort**: Large. **Crate**: `nexus-mcp` (server-side surfaces) + `nexus-bootstrap` (lifecycle).
-Today `nexus-mcp` is an MCP *client*. The FD direction is the inverse: expose Nexus's tools (search, read_file, write_file, run_skill, etc.) as an MCP server so external IDEs / Claude Desktop can drive a Nexus forge. Distinct files from BL-023 / BL-025 (which remain client-side). Pairs with BL-016 (the tool registry is the natural source of truth for advertised tools).
+_BL-042 shipped 2026-04-30 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 _BL-043 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
