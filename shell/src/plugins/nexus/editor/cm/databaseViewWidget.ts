@@ -178,6 +178,28 @@ export class DatabaseViewCache {
     this.cache.delete(key)
   }
 
+  /** Drop every cache slot whose key targets `databasePath`. Cache
+   *  keys are `${databasePath} ${stable-config-JSON}` so a prefix
+   *  match plus the trailing space terminator is sufficient. Returns
+   *  the count of evicted entries — callers can use it to skip the
+   *  decoration recompute when nothing was cached for the path. */
+  invalidatePath(databasePath: string): number {
+    const prefix = `${databasePath} `
+    let n = 0
+    for (const k of [...this.cache.keys()]) {
+      if (k.startsWith(prefix)) {
+        this.cache.delete(k)
+        n++
+      }
+    }
+    return n
+  }
+
+  /** Test helper — number of cache slots currently held. */
+  size(): number {
+    return this.cache.size
+  }
+
   /** Drop everything. Used by tests; production callers prefer
    *  targeted `invalidate`. */
   clear(): void {

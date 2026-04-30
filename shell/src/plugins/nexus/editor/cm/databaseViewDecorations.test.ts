@@ -7,11 +7,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { EditorSelection, EditorState } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
 
 import type { EditorKernelClient } from '../kernelClient.ts'
 import {
   buildDatabaseViewDecorations,
+  databaseViewInvalidate,
+  type KernelEventSubscriber,
+  makeBasesChangeWatcher,
   parseDatabaseViewBlocks,
+  pathToBasePath,
 } from './databaseViewDecorations.ts'
 import { DatabaseViewCache } from './databaseViewWidget.ts'
 
@@ -164,4 +169,172 @@ test('builder emits multiple decorations when multiple blocks live on different 
   assert.equal(ranges.length, 2)
   // Order is deterministic — sorted by `from` ascending.
   assert.ok(ranges[0].from < ranges[1].from)
+})
+
+// ── pathToBasePath ──────────────────────────────────────────────────────────
+
+test('pathToBasePath maps inside-bases paths to the directory itself', () => {
+  assert.equal(pathToBasePath('Tasks.bases'), 'Tasks.bases')
+  assert.equal(pathToBasePath('Tasks.bases/records.json'), 'Tasks.bases')
+  assert.equal(pathToBasePath('Tasks.bases/views/board.json'), 'Tasks.bases')
+  assert.equal(pathToBasePath('nested/Board.bases/records.json'), 'nested/Board.bases')
+})
+
+test('pathToBasePath returns null for paths outside any .bases directory', () => {
+  assert.equal(pathToBasePath(''), null)
+  assert.equal(pathToBasePath('notes/A.md'), null)
+  assert.equal(pathToBasePath('Tasks.basesy/records.json'), null)
+})
+
+// ── makeBasesChangeWatcher ──────────────────────────────────────────────────
+
+class FakeEvents implements KernelEventSubscriber {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  emit: ((topic: string, payload: any) => void) | null = null
+  unsubscribed = false
+  on<T>(_prefix: string, handler: (topic: string, payload: T) => void): Promise<() => void> {
+    this.emit = handler as never
+    return Promise.resolve(() => {
+      this.unsubscribed = true
+    })
+  }
+}
+
+test('watcher invalidates by base path and dispatches a recompute effect on file_modified', async () => {
+  const cache = new DatabaseViewCache()
+  // Seed with two cached layouts under Tasks.bases plus an untouched one.
+  await cache.run('Tasks.bases {"a":1}', () =>
+    Promise.resolve({
+      applied: { view_name: '', view_type: 'table' as const, fields: [], layout: { kind: 'flat' as const, records: [] } },
+      schema: { version: '1.0', fields: {} },
+    }),
+  )
+  await cache.run('Tasks.bases {"a":2}', () =>
+    Promise.resolve({
+      applied: { view_name: '', view_type: 'table' as const, fields: [], layout: { kind: 'flat' as const, records: [] } },
+      schema: { version: '1.0', fields: {} },
+    }),
+  )
+  await cache.run('Other.bases {}', () =>
+    Promise.resolve({
+      applied: { view_name: '', view_type: 'table' as const, fields: [], layout: { kind: 'flat' as const, records: [] } },
+      schema: { version: '1.0', fields: {} },
+    }),
+  )
+  assert.equal(cache.size(), 3)
+
+  const events = new FakeEvents()
+  const view = new EditorView({ state: EditorState.create({ doc: '' }) })
+  const dispatched: unknown[] = []
+  const origDispatch = view.dispatch.bind(view)
+  // Spy on dispatch to confirm the effect type.
+  view.dispatch = (...args) => {
+    dispatched.push(args[0])
+    return origDispatch(...args)
+  }
+
+  const watcher = makeBasesChangeWatcher(view, {
+    client: stubClient,
+    cache,
+    events,
+  })
+
+  // Wait for the subscribe promise to resolve.
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.ok(events.emit, 'subscribe should have wired the handler')
+
+  // Simulate a record-write touching `Tasks.bases/records.json`.
+  events.emit!('com.nexus.storage.file_modified', {
+    path: 'Tasks.bases/records.json',
+    content_hash: 'deadbeef',
+  })
+
+  assert.equal(cache.size(), 1, 'two Tasks.bases entries dropped')
+  assert.ok(cache.peek('Other.bases {}')?.response, 'untouched base survives')
+  // Exactly one dispatch carrying the invalidate effect. Spec
+  // shape is `{ effects: StateEffect | StateEffect[] }`; normalise
+  // to an array before testing each member's `.is()`.
+  const matched = dispatched.filter((d) => {
+    const t = d as { effects?: unknown }
+    const effects = Array.isArray(t.effects)
+      ? t.effects
+      : t.effects !== undefined
+        ? [t.effects]
+        : []
+    return effects.some(
+      (e: unknown) =>
+        typeof (e as { is?: (x: unknown) => boolean }).is === 'function' &&
+        (e as { is: (x: unknown) => boolean }).is(databaseViewInvalidate),
+    )
+  })
+  assert.equal(matched.length, 1)
+
+  watcher.destroy()
+  view.destroy()
+  assert.equal(events.unsubscribed, true)
+})
+
+test('watcher skips dispatch when the changed path is outside any .bases directory', async () => {
+  const cache = new DatabaseViewCache()
+  await cache.run('Tasks.bases {}', () =>
+    Promise.resolve({
+      applied: { view_name: '', view_type: 'table' as const, fields: [], layout: { kind: 'flat' as const, records: [] } },
+      schema: { version: '1.0', fields: {} },
+    }),
+  )
+
+  const events = new FakeEvents()
+  const view = new EditorView({ state: EditorState.create({ doc: '' }) })
+  const dispatched: unknown[] = []
+  const origDispatch = view.dispatch.bind(view)
+  view.dispatch = (...args) => {
+    dispatched.push(args[0])
+    return origDispatch(...args)
+  }
+  makeBasesChangeWatcher(view, { client: stubClient, cache, events })
+  await Promise.resolve()
+  await Promise.resolve()
+
+  events.emit!('com.nexus.storage.file_modified', {
+    path: 'notes/Diary.md',
+    content_hash: 'feedface',
+  })
+  assert.equal(cache.size(), 1, 'unrelated edit must not evict cache')
+  assert.equal(dispatched.length, 0, 'no recompute dispatched')
+  view.destroy()
+})
+
+test('watcher handles file_renamed (both from + to) so a rename into / out of a base flushes', async () => {
+  const cache = new DatabaseViewCache()
+  await cache.run('Tasks.bases {}', () =>
+    Promise.resolve({
+      applied: { view_name: '', view_type: 'table' as const, fields: [], layout: { kind: 'flat' as const, records: [] } },
+      schema: { version: '1.0', fields: {} },
+    }),
+  )
+  const events = new FakeEvents()
+  const view = new EditorView({ state: EditorState.create({ doc: '' }) })
+  makeBasesChangeWatcher(view, { client: stubClient, cache, events })
+  await Promise.resolve()
+  await Promise.resolve()
+
+  // A rename moving a file *out* of Tasks.bases — `from` is the
+  // base-relevant path here.
+  events.emit!('com.nexus.storage.file_renamed', {
+    from: 'Tasks.bases/records.json',
+    to: 'archive/records.json',
+    content_hash: 'a1b2',
+  })
+  assert.equal(cache.size(), 0, 'rename-out should flush the cached view')
+  view.destroy()
+})
+
+test('watcher is a no-op when deps.events is absent', () => {
+  const view = new EditorView({ state: EditorState.create({ doc: '' }) })
+  const cache = new DatabaseViewCache()
+  const handle = makeBasesChangeWatcher(view, { client: stubClient, cache })
+  // No subscribe, no error — destroy is a clean no-op.
+  handle.destroy()
+  view.destroy()
 })

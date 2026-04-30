@@ -648,6 +648,7 @@ export const editorPlugin: Plugin = {
           message: `${message}: ${err instanceof Error ? err.message : String(err)}`,
         })
       },
+      kernelEvents: api.kernel,
     })
 
     // BL-050 Phase 3 — block-handle "Comment" affordance. The bridge
