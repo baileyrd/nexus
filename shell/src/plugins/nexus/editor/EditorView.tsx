@@ -21,6 +21,7 @@ import { blockLinkNavExt } from './cm/blockLinkNav'
 import { ghostCompletionExt } from './cm/ghostCompletion'
 import { linkSuggestExt } from './cm/linkSuggest'
 import { marginSuggestionsExt } from './cm/marginSuggestions'
+import { marginSuggestTriggerExt } from './cm/marginSuggestTrigger'
 import { getRegistry } from '../../../host/shellRegistry'
 import { ContextMenu } from '../../../shell/ContextMenu'
 import { buildTabContextMenu } from './TabContextMenu'
@@ -835,6 +836,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
               ghostCompletionExt(),
               linkSuggestExt(),
               marginSuggestionsExt({ relpath: tab.relpath }),
+              marginSuggestTriggerExt({ relpath: tab.relpath }),
             ]
             return tab.mode === 'live'
               ? [

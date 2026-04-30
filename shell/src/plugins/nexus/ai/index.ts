@@ -31,6 +31,7 @@ import { useAiStore } from './aiStore'
 import { useCmdIStore } from './cmdIStore'
 import { setCmdIApi } from './cmdIApi'
 import { setGhostApi } from './ghostApi'
+import { setMarginApi } from './marginApi'
 import { openCmdI, routeStreamEvent } from './cmdIRuntime'
 import { registerEditorContextAdapter } from './editorContextAdapter'
 import { registerBuiltinAiActions } from './actions/builtins'
@@ -191,6 +192,45 @@ export const aiPlugin: Plugin = {
             description: 'Generation cap for each ghost suggestion.',
             type: 'number' as const,
             default: 64,
+          },
+          // BL-036 phase 4 — ambient margin-suggestions / inline
+          // correction trigger. Defaults agree with
+          // `MARGIN_SUGGEST_DEFAULTS` in `editor/cm/marginSuggestTrigger.ts`
+          // by construction; if you change one, change the other.
+          // Opt-in by default (each pass is a model call; enabling
+          // implicitly would surprise users with provider config
+          // dialogs on first idle).
+          {
+            key: 'ai.marginSuggest.enabled',
+            title: 'Ambient margin suggestions',
+            description:
+              'Run a background AI pass over the active document while you are idle. Surfaces rephrase / tighten / fact-check glyphs in the right margin and wavy underlines for spelling / grammar. Right-click any suggestion for Accept / Dismiss.',
+            type: 'boolean' as const,
+            default: false,
+          },
+          {
+            key: 'ai.marginSuggest.idleMs',
+            title: 'Margin suggest idle (ms)',
+            description:
+              'Quiet period after a keystroke before a margin-suggestion pass fires. Higher = fewer model calls; lower = faster feedback.',
+            type: 'number' as const,
+            default: 5000,
+          },
+          {
+            key: 'ai.marginSuggest.minDocChars',
+            title: 'Margin suggest minimum doc length',
+            description:
+              'Skip the pass when the document is shorter than this many characters. Stops the engine from running on near-empty notes.',
+            type: 'number' as const,
+            default: 200,
+          },
+          {
+            key: 'ai.marginSuggest.maxDocChars',
+            title: 'Margin suggest maximum doc length',
+            description:
+              'Skip the pass when the document is longer than this many characters. Caps token cost on book-length notes.',
+            type: 'number' as const,
+            default: 8000,
           },
         ],
       },
@@ -402,6 +442,11 @@ export const aiPlugin: Plugin = {
     // (e.g. moving Cmd+I to a sandboxed plugin) don't unhook the
     // other.
     setGhostApi(api)
+    // BL-036 phase 4 — same module-scoped handle pattern for the
+    // margin-suggestions idle-trigger CM extension. The trigger
+    // calls `requestPass(api, …)` which routes through
+    // `com.nexus.ai::stream_chat`.
+    setMarginApi(api)
 
     // Subscribe a SECOND time to the stream prefix specifically for the
     // overlay router. The chat-side `subscribeStream` already runs and
