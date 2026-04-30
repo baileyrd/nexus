@@ -20,6 +20,7 @@ import { databaseViewExt } from './cm/databaseViewDecorations'
 import { blockLinkNavExt } from './cm/blockLinkNav'
 import { ghostCompletionExt } from './cm/ghostCompletion'
 import { linkSuggestExt } from './cm/linkSuggest'
+import { marginSuggestionsExt } from './cm/marginSuggestions'
 import { getRegistry } from '../../../host/shellRegistry'
 import { ContextMenu } from '../../../shell/ContextMenu'
 import { buildTabContextMenu } from './TabContextMenu'
@@ -833,6 +834,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
               inlineToolbarExt(),
               ghostCompletionExt(),
               linkSuggestExt(),
+              marginSuggestionsExt({ relpath: tab.relpath }),
             ]
             return tab.mode === 'live'
               ? [
