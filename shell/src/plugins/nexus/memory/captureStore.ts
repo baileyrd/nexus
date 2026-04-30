@@ -11,6 +11,10 @@ import { create } from 'zustand'
 
 import type { KernelAPI } from '../../../types/plugin.ts'
 import { appendInbox } from './kernelClient.ts'
+import {
+  buildCodeSnippetSection,
+  type CodeSourceMeta,
+} from './codeCapture.ts'
 
 /** Lightweight provenance recorded when the hotkey fires. */
 export interface CaptureSourceMeta {
@@ -23,6 +27,10 @@ export interface CaptureSourceMeta {
   app: string
   /** ISO-8601 capture timestamp, set when `captureOpen` runs. */
   capturedAt: string
+  /** BL-046 — code-source provenance. Present when the capture
+   *  came from an IDE selection / `captureCode` IPC; absent for
+   *  the plain hotkey path so the on-disk format is unchanged. */
+  code?: CodeSourceMeta
 }
 
 /** Default source metadata used until `captureOpen` overwrites it. */
@@ -87,14 +95,26 @@ export const useCaptureStore = create<CaptureStore>((set) => ({
  * sees a hand-edited inbox.
  */
 export function buildSnippet(draft: string, sourceMeta: CaptureSourceMeta): string {
-  return [
-    `## Captured at ${sourceMeta.capturedAt}`,
-    '',
-    `Source: ${sourceMeta.app}`,
-    '',
-    draft,
-    '',
-  ].join('\n')
+  const lines: string[] = []
+  lines.push(`## Captured at ${sourceMeta.capturedAt}`)
+  lines.push('')
+  lines.push(`Source: ${sourceMeta.app}`)
+  lines.push('')
+  if (sourceMeta.code) {
+    // Code capture (BL-046): emit `File:` / `Lines:` headers, a
+    // language-tagged fence, and a `#code/<language>` recall tag
+    // in place of a bare draft. The fence body is the user's
+    // draft so any narrative the user added in the textarea ends
+    // up *outside* the fence is left to a future "annotation"
+    // section — for now the textarea body is the code.
+    for (const line of buildCodeSnippetSection(draft, sourceMeta.code)) {
+      lines.push(line)
+    }
+    return lines.join('\n')
+  }
+  lines.push(draft)
+  lines.push('')
+  return lines.join('\n')
 }
 
 /**
