@@ -140,6 +140,25 @@ pub const HANDLER_STAMP_BLOCK: u32 = 11;
 /// splits.
 pub const HANDLER_EXECUTE_DATABASE_VIEW: u32 = 12;
 
+/// Handler id for `resolve_block_link`. Args:
+/// `{ "file_relpath": String, "block_id": Uuid }`; Returns:
+/// `{ "found": bool, "block": Option<Block>, "root_index": Option<usize> }`.
+///
+/// Resolves the `[[<file>#^<block-id>]]` syntax (BL-049). When
+/// `file_relpath` is already open as a session, the handler reads
+/// the in-memory block tree (so unsaved edits flow through);
+/// otherwise it reads the file from disk and parses transiently
+/// without polluting the session map. `root_index` is the position
+/// in `tree.root_blocks` of the root ancestor of the target block —
+/// the shell uses it to scroll into view (the granularity available
+/// before per-block source-position metadata lands).
+///
+/// The handler is read-only: it touches no editor session state.
+/// Callers that need a reactive refresh should subscribe to the
+/// `com.nexus.editor.changed.<relpath>` event already published by
+/// `apply_transaction` / `undo` / `redo`.
+pub const HANDLER_RESOLVE_BLOCK_LINK: u32 = 13;
+
 // ── Wire types ───────────────────────────────────────────────────────────────
 
 /// Snapshot of an open editor session, suitable for IPC return.
@@ -276,6 +295,9 @@ impl CorePlugin for EditorCorePlugin {
                  (storage + database IPC); call via the kernel runtime"
                     .to_string(),
             )),
+            HANDLER_RESOLVE_BLOCK_LINK => {
+                handle_resolve_block_link_sync(&self.forge_root, &self.sessions, args)
+            }
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -287,7 +309,10 @@ impl CorePlugin for EditorCorePlugin {
     /// doesn't have to allocate a future.
     fn dispatch_async(&mut self, handler_id: u32, args: &Value) -> Option<CorePluginFuture> {
         match handler_id {
-            HANDLER_OPEN | HANDLER_SAVE | HANDLER_EXECUTE_DATABASE_VIEW => {}
+            HANDLER_OPEN
+            | HANDLER_SAVE
+            | HANDLER_EXECUTE_DATABASE_VIEW
+            | HANDLER_RESOLVE_BLOCK_LINK => {}
             _ => return None,
         }
 
@@ -304,6 +329,9 @@ impl CorePlugin for EditorCorePlugin {
                 HANDLER_SAVE => handle_save_async(&forge_root, sessions, ctx, &args).await,
                 HANDLER_EXECUTE_DATABASE_VIEW => {
                     handle_execute_database_view(ctx, &args).await
+                }
+                HANDLER_RESOLVE_BLOCK_LINK => {
+                    handle_resolve_block_link_async(&forge_root, sessions, ctx, &args).await
                 }
                 _ => Err(exec_err(format!("unknown async handler id {handler_id}"))),
             }
@@ -552,6 +580,145 @@ async fn handle_execute_database_view(
 
     serde_json::to_value(crate::database_view::ExecuteDatabaseViewResponse { applied, schema })
         .map_err(|e| exec_err(format!("execute_database_view: serialize response: {e}")))
+}
+
+/// Resolve `block_id` against the in-memory session for `relpath`
+/// when one is open, returning the lookup result with the root
+/// ancestor's index in `tree.root_blocks`. Returns `Ok(None)` when
+/// no session exists for `relpath`; the caller falls back to a
+/// fresh parse.
+fn resolve_in_session(
+    sessions: &Mutex<HashMap<String, Session>>,
+    relpath: &str,
+    block_id: uuid::Uuid,
+) -> Result<Option<Value>, PluginError> {
+    let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+    let Some(s) = guard.get(relpath) else {
+        return Ok(None);
+    };
+    Ok(Some(resolve_in_tree(&s.tree, block_id)))
+}
+
+/// Walk `tree.root_blocks` to find which root ancestor contains
+/// `block_id`, returning the lookup payload as JSON. Pure — does
+/// not consult any session map.
+fn resolve_in_tree(tree: &crate::BlockTree, block_id: uuid::Uuid) -> Value {
+    let Some(block) = tree.get(block_id) else {
+        return serde_json::json!({
+            "found": false,
+            "block": null,
+            "root_index": null,
+        });
+    };
+
+    // Walk parents up to a root block.
+    let mut cursor = block;
+    while let Some(parent_id) = cursor.parent_id {
+        match tree.get(parent_id) {
+            Some(parent) => cursor = parent,
+            None => break,
+        }
+    }
+    let root_index = tree.root_blocks.iter().position(|id| *id == cursor.id);
+
+    serde_json::json!({
+        "found": true,
+        "block": block,
+        "root_index": root_index,
+    })
+}
+
+fn parse_resolve_args(args: &Value) -> Result<(String, uuid::Uuid), PluginError> {
+    let relpath = args
+        .get("file_relpath")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            exec_err("resolve_block_link: missing 'file_relpath' string".to_string())
+        })?;
+    let block_id_str = args
+        .get("block_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| exec_err("resolve_block_link: missing 'block_id' string".to_string()))?;
+    let block_id = uuid::Uuid::parse_str(block_id_str)
+        .map_err(|e| exec_err(format!("resolve_block_link: invalid 'block_id': {e}")))?;
+    Ok((relpath, block_id))
+}
+
+fn handle_resolve_block_link_sync(
+    forge_root: &Path,
+    sessions: &Mutex<HashMap<String, Session>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let (relpath, block_id) = parse_resolve_args(args)?;
+
+    if let Some(value) = resolve_in_session(sessions, &relpath, block_id)? {
+        return Ok(value);
+    }
+
+    // No open session — read + parse transiently. Same fs fallback
+    // path as `handle_open_sync` (production traffic goes through
+    // the async path via the kernel runtime).
+    let abs = resolve_within(forge_root, &relpath)
+        .map_err(|e| exec_err(format!("resolve_block_link: {e}")))?;
+    let source = fs::read_to_string(&abs)
+        .map_err(|e| exec_err(format!("resolve_block_link: read '{}': {e}", abs.display())))?;
+    let parser = MarkdownParser::new(ParseOptions {
+        file_path: relpath.clone(),
+        ..ParseOptions::default()
+    });
+    let tree = parser
+        .parse(&source)
+        .map_err(|e| exec_err(format!("resolve_block_link: parse '{relpath}': {e}")))?;
+    Ok(resolve_in_tree(&tree, block_id))
+}
+
+async fn handle_resolve_block_link_async(
+    forge_root: &Path,
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    ctx: Option<Arc<KernelPluginContext>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let (relpath, block_id) = parse_resolve_args(args)?;
+
+    if let Some(value) = resolve_in_session(&sessions, &relpath, block_id)? {
+        return Ok(value);
+    }
+
+    let source = if let Some(ctx) = ctx.as_deref() {
+        #[derive(Deserialize)]
+        struct Resp {
+            bytes: Vec<u8>,
+        }
+        let value = ctx
+            .ipc_call(
+                STORAGE_PLUGIN_ID,
+                "read_file",
+                serde_json::json!({ "path": relpath }),
+                STORAGE_IPC_TIMEOUT,
+            )
+            .await
+            .map_err(|e| exec_err(format!("resolve_block_link: storage.read_file: {e}")))?;
+        let resp: Resp = serde_json::from_value(value).map_err(|e| {
+            exec_err(format!("resolve_block_link: storage.read_file decode: {e}"))
+        })?;
+        String::from_utf8(resp.bytes)
+            .map_err(|_| exec_err(format!("resolve_block_link: '{relpath}' is not UTF-8")))?
+    } else {
+        let abs = resolve_within(forge_root, &relpath)
+            .map_err(|e| exec_err(format!("resolve_block_link: {e}")))?;
+        fs::read_to_string(&abs)
+            .map_err(|e| exec_err(format!("resolve_block_link: read '{}': {e}", abs.display())))?
+    };
+
+    let parser = MarkdownParser::new(ParseOptions {
+        file_path: relpath.clone(),
+        ..ParseOptions::default()
+    });
+    let tree = parser
+        .parse(&source)
+        .map_err(|e| exec_err(format!("resolve_block_link: parse '{relpath}': {e}")))?;
+    Ok(resolve_in_tree(&tree, block_id))
 }
 
 fn handle_apply_transaction(
@@ -1588,5 +1755,172 @@ mod tests {
         );
         let block = snap.tree.blocks.get(&stamp_id).unwrap();
         assert_eq!(block.stable_id, Some(stamp_id));
+    }
+
+    // ── BL-049: resolve_block_link ────────────────────────────────────────
+
+    /// Build a forge with a single markdown file at `relpath` whose
+    /// content is `body`, return the editor plugin already bound to
+    /// that forge. Tests stamp a block via `HANDLER_STAMP_BLOCK` and
+    /// then resolve it via `HANDLER_RESOLVE_BLOCK_LINK`.
+    fn forge_with_file(relpath: &str, body: &str) -> (tempfile::TempDir, EditorCorePlugin) {
+        let dir = tempfile::tempdir().unwrap();
+        let abs = dir.path().join(relpath);
+        if let Some(parent) = abs.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&abs, body).unwrap();
+        let plugin = EditorCorePlugin::new(dir.path().to_path_buf());
+        (dir, plugin)
+    }
+
+    #[test]
+    fn resolve_block_link_returns_block_for_open_session() {
+        let (_dir, mut p) = forge_with_file("notes/a.md", "first paragraph\n\nsecond\n");
+        let snap = open_value(&mut p, "notes/a.md");
+        let block_id = snap.tree.root_blocks[0];
+
+        let resp = p
+            .dispatch(
+                HANDLER_RESOLVE_BLOCK_LINK,
+                &serde_json::json!({
+                    "file_relpath": "notes/a.md",
+                    "block_id": block_id.to_string(),
+                }),
+            )
+            .unwrap();
+        assert_eq!(resp.get("found").and_then(Value::as_bool), Some(true));
+        assert_eq!(resp.get("root_index").and_then(Value::as_u64), Some(0));
+        let block = resp.get("block").unwrap();
+        assert_eq!(
+            block.get("id").and_then(Value::as_str),
+            Some(block_id.to_string()).as_deref(),
+        );
+    }
+
+    #[test]
+    fn resolve_block_link_falls_back_to_disk_when_session_is_closed() {
+        // Stamp a block, save, close — resolve must still find it
+        // via the fs fallback (no session, no kernel context).
+        let (_dir, mut p) = forge_with_file("notes/b.md", "alpha\n\nbeta\n");
+        let snap = open_value(&mut p, "notes/b.md");
+        let target_id = snap.tree.root_blocks[1];
+        let stamped: Value = p
+            .dispatch(
+                HANDLER_STAMP_BLOCK,
+                &serde_json::json!({
+                    "relpath": "notes/b.md",
+                    "block_id": target_id.to_string(),
+                }),
+            )
+            .unwrap();
+        let stable_id = stamped
+            .get("stable_id")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_string();
+        p.dispatch(
+            HANDLER_SAVE,
+            &serde_json::json!({ "relpath": "notes/b.md" }),
+        )
+        .unwrap();
+        p.dispatch(
+            HANDLER_CLOSE,
+            &serde_json::json!({ "relpath": "notes/b.md" }),
+        )
+        .unwrap();
+
+        let resp = p
+            .dispatch(
+                HANDLER_RESOLVE_BLOCK_LINK,
+                &serde_json::json!({
+                    "file_relpath": "notes/b.md",
+                    "block_id": stable_id,
+                }),
+            )
+            .unwrap();
+        assert_eq!(resp.get("found").and_then(Value::as_bool), Some(true));
+        assert_eq!(resp.get("root_index").and_then(Value::as_u64), Some(1));
+    }
+
+    #[test]
+    fn resolve_block_link_returns_not_found_for_unknown_id() {
+        let (_dir, mut p) = forge_with_file("notes/c.md", "only\n");
+        open_value(&mut p, "notes/c.md");
+        let bogus = uuid::Uuid::nil();
+        let resp = p
+            .dispatch(
+                HANDLER_RESOLVE_BLOCK_LINK,
+                &serde_json::json!({
+                    "file_relpath": "notes/c.md",
+                    "block_id": bogus.to_string(),
+                }),
+            )
+            .unwrap();
+        assert_eq!(resp.get("found").and_then(Value::as_bool), Some(false));
+        assert!(resp.get("block").is_some_and(Value::is_null));
+        assert!(resp.get("root_index").is_some_and(Value::is_null));
+    }
+
+    #[test]
+    fn resolve_block_link_root_index_walks_to_root_for_nested_blocks() {
+        // Synthetic tree with a known parent → child relationship so
+        // the test doesn't depend on the markdown parser's container
+        // representation. The resolver must walk up to the root and
+        // report the root's `root_blocks` index for the *child*.
+        use crate::{Block, BlockTree};
+        let mut tree = BlockTree::new(crate::DocumentMetadata::default());
+        let root_a = uuid::Uuid::new_v4();
+        let root_b = uuid::Uuid::new_v4();
+        let child = uuid::Uuid::new_v4();
+        let mk_block = |id: uuid::Uuid| Block {
+            id,
+            stable_id: None,
+            ty: crate::BlockType::Paragraph,
+            content: String::new(),
+            annotations: Vec::new(),
+            properties: crate::BlockProperties::default(),
+            parent_id: None,
+            children: Vec::new(),
+            index_in_parent: 0,
+            created_at: 0,
+            updated_at: 0,
+            is_deleted: false,
+        };
+        tree.insert(mk_block(root_a), None, 0).unwrap();
+        tree.insert(mk_block(root_b), None, 1).unwrap();
+        let mut child_block = mk_block(child);
+        child_block.parent_id = Some(root_b);
+        tree.insert(child_block, Some(root_b), 0).unwrap();
+
+        let resolved = resolve_in_tree(&tree, child);
+        assert_eq!(resolved.get("found").and_then(Value::as_bool), Some(true));
+        assert_eq!(resolved.get("root_index").and_then(Value::as_u64), Some(1));
+    }
+
+    #[test]
+    fn resolve_block_link_rejects_invalid_uuid() {
+        let (_dir, mut p) = forge_with_file("notes/e.md", "x\n");
+        let err = p
+            .dispatch(
+                HANDLER_RESOLVE_BLOCK_LINK,
+                &serde_json::json!({
+                    "file_relpath": "notes/e.md",
+                    "block_id": "not-a-uuid",
+                }),
+            )
+            .unwrap_err();
+        let s = format!("{err:?}");
+        assert!(s.contains("invalid 'block_id'"), "got: {s}");
+    }
+
+    fn open_value(p: &mut EditorCorePlugin, relpath: &str) -> EditorSnapshot {
+        let resp = p
+            .dispatch(
+                HANDLER_OPEN,
+                &serde_json::json!({ "relpath": relpath }),
+            )
+            .unwrap();
+        serde_json::from_value(resp).unwrap()
     }
 }

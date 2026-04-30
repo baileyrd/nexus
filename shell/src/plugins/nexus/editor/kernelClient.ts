@@ -24,6 +24,7 @@ const CMD = {
   getMarkdown: 'get_markdown',
   stampBlock: 'stamp_block',
   executeDatabaseView: 'execute_database_view',
+  resolveBlockLink: 'resolve_block_link',
 } as const
 
 /** Result of a `stamp_block` IPC call. Mirrors the Rust handler's
@@ -147,6 +148,34 @@ export class EditorKernelClient {
       { database_path: databasePath, view_config: viewConfig },
     )
   }
+
+  /**
+   * Resolve a `[[<file>#^<block-id>]]` link (BL-049). Returns
+   * `{ found, block, root_index }` — `root_index` is the position
+   * in `tree.root_blocks` of the target block's root ancestor, used
+   * by the navigation UX to scroll the opened tab to the right
+   * vicinity. The kernel handler reads from the open session if
+   * one exists, otherwise parses the file from disk transiently.
+   */
+  resolveBlockLink(
+    fileRelpath: string,
+    blockId: string,
+  ): Promise<ResolveBlockLinkResponse> {
+    return this.api.invoke<ResolveBlockLinkResponse>(
+      EDITOR_PLUGIN_ID,
+      CMD.resolveBlockLink,
+      { file_relpath: fileRelpath, block_id: blockId },
+    )
+  }
+}
+
+/** Response shape of `resolve_block_link` — mirrors the Rust
+ *  handler in `crates/nexus-editor/src/core_plugin.rs`. `block` is
+ *  null when `found === false`. */
+export interface ResolveBlockLinkResponse {
+  found: boolean
+  block: unknown | null
+  root_index: number | null
 }
 
 // ── execute_database_view wire types ────────────────────────────────────────
