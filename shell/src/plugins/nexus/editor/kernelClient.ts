@@ -22,7 +22,18 @@ const CMD = {
   undo: 'undo',
   redo: 'redo',
   getMarkdown: 'get_markdown',
+  stampBlock: 'stamp_block',
 } as const
+
+/** Result of a `stamp_block` IPC call. Mirrors the Rust handler's
+ *  return shape — `block_id` is the lookup id (post-rekey it equals
+ *  `stable_id` for newly-stamped blocks); `stable_id` is the persistent
+ *  id that ends up in the on-disk `<!-- ^<uuid> -->` marker. */
+export interface StampBlockResult {
+  block_id: string
+  stable_id: string
+  newly_stamped: boolean
+}
 
 /**
  * Client that exposes the editor plugin's IPC surface as typed methods.
@@ -97,6 +108,21 @@ export class EditorKernelClient {
   getMarkdown(relpath: string): Promise<string> {
     return this.api.invoke<string>(EDITOR_PLUGIN_ID, CMD.getMarkdown, {
       relpath,
+    })
+  }
+
+  /**
+   * Promote `blockId` in `relpath` to a stable id (ADR 0017). Returns
+   * `{ block_id, stable_id, newly_stamped }`. Idempotent: a second call
+   * for the same block returns the existing `stable_id`.
+   *
+   * Comments and block-link callers anchor to `stable_id` so the
+   * reference survives upstream block insertions.
+   */
+  stampBlock(relpath: string, blockId: string): Promise<StampBlockResult> {
+    return this.api.invoke<StampBlockResult>(EDITOR_PLUGIN_ID, CMD.stampBlock, {
+      relpath,
+      block_id: blockId,
     })
   }
 }
