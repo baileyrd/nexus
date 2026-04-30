@@ -558,6 +558,10 @@ fn register_core_plugins(
                         "stamp_block",
                         nexus_editor::core_plugin::HANDLER_STAMP_BLOCK,
                     ),
+                    (
+                        "execute_database_view",
+                        nexus_editor::core_plugin::HANDLER_EXECUTE_DATABASE_VIEW,
+                    ),
                 ],
             ),
             forge_root,

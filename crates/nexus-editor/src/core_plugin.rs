@@ -30,6 +30,11 @@ use crate::undo_tree::UndoTree;
 /// IPC `read_file`/`write_file` calls.
 const STORAGE_PLUGIN_ID: &str = "com.nexus.storage";
 
+/// Plugin id of the database core plugin — the target of
+/// `apply_view` calls from the inline `[[{db:query}]]` executor
+/// ([`HANDLER_EXECUTE_DATABASE_VIEW`]).
+const DATABASE_PLUGIN_ID: &str = "com.nexus.database";
+
 /// Per-call timeout for storage IPC. File I/O is local; a generous
 /// bound is safe.
 const STORAGE_IPC_TIMEOUT: Duration = Duration::from_secs(30);
@@ -111,6 +116,29 @@ pub const HANDLER_GET_MARKDOWN: u32 = 10;
 /// (block-links navigator), and BL-050 (side-margin comments) — see
 /// [`docs/adr/0017-block-id-stability.md`](../../../../docs/adr/0017-block-id-stability.md).
 pub const HANDLER_STAMP_BLOCK: u32 = 11;
+
+/// Handler id for `execute_database_view`. Args:
+/// `{ "database_path": String, "view_config": DatabaseViewConfig }`;
+/// Returns:
+/// `{ "applied": <AppliedView>, "schema": BaseSchema }`.
+///
+/// Resolves an inline `[[{db:query}]]` block ([PRD-08 §8.1]) by
+/// (1) loading the target `.bases` directory through
+/// `com.nexus.storage::base_load`, (2) translating
+/// [`crate::DatabaseViewConfig`] into a structured
+/// [`nexus_types::bases::BaseView`] via
+/// [`crate::database_view::config_to_view`], and (3) handing
+/// schema + records + view to `com.nexus.database::apply_view`.
+///
+/// The handler is read-only: it touches no editor session and
+/// emits no `com.nexus.editor.changed.*` event. Callers that need
+/// a reactive refresh should subscribe to
+/// `com.nexus.storage.bases.changed.*` separately.
+///
+/// This is split 1 of BL-012; the CM6 widget, decoration plumbing,
+/// undo integration, and filter/sort UX layer on top in later
+/// splits.
+pub const HANDLER_EXECUTE_DATABASE_VIEW: u32 = 12;
 
 // ── Wire types ───────────────────────────────────────────────────────────────
 
@@ -243,6 +271,11 @@ impl CorePlugin for EditorCorePlugin {
             HANDLER_STAMP_BLOCK => {
                 handle_stamp_block(&self.sessions, self.event_bus.as_ref(), args)
             }
+            HANDLER_EXECUTE_DATABASE_VIEW => Err(exec_err(
+                "execute_database_view requires the async dispatch path \
+                 (storage + database IPC); call via the kernel runtime"
+                    .to_string(),
+            )),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -254,7 +287,7 @@ impl CorePlugin for EditorCorePlugin {
     /// doesn't have to allocate a future.
     fn dispatch_async(&mut self, handler_id: u32, args: &Value) -> Option<CorePluginFuture> {
         match handler_id {
-            HANDLER_OPEN | HANDLER_SAVE => {}
+            HANDLER_OPEN | HANDLER_SAVE | HANDLER_EXECUTE_DATABASE_VIEW => {}
             _ => return None,
         }
 
@@ -269,6 +302,9 @@ impl CorePlugin for EditorCorePlugin {
             match handler_id {
                 HANDLER_OPEN => handle_open_async(&forge_root, sessions, ctx, &args).await,
                 HANDLER_SAVE => handle_save_async(&forge_root, sessions, ctx, &args).await,
+                HANDLER_EXECUTE_DATABASE_VIEW => {
+                    handle_execute_database_view(ctx, &args).await
+                }
                 _ => Err(exec_err(format!("unknown async handler id {handler_id}"))),
             }
         }))
@@ -440,6 +476,82 @@ async fn handle_save_async(
             .map_err(|e| exec_err(format!("save: write '{}': {e}", abs.display())))?;
         Ok(serde_json::json!({}))
     }
+}
+
+/// Execute an inline `[[{db:query}]]` view: load the base, translate
+/// the editor-side [`crate::DatabaseViewConfig`] to a structured
+/// [`nexus_types::bases::BaseView`], and run it through
+/// `com.nexus.database::apply_view`.
+///
+/// Requires a wired [`KernelPluginContext`] — there is no fallback
+/// path because both lookups are kernel-mediated. Returns
+/// [`crate::database_view::ExecuteDatabaseViewResponse`] as JSON.
+async fn handle_execute_database_view(
+    ctx: Option<Arc<KernelPluginContext>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    #[derive(Deserialize)]
+    struct LoadedBase {
+        schema: nexus_types::bases::BaseSchema,
+        records: Vec<nexus_types::bases::BaseRecord>,
+    }
+
+    let parsed: crate::database_view::ExecuteDatabaseViewArgs = serde_json::from_value(
+        args.clone(),
+    )
+    .map_err(|e| exec_err(format!("execute_database_view: invalid args: {e}")))?;
+
+    let ctx = ctx.ok_or_else(|| {
+        exec_err(
+            "execute_database_view: no kernel context wired (this handler \
+             cannot run in context-less unit tests)"
+                .to_string(),
+        )
+    })?;
+
+    // 1. Load the base through storage.
+    let base_value = ctx
+        .ipc_call(
+            STORAGE_PLUGIN_ID,
+            "base_load",
+            serde_json::json!({ "path": parsed.database_path }),
+            STORAGE_IPC_TIMEOUT,
+        )
+        .await
+        .map_err(|e| exec_err(format!("execute_database_view: storage.base_load: {e}")))?;
+
+    // The `base_load` handler returns a [`nexus_types::bases::Base`] —
+    // we only need its schema + records here.
+    let LoadedBase { schema, records } = serde_json::from_value(base_value).map_err(|e| {
+        exec_err(format!(
+            "execute_database_view: decode base_load response: {e}"
+        ))
+    })?;
+
+    // 2. Translate config → structured view.
+    let view = crate::database_view::config_to_view(
+        &parsed.database_path,
+        &parsed.view_config,
+    )
+    .map_err(|e| exec_err(format!("execute_database_view: {e}")))?;
+
+    // 3. Apply via the database plugin.
+    let applied = ctx
+        .ipc_call(
+            DATABASE_PLUGIN_ID,
+            "apply_view",
+            serde_json::json!({
+                "records": records,
+                "schema": schema,
+                "view": view,
+            }),
+            STORAGE_IPC_TIMEOUT,
+        )
+        .await
+        .map_err(|e| exec_err(format!("execute_database_view: database.apply_view: {e}")))?;
+
+    serde_json::to_value(crate::database_view::ExecuteDatabaseViewResponse { applied, schema })
+        .map_err(|e| exec_err(format!("execute_database_view: serialize response: {e}")))
 }
 
 fn handle_apply_transaction(

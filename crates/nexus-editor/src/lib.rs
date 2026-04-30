@@ -13,6 +13,7 @@
 mod annotation;
 mod block;
 pub mod core_plugin;
+pub mod database_view;
 mod error;
 pub mod markdown;
 mod transaction;
