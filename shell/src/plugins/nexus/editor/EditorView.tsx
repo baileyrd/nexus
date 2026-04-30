@@ -11,6 +11,7 @@ import { CodeMirrorHost, type CodeMirrorHostHandle } from './cm/CodeMirrorHost'
 import { transactionBridge } from './cm/transactionBridge'
 import { slashCommandExt } from './cm/slashCommand'
 import { blockSelectionExt } from './cm/blockSelection'
+import { multiCursorPromoteExt } from './cm/multiCursorPromote'
 import { blockHandleExt } from './cm/blockHandle'
 import { inputRulesExt } from './cm/inputRules'
 import { inlineToolbarExt } from './cm/inlineToolbar'
@@ -826,6 +827,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
               }),
               slashCommandExt(),
               blockSelectionExt(),
+              multiCursorPromoteExt(),
               blockHandleExt(),
               inputRulesExt(),
               inlineToolbarExt(),
