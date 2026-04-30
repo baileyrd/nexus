@@ -15,6 +15,7 @@ import { blockHandleExt } from './cm/blockHandle'
 import { inputRulesExt } from './cm/inputRules'
 import { inlineToolbarExt } from './cm/inlineToolbar'
 import { livePreviewExt } from './cm/livePreview'
+import { databaseViewExt } from './cm/databaseViewDecorations'
 import { ghostCompletionExt } from './cm/ghostCompletion'
 import { linkSuggestExt } from './cm/linkSuggest'
 import { getRegistry } from '../../../host/shellRegistry'
@@ -830,7 +831,16 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
               ghostCompletionExt(),
               linkSuggestExt(),
             ]
-            return tab.mode === 'live' ? [...base, livePreviewExt()] : base
+            return tab.mode === 'live'
+              ? [
+                  ...base,
+                  livePreviewExt(),
+                  databaseViewExt({
+                    client: runtime.kernelClient,
+                    onError: runtime.reportBridgeError,
+                  }),
+                ]
+              : base
           }}
         />
       )
