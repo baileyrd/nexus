@@ -524,7 +524,7 @@ Cumulative: ~44 weeks raw, ~50–55 with PR-review buffer at the assumed 2 fg + 
 - [ ] Embedding-backend ADR drafted with the 5-axis comparison (quality / RAM / cold-start / binary cost / license), recorded under "Decisions".
 - [ ] BL-009 mermaid whole-file viewer merged.
 - [ ] BL-015 bases trash view merged.
-- [ ] Settings extraction queue (5 items) merged as one PR.
+- [x] Settings extraction queue (5 items) — all shipped; see "Settings extraction queue" section above for per-item file references.
 - [ ] No outstanding regressions in `cargo test --workspace` / `pnpm --filter nexus-shell test` / `scripts/check_ipc_drift.sh`.
 
 (BL-043 quick-capture hotkey moved to Phase 2 — Tauri global-hotkey plumbing is a 1–2 day task disguised as "small" and would eat into ADR review.)
