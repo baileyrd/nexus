@@ -179,8 +179,11 @@ impl StorageEngine {
     ///
     /// Panics if the internal write-connection mutex is poisoned.
     pub fn write_file(&self, path: &str, content: &[u8]) -> Result<FileMetadata, StorageError> {
-        // 1. Atomic write to disk.
-        let abs_target = self.forge.root().join(path);
+        // 1. Atomic write to disk. Confine to the forge root: `Path::join`
+        //    does not normalize `..` so a raw caller-supplied relpath would
+        //    otherwise let `fs::write` resolve traversal at the syscall
+        //    level. See issue #72.
+        let abs_target = resolve_within(self.forge.root(), path)?;
         atomic_write(&abs_target, content, &self.forge.temp_dir())?;
 
         // 2. Decode content as UTF-8.
@@ -299,7 +302,8 @@ impl StorageEngine {
     ///
     /// Returns [`StorageError`] on I/O failure.
     pub fn write_raw(&self, path: &str, content: &[u8]) -> Result<(), StorageError> {
-        let abs_target = self.forge.root().join(path);
+        // Confine to the forge root; see `write_file` and issue #72.
+        let abs_target = resolve_within(self.forge.root(), path)?;
         atomic_write(&abs_target, content, &self.forge.temp_dir())?;
         Ok(())
     }
@@ -311,7 +315,8 @@ impl StorageEngine {
     /// Returns [`StorageError::FileNotFound`] when the file does not exist,
     /// or [`StorageError::Io`] on other I/O failures.
     pub fn read_file(&self, path: &str) -> Result<Vec<u8>, StorageError> {
-        let abs = self.forge.root().join(path);
+        // Confine to the forge root; see `write_file` and issue #72.
+        let abs = resolve_within(self.forge.root(), path)?;
         std::fs::read(&abs).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 StorageError::FileNotFound(path.to_string())
@@ -876,8 +881,8 @@ impl StorageEngine {
     ///
     /// Panics if the internal write-connection mutex is poisoned.
     pub fn delete_file(&self, path: &str) -> Result<(), StorageError> {
-        // Remove from disk if it exists.
-        let abs = self.forge.root().join(path);
+        // Confine to the forge root; see `write_file` and issue #72.
+        let abs = resolve_within(self.forge.root(), path)?;
         if abs.exists() {
             std::fs::remove_file(&abs)?;
         }
