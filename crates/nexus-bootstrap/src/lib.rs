@@ -706,6 +706,18 @@ fn register_core_plugins(
                         "index_trigger",
                         nexus_ai::core_plugin::HANDLER_INDEX_TRIGGER,
                     ),
+                    // BL-037 — per-forge AI activity timeline.
+                    // `activity_list` reads the JSONL log under
+                    // `.forge/ai-activity.log` newest-first;
+                    // `activity_clear` truncates it.
+                    (
+                        "activity_list",
+                        nexus_ai::core_plugin::HANDLER_ACTIVITY_LIST,
+                    ),
+                    (
+                        "activity_clear",
+                        nexus_ai::core_plugin::HANDLER_ACTIVITY_CLEAR,
+                    ),
                 ],
             ),
             forge_root,

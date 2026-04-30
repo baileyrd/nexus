@@ -1,0 +1,477 @@
+import { useMemo } from 'react'
+import {
+  useActivityTimelineStore,
+  type ActivityEntry,
+  type ActivitySurface,
+} from './activityTimelineStore'
+
+/**
+ * BL-037 — pane-mode view for the AI activity timeline.
+ *
+ *   ┌──────────────────────────────────────────────────────────────┐
+ *   │ ACTIVITY TIMELINE   [filter] [surface ▾] [clear]   {n}/{tot} │
+ *   ├──────────────────────────────────────────────────────────────┤
+ *   │ 14:25:13  chat   anthropic/claude…   "summarize…"            │
+ *   │           files: notes/a.md, …                               │
+ *   │           tools: read_file ✓ write_file ✓                    │
+ *   │ 14:23:55  cmdi   anthropic/claude…   "rephrase this"  ✗       │
+ *   │           error: provider rate-limited                       │
+ *   └──────────────────────────────────────────────────────────────┘
+ *
+ * The view is render-only; the plugin's activate hook owns the
+ * hydrate-on-open + bus-subscribe lifecycle.
+ */
+
+const SURFACE_OPTIONS: ActivitySurface[] = [
+  'chat',
+  'ask',
+  'cmdi',
+  'ghost',
+  'complete',
+  'enrich',
+  'other',
+]
+
+// ── Helpers ────────────────────────────────────────────────────────────
+
+function formatTimestamp(ts: string): string {
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ts
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  return `${hh}:${mm}:${ss}`
+}
+
+function formatDuration(ms?: number | null): string {
+  if (ms == null) return ''
+  if (ms < 1000) return `${ms} ms`
+  return `${(ms / 1000).toFixed(1)} s`
+}
+
+function surfaceColor(s: ActivitySurface): string {
+  switch (s) {
+    case 'chat':
+      return 'var(--accent)'
+    case 'ask':
+      return 'var(--cool)'
+    case 'cmdi':
+      return 'var(--warm)'
+    case 'ghost':
+      return 'var(--fg-muted)'
+    case 'complete':
+      return 'var(--ok)'
+    case 'enrich':
+      return 'var(--accent-soft)'
+    default:
+      return 'var(--fg-dim)'
+  }
+}
+
+function outcomeGlyph(o: ActivityEntry['outcome']): string {
+  switch (o) {
+    case 'ok':
+      return '✓'
+    case 'error':
+      return '✗'
+    case 'cancelled':
+      return '∅'
+    default:
+      return '·'
+  }
+}
+
+function entryMatchesFilter(e: ActivityEntry, needle: string): boolean {
+  if (needle.length === 0) return true
+  const n = needle.toLowerCase()
+  if (e.surface.toLowerCase().includes(n)) return true
+  if ((e.provider ?? '').toLowerCase().includes(n)) return true
+  if ((e.model ?? '').toLowerCase().includes(n)) return true
+  if (e.prompt.toLowerCase().includes(n)) return true
+  if (e.files?.some((f) => f.toLowerCase().includes(n))) return true
+  if (e.tool_calls?.some((t) => t.name.toLowerCase().includes(n))) return true
+  return false
+}
+
+// ── Sub-components ────────────────────────────────────────────────────
+
+function Toolbar({
+  filteredCount,
+  onClear,
+}: {
+  filteredCount: number
+  onClear: () => void
+}) {
+  const filter = useActivityTimelineStore((s) => s.filter)
+  const setFilter = useActivityTimelineStore((s) => s.setFilter)
+  const surfaceFilter = useActivityTimelineStore((s) => s.surfaceFilter)
+  const setSurfaceFilter = useActivityTimelineStore((s) => s.setSurfaceFilter)
+  const total = useActivityTimelineStore((s) => s.entries.length)
+
+  return (
+    <div
+      style={{
+        height: 36,
+        flexShrink: 0,
+        borderBottom: '1px solid var(--line-soft)',
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 12px',
+        gap: 12,
+        background: 'var(--bg)',
+      }}
+    >
+      <input
+        type="search"
+        placeholder="Filter timeline…"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          maxWidth: 320,
+          height: 24,
+          padding: '0 8px',
+          background: 'var(--bg-raised)',
+          color: 'var(--fg)',
+          border: '1px solid var(--line-soft)',
+          borderRadius: 4,
+          fontSize: 12,
+          fontFamily: 'var(--f-ui)',
+          outline: 'none',
+        }}
+      />
+      <select
+        value={surfaceFilter ?? ''}
+        onChange={(e) => {
+          const v = e.target.value
+          setSurfaceFilter(v === '' ? null : (v as ActivitySurface))
+        }}
+        style={{
+          height: 24,
+          background: 'var(--bg-raised)',
+          color: 'var(--fg)',
+          border: '1px solid var(--line-soft)',
+          borderRadius: 4,
+          fontSize: 11,
+          fontFamily: 'var(--f-ui)',
+          padding: '0 6px',
+        }}
+        title="Filter by surface"
+      >
+        <option value="">all surfaces</option>
+        {SURFACE_OPTIONS.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </select>
+      <button
+        onClick={onClear}
+        title="Clear timeline (deletes the on-disk log)"
+        style={{
+          height: 24,
+          padding: '0 8px',
+          background: 'transparent',
+          color: 'var(--fg-muted)',
+          border: '1px solid var(--line-soft)',
+          borderRadius: 4,
+          fontSize: 11,
+          fontFamily: 'var(--f-ui)',
+          cursor: 'pointer',
+        }}
+      >
+        Clear
+      </button>
+      <div
+        style={{
+          marginLeft: 'auto',
+          color: 'var(--fg-dim)',
+          fontFamily: 'var(--f-mono)',
+          fontSize: 11,
+        }}
+      >
+        {filter.length > 0 || surfaceFilter !== null
+          ? `${filteredCount} / ${total}`
+          : `${total}`}
+      </div>
+    </div>
+  )
+}
+
+function EntryRow({ entry }: { entry: ActivityEntry }) {
+  const providerLabel =
+    entry.provider && entry.model
+      ? `${entry.provider}/${entry.model}`
+      : (entry.provider ?? entry.model ?? '')
+  const outcomeColor =
+    entry.outcome === 'error'
+      ? 'var(--risk)'
+      : entry.outcome === 'cancelled'
+        ? 'var(--fg-dim)'
+        : 'var(--ok)'
+
+  return (
+    <div
+      style={{
+        padding: '8px 14px',
+        borderBottom: '1px solid var(--line-soft)',
+        fontFamily: 'var(--f-ui)',
+        fontSize: 12,
+        lineHeight: 1.45,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 10,
+        }}
+      >
+        <span
+          style={{
+            color: 'var(--fg-dim)',
+            fontFamily: 'var(--f-mono)',
+            fontSize: 11,
+            flexShrink: 0,
+          }}
+          title={entry.timestamp}
+        >
+          {formatTimestamp(entry.timestamp)}
+        </span>
+        <span
+          style={{
+            color: surfaceColor(entry.surface),
+            fontFamily: 'var(--f-mono)',
+            fontSize: 11,
+            textTransform: 'lowercase',
+            minWidth: 56,
+            flexShrink: 0,
+          }}
+        >
+          {entry.surface}
+        </span>
+        <span
+          style={{
+            color: outcomeColor,
+            fontFamily: 'var(--f-mono)',
+            fontSize: 12,
+            width: 12,
+            textAlign: 'center',
+            flexShrink: 0,
+          }}
+          title={entry.outcome}
+        >
+          {outcomeGlyph(entry.outcome)}
+        </span>
+        <span
+          style={{
+            color: 'var(--fg)',
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {entry.prompt || <em style={{ color: 'var(--fg-dim)' }}>(no prompt)</em>}
+        </span>
+        {entry.duration_ms != null && (
+          <span
+            style={{
+              color: 'var(--fg-dim)',
+              fontFamily: 'var(--f-mono)',
+              fontSize: 10,
+              flexShrink: 0,
+            }}
+          >
+            {formatDuration(entry.duration_ms)}
+          </span>
+        )}
+      </div>
+      {(providerLabel ||
+        (entry.files && entry.files.length > 0) ||
+        (entry.tool_calls && entry.tool_calls.length > 0) ||
+        entry.error) && (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 12,
+            marginTop: 4,
+            paddingLeft: 90,
+            color: 'var(--fg-muted)',
+            fontFamily: 'var(--f-mono)',
+            fontSize: 10,
+          }}
+        >
+          {providerLabel && (
+            <span title="provider/model">
+              <span style={{ color: 'var(--fg-dim)' }}>model </span>
+              {providerLabel}
+            </span>
+          )}
+          {entry.files && entry.files.length > 0 && (
+            <span title={entry.files.join(', ')}>
+              <span style={{ color: 'var(--fg-dim)' }}>files </span>
+              {entry.files.length === 1
+                ? entry.files[0]
+                : `${entry.files[0]} +${entry.files.length - 1}`}
+            </span>
+          )}
+          {entry.tool_calls && entry.tool_calls.length > 0 && (
+            <span>
+              <span style={{ color: 'var(--fg-dim)' }}>tools </span>
+              {entry.tool_calls.map((t, i) => (
+                <span key={i} style={{ marginRight: 6 }}>
+                  {t.name} {t.ok ? '✓' : '✗'}
+                </span>
+              ))}
+            </span>
+          )}
+          {entry.error && (
+            <span style={{ color: 'var(--risk)' }} title={entry.error}>
+              {entry.error.length > 80 ? entry.error.slice(0, 79) + '…' : entry.error}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EntryList() {
+  const entries = useActivityTimelineStore((s) => s.entries)
+  const filter = useActivityTimelineStore((s) => s.filter)
+  const surfaceFilter = useActivityTimelineStore((s) => s.surfaceFilter)
+  const hydrated = useActivityTimelineStore((s) => s.hydrated)
+
+  const filtered = useMemo(() => {
+    return entries.filter(
+      (e) =>
+        (surfaceFilter === null || e.surface === surfaceFilter) &&
+        entryMatchesFilter(e, filter.trim()),
+    )
+  }, [entries, filter, surfaceFilter])
+
+  if (!hydrated) {
+    return (
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--fg-dim)',
+          fontSize: 12,
+        }}
+      >
+        Loading activity…
+      </div>
+    )
+  }
+
+  if (entries.length === 0) {
+    return (
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--fg-dim)',
+          fontSize: 12,
+          padding: 24,
+          textAlign: 'center',
+        }}
+      >
+        No AI activity yet.
+        <br />
+        Run a chat, Cmd+I, or ask command and it will appear here.
+      </div>
+    )
+  }
+
+  if (filtered.length === 0) {
+    return (
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--fg-dim)',
+          fontSize: 12,
+        }}
+      >
+        No entries match the filter.
+      </div>
+    )
+  }
+
+  return (
+    <div
+      style={{
+        flex: 1,
+        overflowY: 'auto',
+        background: 'var(--bg)',
+      }}
+    >
+      {filtered.map((e) => (
+        <EntryRow key={e.id} entry={e} />
+      ))}
+    </div>
+  )
+}
+
+// ── Root ────────────────────────────────────────────────────────────────
+
+export function ActivityTimelineView({
+  onClear,
+}: {
+  onClear: () => void
+}) {
+  const entries = useActivityTimelineStore((s) => s.entries)
+  const filter = useActivityTimelineStore((s) => s.filter)
+  const surfaceFilter = useActivityTimelineStore((s) => s.surfaceFilter)
+
+  const filteredCount = useMemo(() => {
+    return entries.reduce(
+      (n, e) =>
+        (surfaceFilter === null || e.surface === surfaceFilter) &&
+        entryMatchesFilter(e, filter.trim())
+          ? n + 1
+          : n,
+      0,
+    )
+  }, [entries, filter, surfaceFilter])
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        width: '100%',
+        background: 'var(--bg)',
+        color: 'var(--fg)',
+        fontFamily: 'var(--f-ui)',
+      }}
+    >
+      <div
+        style={{
+          padding: '10px 14px',
+          fontSize: 11,
+          color: 'var(--fg-muted)',
+          textTransform: 'uppercase',
+          letterSpacing: 1,
+          borderBottom: '1px solid var(--line-soft)',
+        }}
+      >
+        Activity Timeline
+      </div>
+      <Toolbar filteredCount={filteredCount} onClear={onClear} />
+      <EntryList />
+    </div>
+  )
+}

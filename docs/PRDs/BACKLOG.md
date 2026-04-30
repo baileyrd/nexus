@@ -333,11 +333,7 @@ _BL-035 shipped 2026-04-29 — see BACKLOG_COMPLETED.md._
 **Effort**: Medium.
 Background pass over the active document surfaces non-blocking margin glyphs ("rephrase", "fact-check", "tighten") that expand into accept/dismiss diffs in the gutter; inline correction is the same engine for typos / grammar with squiggle decoration. Hard prereq: BL-016 tool-calling so suggestions can call domain tools (e.g. dictionary).
 
-### BL-037: AMB activity timeline
-
-**Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) pattern 7.
-**Effort**: Medium.
-Per-forge log of AI interactions (prompt, model, surface, files touched, tool calls, outcome) shown as a scrollable pane. v1 reads from a JSONL log under `.forge/ai-activity.log`; later versions can index for search. **Hosted inside BL-029 multi-window** as a dedicated pane.
+_BL-037 shipped 2026-04-30 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 _BL-038 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 

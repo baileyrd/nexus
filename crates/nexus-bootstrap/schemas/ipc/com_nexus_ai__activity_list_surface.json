@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ActivitySurface",
+  "description": "Surface that originated the AI call. Mirrors the in-product UX\nsurface so users (and future analytics) can slice the timeline.",
+  "oneOf": [
+    {
+      "description": "Chat panel (`stream_chat`, mode=chat).",
+      "type": "string",
+      "const": "chat"
+    },
+    {
+      "description": "RAG retrieve + chat (`stream_ask`).",
+      "type": "string",
+      "const": "ask"
+    },
+    {
+      "description": "Cmd+I command-anywhere overlay (BL-032).",
+      "type": "string",
+      "const": "cmdi"
+    },
+    {
+      "description": "Inline ghost completion (BL-034, mode=complete).",
+      "type": "string",
+      "const": "ghost"
+    },
+    {
+      "description": "Headless single-shot completion (`complete` CLI / mode=complete).",
+      "type": "string",
+      "const": "complete"
+    },
+    {
+      "description": "Auto-enrichment on save (BL-045).",
+      "type": "string",
+      "const": "enrich"
+    },
+    {
+      "description": "Catch-all when the surface tag is missing or unknown.",
+      "type": "string",
+      "const": "other"
+    }
+  ]
+}

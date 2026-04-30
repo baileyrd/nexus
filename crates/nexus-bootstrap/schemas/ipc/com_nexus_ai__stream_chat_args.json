@@ -48,6 +48,13 @@
         "type": "string"
       }
     },
+    "surface": {
+      "description": "BL-037 — surface tag recorded in the activity timeline\n(`chat`, `cmdi`, `ghost`, `complete`, `enrich`, `other`). Omit\nfor the default heuristic (`complete` if `mode=complete`,\notherwise `chat`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "system": {
       "description": "Optional system prompt forwarded to the provider.",
       "type": [

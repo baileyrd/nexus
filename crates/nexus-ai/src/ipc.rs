@@ -235,6 +235,49 @@ pub struct AiStreamChatArgs {
     /// boundary). Ignored for `mode=chat`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trim: Option<bool>,
+    /// BL-037 — surface tag recorded in the activity timeline
+    /// (`chat`, `cmdi`, `ghost`, `complete`, `enrich`, `other`). Omit
+    /// for the default heuristic (`complete` if `mode=complete`,
+    /// otherwise `chat`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface: Option<String>,
+}
+
+// ─── BL-037 — activity timeline IPC ────────────────────────────────────────
+
+/// Args for `com.nexus.ai::activity_list`. Currently a unit shape;
+/// kept as a struct so future cursor / pagination fields can land
+/// without an IPC drift event.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+pub struct AiActivityListArgs {
+    /// Maximum number of entries to return, newest first. Omit for
+    /// "all entries" (currently capped by the on-disk log itself).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// Result for `com.nexus.ai::activity_list`. Order is
+/// newest-first so the shell can render without re-sorting.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+pub struct AiActivityListResult {
+    /// Recorded entries (newest first).
+    pub entries: Vec<crate::activity_log::ActivityEntry>,
 }
 
 #[cfg(test)]
@@ -256,6 +299,7 @@ mod stream_chat_serde_tests {
             max_tokens: None,
             stop: None,
             trim: None,
+            surface: None,
         };
         let json = serde_json::to_value(&args).expect("ser");
         // Optional fields with `None` must not bloat the wire.
@@ -268,6 +312,7 @@ mod stream_chat_serde_tests {
         assert!(!obj.contains_key("max_tokens"));
         assert!(!obj.contains_key("stop"));
         assert!(!obj.contains_key("trim"));
+        assert!(!obj.contains_key("surface"));
 
         let back: AiStreamChatArgs = serde_json::from_value(json).expect("de");
         assert_eq!(back.messages.len(), 1);
@@ -290,6 +335,7 @@ mod stream_chat_serde_tests {
             max_tokens: Some(64),
             stop: Some(vec!["\n\n".to_string(), "END".to_string()]),
             trim: Some(true),
+            surface: Some("ghost".to_string()),
         };
         let json = serde_json::to_value(&args).expect("ser");
         // Snake-case mode + tool policy on the wire.

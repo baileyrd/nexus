@@ -57,4 +57,11 @@ stop?: Array<string> | null,
  * and clip at the last natural break (newline or sentence
  * boundary). Ignored for `mode=chat`.
  */
-trim?: boolean | null, };
+trim?: boolean | null, 
+/**
+ * BL-037 — surface tag recorded in the activity timeline
+ * (`chat`, `cmdi`, `ghost`, `complete`, `enrich`, `other`). Omit
+ * for the default heuristic (`complete` if `mode=complete`,
+ * otherwise `chat`).
+ */
+surface?: string | null, };

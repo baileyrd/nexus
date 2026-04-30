@@ -20,6 +20,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+chrono = { workspace = true }
 ts-rs = { workspace = true, optional = true, features = ["chrono-impl", "uuid-impl"] }
 schemars = { workspace = true, optional = true }
 fastembed = { version = "5", optional = true, default-features = false, features = ["ort-load-dynamic", "hf-hub-rustls-tls"] }

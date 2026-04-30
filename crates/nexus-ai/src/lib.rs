@@ -11,6 +11,7 @@
 
 pub mod ipc;
 
+pub mod activity_log;
 mod anthropic;
 mod chunker;
 mod config;
@@ -30,6 +31,10 @@ mod tokens;
 pub mod tools;
 mod vectorstore;
 
+pub use activity_log::{
+    ActivityEntry, ActivityOutcome, ActivityRecorder, ActivitySurface, ActivityToolCall,
+    ACTIVITY_APPENDED_TOPIC, ACTIVITY_LOG_PATH,
+};
 pub use anthropic::AnthropicProvider;
 pub use chunker::{chunks_from_blocks, Chunk};
 pub use config::{detect_embedding_provider, detect_local_embedding, detect_provider, AiConfig};
