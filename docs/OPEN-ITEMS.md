@@ -453,6 +453,33 @@ The warnings fire on every sidedock collapse/reopen and every leaf move; xterm c
 
 ---
 
+## OI-21 — Bootstrap-side keyring hard-fail enforcement
+
+**Severity:** Should-fix (ADR-0009 contract drift)
+**Surfaced by:** BACKLOG.md "Verification notes" (DOCS_AUDIT_2026-04-28); confirmed 2026-04-30.
+**Status:** Open.
+
+### Finding
+ADR-0009 ("Keyring Hard-Fail Policy") promises that "Nexus refuses to start if the keyring is unavailable". The API surface for the policy is implemented — `nexus_security::CredentialVault::available()` probes `keyring-rs` and returns `SecurityError::KeyringUnavailable { reason, platform_hint }` when the OS keyring is unreachable, and honours `NEXUS_NO_KEYRING=1` as the documented escape hatch. But no bootstrap path actually calls `available()`:
+
+- [`SecurityCorePlugin::on_init`](../crates/nexus-security/src/core_plugin.rs) only logs and verifies the event bus is present.
+- [`SecurityCorePlugin::on_start`](../crates/nexus-security/src/core_plugin.rs) only publishes `com.nexus.security.started`.
+- [`build_cli_runtime` / `build_tui_runtime` in `nexus-bootstrap`](../crates/nexus-bootstrap/src/lib.rs) construct `SecurityCorePlugin::new(Some(bus))` and register it; nothing on the bootstrap path probes the keyring.
+- A workspace-wide `grep` for `CredentialVault` outside `nexus-security` itself finds zero hits — every frontend (`nexus-cli`, `nexus-tui`, `nexus-mcp`, `shell/src-tauri`) starts up without ever exercising the vault.
+
+So a daily-driver machine with a broken keyring (e.g. D-Bus down, locked Keychain) currently boots Nexus without complaint, and the failure surfaces only the first time some plugin asks the vault to store/retrieve a credential. That contradicts the ADR's "refuses to start" wording.
+
+### Desired behavior
+Bootstrap should call `CredentialVault::new().available()?` once, before plugin startup completes, and convert a `KeyringUnavailable` into a fatal startup error that prints the platform hint. `NEXUS_NO_KEYRING=1` short-circuits to `Ok(())` (already handled inside `available()` via the disabled flag). A natural home is `SecurityCorePlugin::on_init`, propagating `Err(PluginError::ExecutionFailed { … })` so the kernel's plugin-init aborts. Frontends already stop boot when a core plugin fails to init.
+
+### Acceptance
+- `cargo run -p nexus-cli -- --help` succeeds on a healthy machine.
+- With the keyring disabled (e.g. `dbus-daemon` killed on Linux), the same command exits non-zero with an error message that includes the platform hint string from `platform_error()`.
+- `NEXUS_NO_KEYRING=1 cargo run -p nexus-cli -- --help` succeeds even when the keyring is unavailable.
+- Kernel-level test in `nexus-security` registers `SecurityCorePlugin` against a stub vault and asserts `on_init` returns `Err` when `available()` returns `KeyringUnavailable`.
+
+---
+
 ## Audit-tail OPEN items without a separate OI entry
 
 Low-impact items from the 2026-04-24 audit reconciliation that are tracked only in `MICROKERNEL-AUDIT.md` / `UI-AUDIT.md` rather than here. Adding an OI entry is warranted if impact justifies the tracking cost:
