@@ -1,8 +1,10 @@
 // shell/src/plugins/nexus/editor/cm/marginSuggestions.test.ts
 //
-// BL-036 phase 2 — pure-logic coverage for the margin-glyph CM
-// extension's resolver, decoration builder, accept-transaction
-// helper, and StateField update behaviour.
+// BL-036 phase 2 + phase 3 — pure-logic coverage for the margin-glyph
+// CM extension. Phase 2 covers the resolver, decoration builder,
+// accept-transaction helper, and StateField update behaviour. Phase 3
+// adds `suggestionAtPos` (right-click hit-test) and
+// `buildContextMenuRows` (Accept / Show diff / Dismiss row spec).
 //
 // We exercise the StateField + effects directly via
 // `EditorState.create` rather than mounting a real EditorView's DOM
@@ -22,8 +24,10 @@ import { EditorState } from '@codemirror/state'
 import {
   __test__,
   buildAcceptTransaction,
+  buildContextMenuRows,
   buildDecorations,
   resolveSuggestions,
+  suggestionAtPos,
   type ResolvedSuggestion,
 } from './marginSuggestions.ts'
 import type { Suggestion } from '../../ai/marginSuggestStore.ts'
@@ -291,4 +295,103 @@ test('buildAcceptTransaction: fact-check (replacement=null) returns null', () =>
     makeResolved({ kind: 'fact-check', replacement: null }),
   )
   assert.equal(spec, null)
+})
+
+// ── Phase 3: suggestionAtPos ────────────────────────────────────────────
+
+test('suggestionAtPos: returns the suggestion whose range covers pos', () => {
+  const list = [
+    makeResolved({ id: 'a', from: 0, to: 5 }),
+    makeResolved({ id: 'b', from: 10, to: 15 }),
+  ]
+  assert.equal(suggestionAtPos(list, 0)?.id, 'a', 'inclusive on `from`')
+  assert.equal(suggestionAtPos(list, 4)?.id, 'a', 'mid-range matches')
+  assert.equal(suggestionAtPos(list, 12)?.id, 'b')
+})
+
+test('suggestionAtPos: exclusive on `to` (right edge falls through)', () => {
+  // Matches Decoration.mark semantics — `to` is exclusive. A click
+  // at the right edge of a span belongs to the next character, not
+  // this suggestion.
+  const list = [makeResolved({ id: 'a', from: 0, to: 5 })]
+  assert.equal(suggestionAtPos(list, 5), null)
+})
+
+test('suggestionAtPos: returns null when no suggestion covers pos', () => {
+  const list = [makeResolved({ id: 'a', from: 10, to: 15 })]
+  assert.equal(suggestionAtPos(list, 0), null)
+  assert.equal(suggestionAtPos(list, 9), null)
+  assert.equal(suggestionAtPos(list, 100), null)
+})
+
+test('suggestionAtPos: empty list returns null', () => {
+  assert.equal(suggestionAtPos([], 0), null)
+})
+
+test('suggestionAtPos: first match wins on overlap (deterministic for the menu)', () => {
+  const list = [
+    makeResolved({ id: 'first', from: 0, to: 10, kind: 'rephrase' }),
+    makeResolved({ id: 'second', from: 5, to: 15, kind: 'tighten' }),
+  ]
+  assert.equal(suggestionAtPos(list, 7)?.id, 'first')
+})
+
+// ── Phase 3: buildContextMenuRows ───────────────────────────────────────
+
+test('buildContextMenuRows: rephrase emits Accept + Dismiss (no Show diff)', () => {
+  const rows = buildContextMenuRows(
+    makeResolved({ kind: 'rephrase', replacement: 'fast' }),
+  )
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    ['accept', 'dismiss'],
+    'rephrase already has a margin glyph; Show diff would be redundant',
+  )
+  assert.match(rows[0].label, /rephrase/i)
+})
+
+test('buildContextMenuRows: tighten emits Accept + Dismiss (no Show diff)', () => {
+  const rows = buildContextMenuRows(
+    makeResolved({ kind: 'tighten', replacement: 'short' }),
+  )
+  assert.deepEqual(rows.map((r) => r.id), ['accept', 'dismiss'])
+})
+
+test('buildContextMenuRows: fact-check emits Dismiss only (annotation-only kind)', () => {
+  const rows = buildContextMenuRows(
+    makeResolved({ kind: 'fact-check', replacement: null }),
+  )
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    ['dismiss'],
+    'fact-check has no replacement to apply; Accept is hidden',
+  )
+})
+
+test('buildContextMenuRows: spelling emits Accept + Show diff + Dismiss', () => {
+  // Spelling has no margin glyph (gutter-clutter avoidance), so the
+  // contextmenu is the only way to see the proposed fix before
+  // applying — Show diff is the unique row vs the glyph kinds.
+  const rows = buildContextMenuRows(
+    makeResolved({ kind: 'spelling', replacement: 'their' }),
+  )
+  assert.deepEqual(rows.map((r) => r.id), ['accept', 'show-diff', 'dismiss'])
+})
+
+test('buildContextMenuRows: grammar emits Accept + Show diff + Dismiss', () => {
+  const rows = buildContextMenuRows(
+    makeResolved({ kind: 'grammar', replacement: 'were' }),
+  )
+  assert.deepEqual(rows.map((r) => r.id), ['accept', 'show-diff', 'dismiss'])
+})
+
+test('buildContextMenuRows: Dismiss is always last', () => {
+  // The CSS for `cm-margin-suggest-menu-row--dismiss` adds a
+  // separator above it. Position-sensitive — assert per-kind.
+  for (const kind of ['rephrase', 'tighten', 'fact-check', 'spelling', 'grammar'] as const) {
+    const rows = buildContextMenuRows(
+      makeResolved({ kind, replacement: kind === 'fact-check' ? null : 'x' }),
+    )
+    assert.equal(rows[rows.length - 1].id, 'dismiss', `last row for ${kind} must be dismiss`)
+  }
 })
