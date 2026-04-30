@@ -16,7 +16,9 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { uriHandlerRegistry } from './registry/UriHandlerRegistry'
 import App from './shell/App'
-import { PopoutShell, isPopoutMode } from './shell/PopoutShell'
+import { PopoutShell, isPopoutMode, POPOUT_CLOSED_EVENT } from './shell/PopoutShell'
+import { workspace as workspaceStore } from './workspace/workspaceStore'
+import { closePopoutTauri } from './workspace/popoutWindowBridge'
 import './shell/shell.css'
 // Importing the store triggers persist rehydration, which sets
 // data-theme/data-density on <html> before the first paint.
@@ -313,6 +315,39 @@ async function boot() {
     }
   }).catch((err) => {
     console.warn('[Boot] failed to register deep-link listener:', err)
+  })
+
+  // BL-029 Phase 2a — popout close-event sync (ADR 0020 §3).
+  // A popout webview emits `nexus:popout-closed` on its
+  // `onCloseRequested` hook just before the OS tears it down.
+  // Removing the matching FloatingWindow from `floating[]` keeps the
+  // main window's state authoritative and avoids the next
+  // `restoreFloatingWindows()` reconciliation re-opening a popout the
+  // user just dismissed.
+  //
+  // We *also* call `close_popout_window` defensively. Closing the
+  // store entry first (synchronously, via `closeFloatingWindow`)
+  // means the persisted `workspace.json` no longer references the
+  // popout even if the OS-side close has already finalized; the
+  // Tauri call is idempotent so a no-op there is fine.
+  listen<{ fwId?: string }>(POPOUT_CLOSED_EVENT, async (event) => {
+    const fwId = event.payload?.fwId
+    if (typeof fwId !== 'string' || fwId.length === 0) {
+      console.warn('[Boot] popout-closed event missing fwId:', event.payload)
+      return
+    }
+    try {
+      await workspaceStore.closeFloatingWindow(fwId)
+    } catch (err) {
+      console.warn('[Boot] popout-closed: closeFloatingWindow failed', err)
+    }
+    try {
+      await closePopoutTauri(fwId)
+    } catch {
+      // Idempotent; the OS window has typically already gone away.
+    }
+  }).catch((err) => {
+    console.warn('[Boot] failed to register popout-closed listener:', err)
   })
 
   contextKeyService.set('shellReady', true)

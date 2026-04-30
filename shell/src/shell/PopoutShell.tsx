@@ -6,23 +6,33 @@
 // for the `popout` query param and mounts this component instead of
 // the full `<App>`.
 //
-// Phase 1 scope (this commit): show a placeholder summarising the
-// requested popout id + leaf id, and the OS-side close affordance is
-// the native window decoration. The full popout-side leaf hydration
-// (mounting the same View instance the main window had, sharing state
-// over Tauri events, in-popout title bar with detach/dock controls)
-// lands in BL-029 Phase 2.
+// Phase 2a scope (this commit): wire the close-request sync so the
+// main window's `floating[]` state stays consistent when the user
+// closes a popout via the OS-X button (or any other native close
+// path). The full popout-side leaf hydration — running plugin
+// activation in the popout webview, hydrating workspace.json, and
+// mounting a `LeafHost` for the requested leaf — is staged in Phase
+// 2b. ADR 0020 documents the design decisions for both slices.
 //
-// Why a placeholder is acceptable Phase 1 ground:
-//  - The Tauri-side primitives + workspace-store API are the
-//    foundational work. Without them, no UI surface can detach a
-//    panel.
-//  - The popout window, once spawned, can already host the
-//    `__nexusShellApi` and `kernel_invoke` IPC since managed state is
-//    process-wide. Future commits add the view-mounting layer on top
-//    of this placeholder without changing the boot path.
+// Why close-event sync ships ahead of leaf rendering:
+//  - It validates the cross-window architecture from ADR 0020 §2/§3
+//    end-to-end (Tauri global events + main-window listener +
+//    workspace-store mutation).
+//  - Without it, closing a popout via OS-X leaves a stale entry in
+//    `floating[]`, which the next main-window reload tries to
+//    re-open — a real bug surfaced once Phase 1 landed.
+//  - It is a self-contained, testable change that does not require
+//    the popout to boot the plugin host.
 
-import React from 'react'
+import React, { useEffect } from 'react'
+import { emit } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+
+/** Tauri-app event emitted by a popout right before it closes. The
+ *  main window listens for this and removes the matching
+ *  FloatingWindow entry from its workspace store. Payload is the
+ *  popout's FloatingWindow id (the `fwId` from the URL). */
+export const POPOUT_CLOSED_EVENT = 'nexus:popout-closed'
 
 interface PopoutInfo {
   fwId: string
@@ -38,8 +48,52 @@ function readPopoutInfo(): PopoutInfo | null {
   return { fwId, leafId }
 }
 
+/**
+ * Subscribe to the OS-level close request and emit
+ * `nexus:popout-closed` with the popout's fwId before letting the
+ * close proceed. ADR 0020 §3: closing a popout removes the leaf from
+ * `floating[]`; the kernel session keeps unsaved buffer state alive.
+ *
+ * The Tauri event is global (no `target`), so the main window's
+ * `listen('nexus:popout-closed', ...)` picks it up regardless of
+ * which popout fired it.
+ *
+ * Failures are logged and ignored — a popout that can't notify the
+ * main window still has to close (the user expects OS-X to work),
+ * and the next `restoreFloatingWindows()` reconciliation on a main-
+ * window reload will close the orphan record anyway.
+ */
+async function installCloseHandshake(fwId: string): Promise<() => void> {
+  try {
+    const unlisten = await getCurrentWindow().onCloseRequested(async () => {
+      try {
+        await emit(POPOUT_CLOSED_EVENT, { fwId })
+      } catch (err) {
+        console.warn('[PopoutShell] failed to emit popout-closed event', err)
+      }
+    })
+    return unlisten
+  } catch (err) {
+    console.warn('[PopoutShell] onCloseRequested registration failed', err)
+    return () => {}
+  }
+}
+
 export function PopoutShell(): JSX.Element {
   const info = readPopoutInfo()
+
+  const fwId = info?.fwId ?? null
+  useEffect(() => {
+    if (!fwId) return
+    let dispose: (() => void) | null = null
+    void installCloseHandshake(fwId).then((fn) => {
+      dispose = fn
+    })
+    return () => {
+      dispose?.()
+    }
+  }, [fwId])
+
   return (
     <div
       style={{
@@ -67,9 +121,11 @@ export function PopoutShell(): JSX.Element {
         leafId: {info?.leafId ?? '(none)'}
       </div>
       <div style={{ fontSize: 11, opacity: 0.4, marginTop: 16, maxWidth: 360 }}>
-        Detached panel rendering will land in BL-029 Phase 2. The host
+        Detached panel rendering will land in BL-029 Phase 2b. The host
         kernel and IPC are already reachable from this window via
-        <code> kernel_invoke</code>.
+        <code> kernel_invoke</code>; the close handshake is wired so
+        OS-X cleanly removes this popout from the main window's
+        floating[] state (ADR 0020 §3).
       </div>
     </div>
   )
@@ -77,10 +133,15 @@ export function PopoutShell(): JSX.Element {
 
 /**
  * Test seam: returns true when the current URL indicates the shell
- * should boot in popout mode. `main.tsx` calls this to short-circuit
- * the plugin-load + workspace-render path.
+ * should boot in popout mode. `main.tsx` calls this with no argument
+ * to short-circuit the plugin-load + workspace-render path. Tests
+ * pass an explicit search string because happy-dom does not update
+ * `window.location.search` on `history.replaceState`.
  */
-export function isPopoutMode(): boolean {
-  if (typeof window === 'undefined') return false
-  return new URLSearchParams(window.location.search).has('popout')
+export function isPopoutMode(search?: string): boolean {
+  if (search === undefined) {
+    if (typeof window === 'undefined') return false
+    search = window.location.search
+  }
+  return new URLSearchParams(search).has('popout')
 }
