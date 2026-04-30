@@ -1,10 +1,12 @@
-//! MCP server implementation: 13 tools for note CRUD, search, graph, tasks, and RAG.
+//! MCP server implementation: 15 tools for note CRUD, search, graph, tasks, RAG, and skills.
 //!
 //! All tools route through the kernel plugin IPC boundary — the server holds
-//! an `Arc<KernelPluginContext>` and issues `ipc_call`s to `com.nexus.storage`
-//! and `com.nexus.ai`, so every tool call is capability-checked and auditable
-//! at the kernel. `nexus_ask` dispatches to the AI plugin's `ask` handler
-//! (RAG over indexed notes).
+//! an `Arc<KernelPluginContext>` and issues `ipc_call`s to `com.nexus.storage`,
+//! `com.nexus.ai`, and `com.nexus.skills`, so every tool call is capability-checked
+//! and auditable at the kernel. `nexus_ask` dispatches to the AI plugin's `ask`
+//! handler (RAG over indexed notes); `nexus_list_skills` / `nexus_render_skill`
+//! surface authored prompt templates from `.forge/skills/` so external clients
+//! can invoke them as named, parameterised prompts.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,6 +28,7 @@ use serde::{Deserialize, Serialize};
 
 const STORAGE_PLUGIN: &str = "com.nexus.storage";
 const AI_PLUGIN: &str = "com.nexus.ai";
+const SKILLS_PLUGIN: &str = "com.nexus.skills";
 const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longer timeout for AI calls — they make outbound HTTP requests to the
 /// chat + embedding providers.
@@ -165,6 +168,21 @@ struct ToggleTaskInput {
 struct AskInput {
     /// The question to answer via RAG over the knowledge base.
     question: String,
+}
+
+/// Input for `nexus_list_skills` (no parameters).
+#[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
+struct ListSkillsInput {}
+
+/// Input for the `nexus_render_skill` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct RenderSkillInput {
+    /// The skill's id (matches the `id:` front-matter field).
+    id: String,
+    /// Optional values keyed by the skill's declared placeholder names.
+    /// Omitted placeholders fall back to the skill's defaults.
+    #[serde(default)]
+    values: serde_json::Map<String, serde_json::Value>,
 }
 
 // ── Output types ─────────────────────────────────────────────────────────────
@@ -310,6 +328,32 @@ struct AskOutput {
     source_count: usize,
 }
 
+/// A single skill entry in a list response.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct SkillEntry {
+    id: String,
+    name: String,
+    description: String,
+    version: String,
+    tags: Vec<String>,
+    applicable_contexts: Vec<String>,
+}
+
+/// Output for `nexus_list_skills`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ListSkillsOutput {
+    count: usize,
+    skills: Vec<SkillEntry>,
+}
+
+/// Output for `nexus_render_skill`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct RenderSkillOutput {
+    id: String,
+    name: String,
+    body: String,
+}
+
 // ── Server ───────────────────────────────────────────────────────────────────
 
 /// MCP server that exposes Nexus forge operations as tools.
@@ -350,6 +394,19 @@ impl NexusMcpServer {
         let value = self
             .context
             .ipc_call(STORAGE_PLUGIN, command, args, IPC_TIMEOUT)
+            .await
+            .map_err(|e| format!("ipc {command}: {e}"))?;
+        serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
+    }
+
+    async fn skills_call<T: serde::de::DeserializeOwned>(
+        &self,
+        command: &str,
+        args: serde_json::Value,
+    ) -> Result<T, String> {
+        let value = self
+            .context
+            .ipc_call(SKILLS_PLUGIN, command, args, IPC_TIMEOUT)
             .await
             .map_err(|e| format!("ipc {command}: {e}"))?;
         serde_json::from_value(value).map_err(|e| format!("decode {command}: {e}"))
@@ -825,6 +882,92 @@ impl NexusMcpServer {
         }
     }
 
+    #[tool(
+        name = "nexus_list_skills",
+        description = "List all skills (authored prompt templates) declared in the forge's .forge/skills directory"
+    )]
+    async fn list_skills(
+        &self,
+        Parameters(_input): Parameters<ListSkillsInput>,
+    ) -> Json<ListSkillsOutput> {
+        // Skills `list` returns the skill metadata directly — fields
+        // mirror the `Skill::meta` shape in nexus-skills.
+        #[derive(Deserialize)]
+        struct Rec {
+            id: String,
+            name: String,
+            #[serde(default)]
+            description: String,
+            #[serde(default)]
+            version: String,
+            #[serde(default)]
+            tags: Vec<String>,
+            #[serde(default)]
+            applicable_contexts: Vec<String>,
+        }
+        match self
+            .skills_call::<Vec<Rec>>("list", serde_json::json!({}))
+            .await
+        {
+            Ok(records) => {
+                let skills: Vec<SkillEntry> = records
+                    .into_iter()
+                    .map(|r| SkillEntry {
+                        id: r.id,
+                        name: r.name,
+                        description: r.description,
+                        version: r.version,
+                        tags: r.tags,
+                        applicable_contexts: r.applicable_contexts,
+                    })
+                    .collect();
+                Json(ListSkillsOutput {
+                    count: skills.len(),
+                    skills,
+                })
+            }
+            Err(e) => {
+                tracing::error!("list_skills failed: {e}");
+                Json(ListSkillsOutput {
+                    count: 0,
+                    skills: Vec::new(),
+                })
+            }
+        }
+    }
+
+    #[tool(
+        name = "nexus_render_skill",
+        description = "Render a skill template to its expanded prompt body, given an optional `values` map of placeholder substitutions"
+    )]
+    async fn render_skill(
+        &self,
+        Parameters(input): Parameters<RenderSkillInput>,
+    ) -> Json<RenderSkillOutput> {
+        #[derive(Deserialize)]
+        struct Rec {
+            id: String,
+            name: String,
+            body: String,
+        }
+        let args = serde_json::json!({
+            "id": &input.id,
+            "values": input.values,
+        });
+        match self.skills_call::<Rec>("render", args).await {
+            Ok(r) => Json(RenderSkillOutput {
+                id: r.id,
+                name: r.name,
+                body: r.body,
+            }),
+            Err(e) => Json(RenderSkillOutput {
+                id: input.id,
+                name: String::new(),
+                body: format!("Error: {e}"),
+            }),
+        }
+    }
+
     /// Shared `write_file` implementation for `create_note` + `update_note`.
     async fn do_write_file(&self, path: &str, content: &str) -> Json<WriteNoteOutput> {
         #[derive(Deserialize)]
@@ -865,8 +1008,10 @@ impl rmcp::ServerHandler for NexusMcpServer {
             .build();
         info.with_instructions(
             "Nexus MCP server: manage a personal knowledge base of markdown notes. \
-             Use nexus_* tools to create, read, update, delete, search, and query notes. \
-             Forge notes are also enumerated as MCP resources under mcp://nexus/notes/.",
+             Use nexus_* tools to create, read, update, delete, search, and query notes; \
+             list and render authored skill templates from .forge/skills via \
+             nexus_list_skills / nexus_render_skill. Forge notes are also enumerated \
+             as MCP resources under mcp://nexus/notes/.",
         )
     }
 
@@ -979,5 +1124,59 @@ mod tests {
     fn build_note_resource_clamps_oversize_to_u32_max() {
         let r = build_note_resource("huge.md", u64::MAX);
         assert_eq!(r.raw.size, Some(u32::MAX));
+    }
+
+    #[test]
+    fn render_skill_input_defaults_values_to_empty_map() {
+        let input: RenderSkillInput = serde_json::from_value(serde_json::json!({
+            "id": "skill-a"
+        }))
+        .unwrap();
+        assert_eq!(input.id, "skill-a");
+        assert!(input.values.is_empty());
+    }
+
+    #[test]
+    fn render_skill_input_round_trips_values_map() {
+        let input: RenderSkillInput = serde_json::from_value(serde_json::json!({
+            "id": "skill-b",
+            "values": { "topic": "rust", "tone": "concise" }
+        }))
+        .unwrap();
+        assert_eq!(input.id, "skill-b");
+        assert_eq!(input.values.len(), 2);
+        assert_eq!(input.values["topic"], serde_json::json!("rust"));
+    }
+
+    #[test]
+    fn list_skills_output_serializes_count_and_skills() {
+        let out = ListSkillsOutput {
+            count: 1,
+            skills: vec![SkillEntry {
+                id: "s1".into(),
+                name: "Skill One".into(),
+                description: "first".into(),
+                version: "1.0.0".into(),
+                tags: vec!["alpha".into()],
+                applicable_contexts: vec!["ai-chat".into()],
+            }],
+        };
+        let v = serde_json::to_value(&out).unwrap();
+        assert_eq!(v["count"], 1);
+        assert_eq!(v["skills"][0]["id"], "s1");
+        assert_eq!(v["skills"][0]["applicable_contexts"][0], "ai-chat");
+    }
+
+    #[test]
+    fn render_skill_output_serializes_id_name_body() {
+        let out = RenderSkillOutput {
+            id: "s1".into(),
+            name: "Skill One".into(),
+            body: "rendered body".into(),
+        };
+        let v = serde_json::to_value(&out).unwrap();
+        assert_eq!(v["id"], "s1");
+        assert_eq!(v["name"], "Skill One");
+        assert_eq!(v["body"], "rendered body");
     }
 }
