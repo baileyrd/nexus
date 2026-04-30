@@ -301,6 +301,21 @@ export interface BlockRefDragBridge {
   ) =>
     | { relpath: string; blockId: string; label: string | null }
     | null
+  /** BL-048 phase 3 — promote the block at `blockIndex` to a
+   *  stable id (UUID per ADR 0017) and persist the document, so a
+   *  cross-plugin drop never carries the rot-prone deterministic
+   *  id. Idempotent: a second call for the same block returns the
+   *  existing `stable_id` without re-saving. Returns `null` when
+   *  the lookup fails (same conditions as `resolve`); errors from
+   *  the IPC layer surface as a rejected promise so the caller can
+   *  toast / fall back. After this resolves, `resolve(blockIndex)`
+   *  returns the stamped resolution synchronously. */
+  stamp?: (
+    blockIndex: number,
+  ) => Promise<
+    | { relpath: string; blockId: string; label: string | null }
+    | null
+  >
 }
 
 let activeBlockRefDragBridge: BlockRefDragBridge | null = null
@@ -521,8 +536,28 @@ class BlockHandlePlugin implements PluginValue {
       // browser fires `dragstart`.
       handle.draggable = true
       handle.addEventListener('dragstart', (ev) => this.onHandleDragStart(ev, b))
+      // BL-048 phase 3 — pre-stamp on hover so the dragstart
+      // resolve sees a stable UUID. The IPC roundtrip starts the
+      // moment the user moves the cursor over the handle (~50–
+      // 200 ms before the first mousedown in the common case),
+      // which is enough to land the stamp before the browser's
+      // drag-threshold fires. Errors are swallowed here — the
+      // dragstart guard still prevents a half-formed payload, and
+      // surfacing kernel hiccups on hover would be noisier than
+      // useful.
+      handle.addEventListener('mouseenter', () => this.onHandleHover(b))
       this.handlesLayer.appendChild(handle)
     }
+  }
+
+  private onHandleHover(block: BlockRange): void {
+    const bridge = activeBlockRefDragBridge
+    if (!bridge?.stamp) return
+    const blockIndex = scanBlocks(this.view).findIndex((b) => b.from === block.from)
+    if (blockIndex < 0) return
+    // Best-effort prefetch — the bridge dedupes duplicate calls so
+    // a user re-hovering the same block doesn't queue extra IPCs.
+    void bridge.stamp(blockIndex).catch(() => undefined)
   }
 
   private onHandleDragStart(event: DragEvent, block: BlockRange): void {
@@ -592,6 +627,26 @@ class BlockHandlePlugin implements PluginValue {
           )
           this.view.dispatch({ effects: closeMenu.of() })
           if (idx >= 0) bridge.onCommentBlock(idx)
+        },
+      })
+    }
+    // BL-048 phase 3 — explicit "Stamp block" affordance. Lets the
+    // user promote a block to a stable id without dragging it
+    // first; pairs with the on-hover auto-stamp path so a deliberate
+    // user gesture still works for keyboard / accessibility flows
+    // that don't emit hover events.
+    if (activeBlockRefDragBridge?.stamp) {
+      const dragBridge = activeBlockRefDragBridge
+      items.push({
+        label: 'Stamp block',
+        action: () => {
+          const idx = scanBlocks(this.view).findIndex(
+            (b) => b.from === block.from && b.to === block.to,
+          )
+          this.view.dispatch({ effects: closeMenu.of() })
+          if (idx >= 0 && dragBridge.stamp) {
+            void dragBridge.stamp(idx).catch(() => undefined)
+          }
         },
       })
     }

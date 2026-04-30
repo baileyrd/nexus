@@ -248,9 +248,7 @@ _BL-047 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 _BL-048 shipped 2026-04-30 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-048 phase 3: opportunistic auto-stamp on dragstart
-
-Kick off `stamp_block` + `save` from the block-handle drag bridge when the source block is unstamped, so cross-plugin drops from un-stamped blocks don't carry the rot-prone `deterministic_block_id`. Pair with a "Stamp block" right-click affordance on the block handle so the user has a deliberate path to promote a block to a stable id without dragging it.
+_BL-048 phase 3 shipped 2026-04-30 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 _BL-049 shipped 2026-04-30 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 

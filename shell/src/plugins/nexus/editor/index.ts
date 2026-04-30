@@ -17,6 +17,7 @@ import {
   setBlockRefDragBridge,
   setCommentBridge,
 } from './cm/blockHandle'
+import { createBlockRefDragBridge } from './blockRefDragBridge'
 import { installInlineToolbarStyles } from './cm/inlineToolbar'
 import { createCommentsApi } from '../comments/commentsApi'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
@@ -747,31 +748,23 @@ export const editorPlugin: Plugin = {
     // BL-048 — drag-to-embed bridge. Resolves the active tab's
     // (relpath, blockId, label) for the dragged block; the
     // canvas-side drop handler reads the typed payload and builds
-    // a text node carrying the BL-049 link form. Falls back to
-    // null for untitled tabs (no save target → no stable id) and
-    // when the session snapshot doesn't have the requested block
-    // index. Soft-blocked on stamp_block: the payload uses the
-    // current id which equals stable_id once stamped, but a
-    // pre-stamp drag carries the deterministic id which can rot
-    // if upstream blocks are inserted before the next save.
-    setBlockRefDragBridge({
-      resolve: (blockIndex) => {
-        const relpath = useEditorStore.getState().activeRelpath
-        if (!relpath) return null
-        if (/^untitled-\d+$/i.test(relpath)) return null
-        const snapshot = sessionManager.getSnapshot(relpath)
-        if (!snapshot) return null
-        const rootIds = snapshot.tree.root_blocks
-        if (blockIndex < 0 || blockIndex >= rootIds.length) return null
-        const blockId = rootIds[blockIndex]
-        // Block content provides the label; truncated to 64 chars
-        // so a long paragraph doesn't bloat the canvas card.
-        const block = (snapshot.tree.blocks as Record<string, { content?: string }>)[blockId]
-        const raw = (block?.content ?? '').replace(/\s+/g, ' ').trim()
-        const label = raw.length > 64 ? `${raw.slice(0, 61)}…` : raw || null
-        return { relpath, blockId, label }
-      },
-    })
+    // a text node carrying the BL-049 link form. Phase 3 added the
+    // async `stamp(blockIndex)` method (promotes a block to a
+    // stable UUID + saves, idempotent) plus a private cache so
+    // `resolve` returns the stamped id synchronously for dragstart.
+    // See `blockRefDragBridge.ts` for the factory + tests.
+    setBlockRefDragBridge(
+      createBlockRefDragBridge({
+        getActiveRelpath: () => useEditorStore.getState().activeRelpath,
+        getSnapshot: (relpath) => sessionManager.getSnapshot(relpath),
+        client: editorClient,
+        warn: (msg, err) => {
+          if (typeof console !== 'undefined' && console.warn) {
+            console.warn(msg, err)
+          }
+        },
+      }),
+    )
 
     setCommentBridge({
       onCommentBlock: (blockIndex) => {
