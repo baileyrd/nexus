@@ -15,9 +15,21 @@
 //      original vs replacement plus Accept / Dismiss buttons.
 //      Reuses the BL-035 dismiss verb on the store.
 //
-// Phase 2 only handles the rephrase / tighten / fact-check kinds;
-// spelling / grammar render the inline mark with their own class
-// (so phase 3's squiggle is a CSS-only swap) but no glyph.
+// Phase 3 adds:
+//   4. A wavy squiggle decoration for spelling / grammar (the kinds
+//      that don't get a margin glyph because they're high-volume
+//      and fine-grained). Rendered via the same `Decoration.mark`
+//      pipeline — only the CSS for `cm-margin-suggest--{spelling,
+//      grammar}` swaps from a dotted underline to a wavy SVG
+//      background.
+//   5. A native `contextmenu` listener — right-click inside ANY
+//      suggestion span (including spelling / grammar that have no
+//      glyph) surfaces a small Accept / Dismiss menu at the click
+//      coords. Composes the same `buildAcceptTransaction` /
+//      `dropOneEffect` machinery the diff card uses. The default
+//      browser context menu is suppressed only when the click is
+//      inside a suggestion — clicks outside still get the platform
+//      menu.
 //
 // Drift safety: every store update + every doc-change transaction
 // drops suggestions whose `[from, to)` no longer matches their
@@ -240,6 +252,76 @@ export function buildAcceptTransaction(
   }
 }
 
+// ── Suggestion-at-position lookup ────────────────────────────────────────
+
+/** Find the suggestion in `state` whose anchored range covers `pos`,
+ *  if any. Used by the right-click contextmenu (phase 3) to surface
+ *  Accept / Dismiss for the suggestion under the cursor — including
+ *  spelling / grammar kinds that don't get a margin glyph.
+ *
+ *  Inclusive on `from`, exclusive on `to` — matches the semantics
+ *  of the `Decoration.mark` range. When multiple suggestions cover
+ *  the same offset (rare; the engine dedupes by `kind|original`
+ *  but two different kinds could overlap), the first in registration
+ *  order wins; that's deterministic enough for the menu's "single
+ *  active suggestion" UX. */
+export function suggestionAtPos(
+  suggestions: ReadonlyArray<ResolvedSuggestion>,
+  pos: number,
+): ResolvedSuggestion | null {
+  for (const s of suggestions) {
+    if (pos >= s.from && pos < s.to) return s
+  }
+  return null
+}
+
+// ── Contextmenu spec ─────────────────────────────────────────────────────
+
+/** A single row to render in the right-click menu over a suggestion.
+ *  Pure-data shape so the DOM render in `MarginSuggestionsView` is
+ *  separable from the spec — tests assert on the spec without
+ *  standing up DOM. */
+export interface ContextMenuRow {
+  /** Stable id for keyed rendering / test assertions. */
+  id: 'accept' | 'dismiss' | 'show-diff'
+  /** Visible label. Includes the kind name when relevant so the
+   *  user knows what they're acting on at a glance. */
+  label: string
+}
+
+/** Build the row list for a contextmenu over `suggestion`. Rules:
+ *
+ *   - "Accept fix" appears iff the suggestion has a non-null
+ *     replacement (rephrase / tighten / spelling / grammar). Hidden
+ *     for fact-check, which is annotation-only.
+ *   - "Show diff" appears iff there's a replacement to compare
+ *     against AND the suggestion isn't already in the diff-card-
+ *     visible set (rephrase / tighten / fact-check, where the
+ *     margin glyph + click already does this). For spelling /
+ *     grammar (no glyph), the right-click is the ONLY way to see
+ *     the proposed fix before applying.
+ *   - "Dismiss" always appears — the user can always close out.
+ *
+ *  Exposed for tests; the contextmenu handler in
+ *  `MarginSuggestionsView` consumes this. */
+export function buildContextMenuRows(suggestion: ResolvedSuggestion): ContextMenuRow[] {
+  const rows: ContextMenuRow[] = []
+  const hasReplacement = suggestion.replacement !== null
+
+  if (hasReplacement) {
+    rows.push({ id: 'accept', label: `Accept ${suggestion.kind} fix` })
+  }
+  // "Show diff" — only for kinds that don't surface a margin glyph
+  // (spelling / grammar). The other kinds already have a glyph
+  // click that opens the diff card; surfacing it twice would be
+  // noise.
+  if (hasReplacement && (suggestion.kind === 'spelling' || suggestion.kind === 'grammar')) {
+    rows.push({ id: 'show-diff', label: 'Show diff' })
+  }
+  rows.push({ id: 'dismiss', label: 'Dismiss suggestion' })
+  return rows
+}
+
 // ── ViewPlugin: glyph layer + diff card DOM ─────────────────────────────
 
 const KIND_GLYPH: Record<SuggestionKind, string> = {
@@ -266,6 +348,12 @@ class MarginSuggestionsView implements PluginValue {
   private readonly relpath: string
   private readonly glyphLayer: HTMLDivElement
   private readonly cardLayer: HTMLDivElement
+  /** Phase 3 — separate layer for the right-click contextmenu so a
+   *  visible card and a visible menu can co-exist without DOM
+   *  surgery (rare in practice — opening the menu collapses the
+   *  card — but the layer separation simplifies hit-testing in
+   *  `onGlobalMouseDown`). */
+  private readonly menuLayer: HTMLDivElement
   private readonly storeUnsub: () => void
   /** Track the active doc text so the resolver only fires when the
    *  store actually changes; resists a thundering herd if the store
@@ -301,6 +389,15 @@ class MarginSuggestionsView implements PluginValue {
     this.cardLayer.addEventListener('mousedown', (e) => e.stopPropagation())
     view.dom.appendChild(this.cardLayer)
 
+    this.menuLayer = document.createElement('div')
+    this.menuLayer.className = 'cm-margin-suggest-menu-layer'
+    this.menuLayer.style.position = 'absolute'
+    this.menuLayer.style.zIndex = '80'
+    this.menuLayer.style.display = 'none'
+    this.menuLayer.addEventListener('mousedown', (e) => e.stopPropagation())
+    view.dom.appendChild(this.menuLayer)
+
+    view.dom.addEventListener('contextmenu', this.onContextMenu)
     document.addEventListener('mousedown', this.onGlobalMouseDown)
 
     // Subscribe to the zustand store. The subscriber fires on every
@@ -356,9 +453,11 @@ class MarginSuggestionsView implements PluginValue {
 
   destroy(): void {
     this.storeUnsub()
+    this.view.dom.removeEventListener('contextmenu', this.onContextMenu)
     document.removeEventListener('mousedown', this.onGlobalMouseDown)
     this.glyphLayer.remove()
     this.cardLayer.remove()
+    this.menuLayer.remove()
   }
 
   // ── DOM render ────────────────────────────────────────────────────────
@@ -516,16 +615,94 @@ class MarginSuggestionsView implements PluginValue {
     useMarginSuggestStore.getState().dismiss(id)
   }
 
-  // ── Outside-click closes the card ────────────────────────────────────
+  // ── Outside-click closes the card + the contextmenu ─────────────────
 
   private onGlobalMouseDown = (e: MouseEvent): void => {
     const target = e.target as Node | null
     if (!target) return
-    if (this.cardLayer.contains(target)) return
-    if (this.glyphLayer.contains(target)) return
+    const inCard = this.cardLayer.contains(target)
+    const inGlyph = this.glyphLayer.contains(target)
+    const inMenu = this.menuLayer.contains(target)
+    if (!inMenu && this.menuLayer.style.display !== 'none') {
+      this.closeMenu()
+    }
+    if (inCard || inGlyph || inMenu) return
     if (this.view.state.field(marginField).expandedId !== null) {
       this.view.dispatch({ effects: expandEffect.of(null) })
     }
+  }
+
+  // ── Right-click contextmenu (phase 3) ────────────────────────────────
+
+  private onContextMenu = (e: MouseEvent): void => {
+    // Map screen coords → CM doc offset; if the click is outside
+    // the active suggestion list we leave the platform menu alone
+    // (platform paste / spell-check shouldn't be eaten).
+    const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY })
+    if (pos === null) return
+    const { suggestions } = this.view.state.field(marginField)
+    const target = suggestionAtPos(suggestions, pos)
+    if (!target) return
+    e.preventDefault()
+    e.stopPropagation()
+    // Close any open diff card so the menu has the user's full
+    // attention; the menu's "Show diff" row reopens it explicitly.
+    if (this.view.state.field(marginField).expandedId !== null) {
+      this.view.dispatch({ effects: expandEffect.of(null) })
+    }
+    this.openMenu(target, e.clientX, e.clientY)
+  }
+
+  private openMenu(target: ResolvedSuggestion, clientX: number, clientY: number): void {
+    const editorRect = this.view.dom.getBoundingClientRect()
+    const rows = buildContextMenuRows(target)
+
+    const menu = document.createElement('div')
+    menu.className = `cm-margin-suggest-menu cm-margin-suggest-menu--${target.kind}`
+
+    for (const row of rows) {
+      const item = document.createElement('button')
+      item.type = 'button'
+      item.className = `cm-margin-suggest-menu-row cm-margin-suggest-menu-row--${row.id}`
+      item.textContent = row.label
+      item.addEventListener('click', (ev) => {
+        ev.preventDefault()
+        ev.stopPropagation()
+        this.handleMenuRow(row.id, target)
+      })
+      menu.appendChild(item)
+    }
+
+    this.menuLayer.replaceChildren(menu)
+    this.menuLayer.style.display = 'block'
+    // Position relative to the editor's dom rect — clientX/Y are
+    // viewport coords, the layer is positioned within view.dom which
+    // is `position: relative` (set in the constructor).
+    this.menuLayer.style.left = `${clientX - editorRect.left}px`
+    this.menuLayer.style.top = `${clientY - editorRect.top}px`
+  }
+
+  private closeMenu(): void {
+    this.menuLayer.style.display = 'none'
+    this.menuLayer.replaceChildren()
+  }
+
+  private handleMenuRow(
+    rowId: ContextMenuRow['id'],
+    target: ResolvedSuggestion,
+  ): void {
+    if (rowId === 'accept') {
+      this.applyAccept(target)
+    } else if (rowId === 'dismiss') {
+      this.applyDismiss(target.id)
+    } else if (rowId === 'show-diff') {
+      // Reopen the diff card the user dismissed when the menu opened.
+      // The card already knows how to render every kind including
+      // spelling / grammar — the only reason those don't get a glyph
+      // is gutter clutter.
+      this.view.dispatch({ effects: expandEffect.of(target.id) })
+    }
+    this.closeMenu()
   }
 }
 
@@ -573,9 +750,26 @@ export function installMarginSuggestStyles(): () => void {
 }
 .cm-margin-suggest--spelling,
 .cm-margin-suggest--grammar {
-  /* Phase 3 swaps these for a wavy underline. */
-  border-bottom-style: dotted;
-  border-bottom-color: var(--ai-accent-warning, #fbbf24);
+  /* Phase 3 — wavy underline. Spec-compliant approach in a single
+   * declaration: a 6×3 SVG repeated horizontally as a background
+   * image so we don't fight CodeMirror's text rendering. The SVG
+   * is encoded inline (no external request, no theme override
+   * needed) and can be tinted by swapping the stroke colour. */
+  border-bottom: none;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 3' width='6' height='3'><path d='M 0 1.5 Q 1.5 0 3 1.5 T 6 1.5' fill='none' stroke='%23fbbf24' stroke-width='0.8'/></svg>");
+  background-repeat: repeat-x;
+  background-position: bottom left;
+  background-size: 6px 3px;
+  padding-bottom: 1px;
+}
+.cm-margin-suggest--spelling {
+  /* Spelling kept on the warning palette; the kind difference is
+   * already conveyed by the contextmenu label so we don't need a
+   * second colour to distinguish it from grammar. */
+}
+.cm-margin-suggest--grammar {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 3' width='6' height='3'><path d='M 0 1.5 Q 1.5 0 3 1.5 T 6 1.5' fill='none' stroke='%23a78bfa' stroke-width='0.8'/></svg>");
 }
 .cm-margin-suggest-glyph {
   display: inline-flex;
@@ -670,6 +864,36 @@ export function installMarginSuggestStyles(): () => void {
 }
 .cm-margin-suggest-card-actions button:hover {
   filter: brightness(1.1);
+}
+.cm-margin-suggest-menu {
+  min-width: 180px;
+  background: var(--bg-raised, #2d2d2d);
+  color: var(--fg, #e5e7eb);
+  border: 1px solid var(--divider-color, #3f3f46);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-family: var(--font-family, system-ui, sans-serif);
+  font-size: 12px;
+  padding: 4px 0;
+}
+.cm-margin-suggest-menu-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.cm-margin-suggest-menu-row:hover {
+  background: var(--bg-hover, #363636);
+}
+.cm-margin-suggest-menu-row--dismiss {
+  border-top: 1px solid var(--divider-color, #3f3f46);
+  margin-top: 2px;
+  padding-top: 6px;
 }
 `
   document.head.appendChild(style)
