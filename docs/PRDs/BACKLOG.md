@@ -371,6 +371,6 @@ Cumulative: ~44 weeks raw, ~50–55 with PR-review buffer at the assumed 2 fg + 
 - [x] BL-009 mermaid whole-file viewer merged.
 - [x] BL-015 bases trash view merged.
 - [x] Settings extraction queue (5 items) — all shipped; see "Settings extraction queue" section above for per-item file references.
-- [ ] No outstanding regressions in `cargo test --workspace` / `pnpm --filter nexus-shell test` / `scripts/check_ipc_drift.sh`.
+- [x] No outstanding regressions in `cargo test --workspace` / `pnpm --filter nexus-shell test` / `scripts/check_ipc_drift.sh` _(verified 2026-04-30 on `claude/review-backlog-AOGDH`: 75 result blocks all `0 failed`; 681/681 shell tests; drift `OK — generated trees match HEAD`)_.
 
 (BL-043 quick-capture hotkey moved to Phase 2 — Tauri global-hotkey plumbing is a 1–2 day task disguised as "small" and would eat into ADR review.)
