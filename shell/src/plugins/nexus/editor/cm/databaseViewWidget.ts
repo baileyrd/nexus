@@ -35,6 +35,16 @@ export interface DatabaseViewWidgetDeps {
   cache?: DatabaseViewCache
   /** Error sink. Defaults to `console.error`. */
   onError?: (message: string, err: unknown) => void
+  /** Optional write-back callback for the BL-012 split-5 filter /
+   *  sort UX. When wired, the widget renders an editable header
+   *  with chips for the current filters / sorts and an "Add"
+   *  affordance; each mutation calls `onUpdateConfig(newConfig)`,
+   *  which the decoration extension uses to dispatch a CM
+   *  transaction replacing the source range with the new
+   *  `[[{db:…}]]` form. The markdown stays the truth and the
+   *  next decoration rebuild parses the new spec like any other
+   *  edit. */
+  onUpdateConfig?: (newConfig: DatabaseViewConfig) => void
 }
 
 /**
@@ -70,31 +80,41 @@ export class DatabaseViewWidget extends WidgetType {
         console.error(`[nexus.editor] ${m}:`, e)
       })
 
+    if (this.deps.onUpdateConfig) {
+      wrap.appendChild(
+        renderHeader(this.viewConfig, this.deps.onUpdateConfig),
+      )
+    }
+
+    const body = document.createElement('div')
+    body.className = 'cm-md-dbview-body'
+    wrap.appendChild(body)
+
     const cached = cache.peek(this.key)
     if (cached?.response) {
-      wrap.replaceChildren(renderApplied(cached.response))
+      body.replaceChildren(renderApplied(cached.response))
       return wrap
     }
     if (cached?.error) {
-      wrap.replaceChildren(renderError(cached.error))
+      body.replaceChildren(renderError(cached.error))
       return wrap
     }
 
-    wrap.replaceChildren(renderPending())
+    body.replaceChildren(renderPending())
 
     const promise = cache.run(this.key, () =>
       this.deps.client.executeDatabaseView(this.databasePath, this.viewConfig),
     )
     void promise.then(
       (resp) => {
-        if (!wrap.isConnected) return
-        wrap.replaceChildren(renderApplied(resp))
+        if (!body.isConnected) return
+        body.replaceChildren(renderApplied(resp))
       },
       (err) => {
-        if (!wrap.isConnected) return
+        if (!body.isConnected) return
         const error = err instanceof Error ? err : new Error(String(err))
         onError('execute_database_view failed', error)
-        wrap.replaceChildren(renderError(error))
+        body.replaceChildren(renderError(error))
       },
     )
 
@@ -220,6 +240,139 @@ export class DatabaseViewCache {
 export const databaseViewCache = new DatabaseViewCache()
 
 // ── Rendering ───────────────────────────────────────────────────────────────
+
+/** Build the editable filter / sort header. Renders chips for
+ *  every active filter / sort with `×` removal buttons, plus an
+ *  "Add filter" / "Add sort" affordance. Each mutation produces a
+ *  fresh `DatabaseViewConfig` and invokes `onUpdate`; the
+ *  decoration extension translates that into a CM transaction
+ *  rewriting the inline `[[{db:…}]]` source. */
+function renderHeader(
+  config: DatabaseViewConfig,
+  onUpdate: (next: DatabaseViewConfig) => void,
+): HTMLElement {
+  const header = document.createElement('div')
+  header.className = 'cm-md-dbview-header'
+
+  const summary = document.createElement('span')
+  summary.className = 'cm-md-dbview-summary'
+  summary.textContent = describeViewType(config.view_type)
+  header.appendChild(summary)
+
+  const filterRow = document.createElement('div')
+  filterRow.className = 'cm-md-dbview-chip-row'
+  filterRow.dataset.kind = 'filters'
+  for (const [i, f] of config.filters.entries()) {
+    filterRow.appendChild(
+      makeChip(`filter: ${f}`, () => onUpdate(removeAt(config, 'filters', i))),
+    )
+  }
+  filterRow.appendChild(
+    makeAddForm('Add filter (e.g. "status = Done")', (raw) => {
+      const trimmed = raw.trim()
+      if (!trimmed) return
+      onUpdate(append(config, 'filters', trimmed))
+    }),
+  )
+  header.appendChild(filterRow)
+
+  const sortRow = document.createElement('div')
+  sortRow.className = 'cm-md-dbview-chip-row'
+  sortRow.dataset.kind = 'sorts'
+  for (const [i, s] of config.sorts.entries()) {
+    sortRow.appendChild(
+      makeChip(`sort: ${s}`, () => onUpdate(removeAt(config, 'sorts', i))),
+    )
+  }
+  sortRow.appendChild(
+    makeAddForm('Add sort (e.g. "due_date asc")', (raw) => {
+      const trimmed = raw.trim()
+      if (!trimmed) return
+      onUpdate(append(config, 'sorts', trimmed))
+    }),
+  )
+  header.appendChild(sortRow)
+
+  return header
+}
+
+function describeViewType(view: DatabaseViewConfig['view_type']): string {
+  switch (view.kind) {
+    case 'table':
+      return 'Table'
+    case 'kanban':
+      return `Kanban (group by: ${view.column_by})`
+    case 'calendar':
+      return `Calendar (date: ${view.date_field})`
+    case 'gallery':
+      return `Gallery (title: ${view.title_field})`
+    case 'custom':
+      return 'Custom view'
+  }
+}
+
+function makeChip(label: string, onRemove: () => void): HTMLElement {
+  const chip = document.createElement('span')
+  chip.className = 'cm-md-dbview-chip'
+  const text = document.createElement('span')
+  text.className = 'cm-md-dbview-chip-text'
+  text.textContent = label
+  const x = document.createElement('button')
+  x.type = 'button'
+  x.className = 'cm-md-dbview-chip-remove'
+  x.textContent = '×'
+  x.title = `Remove ${label}`
+  x.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    onRemove()
+  })
+  chip.append(text, x)
+  return chip
+}
+
+function makeAddForm(
+  placeholder: string,
+  onSubmit: (raw: string) => void,
+): HTMLElement {
+  const form = document.createElement('form')
+  form.className = 'cm-md-dbview-add'
+  const input = document.createElement('input')
+  input.type = 'text'
+  input.placeholder = placeholder
+  input.className = 'cm-md-dbview-add-input'
+  const submit = document.createElement('button')
+  submit.type = 'submit'
+  submit.className = 'cm-md-dbview-add-submit'
+  submit.textContent = '+'
+  submit.title = placeholder
+  form.append(input, submit)
+  form.addEventListener('submit', (ev) => {
+    ev.preventDefault()
+    ev.stopPropagation()
+    const raw = input.value
+    input.value = ''
+    onSubmit(raw)
+  })
+  return form
+}
+
+function append(
+  config: DatabaseViewConfig,
+  field: 'filters' | 'sorts' | 'hidden_columns',
+  value: string,
+): DatabaseViewConfig {
+  return { ...config, [field]: [...config[field], value] }
+}
+
+function removeAt(
+  config: DatabaseViewConfig,
+  field: 'filters' | 'sorts' | 'hidden_columns',
+  index: number,
+): DatabaseViewConfig {
+  const next = [...config[field]]
+  next.splice(index, 1)
+  return { ...config, [field]: next }
+}
 
 /** Internal: build the resolved-state DOM for an `AppliedView`. */
 function renderApplied(resp: ExecuteDatabaseViewResponse): HTMLElement {
