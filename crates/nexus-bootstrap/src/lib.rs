@@ -302,6 +302,10 @@ fn register_core_plugins(
                     ("read_file", nexus_storage::core_plugin::HANDLER_READ_FILE),
                     ("backlinks", nexus_storage::core_plugin::HANDLER_BACKLINKS),
                     (
+                        "backlinks_to_block",
+                        nexus_storage::core_plugin::HANDLER_BACKLINKS_TO_BLOCK,
+                    ),
+                    (
                         "query_tasks",
                         nexus_storage::core_plugin::HANDLER_QUERY_TASKS,
                     ),

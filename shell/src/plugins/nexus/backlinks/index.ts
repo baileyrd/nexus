@@ -15,6 +15,9 @@ const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
 const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 const BACKLINKS_COMMAND = 'backlinks'
+/** BL-049 phase 4 — handler is registered as `backlinks_to_block` in
+ *  nexus-bootstrap (delegates to `KnowledgeGraph::backlinks_to_block`). */
+const BACKLINKS_TO_BLOCK_COMMAND = 'backlinks_to_block'
 
 /**
  * Kernel response shape for `com.nexus.storage::backlinks`, verified
@@ -120,10 +123,17 @@ export const backlinksPlugin: Plugin = {
         store.setLinks([])
         store.setLoading(false)
         store.setError(null)
+        store.setBlockFilter(null)
         return
       }
 
       const requestId = ++currentRequestId
+      // Switching files clears any active block filter — a UUID stamped
+      // in file A is meaningless against file B's incoming-link table.
+      const previousRelpath = store.currentRelpath
+      const blockFilter =
+        previousRelpath === relpath ? store.blockFilter : null
+      if (previousRelpath !== relpath) store.setBlockFilter(null)
       store.setCurrent(relpath)
       store.setLinks([])
       store.setError(null)
@@ -146,11 +156,17 @@ export const backlinksPlugin: Plugin = {
       }
 
       try {
-        const raw = await api.kernel.invoke<KernelBacklink[]>(
-          STORAGE_PLUGIN_ID,
-          BACKLINKS_COMMAND,
-          { path: relpath },
-        )
+        const raw = blockFilter
+          ? await api.kernel.invoke<KernelBacklink[]>(
+              STORAGE_PLUGIN_ID,
+              BACKLINKS_TO_BLOCK_COMMAND,
+              { path: relpath, block_id: blockFilter },
+            )
+          : await api.kernel.invoke<KernelBacklink[]>(
+              STORAGE_PLUGIN_ID,
+              BACKLINKS_COMMAND,
+              { path: relpath },
+            )
         if (requestId !== currentRequestId) return
         useBacklinksStore.getState().setLinks(decode(raw, relpath))
         useBacklinksStore.getState().setLoading(false)
@@ -187,11 +203,18 @@ export const backlinksPlugin: Plugin = {
       if (!available) return
       if (requestId !== currentRequestId) return
       try {
-        const raw = await api.kernel.invoke<KernelBacklink[]>(
-          STORAGE_PLUGIN_ID,
-          BACKLINKS_COMMAND,
-          { path: relpath },
-        )
+        const blockFilter = useBacklinksStore.getState().blockFilter
+        const raw = blockFilter
+          ? await api.kernel.invoke<KernelBacklink[]>(
+              STORAGE_PLUGIN_ID,
+              BACKLINKS_TO_BLOCK_COMMAND,
+              { path: relpath, block_id: blockFilter },
+            )
+          : await api.kernel.invoke<KernelBacklink[]>(
+              STORAGE_PLUGIN_ID,
+              BACKLINKS_COMMAND,
+              { path: relpath },
+            )
         if (requestId !== currentRequestId) return
         const store = useBacklinksStore.getState()
         // Only write through if we're still looking at this file —
@@ -215,6 +238,17 @@ export const backlinksPlugin: Plugin = {
     useEditorStore.subscribe((state, prev) => {
       if (state.activeRelpath !== prev.activeRelpath) {
         void load(state.activeRelpath)
+      }
+    })
+
+    // BL-049 phase 4 — `blockFilter` toggling re-issues `load` so the
+    // panel re-queries the kernel via either `backlinks` or
+    // `backlinks_to_block` based on the new filter state. Fires the
+    // full loading flash since this is a user-initiated mode change,
+    // not a passive content edit.
+    useBacklinksStore.subscribe((state, prev) => {
+      if (state.blockFilter !== prev.blockFilter && state.currentRelpath) {
+        void load(state.currentRelpath)
       }
     })
 

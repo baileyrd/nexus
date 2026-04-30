@@ -36,11 +36,18 @@ interface BacklinksState {
   loading: boolean
   /** Human-readable error string when the last load failed, else null. */
   error: string | null
+  /** BL-049 phase 4 — when set, the panel filters to inbound links whose
+   *  `fragment` is `^<blockFilter>` (case-insensitive). Cleared by
+   *  clicking the active-filter chip's `×`, by switching to a different
+   *  file, or by closing the workspace. The filter is a UUID string;
+   *  `null` means "show every backlink to this file". */
+  blockFilter: string | null
 
   setCurrent(relpath: string | null): void
   setLinks(ls: Backlink[]): void
   setLoading(b: boolean): void
   setError(e: string | null): void
+  setBlockFilter(blockId: string | null): void
   /** Reset everything — used on workspace close. */
   clear(): void
 }
@@ -50,10 +57,18 @@ export const useBacklinksStore = create<BacklinksState>((set) => ({
   links: [],
   loading: false,
   error: null,
+  blockFilter: null,
   setCurrent: (currentRelpath) => set({ currentRelpath }),
   setLinks: (links) => set({ links }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
+  setBlockFilter: (blockFilter) => set({ blockFilter }),
   clear: () =>
-    set({ currentRelpath: null, links: [], loading: false, error: null }),
+    set({
+      currentRelpath: null,
+      links: [],
+      loading: false,
+      error: null,
+      blockFilter: null,
+    }),
 }))

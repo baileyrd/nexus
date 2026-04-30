@@ -1312,6 +1312,25 @@ impl StorageEngine {
         Ok(g.backlinks(path))
     }
 
+    /// Return inbound links to `path` whose fragment is the BL-049 block-anchored
+    /// form `^<block_id>` (case-insensitive on the UUID).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the graph lock is poisoned.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal graph `RwLock` is poisoned.
+    pub fn backlinks_to_block(
+        &self,
+        path: &str,
+        block_id: &str,
+    ) -> Result<Vec<graph::BacklinkResult>, StorageError> {
+        let g = self.graph.read().expect("graph lock poisoned");
+        Ok(g.backlinks_to_block(path, block_id))
+    }
+
     /// Return all outgoing links from the file at `path`.
     ///
     /// # Errors
