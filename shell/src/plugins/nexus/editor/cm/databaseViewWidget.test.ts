@@ -345,6 +345,78 @@ test('grouped layout renders one section per group with record counts in the hea
   document.body.removeChild(root)
 })
 
+test('widget renders editable header with filter / sort chips when onUpdateConfig is wired', async () => {
+  const config: DatabaseViewConfig = {
+    view_type: { kind: 'kanban', column_by: 'status' },
+    filters: ['status = Done', 'priority > 2'],
+    sorts: ['due_date asc'],
+    group_by: null,
+    hidden_columns: [],
+  }
+  const updates: DatabaseViewConfig[] = []
+  const { client } = makeClient(flatResp([]))
+  const widget = new DatabaseViewWidget('Tasks.bases', config, {
+    client,
+    cache: new DatabaseViewCache(),
+    onUpdateConfig: (next) => updates.push(next),
+  })
+  const root = widget.toDOM()
+  document.body.appendChild(root)
+
+  // Header sections rendered.
+  const summary = root.querySelector('.cm-md-dbview-summary')
+  assert.match(summary?.textContent ?? '', /Kanban.*group by: status/)
+
+  const filterChips = root.querySelectorAll(
+    '[data-kind="filters"] .cm-md-dbview-chip-text',
+  )
+  assert.equal(filterChips.length, 2)
+  assert.equal(filterChips[0].textContent, 'filter: status = Done')
+
+  const sortChips = root.querySelectorAll(
+    '[data-kind="sorts"] .cm-md-dbview-chip-text',
+  )
+  assert.equal(sortChips.length, 1)
+
+  // Click the × on the first filter chip.
+  const removeBtn = root.querySelector(
+    '[data-kind="filters"] .cm-md-dbview-chip-remove',
+  ) as HTMLButtonElement
+  removeBtn.click()
+  assert.equal(updates.length, 1)
+  assert.deepEqual(updates[0].filters, ['priority > 2'])
+
+  // Submit the "add filter" form.
+  const addInput = root.querySelector(
+    '[data-kind="filters"] .cm-md-dbview-add-input',
+  ) as HTMLInputElement
+  addInput.value = 'title contains foo'
+  const form = addInput.closest('form') as HTMLFormElement
+  form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+  assert.equal(updates.length, 2)
+  assert.deepEqual(updates[1].filters, [
+    'status = Done',
+    'priority > 2',
+    'title contains foo',
+  ])
+  // Input is cleared post-submit so the user can add a second filter.
+  assert.equal(addInput.value, '')
+
+  document.body.removeChild(root)
+})
+
+test('widget skips the header entirely when onUpdateConfig is absent (read-only mode)', async () => {
+  const { client } = makeClient(flatResp([]))
+  const widget = new DatabaseViewWidget('Tasks.bases', TABLE_CONFIG, {
+    client,
+    cache: new DatabaseViewCache(),
+  })
+  const root = widget.toDOM()
+  document.body.appendChild(root)
+  assert.equal(root.querySelector('.cm-md-dbview-header'), null)
+  document.body.removeChild(root)
+})
+
 test('two widgets with the same key are .eq()', () => {
   const w1 = new DatabaseViewWidget('Tasks.bases', TABLE_CONFIG, {
     client: {} as EditorKernelClient,

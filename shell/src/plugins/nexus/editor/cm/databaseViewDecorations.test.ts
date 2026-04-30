@@ -338,3 +338,138 @@ test('watcher is a no-op when deps.events is absent', () => {
   handle.destroy()
   view.destroy()
 })
+
+// ── serializeDatabaseViewSpec ───────────────────────────────────────────────
+
+import { serializeDatabaseViewSpec } from './databaseViewDecorations.ts'
+
+test('serializer emits the bare path form when no params are needed', () => {
+  assert.equal(
+    serializeDatabaseViewSpec('Tasks.bases', {
+      view_type: { kind: 'table' },
+      filters: [],
+      sorts: [],
+      group_by: null,
+      hidden_columns: [],
+    }),
+    '[[{db:Tasks.bases}]]',
+  )
+})
+
+test('serializer round-trips through the parser for table + filters + sorts', () => {
+  const config = {
+    view_type: { kind: 'table' as const },
+    filters: ['status = Done', 'title contains foo'],
+    sorts: ['due_date asc', 'priority'],
+    group_by: null,
+    hidden_columns: ['archived'],
+  }
+  const out = serializeDatabaseViewSpec('Tasks.bases', config)
+  const parsed = parseDatabaseViewBlocks(out)
+  assert.equal(parsed.blocks.length, 1)
+  const b = parsed.blocks[0]
+  assert.deepEqual(b.config.filters, config.filters)
+  assert.deepEqual(b.config.sorts, config.sorts)
+  assert.deepEqual(b.config.hidden_columns, config.hidden_columns)
+  assert.deepEqual(b.config.view_type, { kind: 'table' })
+})
+
+test('serializer round-trips kanban + group_by', () => {
+  const out = serializeDatabaseViewSpec('Board.bases', {
+    view_type: { kind: 'kanban', column_by: 'status' },
+    filters: [],
+    sorts: [],
+    group_by: null,
+    hidden_columns: [],
+  })
+  const parsed = parseDatabaseViewBlocks(out)
+  assert.equal(parsed.blocks.length, 1)
+  assert.deepEqual(parsed.blocks[0].config.view_type, {
+    kind: 'kanban',
+    column_by: 'status',
+  })
+})
+
+test('serializer percent-encodes filter values containing & and = and spaces', () => {
+  const out = serializeDatabaseViewSpec('Tasks.bases', {
+    view_type: { kind: 'table' },
+    filters: ['title = "a & b"', 'desc contains foo=bar'],
+    sorts: [],
+    group_by: null,
+    hidden_columns: [],
+  })
+  const parsed = parseDatabaseViewBlocks(out)
+  assert.deepEqual(parsed.blocks[0].config.filters, [
+    'title = "a & b"',
+    'desc contains foo=bar',
+  ])
+})
+
+test('serializer rejects an empty database path', () => {
+  assert.throws(() =>
+    serializeDatabaseViewSpec('', {
+      view_type: { kind: 'table' },
+      filters: [],
+      sorts: [],
+      group_by: null,
+      hidden_columns: [],
+    }),
+  )
+})
+
+// ── write-back via CM transaction ───────────────────────────────────────────
+
+test('builder + view: editing through the widget rewrites the inline source', () => {
+  const doc = 'header\n\n[[{db:Tasks.bases}]]\n\nfooter\n'
+  const view = new EditorView({
+    state: EditorState.create({
+      doc,
+      selection: EditorSelection.single(0),
+    }),
+  })
+  const set = buildDatabaseViewDecorations(
+    view.state,
+    { client: stubClient, cache: new DatabaseViewCache() },
+    view,
+  )
+
+  // Pull the widget out of the decoration set so we can invoke
+  // `onUpdateConfig` directly without rendering.
+  let widget: { viewConfig: unknown; deps: { onUpdateConfig?: (c: unknown) => void } } | null = null
+  set.between(0, view.state.doc.length, (_from, _to, deco) => {
+    const w = (deco.spec as { widget?: unknown }).widget as typeof widget
+    if (w) widget = w
+  })
+  assert.ok(widget, 'a widget was registered for the inline block')
+  assert.ok(widget!.deps.onUpdateConfig, 'view-bound widgets carry the write-back callback')
+
+  // Append a filter through the callback. The builder ought to
+  // dispatch a CM change that replaces the source with the new
+  // serialised form.
+  widget!.deps.onUpdateConfig!({
+    view_type: { kind: 'table' },
+    filters: ['status = Done'],
+    sorts: [],
+    group_by: null,
+    hidden_columns: [],
+  })
+
+  const newDoc = view.state.doc.toString()
+  assert.match(newDoc, /\[\[\{db:Tasks\.bases\?filter=status%20%3D%20Done\}\]\]/)
+  view.destroy()
+})
+
+test('builder without a view leaves widgets read-only (no onUpdateConfig)', () => {
+  const state = makeState('header\n\n[[{db:Tasks.bases}]]\n\nfooter\n', 0)
+  const set = buildDatabaseViewDecorations(state, {
+    client: stubClient,
+    cache: new DatabaseViewCache(),
+  })
+  let widget: { deps: { onUpdateConfig?: unknown } } | null = null
+  set.between(0, state.doc.length, (_f, _t, deco) => {
+    const w = (deco.spec as { widget?: unknown }).widget as typeof widget
+    if (w) widget = w
+  })
+  assert.ok(widget)
+  assert.equal(widget!.deps.onUpdateConfig, undefined)
+})

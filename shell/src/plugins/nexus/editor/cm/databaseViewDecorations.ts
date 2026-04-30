@@ -210,6 +210,66 @@ function resolveViewType(
   }
 }
 
+/** Inverse of [`parseDatabaseViewBlocks`] — serialise a
+ *  `(databasePath, config)` pair back to the inline
+ *  `[[{db:<spec>}]]` form. Only emits query-string params when they
+ *  carry information so the bare-table case round-trips to
+ *  `[[{db:<path>}]]` instead of `[[{db:<path>?view=table}]]`.
+ *  Filter / sort / hide values are percent-encoded so spaces and
+ *  `=` / `&` survive a round-trip through the parser.
+ *
+ *  Used by the BL-012 split-5 filter/sort UX to write user
+ *  edits back to the source — the markdown stays the truth and
+ *  the next decoration rebuild parses the new spec the same way
+ *  any other tool would. */
+export function serializeDatabaseViewSpec(
+  databasePath: string,
+  config: DatabaseViewConfig,
+): string {
+  if (!databasePath) throw new Error('database path required')
+  const params: string[] = []
+  const view = config.view_type
+  switch (view.kind) {
+    case 'table':
+      // Default — omit `view=` to keep the source minimal.
+      break
+    case 'kanban':
+      params.push('view=kanban')
+      params.push(`group=${encodeURIComponent(view.column_by)}`)
+      break
+    case 'calendar':
+      params.push('view=calendar')
+      params.push(`date=${encodeURIComponent(view.date_field)}`)
+      break
+    case 'gallery':
+      params.push('view=gallery')
+      params.push(`title=${encodeURIComponent(view.title_field)}`)
+      break
+    case 'custom':
+      // Plugin-provided types fall through to the parser as
+      // `unknown view kind` — preserve the raw value so the
+      // round-trip surfaces an explicit error to the user instead
+      // of silently dropping it.
+      params.push(`view=${encodeURIComponent((view as { 0: string })[0] ?? 'custom')}`)
+      break
+  }
+  if (config.group_by && view.kind !== 'kanban') {
+    params.push(`group=${encodeURIComponent(config.group_by)}`)
+  }
+  for (const f of config.filters) {
+    params.push(`filter=${encodeURIComponent(f)}`)
+  }
+  for (const s of config.sorts) {
+    params.push(`sort=${encodeURIComponent(s)}`)
+  }
+  for (const h of config.hidden_columns) {
+    params.push(`hide=${encodeURIComponent(h)}`)
+  }
+  return params.length === 0
+    ? `[[{db:${databasePath}}]]`
+    : `[[{db:${databasePath}?${params.join('&')}}]]`
+}
+
 // ── Decoration builder ──────────────────────────────────────────────────────
 
 /** Pure decoration builder — emits one `Decoration.replace` per
@@ -218,10 +278,17 @@ function resolveViewType(
  *
  *  Active-line reveal mirrors `livePreviewDecorations` so the user
  *  can position the cursor on the line and edit the spec; off-line,
- *  the source range is replaced by the rendered grid widget. */
+ *  the source range is replaced by the rendered grid widget.
+ *
+ *  When `view` is provided the widgets receive an `onUpdateConfig`
+ *  callback that rewrites the inline source via a CM transaction
+ *  (split-5 filter / sort UX). The state-field path passes
+ *  `view` from its `provide(field)` to keep the source the truth;
+ *  the test harness omits it and exercises the read-only path. */
 export function buildDatabaseViewDecorations(
   state: EditorState,
   deps: DatabaseViewExtDeps,
+  view?: EditorView,
 ): DecorationSet {
   const builder: { from: number; to: number; deco: Decoration }[] = []
   const text = state.doc.toString()
@@ -231,10 +298,40 @@ export function buildDatabaseViewDecorations(
   for (const block of blocks) {
     const line = state.doc.lineAt(block.from)
     if (activeLines.has(line.number)) continue
+    const onUpdateConfig = view
+      ? (next: DatabaseViewConfig) => {
+          // Re-locate the block by its current source range —
+          // `block.from` / `block.to` were captured at scan time and
+          // a concurrent edit elsewhere could have shifted them. The
+          // simplest correct strategy is to re-scan and replace the
+          // first block at `databasePath` whose range still contains
+          // the original `from`; if not found, no-op.
+          const live = view.state
+          const fresh = parseDatabaseViewBlocks(live.doc.toString())
+          const target = fresh.blocks.find(
+            (b) =>
+              b.databasePath === block.databasePath &&
+              b.from <= block.from &&
+              b.to >= block.to - (block.to - block.from) / 2,
+          )
+          if (!target) return
+          const insert = serializeDatabaseViewSpec(target.databasePath, next)
+          view.dispatch({
+            changes: { from: target.from, to: target.to, insert },
+            // Bump the field via the explicit invalidate effect so the
+            // rebuild path runs even if the change happens to be a
+            // no-op rewrite (e.g. removing an already-empty filter
+            // wouldn't mutate the doc but the cache should still flush).
+            effects: databaseViewInvalidate.of(null),
+          })
+        }
+      : undefined
+
     const widget = new DatabaseViewWidget(block.databasePath, block.config, {
       client: deps.client,
       cache: deps.cache ?? databaseViewCache,
       onError: deps.onError,
+      onUpdateConfig,
     })
     builder.push({
       from: block.from,
@@ -367,11 +464,20 @@ export function makeBasesChangeWatcher(
 
 /** CM extension: state field carrying the decoration set + a
  *  matching atomic-ranges provider so the cursor doesn't park inside
- *  a hidden block. */
+ *  a hidden block. The view-bound ViewPlugin owns both the storage-
+ *  event subscription (split 4) and a mutable view reference the
+ *  state field reads through to wire write-back transactions on the
+ *  widget's filter / sort UX (split 5). */
 export function databaseViewExt(deps: DatabaseViewExtDeps): Extension {
+  // Mutable closure holding the active EditorView so the field's
+  // `update(tr)` (which only receives the transaction, not the
+  // view) can pass it through to `buildDatabaseViewDecorations`.
+  // Set on ViewPlugin create, cleared on destroy.
+  const viewRef: { current: EditorView | null } = { current: null }
+
   const field = StateField.define<DecorationSet>({
     create(state) {
-      return buildDatabaseViewDecorations(state, deps)
+      return buildDatabaseViewDecorations(state, deps, viewRef.current ?? undefined)
     },
     update(value, tr) {
       if (
@@ -379,7 +485,11 @@ export function databaseViewExt(deps: DatabaseViewExtDeps): Extension {
         tr.selection ||
         tr.effects.some((e) => e.is(databaseViewInvalidate))
       ) {
-        return buildDatabaseViewDecorations(tr.state, deps)
+        return buildDatabaseViewDecorations(
+          tr.state,
+          deps,
+          viewRef.current ?? undefined,
+        )
       }
       return value
     },
@@ -391,10 +501,26 @@ export function databaseViewExt(deps: DatabaseViewExtDeps): Extension {
     },
   })
 
-  // ViewPlugin owns the storage-event subscription and tears it
-  // down on view destroy. When `deps.events` is absent the watcher
-  // is a no-op so untitled / event-less mounts stay quiet.
-  const watcher = ViewPlugin.define((view) => makeBasesChangeWatcher(view, deps))
+  // ViewPlugin owns (a) the storage-event subscription and (b)
+  // the mutable view reference the state field reads through. When
+  // `deps.events` is absent the watcher half is a no-op; the view
+  // ref is still captured so write-back transactions work even on
+  // event-less mounts.
+  const watcher = ViewPlugin.define((view) => {
+    viewRef.current = view
+    const handle = makeBasesChangeWatcher(view, deps)
+    // Trigger an immediate rebuild so the freshly-installed view
+    // reference flows into the widgets' `onUpdateConfig` closures
+    // — without this, the first decoration set was built before
+    // the ViewPlugin ran and carries `undefined` view.
+    view.dispatch({ effects: databaseViewInvalidate.of(null) })
+    return {
+      destroy() {
+        if (viewRef.current === view) viewRef.current = null
+        handle.destroy()
+      },
+    }
+  })
 
   return [field, watcher]
 }
