@@ -249,9 +249,7 @@ _BL-045 shipped 2026-04-29 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 _BL-046 shipped 2026-04-30 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-046 phase 3: per-language chip row in recall
-
-Drive a per-language sub-chip row from `extractCodeLanguages` over the active recall result set, so a user with both rust and ts captures sees both pills inline. Opportunistic on top of the v1 binary "From project" chip — the helper already exists from phase 2; the surface work is rendering the pills and routing each pill's toggle through the existing filter path.
+_BL-046 phase 3 shipped 2026-04-30 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ### BL-047: MEM scheduled digests
 
