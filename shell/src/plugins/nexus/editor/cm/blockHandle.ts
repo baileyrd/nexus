@@ -264,6 +264,24 @@ const dragField = StateField.define<DragState | null>({
 // stricter typing (GutterMarker lifecycle) and lets us hit-test the
 // handle element directly in mousedown/click.
 
+// ── Comment bridge ──────────────────────────────────────────────────────────
+
+/**
+ * Handler invoked when the user picks "Comment" from a block's gutter
+ * menu. The extension itself doesn't talk to the comments plugin or
+ * the kernel — it just hands the caller the index of the CM-block
+ * (0-based, in source order) so the editor plugin can resolve a
+ * kernel `block_id` from its session snapshot, stamp it for stability,
+ * and dispatch `commentsApi.createThread`.
+ *
+ * Phase 3 of BL-050 — see `docs/PRDs/BACKLOG.md`.
+ */
+export interface CommentBridge {
+  onCommentBlock: (blockIndex: number) => void
+}
+
+let activeCommentBridge: CommentBridge | null = null
+
 // ── ViewPlugin: menu + drag DOM ──────────────────────────────────────────────
 
 class BlockHandlePlugin implements PluginValue {
@@ -483,6 +501,21 @@ class BlockHandlePlugin implements PluginValue {
         action: () => this.view.dispatch({ effects: setTurnIntoOpen.of(!turnIntoOpen) }),
         hasSubmenu: true,
       },
+    ]
+    if (activeCommentBridge) {
+      const bridge = activeCommentBridge
+      items.push({
+        label: 'Comment',
+        action: () => {
+          const idx = scanBlocks(this.view).findIndex(
+            (b) => b.from === block.from && b.to === block.to,
+          )
+          this.view.dispatch({ effects: closeMenu.of() })
+          if (idx >= 0) bridge.onCommentBlock(idx)
+        },
+      })
+    }
+    items.push(
       {
         label: 'Duplicate',
         action: () => {
@@ -511,7 +544,7 @@ class BlockHandlePlugin implements PluginValue {
           this.view.dispatch({ effects: closeMenu.of() })
         },
       },
-    ]
+    )
     for (const it of items) {
       const row = document.createElement('div')
       row.className = 'cm-block-menu__row'
@@ -550,6 +583,16 @@ function buildDecorations(): DecorationSet {
 }
 
 // ── Public extension ────────────────────────────────────────────────────────
+
+/**
+ * Install a process-wide comment bridge. The block-handle dropdown
+ * shows a "Comment" item only when a bridge is set; calling with
+ * `null` removes the affordance. The editor plugin's activate() sets
+ * this once it has the comments-API + session manager wired.
+ */
+export function setCommentBridge(bridge: CommentBridge | null): void {
+  activeCommentBridge = bridge
+}
 
 export function blockHandleExt(): Extension {
   const plugin = ViewPlugin.fromClass(BlockHandlePlugin)

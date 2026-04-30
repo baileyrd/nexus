@@ -8,12 +8,8 @@ import type { KernelAPI } from '../../../types/plugin.ts'
 import type { EditorSnapshot, Transaction } from './types.ts'
 import { EDITOR_PLUGIN_ID, makeEditorClient } from './kernelClient.ts'
 
-const nodeTest: string = 'node:test'
-const nodeAssert: string = 'node:assert/strict'
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { test } = (await import(nodeTest)) as any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const assert = ((await import(nodeAssert)) as any).default
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -121,6 +117,27 @@ test('getMarkdown routes to get_markdown and returns the raw string payload', as
   assert.equal(call.commandId, 'get_markdown')
   assert.deepEqual(call.args, { relpath })
   assert.equal(md, expected)
+})
+
+test('stampBlock routes to stamp_block with relpath + block_id and returns the wire result', async () => {
+  const relpath = 'notes/d.md'
+  const blockId = '22222222-2222-4222-8222-222222222222'
+  const expected = {
+    block_id: '33333333-3333-4333-8333-333333333333',
+    stable_id: '33333333-3333-4333-8333-333333333333',
+    newly_stamped: true,
+  }
+  const { api, calls } = makeMockApi(expected)
+  const client = makeEditorClient(api)
+
+  const result = await client.stampBlock(relpath, blockId)
+
+  assert.equal(calls.length, 1)
+  const call = calls[0]
+  assert.equal(call.pluginId, EDITOR_PLUGIN_ID)
+  assert.equal(call.commandId, 'stamp_block')
+  assert.deepEqual(call.args, { relpath, block_id: blockId })
+  assert.deepEqual(result, expected)
 })
 
 test('openSession / getTree / save / undo / redo / close use the documented command strings', async () => {

@@ -154,6 +154,19 @@ export const commentsPlugin: Plugin = {
       useCommentsStore.getState().clear()
     })
 
+    // BL-050 Phase 3 — the editor margin gutter emits this after a
+    // successful `create_thread` so the pane reflects the new thread
+    // without forcing the user to switch tabs and back. Payload
+    // optional: when `relpath` is omitted, fall back to the editor's
+    // current active tab so a same-file create still refreshes.
+    api.events.on<{ relpath?: string }>('nexus.comments:reload', (payload) => {
+      const relpath =
+        (payload && typeof payload.relpath === 'string' ? payload.relpath : null) ??
+        useEditorStore.getState().activeRelpath
+      if (!relpath) return
+      void load(relpath)
+    })
+
     api.commands.register(COMMAND_FOCUS, async () => {
       const leaf = await workspace.ensureLeafOfType('comments', 'right')
       workspace.revealLeaf(leaf)

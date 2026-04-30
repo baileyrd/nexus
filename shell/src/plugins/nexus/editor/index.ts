@@ -11,8 +11,9 @@ import { setEditorRuntime, getActiveCmView } from './runtime'
 import { makeEditorClient } from './kernelClient'
 import { makeSessionManager } from './sessionManager'
 import { installSlashMenuStyles } from './cm/slashCommand'
-import { installBlockHandleStyles } from './cm/blockHandle'
+import { installBlockHandleStyles, setCommentBridge } from './cm/blockHandle'
 import { installInlineToolbarStyles } from './cm/inlineToolbar'
+import { createCommentsApi } from '../comments/commentsApi'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useFilesStore } from '../files/filesStore'
 
@@ -646,6 +647,105 @@ export const editorPlugin: Plugin = {
           type: 'error',
           message: `${message}: ${err instanceof Error ? err.message : String(err)}`,
         })
+      },
+    })
+
+    // BL-050 Phase 3 — block-handle "Comment" affordance. The bridge
+    // resolves the kernel block_id for the CM-block index, stamps it
+    // for stable cross-session anchoring (ADR 0017), prompts for the
+    // first comment body, and dispatches `commentsApi.createThread`.
+    // Coarse mapping: `tree.root_blocks[blockIndex]` matches CM's
+    // source-order paragraph scan well for flat docs (paragraphs +
+    // headings); nested children of a root collapse into the root for
+    // now. Refinement to per-leaf precision lands when the kernel
+    // exposes block-offset metadata to the bridge.
+    let cachedCommentsApi: ReturnType<typeof createCommentsApi> | null = null
+    const commentsApi = () => {
+      if (!cachedCommentsApi) cachedCommentsApi = createCommentsApi(api.kernel)
+      return cachedCommentsApi
+    }
+    setCommentBridge({
+      onCommentBlock: (blockIndex) => {
+        void (async () => {
+          const relpath = useEditorStore.getState().activeRelpath
+          if (!relpath) return
+          if (!isMarkdownPath(relpath)) {
+            api.notifications.show({
+              type: 'info',
+              message: 'Comments are only supported on markdown files.',
+            })
+            return
+          }
+          if (/^untitled-\d+$/i.test(relpath)) {
+            api.notifications.show({
+              type: 'info',
+              message: 'Save the file before adding comments.',
+            })
+            return
+          }
+          let snapshot = sessionManager.getSnapshot(relpath)
+          if (!snapshot) {
+            try {
+              snapshot = await editorClient.getTree(relpath)
+            } catch (err) {
+              api.notifications.show({
+                type: 'error',
+                message: `Could not read editor session: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              })
+              return
+            }
+          }
+          const roots = snapshot.tree.root_blocks
+          if (roots.length === 0) {
+            api.notifications.show({
+              type: 'warning',
+              message: 'Document is empty — no block to comment on.',
+            })
+            return
+          }
+          const targetIdx = blockIndex < roots.length ? blockIndex : 0
+          const blockId = roots[targetIdx]
+          let body: string | null
+          try {
+            body = await api.input.prompt('Add a comment', '')
+          } catch {
+            return
+          }
+          if (body === null) return
+          const trimmed = body.trim()
+          if (trimmed.length === 0) return
+          try {
+            const stamp = await editorClient.stampBlock(relpath, blockId)
+            await commentsApi().createThread({
+              filePath: relpath,
+              blockId: stamp.stable_id,
+              body: trimmed,
+            })
+            // Save so the stamp anchor (`<!-- ^<uuid> -->`) is persisted.
+            // Without this, a fresh session re-parses the markdown
+            // without the marker and the thread orphans on next reopen.
+            try {
+              await editorClient.saveSession(relpath)
+              useEditorStore.getState().markSaved(relpath)
+            } catch {
+              // Save failures are surfaced via the regular save path's
+              // notification machinery; the thread itself was created
+              // successfully so don't double-notify here.
+            }
+            api.events.emit('nexus.comments:reload', { relpath })
+            api.notifications.show({
+              type: 'info',
+              message: 'Comment added.',
+            })
+          } catch (err) {
+            api.notifications.show({
+              type: 'error',
+              message: `Comment failed: ${err instanceof Error ? err.message : String(err)}`,
+            })
+          }
+        })()
       },
     })
 
