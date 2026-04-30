@@ -22,6 +22,8 @@ export function BacklinksView() {
   const links = useBacklinksStore((s) => s.links)
   const loading = useBacklinksStore((s) => s.loading)
   const error = useBacklinksStore((s) => s.error)
+  const blockFilter = useBacklinksStore((s) => s.blockFilter)
+  const setBlockFilter = useBacklinksStore((s) => s.setBlockFilter)
 
   const header = currentRelpath ? (
     <div
@@ -31,14 +33,28 @@ export function BacklinksView() {
         fontSize: 11,
         fontFamily: 'var(--f-ui)',
         color: 'var(--fg-dim)',
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
       }}
       title={currentRelpath}
     >
-      Backlinks to{' '}
-      <span style={{ color: 'var(--fg)' }}>{basename(currentRelpath)}</span>
+      <div
+        style={{
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        Backlinks to{' '}
+        <span style={{ color: 'var(--fg)' }}>{basename(currentRelpath)}</span>
+      </div>
+      {blockFilter && (
+        <ActiveBlockFilterChip
+          blockId={blockFilter}
+          onClear={() => setBlockFilter(null)}
+        />
+      )}
     </div>
   ) : null
 
@@ -116,6 +132,56 @@ function StateMessage({
 interface BacklinkRowProps {
   link: Backlink
   onPick: () => void
+}
+
+/** BL-049 phase 4 — chip rendered in the header when a per-block filter
+ *  is active. Truncates the UUID to 8 chars to match `FragmentPill`'s
+ *  legibility convention; the `×` clears the filter, which the store
+ *  subscription in `index.ts` picks up to re-issue an unfiltered load. */
+export function ActiveBlockFilterChip({
+  blockId,
+  onClear,
+}: {
+  blockId: string
+  onClear: () => void
+}) {
+  const label = `^${blockId.slice(0, 8)}…`
+  return (
+    <span
+      title={`Filtered to block ${blockId}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '0 4px 0 6px',
+        borderRadius: 999,
+        border: '1px solid var(--line-soft)',
+        background: 'var(--accent-soft, var(--bg-raised))',
+        color: 'var(--fg)',
+        fontSize: 10,
+        fontFamily: 'var(--f-mono)',
+        lineHeight: '16px',
+        alignSelf: 'flex-start',
+      }}
+    >
+      <span>{label}</span>
+      <button
+        type="button"
+        onClick={onClear}
+        aria-label="Clear block filter"
+        style={{
+          all: 'unset',
+          cursor: 'pointer',
+          padding: '0 4px',
+          fontSize: 11,
+          lineHeight: '14px',
+          color: 'var(--fg-dim)',
+        }}
+      >
+        ×
+      </button>
+    </span>
+  )
 }
 
 function BacklinkRow({ link, onPick }: BacklinkRowProps) {
@@ -197,14 +263,33 @@ function BacklinkRow({ link, onPick }: BacklinkRowProps) {
  *  (truncated to the first 8 hex characters so the pill stays
  *  legible) and a "heading" pill for plain heading slugs. Pure
  *  function so the view tests can pin the rendered text without a
- *  full DOM snapshot. */
+ *  full DOM snapshot.
+ *
+ *  BL-049 phase 4 — when rendered inside a `BacklinkRow` the pill is
+ *  clickable for block anchors: clicking sets the per-block filter on
+ *  `useBacklinksStore`. Heading anchors stay non-interactive (no
+ *  matching IPC surface yet). The click handler stops propagation so
+ *  the surrounding row's "open file" handler doesn't also fire. */
 export function FragmentPill({ fragment }: { fragment: string }) {
   const isBlock = fragment.startsWith('^')
   const label = isBlock ? `^${fragment.slice(1, 9)}…` : `#${fragment}`
-  const title = isBlock ? `Block anchor ${fragment}` : `Heading anchor ${fragment}`
+  const titleBase = isBlock
+    ? `Block anchor ${fragment}`
+    : `Heading anchor ${fragment}`
+  const setBlockFilter = useBacklinksStore((s) => s.setBlockFilter)
+  const onClick = isBlock
+    ? (event: React.MouseEvent) => {
+        event.stopPropagation()
+        setBlockFilter(fragment.slice(1))
+      }
+    : undefined
+
   return (
     <span
-      title={title}
+      role={isBlock ? 'button' : undefined}
+      tabIndex={isBlock ? 0 : undefined}
+      onClick={onClick}
+      title={isBlock ? `${titleBase} — click to filter` : titleBase}
       style={{
         display: 'inline-block',
         padding: '0 6px',
@@ -215,6 +300,7 @@ export function FragmentPill({ fragment }: { fragment: string }) {
         fontSize: 10,
         fontFamily: 'var(--f-mono)',
         lineHeight: '16px',
+        cursor: isBlock ? 'pointer' : 'default',
       }}
     >
       {label}

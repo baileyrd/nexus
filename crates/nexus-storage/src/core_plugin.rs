@@ -229,6 +229,11 @@ pub const HANDLER_OBSIDIAN_BASE_QUERY: u32 = 53;
 /// to a configurable `Inbox.md` without the shell having to read +
 /// concatenate + write (which would race against the file watcher).
 pub const HANDLER_NOTE_APPEND: u32 = 54;
+/// Handler id for `backlinks_to_block`. Args: `{ "path": String, "block_id": String }`.
+/// Returns `Vec<BacklinkResult>` filtered to inbound links whose fragment is
+/// the BL-049 block-anchored form `^<block_id>` (case-insensitive on the UUID).
+/// Powers the backlinks pane's per-block filter — see BL-049 phase 4.
+pub const HANDLER_BACKLINKS_TO_BLOCK: u32 = 55;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -404,6 +409,21 @@ impl CorePlugin for StorageCorePlugin {
                     .backlinks(&path)
                     .map_err(|e| exec_err(format!("backlinks: {e}")))?;
                 to_value(&results, "backlinks")
+            }
+            HANDLER_BACKLINKS_TO_BLOCK => {
+                let path = path_arg(args, "backlinks_to_block")?;
+                let block_id = args
+                    .get("block_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        exec_err(
+                            "backlinks_to_block: missing 'block_id' string".to_string(),
+                        )
+                    })?;
+                let results = engine
+                    .backlinks_to_block(&path, block_id)
+                    .map_err(|e| exec_err(format!("backlinks_to_block: {e}")))?;
+                to_value(&results, "backlinks_to_block")
             }
             HANDLER_QUERY_TASKS => {
                 let filter: TaskFilter = parse_args(args, "query_tasks")?;
@@ -1375,6 +1395,50 @@ mod tests {
             resp.get("path").and_then(|v| v.as_str()),
             Some("notes/quick.md"),
         );
+    }
+
+    #[test]
+    fn backlinks_to_block_dispatch_requires_block_id_arg() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut plugin = boot_plugin(dir.path());
+
+        // Missing block_id surfaces as ExecutionFailed with a clear reason
+        // rather than silently filtering on an empty needle.
+        let err = plugin
+            .dispatch(
+                HANDLER_BACKLINKS_TO_BLOCK,
+                &serde_json::json!({ "path": "target.md" }),
+            )
+            .expect_err("missing block_id must reject");
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(
+                    reason.contains("block_id"),
+                    "expected block_id rejection, got: {reason}"
+                );
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn backlinks_to_block_dispatch_returns_empty_for_unknown_path() {
+        // Empty graph — handler should return [] rather than error so
+        // shells can render the empty-state without special-casing.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut plugin = boot_plugin(dir.path());
+
+        let resp = plugin
+            .dispatch(
+                HANDLER_BACKLINKS_TO_BLOCK,
+                &serde_json::json!({
+                    "path": "no-such.md",
+                    "block_id": "11111111-1111-4111-8111-111111111111",
+                }),
+            )
+            .expect("dispatch succeeds with documented args");
+        assert!(resp.is_array(), "response must be a JSON array");
+        assert_eq!(resp.as_array().map(Vec::len), Some(0));
     }
 
     #[test]
