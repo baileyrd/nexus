@@ -269,7 +269,7 @@ _BL-051 shipped 2026-04-30 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 ### Verification notes (no BL ID — informational)
 
-- **ADR-0009 keyring hard-fail enforcement** — Verified 2026-04-30: bootstrap-side enforcement is **missing**. `nexus_security::CredentialVault::available()` and the `NEXUS_NO_KEYRING=1` escape hatch are implemented in `crates/nexus-security/src/credential.rs`, but no caller (`SecurityCorePlugin::on_init`/`on_start`, `nexus-bootstrap`, or any frontend) exercises the probe — Nexus boots cleanly with a broken keyring and only fails on first credential operation. Filed as **OI-21** in [../OPEN-ITEMS.md](../OPEN-ITEMS.md).
+- **ADR-0009 keyring hard-fail enforcement** — Verified 2026-04-30 and resolved as **OI-21** the same day: `SecurityCorePlugin::on_init` now runs an injected `KeyringProbe` (default `CredentialVault::new().available()`) and returns `PluginError::LifecycleError` with the platform hint when the OS keyring is unavailable. Bootstrap propagates the lifecycle error so frontends exit non-zero. See [../OPEN-ITEMS.md](../OPEN-ITEMS.md) §OI-21.
 - **PRD-04a MockPluginContext / MockEventBus** — referenced in template tests as TODO but not yet exposed from `nexus-plugin-api`. Low priority; community plugin authors are not yet writing many tests, and the issue surfaces only when someone tries.
 
 ## Decisions — PRD-04 audit (2026-04-17)
