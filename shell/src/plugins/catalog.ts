@@ -37,6 +37,7 @@ import { filesPlugin } from './nexus/files'
 import { editorPlugin } from './nexus/editor'
 import { outlinePlugin } from './nexus/outline'
 import { backlinksPlugin } from './nexus/backlinks'
+import { commentsPlugin } from './nexus/comments'
 import { bookmarksPlugin } from './nexus/bookmarks'
 import { outgoingLinksPlugin } from './nexus/outgoingLinks'
 import { filePropertiesPlugin } from './nexus/fileProperties'
@@ -169,6 +170,12 @@ export const DEFAULT_OFF_PLUGINS: Registered[] = [
   graphPlugin,
   graphGlobalPlugin,
   backlinksPlugin,
+  // BL-050 Phase 2 — side-margin comment threads pane. Default-off
+  // because thread creation requires the editor margin gutter
+  // (Phase 3) to surface a "comment on this block" affordance;
+  // until then the pane is read-only-plus-mutate against threads
+  // created via direct IPC. Storage backend is `com.nexus.comments`.
+  commentsPlugin,
   bookmarksPlugin,
   outgoingLinksPlugin,
   filePropertiesPlugin,
