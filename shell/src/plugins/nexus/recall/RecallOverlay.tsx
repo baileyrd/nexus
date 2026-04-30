@@ -19,6 +19,7 @@
 
 import { useEffect, useRef } from 'react'
 import { useRecallStore } from './recallStore'
+import { applyCodeFilter } from './codeFilter'
 import {
   cancelPendingSearch,
   copySelectedSnippet,
@@ -79,11 +80,16 @@ function ResultRow({
 }
 
 function ResultList() {
-  const results = useRecallStore((s) => s.results)
+  const rawResults = useRecallStore((s) => s.results)
+  const codeOnly = useRecallStore((s) => s.codeOnly)
   const selectedIndex = useRecallStore((s) => s.selectedIndex)
   const status = useRecallStore((s) => s.status)
   const error = useRecallStore((s) => s.error)
   const setSelectedIndex = useRecallStore((s) => s.setSelectedIndex)
+  // BL-046 phase 2 — filter chip applied at render time. Keeping
+  // `results` in the store unfiltered means toggling the chip off
+  // restores the full list without a re-fetch.
+  const results = applyCodeFilter(rawResults, codeOnly)
 
   if (status === 'error' && error) {
     return (
@@ -267,8 +273,46 @@ export function RecallOverlay() {
             padding: '12px 16px',
           }}
         />
+        <FilterChips />
         <ResultList />
       </div>
+    </div>
+  )
+}
+
+/** BL-046 phase 2 — filter-chip row above the result list. v1
+ *  ships a single binary "From project" chip; phase 3 will fan
+ *  it out to per-language chips driven by the captures present
+ *  in the active result set. */
+function FilterChips() {
+  const codeOnly = useRecallStore((s) => s.codeOnly)
+  const setCodeOnly = useRecallStore((s) => s.setCodeOnly)
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 6,
+        padding: '0 16px 8px',
+        fontFamily: 'var(--f-ui)',
+        fontSize: 12,
+      }}
+    >
+      <button
+        type="button"
+        aria-pressed={codeOnly}
+        onClick={() => setCodeOnly(!codeOnly)}
+        title="Limit results to code captures (BL-046)"
+        style={{
+          padding: '2px 10px',
+          borderRadius: 999,
+          border: '1px solid var(--line-soft)',
+          background: codeOnly ? 'var(--accent, #4c8bf5)' : 'var(--bg-raised)',
+          color: codeOnly ? 'var(--bg-base, #fff)' : 'var(--fg)',
+          cursor: 'pointer',
+        }}
+      >
+        From project
+      </button>
     </div>
   )
 }

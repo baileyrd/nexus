@@ -51,6 +51,12 @@ export interface RecallState {
    *  `beginSearch` and only commits results when the matching id is
    *  still current. */
   currentRequestId: string | null
+  /** BL-046 phase 2 — when `true`, the overlay filters results to
+   *  matches detected as code captures (BL-046 phase 1 `#code/`
+   *  tag or fence header). Resets to `false` on `open()` so each
+   *  hotkey press starts unfiltered; persisted across `close()`
+   *  during a single overlay session for symmetry with `query`. */
+  codeOnly: boolean
 
   open(): void
   close(): void
@@ -60,6 +66,9 @@ export interface RecallState {
   setError(err: Error): void
   moveSelection(delta: number): void
   setSelectedIndex(idx: number): void
+  /** Toggle the BL-046 code-only filter. Reclamps `selectedIndex`
+   *  to stay within the visible result list. */
+  setCodeOnly(value: boolean): void
 }
 
 const INITIAL: Pick<
@@ -71,6 +80,7 @@ const INITIAL: Pick<
   | 'status'
   | 'error'
   | 'currentRequestId'
+  | 'codeOnly'
 > = {
   visible: false,
   query: '',
@@ -79,6 +89,7 @@ const INITIAL: Pick<
   status: 'idle',
   error: null,
   currentRequestId: null,
+  codeOnly: false,
 }
 
 function clamp(idx: number, length: number): number {
@@ -100,6 +111,7 @@ export const useRecallStore = create<RecallState>((set, get) => ({
       status: 'idle',
       error: null,
       currentRequestId: null,
+      codeOnly: false,
     }),
 
   close: () =>
@@ -147,5 +159,23 @@ export const useRecallStore = create<RecallState>((set, get) => ({
   setSelectedIndex: (idx) => {
     const state = get()
     set({ selectedIndex: clamp(idx, state.results.length) })
+  },
+
+  setCodeOnly: (value) => {
+    // The visible-result count changes when the chip toggles, so
+    // reclamp the selection to keep the highlight in range. The
+    // pure filter helper lives in `codeFilter.ts`; we replicate
+    // the predicate inline here to avoid a circular import (the
+    // filter module depends on this store's `RecallMatch` type).
+    const state = get()
+    const visibleCount = value
+      ? state.results.filter((m) => /(^|\n)(#code\/|File:\s+\S+|```[a-zA-Z][\w+-]*)/.test(
+          m.chunk_text ?? '',
+        )).length
+      : state.results.length
+    set({
+      codeOnly: value,
+      selectedIndex: visibleCount > 0 ? Math.min(state.selectedIndex, visibleCount - 1) : 0,
+    })
   },
 }))
