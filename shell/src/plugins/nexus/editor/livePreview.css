@@ -158,6 +158,17 @@
   text-underline-offset: 3px;
   cursor: help;
 }
+
+/* BL-049 phase 2 — clickable inline `[[<file>#^<uuid>]]` block links. */
+.cm-content .cm-md-block-link {
+  color: var(--accent, #4c8bf5);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.cm-content .cm-md-block-link:hover {
+  text-decoration-thickness: 2px;
+}
 .cm-content .cm-md-dbview-header {
   display: flex;
   flex-wrap: wrap;
