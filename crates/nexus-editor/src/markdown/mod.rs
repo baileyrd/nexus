@@ -9,6 +9,7 @@
 //! - [`inline`] — inline annotation extract + serialize
 //! - [`id`] — deterministic block-id generation
 
+mod database_view_spec;
 mod id;
 mod inline;
 mod parse;
@@ -347,6 +348,96 @@ mod tests {
         let code = tree2.get(tree2.root_blocks[0]).unwrap();
         assert_eq!(code.stable_id, Some(id));
         assert_eq!(code.id, id);
+    }
+
+    // ── BL-012 close-out: native [[{db:…}]] parser/serializer ──
+
+    #[test]
+    fn bare_database_view_paragraph_promotes_to_database_view_block() {
+        use crate::DatabaseViewType;
+        let src = "[[{db:Tasks.bases}]]\n";
+        let tree = parser().parse(src).unwrap();
+        assert_eq!(tree.root_blocks.len(), 1);
+        let b = tree.get(tree.root_blocks[0]).unwrap();
+        match &b.ty {
+            BlockType::DatabaseView { database_path, view_config } => {
+                assert_eq!(database_path, "Tasks.bases");
+                assert_eq!(view_config.view_type, DatabaseViewType::Table);
+                assert!(view_config.filters.is_empty());
+                assert!(view_config.sorts.is_empty());
+            }
+            other => panic!("expected DatabaseView, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn database_view_with_kanban_view_and_filters_round_trips() {
+        let src =
+            "[[{db:Tasks.bases?view=kanban&group=status&filter=status%20%3D%20Done&sort=due_date%20asc}]]\n";
+        parse_serialize_parse_is_idempotent(src);
+        let tree = parser().parse(src).unwrap();
+        let b = tree.get(tree.root_blocks[0]).unwrap();
+        match &b.ty {
+            BlockType::DatabaseView { view_config, .. } => {
+                assert_eq!(view_config.filters, vec!["status = Done"]);
+                assert_eq!(view_config.sorts, vec!["due_date asc"]);
+            }
+            other => panic!("expected DatabaseView, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn malformed_database_view_falls_back_to_paragraph() {
+        // Empty path → parser drops back to a paragraph rather than
+        // panicking, so the user sees their typed source verbatim
+        // and can fix it inline. A loud parse error here would
+        // make typo-recovery hostile.
+        let src = "[[{db:}]]\n";
+        let tree = parser().parse(src).unwrap();
+        let b = tree.get(tree.root_blocks[0]).unwrap();
+        assert!(matches!(b.ty, BlockType::Paragraph));
+    }
+
+    #[test]
+    fn database_view_serialization_uses_native_db_syntax_not_wiki_embed() {
+        // Pre-BL-012-close-out, the serializer emitted
+        // `![[Tasks.bases]]` (wiki-embed shape) and lost the view
+        // config entirely; the close-out switches to the native
+        // `[[{db:…}]]` form so config edits round-trip.
+        use crate::DatabaseViewConfig;
+        let mut tree = crate::BlockTree::new(crate::DocumentMetadata::default());
+        let id = uuid::Uuid::new_v4();
+        let block = crate::Block {
+            id,
+            ty: BlockType::DatabaseView {
+                database_path: "Tasks.bases".to_string(),
+                view_config: DatabaseViewConfig::default(),
+            },
+            ..crate::Block::new(BlockType::Paragraph)
+        };
+        tree.blocks.insert(id, block);
+        tree.root_blocks.push(id);
+
+        let md = MarkdownSerializer::serialize(&tree);
+        assert!(md.contains("[[{db:Tasks.bases}]]"));
+        assert!(!md.contains("![["));
+    }
+
+    #[test]
+    fn database_view_stamp_marker_round_trips() {
+        // The stamp anchor (`<!-- ^<uuid> -->`) must travel with the
+        // database-view block the same way it does for every other
+        // block type — otherwise BL-049 / BL-050 anchors against a
+        // db block would orphan on reload.
+        let id = uuid::Uuid::parse_str("ffffffff-1111-4222-8333-444444444444").unwrap();
+        let src = format!("[[{{db:Tasks.bases?view=kanban&group=status}}]]\n<!-- ^{id} -->\n");
+        let tree1 = parser().parse(&src).unwrap();
+        let md = MarkdownSerializer::serialize(&tree1);
+        assert!(md.contains(&format!("<!-- ^{id} -->")));
+        let tree2 = parser().parse(&md).unwrap();
+        let b = tree2.get(tree2.root_blocks[0]).unwrap();
+        assert_eq!(b.stable_id, Some(id));
+        assert!(matches!(b.ty, BlockType::DatabaseView { .. }));
     }
 
     #[test]

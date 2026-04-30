@@ -166,9 +166,7 @@ _BL-011 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 _BL-012 shipped 2026-04-30 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-012 close-out: native parser/serializer for `[[{db:…}]]`
-
-Extend the `nexus-editor` markdown parser/serializer to recognise the `[[{db:…}]]` syntax natively. Today the editor block-tree treats it as `Embed`; the CM widget already handles it because it scans source text directly. Once native, `BlockType::DatabaseView` round-trips through `MarkdownSerializer::serialize` / `MarkdownParser::parse` and the editor's undo tree captures spec edits as block-level transactions instead of free-text replacements.
+_BL-012 close-out shipped 2026-04-30 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 _BL-013 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 

@@ -9,6 +9,7 @@ use crate::annotation::AnnotationType;
 use crate::block::{Block, BlockId, BlockType, PropertyValue};
 use crate::tree::BlockTree;
 
+use super::database_view_spec::serialize_database_view_spec;
 use super::id::format_stable_id_marker;
 use super::inline::serialize_inline;
 
@@ -139,10 +140,16 @@ fn serialize_block(tree: &BlockTree, id: BlockId, out: &mut String) {
             out.push('\n');
         }
         BlockType::Embed { url, .. } => push_wiki_embed(out, url, block),
-        // Deferred types: emit a recognizable fallback that roundtrips
-        // through the parser as a paragraph (no data loss).
-        BlockType::DatabaseView { database_path, .. } => {
-            push_wiki_embed(out, database_path, block);
+        // BL-012 close-out — native serialization of the
+        // `[[{db:<path>?<query>}]]` syntax. Round-trips losslessly
+        // with `MarkdownParser::parse`'s paragraph-promotion path
+        // so the editor's undo tree captures `view_config` edits as
+        // block-level transactions instead of free-text replacements.
+        BlockType::DatabaseView { database_path, view_config } => {
+            out.push_str(&serialize_database_view_spec(database_path, view_config));
+            out.push('\n');
+            push_block_stamp_line(block, out);
+            out.push('\n');
         }
         BlockType::Video { src, .. } | BlockType::Audio { src } | BlockType::File { src, .. } => {
             push_wiki_embed(out, src, block);
