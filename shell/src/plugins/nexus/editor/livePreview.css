@@ -153,3 +153,8 @@
   text-transform: uppercase;
   font-size: 0.8em;
 }
+.cm-content .cm-md-dbview-syntax-error {
+  text-decoration: underline wavy var(--risk, currentColor);
+  text-underline-offset: 3px;
+  cursor: help;
+}
