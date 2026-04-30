@@ -29,10 +29,12 @@ import {
   useCaptureStore,
   type CaptureSourceMeta,
 } from './captureStore'
+import { detectCodeLanguage } from './codeCapture'
 
 const VIEW_ID = 'nexus.memory.captureOverlay'
 const COMMAND_OPEN = 'nexus.memory.captureOpen'
 const COMMAND_COMMIT = 'nexus.memory.captureCommit'
+const COMMAND_OPEN_CODE = 'nexus.memory.captureCodeOpen'
 
 const CONFIG_HOTKEY = 'memory.hotkey'
 const CONFIG_INBOX_PATH = 'memory.inboxPath'
@@ -108,6 +110,11 @@ export const memoryPlugin: Plugin = {
           title: 'Quick Capture: Save to Inbox',
           category: 'Memory',
         },
+        {
+          id: COMMAND_OPEN_CODE,
+          title: 'Quick Capture: Open Code Capture',
+          category: 'Memory',
+        },
       ],
     },
   },
@@ -156,6 +163,67 @@ export const memoryPlugin: Plugin = {
       const sourceMeta = snapshotSourceMeta()
       useCaptureStore.getState().openOverlay(draft, sourceMeta)
     })
+
+    interface CodeCaptureArgs {
+      file?: string
+      language?: string
+      lineRange?: { start: number; end: number }
+      content?: string
+    }
+
+    api.commands.register(
+      COMMAND_OPEN_CODE,
+      async (...rawArgs: unknown[]) => {
+        const args = (rawArgs[0] ?? {}) as CodeCaptureArgs
+        // BL-046 — code-aware capture entry point. Exposed as a
+        // command so an IDE plugin / CLI / right-click action can
+        // call `api.commands.execute(...)` with the source-file
+        // metadata. Falls back to the plain hotkey path when
+        // arguments are missing or the file extension doesn't
+        // resolve to a known language.
+        const ready = await api.kernel.available()
+        if (!ready) {
+          api.notifications.show({
+            type: 'warning',
+            message:
+              'Open a forge before capturing — the code-capture command needs an active workspace.',
+          })
+          return
+        }
+        const file = args.file?.trim() ?? ''
+        const explicitLanguage = args.language?.trim() || null
+        const language = explicitLanguage ?? detectCodeLanguage(file)
+        if (!file || !language) {
+          api.notifications.show({
+            type: 'warning',
+            message:
+              'Code capture requires a file path with a recognised extension. Use Quick Capture for plain text.',
+          })
+          return
+        }
+        const code = {
+          file,
+          language,
+          ...(args.lineRange
+            ? {
+                lineRange: {
+                  start: Math.max(1, Math.floor(args.lineRange.start)),
+                  end: Math.max(
+                    Math.max(1, Math.floor(args.lineRange.start)),
+                    Math.floor(args.lineRange.end),
+                  ),
+                },
+              }
+            : {}),
+        }
+        const draft = (args.content ?? (await readClipboardBestEffort())).replace(
+          /\r\n/g,
+          '\n',
+        )
+        const sourceMeta = { ...snapshotSourceMeta(), code }
+        useCaptureStore.getState().openOverlay(draft, sourceMeta)
+      },
+    )
 
     api.commands.register(COMMAND_COMMIT, async () => {
       const { draft, sourceMeta } = useCaptureStore.getState()
