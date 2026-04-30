@@ -24,6 +24,7 @@ members = [
     "crates/nexus-skills",
     "crates/nexus-workflow",
     "crates/nexus-linkpreview",
+    "crates/nexus-comments",
     "crates/nexus-panic-log",
 ]
 

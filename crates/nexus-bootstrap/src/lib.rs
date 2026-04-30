@@ -255,6 +255,7 @@ fn register_core_plugins(
 ) -> Result<()> {
     use nexus_agent::AgentCorePlugin;
     use nexus_ai::AiCorePlugin;
+    use nexus_comments::core_plugin::CommentsCorePlugin;
     use nexus_linkpreview::core_plugin::LinkPreviewCorePlugin;
     use nexus_skills::SkillsCorePlugin;
     use nexus_workflow::WorkflowCorePlugin;
@@ -838,6 +839,49 @@ fn register_core_plugins(
             Box::new(LinkPreviewCorePlugin::new()),
         )
         .context("failed to register com.nexus.linkpreview")?;
+
+    // Comments — BL-050. Side-margin comment threads anchored to
+    // stable block ids (ADR 0017). Storage in
+    // `<forge>/.forge/comments/<relpath>.json`. Stateless: every
+    // dispatch hits disk fresh.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.comments",
+                "Comments",
+                LifecycleFlags::NONE,
+                &[
+                    ("list", nexus_comments::core_plugin::HANDLER_LIST),
+                    (
+                        "create_thread",
+                        nexus_comments::core_plugin::HANDLER_CREATE_THREAD,
+                    ),
+                    (
+                        "add_reply",
+                        nexus_comments::core_plugin::HANDLER_ADD_REPLY,
+                    ),
+                    (
+                        "set_resolved",
+                        nexus_comments::core_plugin::HANDLER_SET_RESOLVED,
+                    ),
+                    (
+                        "delete_thread",
+                        nexus_comments::core_plugin::HANDLER_DELETE_THREAD,
+                    ),
+                    (
+                        "delete_comment",
+                        nexus_comments::core_plugin::HANDLER_DELETE_COMMENT,
+                    ),
+                    (
+                        "edit_comment",
+                        nexus_comments::core_plugin::HANDLER_EDIT_COMMENT,
+                    ),
+                ],
+            ),
+            forge_root,
+            Box::new(CommentsCorePlugin::new(forge_root)),
+        )
+        .context("failed to register com.nexus.comments")?;
 
     // Agent system — PRD-15 scaffold. Thin dispatch surface over
     // `nexus-agent::{LlmAgent, PlanExecutor}`; bridges to `com.nexus.ai`

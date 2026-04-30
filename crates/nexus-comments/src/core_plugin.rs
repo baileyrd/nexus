@@ -1,0 +1,393 @@
+//! Core plugin wrapping [`crate::CommentStore`].
+//!
+//! Exposes the comment store over kernel IPC so the shell's
+//! side-margin pane (BL-050 follow-up) can read/write threads via
+//! `context.ipc_call("com.nexus.comments", ...)` without linking
+//! this crate directly. Same pattern as `com.nexus.skills` /
+//! `com.nexus.linkpreview`.
+//!
+//! # Handlers
+//!
+//! | Id | Command          | Args                                                               | Returns                            |
+//! |---:|------------------|--------------------------------------------------------------------|------------------------------------|
+//! | 1  | `list`           | `{ file_path }`                                                    | `Vec<Thread>`                      |
+//! | 2  | `create_thread`  | `{ file_path, block_id, body, author? }`                           | `Thread`                           |
+//! | 3  | `add_reply`      | `{ file_path, thread_id, body, author? }`                          | `Comment`                          |
+//! | 4  | `set_resolved`   | `{ file_path, thread_id, resolved, author? }`                      | `Thread`                           |
+//! | 5  | `delete_thread`  | `{ file_path, thread_id }`                                         | `{}`                               |
+//! | 6  | `delete_comment` | `{ file_path, thread_id, comment_id }`                             | `{}`                               |
+//! | 7  | `edit_comment`   | `{ file_path, thread_id, comment_id, body }`                       | `Comment`                          |
+//!
+//! Ids are append-only.
+
+use std::path::Path;
+
+use nexus_plugins::{CorePlugin, PluginError};
+use serde::Deserialize;
+use uuid::Uuid;
+
+use crate::store::{CommentStore, CommentStoreError};
+
+/// Reverse-DNS plugin id.
+pub const PLUGIN_ID: &str = "com.nexus.comments";
+
+/// `list` handler id.
+pub const HANDLER_LIST: u32 = 1;
+/// `create_thread` handler id.
+pub const HANDLER_CREATE_THREAD: u32 = 2;
+/// `add_reply` handler id.
+pub const HANDLER_ADD_REPLY: u32 = 3;
+/// `set_resolved` handler id.
+pub const HANDLER_SET_RESOLVED: u32 = 4;
+/// `delete_thread` handler id.
+pub const HANDLER_DELETE_THREAD: u32 = 5;
+/// `delete_comment` handler id.
+pub const HANDLER_DELETE_COMMENT: u32 = 6;
+/// `edit_comment` handler id.
+pub const HANDLER_EDIT_COMMENT: u32 = 7;
+
+/// Stateless wrapper — every dispatch hits the JSON sidecar fresh.
+pub struct CommentsCorePlugin {
+    store: CommentStore,
+}
+
+impl CommentsCorePlugin {
+    /// Construct a plugin rooted at the given forge directory.
+    #[must_use]
+    pub fn new(forge_root: &Path) -> Self {
+        Self {
+            store: CommentStore::new(forge_root),
+        }
+    }
+}
+
+impl CorePlugin for CommentsCorePlugin {
+    fn dispatch(
+        &mut self,
+        handler_id: u32,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        match handler_id {
+            HANDLER_LIST => dispatch_list(&self.store, args),
+            HANDLER_CREATE_THREAD => dispatch_create_thread(&self.store, args),
+            HANDLER_ADD_REPLY => dispatch_add_reply(&self.store, args),
+            HANDLER_SET_RESOLVED => dispatch_set_resolved(&self.store, args),
+            HANDLER_DELETE_THREAD => dispatch_delete_thread(&self.store, args),
+            HANDLER_DELETE_COMMENT => dispatch_delete_comment(&self.store, args),
+            HANDLER_EDIT_COMMENT => dispatch_edit_comment(&self.store, args),
+            other => Err(exec_err(format!("unknown handler id {other}"))),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct FilePathArg {
+    file_path: String,
+}
+
+#[derive(Deserialize)]
+struct CreateThreadArgs {
+    file_path: String,
+    block_id: Uuid,
+    body: String,
+    #[serde(default)]
+    author: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AddReplyArgs {
+    file_path: String,
+    thread_id: Uuid,
+    body: String,
+    #[serde(default)]
+    author: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SetResolvedArgs {
+    file_path: String,
+    thread_id: Uuid,
+    resolved: bool,
+    #[serde(default)]
+    author: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DeleteThreadArgs {
+    file_path: String,
+    thread_id: Uuid,
+}
+
+#[derive(Deserialize)]
+struct DeleteCommentArgs {
+    file_path: String,
+    thread_id: Uuid,
+    comment_id: Uuid,
+}
+
+#[derive(Deserialize)]
+struct EditCommentArgs {
+    file_path: String,
+    thread_id: Uuid,
+    comment_id: Uuid,
+    body: String,
+}
+
+fn dispatch_list(
+    store: &CommentStore,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: FilePathArg =
+        serde_json::from_value(args.clone()).map_err(|e| exec_err(format!("list: {e}")))?;
+    let threads = store.list_threads(&a.file_path).map_err(|e| map_store_err(&e))?;
+    serde_json::to_value(&threads).map_err(|e| exec_err(format!("list: serialize: {e}")))
+}
+
+fn dispatch_create_thread(
+    store: &CommentStore,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: CreateThreadArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("create_thread: {e}")))?;
+    let thread = store
+        .create_thread(&a.file_path, a.block_id, a.body, a.author)
+        .map_err(|e| map_store_err(&e))?;
+    serde_json::to_value(&thread)
+        .map_err(|e| exec_err(format!("create_thread: serialize: {e}")))
+}
+
+fn dispatch_add_reply(
+    store: &CommentStore,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: AddReplyArgs =
+        serde_json::from_value(args.clone()).map_err(|e| exec_err(format!("add_reply: {e}")))?;
+    let comment = store
+        .add_reply(&a.file_path, a.thread_id, a.body, a.author)
+        .map_err(|e| map_store_err(&e))?;
+    serde_json::to_value(&comment)
+        .map_err(|e| exec_err(format!("add_reply: serialize: {e}")))
+}
+
+fn dispatch_set_resolved(
+    store: &CommentStore,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: SetResolvedArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("set_resolved: {e}")))?;
+    let thread = store
+        .set_resolved(&a.file_path, a.thread_id, a.resolved, a.author)
+        .map_err(|e| map_store_err(&e))?;
+    serde_json::to_value(&thread)
+        .map_err(|e| exec_err(format!("set_resolved: serialize: {e}")))
+}
+
+fn dispatch_delete_thread(
+    store: &CommentStore,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: DeleteThreadArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("delete_thread: {e}")))?;
+    store
+        .delete_thread(&a.file_path, a.thread_id)
+        .map_err(|e| map_store_err(&e))?;
+    Ok(serde_json::json!({}))
+}
+
+fn dispatch_delete_comment(
+    store: &CommentStore,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: DeleteCommentArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("delete_comment: {e}")))?;
+    store
+        .delete_comment(&a.file_path, a.thread_id, a.comment_id)
+        .map_err(|e| map_store_err(&e))?;
+    Ok(serde_json::json!({}))
+}
+
+fn dispatch_edit_comment(
+    store: &CommentStore,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: EditCommentArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("edit_comment: {e}")))?;
+    let comment = store
+        .edit_comment(&a.file_path, a.thread_id, a.comment_id, a.body)
+        .map_err(|e| map_store_err(&e))?;
+    serde_json::to_value(&comment)
+        .map_err(|e| exec_err(format!("edit_comment: serialize: {e}")))
+}
+
+fn map_store_err(err: &CommentStoreError) -> PluginError {
+    exec_err(err.to_string())
+}
+
+fn exec_err(msg: impl Into<String>) -> PluginError {
+    PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason: msg.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tempfile::TempDir;
+
+    fn plugin() -> (TempDir, CommentsCorePlugin) {
+        let dir = TempDir::new().unwrap();
+        let p = CommentsCorePlugin::new(dir.path());
+        (dir, p)
+    }
+
+    #[test]
+    fn list_empty_returns_empty_array() {
+        let (_d, mut p) = plugin();
+        let out = p
+            .dispatch(HANDLER_LIST, &json!({"file_path": "foo.md"}))
+            .unwrap();
+        assert_eq!(out, json!([]));
+    }
+
+    #[test]
+    fn create_then_list_via_ipc() {
+        let (_d, mut p) = plugin();
+        let block_id = Uuid::new_v4();
+        let created = p
+            .dispatch(
+                HANDLER_CREATE_THREAD,
+                &json!({
+                    "file_path": "foo.md",
+                    "block_id": block_id,
+                    "body": "hi",
+                    "author": "alice",
+                }),
+            )
+            .unwrap();
+        let thread_id = created["id"].as_str().unwrap().to_string();
+        assert_eq!(created["block_id"].as_str().unwrap(), block_id.to_string());
+
+        let listed = p
+            .dispatch(HANDLER_LIST, &json!({"file_path": "foo.md"}))
+            .unwrap();
+        let arr = listed.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["id"].as_str().unwrap(), thread_id);
+    }
+
+    #[test]
+    fn add_reply_via_ipc() {
+        let (_d, mut p) = plugin();
+        let block_id = Uuid::new_v4();
+        let created = p
+            .dispatch(
+                HANDLER_CREATE_THREAD,
+                &json!({"file_path": "foo.md", "block_id": block_id, "body": "q?"}),
+            )
+            .unwrap();
+        let tid = created["id"].as_str().unwrap();
+        let reply = p
+            .dispatch(
+                HANDLER_ADD_REPLY,
+                &json!({"file_path": "foo.md", "thread_id": tid, "body": "ans"}),
+            )
+            .unwrap();
+        assert_eq!(reply["body"].as_str().unwrap(), "ans");
+
+        let listed = p
+            .dispatch(HANDLER_LIST, &json!({"file_path": "foo.md"}))
+            .unwrap();
+        assert_eq!(listed[0]["comments"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn set_resolved_and_unresolved() {
+        let (_d, mut p) = plugin();
+        let created = p
+            .dispatch(
+                HANDLER_CREATE_THREAD,
+                &json!({"file_path": "foo.md", "block_id": Uuid::new_v4(), "body": "x"}),
+            )
+            .unwrap();
+        let tid = created["id"].as_str().unwrap();
+
+        let resolved = p
+            .dispatch(
+                HANDLER_SET_RESOLVED,
+                &json!({"file_path": "foo.md", "thread_id": tid, "resolved": true, "author": "carol"}),
+            )
+            .unwrap();
+        assert_eq!(resolved["resolved"], json!(true));
+        assert_eq!(resolved["resolved_by"].as_str().unwrap(), "carol");
+
+        let again = p
+            .dispatch(
+                HANDLER_SET_RESOLVED,
+                &json!({"file_path": "foo.md", "thread_id": tid, "resolved": false}),
+            )
+            .unwrap();
+        assert_eq!(again["resolved"], json!(false));
+        assert!(again.get("resolved_by").is_none() || again["resolved_by"].is_null());
+    }
+
+    #[test]
+    fn delete_thread_via_ipc() {
+        let (_d, mut p) = plugin();
+        let created = p
+            .dispatch(
+                HANDLER_CREATE_THREAD,
+                &json!({"file_path": "foo.md", "block_id": Uuid::new_v4(), "body": "x"}),
+            )
+            .unwrap();
+        let tid = created["id"].as_str().unwrap();
+        p.dispatch(
+            HANDLER_DELETE_THREAD,
+            &json!({"file_path": "foo.md", "thread_id": tid}),
+        )
+        .unwrap();
+        let listed = p
+            .dispatch(HANDLER_LIST, &json!({"file_path": "foo.md"}))
+            .unwrap();
+        assert_eq!(listed, json!([]));
+    }
+
+    #[test]
+    fn unknown_handler_errors() {
+        let (_d, mut p) = plugin();
+        let err = p.dispatch(99, &json!({})).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("unknown handler id 99"), "got: {msg}");
+    }
+
+    #[test]
+    fn edit_comment_via_ipc() {
+        let (_d, mut p) = plugin();
+        let created = p
+            .dispatch(
+                HANDLER_CREATE_THREAD,
+                &json!({"file_path": "foo.md", "block_id": Uuid::new_v4(), "body": "old"}),
+            )
+            .unwrap();
+        let tid = created["id"].as_str().unwrap();
+        let cid = created["comments"][0]["id"].as_str().unwrap();
+        let edited = p
+            .dispatch(
+                HANDLER_EDIT_COMMENT,
+                &json!({"file_path": "foo.md", "thread_id": tid, "comment_id": cid, "body": "new"}),
+            )
+            .unwrap();
+        assert_eq!(edited["body"].as_str().unwrap(), "new");
+        assert!(edited["updated_at"].is_string());
+    }
+
+    #[test]
+    fn invalid_path_surfaces_as_error() {
+        let (_d, mut p) = plugin();
+        let err = p
+            .dispatch(HANDLER_LIST, &json!({"file_path": "/etc/passwd"}))
+            .unwrap_err();
+        assert!(err.to_string().contains("invalid file path"));
+    }
+}
