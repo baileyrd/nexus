@@ -562,6 +562,10 @@ fn register_core_plugins(
                         "execute_database_view",
                         nexus_editor::core_plugin::HANDLER_EXECUTE_DATABASE_VIEW,
                     ),
+                    (
+                        "resolve_block_link",
+                        nexus_editor::core_plugin::HANDLER_RESOLVE_BLOCK_LINK,
+                    ),
                 ],
             ),
             forge_root,

@@ -173,6 +173,30 @@ test('executeDatabaseView routes to execute_database_view with snake_case args',
   assert.deepEqual(result, expected)
 })
 
+test('resolveBlockLink routes to resolve_block_link with snake_case args', async () => {
+  const expected = {
+    found: true,
+    block: { id: 'd8e9f0a1-2b3c-4d5e-9f01-abcdef012345' },
+    root_index: 2,
+  }
+  const { api, calls } = makeMockApi(expected)
+  const client = makeEditorClient(api)
+
+  const result = await client.resolveBlockLink(
+    'notes/a.md',
+    'd8e9f0a1-2b3c-4d5e-9f01-abcdef012345',
+  )
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].pluginId, EDITOR_PLUGIN_ID)
+  assert.equal(calls[0].commandId, 'resolve_block_link')
+  assert.deepEqual(calls[0].args, {
+    file_relpath: 'notes/a.md',
+    block_id: 'd8e9f0a1-2b3c-4d5e-9f01-abcdef012345',
+  })
+  assert.deepEqual(result, expected)
+})
+
 test('openSession / getTree / save / undo / redo / close use the documented command strings', async () => {
   const relpath = 'notes/b.md'
   const snap = emptySnapshot(relpath)
