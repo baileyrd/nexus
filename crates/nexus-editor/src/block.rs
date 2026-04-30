@@ -25,6 +25,16 @@ pub struct Block {
     /// Unique identifier within the document.
     pub id: BlockId,
 
+    /// Stamped cross-session id (ADR 0017). `Some` when the markdown
+    /// source carried a trailing `<!-- ^<uuid> -->` marker on this
+    /// block, or when [`crate::core_plugin::HANDLER_STAMP_BLOCK`] has
+    /// been called against it. The stamped uuid is also reflected in
+    /// [`Self::id`] (the tree is keyed by the effective id), so callers
+    /// generally read `id` and use `stable_id.is_some()` to test whether
+    /// the id is preserved across edits upstream of this block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stable_id: Option<BlockId>,
+
     /// Type discriminant and type-specific data.
     pub ty: BlockType,
 
@@ -66,6 +76,7 @@ impl Block {
         let ts = now_ms();
         Self {
             id: Uuid::new_v4(),
+            stable_id: None,
             ty,
             content: String::new(),
             annotations: Vec::new(),
@@ -77,6 +88,20 @@ impl Block {
             updated_at: ts,
             is_deleted: false,
         }
+    }
+
+    /// Effective block id — the stamped id when present, else
+    /// [`Self::id`].
+    ///
+    /// In practice the two are identical: parse-side stamping rewrites
+    /// `id` to match `stable_id`, and the in-memory [`crate::BlockTree`]
+    /// is keyed by `id`. The accessor exists so cross-session callers
+    /// (BL-048 / BL-049 / BL-050) can express "the id that survives
+    /// edits" symmetrically with the absent-stamp fallback path
+    /// described in ADR 0017.
+    #[must_use]
+    pub fn id(&self) -> BlockId {
+        self.stable_id.unwrap_or(self.id)
     }
 
     /// Builder-style: set plain text content.

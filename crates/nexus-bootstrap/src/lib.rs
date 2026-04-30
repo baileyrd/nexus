@@ -553,6 +553,10 @@ fn register_core_plugins(
                         "get_markdown",
                         nexus_editor::core_plugin::HANDLER_GET_MARKDOWN,
                     ),
+                    (
+                        "stamp_block",
+                        nexus_editor::core_plugin::HANDLER_STAMP_BLOCK,
+                    ),
                 ],
             ),
             forge_root,

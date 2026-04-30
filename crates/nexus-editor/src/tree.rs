@@ -263,6 +263,78 @@ impl BlockTree {
         Ok(removed)
     }
 
+    /// Rekey `old` to `new`, updating every reference to it in
+    /// [`Self::blocks`], [`Self::root_blocks`], the parent's
+    /// `children` vector, each child's `parent_id`, and the block's
+    /// own `id` field.
+    ///
+    /// Used by [`crate::core_plugin::HANDLER_STAMP_BLOCK`] to promote
+    /// a positional block id to a fresh stable id (ADR 0017). The new
+    /// block's [`crate::Block::stable_id`] is set to `new` so the
+    /// serializer emits a `<!-- ^<uuid> -->` marker on the next save.
+    ///
+    /// # Errors
+    /// - [`EditorError::BlockNotFound`] if `old` isn't present.
+    /// - [`EditorError::InvalidTree`] if `new` already exists as a
+    ///   different block, or if the block's parent's child list is
+    ///   inconsistent with `index_in_parent`.
+    pub fn rekey(&mut self, old: BlockId, new: BlockId) -> Result<()> {
+        if old == new {
+            return Ok(());
+        }
+        if self.blocks.contains_key(&new) {
+            return Err(EditorError::InvalidTree(format!(
+                "rekey target id {new} already exists"
+            )));
+        }
+        let mut block = self
+            .blocks
+            .remove(&old)
+            .ok_or(EditorError::BlockNotFound(old))?;
+        let parent_id = block.parent_id;
+        let index = block.index_in_parent;
+        block.id = new;
+        block.stable_id = Some(new);
+        // Children's parent_id must be retargeted.
+        let child_ids: Vec<BlockId> = block.children.clone();
+        // Replace the entry in the parent's children list (or root_blocks).
+        if let Some(pid) = parent_id {
+            let parent_block = self.blocks.get_mut(&pid).ok_or_else(|| {
+                EditorError::InvalidTree(format!("rekey: parent {pid} of {old} missing"))
+            })?;
+            let slot = parent_block.children.get_mut(index).ok_or_else(|| {
+                EditorError::InvalidTree(format!(
+                    "rekey: index {index} out of bounds in parent {pid}"
+                ))
+            })?;
+            if *slot != old {
+                return Err(EditorError::InvalidTree(format!(
+                    "rekey: parent {pid} child[{index}] is {slot}, not {old}"
+                )));
+            }
+            *slot = new;
+        } else {
+            let slot = self.root_blocks.get_mut(index).ok_or_else(|| {
+                EditorError::InvalidTree(format!(
+                    "rekey: index {index} out of bounds in root_blocks"
+                ))
+            })?;
+            if *slot != old {
+                return Err(EditorError::InvalidTree(format!(
+                    "rekey: root_blocks[{index}] is {slot}, not {old}"
+                )));
+            }
+            *slot = new;
+        }
+        for cid in child_ids {
+            if let Some(child) = self.blocks.get_mut(&cid) {
+                child.parent_id = Some(new);
+            }
+        }
+        self.blocks.insert(new, block);
+        Ok(())
+    }
+
     /// Move `id` (and its subtree) to become a child of `new_parent`
     /// at `new_index`.
     ///
@@ -658,5 +730,61 @@ mod tests {
         let a = t.insert(para("a"), None, 0).unwrap();
         t.blocks.get_mut(&a).unwrap().index_in_parent = 99;
         assert!(matches!(t.validate(), Err(EditorError::InvalidTree(_))));
+    }
+
+    // ── ADR 0017: rekey ──
+
+    #[test]
+    fn rekey_preserves_root_position_and_sets_stable_id() {
+        let mut t = BlockTree::default();
+        let a = t.insert(para("a"), None, 0).unwrap();
+        let b = t.insert(para("b"), None, 1).unwrap();
+        let new_b = uuid::Uuid::new_v4();
+        t.rekey(b, new_b).unwrap();
+        assert_eq!(t.root_blocks, vec![a, new_b]);
+        let block = t.get(new_b).unwrap();
+        assert_eq!(block.id, new_b);
+        assert_eq!(block.stable_id, Some(new_b));
+        assert_eq!(block.index_in_parent, 1);
+        assert!(t.validate().is_ok());
+    }
+
+    #[test]
+    fn rekey_retargets_children_parent_ids() {
+        let mut t = BlockTree::default();
+        let parent_id = t.insert(para("p"), None, 0).unwrap();
+        let child_id = t.insert(para("c"), Some(parent_id), 0).unwrap();
+        let new_parent = uuid::Uuid::new_v4();
+        t.rekey(parent_id, new_parent).unwrap();
+        let child = t.get(child_id).unwrap();
+        assert_eq!(child.parent_id, Some(new_parent));
+        assert!(t.validate().is_ok());
+    }
+
+    #[test]
+    fn rekey_rejects_existing_target() {
+        let mut t = BlockTree::default();
+        let a = t.insert(para("a"), None, 0).unwrap();
+        let b = t.insert(para("b"), None, 1).unwrap();
+        assert!(matches!(t.rekey(a, b), Err(EditorError::InvalidTree(_))));
+    }
+
+    #[test]
+    fn rekey_unknown_block_errors() {
+        let mut t = BlockTree::default();
+        let bogus = uuid::Uuid::new_v4();
+        assert!(matches!(
+            t.rekey(bogus, uuid::Uuid::new_v4()),
+            Err(EditorError::BlockNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn rekey_same_id_is_noop() {
+        let mut t = BlockTree::default();
+        let a = t.insert(para("a"), None, 0).unwrap();
+        t.rekey(a, a).unwrap();
+        assert_eq!(t.root_blocks, vec![a]);
+        assert!(t.get(a).unwrap().stable_id.is_none());
     }
 }
