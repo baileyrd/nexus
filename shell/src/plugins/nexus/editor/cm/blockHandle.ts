@@ -14,6 +14,12 @@
 // Rust block tree reconverges on the new shape — no new IPC.
 
 import { EditorSelection, StateEffect, StateField, type Extension } from '@codemirror/state'
+
+import {
+  BLOCK_REF_MIME,
+  blockRefToLink,
+  serializeBlockRef,
+} from '../blockRefDrag'
 import {
   Decoration,
   EditorView,
@@ -282,6 +288,23 @@ export interface CommentBridge {
 
 let activeCommentBridge: CommentBridge | null = null
 
+/** BL-048 — bridge installed by `nexus.editor`'s `activate()` so
+ *  the in-CM block handle can resolve the (relpath, blockId, label)
+ *  triple needed for the cross-plugin drag payload. The handle
+ *  has access to the block's source range but not the kernel
+ *  block id; the bridge does that lookup against the session
+ *  snapshot. Returns `null` when the lookup fails (untitled tab,
+ *  no session, blockIndex out of range). */
+export interface BlockRefDragBridge {
+  resolve: (
+    blockIndex: number,
+  ) =>
+    | { relpath: string; blockId: string; label: string | null }
+    | null
+}
+
+let activeBlockRefDragBridge: BlockRefDragBridge | null = null
+
 // ── ViewPlugin: menu + drag DOM ──────────────────────────────────────────────
 
 class BlockHandlePlugin implements PluginValue {
@@ -483,15 +506,72 @@ class BlockHandlePlugin implements PluginValue {
       const handle = document.createElement('div')
       handle.className = 'cm-block-handle'
       handle.dataset.blockFrom = String(b.from)
-      handle.title = 'Block options · drag to reorder'
+      handle.title = 'Block options · drag to reorder · drag onto canvas to embed'
       handle.setAttribute('aria-label', 'Block handle')
       handle.style.position = 'absolute'
       handle.style.left = '2px'
       handle.style.top = `${top + 2}px`
       handle.style.pointerEvents = 'auto'
       handle.innerHTML = '<span class="cm-block-handle__dot"></span>'.repeat(6)
+      // BL-048 — make the handle a native HTML5 drag source so
+      // canvas / outline / etc. can accept block embeds. The
+      // existing reorder behaviour is mouse-based and triggers on
+      // mousedown+move; native drag fires on the same gesture
+      // when `draggable=true`. Bail out of reorder when the
+      // browser fires `dragstart`.
+      handle.draggable = true
+      handle.addEventListener('dragstart', (ev) => this.onHandleDragStart(ev, b))
       this.handlesLayer.appendChild(handle)
     }
+  }
+
+  private onHandleDragStart(event: DragEvent, block: BlockRange): void {
+    if (!event.dataTransfer) return
+    if (!activeBlockRefDragBridge) {
+      // No bridge wired (test driver / non-markdown tab); fall
+      // back to a no-op so the browser's default drag image
+      // shows but the drop site sees no payload.
+      event.preventDefault()
+      return
+    }
+    const blockIndex = scanBlocks(this.view).findIndex((b) => b.from === block.from)
+    if (blockIndex < 0) {
+      event.preventDefault()
+      return
+    }
+    const resolved = activeBlockRefDragBridge.resolve(blockIndex)
+    if (!resolved) {
+      event.preventDefault()
+      return
+    }
+    let payload: string
+    try {
+      payload = serializeBlockRef({
+        relpath: resolved.relpath,
+        blockId: resolved.blockId,
+        label: resolved.label,
+      })
+    } catch {
+      // Bridge handed back an invalid id (e.g. block not yet
+      // stamped). Don't propagate the drag — surfaces a "no
+      // drop allowed" cursor instead of a half-formed payload.
+      event.preventDefault()
+      return
+    }
+    event.dataTransfer.setData(BLOCK_REF_MIME, payload)
+    // Mirror the link form on `text/plain` so dropping into a
+    // plain-text target (browser address bar, terminal) yields
+    // something useful.
+    event.dataTransfer.setData('text/plain', blockRefToLink({
+      relpath: resolved.relpath,
+      blockId: resolved.blockId,
+      label: resolved.label,
+    }))
+    event.dataTransfer.effectAllowed = 'copy'
+    // Cancel any in-flight reorder gesture so the dotted insert
+    // line doesn't linger across the drag.
+    this.dragging = null
+    this.dropLine.style.display = 'none'
   }
 
   private renderMenuItems(block: BlockRange, turnIntoOpen: boolean): void {
@@ -590,6 +670,10 @@ function buildDecorations(): DecorationSet {
  * `null` removes the affordance. The editor plugin's activate() sets
  * this once it has the comments-API + session manager wired.
  */
+export function setBlockRefDragBridge(bridge: BlockRefDragBridge | null): void {
+  activeBlockRefDragBridge = bridge
+}
+
 export function setCommentBridge(bridge: CommentBridge | null): void {
   activeCommentBridge = bridge
 }
