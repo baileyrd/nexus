@@ -42,6 +42,11 @@ import { exportCanvasPng, triggerDownload } from './exportPng'
 import { autoLayout } from './autoLayout'
 import { setActiveCanvas, type CanvasHandle } from './activeCanvas'
 import { createPatchQueue } from './patchQueue'
+import {
+  buildBlockRefDropNode,
+  hasBlockRefPayload,
+  readBlockRefPayload,
+} from './blockRefDrop'
 import { contextKeyService } from '../../../host/ContextKeyService'
 import type {
   CanvasKernelClient,
@@ -819,6 +824,39 @@ export function CanvasView({ relpath, client }: Props) {
     canvas.addEventListener('dblclick', onDoubleClick)
     canvas.style.cursor = 'grab'
 
+    // BL-048 — accept dropped block references (drag from the
+    // editor's six-dot grip onto an open canvas). The container
+    // div is the drop surface so drops anywhere over the canvas
+    // (including the overlay layer) land here. We compute world
+    // coords from the event and create a `text` node carrying the
+    // BL-049 link form `[[<file>#^<uuid>|<label>]]`; that text
+    // renders as a regular markdown wikilink the editor's
+    // block-link navigator already knows how to follow.
+    const container = containerRef.current
+    const onDragOver = (e: DragEvent) => {
+      if (!hasBlockRefPayload(e)) return
+      e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+    }
+    const onDrop = (e: DragEvent) => {
+      const payload = readBlockRefPayload(e)
+      if (!payload) return
+      e.preventDefault()
+      const rect = canvas.getBoundingClientRect()
+      const cx = e.clientX - rect.left
+      const cy = e.clientY - rect.top
+      const world = screenToWorld(cx, cy)
+      const node = buildBlockRefDropNode(payload, world)
+      useCanvasStore.getState().updateDoc(relpath, (d) => applyNodeAdd(d, node))
+      useCanvasStore.getState().setSelection(relpath, [node.id])
+      commitRef.current(
+        [{ op: 'node_add', node }],
+        [{ op: 'node_remove', id: node.id }],
+      )
+    }
+    container?.addEventListener('dragover', onDragOver)
+    container?.addEventListener('drop', onDrop)
+
     return () => {
       canvas.removeEventListener('wheel', onWheel)
       canvas.removeEventListener('pointerdown', onPointerDown)
@@ -826,6 +864,8 @@ export function CanvasView({ relpath, client }: Props) {
       canvas.removeEventListener('pointerup', onPointerUp)
       canvas.removeEventListener('pointercancel', onPointerUp)
       canvas.removeEventListener('dblclick', onDoubleClick)
+      container?.removeEventListener('dragover', onDragOver)
+      container?.removeEventListener('drop', onDrop)
     }
   }, [relpath])
 
