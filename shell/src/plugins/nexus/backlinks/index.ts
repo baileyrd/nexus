@@ -27,6 +27,11 @@ interface KernelBacklink {
   source_path?: unknown
   link_text?: unknown
   link_type?: unknown
+  /** BL-049 phase 3 — `^<block-id>` for block-anchored links, the
+   *  heading slug for heading-anchored links, absent for plain
+   *  wikilinks. The Rust side adds `#[serde(skip_serializing_if =
+   *  "Option::is_none")]` so older snapshots stay JSON-compatible. */
+  fragment?: unknown
 }
 
 /** Basename of a forge-relative path. Forward-slash only. */
@@ -44,7 +49,7 @@ function basename(relpath: string): string {
  * walks incoming edges only, so a self-link would have to be explicit
  * for this to fire, but we filter defensively.
  */
-function decode(raw: unknown, currentRelpath: string): Backlink[] {
+export function decode(raw: unknown, currentRelpath: string): Backlink[] {
   if (!Array.isArray(raw)) return []
   const out: Backlink[] = []
   for (const item of raw as KernelBacklink[]) {
@@ -55,11 +60,16 @@ function decode(raw: unknown, currentRelpath: string): Backlink[] {
     if (sourceRelpath === currentRelpath) continue
     const linkText = typeof item.link_text === 'string' ? item.link_text : ''
     const linkType = typeof item.link_type === 'string' ? item.link_type : ''
+    const fragment =
+      typeof item.fragment === 'string' && item.fragment.length > 0
+        ? item.fragment
+        : null
     out.push({
       sourceRelpath,
       sourceName: basename(sourceRelpath) || sourceRelpath,
       linkText,
       linkType,
+      fragment,
     })
   }
   return out

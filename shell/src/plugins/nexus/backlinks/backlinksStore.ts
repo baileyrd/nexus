@@ -19,6 +19,12 @@ export interface Backlink {
   linkText: string
   /** "wikilink" | "markdown" | "embed" — passed through from the kernel. */
   linkType: string
+  /** BL-049 phase 3 — anchor fragment carried by the source link.
+   *  `^<block-id>` for block-anchored links, the heading slug for
+   *  heading-anchored links, `null` for plain wikilinks. The view
+   *  surfaces a small pill so the user can tell *which* block /
+   *  section the source pointed at. */
+  fragment: string | null
 }
 
 interface BacklinksState {
