@@ -59,10 +59,7 @@ export function applyCodeFilter(
 }
 
 /** Extract a list of language tags present in a match's chunk
- *  text — used by the chip UI to surface "from rust", "from
- *  typescript" sub-filters once phase 3 of this track lands. For
- *  v1 the chip is binary (on/off) so this is exposed but
- *  unused. */
+ *  text — drives the BL-046 phase-3 per-language chip row. */
 export function extractCodeLanguages(match: RecallMatch): string[] {
   const text = match.chunk_text ?? ''
   if (!text) return []
@@ -73,4 +70,38 @@ export function extractCodeLanguages(match: RecallMatch): string[] {
   const fenceRe = /(?:^|\n)```([a-zA-Z][\w+-]*)/g
   while ((m = fenceRe.exec(text)) !== null) out.add(m[1].toLowerCase())
   return Array.from(out)
+}
+
+/** Roll up the languages present across a result set, sorted
+ *  alphabetically and deduplicated. Used by the chip row to know
+ *  which language pills to render for the *currently visible*
+ *  results — pills only appear for languages a user can actually
+ *  filter to. */
+export function availableLanguages(matches: RecallMatch[]): string[] {
+  const out = new Set<string>()
+  for (const m of matches) {
+    for (const lang of extractCodeLanguages(m)) out.add(lang)
+  }
+  return Array.from(out).sort()
+}
+
+/** OR-semantics language filter: when `languages` is non-empty,
+ *  keep only matches whose `extractCodeLanguages` intersects the
+ *  selected set. An empty selection is the unfiltered passthrough
+ *  (consistent with the chip-row idiom — clicking every chip off
+ *  is equivalent to no filter). Stable order — input order is
+ *  preserved. */
+export function applyLanguageFilter(
+  matches: RecallMatch[],
+  languages: readonly string[],
+): RecallMatch[] {
+  if (languages.length === 0) return matches
+  const wanted = new Set(languages.map((l) => l.toLowerCase()))
+  return matches.filter((m) => {
+    const langs = extractCodeLanguages(m)
+    for (const l of langs) {
+      if (wanted.has(l)) return true
+    }
+    return false
+  })
 }

@@ -19,7 +19,7 @@
 
 import { useEffect, useRef } from 'react'
 import { useRecallStore } from './recallStore'
-import { applyCodeFilter } from './codeFilter'
+import { applyCodeFilter, applyLanguageFilter, availableLanguages } from './codeFilter'
 import {
   cancelPendingSearch,
   copySelectedSnippet,
@@ -82,14 +82,19 @@ function ResultRow({
 function ResultList() {
   const rawResults = useRecallStore((s) => s.results)
   const codeOnly = useRecallStore((s) => s.codeOnly)
+  const selectedLanguages = useRecallStore((s) => s.selectedLanguages)
   const selectedIndex = useRecallStore((s) => s.selectedIndex)
   const status = useRecallStore((s) => s.status)
   const error = useRecallStore((s) => s.error)
   const setSelectedIndex = useRecallStore((s) => s.setSelectedIndex)
-  // BL-046 phase 2 — filter chip applied at render time. Keeping
-  // `results` in the store unfiltered means toggling the chip off
-  // restores the full list without a re-fetch.
-  const results = applyCodeFilter(rawResults, codeOnly)
+  // BL-046 phase 2 — code-only filter chip applied at render
+  // time. Keeping `results` in the store unfiltered means toggling
+  // a chip off restores the prior list without a re-fetch. Phase 3
+  // composes the language refinement on top.
+  const results = applyLanguageFilter(
+    applyCodeFilter(rawResults, codeOnly),
+    selectedLanguages,
+  )
 
   if (status === 'error' && error) {
     return (
@@ -280,17 +285,33 @@ export function RecallOverlay() {
   )
 }
 
-/** BL-046 phase 2 — filter-chip row above the result list. v1
- *  ships a single binary "From project" chip; phase 3 will fan
- *  it out to per-language chips driven by the captures present
- *  in the active result set. */
+/** BL-046 phase 2/3 — filter-chip row above the result list. The
+ *  parent "From project" chip narrows to code captures; below it,
+ *  phase-3 language pills appear for each language present in the
+ *  code-only-filtered result set. Each language pill toggles
+ *  inclusion in `selectedLanguages` (OR semantics). The pills only
+ *  show when "From project" is on so the chip row has a coherent
+ *  hierarchy — flipping the parent chip off also wipes any active
+ *  language refinement (handled in `setCodeOnly`). */
 function FilterChips() {
+  const rawResults = useRecallStore((s) => s.results)
   const codeOnly = useRecallStore((s) => s.codeOnly)
   const setCodeOnly = useRecallStore((s) => s.setCodeOnly)
+  const selectedLanguages = useRecallStore((s) => s.selectedLanguages)
+  const toggleLanguage = useRecallStore((s) => s.toggleLanguage)
+
+  // Languages are derived from the code-only-filtered slice — that
+  // way every pill corresponds to an actual filterable language in
+  // the *currently visible* result set.
+  const languages = codeOnly
+    ? availableLanguages(applyCodeFilter(rawResults, true))
+    : []
+
   return (
     <div
       style={{
         display: 'flex',
+        flexWrap: 'wrap',
         gap: 6,
         padding: '0 16px 8px',
         fontFamily: 'var(--f-ui)',
@@ -313,6 +334,28 @@ function FilterChips() {
       >
         From project
       </button>
+      {languages.map((lang) => {
+        const active = selectedLanguages.includes(lang)
+        return (
+          <button
+            key={lang}
+            type="button"
+            aria-pressed={active}
+            onClick={() => toggleLanguage(lang)}
+            title={`Limit code captures to ${lang}`}
+            style={{
+              padding: '2px 10px',
+              borderRadius: 999,
+              border: '1px solid var(--line-soft)',
+              background: active ? 'var(--accent, #4c8bf5)' : 'var(--bg-raised)',
+              color: active ? 'var(--bg-base, #fff)' : 'var(--fg)',
+              cursor: 'pointer',
+            }}
+          >
+            {lang}
+          </button>
+        )
+      })}
     </div>
   )
 }

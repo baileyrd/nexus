@@ -18,6 +18,7 @@ use crate::block::{now_ms, Block, BlockId, BlockType, DocumentMetadata, FileType
 use crate::error::{EditorError, Result};
 use crate::tree::BlockTree;
 
+use super::database_view_spec::{bare_database_view_target, parse_database_view_spec};
 use super::id::{deterministic_block_id, parse_stable_id_marker, strip_trailing_stable_id_marker};
 use super::inline::collect_inline;
 use super::ParseOptions;
@@ -161,6 +162,26 @@ impl Walker<'_, '_> {
             NodeValue::Paragraph => {
                 let (raw, mut anns) = collect_inline(node);
                 let content = self.strip_inline_stamp(raw, &mut anns);
+
+                // Promote a bare `[[{db:…}]]` paragraph to a
+                // DatabaseView block (BL-012 close-out). Order matters
+                // — the embed check below would otherwise consume any
+                // `![[…]]` shape, but the database-view syntax has no
+                // bang prefix so the two paths can't collide. A
+                // malformed spec (empty path, traversal, unknown view)
+                // falls through to the regular paragraph path so the
+                // user sees their typed source verbatim and can fix it
+                // inline.
+                if let Some(spec) = bare_database_view_target(&content) {
+                    if let Ok((database_path, view_config)) = parse_database_view_spec(spec) {
+                        let block = self.new_block(BlockType::DatabaseView {
+                            database_path,
+                            view_config,
+                        });
+                        self.insert_block(block, parent);
+                        return;
+                    }
+                }
 
                 // Promote a bare `![[target]]` paragraph to an Embed block.
                 if let Some(embed_url) = bare_embed_target(&content) {

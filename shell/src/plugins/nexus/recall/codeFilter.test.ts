@@ -6,6 +6,8 @@ import assert from 'node:assert/strict'
 
 import {
   applyCodeFilter,
+  applyLanguageFilter,
+  availableLanguages,
   extractCodeLanguages,
   isCodeCaptureMatch,
 } from './codeFilter.ts'
@@ -138,4 +140,121 @@ test('store: open() resets codeOnly to false', () => {
   useRecallStore.setState({ codeOnly: true })
   useRecallStore.getState().open()
   assert.equal(useRecallStore.getState().codeOnly, false)
+})
+
+// ── BL-046 phase 3: availableLanguages / applyLanguageFilter ───────────────
+
+test('availableLanguages: rolls up tags + fences across the result set, sorted + deduped', () => {
+  const out = availableLanguages([
+    match('thought one'), // no langs
+    match('#code/rust\nfn x() {}', 'a.md'),
+    match('File: b.ts\n```typescript\nconst x = 1\n```', 'b.md'),
+    match('#code/Rust\nlater', 'c.md'), // case-insensitive dedup
+  ])
+  assert.deepEqual(out, ['rust', 'typescript'])
+})
+
+test('availableLanguages: empty input → empty list', () => {
+  assert.deepEqual(availableLanguages([]), [])
+})
+
+test('applyLanguageFilter: empty selection is a passthrough', () => {
+  const list = [match('#code/rust\nfn x() {}'), match('thought')]
+  assert.equal(applyLanguageFilter(list, []), list)
+})
+
+test('applyLanguageFilter: OR semantics across selected languages, preserves order', () => {
+  const a = match('#code/rust\nfn x() {}', 'a.md')
+  const b = match('thought', 'b.md')
+  const c = match('File: c.ts\n```typescript\nconst x = 1\n```', 'c.md')
+  const d = match('#code/python\nprint(1)', 'd.md')
+  const out = applyLanguageFilter([a, b, c, d], ['rust', 'typescript'])
+  assert.deepEqual(out, [a, c])
+})
+
+test('applyLanguageFilter: case-insensitive selection match', () => {
+  const a = match('#code/rust\nfn x() {}', 'a.md')
+  // Selection comes from the chip row already lowercased, but
+  // `applyLanguageFilter` lowercases on entry too as belt-and-
+  // braces — match either casing.
+  assert.deepEqual(applyLanguageFilter([a], ['Rust']), [a])
+})
+
+// ── BL-046 phase 3: store.toggleLanguage ───────────────────────────────────
+
+test('store: toggleLanguage adds, then removes, on alternating clicks', () => {
+  useRecallStore.setState({
+    visible: true,
+    query: '',
+    results: [
+      match('#code/rust\nfn x() {}', 'a.md'),
+      match('File: b.ts\n```typescript\nconst x = 1\n```', 'b.md'),
+    ],
+    selectedIndex: 0,
+    status: 'idle',
+    error: null,
+    currentRequestId: null,
+    codeOnly: true,
+    selectedLanguages: [],
+  })
+  useRecallStore.getState().toggleLanguage('rust')
+  assert.deepEqual(useRecallStore.getState().selectedLanguages, ['rust'])
+  useRecallStore.getState().toggleLanguage('typescript')
+  assert.deepEqual(
+    useRecallStore.getState().selectedLanguages.sort(),
+    ['rust', 'typescript'],
+  )
+  useRecallStore.getState().toggleLanguage('rust')
+  assert.deepEqual(useRecallStore.getState().selectedLanguages, ['typescript'])
+})
+
+test('store: toggleLanguage normalises casing so duplicates do not accumulate', () => {
+  useRecallStore.setState({
+    selectedLanguages: [],
+    results: [],
+    codeOnly: true,
+    selectedIndex: 0,
+  })
+  useRecallStore.getState().toggleLanguage('Rust')
+  useRecallStore.getState().toggleLanguage('rust') // same chip — should remove
+  assert.deepEqual(useRecallStore.getState().selectedLanguages, [])
+})
+
+test('store: toggleLanguage reclamps selectedIndex when the visible set shrinks', () => {
+  useRecallStore.setState({
+    visible: true,
+    query: '',
+    results: [
+      match('#code/rust\nfn x() {}', 'a.md'),
+      match('File: b.ts\n```typescript\nconst x = 1\n```', 'b.md'),
+      match('#code/python\nprint(1)', 'c.md'),
+    ],
+    selectedIndex: 2,
+    status: 'idle',
+    error: null,
+    currentRequestId: null,
+    codeOnly: true,
+    selectedLanguages: [],
+  })
+  useRecallStore.getState().toggleLanguage('rust')
+  // After toggle: visible = [rust capture]; selection clamps to 0.
+  assert.equal(useRecallStore.getState().selectedIndex, 0)
+})
+
+test('store: setCodeOnly(false) clears any active language refinement', () => {
+  useRecallStore.setState({
+    codeOnly: true,
+    selectedLanguages: ['rust', 'typescript'],
+    results: [match('#code/rust\nfn x() {}')],
+    selectedIndex: 0,
+  })
+  useRecallStore.getState().setCodeOnly(false)
+  assert.equal(useRecallStore.getState().codeOnly, false)
+  assert.deepEqual(useRecallStore.getState().selectedLanguages, [])
+})
+
+test('store: open() resets selectedLanguages to []', () => {
+  useRecallStore.setState({ selectedLanguages: ['rust'] })
+  useRecallStore.getState().open()
+  assert.deepEqual(useRecallStore.getState().selectedLanguages, [])
 })
