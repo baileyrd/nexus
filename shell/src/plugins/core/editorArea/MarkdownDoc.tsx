@@ -65,7 +65,7 @@ export function MarkdownDoc({ source, title, onHeadings, onActiveHeading }: Prop
 
 interface Rendered { html: string; headings: Heading[] }
 
-function renderMarkdown(src: string): Rendered {
+export function renderMarkdown(src: string): Rendered {
   const lines = src.replace(/\r\n/g, '\n').split('\n')
   const out: string[] = []
   const headings: Heading[] = []
@@ -172,7 +172,7 @@ function inline(text: string): string {
   s = s.replace(/(^|\W)\*([^*\n]+)\*(?=\W|$)/g, (_m, p, t) => `${p}<em>${t}</em>`)
   // [text](url)
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
-    (_m, t, u) => `<a href="${u}" target="_blank" rel="noreferrer">${t}</a>`)
+    (_m, t, u) => `<a href="${safeUrl(u)}" target="_blank" rel="noreferrer">${t}</a>`)
   return s
 }
 
@@ -185,6 +185,42 @@ function escapeHtml(s: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+// URL-scheme allowlist for `[text](url)` link rendering. Reject any
+// scheme that can execute script (`javascript:`, `data:`, `vbscript:`,
+// `file:`, ...) by collapsing it to a harmless `#`. Allow:
+//   - http: / https: / mailto: (the schemes a markdown document
+//     legitimately uses)
+//   - fragment-only (`#anchor`), root-relative (`/path`), and explicit
+//     relative paths (`./` / `../`)
+//   - scheme-less relative paths (no `:` before the first `/` or `?`)
+//
+// `target="_blank" rel="noreferrer"` does NOT neutralize `javascript:`
+// hrefs in modern browsers, so attribute hygiene alone is insufficient.
+// See issue #76.
+export function safeUrl(raw: string): string {
+  const url = raw.trim()
+  if (
+    url.startsWith('#') ||
+    url.startsWith('/') ||
+    url.startsWith('./') ||
+    url.startsWith('../')
+  ) {
+    return url
+  }
+  const schemeMatch = url.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/)
+  if (schemeMatch) {
+    const scheme = schemeMatch[1].toLowerCase()
+    if (scheme === 'http' || scheme === 'https' || scheme === 'mailto') {
+      return url
+    }
+    return '#'
+  }
+  // No scheme prefix at all — treat as a scheme-less relative path.
+  return url
 }
 
 function slugify(s: string): string {
