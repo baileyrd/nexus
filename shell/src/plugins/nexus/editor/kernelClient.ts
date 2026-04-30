@@ -23,6 +23,7 @@ const CMD = {
   redo: 'redo',
   getMarkdown: 'get_markdown',
   stampBlock: 'stamp_block',
+  executeDatabaseView: 'execute_database_view',
 } as const
 
 /** Result of a `stamp_block` IPC call. Mirrors the Rust handler's
@@ -124,6 +125,95 @@ export class EditorKernelClient {
       relpath,
       block_id: blockId,
     })
+  }
+
+  /**
+   * Resolve an inline `[[{db:query}]]` block by loading the target
+   * `.bases` directory and running its [`DatabaseViewConfig`] through
+   * `com.nexus.database::apply_view`. Returns the structured view layout
+   * (`applied`) plus the base's [`BaseSchema`] so the renderer can format
+   * cells without a second IPC roundtrip.
+   *
+   * Read-only — does not touch any editor session and emits no
+   * `com.nexus.editor.changed.*` event. BL-012 split 1 backs this.
+   */
+  executeDatabaseView(
+    databasePath: string,
+    viewConfig: DatabaseViewConfig,
+  ): Promise<ExecuteDatabaseViewResponse> {
+    return this.api.invoke<ExecuteDatabaseViewResponse>(
+      EDITOR_PLUGIN_ID,
+      CMD.executeDatabaseView,
+      { database_path: databasePath, view_config: viewConfig },
+    )
+  }
+}
+
+// ── execute_database_view wire types ────────────────────────────────────────
+
+/** Visual layout variants for an inline database-view block — mirrors
+ *  the Rust `DatabaseViewType` discriminated union (snake_case `kind`).
+ *  See `crates/nexus-editor/src/block.rs:340`. */
+export type DatabaseViewType =
+  | { kind: 'table' }
+  | { kind: 'kanban'; column_by: string }
+  | { kind: 'calendar'; date_field: string }
+  | { kind: 'gallery'; title_field: string }
+  | { kind: 'custom'; 0: string }
+
+/** Config for a `BlockType::DatabaseView` — mirrors the Rust
+ *  `DatabaseViewConfig`. Filters and sorts are user-typed strings; the
+ *  Rust executor (BL-012 split 1) parses them into structured rules
+ *  before handing off to `apply_view`. */
+export interface DatabaseViewConfig {
+  view_type: DatabaseViewType
+  filters: string[]
+  sorts: string[]
+  group_by: string | null
+  hidden_columns: string[]
+}
+
+/** A single record after `apply_view` ran. Field map follows
+ *  `nexus_types::bases::BaseRecord` — `id` plus arbitrary user fields
+ *  spread at the top level via `#[serde(flatten)]`. */
+export interface AppliedRecord {
+  id: string
+  deletedAt?: number | null
+  [field: string]: unknown
+}
+
+/** A grouped bucket emitted by Kanban / Calendar / List / Timeline
+ *  layouts — `key` is the discriminator value (or the `(none)`
+ *  sentinel from `MISSING_GROUP_KEY` in the Rust side). */
+export interface AppliedGroup {
+  key: string
+  records: AppliedRecord[]
+}
+
+/** Layout payload returned by `apply_view`. Either a flat record list
+ *  (Table / Gallery) or a list of grouped buckets (Kanban / Calendar /
+ *  List / Timeline). */
+export type AppliedLayout =
+  | { kind: 'flat'; records: AppliedRecord[] }
+  | { kind: 'grouped'; groups: AppliedGroup[] }
+
+/** Result of `apply_view` — preserves the view metadata so the
+ *  renderer can pick a layout-specific component without reparsing
+ *  the source config. */
+export interface AppliedView {
+  view_name: string
+  view_type: 'table' | 'kanban' | 'calendar' | 'gallery' | 'list' | 'timeline'
+  fields: string[]
+  layout: AppliedLayout
+}
+
+/** Response shape of `execute_database_view` — mirrors the Rust
+ *  `crates/nexus-editor/src/database_view.rs:ExecuteDatabaseViewResponse`. */
+export interface ExecuteDatabaseViewResponse {
+  applied: AppliedView
+  schema: {
+    version: string
+    fields: Record<string, unknown>
   }
 }
 

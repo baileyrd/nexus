@@ -101,3 +101,55 @@
   padding: 0.4em 0.6em;
   border-radius: 4px;
 }
+
+/* BL-012 split 2 — inline `[[{db:query}]]` database-view widget. */
+.cm-content .cm-md-dbview-widget {
+  margin: 0.4em 0;
+}
+.cm-content .cm-md-dbview-table {
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+.cm-content .cm-md-dbview-table th,
+.cm-content .cm-md-dbview-table td {
+  border: 1px solid var(--line-soft);
+  padding: 4px 8px;
+  text-align: left;
+}
+.cm-content .cm-md-dbview-table thead th {
+  background: var(--bg-raised);
+  font-weight: 600;
+}
+.cm-content .cm-md-dbview-pending {
+  color: var(--fg-muted);
+  font-style: italic;
+  padding: 0.4em 0.6em;
+}
+.cm-content .cm-md-dbview-empty {
+  color: var(--fg-muted);
+  padding: 0.3em 0.6em;
+}
+.cm-content .cm-md-dbview-grouped .cm-md-dbview-group {
+  margin: 0.6em 0;
+}
+.cm-content .cm-md-dbview-group-heading {
+  margin: 0 0 0.3em 0;
+  font-size: 0.9em;
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+.cm-content .cm-md-dbview-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--risk, var(--line-soft));
+  border-radius: 4px;
+  background: var(--bg-raised);
+  font-size: 0.9em;
+}
+.cm-content .cm-md-dbview-error-tag {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.8em;
+}
