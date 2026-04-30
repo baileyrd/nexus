@@ -62,7 +62,18 @@ function showFatal(message: string) {
   `
 }
 
-async function boot() {
+async function boot(opts: { popoutMode?: boolean } = {}) {
+  const popoutMode = opts.popoutMode === true
+
+  // BL-029 Phase 2b — set the popoutMode context key BEFORE plugin
+  // activation so plugins (`nexus.workspace` chiefly) can adapt their
+  // boot path. ADR 0020 §1: the popout boots the same DEFAULT_ON
+  // plugin set as the main window, but skips kernel-lifecycle calls
+  // (the kernel is owned by the main window via Tauri managed state).
+  if (popoutMode) {
+    contextKeyService.set('popoutMode', true)
+  }
+
   const reg  = new PluginRegistry()
   const host = new ExtensionHost(reg)
 
@@ -186,6 +197,17 @@ async function boot() {
   })
 
   // ── Community plugins ──────────────────────────────────────────────────────
+  // ADR 0020 §1 — popouts skip the community-plugin scan + install-time
+  // consent + sandbox orchestrator. Community plugins primarily contribute
+  // to the main-window chrome and the sandbox bootstrap is non-trivial cost
+  // we pay once per JS context. Popout mode short-circuits to the slot
+  // summary + popout-close listener so the rest of the boot tail still
+  // runs.
+  if (popoutMode) {
+    contextKeyService.set('shellReady', true)
+    return
+  }
+
   // Scan for community plugins AFTER core loads so core services are available
   const communityManifests = await scanCommunityPlugins()
 
@@ -371,6 +393,15 @@ if (isPopoutMode()) {
       <PopoutShell />
     </React.StrictMode>,
   )
+  // BL-029 Phase 2b — run the slimmed-down boot so plugin view creators
+  // are registered before `PopoutShell` hydrates the workspace and mounts
+  // its leaf. The popout's React tree gates rendering on `shellReady`
+  // (set by `boot()` after `host.loadAll`) the same way `<App>` does.
+  boot({ popoutMode: true }).catch((err) => {
+    const stack = err instanceof Error ? (err.stack ?? err.message) : String(err)
+    console.error('[Boot/popout] Fatal:', err)
+    showFatal(stack)
+  })
 } else {
   // Mount React IMMEDIATELY so the user sees SOMETHING even if boot fails mid-way.
   // App renders a "Loading plugins..." placeholder until slots populate.

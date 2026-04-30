@@ -80,6 +80,13 @@ export const workspacePlugin: Plugin = {
     // On boot failure the store is force-cleared to null and the original
     // error is re-thrown so callers (e.g. nexus.launcher) can decide not to
     // record the path into their recents list.
+    // BL-029 Phase 2b — popout webviews share the main window's already-
+    // booted kernel via Tauri managed state. The popout MUST NOT issue
+    // `init_forge` / `boot_kernel` / `shutdown_kernel` (the latter would
+    // tear down the main window's kernel). In popout mode `setRoot` is a
+    // pure UI-state sync.
+    const popoutMode = api.context.get('popoutMode') === true
+
     const setRoot = async (path: string | null): Promise<void> => {
       const prev = useWorkspaceStore.getState().rootPath
 
@@ -95,8 +102,9 @@ export const workspacePlugin: Plugin = {
       }
 
       // Shut down the previous kernel first if one is booted — covers both
-      // the switch (path → other) and close (path → null) cases.
-      if (prev !== null) {
+      // the switch (path → other) and close (path → null) cases. Skipped
+      // in popout mode (kernel is owned by the main window).
+      if (prev !== null && !popoutMode) {
         try {
           await invoke('shutdown_kernel')
         } catch (err) {
@@ -104,7 +112,7 @@ export const workspacePlugin: Plugin = {
         }
       }
 
-      if (path !== null) {
+      if (path !== null && !popoutMode) {
         try {
           await invoke('init_forge', { path })
           // In the e2e harness the Rust `setup` hook may have already

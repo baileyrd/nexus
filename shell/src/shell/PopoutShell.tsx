@@ -6,27 +6,28 @@
 // for the `popout` query param and mounts this component instead of
 // the full `<App>`.
 //
-// Phase 2a scope (this commit): wire the close-request sync so the
-// main window's `floating[]` state stays consistent when the user
-// closes a popout via the OS-X button (or any other native close
-// path). The full popout-side leaf hydration — running plugin
-// activation in the popout webview, hydrating workspace.json, and
-// mounting a `LeafHost` for the requested leaf — is staged in Phase
-// 2b. ADR 0020 documents the design decisions for both slices.
-//
-// Why close-event sync ships ahead of leaf rendering:
-//  - It validates the cross-window architecture from ADR 0020 §2/§3
-//    end-to-end (Tauri global events + main-window listener +
-//    workspace-store mutation).
-//  - Without it, closing a popout via OS-X leaves a stale entry in
-//    `floating[]`, which the next main-window reload tries to
-//    re-open — a real bug surfaced once Phase 1 landed.
-//  - It is a self-contained, testable change that does not require
-//    the popout to boot the plugin host.
+// Phase 2a (shipped 2026-04-30) wired the close-request handshake.
+// Phase 2b (this commit) lights up actual leaf rendering: the popout
+// boots the DEFAULT_ON plugin set with `popoutMode = true` set on the
+// shared context key service (so `nexus.workspace` skips kernel
+// lifecycle calls — see ADR 0020 §1), waits for `shellReady`, hydrates
+// its own copy of `workspace.json` read-only, locates the requested
+// FloatingWindow / leaf, and mounts a single `LeafHost` for it. ADR
+// 0020 §4 — popouts fail closed: an unresolvable fwId or leafId
+// renders an explicit error state instead of silently falling back.
 
-import React, { useEffect } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { emit } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { useContextKey } from '../host/ContextKeyService'
+import { useWorkspaceStore as useNexusWorkspaceStore } from '../plugins/nexus/workspace/workspaceStore'
+import {
+  workspace as workspaceStore,
+  useWorkspaceStore,
+} from '../workspace/workspaceStore'
+import { LeafHost } from '../workspace/WorkspaceRenderer'
+import { buildDefaultLayout, loadWorkspace } from '../workspace'
+import type { Leaf, FloatingWindow, WorkspaceParent } from '../workspace/types'
 
 /** Tauri-app event emitted by a popout right before it closes. The
  *  main window listens for this and removes the matching
@@ -53,15 +54,6 @@ function readPopoutInfo(): PopoutInfo | null {
  * `nexus:popout-closed` with the popout's fwId before letting the
  * close proceed. ADR 0020 §3: closing a popout removes the leaf from
  * `floating[]`; the kernel session keeps unsaved buffer state alive.
- *
- * The Tauri event is global (no `target`), so the main window's
- * `listen('nexus:popout-closed', ...)` picks it up regardless of
- * which popout fired it.
- *
- * Failures are logged and ignored — a popout that can't notify the
- * main window still has to close (the user expects OS-X to work),
- * and the next `restoreFloatingWindows()` reconciliation on a main-
- * window reload will close the orphan record anyway.
  */
 async function installCloseHandshake(fwId: string): Promise<() => void> {
   try {
@@ -79,10 +71,140 @@ async function installCloseHandshake(fwId: string): Promise<() => void> {
   }
 }
 
-export function PopoutShell(): JSX.Element {
-  const info = readPopoutInfo()
+/**
+ * Walk a node and return the first Leaf with the given id. Used to
+ * resolve the popout's `leafId` URL param against the FloatingWindow
+ * subtree we just hydrated. Returns null if no match.
+ */
+export function findLeafInNode(node: WorkspaceParent, leafId: string): Leaf | null {
+  if (node.kind === 'tabs') {
+    return node.leaves.find((l) => l.id === leafId) ?? null
+  }
+  if (node.kind === 'split') {
+    for (const child of node.children) {
+      const hit = findLeafInNode(child, leafId)
+      if (hit) return hit
+    }
+    return null
+  }
+  const withChild = node as { child?: WorkspaceParent }
+  if (withChild.child) return findLeafInNode(withChild.child, leafId)
+  return null
+}
 
+type Resolution =
+  | { kind: 'pending' }
+  | { kind: 'ready'; leaf: Leaf }
+  | { kind: 'error'; reason: string }
+
+/**
+ * Hydrate the popout's per-window workspace store from
+ * `<forge>/.forge/workspace.json` (read-only — main window owns the
+ * write side per ADR 0020 §1) and locate the leaf indicated by the
+ * URL params.
+ *
+ * Failure modes (each maps to ADR 0020 §4):
+ *  - workspace.json missing / malformed → fall back to the default
+ *    layout, then fail closed because the FW will not exist there.
+ *  - fwId not in `floating[]` → "out of sync, close to continue".
+ *  - leafId not under the FW (or FW lost its leaf) → same error.
+ */
+async function resolveLeaf(
+  rootPath: string,
+  fwId: string,
+  leafId: string | null,
+): Promise<Resolution> {
+  const saved = await loadWorkspace(rootPath)
+  const json = saved ?? buildDefaultLayout()
+  await workspaceStore.hydrate(json)
+
+  const fw: FloatingWindow | null = workspaceStore.findFloatingWindow(fwId)
+  if (!fw) {
+    return {
+      kind: 'error',
+      reason: `Popout window ${fwId} is not in the workspace state.`,
+    }
+  }
+
+  if (!leafId) {
+    return {
+      kind: 'error',
+      reason: 'Popout URL is missing the leaf id.',
+    }
+  }
+  const leaf = findLeafInNode(fw, leafId)
+  if (!leaf) {
+    return {
+      kind: 'error',
+      reason: `Leaf ${leafId} is not present in popout ${fwId}.`,
+    }
+  }
+  return { kind: 'ready', leaf }
+}
+
+interface PopoutBodyProps {
+  resolution: Resolution
+}
+
+function PopoutBody({ resolution }: PopoutBodyProps): JSX.Element {
+  if (resolution.kind === 'pending') {
+    return (
+      <div style={popoutInfoStyle}>
+        <div style={popoutTitleStyle}>Loading popout…</div>
+      </div>
+    )
+  }
+  if (resolution.kind === 'error') {
+    return (
+      <div style={popoutInfoStyle}>
+        <div style={popoutTitleStyle}>Popout out of sync</div>
+        <div style={{ fontSize: 12, opacity: 0.7, maxWidth: 420 }}>
+          {resolution.reason}
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.5, marginTop: 12 }}>
+          Close this window to continue.
+        </div>
+      </div>
+    )
+  }
+  return <LeafHost leaf={resolution.leaf} hidden={false} />
+}
+
+const popoutInfoStyle: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+  background: 'var(--background-primary, #1e1e1e)',
+  color: 'var(--text-normal, #ccc)',
+  fontFamily: 'system-ui, sans-serif',
+  padding: 24,
+  textAlign: 'center',
+}
+
+const popoutTitleStyle: React.CSSProperties = {
+  fontSize: 14,
+  fontWeight: 600,
+}
+
+export function PopoutShell(): JSX.Element {
+  const info = useMemo(() => readPopoutInfo(), [])
   const fwId = info?.fwId ?? null
+  const leafId = info?.leafId ?? null
+
+  // shellReady flips to true in main.tsx boot() AFTER every plugin has
+  // activated. Same gate App.tsx uses, for the same reason: every
+  // viewRegistry.register(...) call has run before we hydrate so saved
+  // leaves resolve their creator instead of falling back to `empty`.
+  const shellReady = useContextKey('shellReady') === true
+  const rootPath = useNexusWorkspaceStore((s) => s.rootPath)
+
+  const [resolution, setResolution] = useState<Resolution>({ kind: 'pending' })
+
+  // Close-event handshake — runs once, regardless of resolution outcome.
   useEffect(() => {
     if (!fwId) return
     let dispose: (() => void) | null = null
@@ -94,41 +216,61 @@ export function PopoutShell(): JSX.Element {
     }
   }, [fwId])
 
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        background: 'var(--background-primary, #1e1e1e)',
-        color: 'var(--text-normal, #ccc)',
-        fontFamily: 'system-ui, sans-serif',
-        padding: 24,
-        textAlign: 'center',
-      }}
-    >
-      <div style={{ fontSize: 14, fontWeight: 600 }}>Nexus Popout</div>
-      <div style={{ fontSize: 12, opacity: 0.7 }}>
-        Popout window initialized.
-      </div>
-      <div style={{ fontSize: 11, opacity: 0.5, fontFamily: 'monospace' }}>
-        fwId: {info?.fwId ?? '(none)'}
-        <br />
-        leafId: {info?.leafId ?? '(none)'}
-      </div>
-      <div style={{ fontSize: 11, opacity: 0.4, marginTop: 16, maxWidth: 360 }}>
-        Detached panel rendering will land in BL-029 Phase 2b. The host
-        kernel and IPC are already reachable from this window via
-        <code> kernel_invoke</code>; the close handshake is wired so
-        OS-X cleanly removes this popout from the main window's
-        floating[] state (ADR 0020 §3).
-      </div>
-    </div>
-  )
+  // Hydrate workspace + locate leaf, once `shellReady` and `rootPath`
+  // are both available. The popout never re-runs hydration on a
+  // workspace switch (the popout closes when the user closes its
+  // parent forge in the main window — main triggers
+  // `closeFloatingWindow` for every fw before its `setRoot(null)`).
+  useEffect(() => {
+    if (!fwId) {
+      setResolution({
+        kind: 'error',
+        reason: 'Popout URL is missing the fwId.',
+      })
+      return
+    }
+    if (!shellReady) return
+    if (rootPath === null) return
+    if (resolution.kind !== 'pending') return
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const next = await resolveLeaf(rootPath, fwId, leafId)
+        if (cancelled) return
+        setResolution(next)
+      } catch (err) {
+        if (cancelled) return
+        console.error('[PopoutShell] resolveLeaf failed', err)
+        setResolution({
+          kind: 'error',
+          reason: `Failed to load workspace state: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [shellReady, rootPath, fwId, leafId, resolution.kind])
+
+  // Subscribe to layout-change so the popout reacts when the main
+  // window edits `floating[]` and our FW disappears (e.g. user closed
+  // it from the main window's tab strip). Re-resolves and surfaces the
+  // stale-leaf error state per ADR 0020 §4.
+  const floating = useWorkspaceStore((s) => s.floating)
+  useEffect(() => {
+    if (resolution.kind !== 'ready' || !fwId) return
+    const stillThere = floating.some((fw) => fw.id === fwId)
+    if (!stillThere) {
+      setResolution({
+        kind: 'error',
+        reason: `Popout ${fwId} was closed by the main window.`,
+      })
+    }
+  }, [floating, fwId, resolution.kind])
+
+  return <PopoutBody resolution={resolution} />
 }
 
 /**
