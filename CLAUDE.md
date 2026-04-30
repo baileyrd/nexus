@@ -37,7 +37,7 @@ The other `scripts/test_*.sh` and `scripts/check_*.sh` helpers are thin wrappers
 
 ## Architecture
 
-Nexus is a **microkernel** Rust workspace. Read `docs/ARCHITECTURE.md` and the ADRs under `docs/adr/` (especially 0004, 0005, 0011, 0016) before making structural changes.
+Nexus is a **microkernel** Rust workspace. Read `docs/architecture/C4.md`, `docs/architecture/invariants.md`, and the ADRs under `docs/adr/` (especially 0004, 0005, 0011, 0016) before making structural changes. The doc index is at `docs/README.md`; for "what's actually shipped right now" see `docs/PRDs/IMPLEMENTATION_STATUS.md`.
 
 **Four invariants drive the shape of the system:**
 
@@ -54,7 +54,7 @@ Nexus is a **microkernel** Rust workspace. Read `docs/ARCHITECTURE.md` and the A
 
 - `crates/nexus-kernel/` — event bus, IPC dispatcher, capability system, plugin lifecycle. Keep small.
 - `crates/nexus-storage/` — file-as-truth, SQLite, Tantivy, file watcher, knowledge graph. Owns the forge.
-- `crates/nexus-<service>/` — service plugins (`ai`, `agent`, `editor`, `git`, `linkpreview`, `mcp`, `skills`, `terminal`, `theme`, `workflow`, `database`, `kv`, `security`, `formats`, `panic-log`). Each is a `CorePlugin` registered by `nexus-bootstrap` in deterministic order.
+- `crates/nexus-<service>/` — service plugins (`ai`, `agent`, `comments`, `editor`, `git`, `linkpreview`, `mcp`, `skills`, `terminal`, `theme`, `workflow`, `database`, `kv`, `security`, `formats`, `panic-log`). Each is a `CorePlugin` registered by `nexus-bootstrap` in deterministic order. The full Cargo workspace has 24 members; see `Cargo.toml` for the authoritative list (also includes `nexus-types`, `nexus-plugin-api`, and `nexus-plugins` which are libraries rather than service plugins).
 - `crates/nexus-bootstrap/` — the orchestrator. Frontends call `build_cli_runtime(forge_root)` / `build_tui_runtime(forge_root)` to get a `Runtime` (kernel + registered plugins + invoker context).
 - `crates/nexus-cli/` (`nexus`), `crates/nexus-tui/` (`nexus-tui`), `crates/nexus-mcp/` — frontends. They consume `nexus-bootstrap` and route through `context.ipc_call(...)`.
 - `shell/` + `shell/src-tauri/` (crate `nexus-shell`) — the **single** active desktop target per ADR 0011. The legacy tri-pane `app/` + `crates/nexus-app` was retired in v0.4.0 (recoverable via `v0.1.0-legacy-shell` git tag).
@@ -63,7 +63,7 @@ Nexus is a **microkernel** Rust workspace. Read `docs/ARCHITECTURE.md` and the A
 
 **Guardrails when adding features:**
 
-- New backend capability ⇒ add an IPC handler to the appropriate `nexus-<service>` crate so it's reachable from CLI, TUI, MCP, and the shell uniformly. Do **not** add bespoke `#[tauri::command]` handlers in `shell/src-tauri/`; the bridge is intentionally minimal (`init_forge`, `boot_kernel`, `kernel_invoke`, `kernel_subscribe`, `kernel_unsubscribe`, `kernel_is_booted`, `shutdown_kernel`).
+- New backend capability ⇒ add an IPC handler to the appropriate `nexus-<service>` crate so it's reachable from CLI, TUI, MCP, and the shell uniformly. Do **not** add bespoke `#[tauri::command]` handlers in `shell/src-tauri/` for new capability; route it through `kernel_invoke` → `ipc_call` instead. The Tauri bridge in `shell/src-tauri/src/lib.rs:443-466` registers 22 commands today, grouped by intent: 7 kernel (`init_forge`, `boot_kernel`, `kernel_invoke`, `kernel_subscribe`, `kernel_unsubscribe`, `kernel_is_booted`, `shutdown_kernel`), 5 plugin-management (`scan_plugin_directory`, `scan_plugin_directory_at`, `set_plugin_enabled`, `get_plugin_granted_capabilities`, `set_plugin_granted_capabilities`), 4 persistence (`get_shell_state`, `save_shell_state`, `write_last_forge_path`, `forget_forge_path`), 1 utility (`path_exists`), and 5 popout (`popout_window`, `close_popout_window`, `list_popout_windows`, `get_popout_window_bounds`, `set_popout_window_bounds`) per [ADR 0020](docs/adr/0020-popout-window-architecture.md). Adding a new shell-management command (popout, persistence, etc.) is OK if it's intrinsic to the host; adding a new feature command is not.
 - New UI ⇒ add a plugin under `shell/src/plugins/nexus/<feature>/`, not a hard-coded shell component.
 - If you change an IPC-boundary type (anything that flows through `ipc_call`), regenerate bindings with `scripts/check_ipc_drift.sh` before committing.
 

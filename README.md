@@ -6,21 +6,28 @@ The plugin-first desktop shell at [`shell/`](shell/) + [`shell/src-tauri/`](shel
 
 ## Architecture
 
-Nexus follows a **microkernel** design. A small core (kernel + event bus) coordinates independent subsystems, each in its own crate:
+Nexus follows a **microkernel** design. A small core (kernel + event bus) coordinates independent subsystems, each in its own crate. The Cargo workspace has 24 members; the most load-bearing are:
 
 ```
-nexus-kernel        Event bus, plugin lifecycle, capability enforcement
+nexus-kernel        Event bus, plugin lifecycle, capability enforcement, IPC dispatcher
 nexus-storage       File-as-truth, SQLite index, Tantivy FTS, file watcher, knowledge graph
 nexus-security      OS keyring credential vault, audit logging, path validation
 nexus-plugins       WASM sandbox (wasmtime), plugin manifests, hot-reload
-nexus-ai            Provider traits (Claude, OpenAI, Ollama, llama.cpp), embeddings, RAG
-nexus-mcp           MCP server over stdio — 13 tools for forge operations
-nexus-cli           `nexus` binary — headless CLI with full subcommands
+nexus-ai            Provider traits (Claude, OpenAI, Ollama, llama.cpp), embeddings (fastembed), RAG
+nexus-mcp           MCP server library — 15 nexus_* tools for forge operations
+nexus-cli           `nexus` binary — headless CLI with full subcommands (also hosts `nexus mcp`)
 nexus-tui           `nexus-tui` binary — ratatui-based terminal interface
+nexus-bootstrap     Runtime assembler (build_cli_runtime, build_tui_runtime, init_forge)
 nexus-theme         Theming engine: CSS variables, theme packages, layout, snippet cascade
-nexus-shell         Tauri 2 desktop shell (at `shell/`) — plugin-first, hosts `@nexus/extension-api`
-nexus-types         Shared type definitions
+nexus-shell         Tauri 2 desktop shell at `shell/` — plugin-first, hosts `@nexus/extension-api`
+nexus-types         Shared type definitions (leaf)
 ```
+
+Service plugins (each a `CorePlugin` registered by `nexus-bootstrap`):
+`nexus-agent`, `nexus-comments`, `nexus-database`, `nexus-editor`, `nexus-formats`,
+`nexus-git`, `nexus-kv`, `nexus-linkpreview`, `nexus-panic-log`, `nexus-skills`,
+`nexus-terminal`, `nexus-workflow`, plus `nexus-plugin-api` (SDK surface).
+See [`Cargo.toml`](Cargo.toml) for the authoritative list.
 
 The central concept is the **Forge** — a directory of markdown files that Nexus indexes, links, searches, and extends with AI. Files on disk are always the source of truth; the SQLite index is rebuildable.
 
@@ -100,7 +107,7 @@ Every visible UI element is a plugin contribution loaded by
 Start the MCP server for use with Claude Code, Cursor, or any MCP client:
 
 ```bash
-nexus mcp    # Serves 13 tools over stdio
+nexus mcp    # Serves 15 nexus_* tools over stdio
 ```
 
 ## CLI Reference
@@ -115,15 +122,33 @@ Global options:
   --no-color             Disable color output
 
 Commands:
-  forge    init, status
-  content  create, read, delete, search, tasks, task-toggle, links, backlinks, daily, export
-  graph    status, unresolved, neighbors
-  plugin   install, list, call, uninstall, scaffold
-  watch    Monitor filesystem changes (glob patterns)
-  logs     tail, show, path
-  ai       ask, embed, status, config
-  mcp      Start MCP server (stdio)
+  forge      init, status
+  content    create, read, delete, search, tasks, task-toggle, links,
+             backlinks, daily, export
+  graph      status, unresolved, neighbors
+  tags       list, locate
+  plugin     install, list, call, uninstall, scaffold, enable, disable,
+             reset, settings
+  skill      list, render
+  bases      query, validate
+  canvas     render
+  agent      run, list, history
+  workflow   run, list
+  db         query, schema (forge index introspection)
+  config     get, set, list
+  git        status, log, blame, diff
+  proc       list, kill (process manager via nexus-terminal)
+  term       saved, run (saved-command snippets)
+  watch      monitor filesystem changes (glob patterns)
+  logs       tail, show, path
+  ai         ask, embed, status, config
+  mcp        Start MCP server (stdio)
+  tui        Launch the terminal UI in the current terminal
+  desktop    Launch the Tauri desktop shell (forwards args to nexus-shell)
 ```
+
+For details on individual subcommands see [`docs/users/cli.md`](docs/users/cli.md)
+or run `nexus <subcommand> --help`.
 
 ## TUI Key Bindings
 
@@ -144,23 +169,26 @@ Commands:
 
 ## MCP Tools
 
-When running as an MCP server (`nexus mcp`), the following tools are exposed:
+When running as an MCP server (`nexus mcp`), the following 15 tools are exposed
+(authoritative source: `crates/nexus-mcp/src/server.rs`):
 
 | Tool | Description |
 |------|-------------|
-| `forge_read` | Read file content |
-| `forge_write` | Write/create file |
-| `forge_search` | Full-text search |
-| `note_create` | Create markdown note |
-| `note_delete` | Delete note |
-| `note_list` | List all notes |
-| `graph_status` | Knowledge graph stats |
-| `graph_unresolved` | Broken links |
-| `task_list` | List tasks |
-| `task_toggle` | Toggle task completion |
-| `search` | Scoped FTS (tag:, path:, prop:) |
-| `export_html` | Export note to HTML |
-| `plugin_call` | Invoke a plugin command |
+| `nexus_read_note` | Read a note's content by vault-relative path |
+| `nexus_create_note` | Create a new note with the given path and markdown content |
+| `nexus_update_note` | Update an existing note's content (creates if it does not exist) |
+| `nexus_delete_note` | Delete a note by vault-relative path |
+| `nexus_list_notes` | List notes in the forge, optionally filtered by a path prefix |
+| `nexus_search` | Full-text search across notes (rebuilds the search index before querying) |
+| `nexus_backlinks` | Find all notes that link to the specified note |
+| `nexus_outgoing_links` | Find all outgoing links from the specified note |
+| `nexus_graph_status` | Knowledge graph statistics: node count, edge count, unresolved links |
+| `nexus_list_tags` | List all occurrences of a tag by name across the forge |
+| `nexus_list_tasks` | List tasks (checkboxes) across notes with optional completed/file filters |
+| `nexus_toggle_task` | Toggle a task's completed/incomplete state by its database ID |
+| `nexus_ask` | Ask a question via RAG over your notes |
+| `nexus_list_skills` | List skills declared in the forge's `.forge/skills` directory |
+| `nexus_render_skill` | Render a skill template to its expanded prompt body |
 
 ## Plugin System
 

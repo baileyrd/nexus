@@ -36,11 +36,14 @@ History remains recoverable via git (`v0.1.0-legacy-shell` tag).
 - Add new UI as a plugin in `shell/src/plugins/nexus/<feature>/`. The
   shell itself starts empty — every visible element is a plugin
   contribution.
-- Do **not** reintroduce bespoke `#[tauri::command]` handlers in
-  `shell/src-tauri/`. The bridge is deliberately minimal (`init_forge`,
-  `boot_kernel`, `kernel_invoke`, `kernel_subscribe`,
-  `kernel_unsubscribe`, `kernel_is_booted`, `shutdown_kernel`);
-  capability belongs in a service crate behind IPC.
+- Do **not** add bespoke `#[tauri::command]` handlers in `shell/src-tauri/`
+  for new feature capability. Route it through `kernel_invoke` → `ipc_call`
+  in a service crate. The bridge today registers 22 commands
+  (`shell/src-tauri/src/lib.rs:443-466`), grouped by intent:
+  7 kernel, 5 plugin-management, 4 persistence, 1 utility, and 5 popout
+  (per [ADR 0020](docs/adr/0020-popout-window-architecture.md)). Shell-
+  intrinsic commands (popout, persistence) are fine; feature commands
+  belong in a service crate behind IPC.
 
 ---
 
@@ -50,28 +53,32 @@ History remains recoverable via git (`v0.1.0-legacy-shell` tag).
   plugin lifecycle. Small; keep it that way.
 - `crates/nexus-storage/` — file-as-truth, SQLite index, Tantivy
   full-text search, file watcher. Owns the forge.
-- `crates/nexus-<service>/` — service plugins (AI, agent, editor, git,
-  linkpreview, mcp, skills, terminal, theme, workflow, etc.). Each is a
-  `CorePlugin` registered by `nexus-bootstrap` in a deterministic order.
+- `crates/nexus-<service>/` — service plugins (AI, agent, comments,
+  editor, git, linkpreview, skills, terminal, theme, workflow, etc.).
+  Each is a `CorePlugin` registered by `nexus-bootstrap` in a
+  deterministic order. The full Cargo workspace is 24 crates; see
+  `Cargo.toml` for the authoritative list.
 - `crates/nexus-bootstrap/` — the orchestrator. Assembles a `Runtime`
   (kernel + registered plugins + invoker context) for any frontend.
-- `crates/nexus-cli/` / `crates/nexus-tui/` / `crates/nexus-mcp/` —
-  frontends that consume `nexus-bootstrap::build_*_runtime(forge_root)`
-  and route everything through `context.ipc_call(...)`.
+- `crates/nexus-cli/` / `crates/nexus-tui/` — frontends that consume
+  `nexus-bootstrap::build_*_runtime(forge_root)` and route everything
+  through `context.ipc_call(...)`. The MCP server is a `nexus mcp`
+  subcommand of the CLI (the `nexus-mcp` crate is a library only).
 - `shell/src-tauri/` (crate `nexus-shell`) — the active desktop Tauri
-  host. Thin bridge (`init_forge`, `boot_kernel`, `kernel_invoke`,
-  `kernel_subscribe`, `kernel_unsubscribe`, `kernel_is_booted`,
-  `shutdown_kernel`) + a handful of shell-side conveniences.
+  host. The bridge registers 22 commands (kernel / plugin-mgmt /
+  persistence / utility / popout) — see the guardrail above.
 - `shell/src/` — the active desktop frontend. `ExtensionHost` loads
   plugins from `shell/src/plugins/{core, nexus, community}/`. The shell
   starts **empty** — every visible UI element is a plugin contribution.
 - `packages/nexus-extension-api/` — the stable TypeScript contract for
-  shell plugin authors (`@nexus/extension-api`). Scaffolded; wire-in
-  pending.
+  shell plugin authors (`@nexus/extension-api`).
 
-Architectural decisions live in `docs/adr/`. Feature plans live in
-`docs/` (e.g. `leaf-architecture.md`, `shell-kernel-bridge-plan.md`,
-`canvas-shell-plan.md`, `bases-shell-plan.md`).
+Architectural decisions live in `docs/adr/`. Live, in-flight plans live
+in `docs/roadmap/` (post-migration carryover, formal-release deferred
+work, AI-roadmap exploratory designs). Foundational architecture lives
+in `docs/architecture/`. Historical / shipped plans are in
+`docs/archive/` — see [`docs/archive/README.md`](docs/archive/README.md)
+for the inventory and the convention.
 
 ---
 

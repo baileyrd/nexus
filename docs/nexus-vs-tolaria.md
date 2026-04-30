@@ -15,7 +15,7 @@ A side-by-side look at two markdown-knowledge-base projects on this machine. The
 | AI strategy | Multi-provider trait (Anthropic / OpenAI / Ollama / llama.cpp) with first-class RAG and an agent system | Spawns external **CLI agents** (Claude Code / Codex) — Tolaria itself stores no API keys |
 | Versioning | None built-in | **Git-first** — every vault is a git repo, with auto-commit / sync / pulse view |
 | Surfaces | `nexus` CLI, `nexus-tui` TUI, Tauri desktop shell, MCP stdio server | Tauri desktop app + bundled Node MCP server |
-| MCP | First-class — both server (13 tools, all `nexus_*`-prefixed) **and** host (spawns external MCP servers) | First-class server (6 tools as actually shipped in `mcp-server/index.js`; the architecture doc lists ~14 aspirationally) over stdio + WebSocket bridges; not a host |
+| MCP | First-class — both server (15 tools, all `nexus_*`-prefixed) **and** host (spawns external MCP servers) | First-class server (6 tools as actually shipped in `mcp-server/index.js`; the architecture doc lists ~14 aspirationally) over stdio + WebSocket bridges; not a host |
 | Maturity | v0.1.0 alpha; ~80–100k LOC | v0.1.0; mature feature set, ~90 ADRs, public releases |
 
 The shortest summary: **Nexus is a platform you build *on*; Tolaria is a product you use.**
