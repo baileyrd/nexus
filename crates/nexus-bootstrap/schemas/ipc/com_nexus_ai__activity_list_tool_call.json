@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ActivityToolCall",
+  "description": "One tool call attempted during a chat round. Captures the tool\nname + ok/error split; the actual input/output is intentionally\nnot persisted (could contain large file contents).",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Registered name of the tool (e.g. `read_file`, `write_file`).",
+      "type": "string"
+    },
+    "ok": {
+      "description": "`false` if the executor reported an error.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "ok"
+  ]
+}

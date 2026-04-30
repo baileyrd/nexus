@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiActivityListArgs",
+  "description": "Args for `com.nexus.ai::activity_list`. Currently a unit shape;\nkept as a struct so future cursor / pagination fields can land\nwithout an IPC drift event.",
+  "type": "object",
+  "properties": {
+    "limit": {
+      "description": "Maximum number of entries to return, newest first. Omit for\n\"all entries\" (currently capped by the on-disk log itself).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    }
+  }
+}

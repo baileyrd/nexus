@@ -60,6 +60,7 @@ import { basesPlugin } from './nexus/bases'
 import { aiPlugin } from './nexus/ai'
 import { pluginsMgmtPlugin } from './nexus/pluginsMgmt'
 import { processesPlugin } from './nexus/processes'
+import { activityTimelinePlugin } from './nexus/activityTimeline'
 import { statusBarPlugin } from './nexus/statusBar'
 import { extensionsTabPlugin } from './nexus/extensionsTab'
 import { memoryPlugin } from './nexus/memory'
@@ -160,6 +161,11 @@ export const DEFAULT_OFF_PLUGINS: Registered[] = [
   skillsPlugin,
   terminalPlugin,
   processesPlugin,
+  // BL-037 — AI activity timeline. Default-off because it only
+  // produces meaningful output once the AI plugin is configured;
+  // pairing the enabled-states keeps the empty pane out of users'
+  // way until they've turned the AI plugin on.
+  activityTimelinePlugin,
   graphPlugin,
   graphGlobalPlugin,
   backlinksPlugin,

@@ -19,13 +19,17 @@ use std::path::PathBuf;
 use schemars::{schema_for, JsonSchema};
 
 use nexus_ai::ipc::{
-    AiStreamAskArgs, AiStreamAskMessage, AiStreamAskResult, AiStreamAskRole, AiStreamAskSource,
-    AiStreamChatArgs, AiStreamChatMode, AiToolPolicy,
+    AiActivityListArgs, AiActivityListResult, AiStreamAskArgs, AiStreamAskMessage,
+    AiStreamAskResult, AiStreamAskRole, AiStreamAskSource, AiStreamChatArgs, AiStreamChatMode,
+    AiToolPolicy,
 };
 // FU-13 — RAG response shape (BL-038). TS bindings shipped already;
 // emitting JSON Schema lets MCP / external tools consume the same
 // contract over the wire.
-use nexus_ai::{Citation, RagResponse};
+use nexus_ai::{
+    activity_log::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall},
+    Citation, RagResponse,
+};
 use nexus_storage::ipc::{
     StorageListDirArgs, StorageListDirEntry, StorageListDirResult, StorageNoteAppendArgs,
     StorageNoteAppendResult, StorageReadFileArgs, StorageReadFileResult, StorageSearchArgs,
@@ -99,6 +103,17 @@ fn emit_pilot_ipc_schemas() {
     // honest as `Citation` evolves.
     write_schema::<Citation>("com_nexus_ai__ask", "citation");
     write_schema::<RagResponse>("com_nexus_ai__ask", "result");
+
+    // ── com.nexus.ai::activity_list (BL-037) ─────────────────────────────
+    // Per-forge AI activity timeline. The shell pane consumes
+    // `ActivityEntry` directly; MCP / external tools can drive
+    // `activity_list` against the same shape.
+    write_schema::<AiActivityListArgs>("com_nexus_ai__activity_list", "args");
+    write_schema::<AiActivityListResult>("com_nexus_ai__activity_list", "result");
+    write_schema::<ActivityEntry>("com_nexus_ai__activity_list", "entry");
+    write_schema::<ActivitySurface>("com_nexus_ai__activity_list", "surface");
+    write_schema::<ActivityOutcome>("com_nexus_ai__activity_list", "outcome");
+    write_schema::<ActivityToolCall>("com_nexus_ai__activity_list", "tool_call");
 }
 
 /// Sanity check: after emission the 5 pilot handlers each have at least

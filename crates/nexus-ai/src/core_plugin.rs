@@ -22,13 +22,17 @@ use nexus_kernel::{KernelPluginContext, PluginContext};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Serialize;
 
+use crate::activity_log::{
+    ActivityEntry, ActivityOutcome, ActivityRecorder, ActivitySurface,
+};
 use crate::anthropic::AnthropicProvider;
 use crate::config::{detect_embedding_provider, detect_provider, AiConfig};
 use crate::embedding::EmbeddingProvider;
 use crate::indexing_daemon::{self, DaemonMsg, EmbedderFactory, IndexingDaemon, SharedStatus};
 use tokio::sync::mpsc::UnboundedSender;
 use crate::ipc::{
-    AiStreamAskMessage, AiStreamAskRole, AiStreamChatArgs, AiStreamChatMode, AiToolPolicy,
+    AiActivityListArgs, AiActivityListResult, AiStreamAskMessage, AiStreamAskRole, AiStreamChatArgs,
+    AiStreamChatMode, AiToolPolicy,
 };
 use crate::ollama::OllamaProvider;
 use crate::openai::OpenAiProvider;
@@ -123,6 +127,15 @@ pub const HANDLER_ENRICH_APPLY: u32 = 16;
 /// pushes coalesce in the debouncer.
 pub const HANDLER_INDEX_TRIGGER: u32 = 17;
 
+/// BL-037 — `activity_list`: read the per-forge AI activity timeline
+/// (newest-first). Args [`AiActivityListArgs`] (optionally caps the
+/// number returned); result [`AiActivityListResult`].
+pub const HANDLER_ACTIVITY_LIST: u32 = 18;
+
+/// BL-037 — `activity_clear`: truncate the activity log to zero
+/// bytes. No args, returns `{ cleared: true }`.
+pub const HANDLER_ACTIVITY_CLEAR: u32 = 19;
+
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
     /// Live config — wrapped in `Arc<RwLock<>>` so async handlers can
@@ -156,6 +169,11 @@ pub struct AiCorePlugin {
     /// async `index_trigger` handler can reach it from a future
     /// without borrowing `&self`. Cleared on `on_stop`.
     daemon_tx: Arc<RwLock<Option<UnboundedSender<DaemonMsg>>>>,
+    /// BL-037 — activity timeline recorder. `None` until
+    /// `wire_context` runs; the `stream_chat` / `stream_ask` arms
+    /// fire-and-forget through it on completion. Cloning the
+    /// `ActivityRecorder` is cheap (it's a pair of `Arc`s).
+    activity: Option<ActivityRecorder>,
 }
 
 impl AiCorePlugin {
@@ -170,6 +188,7 @@ impl AiCorePlugin {
             index_status: indexing_daemon::new_status(),
             indexing_daemon: None,
             daemon_tx: Arc::new(RwLock::new(None)),
+            activity: None,
         }
     }
 
@@ -293,8 +312,28 @@ impl CorePlugin for AiCorePlugin {
             }));
         }
 
+        // BL-037 — `activity_list` / `activity_clear` go through the
+        // recorder directly and don't need the kernel context. Routing
+        // before the ctx-required arm lets the shell pane hydrate even
+        // if the caller polls before `wire_context` runs (the recorder
+        // returns an empty list in that case).
+        if handler_id == HANDLER_ACTIVITY_LIST {
+            let activity = self.activity.clone();
+            let args = args.clone();
+            return Some(Box::pin(async move {
+                handle_activity_list(activity, &args).await
+            }));
+        }
+        if handler_id == HANDLER_ACTIVITY_CLEAR {
+            let activity = self.activity.clone();
+            return Some(Box::pin(async move {
+                handle_activity_clear(activity).await
+            }));
+        }
+
         let ctx = self.context.clone();
         let tools = self.tools.clone();
+        let activity = self.activity.clone();
         let ai_cfg = self.ai_config.read().ok().and_then(|g| g.clone());
         let embed_cfg = self.embed_config.read().ok().and_then(|g| g.clone());
         let args = args.clone();
@@ -307,8 +346,12 @@ impl CorePlugin for AiCorePlugin {
                 HANDLER_INDEX_FILE => handle_index_file(&ctx, embed_cfg, &args).await,
                 HANDLER_VECTORSTORE_COUNT => handle_vectorstore_count(&ctx).await,
                 HANDLER_STATUS => handle_status(&ctx, ai_cfg, embed_cfg).await,
-                HANDLER_STREAM_CHAT => handle_stream_chat(ctx, ai_cfg, tools, &args).await,
-                HANDLER_STREAM_ASK => handle_stream_ask(ctx, ai_cfg, embed_cfg, &args).await,
+                HANDLER_STREAM_CHAT => {
+                    handle_stream_chat(ctx, ai_cfg, tools, activity, &args).await
+                }
+                HANDLER_STREAM_ASK => {
+                    handle_stream_ask(ctx, ai_cfg, embed_cfg, activity, &args).await
+                }
                 HANDLER_SESSION_LOAD => handle_session_load(&ctx, &args).await,
                 HANDLER_SESSION_SAVE => handle_session_save(&ctx, &args).await,
                 HANDLER_SESSION_LIST => handle_session_list(&ctx).await,
@@ -337,6 +380,11 @@ impl CorePlugin for AiCorePlugin {
         let mut registry = ToolRegistry::new();
         register_storage_builtins(&mut registry, Arc::clone(&ctx));
         self.tools = Some(Arc::new(registry));
+
+        // BL-037 — bind the activity recorder to the same context so
+        // every AI surface that flows through this plugin can record
+        // an entry on completion without a per-handler ctx clone.
+        self.activity = Some(ActivityRecorder::new(Arc::clone(&ctx)));
 
         // Build the embedder factory — captures the live `embed_config`
         // handle so the daemon picks up runtime `set_config` updates
@@ -719,18 +767,26 @@ fn config_snapshot(ai_cfg: Option<&AiConfig>, embed_cfg: Option<&AiConfig>) -> s
     })
 }
 
+// Each error path records an `ActivityEntry` so the timeline shows
+// failures alongside successes — the overall control flow is mostly
+// linear but needs a recording line at every exit. Splitting per
+// branch would just push the same record_activity_error call out to
+// callers.
+#[allow(clippy::too_many_lines, reason = "BL-037 records on every exit path; flow stays linear")]
 async fn handle_stream_chat(
     ctx: Arc<KernelPluginContext>,
     ai_cfg: Option<AiConfig>,
     tools: Option<Arc<ToolRegistry>>,
+    activity: Option<ActivityRecorder>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     // Decode through the typed `AiStreamChatArgs`. The wire shape matches
     // the historical ad-hoc `{ messages, system, session_id }` shape
     // exactly (same field names, same `lowercase` role tags), so existing
     // chat callers keep working without modification — only the new
-    // optional fields (`mode`, `tools`, `max_tokens`, `stop`, `trim`)
-    // change behaviour for BL-010 / BL-011 / BL-034 callers.
+    // optional fields (`mode`, `tools`, `max_tokens`, `stop`, `trim`,
+    // `surface`) change behaviour for BL-010 / BL-011 / BL-034 / BL-037
+    // callers.
     let parsed: AiStreamChatArgs = serde_json::from_value(args.clone())
         .map_err(|e| exec_err(format!("stream_chat: args decode: {e}")))?;
     let messages = ipc_messages_to_chat(&parsed.messages);
@@ -740,9 +796,32 @@ async fn handle_stream_chat(
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    let ai_cfg = ai_cfg.ok_or_else(|| exec_err("stream_chat: no AI chat provider configured"))?;
-
+    // Capture pre-flight metadata for the activity entry. We resolve
+    // these even on the error path so a failed call still gets logged
+    // with prompt + provider + surface.
+    let started_at = std::time::Instant::now();
+    let prompt_text = last_user_prompt(&parsed.messages);
     let mode = parsed.mode.unwrap_or_default();
+    let surface = resolve_surface(parsed.surface.as_deref(), mode);
+    let provider_label = ai_cfg.as_ref().map(|c| c.provider.clone());
+    let model_label = ai_cfg.as_ref().and_then(|c| c.model.clone());
+
+    let Some(ai_cfg) = ai_cfg else {
+        let err = "stream_chat: no AI chat provider configured";
+        record_activity_error(
+            activity.as_ref(),
+            &session_id,
+            surface,
+            provider_label.clone(),
+            model_label.clone(),
+            prompt_text.clone(),
+            started_at,
+            err,
+        )
+        .await;
+        return Err(exec_err(err));
+    };
+
     // mode=complete forces tools=none regardless of the caller's value
     // — the contract is "single round-trip, no side effects".
     let tool_policy = match mode {
@@ -753,7 +832,7 @@ async fn handle_stream_chat(
     let envelope = EngineEnvelope::new(Arc::clone(&ctx), session_id.clone());
     envelope.publish_start();
 
-    let text = match mode {
+    let outcome = match mode {
         AiStreamChatMode::Chat => {
             let registry = tools.unwrap_or_else(|| Arc::new(ToolRegistry::new()));
             let registry_for_loop: Arc<ToolRegistry> = match tool_policy {
@@ -763,28 +842,178 @@ async fn handle_stream_chat(
                 AiToolPolicy::None => Arc::new(ToolRegistry::new()),
             };
             let on_chunk = envelope.chunk_sink();
-            run_tool_dispatch_loop(
-                build_ai_provider(&ai_cfg).map_err(exec_err)?.as_ref(),
+            let ai = match build_ai_provider(&ai_cfg) {
+                Ok(p) => p,
+                Err(e) => {
+                    record_activity_error(
+                        activity.as_ref(),
+                        &session_id,
+                        surface,
+                        provider_label.clone(),
+                        model_label.clone(),
+                        prompt_text.clone(),
+                        started_at,
+                        &e,
+                    )
+                    .await;
+                    return Err(exec_err(e));
+                }
+            };
+            match run_tool_dispatch_loop(
+                ai.as_ref(),
                 registry_for_loop.as_ref(),
                 messages,
                 system.as_deref(),
                 &on_chunk,
             )
             .await
-            .map_err(|e| exec_err(format!("stream_chat: {e}")))?
+            {
+                Ok(o) => o,
+                Err(e) => {
+                    let msg = format!("stream_chat: {e}");
+                    record_activity_error(
+                        activity.as_ref(),
+                        &session_id,
+                        surface,
+                        provider_label.clone(),
+                        model_label.clone(),
+                        prompt_text.clone(),
+                        started_at,
+                        &msg,
+                    )
+                    .await;
+                    return Err(exec_err(msg));
+                }
+            }
         }
         AiStreamChatMode::Complete => {
-            let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
+            let ai = match build_ai_provider(&ai_cfg) {
+                Ok(p) => p,
+                Err(e) => {
+                    record_activity_error(
+                        activity.as_ref(),
+                        &session_id,
+                        surface,
+                        provider_label.clone(),
+                        model_label.clone(),
+                        prompt_text.clone(),
+                        started_at,
+                        &e,
+                    )
+                    .await;
+                    return Err(exec_err(e));
+                }
+            };
             let on_chunk = envelope.chunk_sink();
-            run_complete(ai.as_ref(), &messages, system.as_deref(), &parsed, &on_chunk)
-                .await
-                .map_err(|e| exec_err(format!("stream_chat: {e}")))?
+            let text = match run_complete(
+                ai.as_ref(),
+                &messages,
+                system.as_deref(),
+                &parsed,
+                &on_chunk,
+            )
+            .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    let msg = format!("stream_chat: {e}");
+                    record_activity_error(
+                        activity.as_ref(),
+                        &session_id,
+                        surface,
+                        provider_label.clone(),
+                        model_label.clone(),
+                        prompt_text.clone(),
+                        started_at,
+                        &msg,
+                    )
+                    .await;
+                    return Err(exec_err(msg));
+                }
+            };
+            // mode=complete has no tool execution.
+            ToolDispatchOutcome {
+                text,
+                tool_calls: Vec::new(),
+                files: Vec::new(),
+            }
         }
     };
 
-    envelope.publish_done(&text);
+    envelope.publish_done(&outcome.text);
 
-    Ok(serde_json::json!({"session_id": session_id, "text": text}))
+    if let Some(rec) = activity {
+        let entry = ActivityEntry {
+            id: uuid::Uuid::new_v4().to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            session_id: session_id.clone(),
+            surface,
+            provider: provider_label,
+            model: model_label,
+            prompt: prompt_text,
+            files: outcome.files.clone(),
+            tool_calls: outcome.tool_calls.clone(),
+            outcome: ActivityOutcome::Ok,
+            error: None,
+            duration_ms: u64::try_from(started_at.elapsed().as_millis()).ok(),
+        };
+        rec.append(entry).await;
+    }
+
+    Ok(serde_json::json!({"session_id": session_id, "text": outcome.text}))
+}
+
+/// Default surface tag derivation when the caller doesn't supply one.
+/// `mode=complete` defaults to `Complete`; everything else defaults
+/// to `Chat`.
+fn resolve_surface(explicit: Option<&str>, mode: AiStreamChatMode) -> ActivitySurface {
+    if let Some(s) = explicit {
+        return ActivitySurface::from_str_lossy(s);
+    }
+    match mode {
+        AiStreamChatMode::Complete => ActivitySurface::Complete,
+        AiStreamChatMode::Chat => ActivitySurface::Chat,
+    }
+}
+
+/// Extract the most recent user message's content as the prompt
+/// recorded on the timeline. Empty when no user turn is present.
+fn last_user_prompt(messages: &[AiStreamAskMessage]) -> String {
+    messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, AiStreamAskRole::User))
+        .map(|m| m.content.clone())
+        .unwrap_or_default()
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn record_activity_error(
+    rec: Option<&ActivityRecorder>,
+    session_id: &str,
+    surface: ActivitySurface,
+    provider: Option<String>,
+    model: Option<String>,
+    prompt: String,
+    started_at: std::time::Instant,
+    error: &str,
+) {
+    let Some(rec) = rec else { return };
+    let entry = ActivityEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        session_id: session_id.to_string(),
+        surface,
+        provider,
+        model,
+        prompt,
+        files: Vec::new(),
+        tool_calls: Vec::new(),
+        outcome: ActivityOutcome::Error,
+        error: Some(error.to_string()),
+        duration_ms: u64::try_from(started_at.elapsed().as_millis()).ok(),
+    };
+    rec.append(entry).await;
 }
 
 /// Translate the typed IPC message list into the provider-facing
@@ -1020,18 +1249,33 @@ fn apply_stop<'a>(text: &'a str, stops: &[String]) -> &'a str {
 /// Returns the concatenated text from every assistant turn (so
 /// downstream `stream_done` consumers see the full reasoning trail,
 /// not just the final summary).
+/// Outcome of [`run_tool_dispatch_loop`]: aggregated text + the
+/// per-call recording the BL-037 activity timeline needs (tool name,
+/// ok/error, file paths the model touched). Files are extracted from
+/// the well-known `path` input field used by `read_file` /
+/// `write_file` and similar; tools without a `path` arg contribute
+/// nothing to `files`.
+#[derive(Debug)]
+struct ToolDispatchOutcome {
+    text: String,
+    tool_calls: Vec<crate::activity_log::ActivityToolCall>,
+    files: Vec<String>,
+}
+
 async fn run_tool_dispatch_loop(
     ai: &dyn AiProvider,
     registry: &ToolRegistry,
     messages: Vec<crate::provider::ChatMessage>,
     system: Option<&str>,
     on_chunk: &(dyn Fn(String) + Send + Sync),
-) -> Result<String, String> {
+) -> Result<ToolDispatchOutcome, String> {
     let mut turns = messages_to_turns(messages);
     let schemas = registry.schemas();
 
     let mut aggregated = String::new();
     let mut round: usize = 0;
+    let mut tool_calls_recorded: Vec<crate::activity_log::ActivityToolCall> = Vec::new();
+    let mut files_recorded: Vec<String> = Vec::new();
 
     loop {
         round += 1;
@@ -1050,7 +1294,11 @@ async fn run_tool_dispatch_loop(
         if output.tool_calls.is_empty() {
             // Model is done. Whether it produced text this round or
             // not, we've reached steady state.
-            return Ok(aggregated);
+            return Ok(ToolDispatchOutcome {
+                text: aggregated,
+                tool_calls: tool_calls_recorded,
+                files: files_recorded,
+            });
         }
 
         // Append the assistant's tool-use turn so the next provider
@@ -1064,6 +1312,25 @@ async fn run_tool_dispatch_loop(
         // append a ToolResult turn for each.
         for call in &output.tool_calls {
             let (content, is_error) = execute_tool_call(registry, call).await;
+            tool_calls_recorded.push(crate::activity_log::ActivityToolCall {
+                name: call.name.clone(),
+                ok: !is_error,
+            });
+            // Extract a file path if the tool input carried one. Most
+            // file-touching tools (read_file, write_file, note_append,
+            // …) accept `{ path: "..." }`; this heuristic is good
+            // enough for v1.
+            if let Some(p) = call
+                .input
+                .as_object()
+                .and_then(|o| o.get("path"))
+                .and_then(|v| v.as_str())
+            {
+                let path = p.to_string();
+                if !files_recorded.contains(&path) {
+                    files_recorded.push(path);
+                }
+            }
             turns.push(ChatTurn::ToolResult {
                 tool_use_id: call.id.clone(),
                 content,
@@ -1117,12 +1384,18 @@ fn messages_to_turns(messages: Vec<crate::provider::ChatMessage>) -> Vec<ChatTur
         .collect()
 }
 
+// Same shape as handle_stream_chat — every error path records an
+// `ActivityEntry` so the timeline reflects retrieval failures, embed
+// failures, etc. alongside successes.
+#[allow(clippy::too_many_lines, reason = "BL-037 records on every exit path; flow stays linear")]
 async fn handle_stream_ask(
     ctx: Arc<KernelPluginContext>,
     ai_cfg: Option<AiConfig>,
     embed_cfg: Option<AiConfig>,
+    activity: Option<ActivityRecorder>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
+    let started_at = std::time::Instant::now();
     let messages: Vec<crate::provider::ChatMessage> = args
         .get("messages")
         .ok_or_else(|| exec_err("stream_ask: missing 'messages'"))
@@ -1146,15 +1419,64 @@ async fn handle_stream_ask(
         .map(|m| m.content.clone())
         .ok_or_else(|| exec_err("stream_ask: no user message in 'messages'"))?;
 
-    let ai_cfg = ai_cfg.ok_or_else(|| exec_err("stream_ask: no AI chat provider configured"))?;
-    let embed_cfg =
-        embed_cfg.ok_or_else(|| exec_err("stream_ask: no embedding provider configured"))?;
-    let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
-    let embedder = build_embedding_provider(&embed_cfg).map_err(exec_err)?;
+    // BL-037 — capture provider + model labels up front so error
+    // entries (no AI cfg, retrieval failure, …) still record them
+    // when present.
+    let provider_label = ai_cfg.as_ref().map(|c| c.provider.clone());
+    let model_label = ai_cfg.as_ref().and_then(|c| c.model.clone());
 
-    let sources = crate::rag::retrieve(&ctx, embedder.as_ref(), &question, limit)
-        .await
-        .map_err(|e| exec_err(format!("stream_ask: retrieve: {e}")))?;
+    let record_err = |err: String| {
+        let rec = activity.clone();
+        let session_id = session_id.clone();
+        let provider_label = provider_label.clone();
+        let model_label = model_label.clone();
+        let prompt = question.clone();
+        async move {
+            record_activity_error(
+                rec.as_ref(),
+                &session_id,
+                ActivitySurface::Ask,
+                provider_label,
+                model_label,
+                prompt,
+                started_at,
+                &err,
+            )
+            .await;
+        }
+    };
+
+    let Some(ai_cfg) = ai_cfg else {
+        record_err("stream_ask: no AI chat provider configured".into()).await;
+        return Err(exec_err("stream_ask: no AI chat provider configured"));
+    };
+    let Some(embed_cfg) = embed_cfg else {
+        record_err("stream_ask: no embedding provider configured".into()).await;
+        return Err(exec_err("stream_ask: no embedding provider configured"));
+    };
+    let ai = match build_ai_provider(&ai_cfg) {
+        Ok(p) => p,
+        Err(e) => {
+            record_err(e.clone()).await;
+            return Err(exec_err(e));
+        }
+    };
+    let embedder = match build_embedding_provider(&embed_cfg) {
+        Ok(p) => p,
+        Err(e) => {
+            record_err(e.clone()).await;
+            return Err(exec_err(e));
+        }
+    };
+
+    let sources = match crate::rag::retrieve(&ctx, embedder.as_ref(), &question, limit).await {
+        Ok(s) => s,
+        Err(e) => {
+            let msg = format!("stream_ask: retrieve: {e}");
+            record_err(msg.clone()).await;
+            return Err(exec_err(msg));
+        }
+    };
     let system = crate::rag::build_rag_prompt(&sources);
 
     let _ = ctx.publish(
@@ -1183,10 +1505,14 @@ async fn handle_stream_ask(
         }
     };
 
-    let text = ai
-        .chat_stream_with(&messages, Some(&system), &on_chunk)
-        .await
-        .map_err(|e| exec_err(format!("stream_ask: {e}")))?;
+    let text = match ai.chat_stream_with(&messages, Some(&system), &on_chunk).await {
+        Ok(t) => t,
+        Err(e) => {
+            let msg = format!("stream_ask: {e}");
+            record_err(msg.clone()).await;
+            return Err(exec_err(msg));
+        }
+    };
 
     // BL-038: enrich sources with line ranges + 1-based numbering so the
     // shell can render `[N]` markers in the answer as clickable chips.
@@ -1202,12 +1528,74 @@ async fn handle_stream_ask(
         }),
     );
 
+    if let Some(rec) = activity {
+        // Files in the timeline = the RAG sources that grounded this
+        // answer. Deduped while preserving retrieval order.
+        let mut files: Vec<String> = Vec::new();
+        for s in &sources {
+            if !files.contains(&s.file_path) {
+                files.push(s.file_path.clone());
+            }
+        }
+        let entry = ActivityEntry {
+            id: uuid::Uuid::new_v4().to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            session_id: session_id.clone(),
+            surface: ActivitySurface::Ask,
+            provider: provider_label,
+            model: model_label,
+            prompt: question.clone(),
+            files,
+            tool_calls: Vec::new(),
+            outcome: ActivityOutcome::Ok,
+            error: None,
+            duration_ms: u64::try_from(started_at.elapsed().as_millis()).ok(),
+        };
+        rec.append(entry).await;
+    }
+
     Ok(serde_json::json!({
         "session_id": session_id,
         "text": text,
         "sources": sources,
         "citations": citations,
     }))
+}
+
+// ─── BL-037 — activity timeline handlers ────────────────────────────────────
+
+async fn handle_activity_list(
+    activity: Option<ActivityRecorder>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: AiActivityListArgs = serde_json::from_value(args.clone()).unwrap_or_default();
+    let Some(rec) = activity else {
+        // Pre-`wire_context`: no recorder yet. Return an empty list
+        // rather than erroring so the shell can poll on activate
+        // without a race.
+        return serde_json::to_value(&AiActivityListResult { entries: Vec::new() })
+            .map_err(|e| exec_err(format!("activity_list: encode: {e}")));
+    };
+    // The on-disk log is oldest-first; the IPC contract returns
+    // newest-first. Reverse + cap.
+    let mut entries = rec.read_all().await?;
+    entries.reverse();
+    if let Some(limit) = parsed.limit {
+        let limit_usize = limit as usize;
+        entries.truncate(limit_usize);
+    }
+    serde_json::to_value(&AiActivityListResult { entries })
+        .map_err(|e| exec_err(format!("activity_list: encode: {e}")))
+}
+
+async fn handle_activity_clear(
+    activity: Option<ActivityRecorder>,
+) -> Result<serde_json::Value, PluginError> {
+    let Some(rec) = activity else {
+        return Ok(serde_json::json!({ "cleared": false }));
+    };
+    rec.clear().await?;
+    Ok(serde_json::json!({ "cleared": true }))
 }
 
 /// Relative path for the legacy single-session file. Kept for
@@ -1568,7 +1956,7 @@ mod tool_dispatch_tests {
         let chunks = Mutex::new(Vec::<String>::new());
         let on_chunk = |s: String| chunks.lock().unwrap().push(s);
 
-        let text = run_tool_dispatch_loop(
+        let outcome = run_tool_dispatch_loop(
             &provider,
             &registry,
             vec![user_msg("hi")],
@@ -1577,7 +1965,9 @@ mod tool_dispatch_tests {
         )
         .await
         .expect("dispatch");
-        assert_eq!(text, "hello");
+        assert_eq!(outcome.text, "hello");
+        assert!(outcome.tool_calls.is_empty());
+        assert!(outcome.files.is_empty());
         assert_eq!(chunks.lock().unwrap().as_slice(), &["hello"]);
     }
 
@@ -1613,7 +2003,7 @@ mod tool_dispatch_tests {
         let chunks = Mutex::new(Vec::<String>::new());
         let on_chunk = |s: String| chunks.lock().unwrap().push(s);
 
-        let text = run_tool_dispatch_loop(
+        let outcome = run_tool_dispatch_loop(
             &provider,
             &registry,
             vec![user_msg("read it")],
@@ -1624,8 +2014,14 @@ mod tool_dispatch_tests {
         .expect("dispatch");
 
         // Aggregated text spans both rounds.
-        assert!(text.contains("let me check"));
-        assert!(text.contains("all done"));
+        assert!(outcome.text.contains("let me check"));
+        assert!(outcome.text.contains("all done"));
+        // BL-037 — the tool call is recorded with ok=true and contributes no
+        // file path (echo doesn't carry a `path` input field).
+        assert_eq!(outcome.tool_calls.len(), 1);
+        assert_eq!(outcome.tool_calls[0].name, "echo");
+        assert!(outcome.tool_calls[0].ok);
+        assert!(outcome.files.is_empty());
 
         // Tool was invoked once with the model's args.
         let inputs = exec.inputs.lock().unwrap();
@@ -1671,7 +2067,7 @@ mod tool_dispatch_tests {
         ]);
         let registry = ToolRegistry::new();
         let on_chunk = |_: String| {};
-        let text = run_tool_dispatch_loop(
+        let outcome = run_tool_dispatch_loop(
             &provider,
             &registry,
             vec![user_msg("call something")],
@@ -1680,7 +2076,11 @@ mod tool_dispatch_tests {
         )
         .await
         .expect("dispatch");
-        assert!(text.contains("recovered"));
+        assert!(outcome.text.contains("recovered"));
+        // BL-037 — unknown-tool entry is recorded as ok=false.
+        assert_eq!(outcome.tool_calls.len(), 1);
+        assert_eq!(outcome.tool_calls[0].name, "missing_tool");
+        assert!(!outcome.tool_calls[0].ok);
 
         let seen = provider.turns_seen.lock().unwrap();
         let round_two = &seen[1];
@@ -1777,6 +2177,7 @@ mod tool_dispatch_tests {
             max_tokens: None,
             stop: None,
             trim: None,
+            surface: None,
         }
     }
 
@@ -1927,7 +2328,7 @@ mod tool_dispatch_tests {
         let chunks = Mutex::new(Vec::<String>::new());
         let on_chunk = |s: String| chunks.lock().unwrap().push(s);
 
-        let text = run_tool_dispatch_loop(
+        let outcome = run_tool_dispatch_loop(
             &provider,
             &registry,
             vec![user_msg("hi")],
@@ -1936,7 +2337,7 @@ mod tool_dispatch_tests {
         )
         .await
         .expect("dispatch");
-        assert_eq!(text, "hello");
+        assert_eq!(outcome.text, "hello");
         assert_eq!(chunks.lock().unwrap().as_slice(), &["hello"]);
         // The dispatch-loop path was the one that ran (turns_seen
         // populated), proving the chat path uses tool dispatch.
@@ -1958,20 +2359,30 @@ mod semantic_search_dispatch_tests {
     use std::sync::Arc;
 
     fn wired_plugin() -> AiCorePlugin {
+        wired_plugin_with_caps(CapabilitySet::default())
+    }
+
+    /// Wire a plugin against a temp forge with `caps` granted. The
+    /// activity-timeline tests need `FsRead` + `FsWrite` so the
+    /// recorder's read-modify-write cycle on `.forge/ai-activity.log`
+    /// can actually persist; the original semantic-search tests run
+    /// fine with the default (empty) set.
+    ///
+    /// The `.forge/` subdirectory is pre-created so writes to
+    /// `.forge/<file>` succeed without an extra `mkdir -p`. Mirrors
+    /// what production does at storage `on_init`.
+    fn wired_plugin_with_caps(caps: CapabilitySet) -> AiCorePlugin {
         let mut plugin = AiCorePlugin::new();
         let dir = tempfile::tempdir().unwrap();
-        // Leak the tempdir for the duration of the test — the context
-        // canonicalises the path at construction so we don't actually
-        // need the directory to outlive the test, but a leak keeps
-        // valgrind quiet.
         let dir_path = dir.path().to_path_buf();
+        std::fs::create_dir_all(dir_path.join(".forge")).unwrap();
         std::mem::forget(dir);
         let kv: Arc<dyn KvStore> = Arc::new(InMemoryKvStore::new());
         let bus = Arc::new(EventBus::new(16));
         let ctx = KernelPluginContext::new(
             "com.nexus.ai",
             "0.0.1",
-            CapabilitySet::default(),
+            caps,
             kv,
             bus,
             &dir_path,
@@ -1980,6 +2391,11 @@ mod semantic_search_dispatch_tests {
         .unwrap();
         plugin.wire_context(Arc::new(ctx));
         plugin
+    }
+
+    fn fs_caps() -> CapabilitySet {
+        use nexus_kernel::Capability;
+        CapabilitySet::from_iter([Capability::FsRead, Capability::FsWrite])
     }
 
     #[tokio::test]
@@ -2087,5 +2503,152 @@ mod semantic_search_dispatch_tests {
             .expect("HANDLER_ENRICH_APPLY must be async");
         let err = fut.await.expect_err("missing proposal should error");
         assert!(format!("{err}").contains("missing 'proposal'"));
+    }
+
+    // ─── BL-037 — activity timeline IPC handler tests ────────────────────
+
+    #[test]
+    fn activity_handler_ids_are_pinned() {
+        // Bootstrap manifest + shell plugin both reference these
+        // constants — bumping them is a wire break.
+        assert_eq!(HANDLER_ACTIVITY_LIST, 18);
+        assert_eq!(HANDLER_ACTIVITY_CLEAR, 19);
+    }
+
+    #[tokio::test]
+    async fn activity_list_returns_empty_when_recorder_unwired() {
+        // No `wire_context` so `self.activity` is `None`. Handler
+        // contract: return an empty list rather than erroring so the
+        // shell pane hydrates cleanly even before bootstrap finishes.
+        let mut plugin = AiCorePlugin::new();
+        let fut = plugin
+            .dispatch_async(HANDLER_ACTIVITY_LIST, &serde_json::json!({}))
+            .expect("HANDLER_ACTIVITY_LIST must be async");
+        let value = fut.await.expect("activity_list must succeed");
+        assert_eq!(value, serde_json::json!({ "entries": [] }));
+    }
+
+    #[tokio::test]
+    async fn activity_clear_returns_cleared_false_when_recorder_unwired() {
+        let mut plugin = AiCorePlugin::new();
+        let fut = plugin
+            .dispatch_async(HANDLER_ACTIVITY_CLEAR, &serde_json::json!({}))
+            .expect("HANDLER_ACTIVITY_CLEAR must be async");
+        let value = fut.await.expect("activity_clear must succeed");
+        assert_eq!(value, serde_json::json!({ "cleared": false }));
+    }
+
+    #[tokio::test]
+    async fn activity_recorder_round_trips_through_disk() {
+        // End-to-end: build a wired plugin (so the recorder is bound
+        // to a real `KernelPluginContext` over a temp forge), append
+        // two entries, list them back. The list IPC contract is
+        // newest-first.
+        let plugin = wired_plugin_with_caps(fs_caps());
+        let recorder = plugin.activity.clone().expect("recorder wired");
+
+        let mut entry1 = ActivityEntry::now(
+            "sess-1".into(),
+            crate::activity_log::ActivitySurface::Chat,
+        );
+        entry1.prompt = "first prompt".into();
+        recorder.append(entry1.clone()).await;
+
+        let mut entry2 = ActivityEntry::now(
+            "sess-2".into(),
+            crate::activity_log::ActivitySurface::Ask,
+        );
+        entry2.prompt = "second prompt".into();
+        entry2.files = vec!["notes/a.md".into(), "notes/b.md".into()];
+        recorder.append(entry2.clone()).await;
+
+        // Read via the IPC handler — exercises both the recorder's
+        // `read_all` and the handler's reverse-to-newest-first.
+        let mut plugin = plugin;
+        let fut = plugin
+            .dispatch_async(HANDLER_ACTIVITY_LIST, &serde_json::json!({}))
+            .expect("HANDLER_ACTIVITY_LIST must be async");
+        let value = fut.await.expect("activity_list");
+        let entries = value
+            .get("entries")
+            .and_then(|v| v.as_array())
+            .expect("entries array");
+        assert_eq!(entries.len(), 2, "two entries expected");
+        // Newest first: entry2's prompt should be at index 0.
+        assert_eq!(entries[0].get("prompt").unwrap(), "second prompt");
+        assert_eq!(entries[1].get("prompt").unwrap(), "first prompt");
+        // Files survived the JSONL round-trip.
+        let files = entries[0]
+            .get("files")
+            .and_then(|v| v.as_array())
+            .expect("files array");
+        assert_eq!(files.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn activity_list_respects_limit_arg() {
+        let plugin = wired_plugin_with_caps(fs_caps());
+        let recorder = plugin.activity.clone().expect("recorder wired");
+        for i in 0..3 {
+            let mut e = ActivityEntry::now(
+                format!("sess-{i}"),
+                crate::activity_log::ActivitySurface::Chat,
+            );
+            e.prompt = format!("prompt {i}");
+            recorder.append(e).await;
+        }
+
+        let mut plugin = plugin;
+        let fut = plugin
+            .dispatch_async(HANDLER_ACTIVITY_LIST, &serde_json::json!({ "limit": 2 }))
+            .expect("HANDLER_ACTIVITY_LIST must be async");
+        let value = fut.await.expect("activity_list");
+        let entries = value
+            .get("entries")
+            .and_then(|v| v.as_array())
+            .expect("entries array");
+        assert_eq!(entries.len(), 2);
+        // Newest two first.
+        assert_eq!(entries[0].get("prompt").unwrap(), "prompt 2");
+        assert_eq!(entries[1].get("prompt").unwrap(), "prompt 1");
+    }
+
+    #[tokio::test]
+    async fn activity_clear_truncates_log() {
+        let plugin = wired_plugin_with_caps(fs_caps());
+        let recorder = plugin.activity.clone().expect("recorder wired");
+        let mut e = ActivityEntry::now(
+            "s".into(),
+            crate::activity_log::ActivitySurface::Chat,
+        );
+        e.prompt = "to be wiped".into();
+        recorder.append(e).await;
+
+        let mut plugin = plugin;
+        // Sanity: there's one entry.
+        let fut = plugin
+            .dispatch_async(HANDLER_ACTIVITY_LIST, &serde_json::json!({}))
+            .unwrap();
+        let value = fut.await.unwrap();
+        assert_eq!(
+            value
+                .get("entries")
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
+
+        // Clear, then list again — must be empty.
+        let fut = plugin
+            .dispatch_async(HANDLER_ACTIVITY_CLEAR, &serde_json::json!({}))
+            .unwrap();
+        let value = fut.await.unwrap();
+        assert_eq!(value, serde_json::json!({ "cleared": true }));
+
+        let fut = plugin
+            .dispatch_async(HANDLER_ACTIVITY_LIST, &serde_json::json!({}))
+            .unwrap();
+        let value = fut.await.unwrap();
+        assert_eq!(value, serde_json::json!({ "entries": [] }));
     }
 }

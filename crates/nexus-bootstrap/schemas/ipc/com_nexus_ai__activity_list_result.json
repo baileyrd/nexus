@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiActivityListResult",
+  "description": "Result for `com.nexus.ai::activity_list`. Order is\nnewest-first so the shell can render without re-sorting.",
+  "type": "object",
+  "properties": {
+    "entries": {
+      "description": "Recorded entries (newest first).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ActivityEntry"
+      }
+    }
+  },
+  "required": [
+    "entries"
+  ],
+  "$defs": {
+    "ActivityEntry": {
+      "description": "One entry in the activity timeline. Persisted as a single JSON\nobject per line in `.forge/ai-activity.log`.",
+      "type": "object",
+      "properties": {
+        "duration_ms": {
+          "description": "Wall-clock duration in milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "error": {
+          "description": "Error message when `outcome=error`. Free-form.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "files": {
+          "description": "Files referenced — RAG sources, tool-call file paths.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "id": {
+          "description": "UUID v4 — stable across reads, useful for de-duping.",
+          "type": "string"
+        },
+        "model": {
+          "description": "Concrete model id, when known.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "description": "Final outcome.",
+          "$ref": "#/$defs/ActivityOutcome"
+        },
+        "prompt": {
+          "description": "Truncated prompt text (last user message). Kept short so the\nlog file stays bounded.",
+          "type": "string"
+        },
+        "provider": {
+          "description": "Provider name (`anthropic` / `openai` / `ollama`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "description": "Originating session id (matches `com.nexus.ai.stream_*` events).",
+          "type": "string"
+        },
+        "surface": {
+          "description": "Surface that triggered the call.",
+          "$ref": "#/$defs/ActivitySurface"
+        },
+        "timestamp": {
+          "description": "RFC3339 wall-clock timestamp (UTC).",
+          "type": "string"
+        },
+        "tool_calls": {
+          "description": "Tool calls attempted, in order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActivityToolCall"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "timestamp",
+        "session_id",
+        "surface",
+        "prompt",
+        "outcome"
+      ]
+    },
+    "ActivityOutcome": {
+      "description": "Outcome of the AI call. Captures success vs failure separately\nfrom the (possibly error) free-form `error` string so the UI can\nflash an error glyph without parsing.",
+      "oneOf": [
+        {
+          "description": "Provider returned text and the surface accepted it.",
+          "type": "string",
+          "const": "ok"
+        },
+        {
+          "description": "Provider errored, network failed, or the surface rejected\nthe response.",
+          "type": "string",
+          "const": "error"
+        },
+        {
+          "description": "User cancelled mid-stream.",
+          "type": "string",
+          "const": "cancelled"
+        }
+      ]
+    },
+    "ActivitySurface": {
+      "description": "Surface that originated the AI call. Mirrors the in-product UX\nsurface so users (and future analytics) can slice the timeline.",
+      "oneOf": [
+        {
+          "description": "Chat panel (`stream_chat`, mode=chat).",
+          "type": "string",
+          "const": "chat"
+        },
+        {
+          "description": "RAG retrieve + chat (`stream_ask`).",
+          "type": "string",
+          "const": "ask"
+        },
+        {
+          "description": "Cmd+I command-anywhere overlay (BL-032).",
+          "type": "string",
+          "const": "cmdi"
+        },
+        {
+          "description": "Inline ghost completion (BL-034, mode=complete).",
+          "type": "string",
+          "const": "ghost"
+        },
+        {
+          "description": "Headless single-shot completion (`complete` CLI / mode=complete).",
+          "type": "string",
+          "const": "complete"
+        },
+        {
+          "description": "Auto-enrichment on save (BL-045).",
+          "type": "string",
+          "const": "enrich"
+        },
+        {
+          "description": "Catch-all when the surface tag is missing or unknown.",
+          "type": "string",
+          "const": "other"
+        }
+      ]
+    },
+    "ActivityToolCall": {
+      "description": "One tool call attempted during a chat round. Captures the tool\nname + ok/error split; the actual input/output is intentionally\nnot persisted (could contain large file contents).",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Registered name of the tool (e.g. `read_file`, `write_file`).",
+          "type": "string"
+        },
+        "ok": {
+          "description": "`false` if the executor reported an error.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "ok"
+      ]
+    }
+  }
+}
