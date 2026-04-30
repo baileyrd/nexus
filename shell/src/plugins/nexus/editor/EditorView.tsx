@@ -16,6 +16,7 @@ import { inputRulesExt } from './cm/inputRules'
 import { inlineToolbarExt } from './cm/inlineToolbar'
 import { livePreviewExt } from './cm/livePreview'
 import { databaseViewExt } from './cm/databaseViewDecorations'
+import { blockLinkNavExt } from './cm/blockLinkNav'
 import { ghostCompletionExt } from './cm/ghostCompletion'
 import { linkSuggestExt } from './cm/linkSuggest'
 import { getRegistry } from '../../../host/shellRegistry'
@@ -840,6 +841,9 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
                     onError: runtime.reportBridgeError,
                     events: runtime.kernelEvents,
                   }),
+                  ...(runtime.onBlockLinkNavigate
+                    ? [blockLinkNavExt({ onNavigate: runtime.onBlockLinkNavigate })]
+                    : []),
                 ]
               : base
           }}

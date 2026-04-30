@@ -8,6 +8,7 @@ import { emptyViewCreator, EMPTY_VIEW_TYPE } from './EmptyView'
 import { useEditorStore, isDirty, type EditorTabMode } from './editorStore'
 import { openSearchPanel } from '@codemirror/search'
 import { setEditorRuntime, getActiveCmView } from './runtime'
+import { revealBlockInView } from './cm/blockLinkNav'
 import { makeEditorClient } from './kernelClient'
 import { makeSessionManager } from './sessionManager'
 import { installSlashMenuStyles } from './cm/slashCommand'
@@ -636,6 +637,18 @@ export const editorPlugin: Plugin = {
       }
     })
 
+    // BL-049 phase 2 — block-link navigation. Click in CM emits
+    // `files:open` to raise the target tab and a follow-up
+    // `nexus.editor:reveal-block` event the editor plugin
+    // consumes after the file finishes loading. The reveal
+    // handler searches the doc for the `<!-- ^<uuid> -->`
+    // marker and scrolls; if the marker isn't yet on disk
+    // (block has been stamped in-memory but the session hasn't
+    // saved), the resolver-supplied `root_index` is the
+    // fallback — phase-3 work, since per-block source-position
+    // metadata isn't on the snapshot today.
+    const pendingReveals = new Map<string, string>()
+
     setEditorRuntime({
       confirmAndClose,
       openUntitled,
@@ -649,6 +662,68 @@ export const editorPlugin: Plugin = {
         })
       },
       kernelEvents: api.kernel,
+      onBlockLinkNavigate: (link) => {
+        // Best-effort tab-name guess from the basename — matches
+        // what the files plugin emits for `files:open`.
+        const lastSlash = Math.max(
+          link.filePath.lastIndexOf('/'),
+          link.filePath.lastIndexOf('\\'),
+        )
+        const name = lastSlash >= 0 ? link.filePath.slice(lastSlash + 1) : link.filePath
+        // Validate the link via the resolver so a stale id surfaces
+        // as a notification instead of silently scrolling nowhere.
+        void editorClient
+          .resolveBlockLink(link.filePath, link.blockId)
+          .then((resp) => {
+            if (!resp.found) {
+              api.notifications.show({
+                type: 'warning',
+                message: `Block ${link.blockId.slice(0, 8)}… not found in ${name}`,
+              })
+              return
+            }
+            api.events.emit(EVENT_FILE_OPEN, { relpath: link.filePath, name })
+            pendingReveals.set(link.filePath, link.blockId)
+            api.events.emit('nexus.editor:reveal-block', {
+              relpath: link.filePath,
+              blockId: link.blockId,
+            })
+          })
+          .catch((err) => {
+            api.notifications.show({
+              type: 'error',
+              message: `Block-link navigation failed: ${err instanceof Error ? err.message : String(err)}`,
+            })
+          })
+      },
+    })
+
+    // Reveal pending block-link targets once the underlying
+    // CM view exists for the active tab. Two trigger paths
+    // exist — `files:open` (already handled above to load the
+    // file) and the editor store's active-tab change. We tap
+    // the latter via a zustand subscription so a click on a
+    // block-link whose tab is *already open* still scrolls.
+    const tryReveal = (relpath: string) => {
+      const blockId = pendingReveals.get(relpath)
+      if (!blockId) return
+      // Defer one tick so the EditorView has a chance to mount
+      // its CM instance via the active-tab effect.
+      queueMicrotask(() => {
+        const cm = getActiveCmView()
+        if (!cm) return
+        const ok = revealBlockInView(cm, blockId)
+        if (ok) pendingReveals.delete(relpath)
+      })
+    }
+    api.events.on<{ relpath: string }>('nexus.editor:reveal-block', (payload) => {
+      if (!payload?.relpath) return
+      // Two attempts — one immediate (file is already open),
+      // one after a short delay (file is being loaded). The
+      // map entry is dropped on the first successful reveal.
+      tryReveal(payload.relpath)
+      setTimeout(() => tryReveal(payload.relpath), 80)
+      setTimeout(() => tryReveal(payload.relpath), 250)
     })
 
     // BL-050 Phase 3 — block-handle "Comment" affordance. The bridge

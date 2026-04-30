@@ -36,6 +36,17 @@ export interface EditorRuntime {
    * inline-grid cache on external `.bases` edits.
    */
   kernelEvents?: import('./cm/databaseViewDecorations.ts').KernelEventSubscriber
+  /**
+   * Click handler for inline `[[<file>#^<uuid>]]` block links
+   * (BL-049 phase 2). When set, the live-preview extension stack
+   * mounts the navigation extension; activate-time wires this to
+   * an `events.emit('files:open', …)` followed by a
+   * `nexus.editor:reveal-block` event so the receiving tab can
+   * scroll to the target block once it finishes loading.
+   */
+  onBlockLinkNavigate?: (
+    link: import('./blockLinks.ts').ParsedBlockLink,
+  ) => void
 }
 
 let _runtime: EditorRuntime | null = null
