@@ -481,16 +481,12 @@ impl CorePlugin for StorageCorePlugin {
                     .ok_or_else(|| {
                         exec_err("note_append: missing 'snippet' string".to_string())
                     })?;
-                // Path confinement: write_file rejects absolute paths +
-                // `..` traversal at the engine boundary; surface that
-                // rejection up front so we don't even read the existing
-                // file. resolve_within is the same primitive write_file
-                // uses internally via atomic_write -> forge.root().join.
-                if std::path::Path::new(&path).is_absolute() {
-                    return Err(exec_err(format!(
-                        "note_append: 'path' must be forge-relative, got '{path}'"
-                    )));
-                }
+                // Path confinement is enforced by `read_file` and
+                // `write_file` via `resolve_within` — absolute paths and
+                // `..` traversal are rejected at the engine boundary
+                // (see issue #72). The `read_file` call below surfaces
+                // the rejection before any disk I/O happens.
+                //
                 // Read existing content; treat a missing file as empty.
                 let existing = match engine.read_file(&path) {
                     Ok(bytes) => bytes,
@@ -1354,11 +1350,15 @@ mod tests {
         let err = plugin
             .dispatch(HANDLER_NOTE_APPEND, &args)
             .expect_err("absolute paths must be rejected");
+        // Rejection now flows from the engine's `resolve_within`
+        // path-confinement check via `read_file` (issue #72), surfaced
+        // by note_append as a `read:` failure containing the offending
+        // relpath.
         match err {
             PluginError::ExecutionFailed { reason, .. } => {
                 assert!(
-                    reason.contains("forge-relative"),
-                    "expected forge-relative rejection, got: {reason}"
+                    reason.contains("invalid relpath") && reason.contains(&abs),
+                    "expected invalid-relpath rejection, got: {reason}"
                 );
             }
             other => panic!("unexpected error variant: {other:?}"),
