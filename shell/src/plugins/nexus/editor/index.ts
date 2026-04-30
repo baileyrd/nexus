@@ -19,6 +19,7 @@ import {
 } from './cm/blockHandle'
 import { createBlockRefDragBridge } from './blockRefDragBridge'
 import { installInlineToolbarStyles } from './cm/inlineToolbar'
+import { installMarginSuggestStyles } from './cm/marginSuggestions'
 import { createCommentsApi } from '../comments/commentsApi'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useFilesStore } from '../files/filesStore'
@@ -154,6 +155,7 @@ export const editorPlugin: Plugin = {
     installSlashMenuStyles()
     installBlockHandleStyles()
     installInlineToolbarStyles()
+    installMarginSuggestStyles()
     const editorClient = makeEditorClient(api.kernel)
     // Phase 4: pass the kernel API so the manager can open a
     // `com.nexus.editor.changed.<relpath>` subscription on acquire.
