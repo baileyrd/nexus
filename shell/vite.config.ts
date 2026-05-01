@@ -37,10 +37,17 @@ export default defineConfig({
   envPrefix: ['VITE_', 'TAURI_'],
 
   build: {
-    // Tauri supports ES2021
+    // SH-016: Branch build target per platform so Vite emits only the
+    // transforms actually needed on each OS, rather than over-targeting.
+    //   windows → WebView2 (Chromium 105+)    → chrome105
+    //   macos   → WebKit ≥ macOS Ventura       → safari15
+    //   linux   → WebKit2GTK 2.40+ (ES2022)    → es2022
+    //   default → browser preview / CI         → es2022
     target: process.env.TAURI_PLATFORM === 'windows'
       ? 'chrome105'
-      : 'safari13',
+      : process.env.TAURI_PLATFORM === 'macos'
+        ? 'safari15'
+        : 'es2022',
     minify: process.env.TAURI_DEBUG ? false : 'esbuild',
     sourcemap: !!process.env.TAURI_DEBUG,
     rollupOptions: {
