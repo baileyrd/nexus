@@ -14,3 +14,12 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 regex-lite = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
+ts-rs = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+
+[features]
+# Emit TypeScript + JSON Schema bindings for the IPC handler types.
+# Off by default so normal Rust builds don't pull ts-rs / schemars.
+# Enable via `cargo test -p nexus-bootstrap --test ipc_schema_emit
+# --features ts-export`. See ADR audit-2026-05-01 P1-3 (#113).
+ts-export = ["dep:ts-rs", "dep:schemars"]

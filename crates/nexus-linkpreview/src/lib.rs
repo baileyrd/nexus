@@ -23,6 +23,11 @@ use regex_lite::Regex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 pub mod core_plugin;
 
 /// Request timeout — covers DNS + connect + read. Kept short because
@@ -43,6 +48,15 @@ const USER_AGENT: &str =
 /// optional — the shell renders whatever it gets and falls back to
 /// the raw URL when everything is missing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct LinkPreview {
     /// Canonical URL the preview describes. Echoes the request URL
     /// so callers can detect redirects or canonicalisations without

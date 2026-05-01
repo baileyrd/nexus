@@ -13,7 +13,12 @@
 //! Ids are append-only.
 
 use nexus_plugins::{CorePlugin, PluginError};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
 
 use crate::{fetch_blocking, FetchError};
 
@@ -22,6 +27,28 @@ pub const PLUGIN_ID: &str = "com.nexus.linkpreview";
 
 /// `fetch` handler id.
 pub const HANDLER_FETCH: u32 = 1;
+
+/// Args for `com.nexus.linkpreview::fetch` (handler id `1`).
+///
+/// Lifted to a file-scope public type by audit-2026-05-01 P1-3 (#113)
+/// so the schema generator can emit a JSON Schema + TypeScript binding
+/// for the IPC contract. Previously inlined inside [`dispatch_fetch`];
+/// behaviour is unchanged.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct FetchArgs {
+    /// URL to fetch. Must be `http`/`https`; the engine rejects other
+    /// schemes with [`FetchError::InvalidUrl`].
+    pub url: String,
+}
 
 /// Core plugin — stateless; every call hits the network fresh. The
 /// shell layer owns caching so previews survive across tab switches
@@ -51,12 +78,7 @@ impl CorePlugin for LinkPreviewCorePlugin {
 }
 
 fn dispatch_fetch(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Args {
-        url: String,
-    }
-    let a: Args = serde_json::from_value(args.clone())
+    let a: FetchArgs = serde_json::from_value(args.clone())
         .map_err(|e| exec_err(format!("fetch: invalid args: {e}")))?;
     match fetch_blocking(&a.url) {
         Ok(preview) => serde_json::to_value(&preview)
@@ -70,9 +92,7 @@ fn dispatch_fetch(args: &serde_json::Value) -> Result<serde_json::Value, PluginE
         Err(err) => {
             tracing::debug!(%err, "link preview fetch failed; returning empty preview");
             let fallback = crate::LinkPreview {
-                url: serde_json::from_value::<Args>(args.clone())
-                    .map(|a| a.url)
-                    .unwrap_or_default(),
+                url: a.url,
                 ..Default::default()
             };
             serde_json::to_value(&fallback)

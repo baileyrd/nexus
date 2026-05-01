@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LinkPreview",
+  "description": "Structured metadata extracted from a web page. Every field is\noptional — the shell renders whatever it gets and falls back to\nthe raw URL when everything is missing.",
+  "type": "object",
+  "properties": {
+    "description": {
+      "description": "`og:description` or `<meta name=\"description\">`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "favicon_url": {
+      "description": "Best-effort favicon URL (absolute where possible).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "image_url": {
+      "description": "`og:image` absolute URL.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "site_name": {
+      "description": "`og:site_name` or the URL's hostname as a fallback.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
+      "description": "`og:title` or `<title>` contents.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "url": {
+      "description": "Canonical URL the preview describes. Echoes the request URL\nso callers can detect redirects or canonicalisations without\nround-tripping.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "url"
+  ]
+}

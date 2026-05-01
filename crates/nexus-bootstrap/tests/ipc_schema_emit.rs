@@ -35,6 +35,11 @@ use nexus_storage::ipc::{
     StorageNoteAppendResult, StorageReadFileArgs, StorageReadFileResult, StorageSearchArgs,
     StorageSearchHit, StorageSearchResult, StorageWriteFileArgs, StorageWriteFileResult,
 };
+// Audit-2026-05-01 P1-3 (#113): linkpreview is the first subsystem
+// brought into the schema generator outside the original storage / ai
+// pilot.
+use nexus_linkpreview::core_plugin::FetchArgs as LinkPreviewFetchArgs;
+use nexus_linkpreview::LinkPreview;
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -114,6 +119,15 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<ActivitySurface>("com_nexus_ai__activity_list", "surface");
     write_schema::<ActivityOutcome>("com_nexus_ai__activity_list", "outcome");
     write_schema::<ActivityToolCall>("com_nexus_ai__activity_list", "tool_call");
+
+    // ── com.nexus.linkpreview::fetch (P1-3 first roll-out) ───────────────
+    // The shell's canvas link-node overlay calls `fetch` with the URL
+    // and renders the returned [`LinkPreview`]. Both the args and the
+    // reply are simple (URL string in, optional metadata out), making
+    // this an ideal first pilot for bringing the remaining subsystems
+    // into the schema generator (audit-2026-05-01 P1-3, issue #113).
+    write_schema::<LinkPreviewFetchArgs>("com_nexus_linkpreview__fetch", "args");
+    write_schema::<LinkPreview>("com_nexus_linkpreview__fetch", "result");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type

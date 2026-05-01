@@ -29,6 +29,12 @@ echo "[drift] regenerating Phase 4 pilot IPC TS bindings (WI-36: storage + ai) �
 cargo test -p nexus-storage --features ts-export --quiet --tests
 cargo test -p nexus-ai --features ts-export --quiet --tests
 
+# audit-2026-05-01 P1-3 (#113): subsystems brought online after the
+# original WI-36 pilot. Each new entry below also needs a feature
+# enable in `crates/nexus-bootstrap/Cargo.toml::ts-export`.
+echo "[drift] regenerating IPC TS bindings (audit P1-3: linkpreview) …"
+cargo test -p nexus-linkpreview --features ts-export --quiet --tests
+
 echo "[drift] regenerating Phase 4 pilot IPC JSON Schemas (WI-36) …"
 cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export --quiet
 

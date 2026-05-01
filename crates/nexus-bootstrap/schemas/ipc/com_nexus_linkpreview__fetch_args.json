@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FetchArgs",
+  "description": "Args for `com.nexus.linkpreview::fetch` (handler id `1`).\n\nLifted to a file-scope public type by audit-2026-05-01 P1-3 (#113)\nso the schema generator can emit a JSON Schema + TypeScript binding\nfor the IPC contract. Previously inlined inside [`dispatch_fetch`];\nbehaviour is unchanged.",
+  "type": "object",
+  "properties": {
+    "url": {
+      "description": "URL to fetch. Must be `http`/`https`; the engine rejects other\nschemes with [`FetchError::InvalidUrl`].",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "url"
+  ]
+}
