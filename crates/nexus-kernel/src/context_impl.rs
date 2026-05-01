@@ -312,6 +312,23 @@ impl PluginContext for KernelPluginContext {
             .clone()
             .ok_or(IpcError::DispatcherUnavailable)?;
 
+        // Per-(target, command) capability gate (issue #77). The
+        // dispatcher's policy is empty by default; bootstrap populates
+        // it for high-impact handlers (e.g.
+        // `com.nexus.terminal::create_session` and
+        // `com.nexus.mcp.host::connect`, both of which spawn arbitrary
+        // processes and must require `Capability::ProcessSpawn`).
+        // Without this check, `IpcCall` alone would launder the effect
+        // of any capability the target plugin holds.
+        for required in dispatcher.required_caller_caps(target_plugin_id, command_id) {
+            if !self.capabilities.contains(required) {
+                audit::log_capability_denied(&self.plugin_id, required.as_str());
+                return Err(IpcError::CapabilityDenied {
+                    plugin_id: self.plugin_id.clone(),
+                });
+            }
+        }
+
         let target = target_plugin_id.to_string();
         let command = command_id.to_string();
         let timeout_ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);

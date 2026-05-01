@@ -1833,13 +1833,25 @@ fn plugin_info_from(
 /// let dispatcher: Arc<dyn IpcDispatcher> = loader.clone();
 /// // ... pass `dispatcher` into KernelPluginContext::new
 /// ```
-pub struct SharedPluginLoader(Mutex<PluginLoader>);
+pub struct SharedPluginLoader {
+    inner: Mutex<PluginLoader>,
+    /// Per-(target plugin, command) capabilities the caller must hold
+    /// in addition to `IpcCall`. Populated by [`Self::add_cap_requirement`]
+    /// at bootstrap time and consulted by
+    /// [`<SharedPluginLoader as IpcDispatcher>::required_caller_caps`].
+    /// Held outside the loader mutex so the on-every-`ipc_call` lookup
+    /// doesn't serialize behind plugin loading. See issue #77.
+    cap_requirements: std::sync::RwLock<HashMap<(String, String), Vec<Capability>>>,
+}
 
 impl SharedPluginLoader {
     /// Wrap a loader for shared kernel access.
     #[must_use]
     pub fn new(loader: PluginLoader) -> Self {
-        Self(Mutex::new(loader))
+        Self {
+            inner: Mutex::new(loader),
+            cap_requirements: std::sync::RwLock::new(HashMap::new()),
+        }
     }
 
     /// Acquire the loader lock; panics on poison.
@@ -1847,7 +1859,7 @@ impl SharedPluginLoader {
     /// # Panics
     /// Panics if the inner mutex is poisoned by a previous panic.
     pub fn lock(&self) -> std::sync::MutexGuard<'_, PluginLoader> {
-        self.0.lock().expect("plugin loader mutex poisoned")
+        self.inner.lock().expect("plugin loader mutex poisoned")
     }
 
     /// Convenience wrapper over [`PluginLoader::wire_context`] that handles
@@ -1863,10 +1875,42 @@ impl SharedPluginLoader {
         plugin_id: &str,
         ctx: Arc<KernelPluginContext>,
     ) -> Result<(), PluginError> {
-        self.0
+        self.inner
             .lock()
             .expect("plugin loader mutex poisoned")
             .wire_context(plugin_id, ctx)
+    }
+
+    /// Require callers of `(target_plugin_id, command_id)` to hold every
+    /// capability in `caps`, on top of the unconditional `IpcCall` check
+    /// the kernel context performs.
+    ///
+    /// Bootstrap calls this at registration time for the small set of
+    /// commands documented as needing more than `IpcCall` — currently
+    /// `com.nexus.terminal::create_session` and
+    /// `com.nexus.mcp.host::connect`, both of which spawn arbitrary
+    /// processes (issue #77). Replaces the prior implicit "any plugin
+    /// holding `IpcCall` can spawn arbitrary processes through the
+    /// terminal/MCP handlers" laundering surface.
+    ///
+    /// Idempotent on `(target, command)`: the latest call wins. The
+    /// kernel context's `ipc_call` reads under a shared lock, so this
+    /// can be called concurrently with active dispatch (it just affects
+    /// future calls).
+    ///
+    /// # Panics
+    /// Panics if the requirements lock is poisoned.
+    pub fn add_cap_requirement(
+        &self,
+        target_plugin_id: impl Into<String>,
+        command_id: impl Into<String>,
+        caps: Vec<Capability>,
+    ) {
+        let mut map = self
+            .cap_requirements
+            .write()
+            .expect("ipc cap-requirements lock poisoned");
+        map.insert((target_plugin_id.into(), command_id.into()), caps);
     }
 }
 
@@ -1882,7 +1926,7 @@ impl IpcDispatcher for SharedPluginLoader {
         // (host::invoke_command) without deadlocking.
         let (backend, handler_id) = {
             let loader = self
-                .0
+                .inner
                 .lock()
                 .map_err(|_| IpcError::PluginCrashedDuringCall {
                     plugin_id: target_plugin_id.to_string(),
@@ -1947,7 +1991,7 @@ impl IpcDispatcher for SharedPluginLoader {
         let command = command_id.to_string();
 
         let inner: CorePluginFuture = {
-            let loader = self.0.lock().ok()?;
+            let loader = self.inner.lock().ok()?;
             let lp = loader.loaded.get(&target)?;
             let handler_id = lp
                 .manifest
@@ -1967,6 +2011,23 @@ impl IpcDispatcher for SharedPluginLoader {
                 command,
             })
         }))
+    }
+
+    fn required_caller_caps(
+        &self,
+        target_plugin_id: &str,
+        command_id: &str,
+    ) -> Vec<Capability> {
+        // Read-locked map populated by `add_cap_requirement` at bootstrap.
+        // Empty result is the default (no extra caps beyond `IpcCall`).
+        // See issue #77.
+        let map = match self.cap_requirements.read() {
+            Ok(m) => m,
+            Err(_) => return Vec::new(),
+        };
+        map.get(&(target_plugin_id.to_string(), command_id.to_string()))
+            .cloned()
+            .unwrap_or_default()
     }
 }
 

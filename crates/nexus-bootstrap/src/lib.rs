@@ -159,6 +159,29 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         .map_err(|e| anyhow::anyhow!("failed to register invoker plugin {invoker_id}: {e}"))?;
 
     let shared = Arc::new(SharedPluginLoader::new(loader));
+
+    // Per-(target, command) capability gate (issue #77). Both of these
+    // handlers spawn arbitrary processes — terminal `create_session`
+    // takes a guest-supplied `shell` + `working_dir` + `env`, MCP
+    // `connect` spawns the MCP server's `command` over stdio. Pre-#77
+    // any caller holding `IpcCall` could reach them, laundering the
+    // effect of `ProcessSpawn` through `IpcCall`. Now the kernel
+    // context's `ipc_call` denies the dispatch unless the caller also
+    // holds `ProcessSpawn`. Combined with #73 (workflow/agent contexts
+    // dropped from `Capability::ALL`), this means a `.workflows/*.toml`
+    // step or LLM-generated tool call can no longer escalate through
+    // these surfaces.
+    shared.add_cap_requirement(
+        "com.nexus.terminal",
+        "create_session",
+        vec![Capability::ProcessSpawn],
+    );
+    shared.add_cap_requirement(
+        "com.nexus.mcp.host",
+        "connect",
+        vec![Capability::ProcessSpawn],
+    );
+
     let dispatcher: Arc<dyn IpcDispatcher> = Arc::clone(&shared) as Arc<dyn IpcDispatcher>;
 
     // Hand the AI plugin its own KernelPluginContext so `ask`/`index_file`
