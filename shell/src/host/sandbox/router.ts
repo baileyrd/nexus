@@ -65,6 +65,40 @@ export interface SandboxPort {
   close?(): void
 }
 
+/// Plugin-id prefix reserved for core (`shell/src/plugins/core/*`,
+/// `shell/src/plugins/nexus/*`) plugins on the Rust kernel side. A
+/// sandboxed community plugin invoking commands in this namespace via
+/// `kernel.invoke` is the documented exploit shape from issue #75 —
+/// it reaches core handlers (storage write/delete, terminal
+/// `create_session`, mcp `connect`, …) through the shell's
+/// `Capability::ALL` invoker context, with no per-caller capability
+/// gate or audit-log identity attribution.
+///
+/// Sandboxed plugins must use the typed surfaces exposed on
+/// `PluginAPI` (`api.platform.fs.*`, `api.workspace.*`, `api.events.*`,
+/// `api.commands.*`, …) for those services, which preserve caller
+/// identity and route through dedicated capability checks. Direct
+/// `kernel.invoke` against `com.nexus.*` is rejected at the sandbox
+/// boundary with `capability_denied`.
+export const CORE_PLUGIN_NAMESPACE_PREFIX = 'com.nexus.'
+
+/** Thrown from `kernel.invoke` when the target id is reserved for
+ * core plugins. Caught by `normalizeError` and surfaced as
+ * `capability_denied`. */
+class SandboxKernelInvokeDeniedError extends Error {
+  readonly targetId: string
+  readonly commandId: string
+  constructor(targetId: string, commandId: string) {
+    super(
+      `kernel.invoke into core plugin '${targetId}.${commandId}' is not allowed from sandboxed plugins; ` +
+        `use the typed PluginAPI surface (api.platform.fs.*, api.workspace.*, etc.) instead`,
+    )
+    this.name = 'SandboxKernelInvokeDeniedError'
+    this.targetId = targetId
+    this.commandId = commandId
+  }
+}
+
 export interface SandboxRouterOptions {
   pluginId: string
   /**
@@ -560,6 +594,16 @@ export class SandboxRouter {
       pluginId: this.pluginId,
       method,
     }
+    // Sandbox-side denies of `kernel.invoke` into the core namespace
+    // (issue #75) surface as `capability_denied` so guests get the
+    // same shape they would for any other capability gate.
+    if (err instanceof SandboxKernelInvokeDeniedError) {
+      return {
+        ...base,
+        kind: 'capability_denied',
+        message: err.message,
+      }
+    }
     if (err instanceof Error) {
       return { ...base, message: err.message }
     }
@@ -633,6 +677,18 @@ export class SandboxRouter {
         const cmdId = String(args.commandId)
         const callArgs = args.args
         const timeoutMs = typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined
+        // Sandboxed community plugins reach `kernel.invoke` via the
+        // shell's `Capability::ALL` invoker context on the Rust side
+        // (bridge.rs:301 → context.ipc_call). That context's identity
+        // is "shell", not the guest's, so per-caller capability checks
+        // and audit-log attribution don't apply. Core-plugin targets
+        // are the documented exploit surface (issue #75) — refuse
+        // them at the sandbox boundary. Sandboxed plugins reach those
+        // services through the typed `api.platform.*` / `api.workspace.*`
+        // surfaces, which preserve caller identity.
+        if (targetId.startsWith(CORE_PLUGIN_NAMESPACE_PREFIX)) {
+          throw new SandboxKernelInvokeDeniedError(targetId, cmdId)
+        }
         return await this.api.kernel.invoke(targetId, cmdId, callArgs, timeoutMs)
       }
       case 'kernel.on': {

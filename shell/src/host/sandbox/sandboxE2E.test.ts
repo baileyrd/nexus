@@ -979,3 +979,138 @@ test('F-8.1.2: each sandboxed plugin gets its own PluginAPI instance', async () 
   )
   await orch.disposeAll()
 })
+
+// ============================================================================
+// Issue #75 — sandboxed plugins must NOT reach core plugins via kernel.invoke
+// ============================================================================
+//
+// Pre-fix: a sandboxed community plugin holding only `IpcCall` could call
+// `kernel.invoke('com.nexus.storage', 'write_file', { path, bytes })` (and
+// equivalent on `com.nexus.terminal`, `com.nexus.mcp.host`, etc.). The
+// invocation reached the core plugin via the shell's `Capability::ALL`
+// invoker context — no per-caller capability check, audit log mis-attributed
+// the call to "shell" instead of the malicious plugin.
+//
+// Fix: at the sandbox router boundary, refuse `kernel.invoke` whose target
+// id is in the `com.nexus.*` namespace. Sandboxed plugins reach those
+// services via the typed `api.platform.*` / `api.workspace.*` surfaces,
+// which preserve caller identity and route through dedicated capability
+// checks.
+//
+// These tests cover each documented dangerous target plus a positive control
+// asserting that legitimate cross-plugin invokes (target outside the core
+// namespace) still pass through.
+
+const CORE_TARGETS_THAT_MUST_BE_REFUSED: Array<[string, string]> = [
+  ['com.nexus.storage', 'write_file'],
+  ['com.nexus.storage', 'delete_file'],
+  ['com.nexus.storage', 'write_raw'],
+  ['com.nexus.storage', 'read_file'],
+  ['com.nexus.terminal', 'create_session'],
+  ['com.nexus.mcp.host', 'connect'],
+  ['com.nexus.security', 'dispatch_grant_capability'],
+  ['com.nexus.ai', 'enrich_apply'],
+]
+
+for (const [targetId, commandId] of CORE_TARGETS_THAT_MUST_BE_REFUSED) {
+  test(`#75: kernel.invoke into core target '${targetId}.${commandId}' is refused`, async () => {
+    let backingReached = false
+    const ctx = buildRouter({
+      grants: new Set(['IpcCall']),
+      api: makeApi({
+        kernelInvoke: () => {
+          backingReached = true
+          throw new Error(
+            `core target '${targetId}.${commandId}' must NOT reach the backing kernel.invoke`,
+          )
+        },
+      }),
+    })
+    await completeHandshake(ctx)
+    ctx.host.sent.length = 0
+    const resp = await rpc(ctx, `inv-${targetId}-${commandId}`, 'kernel.invoke', {
+      pluginId: targetId,
+      commandId,
+      args: { path: '../escape', bytes: [0] },
+    })
+    assert.equal(
+      resp.error?.kind,
+      'capability_denied',
+      `expected capability_denied for ${targetId}.${commandId}; got: ${JSON.stringify(resp.error)}`,
+    )
+    assert.match(
+      String(resp.error?.message),
+      new RegExp(`${targetId}\\.${commandId}`),
+      'error must name the refused target+command for diagnostic clarity',
+    )
+    assert.equal(
+      backingReached,
+      false,
+      `backing kernel.invoke must not be reached for ${targetId}.${commandId}`,
+    )
+    ctx.router.dispose()
+  })
+}
+
+test('#75: kernel.invoke into a non-core target still passes through', async () => {
+  // Positive control: cross-plugin IPC into a NON-core plugin id remains
+  // legitimate. Confirms the deny rule is scoped to `com.nexus.*` and
+  // hasn't accidentally blocked all kernel.invoke calls.
+  let backingArgs: { plugin: string; cmd: string; args: unknown } | null = null
+  const ctx = buildRouter({
+    grants: new Set(['IpcCall']),
+    api: makeApi({
+      kernelInvoke: (plugin, cmd, args) => {
+        backingArgs = { plugin, cmd, args }
+        return { ok: true }
+      },
+    }),
+  })
+  await completeHandshake(ctx)
+  ctx.host.sent.length = 0
+  const resp = await rpc(ctx, 'pos-1', 'kernel.invoke', {
+    pluginId: 'com.example.calendar',
+    commandId: 'today',
+    args: { tz: 'UTC' },
+  })
+  assert.equal(resp.error, undefined, `legitimate invoke must succeed: ${JSON.stringify(resp.error)}`)
+  assert.deepEqual(resp.payload, { ok: true })
+  assert.deepEqual(backingArgs, {
+    plugin: 'com.example.calendar',
+    cmd: 'today',
+    args: { tz: 'UTC' },
+  })
+  ctx.router.dispose()
+})
+
+test('#75: deny check happens before the IpcCall capability check', async () => {
+  // Even a plugin without `IpcCall` should see the same outcome on a
+  // core-namespace target — the existing IpcCall capability gate at
+  // `dispatch` still fires for core-namespace targets, so the test
+  // documents the actual order of checks (general capability gate
+  // first, then per-target deny inside the case body). Either way,
+  // the call never reaches `api.kernel.invoke` and the error kind is
+  // `capability_denied`. This guards against a regression where the
+  // deny check is moved somewhere that a non-IpcCall plugin could
+  // bypass it.
+  let backingReached = false
+  const ctx = buildRouter({
+    grants: new Set(),
+    api: makeApi({
+      kernelInvoke: () => {
+        backingReached = true
+        throw new Error('kernel.invoke must NEVER be reached without IpcCall grant')
+      },
+    }),
+  })
+  await completeHandshake(ctx)
+  ctx.host.sent.length = 0
+  const resp = await rpc(ctx, 'no-cap-1', 'kernel.invoke', {
+    pluginId: 'com.nexus.storage',
+    commandId: 'write_file',
+    args: { path: 'a.md', bytes: [0] },
+  })
+  assert.equal(resp.error?.kind, 'capability_denied')
+  assert.equal(backingReached, false)
+  ctx.router.dispose()
+})
