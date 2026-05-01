@@ -474,6 +474,28 @@ ADR-0009 ("Keyring Hard-Fail Policy") promised "Nexus refuses to start if the ke
 
 ---
 
+## OI-22 — `com.nexus.git` crashes on `status` IPC call at boot
+
+**Severity:** Should-fix (boot-time log noise; git status pane permanently unavailable)
+**Surfaced by:** Manual boot smoke test 2026-05-01 — `[nexus.gitStatus] unavailable: KernelIpcError: plugin 'com.nexus.git' crashed during IPC call to 'status'` appears on every workspace open.
+**Status:** Not started
+
+### Gap
+The shell-side `nexus.gitStatus` plugin invokes `com.nexus.git` → `status` at workspace boot. The Rust plugin panics or returns an unrecoverable error during that call — the shell side handles it gracefully (`[Info]` log, no user-visible crash) but the git-status bar item stays permanently unavailable for the session.
+
+This is a backend-only issue; the shell does not crash and the `nexus.gitStatus` plugin does not need changes. The fix belongs in `crates/nexus-git/src/core_plugin.rs` — likely in the `status` handler where a missing git binary, uninitialized repo, or unexpected error propagation causes the plugin task to terminate early.
+
+### Scope
+- Investigate `crates/nexus-git/src/core_plugin.rs` `HANDLER_STATUS` / `dispatch` branch to find the panic or error propagation that kills the plugin task.
+- Return a typed `GitError::NoRepo` (or similar) rather than panicking when the forge is not a git repository — the most common case for a fresh forge.
+- Verify `crates/nexus-bootstrap/tests/dep_invariants.rs` and the full test suite still pass.
+
+### Acceptance
+- `pnpm tauri:dev` boot into a forge that is not a git repository → `[nexus.gitStatus]` shows "no repository" or similar, no `KernelIpcError`, no crash.
+- Boot into a forge that IS a git repository → status bar shows branch/clean/dirty state.
+
+---
+
 ## Audit-tail OPEN items without a separate OI entry
 
 Low-impact items from the 2026-04-24 audit reconciliation that are tracked only in `MICROKERNEL-AUDIT.md` / `UI-AUDIT.md` rather than here. Adding an OI entry is warranted if impact justifies the tracking cost:
