@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitLogEntry",
+  "description": "One entry in the `log` handler's response array. Mirrors\n[`crate::types::LogEntry`] for the wire.",
+  "type": "object",
+  "properties": {
+    "author": {
+      "description": "Author name.",
+      "type": "string"
+    },
+    "date": {
+      "description": "Commit date as RFC3339 string.",
+      "type": "string"
+    },
+    "hash": {
+      "description": "Short hex commit hash.",
+      "type": "string"
+    },
+    "message": {
+      "description": "Full commit message.",
+      "type": "string"
+    },
+    "parents": {
+      "description": "Parent commit hashes.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "hash",
+    "author",
+    "date",
+    "message",
+    "parents"
+  ]
+}

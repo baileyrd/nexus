@@ -35,6 +35,9 @@ cargo test -p nexus-ai --features ts-export --quiet --tests
 echo "[drift] regenerating IPC TS bindings (audit P1-3: linkpreview) …"
 cargo test -p nexus-linkpreview --features ts-export --quiet --tests
 
+echo "[drift] regenerating IPC TS bindings (audit P1-3: git) …"
+cargo test -p nexus-git --features ts-export --quiet --tests
+
 echo "[drift] regenerating Phase 4 pilot IPC JSON Schemas (WI-36) …"
 cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export --quiet
 

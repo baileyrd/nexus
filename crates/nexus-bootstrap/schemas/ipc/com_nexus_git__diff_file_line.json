@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitDiffLine",
+  "description": "One line in a diff hunk. Mirrors [`crate::types::DiffLine`].",
+  "type": "object",
+  "properties": {
+    "content": {
+      "description": "Line content (without trailing newline).",
+      "type": "string"
+    },
+    "kind": {
+      "description": "Stringified line kind (`Context`, `Added`, `Removed`).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "content"
+  ]
+}

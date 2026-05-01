@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitDiffHunk",
+  "description": "One hunk in the `diff_file` handler's response array. Mirrors\n[`crate::types::HunkDiff`].",
+  "type": "object",
+  "properties": {
+    "lines": {
+      "description": "Lines in this hunk, in order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitDiffLine"
+      }
+    },
+    "new_count": {
+      "description": "Number of lines in the new version.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "new_start": {
+      "description": "Start line in the new file (1-based).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "old_count": {
+      "description": "Number of lines in the old version.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "old_start": {
+      "description": "Start line in the old file (1-based).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "old_start",
+    "old_count",
+    "new_start",
+    "new_count",
+    "lines"
+  ],
+  "$defs": {
+    "GitDiffLine": {
+      "description": "One line in a diff hunk. Mirrors [`crate::types::DiffLine`].",
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "Line content (without trailing newline).",
+          "type": "string"
+        },
+        "kind": {
+          "description": "Stringified line kind (`Context`, `Added`, `Removed`).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "content"
+      ]
+    }
+  }
+}

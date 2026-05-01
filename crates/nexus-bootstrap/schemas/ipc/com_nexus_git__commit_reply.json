@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitCommitReply",
+  "description": "Return type for `com.nexus.git::commit` (handler id `8`).",
+  "type": "object",
+  "properties": {
+    "hash": {
+      "description": "Short hex hash of the newly-created commit.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "hash"
+  ]
+}

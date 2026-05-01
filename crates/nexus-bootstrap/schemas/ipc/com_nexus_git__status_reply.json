@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitStatusReply",
+  "description": "Return type for `com.nexus.git::status` (handler id `1`). Mirrors\n[`crate::types::GitState`] for the wire (the engine emits\n`repo_state` as a stringified Debug of [`crate::types::RepoState`]).",
+  "type": "object",
+  "properties": {
+    "branch": {
+      "description": "Current branch name, or `null` if HEAD is detached.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "head": {
+      "description": "Short hex of HEAD commit (or `\"(none)\"` for empty repos).",
+      "type": "string"
+    },
+    "is_dirty": {
+      "description": "Whether the working tree has uncommitted changes.",
+      "type": "boolean"
+    },
+    "repo_state": {
+      "description": "Stringified repo state (`Clean`, `Merge`, `Rebase`,\n`RebaseInteractive`, `CherryPick`, `Revert`, `Bisect`).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "head",
+    "is_dirty",
+    "repo_state"
+  ]
+}

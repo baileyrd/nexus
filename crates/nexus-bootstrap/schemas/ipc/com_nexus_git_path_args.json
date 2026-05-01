@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitPathArgs",
+  "description": "Args for `com.nexus.git::file_status`, `diff_file`, `stage_file`,\n`unstage_file` (handler ids `4`, `5`, `6`, `7`).",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Forge-relative path of the file. Path-traversal attempts\n(`..`) and absolute paths are rejected by the engine.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}
