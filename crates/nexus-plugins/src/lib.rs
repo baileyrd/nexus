@@ -332,6 +332,14 @@ pub struct PluginManager {
     reloader: Option<hot_reload::HotReloader>,
     safe_mode: bool,
     max_crashes: u32,
+    /// Cached `IpcDispatcher` from [`Self::inject_ipc_dispatcher`] so
+    /// hot-reload can re-inject it into the freshly built sandbox. The
+    /// `inject_ipc_dispatcher_for` API exists for exactly this purpose
+    /// but was never wired up — see issue #74.
+    cached_ipc_dispatcher: Option<Arc<dyn nexus_kernel::IpcDispatcher>>,
+    /// Cached `PluginEventForwarder` from [`Self::inject_event_forwarder`],
+    /// re-injected after hot-reload so `host::emit_event` keeps working.
+    cached_event_forwarder: Option<Arc<dyn sandbox::PluginEventForwarder>>,
 }
 
 impl PluginManager {
@@ -355,6 +363,8 @@ impl PluginManager {
             reloader,
             safe_mode: config.safe_mode,
             max_crashes: config.max_crashes,
+            cached_ipc_dispatcher: None,
+            cached_event_forwarder: None,
         })
     }
 
@@ -770,15 +780,19 @@ impl PluginManager {
     }
 
     /// Inject an [`IpcDispatcher`] into all loaded community plugins.
+    /// The dispatcher is cached so hot-reload can re-inject it into
+    /// freshly built sandboxes (issue #74).
     pub fn inject_ipc_dispatcher(&mut self, dispatcher: &Arc<dyn nexus_kernel::IpcDispatcher>) {
         self.loader.inject_ipc_dispatcher(dispatcher);
+        self.cached_ipc_dispatcher = Some(dispatcher.clone());
     }
 
     /// Inject a [`PluginEventForwarder`] into all loaded community
     /// plugins so `host::emit_event` calls are surfaced to the
-    /// application layer.
+    /// application layer. Cached for re-injection after hot-reload.
     pub fn inject_event_forwarder(&mut self, forwarder: &Arc<dyn sandbox::PluginEventForwarder>) {
         self.loader.inject_event_forwarder(forwarder);
+        self.cached_event_forwarder = Some(forwarder.clone());
     }
 
     /// Return the plugin directory for `plugin_id`, if loaded.
@@ -963,7 +977,25 @@ impl PluginManager {
 
     // ─── Private helpers ──────────────────────────────────────────────────────
 
-    fn reload_plugin(&mut self, plugin_id: &str, wasm_path: &std::path::Path) -> Result<(), PluginError> {
+    /// Hot-reload `plugin_id` from a freshly read wasm at `wasm_path`.
+    ///
+    /// Builds the new sandbox before stopping the old one (so a build
+    /// failure leaves the previous sandbox running), re-evaluates the
+    /// plugin's capabilities from disk (`granted_caps.json` revocations
+    /// take effect — issue #74), and re-injects any cached
+    /// [`IpcDispatcher`] / [`PluginEventForwarder`] so the new sandbox
+    /// can talk to the rest of the system.
+    ///
+    /// Normally invoked through [`Self::poll_reloads`], which drains
+    /// the file-watcher queue. Exposed directly for integration tests
+    /// and for callers that want to force a reload without waiting
+    /// for a debounced `notify` event.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if the plugin id is
+    /// unknown, or [`PluginError::ReloadFailed`] if the new sandbox
+    /// cannot be built (after one retry for transient errors).
+    pub fn reload_plugin(&mut self, plugin_id: &str, wasm_path: &std::path::Path) -> Result<(), PluginError> {
         use std::sync::atomic::Ordering;
 
         // RAII guard so the flag is always cleared, even on early return.
@@ -1004,10 +1036,16 @@ impl PluginManager {
                     .to_string(),
             })?;
             let lifecycle = m.lifecycle.clone();
+            // Re-evaluate capabilities from disk (re-reads `granted_caps.json`
+            // and re-runs HIGH-risk filtering) rather than reusing the
+            // cached set from the previous load. Otherwise an operator
+            // who edits `granted_caps.json` to revoke a HIGH-risk cap
+            // and triggers reload would silently keep the old grant
+            // until full process restart. See issue #74.
             let caps = self
                 .loader
-                .get(plugin_id)
-                .map_or_else(nexus_kernel::CapabilitySet::empty, |i| i.capabilities);
+                .refresh_capabilities(plugin_id)
+                .unwrap_or_else(nexus_kernel::CapabilitySet::empty);
             let settings = self.loader.settings_cache(plugin_id);
             (wasm_config, lifecycle, caps, settings)
         };
@@ -1074,12 +1112,27 @@ impl PluginManager {
                 let _ = guard.call_on_stop();
             }
         }
-        self.loader.replace_sandbox(plugin_id, new_sandbox);
+        self.loader.replace_sandbox(plugin_id, new_sandbox, capabilities);
         self.loader.set_status(plugin_id, nexus_kernel::PluginStatus::Running);
         // A successful reload presumes the fresh sandbox is healthy;
         // clear any in-memory quarantine state so the user doesn't have
         // to manually reset after a hot-reload fix.
         self.loader.clear_quarantine(plugin_id);
+
+        // Re-inject cached host hooks. Without this the freshly built
+        // sandbox has no `IpcDispatcher` (so `host::invoke_command`
+        // fails) and no `PluginEventForwarder` (so `host::emit_event`
+        // is dropped on the floor). The `inject_*_for` API existed
+        // before this fix but was never wired to the reload path —
+        // see issue #74.
+        if let Some(dispatcher) = self.cached_ipc_dispatcher.clone() {
+            self.loader
+                .inject_ipc_dispatcher_for(plugin_id, dispatcher);
+        }
+        if let Some(forwarder) = self.cached_event_forwarder.clone() {
+            self.loader
+                .inject_event_forwarder_for(plugin_id, forwarder);
+        }
 
         Ok(())
     }
