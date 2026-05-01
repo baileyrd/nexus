@@ -57,6 +57,7 @@ fn ipc_consumers_do_not_direct_dep_on_forbidden_subsystems() {
             panic!("failed to parse {}: {e}", manifest.display());
         });
 
+        // Top-level `[dependencies].<forbidden>` — the original check.
         if parsed
             .get("dependencies")
             .and_then(|v| v.get(forbidden_dep))
@@ -67,12 +68,69 @@ fn ipc_consumers_do_not_direct_dep_on_forbidden_subsystems() {
                  is forbidden — route through ipc_call via nexus-bootstrap instead."
             ));
         }
+
+        // Issue #83. Pre-fix the test only checked
+        // `[dependencies]`; a target-conditional dep block like
+        //
+        //   [target.'cfg(unix)'.dependencies]
+        //   nexus-storage = { path = "..." }
+        //
+        // would slip past the invariant. There's no current
+        // foot-gun in the workspace, but completing the check
+        // closes the loophole before it lands.
+        if let Some(target) = parsed.get("target").and_then(toml::Value::as_table) {
+            for (cfg_key, cfg_block) in target {
+                if let Some(deps) = cfg_block.get("dependencies").and_then(toml::Value::as_table)
+                {
+                    if deps.contains_key(*forbidden_dep) {
+                        violations.push(format!(
+                            "  {crate_name}/Cargo.toml: \
+                             [target.'{cfg_key}'.dependencies].{forbidden_dep} \
+                             is forbidden — route through ipc_call via \
+                             nexus-bootstrap instead."
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     assert!(
         violations.is_empty(),
         "dependency invariants violated:\n{}",
         violations.join("\n"),
+    );
+}
+
+/// Self-test for the cfg-deps extension (issue #83): synthesise a
+/// manifest with a forbidden cfg-conditional dep and confirm the
+/// helper logic flags it. Guards against silently-broken extension
+/// — the invariants test above passes today because nothing in the
+/// workspace uses target-cfg deps yet, so without this self-test a
+/// regression in the cfg traversal wouldn't be visible.
+#[test]
+fn cfg_dep_check_catches_synthesised_violation() {
+    let synthetic = r#"
+[package]
+name = "synthetic"
+
+[target.'cfg(unix)'.dependencies]
+nexus-storage = { path = "../nexus-storage" }
+"#;
+    let parsed: toml::Value = toml::from_str(synthetic).expect("parse");
+    let mut hit = false;
+    if let Some(target) = parsed.get("target").and_then(toml::Value::as_table) {
+        for (_cfg, cfg_block) in target {
+            if let Some(deps) = cfg_block.get("dependencies").and_then(toml::Value::as_table) {
+                if deps.contains_key("nexus-storage") {
+                    hit = true;
+                }
+            }
+        }
+    }
+    assert!(
+        hit,
+        "cfg-conditional forbidden dep was not detected by the traversal logic"
     );
 }
 

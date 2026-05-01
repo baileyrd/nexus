@@ -21,7 +21,15 @@ use tokio::runtime::Runtime as TokioRuntime;
 use crate::Runtime;
 
 const STORAGE_PLUGIN: &str = "com.nexus.storage";
-const IPC_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Default per-call timeout for the synchronous storage IPC helpers
+/// in this module. Issue #83 flagged this as un-overridable; for
+/// now callers that need a different timeout build their own
+/// `runtime.context.ipc_call(...)` invocation directly. Exposed as
+/// `pub` so callers can mirror the default rather than re-deriving
+/// it. Adding a `_with_timeout` overload to every helper is
+/// tracked under #83.
+pub const IPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -387,12 +395,26 @@ pub fn unresolved_links(runtime: &Runtime, rt: &TokioRuntime) -> Result<Vec<Unre
 
 /// Re-export of [`nexus_types::bases::BaseSummary`] so CLI/TUI callers don't
 /// need a direct `nexus-types` dep just to consume `base_list` results.
+///
+/// **API stability** (issue #83). The shape and field names are
+/// pinned to whatever `nexus_types::bases::BaseSummary` defines;
+/// any rename or field change in `nexus-types` is a breaking
+/// change for downstream callers reaching this re-export. The
+/// long-term fix is a bootstrap-owned DTO that mirrors the fields
+/// CLI/TUI actually consume — that's tracked under #83. Until
+/// then, audit any `nexus-types::bases::BaseSummary` change for
+/// downstream impact.
 pub use nexus_types::bases::BaseSummary;
 
 /// Re-export of [`nexus_storage::bases::query::QueryResult`] for
 /// `base_query` callers — the SQL query engine lives in the storage
 /// crate (the sole rusqlite owner), so CLI/TUI consumers can reach it
 /// here without depending on `nexus-storage` directly.
+///
+/// **API stability** (issue #83). Same caveat as
+/// [`BaseSummary`] — pinned to the storage crate's shape; a future
+/// bootstrap-owned DTO would isolate the surface from internal
+/// rename / field churn.
 pub use nexus_storage::bases::query::QueryResult as BaseQueryResult;
 
 /// Reindex a `.bases` directory from disk into the `SQLite` index.
