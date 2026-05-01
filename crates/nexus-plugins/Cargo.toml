@@ -26,3 +26,8 @@ notify-debouncer-mini = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
+# Compile WAT (WebAssembly Text Format) fixtures at test time so we don't
+# vendor `.wasm` binaries for every regression test. Pure-Rust, no extra
+# toolchain.
+wat = "1"
