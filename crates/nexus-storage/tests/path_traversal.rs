@@ -84,7 +84,19 @@ fn write_vault_file_rejects_traversal() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut plugin = boot_plugin(dir.path());
 
-    for evil in evil_paths() {
+    // Post-#80, `write_vault_file` rejects anything outside `.forge/`
+    // *before* the engine's `resolve_within` check fires, so most of
+    // the `evil_paths()` set surfaces with the new "outside the
+    // .forge/" message (the .forge/ gate; semantically the same
+    // outcome — the call doesn't touch disk). To keep this test
+    // pinned on the traversal layer specifically, use payloads that
+    // start with `.forge/` (passing the prefix gate) but contain
+    // `..` to exercise resolve_within.
+    let evil_traversals_under_forge = [
+        ".forge/../escape.txt",
+        ".forge/sub/../../escape.txt",
+    ];
+    for evil in evil_traversals_under_forge {
         let args = serde_json::json!({ "path": evil, "bytes": [0u8] });
         let err = plugin
             .dispatch(HANDLER_WRITE_VAULT_FILE, &args)
