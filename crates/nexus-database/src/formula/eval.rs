@@ -95,13 +95,39 @@ pub struct EvalContext<'a> {
     pub fields: &'a serde_json::Map<String, serde_json::Value>,
 }
 
+/// Maximum AST recursion depth permitted during formula evaluation.
+///
+/// The evaluator recurses through `FunctionCall`, `BinaryOp`, `UnaryOp`,
+/// and `If` nodes; deeply nested input (`if(c, if(c, if(...)))`) would
+/// otherwise blow the stack. 64 is comfortably past anything a
+/// hand-written spreadsheet formula reaches and well under the default
+/// stack budget. See issue #78.
+pub const MAX_RECURSION_DEPTH: usize = 64;
+
 /// Evaluate an AST expression against a record context.
 ///
 /// # Errors
 ///
 /// Returns `DatabaseError::FormulaError` on type errors, unknown properties,
-/// or unknown functions.
+/// unknown functions, or AST nesting that exceeds [`MAX_RECURSION_DEPTH`].
 pub fn evaluate(expr: &Expr, ctx: &EvalContext<'_>) -> Result<FormulaValue> {
+    evaluate_inner(expr, ctx, 0)
+}
+
+fn evaluate_inner(
+    expr: &Expr,
+    ctx: &EvalContext<'_>,
+    depth: usize,
+) -> Result<FormulaValue> {
+    if depth > MAX_RECURSION_DEPTH {
+        return Err(DatabaseError::FormulaError {
+            position: 0,
+            message: format!(
+                "formula recursion depth exceeded {MAX_RECURSION_DEPTH}"
+            ),
+        });
+    }
+    let next = depth + 1;
     match expr {
         Expr::Literal(lit) => Ok(match lit {
             LiteralValue::Number(n) => FormulaValue::Number(*n),
@@ -118,19 +144,19 @@ pub fn evaluate(expr: &Expr, ctx: &EvalContext<'_>) -> Result<FormulaValue> {
         Expr::FunctionCall { name, args } => {
             let evaluated_args: Vec<FormulaValue> = args
                 .iter()
-                .map(|a| evaluate(a, ctx))
+                .map(|a| evaluate_inner(a, ctx, next))
                 .collect::<Result<_>>()?;
             functions::call(name, &evaluated_args)
         }
 
         Expr::BinaryOp { left, op, right } => {
-            let lval = evaluate(left, ctx)?;
-            let rval = evaluate(right, ctx)?;
+            let lval = evaluate_inner(left, ctx, next)?;
+            let rval = evaluate_inner(right, ctx, next)?;
             eval_binary_op(&lval, *op, &rval)
         }
 
         Expr::UnaryOp { op, operand } => {
-            let val = evaluate(operand, ctx)?;
+            let val = evaluate_inner(operand, ctx, next)?;
             match op {
                 UnaryOp::Neg => {
                     let n = val.as_number().ok_or_else(|| DatabaseError::FormulaError {
@@ -148,11 +174,11 @@ pub fn evaluate(expr: &Expr, ctx: &EvalContext<'_>) -> Result<FormulaValue> {
             then_branch,
             else_branch,
         } => {
-            let cond = evaluate(condition, ctx)?;
+            let cond = evaluate_inner(condition, ctx, next)?;
             if cond.is_truthy() {
-                evaluate(then_branch, ctx)
+                evaluate_inner(then_branch, ctx, next)
             } else {
-                evaluate(else_branch, ctx)
+                evaluate_inner(else_branch, ctx, next)
             }
         }
     }

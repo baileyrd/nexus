@@ -7,6 +7,13 @@ use std::collections::HashMap;
 
 use crate::error::MarkdownError;
 
+/// Maximum byte size accepted for a YAML frontmatter block. Legitimate
+/// frontmatter is typically a few dozen lines (a few KiB at the high
+/// end); the cap exists to short-circuit the YAML parser before it can
+/// expand pathological alias/anchor structures (the "billion-laughs"
+/// shape) on attacker-controlled input. See issue #78.
+pub const MAX_FRONTMATTER_BYTES: usize = 256 * 1024;
+
 // ── Public types ──────────────────────────────────────────────────────────────
 
 /// Parsed YAML frontmatter with reserved fields and a custom-key escape hatch.
@@ -62,6 +69,16 @@ pub fn extract(content: &str) -> Result<(Frontmatter, &str), MarkdownError> {
     let yaml_src = &after_open[..close_pos];
     let after_close = &after_open[close_pos + close_pattern.len()..];
     let body = after_close.strip_prefix('\n').unwrap_or(after_close);
+
+    if yaml_src.len() > MAX_FRONTMATTER_BYTES {
+        return Err(MarkdownError::FrontmatterParse {
+            file: "<frontmatter>".to_string(),
+            reason: format!(
+                "frontmatter is {} bytes; max is {MAX_FRONTMATTER_BYTES} bytes",
+                yaml_src.len()
+            ),
+        });
+    }
 
     let yaml: serde_yml::Value =
         serde_yml::from_str(yaml_src).map_err(|e| MarkdownError::FrontmatterParse {

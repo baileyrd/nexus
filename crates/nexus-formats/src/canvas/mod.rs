@@ -12,30 +12,76 @@ pub use types::{
 
 use crate::error::CanvasError;
 
+/// Maximum byte size accepted for a `.canvas` JSON file. Legitimate
+/// canvases can be megabytes (per-node text + many nodes), so the
+/// cap is generous; its purpose is to short-circuit the JSON parser
+/// before it walks gigabytes of intermediate state on a malicious
+/// input. See issue #78.
+pub const MAX_CANVAS_BYTES: usize = 50 * 1024 * 1024;
+
+/// Maximum combined node + edge count after parsing. Even within the
+/// byte cap above, a JSON of millions of empty nodes would still
+/// exhaust memory once deserialized. 100k is well past any
+/// realistically-authored canvas.
+pub const MAX_CANVAS_ELEMENTS: usize = 100_000;
+
+fn enforce_caps(json: &str, parsed: &CanvasFile, path: &str) -> Result<(), CanvasError> {
+    if json.len() > MAX_CANVAS_BYTES {
+        return Err(CanvasError::InvalidJson {
+            path: path.to_string(),
+            reason: format!(
+                "canvas is {} bytes; max is {MAX_CANVAS_BYTES} bytes",
+                json.len()
+            ),
+        });
+    }
+    let total = parsed.nodes.len().saturating_add(parsed.edges.len());
+    if total > MAX_CANVAS_ELEMENTS {
+        return Err(CanvasError::InvalidJson {
+            path: path.to_string(),
+            reason: format!(
+                "canvas has {total} nodes+edges; max is {MAX_CANVAS_ELEMENTS}"
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Parse a `.canvas` JSON string into a [`CanvasFile`].
 ///
 /// The `version` field defaults to `"1.0"` when absent.
 ///
 /// # Errors
 ///
-/// Returns [`CanvasError::InvalidJson`] if the JSON is malformed.
+/// Returns [`CanvasError::InvalidJson`] if the JSON is malformed, the
+/// input exceeds [`MAX_CANVAS_BYTES`], or the parsed canvas has more
+/// than [`MAX_CANVAS_ELEMENTS`] combined nodes + edges.
 pub fn parse(json: &str) -> Result<CanvasFile, CanvasError> {
-    serde_json::from_str(json).map_err(|e| CanvasError::InvalidJson {
-        path: "<canvas>".to_string(),
-        reason: e.to_string(),
-    })
+    parse_with_path(json, "<canvas>")
 }
 
 /// Parse a `.canvas` JSON string, specifying a path for error messages.
 ///
 /// # Errors
 ///
-/// Returns [`CanvasError::InvalidJson`] if the JSON is malformed.
+/// Returns [`CanvasError::InvalidJson`] under the same conditions as
+/// [`parse`].
 pub fn parse_with_path(json: &str, path: &str) -> Result<CanvasFile, CanvasError> {
-    serde_json::from_str(json).map_err(|e| CanvasError::InvalidJson {
+    if json.len() > MAX_CANVAS_BYTES {
+        return Err(CanvasError::InvalidJson {
+            path: path.to_string(),
+            reason: format!(
+                "canvas is {} bytes; max is {MAX_CANVAS_BYTES} bytes",
+                json.len()
+            ),
+        });
+    }
+    let parsed: CanvasFile = serde_json::from_str(json).map_err(|e| CanvasError::InvalidJson {
         path: path.to_string(),
         reason: e.to_string(),
-    })
+    })?;
+    enforce_caps(json, &parsed, path)?;
+    Ok(parsed)
 }
 
 /// Serialize a [`CanvasFile`] to pretty-printed JSON.
