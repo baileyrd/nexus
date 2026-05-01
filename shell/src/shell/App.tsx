@@ -13,6 +13,7 @@ import {
   installAutoSave,
   loadWorkspace,
 } from '../workspace'
+import { ErrorBoundary } from './ErrorBoundary'
 
 export default function App() {
   const slots = useSlotStore(s => s.slots)
@@ -171,10 +172,13 @@ export default function App() {
   return (
     <div className="shell-root">
 
-      {/* Overlay */}
-      <div className="shell-overlay">
-        <SlotSurface entries={slots.overlay} />
-      </div>
+      {/* Overlay — independent boundary so a broken modal/toast doesn't
+          take down the rest of the chrome. */}
+      <ErrorBoundary name="overlay">
+        <div className="shell-overlay">
+          <SlotSurface entries={slots.overlay} />
+        </div>
+      </ErrorBoundary>
 
       {/* Workspace — Obsidian-faithful top-level container. Hosts the
           ribbon (.workspace-ribbon.mod-left) and the body columns
@@ -184,9 +188,11 @@ export default function App() {
 
         {/* Activity bar — `.workspace-ribbon.mod-left` in Obsidian.
             Chrome slot — kept as SlotRegistry entry. */}
-        <div className="workspace-ribbon mod-left">
-          <SlotSurface entries={slots.activityBar} />
-        </div>
+        <ErrorBoundary name="activityBar">
+          <div className="workspace-ribbon mod-left">
+            <SlotSurface entries={slots.activityBar} />
+          </div>
+        </ErrorBoundary>
 
         {(() => {
           // Pane-mode: one slot entry takes over the entire body region,
@@ -204,9 +210,11 @@ export default function App() {
 
           if (paneEntry) {
             return (
-              <div className="shell-pane-mode">
-                <SlotSurface entries={[paneEntry]} />
-              </div>
+              <ErrorBoundary name="paneMode">
+                <div className="shell-pane-mode">
+                  <SlotSurface entries={[paneEntry]} />
+                </div>
+              </ErrorBoundary>
             )
           }
 
@@ -221,9 +229,11 @@ export default function App() {
           // plugin activation can finish without a flash of the old
           // layout.
           return (
-            <div className="workspace-main-region" style={{ flex: '1 1 auto', minWidth: 0, display: 'flex' }}>
-              {hydrated ? <Workspace /> : null}
-            </div>
+            <ErrorBoundary name="workspace">
+              <div className="workspace-main-region" style={{ flex: '1 1 auto', minWidth: 0, display: 'flex' }}>
+                {hydrated ? <Workspace /> : null}
+              </div>
+            </ErrorBoundary>
           )
         })()}
       </div>
