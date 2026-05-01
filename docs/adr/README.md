@@ -42,6 +42,7 @@ later revised, write a new ADR that supersedes the old one.
 | [0018](0018-embedding-backend.md) | Local embedding backend (fastembed-rs) | Accepted |
 | [0019](0019-obsidian-base-format.md) | Read-only support for Obsidian `.base` format | Accepted |
 | [0020](0020-popout-window-architecture.md) | Popout window architecture (BL-029 Phase 2) | Accepted |
+| [0021](0021-ipc-handler-versioning.md) | IPC handler versioning convention | Accepted |
 
 ## How ADRs relate to PRDs and BACKLOG
 

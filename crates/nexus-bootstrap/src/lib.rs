@@ -349,6 +349,11 @@ fn register_core_plugins(
         )
         .context("failed to register com.nexus.security")?;
 
+    // Storage is the pilot for ADR 0021 (handler versioning). Every
+    // command below is registered under both `<command>` and
+    // `<command>.v1` via `with_v1_aliases` — the bare alias tracks the
+    // current version, the `.v1` form is the explicit pin. Existing
+    // callers using the bare names continue to work unchanged.
     loader
         .register_core(
             core_manifest_with_ipc(
@@ -359,7 +364,7 @@ fn register_core_plugins(
                     on_start: true,
                     on_stop: true,
                 },
-                &[
+                &with_v1_aliases(&[
                     (
                         "query_files",
                         nexus_storage::core_plugin::HANDLER_QUERY_FILES,
@@ -547,7 +552,7 @@ fn register_core_plugins(
                         "obsidian_base_query",
                         nexus_storage::core_plugin::HANDLER_OBSIDIAN_BASE_QUERY,
                     ),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(StorageCorePlugin::new(
@@ -1173,15 +1178,20 @@ impl LifecycleFlags {
 
 /// Generate a core-plugin manifest inline with no IPC commands declared.
 fn core_manifest(id: &str, name: &str, lc: LifecycleFlags) -> PluginManifest {
-    core_manifest_with_ipc(id, name, lc, &[])
+    let no_commands: &[(&str, u32)] = &[];
+    core_manifest_with_ipc(id, name, lc, no_commands)
 }
 
 /// Generate a core-plugin manifest with IPC command registrations.
-fn core_manifest_with_ipc(
+///
+/// Generic over the command-name string type so the same builder accepts
+/// both the static `&str` slices used by most subsystems and the owned
+/// `String`s produced by [`with_v1_aliases`] (ADR 0021).
+fn core_manifest_with_ipc<S: AsRef<str>>(
     id: &str,
     name: &str,
     lc: LifecycleFlags,
-    ipc_commands: &[(&str, u32)],
+    ipc_commands: &[(S, u32)],
 ) -> PluginManifest {
     let mut toml = format!(
         r#"
@@ -1203,6 +1213,7 @@ on_stop = {stop}
     );
     for (cmd_id, handler_id) in ipc_commands {
         use std::fmt::Write as _;
+        let cmd_id = cmd_id.as_ref();
         let _ = write!(
             toml,
             "\n[[registrations.ipc_command]]\nid = \"{cmd_id}\"\nhandler_id = {handler_id}\n"
@@ -1210,6 +1221,25 @@ on_stop = {stop}
     }
     parse_manifest(&toml, "bootstrap.toml")
         .unwrap_or_else(|e| panic!("bootstrap manifest for {id} failed to parse: {e}"))
+}
+
+/// Expand a list of `(command, handler_id)` pairs to include `.v1`
+/// aliases per [ADR 0021](../../../docs/adr/0021-ipc-handler-versioning.md).
+///
+/// For `[("search", 7)]` returns `[("search", 7), ("search.v1", 7)]`.
+/// Both names resolve to the same handler — the bare form is the
+/// "current version" alias and `.v1` is the explicit version pin. When
+/// `search.v2` ships, the subsystem switches to a hand-written list that
+/// carries all three names (bare → v2's handler, `.v1` → legacy
+/// handler, `.v2` → new handler) so the deprecation timeline is visible
+/// at the registration site.
+pub(crate) fn with_v1_aliases(ipc_commands: &[(&str, u32)]) -> Vec<(String, u32)> {
+    let mut out = Vec::with_capacity(ipc_commands.len() * 2);
+    for &(name, handler_id) in ipc_commands {
+        out.push((name.to_string(), handler_id));
+        out.push((format!("{name}.v1"), handler_id));
+    }
+    out
 }
 
 fn invoker_manifest(id: &str, name: &str) -> PluginManifest {
@@ -1387,5 +1417,42 @@ fn load_webhook_config(forge_root: &std::path::Path) -> nexus_workflow::webhook:
             );
             nexus_workflow::webhook::WebhookConfig::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod with_v1_aliases_tests {
+    use super::with_v1_aliases;
+
+    #[test]
+    fn doubles_each_entry_with_v1_suffix() {
+        let expanded = with_v1_aliases(&[("search", 7), ("read_file", 2)]);
+        assert_eq!(
+            expanded,
+            vec![
+                ("search".to_string(), 7),
+                ("search.v1".to_string(), 7),
+                ("read_file".to_string(), 2),
+                ("read_file.v1".to_string(), 2),
+            ],
+            "every input pair must produce a bare alias and a .v1 alias"
+        );
+    }
+
+    #[test]
+    fn empty_input_yields_empty_output() {
+        assert!(with_v1_aliases(&[]).is_empty());
+    }
+
+    #[test]
+    fn handler_id_is_shared_between_bare_and_v1() {
+        let expanded = with_v1_aliases(&[("delete_file", 12)]);
+        let bare = expanded.iter().find(|(n, _)| n == "delete_file");
+        let v1 = expanded.iter().find(|(n, _)| n == "delete_file.v1");
+        assert_eq!(
+            bare.map(|(_, h)| *h),
+            v1.map(|(_, h)| *h),
+            "bare and .v1 must point at the same handler id (alias semantics)"
+        );
     }
 }

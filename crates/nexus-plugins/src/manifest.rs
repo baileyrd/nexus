@@ -1484,20 +1484,20 @@ pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), Plug
         })?;
     }
 
-    // Rule 4: handler_id values must be unique across all registrations.
+    // Rule 4: handler_id values must be unique across non-IPC registrations.
+    //
+    // ADR 0021 (handler versioning) registers each IPC command twice — once
+    // under its bare name and once under `<name>.v1` — both pointing at
+    // the same `handler_id`. The dispatcher routes by string command, so
+    // duplicate handler_ids inside `ipc_commands` are by-design aliasing.
+    // The other registration kinds (cli/ui/uri/events) have no aliasing
+    // story today and keep the original check.
     let mut seen_handlers: HashSet<u32> = HashSet::new();
     for h in manifest
         .registrations
         .cli_subcommands
         .iter()
         .map(|r| r.handler_id)
-        .chain(
-            manifest
-                .registrations
-                .ipc_commands
-                .iter()
-                .map(|r| r.handler_id),
-        )
         .chain(
             manifest
                 .registrations
@@ -1538,6 +1538,20 @@ pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), Plug
             return Err(PluginError::ManifestValidation {
                 plugin_id: id.clone(),
                 reason: format!("duplicate handler_id {h}"),
+            });
+        }
+    }
+
+    // Rule 4b (ADR 0021): ipc_command `id` strings must be unique within
+    // the plugin. Two entries with the same `id` would silently shadow
+    // each other in `resolve_ipc`'s linear search — a foot-gun the
+    // versioning convention does not need.
+    let mut seen_ipc_ids: HashSet<&str> = HashSet::new();
+    for reg in &manifest.registrations.ipc_commands {
+        if !seen_ipc_ids.insert(reg.id.as_str()) {
+            return Err(PluginError::ManifestValidation {
+                plugin_id: id.clone(),
+                reason: format!("duplicate ipc_command id '{}'", reg.id),
             });
         }
     }
@@ -1810,7 +1824,10 @@ on_stop = true
     }
 
     #[test]
-    fn validate_rejects_duplicate_handler_id() {
+    fn validate_rejects_duplicate_handler_id_across_non_ipc_kinds() {
+        // Cross-kind handler-id collisions outside of `ipc_commands`
+        // remain forbidden — only ipc_commands are excluded so they
+        // can carry ADR-0021 aliases.
         let dir = make_test_plugin_dir("test.wasm");
         let mut m = valid_manifest();
         m.registrations.cli_subcommands.push(CliSubcommandReg {
@@ -1818,9 +1835,13 @@ on_stop = true
             handler_id: 42,
             description: "A".to_string(),
         });
-        m.registrations.ipc_commands.push(IpcCommandReg {
-            id: "ipc.a".to_string(),
+        m.registrations.ui_commands.push(UiCommandReg {
+            id: "ui.a".to_string(),
             handler_id: 42,
+            title: "A".to_string(),
+            category: None,
+            icon: None,
+            keybinding: None,
         });
         let err = validate(&m, dir.path()).unwrap_err();
         assert!(
@@ -1830,7 +1851,29 @@ on_stop = true
     }
 
     #[test]
-    fn validate_rejects_duplicate_handler_id_across_ui_and_ipc() {
+    fn validate_allows_duplicate_handler_id_within_ipc_commands() {
+        // ADR 0021 aliasing: two ipc_command entries pointing at the
+        // same handler_id is the supported pattern for `<cmd>` and
+        // `<cmd>.v1` to resolve to the same backend handler.
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.registrations.ipc_commands.push(IpcCommandReg {
+            id: "search".to_string(),
+            handler_id: 7,
+        });
+        m.registrations.ipc_commands.push(IpcCommandReg {
+            id: "search.v1".to_string(),
+            handler_id: 7,
+        });
+        validate(&m, dir.path()).expect("aliasing within ipc_commands must validate");
+    }
+
+    #[test]
+    fn validate_allows_handler_id_shared_between_ipc_and_other_kind() {
+        // ADR 0021's relaxation only excludes ipc_commands from the
+        // cross-kind uniqueness check; sharing an id across ipc and
+        // ui/cli is now legal too. The dispatcher routes ipc by
+        // string command, so there's no ambiguity.
         let dir = make_test_plugin_dir("test.wasm");
         let mut m = valid_manifest();
         m.registrations.ipc_commands.push(IpcCommandReg {
@@ -1845,9 +1888,29 @@ on_stop = true
             icon: None,
             keybinding: None,
         });
+        validate(&m, dir.path())
+            .expect("ipc/ui handler-id sharing must validate post-ADR-0021");
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_ipc_command_id() {
+        // The ipc-command `id` string must remain unique within the
+        // manifest. Two entries with the same id would silently
+        // shadow in `resolve_ipc`'s linear search — exactly the
+        // foot-gun ADR 0021 sets out to avoid.
+        let dir = make_test_plugin_dir("test.wasm");
+        let mut m = valid_manifest();
+        m.registrations.ipc_commands.push(IpcCommandReg {
+            id: "search".to_string(),
+            handler_id: 7,
+        });
+        m.registrations.ipc_commands.push(IpcCommandReg {
+            id: "search".to_string(),
+            handler_id: 8,
+        });
         let err = validate(&m, dir.path()).unwrap_err();
         assert!(
-            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("duplicate handler_id")),
+            matches!(err, PluginError::ManifestValidation { ref reason, .. } if reason.contains("duplicate ipc_command id")),
             "got {err:?}"
         );
     }
