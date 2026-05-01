@@ -32,7 +32,9 @@ export default function App() {
   const lastHydratedPathRef = useRef<string | null>(null)
 
   useEffect(() => {
-    // Debug: log what's in each slot after mount
+    // Debug: log slot population 500ms after mount. DEV-only so the
+    // timer never fires in production or e2e bundles. (SH-011)
+    if (!import.meta.env.DEV) return
     const timer = setTimeout(() => {
       const reg = getRegistry()
       const info = [
@@ -138,7 +140,10 @@ export default function App() {
       const commandId = reg.keybindings.match(e, keys)
       if (commandId) {
         e.preventDefault()
-        e.stopPropagation()
+        // Do NOT stopPropagation: let the event bubble so assistive
+        // technology (screen-reader virtual cursor / browse-mode keys)
+        // can still observe it. preventDefault alone is enough to
+        // prevent the browser's native action. (SH-006)
         reg.commands.execute(commandId)
       }
     }

@@ -2285,3 +2285,19 @@ body:not(.show-view-header):not(.is-phone) .view-header {
   height: 100%;
   cursor: col-resize;
 }
+
+/* ─── SH-007: prefers-reduced-motion ────────────────────────────────────── */
+/* Zero all transitions and animations for users who have opted out of
+   motion in their OS accessibility settings. The --motion-duration token
+   lets future JS/CSS animations respect this preference by reading the
+   variable instead of hard-coding a duration. */
+:root { --motion-duration: 150ms; }
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-duration: 0ms; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
