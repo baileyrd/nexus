@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SetResolvedArgs",
+  "description": "Args for `com.nexus.comments::set_resolved` (handler id `4`).",
+  "type": "object",
+  "properties": {
+    "author": {
+      "description": "Author of the resolution flip (best-effort).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "file_path": {
+      "description": "Forge-relative path of the markdown file.",
+      "type": "string"
+    },
+    "resolved": {
+      "description": "New resolved flag.",
+      "type": "boolean"
+    },
+    "thread_id": {
+      "description": "Thread to mark.",
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "file_path",
+    "thread_id",
+    "resolved"
+  ]
+}

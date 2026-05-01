@@ -58,6 +58,11 @@ use nexus_agent::core_plugin::{
     PipelineStage, PlanArgs, PlanIdArgs, TraceResponse,
 };
 use nexus_agent::{Observation, Plan, Step, StepResult, StepStatus, ToolCall, TraceEntry};
+use nexus_comments::core_plugin::{
+    AddReplyArgs, CreateThreadArgs, DeleteCommentArgs, DeleteThreadArgs, EditCommentArgs,
+    FilePathArg, SetResolvedArgs,
+};
+use nexus_comments::{Comment, Thread};
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -191,6 +196,17 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<StepResult>("com_nexus_agent", "step_result");
     write_schema::<StepStatus>("com_nexus_agent", "step_status");
     write_schema::<TraceEntry>("com_nexus_agent", "trace_entry");
+
+    // ── com.nexus.comments (P1-3 #113) ───────────────────────────────────
+    write_schema::<FilePathArg>("com_nexus_comments__list", "args");
+    write_schema::<CreateThreadArgs>("com_nexus_comments__create_thread", "args");
+    write_schema::<AddReplyArgs>("com_nexus_comments__add_reply", "args");
+    write_schema::<SetResolvedArgs>("com_nexus_comments__set_resolved", "args");
+    write_schema::<DeleteThreadArgs>("com_nexus_comments__delete_thread", "args");
+    write_schema::<DeleteCommentArgs>("com_nexus_comments__delete_comment", "args");
+    write_schema::<EditCommentArgs>("com_nexus_comments__edit_comment", "args");
+    write_schema::<Comment>("com_nexus_comments", "comment");
+    write_schema::<Thread>("com_nexus_comments", "thread");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type

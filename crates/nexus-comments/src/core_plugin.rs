@@ -23,8 +23,13 @@
 use std::path::Path;
 
 use nexus_plugins::{CorePlugin, PluginError};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
 
 use crate::store::{CommentStore, CommentStoreError};
 
@@ -80,64 +85,155 @@ impl CorePlugin for CommentsCorePlugin {
     }
 }
 
-#[derive(Deserialize)]
+// ── IPC arg types (audit P1-3 #113 — bumped to `pub` for schema gen) ────────
+
+/// Args for `com.nexus.comments::list` (handler id `1`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
-struct FilePathArg {
-    file_path: String,
+pub struct FilePathArg {
+    /// Forge-relative path of the markdown file. Threads are
+    /// addressed relative to a file rather than a uuid so the index
+    /// survives a rename via comment-store migration.
+    pub file_path: String,
 }
 
-#[derive(Deserialize)]
+/// Args for `com.nexus.comments::create_thread` (handler id `2`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
-struct CreateThreadArgs {
-    file_path: String,
-    block_id: Uuid,
-    body: String,
+pub struct CreateThreadArgs {
+    /// Forge-relative path of the markdown file.
+    pub file_path: String,
+    /// Stable block id the thread is anchored to. Caller must have
+    /// ensured the block was stamped via `com.nexus.editor::stamp_block`
+    /// first.
+    pub block_id: Uuid,
+    /// Body text of the first comment in the thread.
+    pub body: String,
+    /// Optional author display name.
     #[serde(default)]
-    author: Option<String>,
+    pub author: Option<String>,
 }
 
-#[derive(Deserialize)]
+/// Args for `com.nexus.comments::add_reply` (handler id `3`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
-struct AddReplyArgs {
-    file_path: String,
-    thread_id: Uuid,
-    body: String,
+pub struct AddReplyArgs {
+    /// Forge-relative path of the markdown file.
+    pub file_path: String,
+    /// Thread to append to.
+    pub thread_id: Uuid,
+    /// Reply body.
+    pub body: String,
+    /// Optional author display name.
     #[serde(default)]
-    author: Option<String>,
+    pub author: Option<String>,
 }
 
-#[derive(Deserialize)]
+/// Args for `com.nexus.comments::set_resolved` (handler id `4`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
-struct SetResolvedArgs {
-    file_path: String,
-    thread_id: Uuid,
-    resolved: bool,
+pub struct SetResolvedArgs {
+    /// Forge-relative path of the markdown file.
+    pub file_path: String,
+    /// Thread to mark.
+    pub thread_id: Uuid,
+    /// New resolved flag.
+    pub resolved: bool,
+    /// Author of the resolution flip (best-effort).
     #[serde(default)]
-    author: Option<String>,
+    pub author: Option<String>,
 }
 
-#[derive(Deserialize)]
+/// Args for `com.nexus.comments::delete_thread` (handler id `5`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
-struct DeleteThreadArgs {
-    file_path: String,
-    thread_id: Uuid,
+pub struct DeleteThreadArgs {
+    /// Forge-relative path of the markdown file.
+    pub file_path: String,
+    /// Thread to delete.
+    pub thread_id: Uuid,
 }
 
-#[derive(Deserialize)]
+/// Args for `com.nexus.comments::delete_comment` (handler id `6`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
-struct DeleteCommentArgs {
-    file_path: String,
-    thread_id: Uuid,
-    comment_id: Uuid,
+pub struct DeleteCommentArgs {
+    /// Forge-relative path of the markdown file.
+    pub file_path: String,
+    /// Thread containing the comment.
+    pub thread_id: Uuid,
+    /// Comment to delete.
+    pub comment_id: Uuid,
 }
 
-#[derive(Deserialize)]
+/// Args for `com.nexus.comments::edit_comment` (handler id `7`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
-struct EditCommentArgs {
-    file_path: String,
-    thread_id: Uuid,
-    comment_id: Uuid,
-    body: String,
+pub struct EditCommentArgs {
+    /// Forge-relative path of the markdown file.
+    pub file_path: String,
+    /// Thread containing the comment.
+    pub thread_id: Uuid,
+    /// Comment to edit.
+    pub comment_id: Uuid,
+    /// New body text.
+    pub body: String,
 }
 
 fn dispatch_list(

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FilePathArg",
+  "description": "Args for `com.nexus.comments::list` (handler id `1`).",
+  "type": "object",
+  "properties": {
+    "file_path": {
+      "description": "Forge-relative path of the markdown file. Threads are\naddressed relative to a file rather than a uuid so the index\nsurvives a rename via comment-store migration.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "file_path"
+  ]
+}

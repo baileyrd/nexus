@@ -44,6 +44,9 @@ cargo test -p nexus-mcp --features ts-export --quiet --tests
 echo "[drift] regenerating IPC TS bindings (audit P1-3: agent) …"
 cargo test -p nexus-agent --features ts-export --quiet --tests
 
+echo "[drift] regenerating IPC TS bindings (audit P1-3: comments) …"
+cargo test -p nexus-comments --features ts-export --quiet --tests
+
 echo "[drift] regenerating Phase 4 pilot IPC JSON Schemas (WI-36) …"
 cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export --quiet
 

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DeleteThreadArgs",
+  "description": "Args for `com.nexus.comments::delete_thread` (handler id `5`).",
+  "type": "object",
+  "properties": {
+    "file_path": {
+      "description": "Forge-relative path of the markdown file.",
+      "type": "string"
+    },
+    "thread_id": {
+      "description": "Thread to delete.",
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "file_path",
+    "thread_id"
+  ]
+}

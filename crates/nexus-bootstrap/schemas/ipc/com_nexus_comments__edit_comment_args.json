@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EditCommentArgs",
+  "description": "Args for `com.nexus.comments::edit_comment` (handler id `7`).",
+  "type": "object",
+  "properties": {
+    "body": {
+      "description": "New body text.",
+      "type": "string"
+    },
+    "comment_id": {
+      "description": "Comment to edit.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "file_path": {
+      "description": "Forge-relative path of the markdown file.",
+      "type": "string"
+    },
+    "thread_id": {
+      "description": "Thread containing the comment.",
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "file_path",
+    "thread_id",
+    "comment_id",
+    "body"
+  ]
+}

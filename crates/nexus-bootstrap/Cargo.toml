@@ -18,6 +18,7 @@ ts-export = [
     "nexus-git/ts-export",
     "nexus-mcp/ts-export",
     "nexus-agent/ts-export",
+    "nexus-comments/ts-export",
 ]
 
 [dependencies]
