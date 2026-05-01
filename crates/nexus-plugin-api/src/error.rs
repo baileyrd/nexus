@@ -227,7 +227,14 @@ impl IpcErrorEnvelope {
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/"))]
 pub enum BusError {
-    /// The event bus has been shut down.
+    /// Reserved for a future event-bus implementation that surfaces
+    /// shutdown explicitly to publishers. The current implementation
+    /// (a `tokio::broadcast` channel) treats "no active subscribers"
+    /// as a non-error condition for fan-out, so `publish_*` helpers
+    /// in `nexus-kernel` discard the underlying `SendError` rather
+    /// than wrapping it as `Closed`. Kept in the variant set so
+    /// callers writing exhaustive `match` arms don't have to revisit
+    /// when the implementation changes. See issue #81.
     #[error("event bus is closed")]
     Closed,
 
