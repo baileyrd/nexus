@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+
 pub use crate::manifest::ThemeCategory;
 use crate::manifest::ThemeManifest;
 use crate::{Result, ThemeError};
@@ -100,6 +103,14 @@ pub struct Theme {
 /// Which light/dark mode the UI is in. The resolver may use this to decide
 /// whether a [`crate::CssSnippet`] applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "ts-export", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemeMode {
     /// Force light mode.

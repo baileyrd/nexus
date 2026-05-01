@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ack",
+  "description": "Response envelope for `apply_config`.",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "description": "Always `true`; present so the wire type is an object, not `null`.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ok"
+  ]
+}

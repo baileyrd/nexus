@@ -41,6 +41,10 @@ use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, PluginError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ts_rs::TS;
+
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
 
 use crate::api::{ThemeConfig, ThemeEngine};
 use crate::theme::ThemeMode;
@@ -81,7 +85,15 @@ pub const HANDLER_RELOAD: u32 = 11;
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 /// Args for `apply_theme`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[cfg_attr(feature = "ts-export", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ApplyThemeArgs {
     /// Theme id to switch to.
@@ -89,7 +101,15 @@ pub struct ApplyThemeArgs {
 }
 
 /// Args for `compute_variables`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[cfg_attr(feature = "ts-export", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ComputeVariablesArgs {
     /// Theme id (does not affect engine state).
@@ -99,7 +119,15 @@ pub struct ComputeVariablesArgs {
 }
 
 /// Args for `toggle_snippet`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[cfg_attr(feature = "ts-export", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ToggleSnippetArgs {
     /// Snippet id to toggle.
@@ -107,7 +135,15 @@ pub struct ToggleSnippetArgs {
 }
 
 /// Args for `reorder_snippets`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[cfg_attr(feature = "ts-export", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ReorderSnippetsArgs {
     /// New ordered list of enabled snippet ids.
@@ -115,7 +151,15 @@ pub struct ReorderSnippetsArgs {
 }
 
 /// Args for `set_mode`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[cfg_attr(feature = "ts-export", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct SetModeArgs {
     /// Desired mode.
@@ -123,7 +167,15 @@ pub struct SetModeArgs {
 }
 
 /// Args for `apply_config`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[cfg_attr(feature = "ts-export", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ApplyConfigArgs {
     /// Config snapshot to restore.
@@ -131,7 +183,15 @@ pub struct ApplyConfigArgs {
 }
 
 /// Args for `set_plugin_overrides`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[cfg_attr(feature = "ts-export", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct SetPluginOverridesArgs {
     /// Variable overrides to merge on top of the cascade.
@@ -139,7 +199,15 @@ pub struct SetPluginOverridesArgs {
 }
 
 /// Response envelope for `apply_config`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "ts-export", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct Ack {
     /// Always `true`; present so the wire type is an object, not `null`.

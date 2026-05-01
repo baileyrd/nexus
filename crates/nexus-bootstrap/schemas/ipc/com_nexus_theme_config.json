@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ThemeConfig",
+  "description": "Config snapshot persisted to disk (see PRD §3.2 step 6).",
+  "type": "object",
+  "properties": {
+    "enabled_snippets": {
+      "description": "Enabled snippet ids, in cascade order.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "mode": {
+      "description": "Selected mode.",
+      "$ref": "#/$defs/ThemeMode"
+    },
+    "theme_id": {
+      "description": "Selected theme id.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "theme_id",
+    "mode",
+    "enabled_snippets"
+  ],
+  "$defs": {
+    "ThemeMode": {
+      "description": "Which light/dark mode the UI is in. The resolver may use this to decide\nwhether a [`crate::CssSnippet`] applies.",
+      "oneOf": [
+        {
+          "description": "Force light mode.",
+          "type": "string",
+          "const": "light"
+        },
+        {
+          "description": "Force dark mode.",
+          "type": "string",
+          "const": "dark"
+        },
+        {
+          "description": "Follow the host OS preference (caller resolves to Light or Dark before\nhanding this to the resolver).",
+          "type": "string",
+          "const": "system"
+        }
+      ]
+    }
+  }
+}

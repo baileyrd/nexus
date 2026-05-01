@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SnippetMetadata",
+  "description": "Listing-friendly snippet description.",
+  "type": "object",
+  "properties": {
+    "description": {
+      "description": "Snippet description from the header.",
+      "type": "string"
+    },
+    "enabled": {
+      "description": "Whether the snippet is currently enabled.",
+      "type": "boolean"
+    },
+    "id": {
+      "description": "Snippet id (filename stem).",
+      "type": "string"
+    },
+    "mode": {
+      "description": "Mode filter.",
+      "$ref": "#/$defs/SnippetMode"
+    },
+    "name": {
+      "description": "Snippet name from the header.",
+      "type": "string"
+    },
+    "scope": {
+      "description": "Scope (global or per-surface selector).",
+      "$ref": "#/$defs/SnippetScope"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "description",
+    "mode",
+    "scope",
+    "enabled"
+  ],
+  "$defs": {
+    "SnippetMode": {
+      "description": "The mode(s) in which a snippet applies.",
+      "oneOf": [
+        {
+          "description": "Applies in both light and dark modes.",
+          "type": "string",
+          "const": "all"
+        },
+        {
+          "description": "Applies only in light mode.",
+          "type": "string",
+          "const": "light"
+        },
+        {
+          "description": "Applies only in dark mode.",
+          "type": "string",
+          "const": "dark"
+        }
+      ]
+    },
+    "SnippetScope": {
+      "description": "Where a snippet's CSS rules apply.",
+      "oneOf": [
+        {
+          "description": "Applied to `<html>` for all surfaces.",
+          "type": "string",
+          "const": "global"
+        },
+        {
+          "description": "Applied only to panes matching the given selector (e.g. `.editor-pane`).",
+          "type": "object",
+          "properties": {
+            "per-surface": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "per-surface"
+          ]
+        }
+      ]
+    }
+  }
+}

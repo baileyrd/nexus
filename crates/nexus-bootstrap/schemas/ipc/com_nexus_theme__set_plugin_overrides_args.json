@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SetPluginOverridesArgs",
+  "description": "Args for `set_plugin_overrides`.",
+  "type": "object",
+  "properties": {
+    "overrides": {
+      "description": "Variable overrides to merge on top of the cascade.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "overrides"
+  ]
+}

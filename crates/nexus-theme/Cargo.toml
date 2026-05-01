@@ -19,6 +19,18 @@ chrono = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 ts-rs = { workspace = true }
+schemars = { workspace = true, optional = true }
+
+[features]
+# Audit-2026-05-01 P1-3 (#113) — emit JSON Schema bindings for IPC
+# arg/reply types alongside the existing ts-rs TypeScript bindings, and
+# trigger ts-rs's `export_to` write side-effect. Off by default so
+# normal builds don't pull schemars and don't write TS files.
+# Enable via `cargo test -p nexus-bootstrap --test ipc_schema_emit
+# --features ts-export`. Note: this crate's other types keep their
+# unconditional `derive(TS)` because they pre-date this feature; only
+# IPC types opt in to feature-gated emission.
+ts-export = ["dep:schemars"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

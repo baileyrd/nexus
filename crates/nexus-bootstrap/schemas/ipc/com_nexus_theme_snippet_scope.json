@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SnippetScope",
+  "description": "Where a snippet's CSS rules apply.",
+  "oneOf": [
+    {
+      "description": "Applied to `<html>` for all surfaces.",
+      "type": "string",
+      "const": "global"
+    },
+    {
+      "description": "Applied only to panes matching the given selector (e.g. `.editor-pane`).",
+      "type": "object",
+      "properties": {
+        "per-surface": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "per-surface"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SnippetMode",
+  "description": "The mode(s) in which a snippet applies.",
+  "oneOf": [
+    {
+      "description": "Applies in both light and dark modes.",
+      "type": "string",
+      "const": "all"
+    },
+    {
+      "description": "Applies only in light mode.",
+      "type": "string",
+      "const": "light"
+    },
+    {
+      "description": "Applies only in dark mode.",
+      "type": "string",
+      "const": "dark"
+    }
+  ]
+}

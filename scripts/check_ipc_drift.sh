@@ -47,6 +47,9 @@ cargo test -p nexus-agent --features ts-export --quiet --tests
 echo "[drift] regenerating IPC TS bindings (audit P1-3: comments) …"
 cargo test -p nexus-comments --features ts-export --quiet --tests
 
+echo "[drift] regenerating IPC TS bindings (audit P1-3: theme) …"
+cargo test -p nexus-theme --features ts-export --quiet --tests
+
 echo "[drift] regenerating Phase 4 pilot IPC JSON Schemas (WI-36) …"
 cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export --quiet
 
@@ -56,7 +59,21 @@ TARGETS=(
     "crates/nexus-bootstrap/schemas/ipc"
 )
 
-if ! git diff --exit-code -- "${TARGETS[@]}"; then
+# `git diff --exit-code` catches modifications to tracked files but
+# silently misses untracked new ones — e.g. a freshly emitted schema
+# for a new IPC type. Layer in `git ls-files --others` so a missing
+# commit of a new generated file is caught here too.
+DRIFTED=0
+git diff --exit-code -- "${TARGETS[@]}" || DRIFTED=1
+UNTRACKED="$(git ls-files --others --exclude-standard -- "${TARGETS[@]}")"
+if [ -n "$UNTRACKED" ]; then
+    echo
+    echo "[drift] untracked generated files (please commit):"
+    echo "$UNTRACKED" | sed 's/^/  /'
+    DRIFTED=1
+fi
+
+if [ "$DRIFTED" -ne 0 ]; then
     cat >&2 <<EOF
 
 [drift] ERROR: regenerating IPC bindings produced a diff in:
@@ -65,7 +82,8 @@ ${TARGETS[*]}
 This means the Rust source of truth changed without committing the
 regenerated TypeScript + JSON Schema output. Fix one of:
 
-  1. Run \`scripts/check_ipc_drift.sh\` locally and commit the result.
+  1. Run \`scripts/check_ipc_drift.sh\` locally and commit the result
+     (including any untracked files listed above).
   2. If the diff is unexpected, check that your pilot IPC type still
      carries \`#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]\`
      and that the \`#[ts(export, export_to = …)]\` path is correct.

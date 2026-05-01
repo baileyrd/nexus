@@ -63,6 +63,13 @@ use nexus_comments::core_plugin::{
     FilePathArg, SetResolvedArgs,
 };
 use nexus_comments::{Comment, Thread};
+use nexus_theme::api::{AppliedTheme, SnippetMetadata, ThemeConfig};
+use nexus_theme::core_plugin::{
+    Ack as ThemeAck, ApplyConfigArgs, ApplyThemeArgs, ComputeVariablesArgs, ReorderSnippetsArgs,
+    SetModeArgs, SetPluginOverridesArgs, ToggleSnippetArgs,
+};
+use nexus_theme::snippet::{SnippetMode, SnippetScope};
+use nexus_theme::ThemeMode;
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -207,6 +214,30 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<EditCommentArgs>("com_nexus_comments__edit_comment", "args");
     write_schema::<Comment>("com_nexus_comments", "comment");
     write_schema::<Thread>("com_nexus_comments", "thread");
+
+    // ── com.nexus.theme (P1-3 #113) ──────────────────────────────────────
+    // The shell's appearance pane drives every theme mutation through
+    // these handlers. Every command's args + the four return shapes
+    // (AppliedTheme / ThemeConfig / SnippetMetadata / Ack) are emitted
+    // so the shell-side store can consume the contract directly.
+    write_schema::<ApplyThemeArgs>("com_nexus_theme__apply_theme", "args");
+    write_schema::<AppliedTheme>("com_nexus_theme__apply_theme", "result");
+    write_schema::<ComputeVariablesArgs>("com_nexus_theme__compute_variables", "args");
+    write_schema::<ToggleSnippetArgs>("com_nexus_theme__toggle_snippet", "args");
+    write_schema::<ReorderSnippetsArgs>("com_nexus_theme__reorder_snippets", "args");
+    write_schema::<SetModeArgs>("com_nexus_theme__set_mode", "args");
+    write_schema::<ApplyConfigArgs>("com_nexus_theme__apply_config", "args");
+    write_schema::<SetPluginOverridesArgs>("com_nexus_theme__set_plugin_overrides", "args");
+    write_schema::<ThemeAck>("com_nexus_theme", "ack");
+    // Shared types referenced from the args/results above. Schemars
+    // inlines them under `$defs` of each consuming schema, but emitting
+    // them as standalone files keeps the per-type contract addressable
+    // (e.g. for documentation links and per-type version pinning).
+    write_schema::<ThemeMode>("com_nexus_theme", "mode");
+    write_schema::<ThemeConfig>("com_nexus_theme", "config");
+    write_schema::<SnippetMetadata>("com_nexus_theme", "snippet_metadata");
+    write_schema::<SnippetMode>("com_nexus_theme", "snippet_mode");
+    write_schema::<SnippetScope>("com_nexus_theme", "snippet_scope");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type
