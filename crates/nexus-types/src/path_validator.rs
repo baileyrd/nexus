@@ -45,6 +45,13 @@ pub struct ForgePathValidator {
 impl ForgePathValidator {
     /// Create a new validator. Canonicalizes `forge_root` immediately.
     ///
+    /// `forge_root` **must exist on disk** at construction time —
+    /// `Path::canonicalize` requires a real path to resolve. Callers
+    /// that want to validate paths against a not-yet-created forge
+    /// root should create the directory first, or use the
+    /// component-only [`crate::paths::resolve_within`] helper, which
+    /// performs no I/O.
+    ///
     /// # Errors
     /// Returns `PathValidationError::InvalidPath` if `forge_root` does not
     /// exist or cannot be canonicalized.
@@ -75,6 +82,13 @@ impl ForgePathValidator {
     /// 3. Normalizes `.` and `..` components, rejecting `..` past the root.
     /// 4. Joins with forge root and canonicalizes (follows symlinks).
     /// 5. Verifies the canonical path starts with the canonical forge root.
+    ///
+    /// This is the **permissive** validator: leading `/` is dropped,
+    /// `.` is dropped, and `..` is allowed as long as it doesn't walk
+    /// past the forge root. For strict, component-only validation
+    /// (no I/O, no normalization), use
+    /// [`crate::paths::resolve_within`] — see the table on that
+    /// helper for the full comparison.
     ///
     /// # Errors
     /// - `PathValidationError::InvalidPath` for null bytes or non-existent paths.
@@ -113,7 +127,7 @@ impl ForgePathValidator {
 
     /// Validate a requested path for a **write** operation. Returns a
     /// canonical target path whose parent is guaranteed to be inside the
-    /// forge root.
+    /// forge root **at validation time**.
     ///
     /// Unlike [`validate`](Self::validate), the target file does not have
     /// to exist; only the deepest existing ancestor is canonicalized, then
@@ -121,6 +135,17 @@ impl ForgePathValidator {
     /// components. This closes the TOCTOU race where canonicalizing the
     /// parent and then writing to the non-canonical path could be steered
     /// through a symlink swap between the two operations.
+    ///
+    /// # Residual TOCTOU
+    /// The "parent guaranteed inside the forge root" invariant only holds
+    /// at the moment this function returns. The non-existing tail
+    /// components — the part of the path that doesn't exist on disk yet
+    /// — can be swapped for symlinks during the gap between validation
+    /// and the actual `open(2)`/`write` syscall. A truly TOCTOU-free
+    /// write requires `openat2(RESOLVE_BENEATH)` on Linux (or the
+    /// equivalent on other platforms); kernel callers that need that
+    /// guarantee should layer it on top of the path returned here. See
+    /// issue #82.
     ///
     /// # Behavior
     /// 1. Rejects paths containing null bytes.
