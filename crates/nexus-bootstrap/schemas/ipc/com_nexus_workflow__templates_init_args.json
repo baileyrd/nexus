@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InitTemplateArgs",
+  "description": "Args for `com.nexus.workflow::templates_init` (handler id `10`).",
+  "type": "object",
+  "properties": {
+    "filename": {
+      "description": "Override filename (default: `<slug>.workflow.toml`).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "overwrite": {
+      "description": "Allow overwriting an existing file. Default `false` —\ncallers must opt in to clobber.",
+      "type": "boolean",
+      "default": false
+    },
+    "slug": {
+      "description": "Template slug to instantiate.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "slug"
+  ]
+}

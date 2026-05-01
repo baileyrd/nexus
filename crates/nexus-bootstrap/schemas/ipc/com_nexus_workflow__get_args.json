@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GetWorkflowArgs",
+  "description": "Args for `com.nexus.workflow::get` (handler id `2`).",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Workflow name to fetch.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name"
+  ]
+}

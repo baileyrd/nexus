@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GetTemplateArgs",
+  "description": "Args for `com.nexus.workflow::templates_get` (handler id `9`).",
+  "type": "object",
+  "properties": {
+    "slug": {
+      "description": "Template slug (e.g. `daily-digest`, `pr-checklist`).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "slug"
+  ]
+}
