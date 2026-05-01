@@ -23,6 +23,9 @@ mod auth;
 mod client;
 mod config;
 pub mod core_plugin;
+/// Wire-mirror IPC arg/reply types — the authoritative contract that
+/// the schema generator and the shell consume (audit P1-3, #113).
+pub mod ipc;
 pub mod pool;
 mod server;
 

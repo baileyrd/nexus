@@ -29,6 +29,14 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl"] }
+
+[features]
+# Audit-2026-05-01 P1-3 (#113) — emit JSON Schema + TypeScript bindings
+# for the wire-mirror IPC types. Off by default. Schemars is already
+# unconditional (used internally for MCP tool schemas) so the feature
+# only gates ts-rs.
+ts-export = ["dep:ts-rs"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

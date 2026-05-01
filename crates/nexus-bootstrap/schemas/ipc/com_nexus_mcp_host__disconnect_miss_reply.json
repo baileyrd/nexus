@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "McpDisconnectMissReply",
+  "description": "Return type for `com.nexus.mcp.host::disconnect` when the named\nserver wasn't connected. The wire shape distinguishes \"no-op\nsuccess\" from a hard error.",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "description": "Always `false` for this variant.",
+      "type": "boolean"
+    },
+    "reason": {
+      "description": "Why the disconnect was a no-op (`\"not connected\"`).",
+      "type": "string"
+    },
+    "server": {
+      "description": "Echoed server name.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ok",
+    "server",
+    "reason"
+  ]
+}

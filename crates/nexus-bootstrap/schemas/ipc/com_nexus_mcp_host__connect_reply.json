@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "McpConnectReply",
+  "description": "Return type for `com.nexus.mcp.host::connect` (handler id `6`)\nand the success branch of `disconnect` (handler id `7`).",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "description": "Always `true` on success.",
+      "type": "boolean"
+    },
+    "server": {
+      "description": "Echoed server name.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ok",
+    "server"
+  ]
+}

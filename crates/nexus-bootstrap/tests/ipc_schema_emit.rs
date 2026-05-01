@@ -47,6 +47,12 @@ use nexus_git::ipc::{
     GitBranch, GitCommitArgs, GitCommitReply, GitDiffHunk, GitDiffLine, GitLogArgs, GitLogEntry,
     GitOk, GitPathArgs, GitStatusReply,
 };
+// nexus-mcp uses a wire-mirror module (`nexus_mcp::ipc`) — the
+// existing handlers construct ad-hoc JSON via `serde_json::json!`.
+use nexus_mcp::ipc::{
+    McpCallToolArgs, McpCallToolReply, McpConnectReply, McpDisconnectMissReply,
+    McpPromptEntry, McpResourceEntry, McpServerArgs, McpServerEntry, McpToolEntry,
+};
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -148,6 +154,18 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<GitCommitArgs>("com_nexus_git__commit", "args");
     write_schema::<GitCommitReply>("com_nexus_git__commit", "reply");
     write_schema::<GitOk>("com_nexus_git", "ok");
+
+    // ── com.nexus.mcp.host (P1-3 #113) ───────────────────────────────────
+    // Wire-mirror types — the impl emits ad-hoc `serde_json::json!`.
+    write_schema::<McpServerArgs>("com_nexus_mcp_host", "server_args");
+    write_schema::<McpCallToolArgs>("com_nexus_mcp_host__call_tool", "args");
+    write_schema::<McpServerEntry>("com_nexus_mcp_host__list_servers", "entry");
+    write_schema::<McpToolEntry>("com_nexus_mcp_host__list_tools", "entry");
+    write_schema::<McpResourceEntry>("com_nexus_mcp_host__list_resources", "entry");
+    write_schema::<McpPromptEntry>("com_nexus_mcp_host__list_prompts", "entry");
+    write_schema::<McpConnectReply>("com_nexus_mcp_host__connect", "reply");
+    write_schema::<McpDisconnectMissReply>("com_nexus_mcp_host__disconnect", "miss_reply");
+    write_schema::<McpCallToolReply>("com_nexus_mcp_host__call_tool", "reply");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type
