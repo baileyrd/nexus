@@ -3,6 +3,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use crate::capability::Capability;
 use crate::error::IpcError;
 
 /// A boxed, `'static`, `Send` future returned by an async IPC handler.
@@ -40,5 +41,26 @@ pub trait IpcDispatcher: Send + Sync {
     ) -> Option<IpcFuture> {
         let _ = (target_plugin_id, command_id, args);
         None
+    }
+
+    /// Capabilities the caller must hold to invoke `command_id` on
+    /// `target_plugin_id`, in addition to the unconditional
+    /// [`Capability::IpcCall`] check the kernel context performs first.
+    ///
+    /// The default returns an empty list — most IPC commands need nothing
+    /// beyond `IpcCall`. Override this for commands that perform high-impact
+    /// side effects (process spawn, external network, …) so callers must
+    /// hold the matching kernel capability rather than laundering the
+    /// effect through `IpcCall` alone. See issue #77.
+    ///
+    /// [`KernelPluginContext::ipc_call`] consults this **before** dispatch,
+    /// so handlers themselves don't need to re-check.
+    fn required_caller_caps(
+        &self,
+        target_plugin_id: &str,
+        command_id: &str,
+    ) -> Vec<Capability> {
+        let _ = (target_plugin_id, command_id);
+        Vec::new()
     }
 }
