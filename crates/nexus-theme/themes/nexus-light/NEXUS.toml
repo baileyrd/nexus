@@ -35,6 +35,22 @@ platform_specific = ["macos", "windows"]
 "--nx-shadow-md" = "0 4px 6px rgba(0, 0, 0, 0.08)"
 "--nx-shadow-lg" = "0 10px 15px rgba(0, 0, 0, 0.10)"
 
+
+"--nx-density-cozy-ui-size"               = "13px"
+"--nx-density-cozy-row-h"                 = "26px"
+"--nx-density-cozy-body-size"             = "16px"
+"--nx-density-cozy-chrome-row-height"     = "36px"
+"--nx-density-cozy-chrome-icon-size"      = "24px"
+"--nx-density-compact-ui-size"            = "12px"
+"--nx-density-compact-row-h"              = "22px"
+"--nx-density-compact-body-size"          = "15px"
+"--nx-density-compact-chrome-row-height"  = "30px"
+"--nx-density-compact-chrome-icon-size"   = "20px"
+"--nx-density-spacious-ui-size"           = "14px"
+"--nx-density-spacious-row-h"             = "30px"
+"--nx-density-spacious-body-size"         = "17px"
+"--nx-density-spacious-chrome-row-height" = "40px"
+"--nx-density-spacious-chrome-icon-size"  = "28px"
 [typography]
 sans_font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
 mono_font = "'Monaco', 'Courier New', monospace"

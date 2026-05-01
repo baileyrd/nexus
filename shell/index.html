@@ -132,14 +132,33 @@
            This alias block has been removed. */
       }
 
-      /* SH-004: density scales prose and chrome together. */
+      /* SH-004 / SH-014: density scales prose and chrome together.
+         SH-014: kernel themes ship --nx-density-<level>-* variables so
+         themes can override density sizing. The hex fallbacks match the
+         canonical defaults and protect against FOUC before the kernel
+         hydrates. */
       :root,
-      [data-density="cozy"]    { --ui-size: 13px; --row-h: 26px; --body-size: 16px;
-                                  --chrome-row-height: 36px; --chrome-icon-size: 24px; }
-      [data-density="compact"] { --ui-size: 12px; --row-h: 22px; --body-size: 15px;
-                                  --chrome-row-height: 30px; --chrome-icon-size: 20px; }
-      [data-density="spacious"]{ --ui-size: 14px; --row-h: 30px; --body-size: 17px;
-                                  --chrome-row-height: 40px; --chrome-icon-size: 28px; }
+      [data-density="cozy"]    {
+        --ui-size:           var(--nx-density-cozy-ui-size, 13px);
+        --row-h:             var(--nx-density-cozy-row-h, 26px);
+        --body-size:         var(--nx-density-cozy-body-size, 16px);
+        --chrome-row-height: var(--nx-density-cozy-chrome-row-height, 36px);
+        --chrome-icon-size:  var(--nx-density-cozy-chrome-icon-size, 24px);
+      }
+      [data-density="compact"] {
+        --ui-size:           var(--nx-density-compact-ui-size, 12px);
+        --row-h:             var(--nx-density-compact-row-h, 22px);
+        --body-size:         var(--nx-density-compact-body-size, 15px);
+        --chrome-row-height: var(--nx-density-compact-chrome-row-height, 30px);
+        --chrome-icon-size:  var(--nx-density-compact-chrome-icon-size, 20px);
+      }
+      [data-density="spacious"] {
+        --ui-size:           var(--nx-density-spacious-ui-size, 14px);
+        --row-h:             var(--nx-density-spacious-row-h, 30px);
+        --body-size:         var(--nx-density-spacious-body-size, 17px);
+        --chrome-row-height: var(--nx-density-spacious-chrome-row-height, 40px);
+        --chrome-icon-size:  var(--nx-density-spacious-chrome-icon-size, 28px);
+      }
 
       /* Prevent white flash before the React tree mounts. */
       html, body { margin: 0; padding: 0; background: var(--background-primary); height: 100%; overflow: hidden; }
