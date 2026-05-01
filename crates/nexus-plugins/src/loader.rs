@@ -2021,9 +2021,8 @@ impl IpcDispatcher for SharedPluginLoader {
         // Read-locked map populated by `add_cap_requirement` at bootstrap.
         // Empty result is the default (no extra caps beyond `IpcCall`).
         // See issue #77.
-        let map = match self.cap_requirements.read() {
-            Ok(m) => m,
-            Err(_) => return Vec::new(),
+        let Ok(map) = self.cap_requirements.read() else {
+            return Vec::new();
         };
         map.get(&(target_plugin_id.to_string(), command_id.to_string()))
             .cloned()

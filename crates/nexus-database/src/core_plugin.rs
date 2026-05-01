@@ -173,8 +173,22 @@ fn to_value<T: serde::Serialize>(
     serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize failed: {e}")))
 }
 
+/// Maximum byte size accepted by the `csv_import` IPC handler. The
+/// reader is fully in-memory; an unbounded `csv_bytes` reaching this
+/// handler from IPC was the documented `DoS` shape from issue #78.
+/// `10 MiB` is generous for any realistic CSV (Excel's row cap times
+/// a hundred columns of small values still lands under it).
+const MAX_CSV_IMPORT_BYTES: usize = 10 * 1024 * 1024;
+
 fn dispatch_csv_import(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
     let a: CsvImportArgs = parse_args(args, "csv_import")?;
+
+    if a.csv_bytes.len() > MAX_CSV_IMPORT_BYTES {
+        return Err(exec_err(format!(
+            "csv_import: input is {} bytes; max is {MAX_CSV_IMPORT_BYTES} bytes",
+            a.csv_bytes.len(),
+        )));
+    }
 
     let mapping = if let Some(pairs) = a.column_mapping {
         ColumnMapping { mappings: pairs }

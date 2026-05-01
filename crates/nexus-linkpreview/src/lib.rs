@@ -15,6 +15,8 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+use std::io::Read;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::time::Duration;
 
 use regex_lite::Regex;
@@ -74,6 +76,117 @@ pub enum FetchError {
     Status(u16),
 }
 
+/// Return `true` if `ip` is a non-public address that an outbound
+/// HTTP client must refuse to connect to: loopback (`127.0.0.0/8`,
+/// `::1`), link-local (`169.254.0.0/16`, `fe80::/10` — also covers
+/// the AWS EC2 metadata IP `169.254.169.254`), RFC1918 private
+/// (`10/8`, `172.16/12`, `192.168/16`), shared address space
+/// (`100.64/10`, RFC6598), IPv4 broadcast (`255.255.255.255`), IPv6
+/// ULA (`fc00::/7`), unspecified (`0.0.0.0`, `::`), multicast, or
+/// IPv4-mapped IPv6 of any of the above. See issue #78.
+///
+/// Pure helper so the SSRF guard can be exhaustively unit-tested
+/// without standing up an HTTP server.
+#[must_use]
+pub fn is_blocked_address(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            if v4.is_loopback() || v4.is_unspecified() || v4.is_multicast() || v4.is_broadcast()
+            {
+                return true;
+            }
+            // RFC1918 private + link-local + shared (CGNAT).
+            let octs = v4.octets();
+            v4.is_private()
+                || v4.is_link_local()
+                // 100.64.0.0/10 — RFC6598 carrier-grade NAT.
+                || (octs[0] == 100 && (64..128).contains(&octs[1]))
+                // 0.0.0.0/8 — "this network" reserved.
+                || octs[0] == 0
+        }
+        IpAddr::V6(v6) => {
+            if v6.is_loopback() || v6.is_unspecified() || v6.is_multicast() {
+                return true;
+            }
+            // IPv4-mapped IPv6 (`::ffff:a.b.c.d`) — recurse into the
+            // v4 check so attackers can't bypass the guard by smuggling
+            // 127.0.0.1 as `::ffff:127.0.0.1`.
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_blocked_address(IpAddr::V4(mapped));
+            }
+            // fc00::/7 — Unique Local Addresses (RFC4193).
+            let segs = v6.segments();
+            if (segs[0] & 0xfe00) == 0xfc00 {
+                return true;
+            }
+            // fe80::/10 — link-local.
+            if (segs[0] & 0xffc0) == 0xfe80 {
+                return true;
+            }
+            false
+        }
+    }
+}
+
+/// Resolve `host` and `port` to socket addresses, returning an error
+/// if any resolved address is non-public per [`is_blocked_address`].
+/// Returns the first allowed address so the caller can record it.
+fn resolve_public_address(host: &str, port: u16) -> Result<IpAddr, FetchError> {
+    let addrs = (host, port)
+        .to_socket_addrs()
+        .map_err(|e| FetchError::Request(format!("DNS resolution failed for {host}: {e}")))?;
+    let mut found_any = false;
+    for addr in addrs {
+        found_any = true;
+        let ip = addr.ip();
+        if is_blocked_address(ip) {
+            return Err(FetchError::InvalidUrl(format!(
+                "host {host} resolves to non-public address {ip} — refused"
+            )));
+        }
+    }
+    if !found_any {
+        return Err(FetchError::Request(format!(
+            "host {host} resolved to no addresses"
+        )));
+    }
+    // We re-resolve at the redirect-policy callback for each redirect
+    // hop, so returning the first IP here is informational only — the
+    // actual outbound connection re-resolves through reqwest. There's
+    // a residual TOCTOU between this check and the connection
+    // (DNS rebinding); locking reqwest to a specific IP is a deeper
+    // change and is documented as residual risk on issue #78.
+    (host, port)
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut iter| iter.next())
+        .map(|s| s.ip())
+        .ok_or_else(|| FetchError::Request(format!("host {host} resolved to no addresses")))
+}
+
+/// Validate that `url` (already known to be http/https) doesn't
+/// resolve to a non-public address. Returns the resolved IP for
+/// audit/logging purposes.
+fn validate_url_target(url: &reqwest::Url) -> Result<IpAddr, FetchError> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| FetchError::InvalidUrl(format!("URL has no host: {url}")))?;
+    // If the URL itself contains a literal IP, we can short-circuit
+    // the resolver entirely.
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_blocked_address(ip) {
+            return Err(FetchError::InvalidUrl(format!(
+                "URL targets non-public address {ip} — refused"
+            )));
+        }
+        return Ok(ip);
+    }
+    let port = url
+        .port_or_known_default()
+        .unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
+    resolve_public_address(host, port)
+}
+
 /// Fetch `url`, parse metadata, return a [`LinkPreview`]. Blocks
 /// the calling thread — run from a kernel handler thread rather
 /// than from async contexts.
@@ -83,16 +196,41 @@ pub enum FetchError {
 /// non-2xx responses. Response bodies that are valid but contain no
 /// recognisable metadata produce an `Ok` with mostly-empty fields.
 pub fn fetch_blocking(url: &str) -> Result<LinkPreview, FetchError> {
-    if !(url.starts_with("http://") || url.starts_with("https://")) {
+    // Parse + validate scheme up front. `reqwest::Url` does the same
+    // parsing reqwest itself does; doing it here means we can run
+    // the SSRF guard before reqwest opens any socket.
+    let parsed = reqwest::Url::parse(url).map_err(|_| FetchError::InvalidUrl(url.to_string()))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
         return Err(FetchError::InvalidUrl(url.to_string()));
     }
+
+    // SSRF guard #1 — initial URL. Resolve the hostname and refuse
+    // anything that lands on a loopback / link-local / private /
+    // metadata IP. See `is_blocked_address`.
+    let _ = validate_url_target(&parsed)?;
+
+    // SSRF guard #2 — every redirect hop. Reqwest follows up to 10
+    // redirects by default; without this check, the initial URL
+    // could be public but a redirect could be `http://169.254.169.254/...`
+    // (AWS metadata) and reqwest would happily follow.
+    let redirect_policy = reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= 5 {
+            return attempt.error("too many redirects");
+        }
+        match validate_url_target(attempt.url()) {
+            Ok(_) => attempt.follow(),
+            Err(e) => attempt.error(e.to_string()),
+        }
+    });
+
     let client = reqwest::blocking::Client::builder()
         .timeout(FETCH_TIMEOUT)
         .user_agent(USER_AGENT)
+        .redirect(redirect_policy)
         .build()
         .map_err(|e| FetchError::Request(e.to_string()))?;
     let resp = client
-        .get(url)
+        .get(parsed)
         .send()
         .map_err(|e| FetchError::Request(e.to_string()))?;
     let status = resp.status();
@@ -100,18 +238,22 @@ pub fn fetch_blocking(url: &str) -> Result<LinkPreview, FetchError> {
         return Err(FetchError::Status(status.as_u16()));
     }
     let final_url = resp.url().to_string();
-    // Cap the read so a malicious host can't stream gigabytes. We
-    // use `.text()` with reqwest's default decoder which handles
-    // charset declared in headers; this is good enough for OG tags.
-    let body = resp
-        .text()
+
+    // Cap at the transport layer via `Read::take` so a server
+    // streaming gigabytes (or a gzip-bomb body, if decompression were
+    // ever enabled) can't be read into memory before the cap kicks
+    // in. `Response` impls `Read` for blocking, so this is just a
+    // bounded `read_to_end`.
+    let mut buf = Vec::with_capacity(MAX_BODY_BYTES.min(64 * 1024));
+    resp.take(MAX_BODY_BYTES as u64)
+        .read_to_end(&mut buf)
         .map_err(|e| FetchError::Request(e.to_string()))?;
-    let body = if body.len() > MAX_BODY_BYTES {
-        &body[..MAX_BODY_BYTES]
-    } else {
-        &body
-    };
-    let mut preview = parse_html(&final_url, body);
+    // `parse_html` only needs the HTML head; treat the bytes as
+    // UTF-8 lossily so a server returning a non-UTF-8 charset
+    // doesn't fail outright.
+    let body = String::from_utf8_lossy(&buf);
+
+    let mut preview = parse_html(&final_url, &body);
     if preview.site_name.is_none() {
         preview.site_name = hostname(&final_url);
     }
