@@ -272,7 +272,11 @@ impl PluginContext for KernelPluginContext {
     // ---- Events ----------------------------------------------------------
 
     fn publish(&self, type_id: &str, payload: serde_json::Value) -> Result<()> {
-        if !type_id.starts_with(&self.plugin_id as &str) {
+        // Fast-fail at the context boundary so the caller gets the same
+        // error class regardless of whether the bus call eventually runs.
+        // See `event_bus::type_id_in_namespace` for why a plain
+        // `starts_with` is unsafe.
+        if !crate::event_bus::type_id_in_namespace(type_id, &self.plugin_id) {
             return Err(BusError::TypeIdNamespaceMismatch {
                 plugin_id: self.plugin_id.clone(),
                 type_id: type_id.to_string(),
@@ -422,6 +426,35 @@ mod tests {
         let ctx = make_context(dir.path(), &[]);
         let result = ctx.publish("com.other.event", serde_json::json!({}));
         assert!(result.is_err());
+    }
+
+    /// Regression for issue #79. The pre-fix check at the context
+    /// boundary was `type_id.starts_with(plugin_id)`, allowing a plugin
+    /// with id `com.test` to publish topics namespaced under
+    /// `com.testimony` etc. `make_context` uses `com.test.plugin`, so
+    /// the substring-prefix attack here is `com.test.plugin*` → the
+    /// hostile `com.test.plugin-evil.event` would have passed pre-fix.
+    #[test]
+    fn publish_rejects_substring_prefix_spoof() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = make_context(dir.path(), &[]);
+        // Same-prefix-different-namespace: shares the `com.test.plugin`
+        // characters but `-evil` breaks the dotted boundary, so the
+        // strict check rejects it.
+        let result =
+            ctx.publish("com.test.plugin-evil.event", serde_json::json!({}));
+        assert!(
+            result.is_err(),
+            "com.test.plugin must NOT be allowed to publish com.test.plugin-evil.event",
+        );
+    }
+
+    #[test]
+    fn publish_allows_dotted_suffix() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = make_context(dir.path(), &[]);
+        ctx.publish("com.test.plugin.event", serde_json::json!({}))
+            .expect("dotted suffix is the legitimate namespace shape");
     }
 
     #[tokio::test]

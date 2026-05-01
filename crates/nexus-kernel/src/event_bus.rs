@@ -18,6 +18,23 @@ pub struct EventBus {
     sender: broadcast::Sender<Arc<PublishedEvent>>,
 }
 
+/// Return true iff `type_id` lies within `plugin_id`'s namespace —
+/// that is, `type_id == plugin_id` (the bare-id form) or `type_id`
+/// equals `plugin_id` followed by a `.` and a non-empty suffix.
+///
+/// Plain `starts_with` is unsafe here: `"com.foo".starts_with("com.fo")`
+/// is true, so a plugin id `com.fo` could spoof `com.foo.event`. The
+/// `.`-separator check is what actually anchors the namespace boundary.
+/// See issue #79.
+pub(crate) fn type_id_in_namespace(type_id: &str, plugin_id: &str) -> bool {
+    if type_id == plugin_id {
+        return true;
+    }
+    type_id
+        .strip_prefix(plugin_id)
+        .is_some_and(|rest| rest.starts_with('.'))
+}
+
 impl EventBus {
     /// Create a new bus with the given ring buffer capacity.
     #[must_use]
@@ -29,14 +46,18 @@ impl EventBus {
     /// Publish an event emitted by a plugin. Enforces two invariants:
     ///
     /// - Only `NexusEvent::Custom` is accepted — plugins cannot emit kernel events.
-    /// - The `type_id` must start with `source_plugin_id` (namespace anti-spoofing).
+    /// - The `type_id` must lie within `source_plugin_id`'s namespace
+    ///   (either equal to it, or extending it with a `.`-separated suffix —
+    ///   see [`type_id_in_namespace`]). This is the kernel's anti-spoofing
+    ///   guarantee for `EventFilter::CustomPrefix` subscribers.
     ///
     /// The kernel populates `emitting_plugin` from `source_plugin_id`; the
     /// plugin cannot override it.
     ///
     /// # Errors
     /// - `BusError::PluginPublishingKernelEvent` if `event` is not `Custom`.
-    /// - `BusError::TypeIdNamespaceMismatch` if `type_id` doesn't start with `source_plugin_id`.
+    /// - `BusError::TypeIdNamespaceMismatch` if `type_id` is not in
+    ///   `source_plugin_id`'s namespace.
     pub fn publish_plugin(
         &self,
         source_plugin_id: &str,
@@ -45,7 +66,7 @@ impl EventBus {
     ) -> Result<()> {
         use crate::error::BusError;
 
-        if !type_id.starts_with(source_plugin_id) {
+        if !type_id_in_namespace(type_id, source_plugin_id) {
             return Err(BusError::TypeIdNamespaceMismatch {
                 plugin_id: source_plugin_id.to_string(),
                 type_id: type_id.to_string(),
@@ -392,6 +413,72 @@ mod tests {
                 crate::error::BusError::TypeIdNamespaceMismatch { .. }
             ))
         ));
+    }
+
+    /// Regression for issue #79. The pre-fix check was `type_id.starts_with(plugin_id)`,
+    /// which let `com.foo` publish `com.foobar.event` because the substring
+    /// `"com.foo"` is a prefix of `"com.foobar.event"`. A subscriber
+    /// filtering on `EventFilter::CustomPrefix("com.foobar.")` would
+    /// receive the spoofed event. The fix anchors the namespace boundary
+    /// on a `.` separator (or strict equality).
+    #[test]
+    fn publish_plugin_rejects_substring_prefix_spoof() {
+        let bus = EventBus::new(16);
+        let result = bus.publish_plugin(
+            "com.foo",
+            "com.foobar.event",
+            serde_json::json!({}),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(crate::error::Error::Bus(
+                    crate::error::BusError::TypeIdNamespaceMismatch { .. }
+                ))
+            ),
+            "com.foo must NOT be allowed to publish com.foobar.event",
+        );
+    }
+
+    #[test]
+    fn publish_plugin_allows_dotted_suffix() {
+        let bus = EventBus::new(16);
+        bus.publish_plugin(
+            "com.foo",
+            "com.foo.event",
+            serde_json::json!({}),
+        )
+        .expect("dotted suffix is the legitimate namespace shape");
+    }
+
+    #[test]
+    fn publish_plugin_allows_bare_plugin_id_as_type_id() {
+        let bus = EventBus::new(16);
+        bus.publish_plugin(
+            "com.foo",
+            "com.foo",
+            serde_json::json!({}),
+        )
+        .expect("bare plugin_id as type_id is unambiguously the plugin's");
+    }
+
+    #[test]
+    fn type_id_in_namespace_unit_cases() {
+        // Adversarial substring-prefix shapes (issue #79).
+        assert!(!type_id_in_namespace("com.foobar.event", "com.foo"));
+        assert!(!type_id_in_namespace("com.foo2.event", "com.foo"));
+        assert!(!type_id_in_namespace("com.foo-bar.event", "com.foo"));
+
+        // Reverse: longer plugin_id must not appear within shorter type_id.
+        assert!(!type_id_in_namespace("com.foo", "com.foobar"));
+
+        // Disjoint ids are rejected.
+        assert!(!type_id_in_namespace("com.evil.spoofed", "com.legit.plugin"));
+
+        // Legitimate suffix shapes pass.
+        assert!(type_id_in_namespace("com.foo.event", "com.foo"));
+        assert!(type_id_in_namespace("com.foo.deeply.nested.event", "com.foo"));
+        assert!(type_id_in_namespace("com.foo", "com.foo"));
     }
 
     #[tokio::test]
