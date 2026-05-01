@@ -43,5 +43,20 @@ export default defineConfig({
       : 'safari13',
     minify: process.env.TAURI_DEBUG ? false : 'esbuild',
     sourcemap: !!process.env.TAURI_DEBUG,
+    rollupOptions: {
+      output: {
+        // SH-009: group heavy vendor libraries into named chunks so the
+        // browser can cache them independently of plugin code changes.
+        // Dynamic plugin imports (catalog.ts load() factories) each get
+        // their own auto-generated chunk from Rollup's code-splitting.
+        manualChunks(id) {
+          if (id.includes('node_modules/@codemirror')) return 'vendor-codemirror'
+          if (id.includes('node_modules/@xterm')) return 'vendor-xterm'
+          if (id.includes('node_modules/mermaid') || id.includes('node_modules/d3') || id.includes('node_modules/dagre')) return 'vendor-mermaid'
+          if (id.includes('node_modules/react-dom')) return 'vendor-react'
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-is')) return 'vendor-react'
+        },
+      },
+    },
   },
 })

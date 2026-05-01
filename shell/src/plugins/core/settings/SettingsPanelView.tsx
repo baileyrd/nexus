@@ -1207,7 +1207,7 @@ function PluginsTab({
   // The set of built-in plugin ids that ship as default-off — these
   // are the ones that get a toggle in the Core plugins list.
   const optionalIds = useMemo(
-    () => new Set(DEFAULT_OFF_PLUGINS.map((p) => p.manifest.id)),
+    () => new Set(DEFAULT_OFF_PLUGINS.map(e => e.id)),
     [],
   )
 
