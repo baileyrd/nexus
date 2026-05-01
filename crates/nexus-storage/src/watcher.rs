@@ -15,6 +15,14 @@ use crate::StorageError;
 // ── Public types ──────────────────────────────────────────────────────────────
 
 /// An event emitted by the file watcher.
+///
+/// `FileCreated` and `FileRenamed` are not currently emitted —
+/// the underlying notify-debouncer-mini collapses them into
+/// `FileModified` / `FileDeleted` shapes, and we re-derive
+/// finer-grained events from path-existence checks. The variants
+/// remain in the enum so a future watcher upgrade that distinguishes
+/// create / rename can land without a public-API break for
+/// downstream pattern matchers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageEvent {
     /// A new file was created.
@@ -26,9 +34,9 @@ pub enum StorageEvent {
     },
     /// An existing file was modified.
     FileModified {
-        /// Relative path from the forge root, or empty string for reconcile signal.
+        /// Relative path from the forge root.
         path: String,
-        /// SHA-256 hex digest of the file content, or empty string for reconcile signal.
+        /// SHA-256 hex digest of the file content.
         content_hash: String,
     },
     /// A file was deleted.
@@ -45,24 +53,47 @@ pub enum StorageEvent {
         /// SHA-256 hex digest of the new file content.
         content_hash: String,
     },
+    /// The watcher is recommending consumers run a reconcile pass
+    /// (re-walk the forge root, rebuild the index from the file
+    /// system). Emitted after a git "batch mode" — when
+    /// `.git/index.lock` exists and then disappears, signaling that
+    /// a checkout / rebase / merge probably moved many files at
+    /// once and per-file events would be unreliable.
+    ///
+    /// Pre-#84 this was signaled in-band by a `FileModified`
+    /// event with empty `path` and `content_hash` strings, which
+    /// downstream consumers had to special-case. The dedicated
+    /// variant makes the contract explicit.
+    ReconcileRequested,
 }
 
 // ── Public helpers ────────────────────────────────────────────────────────────
 
 /// Check if a path should be ignored by the watcher.
 ///
-/// Ignores paths containing `.git`, `.forge/temp`, or `node_modules`,
-/// and filenames ending with `~`, `.swp`, or `.DS_Store`.
+/// Ignores any path whose components include `.git`, `.forge`,
+/// `node_modules`, or `target` (intermediate directories the user
+/// wouldn't author notes inside), and filenames ending with `~`,
+/// `.swp`, or `.DS_Store`.
+///
+/// Component-based matching: pre-#84 this used substring matching
+/// (`path.contains(".git")`), which falsely ignored legitimate
+/// note filenames like `my-.git-history-notes.md`. The fix
+/// inspects each `Component::Normal` segment for an exact match
+/// against the ignored directory names.
 #[must_use]
 pub fn should_ignore(path: &Path) -> bool {
-    // Check path components for ignored directories.
-    let path_str = path.to_string_lossy();
-    if path_str.contains(".git")
-        || path_str.contains(".forge")
-        || path_str.contains("node_modules")
-        || path_str.contains("target/")
-    {
-        return true;
+    use std::path::Component;
+    const IGNORED_DIR_COMPONENTS: &[&str] = &[".git", ".forge", "node_modules", "target"];
+
+    for component in path.components() {
+        if let Component::Normal(seg) = component {
+            if let Some(seg_str) = seg.to_str() {
+                if IGNORED_DIR_COMPONENTS.contains(&seg_str) {
+                    return true;
+                }
+            }
+        }
     }
 
     // Check filename suffixes.
@@ -155,7 +186,19 @@ fn process_events(
     for result in &raw_rx {
         let events = match result {
             Ok(evts) => evts,
-            Err(_errs) => continue,
+            Err(errs) => {
+                // Pre-#84 these were swallowed silently — `Err(_errs) => continue`.
+                // Promoted to a warn so OS-level notify failures (watch
+                // descriptors closing, kernel inotify queue overflow,
+                // FSEvents rate-limiting, …) surface in the log.
+                tracing::warn!(
+                    audit = true,
+                    errors = ?errs,
+                    "storage watcher: notify-debouncer reported errors; some \
+                     filesystem changes may have been missed"
+                );
+                continue;
+            }
         };
 
         let lock_path = forge_root.join(".git").join("index.lock");
@@ -167,12 +210,11 @@ fn process_events(
         }
 
         if git_batch_mode {
-            // Lock is gone — emit reconcile signal and clear state.
+            // Lock is gone — emit a dedicated reconcile signal so
+            // downstream consumers don't have to special-case an
+            // empty-string `FileModified` (issue #84).
             git_batch_mode = false;
-            let _ = storage_tx.send(StorageEvent::FileModified {
-                path: String::new(),
-                content_hash: String::new(),
-            });
+            let _ = storage_tx.send(StorageEvent::ReconcileRequested);
         }
 
         for event in events {
@@ -262,6 +304,21 @@ mod tests {
     fn should_not_ignore_markdown() {
         assert!(!should_ignore(Path::new("/forge/notes/my-note.md")));
         assert!(!should_ignore(Path::new("/forge/notes/daily/2026-04-12.md")));
+    }
+
+    /// Issue #84. Pre-fix the substring matcher (`path.contains(".git")`)
+    /// falsely ignored legitimate notes whose names contained the
+    /// reserved directory name as a substring. The component-based
+    /// matcher only fires on an exact path-component match.
+    #[test]
+    fn should_not_ignore_substring_lookalike_filenames() {
+        assert!(
+            !should_ignore(Path::new("/forge/notes/my-.git-history-notes.md")),
+            "substring matching falsely ignored a legitimate note (#84 regression)"
+        );
+        assert!(!should_ignore(Path::new("/forge/notes/.forgetnot.md")));
+        assert!(!should_ignore(Path::new("/forge/notes/node_modules-rant.md")));
+        assert!(!should_ignore(Path::new("/forge/notes/target-list.md")));
     }
 
     #[test]

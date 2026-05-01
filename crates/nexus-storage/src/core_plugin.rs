@@ -1246,32 +1246,32 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
         }
 
         StorageEvent::FileModified { path, content_hash } => {
-            if path.is_empty() {
-                // Empty path is the reconcile signal emitted after a git batch
-                // burst.  Emit a custom indexing event so subscribers know a
-                // reconcile pass is warranted.
-                let _ = bus.publish_plugin(
-                    PLUGIN_ID,
-                    "com.nexus.storage.indexing.started",
-                    serde_json::json!({}),
-                );
-                // Note: actual reconcile is the caller's responsibility.
-                // Emit completed immediately so subscribers aren't left waiting.
-                let _ = bus.publish_plugin(
-                    PLUGIN_ID,
-                    "com.nexus.storage.indexing.completed",
-                    serde_json::json!({ "triggered_by": "git-batch-mode" }),
-                );
-            } else {
-                let _ = bus.publish_plugin(
-                    PLUGIN_ID,
-                    "com.nexus.storage.file_modified",
-                    serde_json::json!({
-                        "path": path,
-                        "content_hash": content_hash,
-                    }),
-                );
-            }
+            let _ = bus.publish_plugin(
+                PLUGIN_ID,
+                "com.nexus.storage.file_modified",
+                serde_json::json!({
+                    "path": path,
+                    "content_hash": content_hash,
+                }),
+            );
+        }
+
+        StorageEvent::ReconcileRequested => {
+            // Watcher recommends a re-walk of the forge — typically
+            // emitted after a git batch (`.git/index.lock` came + went).
+            // Bracket the indexing window with started/completed events
+            // so subscribers can debounce UI refreshes. The actual
+            // reconcile is the consumer's responsibility (#84).
+            let _ = bus.publish_plugin(
+                PLUGIN_ID,
+                "com.nexus.storage.indexing.started",
+                serde_json::json!({}),
+            );
+            let _ = bus.publish_plugin(
+                PLUGIN_ID,
+                "com.nexus.storage.indexing.completed",
+                serde_json::json!({ "triggered_by": "git-batch-mode" }),
+            );
         }
 
         StorageEvent::FileDeleted { path } => {
@@ -1302,6 +1302,83 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
 mod tests {
     use super::*;
     use crate::StorageEngine;
+
+    /// Issue #84. Handler ids are hand-allocated `u32` constants —
+    /// the convention is "append; never reuse a retired id." That's
+    /// only a comment, so this test catches the case where two
+    /// `HANDLER_*` constants are accidentally given the same id.
+    /// Add the constant's name to the table when a new handler is
+    /// declared (the table is the source of truth the test checks).
+    #[test]
+    fn handler_ids_are_unique() {
+        let mut handlers: Vec<(&str, u32)> = vec![
+            ("HANDLER_QUERY_FILES", HANDLER_QUERY_FILES),
+            ("HANDLER_READ_FILE", HANDLER_READ_FILE),
+            ("HANDLER_BACKLINKS", HANDLER_BACKLINKS),
+            ("HANDLER_QUERY_TASKS", HANDLER_QUERY_TASKS),
+            ("HANDLER_GRAPH_STATS", HANDLER_GRAPH_STATS),
+            ("HANDLER_REBUILD_INDEX", HANDLER_REBUILD_INDEX),
+            ("HANDLER_SEARCH", HANDLER_SEARCH),
+            ("HANDLER_WRITE_FILE", HANDLER_WRITE_FILE),
+            ("HANDLER_DELETE_FILE", HANDLER_DELETE_FILE),
+            ("HANDLER_FILE_EXISTS", HANDLER_FILE_EXISTS),
+            ("HANDLER_REBUILD_SEARCH_INDEX", HANDLER_REBUILD_SEARCH_INDEX),
+            ("HANDLER_TOGGLE_TASK", HANDLER_TOGGLE_TASK),
+            ("HANDLER_OUTGOING_LINKS", HANDLER_OUTGOING_LINKS),
+            ("HANDLER_UNRESOLVED_LINKS", HANDLER_UNRESOLVED_LINKS),
+            ("HANDLER_GRAPH_NEIGHBORS", HANDLER_GRAPH_NEIGHBORS),
+            ("HANDLER_QUERY_TAGS", HANDLER_QUERY_TAGS),
+            ("HANDLER_VECTOR_INSERT", HANDLER_VECTOR_INSERT),
+            ("HANDLER_VECTOR_QUERY", HANDLER_VECTOR_QUERY),
+            ("HANDLER_VECTOR_DELETE_BY_FILE", HANDLER_VECTOR_DELETE_BY_FILE),
+            ("HANDLER_VECTORSTORE_COUNT", HANDLER_VECTORSTORE_COUNT),
+            ("HANDLER_QUERY_BLOCKS", HANDLER_QUERY_BLOCKS),
+            ("HANDLER_CONFIG_READ", HANDLER_CONFIG_READ),
+            ("HANDLER_CONFIG_RESET", HANDLER_CONFIG_RESET),
+            ("HANDLER_BASE_INDEX", HANDLER_BASE_INDEX),
+            ("HANDLER_BASE_LIST", HANDLER_BASE_LIST),
+            ("HANDLER_BASE_QUERY", HANDLER_BASE_QUERY),
+            ("HANDLER_LIST_DIR", HANDLER_LIST_DIR),
+            ("HANDLER_CREATE_FILE", HANDLER_CREATE_FILE),
+            ("HANDLER_CREATE_DIR", HANDLER_CREATE_DIR),
+            ("HANDLER_RENAME_ENTRY", HANDLER_RENAME_ENTRY),
+            ("HANDLER_DELETE_ENTRY", HANDLER_DELETE_ENTRY),
+            ("HANDLER_BASE_LOAD", HANDLER_BASE_LOAD),
+            ("HANDLER_WRITE_VAULT_FILE", HANDLER_WRITE_VAULT_FILE),
+            ("HANDLER_LIST_ALL_LINKS", HANDLER_LIST_ALL_LINKS),
+            ("HANDLER_CANVAS_READ", HANDLER_CANVAS_READ),
+            ("HANDLER_CANVAS_WRITE", HANDLER_CANVAS_WRITE),
+            ("HANDLER_CANVAS_PATCH", HANDLER_CANVAS_PATCH),
+            ("HANDLER_CANVAS_NODES", HANDLER_CANVAS_NODES),
+            ("HANDLER_CANVAS_EDGES", HANDLER_CANVAS_EDGES),
+            ("HANDLER_BASE_RECORD_CREATE", HANDLER_BASE_RECORD_CREATE),
+            ("HANDLER_BASE_RECORD_UPDATE", HANDLER_BASE_RECORD_UPDATE),
+            ("HANDLER_BASE_RECORD_DELETE", HANDLER_BASE_RECORD_DELETE),
+            ("HANDLER_BASE_PROPERTY_CREATE", HANDLER_BASE_PROPERTY_CREATE),
+            ("HANDLER_BASE_PROPERTY_UPDATE", HANDLER_BASE_PROPERTY_UPDATE),
+            ("HANDLER_BASE_PROPERTY_DELETE", HANDLER_BASE_PROPERTY_DELETE),
+            ("HANDLER_BASE_VIEW_CREATE", HANDLER_BASE_VIEW_CREATE),
+            ("HANDLER_BASE_VIEW_UPDATE", HANDLER_BASE_VIEW_UPDATE),
+            ("HANDLER_BASE_VIEW_DELETE", HANDLER_BASE_VIEW_DELETE),
+            ("HANDLER_BASE_CREATE", HANDLER_BASE_CREATE),
+            ("HANDLER_BASE_PROPERTY_RENAME", HANDLER_BASE_PROPERTY_RENAME),
+            ("HANDLER_BASE_RECORD_SOFT_DELETE", HANDLER_BASE_RECORD_SOFT_DELETE),
+            ("HANDLER_BASE_RECORD_RESTORE", HANDLER_BASE_RECORD_RESTORE),
+            ("HANDLER_OBSIDIAN_BASE_QUERY", HANDLER_OBSIDIAN_BASE_QUERY),
+            ("HANDLER_NOTE_APPEND", HANDLER_NOTE_APPEND),
+            ("HANDLER_BACKLINKS_TO_BLOCK", HANDLER_BACKLINKS_TO_BLOCK),
+        ];
+        handlers.sort_by_key(|(_, id)| *id);
+        for window in handlers.windows(2) {
+            let (a_name, a_id) = window[0];
+            let (b_name, b_id) = window[1];
+            assert_ne!(
+                a_id, b_id,
+                "duplicate handler id {a_id}: {a_name} and {b_name} share the same value. \
+                 Append a fresh id rather than reusing a retired one (see core_plugin.rs)"
+            );
+        }
+    }
 
     fn boot_plugin(forge: &std::path::Path) -> StorageCorePlugin {
         // StorageCorePlugin::on_init opens its own engine handle and therefore
