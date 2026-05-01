@@ -32,6 +32,20 @@ pub use manifest::{
 };
 pub use manifest::{load_manifest, parse_manifest, validate};
 pub use sandbox::{PluginData, PluginEventForwarder, WasmSandbox};
+
+/// Host function registration + result codes. Re-exported (doc-hidden)
+/// so integration tests can exercise the host-side capability gate
+/// directly through a custom WASM fixture without going through the
+/// full plugin loader.
+///
+/// Not part of the stable public API — use [`WasmSandbox`] for normal
+/// plugin loading.
+#[doc(hidden)]
+pub mod __testing {
+    pub use crate::host_fns::{
+        register_host_fns, HOST_BUFFER_OVERFLOW, HOST_CAPABILITY_DENIED, HOST_ERROR, HOST_OK,
+    };
+}
 pub use settings::SettingsManager;
 pub use hot_reload::{HotReloader, ReloadEvent};
 pub use nexus_kernel::{PluginInfo, PluginStatus, TrustLevel};
