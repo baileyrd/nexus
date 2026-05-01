@@ -37,6 +37,29 @@ pub enum PathError {
 /// An empty `relpath` resolves to `root` itself (callers that want to
 /// reject empty relpaths should check before calling).
 ///
+/// # When to use this vs [`crate::ForgePathValidator::validate`]
+///
+/// Both helpers exist and have **different semantics by design** —
+/// not every caller wants the same thing:
+///
+/// | | `resolve_within` (this fn) | [`crate::ForgePathValidator::validate`] |
+/// |---|---|---|
+/// | Leading `/` | rejected | silently stripped |
+/// | `.` component | rejected | silently dropped |
+/// | `..` component | rejected unconditionally | accepted iff stays in root |
+/// | Symlink resolution | none (path joined verbatim) | follows symlinks via `canonicalize` |
+/// | Existence requirement | none | path must exist |
+///
+/// Use **`resolve_within`** when the caller has a forge-relative
+/// path that must be a strictly normalised, leaf-only relpath
+/// (storage IPC handlers, atomic-write target paths, places where
+/// `..`-traversal is always wrong). Use
+/// [`crate::ForgePathValidator::validate`] when the caller may have
+/// a user-typed path that's been through
+/// a UI, can be absolute, can use `..` to walk in-root, and must
+/// resolve symlinks before being trusted (kernel context's
+/// `confine_path` for `read_file`/`write_file`).
+///
 /// # Errors
 ///
 /// Returns [`PathError::Invalid`] if `relpath` contains any

@@ -469,7 +469,15 @@ pub fn init_base(dir: &Path, name: &str, schema: &BaseSchema) -> Result<Base, Ba
 
 /// Validate a record against a schema.
 ///
-/// Checks that required fields are present.
+/// **Scope is intentionally narrow**: this checks only that fields
+/// declared with `required = true` in the schema are present on the
+/// record. It does **not** verify field types, `min` / `max` numeric
+/// bounds, `options` enum membership, or any other constraint the
+/// schema may declare — those checks haven't been wired up yet (see
+/// issue #82). The function name is broader than what it currently
+/// guarantees; callers that need full schema validation should
+/// not assume `Ok(())` means anything beyond "required-field
+/// presence."
 ///
 /// # Errors
 ///
