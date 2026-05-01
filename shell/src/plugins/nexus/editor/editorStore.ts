@@ -84,6 +84,12 @@ interface EditorState {
   /** Drop any tracked revision for `relpath` (called on release). */
   clearSessionRevision: (relpath: string) => void
   /**
+   * Atomically seed both `sessionRevision` and `savedRevision` to `revision`
+   * in a single `set` call. Used by `SessionManager.acquire` on first open so
+   * both maps are consistent even when React 18 batches concurrent `set` calls.
+   */
+  seedRevision: (relpath: string, revision: number) => void
+  /**
    * Snapshot the current `sessionRevision` for `relpath` into
    * `savedRevision`. Called after a successful save and after an
    * untitled → named transition establishes the session. Also seeds
@@ -236,6 +242,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const next = new Map(s.sessionRevision)
       next.delete(relpath)
       return { sessionRevision: next }
+    }),
+
+  seedRevision: (relpath, revision) =>
+    set((s) => {
+      const nextSession = new Map(s.sessionRevision)
+      nextSession.set(relpath, revision)
+      const nextSaved = new Map(s.savedRevision)
+      nextSaved.set(relpath, revision)
+      return { sessionRevision: nextSession, savedRevision: nextSaved }
     }),
 
   markSavedRevision: (relpath) =>

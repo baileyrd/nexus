@@ -130,14 +130,11 @@ export class SessionManager {
       return existing.snapshot
     }
     const snapshot = await this.client.openSession(relpath)
-    // Seed the store's known revision from the open-time snapshot so
-    // post-open consumers can read a consistent starting value.
-    useEditorStore.getState().setSessionRevision(relpath, snapshot.revision)
-    // Phase 6: a freshly-opened session mirrors what's on disk, so
-    // `savedRevision` starts equal to `sessionRevision`. Any local
-    // edit (bridge → setSessionRevision) then diverges the two and
-    // `isDirty` flips to true.
-    useEditorStore.getState().markSavedRevision(relpath)
+    // Atomically seed both sessionRevision and savedRevision in one set()
+    // call. Separate calls would race React 18 batching: the second updater
+    // would see pre-batch state where sessionRevision is still empty, causing
+    // markSavedRevision to return early and leave savedRevision unset.
+    useEditorStore.getState().seedRevision(relpath, snapshot.revision)
     const entry: Entry = {
       count: 1,
       snapshot,

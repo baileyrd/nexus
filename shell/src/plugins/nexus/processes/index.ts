@@ -81,11 +81,10 @@ function readShellPlugins(api: PluginAPI): PluginItem[] {
         error: p.error,
       })
     }
-  } catch (err) {
+  } catch {
     // Seed call may run before main.tsx registers the service. Silent —
     // the store is re-seeded when the pane is opened, by which time
     // the service is guaranteed to exist.
-    console.debug('[nexus.processes] pluginList service not yet available:', err)
   }
 
   try {
@@ -101,8 +100,8 @@ function readShellPlugins(api: PluginAPI): PluginItem[] {
         state: m.enabled ? 'active' : 'disabled',
       })
     }
-  } catch (err) {
-    console.debug('[nexus.processes] communityPluginManifests service not yet available:', err)
+  } catch {
+    // Same as above — silently ignored until workspace:opened re-seeds.
   }
 
   return out
