@@ -309,17 +309,53 @@ impl CorePlugin for McpHostPlugin {
                         .map_err(map_client_err)?;
                     let lock = client.lock().await;
                     let result = lock
-                        .call_tool(tool, tool_args)
+                        .call_tool(tool.clone(), tool_args)
                         .await
                         .map_err(map_client_err)?;
-                    let content: Vec<_> = result
-                        .content
-                        .iter()
-                        .filter_map(|c| serde_json::to_value(c).ok())
-                        .collect();
+                    // Issue #85. Cap the aggregated tool response so a
+                    // misbehaving / malicious MCP server can't stream
+                    // gigabyte responses into our memory. We measure
+                    // the per-content-item size as we accumulate so
+                    // the early items still surface even if the tail
+                    // is rejected.
+                    const MAX_TOOL_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+                    const MAX_TOOL_RESPONSE_ITEMS: usize = 1024;
+                    let mut content: Vec<serde_json::Value> = Vec::new();
+                    let mut total_bytes: usize = 0;
+                    let mut truncated = false;
+                    for item in &result.content {
+                        if content.len() >= MAX_TOOL_RESPONSE_ITEMS {
+                            truncated = true;
+                            break;
+                        }
+                        let Ok(v) = serde_json::to_value(item) else {
+                            continue;
+                        };
+                        let item_bytes = serde_json::to_vec(&v).map(|b| b.len()).unwrap_or(0);
+                        if total_bytes.saturating_add(item_bytes) > MAX_TOOL_RESPONSE_BYTES {
+                            truncated = true;
+                            break;
+                        }
+                        total_bytes = total_bytes.saturating_add(item_bytes);
+                        content.push(v);
+                    }
+                    if truncated {
+                        tracing::warn!(
+                            audit = true,
+                            plugin_id = PLUGIN_ID,
+                            server = %server,
+                            tool = %tool,
+                            item_count = content.len(),
+                            byte_count = total_bytes,
+                            "MCP tool response truncated to fit response cap \
+                             ({MAX_TOOL_RESPONSE_ITEMS} items / \
+                             {MAX_TOOL_RESPONSE_BYTES} bytes)"
+                        );
+                    }
                     Ok(json!({
                         "content": content,
                         "is_error": result.is_error,
+                        "truncated": truncated,
                     }))
                 }))
             }

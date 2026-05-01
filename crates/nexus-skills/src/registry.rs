@@ -240,8 +240,15 @@ fn any_skill_newer_than(root: &Path, cutoff_secs: u64) -> std::io::Result<bool> 
         }
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
-            let ft = entry.file_type()?;
             let path = entry.path();
+            // Skip symlinks (issue #85) — same rationale as `visit_dir`
+            // below. We don't want a symlink to make us declare files
+            // outside the skills root "newer", which would force a
+            // reload that walks (and skips) those symlinks anyway.
+            let ft = std::fs::symlink_metadata(&path)?.file_type();
+            if ft.is_symlink() {
+                continue;
+            }
             if ft.is_dir() {
                 if walk(&path, cutoff_secs)? {
                     return Ok(true);
@@ -333,7 +340,19 @@ fn visit_dir(root: &Path, visitor: &mut dyn FnMut(&Path)) -> Result<(), SkillReg
     for entry in std::fs::read_dir(root)? {
         let entry = entry?;
         let path = entry.path();
-        let file_type = entry.file_type()?;
+        // Issue #85. Use `symlink_metadata` rather than relying on
+        // `DirEntry::file_type` (which on some platforms may follow
+        // symlinks). Skip any symlink entry — a symlink in the skills
+        // dir pointing at `/etc` or another reachable directory could
+        // otherwise smuggle the walker outside the intended root and
+        // load arbitrary files as "skills". `is_dir()`/`is_file()` on
+        // a `FileType` are mutually exclusive with `is_symlink()`, so
+        // this also means the walker only recurses through real
+        // directories.
+        let file_type = std::fs::symlink_metadata(&path)?.file_type();
+        if file_type.is_symlink() {
+            continue;
+        }
         if file_type.is_dir() {
             visit_dir(&path, visitor)?;
         } else if file_type.is_file() {
