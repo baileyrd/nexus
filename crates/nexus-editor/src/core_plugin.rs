@@ -166,7 +166,7 @@ pub const HANDLER_RESOLVE_BLOCK_LINK: u32 = 13;
 /// The tree is returned in full — delta snapshots are a follow-up
 /// optimization.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditorSnapshot {
     /// Forge-relative path of the session.
     pub relpath: String,

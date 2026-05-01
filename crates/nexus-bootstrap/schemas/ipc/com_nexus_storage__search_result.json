@@ -12,6 +12,7 @@
       }
     }
   },
+  "additionalProperties": false,
   "required": [
     "results"
   ],
@@ -44,6 +45,7 @@
           "format": "float"
         }
       },
+      "additionalProperties": false,
       "required": [
         "file_path",
         "block_id",

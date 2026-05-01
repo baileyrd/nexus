@@ -13,6 +13,7 @@
       "type": "boolean"
     }
   },
+  "additionalProperties": false,
   "required": [
     "name",
     "ok"

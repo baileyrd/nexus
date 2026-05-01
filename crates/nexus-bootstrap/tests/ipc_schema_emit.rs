@@ -116,6 +116,82 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<ActivityToolCall>("com_nexus_ai__activity_list", "tool_call");
 }
 
+/// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type
+/// must declare `additionalProperties: false`. This is the gate that
+/// locks in the workspace-wide `#[serde(deny_unknown_fields)]` rollout
+/// from P0-1 — without this assertion a future struct could be added
+/// without the attribute and silently slip past code review.
+///
+/// Recurses into nested object types under `definitions` / `$defs` /
+/// `properties.<x>` so a single struct exposing nested object types
+/// is policed in full. Non-object schemas (string/number/enum) are
+/// ignored because `additionalProperties` is meaningless for them.
+#[test]
+fn every_object_schema_denies_additional_properties() {
+    // Re-run emission so this test is independent of ordering.
+    emit_pilot_ipc_schemas();
+
+    let mut violations: Vec<String> = Vec::new();
+    for entry in fs::read_dir(out_dir()).expect("read schemas/ipc") {
+        let entry = entry.expect("dir entry");
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let text = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
+        let label = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("<unknown>")
+            .to_string();
+        check_strict_objects(&value, &label, "$", &mut violations);
+    }
+
+    assert!(
+        violations.is_empty(),
+        "schemas missing additionalProperties: false (audit-2026-05-01 P0-2):\n  {}",
+        violations.join("\n  "),
+    );
+}
+
+/// Recurse `value`, asserting that every object-typed schema sets
+/// `additionalProperties: false`. Walks `definitions`, `$defs`,
+/// `properties.*`, `items`, `anyOf`, `oneOf`, `allOf`. Tolerates
+/// schemas that omit `type` (those describe a union or a $ref).
+fn check_strict_objects(
+    value: &serde_json::Value,
+    file: &str,
+    path: &str,
+    violations: &mut Vec<String>,
+) {
+    if value.get("type").and_then(serde_json::Value::as_str) == Some("object") {
+        match value.get("additionalProperties") {
+            Some(serde_json::Value::Bool(false)) => {}
+            _ => violations.push(format!("{file} :: {path}")),
+        }
+    }
+    for key in ["definitions", "$defs", "properties"] {
+        if let Some(map) = value.get(key).and_then(serde_json::Value::as_object) {
+            for (sub_key, sub) in map {
+                check_strict_objects(sub, file, &format!("{path}.{key}.{sub_key}"), violations);
+            }
+        }
+    }
+    if let Some(items) = value.get("items") {
+        check_strict_objects(items, file, &format!("{path}.items"), violations);
+    }
+    for key in ["anyOf", "oneOf", "allOf"] {
+        if let Some(arr) = value.get(key).and_then(serde_json::Value::as_array) {
+            for (i, sub) in arr.iter().enumerate() {
+                check_strict_objects(sub, file, &format!("{path}.{key}[{i}]"), violations);
+            }
+        }
+    }
+}
+
 /// Sanity check: after emission the 5 pilot handlers each have at least
 /// an `args` and a `result` file on disk.
 #[test]

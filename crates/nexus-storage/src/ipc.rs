@@ -48,6 +48,7 @@ use ts_rs::TS;
     feature = "ts-export",
     ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
 )]
+#[serde(deny_unknown_fields)]
 pub struct StorageSearchArgs {
     /// Full-text query string (Tantivy syntax).
     pub query: String,
@@ -65,6 +66,7 @@ pub struct StorageSearchArgs {
     feature = "ts-export",
     ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
 )]
+#[serde(deny_unknown_fields)]
 pub struct StorageSearchHit {
     /// Path to the file containing the matching block.
     pub file_path: String,
@@ -85,6 +87,7 @@ pub struct StorageSearchHit {
     feature = "ts-export",
     ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
 )]
+#[serde(deny_unknown_fields)]
 pub struct StorageSearchResult {
     /// Ordered (descending by score) list of hits.
     pub results: Vec<StorageSearchHit>,
@@ -99,6 +102,7 @@ pub struct StorageSearchResult {
     feature = "ts-export",
     ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
 )]
+#[serde(deny_unknown_fields)]
 pub struct StorageReadFileArgs {
     /// Forge-relative path of the file to read.
     pub path: String,
@@ -115,6 +119,7 @@ pub struct StorageReadFileArgs {
     feature = "ts-export",
     ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
 )]
+#[serde(deny_unknown_fields)]
 pub struct StorageReadFileResult {
     /// Raw bytes of the file content, or `null` if the file does not exist.
     pub bytes: Option<Vec<u8>>,
@@ -133,6 +138,7 @@ pub struct StorageReadFileResult {
     feature = "ts-export",
     ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
 )]
+#[serde(deny_unknown_fields)]
 pub struct StorageWriteFileArgs {
     /// Forge-relative path of the file to write.
     pub path: String,
@@ -149,6 +155,7 @@ pub struct StorageWriteFileArgs {
     feature = "ts-export",
     ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
 )]
+#[serde(deny_unknown_fields)]
 pub struct StorageWriteFileResult {
     /// Vault-relative path.
     pub path: String,
@@ -177,6 +184,7 @@ pub struct StorageWriteFileResult {
     feature = "ts-export",
     ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
 )]
+#[serde(deny_unknown_fields)]
 pub struct StorageNoteAppendArgs {
     /// Forge-relative path of the inbox file. Created on first append.
     pub path: String,
@@ -195,6 +203,7 @@ pub struct StorageNoteAppendArgs {
     feature = "ts-export",
     ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
 )]
+#[serde(deny_unknown_fields)]
 pub struct StorageNoteAppendResult {
     /// Vault-relative path.
     pub path: String,
@@ -215,6 +224,7 @@ pub struct StorageNoteAppendResult {
     feature = "ts-export",
     ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
 )]
+#[serde(deny_unknown_fields)]
 pub struct StorageListDirArgs {
     /// Forge-relative path of the directory to list. Empty string means the
     /// forge root.
@@ -230,7 +240,7 @@ pub struct StorageListDirArgs {
     feature = "ts-export",
     ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
 )]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StorageListDirEntry {
     /// File or directory name (no path separators).
     pub name: String,
@@ -255,6 +265,7 @@ pub struct StorageListDirEntry {
     feature = "ts-export",
     ts(export, export_to = "../../../packages/nexus-extension-api/src/generated/ipc/")
 )]
+#[serde(deny_unknown_fields)]
 pub struct StorageListDirResult {
     /// Entries in the requested directory. Order is filesystem-dependent.
     pub entries: Vec<StorageListDirEntry>,

@@ -225,6 +225,7 @@ impl CorePlugin for AgentCorePlugin {
 // ── Handler impls ───────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GoalArgs {
     goal: String,
     #[serde(default)]
@@ -232,6 +233,7 @@ struct GoalArgs {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PlanArgs {
     plan: Plan,
 }
@@ -285,6 +287,7 @@ async fn handle_run_plan(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ExecuteStepArgs {
     plan: Plan,
     index: usize,
@@ -550,6 +553,7 @@ async fn handle_history_list(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PlanIdArgs {
     plan_id: String,
 }
@@ -867,6 +871,7 @@ fn to_value<T: serde::Serialize>(
 
 /// Args for [`HANDLER_DELEGATE`]: pick one archetype and a goal.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelegateArgs {
     /// Archetype short name (`"writer"`, `"coder"`, `"researcher"`).
     pub archetype: String,
@@ -876,6 +881,7 @@ pub struct DelegateArgs {
 
 /// One job for [`HANDLER_PARALLEL`].
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ParallelJob {
     /// Archetype short name.
     pub archetype: String,
@@ -885,6 +891,7 @@ pub struct ParallelJob {
 
 /// Args for [`HANDLER_PARALLEL`].
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ParallelArgs {
     /// Jobs fanned out concurrently; results returned in input order.
     pub jobs: Vec<ParallelJob>,
@@ -892,6 +899,7 @@ pub struct ParallelArgs {
 
 /// One stage in [`HANDLER_PIPELINE`].
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PipelineStage {
     /// Archetype short name.
     pub archetype: String,
@@ -902,6 +910,7 @@ pub struct PipelineStage {
 
 /// Args for [`HANDLER_PIPELINE`].
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PipelineArgs {
     /// Stages run sequentially; first failure stops the pipeline and
     /// the partial observation list is returned.
@@ -910,6 +919,7 @@ pub struct PipelineArgs {
 
 /// Response wrapper for [`HANDLER_TRACE_GET`].
 #[derive(serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TraceResponse {
     /// Trace entries in append order.
     pub entries: Vec<TraceEntry>,

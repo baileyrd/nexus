@@ -140,6 +140,7 @@ impl SkillsCorePlugin {
 
     fn dispatch_get(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Args {
             id: String,
         }
@@ -165,6 +166,7 @@ impl SkillsCorePlugin {
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Args {
             context: String,
         }
@@ -179,6 +181,7 @@ impl SkillsCorePlugin {
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Args {
             text: String,
         }
@@ -190,6 +193,7 @@ impl SkillsCorePlugin {
 
     fn dispatch_render(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Args {
             id: String,
             #[serde(default)]
@@ -225,6 +229,7 @@ impl SkillsCorePlugin {
     /// `ExecutionFailed` so the planner can fall back to the raw body.
     fn dispatch_compose(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Args {
             id: String,
         }

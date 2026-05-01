@@ -55,6 +55,7 @@ const STORAGE_IPC_TIMEOUT: Duration = Duration::from_secs(30);
         export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
     )
 )]
+#[serde(deny_unknown_fields)]
 pub struct Citation {
     /// 1-based citation index. Stable within a single [`RagResponse`].
     pub index: u32,
@@ -83,6 +84,7 @@ pub struct Citation {
         export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
     )
 )]
+#[serde(deny_unknown_fields)]
 pub struct RagResponse {
     /// Generated answer text.
     pub answer: String,

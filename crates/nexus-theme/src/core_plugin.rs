@@ -82,6 +82,7 @@ pub const HANDLER_RELOAD: u32 = 11;
 
 /// Args for `apply_theme`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApplyThemeArgs {
     /// Theme id to switch to.
     pub id: String,
@@ -89,6 +90,7 @@ pub struct ApplyThemeArgs {
 
 /// Args for `compute_variables`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ComputeVariablesArgs {
     /// Theme id (does not affect engine state).
     pub theme_id: String,
@@ -98,6 +100,7 @@ pub struct ComputeVariablesArgs {
 
 /// Args for `toggle_snippet`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ToggleSnippetArgs {
     /// Snippet id to toggle.
     pub id: String,
@@ -105,6 +108,7 @@ pub struct ToggleSnippetArgs {
 
 /// Args for `reorder_snippets`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReorderSnippetsArgs {
     /// New ordered list of enabled snippet ids.
     pub ids: Vec<String>,
@@ -112,6 +116,7 @@ pub struct ReorderSnippetsArgs {
 
 /// Args for `set_mode`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SetModeArgs {
     /// Desired mode.
     pub mode: ThemeMode,
@@ -119,6 +124,7 @@ pub struct SetModeArgs {
 
 /// Args for `apply_config`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApplyConfigArgs {
     /// Config snapshot to restore.
     pub config: ThemeConfig,
@@ -126,6 +132,7 @@ pub struct ApplyConfigArgs {
 
 /// Args for `set_plugin_overrides`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SetPluginOverridesArgs {
     /// Variable overrides to merge on top of the cascade.
     pub overrides: VariableMap,
@@ -133,6 +140,7 @@ pub struct SetPluginOverridesArgs {
 
 /// Response envelope for `apply_config`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Ack {
     /// Always `true`; present so the wire type is an object, not `null`.
     pub ok: bool,

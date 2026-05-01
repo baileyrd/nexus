@@ -20,6 +20,7 @@
       "type": "string"
     }
   },
+  "additionalProperties": false,
   "required": [
     "session_id",
     "text",
@@ -50,6 +51,7 @@
           "format": "float"
         }
       },
+      "additionalProperties": false,
       "required": [
         "file_path",
         "block_id",

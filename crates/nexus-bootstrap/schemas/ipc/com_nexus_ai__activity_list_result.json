@@ -12,6 +12,7 @@
       }
     }
   },
+  "additionalProperties": false,
   "required": [
     "entries"
   ],
@@ -89,6 +90,7 @@
           }
         }
       },
+      "additionalProperties": false,
       "required": [
         "id",
         "timestamp",
@@ -171,6 +173,7 @@
           "type": "boolean"
         }
       },
+      "additionalProperties": false,
       "required": [
         "name",
         "ok"

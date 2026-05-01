@@ -81,6 +81,7 @@
       ]
     }
   },
+  "additionalProperties": false,
   "required": [
     "messages"
   ],
@@ -98,6 +99,7 @@
           "$ref": "#/$defs/AiStreamAskRole"
         }
       },
+      "additionalProperties": false,
       "required": [
         "role",
         "content"

@@ -22,8 +22,34 @@ the warning at author time.
 
 ## Currently deprecated
 
-_(none — this file is seeded alongside the DEPRECATED policy. Entries will
-be added here as the API evolves.)_
+### IPC payloads with extra fields are now rejected
+
+**Announced:** 2026-05-01 (audit P0-1, PR following #108).
+**Effective immediately** — no deprecation window because every payload
+that previously sent unknown fields was already a latent bug; the
+serializer just silently dropped them.
+
+**What changed.** Every IPC arg/reply struct in the workspace now
+carries `#[serde(deny_unknown_fields)]`. A plugin or shell caller that
+sends `{ "file_path": "x", "file_pathh": "typo" }` to
+`com.nexus.comments::list` (and analogous typos against any other
+typed handler) now gets `IpcError::PluginCrashedDuringCall` instead of
+silently round-tripping with `file_path` defaulted to `""`.
+
+**Migration.** Inspect any IPC payload your plugin builds. If it
+contains fields not listed in the corresponding `*Args` / `*Reply`
+struct under `crates/nexus-<service>/src/{ipc,core_plugin}.rs`, remove
+them. Run `scripts/check_ipc_drift.sh` and consult the regenerated
+JSON schemas under `crates/nexus-bootstrap/schemas/ipc/` for the
+authoritative shape (`additionalProperties: false` is now asserted by
+`crates/nexus-bootstrap/tests/ipc_schema_emit.rs`).
+
+**Out of scope of this rollout** (handlers that bypass typed structs,
+deserialize fields ad-hoc, and therefore cannot enforce strict
+shapes): `com.nexus.storage::*` (uses `path_arg` helper on raw
+`serde_json::Value`), `com.nexus.git::*`, `com.nexus.mcp::*`. These
+are tracked by a follow-up to refactor them to
+`parse_args::<TypedStruct>(...)`.
 
 ## Trust policy — Script (JS) plugins
 

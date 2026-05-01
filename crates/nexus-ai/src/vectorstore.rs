@@ -48,6 +48,7 @@ pub struct ChunkEmbedding {
         export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
     )
 )]
+#[serde(deny_unknown_fields)]
 pub struct ChunkMatch {
     /// Path of the source file.
     pub file_path: String,

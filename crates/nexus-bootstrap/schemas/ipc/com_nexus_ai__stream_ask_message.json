@@ -13,6 +13,7 @@
       "$ref": "#/$defs/AiStreamAskRole"
     }
   },
+  "additionalProperties": false,
   "required": [
     "role",
     "content"
