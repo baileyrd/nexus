@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitOk",
+  "description": "Return type for `stage_file`, `unstage_file`, `stage_all`,\n`unstage_all` (handler ids `6`, `7`, `9`, `10`). The engine emits\n`{\"ok\": true}` for every successful call.",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "description": "Always `true` when the wrapped operation succeeded.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ok"
+  ]
+}

@@ -40,6 +40,13 @@ use nexus_storage::ipc::{
 // pilot.
 use nexus_linkpreview::core_plugin::FetchArgs as LinkPreviewFetchArgs;
 use nexus_linkpreview::LinkPreview;
+// nexus-git uses a wire-mirror module — handlers emit ad-hoc
+// `serde_json::json!` and the impl types in `nexus_git::types`
+// don't even derive `Serialize`.
+use nexus_git::ipc::{
+    GitBranch, GitCommitArgs, GitCommitReply, GitDiffHunk, GitDiffLine, GitLogArgs, GitLogEntry,
+    GitOk, GitPathArgs, GitStatusReply,
+};
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -128,6 +135,19 @@ fn emit_pilot_ipc_schemas() {
     // into the schema generator (audit-2026-05-01 P1-3, issue #113).
     write_schema::<LinkPreviewFetchArgs>("com_nexus_linkpreview__fetch", "args");
     write_schema::<LinkPreview>("com_nexus_linkpreview__fetch", "result");
+
+    // ── com.nexus.git (P1-3 #113) ────────────────────────────────────────
+    // Wire-mirror types — impl emits ad-hoc `serde_json::json!`.
+    write_schema::<GitStatusReply>("com_nexus_git__status", "reply");
+    write_schema::<GitLogArgs>("com_nexus_git__log", "args");
+    write_schema::<GitLogEntry>("com_nexus_git__log", "entry");
+    write_schema::<GitBranch>("com_nexus_git__branches", "entry");
+    write_schema::<GitPathArgs>("com_nexus_git", "path_args");
+    write_schema::<GitDiffHunk>("com_nexus_git__diff_file", "hunk");
+    write_schema::<GitDiffLine>("com_nexus_git__diff_file", "line");
+    write_schema::<GitCommitArgs>("com_nexus_git__commit", "args");
+    write_schema::<GitCommitReply>("com_nexus_git__commit", "reply");
+    write_schema::<GitOk>("com_nexus_git", "ok");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type
@@ -182,8 +202,21 @@ fn check_strict_objects(
     violations: &mut Vec<String>,
 ) {
     if value.get("type").and_then(serde_json::Value::as_str) == Some("object") {
+        // Accept `false` (struct), object (typed map), or `true`
+        // (any-value map). Missing means a struct without
+        // `deny_unknown_fields` — what P0-2 forbids.
         match value.get("additionalProperties") {
-            Some(serde_json::Value::Bool(false)) => {}
+            Some(serde_json::Value::Bool(_)) => {}
+            Some(serde_json::Value::Object(_)) => {
+                if let Some(inner) = value.get("additionalProperties") {
+                    check_strict_objects(
+                        inner,
+                        file,
+                        &format!("{path}.additionalProperties"),
+                        violations,
+                    );
+                }
+            }
             _ => violations.push(format!("{file} :: {path}")),
         }
     }

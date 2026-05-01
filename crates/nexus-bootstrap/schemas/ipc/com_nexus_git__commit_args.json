@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GitCommitArgs",
+  "description": "Args for `com.nexus.git::commit` (handler id `8`).",
+  "type": "object",
+  "properties": {
+    "message": {
+      "description": "Commit message. Forwarded verbatim to libgit2.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "message"
+  ]
+}
