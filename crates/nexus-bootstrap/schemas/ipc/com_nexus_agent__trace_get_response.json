@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TraceResponse",
+  "description": "Response wrapper for [`HANDLER_TRACE_GET`].",
+  "type": "object",
+  "properties": {
+    "entries": {
+      "description": "Trace entries in append order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TraceEntry"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "entries"
+  ],
+  "$defs": {
+    "TraceEntry": {
+      "description": "One trace entry per delegated stage.\n\nCaptures enough metadata for an \"agent timeline\" UI: which\narchetype ran, the goal it received (after substitution), wall-clock\ntimestamps, terminal status, and a short summary derived from the\nobservation. The trace log is append-only and lives behind a\n`Mutex` so concurrent `parallel` jobs all land in the same vector.",
+      "type": "object",
+      "properties": {
+        "archetype": {
+          "description": "Archetype id resolved by [`build_archetype`] (e.g.\n`com.nexus.agent.writer`).",
+          "type": "string"
+        },
+        "ended_at_ms": {
+          "description": "Unix epoch milliseconds when the stage ended (success or fail).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "goal": {
+          "description": "Goal text actually sent to the planner — already includes any\n`{{prev}}` substitution applied by [`AgentOrchestrator::pipeline`].",
+          "type": "string"
+        },
+        "stage_idx": {
+          "description": "Zero-based ordinal in the orchestrator's append order. For\n`parallel` jobs this reflects completion order, not input\norder; pair with the response vector when ordering matters.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "started_at_ms": {
+          "description": "Unix epoch milliseconds when the stage started.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "status": {
+          "description": "Terminal status — one of `\"ok\"`, `\"failed\"`, `\"plan_failed\"`.",
+          "type": "string"
+        },
+        "summary": {
+          "description": "Short human-readable summary derived from the resulting\nobservation. For pipelines this is also the value stashed\nunder the `\"prev\"` scratch key.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "stage_idx",
+        "archetype",
+        "goal",
+        "started_at_ms",
+        "ended_at_ms",
+        "status",
+        "summary"
+      ]
+    }
+  }
+}

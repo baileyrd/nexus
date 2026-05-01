@@ -8,6 +8,11 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 use crate::{
     AgentError, AutoApprove, Observation, Plan, PolicyDecision, Step, StepPolicy, ToolCall,
     ToolDispatcher,
@@ -15,6 +20,15 @@ use crate::{
 
 /// Outcome of one step in an [`Observation`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct StepResult {
     /// Step id — matches [`Step::id`] in the input plan.
     pub step_id: String,
@@ -29,6 +43,14 @@ pub struct StepResult {
 /// Terminal status for a single step. Mirrors UI affordances (green /
 /// yellow / red / grey).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(rename_all = "snake_case")]
 pub enum StepStatus {
     /// Ran to completion without error (tool call succeeded, or the

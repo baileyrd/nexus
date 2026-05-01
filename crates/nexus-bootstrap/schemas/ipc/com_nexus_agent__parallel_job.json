@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ParallelJob",
+  "description": "One job for [`HANDLER_PARALLEL`].",
+  "type": "object",
+  "properties": {
+    "archetype": {
+      "description": "Archetype short name.",
+      "type": "string"
+    },
+    "goal": {
+      "description": "Natural-language goal.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "archetype",
+    "goal"
+  ]
+}

@@ -35,6 +35,11 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
 use thiserror::Error;
 
 mod agents;
@@ -64,6 +69,15 @@ pub use orchestrator::{AgentOrchestrator, TraceEntry};
 /// need branching or loops return a flat list today and re-plan if
 /// results come back differently than expected.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct Step {
     /// Unique id within the owning plan. Used for correlation in
     /// [`Observation`] and for UI affordances (approve / retry).
@@ -80,6 +94,15 @@ pub struct Step {
 
 /// A plan: ordered list of [`Step`]s produced by [`Agent::plan`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct Plan {
     /// Opaque id — uniquely identifies this planning session for
     /// persistence and resume.
@@ -108,6 +131,15 @@ impl Plan {
 /// Shape mirrors `nexus_kernel::PluginContext::ipc_call` args so the
 /// [`ToolDispatcher`] adapter can forward directly without reshaping.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct ToolCall {
     /// Reverse-DNS id of the target plugin (e.g. `"com.nexus.storage"`).
     pub target_plugin_id: String,
@@ -176,6 +208,15 @@ pub trait Agent: Send + Sync {
 /// What the executor hands back after running a [`Plan`]. A single
 /// observation carries one entry per attempted step.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct Observation {
     /// Plan id this observation describes.
     pub plan_id: String,

@@ -37,7 +37,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nexus_kernel::{KernelPluginContext, PluginContext};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
 
 use crate::{
     build_archetype, orchestrator::AgentOrchestrator, Agent, AgentError, ChatDriver, LlmAgent,
@@ -224,17 +229,37 @@ impl CorePlugin for AgentCorePlugin {
 
 // ── Handler impls ───────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+/// Args for `com.nexus.agent::plan` and `::run` (handler ids `1`, `2`).
+/// Lifted from inline by audit-2026-05-01 P1-3 (#113).
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
-struct GoalArgs {
+pub struct GoalArgs {
     goal: String,
     #[serde(default)]
     archetype: Option<String>,
 }
 
-#[derive(Deserialize)]
+/// Args for `com.nexus.agent::run_plan` (handler id `7`). Lifted from
+/// inline by audit-2026-05-01 P1-3 (#113).
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
-struct PlanArgs {
+pub struct PlanArgs {
     plan: Plan,
 }
 
@@ -286,9 +311,19 @@ async fn handle_run_plan(
     run_plan_internal(ctx, a.plan, None).await
 }
 
-#[derive(Deserialize)]
+/// Args for `com.nexus.agent::execute_step` (handler id `4`). Lifted
+/// from inline by audit-2026-05-01 P1-3 (#113).
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
-struct ExecuteStepArgs {
+pub struct ExecuteStepArgs {
     plan: Plan,
     index: usize,
 }
@@ -552,9 +587,19 @@ async fn handle_history_list(
     Ok(serde_json::Value::Array(out))
 }
 
-#[derive(Deserialize)]
+/// Args for `com.nexus.agent::history_get` and related plan-id-keyed
+/// handlers. Lifted from inline by audit-2026-05-01 P1-3 (#113).
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
-struct PlanIdArgs {
+pub struct PlanIdArgs {
     plan_id: String,
 }
 
@@ -870,7 +915,15 @@ fn to_value<T: serde::Serialize>(
 // ── Orchestrator handlers (BL-027) ──────────────────────────────────────────
 
 /// Args for [`HANDLER_DELEGATE`]: pick one archetype and a goal.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct DelegateArgs {
     /// Archetype short name (`"writer"`, `"coder"`, `"researcher"`).
@@ -880,7 +933,15 @@ pub struct DelegateArgs {
 }
 
 /// One job for [`HANDLER_PARALLEL`].
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ParallelJob {
     /// Archetype short name.
@@ -890,7 +951,15 @@ pub struct ParallelJob {
 }
 
 /// Args for [`HANDLER_PARALLEL`].
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ParallelArgs {
     /// Jobs fanned out concurrently; results returned in input order.
@@ -898,7 +967,15 @@ pub struct ParallelArgs {
 }
 
 /// One stage in [`HANDLER_PIPELINE`].
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct PipelineStage {
     /// Archetype short name.
@@ -909,7 +986,15 @@ pub struct PipelineStage {
 }
 
 /// Args for [`HANDLER_PIPELINE`].
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct PipelineArgs {
     /// Stages run sequentially; first failure stops the pipeline and
@@ -918,7 +1003,15 @@ pub struct PipelineArgs {
 }
 
 /// Response wrapper for [`HANDLER_TRACE_GET`].
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct TraceResponse {
     /// Trace entries in append order.

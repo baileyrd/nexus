@@ -24,6 +24,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 use crate::{
     build_archetype, Agent, AgentError, ChatDriver, Observation, PlanExecutor, ToolDispatcher,
 };
@@ -36,6 +41,15 @@ use crate::{
 /// observation. The trace log is append-only and lives behind a
 /// `Mutex` so concurrent `parallel` jobs all land in the same vector.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct TraceEntry {
     /// Zero-based ordinal in the orchestrator's append order. For
     /// `parallel` jobs this reflects completion order, not input

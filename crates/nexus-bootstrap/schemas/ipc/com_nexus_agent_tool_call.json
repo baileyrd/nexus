@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ToolCall",
+  "description": "A single tool call — the unit of effect an [`Agent`] can request.\nShape mirrors `nexus_kernel::PluginContext::ipc_call` args so the\n[`ToolDispatcher`] adapter can forward directly without reshaping.",
+  "type": "object",
+  "properties": {
+    "args": {
+      "description": "Arbitrary JSON payload — serialized and handed to the plugin."
+    },
+    "command_id": {
+      "description": "Command id within the target plugin (e.g. `\"read_file\"`).",
+      "type": "string"
+    },
+    "target_plugin_id": {
+      "description": "Reverse-DNS id of the target plugin (e.g. `\"com.nexus.storage\"`).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "target_plugin_id",
+    "command_id",
+    "args"
+  ]
+}
