@@ -72,6 +72,24 @@ pub struct Runtime {
     pub context: KernelPluginContext,
     /// Shared plugin loader. Must be kept alive for the lifetime of the
     /// runtime — the context holds an `Arc<dyn IpcDispatcher>` pointing here.
+    ///
+    /// # When to reach for this
+    ///
+    /// Issue #83. The audit suggested `pub(crate)` or "add accessors"
+    /// — neither works in practice today. The shell's bridge
+    /// (`shell/src-tauri/src/bridge.rs`) drains the loader during
+    /// `shutdown_kernel` (every plugin's `on_stop` hook needs to
+    /// fire), and the bootstrap's own integration tests reach for
+    /// the loader as `Arc<dyn IpcDispatcher>` to spin up
+    /// per-call `KernelPluginContext`s. Both are legitimate
+    /// host-side uses that don't fit the `ipc_call` model.
+    ///
+    /// **For everything else, route through
+    /// [`Runtime::context`]** — community / first-party plugin
+    /// code, CLI commands, anything that the shell/CLI/TUI binary
+    /// itself exposes to plugins. Direct loader access is for
+    /// host-internal lifecycle plumbing, not for ergonomic
+    /// shortcuts past the IPC layer.
     pub loader: Arc<SharedPluginLoader>,
 }
 
