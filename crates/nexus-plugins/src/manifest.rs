@@ -1387,6 +1387,41 @@ template = "---\n\u0000"
 pub fn validate(manifest: &PluginManifest, plugin_dir: &Path) -> Result<(), PluginError> {
     let id = &manifest.id;
 
+    // Rule 0 (issue #85): bound the registration vec lengths
+    // before any per-entry validation. A 10M-entry
+    // `[[registrations.ipc_command]]` would otherwise allocate
+    // gigabytes during parse and validation. 1024 entries per kind
+    // is far past anything realistic — the heaviest in-tree plugin
+    // (nexus-storage core) has ~55 IPC commands. Capping per-vec
+    // means a malicious or accidentally-pathological manifest
+    // fails fast with a clear error class instead of OOM-ing or
+    // chewing seconds of CPU.
+    const MAX_REGISTRATIONS_PER_KIND: usize = 1024;
+    let regs = &manifest.registrations;
+    let oversized: &[(&str, usize)] = &[
+        ("cli_subcommand", regs.cli_subcommands.len()),
+        ("ipc_command", regs.ipc_commands.len()),
+        ("event_subscriber", regs.event_subscribers.len()),
+        ("ui_command", regs.ui_commands.len()),
+        ("ui_panel", regs.ui_panels.len()),
+        ("ui_settings_tab", regs.ui_settings_tabs.len()),
+        ("ui_ribbon_item", regs.ui_ribbon_items.len()),
+        ("ui_status_item", regs.ui_status_items.len()),
+        ("slash_command", regs.slash_commands.len()),
+        ("menu_item", regs.menu_items.len()),
+    ];
+    for (kind, count) in oversized {
+        if *count > MAX_REGISTRATIONS_PER_KIND {
+            return Err(PluginError::ManifestValidation {
+                plugin_id: id.clone(),
+                reason: format!(
+                    "[[registrations.{kind}]] declared {count} entries; \
+                     max is {MAX_REGISTRATIONS_PER_KIND}"
+                ),
+            });
+        }
+    }
+
     // Rule 1: ID format.
     let id_re =
         Regex::new(r"^[a-z0-9]+([-._][a-z0-9]+)*\.[a-z0-9]+([-._][a-z0-9]+)*$").unwrap();

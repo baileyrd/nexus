@@ -731,6 +731,23 @@ fn handle_apply_transaction(
         .get("transaction")
         .ok_or_else(|| exec_err("apply_transaction: missing 'transaction'".to_string()))?
         .clone();
+    // Issue #85. Cap the transaction payload size before
+    // deserializing into a `Transaction` so a malicious/buggy caller
+    // can't ask the CRDT engine to walk gigabytes of operations in
+    // one IPC dispatch. 16 MiB is generous (a normal transaction is
+    // a few KB; a large multi-block paste is < 1 MiB) and the cap
+    // is on the JSON byte size, not op count, because per-op cost
+    // varies wildly.
+    const MAX_TRANSACTION_JSON_BYTES: usize = 16 * 1024 * 1024;
+    let tx_json_size = serde_json::to_vec(&tx_value)
+        .map(|v| v.len())
+        .unwrap_or(usize::MAX);
+    if tx_json_size > MAX_TRANSACTION_JSON_BYTES {
+        return Err(exec_err(format!(
+            "apply_transaction: transaction is {tx_json_size} bytes; \
+             max is {MAX_TRANSACTION_JSON_BYTES} bytes"
+        )));
+    }
     let tx: crate::Transaction = serde_json::from_value(tx_value)
         .map_err(|e| exec_err(format!("apply_transaction: invalid transaction: {e}")))?;
     let tx_id = tx.id;

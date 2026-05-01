@@ -59,15 +59,60 @@ pub struct ChunkMatch {
     pub score: f32,
 }
 
+/// Maximum number of chunks accepted in a single `upsert` call.
+/// Issue #85. The audit flagged that there was no per-call cap on
+/// the chunks slice; an indexer bug or malicious caller could
+/// shove millions of embeddings through `vector_insert` in one
+/// IPC dispatch and pin storage's write-side mutex for the
+/// duration. 4096 is generous (a typical document chunks to a
+/// few dozen blocks; a whole forge re-index batches across
+/// many files), and the caller can split larger work into
+/// multiple `upsert` calls.
+pub const MAX_CHUNKS_PER_UPSERT: usize = 4096;
+
+/// Maximum byte size of a single chunk's text. Embeddings cost
+/// scales with chunk size; a multi-megabyte single chunk is a
+/// signal the chunker is broken.
+pub const MAX_CHUNK_TEXT_BYTES: usize = 256 * 1024;
+
+/// Maximum embedding-vector length. The biggest production
+/// embedding model (text-embedding-3-large) emits 3072-dim
+/// vectors; padding 4× as headroom catches the "I forgot to
+/// truncate" bug shape without rejecting any real model.
+pub const MAX_EMBEDDING_DIM: usize = 12_288;
+
 /// Replace all embeddings for `file_path` via storage IPC.
 ///
 /// # Errors
-/// Returns [`AiError::Provider`] wrapping any dispatcher or handler error.
+/// Returns [`AiError::Provider`] wrapping any dispatcher or handler error,
+/// or if `chunks` exceeds [`MAX_CHUNKS_PER_UPSERT`] / any chunk's text
+/// exceeds [`MAX_CHUNK_TEXT_BYTES`] / any embedding length exceeds
+/// [`MAX_EMBEDDING_DIM`].
 pub async fn upsert(
     ctx: &KernelPluginContext,
     file_path: &str,
     chunks: &[ChunkEmbedding],
 ) -> Result<(), AiError> {
+    if chunks.len() > MAX_CHUNKS_PER_UPSERT {
+        return Err(AiError::Provider(format!(
+            "vector_insert: {} chunks; max is {MAX_CHUNKS_PER_UPSERT}",
+            chunks.len()
+        )));
+    }
+    for (i, chunk) in chunks.iter().enumerate() {
+        if chunk.chunk_text.len() > MAX_CHUNK_TEXT_BYTES {
+            return Err(AiError::Provider(format!(
+                "vector_insert: chunk {i} text is {} bytes; max is {MAX_CHUNK_TEXT_BYTES}",
+                chunk.chunk_text.len()
+            )));
+        }
+        if chunk.embedding.len() > MAX_EMBEDDING_DIM {
+            return Err(AiError::Provider(format!(
+                "vector_insert: chunk {i} embedding is {} dims; max is {MAX_EMBEDDING_DIM}",
+                chunk.embedding.len()
+            )));
+        }
+    }
     let args = serde_json::json!({ "file_path": file_path, "chunks": chunks });
     ctx.ipc_call(STORAGE_PLUGIN, "vector_insert", args, STORAGE_IPC_TIMEOUT)
         .await
