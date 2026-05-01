@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DeleteCommentArgs",
+  "description": "Args for `com.nexus.comments::delete_comment` (handler id `6`).",
+  "type": "object",
+  "properties": {
+    "comment_id": {
+      "description": "Comment to delete.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "file_path": {
+      "description": "Forge-relative path of the markdown file.",
+      "type": "string"
+    },
+    "thread_id": {
+      "description": "Thread containing the comment.",
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "file_path",
+    "thread_id",
+    "comment_id"
+  ]
+}

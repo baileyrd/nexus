@@ -1,10 +1,13 @@
 **/target
 **/*.rs.bk
 Cargo.lock
-# ts-rs's impl-features write external-type mirrors into a per-crate
-# `bindings/` directory. Audit P1-3 IPC bindings live under
-# `packages/nexus-extension-api/src/generated/ipc/`; the leftover
-# `bindings/` is build-only.
+# ts-rs's `serde-json-impl` / `chrono-impl` / `uuid-impl` features emit
+# external-type mirrors (e.g. `JsonValue.ts`, `NaiveDateTime.ts`) into
+# a per-crate `bindings/` directory unconditionally — `#[ts(export_to
+# = ...)]` only redirects the OWN types, not the impl-feature mirrors.
+# Audit P1-3 IPC bindings live under
+# `packages/nexus-extension-api/src/generated/ipc/`, so the leftover
+# crate-local `bindings/` is a build-only artefact.
 crates/*/bindings/
 # cargo-sweep timestamp marker
 sweep.timestamp

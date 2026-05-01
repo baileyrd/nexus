@@ -4,6 +4,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 /// Stable identifier for a comment thread.
 pub type ThreadId = Uuid;
 
@@ -12,6 +17,15 @@ pub type CommentId = Uuid;
 
 /// One reply within a thread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct Comment {
     /// Stable id (uuid v7 — ordered by creation time).
     pub id: CommentId,
@@ -35,6 +49,15 @@ pub struct Comment {
 
 /// A thread anchored to one block in one file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct Thread {
     /// Stable thread id.
     pub id: ThreadId,

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Comment",
+  "description": "One reply within a thread.",
+  "type": "object",
+  "properties": {
+    "author": {
+      "description": "Author display name. `None` when the runtime has no\nconfigured user identity (e.g. CLI without `git config user.name`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "body": {
+      "description": "Comment body — opaque markdown / plain text. The shell renders.",
+      "type": "string"
+    },
+    "created_at": {
+      "description": "First-write timestamp.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "id": {
+      "description": "Stable id (uuid v7 — ordered by creation time).",
+      "type": "string",
+      "format": "uuid"
+    },
+    "mentions": {
+      "description": "Mentions extracted from `body` at write time (`@name` tokens).\nStored explicitly so callers don't re-scan the body to surface\nnotifications.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "updated_at": {
+      "description": "Set when the comment is edited in place.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "body",
+    "created_at"
+  ]
+}

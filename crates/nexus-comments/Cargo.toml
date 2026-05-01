@@ -15,6 +15,14 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 regex-lite = { workspace = true }
+ts-rs = { workspace = true, optional = true, features = ["chrono-impl", "uuid-impl"] }
+schemars = { workspace = true, optional = true, features = ["chrono04", "uuid1"] }
+
+[features]
+# Audit-2026-05-01 P1-3 (#113) — emit JSON Schema + TypeScript bindings
+# for IPC arg/reply types. Off by default so normal builds don't pull
+# ts-rs / schemars.
+ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

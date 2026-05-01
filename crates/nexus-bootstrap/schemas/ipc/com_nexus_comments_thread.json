@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Thread",
+  "description": "A thread anchored to one block in one file.",
+  "type": "object",
+  "properties": {
+    "block_id": {
+      "description": "The block this thread is anchored to. The editor is\nresponsible for ensuring `block_id` has been stamped via\n`com.nexus.editor::stamp_block` before the thread is created.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "comments": {
+      "description": "Comments in the thread, ordered oldest-first. Always\nnon-empty: a thread is created with its first comment in a\nsingle transaction.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Comment"
+      }
+    },
+    "created_at": {
+      "description": "Thread-creation timestamp.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "id": {
+      "description": "Stable thread id.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "resolved": {
+      "description": "`true` once a participant marks the thread resolved.",
+      "type": "boolean",
+      "default": false
+    },
+    "resolved_at": {
+      "description": "Set when `resolved` flips from false to true.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "resolved_by": {
+      "description": "Author who resolved the thread (best-effort, may be `None`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "block_id",
+    "created_at",
+    "comments"
+  ],
+  "$defs": {
+    "Comment": {
+      "description": "One reply within a thread.",
+      "type": "object",
+      "properties": {
+        "author": {
+          "description": "Author display name. `None` when the runtime has no\nconfigured user identity (e.g. CLI without `git config user.name`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body": {
+          "description": "Comment body — opaque markdown / plain text. The shell renders.",
+          "type": "string"
+        },
+        "created_at": {
+          "description": "First-write timestamp.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "id": {
+          "description": "Stable id (uuid v7 — ordered by creation time).",
+          "type": "string",
+          "format": "uuid"
+        },
+        "mentions": {
+          "description": "Mentions extracted from `body` at write time (`@name` tokens).\nStored explicitly so callers don't re-scan the body to surface\nnotifications.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "updated_at": {
+          "description": "Set when the comment is edited in place.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "body",
+        "created_at"
+      ]
+    }
+  }
+}

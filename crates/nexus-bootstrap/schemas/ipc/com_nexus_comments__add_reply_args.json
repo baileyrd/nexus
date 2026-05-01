@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AddReplyArgs",
+  "description": "Args for `com.nexus.comments::add_reply` (handler id `3`).",
+  "type": "object",
+  "properties": {
+    "author": {
+      "description": "Optional author display name.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "body": {
+      "description": "Reply body.",
+      "type": "string"
+    },
+    "file_path": {
+      "description": "Forge-relative path of the markdown file.",
+      "type": "string"
+    },
+    "thread_id": {
+      "description": "Thread to append to.",
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "file_path",
+    "thread_id",
+    "body"
+  ]
+}

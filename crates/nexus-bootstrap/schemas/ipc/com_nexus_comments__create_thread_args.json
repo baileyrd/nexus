@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CreateThreadArgs",
+  "description": "Args for `com.nexus.comments::create_thread` (handler id `2`).",
+  "type": "object",
+  "properties": {
+    "author": {
+      "description": "Optional author display name.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "block_id": {
+      "description": "Stable block id the thread is anchored to. Caller must have\nensured the block was stamped via `com.nexus.editor::stamp_block`\nfirst.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "body": {
+      "description": "Body text of the first comment in the thread.",
+      "type": "string"
+    },
+    "file_path": {
+      "description": "Forge-relative path of the markdown file.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "file_path",
+    "block_id",
+    "body"
+  ]
+}
