@@ -42,7 +42,7 @@ use nexus_kernel::{
 };
 use nexus_plugins::SharedPluginLoader;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, WebviewWindow};
 use tauri::async_runtime::JoinHandle;
 use tokio::sync::Mutex;
 
@@ -310,10 +310,19 @@ pub async fn kernel_invoke(
 /// A tokio task is spawned to pump the `EventSubscription` and forward
 /// every match onto the `kernel:event` Tauri channel with the subscription
 /// id baked into the payload.
+///
+/// **Per-window scope (issue #86):** events are emitted to the calling
+/// window only via `webview.emit_to(label, ...)`. Pre-fix this used
+/// `app.emit(...)` which broadcasts to every webview in the app —
+/// a popout opened on a different forge, or a settings/help window
+/// that happened to be alive, would receive every kernel event from
+/// every subscription. Now each subscription's events are scoped to
+/// the window that asked for them.
 #[tauri::command]
 pub async fn kernel_subscribe(
     topic_prefix: String,
     app: AppHandle,
+    webview: WebviewWindow,
     runtime: tauri::State<'_, KernelRuntime>,
 ) -> Result<String, String> {
     let mut subscription = {
@@ -329,6 +338,12 @@ pub async fn kernel_subscribe(
     let subscription_id = uuid::Uuid::new_v4().to_string();
     let subscription_id_for_task = subscription_id.clone();
     let subscriptions_for_task = Arc::clone(&runtime.subscriptions);
+    // Capture the calling window's label and route emits to that
+    // label only; this binds the subscription's lifetime to the
+    // window that requested it. If the window closes, `app.emit_to`
+    // is a no-op, and the subscription's natural-exit cleanup takes
+    // over when the bus closes.
+    let window_label = webview.label().to_string();
 
     let handle = tauri::async_runtime::spawn(async move {
         loop {
@@ -343,10 +358,15 @@ pub async fn kernel_subscribe(
                             topic: type_id.clone(),
                             payload: payload.clone(),
                         };
-                        if let Err(e) = app.emit(KERNEL_EVENT_CHANNEL, envelope) {
+                        if let Err(e) = app.emit_to(
+                            tauri::EventTarget::webview_window(&window_label),
+                            KERNEL_EVENT_CHANNEL,
+                            envelope,
+                        ) {
                             eprintln!(
                                 "[kernel_subscribe] emit failed for sub \
-                                 {subscription_id_for_task}: {e}"
+                                 {subscription_id_for_task} → window \
+                                 '{window_label}': {e}"
                             );
                         }
                     }
