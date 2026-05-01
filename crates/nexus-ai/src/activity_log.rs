@@ -135,6 +135,7 @@ pub enum ActivityOutcome {
         export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
     )
 )]
+#[serde(deny_unknown_fields)]
 pub struct ActivityToolCall {
     /// Registered name of the tool (e.g. `read_file`, `write_file`).
     pub name: String,
@@ -153,6 +154,7 @@ pub struct ActivityToolCall {
         export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
     )
 )]
+#[serde(deny_unknown_fields)]
 pub struct ActivityEntry {
     /// UUID v4 — stable across reads, useful for de-duping.
     pub id: String,

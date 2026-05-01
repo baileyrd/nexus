@@ -41,6 +41,7 @@ pub const HANDLER_APPLY_VIEW: u32 = 4;
 
 /// Arguments for `csv_import`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CsvImportArgs {
     /// Raw CSV file bytes.
     pub csv_bytes: Vec<u8>,
@@ -59,6 +60,7 @@ pub struct CsvImportArgs {
 
 /// Response from `csv_import`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CsvImportResponse {
     /// Records parsed out of the CSV.
     pub records: Vec<nexus_types::bases::BaseRecord>,
@@ -72,6 +74,7 @@ pub struct CsvImportResponse {
 
 /// Arguments for `csv_export`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CsvExportArgs {
     /// Records to serialize.
     pub records: Vec<nexus_types::bases::BaseRecord>,
@@ -81,6 +84,7 @@ pub struct CsvExportArgs {
 
 /// Response from `csv_export`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CsvExportResponse {
     /// Serialized CSV bytes (header row + one row per record).
     pub csv_bytes: Vec<u8>,
@@ -90,6 +94,7 @@ pub struct CsvExportResponse {
 
 /// Arguments for `formula_eval`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FormulaEvalArgs {
     /// Formula expression (Notion-compatible syntax).
     pub expression: String,
@@ -99,6 +104,7 @@ pub struct FormulaEvalArgs {
 
 /// Response from `formula_eval`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FormulaEvalResponse {
     /// Display-formatted result string (same as [`formula::FormulaValue::to_display_string`]).
     pub display: String,
@@ -108,6 +114,7 @@ pub struct FormulaEvalResponse {
 /// pipeline from [`crate::views::apply_view`] and returns an
 /// [`crate::views::AppliedView`].
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApplyViewArgs {
     /// Records to apply the view against.
     pub records: Vec<nexus_types::bases::BaseRecord>,

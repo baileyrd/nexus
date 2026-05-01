@@ -52,6 +52,7 @@ impl CorePlugin for LinkPreviewCorePlugin {
 
 fn dispatch_fetch(args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
     #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
     struct Args {
         url: String,
     }

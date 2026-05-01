@@ -1480,8 +1480,15 @@ fn lookup_by_args(
     args: &serde_json::Value,
 ) -> Result<Workflow, PluginError> {
     #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    #[allow(dead_code)]
     struct Args {
         name: String,
+        // Optional flattened-variables map consumed by `extract_variables`
+        // off the raw JSON; declared here so strict deserialization
+        // accepts callers that pass it.
+        #[serde(default)]
+        variables: Option<serde_json::Value>,
     }
     let a: Args = parse(args, "run")?;
     let reg = registry.lock().map_err(poisoned)?;
@@ -1665,6 +1672,7 @@ impl WorkflowCorePlugin {
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Args {
             name: String,
         }
@@ -1704,6 +1712,7 @@ impl WorkflowCorePlugin {
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Args {
             slug: String,
         }
@@ -1724,6 +1733,7 @@ impl WorkflowCorePlugin {
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Args {
             slug: String,
             #[serde(default)]
@@ -1765,6 +1775,7 @@ impl WorkflowCorePlugin {
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Args {
             text: String,
         }

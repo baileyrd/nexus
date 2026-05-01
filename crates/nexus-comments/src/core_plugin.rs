@@ -81,11 +81,13 @@ impl CorePlugin for CommentsCorePlugin {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FilePathArg {
     file_path: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CreateThreadArgs {
     file_path: String,
     block_id: Uuid,
@@ -95,6 +97,7 @@ struct CreateThreadArgs {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AddReplyArgs {
     file_path: String,
     thread_id: Uuid,
@@ -104,6 +107,7 @@ struct AddReplyArgs {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SetResolvedArgs {
     file_path: String,
     thread_id: Uuid,
@@ -113,12 +117,14 @@ struct SetResolvedArgs {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DeleteThreadArgs {
     file_path: String,
     thread_id: Uuid,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DeleteCommentArgs {
     file_path: String,
     thread_id: Uuid,
@@ -126,6 +132,7 @@ struct DeleteCommentArgs {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EditCommentArgs {
     file_path: String,
     thread_id: Uuid,
