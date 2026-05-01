@@ -7,6 +7,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useNewBaseStore } from './newBaseStore'
 import { BASE_TEMPLATES, type BaseTemplate } from './templates'
 import { getBasesClient } from './runtime'
+import { Modal } from '../../../shell/Modal'
+import { zIndex } from '../../../shell/zIndex'
 
 const EXT = '.bases'
 
@@ -78,6 +80,7 @@ export function NewBaseDialog() {
   }
 
   return (
+    <Modal>
     <div
       role="dialog"
       aria-modal="true"
@@ -92,8 +95,9 @@ export function NewBaseDialog() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 1080,
+        zIndex: zIndex.overlayModal,
         padding: 32,
+        pointerEvents: 'auto',
       }}
     >
       <div
@@ -232,5 +236,6 @@ export function NewBaseDialog() {
         </div>
       </div>
     </div>
+    </Modal>
   )
 }

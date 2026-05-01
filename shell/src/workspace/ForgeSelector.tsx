@@ -8,6 +8,8 @@ import { useWorkspaceStore } from '../plugins/nexus/workspace/workspaceStore'
 import { useLauncherStore } from '../plugins/nexus/launcher/launcherState'
 import { getRegistry } from '../host/shellRegistry'
 import { Ic } from '../shell/icons'
+import { Modal } from '../shell/Modal'
+import { zIndex } from '../shell/zIndex'
 
 const COMMAND_OPEN_FORGE = 'nexus.workspace.open'
 const COMMAND_SET_ROOT = 'nexus.workspace.setRoot'
@@ -130,6 +132,7 @@ export function ForgeSelector(): JSX.Element {
       </button>
 
       {menuOpen && anchorRect && (
+        <Modal>
         <div
           ref={menuRef}
           role="menu"
@@ -143,8 +146,9 @@ export function ForgeSelector(): JSX.Element {
             borderRadius: 6,
             boxShadow: '0 6px 16px rgba(0,0,0,0.4)',
             padding: '4px 0',
-            zIndex: 9500,
+            zIndex: zIndex.dropdown,
             fontSize: 12,
+            pointerEvents: 'auto',
           }}
         >
           {recents.length === 0 && !rootPath && (
@@ -267,6 +271,7 @@ export function ForgeSelector(): JSX.Element {
             <span>Open folder as forge…</span>
           </button>
         </div>
+        </Modal>
       )}
     </div>
   )

@@ -21,6 +21,7 @@ import React, {
 } from 'react'
 import { Icon } from '../icons/index.tsx'
 import { WindowControls } from '../shell/WindowControls'
+import { zIndex } from '../shell/zIndex'
 import type {
   FloatingWindow as FloatingWindowNode,
   Leaf,
@@ -125,7 +126,7 @@ export function Workspace(): JSX.Element {
           position: 'absolute',
           top: 0,
           right: 0,
-          zIndex: 100,
+          zIndex: zIndex.chromeControls,
           pointerEvents: 'auto',
         }}
       >
@@ -866,7 +867,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
             position: 'fixed',
             top: rect.bottom + 4,
             left: Math.max(4, rect.right - 240),
-            zIndex: 200,
+            zIndex: zIndex.dropdown,
             minWidth: 220,
             background: 'var(--background-primary, var(--bg, #1e1e1e))',
             border: '1px solid var(--divider-color, var(--line, #333))',

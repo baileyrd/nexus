@@ -83,6 +83,14 @@
         --size-4-5: 20px;
         --size-4-6: 24px;
 
+        /* ── Z-index scale (mirrors shell/src/shell/zIndex.ts) ──────── */
+        --z-chrome-controls:   100;
+        --z-dropdown:          200;
+        --z-overlay-floating:  900;
+        --z-overlay-modal:    1100;
+        --z-overlay-toast:    1200;
+        --z-overlay-fatal:    9999;
+
         /* ── Chrome dimensions ────────────────────────────────────── */
         --header-height: 30px;
 
@@ -180,10 +188,16 @@
       /* Prevent white flash before the React tree mounts. */
       html, body { margin: 0; padding: 0; background: var(--background-primary); height: 100%; overflow: hidden; }
       #root { height: 100%; }
+      /* SH-002: modal portal root. Sits above #root in stacking order
+         because it appears later in the DOM. pointer-events:none on the
+         container so the workspace beneath stays interactive when no
+         modal is open; individual modals set pointer-events:auto. */
+      #modal-root { position: fixed; inset: 0; pointer-events: none; z-index: var(--z-overlay-modal); }
     </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="modal-root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

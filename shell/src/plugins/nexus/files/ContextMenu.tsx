@@ -17,6 +17,7 @@
 //   - First non-disabled item is auto-focused on mount.
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { zIndex } from '../../../shell/zIndex'
 
 export interface FilesContextMenuItem {
   id: string
@@ -35,7 +36,7 @@ export interface FilesContextMenuProps {
 
 const PANEL_STYLE: CSSProperties = {
   position: 'fixed',
-  zIndex: 200,
+  zIndex: zIndex.dropdown,
   background: 'var(--background-primary, var(--bg-raised, #1e1e1e))',
   border: '1px solid var(--divider-color, var(--line, #333))',
   borderRadius: 6,

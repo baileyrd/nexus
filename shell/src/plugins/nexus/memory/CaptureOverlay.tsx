@@ -11,6 +11,8 @@ import { useEffect, useRef } from 'react'
 
 import { useCaptureStore } from './captureStore'
 import type { CommandsAPI } from '../../../types/plugin.ts'
+import { Modal } from '../../../shell/Modal'
+import { zIndex } from '../../../shell/zIndex'
 
 const COMMAND_COMMIT = 'nexus.memory.captureCommit'
 
@@ -68,6 +70,7 @@ export function CaptureOverlay({ commands }: CaptureOverlayProps = {}) {
   }
 
   return (
+    <Modal>
     <div
       role="dialog"
       aria-modal="true"
@@ -82,8 +85,9 @@ export function CaptureOverlay({ commands }: CaptureOverlayProps = {}) {
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'center',
-        zIndex: 1100,
+        zIndex: zIndex.overlayModal,
         padding: 64,
+        pointerEvents: 'auto',
       }}
     >
       <div
@@ -175,5 +179,6 @@ export function CaptureOverlay({ commands }: CaptureOverlayProps = {}) {
         </div>
       </div>
     </div>
+    </Modal>
   )
 }

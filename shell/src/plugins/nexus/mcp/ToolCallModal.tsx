@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { useMcpStore, type ToolCallState } from './mcpStore'
 import { Icon } from '../../../icons'
+import { Modal } from '../../../shell/Modal'
+import { zIndex } from '../../../shell/zIndex'
 
 interface ToolCallModalProps {
   /**
@@ -73,6 +75,7 @@ export function ToolCallModal({ onRun }: ToolCallModalProps) {
   }
 
   return (
+    <Modal>
     <div
       onClick={(e) => {
         // Close on backdrop click only — guard against propagated
@@ -86,8 +89,9 @@ export function ToolCallModal({ onRun }: ToolCallModalProps) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 1000,
+        zIndex: zIndex.overlayModal,
         padding: 32,
+        pointerEvents: 'auto',
       }}
     >
       <div
@@ -137,6 +141,7 @@ export function ToolCallModal({ onRun }: ToolCallModalProps) {
         </div>
       </div>
     </div>
+    </Modal>
   )
 }
 

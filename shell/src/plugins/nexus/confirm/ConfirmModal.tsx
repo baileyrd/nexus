@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useConfirmStore } from './confirmStore'
+import { Modal } from '../../../shell/Modal'
+import { zIndex } from '../../../shell/zIndex'
 
 /**
  * Centred-overlay confirm dialog. Replaces the platform `window.confirm`
@@ -52,6 +54,7 @@ export function ConfirmModal() {
   const danger = current.danger === true
 
   return (
+    <Modal>
     <div
       role="dialog"
       aria-modal="true"
@@ -66,7 +69,8 @@ export function ConfirmModal() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 1100,
+        zIndex: zIndex.overlayModal,
+        pointerEvents: 'auto',
         padding: 32,
       }}
     >
@@ -133,5 +137,6 @@ export function ConfirmModal() {
         </div>
       </div>
     </div>
+    </Modal>
   )
 }

@@ -13,6 +13,8 @@ import {
   type RiskLevel,
 } from '../../nexus/pluginsMgmt/capabilityInfo'
 import { useCapabilityPromptStore } from './capabilityPromptStore'
+import { Modal } from '../../../shell/Modal'
+import { zIndex } from '../../../shell/zIndex'
 
 const HEADER_BY_REASON: Record<
   'first-install' | 'version-bump' | 'capability-change',
@@ -76,6 +78,7 @@ export function CapabilityModalView() {
   const buckets = bucketByRisk(current.caps)
 
   return (
+    <Modal>
     <div
       role="dialog"
       aria-modal="true"
@@ -87,8 +90,9 @@ export function CapabilityModalView() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 1200,
+        zIndex: zIndex.overlayToast,
         padding: 32,
+        pointerEvents: 'auto',
       }}
       // Intentionally NO backdrop-click-to-dismiss. High-risk consent
       // must be explicit.
@@ -228,6 +232,7 @@ export function CapabilityModalView() {
         </footer>
       </div>
     </div>
+    </Modal>
   )
 }
 

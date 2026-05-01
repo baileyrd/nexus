@@ -7,6 +7,7 @@ import {
 } from 'react'
 import { Icon, type IconName } from '../icons'
 import { getRegistry } from '../host/shellRegistry'
+import { zIndex } from './zIndex'
 
 export type ContextMenuItem =
   | {
@@ -33,7 +34,7 @@ export interface ContextMenuProps {
 
 const PANEL_STYLE: CSSProperties = {
   position: 'fixed',
-  zIndex: 200,
+  zIndex: zIndex.dropdown,
   background: 'var(--background-primary, var(--bg, #1e1e1e))',
   border: '1px solid var(--divider-color, var(--line, #333))',
   borderRadius: 6,

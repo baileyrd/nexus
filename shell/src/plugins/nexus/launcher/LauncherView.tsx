@@ -9,6 +9,8 @@
 import { useState } from 'react'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useLauncherStore } from './launcherState'
+import { Modal } from '../../../shell/Modal'
+import { zIndex } from '../../../shell/zIndex'
 
 // Height of the shell titlebar (matches .shell-titlebar in shell.css).
 // The launcher starts below it so window drag + close keep working.
@@ -279,6 +281,7 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
     : null
 
   return (
+    <Modal>
     <div
       style={{
         position: 'fixed',
@@ -286,10 +289,11 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
         left: 0,
         right: 0,
         bottom: 0,
-        // Below the shell overlay ceiling (9999) and above every pane,
-        // but leaves the 36px titlebar strip uncovered so Tauri drag
-        // and window controls keep working.
-        zIndex: 9000,
+        // Portaled to #modal-root; sits above workspace chrome. Leaves
+        // the titlebar strip uncovered so Tauri drag and window
+        // controls keep working.
+        zIndex: zIndex.overlayModal,
+        pointerEvents: 'auto',
         display: 'flex',
         pointerEvents: 'auto',
         background: 'var(--bg)',
@@ -426,5 +430,6 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
         </div>
       </div>
     </div>
+    </Modal>
   )
 }
