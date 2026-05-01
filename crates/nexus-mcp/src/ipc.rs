@@ -53,6 +53,7 @@ pub struct McpCallToolArgs {
     /// Schema is per-tool and not validated at the IPC boundary;
     /// validation lives on the MCP server side.
     #[serde(default)]
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
     pub arguments: serde_json::Map<String, serde_json::Value>,
 }
 
@@ -197,6 +198,7 @@ pub struct McpDisconnectMissReply {
 pub struct McpCallToolReply {
     /// MCP content items. Each is the raw rmcp `Content` JSON;
     /// schema is per-server.
+    #[cfg_attr(feature = "ts-export", ts(type = "Array<unknown>"))]
     pub content: Vec<serde_json::Value>,
     /// `true` when the tool itself reported failure.
     pub is_error: bool,

@@ -128,6 +128,7 @@ pub struct FormulaEvalArgs {
     /// Formula expression (Notion-compatible syntax).
     pub expression: String,
     /// The record's fields, keyed by schema field name.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
     pub fields: serde_json::Map<String, serde_json::Value>,
 }
 

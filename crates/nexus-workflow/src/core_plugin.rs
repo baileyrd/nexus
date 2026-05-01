@@ -121,6 +121,7 @@ pub struct RunWorkflowArgs {
     /// off the raw JSON; declared here so strict deserialization
     /// accepts callers that pass it.
     #[serde(default)]
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown | null"))]
     pub variables: Option<serde_json::Value>,
 }
 

@@ -107,6 +107,7 @@ pub struct RenderSkillArgs {
     /// (round-tripped to YAML internally so enum-comparison matches
     /// the skill's declared `values:` list).
     #[serde(default)]
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
     pub values: HashMap<String, serde_json::Value>,
 }
 

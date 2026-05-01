@@ -35,6 +35,7 @@ pub struct StepResult {
     /// `Some(response)` when the step carried a tool call that ran;
     /// `None` for informational steps or steps that never ran
     /// (e.g. policy denial, earlier tool failure aborted the plan).
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown | null"))]
     pub response: Option<serde_json::Value>,
     /// Final status — one of `"ok"`, `"denied"`, `"failed"`, `"skipped"`.
     pub status: StepStatus,

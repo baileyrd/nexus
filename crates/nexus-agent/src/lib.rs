@@ -146,6 +146,7 @@ pub struct ToolCall {
     /// Command id within the target plugin (e.g. `"read_file"`).
     pub command_id: String,
     /// Arbitrary JSON payload — serialized and handed to the plugin.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
     pub args: serde_json::Value,
 }
 
