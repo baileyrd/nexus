@@ -1052,11 +1052,27 @@ fn exec_err(reason: String) -> PluginError {
     }
 }
 
+/// IPC arg parser for storage handlers.
+///
+/// **Wire-shape contract** (issue #84): both JSON `null` and an empty
+/// object `{}` are accepted as "no args provided" — the parser
+/// substitutes an empty-object payload before delegating to
+/// `serde_json::from_value`. This is intentional convenience for
+/// callers (CLI, TUI, shell) that pass `null` from a default-flag
+/// path; it does **not** allow `null` to round-trip past serde for
+/// arg structs that have non-`Option` required fields. If a future
+/// `T` introduces a required field, both shapes will fail at the
+/// `from_value` step with the same `default args invalid: missing
+/// field …` message.
+///
+/// Treating the two shapes distinguishably (e.g. error on `null`,
+/// only accept `{}`) was considered and rejected — pre-existing
+/// callers send both, and the contract here is "empty args" rather
+/// than "no field for an `Option<>`-shaped form".
 fn parse_args<T: serde::de::DeserializeOwned>(
     value: &serde_json::Value,
     command: &str,
 ) -> Result<T, PluginError> {
-    // Empty object and null both mean "no args" — accept both.
     if value.is_null() || matches!(value.as_object(), Some(o) if o.is_empty()) {
         return serde_json::from_value(serde_json::json!({}))
             .map_err(|e| exec_err(format!("{command}: default args invalid: {e}")));

@@ -1735,21 +1735,98 @@ fn resolve_target(root: &Path, relpath: &str) -> Result<std::path::PathBuf, Stor
 }
 
 /// Infer a file-type string from a vault-relative path.
+///
+/// Pre-#84 the rule was strictly directory-based: anything under
+/// `attachments/` was an `attachment`, anything else fell through to
+/// `markdown` unless the extension matched `canvas` or `mdx`. That
+/// misclassified an obvious case — a PDF dropped at the forge root
+/// (or anywhere outside `attachments/`) would be tagged
+/// `markdown` and the index would fail to render an attachment-type
+/// preview. The fix prefers extension-based classification for
+/// known binary attachment extensions before falling through to the
+/// directory-based rule.
 fn infer_file_type(path: &str) -> String {
+    let p = Path::new(path);
+    let ext = p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+
+    // Specific text-shaped extensions classify regardless of where
+    // the file lives.
+    if let Some(ext) = ext.as_deref() {
+        if ext == "canvas" {
+            return "canvas".to_string();
+        }
+        if ext == "mdx" {
+            return "mdx".to_string();
+        }
+        // Known binary/attachment extensions classify as `attachment`
+        // even when the file is at the forge root or in some other
+        // user-chosen directory. Issue #84.
+        if matches!(
+            ext,
+            "pdf"
+                | "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "webp"
+                | "svg"
+                | "mp4"
+                | "mov"
+                | "webm"
+                | "mp3"
+                | "wav"
+                | "ogg"
+                | "zip"
+                | "epub"
+        ) {
+            return "attachment".to_string();
+        }
+    }
+
     if path.starts_with("attachments/") {
         "attachment".to_string()
-    } else if Path::new(path)
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("canvas"))
-    {
-        "canvas".to_string()
-    } else if Path::new(path)
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("mdx"))
-    {
-        "mdx".to_string()
     } else {
         "markdown".to_string()
+    }
+}
+
+#[cfg(test)]
+mod infer_file_type_tests {
+    use super::infer_file_type;
+
+    #[test]
+    fn attachments_dir_classifies_as_attachment() {
+        assert_eq!(infer_file_type("attachments/img.png"), "attachment");
+        assert_eq!(infer_file_type("attachments/some.unknown"), "attachment");
+    }
+
+    #[test]
+    fn known_binary_extension_at_forge_root_is_attachment() {
+        // Issue #84 regression — pre-fix `book.pdf` at the forge root
+        // would classify as `markdown`.
+        assert_eq!(infer_file_type("book.pdf"), "attachment");
+        assert_eq!(infer_file_type("photo.png"), "attachment");
+        assert_eq!(infer_file_type("clip.mp4"), "attachment");
+    }
+
+    #[test]
+    fn canvas_and_mdx_classify_by_extension_anywhere() {
+        assert_eq!(infer_file_type("notes/board.canvas"), "canvas");
+        assert_eq!(infer_file_type("attachments/x.canvas"), "canvas");
+        assert_eq!(infer_file_type("doc.mdx"), "mdx");
+    }
+
+    #[test]
+    fn markdown_is_the_fallback() {
+        assert_eq!(infer_file_type("notes/hello.md"), "markdown");
+        assert_eq!(infer_file_type("notes/no-extension"), "markdown");
+        assert_eq!(infer_file_type("daily/2026-04-12"), "markdown");
+    }
+
+    #[test]
+    fn extension_match_is_case_insensitive() {
+        assert_eq!(infer_file_type("BOOK.PDF"), "attachment");
+        assert_eq!(infer_file_type("BOARD.Canvas"), "canvas");
     }
 }
 
