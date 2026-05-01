@@ -338,7 +338,33 @@ class SlashMenuPlugin implements PluginValue {
     const prev = update.startState.field(menuField)
     const next = update.state.field(menuField)
     if (prev === next && !update.docChanged && !update.geometryChanged) return
-    this.sync()
+
+    const menu = next
+    if (!menu) {
+      this.dom.style.display = 'none'
+      this.lastMatches = []
+      return
+    }
+    const matches = filterCommands(slashCommands.all(), menu.query)
+    this.lastMatches = matches
+    if (matches.length === 0) {
+      this.dom.style.display = 'none'
+      return
+    }
+    const highlight = menu.highlight
+    this.view.requestMeasure({
+      read: (view) => ({
+        coords: view.coordsAtPos(menu.from),
+        hostRect: view.dom.getBoundingClientRect(),
+      }),
+      write: ({ coords, hostRect }) => {
+        if (!coords) { this.dom.style.display = 'none'; return }
+        this.dom.style.display = 'block'
+        this.dom.style.left = `${coords.left - hostRect.left}px`
+        this.dom.style.top = `${coords.bottom - hostRect.top + 2}px`
+        this.renderRows(matches, highlight)
+      },
+    })
   }
 
   destroy(): void {

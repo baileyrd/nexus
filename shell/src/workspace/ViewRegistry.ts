@@ -9,6 +9,8 @@ interface ViewStore {
   creators: Map<string, ViewCreator>
   extensions: Map<string, string>
   register: (type: string, creator: ViewCreator) => () => void
+  /** Silently overwrite a creator — for intentional upgrades (e.g. bootstrap → full UI). */
+  update: (type: string, creator: ViewCreator) => () => void
   registerExtensions: (exts: string[], type: string) => () => void
   getCreator: (type: string) => ViewCreator | null
   getTypeForExt: (ext: string) => string | null
@@ -30,6 +32,22 @@ export const useViewStore = create<ViewStore>((set, get) => ({
     return () => {
       set(s => {
         // Only remove if the creator we registered is still the one registered.
+        if (s.creators.get(type) !== creator) return s
+        const creators = new Map(s.creators)
+        creators.delete(type)
+        return { creators }
+      })
+    }
+  },
+
+  update: (type, creator) => {
+    set(s => {
+      const creators = new Map(s.creators)
+      creators.set(type, creator)
+      return { creators }
+    })
+    return () => {
+      set(s => {
         if (s.creators.get(type) !== creator) return s
         const creators = new Map(s.creators)
         creators.delete(type)
@@ -64,6 +82,11 @@ export const useViewStore = create<ViewStore>((set, get) => ({
 export const viewRegistry = {
   register: (type: string, creator: ViewCreator) =>
     useViewStore.getState().register(type, creator),
+
+  /** Silently overwrite a creator without the overwrite warning. Use when
+   *  upgrading a bootstrap placeholder to a full implementation. */
+  update: (type: string, creator: ViewCreator) =>
+    useViewStore.getState().update(type, creator),
 
   registerExtensions: (exts: string[], type: string) =>
     useViewStore.getState().registerExtensions(exts, type),

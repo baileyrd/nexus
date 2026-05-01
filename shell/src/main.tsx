@@ -166,9 +166,20 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
   // key `shell-config`) — the same pathway `api.configuration.setValue`
   // writes through. Reads are synchronous because the store rehydrates
   // on module import, before `boot()` runs.
-  const enabledIds = new Set(
-    useConfigStore.getState().get<string[]>(PLUGINS_ENABLED_CONFIG_KEY, []),
-  )
+  //
+  // One-time migration: catalog IDs were corrected to match their plugin
+  // manifest IDs. Remap any stale stored IDs so existing users keep
+  // their enabled-plugin selections after the rename.
+  const CATALOG_ID_RENAMES: Record<string, string> = {
+    'nexus.graphGlobal': 'nexus.graph.global',
+    'nexus.mermaid':     'community.mermaid',
+  }
+  const rawEnabledIds = useConfigStore.getState().get<string[]>(PLUGINS_ENABLED_CONFIG_KEY, [])
+  const migratedEnabledIds = rawEnabledIds.map(id => CATALOG_ID_RENAMES[id] ?? id)
+  if (migratedEnabledIds.some((id, i) => id !== rawEnabledIds[i])) {
+    useConfigStore.getState().set(PLUGINS_ENABLED_CONFIG_KEY, migratedEnabledIds)
+  }
+  const enabledIds = new Set(migratedEnabledIds)
   const optInEntries = DEFAULT_OFF_PLUGINS.filter(e => enabledIds.has(e.id))
   // SH-020: popout windows skip chrome-only plugins (activity bar, sidebar,
   // status bar, settings, etc.) that contribute to slots the popout shell

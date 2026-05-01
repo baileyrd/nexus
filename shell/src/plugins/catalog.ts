@@ -263,7 +263,7 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/graph').then(m => m.graphPlugin),
   },
   {
-    id: 'nexus.graphGlobal', name: 'Global Graph',
+    id: 'nexus.graph.global', name: 'Global Graph',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     load: () => import('./nexus/graph/globalIndex').then(m => m.graphGlobalPlugin),
   },
@@ -303,7 +303,7 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/allProperties').then(m => m.allPropertiesPlugin),
   },
   {
-    id: 'nexus.mermaid', name: 'Mermaid',
+    id: 'community.mermaid', name: 'Mermaid',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     load: () => import('./community/mermaid').then(m => m.mermaidPlugin),
   },

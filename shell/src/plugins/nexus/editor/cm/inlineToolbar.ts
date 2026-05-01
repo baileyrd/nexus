@@ -109,9 +109,48 @@ class InlineToolbarPlugin implements PluginValue {
   }
 
   update(u: ViewUpdate): void {
-    if (u.selectionSet || u.docChanged || u.viewportChanged || u.geometryChanged) {
-      this.sync()
+    if (!u.selectionSet && !u.docChanged && !u.viewportChanged && !u.geometryChanged) return
+
+    // State-only checks: always safe inside update().
+    const sel = this.view.state.selection.main
+    if (sel.empty) {
+      this.dom.style.display = 'none'
+      return
     }
+    const doc = this.view.state.doc
+    const from = Math.min(sel.anchor, sel.head)
+    const to   = Math.max(sel.anchor, sel.head)
+    const fromLine = doc.lineAt(from).number
+    const toLine   = doc.lineAt(to).number
+    let blankBetween = false
+    for (let i = fromLine; i <= toLine; i++) {
+      if (doc.line(i).text.trim() === '') { blankBetween = true; break }
+    }
+    if (blankBetween) {
+      this.dom.style.display = 'none'
+      return
+    }
+
+    // Layout reads are forbidden inside update() — schedule via requestMeasure.
+    this.view.requestMeasure({
+      read: (view) => ({
+        start:    view.coordsAtPos(from),
+        end:      view.coordsAtPos(to),
+        hostRect: view.dom.getBoundingClientRect(),
+      }),
+      write: ({ start, end, hostRect }) => {
+        if (!start) { this.dom.style.display = 'none'; return }
+        this.dom.style.display = 'flex'
+        const selWidth    = Math.max(0, (end?.right ?? start.right) - start.left)
+        const toolbarWidth = this.dom.offsetWidth || 160
+        const centerX = start.left + selWidth / 2 - toolbarWidth / 2 - hostRect.left
+        const left    = Math.max(4, Math.min(centerX, hostRect.width - toolbarWidth - 4))
+        const aboveTop = start.top - hostRect.top - 36
+        const belowTop = (end?.bottom ?? start.bottom) - hostRect.top + 4
+        this.dom.style.left = `${left}px`
+        this.dom.style.top  = `${aboveTop < 4 ? belowTop : aboveTop}px`
+      },
+    })
   }
 
   destroy(): void {

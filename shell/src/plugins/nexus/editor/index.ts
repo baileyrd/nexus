@@ -392,7 +392,7 @@ export const editorPlugin: Plugin = {
     // with one that renders the Obsidian-style action links — used by
     // the tab-strip `+` button and any other leaf that lands on the
     // empty type (e.g. restored placeholder leaves).
-    viewRegistry.register(EMPTY_VIEW_TYPE, emptyViewCreator)
+    viewRegistry.update(EMPTY_VIEW_TYPE, emptyViewCreator)
 
     // Settings panel auto-generates UI from this. Defaults match the
     // pre-settings behaviour so existing users don't see a regression.

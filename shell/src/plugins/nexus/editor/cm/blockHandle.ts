@@ -369,11 +369,57 @@ class BlockHandlePlugin implements PluginValue {
     window.addEventListener('mousemove', this.onMouseMove)
     window.addEventListener('mouseup', this.onMouseUp)
     document.addEventListener('mousedown', this.onGlobalMouseDown)
-    this.sync()
+    // Defer initial render — coordsAtPos is forbidden during CM's construction update.
+    const initBlocks = scanBlocks(view)
+    view.requestMeasure({
+      read: (v) => ({
+        hostRect: v.dom.getBoundingClientRect(),
+        layout: initBlocks.map(b => ({ b, coords: v.coordsAtPos(b.from) })),
+        menuState: v.state.field(menuField),
+      }),
+      write: ({ hostRect, layout, menuState }) => {
+        this.renderHandles(layout, hostRect)
+        if (!menuState) { this.menu.style.display = 'none'; this.menu.textContent = ''; return }
+        const block = initBlocks.find(b => b.from === menuState.anchorPos)
+        if (!block) { this.view.dispatch({ effects: closeMenu.of() }); return }
+        this.menu.style.display = 'block'
+        this.menu.style.left = `${menuState.x}px`
+        this.menu.style.top = `${menuState.y}px`
+        this.menu.textContent = ''
+        this.renderMenuItems(block, menuState.turnIntoOpen)
+      },
+    })
   }
 
   update(u: ViewUpdate): void {
-    if (u.docChanged || u.viewportChanged || u.transactions.length > 0) this.sync()
+    if (u.docChanged || u.viewportChanged || u.transactions.length > 0) {
+      const blocks = scanBlocks(this.view)
+      const menuState = this.view.state.field(menuField)
+      this.view.requestMeasure({
+        read: (view) => ({
+          hostRect: view.dom.getBoundingClientRect(),
+          layout: blocks.map(b => ({ b, coords: view.coordsAtPos(b.from) })),
+        }),
+        write: ({ hostRect, layout }) => {
+          this.renderHandles(layout, hostRect)
+          if (!menuState) {
+            this.menu.style.display = 'none'
+            this.menu.textContent = ''
+            return
+          }
+          const block = blocks.find(b => b.from === menuState.anchorPos)
+          if (!block) {
+            this.view.dispatch({ effects: closeMenu.of() })
+            return
+          }
+          this.menu.style.display = 'block'
+          this.menu.style.left = `${menuState.x}px`
+          this.menu.style.top = `${menuState.y}px`
+          this.menu.textContent = ''
+          this.renderMenuItems(block, menuState.turnIntoOpen)
+        },
+      })
+    }
   }
 
   destroy(): void {
@@ -488,14 +534,15 @@ class BlockHandlePlugin implements PluginValue {
   }
 
   sync(): void {
-    this.renderHandles()
+    const blocks = scanBlocks(this.view)
+    const hostRect = this.view.dom.getBoundingClientRect()
+    this.renderHandles(blocks.map(b => ({ b, coords: this.view.coordsAtPos(b.from) })), hostRect)
     const state = this.view.state.field(menuField)
     if (!state) {
       this.menu.style.display = 'none'
       this.menu.textContent = ''
       return
     }
-    const blocks = scanBlocks(this.view)
     const block = blocks.find((b) => b.from === state.anchorPos)
     if (!block) {
       this.view.dispatch({ effects: closeMenu.of() })
@@ -508,14 +555,14 @@ class BlockHandlePlugin implements PluginValue {
     this.renderMenuItems(block, state.turnIntoOpen)
   }
 
-  private renderHandles(): void {
+  private renderHandles(
+    layout: Array<{ b: BlockRange; coords: { top: number; bottom: number; left: number; right: number } | null }>,
+    hostRect: { top: number },
+  ): void {
     // Rebuild each sync — the block count is small (tens, not
     // thousands) and sync only runs on doc / viewport change.
     this.handlesLayer.textContent = ''
-    const hostRect = this.view.dom.getBoundingClientRect()
-    const blocks = scanBlocks(this.view)
-    for (const b of blocks) {
-      const coords = this.view.coordsAtPos(b.from)
+    for (const { b, coords } of layout) {
       if (!coords) continue
       const top = coords.top - hostRect.top
       const handle = document.createElement('div')

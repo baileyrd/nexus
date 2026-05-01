@@ -226,7 +226,7 @@ function refreshPluginServices() {
       error: host.getError(id)?.message,
     }
   })
-  reg.registerService('pluginList', pluginList)
+  reg.updateService('pluginList', pluginList)
 
   const enabled = new Set(loaded.map(({ id }) => id))
   const available = DEFAULT_OFF_PLUGINS
@@ -237,6 +237,6 @@ function refreshPluginServices() {
       version: e.version,
       core:    e.core,
     }))
-  reg.registerService('availablePlugins', available)
+  reg.updateService('availablePlugins', available)
   eventBus.emit(PLUGIN_LIST_CHANGED_EVENT, null)
 }

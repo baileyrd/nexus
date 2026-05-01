@@ -509,11 +509,15 @@ export function databaseViewExt(deps: DatabaseViewExtDeps): Extension {
   const watcher = ViewPlugin.define((view) => {
     viewRef.current = view
     const handle = makeBasesChangeWatcher(view, deps)
-    // Trigger an immediate rebuild so the freshly-installed view
-    // reference flows into the widgets' `onUpdateConfig` closures
-    // — without this, the first decoration set was built before
-    // the ViewPlugin ran and carries `undefined` view.
-    view.dispatch({ effects: databaseViewInvalidate.of(null) })
+    // Trigger a rebuild so the freshly-installed view reference flows
+    // into the widgets' `onUpdateConfig` closures. Deferred via
+    // queueMicrotask so we don't dispatch during CM's construction
+    // update (dispatching while CM's updateState != 0 throws).
+    queueMicrotask(() => {
+      if (viewRef.current === view) {
+        view.dispatch({ effects: databaseViewInvalidate.of(null) })
+      }
+    })
     return {
       destroy() {
         if (viewRef.current === view) viewRef.current = null

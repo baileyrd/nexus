@@ -174,19 +174,28 @@ export class LeafImpl implements Leaf {
       return
     }
     if (this.view && this._pendingOpen && !this._opened) {
-      await this.view.onOpen(el)
+      // Set guard flags synchronously before the first await so that a
+      // concurrent attachContainer call (e.g. React Strict Mode fires
+      // cleanup + remount in the same tick) sees the updated state and
+      // skips this branch instead of calling onOpen a second time.
       this._opened = true
       this._openedEl = el
       this._pendingOpen = null
+      await this.view.onOpen(el)
       return
     }
     // Re-attach to a fresh container after a transient unmount (e.g.
     // sidedock collapse/reopen). The view's DOM is in the previous
     // (now-detached) element; re-home it by closing + re-opening.
     if (this.view && this._opened && this._openedEl !== el) {
+      this._openedEl = el  // claim the new container synchronously
+      // Yield before calling onClose so that root.unmount() (inside view
+      // implementations) is not called synchronously during React's
+      // passive-effects commit — React warns on synchronous cross-root
+      // unmounts that happen mid-commit (performSyncWorkOnRoot path).
+      await Promise.resolve()
       await this.view.onClose()
       await this.view.onOpen(el)
-      this._openedEl = el
     }
   }
 }

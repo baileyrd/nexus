@@ -233,9 +233,16 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
         const scrollDom = view.scrollDOM
         const topY = scrollDom.getBoundingClientRect().top
         // `posAtCoords` resolves a viewport coordinate to a doc offset;
-        // then `doc.lineAt` gives us the 1-based line. Fall back to
-        // line 1 if CM can't resolve (e.g. view hasn't laid out yet).
-        const pos = view.posAtCoords({ x: scrollDom.getBoundingClientRect().left + 1, y: topY + 1 })
+        // then `doc.lineAt` gives us the 1-based line. Falls back to
+        // line 1 when CM can't resolve (not yet laid out, or element
+        // has zero dimensions). The `side.top` TypeError is an internal
+        // CM invariant failure — treat it the same as a null return.
+        let pos: number | null = null
+        try {
+          pos = view.posAtCoords({ x: scrollDom.getBoundingClientRect().left + 1, y: topY + 1 })
+        } catch {
+          // view not laid out yet — fall through to line-1 default
+        }
         const topLine = pos != null ? view.state.doc.lineAt(pos).number : 1
         let active = 0
         for (let i = 0; i < headings.length; i++) {

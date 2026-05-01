@@ -406,9 +406,9 @@ class MarginSuggestionsView implements PluginValue {
     this.storeUnsub = useMarginSuggestStore.subscribe((state, prev) => {
       this.maybeSync(state, prev)
     })
-    // Initial pull so existing suggestions paint without waiting for
-    // the next store mutation.
-    this.maybeSync(useMarginSuggestStore.getState(), null)
+    // Initial pull deferred so view.dispatch is not called inside CM's
+    // construction update — dispatching while CM is updating throws.
+    queueMicrotask(() => this.maybeSync(useMarginSuggestStore.getState(), null))
 
     this.render()
   }
@@ -447,7 +447,22 @@ class MarginSuggestionsView implements PluginValue {
       u.geometryChanged ||
       u.startState.field(marginField) !== u.state.field(marginField)
     ) {
-      this.render()
+      const { suggestions, expandedId } = u.state.field(marginField)
+      const expandedTarget = expandedId ? suggestions.find(s => s.id === expandedId) : null
+      this.view.requestMeasure({
+        read: (view) => {
+          const editorRect = view.dom.getBoundingClientRect()
+          const glyphLayout = suggestions
+            .filter(s => GLYPH_KINDS.has(s.kind))
+            .map(s => ({ s, coords: view.coordsAtPos(s.from) }))
+          const cardCoords = expandedTarget ? view.coordsAtPos(expandedTarget.from) : null
+          return { editorRect, glyphLayout, cardCoords }
+        },
+        write: ({ editorRect, glyphLayout, cardCoords }) => {
+          this.renderGlyphs(glyphLayout, editorRect)
+          this.renderCard(suggestions, expandedId, cardCoords, editorRect)
+        },
+      })
     }
   }
 
@@ -464,19 +479,25 @@ class MarginSuggestionsView implements PluginValue {
 
   private render(): void {
     const { suggestions, expandedId } = this.view.state.field(marginField)
-    this.renderGlyphs(suggestions)
-    this.renderCard(suggestions, expandedId)
+    const editorRect = this.view.dom.getBoundingClientRect()
+    const glyphLayout = suggestions
+      .filter(s => GLYPH_KINDS.has(s.kind))
+      .map(s => ({ s, coords: this.view.coordsAtPos(s.from) }))
+    const expandedTarget = expandedId ? suggestions.find(s => s.id === expandedId) : null
+    const cardCoords = expandedTarget ? this.view.coordsAtPos(expandedTarget.from) : null
+    this.renderGlyphs(glyphLayout, editorRect)
+    this.renderCard(suggestions, expandedId, cardCoords, editorRect)
   }
 
-  private renderGlyphs(suggestions: ReadonlyArray<ResolvedSuggestion>): void {
+  private renderGlyphs(
+    layout: Array<{ s: ResolvedSuggestion; coords: { top: number; bottom: number; left: number; right: number } | null }>,
+    editorRect: { top: number },
+  ): void {
     // Naïve full-rebuild — list is small (cap 6) so DOM diffing
     // would be over-engineered. Each glyph is pointer-events: auto
     // so click works through the layer's pointer-events: none.
     this.glyphLayer.replaceChildren()
-    const editorRect = this.view.dom.getBoundingClientRect()
-    for (const s of suggestions) {
-      if (!GLYPH_KINDS.has(s.kind)) continue
-      const coords = this.view.coordsAtPos(s.from)
+    for (const { s, coords } of layout) {
       if (!coords) continue
       const top = coords.top - editorRect.top
       const btn = document.createElement('button')
@@ -505,6 +526,8 @@ class MarginSuggestionsView implements PluginValue {
   private renderCard(
     suggestions: ReadonlyArray<ResolvedSuggestion>,
     expandedId: string | null,
+    coords: { top: number; bottom: number; left: number; right: number } | null,
+    editorRect: { top: number },
   ): void {
     if (expandedId === null) {
       this.cardLayer.style.display = 'none'
@@ -518,8 +541,6 @@ class MarginSuggestionsView implements PluginValue {
       return
     }
 
-    const editorRect = this.view.dom.getBoundingClientRect()
-    const coords = this.view.coordsAtPos(target.from)
     if (!coords) {
       this.cardLayer.style.display = 'none'
       return

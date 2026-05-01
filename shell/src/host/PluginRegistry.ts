@@ -182,6 +182,11 @@ export class PluginRegistry {
     this.services.set(name, service)
   }
 
+  /** Overwrite a service without warning — for intentional refresh after plugin enable/disable. */
+  updateService(name: string, service: unknown) {
+    this.services.set(name, service)
+  }
+
   getService<T>(name: string): T {
     const svc = this.services.get(name)
     if (!svc) {
