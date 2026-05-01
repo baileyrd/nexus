@@ -1350,12 +1350,19 @@ impl PluginLoader {
         &mut self,
         plugin_id: &str,
         sandbox: WasmSandbox,
+        capabilities: CapabilitySet,
     ) -> Option<WasmSandbox> {
         self.loaded.get_mut(plugin_id).and_then(|lp| {
             let mut backend_guard = lp.backend.lock().ok()?;
             if let PluginBackend::Community(_) = &*backend_guard {
                 let old_backend =
                     std::mem::replace(&mut *backend_guard, PluginBackend::Community(sandbox));
+                // Keep the loader's cached capability set in sync with the
+                // sandbox's. `loader.get()` returns this; observers that
+                // inspect `PluginInfo.capabilities` post-reload would see
+                // a stale set otherwise. See issue #74.
+                drop(backend_guard);
+                lp.capabilities = capabilities;
                 if let PluginBackend::Community(old) = old_backend {
                     Some(old)
                 } else {
@@ -1365,6 +1372,21 @@ impl PluginLoader {
                 None
             }
         })
+    }
+
+    /// Re-evaluate capabilities for `plugin_id` from disk: re-reads
+    /// `granted_caps.json` and re-runs the manifest's HIGH-risk filtering
+    /// via [`build_capabilities`]. Returns `None` if the plugin is not
+    /// loaded.
+    ///
+    /// Hot-reload must call this rather than reusing the cached
+    /// [`CapabilitySet`] — otherwise an operator who edits
+    /// `granted_caps.json` to revoke a HIGH-risk cap and then triggers
+    /// a reload would silently keep the old grant until the next full
+    /// process restart. See issue #74.
+    pub(crate) fn refresh_capabilities(&self, plugin_id: &str) -> Option<CapabilitySet> {
+        let lp = self.loaded.get(plugin_id)?;
+        Some(build_capabilities(&lp.manifest, &lp.plugin_dir))
     }
 
     /// Inject an [`IpcDispatcher`] into every loaded community (WASM) plugin's
@@ -1409,6 +1431,23 @@ impl PluginLoader {
             if let Ok(mut backend) = lp.backend.lock() {
                 if let PluginBackend::Community(sandbox) = &mut *backend {
                     sandbox.set_event_forwarder(forwarder.clone());
+                }
+            }
+        }
+    }
+
+    /// Inject a [`PluginEventForwarder`] into a single community
+    /// plugin's sandbox. Symmetric with [`inject_ipc_dispatcher_for`];
+    /// used after hot-reload to wire up the freshly built sandbox.
+    pub fn inject_event_forwarder_for(
+        &mut self,
+        plugin_id: &str,
+        forwarder: Arc<dyn PluginEventForwarder>,
+    ) {
+        if let Some(lp) = self.loaded.get(plugin_id) {
+            if let Ok(mut backend) = lp.backend.lock() {
+                if let PluginBackend::Community(sandbox) = &mut *backend {
+                    sandbox.set_event_forwarder(forwarder);
                 }
             }
         }
