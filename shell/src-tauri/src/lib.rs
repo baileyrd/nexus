@@ -347,6 +347,15 @@ fn get_plugin_granted_capabilities(
 /// Capability strings MUST be in the dotted kernel form (`"fs.read"`,
 /// `"process.spawn"`, …) — the TS consent plugin does the
 /// PascalCase→dotted translation before invoking.
+///
+/// SECURITY (audit-2026-05-01 P2-1): this command mutates the persisted
+/// capability grant. The host validates each capability string against
+/// `Capability::from_str` (issue #86 hardening) but performs no
+/// additional gate — **the renderer-side consent UI is the trust
+/// boundary**. The TS-side `consent` plugin must obtain explicit user
+/// approval via the consent flow before invoking this command. Any
+/// frontend code path that reaches `invoke("set_plugin_granted_capabilities")`
+/// without first surfacing the consent dialog is a security bug.
 #[tauri::command]
 fn set_plugin_granted_capabilities(
     plugin_dir: String,

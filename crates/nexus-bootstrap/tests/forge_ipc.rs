@@ -7,44 +7,37 @@
 //! `rename_entry`, `delete_entry` — are the file-tree CRUD surface. The
 //! shell has no direct `std::fs` path for these; all I/O goes through the
 //! storage plugin.
+//!
+//! Pilot for the audit-2026-05-01 P2-2 `MinimalForge` fixture (#115).
 
 use std::fs;
-use std::time::Duration;
 
-use nexus_bootstrap::build_cli_runtime;
-use nexus_kernel::{IpcError, PluginContext};
+use nexus_kernel::IpcError;
 
-const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+#[path = "common/mod.rs"]
+mod common;
+use common::MinimalForge;
+
 const STORAGE_PLUGIN_ID: &str = "com.nexus.storage";
 
-fn scratch_forge() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().expect("tempdir");
-    nexus_storage::StorageEngine::init(dir.path()).expect("init scratch forge");
-    dir
-}
-
 async fn call(
-    runtime: &nexus_bootstrap::Runtime,
+    forge: &MinimalForge,
     command: &str,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, IpcError> {
-    runtime
-        .context
-        .ipc_call(STORAGE_PLUGIN_ID, command, args, CALL_TIMEOUT)
-        .await
+    forge.ipc_call(STORAGE_PLUGIN_ID, command, args).await
 }
 
 #[tokio::test]
 async fn list_dir_returns_sorted_entries_and_hides_forge_dir() {
-    let forge = scratch_forge();
-    let root = forge.path().to_path_buf();
-    fs::write(root.join("notes/b.md"), b"b").unwrap();
-    fs::write(root.join("notes/a.md"), b"a").unwrap();
-    fs::create_dir_all(root.join("notes/sub")).unwrap();
-    let runtime = build_cli_runtime(root).expect("build runtime");
+    let forge = MinimalForge::with_files(&[
+        ("notes/b.md", b"b"),
+        ("notes/a.md", b"a"),
+    ]);
+    fs::create_dir_all(forge.root().join("notes/sub")).unwrap();
 
     // Root listing must not include `.forge/`.
-    let entries = call(&runtime, "list_dir", serde_json::json!({ "relpath": "" }))
+    let entries = call(&forge, "list_dir", serde_json::json!({ "relpath": "" }))
         .await
         .expect("list_dir root");
     let names: Vec<String> = entries
@@ -58,7 +51,7 @@ async fn list_dir_returns_sorted_entries_and_hides_forge_dir() {
 
     // Subdir listing: dirs first, then files, each alphabetically.
     let entries = call(
-        &runtime,
+        &forge,
         "list_dir",
         serde_json::json!({ "relpath": "notes" }),
     )
@@ -75,23 +68,22 @@ async fn list_dir_returns_sorted_entries_and_hides_forge_dir() {
 
 #[tokio::test]
 async fn create_file_creates_empty_file_and_rejects_overwrite() {
-    let forge = scratch_forge();
-    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
+    let forge = MinimalForge::new();
 
     call(
-        &runtime,
+        &forge,
         "create_file",
         serde_json::json!({ "relpath": "notes/new.md" }),
     )
     .await
     .expect("create_file ok");
-    let meta = fs::metadata(forge.path().join("notes/new.md")).unwrap();
+    let meta = fs::metadata(forge.root().join("notes/new.md")).unwrap();
     assert!(meta.is_file());
     assert_eq!(meta.len(), 0);
 
     // Second call on the same path is rejected.
     let err = call(
-        &runtime,
+        &forge,
         "create_file",
         serde_json::json!({ "relpath": "notes/new.md" }),
     )
@@ -105,20 +97,19 @@ async fn create_file_creates_empty_file_and_rejects_overwrite() {
 
 #[tokio::test]
 async fn create_dir_creates_and_rejects_existing() {
-    let forge = scratch_forge();
-    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
+    let forge = MinimalForge::new();
 
     call(
-        &runtime,
+        &forge,
         "create_dir",
         serde_json::json!({ "relpath": "notes/folder" }),
     )
     .await
     .expect("create_dir ok");
-    assert!(forge.path().join("notes/folder").is_dir());
+    assert!(forge.root().join("notes/folder").is_dir());
 
     let err = call(
-        &runtime,
+        &forge,
         "create_dir",
         serde_json::json!({ "relpath": "notes/folder" }),
     )
@@ -132,13 +123,11 @@ async fn create_dir_creates_and_rejects_existing() {
 
 #[tokio::test]
 async fn rename_entry_moves_file_and_updates_index() {
-    let forge = scratch_forge();
-    let root = forge.path().to_path_buf();
-    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+    let forge = MinimalForge::new();
 
     // Write via IPC so the file lands in the SQLite index.
     call(
-        &runtime,
+        &forge,
         "write_file",
         serde_json::json!({ "path": "notes/old.md", "bytes": b"# old\n".to_vec() }),
     )
@@ -147,19 +136,19 @@ async fn rename_entry_moves_file_and_updates_index() {
 
     // Rename.
     call(
-        &runtime,
+        &forge,
         "rename_entry",
         serde_json::json!({ "from": "notes/old.md", "to": "notes/new.md" }),
     )
     .await
     .expect("rename_entry");
 
-    assert!(!root.join("notes/old.md").exists());
-    assert!(root.join("notes/new.md").exists());
+    assert!(!forge.root().join("notes/old.md").exists());
+    assert!(forge.root().join("notes/new.md").exists());
 
     // Index rows followed the rename.
     let exists_new: serde_json::Value = call(
-        &runtime,
+        &forge,
         "file_exists",
         serde_json::json!({ "path": "notes/new.md" }),
     )
@@ -168,7 +157,7 @@ async fn rename_entry_moves_file_and_updates_index() {
     assert_eq!(exists_new["exists"], true);
 
     let exists_old: serde_json::Value = call(
-        &runtime,
+        &forge,
         "file_exists",
         serde_json::json!({ "path": "notes/old.md" }),
     )
@@ -179,14 +168,13 @@ async fn rename_entry_moves_file_and_updates_index() {
 
 #[tokio::test]
 async fn rename_entry_rejects_existing_destination() {
-    let forge = scratch_forge();
-    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
-
-    fs::write(forge.path().join("notes/a.md"), b"a").unwrap();
-    fs::write(forge.path().join("notes/b.md"), b"b").unwrap();
+    let forge = MinimalForge::with_files(&[
+        ("notes/a.md", b"a"),
+        ("notes/b.md", b"b"),
+    ]);
 
     let err = call(
-        &runtime,
+        &forge,
         "rename_entry",
         serde_json::json!({ "from": "notes/a.md", "to": "notes/b.md" }),
     )
@@ -200,43 +188,39 @@ async fn rename_entry_rejects_existing_destination() {
 
 #[tokio::test]
 async fn delete_entry_handles_files_and_directories() {
-    let forge = scratch_forge();
-    let root = forge.path().to_path_buf();
-    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+    let forge = MinimalForge::with_files(&[("notes/gone.md", b"x")]);
 
     // File path.
-    fs::write(root.join("notes/gone.md"), b"x").unwrap();
     call(
-        &runtime,
+        &forge,
         "delete_entry",
         serde_json::json!({ "relpath": "notes/gone.md" }),
     )
     .await
     .expect("delete_entry file");
-    assert!(!root.join("notes/gone.md").exists());
+    assert!(!forge.root().join("notes/gone.md").exists());
 
     // Directory path (non-empty).
-    fs::create_dir_all(root.join("notes/dir/nested")).unwrap();
-    fs::write(root.join("notes/dir/a.md"), b"a").unwrap();
-    fs::write(root.join("notes/dir/nested/b.md"), b"b").unwrap();
+    fs::create_dir_all(forge.root().join("notes/dir/nested")).unwrap();
+    fs::write(forge.root().join("notes/dir/a.md"), b"a").unwrap();
+    fs::write(forge.root().join("notes/dir/nested/b.md"), b"b").unwrap();
     call(
-        &runtime,
+        &forge,
         "delete_entry",
         serde_json::json!({ "relpath": "notes/dir" }),
     )
     .await
     .expect("delete_entry dir");
-    assert!(!root.join("notes/dir").exists());
+    assert!(!forge.root().join("notes/dir").exists());
 }
 
 #[tokio::test]
 async fn path_confinement_rejects_traversal() {
-    let forge = scratch_forge();
-    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");
+    let forge = MinimalForge::new();
 
     for cmd in ["list_dir", "create_file", "create_dir", "delete_entry"] {
         let err = call(
-            &runtime,
+            &forge,
             cmd,
             serde_json::json!({ "relpath": "../escaped" }),
         )
