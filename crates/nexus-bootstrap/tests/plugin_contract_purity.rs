@@ -220,6 +220,16 @@ fn find_forbidden_deps(manifest_text: &str, forbidden: &[&str]) -> Result<Vec<St
 
 /// Recursively walk `dir` looking for `needle` in any `.rs` file. Matches are
 /// appended to `out` as `path:line-number: line-text`.
+///
+/// Substring matching is intentional and complementary to the Cargo.toml
+/// dependency check elsewhere in this file. A determined evader could
+/// dodge a `nexus_storage::` literal scan by writing
+/// `use nexus_storage as backend; pub use backend::Engine;`, but the
+/// re-export still requires `nexus-storage` in `[dependencies]`, which
+/// the Cargo.toml-side test catches. Belt-and-suspenders: the literal
+/// scan catches the common case (someone types the name directly) and
+/// the dep-list check catches the exotic case (someone aliases). See
+/// issue #83 for the audit context.
 fn find_literal_in_tree(dir: &Path, needle: &str, out: &mut Vec<String>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,

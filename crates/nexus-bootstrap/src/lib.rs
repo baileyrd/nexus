@@ -190,7 +190,7 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
     let ai_ctx = KernelPluginContext::new(
         "com.nexus.ai",
         env!("CARGO_PKG_VERSION"),
-        Capability::ALL.iter().copied().collect::<CapabilitySet>(),
+        all_caps(),
         Arc::clone(&kv_store),
         Arc::clone(&event_bus),
         forge_root,
@@ -238,7 +238,7 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
     let editor_ctx = KernelPluginContext::new(
         "com.nexus.editor",
         env!("CARGO_PKG_VERSION"),
-        Capability::ALL.iter().copied().collect::<CapabilitySet>(),
+        all_caps(),
         Arc::clone(&kv_store),
         Arc::clone(&event_bus),
         forge_root,
@@ -279,7 +279,7 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
     let context = KernelPluginContext::new(
         invoker_id,
         env!("CARGO_PKG_VERSION"),
-        Capability::ALL.iter().copied().collect::<CapabilitySet>(),
+        all_caps(),
         kv_store,
         event_bus,
         forge_root,
@@ -1235,8 +1235,25 @@ fn load_digest_config(forge_root: &std::path::Path) -> nexus_workflow::DigestCon
         digests: Option<nexus_workflow::DigestConfig>,
     }
     let path = forge_root.join(".forge").join("config.toml");
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return nexus_workflow::DigestConfig::default();
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        // Missing config is the normal first-boot path — fall back
+        // silently to defaults. Any other read error (permission
+        // flip, I/O failure on the forge volume, …) needs to be
+        // visible so the operator can investigate; falling back to
+        // defaults is the safe behaviour but the warn logs the
+        // signal. See issue #83.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return nexus_workflow::DigestConfig::default();
+        }
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "config.toml: read failed; falling back to default [digests] config"
+            );
+            return nexus_workflow::DigestConfig::default();
+        }
     };
     match toml::from_str::<Wrapper>(&text) {
         Ok(w) => w.digests.unwrap_or_default(),
@@ -1249,6 +1266,23 @@ fn load_digest_config(forge_root: &std::path::Path) -> nexus_workflow::DigestCon
             nexus_workflow::DigestConfig::default()
         }
     }
+}
+
+/// `Capability::ALL` collected into a `CapabilitySet`. Used by the
+/// AI / editor / shell-invoker contexts that legitimately need
+/// every capability — the workflow and agent contexts have their
+/// own narrower sets (see [`agent_capabilities`],
+/// [`workflow_capabilities`]) per #73. Extracted from five inline
+/// repetitions across the bootstrap path; see issue #83.
+///
+/// "Do all five contexts truly need every capability?" was a
+/// reasonable question from the audit. After #73 only three contexts
+/// hold the full set today; the remaining call sites all wire the
+/// same shape so the helper centralises the "I really do need
+/// everything" decision rather than re-deriving it inline.
+#[must_use]
+pub fn all_caps() -> CapabilitySet {
+    Capability::ALL.iter().copied().collect()
 }
 
 /// Capabilities granted to the `com.nexus.agent` `KernelPluginContext`
@@ -1311,8 +1345,19 @@ fn load_webhook_config(forge_root: &std::path::Path) -> nexus_workflow::webhook:
         webhooks: Option<nexus_workflow::webhook::WebhookConfig>,
     }
     let path = forge_root.join(".forge").join("config.toml");
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return nexus_workflow::webhook::WebhookConfig::default();
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return nexus_workflow::webhook::WebhookConfig::default();
+        }
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                %err,
+                "config.toml: read failed; falling back to default [webhooks] config"
+            );
+            return nexus_workflow::webhook::WebhookConfig::default();
+        }
     };
     match toml::from_str::<Wrapper>(&text) {
         Ok(w) => w.webhooks.unwrap_or_default(),
