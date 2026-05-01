@@ -13,6 +13,15 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 nexus-plugins = { path = "../nexus-plugins" }
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl"] }
+schemars = { workspace = true, optional = true }
+
+[features]
+# Audit-2026-05-01 P1-3 (#113) — emit JSON Schema + TypeScript bindings
+# for the IPC arg/reply types. Off by default so normal builds don't
+# pull ts-rs / schemars. Enable via `cargo test -p nexus-bootstrap
+# --test ipc_schema_emit --features ts-export`.
+ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

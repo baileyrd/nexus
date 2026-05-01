@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ListByContextArgs",
+  "description": "Args for `com.nexus.skills::list_by_context` (handler id `3`).",
+  "type": "object",
+  "properties": {
+    "context": {
+      "description": "Activation context — `pull-request`, `terminal`, `editor`,\n`ai-chat`, `agent`. Matched against each skill's\n`applicable_contexts` list.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "context"
+  ]
+}

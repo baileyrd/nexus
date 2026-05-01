@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RenderSkillArgs",
+  "description": "Args for `com.nexus.skills::render` (handler id `6`).",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Skill id to render.",
+      "type": "string"
+    },
+    "values": {
+      "description": "Parameter overrides for substitution. Each value is JSON\n(round-tripped to YAML internally so enum-comparison matches\nthe skill's declared `values:` list).",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ]
+}
