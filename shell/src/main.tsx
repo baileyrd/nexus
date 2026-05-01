@@ -17,7 +17,12 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { uriHandlerRegistry } from './registry/UriHandlerRegistry'
 import App from './shell/App'
-import { PopoutShell, isPopoutMode, POPOUT_CLOSED_EVENT } from './shell/PopoutShell'
+import {
+  PopoutShell,
+  isPopoutMode,
+  POPOUT_CLOSED_EVENT,
+  POPOUT_BOUNDS_CHANGED_EVENT,
+} from './shell/PopoutShell'
 import { workspace as workspaceStore } from './workspace/workspaceStore'
 import { closePopoutTauri } from './workspace/popoutWindowBridge'
 import './shell/shell.css'
@@ -381,6 +386,28 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
     }
   }).catch((err) => {
     console.warn('[Boot] failed to register popout-closed listener:', err)
+  })
+
+  // SH-021: Popout bounds persistence. Popouts emit
+  // `nexus:popout-bounds-changed` on every move/resize; the main window
+  // updates the matching FloatingWindow entry and the persistence
+  // layer's `layout-change` subscription writes it to workspace.json.
+  listen<{ fwId?: string; bounds?: { x: number; y: number; w: number; h: number } }>(
+    POPOUT_BOUNDS_CHANGED_EVENT,
+    (event) => {
+      const { fwId, bounds } = event.payload ?? {}
+      if (
+        typeof fwId !== 'string' ||
+        fwId.length === 0 ||
+        bounds == null ||
+        typeof bounds.x !== 'number'
+      ) {
+        return
+      }
+      workspaceStore.setFloatingWindowBounds(fwId, bounds)
+    },
+  ).catch((err) => {
+    console.warn('[Boot] failed to register popout-bounds-changed listener:', err)
   })
 
   contextKeyService.set('shellReady', true)

@@ -35,6 +35,19 @@ import type { Leaf, FloatingWindow, WorkspaceParent } from '../workspace/types'
  *  popout's FloatingWindow id (the `fwId` from the URL). */
 export const POPOUT_CLOSED_EVENT = 'nexus:popout-closed'
 
+/**
+ * SH-021: Tauri-app event emitted by a popout when it is moved or
+ * resized. The main window listens for this and calls
+ * `workspace.setFloatingWindowBounds(fwId, bounds)` so bounds survive
+ * restart. Payload: `{ fwId: string, bounds: PopoutBounds }`.
+ */
+export const POPOUT_BOUNDS_CHANGED_EVENT = 'nexus:popout-bounds-changed'
+
+interface PopoutBoundsPayload {
+  fwId: string
+  bounds: { x: number; y: number; w: number; h: number }
+}
+
 interface PopoutInfo {
   fwId: string
   leafId: string | null
@@ -47,6 +60,47 @@ function readPopoutInfo(): PopoutInfo | null {
   if (!fwId) return null
   const leafId = params.get('leaf')
   return { fwId, leafId }
+}
+
+/**
+ * SH-021: Subscribe to OS move/resize events and emit
+ * `nexus:popout-bounds-changed` so the main window can persist the
+ * new bounds. Events are debounced to 300ms to avoid flooding the
+ * main window during continuous drag/resize.
+ */
+async function installBoundsListener(fwId: string): Promise<() => void> {
+  try {
+    const win = getCurrentWindow()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const flush = async () => {
+      try {
+        const [pos, size] = await Promise.all([win.outerPosition(), win.outerSize()])
+        const payload: PopoutBoundsPayload = {
+          fwId,
+          bounds: { x: pos.x, y: pos.y, w: size.width, h: size.height },
+        }
+        await emit(POPOUT_BOUNDS_CHANGED_EVENT, payload)
+      } catch {
+        // Swallow — bounds persistence is best-effort.
+      }
+    }
+    const schedule = () => {
+      clearTimeout(timer)
+      timer = setTimeout(flush, 300)
+    }
+    const [unMove, unResize] = await Promise.all([
+      win.onMoved(schedule),
+      win.onResized(schedule),
+    ])
+    return () => {
+      clearTimeout(timer)
+      unMove()
+      unResize()
+    }
+  } catch (err) {
+    console.warn('[PopoutShell] bounds listener registration failed', err)
+    return () => {}
+  }
 }
 
 /**
@@ -209,6 +263,19 @@ export function PopoutShell(): JSX.Element {
     if (!fwId) return
     let dispose: (() => void) | null = null
     void installCloseHandshake(fwId).then((fn) => {
+      dispose = fn
+    })
+    return () => {
+      dispose?.()
+    }
+  }, [fwId])
+
+  // SH-021: Bounds persistence — emits nexus:popout-bounds-changed on
+  // every OS move/resize so the main window can persist the new bounds.
+  useEffect(() => {
+    if (!fwId) return
+    let dispose: (() => void) | null = null
+    void installBoundsListener(fwId).then((fn) => {
       dispose = fn
     })
     return () => {
