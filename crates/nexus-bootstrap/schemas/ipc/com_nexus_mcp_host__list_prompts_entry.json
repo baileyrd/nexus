@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "McpPromptEntry",
+  "description": "One entry in the `list_prompts` response array.",
+  "type": "object",
+  "properties": {
+    "description": {
+      "description": "Optional description.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Prompt name.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name"
+  ]
+}

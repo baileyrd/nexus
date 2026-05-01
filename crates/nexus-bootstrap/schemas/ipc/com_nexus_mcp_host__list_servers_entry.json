@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "McpServerEntry",
+  "description": "One entry in the `list_servers` response array. Mirrors\n[`crate::config::ServerSpec`] for the wire.",
+  "type": "object",
+  "properties": {
+    "args": {
+      "description": "Process arguments (for stdio servers).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "command": {
+      "description": "Command path or transport URL.",
+      "type": "string"
+    },
+    "disabled": {
+      "description": "`true` if the server is disabled in the manifest.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Configured server name (the `[mcp.servers.<name>]` key).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "command",
+    "args",
+    "disabled"
+  ]
+}

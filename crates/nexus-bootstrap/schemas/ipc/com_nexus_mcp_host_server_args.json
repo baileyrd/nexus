@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "McpServerArgs",
+  "description": "Args for `com.nexus.mcp.host::connect` / `disconnect` / `list_tools` /\n`list_resources` / `list_prompts` (handler ids 6, 7, 2, 4, 5).",
+  "type": "object",
+  "properties": {
+    "server": {
+      "description": "Configured server name (e.g. `linear`, `everything`). The\nengine looks this up in `<forge>/.forge/config.toml`'s\n`[mcp.servers.<name>]` table.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "server"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "McpToolEntry",
+  "description": "One entry in the `list_tools` response array.",
+  "type": "object",
+  "properties": {
+    "description": {
+      "description": "Optional human description.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "Tool name as advertised by the server.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name"
+  ]
+}

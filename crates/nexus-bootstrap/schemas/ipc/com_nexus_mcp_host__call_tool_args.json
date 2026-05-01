@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "McpCallToolArgs",
+  "description": "Args for `com.nexus.mcp.host::call_tool` (handler id `3`).",
+  "type": "object",
+  "properties": {
+    "arguments": {
+      "description": "Tool-call arguments object. Forwarded verbatim to the server.\nSchema is per-tool and not validated at the IPC boundary;\nvalidation lives on the MCP server side.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "server": {
+      "description": "Configured server name.",
+      "type": "string"
+    },
+    "tool": {
+      "description": "Tool name advertised by the server's `tools/list`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "server",
+    "tool"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "McpCallToolReply",
+  "description": "Return type for `com.nexus.mcp.host::call_tool` (handler id `3`).\n`content` carries the per-MCP-content-item array verbatim;\n`truncated` flags when the engine clipped a response that exceeded\nthe per-call size cap (issue #85).",
+  "type": "object",
+  "properties": {
+    "content": {
+      "description": "MCP content items. Each is the raw rmcp `Content` JSON;\nschema is per-server.",
+      "type": "array",
+      "items": true
+    },
+    "is_error": {
+      "description": "`true` when the tool itself reported failure.",
+      "type": "boolean"
+    },
+    "truncated": {
+      "description": "`true` when the engine clipped the content array to fit the\nresponse cap.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "content",
+    "is_error",
+    "truncated"
+  ]
+}

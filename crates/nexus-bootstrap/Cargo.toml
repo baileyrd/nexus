@@ -16,6 +16,7 @@ ts-export = [
     "nexus-ai/ts-export",
     "nexus-linkpreview/ts-export",
     "nexus-git/ts-export",
+    "nexus-mcp/ts-export",
 ]
 
 [dependencies]
