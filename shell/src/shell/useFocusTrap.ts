@@ -49,14 +49,11 @@ export function useFocusTrap(
       else ref.current.focus()
     })
 
-    // Suppress background accessibility tree.
+    // Suppress background accessibility tree. HTMLElement always has `inert`
+    // in modern browsers and TS lib.dom; the property is the preferred path.
     const root = document.getElementById('root')
     if (root) {
-      if ('inert' in root) {
-        ;(root as HTMLElement & { inert: boolean }).inert = true
-      } else {
-        root.setAttribute('aria-hidden', 'true')
-      }
+      root.inert = true
     }
 
     const onKey = (e: KeyboardEvent) => {
@@ -88,11 +85,7 @@ export function useFocusTrap(
       document.removeEventListener('keydown', onKey, true)
       // Restore background accessibility tree.
       if (root) {
-        if ('inert' in root) {
-          ;(root as HTMLElement & { inert: boolean }).inert = false
-        } else {
-          root.removeAttribute('aria-hidden')
-        }
+        root.inert = false
       }
       // Restore focus to wherever the user was before opening the modal.
       if (savedFocus.current && typeof savedFocus.current.focus === 'function') {

@@ -219,6 +219,7 @@ export const pluginsMgmtPlugin: Plugin = {
     version: '0.1.0',
     core: true,
     activationEvents: ['onStartup'],
+    popoutCompatible: false,
     contributes: {
       commands: [
         { id: COMMAND_OPEN, title: 'Manage Plugins', category: 'View' },

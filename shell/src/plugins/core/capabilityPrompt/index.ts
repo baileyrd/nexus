@@ -26,6 +26,7 @@ export const capabilityPromptPlugin: Plugin = {
     version: '0.1.0',
     core: true,
     activationEvents: ['onStartup'],
+    popoutCompatible: false,
     contributes: {},
   },
 

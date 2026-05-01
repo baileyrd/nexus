@@ -11,6 +11,7 @@ export const statusBarPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
+    popoutCompatible: false,
     // `nexus.backlinks` is a soft dep — FileStats reads its zustand
     // store, which is safe to read with no provider (returns 0). Listing
     // it as a hard dep wedged status-bar activation when backlinks was

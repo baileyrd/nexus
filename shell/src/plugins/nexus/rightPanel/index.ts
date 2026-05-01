@@ -25,6 +25,7 @@ export const rightPanelPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
+    popoutCompatible: false,
     contributes: {
       commands: [
         { id: COMMAND_TOGGLE, title: 'Toggle Right Panel', category: 'View' },

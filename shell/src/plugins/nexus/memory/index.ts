@@ -70,6 +70,7 @@ export const memoryPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
+    popoutCompatible: false,
     contributes: {
       configuration: {
         pluginId: 'nexus.memory',

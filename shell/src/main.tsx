@@ -167,7 +167,14 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
   const optInPlugins = DEFAULT_OFF_PLUGINS.filter((p) =>
     enabledIds.has(p.manifest.id),
   )
-  const plugins: Plugin[] = [...DEFAULT_ON_PLUGINS, ...optInPlugins]
+  // SH-020: popout windows skip chrome-only plugins (activity bar, sidebar,
+  // status bar, settings, etc.) that contribute to slots the popout shell
+  // does not render. Plugins opt out by setting `popoutCompatible: false`
+  // in their manifest; absence defaults to true.
+  const defaultOnSet = popoutMode
+    ? DEFAULT_ON_PLUGINS.filter((p) => p.manifest.popoutCompatible !== false)
+    : DEFAULT_ON_PLUGINS
+  const plugins: Plugin[] = [...defaultOnSet, ...optInPlugins]
   if (optInPlugins.length > 0) {
     console.info(
       `[Boot] ${optInPlugins.length} opt-in plugin(s) enabled: ` +

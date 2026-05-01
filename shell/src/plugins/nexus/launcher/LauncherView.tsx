@@ -295,7 +295,6 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
         zIndex: zIndex.overlayModal,
         pointerEvents: 'auto',
         display: 'flex',
-        pointerEvents: 'auto',
         background: 'var(--bg)',
         color: 'var(--fg)',
         fontFamily: 'var(--f-ui)',

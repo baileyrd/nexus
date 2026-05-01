@@ -30,6 +30,7 @@ export const launcherPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
+    popoutCompatible: false,
     dependsOn: ['nexus.workspace'],
     contributes: {},
   },
