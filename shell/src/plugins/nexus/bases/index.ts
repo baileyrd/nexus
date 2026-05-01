@@ -81,7 +81,7 @@ export const basesPlugin: Plugin = {
             {
               style: {
                 padding: 16,
-                color: 'var(--text-muted, #9ca3af)',
+                color: 'var(--text-muted)',
                 fontSize: 12,
               },
             },

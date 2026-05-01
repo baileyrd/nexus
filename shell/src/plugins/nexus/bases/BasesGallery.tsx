@@ -68,9 +68,9 @@ export function BasesGallery({ relpath, base, client: _client }: Props) {
           alignItems: 'center',
           gap: 8,
           padding: '6px 12px',
-          borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
+          borderBottom: '1px solid var(--background-modifier-border)',
           fontSize: 12,
-          color: 'var(--text-muted, #9ca3af)',
+          color: 'var(--text-muted)',
         }}
       >
         {urlColumns.length > 0 ? (
@@ -116,7 +116,7 @@ export function BasesGallery({ relpath, base, client: _client }: Props) {
           />
         ))}
         {base.records.length === 0 && (
-          <div style={{ gridColumn: '1/-1', color: 'var(--text-muted, #9ca3af)', padding: 24 }}>
+          <div style={{ gridColumn: '1/-1', color: 'var(--text-muted)', padding: 24 }}>
             No records yet.
           </div>
         )}
@@ -151,14 +151,14 @@ function Card({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--background-secondary, #252529)',
-        border: '1px solid var(--background-modifier-border, #2a2a2e)',
+        background: 'var(--background-secondary)',
+        border: '1px solid var(--background-modifier-border)',
         borderRadius: 6,
         overflow: 'hidden',
         cursor: 'pointer',
         padding: 0,
         textAlign: 'left',
-        color: 'var(--text-normal, #e4e4e7)',
+        color: 'var(--text-normal)',
       }}
     >
       <div
@@ -166,8 +166,8 @@ function Card({
           aspectRatio: '16 / 9',
           background: imageUrl
             ? `center/cover no-repeat url("${encodeURI(imageUrl)}")`
-            : 'linear-gradient(135deg, var(--background-secondary, #252529), var(--background-secondary-alt, #1a1a1d))',
-          borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
+            : 'linear-gradient(135deg, var(--background-secondary), var(--background-secondary-alt))',
+          borderBottom: '1px solid var(--background-modifier-border)',
         }}
       />
       <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -179,14 +179,14 @@ function Card({
             <div
               key={c.name}
               style={{
-                color: 'var(--text-muted, #9ca3af)',
+                color: 'var(--text-muted)',
                 fontSize: 11,
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
               }}
             >
-              <span style={{ color: 'var(--text-faint, #6b7280)' }}>{c.name}: </span>
+              <span style={{ color: 'var(--text-faint)' }}>{c.name}: </span>
               {formatValue(c.def.type, v)}
             </div>
           )
@@ -197,9 +197,9 @@ function Card({
 }
 
 const selectStyle: React.CSSProperties = {
-  background: 'var(--background-secondary, #252529)',
-  color: 'var(--text-normal, #e4e4e7)',
-  border: '1px solid var(--background-modifier-border, #2a2a2e)',
+  background: 'var(--background-secondary)',
+  color: 'var(--text-normal)',
+  border: '1px solid var(--background-modifier-border)',
   borderRadius: 3,
   padding: '2px 6px',
   fontSize: 11,

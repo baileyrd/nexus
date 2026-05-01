@@ -464,7 +464,7 @@ function RenderForm({ skill, kernel }: RenderFormProps) {
             padding: '4px 10px',
             fontSize: 11,
             fontFamily: 'var(--font-interface)',
-            background: isRendering ? 'var(--background-modifier-hover)' : 'var(--interactive-accent, var(--background-modifier-hover))',
+            background: isRendering ? 'var(--background-modifier-hover)' : 'var(--interactive-accent)',
             color: 'var(--text-normal)',
             border: '1px solid var(--divider-color)',
             borderRadius: 'var(--radius-s)',

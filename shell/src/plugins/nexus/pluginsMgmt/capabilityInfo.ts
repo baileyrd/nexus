@@ -127,21 +127,21 @@ export function chipColours(risk: RiskLevel): { bg: string; fg: string; border: 
   switch (risk) {
     case 'low':
       return {
-        bg:     'color-mix(in oklch, var(--ok, #2e7d32) 18%, transparent)',
-        fg:     'var(--ok, #2e7d32)',
-        border: 'color-mix(in oklch, var(--ok, #2e7d32) 35%, transparent)',
+        bg:     'color-mix(in oklch, var(--ok) 18%, transparent)',
+        fg:     'var(--ok)',
+        border: 'color-mix(in oklch, var(--ok) 35%, transparent)',
       }
     case 'medium':
       return {
-        bg:     'color-mix(in oklch, var(--warn, #c98200) 18%, transparent)',
-        fg:     'var(--warn, #c98200)',
-        border: 'color-mix(in oklch, var(--warn, #c98200) 35%, transparent)',
+        bg:     'color-mix(in oklch, var(--warn) 18%, transparent)',
+        fg:     'var(--warn)',
+        border: 'color-mix(in oklch, var(--warn) 35%, transparent)',
       }
     case 'high':
       return {
-        bg:     'color-mix(in oklch, var(--risk, #c0392b) 20%, transparent)',
-        fg:     'var(--risk, #c0392b)',
-        border: 'color-mix(in oklch, var(--risk, #c0392b) 40%, transparent)',
+        bg:     'color-mix(in oklch, var(--risk) 20%, transparent)',
+        fg:     'var(--risk)',
+        border: 'color-mix(in oklch, var(--risk) 40%, transparent)',
       }
   }
 }

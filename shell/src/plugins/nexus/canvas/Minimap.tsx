@@ -207,7 +207,7 @@ export const Minimap = forwardRef<MinimapHandle, Props>(function Minimap(
         width: MINIMAP_WIDTH,
         height: MINIMAP_HEIGHT,
         borderRadius: 6,
-        border: '1px solid var(--divider-color, var(--background-modifier-border))',
+        border: '1px solid var(--divider-color)',
         boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
         cursor: 'crosshair',
         // Minimap is interactive, unlike the passive overlay layer.

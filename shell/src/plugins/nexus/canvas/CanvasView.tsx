@@ -1253,8 +1253,8 @@ function ControlStrip({
         gap: 6,
         padding: 4,
         borderRadius: 6,
-        background: 'var(--background-secondary, #2d2d2d)',
-        border: '1px solid var(--divider-color, #3f3f46)',
+        background: 'var(--background-secondary)',
+        border: '1px solid var(--divider-color)',
         boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
         pointerEvents: 'auto',
       }}
@@ -1290,8 +1290,8 @@ function ControlStrip({
               bottom: '110%',
               display: 'flex',
               flexDirection: 'column',
-              background: 'var(--background-secondary, #2d2d2d)',
-              border: '1px solid var(--divider-color, #3f3f46)',
+              background: 'var(--background-secondary)',
+              border: '1px solid var(--divider-color)',
               borderRadius: 4,
               boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
               minWidth: 90,
@@ -1315,7 +1315,7 @@ function ControlStrip({
                 style={{
                   padding: '4px 10px',
                   background: 'transparent',
-                  color: 'var(--text-normal, #e5e7eb)',
+                  color: 'var(--text-normal)',
                   border: 'none',
                   textAlign: 'left',
                   cursor: 'pointer',
@@ -1388,9 +1388,9 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
           maxWidth: 440,
           padding: 18,
           borderRadius: 8,
-          background: 'var(--background-secondary, #2d2d2d)',
-          border: '1px solid var(--divider-color, #3f3f46)',
-          color: 'var(--text-normal, #e5e7eb)',
+          background: 'var(--background-secondary)',
+          border: '1px solid var(--divider-color)',
+          color: 'var(--text-normal)',
           fontFamily: 'var(--font-family, system-ui, sans-serif)',
           fontSize: 12,
           boxShadow: '0 8px 28px rgba(0,0,0,0.45)',
@@ -1419,7 +1419,7 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
             style={{
               background: 'transparent',
               border: 'none',
-              color: 'var(--text-muted, #9ca3af)',
+              color: 'var(--text-muted)',
               fontSize: 16,
               cursor: 'pointer',
               padding: 0,
@@ -1437,7 +1437,7 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
                 <td
                   style={{
                     padding: '4px 10px 4px 0',
-                    color: 'var(--text-muted, #9ca3af)',
+                    color: 'var(--text-muted)',
                     fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
                     fontSize: 11,
                     whiteSpace: 'nowrap',
@@ -1477,10 +1477,10 @@ function ControlButton({
       disabled={disabled}
       style={{
         background: active
-          ? 'var(--interactive-accent, #3b82f6)'
+          ? 'var(--interactive-accent)'
           : 'var(--bg-muted, #1e1e1e)',
-        color: active ? '#fff' : 'var(--text-normal, #e5e7eb)',
-        border: '1px solid var(--divider-color, #3f3f46)',
+        color: active ? '#fff' : 'var(--text-normal)',
+        border: '1px solid var(--divider-color)',
         borderRadius: 4,
         padding: '4px 10px',
         fontSize: 11,
@@ -1512,7 +1512,7 @@ function CornerLabel({ children }: { children: React.ReactNode }) {
         bottom: 8,
         right: 12,
         fontSize: 12,
-        color: 'var(--text-muted, #9ca3af)',
+        color: 'var(--text-muted)',
         fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
         pointerEvents: 'none',
       }}

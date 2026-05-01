@@ -79,10 +79,10 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border: 1px solid var(--risk, var(--divider-color));
+  border: 1px solid var(--risk);
   border-radius: 4px;
   background: var(--background-secondary);
-  color: var(--risk, var(--text-normal));
+  color: var(--risk);
   font-family: var(--font-monospace);
   font-size: 0.9em;
 }
@@ -143,7 +143,7 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border: 1px solid var(--risk, var(--divider-color));
+  border: 1px solid var(--risk);
   border-radius: 4px;
   background: var(--background-secondary);
   font-size: 0.9em;
@@ -161,7 +161,7 @@
 
 /* BL-049 phase 2 — clickable inline `[[<file>#^<uuid>]]` block links. */
 .cm-content .cm-md-block-link {
-  color: var(--interactive-accent, #4c8bf5);
+  color: var(--interactive-accent);
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;

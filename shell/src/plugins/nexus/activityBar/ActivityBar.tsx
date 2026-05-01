@@ -93,7 +93,7 @@ function SidebarToggleButton() {
         padding: 0,
         font: 'inherit',
         fontSize: 18,
-        borderBottom: '1px solid var(--divider-color, var(--background-modifier-border, #333))',
+        borderBottom: '1px solid var(--divider-color)',
         transition: 'background 0.08s, color 0.08s',
       }}
     >

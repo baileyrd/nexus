@@ -17,10 +17,10 @@
   flex-direction: column;
   gap: 4px;
   padding: 8px 10px;
-  border: 1px solid var(--risk, var(--divider-color));
+  border: 1px solid var(--risk);
   border-radius: 4px;
   background: var(--background-secondary);
-  color: var(--risk, var(--text-normal));
+  color: var(--risk);
   font-family: var(--font-monospace);
   font-size: 0.9em;
 }
@@ -67,7 +67,7 @@
 }
 
 .nexus-mermaid-toolbar-button:hover {
-  background: var(--background-modifier-hover, var(--background-secondary));
+  background: var(--background-modifier-hover);
 }
 
 .nexus-mermaid-pane .nexus-mermaid-diagram {
@@ -93,7 +93,7 @@
 
 .nexus-mermaid-placeholder {
   padding: 16px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   font-size: 0.9em;
   text-align: center;
 }

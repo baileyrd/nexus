@@ -37,8 +37,8 @@ export interface FilesContextMenuProps {
 const PANEL_STYLE: CSSProperties = {
   position: 'fixed',
   zIndex: zIndex.dropdown,
-  background: 'var(--background-primary, var(--background-secondary, #1e1e1e))',
-  border: '1px solid var(--divider-color, var(--background-modifier-border, #333))',
+  background: 'var(--background-primary)',
+  border: '1px solid var(--divider-color)',
   borderRadius: 6,
   boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
   padding: 4,
@@ -49,7 +49,7 @@ const PANEL_STYLE: CSSProperties = {
 
 const SEPARATOR_STYLE: CSSProperties = {
   height: 1,
-  background: 'var(--divider-color, var(--background-modifier-border, #333))',
+  background: 'var(--divider-color)',
   margin: '4px 0',
 }
 
@@ -182,11 +182,11 @@ function MenuRow({
         border: 0,
         borderRadius: 4,
         background: active && !item.disabled
-          ? 'var(--background-modifier-hover, rgba(255,255,255,0.06))'
+          ? 'var(--background-modifier-hover)'
           : 'transparent',
         color: item.disabled
-          ? 'var(--text-faint, #666)'
-          : 'var(--text-normal, #ddd)',
+          ? 'var(--text-faint)'
+          : 'var(--text-normal)',
         cursor: item.disabled ? 'default' : 'pointer',
         font: 'inherit',
       }}

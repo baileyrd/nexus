@@ -83,8 +83,8 @@ export function ForgeSelector(): JSX.Element {
       style={{
         flex: '0 0 auto',
         padding: '4px 6px',
-        borderTop: '1px solid var(--divider-color, var(--background-modifier-border, #333))',
-        background: 'var(--background-secondary, #252526)',
+        borderTop: '1px solid var(--divider-color)',
+        background: 'var(--background-secondary)',
         fontSize: 12,
       }}
     >
@@ -141,8 +141,8 @@ export function ForgeSelector(): JSX.Element {
             left: anchorRect.left,
             bottom: window.innerHeight - anchorRect.top + 4,
             minWidth: Math.max(220, anchorRect.width),
-            background: 'var(--background-primary, #1e1e1e)',
-            border: '1px solid var(--divider-color, var(--background-modifier-border, #333))',
+            background: 'var(--background-primary)',
+            border: '1px solid var(--divider-color)',
             borderRadius: 6,
             boxShadow: '0 6px 16px rgba(0,0,0,0.4)',
             padding: '4px 0',
@@ -211,7 +211,7 @@ export function ForgeSelector(): JSX.Element {
               style={{
                 height: 1,
                 margin: '4px 0',
-                background: 'var(--divider-color, var(--background-modifier-border, #333))',
+                background: 'var(--divider-color)',
               }}
             />
           )}

@@ -508,7 +508,7 @@ function Toolbar({
         flexShrink: 0,
         flexDirection: 'row',
         alignItems: 'center',
-        borderBottom: '1px solid var(--divider-color, var(--divider-color))',
+        borderBottom: '1px solid var(--divider-color)',
       }}
     >
       <NavButtonsContainer>
@@ -799,7 +799,7 @@ function TreeNode({
       style={
         dropHover
           ? {
-              outline: '1px solid var(--interactive-accent, #4a9eff)',
+              outline: '1px solid var(--interactive-accent)',
               outlineOffset: -1,
               borderRadius: 3,
             }

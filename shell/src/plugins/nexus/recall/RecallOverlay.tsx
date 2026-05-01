@@ -327,7 +327,7 @@ function FilterChips() {
           padding: '2px 10px',
           borderRadius: 999,
           border: '1px solid var(--divider-color)',
-          background: codeOnly ? 'var(--interactive-accent, #4c8bf5)' : 'var(--background-secondary)',
+          background: codeOnly ? 'var(--interactive-accent)' : 'var(--background-secondary)',
           color: codeOnly ? 'var(--bg-base, #fff)' : 'var(--text-normal)',
           cursor: 'pointer',
         }}
@@ -347,7 +347,7 @@ function FilterChips() {
               padding: '2px 10px',
               borderRadius: 999,
               border: '1px solid var(--divider-color)',
-              background: active ? 'var(--interactive-accent, #4c8bf5)' : 'var(--background-secondary)',
+              background: active ? 'var(--interactive-accent)' : 'var(--background-secondary)',
               color: active ? 'var(--bg-base, #fff)' : 'var(--text-normal)',
               cursor: 'pointer',
             }}

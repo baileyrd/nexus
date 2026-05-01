@@ -217,8 +217,8 @@ export function installInlineToolbarStyles(): () => void {
   display: flex;
   gap: 2px;
   padding: 3px;
-  background: var(--background-secondary, #2d2d2d);
-  border: 1px solid var(--divider-color, #3f3f46);
+  background: var(--background-secondary);
+  border: 1px solid var(--divider-color);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   font-family: var(--font-family, system-ui, sans-serif);
@@ -229,7 +229,7 @@ export function installInlineToolbarStyles(): () => void {
   height: 26px;
   padding: 0 8px;
   background: transparent;
-  color: var(--text-normal, #e5e7eb);
+  color: var(--text-normal);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -237,10 +237,10 @@ export function installInlineToolbarStyles(): () => void {
   font-weight: 500;
 }
 .cm-inline-toolbar__btn:hover {
-  background: var(--background-modifier-hover, #363636);
+  background: var(--background-modifier-hover);
 }
 .cm-inline-toolbar__btn:active {
-  background: var(--background-modifier-active, #404040);
+  background: var(--background-modifier-active);
 }
 `
   document.head.appendChild(style)

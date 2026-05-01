@@ -134,7 +134,7 @@ export function WindowControls() {
         // positioned cluster reads as continuous chrome with the trailing
         // tab controls (chevron, right-sidedock toggle) sitting just to
         // its left, instead of a floating cluster on top of the strip.
-        background: 'var(--tab-container-background, var(--background-secondary-alt, #2d2d2d))',
+        background: 'var(--tab-container-background)',
       }}
     >
       <ControlButton onClick={minimize} label="Minimize">

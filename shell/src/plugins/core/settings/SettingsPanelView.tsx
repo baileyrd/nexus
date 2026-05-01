@@ -631,8 +631,8 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
           style={{
             padding: 8,
             marginBottom: 12,
-            background: 'var(--risk-soft, #fdd)',
-            color: 'var(--risk, #900)',
+            background: 'var(--risk-soft)',
+            color: 'var(--risk)',
             borderRadius: 4,
           }}
         >
@@ -818,7 +818,7 @@ function SnippetRow({
         alignItems: 'flex-start',
         gap: 8,
         padding: '8px 6px',
-        borderBottom: '1px solid var(--background-modifier-border, #e0e0e0)',
+        borderBottom: '1px solid var(--background-modifier-border)',
       }}
     >
       <input
@@ -959,8 +959,8 @@ function KeybindingsTab() {
           style={{
             padding: 8,
             marginBottom: 12,
-            background: 'var(--risk-soft, #fdd)',
-            color: 'var(--risk, #900)',
+            background: 'var(--risk-soft)',
+            color: 'var(--risk)',
             borderRadius: 4,
           }}
         >
@@ -1052,8 +1052,8 @@ function KeybindingsTab() {
                     <div>
                       <code style={{
                         background: row.overridden
-                          ? 'var(--interactive-accent-soft, rgba(0,0,0,0.09))'
-                          : 'var(--background-modifier-hover, rgba(0,0,0,0.05))',
+                          ? 'var(--interactive-accent-soft)'
+                          : 'var(--background-modifier-hover)',
                         padding: '2px 6px',
                         borderRadius: 3,
                         fontSize: '0.9em',
@@ -1102,7 +1102,7 @@ function KeybindingsTab() {
 const cellStyle: React.CSSProperties = {
   textAlign: 'left',
   padding: '8px 6px',
-  borderBottom: '1px solid var(--background-modifier-border, #e0e0e0)',
+  borderBottom: '1px solid var(--background-modifier-border)',
   verticalAlign: 'top',
 }
 
@@ -1177,9 +1177,9 @@ function ChordCaptureInput({
       style={{
         width: '100%',
         padding: '4px 6px',
-        border: '1px solid var(--interactive-accent, #06f)',
+        border: '1px solid var(--interactive-accent)',
         borderRadius: 3,
-        background: 'var(--background-primary, #fff)',
+        background: 'var(--background-primary)',
       }}
     />
   )
@@ -1659,8 +1659,8 @@ function CommunityPluginRow({
               style={{
                 padding: '2px 8px',
                 background: 'transparent',
-                color: 'var(--text-faint, #888)',
-                border: '1px solid var(--background-modifier-border, #e0e0e0)',
+                color: 'var(--text-faint)',
+                border: '1px solid var(--background-modifier-border)',
                 borderRadius: 3,
                 fontSize: '0.82em',
                 cursor: 'pointer',

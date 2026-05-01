@@ -131,7 +131,7 @@ export function BasesTimeline({ relpath, base, client: _client }: Props) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--text-muted, #9ca3af)',
+          color: 'var(--text-muted)',
           fontSize: 12,
           padding: 24,
         }}
@@ -150,9 +150,9 @@ export function BasesTimeline({ relpath, base, client: _client }: Props) {
           flexWrap: 'wrap',
           gap: 8,
           padding: '6px 12px',
-          borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
+          borderBottom: '1px solid var(--background-modifier-border)',
           fontSize: 12,
-          color: 'var(--text-muted, #9ca3af)',
+          color: 'var(--text-muted)',
         }}
       >
         <span>Start</span>
@@ -222,7 +222,7 @@ export function BasesTimeline({ relpath, base, client: _client }: Props) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'var(--text-muted, #9ca3af)',
+            color: 'var(--text-muted)',
             fontSize: 12,
           }}
         >
@@ -271,8 +271,8 @@ function TimelineBody({
         style={{
           flex: '0 0 auto',
           width: GROUP_LABEL_WIDTH,
-          borderRight: '1px solid var(--background-modifier-border, #2a2a2e)',
-          background: 'var(--background-secondary, #252529)',
+          borderRight: '1px solid var(--background-modifier-border)',
+          background: 'var(--background-secondary)',
           position: 'sticky',
           left: 0,
           zIndex: 2,
@@ -281,7 +281,7 @@ function TimelineBody({
         <div
           style={{
             height: 32,
-            borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
+            borderBottom: '1px solid var(--background-modifier-border)',
           }}
         />
         {groupOrder.map((g) => (
@@ -292,10 +292,10 @@ function TimelineBody({
               display: 'flex',
               alignItems: 'center',
               padding: '0 10px',
-              borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
+              borderBottom: '1px solid var(--background-modifier-border)',
               fontSize: 11,
               color:
-                g === UNASSIGNED ? 'var(--text-faint, #6b7280)' : 'var(--text-normal, #e4e4e7)',
+                g === UNASSIGNED ? 'var(--text-faint)' : 'var(--text-normal)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -309,12 +309,12 @@ function TimelineBody({
         <div
           style={{
             height: 32,
-            borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
-            background: 'var(--background-secondary, #252529)',
+            borderBottom: '1px solid var(--background-modifier-border)',
+            background: 'var(--background-secondary)',
             position: 'sticky',
             top: 0,
             zIndex: 1,
-            color: 'var(--text-muted, #9ca3af)',
+            color: 'var(--text-muted)',
             fontSize: 11,
           }}
         >
@@ -330,7 +330,7 @@ function TimelineBody({
                 display: 'flex',
                 alignItems: 'center',
                 padding: '0 6px',
-                borderRight: '1px solid var(--background-modifier-border, #2a2a2e)',
+                borderRight: '1px solid var(--background-modifier-border)',
                 boxSizing: 'border-box',
               }}
             >
@@ -347,7 +347,7 @@ function TimelineBody({
                 bottom: 0,
                 left: todayOffset * dayPx,
                 width: 1,
-                background: 'var(--interactive-accent, #60a5fa)',
+                background: 'var(--interactive-accent)',
                 opacity: 0.6,
                 pointerEvents: 'none',
               }}
@@ -362,7 +362,7 @@ function TimelineBody({
                 style={{
                   position: 'relative',
                   height: LANE_HEIGHT,
-                  borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
+                  borderBottom: '1px solid var(--background-modifier-border)',
                 }}
               >
                 {events.map((ev) => {
@@ -382,8 +382,8 @@ function TimelineBody({
                         top: 4,
                         width: span * dayPx - 2,
                         height: LANE_HEIGHT - 8,
-                        background: 'var(--interactive-accent, #60a5fa)',
-                        color: 'var(--interactive-accent-ink, #0f1117)',
+                        background: 'var(--interactive-accent)',
+                        color: 'var(--interactive-accent-ink)',
                         border: 'none',
                         borderRadius: 3,
                         padding: '0 6px',
@@ -460,9 +460,9 @@ function resolveColumn(cols: Column[], name: string | null): Column | null {
 }
 
 const selectStyle: React.CSSProperties = {
-  background: 'var(--background-secondary, #252529)',
-  color: 'var(--text-normal, #e4e4e7)',
-  border: '1px solid var(--background-modifier-border, #2a2a2e)',
+  background: 'var(--background-secondary)',
+  color: 'var(--text-normal)',
+  border: '1px solid var(--background-modifier-border)',
   borderRadius: 3,
   padding: '2px 6px',
   fontSize: 11,

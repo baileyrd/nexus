@@ -341,7 +341,7 @@ function primaryButton(disabled: boolean): React.CSSProperties {
     padding: '4px 12px',
     fontSize: 11,
     fontFamily: 'var(--font-interface)',
-    background: disabled ? 'var(--background-modifier-hover)' : 'var(--interactive-accent, var(--background-modifier-hover))',
+    background: disabled ? 'var(--background-modifier-hover)' : 'var(--interactive-accent)',
     color: 'var(--text-normal)',
     border: '1px solid var(--divider-color)',
     borderRadius: 'var(--radius-s)',

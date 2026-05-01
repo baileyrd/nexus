@@ -90,7 +90,7 @@ export function EnrichAcceptGate() {
                     display: 'inline-block',
                     marginRight: 4,
                     padding: '1px 6px',
-                    background: 'var(--interactive-accent-soft, rgba(0,0,0,0.08))',
+                    background: 'var(--interactive-accent-soft)',
                     borderRadius: 4,
                     fontSize: 12,
                   }}
@@ -164,7 +164,7 @@ export function EnrichAcceptGate() {
             disabled={applying}
             style={{
               padding: '4px 10px',
-              background: 'var(--interactive-accent, #2266ee)',
+              background: 'var(--interactive-accent)',
               color: 'white',
               border: 'none',
               borderRadius: 4,

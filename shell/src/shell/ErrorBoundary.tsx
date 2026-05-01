@@ -53,8 +53,8 @@ export class ErrorBoundary extends Component<Props, State> {
         role="alert"
         style={{
           padding: '12px 16px',
-          background: 'var(--background-modifier-error, #3d1a1a)',
-          color: 'var(--text-error, #f48771)',
+          background: 'var(--background-modifier-error)',
+          color: 'var(--text-error)',
           fontSize: '12px',
           fontFamily: 'var(--font-monospace, monospace)',
           borderRadius: '4px',
@@ -76,8 +76,8 @@ export class ErrorBoundary extends Component<Props, State> {
               padding: '4px 8px',
               fontSize: '11px',
               cursor: 'pointer',
-              background: 'var(--interactive-normal, #3c3c3c)',
-              color: 'var(--text-normal, #cccccc)',
+              background: 'var(--interactive-normal)',
+              color: 'var(--text-normal)',
               border: 'none',
               borderRadius: '3px',
             }}
@@ -90,8 +90,8 @@ export class ErrorBoundary extends Component<Props, State> {
               padding: '4px 8px',
               fontSize: '11px',
               cursor: 'pointer',
-              background: 'var(--interactive-accent, #7c3aed)',
-              color: 'var(--text-on-accent, #ffffff)',
+              background: 'var(--interactive-accent)',
+              color: 'var(--text-on-accent)',
               border: 'none',
               borderRadius: '3px',
             }}

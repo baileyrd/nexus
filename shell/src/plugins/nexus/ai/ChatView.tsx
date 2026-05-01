@@ -750,7 +750,7 @@ function ConfigBanner({
             style={{
               padding: '3px 10px',
               background: 'var(--interactive-accent)',
-              color: 'var(--interactive-accent-ink, #fff)',
+              color: 'var(--interactive-accent-ink)',
               border: '1px solid var(--interactive-accent)',
               borderRadius: 'var(--radius-s)',
               fontSize: 11,
@@ -835,7 +835,7 @@ function EmptyState({
               style={{
                 padding: '6px 14px',
                 background: 'var(--interactive-accent)',
-                color: 'var(--interactive-accent-ink, #fff)',
+                color: 'var(--interactive-accent-ink)',
                 border: '1px solid var(--interactive-accent)',
                 borderRadius: 'var(--radius-s)',
                 fontSize: 12,
@@ -1156,7 +1156,7 @@ function SessionListItem({ meta, active, onLoad, onDelete, onRename }: SessionLi
         alignItems: 'center',
         gap: 4,
         padding: '4px 8px',
-        background: active ? 'var(--background-modifier-active, var(--background-primary))' : 'transparent',
+        background: active ? 'var(--background-modifier-active)' : 'transparent',
         borderLeft: `2px solid ${active ? 'var(--interactive-accent)' : 'transparent'}`,
         cursor: editing ? 'text' : 'pointer',
       }}

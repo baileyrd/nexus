@@ -346,22 +346,22 @@ export function SchemaEditor({ relpath, base, client }: Props) {
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        borderLeft: '1px solid var(--background-modifier-border, #2a2a2e)',
-        background: 'var(--background-secondary, #252529)',
+        borderLeft: '1px solid var(--background-modifier-border)',
+        background: 'var(--background-secondary)',
         fontSize: 12,
       }}
     >
       <div
         style={{
           padding: '8px 12px',
-          borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
+          borderBottom: '1px solid var(--background-modifier-border)',
           display: 'flex',
           alignItems: 'center',
           gap: 8,
         }}
       >
-        <strong style={{ color: 'var(--text-normal, #e4e4e7)' }}>Schema</strong>
-        <span style={{ color: 'var(--text-muted, #9ca3af)' }}>
+        <strong style={{ color: 'var(--text-normal)' }}>Schema</strong>
+        <span style={{ color: 'var(--text-muted)' }}>
           {columns.length} {columns.length === 1 ? 'column' : 'columns'}
         </span>
         <div style={{ flex: 1 }} />
@@ -376,7 +376,7 @@ export function SchemaEditor({ relpath, base, client }: Props) {
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {err && (
-          <div style={{ color: 'var(--risk, #f48771)', padding: '4px 8px' }}>{err}</div>
+          <div style={{ color: 'var(--risk)', padding: '4px 8px' }}>{err}</div>
         )}
         {columns.map(({ name, def }) => (
           <PropertyRow
@@ -400,9 +400,9 @@ export function SchemaEditor({ relpath, base, client }: Props) {
           onClick={() => void handleAdd()}
           style={{
             padding: '6px 10px',
-            background: 'var(--background-primary, #1e1e1e)',
-            color: 'var(--text-normal, #e4e4e7)',
-            border: '1px dashed var(--background-modifier-border, #2a2a2e)',
+            background: 'var(--background-primary)',
+            color: 'var(--text-normal)',
+            border: '1px dashed var(--background-modifier-border)',
             borderRadius: 4,
             cursor: busy ? 'not-allowed' : 'pointer',
             opacity: busy ? 0.5 : 1,
@@ -450,8 +450,8 @@ function PropertyRow({
     <div
       style={{
         padding: 8,
-        background: 'var(--background-primary, #1e1e1e)',
-        border: '1px solid var(--background-modifier-border, #2a2a2e)',
+        background: 'var(--background-primary)',
+        border: '1px solid var(--background-modifier-border)',
         borderRadius: 4,
         display: 'flex',
         flexDirection: 'column',
@@ -459,9 +459,9 @@ function PropertyRow({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontWeight: 500, color: 'var(--text-normal, #e4e4e7)' }}>{name}</span>
+        <span style={{ fontWeight: 500, color: 'var(--text-normal)' }}>{name}</span>
         {def.primary && (
-          <span style={{ color: 'var(--interactive-accent, #60a5fa)', fontSize: 10 }}>primary</span>
+          <span style={{ color: 'var(--interactive-accent)', fontSize: 10 }}>primary</span>
         )}
         <div style={{ flex: 1 }} />
         <button type="button" disabled={busy} onClick={onRename} style={rowBtnStyle} title="Rename column">
@@ -473,7 +473,7 @@ function PropertyRow({
           onClick={onDelete}
           style={{
             ...rowBtnStyle,
-            color: 'var(--risk, #f48771)',
+            color: 'var(--risk)',
             opacity: def.primary ? 0.4 : 1,
           }}
           title={def.primary ? "Can't delete the primary column" : 'Delete column'}
@@ -482,7 +482,7 @@ function PropertyRow({
         </button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <label style={{ color: 'var(--text-muted, #9ca3af)' }}>type</label>
+        <label style={{ color: 'var(--text-muted)' }}>type</label>
         <select
           disabled={busy}
           value={def.type}
@@ -496,7 +496,7 @@ function PropertyRow({
           ))}
         </select>
         {!readOnly && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-muted, #9ca3af)' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-muted)' }}>
             <input
               type="checkbox"
               disabled={busy}
@@ -509,7 +509,7 @@ function PropertyRow({
       </div>
       {(def.type === 'select' || def.type === 'multi-select') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <label style={{ color: 'var(--text-muted, #9ca3af)' }}>options (comma-separated)</label>
+          <label style={{ color: 'var(--text-muted)' }}>options (comma-separated)</label>
           <input
             type="text"
             disabled={busy}
@@ -590,7 +590,7 @@ function FormulaEditorRow({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <label style={{ color: 'var(--text-muted, #9ca3af)' }}>expression</label>
+      <label style={{ color: 'var(--text-muted)' }}>expression</label>
       <textarea
         disabled={busy}
         value={value}
@@ -607,12 +607,12 @@ function FormulaEditorRow({
         placeholder={'e.g. price * 1.1'}
         style={{ ...inputStyle, fontFamily: 'var(--font-monospace, monospace)', resize: 'vertical' }}
       />
-      <div style={{ color: 'var(--text-muted, #9ca3af)', fontSize: 11 }}>
+      <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
         Preview (first record):{' '}
         {previewErr ? (
-          <span style={{ color: 'var(--risk, #f48771)' }}>error — {previewErr}</span>
+          <span style={{ color: 'var(--risk)' }}>error — {previewErr}</span>
         ) : value ? (
-          <span style={{ color: 'var(--text-normal, #e4e4e7)' }}>{preview || '…'}</span>
+          <span style={{ color: 'var(--text-normal)' }}>{preview || '…'}</span>
         ) : (
           <span>—</span>
         )}
@@ -623,9 +623,9 @@ function FormulaEditorRow({
 
 const rowBtnStyle: React.CSSProperties = {
   padding: '2px 8px',
-  background: 'var(--background-secondary, #252529)',
-  color: 'var(--text-normal, #e4e4e7)',
-  border: '1px solid var(--background-modifier-border, #2a2a2e)',
+  background: 'var(--background-secondary)',
+  color: 'var(--text-normal)',
+  border: '1px solid var(--background-modifier-border)',
   borderRadius: 3,
   fontSize: 11,
   cursor: 'pointer',
@@ -634,7 +634,7 @@ const rowBtnStyle: React.CSSProperties = {
 const closeBtnStyle: React.CSSProperties = {
   padding: '2px 8px',
   background: 'transparent',
-  color: 'var(--text-muted, #9ca3af)',
+  color: 'var(--text-muted)',
   border: 'none',
   fontSize: 16,
   cursor: 'pointer',
@@ -643,18 +643,18 @@ const closeBtnStyle: React.CSSProperties = {
 
 const selectStyle: React.CSSProperties = {
   padding: '2px 6px',
-  background: 'var(--background-secondary, #252529)',
-  color: 'var(--text-normal, #e4e4e7)',
-  border: '1px solid var(--background-modifier-border, #2a2a2e)',
+  background: 'var(--background-secondary)',
+  color: 'var(--text-normal)',
+  border: '1px solid var(--background-modifier-border)',
   borderRadius: 3,
   fontSize: 11,
 }
 
 const inputStyle: React.CSSProperties = {
   padding: '4px 8px',
-  background: 'var(--background-secondary, #252529)',
-  color: 'var(--text-normal, #e4e4e7)',
-  border: '1px solid var(--background-modifier-border, #2a2a2e)',
+  background: 'var(--background-secondary)',
+  color: 'var(--text-normal)',
+  border: '1px solid var(--background-modifier-border)',
   borderRadius: 3,
   fontSize: 12,
   fontFamily: 'inherit',

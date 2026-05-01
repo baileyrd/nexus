@@ -790,9 +790,9 @@ export function BasesTable({ relpath, base, client }: Props) {
           alignItems: 'center',
           gap: 8,
           padding: '6px 12px',
-          borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
+          borderBottom: '1px solid var(--background-modifier-border)',
           fontSize: 12,
-          color: 'var(--text-muted, #9ca3af)',
+          color: 'var(--text-muted)',
         }}
       >
         {!readOnly && <button
@@ -828,7 +828,7 @@ export function BasesTable({ relpath, base, client }: Props) {
               type="button"
               onClick={() => void handleHardDeleteRow(selectedRecordId)}
               title="Permanently delete (cannot be undone)"
-              style={{ ...toolbarBtnStyle, color: 'var(--risk, #f48771)' }}
+              style={{ ...toolbarBtnStyle, color: 'var(--risk)' }}
             >
               Delete forever
             </button>
@@ -874,7 +874,7 @@ export function BasesTable({ relpath, base, client }: Props) {
             Clear sort ({sort.field} {sort.dir})
           </button>
         )}
-        {opError && <span style={{ color: 'var(--risk, #f48771)' }}>{opError}</span>}
+        {opError && <span style={{ color: 'var(--risk)' }}>{opError}</span>}
       </div>
       <div ref={scrollRef} style={{ flex: 1, overflow: 'auto' }}>
         <table
@@ -907,10 +907,10 @@ export function BasesTable({ relpath, base, client }: Props) {
                     style={{
                       padding: '6px 10px',
                       textAlign: 'left',
-                      background: 'var(--background-secondary, #252529)',
-                      borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
-                      borderRight: '1px solid var(--background-modifier-border, #2a2a2e)',
-                      color: 'var(--text-muted, #9ca3af)',
+                      background: 'var(--background-secondary)',
+                      borderBottom: '1px solid var(--background-modifier-border)',
+                      borderRight: '1px solid var(--background-modifier-border)',
+                      color: 'var(--text-muted)',
                       fontWeight: 500,
                       cursor: 'pointer',
                       userSelect: 'none',
@@ -925,14 +925,14 @@ export function BasesTable({ relpath, base, client }: Props) {
                       style={{
                         display: 'inline-block',
                         width: 14,
-                        color: 'var(--text-faint, #6b7280)',
+                        color: 'var(--text-faint)',
                       }}
                     >
                       {typeGlyph(c.def.type)}
                     </span>
-                    <span style={{ color: 'var(--text-normal, #e4e4e7)' }}>{c.def.displayName ?? c.name}</span>
+                    <span style={{ color: 'var(--text-normal)' }}>{c.def.displayName ?? c.name}</span>
                     {arrow && (
-                      <span style={{ marginLeft: 6, color: 'var(--interactive-accent, #60a5fa)' }}>
+                      <span style={{ marginLeft: 6, color: 'var(--interactive-accent)' }}>
                         {arrow}
                       </span>
                     )}
@@ -998,7 +998,7 @@ export function BasesTable({ relpath, base, client }: Props) {
                   style={{
                     padding: 24,
                     textAlign: 'center',
-                    color: 'var(--text-muted, #9ca3af)',
+                    color: 'var(--text-muted)',
                   }}
                 >
                   No records. Use "+ New row" to add one.
@@ -1047,7 +1047,7 @@ function Row({
     <tr
       onClick={onSelect}
       style={{
-        background: selected ? 'var(--interactive-accent-soft, #2a2a35)' : 'transparent',
+        background: selected ? 'var(--interactive-accent-soft)' : 'transparent',
         cursor: 'default',
         height: rowHeight,
       }}
@@ -1106,10 +1106,10 @@ function Cell({
   const readOnly = isReadOnly(def.type)
   const base: React.CSSProperties = {
     padding: '4px 10px',
-    borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
-    borderRight: '1px solid var(--background-modifier-border, #2a2a2e)',
+    borderBottom: '1px solid var(--background-modifier-border)',
+    borderRight: '1px solid var(--background-modifier-border)',
     verticalAlign: 'middle',
-    color: readOnly ? 'var(--text-muted, #9ca3af)' : 'var(--text-normal, #e4e4e7)',
+    color: readOnly ? 'var(--text-muted)' : 'var(--text-normal)',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -1227,7 +1227,7 @@ function FormulaCell({
 
   if (err) {
     return (
-      <span style={{ color: 'var(--risk, #f48771)' }} title={err}>
+      <span style={{ color: 'var(--risk)' }} title={err}>
         #err
       </span>
     )
@@ -1243,7 +1243,7 @@ function renderReadCell(def: FieldDefinition, value: unknown, field: string): Re
         href={value}
         target="_blank"
         rel="noreferrer"
-        style={{ color: 'var(--interactive-accent, #60a5fa)' }}
+        style={{ color: 'var(--interactive-accent)' }}
         onClick={(e) => e.stopPropagation()}
       >
         {s}
@@ -1261,7 +1261,7 @@ function renderReadCell(def: FieldDefinition, value: unknown, field: string): Re
               padding: '1px 6px',
               marginRight: 4,
               borderRadius: 4,
-              background: 'var(--background-secondary, #252529)',
+              background: 'var(--background-secondary)',
               fontSize: 11,
             }}
           >
@@ -1285,9 +1285,9 @@ function CellEditor({ def, value, onCommit, onCancel }: EditorProps) {
   const editorStyle: React.CSSProperties = {
     width: '100%',
     padding: '4px 10px',
-    background: 'var(--background-primary, #1e1e22)',
-    color: 'var(--text-normal, #e4e4e7)',
-    border: '1px solid var(--interactive-accent, #60a5fa)',
+    background: 'var(--background-primary)',
+    color: 'var(--text-normal)',
+    border: '1px solid var(--interactive-accent)',
     outline: 'none',
     fontSize: 12,
     fontFamily: 'inherit',
@@ -1471,9 +1471,9 @@ function filenameStem(relpath: string): string {
 
 const toolbarBtnStyle: React.CSSProperties = {
   padding: '3px 8px',
-  background: 'var(--background-secondary, #252529)',
-  color: 'var(--text-normal, #e4e4e7)',
-  border: '1px solid var(--background-modifier-border, #2a2a2e)',
+  background: 'var(--background-secondary)',
+  color: 'var(--text-normal)',
+  border: '1px solid var(--background-modifier-border)',
   borderRadius: 3,
   fontSize: 11,
   cursor: 'pointer',

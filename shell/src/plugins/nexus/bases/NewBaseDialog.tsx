@@ -136,16 +136,16 @@ export function NewBaseDialog() {
             }}
             style={{
               padding: '6px 10px',
-              background: 'var(--background-secondary, #252529)',
+              background: 'var(--background-secondary)',
               color: 'var(--text-normal)',
-              border: '1px solid var(--divider-color, #2a2a2e)',
+              border: '1px solid var(--divider-color)',
               borderRadius: 'var(--radius-s)',
               font: 'inherit',
               outline: 'none',
             }}
           />
           {current.defaultParent && (
-            <span style={{ color: 'var(--text-faint, #6b7280)', fontSize: 11 }}>
+            <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>
               in {current.defaultParent}/
             </span>
           )}
@@ -171,10 +171,10 @@ export function NewBaseDialog() {
                     textAlign: 'left',
                     padding: '8px 10px',
                     background: selected
-                      ? 'var(--interactive-accent-soft, #2a2a35)'
-                      : 'var(--background-secondary, #252529)',
+                      ? 'var(--interactive-accent-soft)'
+                      : 'var(--background-secondary)',
                     color: 'var(--text-normal)',
-                    border: `1px solid ${selected ? 'var(--interactive-accent, #60a5fa)' : 'var(--divider-color, #2a2a2e)'}`,
+                    border: `1px solid ${selected ? 'var(--interactive-accent)' : 'var(--divider-color)'}`,
                     borderRadius: 'var(--radius-s)',
                     font: 'inherit',
                     cursor: 'pointer',
@@ -194,7 +194,7 @@ export function NewBaseDialog() {
         </div>
 
         {err && (
-          <div style={{ color: 'var(--risk, #f48771)', fontSize: 12 }}>{err}</div>
+          <div style={{ color: 'var(--risk)', fontSize: 12 }}>{err}</div>
         )}
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -221,7 +221,7 @@ export function NewBaseDialog() {
             onClick={() => void submit()}
             style={{
               padding: '6px 14px',
-              background: 'var(--interactive-accent, #60a5fa)',
+              background: 'var(--interactive-accent)',
               color: 'var(--background-primary)',
               border: 'none',
               borderRadius: 'var(--radius-s)',
