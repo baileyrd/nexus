@@ -55,9 +55,9 @@ export function AgentView({
         display: 'flex',
         width: '100%',
         height: '100%',
-        background: 'var(--bg)',
-        color: 'var(--fg)',
-        fontFamily: 'var(--f-ui)',
+        background: 'var(--background-primary)',
+        color: 'var(--text-normal)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 'var(--ui-size, 13px)',
       }}
     >
@@ -93,8 +93,8 @@ function HistoryColumn({
         flex: '0 0 240px',
         display: 'flex',
         flexDirection: 'column',
-        borderRight: '1px solid var(--line)',
-        background: 'var(--bg-raised)',
+        borderRight: '1px solid var(--background-modifier-border)',
+        background: 'var(--background-secondary)',
       }}
     >
       <div
@@ -103,14 +103,14 @@ function HistoryColumn({
           alignItems: 'center',
           gap: 8,
           padding: '6px 10px',
-          borderBottom: '1px solid var(--line-soft)',
+          borderBottom: '1px solid var(--divider-color)',
           flex: '0 0 auto',
         }}
       >
         <span
           style={{
             flex: '1 1 auto',
-            color: 'var(--fg-muted)',
+            color: 'var(--text-muted)',
             fontSize: 11,
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
@@ -124,9 +124,9 @@ function HistoryColumn({
         {error ? (
           <Centered colour="var(--risk)">{error}</Centered>
         ) : loading && history.length === 0 ? (
-          <Centered colour="var(--fg-dim)">Loading…</Centered>
+          <Centered colour="var(--text-faint)">Loading…</Centered>
         ) : history.length === 0 ? (
-          <Centered colour="var(--fg-dim)">No past runs.</Centered>
+          <Centered colour="var(--text-faint)">No past runs.</Centered>
         ) : (
           history.map((h) => (
             <HistoryItem
@@ -156,7 +156,7 @@ function HistoryItem({
 }) {
   const success = row.success === true ? 'ok' : row.success === false ? 'failed' : 'unknown'
   const colour =
-    success === 'ok' ? 'var(--ok)' : success === 'failed' ? 'var(--risk)' : 'var(--fg-dim)'
+    success === 'ok' ? 'var(--ok)' : success === 'failed' ? 'var(--risk)' : 'var(--text-faint)'
   return (
     <div
       onClick={onClick}
@@ -172,12 +172,12 @@ function HistoryItem({
         columnGap: 6,
         padding: '6px 10px',
         cursor: 'pointer',
-        borderBottom: '1px solid var(--line-soft)',
-        background: active ? 'var(--bg-hover)' : 'transparent',
-        borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+        borderBottom: '1px solid var(--divider-color)',
+        background: active ? 'var(--background-modifier-hover)' : 'transparent',
+        borderLeft: `2px solid ${active ? 'var(--interactive-accent)' : 'transparent'}`,
       }}
       onMouseEnter={(e) => {
-        if (!active) (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-hover)'
+        if (!active) (e.currentTarget as HTMLDivElement).style.background = 'var(--background-modifier-hover)'
       }}
       onMouseLeave={(e) => {
         if (!active) (e.currentTarget as HTMLDivElement).style.background = 'transparent'
@@ -196,7 +196,7 @@ function HistoryItem({
             }}
             title={row.goal ?? row.plan_id}
           >
-            {row.goal ?? <em style={{ color: 'var(--fg-dim)' }}>(no goal)</em>}
+            {row.goal ?? <em style={{ color: 'var(--text-faint)' }}>(no goal)</em>}
           </span>
         </div>
         <div
@@ -204,8 +204,8 @@ function HistoryItem({
             display: 'flex',
             gap: 8,
             fontSize: 10,
-            color: 'var(--fg-dim)',
-            fontFamily: 'var(--f-mono, monospace)',
+            color: 'var(--text-faint)',
+            fontFamily: 'var(--font-monospace, monospace)',
           }}
         >
           <span>{row.steps} step{row.steps === 1 ? '' : 's'}</span>
@@ -224,10 +224,10 @@ function HistoryItem({
         }}
         onMouseEnter={(e) => {
           (e.currentTarget as HTMLButtonElement).style.color = 'var(--risk)'
-          ;(e.currentTarget as HTMLButtonElement).style.background = 'var(--bg)'
+          ;(e.currentTarget as HTMLButtonElement).style.background = 'var(--background-primary)'
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = 'var(--fg-dim)'
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-faint)'
           ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
         }}
         style={{
@@ -239,9 +239,9 @@ function HistoryItem({
           padding: 0,
           border: 0,
           background: 'transparent',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           cursor: 'pointer',
-          borderRadius: 'var(--r)',
+          borderRadius: 'var(--radius-s)',
           flex: '0 0 auto',
         }}
       >
@@ -292,13 +292,13 @@ function RunColumn({
 
   return (
     <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ padding: 16, borderBottom: '1px solid var(--line-soft)', flex: '0 0 auto' }}>
+      <div style={{ padding: 16, borderBottom: '1px solid var(--divider-color)', flex: '0 0 auto' }}>
         <div
           style={{
             fontSize: 11,
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
-            color: 'var(--fg-muted)',
+            color: 'var(--text-muted)',
             marginBottom: 6,
           }}
         >
@@ -314,10 +314,10 @@ function RunColumn({
             width: '100%',
             boxSizing: 'border-box',
             padding: 8,
-            background: 'var(--bg-raised)',
-            color: 'var(--fg)',
-            border: '1px solid var(--line-soft)',
-            borderRadius: 'var(--r)',
+            background: 'var(--background-secondary)',
+            color: 'var(--text-normal)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-s)',
             font: 'inherit',
             resize: 'vertical',
             outline: 'none',
@@ -363,7 +363,7 @@ function RunColumn({
             onStopRun={onStopRun}
           />
         ) : (
-          <div style={{ color: 'var(--fg-dim)', textAlign: 'center', marginTop: 32 }}>
+          <div style={{ color: 'var(--text-faint)', textAlign: 'center', marginTop: 32 }}>
             Enter a goal and press Plan to generate steps, or Run to plan + execute in one go.
           </div>
         )}
@@ -388,9 +388,9 @@ function ModeToggle({
       title="Auto = run all steps. Step-by-step = approve each step (no history persistence)."
       style={{
         display: 'inline-flex',
-        background: 'var(--bg-raised)',
-        border: '1px solid var(--line-soft)',
-        borderRadius: 'var(--r)',
+        background: 'var(--background-secondary)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
         overflow: 'hidden',
         opacity: disabled ? 0.5 : 1,
       }}
@@ -403,8 +403,8 @@ function ModeToggle({
           disabled={disabled}
           style={{
             padding: '4px 8px',
-            background: value === m ? 'var(--accent)' : 'transparent',
-            color: value === m ? 'var(--bg)' : 'var(--fg-muted)',
+            background: value === m ? 'var(--interactive-accent)' : 'transparent',
+            color: value === m ? 'var(--background-primary)' : 'var(--text-muted)',
             border: 0,
             font: 'inherit',
             fontSize: 11,
@@ -447,10 +447,10 @@ function ArchetypeSelect({ disabled }: { disabled: boolean }) {
       }}
       style={{
         padding: '4px 6px',
-        background: 'var(--bg-raised)',
-        color: 'var(--fg)',
-        border: '1px solid var(--line-soft)',
-        borderRadius: 'var(--r)',
+        background: 'var(--background-secondary)',
+        color: 'var(--text-normal)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
         font: 'inherit',
         fontSize: 11,
         cursor: disabled ? 'default' : 'pointer',
@@ -497,19 +497,19 @@ function PlanView({
             fontSize: 11,
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
-            color: 'var(--fg-muted)',
+            color: 'var(--text-muted)',
           }}
         >
           Plan
         </span>
-        <span style={{ color: 'var(--fg-dim)', fontSize: 11, fontFamily: 'var(--f-mono, monospace)' }}>
+        <span style={{ color: 'var(--text-faint)', fontSize: 11, fontFamily: 'var(--font-monospace, monospace)' }}>
           {plan.id}
         </span>
         {phase === 'awaiting' ? (
-          <span style={{ color: 'var(--accent)', fontSize: 11 }}>Awaiting approval…</span>
+          <span style={{ color: 'var(--interactive-accent)', fontSize: 11 }}>Awaiting approval…</span>
         ) : null}
       </div>
-      <div style={{ color: 'var(--fg)', fontSize: 13, lineHeight: 1.45 }}>{plan.goal}</div>
+      <div style={{ color: 'var(--text-normal)', fontSize: 13, lineHeight: 1.45 }}>{plan.goal}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
         {plan.steps.map((step, idx) => {
           const runtime = stepRuntime[step.id] ?? { status: 'queued' as StepStatus, error: null }
@@ -577,16 +577,16 @@ function StepRow({
         gridTemplateColumns: '24px 1fr auto',
         gap: 8,
         padding: '8px 10px',
-        background: awaitingApproval ? 'var(--bg)' : 'var(--bg-raised)',
-        border: `1px solid ${awaitingApproval ? 'var(--accent)' : 'var(--line-soft)'}`,
-        borderRadius: 'var(--r)',
+        background: awaitingApproval ? 'var(--background-primary)' : 'var(--background-secondary)',
+        border: `1px solid ${awaitingApproval ? 'var(--interactive-accent)' : 'var(--divider-color)'}`,
+        borderRadius: 'var(--radius-s)',
       }}
     >
       <span
         style={{
-          fontFamily: 'var(--f-mono, monospace)',
+          fontFamily: 'var(--font-monospace, monospace)',
           fontSize: 11,
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           textAlign: 'right',
           paddingTop: 1,
         }}
@@ -594,7 +594,7 @@ function StepRow({
         {index + 1}.
       </span>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-        <div style={{ color: 'var(--fg)', fontSize: 13, lineHeight: 1.4 }}>{step.description}</div>
+        <div style={{ color: 'var(--text-normal)', fontSize: 13, lineHeight: 1.4 }}>{step.description}</div>
         {step.tool_call ? (
           <div
             style={{
@@ -602,20 +602,20 @@ function StepRow({
               gap: 6,
               alignItems: 'center',
               fontSize: 11,
-              color: 'var(--fg-dim)',
-              fontFamily: 'var(--f-mono, monospace)',
+              color: 'var(--text-faint)',
+              fontFamily: 'var(--font-monospace, monospace)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
             title={`${step.tool_call.target_plugin_id}::${step.tool_call.command_id}`}
           >
-            <span style={{ color: 'var(--fg-muted)' }}>{step.tool_call.target_plugin_id}</span>
+            <span style={{ color: 'var(--text-muted)' }}>{step.tool_call.target_plugin_id}</span>
             <span>·</span>
             <span>{step.tool_call.command_id}</span>
           </div>
         ) : (
-          <div style={{ fontSize: 11, color: 'var(--fg-dim)', fontStyle: 'italic' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', fontStyle: 'italic' }}>
             informational — no tool call
           </div>
         )}
@@ -628,14 +628,14 @@ function StepRow({
             style={{
               margin: '4px 0 0',
               padding: 8,
-              background: 'var(--bg)',
-              border: '1px solid var(--line-soft)',
-              borderRadius: 'var(--r)',
+              background: 'var(--background-primary)',
+              border: '1px solid var(--divider-color)',
+              borderRadius: 'var(--radius-s)',
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
-              fontFamily: 'var(--f-mono, monospace)',
+              fontFamily: 'var(--font-monospace, monospace)',
               fontSize: 11,
-              color: 'var(--fg-muted)',
+              color: 'var(--text-muted)',
               maxHeight: 240,
               overflow: 'auto',
             }}
@@ -663,7 +663,7 @@ function StepRow({
             fontSize: 10,
             background: palette.bg,
             color: palette.fg,
-            border: palette.border ? '1px solid var(--line-soft)' : 'none',
+            border: palette.border ? '1px solid var(--divider-color)' : 'none',
             flex: '0 0 auto',
           }}
         >
@@ -706,10 +706,10 @@ function SmallButton({
 }) {
   const styles =
     tone === 'primary'
-      ? { bg: 'var(--accent)', fg: 'var(--bg)', border: 'none' }
+      ? { bg: 'var(--interactive-accent)', fg: 'var(--background-primary)', border: 'none' }
       : tone === 'danger'
-        ? { bg: 'var(--bg-raised)', fg: 'var(--risk)', border: '1px solid var(--risk)' }
-        : { bg: 'var(--bg-raised)', fg: 'var(--fg-muted)', border: '1px solid var(--line-soft)' }
+        ? { bg: 'var(--background-secondary)', fg: 'var(--risk)', border: '1px solid var(--risk)' }
+        : { bg: 'var(--background-secondary)', fg: 'var(--text-muted)', border: '1px solid var(--divider-color)' }
   return (
     <button
       type="button"
@@ -719,7 +719,7 @@ function SmallButton({
         background: styles.bg,
         color: styles.fg,
         border: styles.border,
-        borderRadius: 'var(--r)',
+        borderRadius: 'var(--radius-s)',
         font: 'inherit',
         fontSize: 10,
         cursor: 'pointer',
@@ -744,11 +744,11 @@ function previewJson(value: unknown, max = 500): string {
 }
 
 const STATUS_PALETTE: Record<StepStatus, { bg: string; fg: string; label: string; border?: boolean }> = {
-  queued: { bg: 'var(--bg)', fg: 'var(--fg-dim)', label: 'queued', border: true },
-  running: { bg: 'var(--accent)', fg: 'var(--bg)', label: 'running' },
-  ok: { bg: 'var(--ok)', fg: 'var(--bg)', label: 'ok' },
-  failed: { bg: 'var(--risk)', fg: 'var(--bg)', label: 'failed' },
-  skipped: { bg: 'var(--bg)', fg: 'var(--fg-dim)', label: 'skipped', border: true },
+  queued: { bg: 'var(--background-primary)', fg: 'var(--text-faint)', label: 'queued', border: true },
+  running: { bg: 'var(--interactive-accent)', fg: 'var(--background-primary)', label: 'running' },
+  ok: { bg: 'var(--ok)', fg: 'var(--background-primary)', label: 'ok' },
+  failed: { bg: 'var(--risk)', fg: 'var(--background-primary)', label: 'failed' },
+  skipped: { bg: 'var(--background-primary)', fg: 'var(--text-faint)', label: 'skipped', border: true },
 }
 
 function IconButton({
@@ -772,7 +772,7 @@ function IconButton({
       onClick={onClick}
       disabled={disabled}
       onMouseEnter={(e) => {
-        if (!disabled) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
+        if (!disabled) (e.currentTarget as HTMLButtonElement).style.background = 'var(--background-modifier-hover)'
       }}
       onMouseLeave={(e) => {
         (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
@@ -786,9 +786,9 @@ function IconButton({
         padding: 0,
         border: 0,
         background: 'transparent',
-        color: 'var(--fg-muted)',
+        color: 'var(--text-muted)',
         cursor: disabled ? 'default' : 'pointer',
-        borderRadius: 'var(--r)',
+        borderRadius: 'var(--radius-s)',
         opacity: disabled ? 0.5 : 1,
       }}
     >
@@ -815,10 +815,10 @@ function ActionButton({
       disabled={disabled}
       style={{
         padding: '6px 14px',
-        background: primary ? 'var(--accent)' : 'var(--bg-raised)',
-        color: primary ? 'var(--bg)' : 'var(--fg)',
-        border: primary ? 'none' : '1px solid var(--line-soft)',
-        borderRadius: 'var(--r)',
+        background: primary ? 'var(--interactive-accent)' : 'var(--background-secondary)',
+        color: primary ? 'var(--background-primary)' : 'var(--text-normal)',
+        border: primary ? 'none' : '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
         font: 'inherit',
         fontWeight: 500,
         cursor: disabled ? 'default' : 'pointer',

@@ -37,19 +37,19 @@ export interface FilesContextMenuProps {
 const PANEL_STYLE: CSSProperties = {
   position: 'fixed',
   zIndex: zIndex.dropdown,
-  background: 'var(--background-primary, var(--bg-raised, #1e1e1e))',
-  border: '1px solid var(--divider-color, var(--line, #333))',
+  background: 'var(--background-primary, var(--background-secondary, #1e1e1e))',
+  border: '1px solid var(--divider-color, var(--background-modifier-border, #333))',
   borderRadius: 6,
   boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
   padding: 4,
   fontSize: 12,
-  fontFamily: 'var(--f-ui, inherit)',
+  fontFamily: 'var(--font-interface, inherit)',
   minWidth: 180,
 }
 
 const SEPARATOR_STYLE: CSSProperties = {
   height: 1,
-  background: 'var(--divider-color, var(--line, #333))',
+  background: 'var(--divider-color, var(--background-modifier-border, #333))',
   margin: '4px 0',
 }
 
@@ -182,11 +182,11 @@ function MenuRow({
         border: 0,
         borderRadius: 4,
         background: active && !item.disabled
-          ? 'var(--background-modifier-hover, var(--bg-hover, rgba(255,255,255,0.06)))'
+          ? 'var(--background-modifier-hover, rgba(255,255,255,0.06))'
           : 'transparent',
         color: item.disabled
-          ? 'var(--text-faint, var(--fg-dim, #666))'
-          : 'var(--text-normal, var(--fg, #ddd))',
+          ? 'var(--text-faint, #666)'
+          : 'var(--text-normal, #ddd)',
         cursor: item.disabled ? 'default' : 'pointer',
         font: 'inherit',
       }}

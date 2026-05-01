@@ -631,8 +631,8 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
           style={{
             padding: 8,
             marginBottom: 12,
-            background: 'var(--color-error-bg, #fdd)',
-            color: 'var(--color-error, #900)',
+            background: 'var(--risk-soft, #fdd)',
+            color: 'var(--risk, #900)',
             borderRadius: 4,
           }}
         >
@@ -818,7 +818,7 @@ function SnippetRow({
         alignItems: 'flex-start',
         gap: 8,
         padding: '8px 6px',
-        borderBottom: '1px solid var(--color-border, #e0e0e0)',
+        borderBottom: '1px solid var(--background-modifier-border, #e0e0e0)',
       }}
     >
       <input
@@ -959,8 +959,8 @@ function KeybindingsTab() {
           style={{
             padding: 8,
             marginBottom: 12,
-            background: 'var(--color-error-bg, #fdd)',
-            color: 'var(--color-error, #900)',
+            background: 'var(--risk-soft, #fdd)',
+            color: 'var(--risk, #900)',
             borderRadius: 4,
           }}
         >
@@ -1102,7 +1102,7 @@ function KeybindingsTab() {
 const cellStyle: React.CSSProperties = {
   textAlign: 'left',
   padding: '8px 6px',
-  borderBottom: '1px solid var(--color-border, #e0e0e0)',
+  borderBottom: '1px solid var(--background-modifier-border, #e0e0e0)',
   verticalAlign: 'top',
 }
 
@@ -1177,9 +1177,9 @@ function ChordCaptureInput({
       style={{
         width: '100%',
         padding: '4px 6px',
-        border: '1px solid var(--color-accent, #06f)',
+        border: '1px solid var(--interactive-accent, #06f)',
         borderRadius: 3,
-        background: 'var(--color-bg, #fff)',
+        background: 'var(--background-primary, #fff)',
       }}
     />
   )
@@ -1659,8 +1659,8 @@ function CommunityPluginRow({
               style={{
                 padding: '2px 8px',
                 background: 'transparent',
-                color: 'var(--fg-dim, #888)',
-                border: '1px solid var(--color-border, #e0e0e0)',
+                color: 'var(--text-faint, #888)',
+                border: '1px solid var(--background-modifier-border, #e0e0e0)',
                 borderRadius: 3,
                 fontSize: '0.82em',
                 cursor: 'pointer',
@@ -1776,7 +1776,7 @@ function CapabilityChipsRow({
               color: c.fg,
               border: `1px solid ${c.border}`,
               fontSize: '0.72em',
-              fontFamily: 'var(--f-mono, monospace)',
+              fontFamily: 'var(--font-monospace, monospace)',
               fontWeight: 500,
               lineHeight: 1.4,
               whiteSpace: 'nowrap',
@@ -1799,7 +1799,7 @@ const settingsChipRowStyle: React.CSSProperties = {
 
 const settingsChipMutedStyle: React.CSSProperties = {
   fontSize: '0.72em',
-  fontFamily: 'var(--f-mono, monospace)',
+  fontFamily: 'var(--font-monospace, monospace)',
   fontStyle: 'italic',
   opacity: 0.55,
 }

@@ -105,9 +105,9 @@ export function PluginsMgmtView() {
           width: 720,
           maxWidth: '90vw',
           maxHeight: '75vh',
-          background: 'var(--bg-raised)',
-          border: '1px solid var(--line)',
-          borderRadius: 'var(--r-lg)',
+          background: 'var(--background-secondary)',
+          border: '1px solid var(--background-modifier-border)',
+          borderRadius: 'var(--radius-l)',
           boxShadow: 'var(--shadow)',
           overflow: 'hidden',
           display: 'flex',
@@ -122,13 +122,13 @@ export function PluginsMgmtView() {
             justifyContent: 'space-between',
             gap: 12,
             padding: '12px 16px',
-            borderBottom: '1px solid var(--line-soft)',
+            borderBottom: '1px solid var(--divider-color)',
           }}
         >
           <div
             style={{
-              color: 'var(--fg)',
-              fontFamily: 'var(--f-ui)',
+              color: 'var(--text-normal)',
+              fontFamily: 'var(--font-interface)',
               fontSize: 15,
               fontWeight: 600,
             }}
@@ -141,8 +141,8 @@ export function PluginsMgmtView() {
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 6,
-                color: 'var(--fg-dim)',
-                fontFamily: 'var(--f-ui)',
+                color: 'var(--text-faint)',
+                fontFamily: 'var(--font-interface)',
                 fontSize: 12,
                 cursor: 'pointer',
                 userSelect: 'none',
@@ -167,12 +167,12 @@ export function PluginsMgmtView() {
               autoComplete="off"
               style={{
                 width: 260,
-                background: 'var(--bg)',
-                border: '1px solid var(--line-soft)',
-                borderRadius: 'var(--r)',
+                background: 'var(--background-primary)',
+                border: '1px solid var(--divider-color)',
+                borderRadius: 'var(--radius-s)',
                 outline: 0,
-                color: 'var(--fg)',
-                fontFamily: 'var(--f-ui)',
+                color: 'var(--text-normal)',
+                fontFamily: 'var(--font-interface)',
                 fontSize: 13,
                 padding: '6px 10px',
               }}
@@ -193,8 +193,8 @@ export function PluginsMgmtView() {
               style={{
                 padding: '32px 16px',
                 textAlign: 'center',
-                color: 'var(--fg-dim)',
-                fontFamily: 'var(--f-ui)',
+                color: 'var(--text-faint)',
+                fontFamily: 'var(--font-interface)',
                 fontSize: 13,
               }}
             >
@@ -209,10 +209,10 @@ export function PluginsMgmtView() {
         <div
           style={{
             padding: '8px 16px',
-            borderTop: '1px solid var(--line-soft)',
+            borderTop: '1px solid var(--divider-color)',
             textAlign: 'right',
-            color: 'var(--fg-dim)',
-            fontFamily: 'var(--f-ui)',
+            color: 'var(--text-faint)',
+            fontFamily: 'var(--font-interface)',
             fontSize: 11,
           }}
         >
@@ -272,14 +272,14 @@ function SectionHeader({ label }: { label: string }) {
     <div
       style={{
         padding: '8px 16px 6px 16px',
-        background: 'var(--bg)',
-        color: 'var(--fg-muted)',
-        fontFamily: 'var(--f-ui)',
+        background: 'var(--background-primary)',
+        color: 'var(--text-muted)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 10,
         fontWeight: 600,
         letterSpacing: '0.08em',
         textTransform: 'uppercase',
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: '1px solid var(--divider-color)',
         position: 'sticky',
         top: 0,
         zIndex: 1,
@@ -303,8 +303,8 @@ function BuiltInRow({ row }: BuiltInRowProps) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              color: 'var(--fg)',
-              fontFamily: 'var(--f-ui)',
+              color: 'var(--text-normal)',
+              fontFamily: 'var(--font-interface)',
               fontSize: 13,
               fontWeight: 500,
             }}
@@ -313,8 +313,8 @@ function BuiltInRow({ row }: BuiltInRowProps) {
           </div>
           <div
             style={{
-              color: 'var(--fg-dim)',
-              fontFamily: 'var(--f-mono)',
+              color: 'var(--text-faint)',
+              fontFamily: 'var(--font-monospace)',
               fontSize: 11,
               marginTop: 2,
             }}
@@ -325,8 +325,8 @@ function BuiltInRow({ row }: BuiltInRowProps) {
         <StateBadge state={row.state} error={row.error} />
         <div
           style={{
-            color: 'var(--fg-muted)',
-            fontFamily: 'var(--f-mono)',
+            color: 'var(--text-muted)',
+            fontFamily: 'var(--font-monospace)',
             fontSize: 11,
             minWidth: 48,
             textAlign: 'right',
@@ -379,8 +379,8 @@ function CommunityRow({ row }: CommunityRowProps) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              color: 'var(--fg)',
-              fontFamily: 'var(--f-ui)',
+              color: 'var(--text-normal)',
+              fontFamily: 'var(--font-interface)',
               fontSize: 13,
               fontWeight: 500,
             }}
@@ -389,8 +389,8 @@ function CommunityRow({ row }: CommunityRowProps) {
           </div>
           <div
             style={{
-              color: 'var(--fg-dim)',
-              fontFamily: 'var(--f-mono)',
+              color: 'var(--text-faint)',
+              fontFamily: 'var(--font-monospace)',
               fontSize: 11,
               marginTop: 2,
             }}
@@ -406,8 +406,8 @@ function CommunityRow({ row }: CommunityRowProps) {
           {row.description && (
             <div
               style={{
-                color: 'var(--fg-muted)',
-                fontFamily: 'var(--f-ui)',
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-interface)',
                 fontSize: 12,
                 marginTop: 4,
               }}
@@ -420,8 +420,8 @@ function CommunityRow({ row }: CommunityRowProps) {
               style={{
                 color: summary.denied
                   ? 'var(--risk)'
-                  : 'var(--fg-muted)',
-                fontFamily: 'var(--f-ui)',
+                  : 'var(--text-muted)',
+                fontFamily: 'var(--font-interface)',
                 fontSize: 11,
                 marginTop: 4,
               }}
@@ -442,7 +442,7 @@ function CommunityRow({ row }: CommunityRowProps) {
               title={incompatTitle}
               style={{
                 color: 'var(--risk)',
-                fontFamily: 'var(--f-ui)',
+                fontFamily: 'var(--font-interface)',
                 fontSize: 11,
                 marginTop: 4,
               }}
@@ -460,10 +460,10 @@ function CommunityRow({ row }: CommunityRowProps) {
             style={{
               padding: '2px 8px',
               background: 'transparent',
-              color: 'var(--fg-dim)',
-              border: '1px solid var(--line-soft)',
-              borderRadius: 'var(--r)',
-              fontFamily: 'var(--f-ui)',
+              color: 'var(--text-faint)',
+              border: '1px solid var(--divider-color)',
+              borderRadius: 'var(--radius-s)',
+              fontFamily: 'var(--font-interface)',
               fontSize: 11,
               cursor: 'pointer',
             }}
@@ -478,8 +478,8 @@ function CommunityRow({ row }: CommunityRowProps) {
         />
         <div
           style={{
-            color: 'var(--fg-muted)',
-            fontFamily: 'var(--f-mono)',
+            color: 'var(--text-muted)',
+            fontFamily: 'var(--font-monospace)',
             fontSize: 11,
             minWidth: 48,
             textAlign: 'right',
@@ -519,8 +519,8 @@ function AvailableRow({ row }: AvailableRowProps) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              color: 'var(--fg)',
-              fontFamily: 'var(--f-ui)',
+              color: 'var(--text-normal)',
+              fontFamily: 'var(--font-interface)',
               fontSize: 13,
               fontWeight: 500,
             }}
@@ -529,8 +529,8 @@ function AvailableRow({ row }: AvailableRowProps) {
           </div>
           <div
             style={{
-              color: 'var(--fg-dim)',
-              fontFamily: 'var(--f-mono)',
+              color: 'var(--text-faint)',
+              fontFamily: 'var(--font-monospace)',
               fontSize: 11,
               marginTop: 2,
             }}
@@ -541,10 +541,10 @@ function AvailableRow({ row }: AvailableRowProps) {
         <div
           style={{
             padding: '2px 8px',
-            borderRadius: 'var(--r)',
-            background: 'color-mix(in oklch, var(--fg-muted) 15%, transparent)',
-            color: 'var(--fg-muted)',
-            fontFamily: 'var(--f-ui)',
+            borderRadius: 'var(--radius-s)',
+            background: 'color-mix(in oklch, var(--text-muted) 15%, transparent)',
+            color: 'var(--text-muted)',
+            fontFamily: 'var(--font-interface)',
             fontSize: 11,
             fontWeight: 500,
             minWidth: 60,
@@ -555,8 +555,8 @@ function AvailableRow({ row }: AvailableRowProps) {
         </div>
         <div
           style={{
-            color: 'var(--fg-muted)',
-            fontFamily: 'var(--f-mono)',
+            color: 'var(--text-muted)',
+            fontFamily: 'var(--font-monospace)',
             fontSize: 11,
             minWidth: 48,
             textAlign: 'right',
@@ -570,11 +570,11 @@ function AvailableRow({ row }: AvailableRowProps) {
           title="Add to plugins.enabled and reload to activate"
           style={{
             padding: '4px 12px',
-            background: 'var(--accent)',
-            color: 'var(--accent-ink)',
-            border: '1px solid var(--line)',
-            borderRadius: 'var(--r)',
-            fontFamily: 'var(--f-ui)',
+            background: 'var(--interactive-accent)',
+            color: 'var(--interactive-accent-ink)',
+            border: '1px solid var(--background-modifier-border)',
+            borderRadius: 'var(--radius-s)',
+            fontFamily: 'var(--font-interface)',
             fontSize: 11,
             fontWeight: 500,
             cursor: 'pointer',
@@ -605,10 +605,10 @@ function StateBadge({
       title={state === 'error' ? error ?? 'Error' : undefined}
       style={{
         padding: '2px 8px',
-        borderRadius: 'var(--r)',
+        borderRadius: 'var(--radius-s)',
         background: bg,
         color: fg,
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 11,
         fontWeight: 500,
         textTransform: 'capitalize',
@@ -637,8 +637,8 @@ function badgeColours(state: string): { bg: string; fg: string; label: string } 
     }
   }
   return {
-    bg: 'color-mix(in oklch, var(--fg-muted) 15%, transparent)',
-    fg: 'var(--fg-muted)',
+    bg: 'color-mix(in oklch, var(--text-muted) 15%, transparent)',
+    fg: 'var(--text-muted)',
     label: state || 'inactive',
   }
 }
@@ -662,8 +662,8 @@ function Toggle({
         width: 36,
         height: 18,
         borderRadius: 9,
-        border: '1px solid var(--line)',
-        background: enabled ? 'var(--accent)' : 'var(--bg)',
+        border: '1px solid var(--background-modifier-border)',
+        background: enabled ? 'var(--interactive-accent)' : 'var(--background-primary)',
         padding: 0,
         position: 'relative',
         cursor: disabled ? 'not-allowed' : 'pointer',
@@ -678,7 +678,7 @@ function Toggle({
           width: 12,
           height: 12,
           borderRadius: '50%',
-          background: enabled ? 'var(--accent-ink)' : 'var(--fg-muted)',
+          background: enabled ? 'var(--interactive-accent-ink)' : 'var(--text-muted)',
           position: 'absolute',
           top: 2,
           left: enabled ? 20 : 2,
@@ -746,11 +746,11 @@ function CapabilityChips({
             title={`${risk.toUpperCase()} — ${meta?.description ?? cap}`}
             style={{
               padding: '2px 8px',
-              borderRadius: 'var(--r)',
+              borderRadius: 'var(--radius-s)',
               background: c.bg,
               color: c.fg,
               border: `1px solid ${c.border}`,
-              fontFamily: 'var(--f-mono)',
+              fontFamily: 'var(--font-monospace)',
               fontSize: 10,
               fontWeight: 500,
               lineHeight: 1.4,
@@ -773,8 +773,8 @@ const chipRowStyle: React.CSSProperties = {
 }
 
 const mutedNoteStyle: React.CSSProperties = {
-  color: 'var(--fg-muted)',
-  fontFamily: 'var(--f-mono)',
+  color: 'var(--text-muted)',
+  fontFamily: 'var(--font-monospace)',
   fontSize: 10,
   fontStyle: 'italic',
 }
@@ -784,7 +784,7 @@ const mutedNoteStyle: React.CSSProperties = {
 const rowOuterStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  borderBottom: '1px solid var(--line-soft)',
+  borderBottom: '1px solid var(--divider-color)',
 }
 
 const rowStyle: React.CSSProperties = {

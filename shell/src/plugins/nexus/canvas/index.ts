@@ -116,7 +116,7 @@ export const canvasPlugin: Plugin = {
           return createElement('div', {
             style: {
               padding: 16,
-              color: 'var(--fg-muted, #9ca3af)',
+              color: 'var(--text-muted, #9ca3af)',
               fontSize: 12,
             },
           }, 'Canvas leaf without a path')

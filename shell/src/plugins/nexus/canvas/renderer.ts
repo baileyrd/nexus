@@ -215,10 +215,10 @@ export function readTheme(el: HTMLElement): Theme {
   return {
     // Read canonical Obsidian tokens first; legacy aliases as backup.
     bgMuted:  read('--background-primary',         '--bg-muted',  FALLBACK_THEME.bgMuted),
-    bgRaised: read('--background-secondary',        '--bg-raised', FALLBACK_THEME.bgRaised),
-    fg:       read('--text-normal',                 '--fg',        FALLBACK_THEME.fg),
-    fgMuted:  read('--text-muted',                  '--fg-muted',  FALLBACK_THEME.fgMuted),
-    accent:   read('--interactive-accent',          '--accent',    FALLBACK_THEME.accent),
+    bgRaised: read('--background-secondary',        '--background-secondary', FALLBACK_THEME.bgRaised),
+    fg:       read('--text-normal',                 '--text-normal',        FALLBACK_THEME.fg),
+    fgMuted:  read('--text-muted',                  '--text-muted',  FALLBACK_THEME.fgMuted),
+    accent:   read('--interactive-accent',          '--interactive-accent',    FALLBACK_THEME.accent),
     border:   read('--background-modifier-border',  '--divider-color', FALLBACK_THEME.border),
   }
 }

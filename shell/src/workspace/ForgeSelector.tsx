@@ -83,8 +83,8 @@ export function ForgeSelector(): JSX.Element {
       style={{
         flex: '0 0 auto',
         padding: '4px 6px',
-        borderTop: '1px solid var(--divider-color, var(--line, #333))',
-        background: 'var(--background-secondary, var(--bg-raised, #252526))',
+        borderTop: '1px solid var(--divider-color, var(--background-modifier-border, #333))',
+        background: 'var(--background-secondary, #252526)',
         fontSize: 12,
       }}
     >
@@ -100,7 +100,7 @@ export function ForgeSelector(): JSX.Element {
           gap: 8,
           background: 'transparent',
           border: 'none',
-          color: 'var(--fg)',
+          color: 'var(--text-normal)',
           cursor: 'pointer',
           padding: '6px 8px',
           borderRadius: 4,
@@ -108,7 +108,7 @@ export function ForgeSelector(): JSX.Element {
           font: 'inherit',
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'var(--bg-hover)'
+          e.currentTarget.style.background = 'var(--background-modifier-hover)'
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.background = 'transparent'
@@ -117,7 +117,7 @@ export function ForgeSelector(): JSX.Element {
         <Ic.chev
           width={14}
           height={14}
-          style={{ transform: 'rotate(-90deg)', flexShrink: 0, color: 'var(--fg-muted)' }}
+          style={{ transform: 'rotate(-90deg)', flexShrink: 0, color: 'var(--text-muted)' }}
         />
         <span
           style={{
@@ -141,8 +141,8 @@ export function ForgeSelector(): JSX.Element {
             left: anchorRect.left,
             bottom: window.innerHeight - anchorRect.top + 4,
             minWidth: Math.max(220, anchorRect.width),
-            background: 'var(--background-primary, var(--bg, #1e1e1e))',
-            border: '1px solid var(--divider-color, var(--line, #333))',
+            background: 'var(--background-primary, #1e1e1e)',
+            border: '1px solid var(--divider-color, var(--background-modifier-border, #333))',
             borderRadius: 6,
             boxShadow: '0 6px 16px rgba(0,0,0,0.4)',
             padding: '4px 0',
@@ -155,7 +155,7 @@ export function ForgeSelector(): JSX.Element {
             <div
               style={{
                 padding: '8px 12px',
-                color: 'var(--fg-dim)',
+                color: 'var(--text-faint)',
                 fontStyle: 'italic',
               }}
             >
@@ -177,14 +177,14 @@ export function ForgeSelector(): JSX.Element {
                   width: '100%',
                   background: 'transparent',
                   border: 'none',
-                  color: 'var(--fg)',
+                  color: 'var(--text-normal)',
                   cursor: 'pointer',
                   padding: '6px 12px',
                   textAlign: 'left',
                   font: 'inherit',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-hover)'
+                  e.currentTarget.style.background = 'var(--background-modifier-hover)'
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.background = 'transparent'
@@ -211,7 +211,7 @@ export function ForgeSelector(): JSX.Element {
               style={{
                 height: 1,
                 margin: '4px 0',
-                background: 'var(--divider-color, var(--line, #333))',
+                background: 'var(--divider-color, var(--background-modifier-border, #333))',
               }}
             />
           )}
@@ -225,14 +225,14 @@ export function ForgeSelector(): JSX.Element {
               width: '100%',
               background: 'transparent',
               border: 'none',
-              color: 'var(--fg)',
+              color: 'var(--text-normal)',
               cursor: 'pointer',
               padding: '6px 12px',
               textAlign: 'left',
               font: 'inherit',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--bg-hover)'
+              e.currentTarget.style.background = 'var(--background-modifier-hover)'
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent'
@@ -254,14 +254,14 @@ export function ForgeSelector(): JSX.Element {
               width: '100%',
               background: 'transparent',
               border: 'none',
-              color: 'var(--fg)',
+              color: 'var(--text-normal)',
               cursor: 'pointer',
               padding: '6px 12px',
               textAlign: 'left',
               font: 'inherit',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--bg-hover)'
+              e.currentTarget.style.background = 'var(--background-modifier-hover)'
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent'

@@ -103,12 +103,12 @@ export function NewBaseDialog() {
       <div
         style={{
           width: 'min(520px, 100%)',
-          background: 'var(--bg)',
-          color: 'var(--fg)',
-          border: '1px solid var(--line)',
-          borderRadius: 'var(--r)',
+          background: 'var(--background-primary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--background-modifier-border)',
+          borderRadius: 'var(--radius-s)',
           boxShadow: '0 12px 48px rgba(0, 0, 0, 0.4)',
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           fontSize: 'var(--ui-size, 13px)',
           padding: 20,
           display: 'flex',
@@ -121,7 +121,7 @@ export function NewBaseDialog() {
         </div>
 
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>Name</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Name</span>
           <input
             ref={nameInputRef}
             type="text"
@@ -136,23 +136,23 @@ export function NewBaseDialog() {
             }}
             style={{
               padding: '6px 10px',
-              background: 'var(--bg-raised, #252529)',
-              color: 'var(--fg)',
-              border: '1px solid var(--line-soft, #2a2a2e)',
-              borderRadius: 'var(--r)',
+              background: 'var(--background-secondary, #252529)',
+              color: 'var(--text-normal)',
+              border: '1px solid var(--divider-color, #2a2a2e)',
+              borderRadius: 'var(--radius-s)',
               font: 'inherit',
               outline: 'none',
             }}
           />
           {current.defaultParent && (
-            <span style={{ color: 'var(--fg-dim, #6b7280)', fontSize: 11 }}>
+            <span style={{ color: 'var(--text-faint, #6b7280)', fontSize: 11 }}>
               in {current.defaultParent}/
             </span>
           )}
         </label>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>Template</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Template</span>
           <div
             style={{
               display: 'grid',
@@ -171,11 +171,11 @@ export function NewBaseDialog() {
                     textAlign: 'left',
                     padding: '8px 10px',
                     background: selected
-                      ? 'var(--bg-selection, #2a2a35)'
-                      : 'var(--bg-raised, #252529)',
-                    color: 'var(--fg)',
-                    border: `1px solid ${selected ? 'var(--accent, #60a5fa)' : 'var(--line-soft, #2a2a2e)'}`,
-                    borderRadius: 'var(--r)',
+                      ? 'var(--interactive-accent-soft, #2a2a35)'
+                      : 'var(--background-secondary, #252529)',
+                    color: 'var(--text-normal)',
+                    border: `1px solid ${selected ? 'var(--interactive-accent, #60a5fa)' : 'var(--divider-color, #2a2a2e)'}`,
+                    borderRadius: 'var(--radius-s)',
                     font: 'inherit',
                     cursor: 'pointer',
                     display: 'flex',
@@ -184,7 +184,7 @@ export function NewBaseDialog() {
                   }}
                 >
                   <span style={{ fontWeight: 500 }}>{t.label}</span>
-                  <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
                     {t.description}
                   </span>
                 </button>
@@ -204,10 +204,10 @@ export function NewBaseDialog() {
             onClick={() => resolve(null)}
             style={{
               padding: '6px 14px',
-              background: 'var(--bg-raised)',
-              color: 'var(--fg)',
-              border: '1px solid var(--line-soft)',
-              borderRadius: 'var(--r)',
+              background: 'var(--background-secondary)',
+              color: 'var(--text-normal)',
+              border: '1px solid var(--divider-color)',
+              borderRadius: 'var(--radius-s)',
               font: 'inherit',
               cursor: busy ? 'not-allowed' : 'pointer',
               opacity: busy ? 0.6 : 1,
@@ -221,10 +221,10 @@ export function NewBaseDialog() {
             onClick={() => void submit()}
             style={{
               padding: '6px 14px',
-              background: 'var(--accent, #60a5fa)',
-              color: 'var(--bg)',
+              background: 'var(--interactive-accent, #60a5fa)',
+              color: 'var(--background-primary)',
               border: 'none',
-              borderRadius: 'var(--r)',
+              borderRadius: 'var(--radius-s)',
               font: 'inherit',
               fontWeight: 500,
               cursor: busy ? 'not-allowed' : 'pointer',

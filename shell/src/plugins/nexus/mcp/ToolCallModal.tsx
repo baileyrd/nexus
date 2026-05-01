@@ -100,12 +100,12 @@ export function ToolCallModal({ onRun }: ToolCallModalProps) {
           maxHeight: '100%',
           display: 'flex',
           flexDirection: 'column',
-          background: 'var(--bg)',
-          color: 'var(--fg)',
-          border: '1px solid var(--line)',
-          borderRadius: 'var(--r)',
+          background: 'var(--background-primary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--background-modifier-border)',
+          borderRadius: 'var(--radius-s)',
           boxShadow: '0 12px 48px rgba(0, 0, 0, 0.4)',
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           fontSize: 'var(--ui-size, 13px)',
           overflow: 'hidden',
         }}
@@ -163,8 +163,8 @@ function Header({
         alignItems: 'center',
         gap: 8,
         padding: '10px 16px',
-        borderBottom: '1px solid var(--line-soft)',
-        background: 'var(--bg-raised)',
+        borderBottom: '1px solid var(--divider-color)',
+        background: 'var(--background-secondary)',
         flex: '0 0 auto',
       }}
     >
@@ -173,7 +173,7 @@ function Header({
           fontSize: 11,
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
         }}
       >
         Call tool
@@ -181,18 +181,18 @@ function Header({
       <span
         style={{
           flex: '1 1 auto',
-          fontFamily: 'var(--f-mono, monospace)',
+          fontFamily: 'var(--font-monospace, monospace)',
           fontSize: 12,
-          color: 'var(--fg)',
+          color: 'var(--text-normal)',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
         }}
         title={`${serverName}::${toolName}`}
       >
-        <span style={{ color: 'var(--fg-dim)' }}>{serverName}</span>
-        <span style={{ color: 'var(--fg-dim)' }}> · </span>
-        <span style={{ color: 'var(--accent)' }}>{toolName}</span>
+        <span style={{ color: 'var(--text-faint)' }}>{serverName}</span>
+        <span style={{ color: 'var(--text-faint)' }}> · </span>
+        <span style={{ color: 'var(--interactive-accent)' }}>{toolName}</span>
       </span>
       <button
         type="button"
@@ -200,7 +200,7 @@ function Header({
         onClick={onClose}
         disabled={disabled}
         onMouseEnter={(e) => {
-          if (!disabled) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
+          if (!disabled) (e.currentTarget as HTMLButtonElement).style.background = 'var(--background-modifier-hover)'
         }}
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
@@ -211,9 +211,9 @@ function Header({
           padding: 0,
           border: 0,
           background: 'transparent',
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
           cursor: disabled ? 'default' : 'pointer',
-          borderRadius: 'var(--r)',
+          borderRadius: 'var(--radius-s)',
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -245,7 +245,7 @@ const ArgsField = (() => {
             fontSize: 11,
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
-            color: 'var(--fg-muted)',
+            color: 'var(--text-muted)',
             marginBottom: 4,
           }}
         >
@@ -263,11 +263,11 @@ const ArgsField = (() => {
             width: '100%',
             boxSizing: 'border-box',
             padding: 8,
-            background: 'var(--bg-raised)',
-            color: 'var(--fg)',
-            border: '1px solid var(--line-soft)',
-            borderRadius: 'var(--r)',
-            fontFamily: 'var(--f-mono, monospace)',
+            background: 'var(--background-secondary)',
+            color: 'var(--text-normal)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-s)',
+            fontFamily: 'var(--font-monospace, monospace)',
             fontSize: 12,
             lineHeight: 1.45,
             resize: 'vertical',
@@ -299,10 +299,10 @@ function Footer({
         disabled={running}
         style={{
           padding: '6px 14px',
-          background: 'var(--accent)',
-          color: 'var(--bg)',
+          background: 'var(--interactive-accent)',
+          color: 'var(--background-primary)',
           border: 'none',
-          borderRadius: 'var(--r)',
+          borderRadius: 'var(--radius-s)',
           font: 'inherit',
           fontWeight: 500,
           cursor: running ? 'default' : 'pointer',
@@ -317,10 +317,10 @@ function Footer({
         disabled={running}
         style={{
           padding: '6px 14px',
-          background: 'var(--bg-raised)',
-          color: 'var(--fg)',
-          border: '1px solid var(--line-soft)',
-          borderRadius: 'var(--r)',
+          background: 'var(--background-secondary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--divider-color)',
+          borderRadius: 'var(--radius-s)',
           font: 'inherit',
           cursor: running ? 'default' : 'pointer',
           opacity: running ? 0.5 : 1,
@@ -342,10 +342,10 @@ function ErrorBanner({ message }: { message: string }) {
     <div
       style={{
         padding: '8px 10px',
-        background: 'var(--bg-raised)',
+        background: 'var(--background-secondary)',
         color: 'var(--risk)',
         border: '1px solid var(--risk)',
-        borderRadius: 'var(--r)',
+        borderRadius: 'var(--radius-s)',
         fontSize: 12,
         lineHeight: 1.4,
         whiteSpace: 'pre-wrap',
@@ -365,13 +365,13 @@ function ResultPanel({ result }: { result: ToolCallState['result'] }) {
           fontSize: 11,
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
-          color: result.isError ? 'var(--risk)' : 'var(--fg-muted)',
+          color: result.isError ? 'var(--risk)' : 'var(--text-muted)',
         }}
       >
         Result {result.isError ? '· tool reported error' : ''}
       </div>
       {result.content.length === 0 ? (
-        <div style={{ color: 'var(--fg-dim)', fontSize: 12, fontStyle: 'italic' }}>
+        <div style={{ color: 'var(--text-faint)', fontSize: 12, fontStyle: 'italic' }}>
           (empty)
         </div>
       ) : (
@@ -394,10 +394,10 @@ function ContentItem({ item }: { item: unknown }) {
           style={{
             margin: 0,
             padding: 8,
-            background: 'var(--bg-raised)',
-            border: '1px solid var(--line-soft)',
-            borderRadius: 'var(--r)',
-            fontFamily: 'var(--f-mono, monospace)',
+            background: 'var(--background-secondary)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-s)',
+            fontFamily: 'var(--font-monospace, monospace)',
             fontSize: 12,
             lineHeight: 1.45,
             whiteSpace: 'pre-wrap',
@@ -416,15 +416,15 @@ function ContentItem({ item }: { item: unknown }) {
       style={{
         margin: 0,
         padding: 8,
-        background: 'var(--bg-raised)',
-        border: '1px solid var(--line-soft)',
-        borderRadius: 'var(--r)',
-        fontFamily: 'var(--f-mono, monospace)',
+        background: 'var(--background-secondary)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
+        fontFamily: 'var(--font-monospace, monospace)',
         fontSize: 11,
         lineHeight: 1.45,
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
-        color: 'var(--fg-muted)',
+        color: 'var(--text-muted)',
         maxHeight: 320,
         overflow: 'auto',
       }}

@@ -33,9 +33,9 @@ export function McpView({ onRefresh, onConnect, onDisconnect, onExpand, onCallTo
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        background: 'var(--bg)',
-        color: 'var(--fg)',
-        fontFamily: 'var(--f-ui)',
+        background: 'var(--background-primary)',
+        color: 'var(--text-normal)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 'var(--ui-size, 13px)',
       }}
     >
@@ -44,9 +44,9 @@ export function McpView({ onRefresh, onConnect, onDisconnect, onExpand, onCallTo
         {loadError ? (
           <Centered colour="var(--risk)">{loadError}</Centered>
         ) : loading && servers.length === 0 ? (
-          <Centered colour="var(--fg-dim)">Loading…</Centered>
+          <Centered colour="var(--text-faint)">Loading…</Centered>
         ) : servers.length === 0 ? (
-          <Centered colour="var(--fg-dim)">
+          <Centered colour="var(--text-faint)">
             No MCP servers. Add a <code>[servers.&lt;name&gt;]</code> entry to <code>.forge/mcp.toml</code>.
           </Centered>
         ) : (
@@ -82,15 +82,15 @@ function Header({ onRefresh, loading, count }: HeaderProps) {
         alignItems: 'center',
         gap: 8,
         padding: '6px 10px',
-        borderBottom: '1px solid var(--line-soft)',
-        background: 'var(--bg-raised)',
+        borderBottom: '1px solid var(--divider-color)',
+        background: 'var(--background-secondary)',
         flex: '0 0 auto',
       }}
     >
       <span
         style={{
           flex: '1 1 auto',
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
           fontSize: 11,
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
@@ -105,7 +105,7 @@ function Header({ onRefresh, loading, count }: HeaderProps) {
         onClick={onRefresh}
         disabled={loading}
         onMouseEnter={(e) => {
-          if (!loading) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
+          if (!loading) (e.currentTarget as HTMLButtonElement).style.background = 'var(--background-modifier-hover)'
         }}
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
@@ -119,9 +119,9 @@ function Header({ onRefresh, loading, count }: HeaderProps) {
           padding: 0,
           border: 0,
           background: 'transparent',
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
           cursor: loading ? 'default' : 'pointer',
-          borderRadius: 'var(--r)',
+          borderRadius: 'var(--radius-s)',
           opacity: loading ? 0.5 : 1,
         }}
       >
@@ -145,7 +145,7 @@ function ServerRow({ server, state, expanded, onToggle, onConnect, onDisconnect,
   const status: ServerStatus = server.disabled ? 'idle' : state?.status ?? 'idle'
   const busy = status === 'connecting' || status === 'disconnecting'
   return (
-    <div style={{ borderBottom: '1px solid var(--line-soft)' }}>
+    <div style={{ borderBottom: '1px solid var(--divider-color)' }}>
       <div
         onClick={onToggle}
         role="button"
@@ -156,10 +156,10 @@ function ServerRow({ server, state, expanded, onToggle, onConnect, onDisconnect,
           gap: 4,
           padding: '8px 10px',
           cursor: 'pointer',
-          background: expanded ? 'var(--bg-raised)' : 'transparent',
+          background: expanded ? 'var(--background-secondary)' : 'transparent',
         }}
         onMouseEnter={(e) => {
-          if (!expanded) (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-hover)'
+          if (!expanded) (e.currentTarget as HTMLDivElement).style.background = 'var(--background-modifier-hover)'
         }}
         onMouseLeave={(e) => {
           if (!expanded) (e.currentTarget as HTMLDivElement).style.background = 'transparent'
@@ -172,7 +172,7 @@ function ServerRow({ server, state, expanded, onToggle, onConnect, onDisconnect,
               display: 'inline-flex',
               transition: 'transform 80ms',
               transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-              color: 'var(--fg-dim)',
+              color: 'var(--text-faint)',
             }}
           >
             <Icon name="chev" size={12} />
@@ -208,9 +208,9 @@ function ServerRow({ server, state, expanded, onToggle, onConnect, onDisconnect,
         <div
           style={{
             paddingLeft: 18,
-            color: 'var(--fg-dim)',
+            color: 'var(--text-faint)',
             fontSize: 11,
-            fontFamily: 'var(--f-mono, monospace)',
+            fontFamily: 'var(--font-monospace, monospace)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -244,21 +244,21 @@ function ConnectButton({ connected, busy, onConnect, onDisconnect }: ConnectButt
       onClick={onClick}
       disabled={busy}
       onMouseEnter={(e) => {
-        if (!busy) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
+        if (!busy) (e.currentTarget as HTMLButtonElement).style.background = 'var(--background-modifier-hover)'
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-raised)'
+        (e.currentTarget as HTMLButtonElement).style.background = 'var(--background-secondary)'
       }}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
         padding: '0 6px',
         height: 20,
-        background: 'var(--bg-raised)',
-        color: connected ? 'var(--accent)' : 'var(--fg-muted)',
-        border: '1px solid var(--line-soft)',
+        background: 'var(--background-secondary)',
+        color: connected ? 'var(--interactive-accent)' : 'var(--text-muted)',
+        border: '1px solid var(--divider-color)',
         cursor: busy ? 'default' : 'pointer',
-        borderRadius: 'var(--r)',
+        borderRadius: 'var(--radius-s)',
         fontSize: 10,
         opacity: busy ? 0.5 : 1,
         flex: '0 0 auto',
@@ -270,16 +270,16 @@ function ConnectButton({ connected, busy, onConnect, onDisconnect }: ConnectButt
 }
 
 function StatusPill({ status, disabled, error }: { status: ServerStatus; disabled: boolean; error: string | null }) {
-  if (disabled) return <Pill bg="var(--fg-dim)" label="disabled" title="disabled = true in mcp.toml" />
+  if (disabled) return <Pill bg="var(--text-faint)" label="disabled" title="disabled = true in mcp.toml" />
   switch (status) {
     case 'idle':
-      return <Pill bg="var(--bg)" border label="idle" title="Not connected" />
+      return <Pill bg="var(--background-primary)" border label="idle" title="Not connected" />
     case 'connecting':
-      return <Pill bg="var(--accent)" label="…" title="Connecting" />
+      return <Pill bg="var(--interactive-accent)" label="…" title="Connecting" />
     case 'connected':
       return <Pill bg="var(--ok)" label="up" title="Connected" />
     case 'disconnecting':
-      return <Pill bg="var(--accent)" label="…" title="Disconnecting" />
+      return <Pill bg="var(--interactive-accent)" label="…" title="Disconnecting" />
     case 'error':
       return <Pill bg="var(--risk)" label="error" title={error ?? 'Error'} />
   }
@@ -296,8 +296,8 @@ function Pill({ bg, label, title, border }: { bg: string; label: string; title: 
         borderRadius: 999,
         fontSize: 10,
         background: bg,
-        color: border ? 'var(--fg-dim)' : 'var(--bg)',
-        border: border ? '1px solid var(--line-soft)' : 'none',
+        color: border ? 'var(--text-faint)' : 'var(--background-primary)',
+        border: border ? '1px solid var(--divider-color)' : 'none',
         flex: '0 0 auto',
       }}
     >
@@ -309,7 +309,7 @@ function Pill({ bg, label, title, border }: { bg: string; label: string; title: 
 function ExpandedPanel({ state, onCallTool }: { state: ServerState | undefined; onCallTool: (tool: string) => void }) {
   if (!state) {
     return (
-      <div style={{ padding: '8px 28px 12px', color: 'var(--fg-dim)', fontSize: 11 }}>
+      <div style={{ padding: '8px 28px 12px', color: 'var(--text-faint)', fontSize: 11 }}>
         Connecting…
       </div>
     )
@@ -319,7 +319,7 @@ function ExpandedPanel({ state, onCallTool }: { state: ServerState | undefined; 
       <div
         style={{
           padding: '8px 10px 10px 28px',
-          background: 'var(--bg-raised)',
+          background: 'var(--background-secondary)',
           color: 'var(--risk)',
           fontSize: 11,
           lineHeight: 1.4,
@@ -331,7 +331,7 @@ function ExpandedPanel({ state, onCallTool }: { state: ServerState | undefined; 
   }
   if (state.loadingDetails) {
     return (
-      <div style={{ padding: '8px 28px 12px', color: 'var(--fg-dim)', fontSize: 11 }}>
+      <div style={{ padding: '8px 28px 12px', color: 'var(--text-faint)', fontSize: 11 }}>
         Loading capabilities…
       </div>
     )
@@ -343,7 +343,7 @@ function ExpandedPanel({ state, onCallTool }: { state: ServerState | undefined; 
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
-        background: 'var(--bg-raised)',
+        background: 'var(--background-secondary)',
       }}
     >
       <Section title="Tools" count={state.tools?.length ?? 0}>
@@ -379,14 +379,14 @@ function Section({ title, count, children }: { title: string; count: number; chi
           fontSize: 10,
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           marginBottom: 4,
         }}
       >
         {title} ({count})
       </div>
       {count === 0 ? (
-        <div style={{ color: 'var(--fg-dim)', fontSize: 11, fontStyle: 'italic' }}>None.</div>
+        <div style={{ color: 'var(--text-faint)', fontSize: 11, fontStyle: 'italic' }}>None.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>{children}</div>
       )}
@@ -413,17 +413,17 @@ function CapabilityRow({
         gap: 6,
         alignItems: 'start',
         padding: '4px 8px',
-        background: 'var(--bg)',
-        border: '1px solid var(--line-soft)',
-        borderRadius: 'var(--r)',
+        background: 'var(--background-primary)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
         <span
           style={{
-            fontFamily: 'var(--f-mono, monospace)',
+            fontFamily: 'var(--font-monospace, monospace)',
             fontSize: 11,
-            color: 'var(--fg)',
+            color: 'var(--text-normal)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -433,7 +433,7 @@ function CapabilityRow({
           {name}
         </span>
         {description ? (
-          <span style={{ fontSize: 11, color: 'var(--fg-dim)', lineHeight: 1.35 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.35 }}>
             {description}
           </span>
         ) : null}
@@ -448,10 +448,10 @@ function CapabilityRow({
             alignItems: 'center',
             padding: '0 6px',
             height: 20,
-            background: 'var(--bg-raised)',
-            color: 'var(--fg-muted)',
-            border: '1px solid var(--line-soft)',
-            borderRadius: 'var(--r)',
+            background: 'var(--background-secondary)',
+            color: 'var(--text-muted)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-s)',
             fontSize: 10,
             cursor: 'pointer',
             flex: '0 0 auto',

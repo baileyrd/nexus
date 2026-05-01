@@ -45,14 +45,14 @@ export function EnrichAcceptGate() {
         bottom: 16,
         width: 360,
         maxWidth: 'calc(100vw - 32px)',
-        background: 'var(--bg-elevated, var(--bg))',
-        border: '1px solid var(--line)',
+        background: 'var(--bg-elevated, var(--background-primary))',
+        border: '1px solid var(--background-modifier-border)',
         borderRadius: 8,
         boxShadow: '0 6px 24px rgba(0,0,0,0.18)',
         padding: 12,
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 13,
-        color: 'var(--fg)',
+        color: 'var(--text-normal)',
         zIndex: 9999,
       }}
     >
@@ -70,19 +70,19 @@ export function EnrichAcceptGate() {
               Enrich {basename(pending.path)}?
             </span>
             {queueSize > 1 && (
-              <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                 +{queueSize - 1} more
               </span>
             )}
           </div>
           {pending.summary && (
-            <div style={{ marginBottom: 6, color: 'var(--fg-muted)' }}>
+            <div style={{ marginBottom: 6, color: 'var(--text-muted)' }}>
               {pending.summary}
             </div>
           )}
           {pending.tags.length > 0 && (
             <div style={{ marginBottom: 6 }}>
-              <span style={{ color: 'var(--fg-muted)' }}>tags:</span>{' '}
+              <span style={{ color: 'var(--text-muted)' }}>tags:</span>{' '}
               {pending.tags.map((t, i) => (
                 <span
                   key={t}
@@ -90,7 +90,7 @@ export function EnrichAcceptGate() {
                     display: 'inline-block',
                     marginRight: 4,
                     padding: '1px 6px',
-                    background: 'var(--accent-soft, rgba(0,0,0,0.08))',
+                    background: 'var(--interactive-accent-soft, rgba(0,0,0,0.08))',
                     borderRadius: 4,
                     fontSize: 12,
                   }}
@@ -102,7 +102,7 @@ export function EnrichAcceptGate() {
             </div>
           )}
           {pending.related.length > 0 && (
-            <div style={{ marginBottom: 8, fontSize: 12, color: 'var(--fg-muted)' }}>
+            <div style={{ marginBottom: 8, fontSize: 12, color: 'var(--text-muted)' }}>
               related: {pending.related.join(', ')}
             </div>
           )}
@@ -116,7 +116,7 @@ export function EnrichAcceptGate() {
             padding: 6,
             background: 'var(--bg-warning, rgba(255,0,0,0.06))',
             borderRadius: 4,
-            color: 'var(--fg-warning, var(--fg))',
+            color: 'var(--fg-warning, var(--text-normal))',
             fontSize: 12,
           }}
         >
@@ -132,10 +132,10 @@ export function EnrichAcceptGate() {
             style={{
               padding: '4px 10px',
               background: 'transparent',
-              border: '1px solid var(--line)',
+              border: '1px solid var(--background-modifier-border)',
               borderRadius: 4,
               cursor: applying ? 'not-allowed' : 'pointer',
-              color: 'var(--fg-muted)',
+              color: 'var(--text-muted)',
               marginRight: 'auto',
             }}
           >
@@ -149,10 +149,10 @@ export function EnrichAcceptGate() {
           style={{
             padding: '4px 10px',
             background: 'transparent',
-            border: '1px solid var(--line)',
+            border: '1px solid var(--background-modifier-border)',
             borderRadius: 4,
             cursor: applying ? 'not-allowed' : 'pointer',
-            color: 'var(--fg)',
+            color: 'var(--text-normal)',
           }}
         >
           Dismiss
@@ -164,7 +164,7 @@ export function EnrichAcceptGate() {
             disabled={applying}
             style={{
               padding: '4px 10px',
-              background: 'var(--accent, #2266ee)',
+              background: 'var(--interactive-accent, #2266ee)',
               color: 'white',
               border: 'none',
               borderRadius: 4,

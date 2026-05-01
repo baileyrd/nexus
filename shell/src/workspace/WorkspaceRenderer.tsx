@@ -170,8 +170,8 @@ const COLLAPSED_BAR_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'flex-start',
   justifyContent: 'center',
-  background: 'var(--background-secondary, var(--bg-raised, #252526))',
-  borderRight: '1px solid var(--divider-color, var(--line, #333))',
+  background: 'var(--background-secondary, #252526)',
+  borderRight: '1px solid var(--divider-color, var(--background-modifier-border, #333))',
 }
 
 function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
@@ -194,7 +194,7 @@ function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
         minWidth: DOCK_MIN_SIZE,
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--background-secondary, var(--bg-raised, #252526))',
+        background: 'var(--background-secondary, #252526)',
         overflow: 'hidden',
       }}
     >
@@ -254,7 +254,7 @@ function BottomSidedockFrame({ dock }: { dock: Sidedock }): JSX.Element {
         minHeight: DOCK_MIN_SIZE,
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--background-secondary, var(--bg-raised, #252526))',
+        background: 'var(--background-secondary, #252526)',
         overflow: 'hidden',
       }}
     >
@@ -631,7 +631,7 @@ function TabStrip({
     height: 36,
     background: 'transparent',
     border: 'none',
-    color: 'var(--text-muted, var(--fg-muted, #888))',
+    color: 'var(--text-muted, #888)',
     cursor: 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
@@ -657,8 +657,8 @@ function TabStrip({
         display: 'flex',
         flexDirection: 'row',
         flex: '0 0 auto',
-        background: 'var(--tab-container-background, var(--bg-soft, #2d2d2d))',
-        borderBottom: '1px solid var(--divider-color, var(--line, #333))',
+        background: 'var(--tab-container-background, var(--background-secondary-alt, #2d2d2d))',
+        borderBottom: '1px solid var(--divider-color, var(--background-modifier-border, #333))',
         // 36px matches the SidebarToggleButton + activity-bar items'
         // top-row baseline so the center tab row, the right sidedock
         // tab row, and the left activity bar's first icon row all
@@ -722,7 +722,7 @@ function TabStrip({
             style={{
               background: 'transparent',
               border: 'none',
-              color: 'var(--text-muted, var(--fg-muted, #888))',
+              color: 'var(--text-muted, #888)',
               cursor: 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
@@ -847,7 +847,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
           height: 36,
           background: 'transparent',
           border: 'none',
-          color: 'var(--text-muted, var(--fg-muted, #888))',
+          color: 'var(--text-muted, #888)',
           cursor: 'pointer',
           display: 'inline-flex',
           alignItems: 'center',
@@ -870,8 +870,8 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
             left: Math.max(4, rect.right - 240),
             zIndex: zIndex.dropdown,
             minWidth: 220,
-            background: 'var(--background-primary, var(--bg, #1e1e1e))',
-            border: '1px solid var(--divider-color, var(--line, #333))',
+            background: 'var(--background-primary, #1e1e1e)',
+            border: '1px solid var(--divider-color, var(--background-modifier-border, #333))',
             borderRadius: 6,
             boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
             padding: 4,
@@ -897,7 +897,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
                 }}
                 onMouseEnter={(e) => {
                   ;(e.currentTarget as HTMLDivElement).style.background =
-                    'var(--background-modifier-hover, var(--bg-hover, #2a2a2a))'
+                    'var(--background-modifier-hover, #2a2a2a)'
                 }}
                 onMouseLeave={(e) => {
                   ;(e.currentTarget as HTMLDivElement).style.background = 'transparent'
@@ -917,7 +917,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
                     padding: '6px 8px',
                     background: 'transparent',
                     border: 'none',
-                    color: 'var(--text-normal, var(--fg, #ccc))',
+                    color: 'var(--text-normal, #ccc)',
                     cursor: 'pointer',
                     textAlign: 'left',
                     gap: 8,
@@ -956,7 +956,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
                     flex: '0 0 auto',
                     background: 'transparent',
                     border: 'none',
-                    color: 'var(--text-muted, var(--fg-muted, #888))',
+                    color: 'var(--text-muted, #888)',
                     cursor: canPopout ? 'pointer' : 'default',
                     opacity: canPopout ? 1 : 0.3,
                     padding: 0,
@@ -970,7 +970,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
           <div
             style={{
               height: 1,
-              background: 'var(--divider-color, var(--line, #333))',
+              background: 'var(--divider-color, var(--background-modifier-border, #333))',
               margin: '4px 0',
             }}
           />
@@ -986,7 +986,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
               padding: '6px 8px',
               background: 'transparent',
               border: 'none',
-              color: 'var(--text-normal, var(--fg, #ccc))',
+              color: 'var(--text-normal, #ccc)',
               cursor: tabs.leaves.length <= 1 ? 'default' : 'pointer',
               opacity: tabs.leaves.length <= 1 ? 0.4 : 1,
               textAlign: 'left',
@@ -996,7 +996,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
             onMouseEnter={(e) => {
               if (tabs.leaves.length <= 1) return
               ;(e.currentTarget as HTMLButtonElement).style.background =
-                'var(--background-modifier-hover, var(--bg-hover, #2a2a2a))'
+                'var(--background-modifier-hover, #2a2a2a)'
             }}
             onMouseLeave={(e) => {
               ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
@@ -1086,11 +1086,11 @@ function TabButton({
           padding: 0,
           cursor: 'pointer',
           background: active
-            ? 'var(--background-primary, var(--bg, #1e1e1e))'
+            ? 'var(--background-primary, #1e1e1e)'
             : 'transparent',
           color: active
-            ? 'var(--text-normal, var(--fg, #ccc))'
-            : 'var(--text-muted, var(--fg-muted, #888))',
+            ? 'var(--text-normal, #ccc)'
+            : 'var(--text-muted, #888)',
           border: 'none',
         }}
       >
@@ -1133,12 +1133,12 @@ function TabButton({
         padding: '2px 6px',
         cursor: 'pointer',
         background: active
-          ? 'var(--background-primary, var(--bg, #1e1e1e))'
+          ? 'var(--background-primary, #1e1e1e)'
           : 'transparent',
         color: active
-          ? 'var(--text-normal, var(--fg, #ccc))'
-          : 'var(--text-muted, var(--fg-muted, #888))',
-        borderRight: '1px solid var(--divider-color, var(--line, #333))',
+          ? 'var(--text-normal, #ccc)'
+          : 'var(--text-muted, #888)',
+        borderRight: '1px solid var(--divider-color, var(--background-modifier-border, #333))',
         fontSize: 11,
         whiteSpace: 'nowrap',
         // Each tab prefers ~180px but can shrink to ~50px when the

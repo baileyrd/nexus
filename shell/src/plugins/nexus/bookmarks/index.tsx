@@ -12,7 +12,7 @@ function BookmarksView() {
       style={{
         padding: 16,
         fontSize: 12,
-        color: 'var(--fg-dim)',
+        color: 'var(--text-faint)',
         lineHeight: 1.5,
       }}
     >

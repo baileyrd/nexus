@@ -56,10 +56,10 @@ export function CommentsView({ api, author }: ViewProps) {
     <div
       style={{
         padding: '8px 14px',
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: '1px solid var(--divider-color)',
         fontSize: 11,
-        fontFamily: 'var(--f-ui)',
-        color: 'var(--fg-dim)',
+        fontFamily: 'var(--font-interface)',
+        color: 'var(--text-faint)',
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -67,30 +67,30 @@ export function CommentsView({ api, author }: ViewProps) {
       title={currentRelpath}
     >
       Comments on{' '}
-      <span style={{ color: 'var(--fg)' }}>{basename(currentRelpath)}</span>
+      <span style={{ color: 'var(--text-normal)' }}>{basename(currentRelpath)}</span>
     </div>
   ) : null
 
   let body: React.ReactNode
   if (!currentRelpath) {
     body = (
-      <StateMessage color="var(--fg-dim)">
+      <StateMessage color="var(--text-faint)">
         Open a file to see its comment threads.
       </StateMessage>
     )
   } else if (error) {
     body = <StateMessage color="var(--risk)">{error}</StateMessage>
   } else if (loading) {
-    body = <StateMessage color="var(--fg-muted)">Loading…</StateMessage>
+    body = <StateMessage color="var(--text-muted)">Loading…</StateMessage>
   } else if (threads.length === 0) {
     body = (
-      <StateMessage color="var(--fg-dim)">
+      <StateMessage color="var(--text-faint)">
         No comments yet. Use the editor margin to comment on a block.
       </StateMessage>
     )
   } else if (!api) {
     body = (
-      <StateMessage color="var(--fg-muted)">
+      <StateMessage color="var(--text-muted)">
         Kernel not ready. Threads will load shortly.
       </StateMessage>
     )
@@ -137,7 +137,7 @@ function StateMessage({
       style={{
         padding: '12px 14px',
         color,
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 12,
       }}
     >
@@ -223,7 +223,7 @@ function ThreadRow({ thread, api, relpath, author }: ThreadRowProps) {
     <div
       style={{
         padding: '10px 14px',
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: '1px solid var(--divider-color)',
         opacity: thread.resolved ? 0.65 : 1,
       }}
     >
@@ -234,8 +234,8 @@ function ThreadRow({ thread, api, relpath, author }: ThreadRowProps) {
           justifyContent: 'space-between',
           marginBottom: 6,
           fontSize: 11,
-          fontFamily: 'var(--f-mono)',
-          color: 'var(--fg-dim)',
+          fontFamily: 'var(--font-monospace)',
+          color: 'var(--text-faint)',
         }}
       >
         <span title={`Block ${thread.block_id}`}>
@@ -313,7 +313,7 @@ function ThreadRow({ thread, api, relpath, author }: ThreadRowProps) {
             color: 'var(--risk)',
             fontSize: 11,
             marginTop: 4,
-            fontFamily: 'var(--f-ui)',
+            fontFamily: 'var(--font-interface)',
           }}
         >
           {rowError}
@@ -398,8 +398,8 @@ function CommentRow({
     <div
       style={{
         padding: '6px 0',
-        borderTop: '1px dashed var(--line-soft)',
-        fontFamily: 'var(--f-ui)',
+        borderTop: '1px dashed var(--divider-color)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 12,
       }}
     >
@@ -408,12 +408,12 @@ function CommentRow({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'baseline',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           fontSize: 11,
         }}
       >
         <span>
-          <span style={{ color: 'var(--fg)' }}>
+          <span style={{ color: 'var(--text-normal)' }}>
             {comment.author ?? 'anonymous'}
           </span>
           {' · '}
@@ -468,7 +468,7 @@ function CommentRow({
         <>
           <div
             style={{
-              color: 'var(--fg)',
+              color: 'var(--text-normal)',
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
               marginTop: 2,
@@ -479,7 +479,7 @@ function CommentRow({
           {comment.mentions.length > 0 && (
             <div
               style={{
-                color: 'var(--fg-muted)',
+                color: 'var(--text-muted)',
                 fontSize: 11,
                 marginTop: 2,
               }}
@@ -524,22 +524,22 @@ function CommentRow({
 
 const miniButtonStyle: React.CSSProperties = {
   background: 'transparent',
-  border: '1px solid var(--line-soft)',
-  color: 'var(--fg-dim)',
+  border: '1px solid var(--divider-color)',
+  color: 'var(--text-faint)',
   fontSize: 11,
   padding: '2px 6px',
   borderRadius: 3,
   cursor: 'pointer',
-  fontFamily: 'var(--f-ui)',
+  fontFamily: 'var(--font-interface)',
 }
 
 const textareaStyle: React.CSSProperties = {
   width: '100%',
-  background: 'var(--bg-input)',
-  color: 'var(--fg)',
-  border: '1px solid var(--line-soft)',
+  background: 'var(--background-primary)',
+  color: 'var(--text-normal)',
+  border: '1px solid var(--divider-color)',
   borderRadius: 3,
-  fontFamily: 'var(--f-ui)',
+  fontFamily: 'var(--font-interface)',
   fontSize: 12,
   padding: '4px 6px',
   resize: 'vertical',

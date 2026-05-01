@@ -93,12 +93,12 @@ export function CaptureOverlay({ commands }: CaptureOverlayProps = {}) {
       <div
         style={{
           width: 'min(560px, 100%)',
-          background: 'var(--bg)',
-          color: 'var(--fg)',
-          border: '1px solid var(--line)',
-          borderRadius: 'var(--r)',
+          background: 'var(--background-primary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--background-modifier-border)',
+          borderRadius: 'var(--radius-s)',
           boxShadow: '0 12px 48px rgba(0, 0, 0, 0.4)',
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           fontSize: 'var(--ui-size, 13px)',
           padding: 18,
           display: 'flex',
@@ -108,7 +108,7 @@ export function CaptureOverlay({ commands }: CaptureOverlayProps = {}) {
       >
         <div
           id="nexus-memory-capture-title"
-          style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg)' }}
+          style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-normal)' }}
         >
           Quick capture to Inbox
         </div>
@@ -121,10 +121,10 @@ export function CaptureOverlay({ commands }: CaptureOverlayProps = {}) {
           placeholder="Type or paste — Mod+Enter to save, Esc to cancel"
           style={{
             width: '100%',
-            background: 'var(--bg-raised)',
-            color: 'var(--fg)',
-            border: '1px solid var(--line-soft)',
-            borderRadius: 'var(--r)',
+            background: 'var(--background-secondary)',
+            color: 'var(--text-normal)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-s)',
             padding: 10,
             font: 'inherit',
             resize: 'vertical',
@@ -150,10 +150,10 @@ export function CaptureOverlay({ commands }: CaptureOverlayProps = {}) {
             onClick={close}
             style={{
               padding: '6px 14px',
-              background: 'var(--bg-raised)',
-              color: 'var(--fg)',
-              border: '1px solid var(--line-soft)',
-              borderRadius: 'var(--r)',
+              background: 'var(--background-secondary)',
+              color: 'var(--text-normal)',
+              border: '1px solid var(--divider-color)',
+              borderRadius: 'var(--radius-s)',
               font: 'inherit',
               cursor: 'pointer',
             }}
@@ -165,10 +165,10 @@ export function CaptureOverlay({ commands }: CaptureOverlayProps = {}) {
             onClick={fireCommit}
             style={{
               padding: '6px 14px',
-              background: 'var(--accent)',
-              color: 'var(--bg)',
+              background: 'var(--interactive-accent)',
+              color: 'var(--background-primary)',
               border: 'none',
-              borderRadius: 'var(--r)',
+              borderRadius: 'var(--radius-s)',
               font: 'inherit',
               fontWeight: 500,
               cursor: 'pointer',

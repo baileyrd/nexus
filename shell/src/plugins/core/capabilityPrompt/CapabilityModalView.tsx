@@ -101,12 +101,12 @@ export function CapabilityModalView() {
         style={{
           width: 'min(560px, 100%)',
           maxHeight: '80vh',
-          background: 'var(--bg)',
-          color: 'var(--fg)',
-          border: '1px solid var(--line)',
-          borderRadius: 'var(--r)',
+          background: 'var(--background-primary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--background-modifier-border)',
+          borderRadius: 'var(--radius-s)',
           boxShadow: '0 16px 48px rgba(0, 0, 0, 0.5)',
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -115,7 +115,7 @@ export function CapabilityModalView() {
         <header
           style={{
             padding: '16px 20px',
-            borderBottom: '1px solid var(--line-soft)',
+            borderBottom: '1px solid var(--divider-color)',
           }}
         >
           <div
@@ -127,9 +127,9 @@ export function CapabilityModalView() {
           <div
             style={{
               fontSize: 12,
-              color: 'var(--fg-dim)',
+              color: 'var(--text-faint)',
               marginTop: 4,
-              fontFamily: 'var(--f-mono)',
+              fontFamily: 'var(--font-monospace)',
             }}
           >
             {current.pluginName}
@@ -153,7 +153,7 @@ export function CapabilityModalView() {
               margin: 0,
               fontSize: 13,
               lineHeight: 1.5,
-              color: 'var(--fg)',
+              color: 'var(--text-normal)',
             }}
           >
             This plugin requests the following capabilities. High-risk
@@ -194,7 +194,7 @@ export function CapabilityModalView() {
             gap: 8,
             justifyContent: 'flex-end',
             padding: '12px 20px',
-            borderTop: '1px solid var(--line-soft)',
+            borderTop: '1px solid var(--divider-color)',
           }}
         >
           <button
@@ -202,10 +202,10 @@ export function CapabilityModalView() {
             onClick={deny}
             style={{
               padding: '6px 14px',
-              background: 'var(--bg-raised)',
-              color: 'var(--fg)',
-              border: '1px solid var(--line-soft)',
-              borderRadius: 'var(--r)',
+              background: 'var(--background-secondary)',
+              color: 'var(--text-normal)',
+              border: '1px solid var(--divider-color)',
+              borderRadius: 'var(--radius-s)',
               font: 'inherit',
               cursor: 'pointer',
             }}
@@ -218,10 +218,10 @@ export function CapabilityModalView() {
             onClick={approve}
             style={{
               padding: '6px 14px',
-              background: 'var(--accent)',
-              color: 'var(--accent-ink)',
+              background: 'var(--interactive-accent)',
+              color: 'var(--interactive-accent-ink)',
               border: 'none',
-              borderRadius: 'var(--r)',
+              borderRadius: 'var(--radius-s)',
               font: 'inherit',
               fontWeight: 500,
               cursor: 'pointer',
@@ -284,7 +284,7 @@ function CapBucketSection({
                 alignItems: 'flex-start',
                 gap: 8,
                 padding: '6px 8px',
-                borderRadius: 'var(--r)',
+                borderRadius: 'var(--radius-s)',
                 background: isSelected
                   ? colours.bg
                   : 'transparent',
@@ -317,9 +317,9 @@ function CapBucketSection({
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
-                    fontFamily: 'var(--f-mono)',
+                    fontFamily: 'var(--font-monospace)',
                     fontSize: 12,
-                    color: 'var(--fg)',
+                    color: 'var(--text-normal)',
                   }}
                 >
                   {cap}
@@ -328,7 +328,7 @@ function CapBucketSection({
                   <div
                     style={{
                       fontSize: 12,
-                      color: 'var(--fg-dim)',
+                      color: 'var(--text-faint)',
                       marginTop: 1,
                     }}
                   >

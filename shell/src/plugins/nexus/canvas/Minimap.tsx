@@ -82,9 +82,9 @@ export const Minimap = forwardRef<MinimapHandle, Props>(function Minimap(
         return ''
       }
       const bg       = read('--background-primary',        '--bg-muted')
-      const fg       = read('--text-muted',                '--fg-muted')
-      const accent   = read('--interactive-accent',        '--accent')
-      const nodeFill = read('--background-secondary',      '--bg-raised')
+      const fg       = read('--text-muted',                '--text-muted')
+      const accent   = read('--interactive-accent',        '--interactive-accent')
+      const nodeFill = read('--background-secondary',      '--background-secondary')
       ctx.fillStyle = bg
       ctx.fillRect(0, 0, MINIMAP_WIDTH, MINIMAP_HEIGHT)
 

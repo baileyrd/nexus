@@ -781,12 +781,12 @@ export function installBlockHandleStyles(): () => void {
 .cm-block-handle__dot {
   width: 3px;
   height: 3px;
-  background: var(--fg-muted, #9ca3af);
+  background: var(--text-muted, #9ca3af);
   border-radius: 50%;
 }
 .cm-block-handle:hover {
   opacity: 1;
-  background: var(--bg-hover, #363636);
+  background: var(--background-modifier-hover, #363636);
 }
 .cm-block-handle:active {
   cursor: grabbing;
@@ -797,8 +797,8 @@ export function installBlockHandleStyles(): () => void {
 }
 .cm-block-menu {
   min-width: 200px;
-  background: var(--bg-raised, #2d2d2d);
-  color: var(--fg, #e5e7eb);
+  background: var(--background-secondary, #2d2d2d);
+  color: var(--text-normal, #e5e7eb);
   border: 1px solid var(--divider-color, #3f3f46);
   border-radius: 6px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
@@ -811,7 +811,7 @@ export function installBlockHandleStyles(): () => void {
   cursor: pointer;
 }
 .cm-block-menu__row:hover {
-  background: var(--bg-hover, #363636);
+  background: var(--background-modifier-hover, #363636);
 }
 .cm-block-menu__submenu {
   border-top: 1px solid var(--divider-color, #3f3f46);
@@ -819,8 +819,8 @@ export function installBlockHandleStyles(): () => void {
   padding-top: 4px;
 }
 .cm-block-drop-line {
-  background: var(--accent, #60a5fa);
-  box-shadow: 0 0 4px var(--accent, #60a5fa);
+  background: var(--interactive-accent, #60a5fa);
+  box-shadow: 0 0 4px var(--interactive-accent, #60a5fa);
   z-index: 65;
 }
 `

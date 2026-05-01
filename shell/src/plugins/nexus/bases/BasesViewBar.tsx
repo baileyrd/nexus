@@ -259,8 +259,8 @@ export function BasesViewBar({ relpath, base, client }: Props) {
         flexWrap: 'wrap',
         gap: 4,
         padding: '4px 12px',
-        borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
-        background: 'var(--bg-raised-dim, #1a1a1d)',
+        borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
+        background: 'var(--background-secondary-alt, #1a1a1d)',
         fontSize: 11,
       }}
     >
@@ -335,9 +335,9 @@ function ViewPill({
         title={`Apply view · type=${view.type}`}
         style={{
           padding: '2px 8px',
-          background: active ? 'var(--accent, #60a5fa)' : 'var(--bg-raised, #252529)',
-          color: active ? 'var(--fg-on-accent, #0f1117)' : 'var(--fg-primary, #e4e4e7)',
-          border: '1px solid var(--border-subtle, #2a2a2e)',
+          background: active ? 'var(--interactive-accent, #60a5fa)' : 'var(--background-secondary, #252529)',
+          color: active ? 'var(--interactive-accent-ink, #0f1117)' : 'var(--text-normal, #e4e4e7)',
+          border: '1px solid var(--background-modifier-border, #2a2a2e)',
           borderTopRightRadius: 0,
           borderBottomRightRadius: 0,
           borderRight: 'none',
@@ -353,9 +353,9 @@ function ViewPill({
         title="Rename / Duplicate / Delete"
         style={{
           padding: '2px 6px',
-          background: active ? 'var(--accent, #60a5fa)' : 'var(--bg-raised, #252529)',
-          color: active ? 'var(--fg-on-accent, #0f1117)' : 'var(--fg-muted, #9ca3af)',
-          border: '1px solid var(--border-subtle, #2a2a2e)',
+          background: active ? 'var(--interactive-accent, #60a5fa)' : 'var(--background-secondary, #252529)',
+          color: active ? 'var(--interactive-accent-ink, #0f1117)' : 'var(--text-muted, #9ca3af)',
+          border: '1px solid var(--background-modifier-border, #2a2a2e)',
           borderRadius: '0 3px 3px 0',
           cursor: 'pointer',
         }}
@@ -378,8 +378,8 @@ function ViewPill({
               top: '100%',
               right: 0,
               zIndex: 11,
-              background: 'var(--bg-raised, #252529)',
-              border: '1px solid var(--border-subtle, #2a2a2e)',
+              background: 'var(--background-secondary, #252529)',
+              border: '1px solid var(--background-modifier-border, #2a2a2e)',
               borderRadius: 4,
               boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
               display: 'flex',
@@ -435,14 +435,14 @@ function MenuItem({
         padding: '4px 10px',
         background: 'transparent',
         border: 'none',
-        color: destructive ? 'var(--risk, #f48771)' : 'var(--fg-primary, #e4e4e7)',
+        color: destructive ? 'var(--risk, #f48771)' : 'var(--text-normal, #e4e4e7)',
         textAlign: 'left',
         fontSize: 11,
         cursor: 'pointer',
         borderRadius: 3,
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'var(--bg-hover, #303036)'
+        e.currentTarget.style.background = 'var(--background-modifier-hover, #303036)'
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = 'transparent'
@@ -478,8 +478,8 @@ function errMsg(err: unknown): string {
 const newViewBtnStyle: React.CSSProperties = {
   padding: '2px 8px',
   background: 'transparent',
-  color: 'var(--fg-muted, #9ca3af)',
-  border: '1px dashed var(--border-subtle, #2a2a2e)',
+  color: 'var(--text-muted, #9ca3af)',
+  border: '1px dashed var(--background-modifier-border, #2a2a2e)',
   borderRadius: 3,
   fontSize: 11,
   cursor: 'pointer',

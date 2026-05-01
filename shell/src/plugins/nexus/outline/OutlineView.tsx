@@ -143,7 +143,7 @@ export function OutlineView() {
         style={{
           flexShrink: 0,
           padding: '4px 8px 6px',
-          borderBottom: '1px solid var(--line-soft)',
+          borderBottom: '1px solid var(--divider-color)',
         }}
       >
         <SearchInput inputRef={searchRef} value={filter} onChange={setFilter} />
@@ -155,7 +155,7 @@ export function OutlineView() {
             style={{
               padding: 16,
               textAlign: 'center',
-              color: 'var(--fg-dim)',
+              color: 'var(--text-faint)',
               fontSize: 12,
             }}
           >
@@ -166,7 +166,7 @@ export function OutlineView() {
             style={{
               padding: 16,
               textAlign: 'center',
-              color: 'var(--fg-dim)',
+              color: 'var(--text-faint)',
               fontSize: 12,
             }}
           >
@@ -220,7 +220,7 @@ function Toolbar({
         justifyContent: 'center',
         gap: 4,
         padding: '6px 8px',
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: '1px solid var(--divider-color)',
       }}
     >
       <ToolbarButton label="Focus search" icon="search" onClick={onFocusSearch} />
@@ -265,13 +265,13 @@ function ToolbarButton({
         height: 24,
         padding: 0,
         border: 0,
-        background: active ? 'var(--bg)' : hover ? 'var(--bg-hover)' : 'transparent',
-        color: active || hover ? 'var(--fg)' : 'var(--fg-muted)',
+        background: active ? 'var(--background-primary)' : hover ? 'var(--background-modifier-hover)' : 'transparent',
+        color: active || hover ? 'var(--text-normal)' : 'var(--text-muted)',
         cursor: 'pointer',
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 'var(--r)',
+        borderRadius: 'var(--radius-s)',
         transition: 'background 0.08s, color 0.08s',
       }}
     >
@@ -295,13 +295,13 @@ function SearchInput({
         display: 'flex',
         alignItems: 'center',
         gap: 6,
-        background: 'var(--bg)',
-        border: '1px solid var(--line-soft)',
-        borderRadius: 'var(--r)',
+        background: 'var(--background-primary)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
         padding: '4px 10px',
       }}
     >
-      <span style={{ color: 'var(--fg-dim)', display: 'inline-flex', flexShrink: 0 }} aria-hidden>
+      <span style={{ color: 'var(--text-faint)', display: 'inline-flex', flexShrink: 0 }} aria-hidden>
         <Icon name="search" size={12} />
       </span>
       <input
@@ -316,9 +316,9 @@ function SearchInput({
           background: 'transparent',
           border: 0,
           outline: 'none',
-          color: 'var(--fg)',
+          color: 'var(--text-normal)',
           fontSize: 'var(--ui-size, 12px)',
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           padding: 0,
           lineHeight: '20px',
         }}
@@ -355,13 +355,13 @@ function Row({
         padding: `4px 10px 4px ${10 + depth * INDENT_PX}px`,
         cursor: 'pointer',
         fontSize: 12,
-        color: active ? 'var(--fg)' : 'var(--fg-muted)',
-        background: active ? 'var(--bg-hover)' : 'transparent',
+        color: active ? 'var(--text-normal)' : 'var(--text-muted)',
+        background: active ? 'var(--background-modifier-hover)' : 'transparent',
         lineHeight: 1.4,
         fontWeight: active ? 500 : 400,
       }}
       onMouseEnter={(e) => {
-        if (!active) e.currentTarget.style.background = 'var(--bg-hover)'
+        if (!active) e.currentTarget.style.background = 'var(--background-modifier-hover)'
       }}
       onMouseLeave={(e) => {
         if (!active) e.currentTarget.style.background = 'transparent'
@@ -378,7 +378,7 @@ function Row({
             top: 0,
             bottom: 0,
             width: 1,
-            background: 'var(--line-soft)',
+            background: 'var(--divider-color)',
           }}
         />
       ))}
@@ -395,7 +395,7 @@ function Row({
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           cursor: hasChildren ? 'pointer' : 'default',
           flexShrink: 0,
         }}

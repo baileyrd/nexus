@@ -46,9 +46,9 @@ export function SkillEditor({ kernel }: SkillEditorProps) {
         flexDirection: 'column',
         gap: 10,
         padding: 12,
-        background: 'var(--bg)',
-        border: '1px solid var(--line-soft)',
-        borderRadius: 'var(--r)',
+        background: 'var(--background-primary)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
       }}
     >
       <div
@@ -57,7 +57,7 @@ export function SkillEditor({ kernel }: SkillEditorProps) {
           alignItems: 'center',
           gap: 8,
           paddingBottom: 6,
-          borderBottom: '1px solid var(--line-soft)',
+          borderBottom: '1px solid var(--divider-color)',
         }}
       >
         <span
@@ -65,12 +65,12 @@ export function SkillEditor({ kernel }: SkillEditorProps) {
             flex: '1 1 auto',
             fontSize: 12,
             fontWeight: 600,
-            color: 'var(--fg)',
+            color: 'var(--text-normal)',
           }}
         >
           {draft.isNew ? 'New skill' : `Editing ${draft.name || draft.id}`}
         </span>
-        <span style={{ fontSize: 10, color: 'var(--fg-dim)' }}>
+        <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>
           {draft.relpath || '(no path yet)'}
         </span>
       </div>
@@ -88,7 +88,7 @@ export function SkillEditor({ kernel }: SkillEditorProps) {
           style={{
             padding: 8,
             border: '1px solid var(--risk)',
-            borderRadius: 'var(--r)',
+            borderRadius: 'var(--radius-s)',
             color: 'var(--risk)',
             fontSize: 11,
             whiteSpace: 'pre-wrap',
@@ -216,7 +216,7 @@ function BodyField({
           fontSize: 10,
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
         }}
       >
         body (markdown)
@@ -228,11 +228,11 @@ function BodyField({
         spellCheck={false}
         style={{
           padding: 8,
-          background: 'var(--bg-raised)',
-          color: 'var(--fg)',
-          border: '1px solid var(--line-soft)',
-          borderRadius: 'var(--r)',
-          fontFamily: 'var(--f-mono, monospace)',
+          background: 'var(--background-secondary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--divider-color)',
+          borderRadius: 'var(--radius-s)',
+          fontFamily: 'var(--font-monospace, monospace)',
           fontSize: 12,
           lineHeight: 1.45,
           resize: 'vertical',
@@ -266,8 +266,8 @@ function Field({ label, value, onChange, hint, mono, wide }: FieldProps) {
           fontSize: 10,
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
-          color: 'var(--fg-dim)',
-          fontFamily: 'var(--f-mono, monospace)',
+          color: 'var(--text-faint)',
+          fontFamily: 'var(--font-monospace, monospace)',
         }}
       >
         {label}
@@ -279,16 +279,16 @@ function Field({ label, value, onChange, hint, mono, wide }: FieldProps) {
         spellCheck={false}
         style={{
           padding: '4px 8px',
-          background: 'var(--bg-raised)',
-          color: 'var(--fg)',
-          border: '1px solid var(--line-soft)',
-          borderRadius: 'var(--r)',
-          fontFamily: mono ? 'var(--f-mono, monospace)' : 'var(--f-ui)',
+          background: 'var(--background-secondary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--divider-color)',
+          borderRadius: 'var(--radius-s)',
+          fontFamily: mono ? 'var(--font-monospace, monospace)' : 'var(--font-interface)',
           fontSize: 12,
         }}
       />
       {hint ? (
-        <span style={{ fontSize: 10, color: 'var(--fg-dim)' }}>{hint}</span>
+        <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>{hint}</span>
       ) : null}
     </label>
   )
@@ -326,11 +326,11 @@ function chipButton(active: boolean, disabled: boolean): React.CSSProperties {
   return {
     padding: '4px 10px',
     fontSize: 11,
-    fontFamily: 'var(--f-ui)',
-    background: active ? 'var(--bg-hover)' : 'var(--bg)',
-    color: 'var(--fg)',
-    border: '1px solid var(--line-soft)',
-    borderRadius: 'var(--r)',
+    fontFamily: 'var(--font-interface)',
+    background: active ? 'var(--background-modifier-hover)' : 'var(--background-primary)',
+    color: 'var(--text-normal)',
+    border: '1px solid var(--divider-color)',
+    borderRadius: 'var(--radius-s)',
     cursor: disabled ? 'default' : 'pointer',
     opacity: disabled ? 0.6 : 1,
   }
@@ -340,11 +340,11 @@ function primaryButton(disabled: boolean): React.CSSProperties {
   return {
     padding: '4px 12px',
     fontSize: 11,
-    fontFamily: 'var(--f-ui)',
-    background: disabled ? 'var(--bg-hover)' : 'var(--accent, var(--bg-hover))',
-    color: 'var(--fg)',
-    border: '1px solid var(--line-soft)',
-    borderRadius: 'var(--r)',
+    fontFamily: 'var(--font-interface)',
+    background: disabled ? 'var(--background-modifier-hover)' : 'var(--interactive-accent, var(--background-modifier-hover))',
+    color: 'var(--text-normal)',
+    border: '1px solid var(--divider-color)',
+    borderRadius: 'var(--radius-s)',
     cursor: disabled ? 'default' : 'pointer',
     opacity: disabled ? 0.6 : 1,
     fontWeight: 500,

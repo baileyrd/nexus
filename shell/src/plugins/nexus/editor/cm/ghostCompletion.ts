@@ -96,7 +96,7 @@ class GhostWidget extends WidgetType {
     const span = document.createElement('span')
     span.className = 'cm-nexus-ghost'
     span.style.cssText =
-      'opacity:0.45;pointer-events:none;white-space:pre-wrap;color:var(--fg-muted, #9ca3af);'
+      'opacity:0.45;pointer-events:none;white-space:pre-wrap;color:var(--text-muted, #9ca3af);'
     span.textContent = this.text
     return span
   }

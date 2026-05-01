@@ -87,7 +87,7 @@ export function IndexingStatus({ api, onReindex }: IndexingStatusProps) {
   const colour = errored
     ? 'var(--err, #d33)'
     : busy
-      ? 'var(--accent, #4af)'
+      ? 'var(--interactive-accent, #4af)'
       : 'var(--ok, #3a3)'
 
   const label = errored

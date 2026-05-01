@@ -54,11 +54,11 @@ function ResultRow({
       style={{
         padding: '8px 16px',
         cursor: 'pointer',
-        background: selected ? 'var(--bg-selected, var(--accent-soft))' : 'transparent',
-        borderBottom: '1px solid var(--line-soft)',
-        fontFamily: 'var(--f-ui)',
+        background: selected ? 'var(--bg-selected, var(--interactive-accent-soft))' : 'transparent',
+        borderBottom: '1px solid var(--divider-color)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 13,
-        color: 'var(--fg)',
+        color: 'var(--text-normal)',
       }}
     >
       <div style={{ fontWeight: 600, marginBottom: 2 }}>
@@ -66,7 +66,7 @@ function ResultRow({
       </div>
       <div
         style={{
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
           fontSize: 12,
           whiteSpace: 'nowrap',
           overflow: 'hidden',
@@ -103,9 +103,9 @@ function ResultList() {
         style={{
           padding: '12px 16px',
           color: 'var(--danger, #b00020)',
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           fontSize: 13,
-          borderTop: '1px solid var(--line-soft)',
+          borderTop: '1px solid var(--divider-color)',
         }}
       >
         {error.message}
@@ -118,10 +118,10 @@ function ResultList() {
       <div
         style={{
           padding: '12px 16px',
-          color: 'var(--fg-dim)',
-          fontFamily: 'var(--f-ui)',
+          color: 'var(--text-faint)',
+          fontFamily: 'var(--font-interface)',
           fontSize: 13,
-          borderTop: '1px solid var(--line-soft)',
+          borderTop: '1px solid var(--divider-color)',
         }}
       >
         {status === 'searching' ? 'Searching…' : 'Type to recall from your capture notes.'}
@@ -139,7 +139,7 @@ function ResultList() {
         padding: 0,
         maxHeight: 320,
         overflowY: 'auto',
-        borderTop: '1px solid var(--line-soft)',
+        borderTop: '1px solid var(--divider-color)',
       }}
     >
       {results.map((m, i) => (
@@ -251,9 +251,9 @@ export function RecallOverlay() {
         style={{
           width: 640,
           maxWidth: '92vw',
-          background: 'var(--bg-raised)',
-          border: '1px solid var(--line)',
-          borderRadius: 'var(--r-lg)',
+          background: 'var(--background-secondary)',
+          border: '1px solid var(--background-modifier-border)',
+          borderRadius: 'var(--radius-l)',
           boxShadow: 'var(--shadow)',
           overflow: 'hidden',
           display: 'flex',
@@ -272,8 +272,8 @@ export function RecallOverlay() {
             background: 'transparent',
             border: 0,
             outline: 0,
-            color: 'var(--fg)',
-            fontFamily: 'var(--f-ui)',
+            color: 'var(--text-normal)',
+            fontFamily: 'var(--font-interface)',
             fontSize: 14,
             padding: '12px 16px',
           }}
@@ -314,7 +314,7 @@ function FilterChips() {
         flexWrap: 'wrap',
         gap: 6,
         padding: '0 16px 8px',
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 12,
       }}
     >
@@ -326,9 +326,9 @@ function FilterChips() {
         style={{
           padding: '2px 10px',
           borderRadius: 999,
-          border: '1px solid var(--line-soft)',
-          background: codeOnly ? 'var(--accent, #4c8bf5)' : 'var(--bg-raised)',
-          color: codeOnly ? 'var(--bg-base, #fff)' : 'var(--fg)',
+          border: '1px solid var(--divider-color)',
+          background: codeOnly ? 'var(--interactive-accent, #4c8bf5)' : 'var(--background-secondary)',
+          color: codeOnly ? 'var(--bg-base, #fff)' : 'var(--text-normal)',
           cursor: 'pointer',
         }}
       >
@@ -346,9 +346,9 @@ function FilterChips() {
             style={{
               padding: '2px 10px',
               borderRadius: 999,
-              border: '1px solid var(--line-soft)',
-              background: active ? 'var(--accent, #4c8bf5)' : 'var(--bg-raised)',
-              color: active ? 'var(--bg-base, #fff)' : 'var(--fg)',
+              border: '1px solid var(--divider-color)',
+              background: active ? 'var(--interactive-accent, #4c8bf5)' : 'var(--background-secondary)',
+              color: active ? 'var(--bg-base, #fff)' : 'var(--text-normal)',
               cursor: 'pointer',
             }}
           >

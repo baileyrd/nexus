@@ -43,7 +43,7 @@ export function TitleBarView() {
       <div className="breadcrumb" data-tauri-drag-region>
         <span className="sync" title="forge synced" />
         <span>Workspace</span>
-        <span style={{ color: 'var(--fg-dim)' }}>/</span>
+        <span style={{ color: 'var(--text-faint)' }}>/</span>
         <b>Untitled</b>
       </div>
 

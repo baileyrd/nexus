@@ -121,9 +121,9 @@ export function CommandPalette() {
         style={{
           width: 560,
           maxWidth: '90vw',
-          background: 'var(--bg-raised)',
-          border: '1px solid var(--line)',
-          borderRadius: 'var(--r-lg)',
+          background: 'var(--background-secondary)',
+          border: '1px solid var(--background-modifier-border)',
+          borderRadius: 'var(--radius-l)',
           boxShadow: 'var(--shadow)',
           overflow: 'hidden',
           display: 'flex',
@@ -143,11 +143,11 @@ export function CommandPalette() {
             background: 'transparent',
             border: 0,
             outline: 0,
-            color: 'var(--fg)',
-            fontFamily: 'var(--f-ui)',
+            color: 'var(--text-normal)',
+            fontFamily: 'var(--font-interface)',
             fontSize: 14,
             padding: '12px 16px',
-            borderBottom: '1px solid var(--line-soft)',
+            borderBottom: '1px solid var(--divider-color)',
           }}
         />
         <div
@@ -161,8 +161,8 @@ export function CommandPalette() {
             <div
               style={{
                 padding: '12px 16px',
-                color: 'var(--fg-dim)',
-                fontFamily: 'var(--f-ui)',
+                color: 'var(--text-faint)',
+                fontFamily: 'var(--font-interface)',
                 fontSize: 13,
               }}
             >
@@ -209,10 +209,10 @@ function CommandRow({ index, command, selected, onHover, onPick }: CommandRowPro
         gap: 12,
         padding: '8px 16px',
         cursor: 'pointer',
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 13,
-        background: selected ? 'var(--accent-soft)' : 'transparent',
-        color: selected ? 'var(--fg)' : 'var(--fg-muted)',
+        background: selected ? 'var(--interactive-accent-soft)' : 'transparent',
+        color: selected ? 'var(--text-normal)' : 'var(--text-muted)',
       }}
     >
       <div
@@ -226,8 +226,8 @@ function CommandRow({ index, command, selected, onHover, onPick }: CommandRowPro
         <span>{command.title}</span>
         {command.category && (
           <>
-            <span style={{ color: 'var(--fg-dim)', margin: '0 6px' }}>·</span>
-            <span style={{ color: 'var(--fg-dim)', fontSize: '0.85em' }}>
+            <span style={{ color: 'var(--text-faint)', margin: '0 6px' }}>·</span>
+            <span style={{ color: 'var(--text-faint)', fontSize: '0.85em' }}>
               {command.category}
             </span>
           </>
@@ -236,13 +236,13 @@ function CommandRow({ index, command, selected, onHover, onPick }: CommandRowPro
       {command.keybinding && (
         <span
           style={{
-            background: 'var(--bg)',
-            border: '1px solid var(--line-soft)',
-            borderRadius: 'var(--r)',
+            background: 'var(--background-primary)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-s)',
             padding: '1px 6px',
-            fontFamily: 'var(--f-mono)',
+            fontFamily: 'var(--font-monospace)',
             fontSize: '0.78em',
-            color: 'var(--fg-muted)',
+            color: 'var(--text-muted)',
           }}
         >
           {command.keybinding}

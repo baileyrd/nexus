@@ -71,7 +71,7 @@ class EmptyView implements View {
     host.style.justifyContent = 'center'
     host.style.width = '100%'
     host.style.height = '100%'
-    host.style.color = 'var(--fg-dim, var(--fg-muted, #888))'
+    host.style.color = 'var(--text-faint, var(--text-muted, #888))'
     el.appendChild(host)
     this.hostEl = host
 

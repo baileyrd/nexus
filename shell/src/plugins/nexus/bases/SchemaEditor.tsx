@@ -346,22 +346,22 @@ export function SchemaEditor({ relpath, base, client }: Props) {
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        borderLeft: '1px solid var(--border-subtle, #2a2a2e)',
-        background: 'var(--bg-raised, #252529)',
+        borderLeft: '1px solid var(--background-modifier-border, #2a2a2e)',
+        background: 'var(--background-secondary, #252529)',
         fontSize: 12,
       }}
     >
       <div
         style={{
           padding: '8px 12px',
-          borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
+          borderBottom: '1px solid var(--background-modifier-border, #2a2a2e)',
           display: 'flex',
           alignItems: 'center',
           gap: 8,
         }}
       >
-        <strong style={{ color: 'var(--fg-primary, #e4e4e7)' }}>Schema</strong>
-        <span style={{ color: 'var(--fg-muted, #9ca3af)' }}>
+        <strong style={{ color: 'var(--text-normal, #e4e4e7)' }}>Schema</strong>
+        <span style={{ color: 'var(--text-muted, #9ca3af)' }}>
           {columns.length} {columns.length === 1 ? 'column' : 'columns'}
         </span>
         <div style={{ flex: 1 }} />
@@ -400,9 +400,9 @@ export function SchemaEditor({ relpath, base, client }: Props) {
           onClick={() => void handleAdd()}
           style={{
             padding: '6px 10px',
-            background: 'var(--bg-primary, #1e1e1e)',
-            color: 'var(--fg-primary, #e4e4e7)',
-            border: '1px dashed var(--border-subtle, #2a2a2e)',
+            background: 'var(--background-primary, #1e1e1e)',
+            color: 'var(--text-normal, #e4e4e7)',
+            border: '1px dashed var(--background-modifier-border, #2a2a2e)',
             borderRadius: 4,
             cursor: busy ? 'not-allowed' : 'pointer',
             opacity: busy ? 0.5 : 1,
@@ -450,8 +450,8 @@ function PropertyRow({
     <div
       style={{
         padding: 8,
-        background: 'var(--bg-primary, #1e1e1e)',
-        border: '1px solid var(--border-subtle, #2a2a2e)',
+        background: 'var(--background-primary, #1e1e1e)',
+        border: '1px solid var(--background-modifier-border, #2a2a2e)',
         borderRadius: 4,
         display: 'flex',
         flexDirection: 'column',
@@ -459,9 +459,9 @@ function PropertyRow({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontWeight: 500, color: 'var(--fg-primary, #e4e4e7)' }}>{name}</span>
+        <span style={{ fontWeight: 500, color: 'var(--text-normal, #e4e4e7)' }}>{name}</span>
         {def.primary && (
-          <span style={{ color: 'var(--accent, #60a5fa)', fontSize: 10 }}>primary</span>
+          <span style={{ color: 'var(--interactive-accent, #60a5fa)', fontSize: 10 }}>primary</span>
         )}
         <div style={{ flex: 1 }} />
         <button type="button" disabled={busy} onClick={onRename} style={rowBtnStyle} title="Rename column">
@@ -482,7 +482,7 @@ function PropertyRow({
         </button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <label style={{ color: 'var(--fg-muted, #9ca3af)' }}>type</label>
+        <label style={{ color: 'var(--text-muted, #9ca3af)' }}>type</label>
         <select
           disabled={busy}
           value={def.type}
@@ -496,7 +496,7 @@ function PropertyRow({
           ))}
         </select>
         {!readOnly && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--fg-muted, #9ca3af)' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-muted, #9ca3af)' }}>
             <input
               type="checkbox"
               disabled={busy}
@@ -509,7 +509,7 @@ function PropertyRow({
       </div>
       {(def.type === 'select' || def.type === 'multi-select') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <label style={{ color: 'var(--fg-muted, #9ca3af)' }}>options (comma-separated)</label>
+          <label style={{ color: 'var(--text-muted, #9ca3af)' }}>options (comma-separated)</label>
           <input
             type="text"
             disabled={busy}
@@ -590,7 +590,7 @@ function FormulaEditorRow({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <label style={{ color: 'var(--fg-muted, #9ca3af)' }}>expression</label>
+      <label style={{ color: 'var(--text-muted, #9ca3af)' }}>expression</label>
       <textarea
         disabled={busy}
         value={value}
@@ -605,14 +605,14 @@ function FormulaEditorRow({
         rows={2}
         spellCheck={false}
         placeholder={'e.g. price * 1.1'}
-        style={{ ...inputStyle, fontFamily: 'var(--f-mono, monospace)', resize: 'vertical' }}
+        style={{ ...inputStyle, fontFamily: 'var(--font-monospace, monospace)', resize: 'vertical' }}
       />
-      <div style={{ color: 'var(--fg-muted, #9ca3af)', fontSize: 11 }}>
+      <div style={{ color: 'var(--text-muted, #9ca3af)', fontSize: 11 }}>
         Preview (first record):{' '}
         {previewErr ? (
           <span style={{ color: 'var(--risk, #f48771)' }}>error — {previewErr}</span>
         ) : value ? (
-          <span style={{ color: 'var(--fg-primary, #e4e4e7)' }}>{preview || '…'}</span>
+          <span style={{ color: 'var(--text-normal, #e4e4e7)' }}>{preview || '…'}</span>
         ) : (
           <span>—</span>
         )}
@@ -623,9 +623,9 @@ function FormulaEditorRow({
 
 const rowBtnStyle: React.CSSProperties = {
   padding: '2px 8px',
-  background: 'var(--bg-raised, #252529)',
-  color: 'var(--fg-primary, #e4e4e7)',
-  border: '1px solid var(--border-subtle, #2a2a2e)',
+  background: 'var(--background-secondary, #252529)',
+  color: 'var(--text-normal, #e4e4e7)',
+  border: '1px solid var(--background-modifier-border, #2a2a2e)',
   borderRadius: 3,
   fontSize: 11,
   cursor: 'pointer',
@@ -634,7 +634,7 @@ const rowBtnStyle: React.CSSProperties = {
 const closeBtnStyle: React.CSSProperties = {
   padding: '2px 8px',
   background: 'transparent',
-  color: 'var(--fg-muted, #9ca3af)',
+  color: 'var(--text-muted, #9ca3af)',
   border: 'none',
   fontSize: 16,
   cursor: 'pointer',
@@ -643,18 +643,18 @@ const closeBtnStyle: React.CSSProperties = {
 
 const selectStyle: React.CSSProperties = {
   padding: '2px 6px',
-  background: 'var(--bg-raised, #252529)',
-  color: 'var(--fg-primary, #e4e4e7)',
-  border: '1px solid var(--border-subtle, #2a2a2e)',
+  background: 'var(--background-secondary, #252529)',
+  color: 'var(--text-normal, #e4e4e7)',
+  border: '1px solid var(--background-modifier-border, #2a2a2e)',
   borderRadius: 3,
   fontSize: 11,
 }
 
 const inputStyle: React.CSSProperties = {
   padding: '4px 8px',
-  background: 'var(--bg-raised, #252529)',
-  color: 'var(--fg-primary, #e4e4e7)',
-  border: '1px solid var(--border-subtle, #2a2a2e)',
+  background: 'var(--background-secondary, #252529)',
+  color: 'var(--text-normal, #e4e4e7)',
+  border: '1px solid var(--background-modifier-border, #2a2a2e)',
   borderRadius: 3,
   fontSize: 12,
   fontFamily: 'inherit',

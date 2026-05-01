@@ -127,71 +127,9 @@
         /* ── Shadow (unchanged) ───────────────────────────────────── */
         --shadow: var(--nx-shadow-lg, 0 1px 0 oklch(1 0 0 / 0.03) inset, 0 10px 30px oklch(0 0 0 / 0.35));
 
-        /* ──────────────────────────────────────────────────────────
-           Backwards-compat aliases — legacy Forge names that existing
-           .tsx inline styles and unmigrated selectors still reference.
-           Remove these once every consumer uses the Obsidian names
-           above. Nothing else in :root should depend on these.
-           ────────────────────────────────────────────────────────── */
-        --bg:          var(--background-primary);
-        --bg-raised:   var(--background-secondary);
-        --bg-soft:     var(--background-secondary-alt);
-        --bg-hover:    var(--background-modifier-hover);
-        --bg-active:   var(--background-modifier-active);
-        --line:        var(--background-modifier-border);
-        --line-soft:   var(--divider-color);
-        --fg:          var(--text-normal);
-        --fg-muted:    var(--text-muted);
-        --fg-dim:      var(--text-faint);
-        --accent:      var(--interactive-accent);
-        --accent-soft: var(--interactive-accent-soft);
-        --accent-ink:  var(--interactive-accent-ink);
-        --f-ui:        var(--font-interface);
-        --f-body:      var(--font-text);
-        --f-mono:      var(--font-monospace);
-        --r:           var(--radius-s);
-        --r-lg:        var(--radius-l);
-
-        /* Older still-in-tree legacy shims (VSCode-flavored names
-           used by some .tsx / .css selectors). Kept pointing at the
-           Obsidian tokens so nothing visibly shifts. */
-        --shell-bg:       var(--background-primary);
-        --shell-fg:       var(--text-normal);
-        --titlebar-bg:    var(--background-secondary);
-        --activitybar-bg: var(--background-secondary);
-        --sidebar-bg:     var(--background-secondary);
-        --editor-bg:      var(--background-primary);
-        --panel-bg:       var(--background-secondary);
-        --panel-bg-alt:   var(--background-secondary-alt);
-        --statusbar-bg:   var(--background-secondary);
-        --statusbar-fg:   var(--text-muted);
-        --border:         var(--background-modifier-border);
-        --list-hover:     var(--background-modifier-hover);
-        --list-active:    var(--background-modifier-active);
-        --input-bg:       var(--background-primary);
-        --font-ui:        var(--font-interface);
-        --font-mono:      var(--font-monospace);
-
-        /* `--color-*` aliases — referenced by SettingsPanelView and a
-           few other components. Bridged to themed tokens so they
-           inherit the active palette instead of falling through to
-           hardcoded #e0e0e0/#fdd/#900 fallbacks. */
-        --color-border:   var(--background-modifier-border);
-        --color-bg:       var(--background-primary);
-        --color-accent:   var(--interactive-accent);
-        --color-error:    var(--risk);
-        --color-error-bg: var(--risk-soft);
-
-        /* Bases plugin aliases — bases/* .tsx files use these names
-           rather than the canonical Obsidian/--bg/--fg ones. Bridged
-           so picking any kernel theme repaints the bases UI too. */
-        --bg-primary:     var(--background-primary);
-        --bg-raised-dim:  var(--background-secondary-alt);
-        --bg-input:       var(--background-primary);
-        --bg-selection:   var(--interactive-accent-soft);
-        --border-subtle:  var(--background-modifier-border);
-        --fg-primary:     var(--text-normal);
-        --fg-on-accent:   var(--interactive-accent-ink);
+        /* SH-012: Legacy alias families (Forge, VSCode, color-*, bases)
+           have been migrated to the canonical Obsidian token names above.
+           This alias block has been removed. */
       }
 
       :root,

@@ -2,7 +2,7 @@
   display: block;
   margin: 0.4em 0;
   text-align: center;
-  background: var(--bg-raised);
+  background: var(--background-secondary);
   padding: 0.6em;
   border-radius: 4px;
 }
@@ -17,11 +17,11 @@
   flex-direction: column;
   gap: 4px;
   padding: 8px 10px;
-  border: 1px solid var(--risk, var(--line-soft));
+  border: 1px solid var(--risk, var(--divider-color));
   border-radius: 4px;
-  background: var(--bg-raised);
-  color: var(--risk, var(--fg));
-  font-family: var(--f-mono);
+  background: var(--background-secondary);
+  color: var(--risk, var(--text-normal));
+  font-family: var(--font-monospace);
   font-size: 0.9em;
 }
 
@@ -57,9 +57,9 @@
 }
 
 .nexus-mermaid-toolbar-button {
-  background: var(--bg-raised);
-  color: var(--fg);
-  border: 1px solid var(--line-soft);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border: 1px solid var(--divider-color);
   border-radius: 3px;
   padding: 3px 10px;
   font-size: 0.85em;
@@ -67,7 +67,7 @@
 }
 
 .nexus-mermaid-toolbar-button:hover {
-  background: var(--bg-hover, var(--bg-raised));
+  background: var(--background-modifier-hover, var(--background-secondary));
 }
 
 .nexus-mermaid-pane .nexus-mermaid-diagram {
@@ -82,9 +82,9 @@
   flex: 1;
   margin: 0;
   padding: 10px 12px;
-  background: var(--bg-raised);
+  background: var(--background-secondary);
   border-radius: 4px;
-  font-family: var(--f-mono);
+  font-family: var(--font-monospace);
   font-size: 0.9em;
   white-space: pre-wrap;
   word-break: break-word;
@@ -93,7 +93,7 @@
 
 .nexus-mermaid-placeholder {
   padding: 16px;
-  color: var(--fg-muted, #9ca3af);
+  color: var(--text-muted, #9ca3af);
   font-size: 0.9em;
   text-align: center;
 }

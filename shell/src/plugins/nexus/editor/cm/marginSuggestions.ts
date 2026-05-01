@@ -779,8 +779,8 @@ export function installMarginSuggestStyles(): () => void {
   height: 18px;
   border-radius: 50%;
   border: 1px solid var(--divider-color, #3f3f46);
-  background: var(--bg-raised, #2d2d2d);
-  color: var(--fg, #e5e7eb);
+  background: var(--background-secondary, #2d2d2d);
+  color: var(--text-normal, #e5e7eb);
   font-size: 11px;
   line-height: 1;
   cursor: pointer;
@@ -790,7 +790,7 @@ export function installMarginSuggestStyles(): () => void {
 }
 .cm-margin-suggest-glyph:hover {
   opacity: 1;
-  background: var(--bg-hover, #363636);
+  background: var(--background-modifier-hover, #363636);
 }
 .cm-margin-suggest-glyph--rephrase {
   color: var(--ai-accent-rephrase, #60a5fa);
@@ -804,8 +804,8 @@ export function installMarginSuggestStyles(): () => void {
 .cm-margin-suggest-card {
   min-width: 240px;
   max-width: 360px;
-  background: var(--bg-raised, #2d2d2d);
-  color: var(--fg, #e5e7eb);
+  background: var(--background-secondary, #2d2d2d);
+  color: var(--text-normal, #e5e7eb);
   border: 1px solid var(--divider-color, #3f3f46);
   border-radius: 6px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
@@ -817,7 +817,7 @@ export function installMarginSuggestStyles(): () => void {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--fg-muted, #9ca3af);
+  color: var(--text-muted, #9ca3af);
   margin-bottom: 4px;
 }
 .cm-margin-suggest-card-message {
@@ -852,14 +852,14 @@ export function installMarginSuggestStyles(): () => void {
   padding: 4px 10px;
   border-radius: 4px;
   border: 1px solid var(--divider-color, #3f3f46);
-  background: var(--bg, #1e1e1e);
-  color: var(--fg, #e5e7eb);
+  background: var(--background-primary, #1e1e1e);
+  color: var(--text-normal, #e5e7eb);
   font-size: 11px;
   cursor: pointer;
 }
 .cm-margin-suggest-card-accept {
   background: var(--ai-accent, #60a5fa);
-  color: var(--bg, #1e1e1e);
+  color: var(--background-primary, #1e1e1e);
   border-color: var(--ai-accent, #60a5fa);
 }
 .cm-margin-suggest-card-actions button:hover {
@@ -867,8 +867,8 @@ export function installMarginSuggestStyles(): () => void {
 }
 .cm-margin-suggest-menu {
   min-width: 180px;
-  background: var(--bg-raised, #2d2d2d);
-  color: var(--fg, #e5e7eb);
+  background: var(--background-secondary, #2d2d2d);
+  color: var(--text-normal, #e5e7eb);
   border: 1px solid var(--divider-color, #3f3f46);
   border-radius: 6px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
@@ -888,7 +888,7 @@ export function installMarginSuggestStyles(): () => void {
   cursor: pointer;
 }
 .cm-margin-suggest-menu-row:hover {
-  background: var(--bg-hover, #363636);
+  background: var(--background-modifier-hover, #363636);
 }
 .cm-margin-suggest-menu-row--dismiss {
   border-top: 1px solid var(--divider-color, #3f3f46);

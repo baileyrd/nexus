@@ -35,24 +35,24 @@ export interface ContextMenuProps {
 const PANEL_STYLE: CSSProperties = {
   position: 'fixed',
   zIndex: zIndex.dropdown,
-  background: 'var(--background-primary, var(--bg, #1e1e1e))',
-  border: '1px solid var(--divider-color, var(--line, #333))',
+  background: 'var(--background-primary, #1e1e1e)',
+  border: '1px solid var(--divider-color, var(--background-modifier-border, #333))',
   borderRadius: 6,
   boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
   padding: 4,
   fontSize: 12,
-  fontFamily: 'var(--f-ui)',
+  fontFamily: 'var(--font-interface)',
 }
 
 const SEPARATOR_STYLE: CSSProperties = {
   height: 1,
-  background: 'var(--divider-color, var(--line, #333))',
+  background: 'var(--divider-color, var(--background-modifier-border, #333))',
   margin: '4px 0',
 }
 
 const HEADER_STYLE: CSSProperties = {
   padding: '4px 8px',
-  color: 'var(--text-faint, var(--fg-dim, #777))',
+  color: 'var(--text-faint, #777)',
   fontSize: 11,
   textTransform: 'uppercase',
   letterSpacing: 0.5,
@@ -123,12 +123,12 @@ function MenuRow({
         padding: '6px 8px',
         background:
           hover && !disabled
-            ? 'var(--background-modifier-hover, var(--bg-hover, #2a2a2a))'
+            ? 'var(--background-modifier-hover, #2a2a2a)'
             : 'transparent',
         border: 'none',
         color: disabled
-          ? 'var(--text-faint, var(--fg-dim, #777))'
-          : 'var(--text-normal, var(--fg, #ccc))',
+          ? 'var(--text-faint, #777)'
+          : 'var(--text-normal, #ccc)',
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.55 : 1,
         textAlign: 'left',

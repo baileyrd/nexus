@@ -48,7 +48,7 @@ function dotColorForState(state: string): string {
     return 'var(--risk)'
   }
   if (s === 'inactive' || s === 'stopped' || s === 'disabled') {
-    return 'var(--fg-dim)'
+    return 'var(--text-faint)'
   }
   return 'var(--cool)'
 }
@@ -76,7 +76,7 @@ function PluginRow({ p }: { p: PluginItem }) {
         padding: '4px 14px',
         fontSize: 12,
         lineHeight: 1.4,
-        color: 'var(--fg)',
+        color: 'var(--text-normal)',
         cursor: 'default',
       }}
       title={p.error ? `${p.id}\n${p.error}` : p.id}
@@ -93,7 +93,7 @@ function PluginRow({ p }: { p: PluginItem }) {
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {p.name}
       </span>
-      <span style={{ color: 'var(--fg-dim)', fontFamily: 'var(--f-mono)', fontSize: 10 }}>
+      <span style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-monospace)', fontSize: 10 }}>
         {p.version}
       </span>
     </div>
@@ -110,19 +110,19 @@ function SessionRow({ s }: { s: SessionItem }) {
         padding: '4px 14px',
         fontSize: 12,
         lineHeight: 1.4,
-        color: 'var(--fg)',
+        color: 'var(--text-normal)',
         cursor: 'default',
       }}
       title={`${s.kind}: ${s.id}`}
     >
-      <span style={{ width: 10, color: 'var(--fg-dim)', flexShrink: 0, textAlign: 'center' }}>
+      <span style={{ width: 10, color: 'var(--text-faint)', flexShrink: 0, textAlign: 'center' }}>
         {kindGlyph(s.kind)}
       </span>
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {s.label}
       </span>
       {s.detail && (
-        <span style={{ color: 'var(--fg-dim)', fontFamily: 'var(--f-mono)', fontSize: 10 }}>
+        <span style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-monospace)', fontSize: 10 }}>
           {s.detail}
         </span>
       )}
@@ -140,15 +140,15 @@ function SectionHead({ title, count }: { title: string; count: number }) {
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '8px 14px 4px',
-        color: 'var(--fg-muted)',
+        color: 'var(--text-muted)',
         fontSize: 11,
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         textTransform: 'uppercase',
         letterSpacing: 0.5,
       }}
     >
       <span>{title}</span>
-      <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10 }}>{count}</span>
+      <span style={{ fontFamily: 'var(--font-monospace)', fontSize: 10 }}>{count}</span>
     </div>
   )
 }
@@ -162,8 +162,8 @@ function LeftColumn() {
       style={{
         width: 280,
         flexShrink: 0,
-        borderRight: '1px solid var(--line-soft)',
-        background: 'var(--bg-raised)',
+        borderRight: '1px solid var(--divider-color)',
+        background: 'var(--background-secondary)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -173,10 +173,10 @@ function LeftColumn() {
         style={{
           padding: '10px 14px',
           fontSize: 11,
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
           textTransform: 'uppercase',
           letterSpacing: 1,
-          borderBottom: '1px solid var(--line-soft)',
+          borderBottom: '1px solid var(--divider-color)',
         }}
       >
         Processes
@@ -189,7 +189,7 @@ function LeftColumn() {
             style={{
               padding: '4px 14px',
               fontSize: 11,
-              color: 'var(--fg-dim)',
+              color: 'var(--text-faint)',
               fontStyle: 'italic',
             }}
           >
@@ -205,7 +205,7 @@ function LeftColumn() {
             style={{
               padding: '4px 14px',
               fontSize: 11,
-              color: 'var(--fg-dim)',
+              color: 'var(--text-faint)',
               fontStyle: 'italic',
             }}
           >
@@ -251,12 +251,12 @@ function Toolbar({ filteredCount }: { filteredCount: number }) {
       style={{
         height: 36,
         flexShrink: 0,
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: '1px solid var(--divider-color)',
         display: 'flex',
         alignItems: 'center',
         padding: '0 12px',
         gap: 12,
-        background: 'var(--bg)',
+        background: 'var(--background-primary)',
       }}
     >
       <input
@@ -270,12 +270,12 @@ function Toolbar({ filteredCount }: { filteredCount: number }) {
           maxWidth: 320,
           height: 24,
           padding: '0 8px',
-          background: 'var(--bg-raised)',
-          color: 'var(--fg)',
-          border: '1px solid var(--line-soft)',
+          background: 'var(--background-secondary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--divider-color)',
           borderRadius: 4,
           fontSize: 12,
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           outline: 'none',
         }}
       />
@@ -289,12 +289,12 @@ function Toolbar({ filteredCount }: { filteredCount: number }) {
           gap: 4,
           height: 24,
           padding: '0 8px',
-          background: follow ? 'var(--accent-soft)' : 'transparent',
-          color: follow ? 'var(--accent)' : 'var(--fg-muted)',
-          border: '1px solid var(--line-soft)',
+          background: follow ? 'var(--interactive-accent-soft)' : 'transparent',
+          color: follow ? 'var(--interactive-accent)' : 'var(--text-muted)',
+          border: '1px solid var(--divider-color)',
           borderRadius: 4,
           fontSize: 11,
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           cursor: 'pointer',
         }}
       >
@@ -309,11 +309,11 @@ function Toolbar({ filteredCount }: { filteredCount: number }) {
           height: 24,
           padding: '0 8px',
           background: 'transparent',
-          color: 'var(--fg-muted)',
-          border: '1px solid var(--line-soft)',
+          color: 'var(--text-muted)',
+          border: '1px solid var(--divider-color)',
           borderRadius: 4,
           fontSize: 11,
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           cursor: 'pointer',
         }}
       >
@@ -323,8 +323,8 @@ function Toolbar({ filteredCount }: { filteredCount: number }) {
       <div
         style={{
           marginLeft: 'auto',
-          color: 'var(--fg-dim)',
-          fontFamily: 'var(--f-mono)',
+          color: 'var(--text-faint)',
+          fontFamily: 'var(--font-monospace)',
           fontSize: 11,
         }}
       >
@@ -371,9 +371,9 @@ function EventLog() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           fontSize: 12,
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
         }}
       >
         No events captured yet.
@@ -389,9 +389,9 @@ function EventLog() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           fontSize: 12,
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
         }}
       >
         No events match.
@@ -406,7 +406,7 @@ function EventLog() {
         flex: 1,
         overflowY: 'auto',
         padding: '4px 0',
-        background: 'var(--bg)',
+        background: 'var(--background-primary)',
       }}
     >
       {filtered.map((e, i) => (
@@ -422,16 +422,16 @@ function EventLog() {
             whiteSpace: 'nowrap',
           }}
         >
-          <span style={{ color: 'var(--fg-dim)', fontFamily: 'var(--f-mono)', flexShrink: 0 }}>
+          <span style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-monospace)', flexShrink: 0 }}>
             {formatTs(e.timestampMs)}
           </span>
-          <span style={{ color: 'var(--fg)', fontFamily: 'var(--f-ui)', flexShrink: 0 }}>
+          <span style={{ color: 'var(--text-normal)', fontFamily: 'var(--font-interface)', flexShrink: 0 }}>
             {e.topic}
           </span>
           <span
             style={{
-              color: 'var(--fg-muted)',
-              fontFamily: 'var(--f-mono)',
+              color: 'var(--text-muted)',
+              fontFamily: 'var(--font-monospace)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               flex: 1,
@@ -470,7 +470,7 @@ function RightColumn() {
         minWidth: 0,
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--bg)',
+        background: 'var(--background-primary)',
       }}
     >
       <Toolbar filteredCount={filteredCount} />
@@ -488,9 +488,9 @@ export function ProcessesView() {
         display: 'flex',
         height: '100%',
         width: '100%',
-        background: 'var(--bg)',
-        color: 'var(--fg)',
-        fontFamily: 'var(--f-ui)',
+        background: 'var(--background-primary)',
+        color: 'var(--text-normal)',
+        fontFamily: 'var(--font-interface)',
       }}
     >
       <LeftColumn />

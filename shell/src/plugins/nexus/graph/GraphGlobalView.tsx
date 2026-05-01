@@ -464,13 +464,13 @@ export function GraphGlobalView() {
   // Empty / loading / error states.
   let overlay: React.ReactNode = null
   if (loading && rawNodes.length === 0) {
-    overlay = <Centered color="var(--fg-muted)">Loading graph…</Centered>
+    overlay = <Centered color="var(--text-muted)">Loading graph…</Centered>
   } else if (error) {
     overlay = <Centered color="var(--risk)">{error}</Centered>
   } else if (rawNodes.length === 0) {
-    overlay = <Centered color="var(--fg-dim)">No notes in this forge.</Centered>
+    overlay = <Centered color="var(--text-faint)">No notes in this forge.</Centered>
   } else if (filtered.nodes.length === 0) {
-    overlay = <Centered color="var(--fg-dim)">No nodes match filter.</Centered>
+    overlay = <Centered color="var(--text-faint)">No nodes match filter.</Centered>
   }
 
   return (
@@ -484,7 +484,7 @@ export function GraphGlobalView() {
           display: 'block',
           width: size.w,
           height: size.h,
-          background: 'var(--bg)',
+          background: 'var(--background-primary)',
           cursor: dragRef.current?.kind === 'pan' ? 'grabbing' : 'default',
         }}
         onPointerDown={onPointerDown}
@@ -526,11 +526,11 @@ export function GraphGlobalView() {
           bottom: 8,
           right: 10,
           padding: '2px 6px',
-          background: 'var(--bg-raised)',
-          color: 'var(--fg-muted)',
-          fontFamily: 'var(--f-ui)',
+          background: 'var(--background-secondary)',
+          color: 'var(--text-muted)',
+          fontFamily: 'var(--font-interface)',
           fontSize: 11,
-          border: '1px solid var(--line)',
+          border: '1px solid var(--background-modifier-border)',
           borderRadius: 4,
           pointerEvents: 'none',
         }}
@@ -562,9 +562,9 @@ function OverlayButton({
       title={title}
       onClick={onClick}
       style={{
-        background: 'var(--bg-raised)',
-        color: 'var(--fg)',
-        border: '1px solid var(--line)',
+        background: 'var(--background-secondary)',
+        color: 'var(--text-normal)',
+        border: '1px solid var(--background-modifier-border)',
         borderRadius: 4,
         padding: '4px 6px',
         cursor: 'pointer',
@@ -595,7 +595,7 @@ function Centered({
         alignItems: 'center',
         justifyContent: 'center',
         color,
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 12,
         pointerEvents: 'none',
       }}

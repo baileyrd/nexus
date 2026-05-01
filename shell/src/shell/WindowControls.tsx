@@ -14,7 +14,7 @@ const baseControlStyle: React.CSSProperties = {
   height: 36,
   background: 'transparent',
   border: 'none',
-  color: 'var(--fg-muted)',
+  color: 'var(--text-muted)',
   cursor: 'pointer',
   display: 'inline-flex',
   alignItems: 'center',
@@ -38,12 +38,12 @@ function ControlButton({
   // Windows convention: close button hovers to red (literal so it lands
   // unambiguously regardless of theme-token availability); other controls
   // use a subtle raised background from the token palette.
-  const hoverBg = closeAccent ? '#e81123' : 'var(--bg-hover)'
-  const hoverFg = closeAccent ? '#ffffff' : 'var(--fg)'
+  const hoverBg = closeAccent ? '#e81123' : 'var(--background-modifier-hover)'
+  const hoverFg = closeAccent ? '#ffffff' : 'var(--text-normal)'
   const style: React.CSSProperties = {
     ...baseControlStyle,
     background: hover ? hoverBg : 'transparent',
-    color: hover ? hoverFg : 'var(--fg-muted)',
+    color: hover ? hoverFg : 'var(--text-muted)',
   }
   return (
     <button
@@ -134,7 +134,7 @@ export function WindowControls() {
         // positioned cluster reads as continuous chrome with the trailing
         // tab controls (chevron, right-sidedock toggle) sitting just to
         // its left, instead of a floating cluster on top of the strip.
-        background: 'var(--tab-container-background, var(--bg-soft, #2d2d2d))',
+        background: 'var(--tab-container-background, var(--background-secondary-alt, #2d2d2d))',
       }}
     >
       <ControlButton onClick={minimize} label="Minimize">

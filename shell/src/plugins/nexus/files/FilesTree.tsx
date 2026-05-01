@@ -194,7 +194,7 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
       <div
         style={{
           padding: '12px 14px',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           fontSize: 'var(--ui-size, 12px)',
         }}
       >
@@ -508,7 +508,7 @@ function Toolbar({
         flexShrink: 0,
         flexDirection: 'row',
         alignItems: 'center',
-        borderBottom: '1px solid var(--divider-color, var(--line-soft))',
+        borderBottom: '1px solid var(--divider-color, var(--divider-color))',
       }}
     >
       <NavButtonsContainer>
@@ -616,9 +616,9 @@ function SortMenu({
         right: 8,
         marginTop: 4,
         minWidth: 220,
-        background: 'var(--bg-raised)',
-        border: '1px solid var(--line)',
-        borderRadius: 'var(--r)',
+        background: 'var(--background-secondary)',
+        border: '1px solid var(--background-modifier-border)',
+        borderRadius: 'var(--radius-s)',
         boxShadow: '0 6px 24px rgba(0,0,0,0.4)',
         padding: '4px 0',
         zIndex: 10,
@@ -633,7 +633,7 @@ function SortMenu({
             {divider && (
               <div
                 aria-hidden
-                style={{ height: 1, background: 'var(--line-soft)', margin: '4px 0' }}
+                style={{ height: 1, background: 'var(--divider-color)', margin: '4px 0' }}
               />
             )}
             <SortMenuItem
@@ -672,8 +672,8 @@ function SortMenuItem({
         gap: 8,
         width: '100%',
         border: 0,
-        background: hover ? 'var(--bg-hover)' : 'transparent',
-        color: selected ? 'var(--fg)' : 'var(--fg-muted)',
+        background: hover ? 'var(--background-modifier-hover)' : 'transparent',
+        color: selected ? 'var(--text-normal)' : 'var(--text-muted)',
         textAlign: 'left',
         padding: '6px 10px 6px 24px',
         cursor: 'pointer',
@@ -684,7 +684,7 @@ function SortMenuItem({
       {selected && (
         <span
           aria-hidden
-          style={{ position: 'absolute', left: 8, display: 'inline-flex', color: 'var(--fg)' }}
+          style={{ position: 'absolute', left: 8, display: 'inline-flex', color: 'var(--text-normal)' }}
         >
           <Icon name="check" size={12} />
         </span>
@@ -799,7 +799,7 @@ function TreeNode({
       style={
         dropHover
           ? {
-              outline: '1px solid var(--interactive-accent, var(--accent, #4a9eff))',
+              outline: '1px solid var(--interactive-accent, #4a9eff)',
               outlineOffset: -1,
               borderRadius: 3,
             }

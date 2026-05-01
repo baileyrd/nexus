@@ -52,19 +52,19 @@ function formatDuration(ms?: number | null): string {
 function surfaceColor(s: ActivitySurface): string {
   switch (s) {
     case 'chat':
-      return 'var(--accent)'
+      return 'var(--interactive-accent)'
     case 'ask':
       return 'var(--cool)'
     case 'cmdi':
       return 'var(--warm)'
     case 'ghost':
-      return 'var(--fg-muted)'
+      return 'var(--text-muted)'
     case 'complete':
       return 'var(--ok)'
     case 'enrich':
-      return 'var(--accent-soft)'
+      return 'var(--interactive-accent-soft)'
     default:
-      return 'var(--fg-dim)'
+      return 'var(--text-faint)'
   }
 }
 
@@ -113,12 +113,12 @@ function Toolbar({
       style={{
         height: 36,
         flexShrink: 0,
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: '1px solid var(--divider-color)',
         display: 'flex',
         alignItems: 'center',
         padding: '0 12px',
         gap: 12,
-        background: 'var(--bg)',
+        background: 'var(--background-primary)',
       }}
     >
       <input
@@ -132,12 +132,12 @@ function Toolbar({
           maxWidth: 320,
           height: 24,
           padding: '0 8px',
-          background: 'var(--bg-raised)',
-          color: 'var(--fg)',
-          border: '1px solid var(--line-soft)',
+          background: 'var(--background-secondary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--divider-color)',
           borderRadius: 4,
           fontSize: 12,
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           outline: 'none',
         }}
       />
@@ -149,12 +149,12 @@ function Toolbar({
         }}
         style={{
           height: 24,
-          background: 'var(--bg-raised)',
-          color: 'var(--fg)',
-          border: '1px solid var(--line-soft)',
+          background: 'var(--background-secondary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--divider-color)',
           borderRadius: 4,
           fontSize: 11,
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           padding: '0 6px',
         }}
         title="Filter by surface"
@@ -173,11 +173,11 @@ function Toolbar({
           height: 24,
           padding: '0 8px',
           background: 'transparent',
-          color: 'var(--fg-muted)',
-          border: '1px solid var(--line-soft)',
+          color: 'var(--text-muted)',
+          border: '1px solid var(--divider-color)',
           borderRadius: 4,
           fontSize: 11,
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           cursor: 'pointer',
         }}
       >
@@ -186,8 +186,8 @@ function Toolbar({
       <div
         style={{
           marginLeft: 'auto',
-          color: 'var(--fg-dim)',
-          fontFamily: 'var(--f-mono)',
+          color: 'var(--text-faint)',
+          fontFamily: 'var(--font-monospace)',
           fontSize: 11,
         }}
       >
@@ -208,15 +208,15 @@ function EntryRow({ entry }: { entry: ActivityEntry }) {
     entry.outcome === 'error'
       ? 'var(--risk)'
       : entry.outcome === 'cancelled'
-        ? 'var(--fg-dim)'
+        ? 'var(--text-faint)'
         : 'var(--ok)'
 
   return (
     <div
       style={{
         padding: '8px 14px',
-        borderBottom: '1px solid var(--line-soft)',
-        fontFamily: 'var(--f-ui)',
+        borderBottom: '1px solid var(--divider-color)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 12,
         lineHeight: 1.45,
       }}
@@ -230,8 +230,8 @@ function EntryRow({ entry }: { entry: ActivityEntry }) {
       >
         <span
           style={{
-            color: 'var(--fg-dim)',
-            fontFamily: 'var(--f-mono)',
+            color: 'var(--text-faint)',
+            fontFamily: 'var(--font-monospace)',
             fontSize: 11,
             flexShrink: 0,
           }}
@@ -242,7 +242,7 @@ function EntryRow({ entry }: { entry: ActivityEntry }) {
         <span
           style={{
             color: surfaceColor(entry.surface),
-            fontFamily: 'var(--f-mono)',
+            fontFamily: 'var(--font-monospace)',
             fontSize: 11,
             textTransform: 'lowercase',
             minWidth: 56,
@@ -254,7 +254,7 @@ function EntryRow({ entry }: { entry: ActivityEntry }) {
         <span
           style={{
             color: outcomeColor,
-            fontFamily: 'var(--f-mono)',
+            fontFamily: 'var(--font-monospace)',
             fontSize: 12,
             width: 12,
             textAlign: 'center',
@@ -266,7 +266,7 @@ function EntryRow({ entry }: { entry: ActivityEntry }) {
         </span>
         <span
           style={{
-            color: 'var(--fg)',
+            color: 'var(--text-normal)',
             flex: 1,
             minWidth: 0,
             overflow: 'hidden',
@@ -274,13 +274,13 @@ function EntryRow({ entry }: { entry: ActivityEntry }) {
             whiteSpace: 'nowrap',
           }}
         >
-          {entry.prompt || <em style={{ color: 'var(--fg-dim)' }}>(no prompt)</em>}
+          {entry.prompt || <em style={{ color: 'var(--text-faint)' }}>(no prompt)</em>}
         </span>
         {entry.duration_ms != null && (
           <span
             style={{
-              color: 'var(--fg-dim)',
-              fontFamily: 'var(--f-mono)',
+              color: 'var(--text-faint)',
+              fontFamily: 'var(--font-monospace)',
               fontSize: 10,
               flexShrink: 0,
             }}
@@ -300,20 +300,20 @@ function EntryRow({ entry }: { entry: ActivityEntry }) {
             gap: 12,
             marginTop: 4,
             paddingLeft: 90,
-            color: 'var(--fg-muted)',
-            fontFamily: 'var(--f-mono)',
+            color: 'var(--text-muted)',
+            fontFamily: 'var(--font-monospace)',
             fontSize: 10,
           }}
         >
           {providerLabel && (
             <span title="provider/model">
-              <span style={{ color: 'var(--fg-dim)' }}>model </span>
+              <span style={{ color: 'var(--text-faint)' }}>model </span>
               {providerLabel}
             </span>
           )}
           {entry.files && entry.files.length > 0 && (
             <span title={entry.files.join(', ')}>
-              <span style={{ color: 'var(--fg-dim)' }}>files </span>
+              <span style={{ color: 'var(--text-faint)' }}>files </span>
               {entry.files.length === 1
                 ? entry.files[0]
                 : `${entry.files[0]} +${entry.files.length - 1}`}
@@ -321,7 +321,7 @@ function EntryRow({ entry }: { entry: ActivityEntry }) {
           )}
           {entry.tool_calls && entry.tool_calls.length > 0 && (
             <span>
-              <span style={{ color: 'var(--fg-dim)' }}>tools </span>
+              <span style={{ color: 'var(--text-faint)' }}>tools </span>
               {entry.tool_calls.map((t, i) => (
                 <span key={i} style={{ marginRight: 6 }}>
                   {t.name} {t.ok ? '✓' : '✗'}
@@ -362,7 +362,7 @@ function EntryList() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           fontSize: 12,
         }}
       >
@@ -379,7 +379,7 @@ function EntryList() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           fontSize: 12,
           padding: 24,
           textAlign: 'center',
@@ -400,7 +400,7 @@ function EntryList() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           fontSize: 12,
         }}
       >
@@ -414,7 +414,7 @@ function EntryList() {
       style={{
         flex: 1,
         overflowY: 'auto',
-        background: 'var(--bg)',
+        background: 'var(--background-primary)',
       }}
     >
       {filtered.map((e) => (
@@ -453,19 +453,19 @@ export function ActivityTimelineView({
         flexDirection: 'column',
         height: '100%',
         width: '100%',
-        background: 'var(--bg)',
-        color: 'var(--fg)',
-        fontFamily: 'var(--f-ui)',
+        background: 'var(--background-primary)',
+        color: 'var(--text-normal)',
+        fontFamily: 'var(--font-interface)',
       }}
     >
       <div
         style={{
           padding: '10px 14px',
           fontSize: 11,
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
           textTransform: 'uppercase',
           letterSpacing: 1,
-          borderBottom: '1px solid var(--line-soft)',
+          borderBottom: '1px solid var(--divider-color)',
         }}
       >
         Activity Timeline

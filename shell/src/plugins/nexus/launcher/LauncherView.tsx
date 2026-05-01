@@ -41,8 +41,8 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
           alignItems: 'center',
           justifyContent: 'center',
           height: '100%',
-          color: 'var(--fg-dim)',
-          fontFamily: 'var(--f-ui)',
+          color: 'var(--text-faint)',
+          fontFamily: 'var(--font-interface)',
           fontSize: 'var(--ui-size, 13px)',
         }}
       >
@@ -69,11 +69,11 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
             gap: 8,
             padding: '8px 16px',
             cursor: 'pointer',
-            fontFamily: 'var(--f-ui)',
+            fontFamily: 'var(--font-interface)',
             position: 'relative',
           }}
           onMouseEnter={(e) => {
-            (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-hover)'
+            (e.currentTarget as HTMLDivElement).style.background = 'var(--background-modifier-hover)'
           }}
           onMouseLeave={(e) => {
             (e.currentTarget as HTMLDivElement).style.background = 'transparent'
@@ -82,7 +82,7 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
-                color: 'var(--fg)',
+                color: 'var(--text-normal)',
                 fontSize: 'var(--ui-size, 13px)',
                 fontWeight: 600,
                 overflow: 'hidden',
@@ -94,7 +94,7 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
             </div>
             <div
               style={{
-                color: 'var(--fg-muted)',
+                color: 'var(--text-muted)',
                 fontSize: 11,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -114,7 +114,7 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
             style={{
               background: 'transparent',
               border: 'none',
-              color: 'var(--fg-muted)',
+              color: 'var(--text-muted)',
               cursor: 'pointer',
               fontSize: 16,
               lineHeight: 1,
@@ -132,8 +132,8 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
                 position: 'absolute',
                 top: '100%',
                 right: 12,
-                background: 'var(--bg-raised)',
-                border: '1px solid var(--line)',
+                background: 'var(--background-secondary)',
+                border: '1px solid var(--background-modifier-border)',
                 borderRadius: 6,
                 boxShadow: 'var(--shadow)',
                 zIndex: 1,
@@ -153,15 +153,15 @@ function RecentsList({ onActivate }: { onActivate: (path: string) => void }) {
                   textAlign: 'left',
                   background: 'transparent',
                   border: 'none',
-                  color: 'var(--fg)',
+                  color: 'var(--text-normal)',
                   padding: '6px 10px',
                   borderRadius: 4,
                   cursor: 'pointer',
                   fontSize: 'var(--ui-size, 13px)',
-                  fontFamily: 'var(--f-ui)',
+                  fontFamily: 'var(--font-interface)',
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
+                  (e.currentTarget as HTMLButtonElement).style.background = 'var(--background-modifier-hover)'
                 }}
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
@@ -195,19 +195,19 @@ function ActionRow({
   const buttonStyle =
     variant === 'accent'
       ? {
-          background: 'var(--accent)',
-          color: 'var(--accent-ink)',
+          background: 'var(--interactive-accent)',
+          color: 'var(--interactive-accent-ink)',
         }
       : variant === 'disabled'
       ? {
-          background: 'var(--bg-hover)',
-          color: 'var(--fg)',
+          background: 'var(--background-modifier-hover)',
+          color: 'var(--text-normal)',
           opacity: 0.5,
           cursor: 'not-allowed' as const,
         }
       : {
-          background: 'var(--bg-hover)',
-          color: 'var(--fg)',
+          background: 'var(--background-modifier-hover)',
+          color: 'var(--text-normal)',
         }
 
   return (
@@ -217,13 +217,13 @@ function ActionRow({
         alignItems: 'center',
         gap: 16,
         padding: '14px 18px',
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: '1px solid var(--divider-color)',
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
-            color: 'var(--fg)',
+            color: 'var(--text-normal)',
             fontSize: 'var(--ui-size, 13px)',
             fontWeight: 600,
             marginBottom: 3,
@@ -233,7 +233,7 @@ function ActionRow({
         </div>
         <div
           style={{
-            color: 'var(--fg-muted)',
+            color: 'var(--text-muted)',
             fontSize: 12,
           }}
         >
@@ -245,10 +245,10 @@ function ActionRow({
         disabled={disabled}
         style={{
           border: 'none',
-          borderRadius: 'var(--r)',
+          borderRadius: 'var(--radius-s)',
           padding: '6px 16px',
           fontSize: 'var(--ui-size, 13px)',
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           fontWeight: 500,
           cursor: disabled ? 'not-allowed' : 'pointer',
           flexShrink: 0,
@@ -295,9 +295,9 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
         zIndex: zIndex.overlayModal,
         pointerEvents: 'auto',
         display: 'flex',
-        background: 'var(--bg)',
-        color: 'var(--fg)',
-        fontFamily: 'var(--f-ui)',
+        background: 'var(--background-primary)',
+        color: 'var(--text-normal)',
+        fontFamily: 'var(--font-interface)',
       }}
     >
       {onDismiss && (
@@ -316,7 +316,7 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
             placeItems: 'center',
             background: 'transparent',
             border: 'none',
-            color: 'var(--fg-muted)',
+            color: 'var(--text-muted)',
             cursor: 'pointer',
             borderRadius: 4,
             fontSize: 18,
@@ -324,12 +324,12 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
             zIndex: 1,
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'var(--bg-hover)'
-            e.currentTarget.style.color = 'var(--fg)'
+            e.currentTarget.style.background = 'var(--background-modifier-hover)'
+            e.currentTarget.style.color = 'var(--text-normal)'
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = 'var(--fg-muted)'
+            e.currentTarget.style.color = 'var(--text-muted)'
           }}
         >
           ✕
@@ -341,8 +341,8 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
           width: '33%',
           minWidth: 240,
           maxWidth: 420,
-          background: 'var(--bg)',
-          borderRight: '1px solid var(--line-soft)',
+          background: 'var(--background-primary)',
+          borderRight: '1px solid var(--divider-color)',
           display: 'flex',
           flexDirection: 'column',
         }}
@@ -354,7 +354,7 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
             fontWeight: 700,
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
-            color: 'var(--fg-muted)',
+            color: 'var(--text-muted)',
             flexShrink: 0,
           }}
         >
@@ -369,7 +369,7 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
       <div
         style={{
           flex: 1,
-          background: 'var(--bg-raised)',
+          background: 'var(--background-secondary)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -381,8 +381,8 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
         <div style={{ width: '100%', maxWidth: 560 }}>
           <h1
             style={{
-              color: 'var(--accent)',
-              fontFamily: 'var(--f-ui)',
+              color: 'var(--interactive-accent)',
+              fontFamily: 'var(--font-interface)',
               fontSize: 32,
               fontWeight: 600,
               textAlign: 'center',
@@ -395,9 +395,9 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
 
           <div
             style={{
-              background: 'var(--bg)',
-              border: '1px solid var(--line-soft)',
-              borderRadius: 'var(--r-lg)',
+              background: 'var(--background-primary)',
+              border: '1px solid var(--divider-color)',
+              borderRadius: 'var(--radius-l)',
               overflow: 'hidden',
             }}
           >

@@ -38,7 +38,7 @@ function ContextChipRail({
         flexWrap: 'wrap',
         gap: 6,
         padding: '6px 16px 8px',
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: '1px solid var(--divider-color)',
       }}
     >
       {chips.map((chip) => (
@@ -50,13 +50,13 @@ function ContextChipRail({
           title={`Remove ${chip.label}`}
           aria-label={`Remove ${chip.label}`}
           style={{
-            background: 'var(--bg)',
-            border: '1px solid var(--line-soft)',
-            borderRadius: 'var(--r)',
+            background: 'var(--background-primary)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-s)',
             padding: '2px 8px',
-            fontFamily: 'var(--f-ui)',
+            fontFamily: 'var(--font-interface)',
             fontSize: '0.78em',
-            color: 'var(--fg-muted)',
+            color: 'var(--text-muted)',
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
@@ -148,13 +148,13 @@ function ModelSwitcher() {
       title="Model used for this prompt and as the global default"
       aria-label="AI model"
       style={{
-        background: 'var(--bg)',
-        border: '1px solid var(--line-soft)',
-        borderRadius: 'var(--r)',
+        background: 'var(--background-primary)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
         padding: '2px 6px',
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: '0.78em',
-        color: 'var(--fg-muted)',
+        color: 'var(--text-muted)',
         cursor: 'pointer',
       }}
     >
@@ -197,9 +197,9 @@ function ResponsePanel() {
         style={{
           padding: '12px 16px',
           color: 'var(--danger, #b00020)',
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           fontSize: 13,
-          borderTop: '1px solid var(--line-soft)',
+          borderTop: '1px solid var(--divider-color)',
         }}
       >
         {error.message}
@@ -213,15 +213,15 @@ function ResponsePanel() {
         padding: '12px 16px',
         maxHeight: 320,
         overflowY: 'auto',
-        borderTop: '1px solid var(--line-soft)',
-        fontFamily: 'var(--f-ui)',
+        borderTop: '1px solid var(--divider-color)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 13,
-        color: 'var(--fg)',
+        color: 'var(--text-normal)',
         whiteSpace: 'pre-wrap',
       }}
     >
       {responseText.length === 0 && status === 'submitting' ? (
-        <span style={{ color: 'var(--fg-dim)' }}>Thinking…</span>
+        <span style={{ color: 'var(--text-faint)' }}>Thinking…</span>
       ) : (
         responseText
       )}
@@ -315,9 +315,9 @@ export function CmdIOverlay() {
         style={{
           width: 640,
           maxWidth: '92vw',
-          background: 'var(--bg-raised)',
-          border: '1px solid var(--line)',
-          borderRadius: 'var(--r-lg)',
+          background: 'var(--background-secondary)',
+          border: '1px solid var(--background-modifier-border)',
+          borderRadius: 'var(--radius-l)',
           boxShadow: 'var(--shadow)',
           overflow: 'hidden',
           display: 'flex',
@@ -348,8 +348,8 @@ export function CmdIOverlay() {
             background: 'transparent',
             border: 0,
             outline: 0,
-            color: 'var(--fg)',
-            fontFamily: 'var(--f-ui)',
+            color: 'var(--text-normal)',
+            fontFamily: 'var(--font-interface)',
             fontSize: 14,
             padding: '12px 16px',
             resize: 'none',

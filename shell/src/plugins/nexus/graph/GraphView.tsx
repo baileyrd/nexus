@@ -71,7 +71,7 @@ export function GraphView() {
   if (!currentRelpath) {
     return (
       <Container>
-        <StateMessage color="var(--fg-dim)">
+        <StateMessage color="var(--text-faint)">
           Open a file to see its neighbourhood.
         </StateMessage>
       </Container>
@@ -87,7 +87,7 @@ export function GraphView() {
   if (loading) {
     return (
       <Container>
-        <StateMessage color="var(--fg-muted)">Loading…</StateMessage>
+        <StateMessage color="var(--text-muted)">Loading…</StateMessage>
       </Container>
     )
   }
@@ -115,8 +115,8 @@ export function GraphView() {
           style={{
             textAlign: 'center',
             padding: '4px 12px 10px',
-            color: 'var(--fg-dim)',
-            fontFamily: 'var(--f-ui)',
+            color: 'var(--text-faint)',
+            fontFamily: 'var(--font-interface)',
             fontSize: 12,
           }}
         >
@@ -158,7 +158,7 @@ function StateMessage({
       style={{
         padding: '12px 14px',
         color,
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 12,
       }}
     >
@@ -219,7 +219,7 @@ function GraphSvg({
             y1={from.y}
             x2={to.x}
             y2={to.y}
-            stroke="var(--line)"
+            stroke="var(--background-modifier-border)"
             strokeWidth={1}
           />
         )
@@ -269,19 +269,19 @@ function GraphNode({
   const baseRadius = isCentre ? 8 : 6
   const radius = isCentre ? baseRadius : hovered ? baseRadius + 1 : baseRadius
 
-  const fill = isCentre ? 'var(--accent)' : 'var(--bg-raised)'
+  const fill = isCentre ? 'var(--interactive-accent)' : 'var(--background-secondary)'
   const stroke = isCentre
     ? 'none'
     : hovered
-      ? 'var(--accent)'
-      : 'var(--line)'
+      ? 'var(--interactive-accent)'
+      : 'var(--background-modifier-border)'
   const strokeWidth = isCentre ? 0 : 1.25
 
   // Label sits below the circle. Gap scales with radius so hover
   // doesn't make the label leap.
   const labelY = node.y + baseRadius + 12
 
-  const labelFill = isCentre ? 'var(--fg)' : 'var(--fg-muted)'
+  const labelFill = isCentre ? 'var(--text-normal)' : 'var(--text-muted)'
   const labelWeight = isCentre ? 600 : 400
 
   return (
@@ -305,7 +305,7 @@ function GraphNode({
         textAnchor="middle"
         fill={labelFill}
         fontSize={11}
-        fontFamily="var(--f-ui)"
+        fontFamily="var(--font-interface)"
         fontWeight={labelWeight}
         style={{ userSelect: 'none' }}
       >
