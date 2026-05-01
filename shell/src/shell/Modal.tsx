@@ -1,4 +1,5 @@
 // SH-002: modal portal wrapper.
+// SH-005: focus trap integration.
 //
 // Renders children into #modal-root (a sibling of #root in index.html)
 // so modals escape any stacking context created by workspace ancestors.
@@ -10,7 +11,8 @@
 // appends a temporary div so portal semantics still apply.
 
 import { createPortal } from 'react-dom'
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
+import { useFocusTrap } from './useFocusTrap'
 
 function getOrCreateRoot(): HTMLElement {
   const existing = document.getElementById('modal-root')
@@ -23,8 +25,19 @@ function getOrCreateRoot(): HTMLElement {
 
 interface Props {
   children: ReactNode
+  /** When true (default), activate the focus trap. Pass false to opt out. */
+  trapFocus?: boolean
 }
 
-export function Modal({ children }: Props): ReturnType<typeof createPortal> {
-  return createPortal(children, getOrCreateRoot())
+function ModalInner({ children, trapFocus = true }: Props) {
+  const ref = useRef<HTMLDivElement>(null)
+  useFocusTrap(ref, trapFocus)
+  return <div ref={ref} style={{ display: 'contents' }}>{children}</div>
+}
+
+export function Modal({ children, trapFocus = true }: Props): ReturnType<typeof createPortal> {
+  return createPortal(
+    <ModalInner trapFocus={trapFocus}>{children}</ModalInner>,
+    getOrCreateRoot(),
+  )
 }
