@@ -129,67 +129,58 @@ mod tests {
 
     #[test]
     fn load_missing_file_returns_defaults() {
-        let tmp = std::env::temp_dir().join("nexus-test-no-config");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        // `tempfile::tempdir()` over `env::temp_dir().join(static-name)`:
+        // per-process unique paths + RAII cleanup so concurrent test
+        // runs (parallel `cargo test`, multi-shard CI) don't race on
+        // the same directory. See issue #81.
+        let tmp = tempfile::tempdir().unwrap();
 
-        let cfg = KernelConfig::load(&tmp).unwrap();
-        assert_eq!(cfg.forge_root, tmp);
+        let cfg = KernelConfig::load(tmp.path()).unwrap();
+        assert_eq!(cfg.forge_root, tmp.path());
         assert_eq!(cfg.event_bus_capacity, 2048);
         assert!(cfg.hot_reload_enabled);
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn load_valid_config_applies_overrides() {
-        let tmp = std::env::temp_dir().join("nexus-test-valid-config");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(tmp.join(".nexus")).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".nexus")).unwrap();
         std::fs::write(
-            tmp.join(".nexus/config.toml"),
+            tmp.path().join(".nexus/config.toml"),
             "event_bus_capacity = 4096\nhot_reload_enabled = false\n",
         )
         .unwrap();
 
-        let cfg = KernelConfig::load(&tmp).unwrap();
+        let cfg = KernelConfig::load(tmp.path()).unwrap();
         assert_eq!(cfg.event_bus_capacity, 4096);
         assert!(!cfg.hot_reload_enabled);
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn load_malformed_toml_returns_parse_error() {
-        let tmp = std::env::temp_dir().join("nexus-test-bad-config");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(tmp.join(".nexus")).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".nexus")).unwrap();
         std::fs::write(
-            tmp.join(".nexus/config.toml"),
+            tmp.path().join(".nexus/config.toml"),
             "this is not valid toml = = =",
         )
         .unwrap();
 
-        let err = KernelConfig::load(&tmp).unwrap_err();
+        let err = KernelConfig::load(tmp.path()).unwrap_err();
         assert!(matches!(err, ConfigError::TomlParse { .. }));
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn load_zero_capacity_returns_invalid_error() {
-        let tmp = std::env::temp_dir().join("nexus-test-zero-cap");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(tmp.join(".nexus")).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".nexus")).unwrap();
         std::fs::write(
-            tmp.join(".nexus/config.toml"),
+            tmp.path().join(".nexus/config.toml"),
             "event_bus_capacity = 0\n",
         )
         .unwrap();
 
-        let err = KernelConfig::load(&tmp).unwrap_err();
+        let err = KernelConfig::load(tmp.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid { .. }));
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

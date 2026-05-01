@@ -15,23 +15,30 @@ fn kv() -> Arc<dyn KvStore> {
     Arc::new(InMemoryKvStore::new())
 }
 
-/// Tempdir helper — creates a unique path and ensures cleanup on drop.
+/// Tempdir helper — wraps `tempfile::TempDir` so the test bodies
+/// can keep the existing `forge.path.clone()` ergonomics. Per-process
+/// unique paths + RAII cleanup so concurrent test runs don't race on
+/// the same directory (was `env::temp_dir().join("nexus-smoke-...")`
+/// pre-#81).
 struct TempForge {
+    inner: tempfile::TempDir,
     path: PathBuf,
 }
 
 impl TempForge {
-    fn new(label: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("nexus-smoke-{label}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&path);
-        std::fs::create_dir_all(&path).unwrap();
-        Self { path }
+    fn new(_label: &str) -> Self {
+        let inner = tempfile::tempdir().expect("tempdir");
+        let path = inner.path().to_path_buf();
+        Self { inner, path }
     }
 }
 
 impl Drop for TempForge {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.path);
+        // `inner: TempDir` cleans up on drop. The explicit reference
+        // here keeps it alive for `path`'s lifetime; without it the
+        // borrow checker is fine but we've documented the dependency.
+        let _ = &self.inner;
     }
 }
 

@@ -37,8 +37,19 @@ pub(crate) fn type_id_in_namespace(type_id: &str, plugin_id: &str) -> bool {
 
 impl EventBus {
     /// Create a new bus with the given ring buffer capacity.
+    ///
+    /// # Panics
+    /// Panics if `capacity == 0`. `KernelConfig::load` rejects 0 from
+    /// disk, but `KernelConfig::for_testing` and direct struct
+    /// construction can pass 0; failing fast here surfaces the bad
+    /// value at the construction site instead of inside
+    /// `tokio::broadcast::channel`'s panic. See issue #81.
     #[must_use]
     pub fn new(capacity: usize) -> Self {
+        assert!(
+            capacity > 0,
+            "EventBus capacity must be > 0; tokio::broadcast::channel(0) panics"
+        );
         let (sender, _receiver) = broadcast::channel(capacity);
         Self { sender }
     }
@@ -99,7 +110,12 @@ impl EventBus {
     /// To emit plugin-namespaced custom events use [`publish_plugin`] instead.
     ///
     /// # Errors
-    /// Returns `BusError::Closed` if the bus has been shut down.
+    /// Currently infallible. The underlying `broadcast::Sender::send` returns
+    /// `Err` only when there are zero active subscribers — a normal,
+    /// non-error condition for a fan-out bus — which is silently ignored.
+    /// The `Result` return is preserved so a future bus implementation
+    /// (with explicit shutdown semantics) can surface real failures
+    /// without an API break.
     pub fn publish_core(&self, plugin_id: &str, event: NexusEvent) -> Result<()> {
         let metadata = EventMetadata {
             event_id: uuid::Uuid::new_v4(),
@@ -115,7 +131,8 @@ impl EventBus {
     /// Publish a kernel-owned event. Not callable from plugins.
     ///
     /// # Errors
-    /// Returns `BusError::Closed` if the bus has been shut down.
+    /// Currently infallible. See [`publish_core`](Self::publish_core)
+    /// for the rationale on the preserved `Result` return type.
     #[allow(dead_code, clippy::unnecessary_wraps)] // wired up by nexus-plugins (PRD 04)
     pub(crate) fn publish_kernel(&self, event: NexusEvent) -> Result<()> {
         let metadata = EventMetadata {
@@ -233,7 +250,14 @@ fn variant_name(event: &NexusEvent) -> &'static str {
     }
 }
 
-/// Get the current `tracing` span id, if any.
+/// Get the current `tracing` span id as a stringified numeric id,
+/// if any.
+///
+/// Pre-#81 this returned the `Debug` repr (e.g. `"Id(1)"`), which
+/// leaked through to subscribers serializing event metadata —
+/// `Id(1)` is not a useful identifier downstream of the bus.
+/// `Id::into_u64()` gives the underlying numeric id, which is what
+/// callers actually want to correlate spans across logs/events.
 fn current_span_id() -> Option<String> {
     // tracing::Span::current() always returns a span, but it's the None span
     // when no actual span is active. We use its metadata or None.
@@ -241,7 +265,7 @@ fn current_span_id() -> Option<String> {
     if span.is_disabled() {
         None
     } else {
-        span.id().map(|id| format!("{id:?}"))
+        span.id().map(|id| id.into_u64().to_string())
     }
 }
 
@@ -479,6 +503,17 @@ mod tests {
         assert!(type_id_in_namespace("com.foo.event", "com.foo"));
         assert!(type_id_in_namespace("com.foo.deeply.nested.event", "com.foo"));
         assert!(type_id_in_namespace("com.foo", "com.foo"));
+    }
+
+    /// Issue #81. Pre-fix the `tokio::broadcast::channel(0)` panic
+    /// surfaced as a generic "channel capacity must be > 0" message
+    /// from inside tokio, with no hint about where the bad config
+    /// came from. Now `EventBus::new(0)` panics at the construction
+    /// site with a message naming the bus and the constraint.
+    #[test]
+    #[should_panic(expected = "EventBus capacity must be > 0")]
+    fn new_panics_on_zero_capacity() {
+        let _ = EventBus::new(0);
     }
 
     #[tokio::test]

@@ -63,13 +63,18 @@ impl KernelPluginContext {
         forge_root: &Path,
         ipc_dispatcher: Option<Arc<dyn IpcDispatcher>>,
     ) -> Result<Self> {
-        let forge_root_canonical = forge_root.canonicalize()?;
+        // Canonicalize once via the validator (which we need to
+        // construct anyway), then reuse its canonical root for
+        // `forge_root_canonical`. Pre-#81 this called
+        // `forge_root.canonicalize()` twice — once here and once
+        // inside `ForgePathValidator::new` — for the same path.
         let path_validator = ForgePathValidator::new(forge_root).map_err(|e| {
             Error::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("forge root '{}': {e}", forge_root.display()),
             ))
         })?;
+        let forge_root_canonical = path_validator.forge_root().to_path_buf();
         Ok(Self {
             plugin_id: plugin_id.into(),
             plugin_version: plugin_version.into(),
