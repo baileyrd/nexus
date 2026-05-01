@@ -182,10 +182,23 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
     // `com.nexus.ai::stream_chat` for planning, and dispatching every
     // `ToolCall` the resulting plan emits to whatever target plugin
     // the agent picked.
+    //
+    // Capability scope (#73): the agent's direct-cap usage is
+    // `IpcCall` (tool dispatch via ipc_call to AI/storage/etc.) and
+    // `FsRead` (history file reads at
+    // `crates/nexus-agent/src/core_plugin.rs:517`). It does NOT
+    // directly write files, fetch URLs, or spawn processes — those
+    // come transitively through ipc_call to the relevant plugin and
+    // are gated by *that* plugin's capability checks. Granting only
+    // the directly-used caps makes the contract truthful and
+    // prevents silent escalation if new direct-cap code is added.
+    // The IpcCall-laundering problem (workflow/agent can still
+    // ipc_call into high-impact handlers like terminal::create_session)
+    // is tracked separately under #77.
     let agent_ctx = KernelPluginContext::new(
         "com.nexus.agent",
         env!("CARGO_PKG_VERSION"),
-        Capability::ALL.iter().copied().collect::<CapabilitySet>(),
+        agent_capabilities(),
         Arc::clone(&kv_store),
         Arc::clone(&event_bus),
         forge_root,
@@ -215,10 +228,21 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
 
     // Workflow plugin needs the kernel context so its `run` handler
     // can drive arbitrary plugins via ipc_call.
+    //
+    // Capability scope (#73): the workflow plugin's direct-cap usage
+    // is just `IpcCall` — every file/network/process operation it
+    // performs (digest scheduler reads, AI-prompt steps, storage
+    // writes) routes through `ctx.ipc_call(...)`, gated by the target
+    // plugin's own capability checks. Granting only `IpcCall` makes
+    // the contract truthful for both the on-demand `workflow::run`
+    // handler and the cron-driven digest scheduler that runs on top
+    // of the same context. The IpcCall-laundering problem
+    // (workflow can still ipc_call into terminal::create_session,
+    // mcp::connect, etc.) is tracked separately under #77.
     let workflow_ctx = KernelPluginContext::new(
         "com.nexus.workflow",
         env!("CARGO_PKG_VERSION"),
-        Capability::ALL.iter().copied().collect::<CapabilitySet>(),
+        workflow_capabilities(),
         Arc::clone(&kv_store),
         Arc::clone(&event_bus),
         forge_root,
@@ -1202,6 +1226,57 @@ fn load_digest_config(forge_root: &std::path::Path) -> nexus_workflow::DigestCon
             nexus_workflow::DigestConfig::default()
         }
     }
+}
+
+/// Capabilities granted to the `com.nexus.agent` `KernelPluginContext`
+/// at runtime wiring time (issue #73). Scoped to the agent's actual
+/// direct-cap usage:
+///
+/// - `IpcCall` — every `ToolCall` from a plan dispatches via
+///   `ctx.ipc_call(target_plugin_id, command_id, …)` (see
+///   `crates/nexus-bootstrap/src/agent.rs:62-73`), and the planning
+///   loop uses `ipc_call` against `com.nexus.ai::stream_chat`.
+/// - `FsRead` — `crates/nexus-agent/src/core_plugin.rs:517` reads
+///   plan-history JSON files directly via `ctx.read_file(…)`.
+/// - `FsWrite` — `crates/nexus-agent/src/core_plugin.rs:580` deletes
+///   one persisted history entry via `ctx.delete_file(…)` (the
+///   `history_delete` handler). Asymmetric with the history-save
+///   path, which routes through `com.nexus.storage::write_file` via
+///   `ipc_call`; routing the delete the same way is a clean
+///   follow-up but out of scope for #73.
+///
+/// Pre-#73 this was `Capability::ALL`; the audit's amplifier-plugin
+/// finding is that an LLM-generated plan or an attacker-influenced
+/// prompt could exercise NetHttp / ProcessSpawn / FsReadExternal /
+/// FsWriteExternal directly from the agent's context. Restricting to
+/// the directly-used set prevents silent escalation if new
+/// direct-cap code is added. `FsRead` and `FsWrite` are confined to
+/// the forge root by the kernel's `confine_path` (`context_impl.rs`),
+/// so they don't grant external filesystem access; the
+/// transitive IpcCall-laundering surface (agent → terminal,
+/// agent → mcp, …) is tracked under #77.
+#[must_use]
+pub fn agent_capabilities() -> CapabilitySet {
+    [Capability::IpcCall, Capability::FsRead, Capability::FsWrite]
+        .into_iter()
+        .collect()
+}
+
+/// Capabilities granted to the `com.nexus.workflow` `KernelPluginContext`
+/// at runtime wiring time (issue #73). Scoped to `IpcCall` only —
+/// every step type in the workflow executor (ipc/ipc_call, ai_prompt,
+/// digest reads/writes, …) routes through `ctx.ipc_call(…)` rather
+/// than calling kernel surfaces directly.
+///
+/// Pre-#73 this was `Capability::ALL`; user-authored `.workflows/*.toml`
+/// drives the steps, so this is exactly the
+/// "amplifier plugin gets everything" pattern the audit calls out.
+/// The cron-driven digest scheduler runs on top of the same context,
+/// so this scope applies there too. Same caveat about the transitive
+/// IpcCall-laundering surface as for `agent_capabilities`.
+#[must_use]
+pub fn workflow_capabilities() -> CapabilitySet {
+    [Capability::IpcCall].into_iter().collect()
 }
 
 /// BL-028g — pull `[webhooks]` out of `<forge>/.forge/config.toml`.
