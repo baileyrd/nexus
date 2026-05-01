@@ -34,17 +34,20 @@ export const gitStatusPlugin: Plugin = {
     // swallow and clear.
     const loadStatus = async (): Promise<void> => {
       try {
-        const status = await api.kernel.invoke<GitStatus>(
+        // invoke returns null (JSON null) when the forge is not a git repo
+        // (passive mode) and a GitStatus object when it is.
+        const status = await api.kernel.invoke<GitStatus | null>(
           GIT_PLUGIN_ID,
           'status',
           {},
         )
         useGitStatusStore.getState().setStatus(status)
-        console.info('[nexus.gitStatus] loaded', status)
+        if (status !== null) {
+          console.info('[nexus.gitStatus] loaded', status)
+        }
       } catch (err) {
-        // Most common reason: forge root isn't a git repo (plugin returns
-        // an ExecutionFailed on dispatch). Not an error worth surfacing
-        // — just clear the UI.
+        // Unexpected IPC failure — not the no-repo case (which now returns
+        // null instead of throwing). Clear the UI and log for diagnostics.
         console.info('[nexus.gitStatus] unavailable:', err)
         useGitStatusStore.getState().setStatus(null)
       }

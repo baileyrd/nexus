@@ -138,6 +138,14 @@ impl CorePlugin for GitCorePlugin {
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         let Some(w) = &self.worker else {
+            // Passive mode — forge root is not a git repository. HANDLER_STATUS
+            // returns JSON null so the shell-side gitStatus plugin can quietly
+            // set status=null without hitting the PluginCrashedDuringCall path.
+            // All other handlers are not meaningful without a repo and return
+            // an explicit error so callers know the call was rejected.
+            if handler_id == HANDLER_STATUS {
+                return Ok(serde_json::Value::Null);
+            }
             return Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: "forge root is not a git repository".to_string(),
@@ -445,11 +453,24 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_without_repo_returns_error() {
+    fn dispatch_status_without_repo_returns_null() {
         let dir = tempdir().unwrap();
         let mut plugin = GitCorePlugin::new(dir.path().to_path_buf(), None);
         plugin.on_init().unwrap();
+        // Passive mode: HANDLER_STATUS returns JSON null so the shell can
+        // set status=null without hitting the PluginCrashedDuringCall path.
         let result = plugin.dispatch(HANDLER_STATUS, &json!({}));
+        assert!(result.is_ok(), "expected Ok, got {result:?}");
+        assert_eq!(result.unwrap(), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn dispatch_non_status_without_repo_returns_error() {
+        let dir = tempdir().unwrap();
+        let mut plugin = GitCorePlugin::new(dir.path().to_path_buf(), None);
+        plugin.on_init().unwrap();
+        // Non-status handlers are rejected in passive mode.
+        let result = plugin.dispatch(HANDLER_LOG, &json!({}));
         assert!(result.is_err());
     }
 
