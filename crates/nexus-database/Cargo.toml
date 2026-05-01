@@ -17,6 +17,16 @@ uuid = { workspace = true }
 regex-lite = { workspace = true }
 tracing = { workspace = true }
 csv = { workspace = true }
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl"] }
+schemars = { workspace = true, optional = true }
+
+[features]
+# Audit-2026-05-01 P1-3 (#113) — emit JSON Schema + TypeScript bindings
+# for IPC arg/reply types. Off by default. Args/responses that reference
+# `nexus_types::bases::BaseRecord` are out of scope here because
+# BaseRecord uses `#[serde(flatten)]` for forward-compat record fields,
+# which is incompatible with the P0-2 `deny_unknown_fields` gate.
+ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

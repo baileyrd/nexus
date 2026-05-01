@@ -89,6 +89,13 @@ use nexus_terminal::{
     ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ResizeArgs, SearchOutputArgs,
     SendInputArgs, SendRawInputArgs, SessionIdArgs, WaitForPatternArgs, WaitForPatternResponse,
 };
+// nexus-database — only the 4 args/responses that don't reference
+// `nexus_types::bases::BaseRecord` are wired in. BaseRecord uses
+// `#[serde(flatten)]` for forward-compat record fields, which is
+// incompatible with the P0-2 `deny_unknown_fields` gate.
+use nexus_database::core_plugin::{
+    CsvExportResponse, CsvImportArgs, FormulaEvalArgs, FormulaEvalResponse,
+};
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -292,6 +299,14 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<SearchOutputArgs>("com_nexus_terminal__search_output", "args");
     write_schema::<WaitForPatternArgs>("com_nexus_terminal__wait_for_pattern", "args");
     write_schema::<WaitForPatternResponse>("com_nexus_terminal__wait_for_pattern", "response");
+
+    // ── com.nexus.database (P1-3 #113) ───────────────────────────────────
+    // Only the 4 types that don't reference BaseRecord (which uses
+    // flatten and so can't have deny_unknown_fields).
+    write_schema::<CsvImportArgs>("com_nexus_database__csv_import", "args");
+    write_schema::<CsvExportResponse>("com_nexus_database__csv_export", "response");
+    write_schema::<FormulaEvalArgs>("com_nexus_database__formula_eval", "args");
+    write_schema::<FormulaEvalResponse>("com_nexus_database__formula_eval", "response");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type

@@ -17,6 +17,11 @@
 use nexus_plugins::{CorePlugin, PluginError};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 use crate::formula;
 use crate::import_export::{export_csv, import_csv, ColumnMapping};
 
@@ -40,7 +45,15 @@ pub const HANDLER_APPLY_VIEW: u32 = 4;
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 /// Arguments for `csv_import`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct CsvImportArgs {
     /// Raw CSV file bytes.
@@ -84,6 +97,14 @@ pub struct CsvExportArgs {
 
 /// Response from `csv_export`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct CsvExportResponse {
     /// Serialized CSV bytes (header row + one row per record).
@@ -93,7 +114,15 @@ pub struct CsvExportResponse {
 }
 
 /// Arguments for `formula_eval`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct FormulaEvalArgs {
     /// Formula expression (Notion-compatible syntax).
@@ -104,6 +133,14 @@ pub struct FormulaEvalArgs {
 
 /// Response from `formula_eval`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct FormulaEvalResponse {
     /// Display-formatted result string (same as [`formula::FormulaValue::to_display_string`]).

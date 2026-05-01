@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FormulaEvalResponse",
+  "description": "Response from `formula_eval`.",
+  "type": "object",
+  "properties": {
+    "display": {
+      "description": "Display-formatted result string (same as [`formula::FormulaValue::to_display_string`]).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "display"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CsvExportResponse",
+  "description": "Response from `csv_export`.",
+  "type": "object",
+  "properties": {
+    "count": {
+      "description": "Number of records written (excludes header).",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "csv_bytes": {
+      "description": "Serialized CSV bytes (header row + one row per record).",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "csv_bytes",
+    "count"
+  ]
+}
