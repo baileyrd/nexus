@@ -95,6 +95,18 @@ pub fn is_valid_popout_id(id: &str) -> bool {
     })
 }
 
+/// Validate a `leaf_id` supplied by the frontend before it gets
+/// interpolated into a popout URL's query string. Same character
+/// class as [`is_valid_popout_id`] — the audit (#86) flagged that
+/// the prior `!leaf.is_empty()` check let a `leaf_id` smuggle extra
+/// query parameters (`xxx&malicious=foo`) into the popout webview's
+/// URL. Reusing the popout-id rules here keeps the URL-construction
+/// invariant uniform: every dynamic segment is `[A-Za-z0-9_-]+`.
+#[must_use]
+pub fn is_valid_leaf_id(id: &str) -> bool {
+    is_valid_popout_id(id)
+}
+
 /// Build the `<prefix><id>` window label for a popout id. Caller is
 /// expected to have already validated `id` via [`is_valid_popout_id`].
 pub fn label_for_id(id: &str) -> String {
@@ -105,8 +117,14 @@ pub fn label_for_id(id: &str) -> String {
 /// params. `leaf_id` is optional — a popout can be opened without a
 /// pre-attached leaf in case the frontend wants to fill it later.
 pub fn build_popout_url(id: &str, leaf_id: Option<&str>) -> String {
+    // Pre-#86 the only check on `leaf_id` was `!leaf.is_empty()`; a
+    // value like `xxx&malicious=foo` smuggled additional query
+    // parameters into the popout webview URL. Now we require the
+    // same `[A-Za-z0-9_-]+` shape we require for `id` (validated by
+    // [`is_valid_popout_id`] before the URL is built); a leaf_id
+    // that fails the check is treated as absent.
     match leaf_id {
-        Some(leaf) if !leaf.is_empty() => {
+        Some(leaf) if is_valid_leaf_id(leaf) => {
             format!("{POPOUT_ENTRY}?popout={id}&leaf={leaf}")
         }
         _ => format!("{POPOUT_ENTRY}?popout={id}"),
