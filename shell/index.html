@@ -132,10 +132,14 @@
            This alias block has been removed. */
       }
 
+      /* SH-004: density scales prose and chrome together. */
       :root,
-      [data-density="cozy"] { --ui-size: 13px; --row-h: 26px; --body-size: 16px; }
-      [data-density="compact"] { --ui-size: 12px; --row-h: 22px; --body-size: 15px; }
-      [data-density="spacious"] { --ui-size: 14px; --row-h: 30px; --body-size: 17px; }
+      [data-density="cozy"]    { --ui-size: 13px; --row-h: 26px; --body-size: 16px;
+                                  --chrome-row-height: 36px; --chrome-icon-size: 24px; }
+      [data-density="compact"] { --ui-size: 12px; --row-h: 22px; --body-size: 15px;
+                                  --chrome-row-height: 30px; --chrome-icon-size: 20px; }
+      [data-density="spacious"]{ --ui-size: 14px; --row-h: 30px; --body-size: 17px;
+                                  --chrome-row-height: 40px; --chrome-icon-size: 28px; }
 
       /* Prevent white flash before the React tree mounts. */
       html, body { margin: 0; padding: 0; background: var(--background-primary); height: 100%; overflow: hidden; }

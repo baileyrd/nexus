@@ -25,8 +25,10 @@ export const IS_MACOS =
 // ─── Win/Linux style ────────────────────────────────────────────────────────
 
 const baseWinStyle: React.CSSProperties = {
-  width: 40,
-  height: 36,
+  // SH-004: height tracks --chrome-row-height so Win/Linux controls scale
+  // with density. Width is slightly wider (square-ish) for hit-target size.
+  width: 'var(--chrome-row-height)',
+  height: 'var(--chrome-row-height)',
   background: 'transparent',
   border: 'none',
   color: 'var(--text-muted)',
@@ -202,7 +204,7 @@ export function WindowControls() {
           alignItems: 'center',
           gap: 8,
           padding: '0 8px',
-          height: 36,
+          height: 'var(--chrome-row-height)',
           flexShrink: 0,
         }}
       >

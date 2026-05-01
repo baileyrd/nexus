@@ -164,6 +164,8 @@ export function Workspace(): JSX.Element {
 
 const COLLAPSE_THRESHOLD = 120
 const DOCK_MIN_SIZE = 150
+// SH-004: Default width for the collapsed-ribbon placeholder. The actual visual
+// width is overridden by the CSS token --chrome-icon-size from the density block.
 const RIBBON_WIDTH = 24
 // Height of the collapsed bottom-drawer strip. Roughly matches a single
 // tab row — enough to host a label + expand button without eating space.
@@ -177,8 +179,8 @@ interface SidedockFrameProps {
 }
 
 const COLLAPSED_BAR_STYLE: CSSProperties = {
-  width: RIBBON_WIDTH,
-  flex: `0 0 ${RIBBON_WIDTH}px`,
+  width: 'var(--chrome-icon-size)',
+  flex: '0 0 var(--chrome-icon-size)',
   display: 'flex',
   alignItems: 'flex-start',
   justifyContent: 'center',
@@ -635,12 +637,11 @@ function TabStrip({
   }
 
   // Trailing buttons (chevron, right-sidedock toggle) match WindowControls'
-  // 40×36 footprint so the cluster of icons running across the top-right
-  // — chevron, panel-toggle, min, max, close — reads as a single tidy
-  // row instead of a ragged mix of 28/34/40-px buttons.
+  // footprint so the icon cluster across the top edge reads as a single
+  // tidy row. SH-004: height tracks --chrome-row-height.
   const collapseButtonStyle: CSSProperties = {
-    width: 40,
-    height: 36,
+    width: 'var(--chrome-row-height)',
+    height: 'var(--chrome-row-height)',
     background: 'transparent',
     border: 'none',
     color: 'var(--text-muted)',
@@ -676,16 +677,12 @@ function TabStrip({
         flex: '0 0 auto',
         background: 'var(--tab-container-background)',
         borderBottom: '1px solid var(--divider-color)',
-        // 36px matches the SidebarToggleButton + activity-bar items'
-        // top-row baseline so the center tab row, the right sidedock
-        // tab row, and the left activity bar's first icon row all
-        // sit on the same horizontal line. Use a fixed `height`
-        // (not `min-height`) so the strip stays exactly 36px even
-        // when a child like a 36-tall sidebar-tab would otherwise
-        // push the box to 37 with the 1px border-bottom — that
-        // would slip the next row (file-tree toolbar) 1px below the
-        // main dock's view-header.
-        height: 36,
+        // Height tracks --chrome-row-height (SH-004) so the tab strip
+        // scales with density. Use a fixed `height` (not `min-height`)
+        // so the strip stays exactly one row tall — if a child would
+        // otherwise push the box 1px over, that slips the file-tree
+        // toolbar below the main dock's view-header.
+        height: 'var(--chrome-row-height)',
         overflow: 'hidden',
         ...edgePadding,
       }}
@@ -854,8 +851,8 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         style={{
-          width: 40,
-          height: 36,
+          width: 'var(--chrome-row-height)',
+          height: 'var(--chrome-row-height)',
           background: 'transparent',
           border: 'none',
           color: 'var(--text-muted)',
@@ -1092,8 +1089,8 @@ function TabButton({
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: 36,
-          height: 36,
+          width: 'var(--chrome-row-height)',
+          height: 'var(--chrome-row-height)',
           padding: 0,
           cursor: 'pointer',
           background: active
