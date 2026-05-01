@@ -77,6 +77,13 @@ use nexus_theme::ThemeMode;
 use nexus_skills::core_plugin::{
     ComposeSkillArgs, GetSkillArgs, ListByContextArgs, RenderSkillArgs, TriggeredByArgs,
 };
+// nexus-workflow exposes only its Args types — Workflow / Trigger /
+// Step / DigestConfig use `#[serde(flatten)] extra: BTreeMap<String,
+// toml::Value>` for forward-compat, which is incompatible with
+// `deny_unknown_fields` (the P0-2 gate's invariant).
+use nexus_workflow::core_plugin::{
+    GetTemplateArgs, GetWorkflowArgs, InitTemplateArgs, RunWorkflowArgs, ValidateWorkflowArgs,
+};
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -254,6 +261,15 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<TriggeredByArgs>("com_nexus_skills__triggered_by", "args");
     write_schema::<RenderSkillArgs>("com_nexus_skills__render", "args");
     write_schema::<ComposeSkillArgs>("com_nexus_skills__compose", "args");
+
+    // ── com.nexus.workflow (P1-3 #113) ───────────────────────────────────
+    // Args only — see import comment for why Workflow/Trigger/Step
+    // returns are out of scope for this iteration.
+    write_schema::<RunWorkflowArgs>("com_nexus_workflow__run", "args");
+    write_schema::<GetWorkflowArgs>("com_nexus_workflow__get", "args");
+    write_schema::<GetTemplateArgs>("com_nexus_workflow__templates_get", "args");
+    write_schema::<InitTemplateArgs>("com_nexus_workflow__templates_init", "args");
+    write_schema::<ValidateWorkflowArgs>("com_nexus_workflow__validate", "args");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type

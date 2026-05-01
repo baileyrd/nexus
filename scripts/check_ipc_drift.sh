@@ -53,6 +53,9 @@ cargo test -p nexus-theme --features ts-export --quiet --tests
 echo "[drift] regenerating IPC TS bindings (audit P1-3: skills) …"
 cargo test -p nexus-skills --features ts-export --quiet --tests
 
+echo "[drift] regenerating IPC TS bindings (audit P1-3: workflow) …"
+cargo test -p nexus-workflow --features ts-export --quiet --tests
+
 echo "[drift] regenerating Phase 4 pilot IPC JSON Schemas (WI-36) …"
 cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export --quiet
 

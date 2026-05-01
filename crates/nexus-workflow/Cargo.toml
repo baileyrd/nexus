@@ -20,6 +20,16 @@ fastrand = "2"
 futures = "0.3"
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
+ts-rs = { workspace = true, optional = true, features = ["serde-json-impl"] }
+schemars = { workspace = true, optional = true }
+
+[features]
+# Audit-2026-05-01 P1-3 (#113) — emit JSON Schema + TypeScript bindings
+# for IPC arg/reply types. Off by default. Only the Args side is
+# wired in — Workflow / Trigger / Step etc. use
+# `#[serde(flatten)] extra: BTreeMap<String, toml::Value>` which is
+# incompatible with `deny_unknown_fields` (the P0-2 gate).
+ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

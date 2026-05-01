@@ -51,7 +51,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nexus_kernel::{EventFilter, KernelPluginContext, NexusEvent, PluginContext, RecvError};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
 
 use crate::{
     ai_steps, condition_skipped_run, cron::CronSchedule, digests, evaluate_condition,
@@ -92,6 +97,103 @@ pub const HANDLER_TEMPLATES_GET: u32 = 9;
 /// `{ written: true, path }`. Refuses to clobber an existing file
 /// unless `overwrite = true`.
 pub const HANDLER_TEMPLATES_INIT: u32 = 10;
+
+// ── IPC arg types (audit P1-3 #113 — lifted from inline) ─────────────────────
+
+/// Args for `com.nexus.workflow::run` (handler id `5`). Lifted from
+/// an inline `struct Args` inside [`lookup_by_args`] by audit-2026-05-01
+/// P1-3 (#113) so the schema generator can see the shape.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+pub struct RunWorkflowArgs {
+    /// Workflow name (matches `[workflow].name`).
+    pub name: String,
+    /// Optional flattened-variables map consumed by `extract_variables`
+    /// off the raw JSON; declared here so strict deserialization
+    /// accepts callers that pass it.
+    #[serde(default)]
+    pub variables: Option<serde_json::Value>,
+}
+
+/// Args for `com.nexus.workflow::get` (handler id `2`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GetWorkflowArgs {
+    /// Workflow name to fetch.
+    pub name: String,
+}
+
+/// Args for `com.nexus.workflow::templates_get` (handler id `9`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GetTemplateArgs {
+    /// Template slug (e.g. `daily-digest`, `pr-checklist`).
+    pub slug: String,
+}
+
+/// Args for `com.nexus.workflow::templates_init` (handler id `10`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct InitTemplateArgs {
+    /// Template slug to instantiate.
+    pub slug: String,
+    /// Override filename (default: `<slug>.workflow.toml`).
+    #[serde(default)]
+    pub filename: Option<String>,
+    /// Allow overwriting an existing file. Default `false` —
+    /// callers must opt in to clobber.
+    #[serde(default)]
+    pub overwrite: bool,
+}
+
+/// Args for `com.nexus.workflow::validate` (handler id `4`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ValidateWorkflowArgs {
+    /// Raw `.workflow.toml` source text.
+    pub text: String,
+}
 
 /// Default per-step tool-call timeout. Workflow steps often span
 /// multiple plugins; give them enough headroom.
@@ -1479,18 +1581,7 @@ fn lookup_by_args(
     registry: &Mutex<WorkflowRegistry>,
     args: &serde_json::Value,
 ) -> Result<Workflow, PluginError> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    #[allow(dead_code)]
-    struct Args {
-        name: String,
-        // Optional flattened-variables map consumed by `extract_variables`
-        // off the raw JSON; declared here so strict deserialization
-        // accepts callers that pass it.
-        #[serde(default)]
-        variables: Option<serde_json::Value>,
-    }
-    let a: Args = parse(args, "run")?;
+    let a: RunWorkflowArgs = parse(args, "run")?;
     let reg = registry.lock().map_err(poisoned)?;
     reg.get(&a.name)
         .cloned()
@@ -1671,12 +1762,7 @@ impl WorkflowCorePlugin {
         &self,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Args {
-            name: String,
-        }
-        let a: Args = parse(args, "get")?;
+        let a: GetWorkflowArgs = parse(args, "get")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         match reg.get(&a.name) {
             Some(w) => to_value(w, "get"),
@@ -1711,12 +1797,7 @@ impl WorkflowCorePlugin {
     fn dispatch_templates_get(
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Args {
-            slug: String,
-        }
-        let a: Args = parse(args, "templates_get")?;
+        let a: GetTemplateArgs = parse(args, "templates_get")?;
         let t = templates::find(&a.slug)
             .ok_or_else(|| exec_err(format!("no template named '{}'", a.slug)))?;
         Ok(serde_json::json!({
@@ -1732,16 +1813,7 @@ impl WorkflowCorePlugin {
         &self,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Args {
-            slug: String,
-            #[serde(default)]
-            filename: Option<String>,
-            #[serde(default)]
-            overwrite: bool,
-        }
-        let a: Args = parse(args, "templates_init")?;
+        let a: InitTemplateArgs = parse(args, "templates_init")?;
         let t = templates::find(&a.slug)
             .ok_or_else(|| exec_err(format!("no template named '{}'", a.slug)))?;
         let filename = a
@@ -1774,12 +1846,7 @@ impl WorkflowCorePlugin {
     fn dispatch_validate(
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Args {
-            text: String,
-        }
-        let a: Args = parse(args, "validate")?;
+        let a: ValidateWorkflowArgs = parse(args, "validate")?;
         match parse_workflow_text(&a.text) {
             Ok(w) => to_value(&w, "validate"),
             Err(err) => Err(exec_err(format!("invalid workflow: {err}"))),

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RunWorkflowArgs",
+  "description": "Args for `com.nexus.workflow::run` (handler id `5`). Lifted from\nan inline `struct Args` inside [`lookup_by_args`] by audit-2026-05-01\nP1-3 (#113) so the schema generator can see the shape.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Workflow name (matches `[workflow].name`).",
+      "type": "string"
+    },
+    "variables": {
+      "description": "Optional flattened-variables map consumed by `extract_variables`\noff the raw JSON; declared here so strict deserialization\naccepts callers that pass it.",
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name"
+  ]
+}

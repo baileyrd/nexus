@@ -21,6 +21,7 @@ ts-export = [
     "nexus-comments/ts-export",
     "nexus-theme/ts-export",
     "nexus-skills/ts-export",
+    "nexus-workflow/ts-export",
 ]
 
 [dependencies]
