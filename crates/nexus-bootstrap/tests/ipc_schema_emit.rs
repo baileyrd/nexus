@@ -53,6 +53,11 @@ use nexus_mcp::ipc::{
     McpCallToolArgs, McpCallToolReply, McpConnectReply, McpDisconnectMissReply,
     McpPromptEntry, McpResourceEntry, McpServerArgs, McpServerEntry, McpToolEntry,
 };
+use nexus_agent::core_plugin::{
+    DelegateArgs, ExecuteStepArgs, GoalArgs, ParallelArgs, ParallelJob, PipelineArgs,
+    PipelineStage, PlanArgs, PlanIdArgs, TraceResponse,
+};
+use nexus_agent::{Observation, Plan, Step, StepResult, StepStatus, ToolCall, TraceEntry};
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -166,6 +171,26 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<McpConnectReply>("com_nexus_mcp_host__connect", "reply");
     write_schema::<McpDisconnectMissReply>("com_nexus_mcp_host__disconnect", "miss_reply");
     write_schema::<McpCallToolReply>("com_nexus_mcp_host__call_tool", "reply");
+
+    // ── com.nexus.agent (P1-3 #113) ──────────────────────────────────────
+    write_schema::<GoalArgs>("com_nexus_agent__plan", "args");
+    write_schema::<PlanArgs>("com_nexus_agent__run_plan", "args");
+    write_schema::<ExecuteStepArgs>("com_nexus_agent__execute_step", "args");
+    write_schema::<PlanIdArgs>("com_nexus_agent", "plan_id_args");
+    write_schema::<DelegateArgs>("com_nexus_agent__delegate", "args");
+    write_schema::<ParallelArgs>("com_nexus_agent__parallel", "args");
+    write_schema::<ParallelJob>("com_nexus_agent__parallel", "job");
+    write_schema::<PipelineArgs>("com_nexus_agent__pipeline", "args");
+    write_schema::<PipelineStage>("com_nexus_agent__pipeline", "stage");
+    write_schema::<TraceResponse>("com_nexus_agent__trace_get", "response");
+    // Shared types referenced from the args/responses above.
+    write_schema::<Plan>("com_nexus_agent", "plan");
+    write_schema::<Step>("com_nexus_agent", "step");
+    write_schema::<ToolCall>("com_nexus_agent", "tool_call");
+    write_schema::<Observation>("com_nexus_agent", "observation");
+    write_schema::<StepResult>("com_nexus_agent", "step_result");
+    write_schema::<StepStatus>("com_nexus_agent", "step_status");
+    write_schema::<TraceEntry>("com_nexus_agent", "trace_entry");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type

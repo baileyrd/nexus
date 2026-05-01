@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Step",
+  "description": "A unit of work produced by an [`Agent`] and consumed by a\n[`PlanExecutor`]. Steps are deliberately simple — agents that\nneed branching or loops return a flat list today and re-plan if\nresults come back differently than expected.",
+  "type": "object",
+  "properties": {
+    "description": {
+      "description": "Short human-readable description. Surfaced in approval\nprompts and the plan-progress view.",
+      "type": "string"
+    },
+    "id": {
+      "description": "Unique id within the owning plan. Used for correlation in\n[`Observation`] and for UI affordances (approve / retry).",
+      "type": "string"
+    },
+    "tool_call": {
+      "description": "Optional tool call. `None` means the step is informational —\ne.g. the agent is announcing a milestone or handing back a\nresponse to the user — and the executor treats it as a no-op\nthat still appears in the observation log.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ToolCall"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "description"
+  ],
+  "$defs": {
+    "ToolCall": {
+      "description": "A single tool call — the unit of effect an [`Agent`] can request.\nShape mirrors `nexus_kernel::PluginContext::ipc_call` args so the\n[`ToolDispatcher`] adapter can forward directly without reshaping.",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Arbitrary JSON payload — serialized and handed to the plugin."
+        },
+        "command_id": {
+          "description": "Command id within the target plugin (e.g. `\"read_file\"`).",
+          "type": "string"
+        },
+        "target_plugin_id": {
+          "description": "Reverse-DNS id of the target plugin (e.g. `\"com.nexus.storage\"`).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "target_plugin_id",
+        "command_id",
+        "args"
+      ]
+    }
+  }
+}

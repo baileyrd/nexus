@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GoalArgs",
+  "description": "Args for `com.nexus.agent::plan` and `::run` (handler ids `1`, `2`).\nLifted from inline by audit-2026-05-01 P1-3 (#113).",
+  "type": "object",
+  "properties": {
+    "archetype": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "goal": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "goal"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StepResult",
+  "description": "Outcome of one step in an [`Observation`].",
+  "type": "object",
+  "properties": {
+    "response": {
+      "description": "`Some(response)` when the step carried a tool call that ran;\n`None` for informational steps or steps that never ran\n(e.g. policy denial, earlier tool failure aborted the plan)."
+    },
+    "status": {
+      "description": "Final status — one of `\"ok\"`, `\"denied\"`, `\"failed\"`, `\"skipped\"`.",
+      "$ref": "#/$defs/StepStatus"
+    },
+    "step_id": {
+      "description": "Step id — matches [`Step::id`] in the input plan.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "step_id",
+    "status"
+  ],
+  "$defs": {
+    "StepStatus": {
+      "description": "Terminal status for a single step. Mirrors UI affordances (green /\nyellow / red / grey).",
+      "oneOf": [
+        {
+          "description": "Ran to completion without error (tool call succeeded, or the\nstep was informational).",
+          "type": "string",
+          "const": "ok"
+        },
+        {
+          "description": "Policy rejected the step; plan aborted at this point.",
+          "type": "string",
+          "const": "denied"
+        },
+        {
+          "description": "Tool call returned an error.",
+          "type": "string",
+          "const": "failed"
+        },
+        {
+          "description": "Step was skipped because an earlier step failed or was denied.",
+          "type": "string",
+          "const": "skipped"
+        }
+      ]
+    }
+  }
+}

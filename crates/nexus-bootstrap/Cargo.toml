@@ -17,6 +17,7 @@ ts-export = [
     "nexus-linkpreview/ts-export",
     "nexus-git/ts-export",
     "nexus-mcp/ts-export",
+    "nexus-agent/ts-export",
 ]
 
 [dependencies]
