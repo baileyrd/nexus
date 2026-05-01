@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FormulaEvalArgs",
+  "description": "Arguments for `formula_eval`.",
+  "type": "object",
+  "properties": {
+    "expression": {
+      "description": "Formula expression (Notion-compatible syntax).",
+      "type": "string"
+    },
+    "fields": {
+      "description": "The record's fields, keyed by schema field name.",
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "expression",
+    "fields"
+  ]
+}

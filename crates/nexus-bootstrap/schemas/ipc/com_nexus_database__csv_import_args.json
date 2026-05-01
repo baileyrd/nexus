@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CsvImportArgs",
+  "description": "Arguments for `csv_import`.",
+  "type": "object",
+  "properties": {
+    "column_mapping": {
+      "description": "Explicit `(csv_column_index, field_name)` mapping. When `None`, the\nhandler derives one from the headers (or positional 0..N when\n`has_header = false`).",
+      "type": [
+        "array",
+        "null"
+      ],
+      "default": null,
+      "items": {
+        "type": "array",
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          {
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "csv_bytes": {
+      "description": "Raw CSV file bytes.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0
+      }
+    },
+    "field_names": {
+      "description": "Ordered list of field names as they appear in the schema. Used when\nbuilding a default column mapping (header match, or positional).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "has_header": {
+      "description": "Whether the first row is a header. When `true` and `column_mapping`\nis `None`, the handler matches header names against `field_names`.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "csv_bytes",
+    "field_names",
+    "has_header"
+  ]
+}
