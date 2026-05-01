@@ -187,6 +187,61 @@ mod sqlite_tests {
         assert_eq!(store.get("ns2", "key").unwrap().unwrap(), b"val2");
     }
 
+    /// Issue #85. The audit flagged that namespacing relies on
+    /// string-equality with no test for cross-namespace
+    /// interference on writes / deletes. The above
+    /// `namespaces_are_isolated` covers `set`/`get`; this expands
+    /// to delete + overwrite + plugin-id-substring shapes that are
+    /// the obvious regression vectors for "string equality means
+    /// `ns` and `ns2` could collide".
+    #[test]
+    fn delete_does_not_cross_namespaces() {
+        let store = SqliteKvStore::in_memory().unwrap();
+        store.set("plugin.a", "session", b"alpha").unwrap();
+        store.set("plugin.b", "session", b"beta").unwrap();
+
+        store.delete("plugin.a", "session").unwrap();
+
+        assert!(
+            store.get("plugin.a", "session").unwrap().is_none(),
+            "delete should remove the key from its own namespace"
+        );
+        assert_eq!(
+            store.get("plugin.b", "session").unwrap().unwrap(),
+            b"beta",
+            "delete in plugin.a must not touch plugin.b's value"
+        );
+    }
+
+    #[test]
+    fn substring_namespaces_do_not_collide() {
+        // `plugin` and `plugin.foo` share a string prefix. A naive
+        // SQL `LIKE 'plugin%'` rather than `=` would collapse them.
+        let store = SqliteKvStore::in_memory().unwrap();
+        store.set("plugin", "key", b"short").unwrap();
+        store.set("plugin.foo", "key", b"long").unwrap();
+
+        assert_eq!(store.get("plugin", "key").unwrap().unwrap(), b"short");
+        assert_eq!(store.get("plugin.foo", "key").unwrap().unwrap(), b"long");
+
+        store.delete("plugin", "key").unwrap();
+        assert_eq!(
+            store.get("plugin.foo", "key").unwrap().unwrap(),
+            b"long",
+            "deleting a prefix-namespace must not collateral-damage suffix namespaces"
+        );
+    }
+
+    #[test]
+    fn empty_namespace_is_distinct_from_others() {
+        let store = SqliteKvStore::in_memory().unwrap();
+        store.set("", "key", b"empty-ns").unwrap();
+        store.set("ns", "key", b"named-ns").unwrap();
+
+        assert_eq!(store.get("", "key").unwrap().unwrap(), b"empty-ns");
+        assert_eq!(store.get("ns", "key").unwrap().unwrap(), b"named-ns");
+    }
+
     #[test]
     fn delete_removes_key() {
         let store = SqliteKvStore::in_memory().unwrap();
