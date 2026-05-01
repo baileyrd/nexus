@@ -5,6 +5,7 @@
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { clientLogger } from './host/clientLogger'
 import { PluginRegistry } from './host/PluginRegistry'
 import { ExtensionHost } from './host/ExtensionHost'
 import { contextKeyService } from './host/ContextKeyService'
@@ -374,6 +375,22 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
 
   contextKeyService.set('shellReady', true)
 }
+
+// SH-018: global unhandled-error / unhandled-rejection handlers.
+// Forward to clientLogger so errors survive page reload in the ring
+// buffer and reach the Rust log when append_shell_log is available.
+window.addEventListener('error', (event) => {
+  clientLogger.error(
+    '[Global] Uncaught error',
+    event.error ?? event.message,
+  )
+})
+window.addEventListener('unhandledrejection', (event) => {
+  clientLogger.error(
+    '[Global] Unhandled promise rejection',
+    event.reason,
+  )
+})
 
 // Install Obsidian-faithful body-class state machine. Runs once, before
 // React mounts, so platform / frameless / focus classes are present on

@@ -3,11 +3,9 @@
 // Every top-level shell region (activityBar, statusBar, overlay, workspace)
 // is wrapped in its own boundary so a render-time throw inside one plugin's
 // contribution does not unmount the rest of the chrome.
-//
-// Errors are forwarded to `clientLogger` once it exists (SH-017); until
-// then they land on `console.error` which is the same output path as before.
 
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { clientLogger } from '../host/clientLogger'
 
 interface Props {
   /** Identifies this boundary in logs and the fallback UI. */
@@ -29,8 +27,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Forward to clientLogger once SH-017 lands; for now mirror to console.
-    console.error(
+    clientLogger.error(
       `[ErrorBoundary:${this.props.name}] Caught render error`,
       error,
       info.componentStack,
