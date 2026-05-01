@@ -118,10 +118,53 @@ fn scan_plugin_directory() -> Vec<CommunityPluginManifest> {
         .collect()
 }
 
+/// True iff `dir` looks like a plausible plugin-directory root —
+/// non-empty, not the filesystem root, not a system-managed path
+/// (`/etc`, `/proc`, `/sys`, `/dev`, `/usr`, `/bin`, `/sbin`,
+/// `/boot`, `/var`). Issue #86 defense-in-depth — the renderer is
+/// the same trust domain so this isn't a hard security gate, but
+/// catching obvious "the user typed the wrong thing" / "the
+/// frontend has a bug" cases is cheap.
+fn is_plausible_plugin_root(dir: &str) -> bool {
+    if dir.is_empty() {
+        return false;
+    }
+    let path = std::path::Path::new(dir);
+    if path == std::path::Path::new("/") {
+        return false;
+    }
+    // Reject Unix system directories at the top level.
+    const FORBIDDEN_PREFIXES: &[&str] = &[
+        "/etc", "/proc", "/sys", "/dev", "/usr", "/bin", "/sbin", "/boot", "/var",
+    ];
+    for prefix in FORBIDDEN_PREFIXES {
+        if dir == *prefix || dir.starts_with(&format!("{prefix}/")) {
+            return false;
+        }
+    }
+    true
+}
+
 /// Scan an explicit directory path for community plugins.
 /// Used in dev mode to load plugins straight from the repo without copying them.
+///
+/// Issue #86. The renderer is the same trust domain that runs the
+/// shell, so a "compromised renderer can pass `/etc`" attack
+/// already has dozens of other commands to choose from. The
+/// shape-validation here is defense-in-depth: refuse plainly
+/// nonsensical paths (empty, root, system directories) so a buggy
+/// frontend writing "the wrong path string" surfaces as an early
+/// rejection instead of a confusing manifest-list result. A full
+/// "renderer cannot pass arbitrary paths" guarantee needs a
+/// sandboxed-renderer redesign tracked under #86.
 #[tauri::command]
 fn scan_plugin_directory_at(dir: String) -> Vec<CommunityPluginManifest> {
+    if !is_plausible_plugin_root(&dir) {
+        eprintln!(
+            "[scan_plugin_directory_at] refusing implausible plugin root: {dir:?}"
+        );
+        return vec![];
+    }
     let plugins_dir = std::path::Path::new(&dir);
 
     if !plugins_dir.exists() {
