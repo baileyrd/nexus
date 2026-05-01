@@ -47,6 +47,18 @@ fn default_version() -> String {
 }
 
 /// A single data record in a base.
+///
+/// **Reserved field names** (issue #82): `id` and `deletedAt` are
+/// typed fields on this struct; the user-defined `fields` map is
+/// flattened with `#[serde(flatten)]`. Records whose `fields`
+/// include a key named `id` or `deletedAt` round-trip through
+/// serde with the typed field winning silently, which can drop
+/// or rewrite user data on load + re-save. Callers that ingest
+/// arbitrary record shapes (CSV import, schema migration) should
+/// check for and reject these keys before constructing
+/// `BaseRecord`. A future deserializer guard would make this loud
+/// at parse time, but that's a non-trivial custom Deserialize impl
+/// and is tracked under #82.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BaseRecord {
     /// Record unique identifier.
@@ -126,11 +138,26 @@ fn default_sort_dir() -> String {
 }
 
 /// Filter rule for a view.
+///
+/// **`operator` is intentionally `String`** (issue #82). The
+/// canonical operator allowlist lives in
+/// `crates/nexus-storage/src/bases/query.rs` (the SQL-backed query
+/// engine) — `apply_filters` matches `eq` / `neq` / `lt` / `lte` /
+/// `gt` / `gte` / `contains` / `not_contains` / `in` / `not_in` /
+/// `is_empty` / `is_not_empty` and rejects anything else with a
+/// `BasesError::InvalidFilter`. Loading a `Base` with an unknown
+/// operator string here is therefore not a security issue (the
+/// query engine will reject it) but it's also not validated at
+/// load time, so `save_base` followed by a subsequent `query`
+/// surfaces the typo only at query-time. Converting `operator` to
+/// an enum would catch it at load-time but is a breaking type
+/// change with loader-side ramifications; tracked under #82.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilterRule {
     /// Field name to filter on.
     pub field: String,
-    /// Operator (eq, neq, gt, lt, contains, etc.).
+    /// Operator (eq, neq, gt, lt, contains, etc.). See struct
+    /// docstring for the canonical allowlist location.
     pub operator: String,
     /// Value to compare against.
     pub value: serde_json::Value,
@@ -385,6 +412,22 @@ pub fn load_base(dir: &Path) -> Result<Base, BasesError> {
 ///
 /// Creates the directory if it doesn't exist. Writes all constituent files.
 ///
+/// # Atomicity caveat (issue #82)
+///
+/// **This function is not crash-atomic across the directory.** Each
+/// constituent file (`schema.json`, `records.json`, `views.toml`,
+/// `relations.toml`, `metadata.toml`) is written via a non-atomic
+/// `fs::write`, in sequence. A crash between writes leaves the
+/// directory in a half-saved state — e.g. new `schema.json` paired
+/// with stale `records.json`. The legitimate fix is to write to a
+/// sibling staging dir and atomic-rename the dir into place, or
+/// per-file temp+rename via [`crate::paths::resolve_within`] +
+/// `nexus-storage`'s atomic-write helper. Either approach is a
+/// non-trivial refactor with implications for the watcher reload
+/// path; tracked under #82. Callers that need crash-atomic saves
+/// today should serialize the whole `Base` and call into the
+/// storage plugin's `write_file` rather than this function.
+///
 /// # Errors
 ///
 /// Returns [`BasesError`] on I/O or serialization failure.
@@ -612,6 +655,19 @@ fn toml_value_to_json(value: &toml::Value) -> serde_json::Value {
 }
 
 /// Convert a JSON value to a TOML value.
+///
+/// **Lossy round-trip** (issue #82). TOML has no `null` so JSON
+/// `null` is mapped to an empty string; on round-trip back to JSON
+/// the value comes out as `""` rather than `null`. JSON numbers that
+/// fit in `i64` always serialise as TOML integers even if the
+/// original JSON encoded them as floats (`1.0` becomes `1`); a
+/// subsequent JSON re-export turns the `1` back into a JSON number
+/// without the `.0` suffix. Callers persisting user-authored values
+/// through TOML and re-reading them in JSON should be aware that
+/// these two shapes do not survive the round-trip. Fixing requires
+/// either preserving a JSON-typed sidecar or moving views/relations
+/// to a JSON-only on-disk format; both are bigger redesigns tracked
+/// under #82.
 fn json_to_toml_value(value: &serde_json::Value) -> toml::Value {
     match value {
         serde_json::Value::Null => toml::Value::String(String::new()),

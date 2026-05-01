@@ -166,7 +166,19 @@ enum Literal {
 // Hand-written recursive-descent. The grammar is small enough that
 // pulling in a parser combinator (nom, chumsky, winnow) would be
 // overkill — three productions, no precedence layers, no recursion.
-
+//
+// Effective grammar:
+//
+//     expr           ::= ('!' method_call) | method_call | binary
+//     method_call    ::= lhs '.' method '(' literal ')'
+//     binary         ::= lhs operator rhs
+//
+// The `!` prefix is **only** valid in front of a `method_call` —
+// `! a == b` is rejected with `"'!' is only supported on
+// method-call expressions"`. ADR 0019 originally documented the
+// looser shape `'!' expr`; the implementation deliberately
+// narrowed it to method-calls because negating a binary like
+// `a == b` is better written as `a != b`. See issue #82.
 fn parse_expr(src: &str) -> Result<Expr, String> {
     let trimmed = src.trim();
     let (negated, body) = match trimmed.strip_prefix('!') {
@@ -254,6 +266,17 @@ fn parse_binary(src: &str) -> Result<Expr, String> {
 
 /// Find an operator outside any single- or double-quoted string. Used
 /// so `title == "foo == bar"` doesn't split on the inner `==`.
+///
+/// Recognises `\\` and `\<quote>` as escape sequences inside strings
+/// — `title == "she said \"hi\""` no longer closes the string at the
+/// inner `\"`. Pre-#82 the loop closed at every matching quote
+/// regardless of a preceding backslash, so an operator-shaped
+/// substring after the false-close would split the expression at
+/// the wrong position. Note: the literal parser elsewhere in this
+/// module does not currently *interpret* escapes (e.g. `\"` inside
+/// the literal value gets passed through verbatim) — supporting
+/// them in the value is a separate fix; this function just refuses
+/// to be fooled by them when looking for operator boundaries.
 fn find_op_outside_string(src: &str, op: &str) -> Option<usize> {
     let bytes = src.as_bytes();
     let op_bytes = op.as_bytes();
@@ -262,12 +285,18 @@ fn find_op_outside_string(src: &str, op: &str) -> Option<usize> {
     while i + op_bytes.len() <= bytes.len() {
         let b = bytes[i];
         match quote {
-            Some(q) if b == q => {
-                quote = None;
-                i += 1;
-                continue;
-            }
-            Some(_) => {
+            Some(q) => {
+                // Inside a string. Skip the next byte after a
+                // backslash so `\"` and `\\` don't close the string.
+                if b == b'\\' && i + 1 < bytes.len() {
+                    i += 2;
+                    continue;
+                }
+                if b == q {
+                    quote = None;
+                    i += 1;
+                    continue;
+                }
                 i += 1;
                 continue;
             }
@@ -472,6 +501,55 @@ fn apply_method(left: &Value, method: Method, right: &Literal) -> bool {
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod find_op_tests {
+    use super::find_op_outside_string;
+
+    #[test]
+    fn finds_op_in_plain_expression() {
+        assert_eq!(find_op_outside_string("a == b", "=="), Some(2));
+    }
+
+    #[test]
+    fn ignores_op_inside_double_quoted_string() {
+        // The inner `==` must not split the expression.
+        assert_eq!(
+            find_op_outside_string(r#"title == "foo == bar""#, "=="),
+            Some(6),
+            "outer == is at byte 6, not the inner one inside quotes"
+        );
+    }
+
+    #[test]
+    fn ignores_op_inside_single_quoted_string() {
+        assert_eq!(
+            find_op_outside_string("title == 'foo == bar'", "=="),
+            Some(6)
+        );
+    }
+
+    /// Issue #82. Pre-fix the loop closed at every matching quote
+    /// regardless of a preceding backslash, so `\"` inside a string
+    /// false-closed the string and an operator after it would be
+    /// found at the wrong position. Now `\"` (and `\\`) are
+    /// recognised as escapes; the string stays open until an
+    /// un-escaped matching quote.
+    #[test]
+    fn escaped_quotes_do_not_close_strings() {
+        // The whole `"she said \"hi\""` is a single string. The only
+        // `==` is the outer operator at byte 6.
+        assert_eq!(
+            find_op_outside_string(r#"title == "she said \"hi\"""#, "=="),
+            Some(6)
+        );
+        // Backslash-backslash also doesn't close.
+        assert_eq!(
+            find_op_outside_string(r#"path == "C:\\\\foo""#, "=="),
+            Some(5)
+        );
+    }
+}
 
 #[cfg(test)]
 mod tests {
