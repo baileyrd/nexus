@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReadOutputArgs",
+  "description": "Arguments for `read_output`.",
+  "type": "object",
+  "properties": {
+    "count": {
+      "description": "How many lines to return. `None` = to the end.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint",
+      "default": null,
+      "minimum": 0
+    },
+    "id": {
+      "description": "Target session id.",
+      "type": "string"
+    },
+    "start": {
+      "description": "Start line (clamped to buffer length). `None` = from the front.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint",
+      "default": null,
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ]
+}

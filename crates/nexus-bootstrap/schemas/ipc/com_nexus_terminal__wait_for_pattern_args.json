@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WaitForPatternArgs",
+  "description": "Arguments for `wait_for_pattern`.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Target session id.",
+      "type": "string"
+    },
+    "is_regex": {
+      "description": "Regex mode toggle.",
+      "type": "boolean",
+      "default": false
+    },
+    "pattern": {
+      "description": "Pattern to search for.",
+      "type": "string"
+    },
+    "timeout_ms": {
+      "description": "Hard deadline in milliseconds. `0` returns immediately after\none buffer scan.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "pattern",
+    "timeout_ms"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SessionIdArgs",
+  "description": "Arguments for `close_session` / `pump` / `get_session_info` and\nany other single-session-id handler.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Session id the handler targets.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ]
+}

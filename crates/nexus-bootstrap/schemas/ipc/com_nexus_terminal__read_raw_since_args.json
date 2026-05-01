@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReadRawSinceArgs",
+  "description": "Arguments for `read_raw_since`. The cursor is the monotonic\n\"total bytes ever written to this session's ring\" counter returned\nby the previous call — start at `0` for a fresh session. Bytes\nbefore the ring's oldest retained offset are silently skipped\n(clamp-on-eviction) because xterm prefers a gap to an error.",
+  "type": "object",
+  "properties": {
+    "cursor": {
+      "description": "Monotonic byte offset the caller last saw. Use `0` on first call.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "id": {
+      "description": "Target session id.",
+      "type": "string"
+    },
+    "timeout_ms": {
+      "description": "Drain deadline in ms. Defaults to 30 ms — short enough that an\nidle session releases the server Mutex promptly for concurrent\n`send_raw_input` calls.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "default": null,
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "cursor"
+  ]
+}

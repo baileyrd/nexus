@@ -19,6 +19,13 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 # SQLite persistence for sessions + ad-hoc command history (PRD-09 §2.2, §10.1).
 rusqlite = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+
+[features]
+# Audit-2026-05-01 P1-3 (#113) — emit JSON Schema + TypeScript bindings
+# for IPC arg/reply types. Off by default.
+ts-export = ["dep:ts-rs", "dep:schemars"]
 
 # libc is used only on Unix for signal(2) delivery. portable-pty's Child
 # trait only exposes a force-kill (TerminateProcess / SIGKILL); the PRD-09

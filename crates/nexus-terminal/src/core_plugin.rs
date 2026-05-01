@@ -90,6 +90,11 @@ use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, PluginError};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 use crate::saved::{SavedCommand, SqliteSavedCommandStore};
 use crate::server::{InMemoryTerminalServer, ServerSpawnConfig, TerminalEvent, TerminalServer};
 use crate::session::SessionId;
@@ -159,6 +164,14 @@ pub const HANDLER_RESIZE: u32 = 17;
 
 /// Arguments for `create_session`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct CreateSessionArgs {
     /// Human-readable label.
@@ -181,6 +194,14 @@ pub struct CreateSessionArgs {
 
 /// Response from `create_session`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct CreateSessionResponse {
     /// Fresh session id.
@@ -190,6 +211,14 @@ pub struct CreateSessionResponse {
 /// Arguments for `close_session` / `pump` / `get_session_info` and
 /// any other single-session-id handler.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct SessionIdArgs {
     /// Session id the handler targets.
@@ -198,6 +227,14 @@ pub struct SessionIdArgs {
 
 /// Arguments for `send_input`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct SendInputArgs {
     /// Target session id.
@@ -208,6 +245,14 @@ pub struct SendInputArgs {
 
 /// Arguments for `send_raw_input`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct SendRawInputArgs {
     /// Target session id.
@@ -218,6 +263,14 @@ pub struct SendRawInputArgs {
 
 /// Arguments for `pump`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct PumpArgs {
     /// Target session id.
@@ -231,6 +284,14 @@ pub struct PumpArgs {
 
 /// Response from `pump`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct PumpResponse {
     /// Byte count drained from the PTY in this pump.
@@ -239,6 +300,14 @@ pub struct PumpResponse {
 
 /// Arguments for `read_output`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ReadOutputArgs {
     /// Target session id.
@@ -257,6 +326,14 @@ pub struct ReadOutputArgs {
 /// before the ring's oldest retained offset are silently skipped
 /// (clamp-on-eviction) because xterm prefers a gap to an error.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ReadRawSinceArgs {
     /// Target session id.
@@ -276,6 +353,14 @@ pub struct ReadRawSinceArgs {
 /// rejected by the underlying ioctl on most platforms; callers should
 /// clamp to at least `1 × 1`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ResizeArgs {
     /// Target session id.
@@ -288,6 +373,14 @@ pub struct ResizeArgs {
 
 /// Response from `read_raw_since`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ReadRawSinceResponse {
     /// Cursor to pass on the next call — equals `dropped + len` after
@@ -308,6 +401,14 @@ pub struct ReadRawSinceResponse {
 /// drops or out-of-order delivery; `ts_ms` is the publisher's wall
 /// clock in unix milliseconds and is informational only.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct OutputStreamPayload {
     /// Raw bytes appended to the session's ring buffer this dispatch.
@@ -321,6 +422,14 @@ pub struct OutputStreamPayload {
 
 /// Arguments for `search_output`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct SearchOutputArgs {
     /// Target session id.
@@ -334,6 +443,14 @@ pub struct SearchOutputArgs {
 
 /// Arguments for `wait_for_pattern`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct WaitForPatternArgs {
     /// Target session id.
@@ -350,6 +467,14 @@ pub struct WaitForPatternArgs {
 
 /// Response from `wait_for_pattern`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct WaitForPatternResponse {
     /// `true` if a match landed before the deadline.

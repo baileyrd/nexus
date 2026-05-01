@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OutputStreamPayload",
+  "description": "Payload published on `com.nexus.terminal.output.<session_id>` events.\n\nBytes are passed through verbatim — no UTF-8 decode, no ANSI\nsanitisation. The TS subscriber feeds them straight into xterm.js\n(or buffers them) the same way the `read_raw_since` snapshot path\ndoes, so the two read paths can be unioned by the shell without\nreshaping. `seq` is a per-session monotonic counter (starts at `1`\nfor a session's first published chunk) so the subscriber can detect\ndrops or out-of-order delivery; `ts_ms` is the publisher's wall\nclock in unix milliseconds and is informational only.",
+  "type": "object",
+  "properties": {
+    "data": {
+      "description": "Raw bytes appended to the session's ring buffer this dispatch.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0
+      }
+    },
+    "seq": {
+      "description": "Per-session sequence number. Increments by one per published\nchunk for a given session id.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "ts_ms": {
+      "description": "Publisher wall-clock at emission, unix milliseconds.",
+      "type": "integer",
+      "format": "int64"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "data",
+    "seq",
+    "ts_ms"
+  ]
+}
