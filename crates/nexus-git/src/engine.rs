@@ -17,16 +17,23 @@ pub struct GitEngine {
 }
 
 impl GitEngine {
-    /// Discover and open a git repository from the given path.
+    /// Open a git repository at the given path.
     ///
-    /// Uses `Repository::discover()` to find the `.git` directory
-    /// by traversing parent directories.
+    /// Uses `Repository::open()` which looks for repository metadata
+    /// at `path` itself (typically `path/.git`) and does **not**
+    /// traverse parent directories. Pre-#85 this used
+    /// `Repository::discover()`, which walked upward — a forge
+    /// nested inside an unrelated parent git repo (e.g. a notes
+    /// vault checked out under a dotfiles repo) would silently
+    /// operate on the parent's history. The explicit-open shape
+    /// fails fast with `NotARepo` instead.
     ///
     /// # Errors
     ///
-    /// Returns [`GitError::NotARepo`] if no git repository is found.
+    /// Returns [`GitError::NotARepo`] if no git repository exists at
+    /// `path` (the parent dirs are no longer searched).
     pub fn open(path: &Path) -> Result<Self, GitError> {
-        let repo = Repository::discover(path).map_err(|_| {
+        let repo = Repository::open(path).map_err(|_| {
             GitError::NotARepo(path.display().to_string())
         })?;
         Ok(Self { repo })

@@ -1110,6 +1110,26 @@ impl WorkflowCorePlugin {
     }
 }
 
+/// True iff `bind` is a loopback address-port pair. Parses out the
+/// host and checks against `127.0.0.1` and `::1`. Used by the
+/// webhook accept loop to decide whether to emit a "bound to a
+/// non-loopback address" warn at arm time (issue #85).
+fn is_loopback_bind(bind: &str) -> bool {
+    // A bind string looks like `host:port` or `[v6]:port`. Strip the
+    // port suffix and parse the host.
+    let host = match bind.rsplit_once(':') {
+        // `[::1]:18080` → `[::1]`
+        Some((host, _port)) => host.trim_start_matches('[').trim_end_matches(']'),
+        None => bind,
+    };
+    match host.parse::<std::net::IpAddr>() {
+        Ok(ip) => ip.is_loopback(),
+        // Unparseable host — be conservative and treat as non-loopback
+        // so the warn fires (alerting the operator to a typo).
+        Err(_) => host == "localhost",
+    }
+}
+
 async fn webhook_accept_loop(
     ctx: Arc<KernelPluginContext>,
     bind: String,
@@ -1122,6 +1142,22 @@ async fn webhook_accept_loop(
             return;
         }
     };
+    // Issue #85. Default config binds to `127.0.0.1`; an operator
+    // who flips this to `0.0.0.0` (or another non-loopback address)
+    // takes the documented responsibility for exposing the webhook
+    // to the local network. Surface the choice loudly at bind time
+    // so it's not silent — the workflow trigger arms even if the
+    // operator forgot they edited `[webhooks].bind`.
+    if !is_loopback_bind(&bind) {
+        tracing::warn!(
+            audit = true,
+            %bind,
+            "webhook listener bound to a non-loopback address; the listener \
+             accepts requests from any host that can reach this address. \
+             Ensure the bind config is intentional and your shared-secret \
+             headers are set on every workflow."
+        );
+    }
     tracing::info!(%bind, count = specs.len(), "webhook listener armed");
     loop {
         let (sock, peer) = match listener.accept().await {

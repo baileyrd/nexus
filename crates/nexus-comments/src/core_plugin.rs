@@ -143,12 +143,31 @@ fn dispatch_list(
     serde_json::to_value(&threads).map_err(|e| exec_err(format!("list: serialize: {e}")))
 }
 
+/// Maximum byte size accepted for a comment body. Comment threads
+/// persist to `<forge>/.forge/comments/<file>.json`; an unbounded
+/// body causes the per-file JSON to balloon, slowing watcher reload
+/// and bus replay. 64 KiB is far past any normal review comment and
+/// well under the JSON-parser memory pressure threshold. See issue
+/// #85.
+const MAX_COMMENT_BODY_BYTES: usize = 64 * 1024;
+
+fn check_body_size(body: &str, command: &str) -> Result<(), PluginError> {
+    if body.len() > MAX_COMMENT_BODY_BYTES {
+        return Err(exec_err(format!(
+            "{command}: body is {} bytes; max is {MAX_COMMENT_BODY_BYTES} bytes",
+            body.len()
+        )));
+    }
+    Ok(())
+}
+
 fn dispatch_create_thread(
     store: &CommentStore,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let a: CreateThreadArgs = serde_json::from_value(args.clone())
         .map_err(|e| exec_err(format!("create_thread: {e}")))?;
+    check_body_size(&a.body, "create_thread")?;
     let thread = store
         .create_thread(&a.file_path, a.block_id, a.body, a.author)
         .map_err(|e| map_store_err(&e))?;
@@ -162,6 +181,7 @@ fn dispatch_add_reply(
 ) -> Result<serde_json::Value, PluginError> {
     let a: AddReplyArgs =
         serde_json::from_value(args.clone()).map_err(|e| exec_err(format!("add_reply: {e}")))?;
+    check_body_size(&a.body, "add_reply")?;
     let comment = store
         .add_reply(&a.file_path, a.thread_id, a.body, a.author)
         .map_err(|e| map_store_err(&e))?;
@@ -212,6 +232,7 @@ fn dispatch_edit_comment(
 ) -> Result<serde_json::Value, PluginError> {
     let a: EditCommentArgs = serde_json::from_value(args.clone())
         .map_err(|e| exec_err(format!("edit_comment: {e}")))?;
+    check_body_size(&a.body, "edit_comment")?;
     let comment = store
         .edit_comment(&a.file_path, a.thread_id, a.comment_id, a.body)
         .map_err(|e| map_store_err(&e))?;

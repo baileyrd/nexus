@@ -229,9 +229,21 @@ pub fn dispatch_external(app: &mut App, subcommand: &str, args: Vec<String>) -> 
                     "unknown subcommand '{subcommand}'; no plugins with CLI subcommands are installed"
                 ))
             } else {
+                // Plugin manifests are operator-controlled but not
+                // necessarily operator-authored — a malicious manifest
+                // can embed terminal escape sequences in `id` /
+                // `description` to repaint the user's prompt or move
+                // the cursor. Strip ANSI before printing into the
+                // user's terminal. See issue #85.
                 let list = available
                     .iter()
-                    .map(|(id, desc)| format!("  {id:<20} {desc}"))
+                    .map(|(id, desc)| {
+                        format!(
+                            "  {:<20} {}",
+                            strip_ansi(id),
+                            strip_ansi(desc),
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join("\n");
                 Err(anyhow!(
@@ -367,6 +379,103 @@ fn read_plugin_manifest(path: &Path) -> Result<(String, String)> {
         .unwrap_or("?")
         .to_string();
     Ok((name, version))
+}
+
+/// Strip ANSI escape sequences (CSI `\x1b[...`) and other C0/C1
+/// control characters from `s`. Plugin metadata flows from
+/// untrusted manifests into the user's terminal — embedded escapes
+/// could otherwise repaint the prompt, move the cursor, or mask
+/// other output. This is intentionally simple (no full ECMA-48
+/// state machine): drop anything in the C0 range except tab/newline,
+/// drop anything in the C1 range, and drop CSI-style escape
+/// sequences via a tiny state machine. See issue #85.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            // ESC starts an escape sequence — drop until a final
+            // byte (any 0x40-0x7E in CSI, or just one byte in
+            // simple escapes like ESC c).
+            '\x1b' => {
+                if let Some(&next) = chars.peek() {
+                    if next == '[' {
+                        chars.next();
+                        // Consume the parameter bytes (0x30-0x3f) and
+                        // intermediate bytes (0x20-0x2f), then the
+                        // final byte (0x40-0x7e).
+                        for fc in chars.by_ref() {
+                            if matches!(fc, '\x40'..='\x7e') {
+                                break;
+                            }
+                        }
+                    } else {
+                        // Non-CSI escape — drop the next byte too.
+                        chars.next();
+                    }
+                }
+            }
+            // C0 control codes (drop everything except common
+            // whitespace).
+            '\x00'..='\x08' | '\x0b' | '\x0c' | '\x0e'..='\x1f' | '\x7f' => {}
+            // C1 control codes.
+            '\u{80}'..='\u{9f}' => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod strip_ansi_tests {
+    use super::strip_ansi;
+
+    #[test]
+    fn passes_plain_text() {
+        assert_eq!(strip_ansi("hello world"), "hello world");
+    }
+
+    #[test]
+    fn strips_csi_color_sequences() {
+        // \x1b[31m...\x1b[0m — red text with reset.
+        let dirty = "\x1b[31mhello\x1b[0m";
+        assert_eq!(strip_ansi(dirty), "hello");
+    }
+
+    #[test]
+    fn strips_cursor_movement_sequences() {
+        // CSI K (erase in line) + CSI 2J (clear screen) + payload.
+        let dirty = "before\x1b[K\x1b[2Jafter";
+        assert_eq!(strip_ansi(dirty), "beforeafter");
+    }
+
+    #[test]
+    fn strips_bare_escape_and_simple_escapes() {
+        // ESC 7 (DECSC, save cursor).
+        assert_eq!(strip_ansi("a\x1b7b"), "ab");
+        // Bare ESC followed by nothing — dropped.
+        assert_eq!(strip_ansi("a\x1b"), "a");
+    }
+
+    #[test]
+    fn strips_c0_controls_except_tab_and_newline() {
+        // BEL (\x07) and DEL (\x7f) dropped; \t and \n preserved.
+        assert_eq!(strip_ansi("a\x07\tb\nc\x7fd"), "a\tb\ncd");
+    }
+
+    #[test]
+    fn issue_85_malicious_plugin_id_payload() {
+        // Realistic shape: a plugin manifest declaring an `id` that
+        // claims to be `safe-id` but uses ANSI to overwrite the
+        // separator and inject content into help output.
+        let dirty = "evil-id\x1b[1A\x1b[2K\x1b[31mPWNED\x1b[0m";
+        let cleaned = strip_ansi(dirty);
+        assert!(
+            !cleaned.contains('\x1b'),
+            "no escape bytes must survive; got: {cleaned:?}"
+        );
+        assert_eq!(cleaned, "evil-idPWNED");
+    }
 }
 
 #[cfg(test)]

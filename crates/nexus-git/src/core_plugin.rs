@@ -13,7 +13,7 @@
 //! | `com.nexus.git.commit` | HEAD hash changed |
 //! | `com.nexus.git.dirty_changed` | working-tree dirty flag toggled |
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -191,12 +191,12 @@ impl CorePlugin for GitCorePlugin {
                 Ok(serde_json::Value::Array(arr))
             }
             HANDLER_FILE_STATUS => {
-                let path = path_arg(args)?;
+                let path = path_arg(args, &self.forge_root)?;
                 let status = h.with(move |e| e.file_status(&path)).map_err(map_err)?;
                 Ok(json!(status.marker()))
             }
             HANDLER_DIFF_FILE => {
-                let path = path_arg(args)?;
+                let path = path_arg(args, &self.forge_root)?;
                 let hunks = h.with(move |e| e.diff_file(&path)).map_err(map_err)?;
                 let arr: Vec<_> = hunks
                     .iter()
@@ -216,12 +216,12 @@ impl CorePlugin for GitCorePlugin {
                 Ok(serde_json::Value::Array(arr))
             }
             HANDLER_STAGE_FILE => {
-                let path = path_arg(args)?;
+                let path = path_arg(args, &self.forge_root)?;
                 h.with(move |e| e.stage_file(&path)).map_err(map_err)?;
                 Ok(json!({"ok": true}))
             }
             HANDLER_UNSTAGE_FILE => {
-                let path = path_arg(args)?;
+                let path = path_arg(args, &self.forge_root)?;
                 h.with(move |e| e.unstage_file(&path)).map_err(map_err)?;
                 Ok(json!({"ok": true}))
             }
@@ -253,14 +253,37 @@ impl CorePlugin for GitCorePlugin {
     }
 }
 
-fn path_arg(args: &serde_json::Value) -> Result<PathBuf, PluginError> {
-    args.get("path")
+/// Defense-in-depth path validation for git IPC handlers (issue #85).
+///
+/// libgit2 also rejects `..` and absolute paths inside
+/// `index.add_path` / `status_file`, so the trivial traversal is
+/// blocked at the libgit2 boundary today. Calling
+/// [`resolve_within`](nexus_types::paths::resolve_within) here moves
+/// the rejection to the IPC boundary so:
+/// - the contract is explicit (a future libgit2 update can't
+///   regress this),
+/// - the rejection happens before any libgit2 work runs,
+/// - the error class is a clean `ExecutionFailed` rather than a
+///   generic libgit2 string failure.
+///
+/// libgit2's path-based API takes a path relative to the repo root,
+/// so we discard the joined absolute path and return the validated
+/// raw relpath.
+fn path_arg(args: &serde_json::Value, forge_root: &Path) -> Result<PathBuf, PluginError> {
+    let raw = args
+        .get("path")
         .and_then(|v| v.as_str())
-        .map(PathBuf::from)
         .ok_or_else(|| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: "missing 'path' argument".to_string(),
-        })
+        })?;
+    nexus_types::paths::resolve_within(forge_root, raw).map_err(|e| {
+        PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: format!("invalid 'path': {e}"),
+        }
+    })?;
+    Ok(PathBuf::from(raw))
 }
 
 // Passed as a function pointer to `.map_err(map_err)`; wrapping in a

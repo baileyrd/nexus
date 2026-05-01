@@ -116,8 +116,13 @@ impl CorePlugin for McpHostPlugin {
 
     fn on_stop(&mut self) {
         // Best-effort: drop pool — McpClient's Drop sends graceful close.
+        // A misbehaving MCP child that ignores the close signal would
+        // pre-#85 hang `join()` indefinitely and block kernel shutdown.
+        // Now we hard-cap the join with a poll loop; a child that
+        // doesn't release the runtime in time gets stranded (the OS
+        // reclaims at process exit) but kernel shutdown proceeds.
         let pool = Arc::clone(&self.pool);
-        let _ = std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build();
@@ -126,9 +131,25 @@ impl CorePlugin for McpHostPlugin {
                     pool.shutdown_all().await;
                 });
             }
-        })
-        .join();
-        tracing::info!(plugin_id = PLUGIN_ID, "MCP host stopped");
+        });
+        const SHUTDOWN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+        let start = std::time::Instant::now();
+        let poll = std::time::Duration::from_millis(50);
+        while start.elapsed() < SHUTDOWN_DEADLINE {
+            if handle.is_finished() {
+                let _ = handle.join();
+                tracing::info!(plugin_id = PLUGIN_ID, "MCP host stopped");
+                return;
+            }
+            std::thread::sleep(poll);
+        }
+        tracing::warn!(
+            audit = true,
+            plugin_id = PLUGIN_ID,
+            timeout_secs = SHUTDOWN_DEADLINE.as_secs(),
+            "MCP host shutdown timed out; abandoning the join — child processes \
+             may be stranded until the host process exits"
+        );
     }
 
     fn dispatch(
