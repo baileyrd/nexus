@@ -12,11 +12,22 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+
 use crate::variables::VariableMap;
 use crate::{Result, ThemeError};
 
 /// The mode(s) in which a snippet applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "ts-export", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(rename_all = "lowercase")]
 pub enum SnippetMode {
     /// Applies in both light and dark modes.
@@ -30,6 +41,14 @@ pub enum SnippetMode {
 
 /// Where a snippet's CSS rules apply.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "ts-export", derive(JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum SnippetScope {
     /// Applied to `<html>` for all surfaces.

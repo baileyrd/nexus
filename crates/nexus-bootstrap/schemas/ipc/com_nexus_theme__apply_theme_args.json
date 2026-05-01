@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ApplyThemeArgs",
+  "description": "Args for `apply_theme`.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Theme id to switch to.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ]
+}

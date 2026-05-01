@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ComputeVariablesArgs",
+  "description": "Args for `compute_variables`.",
+  "type": "object",
+  "properties": {
+    "enabled_snippets": {
+      "description": "Enabled snippet ids, in cascade order.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "theme_id": {
+      "description": "Theme id (does not affect engine state).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "theme_id",
+    "enabled_snippets"
+  ]
+}

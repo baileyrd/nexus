@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReorderSnippetsArgs",
+  "description": "Args for `reorder_snippets`.",
+  "type": "object",
+  "properties": {
+    "ids": {
+      "description": "New ordered list of enabled snippet ids.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "ids"
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SetModeArgs",
+  "description": "Args for `set_mode`.",
+  "type": "object",
+  "properties": {
+    "mode": {
+      "description": "Desired mode.",
+      "$ref": "#/$defs/ThemeMode"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "mode"
+  ],
+  "$defs": {
+    "ThemeMode": {
+      "description": "Which light/dark mode the UI is in. The resolver may use this to decide\nwhether a [`crate::CssSnippet`] applies.",
+      "oneOf": [
+        {
+          "description": "Force light mode.",
+          "type": "string",
+          "const": "light"
+        },
+        {
+          "description": "Force dark mode.",
+          "type": "string",
+          "const": "dark"
+        },
+        {
+          "description": "Follow the host OS preference (caller resolves to Light or Dark before\nhanding this to the resolver).",
+          "type": "string",
+          "const": "system"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AppliedTheme",
+  "description": "Response shape for [`ThemeEngine::apply_theme`] — matches PRD §10.1\n`AppliedTheme`.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Theme id that was applied.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Human-readable theme name.",
+      "type": "string"
+    },
+    "variables": {
+      "description": "Fully-resolved variable map (base → theme → platform → snippets → plugins).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "variables"
+  ]
+}
