@@ -1107,21 +1107,24 @@ function TabButton({
           // adjacent ribbon button line up at the same visual scale.
           <Icon name={iconName as never} size={18} />
         ) : (
-          // Final fallback: a neutral dot for views with no icon
-          // mapping. Earlier this rendered the first letter of the
-          // viewType uppercase, which surfaced as bare "E"/"X"/etc.
-          // letters in the chrome — visually noisy and easy to mistake
-          // for broken UI.
+          // SH-008: 2-letter short-name from the viewType so AT users and
+          // sighted users without icon mapping can identify the panel.
+          // Derived from the raw viewType (e.g. "my-view" → "MY"), not
+          // from the label, which can be a file path.
           <span
             aria-hidden
             style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: 'currentColor',
-              opacity: 0.5,
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+              lineHeight: 1,
+              opacity: 0.75,
+              textTransform: 'uppercase',
+              fontFamily: 'var(--font-interface)',
             }}
-          />
+          >
+            {(leaf.view?.viewType ?? label).replace(/[^a-zA-Z]/g, '').slice(0, 2) || '??'}
+          </span>
         )}
       </button>
     )
