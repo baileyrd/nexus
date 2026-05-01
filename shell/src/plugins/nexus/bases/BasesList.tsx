@@ -85,7 +85,7 @@ export function BasesList({ relpath, base, client: _client }: Props) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--fg-muted, #9ca3af)',
+          color: 'var(--text-muted)',
           fontSize: 12,
         }}
       >
@@ -102,9 +102,9 @@ export function BasesList({ relpath, base, client: _client }: Props) {
           alignItems: 'center',
           gap: 8,
           padding: '6px 12px',
-          borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
+          borderBottom: '1px solid var(--background-modifier-border)',
           fontSize: 12,
-          color: 'var(--fg-muted, #9ca3af)',
+          color: 'var(--text-muted)',
         }}
       >
         <span>Group by</span>
@@ -112,9 +112,9 @@ export function BasesList({ relpath, base, client: _client }: Props) {
           value={active.name}
           onChange={(e) => setListGroupField(relpath, e.target.value || null)}
           style={{
-            background: 'var(--bg-raised, #252529)',
-            color: 'var(--fg-primary, #e4e4e7)',
-            border: '1px solid var(--border-subtle, #2a2a2e)',
+            background: 'var(--background-secondary)',
+            color: 'var(--text-normal)',
+            border: '1px solid var(--background-modifier-border)',
             borderRadius: 3,
             padding: '2px 6px',
             fontSize: 11,
@@ -141,9 +141,9 @@ export function BasesList({ relpath, base, client: _client }: Props) {
                   alignItems: 'center',
                   gap: 6,
                   width: '100%',
-                  background: 'var(--bg-raised, #252529)',
-                  border: '1px solid var(--border-subtle, #2a2a2e)',
-                  color: 'var(--fg-primary, #e4e4e7)',
+                  background: 'var(--background-secondary)',
+                  border: '1px solid var(--background-modifier-border)',
+                  color: 'var(--text-normal)',
                   borderRadius: 4,
                   padding: '6px 10px',
                   fontSize: 12,
@@ -155,7 +155,7 @@ export function BasesList({ relpath, base, client: _client }: Props) {
                   style={{
                     display: 'inline-block',
                     width: 10,
-                    color: 'var(--fg-dim, #6b7280)',
+                    color: 'var(--text-faint)',
                     transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
                     transition: 'transform 80ms',
                   }}
@@ -163,7 +163,7 @@ export function BasesList({ relpath, base, client: _client }: Props) {
                   ▶
                 </span>
                 <strong>{label}</strong>
-                <span style={{ color: 'var(--fg-dim, #6b7280)', marginLeft: 'auto' }}>
+                <span style={{ color: 'var(--text-faint)', marginLeft: 'auto' }}>
                   {records.length}
                 </span>
               </button>
@@ -217,8 +217,8 @@ function ListRow({
         padding: '6px 12px',
         background: 'transparent',
         border: 'none',
-        borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
-        color: 'var(--fg-primary, #e4e4e7)',
+        borderBottom: '1px solid var(--background-modifier-border)',
+        color: 'var(--text-normal)',
         fontSize: 12,
         cursor: 'pointer',
         textAlign: 'left',
@@ -233,14 +233,14 @@ function ListRow({
           fontWeight: 500,
         }}
       >
-        {title || <span style={{ color: 'var(--fg-dim, #6b7280)' }}>Untitled</span>}
+        {title || <span style={{ color: 'var(--text-faint)' }}>Untitled</span>}
       </span>
       <span
         style={{
           flex: 1,
           display: 'flex',
           gap: 12,
-          color: 'var(--fg-muted, #9ca3af)',
+          color: 'var(--text-muted)',
           overflow: 'hidden',
         }}
       >
@@ -256,7 +256,7 @@ function ListRow({
                 textOverflow: 'ellipsis',
               }}
             >
-              <span style={{ color: 'var(--fg-dim, #6b7280)' }}>{c.name}: </span>
+              <span style={{ color: 'var(--text-faint)' }}>{c.name}: </span>
               {formatValue(c.def.type, v)}
             </span>
           )

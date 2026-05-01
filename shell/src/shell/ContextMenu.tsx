@@ -7,6 +7,7 @@ import {
 } from 'react'
 import { Icon, type IconName } from '../icons'
 import { getRegistry } from '../host/shellRegistry'
+import { zIndex } from './zIndex'
 
 export type ContextMenuItem =
   | {
@@ -33,25 +34,25 @@ export interface ContextMenuProps {
 
 const PANEL_STYLE: CSSProperties = {
   position: 'fixed',
-  zIndex: 200,
-  background: 'var(--background-primary, var(--bg, #1e1e1e))',
-  border: '1px solid var(--divider-color, var(--line, #333))',
+  zIndex: zIndex.dropdown,
+  background: 'var(--background-primary)',
+  border: '1px solid var(--divider-color)',
   borderRadius: 6,
   boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
   padding: 4,
   fontSize: 12,
-  fontFamily: 'var(--f-ui)',
+  fontFamily: 'var(--font-interface)',
 }
 
 const SEPARATOR_STYLE: CSSProperties = {
   height: 1,
-  background: 'var(--divider-color, var(--line, #333))',
+  background: 'var(--divider-color)',
   margin: '4px 0',
 }
 
 const HEADER_STYLE: CSSProperties = {
   padding: '4px 8px',
-  color: 'var(--text-faint, var(--fg-dim, #777))',
+  color: 'var(--text-faint)',
   fontSize: 11,
   textTransform: 'uppercase',
   letterSpacing: 0.5,
@@ -122,12 +123,12 @@ function MenuRow({
         padding: '6px 8px',
         background:
           hover && !disabled
-            ? 'var(--background-modifier-hover, var(--bg-hover, #2a2a2a))'
+            ? 'var(--background-modifier-hover)'
             : 'transparent',
         border: 'none',
         color: disabled
-          ? 'var(--text-faint, var(--fg-dim, #777))'
-          : 'var(--text-normal, var(--fg, #ccc))',
+          ? 'var(--text-faint)'
+          : 'var(--text-normal)',
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.55 : 1,
         textAlign: 'left',

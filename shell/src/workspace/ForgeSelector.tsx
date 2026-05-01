@@ -8,6 +8,8 @@ import { useWorkspaceStore } from '../plugins/nexus/workspace/workspaceStore'
 import { useLauncherStore } from '../plugins/nexus/launcher/launcherState'
 import { getRegistry } from '../host/shellRegistry'
 import { Ic } from '../shell/icons'
+import { Modal } from '../shell/Modal'
+import { zIndex } from '../shell/zIndex'
 
 const COMMAND_OPEN_FORGE = 'nexus.workspace.open'
 const COMMAND_SET_ROOT = 'nexus.workspace.setRoot'
@@ -81,8 +83,8 @@ export function ForgeSelector(): JSX.Element {
       style={{
         flex: '0 0 auto',
         padding: '4px 6px',
-        borderTop: '1px solid var(--divider-color, var(--line, #333))',
-        background: 'var(--background-secondary, var(--bg-raised, #252526))',
+        borderTop: '1px solid var(--divider-color)',
+        background: 'var(--background-secondary)',
         fontSize: 12,
       }}
     >
@@ -98,7 +100,7 @@ export function ForgeSelector(): JSX.Element {
           gap: 8,
           background: 'transparent',
           border: 'none',
-          color: 'var(--fg)',
+          color: 'var(--text-normal)',
           cursor: 'pointer',
           padding: '6px 8px',
           borderRadius: 4,
@@ -106,7 +108,7 @@ export function ForgeSelector(): JSX.Element {
           font: 'inherit',
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'var(--bg-hover)'
+          e.currentTarget.style.background = 'var(--background-modifier-hover)'
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.background = 'transparent'
@@ -115,7 +117,7 @@ export function ForgeSelector(): JSX.Element {
         <Ic.chev
           width={14}
           height={14}
-          style={{ transform: 'rotate(-90deg)', flexShrink: 0, color: 'var(--fg-muted)' }}
+          style={{ transform: 'rotate(-90deg)', flexShrink: 0, color: 'var(--text-muted)' }}
         />
         <span
           style={{
@@ -130,6 +132,7 @@ export function ForgeSelector(): JSX.Element {
       </button>
 
       {menuOpen && anchorRect && (
+        <Modal>
         <div
           ref={menuRef}
           role="menu"
@@ -138,20 +141,21 @@ export function ForgeSelector(): JSX.Element {
             left: anchorRect.left,
             bottom: window.innerHeight - anchorRect.top + 4,
             minWidth: Math.max(220, anchorRect.width),
-            background: 'var(--background-primary, var(--bg, #1e1e1e))',
-            border: '1px solid var(--divider-color, var(--line, #333))',
+            background: 'var(--background-primary)',
+            border: '1px solid var(--divider-color)',
             borderRadius: 6,
             boxShadow: '0 6px 16px rgba(0,0,0,0.4)',
             padding: '4px 0',
-            zIndex: 9500,
+            zIndex: zIndex.dropdown,
             fontSize: 12,
+            pointerEvents: 'auto',
           }}
         >
           {recents.length === 0 && !rootPath && (
             <div
               style={{
                 padding: '8px 12px',
-                color: 'var(--fg-dim)',
+                color: 'var(--text-faint)',
                 fontStyle: 'italic',
               }}
             >
@@ -173,14 +177,14 @@ export function ForgeSelector(): JSX.Element {
                   width: '100%',
                   background: 'transparent',
                   border: 'none',
-                  color: 'var(--fg)',
+                  color: 'var(--text-normal)',
                   cursor: 'pointer',
                   padding: '6px 12px',
                   textAlign: 'left',
                   font: 'inherit',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-hover)'
+                  e.currentTarget.style.background = 'var(--background-modifier-hover)'
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.background = 'transparent'
@@ -207,7 +211,7 @@ export function ForgeSelector(): JSX.Element {
               style={{
                 height: 1,
                 margin: '4px 0',
-                background: 'var(--divider-color, var(--line, #333))',
+                background: 'var(--divider-color)',
               }}
             />
           )}
@@ -221,14 +225,14 @@ export function ForgeSelector(): JSX.Element {
               width: '100%',
               background: 'transparent',
               border: 'none',
-              color: 'var(--fg)',
+              color: 'var(--text-normal)',
               cursor: 'pointer',
               padding: '6px 12px',
               textAlign: 'left',
               font: 'inherit',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--bg-hover)'
+              e.currentTarget.style.background = 'var(--background-modifier-hover)'
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent'
@@ -250,14 +254,14 @@ export function ForgeSelector(): JSX.Element {
               width: '100%',
               background: 'transparent',
               border: 'none',
-              color: 'var(--fg)',
+              color: 'var(--text-normal)',
               cursor: 'pointer',
               padding: '6px 12px',
               textAlign: 'left',
               font: 'inherit',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--bg-hover)'
+              e.currentTarget.style.background = 'var(--background-modifier-hover)'
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent'
@@ -267,6 +271,7 @@ export function ForgeSelector(): JSX.Element {
             <span>Open folder as forge…</span>
           </button>
         </div>
+        </Modal>
       )}
     </div>
   )

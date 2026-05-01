@@ -63,7 +63,7 @@ export function BasesBoard({ relpath, base, client }: Props) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--fg-muted, #9ca3af)',
+          color: 'var(--text-muted)',
           padding: 24,
           fontSize: 12,
         }}
@@ -111,9 +111,9 @@ export function BasesBoard({ relpath, base, client }: Props) {
           alignItems: 'center',
           gap: 8,
           padding: '6px 12px',
-          borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
+          borderBottom: '1px solid var(--background-modifier-border)',
           fontSize: 12,
-          color: 'var(--fg-muted, #9ca3af)',
+          color: 'var(--text-muted)',
         }}
       >
         <span>Group by</span>
@@ -121,9 +121,9 @@ export function BasesBoard({ relpath, base, client }: Props) {
           value={active?.name ?? ''}
           onChange={(e) => setBoardGroupField(relpath, e.target.value || null)}
           style={{
-            background: 'var(--bg-raised, #252529)',
-            color: 'var(--fg-primary, #e4e4e7)',
-            border: '1px solid var(--border-subtle, #2a2a2e)',
+            background: 'var(--background-secondary)',
+            color: 'var(--text-normal)',
+            border: '1px solid var(--background-modifier-border)',
             borderRadius: 3,
             padding: '2px 6px',
             fontSize: 11,
@@ -135,7 +135,7 @@ export function BasesBoard({ relpath, base, client }: Props) {
             </option>
           ))}
         </select>
-        {opError && <span style={{ color: 'var(--risk, #f48771)' }}>{opError}</span>}
+        {opError && <span style={{ color: 'var(--risk)' }}>{opError}</span>}
       </div>
       <div
         style={{
@@ -194,8 +194,8 @@ function BoardColumn({
         flex: '0 0 260px',
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--bg-raised, #252529)',
-        border: `1px solid ${isDragOver ? 'var(--accent, #60a5fa)' : 'var(--border-subtle, #2a2a2e)'}`,
+        background: 'var(--background-secondary)',
+        border: `1px solid ${isDragOver ? 'var(--interactive-accent)' : 'var(--background-modifier-border)'}`,
         borderRadius: 6,
         minWidth: 0,
       }}
@@ -220,14 +220,14 @@ function BoardColumn({
           padding: '8px 12px',
           fontSize: 11,
           fontWeight: 600,
-          color: columnKey === UNASSIGNED ? 'var(--fg-dim, #6b7280)' : 'var(--fg-primary, #e4e4e7)',
-          borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
+          color: columnKey === UNASSIGNED ? 'var(--text-faint)' : 'var(--text-normal)',
+          borderBottom: '1px solid var(--background-modifier-border)',
           display: 'flex',
           justifyContent: 'space-between',
         }}
       >
         <span>{label}</span>
-        <span style={{ color: 'var(--fg-dim, #6b7280)' }}>{records.length}</span>
+        <span style={{ color: 'var(--text-faint)' }}>{records.length}</span>
       </div>
       <div
         style={{
@@ -271,16 +271,16 @@ function Card({
       onClick={onSelect}
       style={{
         padding: 8,
-        background: 'var(--bg-primary, #1e1e1e)',
-        border: '1px solid var(--border-subtle, #2a2a2e)',
+        background: 'var(--background-primary)',
+        border: '1px solid var(--background-modifier-border)',
         borderRadius: 4,
         fontSize: 12,
         cursor: 'grab',
-        color: 'var(--fg-primary, #e4e4e7)',
+        color: 'var(--text-normal)',
       }}
     >
       <div style={{ fontWeight: 500, marginBottom: rest.length ? 4 : 0 }}>
-        {title || <span style={{ color: 'var(--fg-dim, #6b7280)' }}>Untitled</span>}
+        {title || <span style={{ color: 'var(--text-faint)' }}>Untitled</span>}
       </div>
       {rest.map((c) => {
         const v = record[c.name]
@@ -289,14 +289,14 @@ function Card({
           <div
             key={c.name}
             style={{
-              color: 'var(--fg-muted, #9ca3af)',
+              color: 'var(--text-muted)',
               fontSize: 11,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
             }}
           >
-            <span style={{ color: 'var(--fg-dim, #6b7280)' }}>{c.name}: </span>
+            <span style={{ color: 'var(--text-faint)' }}>{c.name}: </span>
             {formatValue(c.def.type, v)}
           </div>
         )

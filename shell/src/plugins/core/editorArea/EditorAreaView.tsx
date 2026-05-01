@@ -108,7 +108,7 @@ function DocSurface({ tab }: { tab: EditorTab }) {
       {error ? (
         <div className="doc"><p style={{ color: 'var(--risk)' }}>Failed to load: {error}</p></div>
       ) : contents == null ? (
-        <div className="doc"><p style={{ color: 'var(--fg-dim)' }}>Loading…</p></div>
+        <div className="doc"><p style={{ color: 'var(--text-faint)' }}>Loading…</p></div>
       ) : isMarkdown ? (
         <MarkdownDoc
           source={contents}

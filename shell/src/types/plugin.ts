@@ -95,6 +95,14 @@ export interface PluginManifest {
   apiVersion?: number
   dependsOn?: string[]
   contributes?: PluginContributions
+  /**
+   * SH-020: Whether this plugin should run in popout windows.
+   * Defaults to true when absent. Set to false for chrome-only plugins
+   * (activity bar, sidebar, status bar, settings, etc.) that contribute
+   * to slots the popout shell does not render — loading them in a popout
+   * is dead work that inflates boot time.
+   */
+  popoutCompatible?: boolean
 }
 
 /**

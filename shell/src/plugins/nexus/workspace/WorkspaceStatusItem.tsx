@@ -29,7 +29,7 @@ export function WorkspaceStatusItem() {
           height: 6,
           borderRadius: '50%',
           flexShrink: 0,
-          background: synced ? 'var(--ok)' : 'var(--fg-dim)',
+          background: synced ? 'var(--ok)' : 'var(--text-faint)',
           boxShadow: synced ? '0 0 4px var(--ok)' : 'none',
         }}
       />

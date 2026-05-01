@@ -89,7 +89,7 @@ export function BasesCalendar({ relpath, base, client }: Props) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--fg-muted, #9ca3af)',
+          color: 'var(--text-muted)',
           fontSize: 12,
           padding: 24,
         }}
@@ -141,9 +141,9 @@ export function BasesCalendar({ relpath, base, client }: Props) {
           alignItems: 'center',
           gap: 8,
           padding: '6px 12px',
-          borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
+          borderBottom: '1px solid var(--background-modifier-border)',
           fontSize: 12,
-          color: 'var(--fg-muted, #9ca3af)',
+          color: 'var(--text-muted)',
         }}
       >
         <button
@@ -153,7 +153,7 @@ export function BasesCalendar({ relpath, base, client }: Props) {
         >
           ‹
         </button>
-        <strong style={{ color: 'var(--fg-primary, #e4e4e7)' }}>{title}</strong>
+        <strong style={{ color: 'var(--text-normal)' }}>{title}</strong>
         <button
           type="button"
           onClick={() => setMonth(relpath, yyyymm(addMonths(monthStart, 1)))}
@@ -181,15 +181,15 @@ export function BasesCalendar({ relpath, base, client }: Props) {
             </option>
           ))}
         </select>
-        {opError && <span style={{ color: 'var(--risk, #f48771)' }}>{opError}</span>}
+        {opError && <span style={{ color: 'var(--risk)' }}>{opError}</span>}
       </div>
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(7, 1fr)',
-          borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
-          background: 'var(--bg-raised, #252529)',
-          color: 'var(--fg-muted, #9ca3af)',
+          borderBottom: '1px solid var(--background-modifier-border)',
+          background: 'var(--background-secondary)',
+          color: 'var(--text-muted)',
           fontSize: 11,
         }}
       >
@@ -216,19 +216,19 @@ export function BasesCalendar({ relpath, base, client }: Props) {
               key={key}
               onClick={() => void createOnDay(cell.day)}
               style={{
-                borderRight: '1px solid var(--border-subtle, #2a2a2e)',
-                borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
+                borderRight: '1px solid var(--background-modifier-border)',
+                borderBottom: '1px solid var(--background-modifier-border)',
                 padding: 4,
                 minHeight: 72,
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 2,
                 background: cell.inMonth
-                  ? 'var(--bg-primary, #1e1e1e)'
-                  : 'var(--bg-raised-dim, #1a1a1d)',
+                  ? 'var(--background-primary)'
+                  : 'var(--background-secondary-alt)',
                 color: cell.inMonth
-                  ? 'var(--fg-primary, #e4e4e7)'
-                  : 'var(--fg-dim, #6b7280)',
+                  ? 'var(--text-normal)'
+                  : 'var(--text-faint)',
                 cursor: 'pointer',
                 fontSize: 11,
               }}
@@ -245,10 +245,10 @@ export function BasesCalendar({ relpath, base, client }: Props) {
                   style={{
                     fontWeight: cell.isToday ? 600 : 400,
                     color: cell.isToday
-                      ? 'var(--accent, #60a5fa)'
+                      ? 'var(--interactive-accent)'
                       : cell.inMonth
-                        ? 'var(--fg-primary, #e4e4e7)'
-                        : 'var(--fg-dim, #6b7280)',
+                        ? 'var(--text-normal)'
+                        : 'var(--text-faint)',
                   }}
                 >
                   {cell.day.getDate()}
@@ -268,12 +268,12 @@ export function BasesCalendar({ relpath, base, client }: Props) {
                     }}
                     style={{
                       textAlign: 'left',
-                      background: 'var(--bg-raised, #252529)',
-                      border: '1px solid var(--border-subtle, #2a2a2e)',
+                      background: 'var(--background-secondary)',
+                      border: '1px solid var(--background-modifier-border)',
                       borderRadius: 3,
                       padding: '1px 4px',
                       fontSize: 10,
-                      color: 'var(--fg-primary, #e4e4e7)',
+                      color: 'var(--text-normal)',
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -286,7 +286,7 @@ export function BasesCalendar({ relpath, base, client }: Props) {
                 )
               })}
               {recs.length > 3 && (
-                <span style={{ fontSize: 10, color: 'var(--fg-dim, #6b7280)' }}>
+                <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>
                   +{recs.length - 3} more
                 </span>
               )}
@@ -339,18 +339,18 @@ function errMsg(err: unknown): string {
 
 const toolbarBtnStyle: React.CSSProperties = {
   padding: '3px 8px',
-  background: 'var(--bg-raised, #252529)',
-  color: 'var(--fg-primary, #e4e4e7)',
-  border: '1px solid var(--border-subtle, #2a2a2e)',
+  background: 'var(--background-secondary)',
+  color: 'var(--text-normal)',
+  border: '1px solid var(--background-modifier-border)',
   borderRadius: 3,
   fontSize: 11,
   cursor: 'pointer',
 }
 
 const selectStyle: React.CSSProperties = {
-  background: 'var(--bg-raised, #252529)',
-  color: 'var(--fg-primary, #e4e4e7)',
-  border: '1px solid var(--border-subtle, #2a2a2e)',
+  background: 'var(--background-secondary)',
+  color: 'var(--text-normal)',
+  border: '1px solid var(--background-modifier-border)',
   borderRadius: 3,
   padding: '2px 6px',
   fontSize: 11,

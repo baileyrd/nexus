@@ -8,52 +8,52 @@
 .cm-content .cm-md-strong { font-weight: 600; }
 
 .cm-content .cm-md-code {
-  font-family: var(--f-mono);
-  background: var(--bg-raised);
+  font-family: var(--font-monospace);
+  background: var(--background-secondary);
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 0.92em;
 }
 
 .cm-content .cm-md-link {
-  color: var(--accent);
+  color: var(--interactive-accent);
   text-decoration: underline;
   cursor: pointer;
 }
 
-.cm-content .cm-md-image { color: var(--fg-muted); }
+.cm-content .cm-md-image { color: var(--text-muted); }
 
 .cm-content .cm-md-h1 { font-size: 1.85em; font-weight: 700; line-height: 1.25; }
 .cm-content .cm-md-h2 { font-size: 1.5em;  font-weight: 700; line-height: 1.3;  }
 .cm-content .cm-md-h3 { font-size: 1.25em; font-weight: 700; line-height: 1.35; }
 .cm-content .cm-md-h4 { font-size: 1.1em;  font-weight: 700; }
 .cm-content .cm-md-h5 { font-size: 1em;    font-weight: 700; }
-.cm-content .cm-md-h6 { font-size: 0.9em;  font-weight: 700; color: var(--fg-muted); }
+.cm-content .cm-md-h6 { font-size: 0.9em;  font-weight: 700; color: var(--text-muted); }
 
 .cm-content .cm-md-blockquote {
-  border-left: 3px solid var(--line-soft);
+  border-left: 3px solid var(--divider-color);
   padding-left: 0.6em;
-  color: var(--fg-muted);
+  color: var(--text-muted);
 }
 .cm-content .cm-md-blockquote-mark { color: var(--fg-faint); }
 
-.cm-content .cm-md-list-marker { color: var(--fg-muted); }
-.cm-content .cm-md-task { color: var(--fg-muted); }
+.cm-content .cm-md-list-marker { color: var(--text-muted); }
+.cm-content .cm-md-task { color: var(--text-muted); }
 
 .cm-content .cm-md-hr-widget {
   border: 0;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider-color);
   margin: 0.6em 0;
   height: 0;
 }
 
 .cm-content .cm-md-codeblock {
-  background: var(--bg-raised);
-  font-family: var(--f-mono);
+  background: var(--background-secondary);
+  font-family: var(--font-monospace);
 }
 .cm-content .cm-md-fence { color: var(--fg-faint); }
 
-.cm-content .cm-md-html { color: var(--fg-muted); }
+.cm-content .cm-md-html { color: var(--text-muted); }
 
 .cm-content .cm-md-table-widget {
   margin: 0.4em 0;
@@ -66,8 +66,8 @@
   margin: 0.4em 0;
 }
 .cm-content .cm-md-fenced-pending {
-  background: var(--bg-raised);
-  font-family: var(--f-mono);
+  background: var(--background-secondary);
+  font-family: var(--font-monospace);
   padding: 0.4em 0.6em;
   border-radius: 4px;
   white-space: pre;
@@ -79,11 +79,11 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border: 1px solid var(--risk, var(--line-soft));
+  border: 1px solid var(--risk);
   border-radius: 4px;
-  background: var(--bg-raised);
-  color: var(--risk, var(--fg));
-  font-family: var(--f-mono);
+  background: var(--background-secondary);
+  color: var(--risk);
+  font-family: var(--font-monospace);
   font-size: 0.9em;
 }
 .cm-content .cm-md-fenced-error-lang,
@@ -96,8 +96,8 @@
   margin: 0.6em 0;
 }
 .nexus-markdown-body .nexus-fenced-pending {
-  background: var(--bg-raised);
-  font-family: var(--f-mono);
+  background: var(--background-secondary);
+  font-family: var(--font-monospace);
   padding: 0.4em 0.6em;
   border-radius: 4px;
 }
@@ -112,21 +112,21 @@
 }
 .cm-content .cm-md-dbview-table th,
 .cm-content .cm-md-dbview-table td {
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--divider-color);
   padding: 4px 8px;
   text-align: left;
 }
 .cm-content .cm-md-dbview-table thead th {
-  background: var(--bg-raised);
+  background: var(--background-secondary);
   font-weight: 600;
 }
 .cm-content .cm-md-dbview-pending {
-  color: var(--fg-muted);
+  color: var(--text-muted);
   font-style: italic;
   padding: 0.4em 0.6em;
 }
 .cm-content .cm-md-dbview-empty {
-  color: var(--fg-muted);
+  color: var(--text-muted);
   padding: 0.3em 0.6em;
 }
 .cm-content .cm-md-dbview-grouped .cm-md-dbview-group {
@@ -135,7 +135,7 @@
 .cm-content .cm-md-dbview-group-heading {
   margin: 0 0 0.3em 0;
   font-size: 0.9em;
-  color: var(--fg-muted);
+  color: var(--text-muted);
   font-weight: 600;
 }
 .cm-content .cm-md-dbview-error {
@@ -143,9 +143,9 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border: 1px solid var(--risk, var(--line-soft));
+  border: 1px solid var(--risk);
   border-radius: 4px;
-  background: var(--bg-raised);
+  background: var(--background-secondary);
   font-size: 0.9em;
 }
 .cm-content .cm-md-dbview-error-tag {
@@ -161,7 +161,7 @@
 
 /* BL-049 phase 2 — clickable inline `[[<file>#^<uuid>]]` block links. */
 .cm-content .cm-md-block-link {
-  color: var(--accent, #4c8bf5);
+  color: var(--interactive-accent);
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
@@ -175,10 +175,10 @@
   align-items: center;
   gap: 6px 10px;
   padding: 4px 6px;
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--divider-color);
   border-bottom: none;
   border-radius: 4px 4px 0 0;
-  background: var(--bg-raised);
+  background: var(--background-secondary);
   font-size: 0.85em;
 }
 .cm-content .cm-md-dbview-summary {
@@ -196,12 +196,12 @@
   align-items: center;
   gap: 4px;
   padding: 1px 4px 1px 6px;
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--divider-color);
   border-radius: 999px;
   background: var(--bg-base);
 }
 .cm-content .cm-md-dbview-chip-text {
-  font-family: var(--f-mono);
+  font-family: var(--font-monospace);
   font-size: 0.9em;
 }
 .cm-content .cm-md-dbview-chip-remove {
@@ -211,7 +211,7 @@
   font-size: 1em;
   line-height: 1;
   padding: 0 3px;
-  color: var(--fg-muted);
+  color: var(--text-muted);
 }
 .cm-content .cm-md-dbview-chip-remove:hover {
   color: var(--fg-default);
@@ -223,7 +223,7 @@
 .cm-content .cm-md-dbview-add-input {
   font: inherit;
   padding: 1px 6px;
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--divider-color);
   border-radius: 4px;
   background: var(--bg-base);
   color: inherit;
@@ -231,12 +231,12 @@
 }
 .cm-content .cm-md-dbview-add-submit {
   padding: 0 6px;
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--divider-color);
   border-radius: 4px;
   background: var(--bg-base);
   cursor: pointer;
 }
 .cm-content .cm-md-dbview-body {
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--divider-color);
   border-radius: 0 0 4px 4px;
 }

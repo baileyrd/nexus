@@ -10,6 +10,7 @@ import type { Plugin } from '../types/plugin'
 import { getRegistry } from './shellRegistry'
 import { getHost } from './shellHost'
 import {
+  type PluginEntry,
   ALL_PLUGINS,
   DEFAULT_OFF_PLUGINS,
   PLUGINS_ENABLED_CONFIG_KEY,
@@ -46,8 +47,8 @@ export async function enableBuiltinPlugin(pluginId: string): Promise<EnableResul
     return { ok: false, error: 'Shell is not booted yet' }
   }
 
-  const plugin = DEFAULT_OFF_PLUGINS.find((p) => p.manifest.id === pluginId)
-  if (!plugin) {
+  const entry = DEFAULT_OFF_PLUGINS.find(e => e.id === pluginId)
+  if (!entry) {
     return { ok: false, error: `Unknown built-in plugin: ${pluginId}` }
   }
   if (host.isActive(pluginId)) {
@@ -58,34 +59,46 @@ export async function enableBuiltinPlugin(pluginId: string): Promise<EnableResul
     return { ok: true }
   }
 
-  // Build a register-set: this plugin plus any default-off deps not yet
+  // Build a register-set: this entry plus any default-off deps not yet
   // registered. Default-on deps are skipped (they're already active and
   // `host.activate` will short-circuit them).
-  const queue: Plugin[] = []
+  // SH-009: traverse dependency graph using PluginEntry metadata (no module
+  // load required), then load all needed modules in parallel.
+  const queue: PluginEntry[] = []
   const seen = new Set<string>()
-  const visit = (p: Plugin): EnableResult | undefined => {
-    if (seen.has(p.manifest.id)) return undefined
-    seen.add(p.manifest.id)
-    for (const depId of p.manifest.dependsOn ?? []) {
+  const visit = (e: PluginEntry): EnableResult | undefined => {
+    if (seen.has(e.id)) return undefined
+    seen.add(e.id)
+    for (const depId of e.dependsOn ?? []) {
       if (host.isActive(depId)) continue
-      const dep = ALL_PLUGINS.find((x) => x.manifest.id === depId)
+      const dep = ALL_PLUGINS.find(x => x.id === depId)
       if (!dep) {
         return {
           ok: false,
-          error: `'${p.manifest.id}' depends on '${depId}' which is not in the catalog`,
+          error: `'${e.id}' depends on '${depId}' which is not in the catalog`,
         }
       }
       const sub = visit(dep)
       if (sub && !sub.ok) return sub
     }
-    queue.push(p)
+    queue.push(e)
     return undefined
   }
-  const visitErr = visit(plugin)
+  const visitErr = visit(entry)
   if (visitErr && !visitErr.ok) return visitErr
 
+  let loadedPlugins: Plugin[]
   try {
-    await host.loadAll(queue)
+    loadedPlugins = await Promise.all(queue.map(e => e.load()))
+  } catch (err) {
+    return {
+      ok: false,
+      error: `Failed to load plugin module: ${err instanceof Error ? err.message : String(err)}`,
+    }
+  }
+
+  try {
+    await host.loadAll(loadedPlugins)
   } catch (err) {
     return {
       ok: false,
@@ -111,11 +124,11 @@ export async function enableBuiltinPlugin(pluginId: string): Promise<EnableResul
   // this, lazy plugins (Bookmarks, Tags, etc.) silently register and
   // the user has to dig through the command palette to see anything.
   if (state !== 'active') {
-    const events = plugin.manifest.activationEvents ?? []
+    const events = entry.activationEvents ?? []
     const focusCmd = events
-      .filter((e) => e.startsWith('onCommand:'))
-      .map((e) => e.slice('onCommand:'.length))
-      .find((c) => /\.(focus|show|open|reveal)$/i.test(c))
+      .filter(e => e.startsWith('onCommand:'))
+      .map(e => e.slice('onCommand:'.length))
+      .find(c => /\.(focus|show|open|reveal)$/i.test(c))
     if (focusCmd) {
       try {
         await reg.commands.execute(focusCmd)
@@ -163,9 +176,7 @@ export async function disableBuiltinPlugin(pluginId: string): Promise<EnableResu
   const host = getHost()
   if (!host) return { ok: false, error: 'Shell is not booted yet' }
 
-  const isOptional = DEFAULT_OFF_PLUGINS.some(
-    (p) => p.manifest.id === pluginId,
-  )
+  const isOptional = DEFAULT_OFF_PLUGINS.some(e => e.id === pluginId)
   if (!isOptional) {
     return {
       ok: false,
@@ -201,22 +212,16 @@ function refreshPluginServices() {
   if (!host || !reg) return
 
   const all = host.listAll()
-  const manifestById = new Map(
-    ALL_PLUGINS.map((p) => [p.manifest.id, p.manifest]),
-  )
-  // `inactive` means the plugin was unloaded (either deactivated or its
-  // lazy pre-registration was swept by `unload`). It's still in the
-  // host's state map so listAll can replay history, but for the
-  // Settings UI it's "off" — must move to `availablePlugins`, not stay
-  // under "Core plugins" where the toggle would be stuck on.
+  // SH-009: use PluginEntry metadata (id, name, version, core) without loading modules.
+  const entryById = new Map(ALL_PLUGINS.map(e => [e.id, e]))
   const loaded = all.filter(({ state }) => state !== 'inactive')
   const pluginList = loaded.map(({ id, state }) => {
-    const m = manifestById.get(id)
+    const e = entryById.get(id)
     return {
       id,
-      name: m?.name ?? id,
-      version: m?.version ?? '?',
-      core: m?.core ?? false,
+      name: e?.name ?? id,
+      version: e?.version ?? '?',
+      core: e?.core ?? false,
       state,
       error: host.getError(id)?.message,
     }
@@ -225,12 +230,12 @@ function refreshPluginServices() {
 
   const enabled = new Set(loaded.map(({ id }) => id))
   const available = DEFAULT_OFF_PLUGINS
-    .filter((p) => !enabled.has(p.manifest.id))
-    .map((p) => ({
-      id: p.manifest.id,
-      name: p.manifest.name,
-      version: p.manifest.version,
-      core: p.manifest.core,
+    .filter(e => !enabled.has(e.id))
+    .map(e => ({
+      id:      e.id,
+      name:    e.name,
+      version: e.version,
+      core:    e.core,
     }))
   reg.registerService('availablePlugins', available)
   eventBus.emit(PLUGIN_LIST_CHANGED_EVENT, null)

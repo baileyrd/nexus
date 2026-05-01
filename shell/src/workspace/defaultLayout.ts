@@ -18,6 +18,7 @@ import type {
   SerializedTabs,
   WorkspaceJSON,
 } from './types.ts'
+import { NARROW_BREAKPOINT } from '../shell/useViewportClass'
 
 const newId = (): string => crypto.randomUUID()
 
@@ -43,6 +44,12 @@ function makeTabs(leafTypes: string[]): SerializedTabs {
  * layout exists.
  */
 export function buildDefaultLayout(): WorkspaceJSON {
+  // SH-003: collapse side docks at narrow viewport so the editor is the
+  // dominant region on small windows (≤ 720 px ~ typical half-screen tile).
+  const isNarrow =
+    typeof window !== 'undefined' &&
+    window.innerWidth < NARROW_BREAKPOINT
+
   const mainTabs = makeTabs(['empty'])
   const mainSplit: SerializedSplit = {
     kind: 'split',
@@ -58,7 +65,7 @@ export function buildDefaultLayout(): WorkspaceJSON {
     direction: 'vertical',
     children: [leftTabs],
     side: 'left',
-    collapsed: false,
+    collapsed: isNarrow,
     size: 260,
   }
 
@@ -77,7 +84,7 @@ export function buildDefaultLayout(): WorkspaceJSON {
     direction: 'vertical',
     children: [rightTabs],
     side: 'right',
-    collapsed: false,
+    collapsed: isNarrow,
     size: 280,
   }
 

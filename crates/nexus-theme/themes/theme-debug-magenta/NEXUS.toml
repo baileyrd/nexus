@@ -1,0 +1,59 @@
+[theme]
+name = "Debug Magenta"
+version = "1.0.0"
+author = "Internal"
+description = "DEV-ONLY: every token resolves to #ff00ff. Load this theme during QA to make missing-token fallbacks visible as hot-pink."
+license = "MIT OR Apache-2.0"
+nexus_min_version = "0.1.0"
+nexus_max_version = "*"
+display_name = "Debug Magenta (dev only)"
+category = "dark"
+supports = ["dark"]
+platform_specific = []
+
+# Every --nx-* token is set to opaque magenta so that any CSS var() call
+# that reaches a hex/rgba fallback instead of routing through the kernel
+# theme cascade will stand out as #ff00ff at runtime.
+[variables]
+"--nx-bg-primary"          = "#ff00ff"
+"--nx-bg-secondary"        = "#ff00ff"
+"--nx-bg-tertiary"         = "#ff00ff"
+"--nx-bg-elevated"         = "#ff00ff"
+"--nx-bg-overlay"          = "#ff00ff"
+"--nx-bg-soft"             = "#ff00ff"
+"--nx-text-primary"        = "#ff00ff"
+"--nx-text-secondary"      = "#ff00ff"
+"--nx-text-tertiary"       = "#ff00ff"
+"--nx-text-muted"          = "#ff00ff"
+"--nx-text-inverted"       = "#ff00ff"
+"--nx-color-primary"       = "#ff00ff"
+"--nx-color-primary-light" = "#ff00ff"
+"--nx-color-primary-dark"  = "#ff00ff"
+"--nx-color-primary-soft"  = "#ff00ff"
+"--nx-interactive-hover"   = "#ff00ff"
+"--nx-interactive-active"  = "#ff00ff"
+"--nx-border"              = "#ff00ff"
+"--nx-shadow-sm"           = "0 1px 2px #ff00ff"
+"--nx-shadow-md"           = "0 4px 6px #ff00ff"
+"--nx-shadow-lg"           = "0 10px 15px #ff00ff"
+"--nx-graph-grid"          = "#ff00ff"
+"--nx-syntax-keyword"      = "#ff00ff"
+"--nx-syntax-string"       = "#ff00ff"
+"--nx-syntax-comment"      = "#ff00ff"
+"--nx-syntax-number"       = "#ff00ff"
+"--nx-syntax-function"     = "#ff00ff"
+"--nx-accent-cool"         = "#ff00ff"
+"--nx-accent-ember"        = "#ff00ff"
+"--nx-accent-ember-soft"   = "#ff00ff"
+"--nx-status-ok"           = "#ff00ff"
+"--nx-status-warn"         = "#ff00ff"
+"--nx-status-risk"         = "#ff00ff"
+
+[tags]
+keywords = ["debug", "dev", "qa"]
+color_temperature = "neutral"
+contrast_level = "none"
+use_case = ["development"]
+
+[version_history]
+"1.0.0" = "Initial release"

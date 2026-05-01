@@ -193,9 +193,9 @@ export function ChatView({
         flexDirection: 'column',
         height: '100%',
         width: '100%',
-        background: 'var(--bg)',
-        color: 'var(--fg)',
-        fontFamily: 'var(--f-ui)',
+        background: 'var(--background-primary)',
+        color: 'var(--text-normal)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 13,
       }}
     >
@@ -260,9 +260,9 @@ export function ChatView({
 
       <div
         style={{
-          borderTop: '1px solid var(--line-soft)',
+          borderTop: '1px solid var(--divider-color)',
           padding: '10px 12px',
-          background: 'var(--bg-raised)',
+          background: 'var(--background-secondary)',
           display: 'flex',
           alignItems: 'flex-end',
           gap: 8,
@@ -285,8 +285,8 @@ export function ChatView({
             maxHeight: 140,
             resize: 'none',
             background: 'transparent',
-            color: 'var(--fg)',
-            fontFamily: 'var(--f-ui)',
+            color: 'var(--text-normal)',
+            fontFamily: 'var(--font-interface)',
             fontSize: 13,
             lineHeight: 1.45,
             border: 0,
@@ -324,16 +324,16 @@ function UserBubble({ turn }: { turn: Extract<AiTurn, { kind: 'user' }> }) {
       style={{
         alignSelf: 'flex-end',
         maxWidth: '88%',
-        background: 'var(--bg-raised)',
-        border: '1px solid var(--line-soft)',
-        borderRadius: 'var(--r)',
+        background: 'var(--background-secondary)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
         padding: '8px 10px',
       }}
     >
       <div
         style={{
           fontSize: 10,
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           textTransform: 'uppercase',
           letterSpacing: 0.4,
           marginBottom: 4,
@@ -343,7 +343,7 @@ function UserBubble({ turn }: { turn: Extract<AiTurn, { kind: 'user' }> }) {
       </div>
       <div
         style={{
-          color: 'var(--fg)',
+          color: 'var(--text-normal)',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           lineHeight: 1.45,
@@ -389,7 +389,7 @@ function AssistantBubble({
         <div
           style={{
             fontSize: 10,
-            color: isError ? 'var(--risk)' : 'var(--fg-dim)',
+            color: isError ? 'var(--risk)' : 'var(--text-faint)',
             textTransform: 'uppercase',
             letterSpacing: 0.4,
           }}
@@ -405,9 +405,9 @@ function AssistantBubble({
         <div
           style={{
             border: '1px solid var(--risk)',
-            background: 'var(--bg-raised)',
-            color: 'var(--fg)',
-            borderRadius: 'var(--r)',
+            background: 'var(--background-secondary)',
+            color: 'var(--text-normal)',
+            borderRadius: 'var(--radius-s)',
             padding: '8px 10px',
             display: 'flex',
             flexDirection: 'column',
@@ -428,7 +428,7 @@ function AssistantBubble({
             <div
               style={{
                 fontSize: 12,
-                color: 'var(--fg-muted)',
+                color: 'var(--text-muted)',
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
               }}
@@ -442,12 +442,12 @@ function AssistantBubble({
                 type="button"
                 onClick={onRetry}
                 style={{
-                  border: '1px solid var(--line-soft)',
+                  border: '1px solid var(--divider-color)',
                   background: 'transparent',
-                  color: 'var(--fg)',
-                  borderRadius: 'var(--r)',
+                  color: 'var(--text-normal)',
+                  borderRadius: 'var(--radius-s)',
                   padding: '4px 10px',
-                  fontFamily: 'var(--f-ui)',
+                  fontFamily: 'var(--font-interface)',
                   fontSize: 12,
                   cursor: 'pointer',
                 }}
@@ -464,7 +464,7 @@ function AssistantBubble({
         // backticks during the stream — port preserves that.
         <div
           style={{
-            color: 'var(--fg)',
+            color: 'var(--text-normal)',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
             lineHeight: 1.5,
@@ -487,7 +487,7 @@ function AssistantBubble({
             <MarkdownBody source={body} />
           )
         ) : (
-          <div style={{ color: 'var(--fg-muted)', fontStyle: 'italic' }}>
+          <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
             (no response)
           </div>
         )
@@ -608,12 +608,12 @@ function CitationChipRow({
               `score ${c.score.toFixed(3)}`
             }
             style={{
-              border: '1px solid var(--line-soft)',
-              background: 'var(--bg-raised)',
-              color: 'var(--fg-dim)',
-              borderRadius: 'var(--r)',
+              border: '1px solid var(--divider-color)',
+              background: 'var(--background-secondary)',
+              color: 'var(--text-faint)',
+              borderRadius: 'var(--radius-s)',
               padding: '2px 8px',
-              fontFamily: 'var(--f-ui)',
+              fontFamily: 'var(--font-interface)',
               fontSize: 11,
               cursor: 'pointer',
               maxWidth: 260,
@@ -622,7 +622,7 @@ function CitationChipRow({
               whiteSpace: 'nowrap',
             }}
           >
-            <span style={{ color: 'var(--accent)', marginRight: 4 }}>[{c.index}]</span>
+            <span style={{ color: 'var(--interactive-accent)', marginRight: 4 }}>[{c.index}]</span>
             {c.path}
             {lineSuffix}
           </button>
@@ -649,12 +649,12 @@ function CopyButton({ text }: { text: string }) {
       title="Copy answer to clipboard"
       style={{
         marginLeft: 'auto',
-        border: '1px solid var(--line-soft)',
+        border: '1px solid var(--divider-color)',
         background: 'transparent',
-        color: copied ? 'var(--accent)' : 'var(--fg-dim)',
-        borderRadius: 'var(--r)',
+        color: copied ? 'var(--interactive-accent)' : 'var(--text-faint)',
+        borderRadius: 'var(--radius-s)',
         padding: '1px 8px',
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 10,
         cursor: 'pointer',
         textTransform: 'uppercase',
@@ -692,12 +692,12 @@ function SourceChipRow({
             (typeof s.score === 'number' ? `score ${s.score.toFixed(3)}` : '')
           }
           style={{
-            border: '1px solid var(--line-soft)',
-            background: 'var(--bg-raised)',
-            color: 'var(--fg-dim)',
-            borderRadius: 'var(--r)',
+            border: '1px solid var(--divider-color)',
+            background: 'var(--background-secondary)',
+            color: 'var(--text-faint)',
+            borderRadius: 'var(--radius-s)',
             padding: '2px 8px',
-            fontFamily: 'var(--f-ui)',
+            fontFamily: 'var(--font-interface)',
             fontSize: 11,
             cursor: 'pointer',
             maxWidth: 220,
@@ -737,9 +737,9 @@ function ConfigBanner({
           gap: 12,
           padding: '8px 12px',
           fontSize: 12,
-          color: 'var(--fg-muted)',
-          background: 'var(--bg-raised)',
-          borderBottom: '1px solid var(--line-soft)',
+          color: 'var(--text-muted)',
+          background: 'var(--background-secondary)',
+          borderBottom: '1px solid var(--divider-color)',
         }}
       >
         <span>No AI provider configured.</span>
@@ -749,12 +749,12 @@ function ConfigBanner({
             onClick={onOpenSettings}
             style={{
               padding: '3px 10px',
-              background: 'var(--accent)',
-              color: 'var(--fg-on-accent, #fff)',
-              border: '1px solid var(--accent)',
-              borderRadius: 'var(--r)',
+              background: 'var(--interactive-accent)',
+              color: 'var(--interactive-accent-ink)',
+              border: '1px solid var(--interactive-accent)',
+              borderRadius: 'var(--radius-s)',
               fontSize: 11,
-              fontFamily: 'var(--f-ui)',
+              fontFamily: 'var(--font-interface)',
               fontWeight: 500,
               cursor: 'pointer',
             }}
@@ -770,9 +770,9 @@ function ConfigBanner({
       style={{
         padding: '4px 12px',
         fontSize: 10,
-        color: 'var(--fg-dim)',
-        background: 'var(--bg-raised)',
-        borderBottom: '1px solid var(--line-soft)',
+        color: 'var(--text-faint)',
+        background: 'var(--background-secondary)',
+        borderBottom: '1px solid var(--divider-color)',
         textTransform: 'uppercase',
         letterSpacing: 0.4,
       }}
@@ -788,7 +788,7 @@ function PendingRow() {
     <div
       className="nexus-ai-pending"
       style={{
-        color: 'var(--fg-muted)',
+        color: 'var(--text-muted)',
         fontSize: 13,
         padding: '2px 0',
       }}
@@ -815,7 +815,7 @@ function EmptyState({
         justifyContent: 'center',
         gap: 12,
         padding: '20px 18px',
-        color: 'var(--fg-dim)',
+        color: 'var(--text-faint)',
         fontSize: 13,
         textAlign: 'center',
       }}
@@ -834,12 +834,12 @@ function EmptyState({
               onClick={onOpenSettings}
               style={{
                 padding: '6px 14px',
-                background: 'var(--accent)',
-                color: 'var(--fg-on-accent, #fff)',
-                border: '1px solid var(--accent)',
-                borderRadius: 'var(--r)',
+                background: 'var(--interactive-accent)',
+                color: 'var(--interactive-accent-ink)',
+                border: '1px solid var(--interactive-accent)',
+                borderRadius: 'var(--radius-s)',
                 fontSize: 12,
-                fontFamily: 'var(--f-ui)',
+                fontFamily: 'var(--font-interface)',
                 fontWeight: 500,
                 cursor: 'pointer',
               }}
@@ -865,9 +865,9 @@ function ErrorBanner({
       role="alert"
       style={{
         border: '1px solid var(--risk)',
-        background: 'var(--bg-raised)',
-        color: 'var(--fg)',
-        borderRadius: 'var(--r)',
+        background: 'var(--background-secondary)',
+        color: 'var(--text-normal)',
+        borderRadius: 'var(--radius-s)',
         padding: '8px 10px',
         display: 'flex',
         flexDirection: 'column',
@@ -893,12 +893,12 @@ function ErrorBanner({
           type="button"
           onClick={onRetry}
           style={{
-            border: '1px solid var(--line-soft)',
+            border: '1px solid var(--divider-color)',
             background: 'transparent',
-            color: 'var(--fg)',
-            borderRadius: 'var(--r)',
+            color: 'var(--text-normal)',
+            borderRadius: 'var(--radius-s)',
             padding: '4px 10px',
-            fontFamily: 'var(--f-ui)',
+            fontFamily: 'var(--font-interface)',
             fontSize: 12,
             cursor: 'pointer',
           }}
@@ -923,7 +923,7 @@ function ActionButton({
   onClick: () => void
   title?: string
 }) {
-  const color = tone === 'danger' ? 'var(--risk)' : 'var(--accent)'
+  const color = tone === 'danger' ? 'var(--risk)' : 'var(--interactive-accent)'
   return (
     <button
       type="button"
@@ -934,12 +934,12 @@ function ActionButton({
         flex: '0 0 auto',
         height: 32,
         padding: '0 12px',
-        border: `1px solid ${disabled ? 'var(--line-soft)' : color}`,
-        borderRadius: 'var(--r)',
+        border: `1px solid ${disabled ? 'var(--divider-color)' : color}`,
+        borderRadius: 'var(--radius-s)',
         background: 'transparent',
-        color: disabled ? 'var(--fg-muted)' : color,
+        color: disabled ? 'var(--text-muted)' : color,
         cursor: disabled ? 'not-allowed' : 'pointer',
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 12,
         opacity: disabled ? 0.55 : 1,
       }}
@@ -995,8 +995,8 @@ function SessionBar({
   return (
     <div
       style={{
-        borderBottom: '1px solid var(--line-soft)',
-        background: 'var(--bg-raised)',
+        borderBottom: '1px solid var(--divider-color)',
+        background: 'var(--background-secondary)',
         flex: '0 0 auto',
       }}
     >
@@ -1014,12 +1014,12 @@ function SessionBar({
           onClick={onToggleExpanded}
           title={expanded ? 'Hide sessions' : 'Show sessions'}
           style={{
-            border: '1px solid var(--line-soft)',
+            border: '1px solid var(--divider-color)',
             background: 'transparent',
-            color: 'var(--fg-dim)',
-            borderRadius: 'var(--r)',
+            color: 'var(--text-faint)',
+            borderRadius: 'var(--radius-s)',
             padding: '2px 6px',
-            fontFamily: 'var(--f-ui)',
+            fontFamily: 'var(--font-interface)',
             fontSize: 11,
             cursor: 'pointer',
             display: 'flex',
@@ -1064,7 +1064,7 @@ function SessionBar({
       {expanded ? (
         <div
           style={{
-            borderTop: '1px solid var(--line-soft)',
+            borderTop: '1px solid var(--divider-color)',
             maxHeight: 200,
             overflowY: 'auto',
             padding: '4px 0',
@@ -1075,7 +1075,7 @@ function SessionBar({
               style={{
                 padding: '6px 12px',
                 fontSize: 11,
-                color: 'var(--fg-muted)',
+                color: 'var(--text-muted)',
               }}
             >
               Loading sessions…
@@ -1085,7 +1085,7 @@ function SessionBar({
               style={{
                 padding: '6px 12px',
                 fontSize: 11,
-                color: 'var(--fg-muted)',
+                color: 'var(--text-muted)',
                 fontStyle: 'italic',
               }}
             >
@@ -1156,8 +1156,8 @@ function SessionListItem({ meta, active, onLoad, onDelete, onRename }: SessionLi
         alignItems: 'center',
         gap: 4,
         padding: '4px 8px',
-        background: active ? 'var(--bg-active, var(--bg))' : 'transparent',
-        borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+        background: active ? 'var(--background-modifier-active)' : 'transparent',
+        borderLeft: `2px solid ${active ? 'var(--interactive-accent)' : 'transparent'}`,
         cursor: editing ? 'text' : 'pointer',
       }}
       onClick={() => {
@@ -1191,12 +1191,12 @@ function SessionListItem({ meta, active, onLoad, onDelete, onRename }: SessionLi
           style={{
             flex: '1 1 auto',
             minWidth: 0,
-            background: 'var(--bg)',
-            color: 'var(--fg)',
-            border: '1px solid var(--accent)',
-            borderRadius: 'var(--r)',
+            background: 'var(--background-primary)',
+            color: 'var(--text-normal)',
+            border: '1px solid var(--interactive-accent)',
+            borderRadius: 'var(--radius-s)',
             padding: '2px 6px',
-            fontFamily: 'var(--f-ui)',
+            fontFamily: 'var(--font-interface)',
             fontSize: 12,
             outline: 'none',
           }}
@@ -1210,7 +1210,7 @@ function SessionListItem({ meta, active, onLoad, onDelete, onRename }: SessionLi
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
             fontSize: 12,
-            color: meta.title?.trim() ? 'var(--fg)' : 'var(--fg-muted)',
+            color: meta.title?.trim() ? 'var(--text-normal)' : 'var(--text-muted)',
             fontStyle: meta.title?.trim() ? 'normal' : 'italic',
           }}
         >
@@ -1230,8 +1230,8 @@ function SessionListItem({ meta, active, onLoad, onDelete, onRename }: SessionLi
             flex: '0 0 auto',
             border: '1px solid transparent',
             background: 'transparent',
-            color: 'var(--fg-muted)',
-            borderRadius: 'var(--r)',
+            color: 'var(--text-muted)',
+            borderRadius: 'var(--radius-s)',
             padding: '0 6px',
             fontSize: 12,
             lineHeight: '20px',
@@ -1256,7 +1256,7 @@ function SmallChip({
   title?: string
   tone?: 'accent'
 }) {
-  const color = tone === 'accent' ? 'var(--accent)' : 'var(--fg-dim)'
+  const color = tone === 'accent' ? 'var(--interactive-accent)' : 'var(--text-faint)'
   return (
     <button
       type="button"
@@ -1264,12 +1264,12 @@ function SmallChip({
       title={title}
       style={{
         flex: '0 0 auto',
-        border: `1px solid ${tone === 'accent' ? color : 'var(--line-soft)'}`,
+        border: `1px solid ${tone === 'accent' ? color : 'var(--divider-color)'}`,
         background: 'transparent',
         color,
-        borderRadius: 'var(--r)',
+        borderRadius: 'var(--radius-s)',
         padding: '2px 8px',
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 11,
         cursor: 'pointer',
       }}

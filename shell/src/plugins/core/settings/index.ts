@@ -14,6 +14,7 @@ export const settingsPlugin: Plugin = {
     version: '1.0.0',
     core: true,
     activationEvents: ['onStartup'],
+    popoutCompatible: false,
     dependsOn: ['core.configuration-service', 'nexus.activityBar'],
     contributes: {
       commands: [

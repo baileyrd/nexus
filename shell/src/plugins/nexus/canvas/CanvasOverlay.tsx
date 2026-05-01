@@ -206,7 +206,7 @@ function TerminalNodeOverlay({
         padding: 10,
         boxSizing: 'border-box',
         overflow: 'hidden',
-        color: 'var(--fg, #e5e7eb)',
+        color: 'var(--text-normal)',
         fontFamily: 'var(--font-family, system-ui, sans-serif)',
         fontSize: 12,
         lineHeight: 1.35,
@@ -226,7 +226,7 @@ function TerminalNodeOverlay({
       >
         <div
           style={{
-            color: 'var(--fg-muted, #9ca3af)',
+            color: 'var(--text-muted)',
             fontSize: 10,
             letterSpacing: 0.4,
             textTransform: 'uppercase',
@@ -249,8 +249,8 @@ function TerminalNodeOverlay({
             // card stays pass-through.
             pointerEvents: 'auto',
             background: running
-              ? 'var(--risk, #ef4444)'
-              : 'var(--accent, #3b82f6)',
+              ? 'var(--risk)'
+              : 'var(--interactive-accent)',
             border: 'none',
             color: '#fff',
             fontSize: 10,
@@ -268,7 +268,7 @@ function TerminalNodeOverlay({
 
       <div
         style={{
-          color: 'var(--accent, #3b82f6)',
+          color: 'var(--interactive-accent)',
           fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
           fontSize: 11,
           overflow: 'hidden',
@@ -280,7 +280,7 @@ function TerminalNodeOverlay({
       </div>
 
       {error && (
-        <div style={{ color: 'var(--risk, #ef4444)', fontSize: 11 }}>{error}</div>
+        <div style={{ color: 'var(--risk)', fontSize: 11 }}>{error}</div>
       )}
 
       <pre
@@ -291,7 +291,7 @@ function TerminalNodeOverlay({
           fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
           fontSize: 11,
           lineHeight: 1.4,
-          color: 'var(--fg, #e5e7eb)',
+          color: 'var(--text-normal)',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           // Anchor to bottom so the newest output is always visible
@@ -417,7 +417,7 @@ function DatabaseNodeOverlay({
         padding: 10,
         boxSizing: 'border-box',
         overflow: 'hidden',
-        color: 'var(--fg, #e5e7eb)',
+        color: 'var(--text-normal)',
         fontFamily: 'var(--font-family, system-ui, sans-serif)',
         fontSize: 12,
         lineHeight: 1.35,
@@ -437,7 +437,7 @@ function DatabaseNodeOverlay({
       >
         <div
           style={{
-            color: 'var(--fg-muted, #9ca3af)',
+            color: 'var(--text-muted)',
             fontSize: 10,
             letterSpacing: 0.4,
             textTransform: 'uppercase',
@@ -453,7 +453,7 @@ function DatabaseNodeOverlay({
         {!loading && base && (
           <div
             style={{
-              color: 'var(--fg-muted, #9ca3af)',
+              color: 'var(--text-muted)',
               fontSize: 10,
               fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
               flex: '0 0 auto',
@@ -465,7 +465,7 @@ function DatabaseNodeOverlay({
       </div>
 
       {error && (
-        <div style={{ color: 'var(--risk, #ef4444)', fontSize: 11 }}>
+        <div style={{ color: 'var(--risk)', fontSize: 11 }}>
           failed to load: {error}
         </div>
       )}
@@ -488,8 +488,8 @@ function DatabaseNodeOverlay({
                     style={{
                       textAlign: 'left',
                       padding: '3px 6px',
-                      color: 'var(--fg-muted, #9ca3af)',
-                      borderBottom: '1px solid var(--divider-color, #3f3f46)',
+                      color: 'var(--text-muted)',
+                      borderBottom: '1px solid var(--divider-color)',
                       fontWeight: 500,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -526,13 +526,13 @@ function DatabaseNodeOverlay({
       )}
 
       {!error && !loading && base && columns.length === 0 && (
-        <div style={{ color: 'var(--fg-muted, #9ca3af)', fontSize: 11 }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
           No schema fields defined.
         </div>
       )}
 
       {!error && !loading && !base && !relpath && (
-        <div style={{ color: 'var(--fg-muted, #9ca3af)', fontSize: 11 }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
           No database linked.
         </div>
       )}
@@ -540,7 +540,7 @@ function DatabaseNodeOverlay({
       {hiddenRows > 0 && (
         <div
           style={{
-            color: 'var(--fg-muted, #9ca3af)',
+            color: 'var(--text-muted)',
             fontSize: 10,
             fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
             flex: '0 0 auto',
@@ -553,7 +553,7 @@ function DatabaseNodeOverlay({
       {relpath && (
         <div
           style={{
-            color: 'var(--fg-muted, #9ca3af)',
+            color: 'var(--text-muted)',
             fontSize: 10,
             fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
             overflow: 'hidden',
@@ -750,7 +750,7 @@ function FileNodeOverlay({
         padding: 10,
         boxSizing: 'border-box',
         overflow: 'hidden',
-        color: 'var(--fg, #e5e7eb)',
+        color: 'var(--text-normal)',
         fontFamily: 'var(--font-family, system-ui, sans-serif)',
         fontSize: 12,
         lineHeight: 1.35,
@@ -770,7 +770,7 @@ function FileNodeOverlay({
       >
         <div
           style={{
-            color: 'var(--fg-muted, #9ca3af)',
+            color: 'var(--text-muted)',
             fontSize: 10,
             letterSpacing: 0.4,
             textTransform: 'uppercase',
@@ -787,7 +787,7 @@ function FileNodeOverlay({
       </div>
 
       {error && (
-        <div style={{ color: 'var(--risk, #ef4444)', fontSize: 11 }}>
+        <div style={{ color: 'var(--risk)', fontSize: 11 }}>
           failed to read: {error}
         </div>
       )}
@@ -809,7 +809,7 @@ function FileNodeOverlay({
             fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
             fontSize: 11,
             lineHeight: 1.4,
-            color: 'var(--fg, #e5e7eb)',
+            color: 'var(--text-normal)',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
           }}
@@ -833,7 +833,7 @@ function FileNodeOverlay({
       )}
 
       {!error && !loading && data?.kind === 'binary' && (
-        <div style={{ color: 'var(--fg-muted, #9ca3af)', fontSize: 11 }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
           {relpath
             ? 'Binary or unsupported file type — no preview available.'
             : 'No file linked.'}
@@ -843,7 +843,7 @@ function FileNodeOverlay({
       {relpath && (
         <div
           style={{
-            color: 'var(--fg-muted, #9ca3af)',
+            color: 'var(--text-muted)',
             fontSize: 10,
             fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
             overflow: 'hidden',
@@ -949,7 +949,7 @@ function LinkNodeOverlay({
         padding: 10,
         boxSizing: 'border-box',
         overflow: 'hidden',
-        color: 'var(--fg, #e5e7eb)',
+        color: 'var(--text-normal)',
         fontFamily: 'var(--font-family, system-ui, sans-serif)',
         fontSize: 12,
         lineHeight: 1.35,
@@ -975,7 +975,7 @@ function LinkNodeOverlay({
         )}
         <div
           style={{
-            color: 'var(--fg-muted, #9ca3af)',
+            color: 'var(--text-muted)',
             fontSize: 10,
             letterSpacing: 0.4,
             textTransform: 'uppercase',
@@ -993,7 +993,7 @@ function LinkNodeOverlay({
         style={{
           fontSize: 13,
           fontWeight: 600,
-          color: 'var(--fg, #e5e7eb)',
+          color: 'var(--text-normal)',
           overflow: 'hidden',
           display: '-webkit-box',
           WebkitLineClamp: 2,
@@ -1007,7 +1007,7 @@ function LinkNodeOverlay({
       {description && (
         <div
           style={{
-            color: 'var(--fg-muted, #9ca3af)',
+            color: 'var(--text-muted)',
             fontSize: 11,
             overflow: 'hidden',
             display: '-webkit-box',
@@ -1039,7 +1039,7 @@ function LinkNodeOverlay({
 
       <div
         style={{
-          color: 'var(--accent, #3b82f6)',
+          color: 'var(--interactive-accent)',
           fontSize: 10,
           fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
           overflow: 'hidden',
@@ -1078,7 +1078,7 @@ function TextNodeOverlay({ node }: { node: CanvasNode }) {
         padding: 10,
         boxSizing: 'border-box',
         overflow: 'hidden',
-        color: 'var(--fg, #e5e7eb)',
+        color: 'var(--text-normal)',
         fontFamily: 'var(--font-family, system-ui, sans-serif)',
         fontSize: 13,
         lineHeight: 1.4,

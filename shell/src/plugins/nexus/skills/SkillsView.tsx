@@ -37,9 +37,9 @@ export function SkillsView({ onRefresh, kernel }: SkillsViewProps) {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        background: 'var(--bg)',
-        color: 'var(--fg)',
-        fontFamily: 'var(--f-ui)',
+        background: 'var(--background-primary)',
+        color: 'var(--text-normal)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 'var(--ui-size, 13px)',
       }}
     >
@@ -56,9 +56,9 @@ export function SkillsView({ onRefresh, kernel }: SkillsViewProps) {
         {loadError ? (
           <Centered colour="var(--risk)">{loadError}</Centered>
         ) : loading && skills.length === 0 ? (
-          <Centered colour="var(--fg-dim)">Loading…</Centered>
+          <Centered colour="var(--text-faint)">Loading…</Centered>
         ) : skills.length === 0 && !newSkillEditor ? (
-          <Centered colour="var(--fg-dim)">
+          <Centered colour="var(--text-faint)">
             No skills. Add a <code>.skill.md</code> under <code>.forge/skills/</code> or click <em>New skill</em>.
           </Centered>
         ) : (
@@ -92,15 +92,15 @@ function Header({ onRefresh, onNew, loading, count }: HeaderProps) {
         alignItems: 'center',
         gap: 8,
         padding: '6px 10px',
-        borderBottom: '1px solid var(--line-soft)',
-        background: 'var(--bg-raised)',
+        borderBottom: '1px solid var(--divider-color)',
+        background: 'var(--background-secondary)',
         flex: '0 0 auto',
       }}
     >
       <span
         style={{
           flex: '1 1 auto',
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
           fontSize: 11,
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
@@ -122,9 +122,9 @@ function Header({ onRefresh, onNew, loading, count }: HeaderProps) {
           padding: 0,
           border: 0,
           background: 'transparent',
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
           cursor: 'pointer',
-          borderRadius: 'var(--r)',
+          borderRadius: 'var(--radius-s)',
           fontSize: 14,
           lineHeight: 1,
         }}
@@ -138,7 +138,7 @@ function Header({ onRefresh, onNew, loading, count }: HeaderProps) {
         onClick={onRefresh}
         disabled={loading}
         onMouseEnter={(e) => {
-          if (!loading) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
+          if (!loading) (e.currentTarget as HTMLButtonElement).style.background = 'var(--background-modifier-hover)'
         }}
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
@@ -152,9 +152,9 @@ function Header({ onRefresh, onNew, loading, count }: HeaderProps) {
           padding: 0,
           border: 0,
           background: 'transparent',
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
           cursor: loading ? 'default' : 'pointer',
-          borderRadius: 'var(--r)',
+          borderRadius: 'var(--radius-s)',
           opacity: loading ? 0.5 : 1,
         }}
       >
@@ -183,7 +183,7 @@ function SkillRow({ skill, expanded, onToggle, kernel }: SkillRowProps) {
   return (
     <div
       style={{
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: '1px solid var(--divider-color)',
       }}
     >
       <div
@@ -196,10 +196,10 @@ function SkillRow({ skill, expanded, onToggle, kernel }: SkillRowProps) {
           gap: 3,
           padding: '8px 10px',
           cursor: 'pointer',
-          background: expanded ? 'var(--bg-raised)' : 'transparent',
+          background: expanded ? 'var(--background-secondary)' : 'transparent',
         }}
         onMouseEnter={(e) => {
-          if (!expanded) (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-hover)'
+          if (!expanded) (e.currentTarget as HTMLDivElement).style.background = 'var(--background-modifier-hover)'
         }}
         onMouseLeave={(e) => {
           if (!expanded) (e.currentTarget as HTMLDivElement).style.background = 'transparent'
@@ -212,7 +212,7 @@ function SkillRow({ skill, expanded, onToggle, kernel }: SkillRowProps) {
               display: 'inline-flex',
               transition: 'transform 80ms',
               transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-              color: 'var(--fg-dim)',
+              color: 'var(--text-faint)',
             }}
           >
             <Icon name="chev" size={12} />
@@ -232,9 +232,9 @@ function SkillRow({ skill, expanded, onToggle, kernel }: SkillRowProps) {
           {skill.version ? (
             <span
               style={{
-                fontFamily: 'var(--font-mono, monospace)',
+                fontFamily: 'var(--font-monospace, monospace)',
                 fontSize: 10,
-                color: 'var(--fg-dim)',
+                color: 'var(--text-faint)',
               }}
             >
               v{skill.version}
@@ -244,7 +244,7 @@ function SkillRow({ skill, expanded, onToggle, kernel }: SkillRowProps) {
         {skill.description ? (
           <div
             style={{
-              color: 'var(--fg-dim)',
+              color: 'var(--text-faint)',
               fontSize: 12,
               lineHeight: 1.35,
               paddingLeft: 18,
@@ -292,7 +292,7 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
-        background: 'var(--bg-raised)',
+        background: 'var(--background-secondary)',
       }}
     >
       {isEditing ? (
@@ -303,20 +303,20 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
       <ChipRow label="triggers" items={skill.triggers} muted />
       <ChipRow label="depends_on" items={skill.dependsOn} muted />
       {skill.author ? (
-        <div style={{ fontSize: 11, color: 'var(--fg-dim)' }}>by {skill.author}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>by {skill.author}</div>
       ) : null}
       {body ? (
         <pre
           style={{
             margin: 0,
             padding: 8,
-            background: 'var(--bg)',
-            border: '1px solid var(--line-soft)',
-            borderRadius: 'var(--r)',
-            fontFamily: 'var(--f-mono, monospace)',
+            background: 'var(--background-primary)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-s)',
+            fontFamily: 'var(--font-monospace, monospace)',
             fontSize: 11,
             lineHeight: 1.45,
-            color: 'var(--fg-muted)',
+            color: 'var(--text-muted)',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
             maxHeight: 240,
@@ -356,7 +356,7 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
           </button>
         ) : null}
         {!isFormOpen && skill.parameters.length > 0 ? (
-          <span style={{ fontSize: 11, color: 'var(--fg-dim)' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
             {skill.parameters.length} parameter{skill.parameters.length === 1 ? '' : 's'}
           </span>
         ) : null}
@@ -370,7 +370,7 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
           style={{
             padding: 8,
             border: '1px solid var(--risk)',
-            borderRadius: 'var(--r)',
+            borderRadius: 'var(--radius-s)',
             color: 'var(--risk)',
             fontSize: 11,
             whiteSpace: 'pre-wrap',
@@ -389,11 +389,11 @@ function chipButton(active: boolean): React.CSSProperties {
   return {
     padding: '3px 8px',
     fontSize: 11,
-    fontFamily: 'var(--f-ui)',
-    background: active ? 'var(--bg-hover)' : 'var(--bg)',
-    color: 'var(--fg)',
-    border: '1px solid var(--line-soft)',
-    borderRadius: 'var(--r)',
+    fontFamily: 'var(--font-interface)',
+    background: active ? 'var(--background-modifier-hover)' : 'var(--background-primary)',
+    color: 'var(--text-normal)',
+    border: '1px solid var(--divider-color)',
+    borderRadius: 'var(--radius-s)',
     cursor: 'pointer',
   }
 }
@@ -437,13 +437,13 @@ function RenderForm({ skill, kernel }: RenderFormProps) {
         flexDirection: 'column',
         gap: 8,
         padding: 8,
-        background: 'var(--bg)',
-        border: '1px solid var(--line-soft)',
-        borderRadius: 'var(--r)',
+        background: 'var(--background-primary)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
       }}
     >
       {skill.parameters.length === 0 ? (
-        <div style={{ fontSize: 11, color: 'var(--fg-dim)' }}>
+        <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
           No declared parameters — submit to render the skill body as-is.
         </div>
       ) : (
@@ -463,11 +463,11 @@ function RenderForm({ skill, kernel }: RenderFormProps) {
           style={{
             padding: '4px 10px',
             fontSize: 11,
-            fontFamily: 'var(--f-ui)',
-            background: isRendering ? 'var(--bg-hover)' : 'var(--accent, var(--bg-hover))',
-            color: 'var(--fg)',
-            border: '1px solid var(--line-soft)',
-            borderRadius: 'var(--r)',
+            fontFamily: 'var(--font-interface)',
+            background: isRendering ? 'var(--background-modifier-hover)' : 'var(--interactive-accent)',
+            color: 'var(--text-normal)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-s)',
             cursor: isRendering ? 'default' : 'pointer',
             opacity: isRendering ? 0.6 : 1,
           }}
@@ -493,31 +493,31 @@ function ParamField({ param, value, onChange }: ParamFieldProps) {
     fontSize: 11,
   }
   const nameStyle: React.CSSProperties = {
-    color: 'var(--fg)',
-    fontFamily: 'var(--f-mono, monospace)',
+    color: 'var(--text-normal)',
+    fontFamily: 'var(--font-monospace, monospace)',
   }
   const helpStyle: React.CSSProperties = {
-    color: 'var(--fg-dim)',
+    color: 'var(--text-faint)',
     fontSize: 10,
     lineHeight: 1.35,
   }
   const inputStyle: React.CSSProperties = {
     padding: '3px 6px',
     fontSize: 12,
-    fontFamily: 'var(--f-mono, monospace)',
-    background: 'var(--bg-raised)',
-    color: 'var(--fg)',
-    border: '1px solid var(--line-soft)',
-    borderRadius: 'var(--r)',
+    fontFamily: 'var(--font-monospace, monospace)',
+    background: 'var(--background-secondary)',
+    color: 'var(--text-normal)',
+    border: '1px solid var(--divider-color)',
+    borderRadius: 'var(--radius-s)',
   }
   const typeBadge = (
     <span
       style={{
         padding: '0 4px',
         fontSize: 9,
-        fontFamily: 'var(--f-mono, monospace)',
-        color: 'var(--fg-dim)',
-        border: '1px solid var(--line-soft)',
+        fontFamily: 'var(--font-monospace, monospace)',
+        color: 'var(--text-faint)',
+        border: '1px solid var(--divider-color)',
         borderRadius: 999,
         marginLeft: 4,
       }}
@@ -664,7 +664,7 @@ function RenderResultPanel({ skillId, body }: { skillId: string; body: string })
           fontSize: 10,
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
         }}
       >
         <span style={{ flex: '1 1 auto' }}>Rendered</span>
@@ -675,7 +675,7 @@ function RenderResultPanel({ skillId, body }: { skillId: string; body: string })
           style={{
             background: 'transparent',
             border: 0,
-            color: 'var(--fg-dim)',
+            color: 'var(--text-faint)',
             cursor: 'pointer',
             fontSize: 10,
             padding: 0,
@@ -688,13 +688,13 @@ function RenderResultPanel({ skillId, body }: { skillId: string; body: string })
         style={{
           margin: 0,
           padding: 8,
-          background: 'var(--bg)',
-          border: '1px solid var(--line-soft)',
-          borderRadius: 'var(--r)',
-          fontFamily: 'var(--f-mono, monospace)',
+          background: 'var(--background-primary)',
+          border: '1px solid var(--divider-color)',
+          borderRadius: 'var(--radius-s)',
+          fontFamily: 'var(--font-monospace, monospace)',
           fontSize: 11,
           lineHeight: 1.45,
-          color: 'var(--fg)',
+          color: 'var(--text-normal)',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           maxHeight: 320,
@@ -722,7 +722,7 @@ function ChipRow({ label, items, muted }: ChipRowProps) {
           fontSize: 10,
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           flex: '0 0 auto',
         }}
       >
@@ -737,10 +737,10 @@ function ChipRow({ label, items, muted }: ChipRowProps) {
             padding: '1px 6px',
             borderRadius: 999,
             fontSize: 10,
-            fontFamily: 'var(--font-mono, monospace)',
-            background: 'var(--bg)',
-            color: muted ? 'var(--fg-dim)' : 'var(--fg-muted)',
-            border: '1px solid var(--line-soft)',
+            fontFamily: 'var(--font-monospace, monospace)',
+            background: 'var(--background-primary)',
+            color: muted ? 'var(--text-faint)' : 'var(--text-muted)',
+            border: '1px solid var(--divider-color)',
           }}
         >
           {item}

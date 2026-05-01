@@ -5,6 +5,7 @@
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { clientLogger } from './host/clientLogger'
 import { PluginRegistry } from './host/PluginRegistry'
 import { ExtensionHost } from './host/ExtensionHost'
 import { contextKeyService } from './host/ContextKeyService'
@@ -16,7 +17,12 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { uriHandlerRegistry } from './registry/UriHandlerRegistry'
 import App from './shell/App'
-import { PopoutShell, isPopoutMode, POPOUT_CLOSED_EVENT } from './shell/PopoutShell'
+import {
+  PopoutShell,
+  isPopoutMode,
+  POPOUT_CLOSED_EVENT,
+  POPOUT_BOUNDS_CHANGED_EVENT,
+} from './shell/PopoutShell'
 import { workspace as workspaceStore } from './workspace/workspaceStore'
 import { closePopoutTauri } from './workspace/popoutWindowBridge'
 import './shell/shell.css'
@@ -38,14 +44,14 @@ import { runInstallTimeConsent } from './plugins/core/capabilityPrompt'
 // postMessage protocol.
 import sandboxRuntimeSource from 'virtual:sandbox-runtime'
 
-// WI-43: built-in plugin registrations live in `plugins/catalog.ts` split
-// into default-on (loaded unconditionally) and default-off (opt-in via
-// Settings > Plugins, persisted under the `plugins.enabled` config key).
-// See docs/planning/PHASE-5-IMPLEMENTATION-PLAN.md §2.
+// WI-43 / SH-009: built-in plugin registrations live in `plugins/catalog.ts`
+// as PluginEntry descriptors with dynamic-import factories. Default-on entries
+// are loaded at boot; default-off entries are loaded only when the user enables
+// them. Each dynamic import becomes a separate Vite chunk (vendor libs are
+// grouped via manualChunks in vite.config.ts).
 import {
   DEFAULT_ON_PLUGINS,
   DEFAULT_OFF_PLUGINS,
-  ALL_PLUGINS,
   PLUGINS_ENABLED_CONFIG_KEY,
 } from './plugins/catalog'
 import { useConfigStore } from './stores/configStore'
@@ -163,14 +169,23 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
   const enabledIds = new Set(
     useConfigStore.getState().get<string[]>(PLUGINS_ENABLED_CONFIG_KEY, []),
   )
-  const optInPlugins = DEFAULT_OFF_PLUGINS.filter((p) =>
-    enabledIds.has(p.manifest.id),
+  const optInEntries = DEFAULT_OFF_PLUGINS.filter(e => enabledIds.has(e.id))
+  // SH-020: popout windows skip chrome-only plugins (activity bar, sidebar,
+  // status bar, settings, etc.) that contribute to slots the popout shell
+  // does not render. Plugins opt out by setting `popoutCompatible: false`
+  // in their entry; absence defaults to true.
+  const defaultOnSet = popoutMode
+    ? DEFAULT_ON_PLUGINS.filter(e => e.popoutCompatible !== false)
+    : DEFAULT_ON_PLUGINS
+  // SH-009: dynamic-import factories — load all selected plugin modules in
+  // parallel before handing them to the host.
+  const plugins: Plugin[] = await Promise.all(
+    [...defaultOnSet, ...optInEntries].map(e => e.load()),
   )
-  const plugins: Plugin[] = [...DEFAULT_ON_PLUGINS, ...optInPlugins]
-  if (optInPlugins.length > 0) {
+  if (optInEntries.length > 0) {
     console.info(
-      `[Boot] ${optInPlugins.length} opt-in plugin(s) enabled: ` +
-        optInPlugins.map((p) => p.manifest.id).join(', '),
+      `[Boot] ${optInEntries.length} opt-in plugin(s) enabled: ` +
+        optInEntries.map(e => e.id).join(', '),
     )
   }
 
@@ -304,18 +319,19 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
   // section with per-row Enable buttons. The button writes the id into
   // `plugins.enabled` via the configuration service and prompts for a
   // reload — there is no in-session hot-activate path yet.
+  // SH-009: use PluginEntry metadata directly; no need to load the module.
   const availablePlugins = DEFAULT_OFF_PLUGINS
-    .filter((p) => !enabledIds.has(p.manifest.id))
-    .map((p) => ({
-      id:      p.manifest.id,
-      name:    p.manifest.name,
-      version: p.manifest.version,
-      core:    p.manifest.core,
+    .filter(e => !enabledIds.has(e.id))
+    .map(e => ({
+      id:      e.id,
+      name:    e.name,
+      version: e.version,
+      core:    e.core,
     }))
   reg.registerService('availablePlugins', availablePlugins)
   // Side-channel for the UI to announce how many total built-ins exist,
   // even when some are disabled — useful for the Plugins modal footer.
-  reg.registerService('builtinPluginTotal', ALL_PLUGINS.length)
+  reg.registerService('builtinPluginTotal', DEFAULT_ON_PLUGINS.length + DEFAULT_OFF_PLUGINS.length)
 
   const { useSlotStore } = await import('./registry/SlotRegistry')
   const slotSummary = Object.entries(useSlotStore.getState().slots)
@@ -372,8 +388,46 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
     console.warn('[Boot] failed to register popout-closed listener:', err)
   })
 
+  // SH-021: Popout bounds persistence. Popouts emit
+  // `nexus:popout-bounds-changed` on every move/resize; the main window
+  // updates the matching FloatingWindow entry and the persistence
+  // layer's `layout-change` subscription writes it to workspace.json.
+  listen<{ fwId?: string; bounds?: { x: number; y: number; w: number; h: number } }>(
+    POPOUT_BOUNDS_CHANGED_EVENT,
+    (event) => {
+      const { fwId, bounds } = event.payload ?? {}
+      if (
+        typeof fwId !== 'string' ||
+        fwId.length === 0 ||
+        bounds == null ||
+        typeof bounds.x !== 'number'
+      ) {
+        return
+      }
+      workspaceStore.setFloatingWindowBounds(fwId, bounds)
+    },
+  ).catch((err) => {
+    console.warn('[Boot] failed to register popout-bounds-changed listener:', err)
+  })
+
   contextKeyService.set('shellReady', true)
 }
+
+// SH-018: global unhandled-error / unhandled-rejection handlers.
+// Forward to clientLogger so errors survive page reload in the ring
+// buffer and reach the Rust log when append_shell_log is available.
+window.addEventListener('error', (event) => {
+  clientLogger.error(
+    '[Global] Uncaught error',
+    event.error ?? event.message,
+  )
+})
+window.addEventListener('unhandledrejection', (event) => {
+  clientLogger.error(
+    '[Global] Unhandled promise rejection',
+    event.reason,
+  )
+})
 
 // Install Obsidian-faithful body-class state machine. Runs once, before
 // React mounts, so platform / frameless / focus classes are present on

@@ -75,7 +75,7 @@ function SidebarToggleButton() {
         position: 'relative',
         height: 36,
         flexShrink: 0,
-        background: hover ? 'var(--bg-hover)' : 'transparent',
+        background: hover ? 'var(--background-modifier-hover)' : 'transparent',
         // WebKit's default <button> appearance paints a subtle inset
         // background that bleeds through when the button is focused
         // (e.g. after a click) — visible as a faint darker square
@@ -85,7 +85,7 @@ function SidebarToggleButton() {
         WebkitAppearance: 'none',
         border: 'none',
         outline: 'none',
-        color: 'var(--fg-muted)',
+        color: 'var(--text-muted)',
         cursor: 'pointer',
         display: 'flex',
         alignItems: 'center',
@@ -93,7 +93,7 @@ function SidebarToggleButton() {
         padding: 0,
         font: 'inherit',
         fontSize: 18,
-        borderBottom: '1px solid var(--divider-color, var(--line, #333))',
+        borderBottom: '1px solid var(--divider-color)',
         transition: 'background 0.08s, color 0.08s',
       }}
     >
@@ -125,7 +125,7 @@ function ActivityBarButton({
       style={{
         position: 'relative',
         height: 44,
-        background: showHover ? 'var(--bg-hover)' : 'transparent',
+        background: showHover ? 'var(--background-modifier-hover)' : 'transparent',
         // Match SidebarToggleButton — neutralise the WebKit-default
         // <button> background and focus outline so the visual state is
         // controlled purely by `background` / `color` above.
@@ -133,7 +133,7 @@ function ActivityBarButton({
         WebkitAppearance: 'none',
         border: 'none',
         outline: 'none',
-        color: active ? 'var(--fg)' : 'var(--fg-muted)',
+        color: active ? 'var(--text-normal)' : 'var(--text-muted)',
         cursor: 'pointer',
         display: 'flex',
         alignItems: 'center',
@@ -153,7 +153,7 @@ function ActivityBarButton({
             top: 0,
             bottom: 0,
             width: 2,
-            background: 'var(--accent)',
+            background: 'var(--interactive-accent)',
           }}
         />
       )}

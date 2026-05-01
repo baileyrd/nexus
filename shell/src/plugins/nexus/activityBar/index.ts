@@ -15,6 +15,7 @@ export const activityBarPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
+    popoutCompatible: false,
     contributes: {
       contextKeys: [
         {

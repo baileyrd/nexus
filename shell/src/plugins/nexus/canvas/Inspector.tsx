@@ -201,13 +201,13 @@ function NodeInspector({
       </Row>
 
       <Row label="Size">
-        <div style={{ color: 'var(--fg-muted, #9ca3af)', fontSize: 11 }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
           {Math.round(node.width)} × {Math.round(node.height)}
         </div>
       </Row>
 
       <Row label="Position">
-        <div style={{ color: 'var(--fg-muted, #9ca3af)', fontSize: 11 }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
           {Math.round(node.x)}, {Math.round(node.y)}
         </div>
       </Row>
@@ -284,7 +284,7 @@ function Header({ type, onClose }: { type: string; onClose?: () => void }) {
         alignItems: 'center',
         fontSize: 10,
         letterSpacing: 0.8,
-        color: 'var(--fg-muted, #9ca3af)',
+        color: 'var(--text-muted)',
         fontFamily: 'var(--font-monospace, ui-monospace, monospace)',
         marginBottom: 12,
       }}
@@ -297,7 +297,7 @@ function Header({ type, onClose }: { type: string; onClose?: () => void }) {
           style={{
             background: 'transparent',
             border: 'none',
-            color: 'var(--fg-muted, #9ca3af)',
+            color: 'var(--text-muted)',
             fontSize: 14,
             cursor: 'pointer',
             lineHeight: 1,
@@ -331,7 +331,7 @@ function Row({
         marginBottom: 10,
       }}
     >
-      <div style={{ fontSize: 11, color: 'var(--fg-muted, #9ca3af)' }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</div>
       <div>{children}</div>
     </div>
   )
@@ -362,8 +362,8 @@ function ColorPicker({
             background: c,
             border:
               value?.toLowerCase() === c
-                ? '2px solid var(--fg, #e5e7eb)'
-                : '1px solid var(--divider-color, #3f3f46)',
+                ? '2px solid var(--text-normal)'
+                : '1px solid var(--divider-color)',
             padding: 0,
             cursor: 'pointer',
           }}
@@ -389,7 +389,7 @@ function ColorPicker({
           style={{
             fontSize: 10,
             background: 'transparent',
-            color: 'var(--fg-muted, #9ca3af)',
+            color: 'var(--text-muted)',
             border: 'none',
             cursor: 'pointer',
             padding: 0,
@@ -411,10 +411,10 @@ const drawerStyle: React.CSSProperties = {
   overflowY: 'auto',
   padding: 14,
   borderRadius: 8,
-  background: 'var(--bg-raised, #2d2d2d)',
-  border: '1px solid var(--divider-color, #3f3f46)',
+  background: 'var(--background-secondary)',
+  border: '1px solid var(--divider-color)',
   boxShadow: '0 4px 16px rgba(0, 0, 0, 0.35)',
-  color: 'var(--fg, #e5e7eb)',
+  color: 'var(--text-normal)',
   fontSize: 12,
   fontFamily: 'var(--font-family, system-ui, sans-serif)',
 }
@@ -423,9 +423,9 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '4px 6px',
   background: 'var(--bg-muted, #1e1e1e)',
-  border: '1px solid var(--divider-color, #3f3f46)',
+  border: '1px solid var(--divider-color)',
   borderRadius: 4,
-  color: 'var(--fg, #e5e7eb)',
+  color: 'var(--text-normal)',
   fontSize: 12,
   boxSizing: 'border-box',
 }
@@ -433,8 +433,8 @@ const inputStyle: React.CSSProperties = {
 const clearBtnStyle: React.CSSProperties = {
   padding: '3px 10px',
   background: 'var(--bg-muted, #1e1e1e)',
-  color: 'var(--fg, #e5e7eb)',
-  border: '1px solid var(--divider-color, #3f3f46)',
+  color: 'var(--text-normal)',
+  border: '1px solid var(--divider-color)',
   borderRadius: 4,
   fontSize: 11,
   cursor: 'pointer',

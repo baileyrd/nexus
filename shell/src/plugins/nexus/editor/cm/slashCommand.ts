@@ -544,9 +544,9 @@ export function installSlashMenuStyles(): () => void {
   max-width: 360px;
   max-height: 320px;
   overflow-y: auto;
-  background: var(--bg-raised, #2d2d2d);
-  color: var(--fg, #e5e7eb);
-  border: 1px solid var(--divider-color, #3f3f46);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border: 1px solid var(--divider-color);
   border-radius: 6px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
   font-family: var(--font-family, system-ui, sans-serif);
@@ -558,7 +558,7 @@ export function installSlashMenuStyles(): () => void {
   font-size: 10px;
   letter-spacing: 0.6px;
   text-transform: uppercase;
-  color: var(--fg-muted, #9ca3af);
+  color: var(--text-muted);
 }
 .cm-slash-menu__row {
   display: flex;
@@ -569,7 +569,7 @@ export function installSlashMenuStyles(): () => void {
 }
 .cm-slash-menu__row--active,
 .cm-slash-menu__row:hover {
-  background: var(--bg-hover, #363636);
+  background: var(--background-modifier-hover);
 }
 .cm-slash-menu__glyph {
   display: inline-flex;
@@ -578,8 +578,8 @@ export function installSlashMenuStyles(): () => void {
   width: 22px;
   height: 22px;
   border-radius: 4px;
-  border: 1px solid var(--divider-color, #3f3f46);
-  color: var(--fg-muted, #9ca3af);
+  border: 1px solid var(--divider-color);
+  color: var(--text-muted);
   font-size: 11px;
   flex-shrink: 0;
 }
@@ -589,14 +589,14 @@ export function installSlashMenuStyles(): () => void {
   min-width: 0;
 }
 .cm-slash-menu__label {
-  color: var(--fg, #e5e7eb);
+  color: var(--text-normal);
 }
 .cm-slash-menu__desc {
-  color: var(--fg-muted, #9ca3af);
+  color: var(--text-muted);
   font-size: 11px;
 }
 .cm-slash-query {
-  text-decoration: underline dotted var(--accent, #60a5fa);
+  text-decoration: underline dotted var(--interactive-accent);
   text-underline-offset: 2px;
 }
 `

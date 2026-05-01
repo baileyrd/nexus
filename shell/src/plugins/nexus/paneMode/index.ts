@@ -13,6 +13,7 @@ export const paneModePlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
+    popoutCompatible: false,
     contributes: {
       commands: [
         { id: COMMAND_ENTER, title: 'Enter Pane Mode', category: 'View' },

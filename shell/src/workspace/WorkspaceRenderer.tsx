@@ -20,7 +20,8 @@ import React, {
   type CSSProperties,
 } from 'react'
 import { Icon } from '../icons/index.tsx'
-import { WindowControls } from '../shell/WindowControls'
+import { WindowControls, IS_MACOS } from '../shell/WindowControls'
+import { zIndex } from '../shell/zIndex'
 import type {
   FloatingWindow as FloatingWindowNode,
   Leaf,
@@ -104,6 +105,20 @@ export function Workspace(): JSX.Element {
   const bottomSplit = workspace.bottomSplit
   const floating = workspace.floating
 
+  // SH-015: Update document.title on active-leaf-change so macOS shows the
+  // current file in the proxy icon / window title bar (also benefits
+  // Windows / Linux task-bar previews).
+  useEffect(() => {
+    const off = workspace.on('active-leaf-change', (payload: unknown) => {
+      const leaf = (payload as { leaf?: { getDisplayText?: () => string } } | undefined)?.leaf
+      const text = leaf?.getDisplayText?.()
+      if (typeof text === 'string' && text.length > 0) {
+        document.title = `${text} — Nexus`
+      }
+    })
+    return off
+  }, [])
+
   return (
     <div className="workspace-root" style={ROOT_STYLE}>
       <div className="workspace-upper" style={UPPER_ROW_STYLE}>
@@ -116,16 +131,14 @@ export function Workspace(): JSX.Element {
         </div>
         <SidedockFrame side="right" dock={rightSplit} />
       </div>
-      {/* Floating window-controls anchor. Absolutely positioned at the
-          window's top-right corner so it sits over whichever view /
-          panel happens to render there, without introducing a new
-          title-bar row that would stack beneath the native chrome. */}
+      {/* SH-015: Floating window-controls anchor. macOS positions controls
+          at top-left (traffic-light convention); Windows/Linux at top-right. */}
       <div
         style={{
           position: 'absolute',
           top: 0,
-          right: 0,
-          zIndex: 100,
+          ...(IS_MACOS ? { left: 0 } : { right: 0 }),
+          zIndex: zIndex.chromeControls,
           pointerEvents: 'auto',
         }}
       >
@@ -151,6 +164,8 @@ export function Workspace(): JSX.Element {
 
 const COLLAPSE_THRESHOLD = 120
 const DOCK_MIN_SIZE = 150
+// SH-004: Default width for the collapsed-ribbon placeholder. The actual visual
+// width is overridden by the CSS token --chrome-icon-size from the density block.
 const RIBBON_WIDTH = 24
 // Height of the collapsed bottom-drawer strip. Roughly matches a single
 // tab row — enough to host a label + expand button without eating space.
@@ -164,13 +179,13 @@ interface SidedockFrameProps {
 }
 
 const COLLAPSED_BAR_STYLE: CSSProperties = {
-  width: RIBBON_WIDTH,
-  flex: `0 0 ${RIBBON_WIDTH}px`,
+  width: 'var(--chrome-icon-size)',
+  flex: '0 0 var(--chrome-icon-size)',
   display: 'flex',
   alignItems: 'flex-start',
   justifyContent: 'center',
-  background: 'var(--background-secondary, var(--bg-raised, #252526))',
-  borderRight: '1px solid var(--divider-color, var(--line, #333))',
+  background: 'var(--background-secondary)',
+  borderRight: '1px solid var(--divider-color)',
 }
 
 function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
@@ -193,7 +208,7 @@ function SidedockFrame({ side, dock }: SidedockFrameProps): JSX.Element {
         minWidth: DOCK_MIN_SIZE,
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--background-secondary, var(--bg-raised, #252526))',
+        background: 'var(--background-secondary)',
         overflow: 'hidden',
       }}
     >
@@ -253,7 +268,7 @@ function BottomSidedockFrame({ dock }: { dock: Sidedock }): JSX.Element {
         minHeight: DOCK_MIN_SIZE,
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--background-secondary, var(--bg-raised, #252526))',
+        background: 'var(--background-secondary)',
         overflow: 'hidden',
       }}
     >
@@ -622,15 +637,14 @@ function TabStrip({
   }
 
   // Trailing buttons (chevron, right-sidedock toggle) match WindowControls'
-  // 40×36 footprint so the cluster of icons running across the top-right
-  // — chevron, panel-toggle, min, max, close — reads as a single tidy
-  // row instead of a ragged mix of 28/34/40-px buttons.
+  // footprint so the icon cluster across the top edge reads as a single
+  // tidy row. SH-004: height tracks --chrome-row-height.
   const collapseButtonStyle: CSSProperties = {
-    width: 40,
-    height: 36,
+    width: 'var(--chrome-row-height)',
+    height: 'var(--chrome-row-height)',
     background: 'transparent',
     border: 'none',
-    color: 'var(--text-muted, var(--fg-muted, #888))',
+    color: 'var(--text-muted)',
     cursor: 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
@@ -641,12 +655,17 @@ function TabStrip({
     flex: '0 0 auto',
   }
 
-  // Trailing controls (chevron, panel-toggle) must never shrink or be
-  // clipped — at narrow window widths they would otherwise slide under
-  // the absolutely-positioned WindowControls (z-index 100). They live
-  // in a fixed-width sibling container so the tabs scroll independently.
-  const reservesWindowControls =
-    sideDock === 'right' || (isMainDock && workspace.rightSplit.collapsed)
+  // SH-015: Reserve edge space so tabs never slide under the absolute
+  // WindowControls cluster. On Windows/Linux the cluster is top-right
+  // (3×40=120px + 8px gap → paddingRight:128); on macOS it is top-left
+  // (3×12px circles + gaps + 8px padding → ~60px, use paddingLeft:68
+  // so the first tab stays clear of the traffic lights).
+  const reservesWindowControls = IS_MACOS
+    ? sideDock === 'left' || (isMainDock && workspace.leftSplit.collapsed)
+    : sideDock === 'right' || (isMainDock && workspace.rightSplit.collapsed)
+  const edgePadding = IS_MACOS
+    ? (reservesWindowControls ? { paddingLeft: 68 } : {})
+    : (reservesWindowControls ? { paddingRight: 128 } : {})
 
   return (
     <div
@@ -656,26 +675,16 @@ function TabStrip({
         display: 'flex',
         flexDirection: 'row',
         flex: '0 0 auto',
-        background: 'var(--tab-container-background, var(--bg-soft, #2d2d2d))',
-        borderBottom: '1px solid var(--divider-color, var(--line, #333))',
-        // 36px matches the SidebarToggleButton + activity-bar items'
-        // top-row baseline so the center tab row, the right sidedock
-        // tab row, and the left activity bar's first icon row all
-        // sit on the same horizontal line. Use a fixed `height`
-        // (not `min-height`) so the strip stays exactly 36px even
-        // when a child like a 36-tall sidebar-tab would otherwise
-        // push the box to 37 with the 1px border-bottom — that
-        // would slip the next row (file-tree toolbar) 1px below the
-        // main dock's view-header.
-        height: 36,
+        background: 'var(--tab-container-background)',
+        borderBottom: '1px solid var(--divider-color)',
+        // Height tracks --chrome-row-height (SH-004) so the tab strip
+        // scales with density. Use a fixed `height` (not `min-height`)
+        // so the strip stays exactly one row tall — if a child would
+        // otherwise push the box 1px over, that slips the file-tree
+        // toolbar below the main dock's view-header.
+        height: 'var(--chrome-row-height)',
         overflow: 'hidden',
-        // Reserve horizontal space at the trailing edge for the absolute
-        // WindowControls cluster (3 × 40px = 120px) when this tab strip is
-        // the rightmost visible column — plus an 8px gap so the trailing
-        // tab controls (chevron + sidedock toggle) don't butt directly up
-        // against min/max/close. That's the right sidedock when expanded,
-        // or the main dock when the right sidedock is collapsed.
-        ...(reservesWindowControls ? { paddingRight: 128 } : {}),
+        ...edgePadding,
       }}
     >
       <div
@@ -721,7 +730,7 @@ function TabStrip({
             style={{
               background: 'transparent',
               border: 'none',
-              color: 'var(--text-muted, var(--fg-muted, #888))',
+              color: 'var(--text-muted)',
               cursor: 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
@@ -764,6 +773,7 @@ function TabStrip({
               re-expands the dock once hidden. */}
           <button
             type="button"
+            className="workspace-tab-strip-right-toggle"
             aria-label={
               workspace.rightSplit.collapsed
                 ? 'Show right sidebar'
@@ -841,11 +851,11 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         style={{
-          width: 40,
-          height: 36,
+          width: 'var(--chrome-row-height)',
+          height: 'var(--chrome-row-height)',
           background: 'transparent',
           border: 'none',
-          color: 'var(--text-muted, var(--fg-muted, #888))',
+          color: 'var(--text-muted)',
           cursor: 'pointer',
           display: 'inline-flex',
           alignItems: 'center',
@@ -866,10 +876,10 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
             position: 'fixed',
             top: rect.bottom + 4,
             left: Math.max(4, rect.right - 240),
-            zIndex: 200,
+            zIndex: zIndex.dropdown,
             minWidth: 220,
-            background: 'var(--background-primary, var(--bg, #1e1e1e))',
-            border: '1px solid var(--divider-color, var(--line, #333))',
+            background: 'var(--background-primary)',
+            border: '1px solid var(--divider-color)',
             borderRadius: 6,
             boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
             padding: 4,
@@ -895,7 +905,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
                 }}
                 onMouseEnter={(e) => {
                   ;(e.currentTarget as HTMLDivElement).style.background =
-                    'var(--background-modifier-hover, var(--bg-hover, #2a2a2a))'
+                    'var(--background-modifier-hover)'
                 }}
                 onMouseLeave={(e) => {
                   ;(e.currentTarget as HTMLDivElement).style.background = 'transparent'
@@ -915,7 +925,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
                     padding: '6px 8px',
                     background: 'transparent',
                     border: 'none',
-                    color: 'var(--text-normal, var(--fg, #ccc))',
+                    color: 'var(--text-normal)',
                     cursor: 'pointer',
                     textAlign: 'left',
                     gap: 8,
@@ -954,7 +964,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
                     flex: '0 0 auto',
                     background: 'transparent',
                     border: 'none',
-                    color: 'var(--text-muted, var(--fg-muted, #888))',
+                    color: 'var(--text-muted)',
                     cursor: canPopout ? 'pointer' : 'default',
                     opacity: canPopout ? 1 : 0.3,
                     padding: 0,
@@ -968,7 +978,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
           <div
             style={{
               height: 1,
-              background: 'var(--divider-color, var(--line, #333))',
+              background: 'var(--divider-color)',
               margin: '4px 0',
             }}
           />
@@ -984,7 +994,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
               padding: '6px 8px',
               background: 'transparent',
               border: 'none',
-              color: 'var(--text-normal, var(--fg, #ccc))',
+              color: 'var(--text-normal)',
               cursor: tabs.leaves.length <= 1 ? 'default' : 'pointer',
               opacity: tabs.leaves.length <= 1 ? 0.4 : 1,
               textAlign: 'left',
@@ -994,7 +1004,7 @@ function TabListDropdown({ tabs }: { tabs: Tabs }): JSX.Element {
             onMouseEnter={(e) => {
               if (tabs.leaves.length <= 1) return
               ;(e.currentTarget as HTMLButtonElement).style.background =
-                'var(--background-modifier-hover, var(--bg-hover, #2a2a2a))'
+                'var(--background-modifier-hover)'
             }}
             onMouseLeave={(e) => {
               ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
@@ -1079,16 +1089,16 @@ function TabButton({
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: 36,
-          height: 36,
+          width: 'var(--chrome-row-height)',
+          height: 'var(--chrome-row-height)',
           padding: 0,
           cursor: 'pointer',
           background: active
-            ? 'var(--background-primary, var(--bg, #1e1e1e))'
+            ? 'var(--background-primary)'
             : 'transparent',
           color: active
-            ? 'var(--text-normal, var(--fg, #ccc))'
-            : 'var(--text-muted, var(--fg-muted, #888))',
+            ? 'var(--text-normal)'
+            : 'var(--text-muted)',
           border: 'none',
         }}
       >
@@ -1097,21 +1107,24 @@ function TabButton({
           // adjacent ribbon button line up at the same visual scale.
           <Icon name={iconName as never} size={18} />
         ) : (
-          // Final fallback: a neutral dot for views with no icon
-          // mapping. Earlier this rendered the first letter of the
-          // viewType uppercase, which surfaced as bare "E"/"X"/etc.
-          // letters in the chrome — visually noisy and easy to mistake
-          // for broken UI.
+          // SH-008: 2-letter short-name from the viewType so AT users and
+          // sighted users without icon mapping can identify the panel.
+          // Derived from the raw viewType (e.g. "my-view" → "MY"), not
+          // from the label, which can be a file path.
           <span
             aria-hidden
             style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: 'currentColor',
-              opacity: 0.5,
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+              lineHeight: 1,
+              opacity: 0.75,
+              textTransform: 'uppercase',
+              fontFamily: 'var(--font-interface)',
             }}
-          />
+          >
+            {(leaf.view?.viewType ?? label).replace(/[^a-zA-Z]/g, '').slice(0, 2) || '??'}
+          </span>
         )}
       </button>
     )
@@ -1131,12 +1144,12 @@ function TabButton({
         padding: '2px 6px',
         cursor: 'pointer',
         background: active
-          ? 'var(--background-primary, var(--bg, #1e1e1e))'
+          ? 'var(--background-primary)'
           : 'transparent',
         color: active
-          ? 'var(--text-normal, var(--fg, #ccc))'
-          : 'var(--text-muted, var(--fg-muted, #888))',
-        borderRight: '1px solid var(--divider-color, var(--line, #333))',
+          ? 'var(--text-normal)'
+          : 'var(--text-muted)',
+        borderRight: '1px solid var(--divider-color)',
         fontSize: 11,
         whiteSpace: 'nowrap',
         // Each tab prefers ~180px but can shrink to ~50px when the

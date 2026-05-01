@@ -67,7 +67,7 @@ function OutlinePane() {
         <span className="kbd" style={{ fontSize: 9 }}>{headings.length} hdrs</span>
       </div>
       {headings.length === 0 ? (
-        <div style={{ color: 'var(--fg-dim)', fontSize: 12, padding: '8px 6px' }}>
+        <div style={{ color: 'var(--text-faint)', fontSize: 12, padding: '8px 6px' }}>
           No headings in the active document.
         </div>
       ) : (
@@ -93,7 +93,7 @@ function BacklinksPane() {
         <span>Linked mentions · 0</span>
         <span className="kbd" style={{ fontSize: 9 }}>0 in</span>
       </div>
-      <div style={{ color: 'var(--fg-dim)', fontSize: 12, padding: '8px 6px', lineHeight: 1.6 }}>
+      <div style={{ color: 'var(--text-faint)', fontSize: 12, padding: '8px 6px', lineHeight: 1.6 }}>
         Backlinks will appear here once an index is attached to the workspace.
       </div>
     </div>
@@ -110,8 +110,8 @@ function GraphPane() {
       <div style={{
         height: 220,
         display: 'grid', placeItems: 'center',
-        color: 'var(--fg-dim)', fontSize: 12,
-        border: '1px dashed var(--line-soft)', borderRadius: 6,
+        color: 'var(--text-faint)', fontSize: 12,
+        border: '1px dashed var(--divider-color)', borderRadius: 6,
         margin: 4,
       }}>
         Graph view — coming next

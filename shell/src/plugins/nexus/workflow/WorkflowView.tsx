@@ -34,9 +34,9 @@ export function WorkflowView({ onRun, onRefresh, onValidate }: WorkflowViewProps
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        background: 'var(--bg)',
-        color: 'var(--fg)',
-        fontFamily: 'var(--f-ui)',
+        background: 'var(--background-primary)',
+        color: 'var(--text-normal)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 'var(--ui-size, 13px)',
       }}
     >
@@ -45,9 +45,9 @@ export function WorkflowView({ onRun, onRefresh, onValidate }: WorkflowViewProps
         {loadError ? (
           <Centered colour="var(--risk)">{loadError}</Centered>
         ) : loading && workflows.length === 0 ? (
-          <Centered colour="var(--fg-dim)">Loading…</Centered>
+          <Centered colour="var(--text-faint)">Loading…</Centered>
         ) : workflows.length === 0 ? (
-          <Centered colour="var(--fg-dim)">
+          <Centered colour="var(--text-faint)">
             No workflows. Add a <code>.workflow.toml</code> under <code>.workflows/</code>.
           </Centered>
         ) : (
@@ -85,15 +85,15 @@ function Header({ onRefresh, loading, count }: HeaderProps) {
         alignItems: 'center',
         gap: 8,
         padding: '6px 10px',
-        borderBottom: '1px solid var(--line-soft)',
-        background: 'var(--bg-raised)',
+        borderBottom: '1px solid var(--divider-color)',
+        background: 'var(--background-secondary)',
         flex: '0 0 auto',
       }}
     >
       <span
         style={{
           flex: '1 1 auto',
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
           fontSize: 11,
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
@@ -108,7 +108,7 @@ function Header({ onRefresh, loading, count }: HeaderProps) {
         onClick={onRefresh}
         disabled={loading}
         onMouseEnter={(e) => {
-          if (!loading) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
+          if (!loading) (e.currentTarget as HTMLButtonElement).style.background = 'var(--background-modifier-hover)'
         }}
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
@@ -122,9 +122,9 @@ function Header({ onRefresh, loading, count }: HeaderProps) {
           padding: 0,
           border: 0,
           background: 'transparent',
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
           cursor: loading ? 'default' : 'pointer',
-          borderRadius: 'var(--r)',
+          borderRadius: 'var(--radius-s)',
           opacity: loading ? 0.5 : 1,
         }}
       >
@@ -151,7 +151,7 @@ function WorkflowRow({ workflow, run, onRun }: WorkflowRowProps) {
         flexDirection: 'column',
         gap: 4,
         padding: '8px 10px',
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: '1px solid var(--divider-color)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -159,7 +159,7 @@ function WorkflowRow({ workflow, run, onRun }: WorkflowRowProps) {
           style={{
             flex: '1 1 auto',
             fontWeight: 500,
-            color: 'var(--fg)',
+            color: 'var(--text-normal)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -174,7 +174,7 @@ function WorkflowRow({ workflow, run, onRun }: WorkflowRowProps) {
       {workflow.description ? (
         <div
           style={{
-            color: 'var(--fg-dim)',
+            color: 'var(--text-faint)',
             fontSize: 12,
             lineHeight: 1.35,
           }}
@@ -205,10 +205,10 @@ function Chip({ label, muted }: ChipProps) {
         padding: '1px 6px',
         borderRadius: 999,
         fontSize: 10,
-        fontFamily: 'var(--font-mono, monospace)',
-        background: 'var(--bg-raised)',
-        color: muted ? 'var(--fg-dim)' : 'var(--fg-muted)',
-        border: '1px solid var(--line-soft)',
+        fontFamily: 'var(--font-monospace, monospace)',
+        background: 'var(--background-secondary)',
+        color: muted ? 'var(--text-faint)' : 'var(--text-muted)',
+        border: '1px solid var(--divider-color)',
       }}
     >
       {label}
@@ -230,10 +230,10 @@ function RunButton({ disabled, onClick }: RunButtonProps) {
       onClick={onClick}
       disabled={disabled}
       onMouseEnter={(e) => {
-        if (!disabled) (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent)'
+        if (!disabled) (e.currentTarget as HTMLButtonElement).style.background = 'var(--interactive-accent)'
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-raised)'
+        (e.currentTarget as HTMLButtonElement).style.background = 'var(--background-secondary)'
       }}
       style={{
         display: 'inline-flex',
@@ -242,11 +242,11 @@ function RunButton({ disabled, onClick }: RunButtonProps) {
         width: 24,
         height: 24,
         padding: 0,
-        background: 'var(--bg-raised)',
-        color: 'var(--fg)',
-        border: '1px solid var(--line-soft)',
+        background: 'var(--background-secondary)',
+        color: 'var(--text-normal)',
+        border: '1px solid var(--divider-color)',
         cursor: disabled ? 'default' : 'pointer',
-        borderRadius: 'var(--r)',
+        borderRadius: 'var(--radius-s)',
         flex: '0 0 auto',
         opacity: disabled ? 0.5 : 1,
       }}
@@ -263,7 +263,7 @@ interface RunStatusPillProps {
 
 /**
  * Tiny status indicator next to the Run button. Colour mirrors the
- * design tokens: --ok (done), --accent (running), --risk (error).
+ * design tokens: --ok (done), --interactive-accent (running), --risk (error).
  * The error message is exposed via the `title` attribute — the
  * sidebar is too narrow to render it inline, but the user can hover
  * to read it before retrying.
@@ -271,7 +271,7 @@ interface RunStatusPillProps {
 function RunStatusPill({ status, error }: RunStatusPillProps) {
   if (status === 'idle') return null
   const palette = {
-    running: { bg: 'var(--accent)', label: 'Running…' },
+    running: { bg: 'var(--interactive-accent)', label: 'Running…' },
     done: { bg: 'var(--ok)', label: 'Done' },
     error: { bg: 'var(--risk)', label: 'Error' },
   }[status]
@@ -285,7 +285,7 @@ function RunStatusPill({ status, error }: RunStatusPillProps) {
         borderRadius: 999,
         fontSize: 10,
         background: palette.bg,
-        color: 'var(--bg)',
+        color: 'var(--background-primary)',
         flex: '0 0 auto',
       }}
     >
@@ -325,8 +325,8 @@ function ValidatePanel({ validate, onTextChange, onValidate, onClear }: Validate
       open={isOpen}
       style={{
         flex: '0 0 auto',
-        borderTop: '1px solid var(--line-soft)',
-        background: 'var(--bg-raised)',
+        borderTop: '1px solid var(--divider-color)',
+        background: 'var(--background-secondary)',
         fontSize: 12,
       }}
     >
@@ -335,7 +335,7 @@ function ValidatePanel({ validate, onTextChange, onValidate, onClear }: Validate
           listStyle: 'none',
           cursor: 'pointer',
           padding: '6px 10px',
-          color: 'var(--fg-muted)',
+          color: 'var(--text-muted)',
           fontSize: 11,
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
@@ -356,13 +356,13 @@ function ValidatePanel({ validate, onTextChange, onValidate, onClear }: Validate
             minHeight: 120,
             resize: 'vertical',
             padding: 6,
-            fontFamily: 'var(--font-mono, monospace)',
+            fontFamily: 'var(--font-monospace, monospace)',
             fontSize: 11,
             lineHeight: 1.4,
-            background: 'var(--bg)',
-            color: 'var(--fg)',
-            border: '1px solid var(--line-soft)',
-            borderRadius: 'var(--r)',
+            background: 'var(--background-primary)',
+            color: 'var(--text-normal)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-s)',
             boxSizing: 'border-box',
           }}
         />
@@ -373,10 +373,10 @@ function ValidatePanel({ validate, onTextChange, onValidate, onClear }: Validate
             disabled={validate.status === 'validating'}
             style={{
               padding: '4px 10px',
-              background: 'var(--accent)',
-              color: 'var(--bg)',
+              background: 'var(--interactive-accent)',
+              color: 'var(--background-primary)',
               border: 0,
-              borderRadius: 'var(--r)',
+              borderRadius: 'var(--radius-s)',
               cursor: validate.status === 'validating' ? 'default' : 'pointer',
               fontSize: 11,
               opacity: validate.status === 'validating' ? 0.6 : 1,
@@ -391,9 +391,9 @@ function ValidatePanel({ validate, onTextChange, onValidate, onClear }: Validate
             style={{
               padding: '4px 10px',
               background: 'transparent',
-              color: 'var(--fg-muted)',
-              border: '1px solid var(--line-soft)',
-              borderRadius: 'var(--r)',
+              color: 'var(--text-muted)',
+              border: '1px solid var(--divider-color)',
+              borderRadius: 'var(--radius-s)',
               cursor: 'pointer',
               fontSize: 11,
             }}
@@ -427,7 +427,7 @@ function ValidateBadge({ state }: ValidateBadgeProps) {
         borderRadius: 999,
         fontSize: 10,
         background: palette.bg,
-        color: 'var(--bg)',
+        color: 'var(--background-primary)',
       }}
     >
       {palette.label}
@@ -453,11 +453,11 @@ function ValidateResult({ state }: ValidateResultProps) {
         style={{
           margin: 0,
           padding: '6px 8px',
-          background: 'var(--bg)',
+          background: 'var(--background-primary)',
           color: 'var(--risk)',
           border: '1px solid var(--risk)',
-          borderRadius: 'var(--r)',
-          fontFamily: 'var(--font-mono, monospace)',
+          borderRadius: 'var(--radius-s)',
+          fontFamily: 'var(--font-monospace, monospace)',
           fontSize: 11,
           lineHeight: 1.4,
           whiteSpace: 'pre-wrap',

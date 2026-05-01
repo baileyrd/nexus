@@ -149,8 +149,8 @@ export function BasesView({ relpath, client }: Props) {
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
-    background: 'var(--bg-primary, #1e1e1e)',
-    color: 'var(--fg-primary, #e4e4e7)',
+    background: 'var(--background-primary)',
+    color: 'var(--text-normal)',
     fontSize: 13,
     // Cleared default focus ring; the global keybinding dispatcher
     // hooks `bases.focused` off of focusin/out on this container.
@@ -158,7 +158,7 @@ export function BasesView({ relpath, client }: Props) {
   }
   const headerStyle: React.CSSProperties = {
     padding: '8px 12px',
-    borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
+    borderBottom: '1px solid var(--background-modifier-border)',
     display: 'flex',
     alignItems: 'center',
     // Allow the toolbar to reflow onto a second row when the leaf is
@@ -169,7 +169,7 @@ export function BasesView({ relpath, client }: Props) {
     rowGap: 6,
     gap: 8,
     fontSize: 12,
-    color: 'var(--fg-muted, #9ca3af)',
+    color: 'var(--text-muted)',
   }
   const bodyStyle: React.CSSProperties = {
     padding: 16,
@@ -189,7 +189,7 @@ export function BasesView({ relpath, client }: Props) {
     return (
       <div ref={containerRef} tabIndex={0} style={wrapperStyle}>
         <div style={headerStyle}>{relpath}</div>
-        <div style={{ ...bodyStyle, color: 'var(--risk, #f48771)' }}>
+        <div style={{ ...bodyStyle, color: 'var(--risk)' }}>
           Failed to load base: {tab.error}
         </div>
       </div>
@@ -220,7 +220,7 @@ export function BasesView({ relpath, client }: Props) {
   return (
     <div ref={containerRef} tabIndex={0} style={wrapperStyle}>
       <div style={headerStyle}>
-        <strong style={{ color: 'var(--fg-primary, #e4e4e7)' }}>{base.name}</strong>
+        <strong style={{ color: 'var(--text-normal)' }}>{base.name}</strong>
         <span>·</span>
         <span>{visibleRecords.length} records</span>
         <span>·</span>
@@ -232,11 +232,11 @@ export function BasesView({ relpath, client }: Props) {
             title="This is an Obsidian .base file — read-only (ADR 0019)"
             style={{
               padding: '2px 8px',
-              background: 'var(--bg-raised, #252529)',
-              border: '1px solid var(--border-subtle, #2a2a2e)',
+              background: 'var(--background-secondary)',
+              border: '1px solid var(--background-modifier-border)',
               borderRadius: 3,
               fontSize: 10,
-              color: 'var(--fg-muted, #9ca3af)',
+              color: 'var(--text-muted)',
               textTransform: 'uppercase',
               letterSpacing: 0.5,
             }}
@@ -254,9 +254,9 @@ export function BasesView({ relpath, client }: Props) {
               title="Undo (Ctrl/Cmd+Z)"
               style={{
                 padding: '3px 10px',
-                background: 'var(--bg-raised, #252529)',
-                color: 'var(--fg-primary, #e4e4e7)',
-                border: '1px solid var(--border-subtle, #2a2a2e)',
+                background: 'var(--background-secondary)',
+                color: 'var(--text-normal)',
+                border: '1px solid var(--background-modifier-border)',
                 borderRadius: 3,
                 fontSize: 11,
                 cursor: undoLen === 0 ? 'not-allowed' : 'pointer',
@@ -273,9 +273,9 @@ export function BasesView({ relpath, client }: Props) {
               title="Redo (Ctrl/Cmd+Shift+Z)"
               style={{
                 padding: '3px 10px',
-                background: 'var(--bg-raised, #252529)',
-                color: 'var(--fg-primary, #e4e4e7)',
-                border: '1px solid var(--border-subtle, #2a2a2e)',
+                background: 'var(--background-secondary)',
+                color: 'var(--text-normal)',
+                border: '1px solid var(--background-modifier-border)',
                 borderRadius: 3,
                 fontSize: 11,
                 cursor: redoLen === 0 ? 'not-allowed' : 'pointer',
@@ -297,9 +297,9 @@ export function BasesView({ relpath, client }: Props) {
           }
           style={{
             padding: '3px 10px',
-            background: trashOpen ? 'var(--risk, #f48771)' : 'var(--bg-raised, #252529)',
-            color: trashOpen ? 'var(--fg-on-accent, #0f1117)' : 'var(--fg-primary, #e4e4e7)',
-            border: '1px solid var(--border-subtle, #2a2a2e)',
+            background: trashOpen ? 'var(--risk)' : 'var(--background-secondary)',
+            color: trashOpen ? 'var(--interactive-accent-ink)' : 'var(--text-normal)',
+            border: '1px solid var(--background-modifier-border)',
             borderRadius: 3,
             fontSize: 11,
             cursor: 'pointer',
@@ -314,9 +314,9 @@ export function BasesView({ relpath, client }: Props) {
           title="Schema editor"
           style={{
             padding: '3px 10px',
-            background: schemaEditorOpen ? 'var(--accent, #60a5fa)' : 'var(--bg-raised, #252529)',
-            color: schemaEditorOpen ? 'var(--fg-on-accent, #0f1117)' : 'var(--fg-primary, #e4e4e7)',
-            border: '1px solid var(--border-subtle, #2a2a2e)',
+            background: schemaEditorOpen ? 'var(--interactive-accent)' : 'var(--background-secondary)',
+            color: schemaEditorOpen ? 'var(--interactive-accent-ink)' : 'var(--text-normal)',
+            border: '1px solid var(--background-modifier-border)',
             borderRadius: 3,
             fontSize: 11,
             cursor: 'pointer',
@@ -336,10 +336,10 @@ export function BasesView({ relpath, client }: Props) {
                 style={{
                   padding: '3px 10px',
                   background: active
-                    ? 'var(--accent, #60a5fa)'
-                    : 'var(--bg-raised, #252529)',
-                  color: active ? 'var(--fg-on-accent, #0f1117)' : 'var(--fg-primary, #e4e4e7)',
-                  border: '1px solid var(--border-subtle, #2a2a2e)',
+                    ? 'var(--interactive-accent)'
+                    : 'var(--background-secondary)',
+                  color: active ? 'var(--interactive-accent-ink)' : 'var(--text-normal)',
+                  border: '1px solid var(--background-modifier-border)',
                   borderRadius: 3,
                   fontSize: 11,
                   cursor: 'pointer',
@@ -356,9 +356,9 @@ export function BasesView({ relpath, client }: Props) {
           role="alert"
           style={{
             padding: '6px 12px',
-            borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
-            background: 'var(--bg-raised, #252529)',
-            color: 'var(--risk, #f48771)',
+            borderBottom: '1px solid var(--background-modifier-border)',
+            background: 'var(--background-secondary)',
+            color: 'var(--risk)',
             fontSize: 11,
             display: 'flex',
             alignItems: 'center',
@@ -373,8 +373,8 @@ export function BasesView({ relpath, client }: Props) {
             style={{
               padding: '2px 8px',
               background: 'transparent',
-              color: 'var(--fg-muted, #9ca3af)',
-              border: '1px solid var(--border-subtle, #2a2a2e)',
+              color: 'var(--text-muted)',
+              border: '1px solid var(--background-modifier-border)',
               borderRadius: 3,
               fontSize: 11,
               cursor: 'pointer',
@@ -389,9 +389,9 @@ export function BasesView({ relpath, client }: Props) {
           role="alert"
           style={{
             padding: '6px 12px',
-            borderBottom: '1px solid var(--border-subtle, #2a2a2e)',
-            background: 'var(--bg-raised, #252529)',
-            color: 'var(--risk, #f48771)',
+            borderBottom: '1px solid var(--background-modifier-border)',
+            background: 'var(--background-secondary)',
+            color: 'var(--risk)',
             fontSize: 11,
           }}
         >
@@ -400,7 +400,7 @@ export function BasesView({ relpath, client }: Props) {
             : `${unsupportedFilters.length} filter expressions are unsupported and were excluded:`}
           <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
             {unsupportedFilters.map((f) => (
-              <li key={f} style={{ fontFamily: 'var(--font-mono, monospace)' }}>{f}</li>
+              <li key={f} style={{ fontFamily: 'var(--font-monospace, monospace)' }}>{f}</li>
             ))}
           </ul>
         </div>
@@ -443,7 +443,7 @@ function TrashEmptyState({ onBackToLive }: { onBackToLive: () => void }) {
         justifyContent: 'center',
         gap: 12,
         padding: 24,
-        color: 'var(--fg-muted, #9ca3af)',
+        color: 'var(--text-muted)',
         fontSize: 13,
       }}
     >
@@ -453,9 +453,9 @@ function TrashEmptyState({ onBackToLive }: { onBackToLive: () => void }) {
         onClick={onBackToLive}
         style={{
           padding: '4px 12px',
-          background: 'var(--bg-raised, #252529)',
-          color: 'var(--fg-primary, #e4e4e7)',
-          border: '1px solid var(--border-subtle, #2a2a2e)',
+          background: 'var(--background-secondary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--background-modifier-border)',
           borderRadius: 3,
           fontSize: 11,
           cursor: 'pointer',

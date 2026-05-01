@@ -7,6 +7,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useNewBaseStore } from './newBaseStore'
 import { BASE_TEMPLATES, type BaseTemplate } from './templates'
 import { getBasesClient } from './runtime'
+import { Modal } from '../../../shell/Modal'
+import { zIndex } from '../../../shell/zIndex'
 
 const EXT = '.bases'
 
@@ -78,6 +80,7 @@ export function NewBaseDialog() {
   }
 
   return (
+    <Modal>
     <div
       role="dialog"
       aria-modal="true"
@@ -92,19 +95,20 @@ export function NewBaseDialog() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 1080,
+        zIndex: zIndex.overlayModal,
         padding: 32,
+        pointerEvents: 'auto',
       }}
     >
       <div
         style={{
           width: 'min(520px, 100%)',
-          background: 'var(--bg)',
-          color: 'var(--fg)',
-          border: '1px solid var(--line)',
-          borderRadius: 'var(--r)',
+          background: 'var(--background-primary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--background-modifier-border)',
+          borderRadius: 'var(--radius-s)',
           boxShadow: '0 12px 48px rgba(0, 0, 0, 0.4)',
-          fontFamily: 'var(--f-ui)',
+          fontFamily: 'var(--font-interface)',
           fontSize: 'var(--ui-size, 13px)',
           padding: 20,
           display: 'flex',
@@ -117,7 +121,7 @@ export function NewBaseDialog() {
         </div>
 
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>Name</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Name</span>
           <input
             ref={nameInputRef}
             type="text"
@@ -132,23 +136,23 @@ export function NewBaseDialog() {
             }}
             style={{
               padding: '6px 10px',
-              background: 'var(--bg-raised, #252529)',
-              color: 'var(--fg)',
-              border: '1px solid var(--line-soft, #2a2a2e)',
-              borderRadius: 'var(--r)',
+              background: 'var(--background-secondary)',
+              color: 'var(--text-normal)',
+              border: '1px solid var(--divider-color)',
+              borderRadius: 'var(--radius-s)',
               font: 'inherit',
               outline: 'none',
             }}
           />
           {current.defaultParent && (
-            <span style={{ color: 'var(--fg-dim, #6b7280)', fontSize: 11 }}>
+            <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>
               in {current.defaultParent}/
             </span>
           )}
         </label>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>Template</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Template</span>
           <div
             style={{
               display: 'grid',
@@ -167,11 +171,11 @@ export function NewBaseDialog() {
                     textAlign: 'left',
                     padding: '8px 10px',
                     background: selected
-                      ? 'var(--bg-selection, #2a2a35)'
-                      : 'var(--bg-raised, #252529)',
-                    color: 'var(--fg)',
-                    border: `1px solid ${selected ? 'var(--accent, #60a5fa)' : 'var(--line-soft, #2a2a2e)'}`,
-                    borderRadius: 'var(--r)',
+                      ? 'var(--interactive-accent-soft)'
+                      : 'var(--background-secondary)',
+                    color: 'var(--text-normal)',
+                    border: `1px solid ${selected ? 'var(--interactive-accent)' : 'var(--divider-color)'}`,
+                    borderRadius: 'var(--radius-s)',
                     font: 'inherit',
                     cursor: 'pointer',
                     display: 'flex',
@@ -180,7 +184,7 @@ export function NewBaseDialog() {
                   }}
                 >
                   <span style={{ fontWeight: 500 }}>{t.label}</span>
-                  <span style={{ color: 'var(--fg-muted)', fontSize: 11 }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
                     {t.description}
                   </span>
                 </button>
@@ -190,7 +194,7 @@ export function NewBaseDialog() {
         </div>
 
         {err && (
-          <div style={{ color: 'var(--risk, #f48771)', fontSize: 12 }}>{err}</div>
+          <div style={{ color: 'var(--risk)', fontSize: 12 }}>{err}</div>
         )}
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -200,10 +204,10 @@ export function NewBaseDialog() {
             onClick={() => resolve(null)}
             style={{
               padding: '6px 14px',
-              background: 'var(--bg-raised)',
-              color: 'var(--fg)',
-              border: '1px solid var(--line-soft)',
-              borderRadius: 'var(--r)',
+              background: 'var(--background-secondary)',
+              color: 'var(--text-normal)',
+              border: '1px solid var(--divider-color)',
+              borderRadius: 'var(--radius-s)',
               font: 'inherit',
               cursor: busy ? 'not-allowed' : 'pointer',
               opacity: busy ? 0.6 : 1,
@@ -217,10 +221,10 @@ export function NewBaseDialog() {
             onClick={() => void submit()}
             style={{
               padding: '6px 14px',
-              background: 'var(--accent, #60a5fa)',
-              color: 'var(--bg)',
+              background: 'var(--interactive-accent)',
+              color: 'var(--background-primary)',
               border: 'none',
-              borderRadius: 'var(--r)',
+              borderRadius: 'var(--radius-s)',
               font: 'inherit',
               fontWeight: 500,
               cursor: busy ? 'not-allowed' : 'pointer',
@@ -232,5 +236,6 @@ export function NewBaseDialog() {
         </div>
       </div>
     </div>
+    </Modal>
   )
 }

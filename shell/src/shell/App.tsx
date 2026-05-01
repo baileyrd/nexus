@@ -13,8 +13,13 @@ import {
   installAutoSave,
   loadWorkspace,
 } from '../workspace'
+import { ErrorBoundary } from './ErrorBoundary'
+import { useViewportClass } from './useViewportClass'
 
 export default function App() {
+  // SH-003: write body.is-narrow/is-medium/is-wide via ResizeObserver.
+  useViewportClass()
+
   const slots = useSlotStore(s => s.slots)
   const paneModeViewId = usePaneModeStore(s => s.activeViewId)
   const rootPath = useNexusWorkspaceStore(s => s.rootPath)
@@ -31,7 +36,9 @@ export default function App() {
   const lastHydratedPathRef = useRef<string | null>(null)
 
   useEffect(() => {
-    // Debug: log what's in each slot after mount
+    // Debug: log slot population 500ms after mount. DEV-only so the
+    // timer never fires in production or e2e bundles. (SH-011)
+    if (!import.meta.env.DEV) return
     const timer = setTimeout(() => {
       const reg = getRegistry()
       const info = [
@@ -137,7 +144,10 @@ export default function App() {
       const commandId = reg.keybindings.match(e, keys)
       if (commandId) {
         e.preventDefault()
-        e.stopPropagation()
+        // Do NOT stopPropagation: let the event bubble so assistive
+        // technology (screen-reader virtual cursor / browse-mode keys)
+        // can still observe it. preventDefault alone is enough to
+        // prevent the browser's native action. (SH-006)
         reg.commands.execute(commandId)
       }
     }
@@ -171,10 +181,13 @@ export default function App() {
   return (
     <div className="shell-root">
 
-      {/* Overlay */}
-      <div className="shell-overlay">
-        <SlotSurface entries={slots.overlay} />
-      </div>
+      {/* Overlay — independent boundary so a broken modal/toast doesn't
+          take down the rest of the chrome. */}
+      <ErrorBoundary name="overlay">
+        <div className="shell-overlay">
+          <SlotSurface entries={slots.overlay} />
+        </div>
+      </ErrorBoundary>
 
       {/* Workspace — Obsidian-faithful top-level container. Hosts the
           ribbon (.workspace-ribbon.mod-left) and the body columns
@@ -184,9 +197,11 @@ export default function App() {
 
         {/* Activity bar — `.workspace-ribbon.mod-left` in Obsidian.
             Chrome slot — kept as SlotRegistry entry. */}
-        <div className="workspace-ribbon mod-left">
-          <SlotSurface entries={slots.activityBar} />
-        </div>
+        <ErrorBoundary name="activityBar">
+          <div className="workspace-ribbon mod-left">
+            <SlotSurface entries={slots.activityBar} />
+          </div>
+        </ErrorBoundary>
 
         {(() => {
           // Pane-mode: one slot entry takes over the entire body region,
@@ -204,9 +219,11 @@ export default function App() {
 
           if (paneEntry) {
             return (
-              <div className="shell-pane-mode">
-                <SlotSurface entries={[paneEntry]} />
-              </div>
+              <ErrorBoundary name="paneMode">
+                <div className="shell-pane-mode">
+                  <SlotSurface entries={[paneEntry]} />
+                </div>
+              </ErrorBoundary>
             )
           }
 
@@ -221,9 +238,11 @@ export default function App() {
           // plugin activation can finish without a flash of the old
           // layout.
           return (
-            <div className="workspace-main-region" style={{ flex: '1 1 auto', minWidth: 0, display: 'flex' }}>
-              {hydrated ? <Workspace /> : null}
-            </div>
+            <ErrorBoundary name="workspace">
+              <div className="workspace-main-region" style={{ flex: '1 1 auto', minWidth: 0, display: 'flex' }}>
+                {hydrated ? <Workspace /> : null}
+              </div>
+            </ErrorBoundary>
           )
         })()}
       </div>

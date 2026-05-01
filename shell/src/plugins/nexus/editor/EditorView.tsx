@@ -323,9 +323,9 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
     flexDirection: 'column',
     width: '100%',
     height: '100%',
-    background: 'var(--bg)',
-    color: 'var(--fg)',
-    fontFamily: 'var(--f-ui)',
+    background: 'var(--background-primary)',
+    color: 'var(--text-normal)',
+    fontFamily: 'var(--font-interface)',
     fontSize: 'var(--ui-size, 13px)',
     overflow: 'hidden',
   }
@@ -385,7 +385,7 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
  * Obsidian's `.view-header` pattern. Three slots:
  *   left    — reserved for future back/forward navigation
  *   title   — breadcrumb over `activeTab.relpath`, final segment in
- *             --fg, earlier segments in --fg-muted, separated by a
+ *             --text-normal, earlier segments in --text-muted, separated by a
  *             right-chevron icon
  *   actions — reserved for future view-actions (e.g. pin, more menu)
  *
@@ -419,7 +419,7 @@ function ViewHeader({ activeTab, mode, onToggleMode }: ViewHeaderProps) {
   const disabledNavStyle: React.CSSProperties = {
     background: 'transparent',
     border: 'none',
-    color: 'var(--fg-muted)',
+    color: 'var(--text-muted)',
     cursor: 'default',
     opacity: 0.45,
     display: 'inline-flex',
@@ -432,7 +432,7 @@ function ViewHeader({ activeTab, mode, onToggleMode }: ViewHeaderProps) {
   const activeNavStyle: React.CSSProperties = {
     background: 'transparent',
     border: 'none',
-    color: 'var(--fg-muted)',
+    color: 'var(--text-muted)',
     cursor: 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
@@ -560,15 +560,15 @@ export function EmptyStateActions({ hasAnyTab }: { hasAnyTab: boolean }) {
     background: 'transparent',
     border: 0,
     padding: '4px 8px',
-    color: 'var(--accent)',
+    color: 'var(--interactive-accent)',
     cursor: 'pointer',
     fontFamily: 'inherit',
     fontSize: 'inherit',
     textAlign: 'center',
-    borderRadius: 'var(--r, 4px)',
+    borderRadius: 'var(--radius-s, 4px)',
   }
   const hintStyle: React.CSSProperties = {
-    color: 'var(--fg-muted)',
+    color: 'var(--text-muted)',
     marginLeft: 4,
   }
 
@@ -658,7 +658,7 @@ function ModeToggle({ mode, onClick }: ModeToggleProps) {
       title={label}
       onClick={onClick}
       onMouseEnter={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover)'
+        (e.currentTarget as HTMLButtonElement).style.background = 'var(--background-modifier-hover)'
       }}
       onMouseLeave={(e) => {
         (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
@@ -675,9 +675,9 @@ function ModeToggle({ mode, onClick }: ModeToggleProps) {
         padding: 0,
         border: 0,
         background: 'transparent',
-        color: 'var(--fg-muted)',
+        color: 'var(--text-muted)',
         cursor: 'pointer',
-        borderRadius: 'var(--r)',
+        borderRadius: 'var(--radius-s)',
       }}
     >
       {showPencil ? (
@@ -739,12 +739,12 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
           <button
             onClick={() => onRetry(tab.relpath)}
             style={{
-              background: 'var(--bg-raised)',
-              color: 'var(--fg)',
-              border: '1px solid var(--line-soft)',
-              borderRadius: 'var(--r, 6px)',
+              background: 'var(--background-secondary)',
+              color: 'var(--text-normal)',
+              border: '1px solid var(--divider-color)',
+              borderRadius: 'var(--radius-s, 6px)',
               padding: '6px 14px',
-              fontFamily: 'var(--f-ui)',
+              fontFamily: 'var(--font-interface)',
               fontSize: 'var(--ui-size, 13px)',
               cursor: 'pointer',
             }}
@@ -757,7 +757,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
   }
 
   if (tab.loading) {
-    return <div style={{ ...centredStyle, color: 'var(--fg-dim)' }}>Loading…</div>
+    return <div style={{ ...centredStyle, color: 'var(--text-faint)' }}>Loading…</div>
   }
 
   // HTML files render in a sandboxed iframe in live/preview mode so the

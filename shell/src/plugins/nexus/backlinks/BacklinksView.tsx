@@ -29,10 +29,10 @@ export function BacklinksView() {
     <div
       style={{
         padding: '8px 14px',
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: '1px solid var(--divider-color)',
         fontSize: 11,
-        fontFamily: 'var(--f-ui)',
-        color: 'var(--fg-dim)',
+        fontFamily: 'var(--font-interface)',
+        color: 'var(--text-faint)',
         display: 'flex',
         flexDirection: 'column',
         gap: 4,
@@ -47,7 +47,7 @@ export function BacklinksView() {
         }}
       >
         Backlinks to{' '}
-        <span style={{ color: 'var(--fg)' }}>{basename(currentRelpath)}</span>
+        <span style={{ color: 'var(--text-normal)' }}>{basename(currentRelpath)}</span>
       </div>
       {blockFilter && (
         <ActiveBlockFilterChip
@@ -64,16 +64,16 @@ export function BacklinksView() {
   let body: React.ReactNode
   if (!currentRelpath) {
     body = (
-      <StateMessage color="var(--fg-dim)">
+      <StateMessage color="var(--text-faint)">
         Open a file to see its backlinks.
       </StateMessage>
     )
   } else if (error) {
     body = <StateMessage color="var(--risk)">{error}</StateMessage>
   } else if (loading) {
-    body = <StateMessage color="var(--fg-muted)">Loading…</StateMessage>
+    body = <StateMessage color="var(--text-muted)">Loading…</StateMessage>
   } else if (links.length === 0) {
-    body = <StateMessage color="var(--fg-dim)">No backlinks found.</StateMessage>
+    body = <StateMessage color="var(--text-faint)">No backlinks found.</StateMessage>
   } else {
     body = (
       <div style={{ overflowY: 'auto', flex: 1 }}>
@@ -120,7 +120,7 @@ function StateMessage({
       style={{
         padding: '12px 14px',
         color,
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 12,
       }}
     >
@@ -155,11 +155,11 @@ export function ActiveBlockFilterChip({
         gap: 4,
         padding: '0 4px 0 6px',
         borderRadius: 999,
-        border: '1px solid var(--line-soft)',
-        background: 'var(--accent-soft, var(--bg-raised))',
-        color: 'var(--fg)',
+        border: '1px solid var(--divider-color)',
+        background: 'var(--interactive-accent-soft)',
+        color: 'var(--text-normal)',
         fontSize: 10,
-        fontFamily: 'var(--f-mono)',
+        fontFamily: 'var(--font-monospace)',
         lineHeight: '16px',
         alignSelf: 'flex-start',
       }}
@@ -175,7 +175,7 @@ export function ActiveBlockFilterChip({
           padding: '0 4px',
           fontSize: 11,
           lineHeight: '14px',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
         }}
       >
         ×
@@ -201,11 +201,11 @@ function BacklinkRow({ link, onPick }: BacklinkRowProps) {
         cursor: 'pointer',
         background: 'transparent',
         transition: 'background 0.06s',
-        fontFamily: 'var(--f-ui)',
-        borderBottom: '1px solid var(--line-soft)',
+        fontFamily: 'var(--font-interface)',
+        borderBottom: '1px solid var(--divider-color)',
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'var(--bg-hover)'
+        e.currentTarget.style.background = 'var(--background-modifier-hover)'
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = 'transparent'
@@ -213,7 +213,7 @@ function BacklinkRow({ link, onPick }: BacklinkRowProps) {
     >
       <div
         style={{
-          color: 'var(--fg)',
+          color: 'var(--text-normal)',
           fontSize: 13,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -224,7 +224,7 @@ function BacklinkRow({ link, onPick }: BacklinkRowProps) {
       </div>
       <div
         style={{
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           fontSize: 11,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -242,7 +242,7 @@ function BacklinkRow({ link, onPick }: BacklinkRowProps) {
       {showExcerpt && (
         <div
           style={{
-            color: 'var(--fg-muted)',
+            color: 'var(--text-muted)',
             fontSize: 12,
             marginTop: 4,
             display: '-webkit-box',
@@ -294,11 +294,11 @@ export function FragmentPill({ fragment }: { fragment: string }) {
         display: 'inline-block',
         padding: '0 6px',
         borderRadius: 999,
-        border: '1px solid var(--line-soft)',
-        background: isBlock ? 'var(--accent-soft, var(--bg-raised))' : 'var(--bg-raised)',
-        color: 'var(--fg-muted)',
+        border: '1px solid var(--divider-color)',
+        background: isBlock ? 'var(--interactive-accent-soft)' : 'var(--background-secondary)',
+        color: 'var(--text-muted)',
         fontSize: 10,
-        fontFamily: 'var(--f-mono)',
+        fontFamily: 'var(--font-monospace)',
         lineHeight: '16px',
         cursor: isBlock ? 'pointer' : 'default',
       }}

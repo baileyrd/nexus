@@ -63,7 +63,7 @@ interface ReadRawSinceResponse {
 /**
  * Resolve a CSS custom property against the document root to a plain
  * colour string — xterm renders to canvas and reads theme values
- * literally, so `var(--fg)` would show up as an empty string inside
+ * literally, so `var(--text-normal)` would show up as an empty string inside
  * its internal colour parser. Falls back to `fallback` when the
  * property is unset (covers boot-before-tokens race) or resolves to
  * an empty string.
@@ -86,18 +86,18 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     // needs concrete values because the viewport is a canvas, not a
     // DOM tree that participates in CSS variable cascade.
     const buildTheme = () => ({
-      // Transparent so panel background (--bg-raised via CSS) wins —
+      // Transparent so panel background (--background-secondary via CSS) wins —
       // xterm blends ANSI bg colours on top of this.
       background: '#00000000',
-      foreground: readCssVar('--fg', '#e6e6e6'),
-      cursor: readCssVar('--accent', '#7aa2f7'),
-      cursorAccent: readCssVar('--bg-raised', '#1a1a1a'),
-      selectionBackground: readCssVar('--accent-soft', '#3a3a5a'),
+      foreground: readCssVar('--text-normal', '#e6e6e6'),
+      cursor: readCssVar('--interactive-accent', '#7aa2f7'),
+      cursorAccent: readCssVar('--background-secondary', '#1a1a1a'),
+      selectionBackground: readCssVar('--interactive-accent-soft', '#3a3a5a'),
     })
     const theme = buildTheme()
 
     const fontFamily =
-      readCssVar('--f-mono', 'ui-monospace, SFMono-Regular, Menlo, monospace')
+      readCssVar('--font-monospace', 'ui-monospace, SFMono-Regular, Menlo, monospace')
 
     const term = new Terminal({
       theme,
@@ -181,7 +181,7 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       if (s.resolvedVariables === prev.resolvedVariables) return
       term.options.theme = buildTheme()
       term.options.fontFamily = readCssVar(
-        '--f-mono',
+        '--font-monospace',
         'ui-monospace, SFMono-Regular, Menlo, monospace',
       )
     })

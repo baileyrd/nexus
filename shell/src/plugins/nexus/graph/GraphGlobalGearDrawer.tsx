@@ -21,12 +21,12 @@ export function GraphGlobalGearDrawer({ open, onClose }: Props) {
         width: 260,
         maxHeight: 'calc(100% - 56px)',
         overflowY: 'auto',
-        background: 'var(--bg-raised)',
-        border: '1px solid var(--line)',
+        background: 'var(--background-secondary)',
+        border: '1px solid var(--background-modifier-border)',
         borderRadius: 6,
         padding: 12,
         zIndex: 10,
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 12,
         boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
       }}
@@ -123,7 +123,7 @@ function Header({ label }: { label: string }) {
       style={{
         marginTop: 8,
         marginBottom: 4,
-        color: 'var(--fg-muted)',
+        color: 'var(--text-muted)',
         textTransform: 'uppercase',
         fontSize: 10,
         letterSpacing: 0.6,
@@ -137,7 +137,7 @@ function Header({ label }: { label: string }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label style={{ display: 'block', marginBottom: 6 }}>
-      <div style={{ color: 'var(--fg-dim)', marginBottom: 2 }}>{label}</div>
+      <div style={{ color: 'var(--text-faint)', marginBottom: 2 }}>{label}</div>
       {children}
     </label>
   )
@@ -159,7 +159,7 @@ function Toggle({
         alignItems: 'center',
         gap: 6,
         marginBottom: 4,
-        color: 'var(--fg)',
+        color: 'var(--text-normal)',
         cursor: 'pointer',
       }}
     >
@@ -194,7 +194,7 @@ function Slider({
         style={{
           display: 'flex',
           justifyContent: 'space-between',
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
         }}
       >
         <span>{label}</span>
@@ -215,22 +215,22 @@ function Slider({
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
-  background: 'var(--bg)',
-  color: 'var(--fg)',
-  border: '1px solid var(--line)',
+  background: 'var(--background-primary)',
+  color: 'var(--text-normal)',
+  border: '1px solid var(--background-modifier-border)',
   borderRadius: 4,
   padding: '4px 6px',
-  fontFamily: 'var(--f-ui)',
+  fontFamily: 'var(--font-interface)',
   fontSize: 12,
 }
 
 const buttonStyle: React.CSSProperties = {
-  background: 'var(--bg)',
-  color: 'var(--fg)',
-  border: '1px solid var(--line)',
+  background: 'var(--background-primary)',
+  color: 'var(--text-normal)',
+  border: '1px solid var(--background-modifier-border)',
   borderRadius: 4,
   padding: '4px 10px',
-  fontFamily: 'var(--f-ui)',
+  fontFamily: 'var(--font-interface)',
   fontSize: 12,
   cursor: 'pointer',
 }

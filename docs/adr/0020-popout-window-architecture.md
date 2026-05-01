@@ -37,28 +37,30 @@ and a handful of derived choices.
 
 ## Decisions
 
-### 1. Plugin boot scope — full parity, minus marketplace surface
+### 1. Plugin boot scope — popout-compatible subset
 
-**A popout webview boots the same `DEFAULT_ON` plugin set that the main
-window boots, plus the same opt-in plugins from `plugins.enabled`.**
+**A popout webview boots the `DEFAULT_ON` plugins whose manifests have
+`popoutCompatible !== false`, plus the same opt-in plugins from
+`plugins.enabled`.**
 
-A trimmed "minimal" set (e.g. just the editor and the file explorer)
-was rejected because:
+Chrome-only plugins (activity bar, sidebar, right panel, status bar,
+launcher, pane mode, git-status indicator, settings, capability-prompt,
+plugins-mgmt, extensions tab, memory quick-capture) set
+`popoutCompatible: false` in their manifests. These plugins contribute
+to slots the popout shell does not render, so loading them is dead work.
+Filtering them reduces the popout boot set from ~26 to ~14 plugins
+(SH-020).
 
-- Determining a minimal set requires a static dependency graph the
-  shell does not have. Most contributing plugins announce themselves
-  through `viewRegistry.register` at activation time, and a Leaf can
-  carry any `viewType` — restricting the popout's plugin set means a
-  popped-out canvas, bases, terminal, or graph leaf would silently
-  fall through to the `empty` view creator.
-- The cost is small. Most plugins are lazy-activated via
-  `activationEvents`. A second `host.loadAll(DEFAULT_ON_PLUGINS)` adds
-  ~100 ms to popout open on a typical machine and zero steady-state
-  cost.
-- Plugin activation is idempotent on a fresh JS context. There is no
-  shared state between the main window's `PluginRegistry` and the
-  popout's, so re-running activation in the popout is a clean
-  registration into a fresh registry.
+The original "full parity" approach was shipped in Phase 2b and
+superseded by SH-020 for the following reasons:
+
+- The trimmed set can now be declared statically via the manifest flag
+  rather than inferred from a dependency graph: plugins that register
+  `viewRegistry.register` contributions need to run in popout-mode so
+  any leaf type can render; chrome-only plugins do not.
+- The flag defaults to `true` (absent = compatible), so new plugins
+  load in popouts by default and opt out explicitly when they know they
+  are chrome-only. This makes the common case zero-friction.
 
 **Three subsystems are intentionally skipped in popout-mode boot:**
 
@@ -77,14 +79,25 @@ was rejected because:
   popout (none today — popouts are single-leaf) would not persist;
   Phase-3 multi-leaf popouts will need a different sync model.
 
-**Plugins that do contribute main-window chrome (activity bar, status
-bar, ribbon, title bar) still activate in popout-mode**, but their
-contributions go into the popout's own SlotRegistry — which the popout
-shell does not render. This is a small amount of dead work in exchange
-for a simple, uniform boot path. A plugin that needs to skip an
-expensive contribution in popout-mode can read
-`contextKeyService.snapshot()['popoutMode'] === true`, which the popout
-boot path sets before activation.
+**Popout-compatible allowlist** (DEFAULT_ON plugins with
+`popoutCompatible: true` or absent):
+
+| Plugin id | Reason needed |
+|---|---|
+| `core.configurationService` | all plugins depend on it |
+| `core.notificationService` | view plugins may raise notifications |
+| `core.fileSystemService` | editor / file-browser leaf needs fs |
+| `core.themeService` | theming tokens must resolve |
+| `core.zoom` | per-window zoom shortcuts |
+| `nexus.workspace` | manages the popout leaf tree |
+| `nexus.files` | file-browser leaf |
+| `nexus.editor` | markdown editor leaf |
+| `nexus.outline` | document outline leaf |
+| `nexus.commandPalette` | keyboard dispatch layer |
+| `nexus.confirm` | confirmation dialogs used by view plugins |
+| `nexus.search` | search leaf |
+| `nexus.canvas` | canvas leaf |
+| `nexus.bases` | bases directory leaf |
 
 ### 2. Cross-window sync — through the shared kernel only
 

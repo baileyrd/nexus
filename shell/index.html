@@ -4,12 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Shell</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
+    <!-- SH-010: Self-hosted fonts. woff2 files live in public/fonts/.
+         See shell/public/fonts/README.md for the download instructions.
+         The @font-face declarations below reference /fonts/* which Vite
+         copies from public/ to dist/ verbatim. Using font-display:swap
+         so the system stack renders immediately while the custom fonts
+         load, matching what the Google Fonts stylesheet did. -->
+    <style>
+      @font-face { font-family: 'Inter'; src: url('/fonts/Inter-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+      @font-face { font-family: 'Inter'; src: url('/fonts/Inter-Medium.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+      @font-face { font-family: 'Inter'; src: url('/fonts/Inter-SemiBold.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+      @font-face { font-family: 'Inter'; src: url('/fonts/Inter-Bold.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+
+      @font-face { font-family: 'IBM Plex Serif'; src: url('/fonts/IBMPlexSerif-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+      @font-face { font-family: 'IBM Plex Serif'; src: url('/fonts/IBMPlexSerif-Italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+      @font-face { font-family: 'IBM Plex Serif'; src: url('/fonts/IBMPlexSerif-Medium.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+      @font-face { font-family: 'IBM Plex Serif'; src: url('/fonts/IBMPlexSerif-SemiBold.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+
+      @font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+      @font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-Medium.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+    </style>
     <style>
       /* Design tokens live here (not in shell.css) because the webview
          reliably parses :root custom properties from inline <style>
@@ -83,6 +97,14 @@
         --size-4-5: 20px;
         --size-4-6: 24px;
 
+        /* ── Z-index scale (mirrors shell/src/shell/zIndex.ts) ──────── */
+        --z-chrome-controls:   100;
+        --z-dropdown:          200;
+        --z-overlay-floating:  900;
+        --z-overlay-modal:    1100;
+        --z-overlay-toast:    1200;
+        --z-overlay-fatal:    9999;
+
         /* ── Chrome dimensions ────────────────────────────────────── */
         --header-height: 30px;
 
@@ -105,85 +127,52 @@
         /* ── Shadow (unchanged) ───────────────────────────────────── */
         --shadow: var(--nx-shadow-lg, 0 1px 0 oklch(1 0 0 / 0.03) inset, 0 10px 30px oklch(0 0 0 / 0.35));
 
-        /* ──────────────────────────────────────────────────────────
-           Backwards-compat aliases — legacy Forge names that existing
-           .tsx inline styles and unmigrated selectors still reference.
-           Remove these once every consumer uses the Obsidian names
-           above. Nothing else in :root should depend on these.
-           ────────────────────────────────────────────────────────── */
-        --bg:          var(--background-primary);
-        --bg-raised:   var(--background-secondary);
-        --bg-soft:     var(--background-secondary-alt);
-        --bg-hover:    var(--background-modifier-hover);
-        --bg-active:   var(--background-modifier-active);
-        --line:        var(--background-modifier-border);
-        --line-soft:   var(--divider-color);
-        --fg:          var(--text-normal);
-        --fg-muted:    var(--text-muted);
-        --fg-dim:      var(--text-faint);
-        --accent:      var(--interactive-accent);
-        --accent-soft: var(--interactive-accent-soft);
-        --accent-ink:  var(--interactive-accent-ink);
-        --f-ui:        var(--font-interface);
-        --f-body:      var(--font-text);
-        --f-mono:      var(--font-monospace);
-        --r:           var(--radius-s);
-        --r-lg:        var(--radius-l);
-
-        /* Older still-in-tree legacy shims (VSCode-flavored names
-           used by some .tsx / .css selectors). Kept pointing at the
-           Obsidian tokens so nothing visibly shifts. */
-        --shell-bg:       var(--background-primary);
-        --shell-fg:       var(--text-normal);
-        --titlebar-bg:    var(--background-secondary);
-        --activitybar-bg: var(--background-secondary);
-        --sidebar-bg:     var(--background-secondary);
-        --editor-bg:      var(--background-primary);
-        --panel-bg:       var(--background-secondary);
-        --panel-bg-alt:   var(--background-secondary-alt);
-        --statusbar-bg:   var(--background-secondary);
-        --statusbar-fg:   var(--text-muted);
-        --border:         var(--background-modifier-border);
-        --list-hover:     var(--background-modifier-hover);
-        --list-active:    var(--background-modifier-active);
-        --input-bg:       var(--background-primary);
-        --font-ui:        var(--font-interface);
-        --font-mono:      var(--font-monospace);
-
-        /* `--color-*` aliases — referenced by SettingsPanelView and a
-           few other components. Bridged to themed tokens so they
-           inherit the active palette instead of falling through to
-           hardcoded #e0e0e0/#fdd/#900 fallbacks. */
-        --color-border:   var(--background-modifier-border);
-        --color-bg:       var(--background-primary);
-        --color-accent:   var(--interactive-accent);
-        --color-error:    var(--risk);
-        --color-error-bg: var(--risk-soft);
-
-        /* Bases plugin aliases — bases/* .tsx files use these names
-           rather than the canonical Obsidian/--bg/--fg ones. Bridged
-           so picking any kernel theme repaints the bases UI too. */
-        --bg-primary:     var(--background-primary);
-        --bg-raised-dim:  var(--background-secondary-alt);
-        --bg-input:       var(--background-primary);
-        --bg-selection:   var(--interactive-accent-soft);
-        --border-subtle:  var(--background-modifier-border);
-        --fg-primary:     var(--text-normal);
-        --fg-on-accent:   var(--interactive-accent-ink);
+        /* SH-012: Legacy alias families (Forge, VSCode, color-*, bases)
+           have been migrated to the canonical Obsidian token names above.
+           This alias block has been removed. */
       }
 
+      /* SH-004 / SH-014: density scales prose and chrome together.
+         SH-014: kernel themes ship --nx-density-<level>-* variables so
+         themes can override density sizing. The hex fallbacks match the
+         canonical defaults and protect against FOUC before the kernel
+         hydrates. */
       :root,
-      [data-density="cozy"] { --ui-size: 13px; --row-h: 26px; --body-size: 16px; }
-      [data-density="compact"] { --ui-size: 12px; --row-h: 22px; --body-size: 15px; }
-      [data-density="spacious"] { --ui-size: 14px; --row-h: 30px; --body-size: 17px; }
+      [data-density="cozy"]    {
+        --ui-size:           var(--nx-density-cozy-ui-size, 13px);
+        --row-h:             var(--nx-density-cozy-row-h, 26px);
+        --body-size:         var(--nx-density-cozy-body-size, 16px);
+        --chrome-row-height: var(--nx-density-cozy-chrome-row-height, 36px);
+        --chrome-icon-size:  var(--nx-density-cozy-chrome-icon-size, 24px);
+      }
+      [data-density="compact"] {
+        --ui-size:           var(--nx-density-compact-ui-size, 12px);
+        --row-h:             var(--nx-density-compact-row-h, 22px);
+        --body-size:         var(--nx-density-compact-body-size, 15px);
+        --chrome-row-height: var(--nx-density-compact-chrome-row-height, 30px);
+        --chrome-icon-size:  var(--nx-density-compact-chrome-icon-size, 20px);
+      }
+      [data-density="spacious"] {
+        --ui-size:           var(--nx-density-spacious-ui-size, 14px);
+        --row-h:             var(--nx-density-spacious-row-h, 30px);
+        --body-size:         var(--nx-density-spacious-body-size, 17px);
+        --chrome-row-height: var(--nx-density-spacious-chrome-row-height, 40px);
+        --chrome-icon-size:  var(--nx-density-spacious-chrome-icon-size, 28px);
+      }
 
       /* Prevent white flash before the React tree mounts. */
       html, body { margin: 0; padding: 0; background: var(--background-primary); height: 100%; overflow: hidden; }
       #root { height: 100%; }
+      /* SH-002: modal portal root. Sits above #root in stacking order
+         because it appears later in the DOM. pointer-events:none on the
+         container so the workspace beneath stays interactive when no
+         modal is open; individual modals set pointer-events:auto. */
+      #modal-root { position: fixed; inset: 0; pointer-events: none; z-index: var(--z-overlay-modal); }
     </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="modal-root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

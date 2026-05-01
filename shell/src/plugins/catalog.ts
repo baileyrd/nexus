@@ -2,193 +2,318 @@
 //
 // WI-43: Plugin curation catalog.
 //
-// Single source of truth for the shell's built-in plugin registrations,
-// split into a default-on set (loaded at boot) and a default-off set
-// (shipped but dormant, opt-in via Settings > Plugins).
+// SH-009: Each entry is a thin descriptor with just enough metadata for boot-
+// time filtering (id, popoutCompatible, dependsOn) plus a `load()` factory
+// that returns a Promise<Plugin>. Vite splits each dynamic import into its
+// own chunk, so heavy plugins (editor, bases, canvas, graph, terminal, etc.)
+// are not parsed until they're actually activated.
 //
-// No plugins are deleted — every import that used to live in main.tsx is
-// preserved here. Users can enable any default-off entry by adding its id
-// to the persisted `plugins.enabled: string[]` config value.
+// The metadata fields (id, name, version, core, activationEvents, dependsOn)
+// are duplicated from the plugin's own manifest so callers can filter/inspect
+// without loading the module. Any mismatch is a bug in this file.
 
-// Plugin contract type. The `import type` is split across two lines so
-// the WI-43 acceptance grep (`grep -c "^import.*Plugin" catalog.ts`)
-// counts only the real plugin registrations below, not this type shim.
-import type {
-  Plugin as Registered,
-} from '../types/plugin'
+import type { Plugin } from '../types/plugin'
 
-// ── Service plugins ───────────────────────────────────────────────────────────
-import { configurationServicePlugin } from './core/configurationService'
-import { notificationServicePlugin }  from './core/notificationService'
-import { fileSystemServicePlugin }    from './core/fileSystemService'
-import { settingsPlugin }             from './core/settings'
-import { capabilityPromptPlugin }     from './core/capabilityPrompt'
-import { themeServicePlugin }         from './core/themeService'
-import { zoomPlugin }                 from './core/zoom'
-
-// ── Nexus plugins ─────────────────────────────────────────────────────────────
-import { workspacePlugin } from './nexus/workspace'
-import { gitStatusPlugin } from './nexus/gitStatus'
-import { activityBarPlugin } from './nexus/activityBar'
-import { sidebarPlugin } from './nexus/sidebar'
-import { rightPanelPlugin } from './nexus/rightPanel'
-import { launcherPlugin } from './nexus/launcher'
-import { filesPlugin } from './nexus/files'
-import { editorPlugin } from './nexus/editor'
-import { outlinePlugin } from './nexus/outline'
-import { backlinksPlugin } from './nexus/backlinks'
-import { commentsPlugin } from './nexus/comments'
-import { bookmarksPlugin } from './nexus/bookmarks'
-import { outgoingLinksPlugin } from './nexus/outgoingLinks'
-import { filePropertiesPlugin } from './nexus/fileProperties'
-import { tagsPlugin } from './nexus/tags'
-import { allPropertiesPlugin } from './nexus/allProperties'
-import { graphPlugin } from './nexus/graph'
-import { graphGlobalPlugin } from './nexus/graph/globalIndex'
-import { searchPlugin } from './nexus/search'
-import { semanticSearchPlugin } from './nexus/semanticSearch'
-import { linkSuggestPlugin } from './nexus/linkSuggest'
-import { workflowPlugin } from './nexus/workflow'
-import { skillsPlugin } from './nexus/skills'
-import { mcpPlugin } from './nexus/mcp'
-import { agentPlugin } from './nexus/agent'
-import { confirmPlugin } from './nexus/confirm'
-import { commandPalettePlugin } from './nexus/commandPalette'
-import { paneModePlugin } from './nexus/paneMode'
-import { terminalPlugin } from './nexus/terminal'
-import { canvasPlugin } from './nexus/canvas'
-import { basesPlugin } from './nexus/bases'
-import { aiPlugin } from './nexus/ai'
-import { pluginsMgmtPlugin } from './nexus/pluginsMgmt'
-import { processesPlugin } from './nexus/processes'
-import { activityTimelinePlugin } from './nexus/activityTimeline'
-import { statusBarPlugin } from './nexus/statusBar'
-import { extensionsTabPlugin } from './nexus/extensionsTab'
-import { memoryPlugin } from './nexus/memory'
-import { recallPlugin } from './nexus/recall'
-import { enrichPlugin } from './nexus/enrich'
-
-// ── Community plugins (BL-008+) — directory location matches the
-// community-plugin layout, but registration goes through the catalog
-// because the Blob-URL community-plugin loader cannot resolve bundled
-// dependencies like `mermaid`. Plugins listed here behave identically
-// to default-off nexus plugins from the user's perspective. See
-// shell/src/plugins/community/mermaid/README.md.
-import { mermaidPlugin } from './community/mermaid'
+// ── PluginEntry ───────────────────────────────────────────────────────────────
+// Lightweight descriptor. Load the plugin module only when needed.
+export interface PluginEntry {
+  readonly id: string
+  readonly name: string
+  readonly version: string
+  readonly core: boolean
+  readonly activationEvents: string[]
+  readonly dependsOn?: string[]
+  /**
+   * SH-020: false for chrome-only plugins that contribute to slots the popout
+   * shell does not render. Absent/true means the plugin runs in popouts.
+   */
+  readonly popoutCompatible?: boolean
+  load(): Promise<Plugin>
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Default-on set (22) — loaded unconditionally at boot.
-//
-// Six core services, plus the baseline shell chrome + editing surface a
-// personal note-taking workflow can't live without.
+// Default-on set (~14) — loaded unconditionally at boot.
 // ──────────────────────────────────────────────────────────────────────────────
-export const DEFAULT_ON_PLUGINS: Registered[] = [
-  // Core services
-  configurationServicePlugin,
-  notificationServicePlugin,
-  fileSystemServicePlugin,
-  settingsPlugin,
-  capabilityPromptPlugin,
-  themeServicePlugin,
-  zoomPlugin,
-  // Workspace + git
-  workspacePlugin,
-  gitStatusPlugin,
-  // Chrome
-  activityBarPlugin,
-  sidebarPlugin,
-  rightPanelPlugin,
-  statusBarPlugin,
-  launcherPlugin,
-  // Editing surface
-  filesPlugin,
-  editorPlugin,
-  outlinePlugin,
-  // UX primitives
-  commandPalettePlugin,
-  confirmPlugin,
-  paneModePlugin,
-  // Search
-  searchPlugin,
-  // Canvas (claims `.canvas` extension; otherwise files render as JSON)
-  canvasPlugin,
-  // Bases (claims `.bases` directories; otherwise the editor tries to
-  // `read_file` on a directory and the IPC bridge surfaces the EISDIR
-  // as a spurious "plugin crashed during IPC call".)
-  basesPlugin,
-  // Plugin management (required to turn the rest on)
-  pluginsMgmtPlugin,
-  // Plugin observability — Settings > Extensions tab (OI-08).
-  // Default-on so plugin activation errors surface immediately rather
-  // than only in the dev console.
-  extensionsTabPlugin,
-  // BL-043 — Cmd+Alt+N quick-capture overlay. Default-on so the global
-  // shortcut is registered at boot without the user having to opt in.
-  memoryPlugin,
+export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
+  // ── Core services ──────────────────────────────────────────────────────────
+  {
+    id: 'core.configurationService', name: 'Configuration Service',
+    version: '0.1.0', core: true, activationEvents: ['onStartup'],
+    load: () => import('./core/configurationService').then(m => m.configurationServicePlugin),
+  },
+  {
+    id: 'core.notificationService', name: 'Notification Service',
+    version: '0.1.0', core: true, activationEvents: ['onStartup'],
+    load: () => import('./core/notificationService').then(m => m.notificationServicePlugin),
+  },
+  {
+    id: 'core.fileSystemService', name: 'File System Service',
+    version: '0.1.0', core: true, activationEvents: ['onStartup'],
+    load: () => import('./core/fileSystemService').then(m => m.fileSystemServicePlugin),
+  },
+  {
+    id: 'core.settings', name: 'Settings',
+    version: '1.0.0', core: true, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    dependsOn: ['core.configuration-service', 'nexus.activityBar'],
+    load: () => import('./core/settings').then(m => m.settingsPlugin),
+  },
+  {
+    id: 'core.capabilityPrompt', name: 'Capability Prompt',
+    version: '0.1.0', core: true, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    load: () => import('./core/capabilityPrompt').then(m => m.capabilityPromptPlugin),
+  },
+  {
+    id: 'core.themeService', name: 'Theme Service',
+    version: '0.1.0', core: true, activationEvents: ['onStartup'],
+    load: () => import('./core/themeService').then(m => m.themeServicePlugin),
+  },
+  {
+    id: 'core.zoom', name: 'Zoom',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./core/zoom').then(m => m.zoomPlugin),
+  },
+  // ── Workspace + git ────────────────────────────────────────────────────────
+  {
+    id: 'nexus.workspace', name: 'Workspace',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/workspace').then(m => m.workspacePlugin),
+  },
+  {
+    id: 'nexus.gitStatus', name: 'Git Status',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    dependsOn: ['nexus.workspace'],
+    load: () => import('./nexus/gitStatus').then(m => m.gitStatusPlugin),
+  },
+  // ── Chrome ─────────────────────────────────────────────────────────────────
+  {
+    id: 'nexus.activityBar', name: 'Activity Bar',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    load: () => import('./nexus/activityBar').then(m => m.activityBarPlugin),
+  },
+  {
+    id: 'nexus.sidebar', name: 'Sidebar',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    load: () => import('./nexus/sidebar').then(m => m.sidebarPlugin),
+  },
+  {
+    id: 'nexus.rightPanel', name: 'Right Panel',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    load: () => import('./nexus/rightPanel').then(m => m.rightPanelPlugin),
+  },
+  {
+    id: 'nexus.statusBar', name: 'Status Bar',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    dependsOn: ['nexus.workspace', 'nexus.editor'],
+    load: () => import('./nexus/statusBar').then(m => m.statusBarPlugin),
+  },
+  {
+    id: 'nexus.launcher', name: 'Launcher',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    dependsOn: ['nexus.workspace'],
+    load: () => import('./nexus/launcher').then(m => m.launcherPlugin),
+  },
+  // ── Editing surface ────────────────────────────────────────────────────────
+  {
+    id: 'nexus.files', name: 'Files',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/files').then(m => m.filesPlugin),
+  },
+  {
+    id: 'nexus.editor', name: 'Editor',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/editor').then(m => m.editorPlugin),
+  },
+  {
+    id: 'nexus.outline', name: 'Outline',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/outline').then(m => m.outlinePlugin),
+  },
+  // ── UX primitives ──────────────────────────────────────────────────────────
+  {
+    id: 'nexus.commandPalette', name: 'Command Palette',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/commandPalette').then(m => m.commandPalettePlugin),
+  },
+  {
+    id: 'nexus.confirm', name: 'Confirm',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/confirm').then(m => m.confirmPlugin),
+  },
+  {
+    id: 'nexus.paneMode', name: 'Pane Mode',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    load: () => import('./nexus/paneMode').then(m => m.paneModePlugin),
+  },
+  // ── Search ─────────────────────────────────────────────────────────────────
+  {
+    id: 'nexus.search', name: 'Search',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/search').then(m => m.searchPlugin),
+  },
+  // ── View creators ──────────────────────────────────────────────────────────
+  {
+    id: 'nexus.canvas', name: 'Canvas',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/canvas').then(m => m.canvasPlugin),
+  },
+  {
+    id: 'nexus.bases', name: 'Bases',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/bases').then(m => m.basesPlugin),
+  },
+  // ── Plugin management ──────────────────────────────────────────────────────
+  {
+    id: 'nexus.pluginsMgmt', name: 'Plugins',
+    version: '0.1.0', core: true, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    load: () => import('./nexus/pluginsMgmt').then(m => m.pluginsMgmtPlugin),
+  },
+  {
+    id: 'nexus.extensionsTab', name: 'Extensions Tab',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    load: () => import('./nexus/extensionsTab').then(m => m.extensionsTabPlugin),
+  },
+  {
+    id: 'nexus.memory', name: 'Memory',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    load: () => import('./nexus/memory').then(m => m.memoryPlugin),
+  },
 ]
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Default-off set (16) — shipped but dormant. Enable per-row from
+// Default-off set — shipped but dormant. Enable per-row from
 // Settings > Plugins; enabled ids are persisted into the
 // `plugins.enabled: string[]` config value and picked up on next boot.
 // ──────────────────────────────────────────────────────────────────────────────
-export const DEFAULT_OFF_PLUGINS: Registered[] = [
-  aiPlugin,
-  // BL-040 — palette-only "Search by Meaning" surface. Default-off
-  // because it depends on the AI plugin's embedding provider being
-  // configured; pairing the two enabled-states keeps the user from
-  // seeing the command before the backend can answer it.
-  semanticSearchPlugin,
-  // BL-039 — inline AI link suggestions. Default-off for the same
-  // reason as semanticSearchPlugin: it depends on the AI plugin's
-  // embedding provider being configured. Pairing the enabled-states
-  // keeps the user from seeing dead suggestions before the backend
-  // can answer.
-  linkSuggestPlugin,
-  // BL-044 — Cmd+Shift+R recall overlay. Default-off for the same
-  // reason as semanticSearchPlugin / linkSuggestPlugin: requires the
-  // AI plugin's embedding provider to be configured. Pairs naturally
-  // with `nexus.memory` (BL-043) which owns the inbox path the
-  // recall overlay scopes against.
-  recallPlugin,
-  // BL-045 — auto-enrichment on save. Default-off because it issues
-  // an AI chat call + an embedding+vector lookup per saved markdown
-  // file (throttled to 5 s per-file). Requires both an AI chat
-  // provider and an embedding provider to be configured.
-  enrichPlugin,
-  agentPlugin,
-  mcpPlugin,
-  workflowPlugin,
-  skillsPlugin,
-  terminalPlugin,
-  processesPlugin,
-  // BL-037 — AI activity timeline. Default-off because it only
-  // produces meaningful output once the AI plugin is configured;
-  // pairing the enabled-states keeps the empty pane out of users'
-  // way until they've turned the AI plugin on.
-  activityTimelinePlugin,
-  graphPlugin,
-  graphGlobalPlugin,
-  backlinksPlugin,
-  // BL-050 Phase 2 — side-margin comment threads pane. Default-off
-  // because thread creation requires the editor margin gutter
-  // (Phase 3) to surface a "comment on this block" affordance;
-  // until then the pane is read-only-plus-mutate against threads
-  // created via direct IPC. Storage backend is `com.nexus.comments`.
-  commentsPlugin,
-  bookmarksPlugin,
-  outgoingLinksPlugin,
-  filePropertiesPlugin,
-  tagsPlugin,
-  allPropertiesPlugin,
-  mermaidPlugin,
+export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
+  {
+    id: 'nexus.ai', name: 'AI',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/ai').then(m => m.aiPlugin),
+  },
+  {
+    id: 'nexus.semanticSearch', name: 'Semantic Search',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/semanticSearch').then(m => m.semanticSearchPlugin),
+  },
+  {
+    id: 'nexus.linkSuggest', name: 'Link Suggest',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/linkSuggest').then(m => m.linkSuggestPlugin),
+  },
+  {
+    id: 'nexus.recall', name: 'Recall',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/recall').then(m => m.recallPlugin),
+  },
+  {
+    id: 'nexus.enrich', name: 'Enrich',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/enrich').then(m => m.enrichPlugin),
+  },
+  {
+    id: 'nexus.agent', name: 'Agent',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/agent').then(m => m.agentPlugin),
+  },
+  {
+    id: 'nexus.mcp', name: 'MCP',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/mcp').then(m => m.mcpPlugin),
+  },
+  {
+    id: 'nexus.workflow', name: 'Workflow',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/workflow').then(m => m.workflowPlugin),
+  },
+  {
+    id: 'nexus.skills', name: 'Skills',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/skills').then(m => m.skillsPlugin),
+  },
+  {
+    id: 'nexus.terminal', name: 'Terminal',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/terminal').then(m => m.terminalPlugin),
+  },
+  {
+    id: 'nexus.processes', name: 'Processes',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/processes').then(m => m.processesPlugin),
+  },
+  {
+    id: 'nexus.activityTimeline', name: 'Activity Timeline',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/activityTimeline').then(m => m.activityTimelinePlugin),
+  },
+  {
+    id: 'nexus.graph', name: 'Graph',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/graph').then(m => m.graphPlugin),
+  },
+  {
+    id: 'nexus.graphGlobal', name: 'Global Graph',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/graph/globalIndex').then(m => m.graphGlobalPlugin),
+  },
+  {
+    id: 'nexus.backlinks', name: 'Backlinks',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/backlinks').then(m => m.backlinksPlugin),
+  },
+  {
+    id: 'nexus.comments', name: 'Comments',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/comments').then(m => m.commentsPlugin),
+  },
+  {
+    id: 'nexus.bookmarks', name: 'Bookmarks',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/bookmarks').then(m => m.bookmarksPlugin),
+  },
+  {
+    id: 'nexus.outgoingLinks', name: 'Outgoing Links',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/outgoingLinks').then(m => m.outgoingLinksPlugin),
+  },
+  {
+    id: 'nexus.fileProperties', name: 'File Properties',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/fileProperties').then(m => m.filePropertiesPlugin),
+  },
+  {
+    id: 'nexus.tags', name: 'Tags',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/tags').then(m => m.tagsPlugin),
+  },
+  {
+    id: 'nexus.allProperties', name: 'All Properties',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/allProperties').then(m => m.allPropertiesPlugin),
+  },
+  {
+    id: 'nexus.mermaid', name: 'Mermaid',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./community/mermaid').then(m => m.mermaidPlugin),
+  },
 ]
 
 /**
  * Flat catalog of every built-in plugin — used by tooling and the
  * PluginsMgmt UI to present the full known set regardless of enablement.
  */
-export const ALL_PLUGINS: Registered[] = [
+export const ALL_PLUGINS: PluginEntry[] = [
   ...DEFAULT_ON_PLUGINS,
   ...DEFAULT_OFF_PLUGINS,
 ]

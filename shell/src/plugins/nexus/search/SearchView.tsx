@@ -103,11 +103,11 @@ export function SearchView({ onHitActivate }: SearchViewProps) {
       style={{
         background: 'transparent',
         border: 0,
-        borderBottom: '1px solid var(--line-soft)',
+        borderBottom: '1px solid var(--divider-color)',
         outline: 0,
         padding: '10px 14px',
-        color: 'var(--fg)',
-        fontFamily: 'var(--f-ui)',
+        color: 'var(--text-normal)',
+        fontFamily: 'var(--font-interface)',
         width: '100%',
         boxSizing: 'border-box',
       }}
@@ -118,15 +118,15 @@ export function SearchView({ onHitActivate }: SearchViewProps) {
   // empty query > no matches > results.
   let body: React.ReactNode
   if (!rootPath) {
-    body = <StateMessage color="var(--fg-dim)">Open a workspace to search.</StateMessage>
+    body = <StateMessage color="var(--text-faint)">Open a workspace to search.</StateMessage>
   } else if (error) {
     body = <StateMessage color="var(--risk)">{error}</StateMessage>
   } else if (loading) {
-    body = <StateMessage color="var(--fg-muted)">Searching…</StateMessage>
+    body = <StateMessage color="var(--text-muted)">Searching…</StateMessage>
   } else if (query.trim() === '') {
-    body = <StateMessage color="var(--fg-dim)">Type to search.</StateMessage>
+    body = <StateMessage color="var(--text-faint)">Type to search.</StateMessage>
   } else if (results.length === 0) {
-    body = <StateMessage color="var(--fg-dim)">No matches.</StateMessage>
+    body = <StateMessage color="var(--text-faint)">No matches.</StateMessage>
   } else {
     body = (
       <div ref={listRef} style={{ overflowY: 'auto', flex: 1 }}>
@@ -171,7 +171,7 @@ function StateMessage({
       style={{
         padding: '12px 14px',
         color,
-        fontFamily: 'var(--f-ui)',
+        fontFamily: 'var(--font-interface)',
         fontSize: 12,
       }}
     >
@@ -202,15 +202,15 @@ function ResultRow({ index, hit, selected, onHover, onPick }: ResultRowProps) {
       style={{
         padding: '8px 14px',
         cursor: 'pointer',
-        background: selected ? 'var(--accent-soft)' : 'transparent',
+        background: selected ? 'var(--interactive-accent-soft)' : 'transparent',
         transition: 'background 0.06s',
-        fontFamily: 'var(--f-ui)',
-        borderBottom: '1px solid var(--line-soft)',
+        fontFamily: 'var(--font-interface)',
+        borderBottom: '1px solid var(--divider-color)',
       }}
     >
       <div
         style={{
-          color: 'var(--fg)',
+          color: 'var(--text-normal)',
           fontSize: 13,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -221,7 +221,7 @@ function ResultRow({ index, hit, selected, onHover, onPick }: ResultRowProps) {
       </div>
       <div
         style={{
-          color: 'var(--fg-dim)',
+          color: 'var(--text-faint)',
           fontSize: 11,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -234,7 +234,7 @@ function ResultRow({ index, hit, selected, onHover, onPick }: ResultRowProps) {
       {showSnippet && (
         <div
           style={{
-            color: 'var(--fg-muted)',
+            color: 'var(--text-muted)',
             fontSize: 12,
             marginTop: 4,
             display: '-webkit-box',

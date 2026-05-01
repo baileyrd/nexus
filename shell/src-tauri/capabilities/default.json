@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default permissions for the shell",
-  "windows": ["main", "*"],
+  "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:default",

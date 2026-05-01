@@ -91,7 +91,7 @@ export function FileExplorerView() {
       </div>
 
       <div className="filter">
-        <Ic.search style={{ width: 12, height: 12, color: 'var(--fg-dim)' }} />
+        <Ic.search style={{ width: 12, height: 12, color: 'var(--text-faint)' }} />
         <input
           value={filter}
           onChange={e => setFilter(e.target.value)}
@@ -102,13 +102,13 @@ export function FileExplorerView() {
 
       <div className="tree">
         {!rootPath ? (
-          <div style={{ padding: 20, textAlign: 'center', color: 'var(--fg-dim)', fontSize: 12 }}>
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-faint)', fontSize: 12 }}>
             <p style={{ marginBottom: 10 }}>No folder open</p>
             <button
               onClick={handleOpenFolder}
               style={{
-                background: 'var(--accent)', color: 'var(--accent-ink)',
-                border: 'none', borderRadius: 'var(--r)',
+                background: 'var(--interactive-accent)', color: 'var(--interactive-accent-ink)',
+                border: 'none', borderRadius: 'var(--radius-s)',
                 padding: '6px 14px', fontSize: 12, cursor: 'pointer',
                 fontWeight: 500,
               }}

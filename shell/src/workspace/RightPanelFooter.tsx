@@ -51,9 +51,9 @@ export function RightPanelFooter(): JSX.Element {
         alignItems: 'center',
         gap: 6,
         padding: '4px 10px',
-        borderTop: '1px solid var(--divider-color, var(--line, #333))',
-        background: 'var(--background-secondary, var(--bg-raised, #252526))',
-        color: 'var(--fg-muted)',
+        borderTop: '1px solid var(--divider-color)',
+        background: 'var(--background-secondary)',
+        color: 'var(--text-muted)',
         fontSize: 11,
         fontVariantNumeric: 'tabular-nums',
         overflow: 'hidden',
@@ -79,7 +79,7 @@ export function RightPanelFooter(): JSX.Element {
           height: 7,
           borderRadius: '50%',
           flexShrink: 0,
-          background: synced ? 'var(--ok)' : 'var(--fg-dim)',
+          background: synced ? 'var(--ok)' : 'var(--text-faint)',
           boxShadow: synced ? '0 0 4px var(--ok)' : 'none',
         }}
       />

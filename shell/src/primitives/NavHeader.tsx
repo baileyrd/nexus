@@ -57,7 +57,7 @@ export function NavButtonsContainer({
         gap: 'var(--size-2-1)',
         ...(hasSeparator
           ? {
-              borderBottom: '1px solid var(--divider-color, var(--line-soft))',
+              borderBottom: '1px solid var(--divider-color)',
               paddingBottom: 'var(--size-2-3)',
               marginBottom: 'var(--size-4-2)',
             }
