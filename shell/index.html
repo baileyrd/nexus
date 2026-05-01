@@ -4,12 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Shell</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
+    <!-- SH-010: Self-hosted fonts. woff2 files live in public/fonts/.
+         See shell/public/fonts/README.md for the download instructions.
+         The @font-face declarations below reference /fonts/* which Vite
+         copies from public/ to dist/ verbatim. Using font-display:swap
+         so the system stack renders immediately while the custom fonts
+         load, matching what the Google Fonts stylesheet did. -->
+    <style>
+      @font-face { font-family: 'Inter'; src: url('/fonts/Inter-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+      @font-face { font-family: 'Inter'; src: url('/fonts/Inter-Medium.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+      @font-face { font-family: 'Inter'; src: url('/fonts/Inter-SemiBold.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+      @font-face { font-family: 'Inter'; src: url('/fonts/Inter-Bold.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+
+      @font-face { font-family: 'IBM Plex Serif'; src: url('/fonts/IBMPlexSerif-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+      @font-face { font-family: 'IBM Plex Serif'; src: url('/fonts/IBMPlexSerif-Italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+      @font-face { font-family: 'IBM Plex Serif'; src: url('/fonts/IBMPlexSerif-Medium.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+      @font-face { font-family: 'IBM Plex Serif'; src: url('/fonts/IBMPlexSerif-SemiBold.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+
+      @font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+      @font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-Medium.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+    </style>
     <style>
       /* Design tokens live here (not in shell.css) because the webview
          reliably parses :root custom properties from inline <style>
