@@ -20,7 +20,7 @@ import React, {
   type CSSProperties,
 } from 'react'
 import { Icon } from '../icons/index.tsx'
-import { WindowControls } from '../shell/WindowControls'
+import { WindowControls, IS_MACOS } from '../shell/WindowControls'
 import { zIndex } from '../shell/zIndex'
 import type {
   FloatingWindow as FloatingWindowNode,
@@ -105,6 +105,20 @@ export function Workspace(): JSX.Element {
   const bottomSplit = workspace.bottomSplit
   const floating = workspace.floating
 
+  // SH-015: Update document.title on active-leaf-change so macOS shows the
+  // current file in the proxy icon / window title bar (also benefits
+  // Windows / Linux task-bar previews).
+  useEffect(() => {
+    const off = workspace.on('active-leaf-change', (payload: unknown) => {
+      const leaf = (payload as { leaf?: { getDisplayText?: () => string } } | undefined)?.leaf
+      const text = leaf?.getDisplayText?.()
+      if (typeof text === 'string' && text.length > 0) {
+        document.title = `${text} — Nexus`
+      }
+    })
+    return off
+  }, [])
+
   return (
     <div className="workspace-root" style={ROOT_STYLE}>
       <div className="workspace-upper" style={UPPER_ROW_STYLE}>
@@ -117,15 +131,13 @@ export function Workspace(): JSX.Element {
         </div>
         <SidedockFrame side="right" dock={rightSplit} />
       </div>
-      {/* Floating window-controls anchor. Absolutely positioned at the
-          window's top-right corner so it sits over whichever view /
-          panel happens to render there, without introducing a new
-          title-bar row that would stack beneath the native chrome. */}
+      {/* SH-015: Floating window-controls anchor. macOS positions controls
+          at top-left (traffic-light convention); Windows/Linux at top-right. */}
       <div
         style={{
           position: 'absolute',
           top: 0,
-          right: 0,
+          ...(IS_MACOS ? { left: 0 } : { right: 0 }),
           zIndex: zIndex.chromeControls,
           pointerEvents: 'auto',
         }}
@@ -642,12 +654,17 @@ function TabStrip({
     flex: '0 0 auto',
   }
 
-  // Trailing controls (chevron, panel-toggle) must never shrink or be
-  // clipped — at narrow window widths they would otherwise slide under
-  // the absolutely-positioned WindowControls (z-index 100). They live
-  // in a fixed-width sibling container so the tabs scroll independently.
-  const reservesWindowControls =
-    sideDock === 'right' || (isMainDock && workspace.rightSplit.collapsed)
+  // SH-015: Reserve edge space so tabs never slide under the absolute
+  // WindowControls cluster. On Windows/Linux the cluster is top-right
+  // (3×40=120px + 8px gap → paddingRight:128); on macOS it is top-left
+  // (3×12px circles + gaps + 8px padding → ~60px, use paddingLeft:68
+  // so the first tab stays clear of the traffic lights).
+  const reservesWindowControls = IS_MACOS
+    ? sideDock === 'left' || (isMainDock && workspace.leftSplit.collapsed)
+    : sideDock === 'right' || (isMainDock && workspace.rightSplit.collapsed)
+  const edgePadding = IS_MACOS
+    ? (reservesWindowControls ? { paddingLeft: 68 } : {})
+    : (reservesWindowControls ? { paddingRight: 128 } : {})
 
   return (
     <div
@@ -670,13 +687,7 @@ function TabStrip({
         // main dock's view-header.
         height: 36,
         overflow: 'hidden',
-        // Reserve horizontal space at the trailing edge for the absolute
-        // WindowControls cluster (3 × 40px = 120px) when this tab strip is
-        // the rightmost visible column — plus an 8px gap so the trailing
-        // tab controls (chevron + sidedock toggle) don't butt directly up
-        // against min/max/close. That's the right sidedock when expanded,
-        // or the main dock when the right sidedock is collapsed.
-        ...(reservesWindowControls ? { paddingRight: 128 } : {}),
+        ...edgePadding,
       }}
     >
       <div
