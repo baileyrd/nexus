@@ -117,7 +117,6 @@ pub struct StorageEngine {
     pool: r2d2::Pool<SqliteConnectionManager>,
     write_conn: Mutex<rusqlite::Connection>,
     search_index: SearchIndex,
-    watcher: Option<watcher::Watcher>,
     graph: Arc<RwLock<graph::KnowledgeGraph>>,
 }
 
@@ -1538,61 +1537,6 @@ impl StorageEngine {
         Ok(())
     }
 
-    // ── Watcher ───────────────────────────────────────────────────────────────
-
-    /// Return the watcher event receiver, if the watcher started successfully.
-    #[must_use]
-    pub fn watch_changes(&self) -> Option<&std::sync::mpsc::Receiver<StorageEvent>> {
-        self.watcher.as_ref().map(watcher::Watcher::events)
-    }
-
-    // ── Watcher Reconcile ────────────────────────────────────────────────────
-
-    /// Process pending file watcher events, re-indexing changed files.
-    ///
-    /// Drains all pending events from the watcher (non-blocking). For each event:
-    /// - `FileCreated`/`FileModified`: re-reads from disk and re-indexes
-    /// - `FileDeleted`: removes from index and graph
-    /// - `FileRenamed`: removes old path, indexes new path
-    ///
-    /// Returns the number of events processed.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`StorageError`] on I/O or database failure.
-    pub fn process_watcher_events(&self) -> Result<usize, StorageError> {
-        let rx = match self.watcher.as_ref() {
-            Some(w) => w.events(),
-            None => return Ok(0),
-        };
-
-        let mut count = 0;
-        while let Ok(event) = rx.try_recv() {
-            match &event {
-                StorageEvent::FileCreated { path, .. }
-                | StorageEvent::FileModified { path, .. } => {
-                    let abs = self.forge.root().join(path);
-                    if let Ok(bytes) = std::fs::read(&abs) {
-                        let _ = self.write_file(path, &bytes);
-                    }
-                }
-                StorageEvent::FileDeleted { path } => {
-                    let _ = self.delete_file(path);
-                }
-                StorageEvent::FileRenamed { from, to, .. } => {
-                    let _ = self.delete_file(from);
-                    let abs = self.forge.root().join(to);
-                    if let Ok(bytes) = std::fs::read(&abs) {
-                        let _ = self.write_file(to, &bytes);
-                    }
-                }
-            }
-            count += 1;
-        }
-
-        Ok(count)
-    }
-
     // ── Obsidian `.base` (read-only) ──────────────────────────────────────────
 
     /// Read, parse, and evaluate an Obsidian single-file `.base`
@@ -1731,8 +1675,12 @@ fn open_internal(
     // 6. Open SearchIndex.
     let search_index = SearchIndex::open(&forge.search_dir())?;
 
-    // 7. Start file watcher (best-effort).
-    let watcher = Watcher::start(forge.root(), config.debounce_ms).ok();
+    // (Watcher creation moved out of the engine in #80 — the engine
+    // is now `Send + Sync` so `StorageCorePlugin` can hold it as
+    // `Arc<StorageEngine>` and dispatch IPC handlers concurrently
+    // without a per-call mutex. The plugin's `on_start` hook starts
+    // the production watcher and moves it into a dedicated bridge
+    // thread; the engine no longer needs its own.)
 
     // 8. If not new: run reconcile against write_conn.
     if !is_new {
@@ -1753,7 +1701,6 @@ fn open_internal(
         pool,
         write_conn: Mutex::new(write_conn),
         search_index,
-        watcher,
         graph,
     })
 }

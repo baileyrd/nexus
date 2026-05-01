@@ -12,7 +12,7 @@
 //! explicitly after batches of changes.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use nexus_kernel::EventBus;
@@ -255,10 +255,12 @@ pub struct StorageCorePlugin {
     event_bus: Arc<EventBus>,
     /// Opened by `on_init`; used by the IPC dispatch handlers.
     ///
-    /// Wrapped in [`Mutex`] purely so the plugin stays `Sync` — `StorageEngine`
-    /// itself owns a `Watcher` whose `mpsc::Receiver` is `Send` but not `Sync`.
-    /// Storage methods all take `&self` so no fine-grained locking is needed.
-    engine: Option<Mutex<StorageEngine>>,
+    /// Wrapped in [`Arc`] for cheap clone into background threads
+    /// (the bridge loop, parallel index workers, …). `StorageEngine`
+    /// is `Send + Sync` post-#80 — its methods all take `&self` and
+    /// it no longer owns a non-`Sync` `mpsc::Receiver` — so concurrent
+    /// IPC dispatch needs no per-call locking.
+    engine: Option<Arc<StorageEngine>>,
     stop_tx: Option<mpsc::SyncSender<()>>,
     bridge_thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -284,10 +286,11 @@ impl StorageCorePlugin {
     /// Direct access to the underlying engine for the bootstrap/CLI during
     /// migration. Returns `None` before `on_init` has run successfully.
     ///
-    /// Callers must lock the returned [`Mutex`]; in practice the lock is
-    /// always held briefly because [`StorageEngine`] methods all take `&self`.
+    /// `StorageEngine` is `Send + Sync`; callers can clone the
+    /// returned `Arc` cheaply and dispatch concurrently without
+    /// locking. See issue #80.
     #[must_use]
-    pub fn engine(&self) -> Option<&Mutex<StorageEngine>> {
+    pub fn engine(&self) -> Option<&Arc<StorageEngine>> {
         self.engine.as_ref()
     }
 }
@@ -315,7 +318,7 @@ impl CorePlugin for StorageCorePlugin {
                 reason: format!("failed to open storage engine: {e}"),
             }
         })?;
-        self.engine = Some(Mutex::new(engine));
+        self.engine = Some(Arc::new(engine));
         Ok(())
     }
 
@@ -375,11 +378,13 @@ impl CorePlugin for StorageCorePlugin {
             _ => {}
         }
 
-        let engine_mutex = self.engine.as_ref().ok_or_else(|| PluginError::ExecutionFailed {
+        // Engine is `Arc<StorageEngine>`; no per-call locking. Methods
+        // all take `&self`, internal write paths use a fine-grained
+        // mutex on the write connection where needed. See issue #80.
+        let engine = self.engine.as_ref().ok_or_else(|| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
             reason: "storage engine not initialised (on_init did not run)".to_string(),
         })?;
-        let engine = engine_mutex.lock().map_err(|_| exec_err("engine lock poisoned".to_string()))?;
 
         match handler_id {
             HANDLER_QUERY_FILES => {
@@ -506,6 +511,19 @@ impl CorePlugin for StorageCorePlugin {
             }
             HANDLER_WRITE_VAULT_FILE => {
                 let path = path_arg(args, "write_vault_file")?;
+                // The handler is documented as ".forge/-prefixed
+                // shell metadata only" — `write_raw` skips FTS,
+                // graph, and watcher updates, so a vault path
+                // (e.g. `notes/foo.md`) written here would silently
+                // diverge from the index. Confine to the `.forge/`
+                // subdirectory; user-facing writes must go through
+                // `HANDLER_WRITE_FILE`. See issue #80.
+                if !is_forge_metadata_path(&path) {
+                    return Err(exec_err(format!(
+                        "write_vault_file: '{path}' is outside the .forge/ \
+                         metadata namespace; vault writes must go through write_file"
+                    )));
+                }
                 let bytes: Vec<u8> = args
                     .get("bytes")
                     .ok_or_else(|| exec_err("write_vault_file: missing 'bytes'".to_string()))
@@ -1045,6 +1063,18 @@ fn parse_args<T: serde::de::DeserializeOwned>(
     }
     serde_json::from_value(value.clone())
         .map_err(|e| exec_err(format!("{command}: invalid args: {e}")))
+}
+
+/// True iff `path` is a forge-relative path inside the `.forge/`
+/// metadata directory (the namespace `HANDLER_WRITE_VAULT_FILE` is
+/// documented to own — workspace.json, kv.sqlite3 sidecars, plugin
+/// state, etc.). Accepts both `/`-separated POSIX paths and
+/// `\`-separated Windows-style paths so the check does the right
+/// thing regardless of the platform-native separator the caller
+/// happens to send.
+fn is_forge_metadata_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    normalized == ".forge" || normalized.starts_with(".forge/")
 }
 
 fn path_arg(value: &serde_json::Value, command: &str) -> Result<String, PluginError> {
