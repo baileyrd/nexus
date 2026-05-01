@@ -314,6 +314,23 @@ fn set_plugin_granted_capabilities(
     if !p.exists() {
         return Err(format!("plugin_dir does not exist: {plugin_dir}"));
     }
+    // Issue #86. Pre-fix this was a pure pass-through — a buggy or
+    // malicious frontend could persist `["definitely-fake-cap"]` to
+    // disk; the kernel's `load_granted_high_risk_caps` would silently
+    // filter unknowns at load time, so the bad string just sat there
+    // confusing operators and complicating audit. Validate every
+    // entry against the canonical kernel enum at write time so the
+    // file is always well-formed.
+    for cap in &capabilities {
+        if nexus_plugin_api::Capability::from_str(cap).is_err() {
+            return Err(format!(
+                "set_plugin_granted_capabilities: '{cap}' is not a recognised \
+                 capability — refusing to persist garbage to granted_caps.json. \
+                 Wire form is the dotted kernel name (e.g. 'fs.read', \
+                 'process.spawn')."
+            ));
+        }
+    }
     let entry = GrantedCapabilityEntry { version, capabilities };
     write_granted_entry(p, &entry)
 }

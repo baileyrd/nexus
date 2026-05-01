@@ -13,6 +13,7 @@ import { PLUGIN_API_VERSION } from '@nexus/extension-api'
 import type { Plugin }   from '../types/plugin'
 import type { SandboxOrchestrator } from './sandbox/SandboxOrchestrator'
 import { parseManifestCapabilities } from '../plugins/nexus/pluginsMgmt/capabilityInfo'
+import { assertValidPluginId } from './PluginAPI'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -282,6 +283,16 @@ async function loadOnePlugin(
   manifest: CommunityPluginManifest,
   options: LoadCommunityPluginsOptions,
 ): Promise<Plugin | null> {
+  // Issue #86. `assertValidPluginId` (in PluginAPI.ts) forbids `:`
+  // because it's the separator inside `plugin:<id>:<key>`
+  // localStorage keys — a plugin id like `"a:b"` would otherwise
+  // collide with the `a` plugin's namespace. The check fires
+  // implicitly later when `apiFactory(pluginId)` runs, but by then
+  // the bad id has already been registered, persisted, and
+  // referenced in event subscriptions. Rejecting at manifest-parse
+  // time means a malformed id never enters the registry.
+  assertValidPluginId(manifest.id)
+
   // WI-33: reject incompatible plugins BEFORE touching their JS bundle.
   // Throwing here surfaces as a rejected Promise in
   // `loadEnabledCommunityPlugins`, which already logs + skips the plugin.
