@@ -2286,6 +2286,35 @@ body:not(.show-view-header):not(.is-phone) .view-header {
   cursor: col-resize;
 }
 
+/* ─── SH-003: narrow-viewport responsive layout ─────────────────────────── */
+/* body.is-narrow is written by useViewportClass() when the window is < 768 px.
+   At narrow widths the left and right sidedocks default to collapsed (see
+   buildDefaultLayout). If the user manually expands one it renders in overlay
+   mode (position: fixed) so it floats over the editor without compressing it.
+   body.is-medium / body.is-wide are available for future narrowing rules. */
+body.is-narrow .workspace-sidedock {
+  position: fixed;
+  top: var(--header-height, 30px);
+  bottom: 0;
+  z-index: var(--z-dropdown);
+}
+body.is-narrow .workspace-sidedock.mod-left {
+  left: 0;
+  /* Prevent the overlay from consuming the full narrow viewport. */
+  max-width: 80vw;
+  box-shadow: 4px 0 16px oklch(0 0 0 / 0.45);
+}
+body.is-narrow .workspace-sidedock.mod-right {
+  right: 0;
+  max-width: 80vw;
+  box-shadow: -4px 0 16px oklch(0 0 0 / 0.45);
+}
+/* Hide the right-sidedock toggle button in the tab strip at narrow widths —
+   the user re-expands via the activity bar instead. */
+body.is-narrow .workspace-tab-strip-right-toggle {
+  display: none;
+}
+
 /* ─── SH-007: prefers-reduced-motion ────────────────────────────────────── */
 /* Zero all transitions and animations for users who have opted out of
    motion in their OS accessibility settings. The --motion-duration token

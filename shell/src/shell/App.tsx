@@ -14,8 +14,12 @@ import {
   loadWorkspace,
 } from '../workspace'
 import { ErrorBoundary } from './ErrorBoundary'
+import { useViewportClass } from './useViewportClass'
 
 export default function App() {
+  // SH-003: write body.is-narrow/is-medium/is-wide via ResizeObserver.
+  useViewportClass()
+
   const slots = useSlotStore(s => s.slots)
   const paneModeViewId = usePaneModeStore(s => s.activeViewId)
   const rootPath = useNexusWorkspaceStore(s => s.rootPath)

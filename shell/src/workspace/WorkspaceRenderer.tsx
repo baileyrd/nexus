@@ -765,6 +765,7 @@ function TabStrip({
               re-expands the dock once hidden. */}
           <button
             type="button"
+            className="workspace-tab-strip-right-toggle"
             aria-label={
               workspace.rightSplit.collapsed
                 ? 'Show right sidebar'
