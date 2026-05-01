@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Env
+.env
+
+# Run artifacts
+data/*
+!data/.gitkeep
+results/*
+!results/.gitkeep
+wiki_cache/
