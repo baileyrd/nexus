@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ResizeArgs",
+  "description": "Arguments for `resize`. `cols` / `rows` are character cells, matching\nthe unit `Terminal.resize(cols, rows)` uses on the xterm.js side and\n`MasterPty::resize` uses inside `portable-pty`. Zero values are\nrejected by the underlying ioctl on most platforms; callers should\nclamp to at least `1 × 1`.",
+  "type": "object",
+  "properties": {
+    "cols": {
+      "description": "New column count (character cells).",
+      "type": "integer",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0
+    },
+    "id": {
+      "description": "Target session id.",
+      "type": "string"
+    },
+    "rows": {
+      "description": "New row count (character cells).",
+      "type": "integer",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "cols",
+    "rows"
+  ]
+}

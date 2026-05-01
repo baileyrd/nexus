@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SendInputArgs",
+  "description": "Arguments for `send_input`.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Target session id.",
+      "type": "string"
+    },
+    "input": {
+      "description": "String input (newline appended automatically if absent).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "input"
+  ]
+}

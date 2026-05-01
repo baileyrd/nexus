@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PumpResponse",
+  "description": "Response from `pump`.",
+  "type": "object",
+  "properties": {
+    "bytes": {
+      "description": "Byte count drained from the PTY in this pump.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "bytes"
+  ]
+}

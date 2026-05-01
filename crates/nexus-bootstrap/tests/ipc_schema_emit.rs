@@ -84,6 +84,11 @@ use nexus_skills::core_plugin::{
 use nexus_workflow::core_plugin::{
     GetTemplateArgs, GetWorkflowArgs, InitTemplateArgs, RunWorkflowArgs, ValidateWorkflowArgs,
 };
+use nexus_terminal::{
+    CreateSessionArgs, CreateSessionResponse, OutputStreamPayload, PumpArgs, PumpResponse,
+    ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ResizeArgs, SearchOutputArgs,
+    SendInputArgs, SendRawInputArgs, SessionIdArgs, WaitForPatternArgs, WaitForPatternResponse,
+};
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -270,6 +275,23 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<GetTemplateArgs>("com_nexus_workflow__templates_get", "args");
     write_schema::<InitTemplateArgs>("com_nexus_workflow__templates_init", "args");
     write_schema::<ValidateWorkflowArgs>("com_nexus_workflow__validate", "args");
+
+    // ── com.nexus.terminal (P1-3 #113) ───────────────────────────────────
+    write_schema::<CreateSessionArgs>("com_nexus_terminal__create_session", "args");
+    write_schema::<CreateSessionResponse>("com_nexus_terminal__create_session", "response");
+    write_schema::<SessionIdArgs>("com_nexus_terminal", "session_id_args");
+    write_schema::<SendInputArgs>("com_nexus_terminal__send_input", "args");
+    write_schema::<SendRawInputArgs>("com_nexus_terminal__send_raw_input", "args");
+    write_schema::<PumpArgs>("com_nexus_terminal__pump", "args");
+    write_schema::<PumpResponse>("com_nexus_terminal__pump", "response");
+    write_schema::<ReadOutputArgs>("com_nexus_terminal__read_output", "args");
+    write_schema::<ReadRawSinceArgs>("com_nexus_terminal__read_raw_since", "args");
+    write_schema::<ReadRawSinceResponse>("com_nexus_terminal__read_raw_since", "response");
+    write_schema::<ResizeArgs>("com_nexus_terminal__resize", "args");
+    write_schema::<OutputStreamPayload>("com_nexus_terminal", "output_stream_payload");
+    write_schema::<SearchOutputArgs>("com_nexus_terminal__search_output", "args");
+    write_schema::<WaitForPatternArgs>("com_nexus_terminal__wait_for_pattern", "args");
+    write_schema::<WaitForPatternResponse>("com_nexus_terminal__wait_for_pattern", "response");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SearchOutputArgs",
+  "description": "Arguments for `search_output`.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Target session id.",
+      "type": "string"
+    },
+    "is_regex": {
+      "description": "`true` = regex (regex-lite), `false` = substring.",
+      "type": "boolean",
+      "default": false
+    },
+    "query": {
+      "description": "Query string.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "query"
+  ]
+}

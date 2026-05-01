@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReadRawSinceResponse",
+  "description": "Response from `read_raw_since`.",
+  "type": "object",
+  "properties": {
+    "cursor": {
+      "description": "Cursor to pass on the next call — equals `dropped + len` after\nthe drain.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "data": {
+      "description": "Raw bytes past the caller's cursor (ANSI sequences intact).",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "cursor",
+    "data"
+  ]
+}

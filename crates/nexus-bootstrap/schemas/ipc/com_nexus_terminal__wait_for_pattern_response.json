@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WaitForPatternResponse",
+  "description": "Response from `wait_for_pattern`.",
+  "type": "object",
+  "properties": {
+    "matched": {
+      "description": "`true` if a match landed before the deadline.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "matched"
+  ]
+}

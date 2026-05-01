@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PumpArgs",
+  "description": "Arguments for `pump`.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Target session id.",
+      "type": "string"
+    },
+    "timeout_ms": {
+      "description": "Per-call read deadline in milliseconds. Defaults to 100 ms when\nomitted — a short-enough window that an idle session doesn't\nburn CPU, long enough to catch a single output flush.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "default": null,
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ]
+}
