@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ComposeSkillArgs",
+  "description": "Args for `com.nexus.skills::compose` (handler id `7`).",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Skill id to compose. The engine resolves the `depends_on`\nclosure transitively.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ]
+}

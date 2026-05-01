@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TriggeredByArgs",
+  "description": "Args for `com.nexus.skills::triggered_by` (handler id `4`).",
+  "type": "object",
+  "properties": {
+    "text": {
+      "description": "Text to scan for trigger keywords/phrases.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "text"
+  ]
+}

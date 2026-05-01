@@ -70,6 +70,13 @@ use nexus_theme::core_plugin::{
 };
 use nexus_theme::snippet::{SnippetMode, SnippetScope};
 use nexus_theme::ThemeMode;
+// nexus-skills exposes only its Args types — the return Skill/SkillMeta
+// uses `#[serde(flatten)] extra: BTreeMap<String, serde_yml::Value>`
+// for forward-compat YAML, which is fundamentally incompatible with
+// `deny_unknown_fields`. Shell-side consumers treat Skill as opaque.
+use nexus_skills::core_plugin::{
+    ComposeSkillArgs, GetSkillArgs, ListByContextArgs, RenderSkillArgs, TriggeredByArgs,
+};
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -238,6 +245,15 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<SnippetMetadata>("com_nexus_theme", "snippet_metadata");
     write_schema::<SnippetMode>("com_nexus_theme", "snippet_mode");
     write_schema::<SnippetScope>("com_nexus_theme", "snippet_scope");
+
+    // ── com.nexus.skills (P1-3 #113) ─────────────────────────────────────
+    // Args only — see import comment above for why Skill returns are
+    // out of scope for this iteration.
+    write_schema::<GetSkillArgs>("com_nexus_skills__get", "args");
+    write_schema::<ListByContextArgs>("com_nexus_skills__list_by_context", "args");
+    write_schema::<TriggeredByArgs>("com_nexus_skills__triggered_by", "args");
+    write_schema::<RenderSkillArgs>("com_nexus_skills__render", "args");
+    write_schema::<ComposeSkillArgs>("com_nexus_skills__compose", "args");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type

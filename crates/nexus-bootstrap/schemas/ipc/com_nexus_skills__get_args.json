@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GetSkillArgs",
+  "description": "Args for `com.nexus.skills::get` (handler id `2`). Lifted from an\ninline `struct Args` inside [`SkillsCorePlugin::dispatch_get`] by\naudit-2026-05-01 P1-3 (#113) so the schema generator can see the\nshape.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Unique kebab-case skill id to fetch.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ]
+}

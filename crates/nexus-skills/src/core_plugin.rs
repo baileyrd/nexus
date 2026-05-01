@@ -20,13 +20,112 @@
 //!
 //! Ids are append-only.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use nexus_plugins::{CorePlugin, PluginError};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
 
 use crate::{registry_index, SkillRegistry, SkillRegistryError};
+
+// ── IPC arg types (audit P1-3 #113 — lifted from inline) ─────────────────────
+
+/// Args for `com.nexus.skills::get` (handler id `2`). Lifted from an
+/// inline `struct Args` inside [`SkillsCorePlugin::dispatch_get`] by
+/// audit-2026-05-01 P1-3 (#113) so the schema generator can see the
+/// shape.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GetSkillArgs {
+    /// Unique kebab-case skill id to fetch.
+    pub id: String,
+}
+
+/// Args for `com.nexus.skills::list_by_context` (handler id `3`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ListByContextArgs {
+    /// Activation context — `pull-request`, `terminal`, `editor`,
+    /// `ai-chat`, `agent`. Matched against each skill's
+    /// `applicable_contexts` list.
+    pub context: String,
+}
+
+/// Args for `com.nexus.skills::triggered_by` (handler id `4`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct TriggeredByArgs {
+    /// Text to scan for trigger keywords/phrases.
+    pub text: String,
+}
+
+/// Args for `com.nexus.skills::render` (handler id `6`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct RenderSkillArgs {
+    /// Skill id to render.
+    pub id: String,
+    /// Parameter overrides for substitution. Each value is JSON
+    /// (round-tripped to YAML internally so enum-comparison matches
+    /// the skill's declared `values:` list).
+    #[serde(default)]
+    pub values: HashMap<String, serde_json::Value>,
+}
+
+/// Args for `com.nexus.skills::compose` (handler id `7`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ComposeSkillArgs {
+    /// Skill id to compose. The engine resolves the `depends_on`
+    /// closure transitively.
+    pub id: String,
+}
 
 /// Reverse-DNS identifier.
 pub const PLUGIN_ID: &str = "com.nexus.skills";
@@ -139,12 +238,7 @@ impl SkillsCorePlugin {
     }
 
     fn dispatch_get(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Args {
-            id: String,
-        }
-        let a: Args = parse(args, "get")?;
+        let a: GetSkillArgs = parse(args, "get")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         match reg.get(&a.id) {
             Some(skill) => {
@@ -165,12 +259,7 @@ impl SkillsCorePlugin {
         &self,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Args {
-            context: String,
-        }
-        let a: Args = parse(args, "list_by_context")?;
+        let a: ListByContextArgs = parse(args, "list_by_context")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         let skills: Vec<_> = reg.by_context(&a.context).cloned().collect();
         to_value(&skills, "list_by_context")
@@ -180,26 +269,14 @@ impl SkillsCorePlugin {
         &self,
         args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Args {
-            text: String,
-        }
-        let a: Args = parse(args, "triggered_by")?;
+        let a: TriggeredByArgs = parse(args, "triggered_by")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         let skills: Vec<_> = reg.triggered_by(&a.text).cloned().collect();
         to_value(&skills, "triggered_by")
     }
 
     fn dispatch_render(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Args {
-            id: String,
-            #[serde(default)]
-            values: std::collections::HashMap<String, serde_json::Value>,
-        }
-        let a: Args = parse(args, "render")?;
+        let a: RenderSkillArgs = parse(args, "render")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         let skill = reg
             .get(&a.id)
@@ -228,12 +305,7 @@ impl SkillsCorePlugin {
     /// conflict warnings. Cycle / missing-dependency are surfaced as
     /// `ExecutionFailed` so the planner can fall back to the raw body.
     fn dispatch_compose(&self, args: &serde_json::Value) -> Result<serde_json::Value, PluginError> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Args {
-            id: String,
-        }
-        let a: Args = parse(args, "compose")?;
+        let a: ComposeSkillArgs = parse(args, "compose")?;
         let reg = self.registry.lock().map_err(poisoned)?;
         match crate::compose::compose(&reg, &a.id) {
             Ok(composed) => to_value(&composed, "compose"),

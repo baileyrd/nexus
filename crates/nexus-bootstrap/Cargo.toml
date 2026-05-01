@@ -20,6 +20,7 @@ ts-export = [
     "nexus-agent/ts-export",
     "nexus-comments/ts-export",
     "nexus-theme/ts-export",
+    "nexus-skills/ts-export",
 ]
 
 [dependencies]
