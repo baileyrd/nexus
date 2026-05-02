@@ -1,3 +1,4 @@
+import { syntaxTree } from '@codemirror/language'
 import { StateEffect, StateField, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, type DecorationSet } from '@codemirror/view'
 import { buildLivePreviewDecorations } from './livePreviewDecorations'
@@ -30,7 +31,11 @@ export function livePreviewExt(): Extension {
       if (
         tr.docChanged ||
         tr.selection ||
-        tr.effects.some((e) => e.is(fencedRegistryChanged))
+        tr.effects.some((e) => e.is(fencedRegistryChanged)) ||
+        // Lezer parses incrementally and asynchronously. When the parser
+        // catches up after initial load the tree object is replaced — detect
+        // that so tables/headings render without requiring a cursor move.
+        syntaxTree(tr.state) !== syntaxTree(tr.startState)
       ) {
         return buildLivePreviewDecorations(tr.state)
       }
