@@ -8,6 +8,7 @@ use std::fs;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
+use ed25519_dalek::{Signature, VerifyingKey, Verifier};
 
 /// Tauri event channel used to forward OS deep-link URLs to the frontend.
 /// The frontend's bootstrap code listens on this channel and forwards
@@ -15,6 +16,84 @@ use tauri_plugin_deep_link::DeepLinkExt;
 /// `shell/src/registry/UriHandlerRegistry.ts` header (WI-13) for the
 /// contract. This is the Tauri-side bridge referenced in that header.
 const DEEP_LINK_EVENT: &str = "nexus:url-opened";
+
+// ── OI-15: Manifest signature verification ────────────────────────────────────
+
+/// Ed25519 public keys (hex) trusted by this build.
+/// Empty until the marketplace CA is established; all signed plugins
+/// with unrecognised keys are rejected rather than silently loaded.
+static TRUSTED_PUBLIC_KEYS: &[&str] = &[];
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum VerificationStatus {
+    /// No plugin.json.sig file present — plugin is unsigned.
+    #[default]
+    Unsigned,
+    /// Signature valid and public key is in TRUSTED_PUBLIC_KEYS.
+    Verified,
+    /// Signature present and cryptographically valid, but the public
+    /// key is not in TRUSTED_PUBLIC_KEYS.  Plugin is rejected.
+    UntrustedKey,
+    /// plugin.json.sig is present but malformed or the signature does
+    /// not verify against plugin.json.  Plugin is rejected.
+    InvalidSignature,
+}
+
+/// Verify `manifest_bytes` (the raw plugin.json bytes) against an
+/// optional `plugin.json.sig` file in `dir_path`.
+///
+/// Sig file format — JSON object:
+///   `{ "publicKey": "<64-hex-char Ed25519 key>",
+///      "signature": "<128-hex-char Ed25519 signature>" }`
+fn verify_plugin_signature(manifest_bytes: &[u8], dir_path: &std::path::Path) -> VerificationStatus {
+    let sig_path = dir_path.join("plugin.json.sig");
+    if !sig_path.exists() {
+        return VerificationStatus::Unsigned;
+    }
+
+    let sig_content = match fs::read_to_string(&sig_path) {
+        Ok(c)  => c,
+        Err(_) => return VerificationStatus::InvalidSignature,
+    };
+
+    #[derive(Deserialize)]
+    struct SigFile { #[serde(rename = "publicKey")] public_key: String, signature: String }
+
+    let sig_file: SigFile = match serde_json::from_str(&sig_content) {
+        Ok(s)  => s,
+        Err(_) => return VerificationStatus::InvalidSignature,
+    };
+
+    // Decode hex → bytes
+    let key_bytes: Vec<u8> = match hex::decode(&sig_file.public_key) {
+        Ok(b) if b.len() == 32 => b,
+        _                       => return VerificationStatus::InvalidSignature,
+    };
+    let sig_bytes: Vec<u8> = match hex::decode(&sig_file.signature) {
+        Ok(b) if b.len() == 64 => b,
+        _                       => return VerificationStatus::InvalidSignature,
+    };
+
+    // Check trusted-key list before doing crypto
+    if !TRUSTED_PUBLIC_KEYS.contains(&sig_file.public_key.as_str()) {
+        return VerificationStatus::UntrustedKey;
+    }
+
+    let verifying_key = match VerifyingKey::from_bytes(key_bytes[..32].try_into().unwrap()) {
+        Ok(k)  => k,
+        Err(_) => return VerificationStatus::InvalidSignature,
+    };
+    let signature = match Signature::from_slice(&sig_bytes) {
+        Ok(s)  => s,
+        Err(_) => return VerificationStatus::InvalidSignature,
+    };
+
+    match verifying_key.verify(manifest_bytes, &signature) {
+        Ok(_)  => VerificationStatus::Verified,
+        Err(_) => VerificationStatus::InvalidSignature,
+    }
+}
 
 // ── Community plugin manifest ─────────────────────────────────────────────────
 
@@ -49,6 +128,9 @@ pub struct CommunityPluginManifest {
     pub dir:         String,
     #[serde(skip_deserializing, default)]
     pub manifest_path: String,
+    /// OI-15 — result of Ed25519 signature check against plugin.json.sig.
+    #[serde(skip_deserializing, default)]
+    pub verification_status: VerificationStatus,
 }
 
 fn default_true() -> bool { true }
@@ -111,8 +193,19 @@ fn scan_plugin_directory() -> Vec<CommunityPluginManifest> {
                 return None;
             }
 
-            manifest.dir           = dir_path.to_string_lossy().into_owned();
-            manifest.manifest_path = manifest_path.to_string_lossy().into_owned();
+            // OI-15 — reject plugins with a bad or untrusted signature
+            let status = verify_plugin_signature(content.as_bytes(), &dir_path);
+            if matches!(status, VerificationStatus::UntrustedKey | VerificationStatus::InvalidSignature) {
+                eprintln!(
+                    "[scan_plugin_directory] Rejecting {} — {:?}",
+                    dir_path.display(), status
+                );
+                return None;
+            }
+
+            manifest.dir                 = dir_path.to_string_lossy().into_owned();
+            manifest.manifest_path       = manifest_path.to_string_lossy().into_owned();
+            manifest.verification_status = status;
             Some(manifest)
         })
         .collect()
@@ -202,8 +295,19 @@ fn scan_plugin_directory_at(dir: String) -> Vec<CommunityPluginManifest> {
                 return None;
             }
 
-            manifest.dir           = dir_path.to_string_lossy().into_owned();
-            manifest.manifest_path = manifest_path.to_string_lossy().into_owned();
+            // OI-15 — reject plugins with a bad or untrusted signature
+            let status = verify_plugin_signature(content.as_bytes(), &dir_path);
+            if matches!(status, VerificationStatus::UntrustedKey | VerificationStatus::InvalidSignature) {
+                eprintln!(
+                    "[scan_plugin_directory_at] Rejecting {} — {:?}",
+                    dir_path.display(), status
+                );
+                return None;
+            }
+
+            manifest.dir                 = dir_path.to_string_lossy().into_owned();
+            manifest.manifest_path       = manifest_path.to_string_lossy().into_owned();
+            manifest.verification_status = status;
             Some(manifest)
         })
         .collect()

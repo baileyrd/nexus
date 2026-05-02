@@ -36,6 +36,9 @@ tokio               = { version = "1", features = ["sync"] }
 uuid                = { version = "1", features = ["v4"] }
 tracing             = "0.1"
 tracing-subscriber  = { version = "0.3", features = ["env-filter", "fmt"] }
+# OI-15 — Ed25519 manifest signature verification
+ed25519-dalek       = "2"
+hex                 = "0.4"
 
 # Kernel path deps. These resolve across the workspace `exclude = ["shell"]`
 # boundary without un-excluding this crate. See

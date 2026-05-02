@@ -65,6 +65,17 @@ export interface CommunityPluginManifest {
   dir:          string
   /** Absolute path to plugin.json — injected by the Rust scanner */
   manifestPath: string
+  /**
+   * OI-15 — Ed25519 signature check result injected by the Rust scanner.
+   * `undefined` means the Rust side is older (pre-OI-15) and did not
+   * supply the field; treat as `'unsigned'`.
+   *
+   *   - `'unsigned'`          — no plugin.json.sig present; loads normally
+   *   - `'verified'`          — signed by a key in TRUSTED_PUBLIC_KEYS
+   *   - `'untrustedKey'`      — sig present but key not trusted; rejected at scan
+   *   - `'invalidSignature'`  — sig file corrupt or crypto failure; rejected at scan
+   */
+  verificationStatus?: 'unsigned' | 'verified' | 'untrustedKey' | 'invalidSignature'
 }
 
 // ── API-version error (WI-33) ────────────────────────────────────────────────
