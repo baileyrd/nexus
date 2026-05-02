@@ -16,6 +16,8 @@ Severity rubric:
 
 ### SH-001 · No React error boundary in the shell tree
 
+**Status: Resolved** — `shell/src/shell/ErrorBoundary.tsx` added; independent boundaries wrap overlay, activityBar, paneMode, and workspace regions in `App.tsx`; `ErrorBoundary.test.tsx` covers the isolation contract.
+
 **Dimension:** 03 Layout & Composition.
 **Files:** `shell/src/main.tsx:54-63, 408-419`, `shell/src/shell/App.tsx:171-232`.
 **Evidence:** `rg 'ErrorBoundary|componentDidCatch|getDerivedStateFromError' shell/src` returns no matches. `main.tsx::showFatal` only fires when the top-level `boot()` promise rejects — a render-time throw inside a slot contribution (an activity-bar item, status-bar item, modal) bubbles to React's default behavior and unmounts the whole tree.
@@ -33,6 +35,8 @@ Severity rubric:
 ---
 
 ### SH-019 · Tauri capability scope grants popout windows full fs write access
+
+**Status: Resolved** — `default.json` tightened to `"windows": ["main"]`; `shell/src-tauri/capabilities/popout.json` added with minimal permission set (no fs writes).
 
 **Dimension:** 12 Multi-Window.
 **Files:** `shell/src-tauri/capabilities/default.json`, `shell/src-tauri/src/windows.rs`.
@@ -53,6 +57,8 @@ Severity rubric:
 
 ### SH-002 · Modal layer not portaled; z-index literals scattered across 8+ values
 
+**Status: Resolved** — `Modal.tsx` + `createPortal` added; `zIndex.ts` 6-tier scale defined; all shell-level modals migrated; CapabilityBannerView + EnrichAcceptGate last two raw literals fixed 2026-05-01.
+
 **Dimension:** 03 Layout & Composition.
 **Files (z-index sites):** `shell/src/shell/shell.css:55, 95, 1203, 2048`; `shell/src/workspace/WorkspaceRenderer.tsx:128, 329, 336, 529, 537, 869`; `shell/src/shell/ContextMenu.tsx:36`; `shell/src/plugins/nexus/launcher/LauncherView.tsx:137, 292, 321`; `shell/src/plugins/core/capabilityPrompt/CapabilityBannerView.tsx:49`; `shell/src/plugins/nexus/enrich/EnrichAcceptGate.tsx:56`; `shell/src/workspace/ForgeSelector.tsx:146`; `shell/src/plugins/core/capabilityPrompt/CapabilityModalView.tsx:90`; `shell/src/plugins/nexus/memory/CaptureOverlay.tsx:85`; `shell/src/plugins/nexus/mcp/ToolCallModal.tsx:89`; `shell/src/plugins/nexus/confirm/ConfirmModal.tsx:69`; `shell/src/plugins/nexus/bases/NewBaseDialog.tsx:95`; `shell/src/plugins/nexus/files/ContextMenu.tsx:38`.
 **Evidence:** `rg 'createPortal|<Portal' shell/src` returns no matches. Distinct z-index values found: `1, 2, 10, 11, 50, 60, 65, 70, 100, 200, 900, 1000, 1080, 1100, 1200, 9000, 9500, 9999`.
@@ -68,6 +74,8 @@ Severity rubric:
 ---
 
 ### SH-003 · No responsive layout logic; chrome eats content at narrow widths
+
+**Status: Resolved** — `useViewportClass()` hook added (ResizeObserver writing `body.is-narrow/is-medium/is-wide`); `shell.css` narrow-mode rules collapse sidedocks; `App.tsx` calls the hook on mount.
 
 **Dimension:** 03 Layout & Composition.
 **Files:** `shell/index.html:181`, `shell/src/shell/shell.css`, `shell/src/workspace/WorkspaceRenderer.tsx:152-157, 670-679, 715, 754`, `shell/src-tauri/tauri.conf.json:13-23`.
@@ -85,6 +93,8 @@ Severity rubric:
 
 ### SH-005 · Modals don't trap focus; underlying chrome remains in tab order
 
+**Status: Resolved** — `useFocusTrap.ts` added; integrated into `Modal.tsx` (`trapFocus` prop, default true); `useFocusTrap.test.tsx` covers the cycle and restore contract.
+
 **Dimension:** 05 Accessibility.
 **Files:** `shell/src/plugins/nexus/confirm/ConfirmModal.tsx`, `shell/src/plugins/core/capabilityPrompt/CapabilityModalView.tsx`, `shell/src/plugins/nexus/mcp/ToolCallModal.tsx`, `shell/src/plugins/nexus/bases/NewBaseDialog.tsx`, `shell/src/plugins/nexus/commandPalette/CommandPalette.tsx`.
 **Evidence:** `rg 'focus-trap|focusTrap|inert' shell/src` returns no matches. Modals set `aria-modal="true"` and listen for Escape, but Tab navigates out into `slots.activityBar`, `slots.statusBarLeft`, etc.
@@ -100,6 +110,8 @@ Severity rubric:
 
 ### SH-006 · App-level keydown handler `stopPropagation`s every match — risks blocking AT key forwarding
 
+**Status: Resolved** — `stopPropagation()` removed from `App.tsx` keydown handler; `preventDefault()` alone is now used, letting events bubble for assistive technology.
+
 **Dimension:** 05 Accessibility.
 **Files:** `shell/src/shell/App.tsx:130-146`.
 **Evidence:** `App.tsx:139-141` calls `e.preventDefault(); e.stopPropagation();` whenever `reg.keybindings.match()` returns a commandId. The guard against INPUT/TEXTAREA/contenteditable is correct but doesn't account for screen-reader virtual cursor mode.
@@ -114,6 +126,8 @@ Severity rubric:
 ---
 
 ### SH-009 · No code splitting; all default-on plugins ship in main bundle
+
+**Status: Resolved** — `catalog.ts` uses dynamic-import factories; `boot()` awaits `Promise.all(entries.map(e => e.load()))`; `vite.config.ts` `manualChunks` groups vendor-react, vendor-codemirror, vendor-xterm, and per-plugin chunks.
 
 **Dimension:** 07 Performance.
 **Files:** `shell/src/main.tsx:45-50`, `shell/src/plugins/catalog.ts`, `shell/vite.config.ts`.
@@ -131,6 +145,8 @@ Severity rubric:
 
 ### SH-010 · Google Fonts pulled from `googleapis.com` at boot; CSP `font-src` doesn't allow `gstatic.com`
 
+**Status: Resolved** — fonts self-hosted in `shell/public/fonts/`; inline `@font-face` in `index.html`; no external font requests.
+
 **Dimension:** 07 Performance / 09 Cross-Platform.
 **Files:** `shell/index.html:7-12`, `shell/src-tauri/tauri.conf.json:30-32`.
 **Evidence:** `index.html` preconnects to `fonts.googleapis.com` and `fonts.gstatic.com` and pulls `Inter, IBM Plex Serif, JetBrains Mono`. `tauri.conf.json#app.security.csp.font-src` is `["'self'", "data:"]` — gstatic is *not* allowed. Either the prod build has been silently failing to load fonts, or some other allowance is in play.
@@ -145,6 +161,8 @@ Severity rubric:
 ---
 
 ### SH-012 · Five overlapping CSS-token alias families create author-intent drift
+
+**Status: Resolved** — legacy alias families removed from `index.html`; all source files use the Obsidian canonical set; zero legacy-token references in `shell/src`.
 
 **Dimension:** 08 Theming & Design Tokens.
 **Files:** `shell/index.html:108-173`.
@@ -193,6 +211,8 @@ Severity rubric:
 
 ### SH-017 · 241 `console.*` calls across 69 files; no centralized client logger
 
+**Status: Resolved** — `host/clientLogger.ts` added (ring buffer + tracing flush); public re-export at `src/clientLogger.ts` for plugin files; all 191 non-test `console.*` calls replaced; `append_shell_log` Tauri command wired in `lib.rs` so entries flow to Rust tracing at `nexus_shell::renderer` target.
+
 **Dimension:** 11 Observability.
 **Files:** spread across `shell/src/`. Densest: `main.tsx` (16), `host/ExtensionHost.ts` (7), `host/PluginRegistry.ts` (3), `plugins/nexus/launcher/index.ts` (2), `plugins/nexus/recall/RecallOverlay.tsx` (8).
 **Evidence:** `rg 'console\.' shell/src` returns 241 matches.
@@ -209,6 +229,8 @@ Severity rubric:
 
 ### SH-018 · No error → backend pipe; in-render throws vanish on reload
 
+**Status: Resolved** — `window.onerror` and `window.onunhandledrejection` handlers registered in `main.tsx`, forwarding through `clientLogger.error`; `ErrorBoundary` (SH-001) reports through the same path.
+
 **Dimension:** 11 Observability.
 **Files:** `shell/src/host/ExtensionHost.ts:160-168, 293-298`, `shell/src/main.tsx:54-63`.
 **Evidence:** `ExtensionHost.fail()` writes to `errors` map and prints; `showFatal` only fires for the top-level `boot()` rejection. There's no `window.onerror` or `window.onunhandledrejection` handler.
@@ -223,6 +245,8 @@ Severity rubric:
 ---
 
 ### SH-020 · Popout boots a full plugin set; not all plugins contribute to popouts
+
+**Status: Resolved** — `popoutCompatible` field added to `PluginEntry`; `boot()` filters `DEFAULT_ON_PLUGINS` to `popoutCompatible !== false` in popout mode; chrome-only plugins marked `popoutCompatible: false` in catalog.
 
 **Dimension:** 12 Multi-Window.
 **Files:** `shell/src/main.tsx:206-209`, `shell/src/plugins/catalog.ts`.
@@ -269,6 +293,8 @@ Severity rubric:
 
 ### SH-011 · App.tsx 500ms debug logger fires on every slot change
 
+**Status: Resolved** — debug timer gated on `import.meta.env.DEV`.
+
 **Dimension:** 07 Performance.
 **Files:** `shell/src/shell/App.tsx:33-48`.
 
@@ -295,6 +321,8 @@ Severity rubric:
 ---
 
 ### SH-021 · Popout cannot persist its own bounds back to workspace.json
+
+**Status: Resolved** — popout emits `nexus:popout-bounds-changed`; main window listens in `main.tsx`, calls `workspaceStore.setFloatingWindowBounds`, which triggers `layout-change` → autosave to `workspace.json`.
 
 **Dimension:** 12/13 Multi-Window/Persistence.
 **Files:** `shell/src/shell/PopoutShell.tsx`, `shell/src/workspace/popoutWindowBridge.ts`, `shell/src/workspace/persistence.ts`.
