@@ -20,6 +20,7 @@
 // store or this overlay store based on the `session_id` correlation.
 
 import type { PluginAPI } from '../../../types/plugin'
+import { clientLogger } from '../../../clientLogger'
 import {
   contextContributors,
   assemblePrompt,
@@ -79,7 +80,7 @@ export async function openCmdI(): Promise<void> {
     // Defensive — `collect()` already swallows per-contributor throws,
     // but a bug in the registry itself shouldn't trap the user inside
     // a half-broken overlay.
-    console.warn('[nexus.ai/cmdI] collect failed', err)
+    clientLogger.warn('[nexus.ai/cmdI] collect failed', err)
     useCmdIStore.getState().setChips([])
   }
 }

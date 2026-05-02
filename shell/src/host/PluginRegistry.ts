@@ -10,6 +10,7 @@ import { StatusBarRegistry } from '../registry/StatusBarRegistry'
 import { slotRegistry } from '../registry/SlotRegistry'
 import { uriHandlerRegistry } from '../registry/UriHandlerRegistry'
 import { eventBus } from './EventBus'
+import { clientLogger } from './clientLogger'
 
 export class PluginRegistry {
   readonly commands     = new CommandRegistry()
@@ -128,7 +129,7 @@ export class PluginRegistry {
           // its rail icons visible until reload.
           case 'activityBar': eventBus.emit('activityBar:itemRemoved', { id }); break
           default:
-            console.warn(`[PluginRegistry] Unknown contribution type: '${type}'`)
+            clientLogger.warn(`[PluginRegistry] Unknown contribution type: '${type}'`)
         }
       }
       this.ownership.delete(pluginId)
@@ -143,7 +144,7 @@ export class PluginRegistry {
         try {
           unsub()
         } catch (err) {
-          console.warn(
+          clientLogger.warn(
             `[PluginRegistry] subscription disposer threw for '${pluginId}':`,
             err,
           )
@@ -177,7 +178,7 @@ export class PluginRegistry {
 
   registerService(name: string, service: unknown) {
     if (this.services.has(name)) {
-      console.warn(`[PluginRegistry] Service '${name}' is already registered — overwriting`)
+      clientLogger.warn(`[PluginRegistry] Service '${name}' is already registered — overwriting`)
     }
     this.services.set(name, service)
   }

@@ -32,6 +32,7 @@
 //     report for the deferred Tauri wiring.
 
 import { activationTriggers } from '../host/ActivationTriggers'
+import { clientLogger } from '../host/clientLogger'
 
 export type UriHandler = (uri: URL) => void | Promise<void>
 
@@ -60,13 +61,13 @@ export class UriHandlerRegistry {
   register(scheme: string, pluginId: string, handler: UriHandler): () => void {
     const canonical = canonicalizeScheme(scheme)
     if (!canonical) {
-      console.warn(`[UriHandlerRegistry] register: empty/invalid scheme '${scheme}'`)
+      clientLogger.warn(`[UriHandlerRegistry] register: empty/invalid scheme '${scheme}'`)
       return () => {}
     }
 
     const existing = this.handlers.get(canonical)
     if (existing && existing.pluginId !== pluginId) {
-      console.warn(
+      clientLogger.warn(
         `[UriHandlerRegistry] scheme '${canonical}' already owned by ` +
           `'${existing.pluginId}' — ignoring duplicate registration from '${pluginId}'`,
       )
@@ -117,7 +118,7 @@ export class UriHandlerRegistry {
         .fire(triggerKey)
         .then(() => this.invoke(scheme, uri))
         .catch((err) => {
-          console.error(
+          clientLogger.error(
             `[UriHandlerRegistry] activation trigger for '${scheme}' threw:`,
             err,
           )
@@ -139,14 +140,14 @@ export class UriHandlerRegistry {
       // `dispatch` stays sync and best-effort.
       if (result && typeof (result as Promise<void>).then === 'function') {
         ;(result as Promise<void>).catch((err) => {
-          console.error(
+          clientLogger.error(
             `[UriHandlerRegistry] handler for '${scheme}' (plugin '${entry.pluginId}') threw:`,
             err,
           )
         })
       }
     } catch (err) {
-      console.error(
+      clientLogger.error(
         `[UriHandlerRegistry] handler for '${scheme}' (plugin '${entry.pluginId}') threw:`,
         err,
       )

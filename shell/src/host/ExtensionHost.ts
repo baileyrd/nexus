@@ -7,6 +7,7 @@ import { PluginRegistry } from './PluginRegistry'
 import { buildPluginAPI } from './PluginAPI'
 import { eventBus } from './EventBus'
 import { activationTriggers } from './ActivationTriggers'
+import { clientLogger } from './clientLogger'
 
 export type PluginState =
   | 'registered'    // known but not yet activating
@@ -37,7 +38,7 @@ export class ExtensionHost {
     activationTriggers.setActivator(async (pluginId) => {
       const plugin = this.plugins.get(pluginId)
       if (!plugin) {
-        console.warn(`[ExtensionHost] activator: unknown plugin '${pluginId}'`)
+        clientLogger.warn(`[ExtensionHost] activator: unknown plugin '${pluginId}'`)
         return
       }
       await this.activate(plugin)
@@ -156,7 +157,7 @@ export class ExtensionHost {
       // rather than re-attempts.
       activationTriggers.evict(id)
       eventBus.emit('plugin:activated', { pluginId: id })
-      console.info(`[ExtensionHost] ✓ ${id}`)
+      clientLogger.info(`[ExtensionHost] ✓ ${id}`)
     } catch (err) {
       // Clean up any partial registrations before marking as failed
       this.registry.unregisterAll(id)
@@ -207,11 +208,11 @@ export class ExtensionHost {
             // race is no longer waiting on, the same belt-and-braces
             // pattern OI-11 uses for the cancel side.
             .catch((err) => {
-              console.error(`[ExtensionHost] shutdown deactivate failed for '${id}':`, err)
+              clientLogger.error(`[ExtensionHost] shutdown deactivate failed for '${id}':`, err)
             })
           const timeoutPromise = new Promise<void>((resolve) => {
             timer = setTimeout(() => {
-              console.warn(
+              clientLogger.warn(
                 `[ExtensionHost] shutdown deactivate hit ${perPluginCapMs}ms cap for '${id}'`,
               )
               resolve()
@@ -243,7 +244,7 @@ export class ExtensionHost {
       try {
         await plugin.deactivate?.()
       } catch (err) {
-        console.error(`[ExtensionHost] deactivate() threw for '${id}':`, err)
+        clientLogger.error(`[ExtensionHost] deactivate() threw for '${id}':`, err)
       }
     }
 
@@ -260,7 +261,7 @@ export class ExtensionHost {
 
     this.states.set(id, 'inactive')
     eventBus.emit('plugin:deactivated', { pluginId: id })
-    console.info(`[ExtensionHost] ✗ ${id} (unloaded)`)
+    clientLogger.info(`[ExtensionHost] ✗ ${id} (unloaded)`)
   }
 
   // ─── Introspection ────────────────────────────────────────────────────────
@@ -294,7 +295,7 @@ export class ExtensionHost {
     this.states.set(id, 'error')
     this.errors.set(id, error)
     eventBus.emit('plugin:error', { pluginId: id, error })
-    console.error(`[ExtensionHost] ✗ ${id}: ${error.message}`)
+    clientLogger.error(`[ExtensionHost] ✗ ${id}: ${error.message}`)
   }
 
   private registerManifestContributions(plugin: Plugin) {

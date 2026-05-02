@@ -49,6 +49,7 @@ import {
   type SandboxMethodName,
 } from './methodCatalog'
 import { checkCapability, requiredCapabilityFor } from './capabilityGuard'
+import { clientLogger } from '../clientLogger'
 
 /**
  * Minimal postMessage endpoint. Lines up with the subset of `MessagePort`
@@ -234,7 +235,7 @@ export class SandboxRouter {
     this.registry = opts.registry
     this.defaultTimeoutMs = opts.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS
     this.timeoutOverrides = { ...BUILTIN_TIMEOUT_OVERRIDES, ...(opts.timeoutOverrides ?? {}) }
-    this.warn = opts.warn ?? ((...args) => console.warn('[SandboxRouter]', ...args))
+    this.warn = opts.warn ?? ((...args) => clientLogger.warn('[SandboxRouter]', ...args))
 
     this.port.onmessage = (ev) => this.onRaw(ev.data)
     this.port.start?.()

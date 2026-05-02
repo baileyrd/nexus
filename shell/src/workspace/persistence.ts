@@ -19,6 +19,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { SerializedNode, WorkspaceJSON } from './types.ts'
 import { workspace } from './workspaceStore.ts'
+import { clientLogger } from '../host/clientLogger'
 
 // ---------------------------------------------------------------------------
 // Kernel bridge shim — a module-level function pointer so tests can swap it
@@ -65,7 +66,7 @@ const defaultBridge: KernelBridge = {
       if (resp.bytes == null) return null
       return new TextDecoder().decode(new Uint8Array(resp.bytes))
     } catch (err) {
-      console.warn('[workspace.persistence] readVaultFile failed', err)
+      clientLogger.warn('[workspace.persistence] readVaultFile failed', err)
       return null
     }
   },
@@ -189,11 +190,11 @@ export async function loadWorkspace(
   try {
     parsed = JSON.parse(text)
   } catch (err) {
-    console.warn('[workspace.persistence] malformed workspace.json, falling back to default', err)
+    clientLogger.warn('[workspace.persistence] malformed workspace.json, falling back to default', err)
     return null
   }
   if (!isWorkspaceJSON(parsed)) {
-    console.warn('[workspace.persistence] workspace.json failed schema validation, falling back to default')
+    clientLogger.warn('[workspace.persistence] workspace.json failed schema validation, falling back to default')
     return null
   }
   return parsed
@@ -213,7 +214,7 @@ export async function saveWorkspace(
   try {
     await activeBridge.writeVaultFile(WORKSPACE_REL, text)
   } catch (err) {
-    console.error('[workspace.persistence] saveWorkspace failed', err)
+    clientLogger.error('[workspace.persistence] saveWorkspace failed', err)
   }
 }
 

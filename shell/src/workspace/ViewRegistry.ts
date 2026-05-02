@@ -4,6 +4,7 @@
 
 import { create } from 'zustand'
 import type { Leaf, View, ViewCreator } from './types'
+import { clientLogger } from '../host/clientLogger'
 
 interface ViewStore {
   creators: Map<string, ViewCreator>
@@ -23,7 +24,7 @@ export const useViewStore = create<ViewStore>((set, get) => ({
   register: (type, creator) => {
     set(s => {
       if (s.creators.has(type)) {
-        console.warn(`[ViewRegistry] overriding existing creator for '${type}'`)
+        clientLogger.warn(`[ViewRegistry] overriding existing creator for '${type}'`)
       }
       const creators = new Map(s.creators)
       creators.set(type, creator)

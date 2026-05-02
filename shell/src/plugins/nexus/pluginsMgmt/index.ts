@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { clientLogger } from '../../../clientLogger'
 import type { Capability } from '@nexus/extension-api'
 import { PLUGIN_API_VERSION } from '@nexus/extension-api'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
@@ -91,7 +92,7 @@ async function refreshGrants(manifests: CommunityPluginManifest[]) {
       })
     }
   } catch (err) {
-    console.warn('[nexus.pluginsMgmt] refreshGrants failed:', err)
+    clientLogger.warn('[nexus.pluginsMgmt] refreshGrants failed:', err)
   }
 }
 
@@ -120,7 +121,7 @@ function readRows(api: PluginAPI): PluginRow[] {
       }),
     )
   } catch (err) {
-    console.warn('[nexus.pluginsMgmt] pluginList service missing:', err)
+    clientLogger.warn('[nexus.pluginsMgmt] pluginList service missing:', err)
   }
 
   let community: CommunityPluginRow[] = []
@@ -179,7 +180,7 @@ function readRows(api: PluginAPI): PluginRow[] {
       },
     )
   } catch (err) {
-    console.warn('[nexus.pluginsMgmt] communityPluginManifests service missing:', err)
+    clientLogger.warn('[nexus.pluginsMgmt] communityPluginManifests service missing:', err)
   }
 
   // WI-43: dormant default-off catalog entries — shipped but not loaded
@@ -288,7 +289,7 @@ export const pluginsMgmtPlugin: Plugin = {
     api.commands.register(COMMAND_REVIEW_CAPS, async (...args: unknown[]) => {
       const pluginId = args[0]
       if (typeof pluginId !== 'string') {
-        console.warn('[nexus.pluginsMgmt] reviewCapabilities requires a pluginId')
+        clientLogger.warn('[nexus.pluginsMgmt] reviewCapabilities requires a pluginId')
         return
       }
       const rows = usePluginsMgmtStore.getState().rows
@@ -306,7 +307,7 @@ export const pluginsMgmtPlugin: Plugin = {
         )
         prior = kernelStringsToCaps(raw[pluginId]?.capabilities ?? [])
       } catch (err) {
-        console.warn('[nexus.pluginsMgmt] get_granted failed:', err)
+        clientLogger.warn('[nexus.pluginsMgmt] get_granted failed:', err)
       }
 
       const result = await requestModalConsent({
@@ -331,7 +332,7 @@ export const pluginsMgmtPlugin: Plugin = {
           capabilities: result === null ? [] : capsToKernelStrings(result),
         })
       } catch (err) {
-        console.warn(
+        clientLogger.warn(
           `[nexus.pluginsMgmt] set_granted failed for ${pluginId}:`,
           err,
         )
@@ -360,7 +361,7 @@ export const pluginsMgmtPlugin: Plugin = {
     api.commands.register(COMMAND_ENABLE_BUILTIN, async (...args: unknown[]) => {
       const pluginId = args[0]
       if (typeof pluginId !== 'string') {
-        console.warn('[nexus.pluginsMgmt] enableBuiltin requires a pluginId')
+        clientLogger.warn('[nexus.pluginsMgmt] enableBuiltin requires a pluginId')
         return
       }
       const current = api.configuration.getValue<string[]>(
@@ -399,7 +400,7 @@ export const pluginsMgmtPlugin: Plugin = {
     api.commands.register(COMMAND_TOGGLE_COMMUNITY, async (...args: unknown[]) => {
       const pluginId = args[0]
       if (typeof pluginId !== 'string') {
-        console.warn('[nexus.pluginsMgmt] toggleCommunity requires a pluginId string')
+        clientLogger.warn('[nexus.pluginsMgmt] toggleCommunity requires a pluginId string')
         return
       }
 
@@ -408,7 +409,7 @@ export const pluginsMgmtPlugin: Plugin = {
         (r): r is CommunityPluginRow => r.kind === 'community' && r.id === pluginId,
       )
       if (!row) {
-        console.warn(`[nexus.pluginsMgmt] Unknown community plugin: ${pluginId}`)
+        clientLogger.warn(`[nexus.pluginsMgmt] Unknown community plugin: ${pluginId}`)
         return
       }
 
@@ -423,7 +424,7 @@ export const pluginsMgmtPlugin: Plugin = {
         // The Rust signature is `set_plugin_enabled(plugin_id: String, enabled: bool)`.
         await invoke('set_plugin_enabled', { pluginId, enabled: next })
       } catch (err) {
-        console.warn(
+        clientLogger.warn(
           `[nexus.pluginsMgmt] set_plugin_enabled failed for ${pluginId}:`,
           err,
         )

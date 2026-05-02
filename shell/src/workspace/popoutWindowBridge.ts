@@ -18,6 +18,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { workspace } from './workspaceStore.ts'
 import type { FloatingWindow, Leaf } from './types.ts'
+import { clientLogger } from '../host/clientLogger'
 
 interface PopoutBounds {
   x: number
@@ -94,7 +95,7 @@ export async function popoutLeaf(
   try {
     await popoutWindowTauri(fwId, leafId, opts?.title, opts?.bounds)
   } catch (err) {
-    console.error('[popoutWindowBridge] popout_window failed; rolling back', err)
+    clientLogger.error('[popoutWindowBridge] popout_window failed; rolling back', err)
     // Roll back the store mutation so the user sees a consistent state.
     await workspace.closeFloatingWindow(fwId)
     throw err
@@ -116,7 +117,7 @@ export async function closePopout(fwId: string): Promise<void> {
   } catch (err) {
     // The store side has already cleaned up. Log but don't throw —
     // a missing OS window is a no-op on the Tauri side already.
-    console.warn('[popoutWindowBridge] close_popout_window failed', err)
+    clientLogger.warn('[popoutWindowBridge] close_popout_window failed', err)
   }
 }
 
@@ -149,7 +150,7 @@ export async function restoreFloatingWindows(): Promise<void> {
   try {
     snapshots = await listPopoutsTauri()
   } catch (err) {
-    console.warn('[popoutWindowBridge] list_popout_windows failed', err)
+    clientLogger.warn('[popoutWindowBridge] list_popout_windows failed', err)
   }
   const liveLabels = new Set(snapshots.map((s) => s.label))
   const expectedLabels = new Set(
@@ -164,7 +165,7 @@ export async function restoreFloatingWindows(): Promise<void> {
     try {
       await popoutWindowTauri(fw.id, leafId, undefined, fw.bounds)
     } catch (err) {
-      console.warn(`[popoutWindowBridge] failed to restore ${label}`, err)
+      clientLogger.warn(`[popoutWindowBridge] failed to restore ${label}`, err)
     }
   }
 
@@ -179,7 +180,7 @@ export async function restoreFloatingWindows(): Promise<void> {
     try {
       await closePopoutTauri(id)
     } catch (err) {
-      console.warn(`[popoutWindowBridge] orphan close failed for ${snap.label}`, err)
+      clientLogger.warn(`[popoutWindowBridge] orphan close failed for ${snap.label}`, err)
     }
   }
 }

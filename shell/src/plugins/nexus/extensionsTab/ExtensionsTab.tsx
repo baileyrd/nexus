@@ -10,6 +10,7 @@
 
 import { useMemo } from 'react'
 import { usePluginsStatusStore } from '../../../stores/pluginsStatusStore'
+import { clientLogger } from '../../../clientLogger'
 
 // `disableBuiltinPlugin` is dynamic-imported in the click handler, not
 // at module top level — see comment on the click handler below for
@@ -114,7 +115,7 @@ function ExtensionRow({ row }: ExtensionRowProps) {
     const { disableBuiltinPlugin } = await import('../../../host/pluginActivation')
     const result = await disableBuiltinPlugin(row.id)
     if (!result.ok) {
-      console.error(`[extensions-tab] disable failed for ${row.id}: ${result.error}`)
+      clientLogger.error(`[extensions-tab] disable failed for ${row.id}: ${result.error}`)
     }
     // Success: ExtensionHost emits `plugin:deactivated`, the store
     // catches it, the row updates on the next render — no manual

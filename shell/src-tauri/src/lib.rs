@@ -408,6 +408,38 @@ fn path_exists(path: String) -> bool {
 // standalone `read_dir` Tauri command was retired in Phase 1 of the
 // shell ↔ kernel bridge migration (see docs/shell-kernel-bridge-plan.md).
 
+// ── Renderer log bridge ───────────────────────────────────────────────────────
+
+/// A single log entry forwarded from the browser-side `clientLogger` ring
+/// buffer. The `ts` field is a Unix-epoch millisecond timestamp (`Date.now()`);
+/// `level` is one of `"debug" | "info" | "warn" | "error"`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RendererLogEntry {
+    pub ts:      u64,
+    pub level:   String,
+    pub message: String,
+}
+
+/// Receive a batch of log entries from the browser-side `clientLogger` and
+/// forward them through the Rust `tracing` subscriber with the
+/// `nexus_shell::renderer` target so they appear alongside kernel logs.
+///
+/// Called by `clientLogger.ts` approximately every second when entries are
+/// pending. Fire-and-forget from the browser side — errors here are swallowed
+/// so a log-flush failure never breaks the renderer.
+#[tauri::command]
+fn append_shell_log(entries: Vec<RendererLogEntry>) {
+    for e in entries {
+        match e.level.as_str() {
+            "error" => tracing::error!(target: "nexus_shell::renderer", ts = e.ts, "{}", e.message),
+            "warn"  => tracing::warn! (target: "nexus_shell::renderer", ts = e.ts, "{}", e.message),
+            "debug" => tracing::debug!(target: "nexus_shell::renderer", ts = e.ts, "{}", e.message),
+            _       => tracing::info! (target: "nexus_shell::renderer", ts = e.ts, "{}", e.message),
+        }
+    }
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -516,6 +548,7 @@ pub fn run() {
             get_plugin_granted_capabilities,
             set_plugin_granted_capabilities,
             path_exists,
+            append_shell_log,
             persistence::get_shell_state,
             persistence::save_shell_state,
             persistence::write_last_forge_path,

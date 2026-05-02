@@ -5,6 +5,7 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { ConfigurationRegistry } from '../../../registry/ConfigurationRegistry'
 import { configStore } from '../../../stores/configStore'
+import { clientLogger } from '../../../clientLogger'
 
 export const configurationServicePlugin: Plugin = {
   manifest: {
@@ -25,6 +26,6 @@ export const configurationServicePlugin: Plugin = {
     // Register the store so api.configuration.getValue/setValue work
     api.internal!.registerInternalService('configStore', configStore)
 
-    console.info('[core.configuration-service] ready')
+    clientLogger.info('[core.configuration-service] ready')
   },
 }

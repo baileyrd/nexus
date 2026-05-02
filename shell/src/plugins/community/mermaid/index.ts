@@ -20,6 +20,7 @@
 import type { Leaf, ViewCreator } from '../../../workspace'
 import { ViewBase, viewRegistry } from '../../../workspace'
 import type { KernelAPI, Plugin, PluginAPI } from '../../../types/plugin'
+import { clientLogger } from '../../../clientLogger'
 
 const PLUGIN_ID = 'community.mermaid'
 const LANGUAGE = 'mermaid'
@@ -135,7 +136,7 @@ function ensureStylesheet(): void {
   // Side-effect import of the plugin stylesheet. Vite tracks it as a
   // CSS asset and ships it in the editor bundle's stylesheet graph.
   void import('./mermaid.css').catch((err) => {
-    console.warn('[community.mermaid] mermaid.css load failed:', err)
+    clientLogger.warn('[community.mermaid] mermaid.css load failed:', err)
   })
 }
 

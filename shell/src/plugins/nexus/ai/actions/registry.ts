@@ -23,6 +23,7 @@ import type {
   AiActionContext,
   AiActionSurface,
 } from '@nexus/extension-api'
+import { clientLogger } from '../../../../clientLogger'
 
 class AiActionRegistry {
   private actions: AiAction[] = []
@@ -34,7 +35,7 @@ class AiActionRegistry {
   register(action: AiAction): () => void {
     const id = action.id?.trim?.() ?? ''
     if (!id) {
-      console.warn(`[ai.actions] register: empty id — ignored`)
+      clientLogger.warn(`[ai.actions] register: empty id — ignored`)
       return () => {}
     }
     this.actions.push(action)
@@ -70,7 +71,7 @@ class AiActionRegistry {
       await action.run(ctx)
       return true
     } catch (err) {
-      console.warn(`[ai.actions] '${action.id}' run threw`, err)
+      clientLogger.warn(`[ai.actions] '${action.id}' run threw`, err)
       return false
     }
   }

@@ -28,6 +28,7 @@
 
 import type { RpcEnvelope } from '@nexus/extension-api'
 import { isRpcEnvelope } from '@nexus/extension-api'
+import { clientLogger } from '../clientLogger'
 import type { SandboxPort } from './router'
 
 /**
@@ -106,7 +107,7 @@ export class IframePort implements SandboxPort {
         '[IframePort] no Window available — supply `opts.window` in tests',
       )
     }
-    this.warn = opts.warn ?? ((...args) => console.warn('[IframePort]', ...args))
+    this.warn = opts.warn ?? ((...args) => clientLogger.warn('[IframePort]', ...args))
 
     this.windowListener = (ev: MessageEvent): void => {
       if (this.closed) return

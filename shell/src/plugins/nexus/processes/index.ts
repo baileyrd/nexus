@@ -2,6 +2,7 @@ import type { Plugin, PluginAPI } from '../../../types/plugin'
 import type { CommunityPluginManifest } from '../../../host/communityPluginLoader'
 import { usePaneModeStore } from '../../../stores/paneModeStore'
 import { ProcessesView } from './ProcessesView'
+import { clientLogger } from '../../../clientLogger'
 import {
   useProcessesStore,
   type PluginItem,
@@ -142,7 +143,7 @@ async function readSessions(api: PluginAPI): Promise<SessionItem[]> {
       })
     }
   } catch (err) {
-    console.debug('[nexus.processes] list_sessions failed:', err)
+    clientLogger.debug('[nexus.processes] list_sessions failed:', err)
   }
 
   // MCP server entries. `list_servers` returns the configured servers
@@ -163,7 +164,7 @@ async function readSessions(api: PluginAPI): Promise<SessionItem[]> {
       })
     }
   } catch (err) {
-    console.debug('[nexus.processes] list_servers failed:', err)
+    clientLogger.debug('[nexus.processes] list_servers failed:', err)
   }
 
   return out
@@ -293,7 +294,7 @@ export const processesPlugin: Plugin = {
           TOPIC_PREFIXES.map((prefix) => api.kernel.on(prefix, handleKernelEvent)),
         )
       } catch (err) {
-        console.warn('[nexus.processes] failed to subscribe to kernel events:', err)
+        clientLogger.warn('[nexus.processes] failed to subscribe to kernel events:', err)
         kernelUnsubs = []
       }
     }
@@ -303,7 +304,7 @@ export const processesPlugin: Plugin = {
         try {
           unsub()
         } catch (err) {
-          console.warn('[nexus.processes] unsubscribe failed:', err)
+          clientLogger.warn('[nexus.processes] unsubscribe failed:', err)
         }
       }
       kernelUnsubs = []

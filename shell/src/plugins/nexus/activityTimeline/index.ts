@@ -28,6 +28,7 @@ import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { usePaneModeStore } from '../../../stores/paneModeStore'
 import { ActivityTimelineView } from './ActivityTimelineView'
+import { clientLogger } from '../../../clientLogger'
 import {
   useActivityTimelineStore,
   type ActivityEntry,
@@ -72,7 +73,7 @@ async function hydrateFromKernel(api: PluginAPI): Promise<void> {
       .getState()
       .hydrate(Array.isArray(result?.entries) ? result.entries : [])
   } catch (err) {
-    console.debug(
+    clientLogger.debug(
       '[nexus.activityTimeline] activity_list hydrate failed:',
       err,
     )
@@ -86,7 +87,7 @@ async function clearTimeline(api: PluginAPI): Promise<void> {
   try {
     await api.kernel.invoke(AI_PLUGIN_ID, 'activity_clear')
   } catch (err) {
-    console.warn(
+    clientLogger.warn(
       '[nexus.activityTimeline] activity_clear failed:',
       err,
     )
@@ -190,7 +191,7 @@ export const activityTimelinePlugin: Plugin = {
           },
         )
       } catch (err) {
-        console.warn(
+        clientLogger.warn(
           '[nexus.activityTimeline] failed to subscribe to activity bus:',
           err,
         )
@@ -202,7 +203,7 @@ export const activityTimelinePlugin: Plugin = {
       try {
         kernelUnsub()
       } catch (err) {
-        console.warn(
+        clientLogger.warn(
           '[nexus.activityTimeline] unsubscribe failed:',
           err,
         )

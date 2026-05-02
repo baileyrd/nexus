@@ -21,6 +21,8 @@
 // promotion to `api.ai.registerContextContributor` is left to the
 // follow-up that lands BL-033.
 
+import { clientLogger } from '../../../clientLogger'
+
 /** Categorical hint for how a contributed chip should render. */
 export type ContextChipKind =
   | 'file'
@@ -86,7 +88,7 @@ class ContextContributorRegistry {
   register(surfaceId: string, contributor: ContextContributor): () => void {
     const id = surfaceId.trim()
     if (!id) {
-      console.warn(`[contextContributors] register: empty surfaceId — ignored`)
+      clientLogger.warn(`[contextContributors] register: empty surfaceId — ignored`)
       return () => {}
     }
     const entry: Entry = { surfaceId: id, contributor }
@@ -117,7 +119,7 @@ class ContextContributorRegistry {
         const result = await entry.contributor()
         if (result) out.push(result)
       } catch (err) {
-        console.warn(
+        clientLogger.warn(
           `[contextContributors] '${entry.surfaceId}' contributor threw`,
           err,
         )

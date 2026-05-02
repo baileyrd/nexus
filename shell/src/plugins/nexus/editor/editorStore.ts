@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { TransactionId } from './types.ts'
+import { clientLogger } from '../../../clientLogger'
 
 /**
  * View mode per tab.
@@ -205,7 +206,7 @@ export function isDirty(tab: EditorTab): boolean {
       // assume clean (matches prior `?? current` behaviour) so we
       // don't false-flag every newly-opened tab as dirty, but log so
       // the broken invariant surfaces in dev builds.
-      console.warn(
+      clientLogger.warn(
         `[editorStore] isDirty: sessionRevision present but savedRevision missing for '${tab.relpath}' — invariant violation; treating as clean. This indicates a missed acquire seed in SessionManager.`,
       )
       return false

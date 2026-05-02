@@ -1,6 +1,7 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { useGitStatusStore, type GitStatus } from './gitStatusStore'
 import { GitStatusItem } from './GitStatusItem'
+import { clientLogger } from '../../../clientLogger'
 
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
@@ -43,12 +44,12 @@ export const gitStatusPlugin: Plugin = {
         )
         useGitStatusStore.getState().setStatus(status)
         if (status !== null) {
-          console.info('[nexus.gitStatus] loaded', status)
+          clientLogger.info('[nexus.gitStatus] loaded', status)
         }
       } catch (err) {
         // Unexpected IPC failure — not the no-repo case (which now returns
         // null instead of throwing). Clear the UI and log for diagnostics.
-        console.info('[nexus.gitStatus] unavailable:', err)
+        clientLogger.info('[nexus.gitStatus] unavailable:', err)
         useGitStatusStore.getState().setStatus(null)
       }
     }
@@ -83,7 +84,7 @@ export const gitStatusPlugin: Plugin = {
         const unsub = await api.kernel.on(TOPIC_PREFIX, handleGitEvent)
         gitUnsubs = [unsub]
       } catch (err) {
-        console.warn('[nexus.gitStatus] failed to subscribe to git events:', err)
+        clientLogger.warn('[nexus.gitStatus] failed to subscribe to git events:', err)
         gitUnsubs = []
       }
     }
@@ -93,7 +94,7 @@ export const gitStatusPlugin: Plugin = {
         try {
           unsub()
         } catch (err) {
-          console.warn('[nexus.gitStatus] unsubscribe failed:', err)
+          clientLogger.warn('[nexus.gitStatus] unsubscribe failed:', err)
         }
       }
       gitUnsubs = []

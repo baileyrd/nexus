@@ -9,6 +9,7 @@
 import { useEffect } from 'react'
 import { useCapabilityPromptStore, type Banner } from './capabilityPromptStore'
 import { highestRisk } from '../../nexus/pluginsMgmt/capabilityInfo'
+import { zIndex } from '../../../shell/zIndex'
 
 const BANNER_AUTO_DISMISS_MS = 10_000
 
@@ -46,7 +47,7 @@ export function CapabilityBannerView() {
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
-        zIndex: 900,
+        zIndex: zIndex.overlayFloating,
         pointerEvents: 'none',
       }}
     >

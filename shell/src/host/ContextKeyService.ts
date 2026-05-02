@@ -3,6 +3,7 @@
 // Drives command enablement (when-clauses) and conditional rendering.
 
 import { create } from 'zustand'
+import { clientLogger } from './clientLogger'
 
 interface ContextKeyStore {
   keys: Record<string, unknown>
@@ -85,7 +86,7 @@ export function evaluateWhen(
     const result = parseOr(tokens, keys)
     return Boolean(result)
   } catch {
-    console.warn(`[ContextKeyService] Failed to evaluate: '${expression}'`)
+    clientLogger.warn(`[ContextKeyService] Failed to evaluate: '${expression}'`)
     return false
   }
 }

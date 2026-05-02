@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { clientLogger } from '../../../clientLogger'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -135,7 +136,7 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
           // from a sandboxed JS context — log so the user can see why
           // their copy didn't take.
           void navigator.clipboard.writeText(sel).catch((err) => {
-            console.warn('[Terminal] clipboard write failed:', err)
+            clientLogger.warn('[Terminal] clipboard write failed:', err)
           })
         }
         ev.preventDefault()
@@ -330,7 +331,7 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       try {
         text = await navigator.clipboard.readText()
       } catch (err) {
-        console.warn(
+        clientLogger.warn(
           '[Terminal] clipboard read denied — install @tauri-apps/plugin-clipboard-manager if this persists:',
           err,
         )

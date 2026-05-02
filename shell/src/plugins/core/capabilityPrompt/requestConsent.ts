@@ -30,6 +30,7 @@ import {
   useCapabilityPromptStore,
   type ModalPrompt,
 } from './capabilityPromptStore'
+import { clientLogger } from '../../../clientLogger'
 
 export type ConsentOutcome = 'approved' | 'denied' | 'auto'
 
@@ -98,7 +99,7 @@ export async function runInstallTimeConsent(
   try {
     priorMap = await getGranted(dirMap)
   } catch (err) {
-    console.warn(
+    clientLogger.warn(
       '[core.capabilityPrompt] get_plugin_granted_capabilities failed; ' +
         'assuming no prior grants:',
       err,
@@ -127,7 +128,7 @@ export async function runInstallTimeConsent(
             capabilities: capsToKernelStrings(prior.capabilities),
           })
         } catch (err) {
-          console.warn(
+          clientLogger.warn(
             `[core.capabilityPrompt] failed to refresh grants for ${m.id}:`,
             err,
           )
@@ -172,7 +173,7 @@ export async function runInstallTimeConsent(
           capabilities: [],
         })
       } catch (err) {
-        console.warn(
+        clientLogger.warn(
           `[core.capabilityPrompt] failed to persist denial for ${m.id}:`,
           err,
         )
@@ -188,7 +189,7 @@ export async function runInstallTimeConsent(
         capabilities: capsToKernelStrings(grantedCaps),
       })
     } catch (err) {
-      console.warn(
+      clientLogger.warn(
         `[core.capabilityPrompt] failed to persist grants for ${m.id}:`,
         err,
       )

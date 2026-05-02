@@ -33,6 +33,7 @@ import {
 } from '@tauri-apps/plugin-fs'
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
 import { open as openInShell } from '@tauri-apps/plugin-shell'
+import { clientLogger } from './clientLogger'
 import type { ComponentType } from 'react'
 
 interface BuildOptions {
@@ -224,7 +225,7 @@ export function buildPluginAPI(
           const store = registry.getService<{ set: (k: string, v: unknown) => void }>('configStore')
           store.set(key, value)
         } catch {
-          console.warn('[PluginAPI] configuration-service not loaded yet')
+          clientLogger.warn('[PluginAPI] configuration-service not loaded yet')
         }
       },
       onChange(key: string, handler: (v: unknown) => void) {
@@ -259,7 +260,7 @@ export function buildPluginAPI(
           queue.push(notification)
         } catch {
           // Fallback to console if notification service isn't loaded
-          console.info(`[Notification] ${notification.message}`)
+          clientLogger.info(`[Notification] ${notification.message}`)
         }
       },
     },
@@ -356,7 +357,7 @@ export function buildPluginAPI(
           // on failure) and doesn't need to block the caller's teardown.
           unlisten()
           invoke('kernel_unsubscribe', { subscriptionId }).catch((e) =>
-            console.warn('[api.kernel.on] unsubscribe failed', e),
+            clientLogger.warn('[api.kernel.on] unsubscribe failed', e),
           )
         }
         // Track for automatic sweep on plugin unload — without this the
@@ -517,7 +518,7 @@ export function buildPluginAPI(
           try {
             handler(next)
           } catch (err) {
-            console.warn(`[api.editor.onChange] handler for ${pluginId} threw`, err)
+            clientLogger.warn(`[api.editor.onChange] handler for ${pluginId} threw`, err)
           }
         })
         let disposed = false
@@ -574,7 +575,7 @@ export function buildPluginAPI(
       defineSlot(_slotId: string) {
         // Slot IDs are currently a union type — extending at runtime
         // would require dynamic SlotId handling. Documented as future work.
-        console.warn('[PluginAPI] defineSlot is not yet implemented')
+        clientLogger.warn('[PluginAPI] defineSlot is not yet implemented')
       },
       registry,
     }

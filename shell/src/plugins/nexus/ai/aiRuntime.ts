@@ -26,6 +26,7 @@
 // further chunks bounce off the matching-turn guard in the store.
 
 import type { KernelAPI, PluginAPI } from '../../../types/plugin'
+import { clientLogger } from '../../../clientLogger'
 import {
   useAiStore,
   type AiConfig,
@@ -277,7 +278,7 @@ export async function hydrateConfig(api: PluginAPI): Promise<void> {
     useAiStore.getState().setConfig(cfg)
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn('[nexus.ai] hydrateConfig failed', err)
+    clientLogger.warn('[nexus.ai] hydrateConfig failed', err)
   }
 }
 
@@ -378,7 +379,7 @@ export async function pushUserConfig(
     useAiStore.getState().setConfig(cfg)
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn('[nexus.ai] pushUserConfig failed', err)
+    clientLogger.warn('[nexus.ai] pushUserConfig failed', err)
   }
 }
 
@@ -603,7 +604,7 @@ export async function loadSessions(api: PluginAPI): Promise<void> {
   } catch (err) {
     // Plugin may not be wired yet — swallow per legacy (ChatPanel.tsx:287).
     // eslint-disable-next-line no-console
-    console.warn('[nexus.ai] loadSessions failed', err)
+    clientLogger.warn('[nexus.ai] loadSessions failed', err)
     useAiStore.getState().setSessions([])
   } finally {
     useAiStore.getState().setSessionsLoading(false)
@@ -706,7 +707,7 @@ export async function loadSession(api: PluginAPI, id: string): Promise<void> {
     useAiStore.getState().setActiveSessionId(id)
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn('[nexus.ai] loadSession failed', err)
+    clientLogger.warn('[nexus.ai] loadSession failed', err)
   }
 }
 
@@ -762,7 +763,7 @@ export async function saveCurrentSession(
     return id
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn('[nexus.ai] saveCurrentSession failed', err)
+    clientLogger.warn('[nexus.ai] saveCurrentSession failed', err)
     return null
   }
 }
@@ -778,7 +779,7 @@ export async function deleteSession(api: PluginAPI, id: string): Promise<void> {
     await api.kernel.invoke<unknown>(AI_PLUGIN_ID, HANDLER_SESSION_DELETE, { id })
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn('[nexus.ai] deleteSession failed', err)
+    clientLogger.warn('[nexus.ai] deleteSession failed', err)
     // Still proceed to refresh the list — legacy ChatPanel.tsx:798
     // pattern (warn + carry on; the file may already be gone).
   }
@@ -822,7 +823,7 @@ export async function renameSession(
       turnsToWrite = decodeTurns(raw?.turns)
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.warn('[nexus.ai] renameSession load failed', err)
+      clientLogger.warn('[nexus.ai] renameSession load failed', err)
       return
     }
   }
@@ -836,7 +837,7 @@ export async function renameSession(
     })
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn('[nexus.ai] renameSession save failed', err)
+    clientLogger.warn('[nexus.ai] renameSession save failed', err)
     return
   }
   await loadSessions(api)

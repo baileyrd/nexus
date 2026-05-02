@@ -1,5 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { clientLogger } from '../../../clientLogger'
 import { viewRegistry, workspace } from '../../../workspace'
 import type { Leaf, Tabs, WorkspaceParent } from '../../../workspace'
 import { EditorView } from './EditorView'
@@ -761,9 +762,7 @@ export const editorPlugin: Plugin = {
         getSnapshot: (relpath) => sessionManager.getSnapshot(relpath),
         client: editorClient,
         warn: (msg, err) => {
-          if (typeof console !== 'undefined' && console.warn) {
-            console.warn(msg, err)
-          }
+          clientLogger.warn(msg, err)
         },
       }),
     )

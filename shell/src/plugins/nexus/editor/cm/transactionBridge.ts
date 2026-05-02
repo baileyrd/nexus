@@ -32,6 +32,7 @@ import { EditorView, ViewUpdate } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
 
 import type { EditorKernelClient } from '../kernelClient.ts'
+import { clientLogger } from '../../../../clientLogger'
 import type {
   BlockId,
   EditorSnapshot,
@@ -398,6 +399,5 @@ export function transactionBridge(opts: TransactionBridgeOptions): Extension {
 }
 
 function defaultErrorReporter(message: string, err: unknown): void {
-  // eslint-disable-next-line no-console
-  console.error(`[nexus.editor] ${message}:`, err)
+  clientLogger.error(`[nexus.editor] ${message}:`, err)
 }

@@ -1,5 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { clientLogger } from '../../../clientLogger'
 import { viewRegistry, workspace } from '../../../workspace'
 import { FilesTree } from './FilesTree'
 import { fileExplorerViewCreator } from './FileExplorerView'
@@ -423,7 +424,7 @@ export const filesPlugin: Plugin = {
           api.kernel.on(TOPIC_FILE_RENAMED, handleFsEvent),
         ])
       } catch (err) {
-        console.warn('[nexus.files] failed to subscribe to storage events:', err)
+        clientLogger.warn('[nexus.files] failed to subscribe to storage events:', err)
         fsUnsubs = []
       }
     }
@@ -433,7 +434,7 @@ export const filesPlugin: Plugin = {
         try {
           unsub()
         } catch (err) {
-          console.warn('[nexus.files] unsubscribe failed:', err)
+          clientLogger.warn('[nexus.files] unsubscribe failed:', err)
         }
       }
       fsUnsubs = []

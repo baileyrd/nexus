@@ -5,6 +5,7 @@
 
 import type { KernelAPI } from '../../../types/plugin'
 import type { FilesDirEntry } from './filesStore'
+import { clientLogger } from '../../../clientLogger'
 
 const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 
@@ -24,7 +25,7 @@ export function setKernel(api: KernelAPI) {
  */
 export async function loadChildren(relpath: string): Promise<FilesDirEntry[]> {
   if (!kernel) {
-    console.warn('[nexus.files] loadChildren called before activate; kernel handle missing')
+    clientLogger.warn('[nexus.files] loadChildren called before activate; kernel handle missing')
     return []
   }
   try {
@@ -32,7 +33,7 @@ export async function loadChildren(relpath: string): Promise<FilesDirEntry[]> {
       relpath,
     })
   } catch (err) {
-    console.warn('[nexus.files] list_dir failed for', JSON.stringify(relpath), err)
+    clientLogger.warn('[nexus.files] list_dir failed for', JSON.stringify(relpath), err)
     return []
   }
 }

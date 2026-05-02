@@ -13,6 +13,7 @@ import jsPDF from 'jspdf'
 import type { CanvasDoc } from './kernelClient'
 import { contentBounds } from './renderer'
 import { configStore } from '../../../stores/configStore'
+import { clientLogger } from '../../../clientLogger'
 
 /** Max pixel dimension per edge to keep exports manageable. Mirrors
  *  exportPng.ts. */
@@ -68,7 +69,7 @@ async function snapshotContainer(
   try {
     return await producer(container, opts)
   } catch (err) {
-    console.warn('[nexus.canvas] html-to-image snapshot failed:', err)
+    clientLogger.warn('[nexus.canvas] html-to-image snapshot failed:', err)
     return null
   }
 }

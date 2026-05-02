@@ -14,6 +14,7 @@ import type { Plugin }   from '../types/plugin'
 import type { SandboxOrchestrator } from './sandbox/SandboxOrchestrator'
 import { parseManifestCapabilities } from '../plugins/nexus/pluginsMgmt/capabilityInfo'
 import { assertValidPluginId } from './PluginAPI'
+import { clientLogger } from './clientLogger'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -123,7 +124,7 @@ export function checkApiVersion(
   if (apiVersion === undefined || apiVersion === null) {
     if (!warnedLegacyPlugins.has(pluginId)) {
       warnedLegacyPlugins.add(pluginId)
-      console.warn(
+      clientLogger.warn(
         `[CommunityLoader] '${pluginId}' declares no apiVersion — ` +
         `treating as legacy plugin. Add \`"apiVersion": ${supported}\` ` +
         `to plugin.json to opt in to the stable ABI.`,
@@ -179,10 +180,10 @@ export async function scanCommunityPlugins(): Promise<CommunityPluginManifest[]>
     results[1].status === 'fulfilled' ? results[1].value : []
 
   if (results[0].status === 'rejected') {
-    console.warn('[CommunityLoader] scan_plugin_directory failed:', (results[0] as PromiseRejectedResult).reason)
+    clientLogger.warn('[CommunityLoader] scan_plugin_directory failed:', (results[0] as PromiseRejectedResult).reason)
   }
   if (results[1].status === 'rejected') {
-    console.warn('[CommunityLoader] scan_plugin_directory_at failed:', (results[1] as PromiseRejectedResult).reason)
+    clientLogger.warn('[CommunityLoader] scan_plugin_directory_at failed:', (results[1] as PromiseRejectedResult).reason)
   }
 
   // Merge: installed plugins take precedence; repo fills in anything not installed
@@ -194,7 +195,7 @@ export async function scanCommunityPlugins(): Promise<CommunityPluginManifest[]>
       .map(m => ({ ...m, _source: 'repo' as const })),
   ]
 
-  console.info(
+  clientLogger.info(
     `[CommunityLoader] ${merged.length} plugin(s) discovered` +
     (import.meta.env.DEV ? ` (${fromRepo.length} from repo)` : '')
   )
@@ -267,7 +268,7 @@ export async function loadEnabledCommunityPlugins(
       // ExtensionHost's in-realm plugin list.
       if (result.value) plugins.push(result.value)
     } else {
-      console.error(
+      clientLogger.error(
         `[CommunityLoader] ✗ ${enabled[i].id}:`,
         result.reason
       )
@@ -347,7 +348,7 @@ async function loadOnePlugin(
     plugin.manifest.version = manifest.version
     plugin.manifest.core    = false
 
-    console.info(`[CommunityLoader] ✓ loaded ${manifest.id}`)
+    clientLogger.info(`[CommunityLoader] ✓ loaded ${manifest.id}`)
     return plugin
   } finally {
     URL.revokeObjectURL(url)
@@ -359,7 +360,7 @@ async function loadSandboxedPlugin(
   options: LoadCommunityPluginsOptions,
 ): Promise<null> {
   if (!options.orchestrator || !options.getRuntimeUrl) {
-    console.warn(
+    clientLogger.warn(
       `[CommunityLoader] skipping sandboxed plugin '${manifest.id}' — ` +
       `caller did not provide a SandboxOrchestrator + getRuntimeUrl factory`,
     )
@@ -396,7 +397,7 @@ async function loadSandboxedPlugin(
       capabilities: new Set<string>(caps),
       manifestApiVersion: manifest.apiVersion,
     })
-    console.info(`[CommunityLoader] ✓ loaded (sandboxed) ${manifest.id}`)
+    clientLogger.info(`[CommunityLoader] ✓ loaded (sandboxed) ${manifest.id}`)
   } catch (err) {
     // Revoke the blob URL so the iframe's failure doesn't leak the
     // Blob reference. (The orchestrator revokes on successful load

@@ -6,6 +6,7 @@
 // selection, resize handles, drag-from-edge create, undo/redo stack.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { clientLogger } from '../../../clientLogger'
 import {
   useCanvasStore,
   MIN_ZOOM,
@@ -264,7 +265,7 @@ export function CanvasView({ relpath, client }: Props) {
         // Surface to the tab so the corner label flips to error
         // mode; also keep the console breadcrumb the pre-WI-11
         // handler had so existing operator runbooks still work.
-        console.warn('[nexus.canvas] patch failed:', err)
+        clientLogger.warn('[nexus.canvas] patch failed:', err)
         useCanvasStore.getState().setPatchError(relpath, String(err))
       },
     })

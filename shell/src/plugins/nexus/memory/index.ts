@@ -12,6 +12,7 @@
 // slot — no separate `WebviewWindow` (per ADR 0011 single-window posture).
 
 import { createElement, type ReactElement } from 'react'
+import { clientLogger } from '../../../clientLogger'
 
 import {
   isRegistered,
@@ -267,7 +268,7 @@ export const memoryPlugin: Plugin = {
           try {
             await unregister(accelerator)
           } catch (err) {
-            console.warn(
+            clientLogger.warn(
               '[nexus.memory] unregister of stale binding failed:',
               err,
             )
@@ -292,7 +293,7 @@ export const memoryPlugin: Plugin = {
       try {
         await unregister(accelerator)
       } catch (err) {
-        console.warn('[nexus.memory] unregister failed:', err)
+        clientLogger.warn('[nexus.memory] unregister failed:', err)
       }
     }
 

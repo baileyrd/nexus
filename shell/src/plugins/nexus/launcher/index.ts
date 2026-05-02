@@ -17,6 +17,7 @@ import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { useLauncherStore } from './launcherState'
 import { LauncherView } from './LauncherView'
+import { clientLogger } from '../../../clientLogger'
 
 const EVENT_OPENED = 'workspace:opened'
 const EVENT_CLOSED = 'workspace:closed'
@@ -50,7 +51,7 @@ export const launcherPlugin: Plugin = {
 
     const reportBootFailure = (path: string | null, err: unknown) => {
       const message = err instanceof Error ? err.message : String(err)
-      console.warn('[nexus.launcher] workspace command failed', path, err)
+      clientLogger.warn('[nexus.launcher] workspace command failed', path, err)
       // api.notifications.show is always defined (PluginAPI contract); if
       // the notification service hasn't loaded yet it silently falls back
       // to a console line, which is fine.
@@ -62,7 +63,7 @@ export const launcherPlugin: Plugin = {
             : `Could not open workspace: ${message}`,
         })
       } catch (notifyErr) {
-        console.warn('[nexus.launcher] notifications.show failed:', notifyErr)
+        clientLogger.warn('[nexus.launcher] notifications.show failed:', notifyErr)
       }
     }
 

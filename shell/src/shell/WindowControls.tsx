@@ -15,6 +15,7 @@
 // drag region).
 import { useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { clientLogger } from '../host/clientLogger'
 
 // Resolved once at module init — `installBodyClasses()` is guaranteed to
 // run before any plugin or React tree is mounted.
@@ -183,7 +184,7 @@ export function WindowControls() {
           setMaximized(now)
         })
       } catch (err) {
-        console.warn('[WindowControls] failed to wire maximize listener:', err)
+        clientLogger.warn('[WindowControls] failed to wire maximize listener:', err)
       }
     })()
     return () => {

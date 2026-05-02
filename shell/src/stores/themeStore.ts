@@ -24,6 +24,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { PluginAPI } from '../types/plugin'
+import { clientLogger } from '../host/clientLogger'
 
 // Wire shapes — mirror the Rust DTOs in crates/nexus-theme. Kept
 // loose (`Record<string, string>` for variables, optional snippet
@@ -202,7 +203,7 @@ export const useThemeStore = create<ThemeStore>()(
               },
             })
           } catch (err) {
-            console.warn(
+            clientLogger.warn(
               '[themeStore] apply_config (restore) failed; falling back to kernel default',
               err,
             )
@@ -219,7 +220,7 @@ export const useThemeStore = create<ThemeStore>()(
           api.kernel
             .invoke<KernelThemeConfig>(THEME_PLUGIN_ID, 'get_theme_config', {})
             .catch((err) => {
-              console.warn(
+              clientLogger.warn(
                 '[themeStore] get_theme_config failed; using defaults',
                 err,
               )

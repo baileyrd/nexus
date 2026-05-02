@@ -2,6 +2,8 @@
 // Typed publish/subscribe for decoupled plugin communication.
 // Plugins never import each other directly — they use events.
 
+import { clientLogger } from './clientLogger'
+
 type Handler<T = unknown> = (payload: T) => void
 
 class EventBus {
@@ -36,7 +38,7 @@ class EventBus {
         try {
           handler(payload)
         } catch (err) {
-          console.error(`[EventBus] Handler for '${event}' threw:`, err)
+          clientLogger.error(`[EventBus] Handler for '${event}' threw:`, err)
         }
       }
     }
@@ -49,7 +51,7 @@ class EventBus {
         try {
           handler(wrapped)
         } catch (err) {
-          console.error(`[EventBus] Wildcard handler threw on '${event}':`, err)
+          clientLogger.error(`[EventBus] Wildcard handler threw on '${event}':`, err)
         }
       }
     }

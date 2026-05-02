@@ -7,6 +7,7 @@
 
 import type { Plugin, PluginAPI, FileEntry, FsEvent } from '../../../types/plugin'
 import { watch } from '@tauri-apps/plugin-fs'
+import { clientLogger } from '../../../clientLogger'
 
 type PlatformFs = PluginAPI['platform']['fs']
 
@@ -73,6 +74,6 @@ export const fileSystemServicePlugin: Plugin = {
 
   activate(api: PluginAPI) {
     api.internal!.registerInternalService('fsService', new FilesystemService(api.platform.fs))
-    console.info('[core.filesystem-service] ready')
+    clientLogger.info('[core.filesystem-service] ready')
   },
 }

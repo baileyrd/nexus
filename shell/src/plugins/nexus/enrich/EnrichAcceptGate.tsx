@@ -12,6 +12,7 @@
 import { headPending, useEnrichStore } from './enrichStore'
 import { applyPending } from './enrichRuntime'
 import { getEnrichApi } from './enrichApi'
+import { zIndex } from '../../../shell/zIndex'
 
 function basename(p: string): string {
   const i = p.lastIndexOf('/')
@@ -53,7 +54,7 @@ export function EnrichAcceptGate() {
         fontFamily: 'var(--font-interface)',
         fontSize: 13,
         color: 'var(--text-normal)',
-        zIndex: 9999,
+        zIndex: zIndex.overlayFloating,
       }}
     >
       {pending && (

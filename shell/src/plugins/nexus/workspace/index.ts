@@ -1,6 +1,7 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
+import { clientLogger } from '../../../clientLogger'
 import { useWorkspaceStore } from './workspaceStore'
 import { WorkspaceStatusItem } from './WorkspaceStatusItem'
 
@@ -108,7 +109,7 @@ export const workspacePlugin: Plugin = {
         try {
           await invoke('shutdown_kernel')
         } catch (err) {
-          console.warn('[nexus.workspace] shutdown_kernel failed (continuing):', err)
+          clientLogger.warn('[nexus.workspace] shutdown_kernel failed (continuing):', err)
         }
       }
 
@@ -124,7 +125,7 @@ export const workspacePlugin: Plugin = {
             await invoke('boot_kernel', { path })
           }
         } catch (err) {
-          console.error('[nexus.workspace] kernel boot failed for', path, err)
+          clientLogger.error('[nexus.workspace] kernel boot failed for', path, err)
           // Force-clear so the UI reflects "no workspace" rather than
           // stalling on a half-booted state.
           useWorkspaceStore.getState().setRootPath(null)
@@ -142,7 +143,7 @@ export const workspacePlugin: Plugin = {
       api.context.set(CONTEXT_KEY_HAS_ROOT, path !== null)
       if (path) {
         api.storage.set(STORAGE_KEY, path)
-        console.info('[nexus.workspace] saved root:', path)
+        clientLogger.info('[nexus.workspace] saved root:', path)
         api.events.emit(EVENT_OPENED, { path })
       } else {
         api.storage.delete(STORAGE_KEY)
@@ -160,18 +161,18 @@ export const workspacePlugin: Plugin = {
         const state = await invoke<{ lastForgePath: string | null }>('get_shell_state')
         if (state.lastForgePath) {
           persisted = state.lastForgePath
-          console.info('[nexus.workspace] restoring from shell-state lastForgePath')
+          clientLogger.info('[nexus.workspace] restoring from shell-state lastForgePath')
         }
       } catch (err) {
-        console.warn('[nexus.workspace] get_shell_state failed:', err)
+        clientLogger.warn('[nexus.workspace] get_shell_state failed:', err)
       }
     }
-    console.info('[nexus.workspace] boot — persisted root:', persisted ?? '<none>')
+    clientLogger.info('[nexus.workspace] boot — persisted root:', persisted ?? '<none>')
     if (persisted) {
       try {
         const stillExists = await invoke<boolean>('path_exists', { path: persisted })
         if (stillExists) {
-          console.info('[nexus.workspace] restoring', persisted)
+          clientLogger.info('[nexus.workspace] restoring', persisted)
           try {
             await setRoot(persisted)
           } catch (err) {
@@ -179,18 +180,18 @@ export const workspacePlugin: Plugin = {
             // migration needed, etc.). setRoot already cleared storage +
             // emitted workspace:closed, so the launcher will appear. Just
             // log and move on rather than propagating out of activate().
-            console.warn(
+            clientLogger.warn(
               '[nexus.workspace] kernel boot failed for persisted path, falling back to launcher:',
               err,
             )
           }
         } else {
-          console.info('[nexus.workspace] persisted path no longer exists, clearing')
+          clientLogger.info('[nexus.workspace] persisted path no longer exists, clearing')
           api.storage.delete(STORAGE_KEY)
           await setRoot(null)
         }
       } catch (err) {
-        console.warn('[nexus.workspace] failed to verify persisted path:', err)
+        clientLogger.warn('[nexus.workspace] failed to verify persisted path:', err)
         await setRoot(null)
       }
     } else {

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { clientLogger } from '../../../clientLogger'
 
 /** BL-022 — change-notification surface. The plugin's `index.ts`
  *  installs a listener via `subscribeSkillsChanged` so it can refetch
@@ -21,7 +22,7 @@ function emitChange(event: { id: string; action: ChangeAction }): void {
       listener(event)
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.warn('[nexus.skills] change listener threw', err)
+      clientLogger.warn('[nexus.skills] change listener threw', err)
     }
   }
 }
@@ -415,7 +416,7 @@ export const useSkillsStore = create<SkillsStoreState>((set, get) => ({
         await api.invoke<unknown>(SKILLS_PLUGIN_ID, CMD_RELOAD, {})
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn('[nexus.skills] reload after save failed', err)
+        clientLogger.warn('[nexus.skills] reload after save failed', err)
       }
       set({ saving: false, editingId: null, draft: null, saveError: null })
       // Tell the plugin's `refresh` driver to re-fetch the listing so
@@ -441,7 +442,7 @@ export const useSkillsStore = create<SkillsStoreState>((set, get) => ({
         await api.invoke<unknown>(SKILLS_PLUGIN_ID, CMD_RELOAD, {})
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn('[nexus.skills] reload after delete failed', err)
+        clientLogger.warn('[nexus.skills] reload after delete failed', err)
       }
       set((s) => ({
         saving: false,

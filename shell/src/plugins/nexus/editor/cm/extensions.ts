@@ -11,6 +11,7 @@ import { defaultKeymap } from '@codemirror/commands'
 import { search, searchKeymap } from '@codemirror/search'
 
 import type { EditorKernelClient } from '../kernelClient.ts'
+import { clientLogger } from '../../../../clientLogger'
 
 export interface BaselineExtensionsOptions {
   /**
@@ -62,7 +63,7 @@ export function baselineExtensions(
       applyCanonical,
       onError = (m, e) => {
         // eslint-disable-next-line no-console
-        console.error(`[nexus.editor] ${m}:`, e)
+        clientLogger.error(`[nexus.editor] ${m}:`, e)
       },
     } = opts.kernelUndo
 

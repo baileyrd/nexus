@@ -1,5 +1,6 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { usePaneModeStore } from '../../../stores/paneModeStore'
+import { clientLogger } from '../../../clientLogger'
 
 const COMMAND_ENTER = 'nexus.paneMode.enter'
 const COMMAND_EXIT = 'nexus.paneMode.exit'
@@ -48,7 +49,7 @@ export const paneModePlugin: Plugin = {
   async activate(api: PluginAPI) {
     api.commands.register(COMMAND_ENTER, async (viewId?: unknown) => {
       if (typeof viewId !== 'string' || viewId.length === 0) {
-        console.warn(
+        clientLogger.warn(
           '[nexus.paneMode] enter called without a viewId string arg; ignoring.',
         )
         return

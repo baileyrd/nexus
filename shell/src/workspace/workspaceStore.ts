@@ -10,6 +10,7 @@
 // singleton facade — mirroring the pattern in `shell/src/registry/SlotRegistry.ts`.
 
 import { create } from 'zustand'
+import { clientLogger } from '../host/clientLogger'
 import type {
   FloatingWindow,
   Leaf,
@@ -916,7 +917,7 @@ async function hydrate(json?: WorkspaceJSON): Promise<void> {
       if (node.kind === 'floating') {
         floating.push(node)
       } else {
-        console.warn(
+        clientLogger.warn(
           '[workspaceStore.hydrate] floating entry is not a floating node; skipped',
           fwJson,
         )

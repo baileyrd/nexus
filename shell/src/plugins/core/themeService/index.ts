@@ -19,6 +19,7 @@ import {
   useThemeStore,
   type KernelThemeConfig,
 } from '../../../stores/themeStore'
+import { clientLogger } from '../../../clientLogger'
 
 export const themeServicePlugin: Plugin = {
   manifest: {
@@ -41,7 +42,7 @@ export const themeServicePlugin: Plugin = {
       try {
         await useThemeStore.getState().hydrate(api)
       } catch (err) {
-        console.warn(
+        clientLogger.warn(
           '[core.theme-service] hydrate failed; using shell.css defaults',
           err,
         )
@@ -70,12 +71,12 @@ export const themeServicePlugin: Plugin = {
         void useThemeStore.getState().hydrate(api)
       })
     } catch (err) {
-      console.warn(
+      clientLogger.warn(
         '[core.theme-service] subscribe to com.nexus.theme.changed failed',
         err,
       )
     }
 
-    console.info('[core.theme-service] kernel-sync ready')
+    clientLogger.info('[core.theme-service] kernel-sync ready')
   },
 }

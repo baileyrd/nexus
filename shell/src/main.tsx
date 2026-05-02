@@ -152,7 +152,7 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
       // another round-trip through this file.
       registry: reg,
     }
-    console.info('[Boot] __nexusShellApi attached (VITE_E2E=true)')
+    clientLogger.info('[Boot] __nexusShellApi attached (VITE_E2E=true)')
   }
 
   // Terminal visibility on boot: it is a Leaf inside the right sidedock
@@ -194,7 +194,7 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
     [...defaultOnSet, ...optInEntries].map(e => e.load()),
   )
   if (optInEntries.length > 0) {
-    console.info(
+    clientLogger.info(
       `[Boot] ${optInEntries.length} opt-in plugin(s) enabled: ` +
         optInEntries.map(e => e.id).join(', '),
     )
@@ -210,15 +210,15 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
     )
   }
 
-  console.info(`[Boot] Loading ${plugins.length} plugins...`)
+  clientLogger.info(`[Boot] Loading ${plugins.length} plugins...`)
   await host.loadAll(plugins)
 
   const all = host.listAll()
   all.forEach(({ id, state }) => {
     if (state === 'error') {
-      console.error(`[Boot] FAILED: ${id}`, host.getError(id))
+      clientLogger.error(`[Boot] FAILED: ${id}`, host.getError(id))
     } else {
-      console.info(`[Boot] ${state === 'active' ? '✓' : '?'} ${id}: ${state}`)
+      clientLogger.info(`[Boot] ${state === 'active' ? '✓' : '?'} ${id}: ${state}`)
     }
   })
 
@@ -251,13 +251,13 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
     const consent = await runInstallTimeConsent(communityManifests)
     deniedCommunityIds = consent.denied
     if (deniedCommunityIds.size > 0) {
-      console.info(
+      clientLogger.info(
         `[Boot] ${deniedCommunityIds.size} community plugin(s) denied ` +
         `by consent prompt: ${[...deniedCommunityIds].join(', ')}`,
       )
     }
   } catch (err) {
-    console.warn('[Boot] capability consent flow failed; continuing:', err)
+    clientLogger.warn('[Boot] capability consent flow failed; continuing:', err)
   }
   // Expose the denied set so PluginsMgmt can render "denied" rows.
   reg.registerService('communityPluginDenied', deniedCommunityIds)
@@ -311,7 +311,7 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
     getRuntimeUrl,
   })
   if (communityPlugins.length > 0) {
-    console.info(`[Boot] Loading ${communityPlugins.length} community plugin(s)...`)
+    clientLogger.info(`[Boot] Loading ${communityPlugins.length} community plugin(s)...`)
     await host.loadAll(communityPlugins)
   }
 
@@ -348,7 +348,7 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
   const slotSummary = Object.entries(useSlotStore.getState().slots)
     .map(([k, v]) => `${k}:${(v as any[]).length}`)
     .join(' ')
-  console.info(`[Boot] Slots: ${slotSummary}`)
+  clientLogger.info(`[Boot] Slots: ${slotSummary}`)
 
   // WI-13 follow-up: receive OS-level `nexus://…` deep-links from the
   // Rust side (see `shell/src-tauri/src/lib.rs` — `on_open_url`) and
@@ -360,10 +360,10 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
       const url = new URL(event.payload)
       uriHandlerRegistry.dispatch(url)
     } catch (err) {
-      console.warn('[Boot] deep-link payload not parseable:', event.payload, err)
+      clientLogger.warn('[Boot] deep-link payload not parseable:', event.payload, err)
     }
   }).catch((err) => {
-    console.warn('[Boot] failed to register deep-link listener:', err)
+    clientLogger.warn('[Boot] failed to register deep-link listener:', err)
   })
 
   // BL-029 Phase 2a — popout close-event sync (ADR 0020 §3).
@@ -382,13 +382,13 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
   listen<{ fwId?: string }>(POPOUT_CLOSED_EVENT, async (event) => {
     const fwId = event.payload?.fwId
     if (typeof fwId !== 'string' || fwId.length === 0) {
-      console.warn('[Boot] popout-closed event missing fwId:', event.payload)
+      clientLogger.warn('[Boot] popout-closed event missing fwId:', event.payload)
       return
     }
     try {
       await workspaceStore.closeFloatingWindow(fwId)
     } catch (err) {
-      console.warn('[Boot] popout-closed: closeFloatingWindow failed', err)
+      clientLogger.warn('[Boot] popout-closed: closeFloatingWindow failed', err)
     }
     try {
       await closePopoutTauri(fwId)
@@ -396,7 +396,7 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
       // Idempotent; the OS window has typically already gone away.
     }
   }).catch((err) => {
-    console.warn('[Boot] failed to register popout-closed listener:', err)
+    clientLogger.warn('[Boot] failed to register popout-closed listener:', err)
   })
 
   // SH-021: Popout bounds persistence. Popouts emit
@@ -418,7 +418,7 @@ async function boot(opts: { popoutMode?: boolean } = {}) {
       workspaceStore.setFloatingWindowBounds(fwId, bounds)
     },
   ).catch((err) => {
-    console.warn('[Boot] failed to register popout-bounds-changed listener:', err)
+    clientLogger.warn('[Boot] failed to register popout-bounds-changed listener:', err)
   })
 
   contextKeyService.set('shellReady', true)
@@ -464,7 +464,7 @@ if (isPopoutMode()) {
   // (set by `boot()` after `host.loadAll`) the same way `<App>` does.
   boot({ popoutMode: true }).catch((err) => {
     const stack = err instanceof Error ? (err.stack ?? err.message) : String(err)
-    console.error('[Boot/popout] Fatal:', err)
+    clientLogger.error('[Boot/popout] Fatal:', err)
     showFatal(stack)
   })
 } else {
@@ -478,7 +478,7 @@ if (isPopoutMode()) {
 
   boot().catch(err => {
     const stack = err instanceof Error ? (err.stack ?? err.message) : String(err)
-    console.error('[Boot] Fatal:', err)
+    clientLogger.error('[Boot] Fatal:', err)
     showFatal(stack)
   })
 }

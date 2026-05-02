@@ -1,5 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { clientLogger } from '../../../clientLogger'
 import { usePaneModeStore } from '../../../stores/paneModeStore'
 import { AgentView } from './AgentView'
 import {
@@ -226,7 +227,7 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
         // Swallow — the fallback catalogue is already installed and
         // the picker still works. Logged at warn so a regression in
         // the IPC wiring surfaces.
-        console.warn('[nexus.agent] list_archetypes failed:', err)
+        clientLogger.warn('[nexus.agent] list_archetypes failed:', err)
       }
     }
 
@@ -509,7 +510,7 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
           if (typeof r.goal === 'string') useAgentStore.getState().setGoal(r.goal)
         }
       } catch (err) {
-        console.warn('[nexus.agent] history_get failed:', err)
+        clientLogger.warn('[nexus.agent] history_get failed:', err)
       }
     }
 
@@ -595,7 +596,7 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
       try {
         agentUnsub = await api.kernel.on(AGENT_TOPIC_PREFIX, handleAgentTopic)
       } catch (err) {
-        console.warn('[nexus.agent] failed to subscribe to agent topics:', err)
+        clientLogger.warn('[nexus.agent] failed to subscribe to agent topics:', err)
       }
     }
 
@@ -604,7 +605,7 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
         try {
           agentUnsub()
         } catch (err) {
-          console.warn('[nexus.agent] unsubscribe failed:', err)
+          clientLogger.warn('[nexus.agent] unsubscribe failed:', err)
         }
         agentUnsub = null
       }

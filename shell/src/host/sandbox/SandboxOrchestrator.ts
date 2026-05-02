@@ -41,6 +41,7 @@ import { SandboxRouter } from './router'
 import type { PluginAPI } from '../../types/plugin'
 import type { PluginRegistry } from '../PluginRegistry'
 import { eventBus } from '../EventBus'
+import { clientLogger } from '../clientLogger'
 
 // ─── Public shapes ───────────────────────────────────────────────────────────
 
@@ -305,7 +306,7 @@ class SandboxInstanceImpl implements SandboxInstance {
     this.handshakeTimeoutMs =
       orchOpts.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS
     this.warn =
-      orchOpts.warn ?? ((...args) => console.warn('[SandboxOrchestrator]', ...args))
+      orchOpts.warn ?? ((...args) => clientLogger.warn('[SandboxOrchestrator]', ...args))
     this.windowRef =
       (orchOpts.window ??
         (globalThis as unknown as Window & typeof globalThis)) as Window &

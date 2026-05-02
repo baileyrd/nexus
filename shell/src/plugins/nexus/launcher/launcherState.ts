@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { create } from 'zustand'
+import { clientLogger } from '../../../clientLogger'
 
 export interface ShellState {
   version: number
@@ -27,7 +28,7 @@ async function getState(): Promise<ShellState> {
   try {
     return await invoke<ShellState>('get_shell_state')
   } catch (err) {
-    console.warn('[nexus.launcher] get_shell_state failed:', err)
+    clientLogger.warn('[nexus.launcher] get_shell_state failed:', err)
     return EMPTY
   }
 }

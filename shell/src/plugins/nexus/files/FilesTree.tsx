@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { useFilesStore, type FilesDirEntry, type SortMode } from './filesStore'
+import { clientLogger } from '../../../clientLogger'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useEditorStore } from '../editor/editorStore'
 import { createDir, createFile, loadChildren, renameEntry } from './kernelClient'
@@ -234,7 +235,7 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
       await refreshParent(parent)
       setSelected(relpath)
     } catch (err) {
-      console.warn('[nexus.files] create_file failed:', err)
+      clientLogger.warn('[nexus.files] create_file failed:', err)
       await api.input.confirm(`Failed to create "${withExt}": ${(err as Error).message ?? err}`)
     }
   }
@@ -260,7 +261,7 @@ export function FilesTree({ onFileActivate }: FilesTreeProps) {
       setExpanded(relpath, true)
       await refreshParent(parent)
     } catch (err) {
-      console.warn('[nexus.files] create_dir failed:', err)
+      clientLogger.warn('[nexus.files] create_dir failed:', err)
       await api.input.confirm(`Failed to create "${trimmed}": ${(err as Error).message ?? err}`)
     }
   }

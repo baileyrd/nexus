@@ -18,6 +18,7 @@
 import type { KeybindingContribution } from '../types/plugin'
 import { evaluateWhen } from '../host/ContextKeyService'
 import { eventBus } from '../host/EventBus'
+import { clientLogger } from '../host/clientLogger'
 
 interface KeybindingEntry {
   id: string
@@ -107,7 +108,7 @@ export class KeybindingRegistry {
    */
   bindStorage(storage: OverrideStorage): void {
     if (this.storage !== null) {
-      console.warn('[KeybindingRegistry] bindStorage called more than once — ignoring')
+      clientLogger.warn('[KeybindingRegistry] bindStorage called more than once — ignoring')
       return
     }
     this.storage = storage
@@ -204,14 +205,14 @@ export class KeybindingRegistry {
    */
   async loadOverrides(): Promise<void> {
     if (!this.storage) {
-      console.warn('[KeybindingRegistry] loadOverrides called before bindStorage — no-op')
+      clientLogger.warn('[KeybindingRegistry] loadOverrides called before bindStorage — no-op')
       return
     }
     let loaded: Record<string, string> = {}
     try {
       loaded = await this.storage.read()
     } catch (err) {
-      console.warn('[KeybindingRegistry] loadOverrides failed:', err)
+      clientLogger.warn('[KeybindingRegistry] loadOverrides failed:', err)
       return
     }
     this.overrides = new Map(Object.entries(loaded))
@@ -230,7 +231,7 @@ export class KeybindingRegistry {
     chord: string,
   ): Promise<void> {
     if (!this.storage) {
-      console.warn('[KeybindingRegistry] setOverride called before bindStorage — no-op')
+      clientLogger.warn('[KeybindingRegistry] setOverride called before bindStorage — no-op')
       return
     }
     const normalized = normalizeChord(chord)
@@ -244,7 +245,7 @@ export class KeybindingRegistry {
    *  No-ops (with a warning) if no storage has been bound. */
   async clearOverride(commandId: string): Promise<void> {
     if (!this.storage) {
-      console.warn('[KeybindingRegistry] clearOverride called before bindStorage — no-op')
+      clientLogger.warn('[KeybindingRegistry] clearOverride called before bindStorage — no-op')
       return
     }
     if (!this.overrides.delete(commandId)) return
@@ -391,7 +392,7 @@ export class KeybindingRegistry {
     try {
       await this.storage!.write(Object.fromEntries(this.overrides))
     } catch (err) {
-      console.error('[KeybindingRegistry] persist failed:', err)
+      clientLogger.error('[KeybindingRegistry] persist failed:', err)
       throw err
     }
   }

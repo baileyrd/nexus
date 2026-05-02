@@ -28,6 +28,7 @@ import {
 import { LeafHost } from '../workspace/WorkspaceRenderer'
 import { buildDefaultLayout, loadWorkspace } from '../workspace'
 import type { Leaf, FloatingWindow, WorkspaceParent } from '../workspace/types'
+import { clientLogger } from '../host/clientLogger'
 
 /** Tauri-app event emitted by a popout right before it closes. The
  *  main window listens for this and removes the matching
@@ -98,7 +99,7 @@ async function installBoundsListener(fwId: string): Promise<() => void> {
       unResize()
     }
   } catch (err) {
-    console.warn('[PopoutShell] bounds listener registration failed', err)
+    clientLogger.warn('[PopoutShell] bounds listener registration failed', err)
     return () => {}
   }
 }
@@ -115,12 +116,12 @@ async function installCloseHandshake(fwId: string): Promise<() => void> {
       try {
         await emit(POPOUT_CLOSED_EVENT, { fwId })
       } catch (err) {
-        console.warn('[PopoutShell] failed to emit popout-closed event', err)
+        clientLogger.warn('[PopoutShell] failed to emit popout-closed event', err)
       }
     })
     return unlisten
   } catch (err) {
-    console.warn('[PopoutShell] onCloseRequested registration failed', err)
+    clientLogger.warn('[PopoutShell] onCloseRequested registration failed', err)
     return () => {}
   }
 }
@@ -308,7 +309,7 @@ export function PopoutShell(): JSX.Element {
         setResolution(next)
       } catch (err) {
         if (cancelled) return
-        console.error('[PopoutShell] resolveLeaf failed', err)
+        clientLogger.error('[PopoutShell] resolveLeaf failed', err)
         setResolution({
           kind: 'error',
           reason: `Failed to load workspace state: ${err instanceof Error ? err.message : String(err)}`,

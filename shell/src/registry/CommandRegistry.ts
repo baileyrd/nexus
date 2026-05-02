@@ -6,6 +6,7 @@ import type { CommandContribution, CommandEntry } from '../types/plugin'
 import { activationTriggers } from '../host/ActivationTriggers'
 import { eventBus } from '../host/EventBus'
 import { configStore } from '../stores/configStore'
+import { clientLogger } from '../host/clientLogger'
 
 /** OI-11 — defaults, also re-used as the test override floor. */
 const DEFAULT_WARN_MS = 250
@@ -70,7 +71,7 @@ export class CommandRegistry {
     }
     const cmd = this.commands.get(id)
     if (!cmd?.handler) {
-      console.warn(`[CommandRegistry] No handler for command '${id}'`)
+      clientLogger.warn(`[CommandRegistry] No handler for command '${id}'`)
       return
     }
     // WI-35 — per-plugin crash quarantine (Q3 default: re-throw).
@@ -98,7 +99,7 @@ export class CommandRegistry {
 
     if (warnMs > 0) {
       warnTimer = setTimeout(() => {
-        console.warn(
+        clientLogger.warn(
           `[CommandRegistry] Command '${id}' (plugin '${cmd.pluginId}') still pending after ${warnMs}ms`,
         )
       }, warnMs)
@@ -138,14 +139,14 @@ export class CommandRegistry {
         : handlerPromise)
     } catch (err) {
       if (err instanceof CommandCancelledError) {
-        console.warn(`[CommandRegistry] Command '${id}' hard-cancelled after ${cancelMs}ms`)
+        clientLogger.warn(`[CommandRegistry] Command '${id}' hard-cancelled after ${cancelMs}ms`)
         // The handler is still running — silently swallow whatever it
         // produces so an unhandled-rejection handler doesn't fire
         // *and* the original cancel still surfaces to the caller.
         handlerPromise.catch(() => {})
         throw err
       }
-      console.error(`[CommandRegistry] Command '${id}' threw:`, err)
+      clientLogger.error(`[CommandRegistry] Command '${id}' threw:`, err)
       try {
         eventBus.emit('command:error', {
           commandId: id,

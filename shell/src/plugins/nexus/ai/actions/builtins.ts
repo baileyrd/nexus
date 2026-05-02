@@ -15,6 +15,7 @@
 // console line beats silently dropping the answer.
 
 import type { PluginAPI } from '../../../../types/plugin'
+import { clientLogger } from '../../../../clientLogger'
 import type {
   AiAction,
   AiActionContext,
@@ -74,7 +75,7 @@ function surfaceResult(api: PluginAPI, action: AiAction, text: string): void {
     message: `${action.label}: ${trimmed.slice(0, 240)}${trimmed.length > 240 ? '…' : ''}`,
   })
   // eslint-disable-next-line no-console
-  console.info(`[nexus.ai.actions] ${action.id} →`, trimmed)
+  clientLogger.info(`[nexus.ai.actions] ${action.id} →`, trimmed)
 }
 
 /** Wrap a prompt-builder + label into a fully-formed `AiAction` bound

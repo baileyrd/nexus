@@ -30,6 +30,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { PanelNode } from '@nexus/extension-api'
 import type { PluginAPI } from '../../types/plugin'
 import type { SandboxInstance } from './SandboxOrchestrator'
+import { clientLogger } from '../clientLogger'
 
 export interface SandboxPanelViewProps {
   /**
@@ -191,7 +192,7 @@ export function renderPanelNode(
             // its own error via notifications.show.
             void Promise.resolve(api.commands.execute(node.commandId)).catch(
               (err) => {
-                console.warn(
+                clientLogger.warn(
                   '[SandboxPanelView] command execute threw',
                   node.commandId,
                   err,

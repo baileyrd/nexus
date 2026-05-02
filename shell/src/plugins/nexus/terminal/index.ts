@@ -1,5 +1,6 @@
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { clientLogger } from '../../../clientLogger'
 import { viewRegistry, workspace } from '../../../workspace'
 import { TerminalView } from './TerminalView'
 import { terminalPaneViewCreator } from './TerminalPaneView'
@@ -167,7 +168,7 @@ export const terminalPlugin: Plugin = {
           data: new Uint8Array(resp.data),
         }
       } catch (err) {
-        console.warn('[nexus.terminal] lag-recovery read_raw_since failed:', err)
+        clientLogger.warn('[nexus.terminal] lag-recovery read_raw_since failed:', err)
         return null
       }
     }
@@ -186,7 +187,7 @@ export const terminalPlugin: Plugin = {
           },
         )
       } catch (err) {
-        console.warn('[nexus.terminal] failed to subscribe to output stream:', err)
+        clientLogger.warn('[nexus.terminal] failed to subscribe to output stream:', err)
         streamUnsub = null
       }
     }
@@ -195,7 +196,7 @@ export const terminalPlugin: Plugin = {
       try {
         streamUnsub()
       } catch (err) {
-        console.warn('[nexus.terminal] stream unsubscribe failed:', err)
+        clientLogger.warn('[nexus.terminal] stream unsubscribe failed:', err)
       }
       streamUnsub = null
     }
@@ -222,9 +223,9 @@ export const terminalPlugin: Plugin = {
           },
         )
         useTerminalStore.getState().setSession(resp.id)
-        console.info('[nexus.terminal] session created:', resp.id)
+        clientLogger.info('[nexus.terminal] session created:', resp.id)
       } catch (err) {
-        console.warn('[nexus.terminal] create_session failed:', err)
+        clientLogger.warn('[nexus.terminal] create_session failed:', err)
       }
     }
 
@@ -238,7 +239,7 @@ export const terminalPlugin: Plugin = {
         // Kernel may already be shutting down (workspace:closed path
         // tears it down before this handler runs). Not worth
         // surfacing.
-        console.info('[nexus.terminal] close_session skipped:', err)
+        clientLogger.info('[nexus.terminal] close_session skipped:', err)
       }
     }
 

@@ -4,6 +4,7 @@
 
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { configStore } from '../../../stores/configStore'
+import { clientLogger } from '../../../clientLogger'
 
 const DEFAULT_NOTIFICATION_DURATION_MS = 4000
 const CONFIG_KEY_DURATION = 'ui.notificationDurationMs'
@@ -85,6 +86,6 @@ export const notificationServicePlugin: Plugin = {
   activate(api: PluginAPI) {
     api.internal!.registerInternalService('notificationQueue', new NotificationQueue())
     api.configuration.register(notificationServicePlugin.manifest.contributes!.configuration!)
-    console.info('[core.notification-service] ready')
+    clientLogger.info('[core.notification-service] ready')
   },
 }

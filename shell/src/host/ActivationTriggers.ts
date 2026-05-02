@@ -27,6 +27,8 @@
 // Failed activations also evict the keys so the trigger doesn't keep
 // re-trying a known-broken plugin and stalling the dispatch path.
 
+import { clientLogger } from './clientLogger'
+
 export type Activator = (pluginId: string) => Promise<void>
 
 export class ActivationTriggers {
@@ -105,7 +107,7 @@ export class ActivationTriggers {
           // The host already logs + emits plugin:error; we don't rethrow
           // because the trigger source has nothing to do with the failure
           // (the user clicking a view button shouldn't see a thrown promise).
-          console.warn(
+          clientLogger.warn(
             `[ActivationTriggers] activator for '${pid}' (trigger '${triggerKey}') threw:`,
             err,
           )

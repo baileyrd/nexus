@@ -21,6 +21,7 @@ import {
   PLUGIN_LIST_CHANGED_EVENT,
 } from '../../../host/pluginActivation'
 import { eventBus } from '../../../host/EventBus'
+import { clientLogger } from '../../../clientLogger'
 import { DEFAULT_OFF_PLUGINS } from '../../catalog'
 import {
   formatChord,
@@ -1244,7 +1245,7 @@ function PluginsTab({
       await invoke('set_plugin_enabled', { pluginId, enabled })
       setPendingChanges(prev => ({ ...prev, [pluginId]: true }))
     } catch (err) {
-      console.error('[PluginsTab] set_plugin_enabled failed:', err)
+      clientLogger.error('[PluginsTab] set_plugin_enabled failed:', err)
     } finally {
       setSaving(null)
     }
@@ -1597,7 +1598,7 @@ function CommunityPluginRow({
         capabilities: result === null ? [] : capsToKernelStrings(result),
       })
     } catch (err) {
-      console.warn('[settings] set_granted failed:', err)
+      clientLogger.warn('[settings] set_granted failed:', err)
     }
     setNonce(n => n + 1)
   }

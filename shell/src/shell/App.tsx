@@ -15,6 +15,7 @@ import {
 } from '../workspace'
 import { ErrorBoundary } from './ErrorBoundary'
 import { useViewportClass } from './useViewportClass'
+import { clientLogger } from '../host/clientLogger'
 
 export default function App() {
   // SH-003: write body.is-narrow/is-medium/is-wide via ResizeObserver.
@@ -48,7 +49,7 @@ export default function App() {
         `statusBarRight: ${slots.statusBarRight.length}`,
         `overlay: ${slots.overlay.length}`,
       ].join(' | ')
-      console.info('[App] Slots:', info)
+      clientLogger.info('[App] Slots:', info)
       setDebugInfo(info)
     }, 500)
     return () => clearTimeout(timer)
@@ -99,7 +100,7 @@ export default function App() {
         autoSaveStopRef.current = installAutoSave(rootPath)
         setHydrated(true)
       } catch (err) {
-        console.error('[App] workspace hydrate failed, falling back to default', err)
+        clientLogger.error('[App] workspace hydrate failed, falling back to default', err)
         if (cancelled) return
         const fallback = buildDefaultLayout()
         await workspaceStore.hydrate(fallback)
@@ -212,7 +213,7 @@ export default function App() {
             : undefined
 
           if (paneModeViewId && !paneEntry) {
-            console.warn(
+            clientLogger.warn(
               `[App] Pane-mode viewId "${paneModeViewId}" is set but no matching slot entry exists; falling through to workspace renderer.`,
             )
           }

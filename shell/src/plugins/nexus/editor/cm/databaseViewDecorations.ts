@@ -32,6 +32,7 @@ import {
   EditorView,
   ViewPlugin,
 } from '@codemirror/view'
+import { clientLogger } from '../../../../clientLogger'
 
 import {
   databaseViewCache,
@@ -445,7 +446,7 @@ export function makeBasesChangeWatcher(
       const onError =
         deps.onError ??
         ((m, e) => {
-          console.error(`[nexus.editor] ${m}:`, e)
+          clientLogger.error(`[nexus.editor] ${m}:`, e)
         })
       onError('database-view watcher: subscribe failed', err)
     },
