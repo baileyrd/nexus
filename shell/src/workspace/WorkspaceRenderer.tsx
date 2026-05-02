@@ -624,6 +624,12 @@ function TabStrip({
   isMainDock?: boolean
   sideDock?: 'left' | 'right'
 }): JSX.Element {
+  // Tab drag-reorder state. `dragSrcIndex` is a ref (no re-render needed
+  // to track the source); `dragOverIndex` is state so the drop indicator
+  // hairline appears/disappears without a full strip remount.
+  const dragSrcIndex = useRef<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+
   const handleNewTab = (): void => {
     const leaf = workspace.createLeaf(tabs)
     tabs.leaves.push(leaf)
@@ -717,6 +723,33 @@ function TabStrip({
                 void workspace.detachLeaf(leaf)
               }}
               sideDock={sideDock}
+              // Drag-reorder — main-dock only (sideDock tabs use icon-only
+              // buttons that live in a fixed rail; reordering them is not
+              // currently supported and their button element has no space
+              // for a visible drag affordance).
+              {...(!sideDock && {
+                isDragOver: dragOverIndex === i,
+                onTabDragStart: () => { dragSrcIndex.current = i },
+                onTabDragOver: (e) => {
+                  e.preventDefault()
+                  if (dragSrcIndex.current !== null && dragSrcIndex.current !== i) {
+                    setDragOverIndex(i)
+                  }
+                },
+                onTabDragLeave: () => setDragOverIndex(null),
+                onTabDrop: (e) => {
+                  e.preventDefault()
+                  if (dragSrcIndex.current !== null && dragSrcIndex.current !== i) {
+                    workspace.reorderLeaves(tabs.id, dragSrcIndex.current, i)
+                  }
+                  dragSrcIndex.current = null
+                  setDragOverIndex(null)
+                },
+                onTabDragEnd: () => {
+                  dragSrcIndex.current = null
+                  setDragOverIndex(null)
+                },
+              })}
             />
           )
         })}
@@ -1029,6 +1062,13 @@ interface TabButtonProps {
    *  icon-only button with no ×-close (Obsidian sidebar-tab pattern).
    *  Left-undefined for main-dock tabs, which keep label + close. */
   sideDock?: 'left' | 'right'
+  /** Drag-reorder props — only passed for main-dock tabs. */
+  onTabDragStart?: () => void
+  onTabDragOver?: (e: React.DragEvent) => void
+  onTabDragLeave?: () => void
+  onTabDrop?: (e: React.DragEvent) => void
+  onTabDragEnd?: () => void
+  isDragOver?: boolean
 }
 
 /** Fallback viewType → icon mapping for sidebar tabs. Used when a
@@ -1065,6 +1105,12 @@ function TabButton({
   onActivate,
   onClose,
   sideDock,
+  onTabDragStart,
+  onTabDragOver,
+  onTabDragLeave,
+  onTabDrop,
+  onTabDragEnd,
+  isDragOver,
 }: TabButtonProps): JSX.Element {
   // Views may override `getDisplayText()` to show a per-instance label
   // (e.g. markdown shows the filename). Fall back to `viewType`, or
@@ -1134,7 +1180,16 @@ function TabButton({
     <div
       role="tab"
       aria-selected={active}
+      draggable={!!onTabDragStart}
       onClick={onActivate}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move'
+        onTabDragStart?.()
+      }}
+      onDragOver={onTabDragOver}
+      onDragLeave={onTabDragLeave}
+      onDrop={onTabDrop}
+      onDragEnd={onTabDragEnd}
       className={`workspace-tab${active ? ' is-active' : ''}`}
       title={label}
       style={{
@@ -1150,6 +1205,9 @@ function TabButton({
           ? 'var(--text-normal)'
           : 'var(--text-muted)',
         borderRight: '1px solid var(--divider-color)',
+        // Drop indicator: 2px accent hairline on the left edge of the
+        // target tab so the user sees exactly where the tab will land.
+        boxShadow: isDragOver ? 'inset 2px 0 0 var(--interactive-accent)' : undefined,
         fontSize: 11,
         whiteSpace: 'nowrap',
         // Each tab prefers ~180px but can shrink to ~50px when the

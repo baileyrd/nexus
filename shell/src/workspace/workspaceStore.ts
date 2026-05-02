@@ -442,6 +442,35 @@ function setTabActiveIndex(tabsId: string, index: number): void {
   if (selected) setActiveLeaf(selected)
 }
 
+/**
+ * Move the leaf at `fromIndex` to `toIndex` within the Tabs group
+ * identified by `tabsId`. The currently-active leaf stays active after
+ * the reorder — its index is recalculated by object identity.
+ */
+function reorderLeaves(tabsId: string, fromIndex: number, toIndex: number): void {
+  if (fromIndex === toIndex) return
+  const roots: WorkspaceParent[] = [
+    state().rootSplit,
+    state().leftSplit,
+    state().rightSplit,
+    state().bottomSplit,
+    ...state().floating,
+  ]
+  const found = findTabsById(tabsId, roots)
+  if (!found) return
+  const { leaves } = found
+  if (fromIndex < 0 || fromIndex >= leaves.length) return
+  if (toIndex < 0 || toIndex >= leaves.length) return
+
+  const activeLeaf = leaves[found.activeIndex]
+  const [moved] = leaves.splice(fromIndex, 1)
+  if (!moved) return
+  leaves.splice(toIndex, 0, moved)
+  found.activeIndex = Math.max(0, leaves.indexOf(activeLeaf!))
+
+  emitInternal('layout-change')
+}
+
 function findTabsById(id: string, roots: WorkspaceParent[]): Tabs | null {
   const visit = (n: WorkspaceParent): Tabs | null => {
     if (n.kind === 'tabs') return n.id === id ? n : null
@@ -1042,6 +1071,7 @@ export const workspace = {
   setSidedockCollapsed,
   setSplitSizes,
   setTabActiveIndex,
+  reorderLeaves,
   detachLeaf,
   // BL-029
   popoutLeaf,
