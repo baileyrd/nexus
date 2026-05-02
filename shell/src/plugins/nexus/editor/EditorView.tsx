@@ -5,7 +5,7 @@ import { renderMarkdown, hydrateFencedCode } from './markdownRender'
 import { eventBus } from '../../../host/EventBus'
 import { useOutlineStore } from '../outline/outlineStore'
 import { Icon } from '../../../icons'
-import { useWorkspaceField, workspace } from '../../../workspace'
+import { useWorkspaceField, workspace, type Tabs } from '../../../workspace'
 import { getEditorRuntime, setActiveCmView } from './runtime'
 import { CodeMirrorHost, type CodeMirrorHostHandle } from './cm/CodeMirrorHost'
 import { transactionBridge } from './cm/transactionBridge'
@@ -100,7 +100,28 @@ interface EditorViewProps {
    *  `MarkdownView`'s `state.relpath`. Undefined for leaves that
    *  haven't been assigned a file yet (empty state). */
   relpath: string | undefined
+  /** The workspace leaf ID — used to locate this leaf in its Tabs strip
+   *  so the ← → nav buttons can move it left or right. */
+  leafId: string
   onRetry: (relpath: string) => void
+}
+
+/** Returns the position of `leafId` within its Tabs strip, or null if not found.
+ *  Re-evaluates on every `layout-change` so the button enabled state tracks moves. */
+function useTabPosition(leafId: string): { tabsId: string; index: number; total: number } | null {
+  const [pos, setPos] = useState<{ tabsId: string; index: number; total: number } | null>(null)
+  useEffect(() => {
+    function compute() {
+      const leaf = workspace.leaves.get(leafId)
+      if (!leaf || leaf.parent.kind !== 'tabs') { setPos(null); return }
+      const tabs = leaf.parent as Tabs
+      const index = tabs.leaves.findIndex((l) => l.id === leafId)
+      setPos(index >= 0 ? { tabsId: tabs.id, index, total: tabs.leaves.length } : null)
+    }
+    compute()
+    return workspace.on('layout-change', compute)
+  }, [leafId])
+  return pos
 }
 
 function isMarkdown(name: string): boolean {
@@ -120,9 +141,10 @@ function isHtml(name: string): boolean {
  * Empty, loading, and error states are computed per-tab so a failed
  * load on one tab doesn't bleed into any neighbour.
  */
-export function EditorView({ relpath, onRetry }: EditorViewProps) {
+export function EditorView({ relpath, leafId, onRetry }: EditorViewProps) {
   const tabs = useEditorStore((s) => s.tabs)
   const setMode = useEditorStore((s) => s.setMode)
+  const tabPos = useTabPosition(leafId)
 
   // Each leaf binds to exactly one file via its workspace state.relpath;
   // the leaf's own TabButton in `WorkspaceRenderer.TabStrip` is the
@@ -373,6 +395,16 @@ export function EditorView({ relpath, onRetry }: EditorViewProps) {
           const next: EditorTabMode = activeTab.mode === 'source' ? 'live' : 'source'
           setMode(activeTab.relpath, next)
         }}
+        onMoveLeft={
+          tabPos && tabPos.index > 0
+            ? () => workspace.reorderLeaves(tabPos.tabsId, tabPos.index, tabPos.index - 1)
+            : undefined
+        }
+        onMoveRight={
+          tabPos && tabPos.index < tabPos.total - 1
+            ? () => workspace.reorderLeaves(tabPos.tabsId, tabPos.index, tabPos.index + 1)
+            : undefined
+        }
       />
       <div ref={scrollWrapRef} style={{ flex: '1 1 auto', overflow: 'auto', position: 'relative' }}>
         <TabBody
@@ -405,9 +437,11 @@ interface ViewHeaderProps {
   activeTab: EditorTab | null
   mode?: EditorTabMode
   onToggleMode?: () => void
+  onMoveLeft?: () => void
+  onMoveRight?: () => void
 }
 
-function ViewHeader({ activeTab, mode, onToggleMode }: ViewHeaderProps) {
+function ViewHeader({ activeTab, mode, onToggleMode, onMoveLeft, onMoveRight }: ViewHeaderProps) {
   const moreButtonRef = useRef<HTMLButtonElement | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
   const moreAnchorRect = moreOpen
@@ -453,19 +487,21 @@ function ViewHeader({ activeTab, mode, onToggleMode }: ViewHeaderProps) {
       <div className="view-header-left" style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
         <button
           type="button"
-          aria-label="Back"
-          title="Back"
-          disabled
-          style={disabledNavStyle}
+          aria-label="Move tab left"
+          title="Move tab left"
+          disabled={!onMoveLeft}
+          onClick={onMoveLeft}
+          style={onMoveLeft ? activeNavStyle : disabledNavStyle}
         >
           <Icon name="arrowLeft" size={16} />
         </button>
         <button
           type="button"
-          aria-label="Forward"
-          title="Forward"
-          disabled
-          style={disabledNavStyle}
+          aria-label="Move tab right"
+          title="Move tab right"
+          disabled={!onMoveRight}
+          onClick={onMoveRight}
+          style={onMoveRight ? activeNavStyle : disabledNavStyle}
         >
           <Icon name="arrowRight" size={16} />
         </button>

@@ -383,7 +383,7 @@ export const editorPlugin: Plugin = {
     viewRegistry.register(
       'markdown',
       markdownViewCreator(
-        (relpath) => createElement(EditorView, { relpath, onRetry: handleRetry }),
+        (relpath, leafId) => createElement(EditorView, { relpath, leafId, onRetry: handleRetry }),
         sessionManager,
       ),
     )

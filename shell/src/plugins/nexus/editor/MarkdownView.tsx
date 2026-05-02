@@ -15,7 +15,7 @@ import type { Leaf, ViewCreator } from '../../../workspace'
 import { ViewBase } from '../../../workspace'
 import type { SessionManager } from './sessionManager.ts'
 
-type RenderFn = (relpath: string | undefined) => ReactElement
+type RenderFn = (relpath: string | undefined, leafId: string) => ReactElement
 
 /**
  * Per-leaf state for a future per-tab model — today the editor store
@@ -78,7 +78,7 @@ export class MarkdownView extends ViewBase {
     // can rely on it here. If a later `setState` changes the relpath,
     // callers must drive a re-render themselves — today `state.relpath`
     // is write-once per leaf lifetime.
-    this.root.render(this.render(this.state.relpath))
+    this.root.render(this.render(this.state.relpath, this.leaf.id))
 
     // Pin the kernel session as long as this leaf is mounted. Untitled
     // / empty relpaths resolve to `null` in SessionManager and are a
