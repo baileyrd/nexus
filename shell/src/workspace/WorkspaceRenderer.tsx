@@ -732,6 +732,7 @@ function TabStrip({
                 onTabDragStart: () => { dragSrcIndex.current = i },
                 onTabDragOver: (e) => {
                   e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
                   if (dragSrcIndex.current !== null && dragSrcIndex.current !== i) {
                     setDragOverIndex(i)
                   }
@@ -1184,10 +1185,20 @@ function TabButton({
       onClick={onActivate}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = 'move'
+        // setData is required by WebKit — without it the drop event
+        // never fires, even if dragover calls preventDefault().
+        e.dataTransfer.setData('text/plain', '')
         onTabDragStart?.()
       }}
       onDragOver={onTabDragOver}
-      onDragLeave={onTabDragLeave}
+      onDragLeave={(e) => {
+        // dragleave fires when the cursor enters a child element
+        // (label span, close button). relatedTarget is that child;
+        // if it's still inside this tab we haven't really left.
+        const related = e.relatedTarget as Node | null
+        if (related && (e.currentTarget as HTMLElement).contains(related)) return
+        onTabDragLeave?.()
+      }}
       onDrop={onTabDrop}
       onDragEnd={onTabDragEnd}
       className={`workspace-tab${active ? ' is-active' : ''}`}
