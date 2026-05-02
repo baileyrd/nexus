@@ -42,6 +42,7 @@ import {
   kernelStringsToCaps,
   type PriorGrant,
 } from '../capabilityPrompt'
+import type { SnippetEntry, SnippetConflict } from '../../../registry/SnippetRegistry'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -198,7 +199,7 @@ function useContributedSettingsTabs(): SettingsTabEntry[] {
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
 // Built-in tab ids; plugin-contributed tab ids are opaque strings.
-const BUILT_IN_TABS = ['settings', 'appearance', 'keybindings', 'plugins'] as const
+const BUILT_IN_TABS = ['settings', 'appearance', 'keybindings', 'plugins', 'snippets'] as const
 type BuiltInTab = (typeof BUILT_IN_TABS)[number]
 type NavTab = BuiltInTab | string
 
@@ -348,6 +349,11 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             active={navTab === 'plugins'}
             onClick={() => setNavTab('plugins')}
           />
+          <RailItem
+            label="Snippets"
+            active={navTab === 'snippets'}
+            onClick={() => setNavTab('snippets')}
+          />
           {/* Plugin-contributed tabs (OI-01 + OI-08). Filter by group so
               we can give core/community plugin tabs their own rail
               groups in a follow-up; for now show 'options' inline with
@@ -440,6 +446,13 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
                       community={community}
                       available={available}
                     />
+                  </div>
+                </div>
+              )}
+              {navTab === 'snippets' && (
+                <div className="settings-body">
+                  <div className="settings-content">
+                    <SnippetsTab />
                   </div>
                 </div>
               )}
@@ -975,8 +988,8 @@ function KeybindingsTab() {
           style={{
             padding: 8,
             marginBottom: 12,
-            background: 'var(--color-warning-bg, #fff7d6)',
-            color: 'var(--color-warning, #8a6d00)',
+            background: 'var(--color-warning-bg)',
+            color: 'var(--color-warning)',
             borderRadius: 4,
             fontSize: '0.9em',
           }}
@@ -1030,9 +1043,9 @@ function KeybindingsTab() {
                           fontSize: '0.7em',
                           fontWeight: 600,
                           lineHeight: '14px',
-                          color: 'var(--color-warning, #8a6d00)',
-                          background: 'var(--color-warning-bg, #fff7d6)',
-                          border: '1px solid var(--color-warning, #8a6d00)',
+                          color: 'var(--color-warning)',
+                          background: 'var(--color-warning-bg)',
+                          border: '1px solid var(--color-warning)',
                           borderRadius: 3,
                           verticalAlign: 'middle',
                         }}
@@ -1652,6 +1665,27 @@ function CommunityPluginRow({
           {changed && (
             <span className="plugin-row__restart-pill">restart needed</span>
           )}
+          {/* OI-15 — verification badge */}
+          {(manifest.verificationStatus === 'verified')
+            ? (
+              <span
+                className="plugin-row__restart-pill"
+                title="Signed by a trusted key"
+                style={{ color: 'var(--nexus-color-success)', borderColor: 'var(--nexus-color-success)' }}
+              >
+                verified
+              </span>
+            )
+            : (
+              <span
+                className="plugin-row__restart-pill"
+                title="No trusted signature — install only plugins you trust"
+                style={{ color: 'var(--text-faint)', borderColor: 'var(--background-modifier-border)' }}
+              >
+                unsigned
+              </span>
+            )
+          }
           {capabilities && capabilities.length > 0 && !incompatible && (
             <button
               type="button"
@@ -1895,6 +1929,155 @@ function SettingsField({ field }: { field: ConfigSchema }) {
       <p className="settings-field-description">{field.description}</p>
       {field.type !== 'boolean' && (
         <div className="settings-field-control">{renderControl()}</div>
+      )}
+    </div>
+  )
+}
+
+// ─── Snippets tab (OI-18) ─────────────────────────────────────────────────────
+
+function useSnippetRows(): SnippetEntry[] {
+  return useMemo(() => {
+    const reg = getRegistry()
+    if (!reg) return []
+    return reg.snippets.all()
+  }, [])
+}
+
+function useSnippetConflicts(): SnippetConflict[] {
+  const [conflicts, setConflicts] = useState<SnippetConflict[]>(() => {
+    const reg = getRegistry()
+    return reg?.snippets.getConflicts() ?? []
+  })
+  useEffect(() => {
+    return eventBus.on<{ conflicts: SnippetConflict[] }>('plugins:snippets-conflict', (payload) => {
+      setConflicts(payload.conflicts)
+    })
+  }, [])
+  return conflicts
+}
+
+function SnippetsTab() {
+  const [query, setQuery] = useState('')
+  const rows = useSnippetRows()
+  const conflicts = useSnippetConflicts()
+
+  const conflictTriggers = useMemo(
+    () => new Set(conflicts.map(c => c.trigger)),
+    [conflicts],
+  )
+
+  const filtered = useMemo(
+    () =>
+      query
+        ? rows.filter(
+            r =>
+              r.trigger.toLowerCase().includes(query.toLowerCase()) ||
+              r.id.toLowerCase().includes(query.toLowerCase()) ||
+              r.pluginId.toLowerCase().includes(query.toLowerCase()),
+          )
+        : rows,
+    [rows, query],
+  )
+
+  const conflictCount = conflicts.length
+
+  return (
+    <div className="keybindings-tab">
+      <h3 style={{ marginTop: 0 }}>Snippets</h3>
+      <p className="settings-help" style={{ marginBottom: '1rem' }}>
+        Text-expansion snippets registered by plugins. Type a trigger string in
+        the editor and press Tab to expand it. Conflicts occur when two plugins
+        claim the same trigger — last-registered wins.
+      </p>
+
+      <input
+        className="settings-search"
+        placeholder="Filter by trigger, id, or plugin…"
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        style={{ marginBottom: 12 }}
+      />
+
+      {conflictCount > 0 && (
+        <div
+          role="status"
+          style={{
+            padding: 8,
+            marginBottom: 12,
+            background: 'var(--color-warning-bg)',
+            color: 'var(--color-warning)',
+            borderRadius: 4,
+            fontSize: '0.9em',
+          }}
+        >
+          {conflictCount === 1
+            ? '1 trigger is claimed by more than one plugin.'
+            : `${conflictCount} triggers are claimed by more than one plugin.`}
+          {' The last-registered snippet wins.'}
+        </div>
+      )}
+
+      {filtered.length === 0 ? (
+        <p className="settings-empty">
+          {query ? 'No snippets match.' : 'No snippets registered.'}
+        </p>
+      ) : (
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--background-modifier-border)' }}>
+              <th style={{ padding: '0.4rem 0.5rem' }}>Trigger</th>
+              <th style={{ padding: '0.4rem 0.5rem' }}>Body</th>
+              <th style={{ padding: '0.4rem 0.5rem' }}>Plugin</th>
+              <th style={{ padding: '0.4rem 0.5rem' }}>File types</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(row => {
+              const isConflict = conflictTriggers.has(row.trigger)
+              return (
+                <tr
+                  key={row.id}
+                  style={{ borderBottom: '1px solid var(--background-modifier-border)' }}
+                >
+                  <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'var(--font-monospace)', whiteSpace: 'nowrap' }}>
+                    {row.trigger}
+                    {isConflict && (
+                      <span
+                        title="Trigger conflict — more than one plugin registered this trigger"
+                        aria-label="Snippet trigger conflict"
+                        style={{
+                          display: 'inline-block',
+                          marginLeft: 6,
+                          padding: '0 5px',
+                          fontSize: '0.7em',
+                          fontWeight: 600,
+                          lineHeight: '14px',
+                          color: 'var(--color-warning)',
+                          background: 'var(--color-warning-bg)',
+                          border: '1px solid var(--color-warning)',
+                          borderRadius: 3,
+                          verticalAlign: 'middle',
+                        }}
+                      >
+                        {'!'}
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'var(--font-monospace)', color: 'var(--text-muted)', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {row.body}
+                  </td>
+                  <td style={{ padding: '0.4rem 0.5rem', color: 'var(--text-muted)', fontSize: '0.9em' }}>
+                    {row.pluginId}
+                  </td>
+                  <td style={{ padding: '0.4rem 0.5rem', color: 'var(--text-faint)', fontSize: '0.85em' }}>
+                    {row.fileTypes?.join(', ') ?? '—'}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       )}
     </div>
   )

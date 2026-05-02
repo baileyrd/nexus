@@ -85,7 +85,7 @@ export function IndexingStatus({ api, onReindex }: IndexingStatusProps) {
   const busy = status.pending_files > 0
   const errored = status.last_error !== null
   const colour = errored
-    ? 'var(--err, #d33)'
+    ? 'var(--err)'
     : busy
       ? 'var(--interactive-accent)'
       : 'var(--ok)'

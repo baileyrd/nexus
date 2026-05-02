@@ -6,6 +6,7 @@ import { CommandRegistry } from '../registry/CommandRegistry'
 import { ConfigurationRegistry } from '../registry/ConfigurationRegistry'
 import { KeybindingRegistry } from '../registry/KeybindingRegistry'
 import { SettingsTabRegistry } from '../registry/SettingsTabRegistry'
+import { SnippetRegistry } from '../registry/SnippetRegistry'
 import { StatusBarRegistry } from '../registry/StatusBarRegistry'
 import { slotRegistry } from '../registry/SlotRegistry'
 import { uriHandlerRegistry } from '../registry/UriHandlerRegistry'
@@ -17,6 +18,7 @@ export class PluginRegistry {
   readonly config       = new ConfigurationRegistry()
   readonly keybindings  = new KeybindingRegistry()
   readonly settingsTabs = new SettingsTabRegistry()
+  readonly snippets     = new SnippetRegistry()
   readonly statusBar    = new StatusBarRegistry()
 
   // Internal services registered by core service plugins
@@ -123,6 +125,7 @@ export class PluginRegistry {
           case 'config':      this.config.unregister(id);       break
           case 'keybinding':  this.keybindings.unregister(id);  break
           case 'settingsTab': this.settingsTabs.unregister(id); break
+          case 'snippet':     this.snippets.unregister(id);     break
           // Activity-bar items live in a Zustand store fed by the
           // event bus; emitting `itemRemoved` is the supported way to
           // drop them. Without this case, disabling a plugin leaves

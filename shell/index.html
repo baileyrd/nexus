@@ -69,6 +69,30 @@
         --risk-soft:                     oklch(0.72  0.17  25 / 0.14);
         --cool:                          oklch(0.76  0.09  230);
 
+        /* ── Token bridges: map plugin-local names to the canonical set.
+              These let ExtensionsTab, SettingsPanelView, IndexingStatus,
+              and the AI suggestion rail reference stable names without
+              falling back to hard-coded hex values (SH-013). ───────── */
+        --err:                           var(--risk);
+        --color-warning:                 var(--warn);
+        --color-warning-bg:              var(--warn-soft);
+        --nexus-color-success:           var(--ok);
+        --nexus-color-danger:            var(--risk);
+        --nexus-color-info:              var(--interactive-accent);
+        --nexus-color-muted:             var(--text-muted);
+        --nexus-color-border:            var(--background-modifier-border);
+        --nexus-color-border-subtle:     var(--background-modifier-border);
+        --ai-accent:                     var(--interactive-accent);
+        --ai-accent-rephrase:            var(--interactive-accent);
+        --ai-accent-tighten:             var(--cool);
+        --ai-accent-warning:             var(--warn);
+        --accent-muted:                  var(--interactive-accent);
+        --accent-danger:                 var(--risk);
+        --accent-fg:                     var(--interactive-accent-ink);
+        --bg-danger-soft:                var(--risk-soft);
+        --bg-muted:                      var(--background-secondary-alt);
+        --danger:                        var(--risk);
+
         /* ── Typography tokens ────────────────────────────────────── */
         --font-interface: 'Inter', system-ui, -apple-system, sans-serif;
         --font-text:      'IBM Plex Serif', Georgia, serif;

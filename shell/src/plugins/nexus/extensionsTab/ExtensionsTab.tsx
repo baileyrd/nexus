@@ -18,12 +18,12 @@ import { clientLogger } from '../../../clientLogger'
 // hygiene rule that keeps plugins from reaching into shell host/.)
 
 const STATE_BADGES: Record<string, { label: string; color: string }> = {
-  active: { label: 'active', color: 'var(--nexus-color-success, #22c55e)' },
-  inactive: { label: 'inactive', color: 'var(--nexus-color-muted, #9ca3af)' },
-  error: { label: 'error', color: 'var(--nexus-color-danger, #ef4444)' },
-  registered: { label: 'registered', color: 'var(--nexus-color-muted, #9ca3af)' },
-  activating: { label: 'activating', color: 'var(--nexus-color-info, #3b82f6)' },
-  deactivating: { label: 'deactivating', color: 'var(--nexus-color-info, #3b82f6)' },
+  active: { label: 'active', color: 'var(--nexus-color-success)' },
+  inactive: { label: 'inactive', color: 'var(--nexus-color-muted)' },
+  error: { label: 'error', color: 'var(--nexus-color-danger)' },
+  registered: { label: 'registered', color: 'var(--nexus-color-muted)' },
+  activating: { label: 'activating', color: 'var(--nexus-color-info)' },
+  deactivating: { label: 'deactivating', color: 'var(--nexus-color-info)' },
 }
 
 interface Row {
@@ -70,7 +70,7 @@ export function ExtensionsTab() {
       </p>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
-          <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--nexus-color-border, #374151)' }}>
+          <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--nexus-color-border)' }}>
             <th style={{ padding: '0.4rem 0.5rem' }}>Plugin</th>
             <th style={{ padding: '0.4rem 0.5rem' }}>State</th>
             <th style={{ padding: '0.4rem 0.5rem' }}>Detail</th>
@@ -92,7 +92,7 @@ interface ExtensionRowProps {
 }
 
 function ExtensionRow({ row }: ExtensionRowProps) {
-  const badge = STATE_BADGES[row.state] ?? { label: row.state, color: 'var(--nexus-color-muted, #9ca3af)' }
+  const badge = STATE_BADGES[row.state] ?? { label: row.state, color: 'var(--nexus-color-muted)' }
   // Show Disable for any active plugin. `disableBuiltinPlugin` itself
   // gates the operation: it returns `{ ok: false, error: '...required
   // built-in...' }` for DEFAULT_ON plugins, so we let the host be the
@@ -123,7 +123,7 @@ function ExtensionRow({ row }: ExtensionRowProps) {
   }
 
   return (
-    <tr style={{ borderBottom: '1px solid var(--nexus-color-border-subtle, #1f2937)' }}>
+    <tr style={{ borderBottom: '1px solid var(--nexus-color-border-subtle)' }}>
       <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'var(--nexus-font-mono)' }}>
         {row.id}
       </td>
@@ -141,9 +141,9 @@ function ExtensionRow({ row }: ExtensionRowProps) {
           {badge.label}
         </span>
       </td>
-      <td style={{ padding: '0.4rem 0.5rem', color: 'var(--nexus-color-muted, #9ca3af)' }}>
+      <td style={{ padding: '0.4rem 0.5rem', color: 'var(--nexus-color-muted)' }}>
         {row.lastError ? (
-          <span title={row.lastError.stack} style={{ color: 'var(--nexus-color-danger, #ef4444)' }}>
+          <span title={row.lastError.stack} style={{ color: 'var(--nexus-color-danger)' }}>
             {row.lastError.message}
           </span>
         ) : (

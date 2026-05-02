@@ -196,7 +196,7 @@ function ResponsePanel() {
         role="alert"
         style={{
           padding: '12px 16px',
-          color: 'var(--danger, #b00020)',
+          color: 'var(--danger)',
           fontFamily: 'var(--font-interface)',
           fontSize: 13,
           borderTop: '1px solid var(--divider-color)',

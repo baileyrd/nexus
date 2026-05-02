@@ -756,17 +756,17 @@ export function installMarginSuggestStyles(): () => void {
   style.id = id
   style.textContent = `
 .cm-margin-suggest {
-  border-bottom: 1px dashed var(--ai-accent, #60a5fa);
+  border-bottom: 1px dashed var(--ai-accent);
   background: rgba(96, 165, 250, 0.06);
 }
 .cm-margin-suggest--rephrase {
-  border-bottom-color: var(--ai-accent-rephrase, #60a5fa);
+  border-bottom-color: var(--ai-accent-rephrase);
 }
 .cm-margin-suggest--tighten {
-  border-bottom-color: var(--ai-accent-tighten, #a78bfa);
+  border-bottom-color: var(--ai-accent-tighten);
 }
 .cm-margin-suggest--fact-check {
-  border-bottom-color: var(--ai-accent-warning, #fbbf24);
+  border-bottom-color: var(--ai-accent-warning);
   background: rgba(251, 191, 36, 0.08);
 }
 .cm-margin-suggest--spelling,
@@ -814,13 +814,13 @@ export function installMarginSuggestStyles(): () => void {
   background: var(--background-modifier-hover);
 }
 .cm-margin-suggest-glyph--rephrase {
-  color: var(--ai-accent-rephrase, #60a5fa);
+  color: var(--ai-accent-rephrase);
 }
 .cm-margin-suggest-glyph--tighten {
-  color: var(--ai-accent-tighten, #a78bfa);
+  color: var(--ai-accent-tighten);
 }
 .cm-margin-suggest-glyph--fact-check {
-  color: var(--ai-accent-warning, #fbbf24);
+  color: var(--ai-accent-warning);
 }
 .cm-margin-suggest-card {
   min-width: 240px;
@@ -879,9 +879,9 @@ export function installMarginSuggestStyles(): () => void {
   cursor: pointer;
 }
 .cm-margin-suggest-card-accept {
-  background: var(--ai-accent, #60a5fa);
+  background: var(--ai-accent);
   color: var(--background-primary);
-  border-color: var(--ai-accent, #60a5fa);
+  border-color: var(--ai-accent);
 }
 .cm-margin-suggest-card-actions button:hover {
   filter: brightness(1.1);

@@ -422,7 +422,7 @@ const drawerStyle: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '4px 6px',
-  background: 'var(--bg-muted, #1e1e1e)',
+  background: 'var(--bg-muted)',
   border: '1px solid var(--divider-color)',
   borderRadius: 4,
   color: 'var(--text-normal)',
@@ -432,7 +432,7 @@ const inputStyle: React.CSSProperties = {
 
 const clearBtnStyle: React.CSSProperties = {
   padding: '3px 10px',
-  background: 'var(--bg-muted, #1e1e1e)',
+  background: 'var(--bg-muted)',
   color: 'var(--text-normal)',
   border: '1px solid var(--divider-color)',
   borderRadius: 4,

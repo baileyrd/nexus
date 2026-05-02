@@ -8,6 +8,7 @@ import type {
   ConfigSection,
   KernelEventEnvelope,
   FencedRenderer,
+  Snippet,
 } from '../types/plugin'
 import { fencedCodeRegistry } from '../plugins/nexus/editor/cm/fencedCodeRegistry'
 import type { PluginRegistry } from './PluginRegistry'
@@ -540,6 +541,16 @@ export function buildPluginAPI(
         }
         registry.trackSubscription(pluginId, unsub)
         return unsub
+      },
+      registerSnippet(snippet: Snippet): () => void {
+        registry.snippets.register(pluginId, snippet)
+        registry.track(pluginId, `snippet:${snippet.id}`)
+        let disposed = false
+        return () => {
+          if (disposed) return
+          disposed = true
+          registry.snippets.unregister(snippet.id)
+        }
       },
     },
 

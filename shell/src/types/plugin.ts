@@ -55,6 +55,7 @@ export type {
   PlatformOpenDirectoryOptions,
   PlatformSaveFileOptions,
   UriAPI,
+  Snippet,
 } from '@nexus/extension-api'
 
 import type {
@@ -71,6 +72,7 @@ import type {
   FsEvent,
   PlatformAPI,
   UriAPI,
+  Snippet,
 } from '@nexus/extension-api'
 
 // ─── Shell-coupled manifest + contributions ─────────────────────────────────
@@ -114,6 +116,21 @@ export interface SettingsTabEntry extends SettingsTabContribution {
   pluginId: string
 }
 
+/**
+ * OI-18 — Manifest-declared snippet contribution. Matches the runtime
+ * `Snippet` shape from `@nexus/extension-api` so plugins can declare
+ * snippets statically (for conflict detection before activation) or
+ * register them dynamically in `activate()` via `api.editor.registerSnippet`.
+ */
+export interface SnippetContribution {
+  id:           string
+  trigger:      string
+  body:         string
+  description?: string
+  /** When set, this snippet only fires for listed file extensions (e.g. `["md", "mdx"]`). */
+  fileTypes?:   string[]
+}
+
 export interface PluginContributions {
   commands?: CommandContribution[]
   views?: ViewContribution[]
@@ -123,6 +140,8 @@ export interface PluginContributions {
   configuration?: ConfigSection
   contextKeys?: ContextKeyContribution[]
   settingsTabs?: SettingsTabContribution[]
+  /** OI-18 — snippets declared statically in the manifest. */
+  snippets?: SnippetContribution[]
 }
 
 // ─── Plugin contract ──────────────────────────────────────────────────────────
@@ -245,6 +264,14 @@ export interface EditorAPI {
     language: string,
     renderer: FencedRenderer,
   ): () => void
+  /**
+   * OI-18 — register a text-expansion snippet. Duplicates of an
+   * existing trigger are stored and surfaced as a conflict in
+   * Settings → Snippets; last-registered wins for expansion.
+   * The returned disposer removes the snippet and re-evaluates
+   * conflicts. Auto-swept on plugin unload.
+   */
+  registerSnippet(snippet: Snippet): () => void
 }
 
 export type FencedRenderResult = HTMLElement | Promise<HTMLElement>

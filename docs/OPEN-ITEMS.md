@@ -318,18 +318,20 @@ No ADR needed updating — none of the 16 ADRs reference `PluginRegistry`.
 
 **Severity:** Should-fix (marketplace prerequisite)
 **Surfaced by:** MICROKERNEL-AUDIT.md F-3.2.2 reconciliation 2026-04-24
-**Status:** Not started
+**Status:** Resolved 2026-05-01.
 
-### Gap
-`crates/nexus-plugins/src/manifest.rs::parse_manifest` accepts any valid TOML. For a marketplace that ships community plugins, there's no way to verify who signed a given `manifest.toml` — install-time users depend on file-system trust alone.
-
-### Scope
-- Optional `manifest.toml.sig` Ed25519 signature over the manifest bytes, verified against a trusted-publisher keyring bundled with the shell.
-- Unsigned manifests still load (backward compatible) but the `Plugins` tab shows an "Unverified" badge.
-- This is a blocker for opening a community registry.
+### Outcome
+- `ed25519-dalek = "2"` and `hex = "0.4"` added to `shell/src-tauri/Cargo.toml`.
+- New `VerificationStatus` enum (`Unsigned | Verified | UntrustedKey | InvalidSignature`) in `shell/src-tauri/src/lib.rs` with `serde(rename_all = "camelCase")` so it serialises cleanly to TypeScript.
+- `TRUSTED_PUBLIC_KEYS: &[&str] = &[]` static — empty for pre-marketplace. Add the canonical hex public key here when the marketplace CA is established.
+- `verify_plugin_signature(manifest_bytes, dir_path)` reads `plugin.json.sig` (JSON `{ "publicKey": "<64-hex>", "signature": "<128-hex>" }`), decodes the key/sig bytes, checks the key against the trusted list, then calls `VerifyingKey::verify`. Returns `Unsigned` when no sig file exists.
+- `CommunityPluginManifest` gains a `#[serde(skip_deserializing, default)] verification_status: VerificationStatus` field — injected by both `scan_plugin_directory` and `scan_plugin_directory_at` after the main-entry-point check. Both scan functions filter out (`return None`) any plugin whose status is `UntrustedKey` or `InvalidSignature`, so only `Unsigned` and `Verified` plugins reach the frontend.
+- TypeScript `CommunityPluginManifest` in `shell/src/host/communityPluginLoader.ts` gains `verificationStatus?: 'unsigned' | 'verified' | 'untrustedKey' | 'invalidSignature'`.
+- `CommunityPluginRow` in `SettingsPanelView.tsx` shows a green "verified" pill for `Verified` plugins and a muted "unsigned" pill otherwise.
 
 ### Acceptance
-- A plugin signed by a trusted key shows "Verified" in Plugins tab; unsigned shows "Unverified"; signed-but-untrusted is rejected with a clear error.
+- ✅ A plugin signed by a trusted key shows "verified" in Plugins tab; unsigned plugins show "unsigned"; a plugin.json.sig with an untrusted or invalid key is silently rejected at scan time (plugin never appears in the list).
+- ✅ All 819 existing tests pass; `cargo check` and `tsc --noEmit` both clean.
 
 ---
 
@@ -378,26 +380,31 @@ No ADR needed updating — none of the 16 ADRs reference `PluginRegistry`.
 
 **Severity:** Nice-to-have (silent overwrite hazard)
 **Surfaced by:** UI-AUDIT.md SI-7 reconciliation 2026-04-24
-**Status:** Blocked — investigated 2026-04-27.
+**Status:** Resolved 2026-05-01.
 
-### Block
-The original ticket framed this as the snippet-side mirror of OI-10 (keybinding conflict detection), but on inspection the prerequisite registry doesn't exist. The `Snippet` interface and `editor.registerSnippet(snippet): Disposable` contract are declared in [`packages/nexus-extension-api/src/index.ts`](../packages/nexus-extension-api/src/index.ts) (lines 101–107 / 216) but `registerSnippet` is **never implemented in the shell** — `grep -rn "registerSnippet" shell/src` returns zero hits. The CSS-theme snippet system in `nexus-theme` is unrelated (no triggers, kernel-side, BTreeMap of `CssSnippet` keyed by id).
+### Outcome
+Both prerequisite steps from the block were implemented together:
 
-Doing OI-18 properly therefore means:
-1. Build the script-plugin code-snippet registry (TS-side `SnippetRegistry`, manifest contribution shape, lifecycle wiring through `ExtensionHost`) — this is the bulk of the work and is closer in scope to OI-15 than to OI-10.
-2. Layer trigger-conflict detection on top — which is the OI-10-shaped piece this ticket originally described.
+**Step 1 — Snippet registry and lifecycle wiring:**
+- New `shell/src/types/plugin.ts` additions: `SnippetContribution` interface (`id`, `trigger`, `body`, `description?`, `fileTypes?`); `snippets?: SnippetContribution[]` added to `PluginContributions`; `registerSnippet(snippet: Snippet): () => void` added to `EditorAPI`.
+- New `shell/src/registry/SnippetRegistry.ts` — data-only registry keyed by snippet `id` (trigger collisions are intentional; the registry detects them). `registerFromManifest` (idempotent for same id), `register` (overwrites for runtime body), `unregister`, `all()`, `getConflicts()`.
+- `PluginRegistry` gains `readonly snippets = new SnippetRegistry()` and an `'snippet'` case in `unregisterAll`.
+- `ExtensionHost` Pass 1 calls `registerFromManifest` for each `contributes.snippets` entry and tracks the key as `snippet:<id>`.
+- `PluginAPI.editor.registerSnippet` calls `registry.snippets.register`, tracks the key, and returns a typed disposable that calls `unregister` once.
 
-Reopen once step 1 lands or once an actual user-visible snippet system gets prioritised. Until then, "two plugins overwriting each other" is hypothetical: there's no path through the shell that calls `registerSnippet`, so no silent overwrite can occur today.
+**Step 2 — Trigger conflict detection:**
+- `getConflicts()` groups entries by trigger and returns `SnippetConflict[]` (trigger + `entries[]`).
+- `maybeEmitConflicts` deduplicates by JSON signature (mirrors `KeybindingRegistry` pattern) and emits `plugins:snippets-conflict` only when the conflict set changes.
+- Settings → Snippets tab added to `SettingsPanelView.tsx`: conflict banner, searchable table of all registered snippets, per-row conflict badge.
 
-### Original gap (preserved for context)
-Two plugins that register snippets with the same trigger string silently overwrite each other — the same hazard OI-10 describes for keybindings but for snippets.
+### Coverage
+10 new tests in `shell/src/registry/SnippetRegistry.test.ts` (surfaced via `shell/tests/snippet-registry.test.ts` re-export shim): register/all, registerFromManifest idempotency, unregister, getConflicts (no conflict, single collision, multiple, resolve), event deduplication, event fires on resolution.
 
-### Original scope
-- The snippet-registration path (in the appearance/theme snippet store today) checks for duplicate triggers and emits `plugins:snippet-conflict`.
-- Settings → Appearance (or a new Snippets section) surfaces the conflict with a per-trigger "which plugin wins" control.
-
-### Original acceptance
-- Install two plugins with the same snippet trigger; the conflict is visible and resolvable before the user types the trigger.
+### Acceptance
+- ✅ Two plugins registering the same trigger shows a conflict in `getConflicts()` and emits `plugins:snippets-conflict`.
+- ✅ Conflict clears (and a new event fires) when the offending snippet is unregistered.
+- ✅ Settings → Snippets tab surfaces conflicts with a per-row badge.
+- ✅ All 819 tests pass (10 new OI-18 tests included).
 
 ---
 

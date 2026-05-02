@@ -137,7 +137,7 @@ class LinkGhostWidget extends WidgetType {
     // Slightly bluer than the AI ghost so the two surfaces are
     // visually distinguishable when both fire in succession.
     span.style.cssText =
-      'opacity:0.55;pointer-events:none;white-space:pre-wrap;color:var(--accent-muted, #6b8aff);'
+      'opacity:0.55;pointer-events:none;white-space:pre-wrap;color:var(--accent-muted);'
     span.textContent = this.text
     return span
   }

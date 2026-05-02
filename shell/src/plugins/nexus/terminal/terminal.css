@@ -81,8 +81,8 @@
 
 .nexus-saved-commands-error {
   font-size: 11px;
-  color: var(--accent-danger, #e06c75);
-  background: var(--bg-danger-soft, rgba(224, 108, 117, 0.08));
+  color: var(--accent-danger);
+  background: var(--bg-danger-soft);
   padding: 4px 6px;
   border-radius: 3px;
   margin-bottom: 6px;
@@ -110,7 +110,7 @@
   padding: 6px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
-  background: var(--bg-base, transparent);
+  background: transparent;
 }
 
 .nexus-saved-command-body {
@@ -186,7 +186,7 @@
   margin-bottom: 6px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
-  background: var(--bg-base, transparent);
+  background: transparent;
 }
 
 .nexus-saved-command-form label {
@@ -225,5 +225,5 @@
 .nexus-saved-command-form-actions button[type='submit'] {
   background: var(--interactive-accent);
   border-color: var(--interactive-accent);
-  color: var(--accent-fg, #ffffff);
+  color: var(--accent-fg);
 }

@@ -325,6 +325,14 @@ export class ExtensionHost {
       this.registry.track(id, `settingsTab:${t.id}`)
     })
 
+    // OI-18 — manifest-declared snippets. Registered before activate()
+    // so conflict detection fires even for plugins that declare snippets
+    // statically without calling api.editor.registerSnippet().
+    contributes.snippets?.forEach(s => {
+      this.registry.snippets.registerFromManifest(id, s)
+      this.registry.track(id, `snippet:${s.id}`)
+    })
+
     // Views and config schema are registered in activate() when the
     // component/schema is available — not from the manifest alone
   }

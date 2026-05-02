@@ -1479,7 +1479,7 @@ function ControlButton({
       style={{
         background: active
           ? 'var(--interactive-accent)'
-          : 'var(--bg-muted, #1e1e1e)',
+          : 'var(--bg-muted)',
         color: active ? '#fff' : 'var(--text-normal)',
         border: '1px solid var(--divider-color)',
         borderRadius: 4,

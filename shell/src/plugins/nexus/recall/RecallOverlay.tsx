@@ -102,7 +102,7 @@ function ResultList() {
         role="alert"
         style={{
           padding: '12px 16px',
-          color: 'var(--danger, #b00020)',
+          color: 'var(--danger)',
           fontFamily: 'var(--font-interface)',
           fontSize: 13,
           borderTop: '1px solid var(--divider-color)',
@@ -328,7 +328,7 @@ function FilterChips() {
           borderRadius: 999,
           border: '1px solid var(--divider-color)',
           background: codeOnly ? 'var(--interactive-accent)' : 'var(--background-secondary)',
-          color: codeOnly ? 'var(--bg-base, #fff)' : 'var(--text-normal)',
+          color: codeOnly ? 'var(--interactive-accent-ink)' : 'var(--text-normal)',
           cursor: 'pointer',
         }}
       >
@@ -348,7 +348,7 @@ function FilterChips() {
               borderRadius: 999,
               border: '1px solid var(--divider-color)',
               background: active ? 'var(--interactive-accent)' : 'var(--background-secondary)',
-              color: active ? 'var(--bg-base, #fff)' : 'var(--text-normal)',
+              color: active ? 'var(--interactive-accent-ink)' : 'var(--text-normal)',
               cursor: 'pointer',
             }}
           >
