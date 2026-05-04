@@ -2156,6 +2156,7 @@ function PluginsTab({
   const [pendingChanges, setPendingChanges] = useState<Record<string, boolean>>({})
   const [saving,         setSaving]         = useState<string | null>(null)
   const [highRiskOnly,   setHighRiskOnly]   = useState(false)
+  const [pluginQuery,    setPluginQuery]    = useState('')
   // Per-row state for the hot enable/disable flow. `pendingBuiltin`
   // shows a spinner; `builtinErrors` surfaces the failure inline.
   const [pendingBuiltin, setPendingBuiltin] = useState<Set<string>>(new Set())
@@ -2215,21 +2216,42 @@ function PluginsTab({
   // today) are *not* hidden by the filter — better to show them as
   // "(unknown)" than to silently drop them, since "unknown" is itself
   // a risk signal worth surfacing to the user.
+  // Two-stage filter: high-risk gate first, then text query against
+  // name + id + description. The query field at the top of the page
+  // mirrors Obsidian's "Search plugins..." header pattern.
+  const matchesQuery = useCallback(
+    (fields: ReadonlyArray<string | undefined>) => {
+      const q = pluginQuery.trim().toLowerCase()
+      if (!q) return true
+      return fields.some((v) => typeof v === 'string' && v.toLowerCase().includes(q))
+    },
+    [pluginQuery],
+  )
+
   const filteredCore = useMemo(() => {
-    if (!highRiskOnly) return corePlugins
-    return corePlugins.filter(p => {
-      const caps = parseManifestCapabilities(p.capabilities)
-      return caps !== null && hasHighRisk(caps)
+    return corePlugins.filter((p) => {
+      if (highRiskOnly) {
+        const caps = parseManifestCapabilities(p.capabilities)
+        if (caps === null || !hasHighRisk(caps)) return false
+      }
+      return matchesQuery([p.name, p.id, p.description])
     })
-  }, [corePlugins, highRiskOnly])
+  }, [corePlugins, highRiskOnly, matchesQuery])
+
+  const filteredAvailable = useMemo(
+    () => available.filter((p) => matchesQuery([p.name, p.id, p.description])),
+    [available, matchesQuery],
+  )
 
   const filteredCommunity = useMemo(() => {
-    if (!highRiskOnly) return community
-    return community.filter(m => {
-      const caps = parseManifestCapabilities(m.capabilities)
-      return caps !== null && hasHighRisk(caps)
+    return community.filter((m) => {
+      if (highRiskOnly) {
+        const caps = parseManifestCapabilities(m.capabilities)
+        if (caps === null || !hasHighRisk(caps)) return false
+      }
+      return matchesQuery([m.name, m.id, m.description])
     })
-  }, [community, highRiskOnly])
+  }, [community, highRiskOnly, matchesQuery])
 
   return (
     <div className="plugins-tab">
@@ -2240,17 +2262,18 @@ function PluginsTab({
         </div>
       )}
 
-      {/* High-risk filter — keeps the audit-style "what's spawning
-          processes / writing outside the forge?" question one click
-          away. Doesn't filter out (unknown)-capability plugins on
-          purpose — see filter memo above. */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          padding: '0 8px 8px 8px',
-        }}
-      >
+      {/* Header — Obsidian-style search input + audit-mode toggle.
+          Keeps the high-risk filter one click away while making the
+          search box the primary affordance. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <input
+          type="search"
+          className="settings-search"
+          placeholder="Search plugins..."
+          value={pluginQuery}
+          onChange={(e) => setPluginQuery(e.target.value)}
+          style={{ flex: 1 }}
+        />
         <label
           style={{
             display: 'inline-flex',
@@ -2260,15 +2283,16 @@ function PluginsTab({
             opacity: 0.8,
             cursor: 'pointer',
             userSelect: 'none',
+            whiteSpace: 'nowrap',
           }}
           title="Show only plugins with at least one high-risk capability"
         >
           <input
             type="checkbox"
             checked={highRiskOnly}
-            onChange={e => setHighRiskOnly(e.target.checked)}
+            onChange={(e) => setHighRiskOnly(e.target.checked)}
           />
-          Show only high-risk plugins
+          High-risk only
         </label>
       </div>
 
@@ -2276,7 +2300,7 @@ function PluginsTab({
           dormant default-off ones. Required (default-on) plugins have
           no toggle; optional (default-off) plugins toggle live. */}
       {(() => {
-        const optionalDisabled = highRiskOnly ? [] : available
+        const optionalDisabled = highRiskOnly ? [] : filteredAvailable
         const totalCore = filteredCore.length + optionalDisabled.length
         return (
           <>
