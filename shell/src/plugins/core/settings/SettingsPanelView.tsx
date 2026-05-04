@@ -1800,22 +1800,42 @@ function KeybindingsTab() {
   }, [])
 
   return (
-    <div className="keybindings-tab">
-      <header style={{ marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>Keyboard Shortcuts</h2>
-        <p className="settings-section-desc" style={{ margin: '4px 0 0', opacity: 0.75 }}>
-          Click a chord to record a new one. Overrides persist across restarts.
-        </p>
-      </header>
-
-      <input
-        type="search"
-        className="settings-search"
-        placeholder="Filter commands or chords..."
-        value={query}
-        onChange={e => setQuery(e.target.value)}
-        style={{ marginBottom: 12, width: '100%' }}
-      />
+    <div className="settings-section">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="settings-field-title">Search hotkeys</div>
+          <div className="settings-field-description" style={{ marginBottom: 0 }}>
+            Showing {rows.length} hotkey{rows.length === 1 ? '' : 's'}.
+          </div>
+        </div>
+        <span
+          aria-hidden="true"
+          title="Filter (coming soon)"
+          style={{
+            color: 'var(--text-muted)',
+            fontSize: 14,
+            paddingTop: 4,
+            cursor: 'default',
+          }}
+        >
+          ▽
+        </span>
+        <input
+          type="search"
+          className="settings-search"
+          placeholder="Filter..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ minWidth: 180, maxWidth: 260, marginTop: 2 }}
+        />
+      </div>
 
       {error && (
         <div
@@ -1854,120 +1874,140 @@ function KeybindingsTab() {
       {filtered.length === 0 ? (
         <p className="settings-empty">No keybindings match.</p>
       ) : (
-        <table className="keybindings-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th style={cellStyle}>Command</th>
-              <th style={cellStyle}>Shortcut</th>
-              <th style={{ ...cellStyle, width: 120 }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(row => (
-              <tr key={row.commandId}>
-                <td style={cellStyle}>
-                  <div style={{ fontWeight: 500 }}>
-                    {row.title}
-                    {row.overridden && (
-                      <span
-                        title="Override active"
-                        style={{
-                          display: 'inline-block',
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          background: 'var(--interactive-accent)',
-                          marginLeft: 5,
-                          verticalAlign: 'middle',
-                        }}
-                      />
-                    )}
-                    {row.conflictsWith.length > 0 && (
-                      <span
-                        title={`Chord conflict — also bound to: ${row.conflictsWith.join(', ')}`}
-                        aria-label="Keybinding conflict"
-                        style={{
-                          display: 'inline-block',
-                          marginLeft: 6,
-                          padding: '0 5px',
-                          fontSize: '0.7em',
-                          fontWeight: 600,
-                          lineHeight: '14px',
-                          color: 'var(--color-warning)',
-                          background: 'var(--color-warning-bg)',
-                          border: '1px solid var(--color-warning)',
-                          borderRadius: 3,
-                          verticalAlign: 'middle',
-                        }}
-                      >
-                        {'!'}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: '0.85em', opacity: 0.6 }}>{row.commandId}</div>
-                </td>
-                <td style={cellStyle}>
-                  {editing === row.commandId ? (
-                    <ChordCaptureInput
-                      onCommit={chord => void handleCommit(row.commandId, chord)}
-                      onCancel={() => setEditing(null)}
+        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+          {filtered.map((row) => (
+            <li
+              key={row.commandId}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 4px',
+                borderBottom: '1px solid var(--background-modifier-border)',
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                  <span style={{ color: 'var(--text-normal)' }}>{row.title}</span>
+                  {row.overridden && (
+                    <span
+                      title="Override active"
+                      style={{
+                        display: 'inline-block',
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        background: 'var(--interactive-accent)',
+                      }}
                     />
-                  ) : (
-                    <div>
-                      <code style={{
-                        background: row.overridden
-                          ? 'var(--interactive-accent-soft)'
-                          : 'var(--background-modifier-hover)',
-                        padding: '2px 6px',
+                  )}
+                  {row.conflictsWith.length > 0 && (
+                    <span
+                      title={`Chord conflict — also bound to: ${row.conflictsWith.join(', ')}`}
+                      aria-label="Keybinding conflict"
+                      style={{
+                        padding: '0 5px',
+                        fontSize: '0.7em',
+                        fontWeight: 600,
+                        lineHeight: '14px',
+                        color: 'var(--color-warning)',
+                        background: 'var(--color-warning-bg)',
+                        border: '1px solid var(--color-warning)',
                         borderRadius: 3,
-                        fontSize: '0.9em',
-                        fontWeight: row.overridden ? 600 : undefined,
-                      }}>
-                        {formatChord(row.current) || '—'}
-                      </code>
-                      {row.overridden && (
-                        <div style={{ marginTop: 3, fontSize: '0.78em', opacity: 0.55 }}>
-                          {'← '}{formatChord(row.default) || '—'}
-                        </div>
-                      )}
-                    </div>
+                      }}
+                    >
+                      !
+                    </span>
                   )}
-                </td>
-                <td style={{ ...cellStyle, width: 120 }}>
-                  {editing === row.commandId ? null : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setEditing(row.commandId)}
-                        style={{ marginRight: 6 }}
-                      >
-                        Edit
-                      </button>
-                      {row.overridden && (
-                        <button
-                          type="button"
-                          onClick={() => void handleReset(row.commandId)}
-                        >
-                          Reset
-                        </button>
-                      )}
-                    </>
+                </div>
+              </div>
+
+              {editing === row.commandId ? (
+                <ChordCaptureInput
+                  onCommit={(chord) => void handleCommit(row.commandId, chord)}
+                  onCancel={() => setEditing(null)}
+                />
+              ) : row.current ? (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    background: row.overridden
+                      ? 'var(--interactive-accent-soft)'
+                      : 'var(--background-modifier-hover)',
+                    color: 'var(--text-normal)',
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontFamily: 'var(--font-monospace, monospace)',
+                  }}
+                >
+                  {formatChord(row.current)}
+                  {row.overridden && (
+                    <button
+                      type="button"
+                      onClick={() => void handleReset(row.commandId)}
+                      title={`Reset to default (${formatChord(row.default) || '—'})`}
+                      aria-label="Reset to default"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                        padding: 0,
+                        fontSize: 12,
+                        lineHeight: 1,
+                      }}
+                    >
+                      ✕
+                    </button>
                   )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </span>
+              ) : (
+                <span
+                  style={{
+                    background: 'var(--background-modifier-hover)',
+                    color: 'var(--text-muted)',
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    fontSize: 12,
+                  }}
+                >
+                  Blank
+                </span>
+              )}
+
+              {editing !== row.commandId && (
+                <button
+                  type="button"
+                  onClick={() => setEditing(row.commandId)}
+                  title="Add or change shortcut"
+                  aria-label="Edit shortcut"
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: '50%',
+                    border: '1px solid var(--background-modifier-border)',
+                    background: 'transparent',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    display: 'inline-grid',
+                    placeItems: 'center',
+                    fontSize: 14,
+                    lineHeight: 1,
+                    padding: 0,
+                  }}
+                >
+                  +
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   )
-}
-
-const cellStyle: React.CSSProperties = {
-  textAlign: 'left',
-  padding: '8px 6px',
-  borderBottom: '1px solid var(--background-modifier-border)',
-  verticalAlign: 'top',
 }
 
 /**
