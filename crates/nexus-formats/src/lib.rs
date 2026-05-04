@@ -24,10 +24,15 @@
 
 pub mod canvas;
 pub mod config;
+pub mod core_plugin;
 pub mod error;
 pub mod markdown;
 pub mod notion;
 pub mod util;
+
+pub use core_plugin::{
+    FormatsCorePlugin, HANDLER_EXPORT_NOTION, HANDLER_IMPORT_NOTION, PLUGIN_ID,
+};
 
 // ── Convenience re-exports ────────────────────────────────────────────────────
 

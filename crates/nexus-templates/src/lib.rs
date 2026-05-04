@@ -48,10 +48,15 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod builtins;
+pub mod core_plugin;
 pub mod registry;
 pub mod substitute;
 pub mod template;
 
+pub use core_plugin::{
+    TemplatesCorePlugin, HANDLER_APPLY, HANDLER_GET, HANDLER_LIST, HANDLER_RELOAD,
+    HANDLER_RENDER, PLUGIN_ID,
+};
 pub use registry::{TemplateRegistry, TemplateRegistryError};
 pub use substitute::{render, SubstitutionError};
 pub use template::{

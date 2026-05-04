@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ImportNotionArgs",
+  "description": "Args for `com.nexus.formats::import_notion` (handler `1`).",
+  "type": "object",
+  "properties": {
+    "dest": {
+      "description": "Destination directory. Forge-relative if not absolute. Defaults to\n`Imported from Notion` under the forge root.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "source": {
+      "description": "Absolute path to the Notion zip export.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "source"
+  ]
+}

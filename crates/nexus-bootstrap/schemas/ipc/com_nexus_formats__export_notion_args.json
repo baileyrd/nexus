@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExportNotionArgs",
+  "description": "Args for `com.nexus.formats::export_notion` (handler `2`).",
+  "type": "object",
+  "properties": {
+    "dest": {
+      "description": "Output directory. Created if missing.",
+      "type": "string"
+    },
+    "source": {
+      "description": "Forge-relative subdirectory to export. Defaults to the entire forge.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "dest"
+  ]
+}

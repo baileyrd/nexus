@@ -35,7 +35,11 @@ plugin_id: string,
 /**
  * The command id.
  */
-command: string, } } | { "SerializationFailed": { 
+command: string, 
+/**
+ * Underlying execution reason, if available. Empty for true panics.
+ */
+reason: string, } } | { "SerializationFailed": { 
 /**
  * Reason from the serializer.
  */

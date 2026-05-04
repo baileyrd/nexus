@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RenderTemplateArgs",
+  "description": "Args for `com.nexus.templates::render` (handler `3`).",
+  "type": "object",
+  "properties": {
+    "args": {
+      "description": "Parameter overrides. Each value is a string (the substitution engine\nonly handles strings; richer types render via JSON-stringify on the\ncaller side).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "name": {
+      "description": "Template name to render.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name"
+  ]
+}

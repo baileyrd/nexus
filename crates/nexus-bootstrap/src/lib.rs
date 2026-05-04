@@ -322,7 +322,9 @@ fn register_core_plugins(
     use nexus_ai::AiCorePlugin;
     use nexus_comments::core_plugin::CommentsCorePlugin;
     use nexus_linkpreview::core_plugin::LinkPreviewCorePlugin;
+    use nexus_formats::FormatsCorePlugin;
     use nexus_skills::SkillsCorePlugin;
+    use nexus_templates::TemplatesCorePlugin;
     use nexus_workflow::WorkflowCorePlugin;
     use nexus_editor::EditorCorePlugin;
     use nexus_git::GitCorePlugin;
@@ -856,6 +858,49 @@ fn register_core_plugins(
             Box::new(SkillsCorePlugin::open(skills_dir)),
         )
         .context("failed to register com.nexus.skills")?;
+
+    // Templates — page-template subsystem. Holds the forge root and
+    // serves list/get/render/apply/reload over IPC. Built-ins are
+    // included automatically; user templates live at
+    // `<forge>/.forge/templates/`.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.templates",
+                "Templates",
+                LifecycleFlags::NONE,
+                &[
+                    ("list", nexus_templates::HANDLER_LIST),
+                    ("get", nexus_templates::HANDLER_GET),
+                    ("render", nexus_templates::HANDLER_RENDER),
+                    ("apply", nexus_templates::HANDLER_APPLY),
+                    ("reload", nexus_templates::HANDLER_RELOAD),
+                ],
+            ),
+            forge_root,
+            Box::new(TemplatesCorePlugin::open(forge_root.to_path_buf())),
+        )
+        .context("failed to register com.nexus.templates")?;
+
+    // Formats — Notion zip-import / format-export. Wraps the
+    // pure-library converters in `nexus-formats::notion` behind two
+    // IPC handlers so the shell, CLI plugins, and external clients can
+    // drive imports/exports through one path.
+    loader
+        .register_core(
+            core_manifest_with_ipc(
+                "com.nexus.formats",
+                "Formats",
+                LifecycleFlags::NONE,
+                &[
+                    ("import_notion", nexus_formats::HANDLER_IMPORT_NOTION),
+                    ("export_notion", nexus_formats::HANDLER_EXPORT_NOTION),
+                ],
+            ),
+            forge_root,
+            Box::new(FormatsCorePlugin::open(forge_root.to_path_buf())),
+        )
+        .context("failed to register com.nexus.formats")?;
 
     // Workflow — PRD-16 scaffold. Read-mostly surface over
     // `.workflows/` TOML files. Library stays kernel-free; this

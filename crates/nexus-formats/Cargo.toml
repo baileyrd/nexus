@@ -19,6 +19,13 @@ chrono     = { workspace = true }
 csv        = { workspace = true }
 zip        = { workspace = true }
 uuid       = { workspace = true }
+tracing    = { workspace = true }
+nexus-plugins = { path = "../nexus-plugins" }
+ts-rs      = { workspace = true, optional = true, features = ["serde-json-impl"] }
+schemars   = { workspace = true, optional = true }
+
+[features]
+ts-export = ["dep:ts-rs", "dep:schemars"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -96,6 +96,14 @@ use nexus_terminal::{
 use nexus_database::core_plugin::{
     CsvExportResponse, CsvImportArgs, FormulaEvalArgs, FormulaEvalResponse,
 };
+// nexus-templates: the four args types for the page-template subsystem.
+// Note `GetTemplateArgs` collides with the workflow-templates type, so
+// we alias on import.
+use nexus_templates::core_plugin::{
+    ApplyTemplateArgs, GetPageTemplateArgs, RenderTemplateArgs,
+};
+// nexus-formats: Notion zip-import / format-export args.
+use nexus_formats::core_plugin::{ExportNotionArgs, ImportNotionArgs};
 
 /// Relative path under `crates/nexus-bootstrap/schemas/ipc/`. Emits
 /// `<plugin>_<command>_<suffix>.json` so sibling types for the same
@@ -307,6 +315,15 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<CsvExportResponse>("com_nexus_database__csv_export", "response");
     write_schema::<FormulaEvalArgs>("com_nexus_database__formula_eval", "args");
     write_schema::<FormulaEvalResponse>("com_nexus_database__formula_eval", "response");
+
+    // ── com.nexus.templates ──────────────────────────────────────────────
+    write_schema::<GetPageTemplateArgs>("com_nexus_templates__get", "args");
+    write_schema::<RenderTemplateArgs>("com_nexus_templates__render", "args");
+    write_schema::<ApplyTemplateArgs>("com_nexus_templates__apply", "args");
+
+    // ── com.nexus.formats ────────────────────────────────────────────────
+    write_schema::<ImportNotionArgs>("com_nexus_formats__import_notion", "args");
+    write_schema::<ExportNotionArgs>("com_nexus_formats__export_notion", "args");
 }
 
 /// Audit-2026-05-01 P0-2: every emitted JSON schema for an object type

@@ -21,6 +21,8 @@ ts-export = [
     "nexus-comments/ts-export",
     "nexus-theme/ts-export",
     "nexus-skills/ts-export",
+    "nexus-templates/ts-export",
+    "nexus-formats/ts-export",
     "nexus-workflow/ts-export",
     "nexus-terminal/ts-export",
     "nexus-database/ts-export",
@@ -43,6 +45,7 @@ nexus-mcp = { path = "../nexus-mcp" }
 nexus-types = { path = "../nexus-types" }
 nexus-agent = { path = "../nexus-agent" }
 nexus-skills = { path = "../nexus-skills" }
+nexus-templates = { path = "../nexus-templates" }
 nexus-workflow = { path = "../nexus-workflow" }
 nexus-linkpreview = { path = "../nexus-linkpreview" }
 nexus-comments = { path = "../nexus-comments" }

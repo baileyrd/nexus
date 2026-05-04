@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GetPageTemplateArgs",
+  "description": "Args for `com.nexus.templates::get` (handler `2`).",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Unique short template name (matches the `name:` frontmatter field).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name"
+  ]
+}
