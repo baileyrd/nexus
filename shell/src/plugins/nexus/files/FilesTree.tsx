@@ -364,13 +364,23 @@ function buildMenuItems(target: FilesDirEntry | null): FilesContextMenuItem[] {
   const items: FilesContextMenuItem[] = [
     {
       id: 'new-file',
-      label: 'New File',
+      label: 'New note',
       onSelect: () => void api.commands.execute('nexus.files.create.file', { parent }),
     },
     {
       id: 'new-folder',
-      label: 'New Folder',
+      label: 'New folder',
       onSelect: () => void api.commands.execute('nexus.files.create.folder', { parent }),
+    },
+    {
+      id: 'new-canvas',
+      label: 'New canvas',
+      onSelect: () => void api.commands.execute('nexus.canvas.new', { parent }),
+    },
+    {
+      id: 'new-base',
+      label: 'New base',
+      onSelect: () => void api.commands.execute('nexus.bases.new', { parent }),
     },
   ]
 

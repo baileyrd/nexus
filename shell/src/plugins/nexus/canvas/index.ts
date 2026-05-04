@@ -15,6 +15,7 @@ import { withActiveCanvas } from './activeCanvas'
 /** Command ids are exported so CanvasView can reference them in the
  *  help overlay rather than hard-coding strings. */
 export const CANVAS_COMMANDS = {
+  new: 'nexus.canvas.new',
   undo: 'canvas.undo',
   redo: 'canvas.redo',
   delete: 'canvas.delete',
@@ -30,6 +31,14 @@ export const CANVAS_COMMANDS = {
   exportPdf: 'canvas.export.pdf',
 } as const
 
+const STORAGE_PLUGIN_ID = 'com.nexus.storage'
+const EVENT_FILE_OPEN = 'files:open'
+
+interface DirEntry {
+  name: string
+  isDir: boolean
+}
+
 export const canvasPlugin: Plugin = {
   manifest: {
     id: 'nexus.canvas',
@@ -40,6 +49,7 @@ export const canvasPlugin: Plugin = {
     dependsOn: ['nexus.workspace'],
     contributes: {
       commands: [
+        { id: CANVAS_COMMANDS.new, title: 'Canvas: New canvas', category: 'Canvas' },
         { id: CANVAS_COMMANDS.undo, title: 'Canvas: Undo' },
         { id: CANVAS_COMMANDS.redo, title: 'Canvas: Redo' },
         { id: CANVAS_COMMANDS.delete, title: 'Canvas: Delete selection' },
@@ -133,6 +143,47 @@ export const canvasPlugin: Plugin = {
     // missing handle is a no-op (e.g. palette invocation with no
     // canvas open), matching the "when"-gated behaviour of the
     // keybindings themselves.
+    // New canvas — auto-name "Untitled.canvas" (with collision suffix),
+    // write an empty canvas doc, then emit files:open so the editor
+    // routes the new path to the canvas view. Mirrors the Obsidian
+    // behaviour invoked from the file-explorer right-click menu.
+    api.commands.register(CANVAS_COMMANDS.new, async (...args) => {
+      const arg = args[0]
+      const parent =
+        arg && typeof arg === 'object' && 'parent' in arg && typeof (arg as { parent?: unknown }).parent === 'string'
+          ? (arg as { parent: string }).parent
+          : ''
+      try {
+        let entries: DirEntry[] = []
+        try {
+          entries = await api.kernel.invoke<DirEntry[]>(STORAGE_PLUGIN_ID, 'list_dir', {
+            relpath: parent,
+          })
+        } catch {
+          // list_dir failure is non-fatal — fall back to "Untitled.canvas"
+          // and let canvas_write surface the real error if it collides.
+        }
+        const taken = new Set(entries.map((e) => e.name.toLowerCase()))
+        let name = 'Untitled.canvas'
+        let n = 1
+        while (taken.has(name.toLowerCase())) {
+          name = `Untitled ${n}.canvas`
+          n += 1
+        }
+        const relpath = parent ? `${parent}/${name}` : name
+        await api.kernel.invoke<unknown>(STORAGE_PLUGIN_ID, 'canvas_write', {
+          path: relpath,
+          canvas: { version: '1.0', nodes: [], edges: [] },
+        })
+        api.events.emit(EVENT_FILE_OPEN, { relpath, name })
+      } catch (err) {
+        api.notifications.show({
+          type: 'error',
+          message: `Failed to create canvas: ${err instanceof Error ? err.message : String(err)}`,
+        })
+      }
+    })
+
     api.commands.register(CANVAS_COMMANDS.undo, () => withActiveCanvas((h) => h.undo()))
     api.commands.register(CANVAS_COMMANDS.redo, () => withActiveCanvas((h) => h.redo()))
     api.commands.register(CANVAS_COMMANDS.delete, () => withActiveCanvas((h) => h.deleteSelected()))
