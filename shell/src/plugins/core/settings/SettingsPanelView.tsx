@@ -483,6 +483,12 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
                   corePlugins={plugins}
                   community={community}
                   available={available}
+                  pluginsWithOptions={
+                    new Set([
+                      ...sections.map((s) => s.pluginId),
+                      ...STUB_CORE_PLUGINS.map((p) => p.id),
+                    ])
+                  }
                   onJumpToHotkeys={(pluginId) => {
                     // Mirror Obsidian: each row's + button opens the
                     // Hotkeys page pre-filtered to commands owned by
@@ -491,6 +497,11 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
                     // visits start fresh.
                     useContextKeyStore.getState().set('settingsHotkeysQuery', pluginId)
                     setNavTab('hotkeys')
+                  }}
+                  onJumpToOptions={(pluginId) => {
+                    // Mirror Obsidian's gear shortcut on rows whose
+                    // plugin has its own settings page.
+                    setNavTab(pluginId)
                   }}
                 />
               ) : navTab === 'community-plugins' ? (
@@ -2691,12 +2702,16 @@ function PluginsTab({
   corePlugins,
   community,
   available,
+  pluginsWithOptions,
   onJumpToHotkeys,
+  onJumpToOptions,
 }: {
   corePlugins: PluginInfo[]
   community:   CommunityPluginManifest[]
   available:   AvailablePluginInfo[]
+  pluginsWithOptions: Set<string>
   onJumpToHotkeys: (pluginId: string) => void
+  onJumpToOptions: (pluginId: string) => void
 }) {
   const [pendingChanges, setPendingChanges] = useState<Record<string, boolean>>({})
   const [saving,         setSaving]         = useState<string | null>(null)
@@ -2873,6 +2888,8 @@ function PluginsTab({
                       error={builtinErrors[p.id]}
                       onToggle={(next) => { void handleToggleBuiltin(p.id, next) }}
                       onJumpToHotkeys={() => onJumpToHotkeys(p.id)}
+                      hasOptions={pluginsWithOptions.has(p.id)}
+                      onJumpToOptions={() => onJumpToOptions(p.id)}
                     />
                   ))}
                   {optionalDisabled.map(p => (
@@ -2883,6 +2900,8 @@ function PluginsTab({
                       error={builtinErrors[p.id]}
                       onToggle={(next) => { void handleToggleBuiltin(p.id, next) }}
                       onJumpToHotkeys={() => onJumpToHotkeys(p.id)}
+                      hasOptions={pluginsWithOptions.has(p.id)}
+                      onJumpToOptions={() => onJumpToOptions(p.id)}
                     />
                   ))}
                 </>
@@ -2922,6 +2941,8 @@ function PluginsTab({
               changed={!!pendingChanges[m.id]}
               onToggle={handleToggle}
               onJumpToHotkeys={() => onJumpToHotkeys(m.id)}
+              hasOptions={pluginsWithOptions.has(m.id)}
+              onJumpToOptions={() => onJumpToOptions(m.id)}
             />
           ))
         )}
@@ -2945,6 +2966,8 @@ function CorePluginRow({
   error,
   onToggle,
   onJumpToHotkeys,
+  hasOptions,
+  onJumpToOptions,
 }: {
   plugin:   PluginInfo
   optional: boolean
@@ -2952,6 +2975,8 @@ function CorePluginRow({
   error?:   string
   onToggle: (next: boolean) => void
   onJumpToHotkeys: () => void
+  hasOptions: boolean
+  onJumpToOptions: () => void
 }) {
   const capabilities = useMemo(
     () => parseManifestCapabilities(plugin.capabilities),
@@ -2977,6 +3002,7 @@ function CorePluginRow({
               </span>
             )
           })()}
+          {hasOptions && <OptionsShortcutButton onClick={onJumpToOptions} />}
           <HotkeysShortcutButton onClick={onJumpToHotkeys} />
           {optional && (() => {
             // `pluginList` no longer surfaces 'inactive' rows (they
@@ -3032,12 +3058,16 @@ function DisabledOptionalRow({
   error,
   onToggle,
   onJumpToHotkeys,
+  hasOptions,
+  onJumpToOptions,
 }: {
   plugin:   AvailablePluginInfo
   busy:     boolean
   error?:   string
   onToggle: (next: boolean) => void
   onJumpToHotkeys: () => void
+  hasOptions: boolean
+  onJumpToOptions: () => void
 }) {
   return (
     <div className={`plugin-row ${error ? 'plugin-row--error' : ''}`}>
@@ -3050,6 +3080,7 @@ function DisabledOptionalRow({
             <span className="plugin-row__badge plugin-row__badge--core">core</span>
           )}
           <span className="plugin-row__version">v{plugin.version}</span>
+          {hasOptions && <OptionsShortcutButton onClick={onJumpToOptions} />}
           <HotkeysShortcutButton onClick={onJumpToHotkeys} />
           <label
             className="plugin-row__toggle"
@@ -3070,6 +3101,46 @@ function DisabledOptionalRow({
         {error && <div className="plugin-row__error">{error}</div>}
       </div>
     </div>
+  )
+}
+
+// Compact gear button next to a plugin row's toggle. Only rendered
+// when the plugin has its own settings page (real config schema or a
+// cp-stub:* placeholder). Clicking jumps the rail to that plugin's
+// settings entry — matches Obsidian's row-level "Options" shortcut.
+function OptionsShortcutButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Options"
+      aria-label="Open settings for this plugin"
+      style={{
+        width: 22,
+        height: 22,
+        marginRight: 6,
+        borderRadius: '50%',
+        border: '1px solid var(--background-modifier-border)',
+        background: 'transparent',
+        color: 'var(--text-muted)',
+        cursor: 'pointer',
+        display: 'inline-grid',
+        placeItems: 'center',
+        fontSize: 12,
+        lineHeight: 1,
+        padding: 0,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'var(--background-modifier-hover)'
+        e.currentTarget.style.color = 'var(--text-normal)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.color = 'var(--text-muted)'
+      }}
+    >
+      ⚙
+    </button>
   )
 }
 
@@ -3116,13 +3187,15 @@ function HotkeysShortcutButton({ onClick }: { onClick: () => void }) {
 // ─── Community plugin row (toggleable) ───────────────────────────────────────
 
 function CommunityPluginRow({
-  manifest, saving, changed, onToggle, onJumpToHotkeys,
+  manifest, saving, changed, onToggle, onJumpToHotkeys, hasOptions, onJumpToOptions,
 }: {
   manifest: CommunityPluginManifest
   saving:   boolean
   changed:  boolean
   onToggle: (id: string, enabled: boolean) => void
   onJumpToHotkeys: () => void
+  hasOptions: boolean
+  onJumpToOptions: () => void
 }) {
   // Optimistic local state
   const [enabled, setEnabled] = useState(manifest.enabled)
@@ -3286,6 +3359,7 @@ function CommunityPluginRow({
               Review
             </button>
           )}
+          {hasOptions && <OptionsShortcutButton onClick={onJumpToOptions} />}
           <HotkeysShortcutButton onClick={onJumpToHotkeys} />
           <label
             className="plugin-row__toggle"
