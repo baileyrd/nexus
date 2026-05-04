@@ -28,7 +28,8 @@ You're building a community WASM/JS plugin or a shell-side TS plugin.
 
 | Read | What it gives you |
 |---|---|
-| [`plugin-authors/README.md`](plugin-authors/README.md) | Curated journey for plugin authors |
+| [`developer/README.md`](developer/README.md) | **Developer docs** — Obsidian-style hub: plugins, editor, UI, themes, core plugins, reference (start here) |
+| [`plugin-authors/README.md`](plugin-authors/README.md) | Original plugin-authors hub (now linked from developer/) |
 | [`plugin-authors/quickstart.md`](plugin-authors/quickstart.md) | Scaffold and run your first plugin |
 | [`../shell/docs/writing-a-plugin.md`](../shell/docs/writing-a-plugin.md) | In-depth shell plugin reference |
 | [`../shell/docs/plugin-api.md`](../shell/docs/plugin-api.md) | The `@nexus/extension-api` surface |
