@@ -3,6 +3,11 @@
 End-user documentation. You've installed Nexus and pointed it at a forge
 of markdown — now what?
 
+> **Looking for task-oriented guides?** The [`../help/`](../help/README.md)
+> tree is a full Obsidian-style help system: getting started, editing,
+> linking, search, plugins, AI, advanced subsystems, customization. The
+> page below is the dry reference (every command, every flag).
+
 ## Getting started
 
 The repo-root [`README.md`](../../README.md) covers install, build, and

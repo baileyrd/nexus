@@ -45,7 +45,8 @@ You want to install Nexus, point it at a forge of markdown, and use it.
 | Read | What it gives you |
 |---|---|
 | [`../README.md`](../README.md) | Install, build, CLI / TUI / shell / MCP quickstart |
-| [`users/README.md`](users/README.md) | End-user documentation hub |
+| [`help/README.md`](help/README.md) | **Help docs** — task-oriented guides modelled on Obsidian's help (start here) |
+| [`users/README.md`](users/README.md) | End-user documentation hub (reference) |
 | [`users/cli.md`](users/cli.md) | Full CLI command reference |
 | [`users/tui.md`](users/tui.md) | TUI key bindings and behaviour |
 | [`users/mcp.md`](users/mcp.md) | MCP server, the 15 `nexus_*` tools, Claude Code / Cursor integration |
