@@ -1273,15 +1273,23 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
     [availableSnippets, enabledSnippets],
   )
 
-  return (
-    <div className="appearance-tab">
-      <header style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>Appearance</h2>
-        <p className="settings-section-desc" style={{ margin: '4px 0 0', opacity: 0.75 }}>
-          Theme, light/dark mode, and CSS snippet cascade. Changes apply live.
-        </p>
-      </header>
+  // Derived: render hint for the theme dropdown.
+  const activeMeta = availableThemes.find((t) => t.id === activeThemeId)
+  const activeCategory =
+    typeof activeMeta?.category === 'string' ? activeMeta.category : undefined
+  const scheme: 'light' | 'dark' =
+    activeCategory === 'light'
+      ? 'light'
+      : activeCategory === 'dark'
+      ? 'dark'
+      : mode === 'light'
+      ? 'light'
+      : 'dark'
 
+  const comingSoon = useComingSoon(api)
+
+  return (
+    <div className="settings-section">
       {error && (
         <div
           role="alert"
@@ -1297,161 +1305,360 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
         </div>
       )}
 
-      {/* ── Theme picker ── */}
-      <section className="settings-section" style={{ marginBottom: 24 }}>
-        <h3 className="settings-section-title">Theme</h3>
-        <p className="settings-field-description">
-          Pick a base palette. Variables apply to :root immediately.
-        </p>
-        <div className="settings-field-control" style={{ marginTop: 8 }}>
-          {(() => {
-            // Native <option> elements use OS-rendered chrome; CSS on
-            // the parent select doesn't reach them. `color-scheme` is
-            // the one hint Chromium honors — set it to match the
-            // active theme's category so the popup list renders with
-            // the right contrast. Falls back to the user's Mode pick
-            // when the active theme has no category metadata, and
-            // finally to 'dark' so we never render light-on-light.
-            const activeMeta = availableThemes.find((t) => t.id === activeThemeId)
-            const activeCategory =
-              typeof activeMeta?.category === 'string' ? activeMeta.category : undefined
-            const scheme: 'light' | 'dark' =
-              activeCategory === 'light'
-                ? 'light'
-                : activeCategory === 'dark'
-                ? 'dark'
-                : mode === 'light'
-                ? 'light'
-                : 'dark'
-            return (
-              <select
-                value={activeThemeId ?? ''}
-                disabled={busy || !loaded || availableThemes.length === 0}
-                onChange={e => handleThemeChange(e.target.value)}
-                style={{
-                  minWidth: 240,
-                  padding: '4px 8px',
-                  background: 'var(--background-primary)',
-                  color: 'var(--text-normal)',
-                  border: '1px solid var(--background-modifier-border)',
-                  borderRadius: 3,
-                  fontSize: 13,
-                  colorScheme: scheme,
-                }}
-              >
-                {availableThemes.length === 0 && (
-                  <option value="">{loaded ? 'No themes installed' : 'Loading...'}</option>
-                )}
-                {availableThemes.map(t => (
-                  <option
-                    key={t.id}
-                    value={t.id}
-                    // Belt-and-braces: also style each option directly.
-                    // Chromium honors these on Linux/Windows even when
-                    // the popup is OS-native.
-                    style={{
-                      background: scheme === 'dark' ? '#1f1f1f' : '#ffffff',
-                      color: scheme === 'dark' ? '#e5e5e5' : '#1a1a1a',
-                    }}
-                  >
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            )
-          })()}
-        </div>
-      </section>
-
-      {/* ── Mode ── */}
-      <section className="settings-section" style={{ marginBottom: 24 }}>
-        <h3 className="settings-section-title">Mode</h3>
-        <p className="settings-field-description">
-          Light or dark, or follow the OS preference.
-        </p>
-        <div role="radiogroup" aria-label="Theme mode" style={{ marginTop: 8, display: 'flex', gap: 16 }}>
-          {(['light', 'dark', 'system'] as const).map(m => (
-            <label
-              key={m}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: busy ? 'wait' : 'pointer' }}
+      {/* ── Top group ─────────────────────────────────────────── */}
+      <StubRow
+        title="Base color scheme"
+        description="Choose Nexus's default color scheme."
+        control={
+          <select
+            value={mode}
+            disabled={busy}
+            onChange={(e) => handleModeChange(e.target.value as ThemeMode)}
+            title="Light, dark, or follow the OS preference."
+          >
+            <option value="system">Adapt to system</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Accent color"
+        description="Choose the accent color used throughout the app."
+        control={
+          <button
+            type="button"
+            onClick={comingSoon('Accent color')}
+            title="Coming soon"
+            aria-label="Pick accent color"
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: '50%',
+              background: 'var(--interactive-accent)',
+              border: '1px solid var(--background-modifier-border)',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          />
+        }
+      />
+      <StubRow
+        title="Themes"
+        description="Manage installed themes and browse community themes."
+        control={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <select
+              value={activeThemeId ?? ''}
+              disabled={busy || !loaded || availableThemes.length === 0}
+              onChange={(e) => handleThemeChange(e.target.value)}
+              style={{
+                minWidth: 160,
+                colorScheme: scheme,
+              }}
+              title="Active theme"
             >
-              <input
-                type="radio"
-                name="theme-mode"
-                value={m}
-                checked={mode === m}
-                disabled={busy}
-                onChange={() => handleModeChange(m)}
-              />
-              <span style={{ textTransform: 'capitalize' }}>{m}</span>
-            </label>
-          ))}
-        </div>
-      </section>
+              {availableThemes.length === 0 && (
+                <option value="">{loaded ? 'No themes installed' : 'Loading...'}</option>
+              )}
+              {availableThemes.map((t) => (
+                <option
+                  key={t.id}
+                  value={t.id}
+                  style={{
+                    background: scheme === 'dark' ? '#1f1f1f' : '#ffffff',
+                    color: scheme === 'dark' ? '#e5e5e5' : '#1a1a1a',
+                  }}
+                >
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={comingSoon('Manage themes')}
+              title="Coming soon"
+              style={{
+                background: 'var(--interactive-accent)',
+                color: 'var(--interactive-accent-ink)',
+                border: 'none',
+                borderRadius: 4,
+                padding: '4px 12px',
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              Manage
+            </button>
+          </div>
+        }
+      />
+      <StubRow
+        title="Current community themes"
+        description="You currently have 0 themes installed."
+        control={<span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>}
+      />
 
-      {/* ── Snippets ── */}
-      <section className="settings-section">
-        <h3 className="settings-section-title">CSS snippets</h3>
-        <p className="settings-field-description">
-          Layered after the theme. Drag order matters — later snippets
-          override earlier ones. Use up/down to reorder.
+      {/* ── Interface (stubs) ─────────────────────────────────── */}
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Interface</div>
+      <StubRow
+        title="Inline title"
+        description="Display the filename as an editable title inline with the file contents."
+        control={<StubToggle on={true} label="Toggle inline title" onClick={comingSoon('Inline title')} />}
+      />
+      <StubRow
+        title="Show tab title bar"
+        description="Display the header at the top of every tab."
+        control={<StubToggle on={true} label="Toggle tab title bar" onClick={comingSoon('Show tab title bar')} />}
+      />
+      <StubRow
+        title="Show ribbon"
+        description="Display vertical toolbar on the side of the window."
+        control={<StubToggle on={true} label="Toggle ribbon" onClick={comingSoon('Show ribbon')} />}
+      />
+      <StubRow
+        title="Ribbon menu configuration"
+        description="Configure what commands appear in the ribbon menu."
+        control={
+          <button
+            type="button"
+            onClick={comingSoon('Ribbon menu configuration')}
+            title="Coming soon"
+            style={{
+              background: 'var(--background-modifier-hover)',
+              color: 'var(--text-normal)',
+              border: 'none',
+              borderRadius: 4,
+              padding: '4px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Manage
+          </button>
+        }
+      />
+
+      {/* ── Font (stubs) ──────────────────────────────────────── */}
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Font</div>
+      <StubRow
+        title="Interface font"
+        description="Set base font for all of Nexus."
+        control={
+          <button
+            type="button"
+            onClick={comingSoon('Interface font')}
+            title="Coming soon"
+            style={{
+              background: 'var(--background-modifier-hover)',
+              color: 'var(--text-normal)',
+              border: 'none',
+              borderRadius: 4,
+              padding: '4px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Manage
+          </button>
+        }
+      />
+      <StubRow
+        title="Text font"
+        description="Set font for editing and reading views."
+        control={
+          <button
+            type="button"
+            onClick={comingSoon('Text font')}
+            title="Coming soon"
+            style={{
+              background: 'var(--background-modifier-hover)',
+              color: 'var(--text-normal)',
+              border: 'none',
+              borderRadius: 4,
+              padding: '4px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Manage
+          </button>
+        }
+      />
+      <StubRow
+        title="Monospace font"
+        description="Set font for places like code blocks and frontmatter."
+        control={
+          <button
+            type="button"
+            onClick={comingSoon('Monospace font')}
+            title="Coming soon"
+            style={{
+              background: 'var(--background-modifier-hover)',
+              color: 'var(--text-normal)',
+              border: 'none',
+              borderRadius: 4,
+              padding: '4px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Manage
+          </button>
+        }
+      />
+      <StubRow
+        title="Font size"
+        description="Font size in pixels that affects editing and reading views."
+        control={
+          <input
+            type="range"
+            min={10}
+            max={24}
+            defaultValue={14}
+            onChange={comingSoon('Font size')}
+            title="Coming soon"
+            style={{ minWidth: 120 }}
+          />
+        }
+      />
+      <StubRow
+        title="Quick font size adjustment"
+        description="Adjust the font size using Ctrl + Scroll, or using the trackpad pinch-zoom gesture."
+        control={
+          <StubToggle
+            on={false}
+            label="Toggle quick font size adjustment"
+            onClick={comingSoon('Quick font size adjustment')}
+          />
+        }
+      />
+
+      {/* ── Advanced (stubs) ──────────────────────────────────── */}
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Advanced</div>
+      <StubRow
+        title="Zoom level"
+        description="Controls the overall zoom level of the app."
+        control={
+          <input
+            type="range"
+            min={50}
+            max={200}
+            defaultValue={100}
+            onChange={comingSoon('Zoom level')}
+            title="Coming soon"
+            style={{ minWidth: 120 }}
+          />
+        }
+      />
+      <StubRow
+        title="Native menus"
+        description="Menus throughout the app will match the operating system. They will not be affected by your theme."
+        control={<StubToggle on={false} label="Toggle native menus" onClick={comingSoon('Native menus')} />}
+      />
+      <StubRow
+        title="Window frame style"
+        description="Determines the styling of the title bar of Nexus windows. Requires a full restart to take effect."
+        control={
+          <select defaultValue="hidden" onChange={comingSoon('Window frame style')} title="Coming soon">
+            <option value="hidden">Hidden (default)</option>
+            <option value="native">Native</option>
+            <option value="custom">Custom</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Custom app icon"
+        description="Set a custom icon for the app."
+        control={
+          <button
+            type="button"
+            onClick={comingSoon('Custom app icon')}
+            title="Coming soon"
+            style={{
+              background: 'var(--background-modifier-hover)',
+              color: 'var(--text-normal)',
+              border: 'none',
+              borderRadius: 4,
+              padding: '4px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Choose
+          </button>
+        }
+      />
+      <StubRow
+        title="Hardware acceleration"
+        description={
+          'Turns on hardware acceleration, which uses your GPU to make Nexus smoother. ' +
+          'If you turn this off, app performance will be severely degraded.'
+        }
+        control={
+          <StubToggle
+            on={true}
+            label="Toggle hardware acceleration"
+            onClick={comingSoon('Hardware acceleration')}
+          />
+        }
+      />
+
+      {/* ── CSS snippets (real controls) ─────────────────────── */}
+      <div className="settings-section-title" style={{ marginTop: 24 }}>CSS snippets</div>
+      <p className="settings-field-description">
+        Layered after the theme. Order matters — later snippets override earlier ones.
+      </p>
+      {availableSnippets.length === 0 ? (
+        <p className="settings-empty" style={{ marginTop: 12 }}>
+          No CSS snippets found. Drop a <code>.css</code> file into your snippets directory and restart.
         </p>
-
-        {availableSnippets.length === 0 ? (
-          <p className="settings-empty" style={{ marginTop: 12 }}>
-            No snippets installed. Drop a <code>.css</code> file into your
-            snippets directory and restart.
-          </p>
-        ) : (
-          <>
-            {enabledList.length > 0 && (
-              <div style={{ marginTop: 12 }}>
-                <div style={{ fontSize: '0.85em', opacity: 0.6, marginBottom: 4 }}>
-                  Enabled (cascade order, top → bottom)
-                </div>
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  {enabledList.map((s, i) => (
-                    <SnippetRow
-                      key={s.id}
-                      snippet={s}
-                      enabled
-                      busy={busy}
-                      canMoveUp={i > 0}
-                      canMoveDown={i < enabledList.length - 1}
-                      onToggle={() => handleSnippetToggle(s.id)}
-                      onMoveUp={() => handleReorder(s.id, 'up')}
-                      onMoveDown={() => handleReorder(s.id, 'down')}
-                    />
-                  ))}
-                </ul>
+      ) : (
+        <>
+          {enabledList.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: '0.85em', opacity: 0.6, marginBottom: 4 }}>
+                Enabled (cascade order, top → bottom)
               </div>
-            )}
-
-            {disabledList.length > 0 && (
-              <div style={{ marginTop: 16 }}>
-                <div style={{ fontSize: '0.85em', opacity: 0.6, marginBottom: 4 }}>
-                  Available
-                </div>
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  {disabledList.map(s => (
-                    <SnippetRow
-                      key={s.id}
-                      snippet={s}
-                      enabled={false}
-                      busy={busy}
-                      canMoveUp={false}
-                      canMoveDown={false}
-                      onToggle={() => handleSnippetToggle(s.id)}
-                      onMoveUp={() => {}}
-                      onMoveDown={() => {}}
-                    />
-                  ))}
-                </ul>
-              </div>
-            )}
-          </>
-        )}
-      </section>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {enabledList.map((s, i) => (
+                  <SnippetRow
+                    key={s.id}
+                    snippet={s}
+                    enabled
+                    busy={busy}
+                    canMoveUp={i > 0}
+                    canMoveDown={i < enabledList.length - 1}
+                    onToggle={() => handleSnippetToggle(s.id)}
+                    onMoveUp={() => handleReorder(s.id, 'up')}
+                    onMoveDown={() => handleReorder(s.id, 'down')}
+                  />
+                ))}
+              </ul>
+            </div>
+          )}
+          {disabledList.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: '0.85em', opacity: 0.6, marginBottom: 4 }}>Available</div>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {disabledList.map((s) => (
+                  <SnippetRow
+                    key={s.id}
+                    snippet={s}
+                    enabled={false}
+                    busy={busy}
+                    canMoveUp={false}
+                    canMoveDown={false}
+                    onToggle={() => handleSnippetToggle(s.id)}
+                    onMoveUp={() => {}}
+                    onMoveDown={() => {}}
+                  />
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
