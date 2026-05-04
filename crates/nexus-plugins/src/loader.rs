@@ -1931,6 +1931,7 @@ impl IpcDispatcher for SharedPluginLoader {
                 .map_err(|_| IpcError::PluginCrashedDuringCall {
                     plugin_id: target_plugin_id.to_string(),
                     command: command_id.to_string(),
+                    reason: String::new(),
                 })?;
 
             loader.resolve_ipc(target_plugin_id, command_id).map_err(
@@ -1949,6 +1950,7 @@ impl IpcDispatcher for SharedPluginLoader {
                     _ => IpcError::PluginCrashedDuringCall {
                         plugin_id: target_plugin_id.to_string(),
                         command: command_id.to_string(),
+                        reason: String::new(),
                     },
                 },
             )?
@@ -1968,12 +1970,14 @@ impl IpcDispatcher for SharedPluginLoader {
             .map_err(|_| IpcError::PluginCrashedDuringCall {
                 plugin_id: target_plugin_id.to_string(),
                 command: command_id.to_string(),
+                reason: String::new(),
             })?;
         guard
             .dispatch(handler_id, args)
-            .map_err(|_| IpcError::PluginCrashedDuringCall {
+            .map_err(|e| IpcError::PluginCrashedDuringCall {
                 plugin_id: target_plugin_id.to_string(),
                 command: command_id.to_string(),
+                reason: e.to_string(),
             })
     }
 
@@ -2006,9 +2010,10 @@ impl IpcDispatcher for SharedPluginLoader {
         };
 
         Some(Box::pin(async move {
-            inner.await.map_err(|_| IpcError::PluginCrashedDuringCall {
+            inner.await.map_err(|e| IpcError::PluginCrashedDuringCall {
                 plugin_id: target,
                 command,
+                reason: e.to_string(),
             })
         }))
     }

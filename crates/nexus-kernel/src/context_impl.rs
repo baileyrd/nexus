@@ -364,6 +364,7 @@ impl PluginContext for KernelPluginContext {
             Ok(Err(_panic)) => Err(IpcError::PluginCrashedDuringCall {
                 plugin_id: target,
                 command,
+                reason: String::new(),
             }),
             Err(_elapsed) => Err(IpcError::Timeout {
                 plugin_id: target,

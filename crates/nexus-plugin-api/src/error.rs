@@ -36,12 +36,14 @@ pub enum IpcError {
     },
 
     /// The target plugin crashed during the IPC call.
-    #[error("plugin '{plugin_id}' crashed during IPC call to '{command}'")]
+    #[error("plugin '{plugin_id}' crashed during IPC call to '{command}'{}", if reason.is_empty() { String::new() } else { format!(": {reason}") })]
     PluginCrashedDuringCall {
         /// The target plugin id.
         plugin_id: String,
         /// The command id.
         command: String,
+        /// Underlying execution reason, if available. Empty for true panics.
+        reason: String,
     },
 
     /// Failed to serialize the argument payload.
@@ -166,7 +168,7 @@ impl IpcErrorEnvelope {
                 message,
                 retryable: false,
             },
-            IpcError::PluginCrashedDuringCall { plugin_id, command } => Self {
+            IpcError::PluginCrashedDuringCall { plugin_id, command, .. } => Self {
                 kind: IpcErrorKind::PluginCrashed,
                 plugin_id: plugin_id.clone(),
                 command: command.clone(),
@@ -363,6 +365,7 @@ mod tests {
         let err = IpcError::PluginCrashedDuringCall {
             plugin_id: "com.test".to_string(),
             command: "boom".to_string(),
+            reason: String::new(),
         };
         let env = IpcErrorEnvelope::from_ipc_error(&err);
         assert_eq!(env.kind, IpcErrorKind::PluginCrashed);

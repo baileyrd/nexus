@@ -278,7 +278,7 @@ async fn ipc_call_handler_error_becomes_crashed_during_call() {
     assert!(
         matches!(
             err,
-            IpcError::PluginCrashedDuringCall { ref plugin_id, ref command }
+            IpcError::PluginCrashedDuringCall { ref plugin_id, ref command, .. }
                 if plugin_id == "dev.test.broken" && command == "boom"
         ),
         "got {err:?}"
