@@ -62,6 +62,7 @@ const TAURI_IMPORT_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/nexus/memory/index.ts',                       // BL-043: tauri-plugin-global-shortcut — no @nexus/extension-api global-hotkey surface yet
   'shell/src/plugins/nexus/pluginsMgmt/index.ts',                  // shell-internal: set_plugin_enabled
   'shell/src/plugins/nexus/workspace/index.ts',                    // shell-internal: boot_kernel + init_forge + shutdown_kernel + plugin-dialog.open
+  'shell/src/plugins/nexus/notion/index.ts',                       // plugin-dialog.open for source-zip + dest-folder pickers (no PlatformDialog API surface yet — same drain plan as workspace plugin)
   //
   // ─── Partial Tauri retention: missing api.platform surface ────────────────
   // fileSystemService routed read/write/etc through api.platform.fs in WI-25

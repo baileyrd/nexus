@@ -1,4 +1,5 @@
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 
 const PLUGIN_ID = 'com.nexus.formats'
 const HANDLER_IMPORT = 'import_notion'
@@ -65,11 +66,14 @@ export const notionPlugin: Plugin = {
         return
       }
 
-      const source = await api.input.prompt(
-        'Path to a Notion zip export',
-        '/path/to/Export-…zip',
-      )
-      if (!source) return
+      const sourcePicked = await openDialog({
+        title: 'Pick a Notion zip export',
+        multiple: false,
+        directory: false,
+        filters: [{ name: 'Notion export (zip)', extensions: ['zip'] }],
+      })
+      if (typeof sourcePicked !== 'string') return
+      const source = sourcePicked
 
       const dest = await api.input.prompt(
         'Destination subfolder (forge-relative). Leave blank for "Imported from Notion".',
@@ -123,11 +127,13 @@ export const notionPlugin: Plugin = {
       )
       if (source === null) return
 
-      const dest = await api.input.prompt(
-        'Output directory (absolute path). Will be created if missing.',
-        '/tmp/notion-export',
-      )
-      if (!dest) return
+      const destPicked = await openDialog({
+        title: 'Pick output directory',
+        multiple: false,
+        directory: true,
+      })
+      if (typeof destPicked !== 'string') return
+      const dest = destPicked
 
       try {
         const result = await api.kernel.invoke<ExportReport>(

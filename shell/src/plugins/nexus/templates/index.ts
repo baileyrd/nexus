@@ -1,4 +1,9 @@
+import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
+import { viewRegistry, workspace } from '../../../workspace'
+import { TemplatesView } from './TemplatesView'
+import { templatesPaneViewCreator } from './TemplatesPaneView'
+import { useTemplatesStore, type TemplateEntry } from './templatesStore'
 
 const PLUGIN_ID = 'com.nexus.templates'
 const HANDLER_LIST = 'list'
@@ -6,21 +11,12 @@ const HANDLER_APPLY = 'apply'
 
 const COMMAND_NEW = 'nexus.templates.new'
 const COMMAND_LIST = 'nexus.templates.list'
+const COMMAND_SHOW = 'nexus.templates.show'
+const COMMAND_REFRESH = 'nexus.templates.refresh'
+const VIEW_ID = 'nexus.templates.view'
 
-interface TemplateParameter {
-  name: string
-  type?: string
-  default?: string | null
-  required?: boolean
-  description?: string | null
-}
-
-interface TemplateMeta {
-  name: string
-  description: string | null
-  target_path: string | null
-  parameters: TemplateParameter[]
-}
+const EVENT_WORKSPACE_OPENED = 'workspace:opened'
+const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
 interface ApplyResult {
   name: string
@@ -48,6 +44,7 @@ export const templatesPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.sidebar'],
     contributes: {
       commands: [
         {
@@ -60,15 +57,95 @@ export const templatesPlugin: Plugin = {
           title: 'List available templates',
           category: 'Templates',
         },
+        {
+          id: COMMAND_SHOW,
+          title: 'Show Templates panel',
+          category: 'Templates',
+        },
+        {
+          id: COMMAND_REFRESH,
+          title: 'Refresh templates',
+          category: 'Templates',
+        },
       ],
     },
   },
 
   async activate(api: PluginAPI) {
-    const fetchList = async (): Promise<TemplateMeta[]> => {
+    const fetchList = async (): Promise<TemplateEntry[]> => {
       const raw = await api.kernel.invoke<unknown>(PLUGIN_ID, HANDLER_LIST, {})
       if (!Array.isArray(raw)) return []
-      return raw as TemplateMeta[]
+      return raw as TemplateEntry[]
+    }
+
+    const refresh = async (): Promise<void> => {
+      const store = useTemplatesStore.getState()
+      let available = false
+      try {
+        available = await api.kernel.available()
+      } catch {
+        available = false
+      }
+      if (!available) {
+        store.setLoading(false)
+        store.setLoadError('Open a workspace to load templates.')
+        store.setTemplates([])
+        return
+      }
+      store.setLoading(true)
+      store.setLoadError(null)
+      try {
+        const list = await fetchList()
+        useTemplatesStore.getState().setTemplates(list)
+        useTemplatesStore.getState().setLoading(false)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        useTemplatesStore.getState().setLoadError(message)
+        useTemplatesStore.getState().setTemplates([])
+        useTemplatesStore.getState().setLoading(false)
+      }
+    }
+
+    const renderTemplatesView = () =>
+      createElement(TemplatesView, {
+        kernel: api.kernel,
+        onRefresh: () => void refresh(),
+        notify: (message, type = 'info') =>
+          api.notifications.show({ message, type, duration: 5000 }),
+        openFile: (path: string) =>
+          void api.commands.execute('nexus.files.openByPath', path).catch(() => {
+            // openByPath may not exist in every shell build — silent fall-through.
+          }),
+      })
+
+    viewRegistry.register('templates', templatesPaneViewCreator(renderTemplatesView))
+
+    api.activityBar.addItem({
+      id: 'nexus.templates.activityItem',
+      icon: '',
+      iconName: 'layout-template',
+      title: 'Templates',
+      viewId: VIEW_ID,
+      priority: 45,
+      command: COMMAND_SHOW,
+    })
+
+    api.commands.register(COMMAND_REFRESH, () => {
+      void refresh()
+    })
+    api.commands.register(COMMAND_SHOW, async () => {
+      const leaf = await workspace.ensureLeafOfType('templates', 'main')
+      workspace.revealLeaf(leaf)
+    })
+
+    api.events.on(EVENT_WORKSPACE_OPENED, () => {
+      void refresh()
+    })
+    api.events.on(EVENT_WORKSPACE_CLOSED, () => {
+      useTemplatesStore.getState().reset()
+    })
+    if (await api.kernel.available()) {
+      void refresh()
     }
 
     api.commands.register(COMMAND_LIST, async () => {
@@ -106,7 +183,7 @@ export const templatesPlugin: Plugin = {
         return
       }
 
-      let list: TemplateMeta[]
+      let list: TemplateEntry[]
       try {
         list = await fetchList()
       } catch (err) {
