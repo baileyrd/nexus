@@ -1,12 +1,13 @@
 // src/plugins/nexus/launcher/LauncherView.tsx
 //
-// Obsidian-style workspace picker. Renders as a full-window overlay
-// (minus the titlebar strip, which stays interactive so window drag
-// and close controls keep working) whenever no workspace is open.
-// Returns null when a root path is set, hiding itself for the rest
-// of the session.
+// Obsidian-style workspace picker. Renders as a centered modal dialog
+// over a dimmed backdrop whenever no workspace is open. The titlebar
+// strip stays interactive (window drag + window controls keep working).
+// Returns null when a root path is set, hiding itself for the rest of
+// the session.
 
 import { useState } from 'react'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useLauncherStore } from './launcherState'
 import { Modal } from '../../../shell/Modal'
@@ -266,169 +267,202 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
   const manageReturnTo = useLauncherStore((s) => s.manageReturnTo)
   const clearReturnTo = useLauncherStore((s) => s.setManageReturnTo)
 
-  // Once the user has a workspace open the launcher disappears. The
-  // shell's regular tri-pane layout takes over. This is cheaper than
-  // unmounting the plugin — keeping it in the slot lets it reappear
-  // instantly if the workspace is later closed.
-  if (rootPath) return null
+  // The launcher renders when (a) no workspace is loaded yet — first
+  // boot or post-close — or (b) it was explicitly opened over a running
+  // workspace via "Manage Forges". In the second case we keep the
+  // workspace mounted underneath the modal so per-file editor sessions
+  // survive the dismiss.
+  if (rootPath && !manageReturnTo) return null
 
+  // Dismiss behaviour:
+  //   - If a workspace is mounted underneath, closing the modal is just
+  //     clearing the manage-return marker; the workspace remains open.
+  //   - Otherwise no workspace is loaded and there is nowhere to return
+  //     to; closing the OS window is the user's only escape (mirrors
+  //     Obsidian's vault picker, which closes the app on dismiss).
   const onDismiss = manageReturnTo
-    ? () => {
-        const target = manageReturnTo
-        clearReturnTo(null)
-        void onActivatePath(target)
+    ? () => clearReturnTo(null)
+    : () => {
+        void getCurrentWindow().close()
       }
-    : null
+
+  // Switching forges from the manage-launcher must also retire the
+  // marker — otherwise the modal stays up over the new workspace.
+  const onActivate = (path: string) => {
+    if (manageReturnTo) clearReturnTo(null)
+    onActivatePath(path)
+  }
+  const onCreate = () => {
+    if (manageReturnTo) clearReturnTo(null)
+    onOpenFolder()
+  }
 
   return (
     <Modal>
-    <div
-      style={{
-        position: 'fixed',
-        top: TITLEBAR_HEIGHT,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        // Portaled to #modal-root; sits above workspace chrome. Leaves
-        // the titlebar strip uncovered so Tauri drag and window
-        // controls keep working.
-        zIndex: zIndex.overlayModal,
-        pointerEvents: 'auto',
-        display: 'flex',
-        background: 'var(--background-primary)',
-        color: 'var(--text-normal)',
-        fontFamily: 'var(--font-interface)',
-      }}
-    >
-      {onDismiss && (
-        <button
-          type="button"
-          aria-label="Close launcher"
-          title="Return to current forge"
-          onClick={onDismiss}
-          style={{
-            position: 'absolute',
-            top: 12,
-            right: 16,
-            width: 28,
-            height: 28,
-            display: 'inline-grid',
-            placeItems: 'center',
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--text-muted)',
-            cursor: 'pointer',
-            borderRadius: 4,
-            fontSize: 18,
-            lineHeight: 1,
-            zIndex: 1,
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'var(--background-modifier-hover)'
-            e.currentTarget.style.color = 'var(--text-normal)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = 'var(--text-muted)'
-          }}
-        >
-          ✕
-        </button>
-      )}
-      {/* Left column — recents */}
+      {/* Dimmed backdrop — covers the workspace area below the titlebar. */}
       <div
         style={{
-          width: '33%',
-          minWidth: 240,
-          maxWidth: 420,
-          background: 'var(--background-primary)',
-          borderRight: '1px solid var(--divider-color)',
+          position: 'fixed',
+          top: TITLEBAR_HEIGHT,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: zIndex.overlayModal,
+          pointerEvents: 'auto',
+          background: 'rgba(0, 0, 0, 0.55)',
           display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <div
-          style={{
-            padding: '16px 18px 10px',
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: 'var(--text-muted)',
-            flexShrink: 0,
-          }}
-        >
-          Recent
-        </div>
-        <div style={{ flex: 1, minHeight: 0 }}>
-          <RecentsList onActivate={onActivatePath} />
-        </div>
-      </div>
-
-      {/* Right column — title + actions */}
-      <div
-        style={{
-          flex: 1,
-          background: 'var(--background-secondary)',
-          display: 'flex',
-          flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: 40,
-          overflowY: 'auto',
+          fontFamily: 'var(--font-interface)',
+          color: 'var(--text-normal)',
         }}
       >
-        <div style={{ width: '100%', maxWidth: 560 }}>
-          <h1
+        {/* Centered dialog */}
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Open or create a forge"
+          style={{
+            width: 'min(880px, calc(100vw - 64px))',
+            height: 'min(560px, calc(100vh - 96px))',
+            display: 'flex',
+            background: 'var(--background-primary)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-l)',
+            overflow: 'hidden',
+            boxShadow: 'var(--shadow), 0 24px 64px rgba(0, 0, 0, 0.45)',
+            position: 'relative',
+          }}
+        >
+          <button
+            type="button"
+            aria-label="Close launcher"
+            title={manageReturnTo ? 'Return to current forge' : 'Close window'}
+            onClick={onDismiss}
             style={{
-              color: 'var(--interactive-accent)',
-              fontFamily: 'var(--font-interface)',
-              fontSize: 32,
-              fontWeight: 600,
-              textAlign: 'center',
-              marginBottom: 32,
-              letterSpacing: '-0.01em',
+              position: 'absolute',
+              top: 10,
+              right: 12,
+              width: 28,
+              height: 28,
+              display: 'inline-grid',
+              placeItems: 'center',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              borderRadius: 4,
+              fontSize: 18,
+              lineHeight: 1,
+              zIndex: 1,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--background-modifier-hover)'
+              e.currentTarget.style.color = 'var(--text-normal)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = 'var(--text-muted)'
             }}
           >
-            Nexus
-          </h1>
+            ✕
+          </button>
 
+          {/* Left column — recents */}
           <div
             style={{
+              width: '38%',
+              minWidth: 220,
+              maxWidth: 340,
               background: 'var(--background-primary)',
-              border: '1px solid var(--divider-color)',
-              borderRadius: 'var(--radius-l)',
-              overflow: 'hidden',
+              borderRight: '1px solid var(--divider-color)',
+              display: 'flex',
+              flexDirection: 'column',
             }}
           >
-            <ActionRow
-              heading="Create new workspace"
-              description="Create a new Nexus workspace under a folder."
-              buttonLabel="Create"
-              variant="accent"
-              onClick={onOpenFolder}
-            />
-            <ActionRow
-              heading="Open folder as workspace"
-              description="Choose an existing folder."
-              buttonLabel="Open"
-              variant="neutral"
-              onClick={onOpenFolder}
-            />
-            {/* Last row — strip the bottom border */}
-            <div style={{ borderBottom: 0 }}>
-              <ActionRow
-                heading="Clone from git"
-                description="Clone a remote workspace."
-                buttonLabel="Sign in"
-                variant="disabled"
-                disabled
-              />
+            <div
+              style={{
+                padding: '16px 18px 10px',
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: 'var(--text-muted)',
+                flexShrink: 0,
+              }}
+            >
+              Recent
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <RecentsList onActivate={onActivate} />
+            </div>
+          </div>
+
+          {/* Right column — branding + actions */}
+          <div
+            style={{
+              flex: 1,
+              background: 'var(--background-secondary)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 32,
+              overflowY: 'auto',
+            }}
+          >
+            <div style={{ width: '100%', maxWidth: 480 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  marginBottom: 24,
+                }}
+              >
+                <img
+                  src="/nexus-logo.png"
+                  alt="Nexus"
+                  style={{ width: 220, height: 'auto', display: 'block' }}
+                />
+              </div>
+
+              <div
+                style={{
+                  background: 'var(--background-primary)',
+                  border: '1px solid var(--divider-color)',
+                  borderRadius: 'var(--radius-l)',
+                  overflow: 'hidden',
+                }}
+              >
+                <ActionRow
+                  heading="Create new workspace"
+                  description="Create a new Nexus workspace under a folder."
+                  buttonLabel="Create"
+                  variant="accent"
+                  onClick={onCreate}
+                />
+                <ActionRow
+                  heading="Open folder as workspace"
+                  description="Choose an existing folder."
+                  buttonLabel="Open"
+                  variant="neutral"
+                  onClick={onCreate}
+                />
+                {/* Last row — strip the bottom border */}
+                <div style={{ borderBottom: 0 }}>
+                  <ActionRow
+                    heading="Clone from git"
+                    description="Clone a remote workspace."
+                    buttonLabel="Sign in"
+                    variant="disabled"
+                    disabled
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
     </Modal>
   )
 }

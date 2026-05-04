@@ -13,7 +13,6 @@ import { zIndex } from '../shell/zIndex'
 
 const COMMAND_OPEN_FORGE = 'nexus.workspace.open'
 const COMMAND_SET_ROOT = 'nexus.workspace.setRoot'
-const COMMAND_CLOSE = 'nexus.workspace.close'
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean)
@@ -63,17 +62,17 @@ export function ForgeSelector(): JSX.Element {
     await run(COMMAND_SET_ROOT, path)
   }
 
-  // "Manage forges…" drops back into the launcher overlay by closing
-  // the current workspace. The launcher auto-shows whenever rootPath
-  // is null.
-  const openLauncher = async () => {
+  // "Manage forges…" overlays the launcher on top of the active
+  // workspace. We deliberately do NOT close the workspace here — closing
+  // and re-activating the same path tears down per-file editor sessions
+  // and leaves open tabs in a broken `get_markdown` state on cancel.
+  // Setting `manageReturnTo` is enough; the launcher uses it as a
+  // second render trigger and a "return to" target.
+  const openLauncher = () => {
     setMenuOpen(false)
-    // Remember which forge to return to if the user dismisses the
-    // launcher without picking something.
     if (rootPath) {
       useLauncherStore.getState().setManageReturnTo(rootPath)
     }
-    await run(COMMAND_CLOSE)
   }
 
   const anchorRect = anchorRef.current?.getBoundingClientRect()
@@ -217,7 +216,7 @@ export function ForgeSelector(): JSX.Element {
           )}
           <button
             type="button"
-            onClick={() => void openLauncher()}
+            onClick={openLauncher}
             style={{
               display: 'flex',
               alignItems: 'center',
