@@ -1,4 +1,4 @@
-# Obsidian-parity tracker — Canvas + Bases + Graph
+# Obsidian-parity tracker — Canvas + Bases + Graph + Activity Bar
 
 Snapshot date: 2026-05-04. Maps every visible affordance in the
 Obsidian Canvas, Bases, and Graph views to its Nexus state — done,
@@ -8,6 +8,7 @@ Source files in Nexus:
 - Canvas: `shell/src/plugins/nexus/canvas/`
 - Bases:  `shell/src/plugins/nexus/bases/`
 - Graph:  `shell/src/plugins/nexus/graph/`
+- Activity bar: `shell/src/plugins/core/activityBar/`
 
 Status legend: ✅ done · 🟡 functional but different shape · ⚪ missing.
 
@@ -274,7 +275,41 @@ matcher; nodes get coloured by group membership.
 
 ---
 
-## 4. Cross-feature notes
+## 4. Activity bar (left rail)
+
+The Obsidian left rail shows a vertical stack of action buttons; each
+hover reveals a tooltip naming the action. The Nexus equivalent is the
+`core.activity-bar` plugin with seeded entries (Search, Graph, Tasks,
+Git, Bases, Templates, AI) plus per-plugin `api.activityBar.addItem`
+contributions from feature plugins.
+
+| Tooltip seen in Obsidian | Nexus equivalent | State |
+|---|---|---|
+| Open quick switcher | core seed `rail.search` (Search) | 🟡 Quick switcher itself isn't a separate plugin in Nexus; the Search rail item maps loosely. |
+| Open graph view | `nexus.graph` (`globalIndex.ts` registers an activity-bar entry) | ✅ |
+| Create new canvas | `nexus.canvas.new` (committed in d409a77 / 20b998f) | ✅ |
+| Open today's daily note | – | ⚪ No daily-notes plugin exists yet. |
+| Insert template | `nexus.templates` | ✅ |
+| Open command palette | `nexus.commandPalette` (core seed) | ✅ |
+| Create new base | `nexus.bases.new` | ✅ |
+| Start/stop recording | – | ⚪ No audio-recorder plugin exists yet. |
+
+### 4.1 Outstanding bites
+
+1. ⚪ **Daily Notes plugin** — register an activity-bar entry that
+   resolves the date format → relpath, opens (or creates) today's
+   note. Settings stub already exists at `cp-stub:daily-notes`.
+2. ⚪ **Audio Recorder plugin** — `MediaRecorder` API → write WebM/Opus
+   under the configured attachments folder, drop a markdown link at
+   caret. Activity-bar mic button toggles record state.
+3. 🟡 **Quick switcher** vs Search — Obsidian's quick switcher is a
+   focused file picker (Ctrl/Cmd+O), separate from full-text search.
+   Today the rail item routes to Search; consider promoting the file-
+   open command palette to its own rail action.
+
+---
+
+## 5. Cross-feature notes
 
 - **Both areas have a "more actions" `⋮` button at the top-right** that
   routes through the editor tab-actions menu. Stubs for that menu are
@@ -287,7 +322,7 @@ matcher; nodes get coloured by group membership.
   rail's note/media sources, Bases formula reference picker). Consider
   building it once in a shared location.
 
-## 5. References
+## 6. References
 
 - ADR 0019 — Obsidian base format (`.base` is read-only): `docs/adr/0019-obsidian-base-format.md`
 - Bases shell plan: `docs/archive/bases-shell-plan.md`
