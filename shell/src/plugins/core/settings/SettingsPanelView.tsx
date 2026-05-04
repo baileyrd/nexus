@@ -469,10 +469,7 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
               ) : navTab === 'hotkeys' ? (
                 <KeybindingsTab />
               ) : navTab === 'keychain' ? (
-                <ComingSoonTab
-                  title="Keychain"
-                  description="Stored credentials (provider API keys, sync tokens) will be managed here. Today, secrets are read from environment variables and per-plugin settings."
-                />
+                <KeychainTab api={api} />
               ) : navTab === 'plugins' ? (
                 <PluginsTab
                   corePlugins={plugins}
@@ -1106,6 +1103,62 @@ function FilesLinksTab({ api }: { api?: PluginAPI }) {
           </button>
         }
       />
+    </div>
+  )
+}
+
+// ─── Keychain page (stub) ────────────────────────────────────────────────────
+//
+// Mirrors Obsidian's Keychain layout: "Secrets" header with a + add
+// button, and an empty-state info card explaining what secrets are
+// for. Adding a secret fires a "Coming soon" toast — wiring to the
+// platform keyring is tracked separately.
+
+function KeychainTab({ api }: { api?: PluginAPI }) {
+  const comingSoon = useComingSoon(api)
+  return (
+    <div className="settings-section">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 12,
+        }}
+      >
+        <div className="settings-section-title" style={{ margin: 0 }}>Secrets</div>
+        <button
+          type="button"
+          onClick={comingSoon('Add secret')}
+          title="Coming soon"
+          aria-label="Add secret"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-muted)',
+            cursor: 'pointer',
+            fontSize: 18,
+            lineHeight: 1,
+            padding: '2px 6px',
+            borderRadius: 4,
+          }}
+        >
+          +
+        </button>
+      </div>
+      <div
+        style={{
+          padding: '14px 16px',
+          background: 'var(--background-modifier-hover)',
+          color: 'var(--text-muted)',
+          borderRadius: 6,
+          fontSize: 13,
+          lineHeight: 1.5,
+        }}
+      >
+        No secrets have been added. Secrets are used to store information like API
+        keys and passwords that plugins can use.
+      </div>
     </div>
   )
 }
