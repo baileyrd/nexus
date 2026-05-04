@@ -1,4 +1,4 @@
-# Obsidian-parity tracker — Canvas + Bases + Graph + Activity Bar
+# Obsidian-parity tracker — Canvas + Bases + Graph + Activity Bar + Status Bar
 
 Snapshot date: 2026-05-04. Maps every visible affordance in the
 Obsidian Canvas, Bases, and Graph views to its Nexus state — done,
@@ -9,6 +9,7 @@ Source files in Nexus:
 - Bases:  `shell/src/plugins/nexus/bases/`
 - Graph:  `shell/src/plugins/nexus/graph/`
 - Activity bar: `shell/src/plugins/core/activityBar/`
+- Status bar: `shell/src/plugins/nexus/statusBar/`
 
 Status legend: ✅ done · 🟡 functional but different shape · ⚪ missing.
 
@@ -309,7 +310,34 @@ contributions from feature plugins.
 
 ---
 
-## 5. Cross-feature notes
+## 5. Status bar (bottom-right indicators)
+
+Obsidian's status bar surfaces small per-feature indicators on the
+right side of the bottom strip. Each is a button: hover shows a
+tooltip, click opens a popup with a status summary and a "Settings"
+shortcut into the relevant rail entry.
+
+| Indicator | Nexus state | Notes |
+|---|---|---|
+| Sync status (Uninitialized / Logged in / Synced / Error) with click-popup → Settings shortcut | ⚪ | Sync settings page exists as `cp-stub:sync`; the indicator is missing entirely. |
+| Word count / character count for the active editor | ✅ | `nexus.statusBar` slot has equivalent. |
+| Indexing progress (BL-041 daemon badge) | ✅ | `nexus.statusBar.indexingStatus` view registers in `statusBarRight`. |
+| Editing-mode toggle (Source / Live / Reading) on the right | 🟡 | Editor exposes the toggle from the tab menu, not as a dedicated status-bar widget. |
+
+### 5.1 Outstanding bites
+
+1. ⚪ **Sync status indicator** — small dot/icon in `statusBarRight`,
+   tooltip "Sync: Uninitialized" today; click pops a small menu with
+   the status header plus a Settings entry that calls
+   `setNavTab('cp-stub:sync')`. ~80 lines, all visual until Sync is
+   real.
+2. ⚪ **Editing-mode status-bar widget** — surface the existing tab
+   command (`nexus.editor.toggleMode`) as a permanent right-side
+   button so it's reachable without opening the tab menu. ~50 lines.
+
+---
+
+## 6. Cross-feature notes
 
 - **Both areas have a "more actions" `⋮` button at the top-right** that
   routes through the editor tab-actions menu. Stubs for that menu are
@@ -322,7 +350,7 @@ contributions from feature plugins.
   rail's note/media sources, Bases formula reference picker). Consider
   building it once in a shared location.
 
-## 6. References
+## 7. References
 
 - ADR 0019 — Obsidian base format (`.base` is read-only): `docs/adr/0019-obsidian-base-format.md`
 - Bases shell plan: `docs/archive/bases-shell-plan.md`
