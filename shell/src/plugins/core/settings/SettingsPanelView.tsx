@@ -483,6 +483,15 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
                   corePlugins={plugins}
                   community={community}
                   available={available}
+                  onJumpToHotkeys={(pluginId) => {
+                    // Mirror Obsidian: each row's + button opens the
+                    // Hotkeys page pre-filtered to commands owned by
+                    // the row's plugin. The seed is consumed once by
+                    // KeybindingsTab and then cleared so subsequent
+                    // visits start fresh.
+                    useContextKeyStore.getState().set('settingsHotkeysQuery', pluginId)
+                    setNavTab('hotkeys')
+                  }}
                 />
               ) : navTab === 'community-plugins' ? (
                 <ComingSoonTab
@@ -2329,11 +2338,22 @@ function useBindingRows(refreshNonce: number): BindingDisplayRow[] {
 }
 
 function KeybindingsTab() {
-  const [query,    setQuery]    = useState('')
-  const [editing,  setEditing]  = useState<string | null>(null)
-  const [nonce,    setNonce]    = useState(0)
-  const [error,    setError]    = useState<string | null>(null)
+  const seededQuery = useContextKey('settingsHotkeysQuery') as string | undefined
+  const [query, setQuery] = useState(seededQuery ?? '')
+  const [editing, setEditing] = useState<string | null>(null)
+  const [nonce, setNonce] = useState(0)
+  const [error, setError] = useState<string | null>(null)
   const rows = useBindingRows(nonce)
+
+  // One-shot consume: if a sibling component (e.g. Core plugins page's
+  // per-row + button) seeded a query before navigating us here, apply
+  // it once then clear so subsequent visits start fresh.
+  useEffect(() => {
+    if (typeof seededQuery === 'string' && seededQuery !== '') {
+      setQuery(seededQuery)
+      useContextKeyStore.getState().set('settingsHotkeysQuery', undefined)
+    }
+  }, [seededQuery])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -2671,10 +2691,12 @@ function PluginsTab({
   corePlugins,
   community,
   available,
+  onJumpToHotkeys,
 }: {
   corePlugins: PluginInfo[]
   community:   CommunityPluginManifest[]
   available:   AvailablePluginInfo[]
+  onJumpToHotkeys: (pluginId: string) => void
 }) {
   const [pendingChanges, setPendingChanges] = useState<Record<string, boolean>>({})
   const [saving,         setSaving]         = useState<string | null>(null)
@@ -2850,6 +2872,7 @@ function PluginsTab({
                       busy={pendingBuiltin.has(p.id)}
                       error={builtinErrors[p.id]}
                       onToggle={(next) => { void handleToggleBuiltin(p.id, next) }}
+                      onJumpToHotkeys={() => onJumpToHotkeys(p.id)}
                     />
                   ))}
                   {optionalDisabled.map(p => (
@@ -2859,6 +2882,7 @@ function PluginsTab({
                       busy={pendingBuiltin.has(p.id)}
                       error={builtinErrors[p.id]}
                       onToggle={(next) => { void handleToggleBuiltin(p.id, next) }}
+                      onJumpToHotkeys={() => onJumpToHotkeys(p.id)}
                     />
                   ))}
                 </>
@@ -2897,6 +2921,7 @@ function PluginsTab({
               saving={saving === m.id}
               changed={!!pendingChanges[m.id]}
               onToggle={handleToggle}
+              onJumpToHotkeys={() => onJumpToHotkeys(m.id)}
             />
           ))
         )}
@@ -2919,12 +2944,14 @@ function CorePluginRow({
   busy,
   error,
   onToggle,
+  onJumpToHotkeys,
 }: {
   plugin:   PluginInfo
   optional: boolean
   busy:     boolean
   error?:   string
   onToggle: (next: boolean) => void
+  onJumpToHotkeys: () => void
 }) {
   const capabilities = useMemo(
     () => parseManifestCapabilities(plugin.capabilities),
@@ -2950,6 +2977,7 @@ function CorePluginRow({
               </span>
             )
           })()}
+          <HotkeysShortcutButton onClick={onJumpToHotkeys} />
           {optional && (() => {
             // `pluginList` no longer surfaces 'inactive' rows (they
             // route through DisabledOptionalRow), so anything reaching
@@ -3003,11 +3031,13 @@ function DisabledOptionalRow({
   busy,
   error,
   onToggle,
+  onJumpToHotkeys,
 }: {
   plugin:   AvailablePluginInfo
   busy:     boolean
   error?:   string
   onToggle: (next: boolean) => void
+  onJumpToHotkeys: () => void
 }) {
   return (
     <div className={`plugin-row ${error ? 'plugin-row--error' : ''}`}>
@@ -3020,6 +3050,7 @@ function DisabledOptionalRow({
             <span className="plugin-row__badge plugin-row__badge--core">core</span>
           )}
           <span className="plugin-row__version">v{plugin.version}</span>
+          <HotkeysShortcutButton onClick={onJumpToHotkeys} />
           <label
             className="plugin-row__toggle"
             title={busy ? 'Working…' : 'Enable'}
@@ -3042,15 +3073,56 @@ function DisabledOptionalRow({
   )
 }
 
+// Compact `+` button next to a plugin row's toggle. Mirrors Obsidian's
+// "open Hotkeys filtered to this plugin" affordance — clicking
+// switches the settings panel to the Hotkeys page with a search query
+// pre-filled with the plugin id, so only that plugin's commands show.
+function HotkeysShortcutButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Hotkeys"
+      aria-label="Open hotkeys for this plugin"
+      style={{
+        width: 22,
+        height: 22,
+        marginRight: 6,
+        borderRadius: '50%',
+        border: '1px solid var(--background-modifier-border)',
+        background: 'transparent',
+        color: 'var(--text-muted)',
+        cursor: 'pointer',
+        display: 'inline-grid',
+        placeItems: 'center',
+        fontSize: 14,
+        lineHeight: 1,
+        padding: 0,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'var(--background-modifier-hover)'
+        e.currentTarget.style.color = 'var(--text-normal)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.color = 'var(--text-muted)'
+      }}
+    >
+      +
+    </button>
+  )
+}
+
 // ─── Community plugin row (toggleable) ───────────────────────────────────────
 
 function CommunityPluginRow({
-  manifest, saving, changed, onToggle,
+  manifest, saving, changed, onToggle, onJumpToHotkeys,
 }: {
   manifest: CommunityPluginManifest
   saving:   boolean
   changed:  boolean
   onToggle: (id: string, enabled: boolean) => void
+  onJumpToHotkeys: () => void
 }) {
   // Optimistic local state
   const [enabled, setEnabled] = useState(manifest.enabled)
@@ -3214,6 +3286,7 @@ function CommunityPluginRow({
               Review
             </button>
           )}
+          <HotkeysShortcutButton onClick={onJumpToHotkeys} />
           <label
             className="plugin-row__toggle"
             title={
