@@ -243,6 +243,16 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/skills').then(m => m.skillsPlugin),
   },
   {
+    id: 'nexus.templates', name: 'Templates',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/templates').then(m => m.templatesPlugin),
+  },
+  {
+    id: 'nexus.notion', name: 'Notion',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    load: () => import('./nexus/notion').then(m => m.notionPlugin),
+  },
+  {
     id: 'nexus.terminal', name: 'Terminal',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     load: () => import('./nexus/terminal').then(m => m.terminalPlugin),

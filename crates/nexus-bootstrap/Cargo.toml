@@ -63,3 +63,5 @@ tempfile = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 schemars = { workspace = true }
+zip = { workspace = true }
+nexus-storage = { path = "../nexus-storage" }
