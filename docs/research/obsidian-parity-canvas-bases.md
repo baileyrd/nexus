@@ -1,12 +1,13 @@
-# Obsidian-parity tracker — Canvas + Bases
+# Obsidian-parity tracker — Canvas + Bases + Graph
 
 Snapshot date: 2026-05-04. Maps every visible affordance in the
-Obsidian Canvas and Bases views to its Nexus state — done, partial, or
-missing — and lists shippable bites in priority order.
+Obsidian Canvas, Bases, and Graph views to its Nexus state — done,
+partial, or missing — and lists shippable bites in priority order.
 
 Source files in Nexus:
 - Canvas: `shell/src/plugins/nexus/canvas/`
 - Bases:  `shell/src/plugins/nexus/bases/`
+- Graph:  `shell/src/plugins/nexus/graph/`
 
 Status legend: ✅ done · 🟡 functional but different shape · ⚪ missing.
 
@@ -183,7 +184,97 @@ input + expand-to-full-editor button).
 
 ---
 
-## 3. Cross-feature notes
+## 3. Graph (global graph view)
+
+### 3.1 Surface and interaction
+
+| Affordance | Nexus state | Notes |
+|---|---|---|
+| Force-directed layout (nodes + edges from link graph) | ✅ | `GraphGlobalView.tsx` + `forceLayout.ts`. |
+| Pan / zoom | ✅ | |
+| Click node → open file | ✅ | |
+| Per-file local graph (just neighbours of the active file) | ✅ | `GraphView.tsx`. |
+| Settings drawer (gear) | ✅ | `GraphGlobalGearDrawer.tsx`. |
+
+### 3.2 Filters section
+
+| Filter | Obsidian | Nexus | Notes |
+|---|---|---|---|
+| Search files… | ✅ | 🟡 | Nexus's "Path filter" accepts substring/glob; Obsidian search matches names. Same intent, different UX. |
+| Tags toggle | ✅ | ⚪ | Show/hide tag nodes in the graph. Not modelled in Nexus's graph today. |
+| Attachments toggle | ✅ | ⚪ | Show/hide non-markdown files. Missing. |
+| Existing files only | ✅ | 🟡 | Nexus has the inverse: "Include unresolved links". Same control, opposite default. |
+| Orphans (no in/out links) | ✅ | ✅ | Nexus's "Include orphan nodes" maps directly. |
+
+### 3.3 Groups section
+
+Obsidian lets the user define named groups (with colour) by glob/path
+matcher; nodes get coloured by group membership.
+
+| Element | Nexus state | Notes |
+|---|---|---|
+| New group button | ⚪ | Nexus has only `Colour by folder` (a single boolean), not user-defined groups. |
+| Coloured nodes by group | ⚪ | Tied to (1). |
+| Per-group remove | ⚪ | |
+
+### 3.4 Display section
+
+| Control | Obsidian | Nexus | Notes |
+|---|---|---|---|
+| Arrows toggle | ✅ | ⚪ | Render edges as directed arrows. Nexus draws plain lines. |
+| Text fade threshold slider | ✅ | ⚪ | Hide labels below a zoom threshold. |
+| Node size slider | ✅ | ⚪ | Adjust node radius. |
+| Link thickness slider | ✅ | ⚪ | |
+| Animate button | ✅ | ⚪ | One-shot re-layout animation. |
+| Show labels toggle | – | ✅ | Nexus-only — Obsidian always shows labels. |
+| Freeze simulation | – | ✅ | Nexus-only convenience. |
+
+### 3.5 Forces section
+
+| Force | Obsidian | Nexus | Notes |
+|---|---|---|---|
+| Center force | ✅ | ✅ | Nexus's "Center gravity". |
+| Repel force | ✅ | ✅ | Nexus's "Repulsion". |
+| Link force | ✅ | ✅ | Nexus's "Link strength". |
+| Link distance | ✅ | ✅ | Same name. |
+
+### 3.6 Right-rail toolbar
+
+| Button | Obsidian | Nexus | Notes |
+|---|---|---|---|
+| ⚙ Settings (filters/groups/display/forces) | ✅ | ✅ | Wires to gear drawer. |
+| 🎨 Start timelapse animation | ✅ | ⚪ | Walks the graph in chronological order (file ctime), animating nodes appearing as their files were created. |
+
+### 3.7 Tab-actions menu (`⋮`)
+
+| Item | Nexus state | Notes |
+|---|---|---|
+| Split right / Split down | ✅ | Existing tab-actions menu. |
+| Copy screenshot | ⚪ | Copy the rendered graph to the clipboard as PNG. |
+| Bookmark | ✅ | Existing. |
+
+### 3.8 Outstanding bites for Graph (priority order)
+
+1. ⚪ **Display section parity** — Arrows toggle, Text fade threshold,
+   Node size, Link thickness, Animate button. ~120 lines (slider
+   primitives + force-layout config plumbing).
+2. ⚪ **Tags + Attachments filters** — extend the graph data model so
+   tags become first-class nodes and attachments are filterable. ~150
+   lines.
+3. ⚪ **Named groups** — replace `colourByFolder` with a list of
+   user-defined groups (glob → colour); add UI for create/edit/delete.
+   ~200 lines + new persisted settings shape.
+4. ⚪ **Existing files only** — add the inverse-of-unresolved toggle
+   to match Obsidian's default. Trivial. ~10 lines.
+5. ⚪ **Copy screenshot** — render to canvas, write blob to clipboard
+   via `navigator.clipboard.write`. ~50 lines.
+6. ⚪ **Timelapse animation** — order nodes by ctime, animate their
+   appearance over a configurable duration. ~150 lines + a small
+   timeline overlay.
+
+---
+
+## 4. Cross-feature notes
 
 - **Both areas have a "more actions" `⋮` button at the top-right** that
   routes through the editor tab-actions menu. Stubs for that menu are
@@ -196,7 +287,7 @@ input + expand-to-full-editor button).
   rail's note/media sources, Bases formula reference picker). Consider
   building it once in a shared location.
 
-## 4. References
+## 5. References
 
 - ADR 0019 — Obsidian base format (`.base` is read-only): `docs/adr/0019-obsidian-base-format.md`
 - Bases shell plan: `docs/archive/bases-shell-plan.md`
