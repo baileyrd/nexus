@@ -9,6 +9,7 @@ pub mod desktop;
 pub mod forge;
 pub mod git;
 pub mod graph;
+pub mod import;
 pub mod logs;
 pub mod mcp;
 pub mod plugin;

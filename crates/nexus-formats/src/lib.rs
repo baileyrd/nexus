@@ -26,6 +26,7 @@ pub mod canvas;
 pub mod config;
 pub mod error;
 pub mod markdown;
+pub mod notion;
 pub mod util;
 
 // ── Convenience re-exports ────────────────────────────────────────────────────

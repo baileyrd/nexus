@@ -21,6 +21,7 @@ nexus-git = { path = "../nexus-git" }
 nexus-terminal = { path = "../nexus-terminal" }
 nexus-tui = { path = "../nexus-tui" }
 nexus-panic-log = { path = "../nexus-panic-log" }
+nexus-formats = { path = "../nexus-formats" }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }

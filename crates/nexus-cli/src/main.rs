@@ -126,6 +126,9 @@ enum Commands {
         shell: Shell,
     },
 
+    /// Import external knowledge-tool exports (Notion, …)
+    Import(ImportArgs),
+
     /// Plugin-registered subcommand (`nexus <plugin-id> [args…]`)
     #[command(external_subcommand)]
     External(Vec<OsString>),
@@ -914,6 +917,29 @@ enum BasesCommand {
 }
 
 // ---------------------------------------------------------------------------
+// Import
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+struct ImportArgs {
+    #[command(subcommand)]
+    command: ImportCommand,
+}
+
+#[derive(Subcommand)]
+enum ImportCommand {
+    /// Import a Notion markdown-export zip
+    Notion {
+        /// Path to the Notion zip export
+        #[arg(long = "source")]
+        source: PathBuf,
+        /// Forge-relative destination directory (default: "Imported from Notion")
+        #[arg(long = "dest")]
+        dest: Option<PathBuf>,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Git
 // ---------------------------------------------------------------------------
 
@@ -1446,6 +1472,12 @@ fn main() {
             generate(shell, &mut cmd, "nexus", &mut std::io::stdout());
             Ok(())
         }
+
+        Commands::Import(args) => match args.command {
+            ImportCommand::Notion { source, dest } => {
+                commands::import::notion_zip(&app, &source, dest)
+            }
+        },
 
         // Dispatch to a plugin-registered CLI subcommand: `nexus <subcommand> [args…]`
         Commands::External(raw_args) => {

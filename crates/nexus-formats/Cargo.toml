@@ -16,6 +16,9 @@ comrak     = { workspace = true }
 sha2       = { workspace = true }
 regex-lite = { workspace = true }
 chrono     = { workspace = true }
+csv        = { workspace = true }
+zip        = { workspace = true }
+uuid       = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
