@@ -252,6 +252,14 @@ impl Template {
             Some(t) => render(t, values)?,
             None => format!("{}.md", self.meta.name),
         };
+        // If the user typed a parameter that already ends in `.md` (e.g.
+        // `title = "Notes.md"`), the rendered target_path can come out
+        // looking like `Notes.md.md`. Collapse the duplicate.
+        let target = if let Some(stripped) = target.strip_suffix(".md.md") {
+            format!("{stripped}.md")
+        } else {
+            target
+        };
         Ok((body, target))
     }
 
@@ -393,6 +401,18 @@ mod tests {
         let out = t.apply(&BTreeMap::new(), dir.path(), false).unwrap();
         assert!(out.starts_with(dir.path().join("daily")));
         assert!(out.extension().is_some_and(|e| e == "md"));
+    }
+
+    #[test]
+    fn collapses_double_md_extension() {
+        let t = parse(
+            "---\nname: x\ntarget_path: \"{{title}}.md\"\nparameters:\n  - name: title\n    required: true\n---\nbody\n",
+        );
+        let dir = tempdir().unwrap();
+        let mut args = BTreeMap::new();
+        args.insert("title".to_string(), "Notes.md".to_string());
+        let out = t.apply(&args, dir.path(), false).unwrap();
+        assert_eq!(out.file_name().unwrap(), "Notes.md");
     }
 
     #[test]
