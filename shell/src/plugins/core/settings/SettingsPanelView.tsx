@@ -208,7 +208,17 @@ function useContributedSettingsTabs(): SettingsTabEntry[] {
 //   hotkeys       → keybindings table (was 'keybindings')
 //   plugins       → core/community plugin manager
 //   snippets      → CSS snippets manager
-const BUILT_IN_TABS = ['general', 'appearance', 'hotkeys', 'plugins', 'snippets'] as const
+const BUILT_IN_TABS = [
+  'general',
+  'editor-options',
+  'files-links',
+  'appearance',
+  'hotkeys',
+  'keychain',
+  'plugins',
+  'community-plugins',
+  'snippets',
+] as const
 type BuiltInTab = (typeof BUILT_IN_TABS)[number]
 type NavTab = BuiltInTab | string
 
@@ -347,6 +357,16 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             onClick={() => setNavTab('general')}
           />
           <RailItem
+            label="Editor"
+            active={navTab === 'editor-options'}
+            onClick={() => setNavTab('editor-options')}
+          />
+          <RailItem
+            label="Files and links"
+            active={navTab === 'files-links'}
+            onClick={() => setNavTab('files-links')}
+          />
+          <RailItem
             label="Appearance"
             active={navTab === 'appearance'}
             onClick={() => setNavTab('appearance')}
@@ -357,9 +377,19 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             onClick={() => setNavTab('hotkeys')}
           />
           <RailItem
+            label="Keychain"
+            active={navTab === 'keychain'}
+            onClick={() => setNavTab('keychain')}
+          />
+          <RailItem
             label="Core plugins"
             active={navTab === 'plugins'}
             onClick={() => setNavTab('plugins')}
+          />
+          <RailItem
+            label="Community plugins"
+            active={navTab === 'community-plugins'}
+            onClick={() => setNavTab('community-plugins')}
           />
           <RailItem
             label="Snippets"
@@ -429,16 +459,33 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
                   ))}
                 </>
               ) : navTab === 'general' ? (
-                <GeneralTab />
+                <GeneralTab api={api} />
+              ) : navTab === 'editor-options' ? (
+                <EditorOptionsTab api={api} />
+              ) : navTab === 'files-links' ? (
+                <ComingSoonTab
+                  title="Files and links"
+                  description="Default new-file location, attachment folder, link format (wiki vs Markdown), and confirm-before-delete options will live here."
+                />
               ) : navTab === 'appearance' ? (
                 <AppearanceTab api={api} />
               ) : navTab === 'hotkeys' ? (
                 <KeybindingsTab />
+              ) : navTab === 'keychain' ? (
+                <ComingSoonTab
+                  title="Keychain"
+                  description="Stored credentials (provider API keys, sync tokens) will be managed here. Today, secrets are read from environment variables and per-plugin settings."
+                />
               ) : navTab === 'plugins' ? (
                 <PluginsTab
                   corePlugins={plugins}
                   community={community}
                   available={available}
+                />
+              ) : navTab === 'community-plugins' ? (
+                <ComingSoonTab
+                  title="Community plugins"
+                  description="Browse and install third-party plugins from the Nexus directory. For now, drop community plugins into your forge's .forge/plugins/ folder; they'll appear under Core plugins."
                 />
               ) : navTab === 'snippets' ? (
                 <SnippetsTab />
@@ -461,17 +508,113 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
 // block but skips the auto-update / language / commercial-license rows
 // since none of those apply yet.
 
-function GeneralTab() {
+// ─── Stub-page primitives ─────────────────────────────────────────────────────
+//
+// Shared pieces for the "Coming soon" pages (General, Editor, Files and
+// links, Keychain, Community plugins). Each control fires an info toast
+// via `api.notifications` so users get feedback when they poke at a row
+// instead of an unresponsive control.
+
+function useComingSoon(api?: PluginAPI) {
+  return (label: string) => () => {
+    api?.notifications.show({
+      type: 'info',
+      message: `${label} — coming soon.`,
+    })
+  }
+}
+
+function StubToggle({
+  on,
+  label,
+  onClick,
+}: {
+  on: boolean
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Coming soon"
+      aria-label={label}
+      style={{
+        width: 36,
+        height: 20,
+        borderRadius: 10,
+        border: '1px solid var(--background-modifier-border)',
+        background: on ? 'var(--interactive-accent)' : 'var(--background-modifier-hover)',
+        cursor: 'pointer',
+        position: 'relative',
+        padding: 0,
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          top: 2,
+          left: on ? 18 : 2,
+          width: 14,
+          height: 14,
+          borderRadius: '50%',
+          background: on ? 'var(--interactive-accent-ink)' : 'var(--text-muted)',
+          transition: 'left 120ms',
+        }}
+      />
+    </button>
+  )
+}
+
+function StubRow({
+  title,
+  description,
+  control,
+}: {
+  title: string
+  description: string
+  control: React.ReactNode
+}) {
+  return (
+    <div className="settings-field">
+      <div className="settings-field-header">
+        <div className="settings-field-title">{title}</div>
+        <div className="settings-field-control">{control}</div>
+      </div>
+      <div className="settings-field-description">{description}</div>
+    </div>
+  )
+}
+
+function ComingSoonTab({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="settings-section">
+      <div className="settings-section-title">{title}</div>
+      <div className="settings-field">
+        <div className="settings-field-header">
+          <div className="settings-field-title">Coming soon</div>
+        </div>
+        <div className="settings-field-description">{description}</div>
+      </div>
+    </div>
+  )
+}
+
+function GeneralTab({ api }: { api?: PluginAPI }) {
   const version = (import.meta.env?.VITE_APP_VERSION as string | undefined) ?? '0.1.0'
+  const comingSoon = useComingSoon(api)
+
   return (
     <div className="settings-section">
       <div className="settings-section-title">About Nexus</div>
+
       <div className="settings-field">
         <div className="settings-field-header">
           <div className="settings-field-title">Version</div>
         </div>
         <div className="settings-field-description">{version}</div>
       </div>
+
       <div className="settings-field">
         <div className="settings-field-header">
           <div className="settings-field-title">Source</div>
@@ -490,6 +633,292 @@ function GeneralTab() {
           </a>
         </div>
       </div>
+
+      <StubRow
+        title="Automatic updates"
+        description="Turn this off to prevent Nexus from checking for updates."
+        control={
+          <StubToggle
+            on={true}
+            label="Toggle automatic updates"
+            onClick={comingSoon('Automatic updates')}
+          />
+        }
+      />
+
+      <StubRow
+        title="Language"
+        description="Change the display language."
+        control={
+          <select
+            defaultValue="en"
+            onChange={comingSoon('Language')}
+            title="Coming soon"
+          >
+            <option value="en">English</option>
+          </select>
+        }
+      />
+
+      <StubRow
+        title="Help"
+        description="Learn how to use Nexus and get help from the community."
+        control={
+          <button
+            type="button"
+            onClick={comingSoon('Help')}
+            title="Coming soon"
+            style={{
+              background: 'var(--background-modifier-hover)',
+              color: 'var(--text-normal)',
+              border: 'none',
+              borderRadius: 4,
+              padding: '4px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Open
+          </button>
+        }
+      />
+
+      <div className="settings-section-title" style={{ marginTop: 24 }}>
+        Advanced
+      </div>
+
+      <StubRow
+        title="Notify if startup takes longer than expected"
+        description="Diagnose issues by seeing what is causing the app to load slowly."
+        control={
+          <StubToggle
+            on={false}
+            label="Toggle slow-startup notification"
+            onClick={comingSoon('Startup-time notification')}
+          />
+        }
+      />
+
+      <StubRow
+        title="Command line interface"
+        description="Allow interactions with Nexus from the command line."
+        control={
+          <StubToggle
+            on={false}
+            label="Toggle command line interface"
+            onClick={comingSoon('Command line interface')}
+          />
+        }
+      />
+    </div>
+  )
+}
+
+// ─── Editor page (stub) ──────────────────────────────────────────────────────
+//
+// Mirrors Obsidian's Editor settings — same row order and labels. None
+// of these toggles are wired to real preferences yet; they render in
+// their Obsidian default state and surface a "Coming soon" toast on
+// interaction. Real per-plugin editor settings already live under
+// `Core plugins > nexus.editor`; this stub will eventually consolidate
+// them into a single Obsidian-style page.
+
+function EditorOptionsTab({ api }: { api?: PluginAPI }) {
+  const comingSoon = useComingSoon(api)
+  return (
+    <div className="settings-section">
+      <StubRow
+        title="Always focus new tabs"
+        description="When you open a link in a new tab, switch to it immediately."
+        control={
+          <StubToggle on={true} label="Toggle focus new tabs" onClick={comingSoon('Always focus new tabs')} />
+        }
+      />
+      <StubRow
+        title="Default view for new tabs"
+        description="The default view that a new Markdown tab gets opened in."
+        control={
+          <select defaultValue="editing" onChange={comingSoon('Default view for new tabs')} title="Coming soon">
+            <option value="editing">Editing view</option>
+            <option value="reading">Reading view</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Default editing mode"
+        description="The default editing mode a new tab will start with."
+        control={
+          <select defaultValue="live" onChange={comingSoon('Default editing mode')} title="Coming soon">
+            <option value="live">Live Preview</option>
+            <option value="source">Source mode</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Show editing mode in status bar"
+        description="Show the editing mode toggle in the status bar."
+        control={
+          <StubToggle
+            on={true}
+            label="Toggle editing-mode status bar"
+            onClick={comingSoon('Show editing mode in status bar')}
+          />
+        }
+      />
+
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Display</div>
+
+      <StubRow
+        title="Readable line length"
+        description="Limit maximum line length. Less content fits onscreen, but long blocks of text are more readable."
+        control={
+          <StubToggle on={true} label="Toggle readable line length" onClick={comingSoon('Readable line length')} />
+        }
+      />
+      <StubRow
+        title="Strict line breaks"
+        description="Markdown specs ignore single line breaks in reading view. Turn this off to make single line breaks visible."
+        control={
+          <StubToggle on={false} label="Toggle strict line breaks" onClick={comingSoon('Strict line breaks')} />
+        }
+      />
+      <StubRow
+        title="Properties in document"
+        description="Choose how properties are displayed at the top of notes. Select &ldquo;source&rdquo; to show properties as raw YAML."
+        control={
+          <select defaultValue="visible" onChange={comingSoon('Properties in document')} title="Coming soon">
+            <option value="visible">Visible</option>
+            <option value="hidden">Hidden</option>
+            <option value="source">Source</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Fold heading"
+        description="Lets you fold all content under a heading."
+        control={<StubToggle on={true} label="Toggle fold heading" onClick={comingSoon('Fold heading')} />}
+      />
+      <StubRow
+        title="Fold indent"
+        description="Lets you fold part of an indentation, such as lists."
+        control={<StubToggle on={true} label="Toggle fold indent" onClick={comingSoon('Fold indent')} />}
+      />
+      <StubRow
+        title="Line numbers"
+        description="Show line numbers in the gutter."
+        control={<StubToggle on={false} label="Toggle line numbers" onClick={comingSoon('Line numbers')} />}
+      />
+      <StubRow
+        title="Indentation guides"
+        description="Show vertical relationship lines between list items."
+        control={
+          <StubToggle on={true} label="Toggle indentation guides" onClick={comingSoon('Indentation guides')} />
+        }
+      />
+      <StubRow
+        title="Right-to-left (RTL)"
+        description="Sets the default text direction of notes to right-to-left."
+        control={<StubToggle on={false} label="Toggle RTL" onClick={comingSoon('Right-to-left (RTL)')} />}
+      />
+
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Behavior</div>
+
+      <StubRow
+        title="Spellcheck"
+        description="Turn on the spellchecker."
+        control={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              onClick={comingSoon('Spellcheck options')}
+              title="Coming soon"
+              aria-label="Spellcheck options"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: 2,
+                fontSize: 14,
+                lineHeight: 1,
+              }}
+            >
+              ⚙
+            </button>
+            <StubToggle on={true} label="Toggle spellcheck" onClick={comingSoon('Spellcheck')} />
+          </div>
+        }
+      />
+      <StubRow
+        title="Spellcheck languages"
+        description="Choose the languages for the spellchecker to use."
+        control={
+          <select defaultValue="en-US" onChange={comingSoon('Spellcheck languages')} title="Coming soon">
+            <option value="en-US">English (United States)</option>
+            <option value="add">+ Add language…</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Auto-pair brackets"
+        description="Pair brackets and quotes automatically."
+        control={<StubToggle on={true} label="Toggle auto-pair brackets" onClick={comingSoon('Auto-pair brackets')} />}
+      />
+      <StubRow
+        title="Auto-pair Markdown syntax"
+        description="Pair symbols automatically for bold, italic, code, and more."
+        control={
+          <StubToggle
+            on={true}
+            label="Toggle auto-pair Markdown syntax"
+            onClick={comingSoon('Auto-pair Markdown syntax')}
+          />
+        }
+      />
+      <StubRow
+        title="Smart lists"
+        description="Automatically set indentation and place list items correctly."
+        control={<StubToggle on={true} label="Toggle smart lists" onClick={comingSoon('Smart lists')} />}
+      />
+      <StubRow
+        title="Indent using tabs"
+        description="Use tabs to indent by pressing the &ldquo;Tab&rdquo; key. Turn this off to indent using 4 spaces."
+        control={<StubToggle on={true} label="Toggle indent using tabs" onClick={comingSoon('Indent using tabs')} />}
+      />
+      <StubRow
+        title="Indent visual width"
+        description="Number of spaces a tab character will render as."
+        control={
+          <input
+            type="range"
+            min={2}
+            max={8}
+            defaultValue={4}
+            onChange={comingSoon('Indent visual width')}
+            title="Coming soon"
+            style={{ minWidth: 120 }}
+          />
+        }
+      />
+
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Advanced</div>
+
+      <StubRow
+        title="Convert pasted HTML to Markdown"
+        description="Automatically convert HTML to Markdown when pasting and drag-and-drop from web pages. Use Ctrl/Cmd+Shift+V to paste HTML without converting."
+        control={
+          <StubToggle
+            on={true}
+            label="Toggle convert pasted HTML"
+            onClick={comingSoon('Convert pasted HTML to Markdown')}
+          />
+        }
+      />
+      <StubRow
+        title="Vim key bindings"
+        description="Use Vim key bindings when editing."
+        control={<StubToggle on={false} label="Toggle Vim key bindings" onClick={comingSoon('Vim key bindings')} />}
+      />
     </div>
   )
 }
