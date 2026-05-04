@@ -68,7 +68,7 @@ export const settingsPlugin: Plugin = {
 
     api.commands.register('workbench.action.openKeybindings', () => {
       api.context.set('settingsPanelVisible', true)
-      api.context.set('settingsActiveTab', 'keybindings')
+      api.context.set('settingsActiveTab', 'hotkeys')
     })
 
     api.commands.register('workbench.action.openHelp', () => {

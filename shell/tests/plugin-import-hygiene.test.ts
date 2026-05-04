@@ -48,6 +48,7 @@ const TAURI_IMPORT_ALLOWLIST: ReadonlySet<string> = new Set([
   'shell/src/plugins/core/editorArea/EditorAreaView.tsx',          // plugin-fs.readTextFile
   'shell/src/plugins/core/fileExplorer/FileExplorerView.tsx',      // plugin-dialog.open + plugin-fs.readDir
   'shell/src/plugins/core/titleBar/TitleBarView.tsx',              // api/window.getCurrentWindow
+  'shell/src/plugins/nexus/launcher/LauncherView.tsx',             // api/window.getCurrentWindow — close button on the workspace picker; same React-component pattern (no `api` in scope)
   //
   // ─── Shell-internal callers: legitimate exceptions ─────────────────────────
   // These plugins call shell-internal Tauri commands (boot_kernel,

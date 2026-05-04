@@ -200,8 +200,15 @@ function useContributedSettingsTabs(): SettingsTabEntry[] {
 
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
-// Built-in tab ids; plugin-contributed tab ids are opaque strings.
-const BUILT_IN_TABS = ['settings', 'appearance', 'keybindings', 'plugins', 'snippets'] as const
+// Built-in rail entry ids. Plugin-contributed tab ids and per-plugin
+// schema sections (rendered under the "Core plugins" group header) are
+// opaque strings. Naming follows Obsidian for parity:
+//   general       → about page (version + repo link)
+//   appearance    → theme + snippets
+//   hotkeys       → keybindings table (was 'keybindings')
+//   plugins       → core/community plugin manager
+//   snippets      → CSS snippets manager
+const BUILT_IN_TABS = ['general', 'appearance', 'hotkeys', 'plugins', 'snippets'] as const
 type BuiltInTab = (typeof BUILT_IN_TABS)[number]
 type NavTab = BuiltInTab | string
 
@@ -230,9 +237,8 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
   const available  = useAvailablePlugins()
   const contributedTabs = useContributedSettingsTabs()
 
-  const [navTab,        setNavTab]        = useState<NavTab>('settings')
-  const [query,         setQuery]         = useState('')
-  const [activeSection, setActiveSection] = useState<string | null>(null)
+  const [navTab, setNavTab] = useState<NavTab>('general')
+  const [query, setQuery] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Hydrate the last-opened tab the first time the panel opens. The
@@ -268,12 +274,12 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
 
   // External "jump to plugin section" hook — used by AI chat's
   // empty-state CTA to land the user directly in nexus.ai's settings
-  // group rather than whichever section was last open.
+  // group rather than whichever section was last open. The plugin id
+  // is itself a navTab now (one rail entry per plugin schema).
   useEffect(() => {
     return eventBus.on('settings:focusSection', (pluginId: unknown) => {
       if (typeof pluginId !== 'string') return
-      setNavTab('settings')
-      setActiveSection(pluginId)
+      setNavTab(pluginId)
     })
   }, [])
 
@@ -292,29 +298,32 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
   }
 
   useEffect(() => {
-    if (sections.length > 0 && !activeSection) {
-      setActiveSection(sections[0].pluginId)
-    }
-  }, [sections, activeSection])
-
-  useEffect(() => {
     if (visible) setTimeout(() => inputRef.current?.focus(), 0)
   }, [visible])
 
   if (!visible) return null
 
-  const displayedSections = query
+  // Cross-plugin search across all registered schemas. Active only when
+  // the search box has a query — overrides the rail's selected page.
+  const searchHits = query
     ? sections
-        .map(s => ({
+        .map((s) => ({
           ...s,
-          schema: s.schema.filter(f =>
-            f.title.toLowerCase().includes(query.toLowerCase()) ||
-            f.description.toLowerCase().includes(query.toLowerCase()) ||
-            f.key.toLowerCase().includes(query.toLowerCase())
+          schema: s.schema.filter(
+            (f) =>
+              f.title.toLowerCase().includes(query.toLowerCase()) ||
+              f.description.toLowerCase().includes(query.toLowerCase()) ||
+              f.key.toLowerCase().includes(query.toLowerCase()),
           ),
         }))
-        .filter(s => s.schema.length > 0)
-    : sections.filter(s => !activeSection || s.pluginId === activeSection)
+        .filter((s) => s.schema.length > 0)
+    : []
+
+  const sectionsByPlugin = new Map(sections.map((s) => [s.pluginId, s]))
+  const optionsContributed = contributedTabs.filter(
+    (t) => (t.group ?? 'options') === 'options',
+  )
+  const pluginContributed = contributedTabs.filter((t) => (t.group ?? 'options') !== 'options')
 
   return (
     <div
@@ -324,17 +333,18 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
     >
       <div
         className="settings-panel"
-        onClick={e => e.stopPropagation()}
-        onKeyDown={e => e.key === 'Escape' && close()}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.key === 'Escape' && close()}
       >
-        {/* Left rail — built-in tabs only. Per-plugin entries are
-            managed from the Plugins tab on the right. */}
+        {/* Left rail — Obsidian-style flat nav with grouped sections.
+            "Options" lists the built-in pages; "Core plugins" lists every
+            plugin schema as its own page. No inner sub-nav. */}
         <nav className="settings-rail">
           <div className="settings-rail-group-header">Options</div>
           <RailItem
-            label="Settings"
-            active={navTab === 'settings'}
-            onClick={() => setNavTab('settings')}
+            label="General"
+            active={navTab === 'general'}
+            onClick={() => setNavTab('general')}
           />
           <RailItem
             label="Appearance"
@@ -342,12 +352,12 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             onClick={() => setNavTab('appearance')}
           />
           <RailItem
-            label="Keybindings"
-            active={navTab === 'keybindings'}
-            onClick={() => setNavTab('keybindings')}
+            label="Hotkeys"
+            active={navTab === 'hotkeys'}
+            onClick={() => setNavTab('hotkeys')}
           />
           <RailItem
-            label="Plugins"
+            label="Core plugins"
             active={navTab === 'plugins'}
             onClick={() => setNavTab('plugins')}
           />
@@ -356,26 +366,43 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             active={navTab === 'snippets'}
             onClick={() => setNavTab('snippets')}
           />
-          {/* Plugin-contributed tabs (OI-01 + OI-08). Filter by group so
-              we can give core/community plugin tabs their own rail
-              groups in a follow-up; for now show 'options' inline with
-              the built-ins and skip non-options groups. */}
-          {contributedTabs
-            .filter((t) => (t.group ?? 'options') === 'options')
-            .map((t) => (
-              <RailItem
-                key={t.id}
-                label={t.title}
-                active={navTab === t.id}
-                onClick={() => setNavTab(t.id)}
-              />
-            ))}
+          {optionsContributed.map((t) => (
+            <RailItem
+              key={t.id}
+              label={t.title}
+              active={navTab === t.id}
+              onClick={() => setNavTab(t.id)}
+            />
+          ))}
+
+          {sections.length > 0 && (
+            <div className="settings-rail-group-header">Core plugins</div>
+          )}
+          {sections.map((s) => (
+            <RailItem
+              key={s.pluginId}
+              label={s.title}
+              active={navTab === s.pluginId}
+              onClick={() => setNavTab(s.pluginId)}
+            />
+          ))}
+
+          {pluginContributed.length > 0 && (
+            <div className="settings-rail-group-header">Community plugins</div>
+          )}
+          {pluginContributed.map((t) => (
+            <RailItem
+              key={t.id}
+              label={t.title}
+              active={navTab === t.id}
+              onClick={() => setNavTab(t.id)}
+            />
+          ))}
         </nav>
 
         {/* Right pane — topbar + content for the selected rail entry.
             Search lives in the topbar regardless of tab; an active query
-            overrides the tab body with cross-plugin search results
-            (Phase C). */}
+            overrides the page body with cross-plugin search results. */}
         <div className="settings-main">
           <div className="settings-topbar">
             <input
@@ -383,86 +410,84 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
               className="settings-search"
               placeholder="Search settings..."
               value={query}
-              onChange={e => setQuery(e.target.value)}
+              onChange={(e) => setQuery(e.target.value)}
             />
             <button className="settings-close" onClick={close}>✕</button>
           </div>
 
-          {query ? (
-            <div className="settings-body">
-              <div className="settings-content">
-                {displayedSections.length === 0 && (
-                  <p className="settings-empty">
-                    No settings found for &ldquo;{query}&rdquo;
-                  </p>
-                )}
-                {displayedSections.map(section => (
-                  <SettingsSection key={section.pluginId} section={section} />
-                ))}
-              </div>
-            </div>
-          ) : (
-            <>
-              {navTab === 'settings' && (
-                <div className="settings-body">
-                  <nav className="settings-nav">
-                    {sections.map(s => (
-                      <button
-                        key={s.pluginId}
-                        className={`settings-nav-item ${activeSection === s.pluginId ? 'settings-nav-item--active' : ''}`}
-                        onClick={() => setActiveSection(s.pluginId)}
-                      >
-                        {s.title}
-                      </button>
-                    ))}
-                  </nav>
-                  <div className="settings-content">
-                    {displayedSections.length === 0 && (
-                      <p className="settings-empty">No settings registered.</p>
-                    )}
-                    {displayedSections.map(section => (
-                      <SettingsSection key={section.pluginId} section={section} />
-                    ))}
-                  </div>
-                </div>
-              )}
-              {navTab === 'appearance' && (
-                <div className="settings-body">
-                  <div className="settings-content">
-                    <AppearanceTab api={api} />
-                  </div>
-                </div>
-              )}
-              {navTab === 'keybindings' && (
-                <div className="settings-body">
-                  <div className="settings-content">
-                    <KeybindingsTab />
-                  </div>
-                </div>
-              )}
-              {navTab === 'plugins' && (
-                <div className="settings-body">
-                  <div className="settings-content">
-                    <PluginsTab
-                      corePlugins={plugins}
-                      community={community}
-                      available={available}
-                    />
-                  </div>
-                </div>
-              )}
-              {navTab === 'snippets' && (
-                <div className="settings-body">
-                  <div className="settings-content">
-                    <SnippetsTab />
-                  </div>
-                </div>
-              )}
-              {!BUILT_IN_TABS.includes(navTab as BuiltInTab) && (
+          <div className="settings-body">
+            <div className="settings-content">
+              {query ? (
+                <>
+                  {searchHits.length === 0 && (
+                    <p className="settings-empty">
+                      No settings found for &ldquo;{query}&rdquo;
+                    </p>
+                  )}
+                  {searchHits.map((section) => (
+                    <SettingsSection key={section.pluginId} section={section} />
+                  ))}
+                </>
+              ) : navTab === 'general' ? (
+                <GeneralTab />
+              ) : navTab === 'appearance' ? (
+                <AppearanceTab api={api} />
+              ) : navTab === 'hotkeys' ? (
+                <KeybindingsTab />
+              ) : navTab === 'plugins' ? (
+                <PluginsTab
+                  corePlugins={plugins}
+                  community={community}
+                  available={available}
+                />
+              ) : navTab === 'snippets' ? (
+                <SnippetsTab />
+              ) : sectionsByPlugin.has(navTab) ? (
+                <SettingsSection section={sectionsByPlugin.get(navTab)!} />
+              ) : (
                 <ContributedTabBody navTab={navTab} />
               )}
-            </>
-          )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── General page ─────────────────────────────────────────────────────────────
+//
+// Lightweight "About" landing page. Mirrors Obsidian's General > Version
+// block but skips the auto-update / language / commercial-license rows
+// since none of those apply yet.
+
+function GeneralTab() {
+  const version = (import.meta.env?.VITE_APP_VERSION as string | undefined) ?? '0.1.0'
+  return (
+    <div className="settings-section">
+      <div className="settings-section-title">About Nexus</div>
+      <div className="settings-field">
+        <div className="settings-field-header">
+          <div className="settings-field-title">Version</div>
+        </div>
+        <div className="settings-field-description">{version}</div>
+      </div>
+      <div className="settings-field">
+        <div className="settings-field-header">
+          <div className="settings-field-title">Source</div>
+        </div>
+        <div className="settings-field-description">
+          <a
+            href="https://github.com/baileyrd/nexus"
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => {
+              e.preventDefault()
+              window.open('https://github.com/baileyrd/nexus', '_blank')
+            }}
+          >
+            github.com/baileyrd/nexus
+          </a>
         </div>
       </div>
     </div>
