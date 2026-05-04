@@ -133,6 +133,14 @@ export const aiPlugin: Plugin = {
             options: ['', 'openai', 'ollama'],
           },
           {
+            key: 'ai.embedModel',
+            title: 'Embedding model',
+            description:
+              'Ollama model used for RAG embeddings (e.g. nomic-embed-text, mxbai-embed-large). Leave blank for the provider default (nomic-embed-text).',
+            type: 'string' as const,
+            default: '',
+          },
+          {
             key: 'ai.embedApiKey',
             title: 'Embedding API key',
             description:
@@ -393,6 +401,7 @@ export const aiPlugin: Plugin = {
         apiKey: cfg.get<string>('ai.apiKey', ''),
         baseUrl: cfg.get<string>('ai.baseUrl', ''),
         embedProvider: cfg.get<string>('ai.embedProvider', ''),
+        embedModel: cfg.get<string>('ai.embedModel', ''),
         embedApiKey: cfg.get<string>('ai.embedApiKey', ''),
         embedBaseUrl: cfg.get<string>('ai.embedBaseUrl', ''),
       }
@@ -419,6 +428,7 @@ export const aiPlugin: Plugin = {
       'ai.apiKey',
       'ai.baseUrl',
       'ai.embedProvider',
+      'ai.embedModel',
       'ai.embedApiKey',
       'ai.embedBaseUrl',
     ]

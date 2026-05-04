@@ -40,10 +40,9 @@ const AI_PLUGIN_ID = 'com.nexus.ai'
  *  shape. */
 const HANDLER_STREAM_CHAT = 'stream_chat'
 
-/** Wall-clock budget per pass. Slightly tighter than the 60s chat
- *  budget — a margin pass that takes a full minute would mean the
- *  user has typed a paragraph since it started, so the result is
- *  almost certainly stale anyway. */
+/** Wall-clock budget per pass. Kept short — a margin pass that takes
+ *  a full minute would mean the user has typed a paragraph since it
+ *  started, so the result is almost certainly stale anyway. */
 const MARGIN_PASS_TIMEOUT_MS = 30_000
 
 /** Soft cap on per-pass suggestions. Models occasionally over-

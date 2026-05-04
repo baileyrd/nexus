@@ -30,20 +30,27 @@ pub struct OllamaProvider {
     client: reqwest::Client,
     base_url: String,
     chat_model: String,
+    embedding_model: String,
 }
 
 impl OllamaProvider {
     /// Create a new Ollama provider.
     ///
     /// If `base_url` is `None`, defaults to `http://localhost:11434`.
-    /// If `model` is `None`, defaults to `llama3.2` for chat and
-    /// `nomic-embed-text` for embeddings.
+    /// If `chat_model` is `None`, defaults to `llama3.2`.
+    /// If `embedding_model` is `None`, defaults to `nomic-embed-text`.
     #[must_use]
-    pub fn new(base_url: Option<String>, model: Option<String>) -> Self {
+    pub fn new(
+        base_url: Option<String>,
+        chat_model: Option<String>,
+        embedding_model: Option<String>,
+    ) -> Self {
         Self {
             client: reqwest::Client::new(),
             base_url: base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string()),
-            chat_model: model.unwrap_or_else(|| DEFAULT_CHAT_MODEL.to_string()),
+            chat_model: chat_model.unwrap_or_else(|| DEFAULT_CHAT_MODEL.to_string()),
+            embedding_model: embedding_model
+                .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string()),
         }
     }
 }
@@ -56,6 +63,10 @@ struct OllamaChatRequest<'a> {
     model: &'a str,
     messages: Vec<OllamaChatMessage<'a>>,
     stream: bool,
+    /// Disable thinking mode for Qwen3-family models. Non-thinking models
+    /// ignore this field. Without it, Qwen3 may emit only `thinking` chunks
+    /// and leave `content` empty, producing a blank response in the UI.
+    think: bool,
 }
 
 /// A message in an Ollama chat request.
@@ -140,6 +151,7 @@ impl AiProvider for OllamaProvider {
             model: &self.chat_model,
             messages: api_messages,
             stream: false,
+            think: false,
         };
 
         let response = self
@@ -199,6 +211,7 @@ impl AiProvider for OllamaProvider {
             model: &self.chat_model,
             messages: api_messages,
             stream: true,
+            think: false,
         };
 
         let response = self
@@ -258,6 +271,7 @@ impl AiProvider for OllamaProvider {
             model: &self.chat_model,
             messages: api_messages,
             stream: true,
+            think: false,
             tools: if api_tools.is_empty() {
                 None
             } else {
@@ -357,7 +371,7 @@ impl EmbeddingProvider for OllamaProvider {
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, AiError> {
         let url = format!("{}/api/embed", self.base_url);
         let body = OllamaEmbedRequest {
-            model: DEFAULT_EMBEDDING_MODEL,
+            model: &self.embedding_model,
             input: texts,
         };
 
@@ -403,6 +417,7 @@ struct OllamaToolRequest<'a> {
     model: &'a str,
     messages: Vec<OllamaToolMessage>,
     stream: bool,
+    think: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<OllamaTool<'a>>>,
 }
@@ -797,6 +812,7 @@ mod tool_format_tests {
             model: "llama3.2",
             messages: Vec::new(),
             stream: true,
+            think: false,
             tools: None,
         };
         let json = serde_json::to_value(&body).expect("ser");
@@ -815,6 +831,7 @@ mod tool_format_tests {
             model: "llama3.2",
             messages: Vec::new(),
             stream: true,
+            think: false,
             tools: Some(wire_tools),
         };
         let json = serde_json::to_value(&body).expect("ser");
@@ -871,7 +888,7 @@ mod streaming_dispatch_tests {
         ]
         .join("\n");
         let url = spawn_one_shot_server(body.into_bytes());
-        let provider = OllamaProvider::new(Some(url), Some("llama3.2".to_string()));
+        let provider = OllamaProvider::new(Some(url), Some("llama3.2".to_string()), None);
 
         let chunks = Mutex::new(Vec::<String>::new());
         let on_chunk = |s: String| chunks.lock().unwrap().push(s);
@@ -910,7 +927,7 @@ mod streaming_dispatch_tests {
         ]
         .join("\n");
         let url = spawn_one_shot_server(body.into_bytes());
-        let provider = OllamaProvider::new(Some(url), Some("llama3.2".to_string()));
+        let provider = OllamaProvider::new(Some(url), Some("llama3.2".to_string()), None);
 
         let chunks = Mutex::new(Vec::<String>::new());
         let on_chunk = |s: String| chunks.lock().unwrap().push(s);
@@ -953,7 +970,7 @@ mod streaming_dispatch_tests {
             }
         });
         let url = format!("http://{addr}");
-        let provider = OllamaProvider::new(Some(url), Some("llama3.2".to_string()));
+        let provider = OllamaProvider::new(Some(url), Some("llama3.2".to_string()), None);
         let on_chunk = |_: String| {};
         let err = provider
             .chat_turn_with_tools(

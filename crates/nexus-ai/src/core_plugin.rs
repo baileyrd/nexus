@@ -1753,6 +1753,7 @@ fn build_ai_provider(cfg: &AiConfig) -> Result<Box<dyn AiProvider>, String> {
         "ollama" => Ok(Box::new(OllamaProvider::new(
             cfg.base_url.clone(),
             cfg.model.clone(),
+            None,
         ))),
         other => Err(format!("unknown AI provider: {other}")),
     }
@@ -1765,7 +1766,11 @@ fn build_embedding_provider(cfg: &AiConfig) -> Result<Box<dyn EmbeddingProvider>
             None,
             4096,
         ))),
-        "ollama" => Ok(Box::new(OllamaProvider::new(cfg.base_url.clone(), None))),
+        "ollama" => Ok(Box::new(OllamaProvider::new(
+            cfg.base_url.clone(),
+            None,
+            cfg.model.clone(),
+        ))),
         "local" => build_local_embedding_provider(cfg),
         other => Err(format!("unknown embedding provider: {other}")),
     }

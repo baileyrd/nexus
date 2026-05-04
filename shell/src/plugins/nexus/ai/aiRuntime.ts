@@ -59,9 +59,9 @@ const TOPIC_DONE = 'com.nexus.ai.stream_done'
 /** Top-k RAG sources fetched per question. Match nexus-ai's default. */
 const RAG_TOP_K = 5
 
-/** Wall-clock budget for a single Q&A. Closes legacy ChatPanel.tsx
- *  reference §6 "no client-side timeout, no abort button" gap. */
-const AI_REQUEST_TIMEOUT_MS = 60_000
+/** Wall-clock budget for a single Q&A. Set to 5 min to accommodate
+ *  local Ollama models that may need time to load on first inference. */
+const AI_REQUEST_TIMEOUT_MS = 300_000
 
 let kernel: KernelAPI | null = null
 
@@ -298,8 +298,21 @@ export interface AiUserConfig {
   /** Embedding provider for RAG. Defaults to chat provider when blank
    *  and the chat provider supports embeddings (currently OpenAI). */
   embedProvider?: string
+  embedModel?: string
   embedApiKey?: string
   embedBaseUrl?: string
+}
+
+/**
+ * Ensure a base URL has an HTTP scheme so reqwest can parse it.
+ * Returns null for blank input; prepends "http://" when the user typed a
+ * bare host:port (e.g. "192.168.50.152:11434" → "http://192.168.50.152:11434").
+ */
+function normalizeBaseUrl(raw: string | null | undefined): string | null {
+  const s = (raw ?? '').trim()
+  if (!s) return null
+  if (/^https?:\/\//i.test(s)) return s
+  return `http://${s}`
 }
 
 /** Build the kernel-side `set_config` payload from a user config. An
@@ -314,26 +327,27 @@ function buildSetConfigPayload(user: AiUserConfig): Record<string, unknown> {
       provider: ai,
       model: (user.model ?? '').trim() || null,
       api_key: (user.apiKey ?? '').trim() || null,
-      base_url: (user.baseUrl ?? '').trim() || null,
+      base_url: normalizeBaseUrl(user.baseUrl),
     }
   }
   // Embedding side: explicit provider always wins; otherwise mirror
   // the chat provider when it supports embeddings (OpenAI/Ollama),
   // reusing the chat key/url so the user only fills one form.
   const explicitEmbed = (user.embedProvider ?? '').trim()
+  const embedModel = (user.embedModel ?? '').trim() || null
   if (explicitEmbed.length > 0) {
     payload.embedding = {
       provider: explicitEmbed,
-      model: null,
+      model: embedModel,
       api_key: (user.embedApiKey ?? '').trim() || null,
-      base_url: (user.embedBaseUrl ?? '').trim() || null,
+      base_url: normalizeBaseUrl(user.embedBaseUrl),
     }
   } else if (ai === 'openai' || ai === 'ollama') {
     payload.embedding = {
       provider: ai,
-      model: null,
+      model: embedModel,
       api_key: (user.apiKey ?? '').trim() || null,
-      base_url: (user.baseUrl ?? '').trim() || null,
+      base_url: normalizeBaseUrl(user.baseUrl),
     }
   } else {
     // Anthropic doesn't ship embeddings — clear so the kernel either
@@ -360,6 +374,7 @@ export async function pushUserConfig(
     !user.apiKey &&
     !user.baseUrl &&
     !user.embedProvider &&
+    !user.embedModel &&
     !user.embedApiKey &&
     !user.embedBaseUrl
   if (allBlank) {
