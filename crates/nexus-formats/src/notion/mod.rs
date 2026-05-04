@@ -181,6 +181,9 @@ fn convert_page(
     if let Some(uid) = notion_id {
         fm.entry("notion_id".to_string()).or_insert(uid);
     }
+    // Provenance — lets graph/search filter "everything that came from
+    // Notion" without re-deriving it from the (now-absent) UUID suffix.
+    fm.entry("source".to_string()).or_insert_with(|| "notion".to_string());
 
     if markdown::has_unconverted_warning_marker(&body_converted) {
         report

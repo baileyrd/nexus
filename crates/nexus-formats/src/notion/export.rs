@@ -198,10 +198,11 @@ fn export_markdown(
     let mut out = String::new();
     out.push_str(&format!("# {stem}\n\n"));
 
-    // Property table from frontmatter (skip notion_id; that's metadata).
+    // Property table from frontmatter (skip notion_id and source; those
+    // are import-side metadata, not user-visible properties).
     let displayable: Vec<(&String, &String)> = fm
         .iter()
-        .filter(|(k, _)| k.as_str() != "notion_id")
+        .filter(|(k, _)| !matches!(k.as_str(), "notion_id" | "source"))
         .collect();
     if !displayable.is_empty() {
         out.push_str("|  |  |\n");
