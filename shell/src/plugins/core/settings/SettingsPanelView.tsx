@@ -463,10 +463,7 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
               ) : navTab === 'editor-options' ? (
                 <EditorOptionsTab api={api} />
               ) : navTab === 'files-links' ? (
-                <ComingSoonTab
-                  title="Files and links"
-                  description="Default new-file location, attachment folder, link format (wiki vs Markdown), and confirm-before-delete options will live here."
-                />
+                <FilesLinksTab api={api} />
               ) : navTab === 'appearance' ? (
                 <AppearanceTab api={api} />
               ) : navTab === 'hotkeys' ? (
@@ -918,6 +915,196 @@ function EditorOptionsTab({ api }: { api?: PluginAPI }) {
         title="Vim key bindings"
         description="Use Vim key bindings when editing."
         control={<StubToggle on={false} label="Toggle Vim key bindings" onClick={comingSoon('Vim key bindings')} />}
+      />
+    </div>
+  )
+}
+
+// ─── Files and links page (stub) ─────────────────────────────────────────────
+//
+// Mirrors Obsidian's Files and links settings. None of these are wired
+// to real preferences yet; controls render in their Obsidian default
+// state and surface a "Coming soon" toast on interaction. Terminology
+// updated to forge/Nexus where applicable.
+
+function FilesLinksTab({ api }: { api?: PluginAPI }) {
+  const comingSoon = useComingSoon(api)
+  return (
+    <div className="settings-section">
+      <StubRow
+        title="Default file to open"
+        description="Choose which file to open when the app starts."
+        control={
+          <select defaultValue="last" onChange={comingSoon('Default file to open')} title="Coming soon">
+            <option value="last">Last opened</option>
+            <option value="none">None</option>
+            <option value="specific">Specific file…</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Default location for new notes"
+        description="Where newly created notes are placed."
+        control={
+          <select defaultValue="root" onChange={comingSoon('Default location for new notes')} title="Coming soon">
+            <option value="root">Forge folder</option>
+            <option value="same">Same folder as current file</option>
+            <option value="specific">Specific folder…</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Default location for new attachments"
+        description="Where newly added attachments are placed."
+        control={
+          <select
+            defaultValue="root"
+            onChange={comingSoon('Default location for new attachments')}
+            title="Coming soon"
+          >
+            <option value="root">Forge folder</option>
+            <option value="same">Same folder as current file</option>
+            <option value="specific">Specific folder…</option>
+          </select>
+        }
+      />
+
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Links</div>
+
+      <StubRow
+        title="New link format"
+        description="What links to insert when auto-generating internal links."
+        control={
+          <select defaultValue="shortest" onChange={comingSoon('New link format')} title="Coming soon">
+            <option value="shortest">Shortest path when possible</option>
+            <option value="relative">Relative path</option>
+            <option value="absolute">Absolute path</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Automatically update internal links"
+        description="Turn off to be prompted to update links after renaming a file."
+        control={
+          <StubToggle
+            on={false}
+            label="Toggle automatic link updates"
+            onClick={comingSoon('Automatically update internal links')}
+          />
+        }
+      />
+      <StubRow
+        title="Use [[Wikilinks]]"
+        description="Auto-generate Wikilinks for [[links]] and ![[images]] instead of Markdown links and images. Disable this option to generate Markdown links instead."
+        control={<StubToggle on={true} label="Toggle wikilinks" onClick={comingSoon('Use Wikilinks')} />}
+      />
+      <StubRow
+        title="Show all file types"
+        description="Show files with any extension even if Nexus can't open them natively, so you can link to them and see them in the file explorer and quick switcher."
+        control={
+          <StubToggle on={false} label="Toggle show all file types" onClick={comingSoon('Show all file types')} />
+        }
+      />
+
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Trash</div>
+
+      <StubRow
+        title="Confirm before deleting files"
+        description="Avoid accidentally deleting files."
+        control={
+          <StubToggle on={true} label="Toggle delete confirmation" onClick={comingSoon('Confirm before deleting files')} />
+        }
+      />
+      <StubRow
+        title="Delete attachments when deleting files"
+        description="Automatically remove attachments linked to the deleted file if they're not used elsewhere."
+        control={
+          <select
+            defaultValue="ask"
+            onChange={comingSoon('Delete attachments when deleting files')}
+            title="Coming soon"
+          >
+            <option value="ask">Ask each time</option>
+            <option value="always">Always</option>
+            <option value="never">Never</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Deleted files"
+        description="What happens to a file after you delete it."
+        control={
+          <select defaultValue="system" onChange={comingSoon('Deleted files')} title="Coming soon">
+            <option value="system">Move to system trash</option>
+            <option value="forge">Move to .trash in forge</option>
+            <option value="permanent">Delete permanently</option>
+          </select>
+        }
+      />
+
+      <div className="settings-section-title" style={{ marginTop: 24 }}>Advanced</div>
+
+      <StubRow
+        title="Excluded files"
+        description="Excluded files will be hidden in Search, Graph view, and Unlinked Mentions, less noticeable in Quick Switcher and link suggestions."
+        control={
+          <button
+            type="button"
+            onClick={comingSoon('Excluded files')}
+            title="Coming soon"
+            style={{
+              background: 'var(--background-modifier-hover)',
+              color: 'var(--text-normal)',
+              border: 'none',
+              borderRadius: 4,
+              padding: '4px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Manage
+          </button>
+        }
+      />
+      <StubRow
+        title="Override config folder"
+        description="Use a different config folder than the default one. Must start with a dot."
+        control={
+          <input
+            type="text"
+            placeholder=".forge"
+            onChange={comingSoon('Override config folder')}
+            title="Coming soon"
+            style={{ minWidth: 180 }}
+          />
+        }
+      />
+      <StubRow
+        title="Allow URI callbacks"
+        description="Enable the use of x-callback-url through x-success or x-error when handling Nexus URIs."
+        control={<StubToggle on={false} label="Toggle URI callbacks" onClick={comingSoon('Allow URI callbacks')} />}
+      />
+      <StubRow
+        title="Rebuild forge cache"
+        description="Rebuilding the cache could take a few seconds to a few minutes depending on the size of your forge."
+        control={
+          <button
+            type="button"
+            onClick={comingSoon('Rebuild forge cache')}
+            title="Coming soon"
+            style={{
+              background: 'transparent',
+              color: 'var(--text-error, #e06c75)',
+              border: '1px solid var(--text-error, #e06c75)',
+              borderRadius: 4,
+              padding: '4px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Rebuild
+          </button>
+        }
       />
     </div>
   )
