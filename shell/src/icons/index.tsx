@@ -49,6 +49,7 @@ import {
   Zap,
   GitBranch,
   HelpCircle,
+  LayoutTemplate,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -126,6 +127,7 @@ const ICON_MAP = {
   refresh:     { component: RefreshCw },
   clock:       { component: Clock },
   star:        { component: Star },
+  template:    { component: LayoutTemplate },
 
   // Editing / sort
   sortAZ:      { component: ArrowDownUp },

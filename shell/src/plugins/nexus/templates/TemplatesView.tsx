@@ -19,6 +19,8 @@ export interface TemplatesViewProps {
 const PLUGIN_ID = 'com.nexus.templates'
 const HANDLER_APPLY = 'apply'
 
+const EMPTY_FORM: Record<string, string> = Object.freeze({}) as Record<string, string>
+
 interface ApplyResult {
   name: string
   path: string
@@ -220,7 +222,7 @@ function TemplateForm({
   notify,
   openFile,
 }: TemplateFormProps): JSX.Element {
-  const formValues = useTemplatesStore((s) => s.formValues[tpl.name] ?? {})
+  const formValues = useTemplatesStore((s) => s.formValues[tpl.name]) ?? EMPTY_FORM
   const setFormValue = useTemplatesStore((s) => s.setFormValue)
   const clearForm = useTemplatesStore((s) => s.clearForm)
   const setLastApplied = useTemplatesStore((s) => s.setLastApplied)

@@ -123,7 +123,7 @@ export const templatesPlugin: Plugin = {
     api.activityBar.addItem({
       id: 'nexus.templates.activityItem',
       icon: '',
-      iconName: 'layout-template',
+      iconName: 'template',
       title: 'Templates',
       viewId: VIEW_ID,
       priority: 45,
