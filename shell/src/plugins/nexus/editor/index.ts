@@ -54,6 +54,49 @@ const COMMAND_REVEAL_IN_NAV = 'nexus.editor.revealInNavigation'
 const COMMAND_REVEAL_IN_OS = 'nexus.editor.revealInOS'
 const COMMAND_OPEN_DEFAULT_APP = 'nexus.editor.openInDefaultApp'
 const COMMAND_DELETE_FILE = 'nexus.editor.deleteFile'
+
+// Tab-actions menu placeholders. Each one shows a "Coming soon"
+// notification so users get feedback instead of a dead disabled row.
+// Listed here so the manifest contributions and runtime registrations
+// stay in sync.
+const STUB_COMMANDS: ReadonlyArray<{ id: string; title: string; label: string }> = [
+  { id: 'nexus.editor.stub.splitRight', title: 'Split right', label: 'Split right' },
+  { id: 'nexus.editor.stub.splitDown', title: 'Split down', label: 'Split down' },
+  {
+    id: 'nexus.editor.stub.openInNewWindow',
+    title: 'Open in new window',
+    label: 'Open in new window',
+  },
+  {
+    id: 'nexus.editor.stub.openLinkedView',
+    title: 'Open linked view',
+    label: 'Open linked view',
+  },
+  { id: 'nexus.editor.stub.rename', title: 'Rename file', label: 'Rename' },
+  { id: 'nexus.editor.stub.moveTo', title: 'Move file to…', label: 'Move file to' },
+  { id: 'nexus.editor.stub.bookmark', title: 'Bookmark file', label: 'Bookmark' },
+  {
+    id: 'nexus.editor.stub.addProperty',
+    title: 'Add file property',
+    label: 'Add file property',
+  },
+  {
+    id: 'nexus.editor.stub.backlinksInDocument',
+    title: 'Backlinks in document',
+    label: 'Backlinks in document',
+  },
+  {
+    id: 'nexus.editor.stub.versionHistory',
+    title: 'Open version history',
+    label: 'Version history',
+  },
+  {
+    id: 'nexus.editor.stub.mergeFile',
+    title: 'Merge entire file with…',
+    label: 'Merge entire file',
+  },
+  { id: 'nexus.editor.stub.exportPdf', title: 'Export to PDF…', label: 'Export to PDF' },
+]
 const DELETE_FILE_HANDLER = 'delete_file'
 const CONTEXT_KEY_HAS_ACTIVE_TAB = 'nexus.editor.hasActiveTab'
 const CONTEXT_KEY_ACTIVE_TAB_DIRTY = 'nexus.editor.activeTabDirty'
@@ -115,6 +158,7 @@ export const editorPlugin: Plugin = {
         { id: COMMAND_REVEAL_IN_OS, title: 'Show in System Explorer', category: 'Editor' },
         { id: COMMAND_OPEN_DEFAULT_APP, title: 'Open in Default App', category: 'Editor' },
         { id: COMMAND_DELETE_FILE, title: 'Delete File', category: 'Editor' },
+        ...STUB_COMMANDS.map((s) => ({ id: s.id, title: s.title, category: 'Editor' })),
       ],
       keybindings: [
         {
@@ -620,6 +664,15 @@ export const editorPlugin: Plugin = {
         })
       }
     })
+
+    for (const stub of STUB_COMMANDS) {
+      api.commands.register(stub.id, () => {
+        api.notifications.show({
+          type: 'info',
+          message: `${stub.label} — coming soon.`,
+        })
+      })
+    }
 
     api.commands.register(COMMAND_DELETE_FILE, async () => {
       const relpath = activeTabRelpath()

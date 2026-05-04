@@ -1,7 +1,10 @@
 import type { ContextMenuItem } from '../../../shell/ContextMenu'
 import type { EditorTabMode } from './editorStore'
 
-const NOT_YET = 'Not yet implemented'
+// Placeholder commands. Each one is registered in editor/index.ts and
+// fires a "Coming soon" notification — clicking gives feedback instead
+// of leaving the user with a greyed-out row that looks broken.
+const COMING_SOON_TOOLTIP = 'Coming soon'
 
 export function buildTabContextMenu(args: {
   mode: EditorTabMode
@@ -26,30 +29,29 @@ export function buildTabContextMenu(args: {
       commandId: 'nexus.editor.toggleReadingView',
     },
     { kind: 'separator' },
-    // Deferred: needs a `workspace.splitLeaf(direction)` API on workspaceStore that doesn't exist yet; out of scope for this menu.
     {
       kind: 'item',
       label: 'Split right',
-      disabled: true,
-      tooltip: NOT_YET,
+      commandId: 'nexus.editor.stub.splitRight',
+      tooltip: COMING_SOON_TOOLTIP,
     },
     {
       kind: 'item',
       label: 'Split down',
-      disabled: true,
-      tooltip: NOT_YET,
+      commandId: 'nexus.editor.stub.splitDown',
+      tooltip: COMING_SOON_TOOLTIP,
     },
     {
       kind: 'item',
       label: 'Open in new window',
-      disabled: true,
-      tooltip: NOT_YET,
+      commandId: 'nexus.editor.stub.openInNewWindow',
+      tooltip: COMING_SOON_TOOLTIP,
     },
     {
       kind: 'item',
       label: 'Open linked view',
-      disabled: true,
-      tooltip: NOT_YET,
+      commandId: 'nexus.editor.stub.openLinkedView',
+      tooltip: COMING_SOON_TOOLTIP,
     },
     { kind: 'separator' },
     {
@@ -66,14 +68,14 @@ export function buildTabContextMenu(args: {
     {
       kind: 'item',
       label: 'Rename...',
-      disabled: true,
-      tooltip: NOT_YET,
+      commandId: 'nexus.editor.stub.rename',
+      tooltip: COMING_SOON_TOOLTIP,
     },
     {
       kind: 'item',
       label: 'Move file to...',
-      disabled: true,
-      tooltip: NOT_YET,
+      commandId: 'nexus.editor.stub.moveTo',
+      tooltip: COMING_SOON_TOOLTIP,
     },
     {
       kind: 'item',
@@ -126,38 +128,38 @@ export function buildTabContextMenu(args: {
     {
       kind: 'item',
       label: 'Bookmark...',
-      disabled: true,
-      tooltip: NOT_YET,
+      commandId: 'nexus.editor.stub.bookmark',
+      tooltip: COMING_SOON_TOOLTIP,
     },
     {
       kind: 'item',
       label: 'Add file property',
-      disabled: true,
-      tooltip: NOT_YET,
+      commandId: 'nexus.editor.stub.addProperty',
+      tooltip: COMING_SOON_TOOLTIP,
     },
     {
       kind: 'item',
       label: 'Backlinks in document',
-      disabled: true,
-      tooltip: NOT_YET,
+      commandId: 'nexus.editor.stub.backlinksInDocument',
+      tooltip: COMING_SOON_TOOLTIP,
     },
     {
       kind: 'item',
       label: 'Open version history',
-      disabled: true,
-      tooltip: NOT_YET,
+      commandId: 'nexus.editor.stub.versionHistory',
+      tooltip: COMING_SOON_TOOLTIP,
     },
     {
       kind: 'item',
       label: 'Merge entire file with...',
-      disabled: true,
-      tooltip: NOT_YET,
+      commandId: 'nexus.editor.stub.mergeFile',
+      tooltip: COMING_SOON_TOOLTIP,
     },
     {
       kind: 'item',
       label: 'Export to PDF...',
-      disabled: true,
-      tooltip: NOT_YET,
+      commandId: 'nexus.editor.stub.exportPdf',
+      tooltip: COMING_SOON_TOOLTIP,
     },
   ]
 }
