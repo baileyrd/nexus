@@ -6,6 +6,7 @@ pub mod config;
 pub mod content;
 pub mod db;
 pub mod desktop;
+pub mod export;
 pub mod forge;
 pub mod git;
 pub mod graph;

@@ -54,10 +54,10 @@ pub fn csv_to_bases(csv_str: &str, name: &str) -> crate::Result<String> {
         .map(|col_idx| infer_column_type(&samples, col_idx))
         .collect();
 
-    // Emit TOML.
+    // Emit TOML. Records are inlined as `[[records]]` array-of-tables; no
+    // sentinel needed (the presence of `[[records]]` is the signal).
     let mut out = String::new();
-    out.push_str(&format!("name = \"{}\"\n", escape_toml_str(name)));
-    out.push_str("records = \"@inline\"\n\n");
+    out.push_str(&format!("name = \"{}\"\n\n", escape_toml_str(name)));
 
     for (header, ty) in headers.iter().zip(types.iter()) {
         out.push_str("[[fields]]\n");

@@ -129,6 +129,9 @@ enum Commands {
     /// Import external knowledge-tool exports (Notion, …)
     Import(ImportArgs),
 
+    /// Export forge content to external formats (Notion, …)
+    Export(ExportArgs),
+
     /// Plugin-registered subcommand (`nexus <plugin-id> [args…]`)
     #[command(external_subcommand)]
     External(Vec<OsString>),
@@ -939,6 +942,25 @@ enum ImportCommand {
     },
 }
 
+#[derive(Parser)]
+struct ExportArgs {
+    #[command(subcommand)]
+    command: ExportCommand,
+}
+
+#[derive(Subcommand)]
+enum ExportCommand {
+    /// Export to a Notion-compatible folder tree (re-importable into Notion)
+    Notion {
+        /// Forge-relative subdirectory to export (default: forge root)
+        #[arg(long = "source")]
+        source: Option<PathBuf>,
+        /// Output directory (created if missing)
+        #[arg(long = "dest")]
+        dest: PathBuf,
+    },
+}
+
 // ---------------------------------------------------------------------------
 // Git
 // ---------------------------------------------------------------------------
@@ -1476,6 +1498,12 @@ fn main() {
         Commands::Import(args) => match args.command {
             ImportCommand::Notion { source, dest } => {
                 commands::import::notion_zip(&app, &source, dest)
+            }
+        },
+
+        Commands::Export(args) => match args.command {
+            ExportCommand::Notion { source, dest } => {
+                commands::export::notion_dir(&app, source, &dest)
             }
         },
 

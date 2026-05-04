@@ -21,9 +21,12 @@
 //! recorded in the [`ImportReport`].
 
 pub mod database;
+pub mod export;
 pub mod filename;
 pub mod markdown;
 pub mod property;
+
+pub use export::{export_to_notion, ExportReport};
 
 use std::collections::HashMap;
 use std::io::{Read, Seek};
