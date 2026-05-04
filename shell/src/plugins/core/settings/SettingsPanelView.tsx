@@ -405,7 +405,7 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
             />
           ))}
 
-          {sections.length > 0 && (
+          {(sections.length > 0 || STUB_CORE_PLUGINS.length > 0) && (
             <div className="settings-rail-group-header">Core plugins</div>
           )}
           {sections.map((s) => (
@@ -414,6 +414,14 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
               label={s.title}
               active={navTab === s.pluginId}
               onClick={() => setNavTab(s.pluginId)}
+            />
+          ))}
+          {STUB_CORE_PLUGINS.map((p) => (
+            <RailItem
+              key={p.id}
+              label={p.label}
+              active={navTab === p.id}
+              onClick={() => setNavTab(p.id)}
             />
           ))}
 
@@ -485,6 +493,8 @@ export function SettingsPanelView(props: SettingsPanelViewProps = {}) {
                 <SnippetsTab />
               ) : sectionsByPlugin.has(navTab) ? (
                 <SettingsSection section={sectionsByPlugin.get(navTab)!} />
+              ) : STUB_CORE_BY_ID.has(navTab) ? (
+                STUB_CORE_BY_ID.get(navTab)!.render(api)
               ) : (
                 <ContributedTabBody navTab={navTab} />
               )}
@@ -1159,6 +1169,519 @@ function KeychainTab({ api }: { api?: PluginAPI }) {
         No secrets have been added. Secrets are used to store information like API
         keys and passwords that plugins can use.
       </div>
+    </div>
+  )
+}
+
+// ─── Obsidian-parity core plugin stubs ──────────────────────────────────────
+//
+// Rail entries for ten Obsidian core plugins that don't exist in Nexus
+// yet. Each opens a stub settings page that mirrors the Obsidian layout
+// exactly — controls render in their default state and surface a
+// "Coming soon" toast on interaction.
+//
+// Tab ids live in their own `cp-stub:<name>` namespace so they don't
+// collide with real plugin ids. The list also drives the rail below
+// the "Core plugins" header in alphabetical order.
+
+interface StubCorePluginEntry {
+  id: string
+  label: string
+  render: (api: PluginAPI | undefined) => React.ReactNode
+}
+
+const STUB_CORE_PLUGINS: ReadonlyArray<StubCorePluginEntry> = [
+  {
+    id: 'cp-stub:backlinks',
+    label: 'Backlinks',
+    render: (api) => <StubBacklinksPage api={api} />,
+  },
+  {
+    id: 'cp-stub:canvas',
+    label: 'Canvas',
+    render: (api) => <StubCanvasPage api={api} />,
+  },
+  {
+    id: 'cp-stub:command-palette',
+    label: 'Command palette',
+    render: () => <StubCommandPalettePage />,
+  },
+  {
+    id: 'cp-stub:daily-notes',
+    label: 'Daily notes',
+    render: (api) => <StubDailyNotesPage api={api} />,
+  },
+  {
+    id: 'cp-stub:file-recovery',
+    label: 'File recovery',
+    render: (api) => <StubFileRecoveryPage api={api} />,
+  },
+  {
+    id: 'cp-stub:note-composer',
+    label: 'Note composer',
+    render: (api) => <StubNoteComposerPage api={api} />,
+  },
+  {
+    id: 'cp-stub:page-preview',
+    label: 'Page preview',
+    render: (api) => <StubPagePreviewPage api={api} />,
+  },
+  {
+    id: 'cp-stub:quick-switcher',
+    label: 'Quick switcher',
+    render: (api) => <StubQuickSwitcherPage api={api} />,
+  },
+  {
+    id: 'cp-stub:sync',
+    label: 'Sync',
+    render: (api) => <StubSyncPage api={api} />,
+  },
+  {
+    id: 'cp-stub:templates',
+    label: 'Templates',
+    render: (api) => <StubTemplatesPage api={api} />,
+  },
+]
+
+const STUB_CORE_BY_ID = new Map(STUB_CORE_PLUGINS.map((p) => [p.id, p]))
+
+function StubBacklinksPage({ api }: { api?: PluginAPI }) {
+  const comingSoon = useComingSoon(api)
+  return (
+    <div className="settings-section">
+      <StubRow
+        title="Show backlinks at the bottom of notes"
+        description="Make backlinks visible in new tabs by default."
+        control={
+          <StubToggle on={false} label="Toggle backlinks at bottom" onClick={comingSoon('Show backlinks at the bottom of notes')} />
+        }
+      />
+    </div>
+  )
+}
+
+function StubCanvasPage({ api }: { api?: PluginAPI }) {
+  const comingSoon = useComingSoon(api)
+  return (
+    <div className="settings-section">
+      <StubRow
+        title="Default location for new canvas files"
+        description="Where newly created canvases are placed."
+        control={
+          <select defaultValue="root" onChange={comingSoon('Default canvas location')} title="Coming soon">
+            <option value="root">Forge folder</option>
+            <option value="same">Same folder as current file</option>
+            <option value="specific">Specific folder…</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Default mouse wheel behavior"
+        description=""
+        control={
+          <select defaultValue="pan" onChange={comingSoon('Default mouse wheel behavior')} title="Coming soon">
+            <option value="pan">Pan</option>
+            <option value="zoom">Zoom</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Default Ctrl + Drag behavior"
+        description=""
+        control={
+          <select defaultValue="menu" onChange={comingSoon('Default Ctrl+Drag behavior')} title="Coming soon">
+            <option value="menu">Show menu</option>
+            <option value="select">Select</option>
+            <option value="zoom">Zoom</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Show card names"
+        description=""
+        control={
+          <select defaultValue="always" onChange={comingSoon('Show card names')} title="Coming soon">
+            <option value="always">Always</option>
+            <option value="hover">On hover</option>
+            <option value="never">Never</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Snap to grid"
+        description="Snap cards to the background grid when moving and resizing."
+        control={<StubToggle on={true} label="Toggle snap to grid" onClick={comingSoon('Snap to grid')} />}
+      />
+      <StubRow
+        title="Snap to objects"
+        description="Snap cards to nearby objects when moving and resizing."
+        control={<StubToggle on={true} label="Toggle snap to objects" onClick={comingSoon('Snap to objects')} />}
+      />
+      <StubRow
+        title="Zoom threshold for hiding card content"
+        description="Lower values will increase performance but hide card content sooner when zooming out."
+        control={
+          <input
+            type="range"
+            min={0}
+            max={100}
+            defaultValue={40}
+            onChange={comingSoon('Zoom threshold for hiding card content')}
+            title="Coming soon"
+            style={{ minWidth: 120 }}
+          />
+        }
+      />
+    </div>
+  )
+}
+
+function StubCommandPalettePage() {
+  return (
+    <div className="settings-section">
+      <div className="settings-section-title">Pinned commands</div>
+      <div
+        style={{
+          padding: '14px 16px',
+          background: 'var(--background-modifier-hover)',
+          borderRadius: 6,
+        }}
+      >
+        <input
+          type="search"
+          className="settings-search"
+          placeholder="Select a command to add..."
+          disabled
+          style={{ width: '100%', marginBottom: 8 }}
+          title="Coming soon"
+        />
+        <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No commands found.</div>
+      </div>
+    </div>
+  )
+}
+
+function StubDailyNotesPage({ api }: { api?: PluginAPI }) {
+  const comingSoon = useComingSoon(api)
+  const today = new Date().toISOString().slice(0, 10)
+  return (
+    <div className="settings-section">
+      <StubRow
+        title="Date format"
+        description="Choose how daily notes are named in your forge."
+        control={
+          <input
+            type="text"
+            defaultValue={today}
+            onChange={comingSoon('Date format')}
+            title="Coming soon"
+            style={{ minWidth: 160 }}
+          />
+        }
+      />
+      <StubRow
+        title="New file location"
+        description="New daily notes will be placed here."
+        control={
+          <input
+            type="text"
+            placeholder="Example: folder 1/folder 2"
+            onChange={comingSoon('Daily note location')}
+            title="Coming soon"
+            style={{ minWidth: 200 }}
+          />
+        }
+      />
+      <StubRow
+        title="Template file location"
+        description="Choose the file to use as a template."
+        control={
+          <input
+            type="text"
+            placeholder="Example: folder/note"
+            onChange={comingSoon('Daily note template')}
+            title="Coming soon"
+            style={{ minWidth: 200 }}
+          />
+        }
+      />
+    </div>
+  )
+}
+
+function StubFileRecoveryPage({ api }: { api?: PluginAPI }) {
+  const comingSoon = useComingSoon(api)
+  return (
+    <div className="settings-section">
+      <StubRow
+        title="Snapshot interval"
+        description="Minimal interval in minutes between two snapshots."
+        control={
+          <input
+            type="number"
+            min={1}
+            defaultValue={5}
+            onChange={comingSoon('Snapshot interval')}
+            title="Coming soon"
+            style={{ width: 80 }}
+          />
+        }
+      />
+      <StubRow
+        title="History length"
+        description="Number of days the snapshots are kept for."
+        control={
+          <input
+            type="number"
+            min={1}
+            defaultValue={7}
+            onChange={comingSoon('History length')}
+            title="Coming soon"
+            style={{ width: 80 }}
+          />
+        }
+      />
+      <StubRow
+        title="Snapshots"
+        description="View and restore saved snapshots."
+        control={
+          <button
+            type="button"
+            onClick={comingSoon('View snapshots')}
+            title="Coming soon"
+            style={{
+              background: 'var(--interactive-accent)',
+              color: 'var(--interactive-accent-ink)',
+              border: 'none',
+              borderRadius: 4,
+              padding: '4px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            View
+          </button>
+        }
+      />
+      <StubRow
+        title="Clear history"
+        description="Delete all snapshots."
+        control={
+          <button
+            type="button"
+            onClick={comingSoon('Clear file recovery history')}
+            title="Coming soon"
+            style={{
+              background: 'transparent',
+              color: 'var(--text-error, #e06c75)',
+              border: '1px solid var(--text-error, #e06c75)',
+              borderRadius: 4,
+              padding: '4px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Clear
+          </button>
+        }
+      />
+    </div>
+  )
+}
+
+function StubNoteComposerPage({ api }: { api?: PluginAPI }) {
+  const comingSoon = useComingSoon(api)
+  return (
+    <div className="settings-section">
+      <StubRow
+        title="Text after extraction"
+        description="What to show in place of the selected text after extracting it."
+        control={
+          <select defaultValue="link" onChange={comingSoon('Text after extraction')} title="Coming soon">
+            <option value="link">Link to new file</option>
+            <option value="embed">Embed new file</option>
+            <option value="nothing">Nothing</option>
+          </select>
+        }
+      />
+      <StubRow
+        title="Template file location"
+        description="Template file to use when merging or extracting. Available variables: {{content}}, {{fromTitle}}, {{newTitle}}, {{date:FORMAT}}, e.g. {{date:YYYY-MM-DD}}."
+        control={
+          <input
+            type="text"
+            placeholder="Example: folder/note"
+            onChange={comingSoon('Note composer template')}
+            title="Coming soon"
+            style={{ minWidth: 200 }}
+          />
+        }
+      />
+      <StubRow
+        title="Confirm file merge"
+        description="Prompt before merging two files."
+        control={<StubToggle on={true} label="Toggle confirm file merge" onClick={comingSoon('Confirm file merge')} />}
+      />
+    </div>
+  )
+}
+
+function StubPagePreviewPage({ api }: { api?: PluginAPI }) {
+  const comingSoon = useComingSoon(api)
+  const surfaces: ReadonlyArray<{ key: string; label: string; on: boolean }> = [
+    { key: 'search', label: 'Search, Backlinks, and Outgoing links', on: true },
+    { key: 'reading', label: 'Reading view', on: false },
+    { key: 'editing', label: 'Editing view', on: true },
+    { key: 'tabs', label: 'Tab header', on: true },
+    { key: 'files', label: 'Files', on: true },
+    { key: 'properties', label: 'Properties view', on: true },
+    { key: 'bookmarks', label: 'Bookmarks', on: true },
+    { key: 'outline', label: 'Outline', on: true },
+    { key: 'bases', label: 'Bases', on: true },
+    { key: 'graph', label: 'Graph view', on: true },
+  ]
+  return (
+    <div className="settings-section">
+      <div className="settings-section-title">Require Ctrl to trigger page preview on hover</div>
+      {surfaces.map((s) => (
+        <StubRow
+          key={s.key}
+          title={s.label}
+          description=""
+          control={
+            <StubToggle
+              on={s.on}
+              label={`Toggle Ctrl-required on ${s.label}`}
+              onClick={comingSoon(`Page preview: ${s.label}`)}
+            />
+          }
+        />
+      ))}
+    </div>
+  )
+}
+
+function StubQuickSwitcherPage({ api }: { api?: PluginAPI }) {
+  const comingSoon = useComingSoon(api)
+  return (
+    <div className="settings-section">
+      <StubRow
+        title="Show existing only"
+        description="Only show results from existing files. Links to files that are not yet created will be hidden."
+        control={
+          <StubToggle on={false} label="Toggle show existing only" onClick={comingSoon('Show existing only')} />
+        }
+      />
+      <StubRow
+        title="Show attachments"
+        description="Show attachment files like images, videos, and PDFs."
+        control={<StubToggle on={true} label="Toggle show attachments" onClick={comingSoon('Show attachments')} />}
+      />
+    </div>
+  )
+}
+
+function StubSyncPage({ api }: { api?: PluginAPI }) {
+  const comingSoon = useComingSoon(api)
+  return (
+    <div className="settings-section">
+      <p style={{ marginBottom: 12 }}>
+        Nexus Sync is the add-on sync service with end-to-end encryption and version
+        history.
+      </p>
+      <p style={{ marginBottom: 16 }}>
+        To start syncing, please log in or create a new Nexus account.
+      </p>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={comingSoon('Sign up for Sync')}
+          title="Coming soon"
+          style={{
+            background: 'var(--interactive-accent)',
+            color: 'var(--interactive-accent-ink)',
+            border: 'none',
+            borderRadius: 4,
+            padding: '6px 14px',
+            fontSize: 13,
+            cursor: 'pointer',
+          }}
+        >
+          Sign up
+        </button>
+        <button
+          type="button"
+          onClick={comingSoon('Log in to Sync')}
+          title="Coming soon"
+          style={{
+            background: 'var(--background-modifier-hover)',
+            color: 'var(--text-normal)',
+            border: 'none',
+            borderRadius: 4,
+            padding: '6px 14px',
+            fontSize: 13,
+            cursor: 'pointer',
+          }}
+        >
+          Log in
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function StubTemplatesPage({ api }: { api?: PluginAPI }) {
+  const comingSoon = useComingSoon(api)
+  const now = new Date()
+  const today = now.toISOString().slice(0, 10)
+  const time = now.toTimeString().slice(0, 5)
+  return (
+    <div className="settings-section">
+      <StubRow
+        title="Template folder location"
+        description="Files in this folder will be available as templates."
+        control={
+          <input
+            type="text"
+            placeholder="Example: folder 1/folder 2"
+            onChange={comingSoon('Template folder location')}
+            title="Coming soon"
+            style={{ minWidth: 200 }}
+          />
+        }
+      />
+      <StubRow
+        title="Date format"
+        description={
+          '{{date}} in the template file will be replaced with this value. ' +
+          `Your current syntax looks like this: ${today}`
+        }
+        control={
+          <input
+            type="text"
+            placeholder="YYYY-MM-DD"
+            onChange={comingSoon('Templates date format')}
+            title="Coming soon"
+            style={{ minWidth: 160 }}
+          />
+        }
+      />
+      <StubRow
+        title="Time format"
+        description={
+          '{{time}} in the template file will be replaced with this value. ' +
+          `Your current syntax looks like this: ${time}`
+        }
+        control={
+          <input
+            type="text"
+            placeholder="HH:mm"
+            onChange={comingSoon('Templates time format')}
+            title="Coming soon"
+            style={{ minWidth: 160 }}
+          />
+        }
+      />
     </div>
   )
 }
