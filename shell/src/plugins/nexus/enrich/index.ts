@@ -33,6 +33,7 @@ export const enrichPlugin: Plugin = {
     version: '0.1.0',
     core: false,
     activationEvents: ['onStartup'],
+    dependsOn: ['nexus.ai'],
     contributes: {
       configuration: {
         pluginId: 'nexus.enrich',

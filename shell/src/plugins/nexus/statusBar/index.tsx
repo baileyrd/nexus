@@ -2,8 +2,6 @@ import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { FileStats } from './FileStats'
 import { IndexingStatus } from './IndexingStatus'
 
-const COMMAND_REINDEX_FORGE = 'nexus.statusBar.reindexForge'
-
 export const statusBarPlugin: Plugin = {
   manifest: {
     id: 'nexus.statusBar',
@@ -17,15 +15,6 @@ export const statusBarPlugin: Plugin = {
     // it as a hard dep wedged status-bar activation when backlinks was
     // default-off.
     dependsOn: ['nexus.workspace', 'nexus.editor'],
-    contributes: {
-      commands: [
-        {
-          id: COMMAND_REINDEX_FORGE,
-          title: 'Reindex forge',
-          category: 'AI',
-        },
-      ],
-    },
   },
 
   activate(api: PluginAPI) {
@@ -42,13 +31,6 @@ export const statusBarPlugin: Plugin = {
       slot: 'statusBarRight',
       component: () => <IndexingStatus api={api} onReindex={() => triggerReindex(api)} />,
       priority: 20,
-    })
-
-    // FU-2 — manual reindex command. Mirrors the badge button;
-    // exposed in the palette so headless / keyboard-driven users
-    // can fire it without finding the badge.
-    api.commands.register(COMMAND_REINDEX_FORGE, async () => {
-      await triggerReindex(api)
     })
   },
 }

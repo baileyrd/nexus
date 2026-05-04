@@ -62,6 +62,7 @@ const COMMAND_CLEAR = 'nexus.ai.clear'
 const COMMAND_OPEN_SETTINGS = 'nexus.ai.openSettings'
 const COMMAND_CMD_I_OPEN = 'nexus.ai.cmdI.open'
 const COMMAND_CMD_I_CLOSE = 'nexus.ai.cmdI.close'
+const COMMAND_REINDEX_FORGE = 'nexus.ai.reindexForge'
 const CONTEXT_KEY_CMD_I_VISIBLE = 'nexus.ai.cmdI.visible'
 
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
@@ -249,6 +250,7 @@ export const aiPlugin: Plugin = {
         // BL-032 — Cmd+I command-anywhere AI overlay.
         { id: COMMAND_CMD_I_OPEN, title: 'Ask AI about current context…', category: 'AI' },
         { id: COMMAND_CMD_I_CLOSE, title: 'Dismiss AI overlay', category: 'AI' },
+        { id: COMMAND_REINDEX_FORGE, title: 'Reindex forge', category: 'AI' },
       ],
       keybindings: [
         { command: COMMAND_FOCUS, key: 'ctrl+alt+a', mac: 'cmd+alt+a' },
@@ -348,6 +350,30 @@ export const aiPlugin: Plugin = {
     api.commands.register(COMMAND_CLEAR, () => {
       cancelInFlight()
       useAiStore.getState().clearTurns()
+    })
+
+    // FU-2 — manual reindex command. Mirrors the status-bar badge button;
+    // exposed in the palette so keyboard-driven users can fire it without
+    // finding the badge. Lives on the AI plugin so it disappears from the
+    // palette when the user disables AI.
+    api.commands.register(COMMAND_REINDEX_FORGE, async () => {
+      try {
+        const result = await api.kernel.invoke<{ queued?: number }>(
+          'com.nexus.ai',
+          'index_trigger',
+          {},
+        )
+        const queued = typeof result?.queued === 'number' ? result.queued : 0
+        api.notifications.show({
+          type: 'info',
+          message: queued > 0
+            ? `Reindex queued: ${queued} file${queued === 1 ? '' : 's'}.`
+            : 'Reindex queued: nothing to do (forge index empty).',
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        api.notifications.show({ type: 'error', message: `Reindex failed: ${msg}` })
+      }
     })
 
     // Wipe the store when the workspace closes. Answers from a

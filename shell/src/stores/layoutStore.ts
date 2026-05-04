@@ -44,6 +44,10 @@ export const useLayoutStore = create<LayoutStore>()(
       // fields retired (now live in the workspace tree). Bumping the
       // version drops any persisted state from v2.
       version: 3,
+      migrate: (_persisted, _version) => ({
+        activityBar: { visible: true },
+        showViewHeader: true,
+      } as LayoutStore),
       merge: (persisted, current) => ({ ...current, ...(persisted as Partial<LayoutStore>) }),
     }
   )
