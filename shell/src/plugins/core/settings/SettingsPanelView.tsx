@@ -47,12 +47,13 @@ import type { SnippetEntry, SnippetConflict } from '../../../registry/SnippetReg
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface PluginInfo {
-  id:      string
-  name:    string
-  version: string
-  core:    boolean
-  state:   string
-  error?:  string
+  id:           string
+  name:         string
+  version:      string
+  core:         boolean
+  state:        string
+  error?:       string
+  description?: string
   /**
    * Optional declared capability list (WI-18). Core plugins registered
    * via `main.tsx` legitimately leave this absent — they inherit
@@ -68,10 +69,11 @@ interface PluginInfo {
 
 /** Dormant default-off built-in plugin (shipped, not loaded this session). */
 interface AvailablePluginInfo {
-  id:      string
-  name:    string
-  version: string
-  core:    boolean
+  id:           string
+  name:         string
+  version:      string
+  core:         boolean
+  description?: string
 }
 
 // ─── Data hooks ───────────────────────────────────────────────────────────────
@@ -1449,9 +1451,17 @@ function CorePluginRow({
           <span className="plugin-row__id">{plugin.id}</span>
           <span className="plugin-row__badge plugin-row__badge--core">core</span>
           <span className="plugin-row__version">v{plugin.version}</span>
-          <span className={`plugin-row__state plugin-row__state--${plugin.state}`}>
-            {plugin.state}
-          </span>
+          {(() => {
+            // 'registered' is the kernel's lazy-activation state — the plugin
+            // is loaded and its triggers wired, but activate() runs on first
+            // use. From the user's POV that's just "ready", so map the label.
+            const display = plugin.state === 'registered' ? 'ready' : plugin.state
+            return (
+              <span className={`plugin-row__state plugin-row__state--${display}`}>
+                {display}
+              </span>
+            )
+          })()}
           {optional && (() => {
             // `pluginList` no longer surfaces 'inactive' rows (they
             // route through DisabledOptionalRow), so anything reaching
@@ -1475,11 +1485,20 @@ function CorePluginRow({
             )
           })()}
         </div>
+        {plugin.description && (
+          <div className="plugin-row__description">{plugin.description}</div>
+        )}
         {plugin.state === 'error' && plugin.error && (
           <div className="plugin-row__error">{plugin.error}</div>
         )}
         {error && <div className="plugin-row__error">{error}</div>}
-        <CapabilityChipsRow capabilities={capabilities} />
+        {/* Core plugins inherit Capability::ALL from bootstrap and don't
+            declare per-plugin capabilities, so an "(unknown)" chip would
+            be noise. Render the chip row only when the manifest actually
+            lists something. */}
+        {capabilities !== null && capabilities.length > 0 && (
+          <CapabilityChipsRow capabilities={capabilities} />
+        )}
       </div>
     </div>
   )
@@ -1526,6 +1545,9 @@ function DisabledOptionalRow({
             <span className="plugin-row__toggle-track" />
           </label>
         </div>
+        {plugin.description && (
+          <div className="plugin-row__description">{plugin.description}</div>
+        )}
         {error && <div className="plugin-row__error">{error}</div>}
       </div>
     </div>

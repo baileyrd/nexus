@@ -1054,6 +1054,7 @@ body {
   border-radius: 10px;
 }
 .plugin-row__state--active      { color: #4ec9b0; background: rgba(78,201,176,0.15); }
+.plugin-row__state--ready       { color: #4ec9b0; background: rgba(78,201,176,0.15); }
 .plugin-row__state--error       { color: #f48771; background: rgba(244,135,113,0.15); }
 .plugin-row__state--activating  { color: #dcdcaa; background: rgba(220,220,170,0.15); }
 .plugin-row__state--inactive    { color: var(--text-muted); }
@@ -1065,6 +1066,13 @@ body {
   font-family: var(--font-monospace);
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.plugin-row__description {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
 }
 
 /* ─── Plugins tab extras ─────────────────────────────────────────────────── */

@@ -23,6 +23,8 @@ export interface PluginEntry {
   readonly core: boolean
   readonly activationEvents: string[]
   readonly dependsOn?: string[]
+  /** Short, user-facing summary shown in Settings → Plugins. */
+  readonly description: string
   /**
    * SH-020: false for chrome-only plugins that contribute to slots the popout
    * shell does not render. Absent/true means the plugin runs in popouts.
@@ -37,47 +39,55 @@ export interface PluginEntry {
 export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
   // ── Core services ──────────────────────────────────────────────────────────
   {
-    id: 'core.configurationService', name: 'Configuration Service',
+    id: 'core.configuration-service', name: 'Configuration Service',
     version: '0.1.0', core: true, activationEvents: ['onStartup'],
+    description: 'Reads and writes the shell config store; backs api.configuration for every plugin.',
     load: () => import('./core/configurationService').then(m => m.configurationServicePlugin),
   },
   {
-    id: 'core.notificationService', name: 'Notification Service',
+    id: 'core.notification-service', name: 'Notification Service',
     version: '0.1.0', core: true, activationEvents: ['onStartup'],
+    description: 'Toast + status notifications surfaced through api.notifications.',
     load: () => import('./core/notificationService').then(m => m.notificationServicePlugin),
   },
   {
-    id: 'core.fileSystemService', name: 'File System Service',
+    id: 'core.filesystem-service', name: 'File System Service',
     version: '0.1.0', core: true, activationEvents: ['onStartup'],
+    description: 'Forge-relative file IO with capability checks; the only path to user files.',
     load: () => import('./core/fileSystemService').then(m => m.fileSystemServicePlugin),
   },
   {
     id: 'core.settings', name: 'Settings',
-    version: '1.0.0', core: true, activationEvents: ['onStartup'],
+    version: '0.1.0', core: true, activationEvents: ['onStartup'],
     popoutCompatible: false,
     dependsOn: ['core.configuration-service', 'nexus.activityBar'],
+    description: 'The Settings panel — config sections, themes, keybindings, plugin management.',
     load: () => import('./core/settings').then(m => m.settingsPlugin),
   },
   {
     id: 'core.capabilityPrompt', name: 'Capability Prompt',
     version: '0.1.0', core: true, activationEvents: ['onStartup'],
     popoutCompatible: false,
+    description: 'Modal that asks the user to grant or deny high-risk plugin capabilities.',
     load: () => import('./core/capabilityPrompt').then(m => m.capabilityPromptPlugin),
   },
   {
-    id: 'core.themeService', name: 'Theme Service',
+    id: 'core.theme-service', name: 'Theme Service',
     version: '0.1.0', core: true, activationEvents: ['onStartup'],
+    description: 'Loads, switches, and persists colour themes; exposes CSS variables to the shell.',
     load: () => import('./core/themeService').then(m => m.themeServicePlugin),
   },
   {
     id: 'core.zoom', name: 'Zoom',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Application-wide UI zoom with persisted level (Ctrl+=, Ctrl+-, Ctrl+0).',
     load: () => import('./core/zoom').then(m => m.zoomPlugin),
   },
   // ── Workspace + git ────────────────────────────────────────────────────────
   {
     id: 'nexus.workspace', name: 'Workspace',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Tabs, splits, and pane state — the leaf/view layout that hosts every editor.',
     load: () => import('./nexus/workspace').then(m => m.workspacePlugin),
   },
   {
@@ -85,6 +95,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
     dependsOn: ['nexus.workspace'],
+    description: 'Status bar branch + dirty indicator for the forge’s git repository.',
     load: () => import('./nexus/gitStatus').then(m => m.gitStatusPlugin),
   },
   // ── Chrome ─────────────────────────────────────────────────────────────────
@@ -92,18 +103,21 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     id: 'nexus.activityBar', name: 'Activity Bar',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
+    description: 'The left-edge icon rail that switches between sidebar views.',
     load: () => import('./nexus/activityBar').then(m => m.activityBarPlugin),
   },
   {
     id: 'nexus.sidebar', name: 'Sidebar',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
+    description: 'The collapsible left panel that hosts file tree, search, and plugin views.',
     load: () => import('./nexus/sidebar').then(m => m.sidebarPlugin),
   },
   {
     id: 'nexus.rightPanel', name: 'Right Panel',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
+    description: 'The right-side panel for outline, properties, backlinks and similar context views.',
     load: () => import('./nexus/rightPanel').then(m => m.rightPanelPlugin),
   },
   {
@@ -111,6 +125,7 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
     dependsOn: ['nexus.workspace', 'nexus.editor'],
+    description: 'Bottom status bar — cursor position, word count, encoding, plugin badges.',
     load: () => import('./nexus/statusBar').then(m => m.statusBarPlugin),
   },
   {
@@ -118,56 +133,66 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
     dependsOn: ['nexus.workspace'],
+    description: 'Empty-workspace welcome screen with quick links to recent forges and docs.',
     load: () => import('./nexus/launcher').then(m => m.launcherPlugin),
   },
   // ── Editing surface ────────────────────────────────────────────────────────
   {
     id: 'nexus.files', name: 'Files',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'File-tree explorer with create / rename / move / delete and drag-and-drop.',
     load: () => import('./nexus/files').then(m => m.filesPlugin),
   },
   {
     id: 'nexus.editor', name: 'Editor',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'CodeMirror-based markdown editor with live preview, snippets and link-aware extensions.',
     load: () => import('./nexus/editor').then(m => m.editorPlugin),
   },
   {
     id: 'nexus.outline', name: 'Outline',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Heading outline of the active document, with click-to-jump navigation.',
     load: () => import('./nexus/outline').then(m => m.outlinePlugin),
   },
   // ── UX primitives ──────────────────────────────────────────────────────────
   {
     id: 'nexus.commandPalette', name: 'Command Palette',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Ctrl+P fuzzy-finder for every command contributed by the shell and plugins.',
     load: () => import('./nexus/commandPalette').then(m => m.commandPalettePlugin),
   },
   {
     id: 'nexus.confirm', name: 'Confirm',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Generic confirm / prompt modal exposed to plugins via api.ui.confirm.',
     load: () => import('./nexus/confirm').then(m => m.confirmPlugin),
   },
   {
     id: 'nexus.paneMode', name: 'Pane Mode',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
+    description: 'Toggles edit / read / source modes on the active pane and persists per-leaf state.',
     load: () => import('./nexus/paneMode').then(m => m.paneModePlugin),
   },
   // ── Search ─────────────────────────────────────────────────────────────────
   {
     id: 'nexus.search', name: 'Search',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Full-text search across the forge with path:, tag: and prop: operators.',
     load: () => import('./nexus/search').then(m => m.searchPlugin),
   },
   // ── View creators ──────────────────────────────────────────────────────────
   {
     id: 'nexus.canvas', name: 'Canvas',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Infinite-canvas surface for sketching, mind-maps and visual note layout.',
     load: () => import('./nexus/canvas').then(m => m.canvasPlugin),
   },
   {
     id: 'nexus.bases', name: 'Bases',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Database-style table views over notes, filtered by frontmatter properties.',
     load: () => import('./nexus/bases').then(m => m.basesPlugin),
   },
   // ── Plugin management ──────────────────────────────────────────────────────
@@ -175,18 +200,21 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     id: 'nexus.pluginsMgmt', name: 'Plugins',
     version: '0.1.0', core: true, activationEvents: ['onStartup'],
     popoutCompatible: false,
+    description: 'Standalone plugin manager modal — toggle, review capabilities, scan drop folders.',
     load: () => import('./nexus/pluginsMgmt').then(m => m.pluginsMgmtPlugin),
   },
   {
     id: 'nexus.extensionsTab', name: 'Extensions Tab',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
+    description: 'Activity-bar tab listing installed plugins with at-a-glance state and errors.',
     load: () => import('./nexus/extensionsTab').then(m => m.extensionsTabPlugin),
   },
   {
     id: 'nexus.memory', name: 'Memory',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
+    description: 'Persistent agent memory store — long-term facts surfaced to AI features.',
     load: () => import('./nexus/memory').then(m => m.memoryPlugin),
   },
 ]
@@ -200,121 +228,145 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.ai', name: 'AI',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Inline AI assistant — chat, edit, completion. Ctrl+I opens the side dock.',
     load: () => import('./nexus/ai').then(m => m.aiPlugin),
   },
   {
     id: 'nexus.semanticSearch', name: 'Semantic Search',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Embedding-based search across the forge — find notes by meaning, not keyword.',
     load: () => import('./nexus/semanticSearch').then(m => m.semanticSearchPlugin),
   },
   {
     id: 'nexus.linkSuggest', name: 'Link Suggest',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'AI-powered suggestions for [[wiki-links]] you might want to add to the current note.',
     load: () => import('./nexus/linkSuggest').then(m => m.linkSuggestPlugin),
   },
   {
     id: 'nexus.recall', name: 'Recall',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Spaced-repetition flashcards generated from highlights and frontmatter blocks.',
     load: () => import('./nexus/recall').then(m => m.recallPlugin),
   },
   {
     id: 'nexus.enrich', name: 'Enrich',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'AI enrichment pipeline — auto-tag, summarise, and extract entities from notes.',
     load: () => import('./nexus/enrich').then(m => m.enrichPlugin),
   },
   {
     id: 'nexus.agent', name: 'Agent',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Autonomous multi-step agent runner with planning and tool-use over your forge.',
     load: () => import('./nexus/agent').then(m => m.agentPlugin),
   },
   {
     id: 'nexus.mcp', name: 'MCP',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Model Context Protocol bridge — connect external MCP servers as tools and resources.',
     load: () => import('./nexus/mcp').then(m => m.mcpPlugin),
   },
   {
     id: 'nexus.workflow', name: 'Workflow',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Author and run multi-step workflows that chain commands, prompts and scripts.',
     load: () => import('./nexus/workflow').then(m => m.workflowPlugin),
   },
   {
     id: 'nexus.skills', name: 'Skills',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Reusable AI skill library — invoke saved prompts and automations from the palette.',
     load: () => import('./nexus/skills').then(m => m.skillsPlugin),
   },
   {
     id: 'nexus.templates', name: 'Templates',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Insert templated notes from a library, with variable expansion and folder targeting.',
     load: () => import('./nexus/templates').then(m => m.templatesPlugin),
   },
   {
     id: 'nexus.notion', name: 'Notion',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Import Notion exports as markdown, preserving frontmatter and attachment links.',
     load: () => import('./nexus/notion').then(m => m.notionPlugin),
   },
   {
     id: 'nexus.terminal', name: 'Terminal',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Embedded shell tabs running inside the panel area, scoped to the forge directory.',
     load: () => import('./nexus/terminal').then(m => m.terminalPlugin),
   },
   {
     id: 'nexus.processes', name: 'Processes',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'View and manage long-running background tasks (indexers, agents, MCP servers).',
     load: () => import('./nexus/processes').then(m => m.processesPlugin),
   },
   {
     id: 'nexus.activityTimeline', name: 'Activity Timeline',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Chronological feed of recent edits, commits, and AI actions across the forge.',
     load: () => import('./nexus/activityTimeline').then(m => m.activityTimelinePlugin),
   },
   {
     id: 'nexus.graph', name: 'Graph',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Local link-graph visualisation centred on the active note.',
     load: () => import('./nexus/graph').then(m => m.graphPlugin),
   },
   {
     id: 'nexus.graph.global', name: 'Global Graph',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Forge-wide link graph — every note and edge, with clustering and search overlay.',
     load: () => import('./nexus/graph/globalIndex').then(m => m.graphGlobalPlugin),
   },
   {
     id: 'nexus.backlinks', name: 'Backlinks',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Side panel listing every note that links to the current document.',
     load: () => import('./nexus/backlinks').then(m => m.backlinksPlugin),
   },
   {
     id: 'nexus.comments', name: 'Comments',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Inline review comments anchored to selections, persisted alongside the note.',
     load: () => import('./nexus/comments').then(m => m.commentsPlugin),
   },
   {
     id: 'nexus.bookmarks', name: 'Bookmarks',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Pin notes, headings, and search queries for one-keystroke access.',
     load: () => import('./nexus/bookmarks').then(m => m.bookmarksPlugin),
   },
   {
     id: 'nexus.outgoingLinks', name: 'Outgoing Links',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Side panel listing every link, embed, and unresolved reference in the active note.',
     load: () => import('./nexus/outgoingLinks').then(m => m.outgoingLinksPlugin),
   },
   {
     id: 'nexus.fileProperties', name: 'File Properties',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Edit the active note’s frontmatter as a typed key/value form.',
     load: () => import('./nexus/fileProperties').then(m => m.filePropertiesPlugin),
   },
   {
     id: 'nexus.tags', name: 'Tags',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Browse and filter notes by #tag, with counts and nested-tag drill-down.',
     load: () => import('./nexus/tags').then(m => m.tagsPlugin),
   },
   {
     id: 'nexus.allProperties', name: 'All Properties',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Forge-wide property explorer — every frontmatter key, value, and the notes using it.',
     load: () => import('./nexus/allProperties').then(m => m.allPropertiesPlugin),
   },
   {
     id: 'community.mermaid', name: 'Mermaid',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Renders ```mermaid``` code blocks as inline diagrams in read-mode previews.',
     load: () => import('./community/mermaid').then(m => m.mermaidPlugin),
   },
 ]

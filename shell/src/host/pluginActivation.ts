@@ -222,6 +222,7 @@ function refreshPluginServices() {
       name: e?.name ?? id,
       version: e?.version ?? '?',
       core: e?.core ?? false,
+      description: e?.description,
       state,
       error: host.getError(id)?.message,
     }
@@ -232,10 +233,11 @@ function refreshPluginServices() {
   const available = DEFAULT_OFF_PLUGINS
     .filter(e => !enabled.has(e.id))
     .map(e => ({
-      id:      e.id,
-      name:    e.name,
-      version: e.version,
-      core:    e.core,
+      id:          e.id,
+      name:        e.name,
+      version:     e.version,
+      core:        e.core,
+      description: e.description,
     }))
   reg.updateService('availablePlugins', available)
   eventBus.emit(PLUGIN_LIST_CHANGED_EVENT, null)
