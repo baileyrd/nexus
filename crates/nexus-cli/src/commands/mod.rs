@@ -17,6 +17,7 @@ pub mod plugin;
 pub mod proc;
 pub mod skill;
 pub mod tags;
+pub mod template;
 pub mod term;
 pub mod tui;
 pub mod watch;

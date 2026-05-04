@@ -132,6 +132,9 @@ enum Commands {
     /// Export forge content to external formats (Notion, …)
     Export(ExportArgs),
 
+    /// Page template operations (list, apply)
+    Template(TemplateArgs),
+
     /// Plugin-registered subcommand (`nexus <plugin-id> [args…]`)
     #[command(external_subcommand)]
     External(Vec<OsString>),
@@ -943,6 +946,35 @@ enum ImportCommand {
 }
 
 #[derive(Parser)]
+struct TemplateArgs {
+    #[command(subcommand)]
+    command: TemplateCommand,
+}
+
+#[derive(Subcommand)]
+enum TemplateCommand {
+    /// List every template available in the active forge.
+    List,
+    /// Render a template and write the result to the forge.
+    Apply {
+        /// Template name (from `template list`)
+        name: String,
+        /// Set a parameter: `--arg key=value` (repeatable)
+        #[arg(long = "arg", action = ArgAction::Append)]
+        args: Vec<String>,
+        /// Override the template's `target_path`. Forge-relative.
+        #[arg(long = "target")]
+        target: Option<PathBuf>,
+        /// Overwrite the destination if it exists.
+        #[arg(long = "overwrite")]
+        overwrite: bool,
+        /// Print what would be written without touching disk.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
+}
+
+#[derive(Parser)]
 struct ExportArgs {
     #[command(subcommand)]
     command: ExportCommand,
@@ -1505,6 +1537,17 @@ fn main() {
             ExportCommand::Notion { source, dest } => {
                 commands::export::notion_dir(&app, source, &dest)
             }
+        },
+
+        Commands::Template(args) => match args.command {
+            TemplateCommand::List => commands::template::list(&app),
+            TemplateCommand::Apply {
+                name,
+                args,
+                target,
+                overwrite,
+                dry_run,
+            } => commands::template::apply(&app, &name, args, target, overwrite, dry_run),
         },
 
         // Dispatch to a plugin-registered CLI subcommand: `nexus <subcommand> [args…]`

@@ -22,6 +22,7 @@ nexus-terminal = { path = "../nexus-terminal" }
 nexus-tui = { path = "../nexus-tui" }
 nexus-panic-log = { path = "../nexus-panic-log" }
 nexus-formats = { path = "../nexus-formats" }
+nexus-templates = { path = "../nexus-templates" }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }
