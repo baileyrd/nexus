@@ -42,6 +42,9 @@ import { Minimap, type MinimapHandle } from './Minimap'
 import { exportCanvasPng, triggerDownload } from './exportPng'
 import { autoLayout } from './autoLayout'
 import { setActiveCanvas, type CanvasHandle } from './activeCanvas'
+import { CanvasRightRail } from './CanvasRightRail'
+import { CanvasDragRail, CANVAS_BLANK_CARD_MIME } from './CanvasDragRail'
+import { getCanvasApi } from './canvasApi'
 import { createPatchQueue } from './patchQueue'
 import {
   buildBlockRefDropNode,
@@ -840,13 +843,37 @@ export function CanvasView({ relpath, client }: Props) {
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
     }
     const onDrop = (e: DragEvent) => {
-      const payload = readBlockRefPayload(e)
-      if (!payload) return
-      e.preventDefault()
       const rect = canvas.getBoundingClientRect()
       const cx = e.clientX - rect.left
       const cy = e.clientY - rect.top
       const world = screenToWorld(cx, cy)
+
+      // Bottom-rail "drag to add card" → empty text node at drop point.
+      // Cheaper to check the MIME than to parse the payload.
+      if (e.dataTransfer?.types.includes(CANVAS_BLANK_CARD_MIME)) {
+        e.preventDefault()
+        const { width, height } = DEFAULT_TEXT_NODE_SIZE
+        const node: CanvasNode = {
+          id: newNodeId(),
+          type: 'text',
+          x: world.x - width / 2,
+          y: world.y - height / 2,
+          width,
+          height,
+          text: '',
+        }
+        useCanvasStore.getState().updateDoc(relpath, (d) => applyNodeAdd(d, node))
+        useCanvasStore.getState().setSelection(relpath, [node.id])
+        commitRef.current(
+          [{ op: 'node_add', node }],
+          [{ op: 'node_remove', id: node.id }],
+        )
+        return
+      }
+
+      const payload = readBlockRefPayload(e)
+      if (!payload) return
+      e.preventDefault()
       const node = buildBlockRefDropNode(payload, world)
       useCanvasStore.getState().updateDoc(relpath, (d) => applyNodeAdd(d, node))
       useCanvasStore.getState().setSelection(relpath, [node.id])
@@ -1092,29 +1119,119 @@ export function CanvasView({ relpath, client }: Props) {
     }
   }
 
+  // Coming-soon toast factory used by the right rail's settings popup
+  // (Snap to objects, Read-only) and the drag rail's note/media stubs.
+  // Reads `getCanvasApi()` lazily so the canvas plugin's activate hook
+  // gets a chance to publish the api before the first interaction.
+  const comingSoon = useCallback(
+    (label: string) => () => {
+      getCanvasApi()?.notifications.show({
+        type: 'info',
+        message: `${label} — coming soon.`,
+      })
+    },
+    [],
+  )
+
+  // Build the canvas-handle each render. Cheap object construction
+  // beats juggling refs to keep the closures fresh; both the focus
+  // effect and the chrome rails consume the same object.
+  const handle: CanvasHandle = {
+    undo: runUndo,
+    redo: runRedo,
+    deleteSelected: runDelete,
+    fit: () => runFit(false),
+    fitSelection: () => runFit(true),
+    toggleHelp: () => setShowHelp((v) => !v),
+    closeHelp: () => setShowHelp(false),
+    toggleGrid: onToggleGrid,
+    toggleBackgroundInspector: () => setShowDocInspector((v) => !v),
+    tidy: onTidy,
+    exportPng: onExportPng,
+    exportSvg: onExportSvg,
+    exportPdf: onExportPdf,
+    zoomBy: (factor: number) => {
+        const cam = cameraRef.current
+        const c = canvasRef.current
+        if (!c) return
+        const ZOOM_MIN = 0.1
+        const ZOOM_MAX = 8
+        const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, cam.zoom * factor))
+        if (next === cam.zoom) return
+        // Anchor zoom on the viewport centre. cameraDirtyRef triggers
+        // the RAF flush so the canvas redraws and the store gets the
+        // update.
+        const rect = c.getBoundingClientRect()
+        const cx = rect.width / 2
+        const cy = rect.height / 2
+        const wx = (cx - cam.x) / cam.zoom
+        const wy = (cy - cam.y) / cam.zoom
+        cameraRef.current = {
+          x: cx - wx * next,
+          y: cy - wy * next,
+          zoom: next,
+        }
+        cameraDirtyRef.current = true
+      },
+      resetZoom: () => {
+        const cam = cameraRef.current
+        if (cam.zoom === 1) return
+        const c = canvasRef.current
+        if (!c) return
+        const rect = c.getBoundingClientRect()
+        const cx = rect.width / 2
+        const cy = rect.height / 2
+        const wx = (cx - cam.x) / cam.zoom
+        const wy = (cy - cam.y) / cam.zoom
+        cameraRef.current = { x: cx - wx, y: cy - wy, zoom: 1 }
+        cameraDirtyRef.current = true
+      },
+      addBlankCard: (world?: { x: number; y: number }) => {
+        const c = canvasRef.current
+        const cam = cameraRef.current
+        let target = world
+        if (!target && c) {
+          const rect = c.getBoundingClientRect()
+          target = {
+            x: (rect.width / 2 - cam.x) / cam.zoom,
+            y: (rect.height / 2 - cam.y) / cam.zoom,
+          }
+        }
+        if (!target) return
+        const { width, height } = DEFAULT_TEXT_NODE_SIZE
+        const node: CanvasNode = {
+          id: newNodeId(),
+          type: 'text',
+          x: target.x - width / 2,
+          y: target.y - height / 2,
+          width,
+          height,
+          text: '',
+        }
+        useCanvasStore.getState().updateDoc(relpath, (d) => applyNodeAdd(d, node))
+        useCanvasStore.getState().setSelection(relpath, [node.id])
+        commitRef.current(
+          [{ op: 'node_add', node }],
+          [{ op: 'node_remove', id: node.id }],
+        )
+    },
+  }
+
+  // Keep a stable ref to the latest handle so the focus-claim effect
+  // below always pushes the freshest closures into setActiveCanvas
+  // without a re-subscribe cycle. The rails read from `handle`
+  // directly each render.
+  const handleRef = useRef(handle)
+  handleRef.current = handle
+
   // Publish the active-canvas handle whenever focus lands inside the
   // container. Commands registered by the plugin dispatch against
   // whichever canvas last claimed focus.
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
-    const handle: CanvasHandle = {
-      undo: runUndo,
-      redo: runRedo,
-      deleteSelected: runDelete,
-      fit: () => runFit(false),
-      fitSelection: () => runFit(true),
-      toggleHelp: () => setShowHelp((v) => !v),
-      closeHelp: () => setShowHelp(false),
-      toggleGrid: onToggleGrid,
-      toggleBackgroundInspector: () => setShowDocInspector((v) => !v),
-      tidy: onTidy,
-      exportPng: onExportPng,
-      exportSvg: onExportSvg,
-      exportPdf: onExportPdf,
-    }
     const claimFocus = () => {
-      setActiveCanvas(handle)
+      setActiveCanvas(handleRef.current)
       contextKeyService.set('canvas.focused', true)
     }
     const releaseFocus = () => {
@@ -1144,8 +1261,7 @@ export function CanvasView({ relpath, client }: Props) {
       container.removeEventListener('focusout', onFocusOut)
       container.removeEventListener('pointerdown', focusOnPointer)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runUndo, runRedo, runDelete, runFit, onToggleGrid, onTidy, onExportPng])
+  }, [])
 
   // Keep the help-overlay context key in sync so the Escape binding
   // only fires when the overlay is actually open.
@@ -1196,6 +1312,12 @@ export function CanvasView({ relpath, client }: Props) {
         />
       )}
       <Minimap ref={minimapRef} onRecenter={onMinimapRecenter} />
+      <CanvasRightRail
+        handle={handle}
+        showGrid={showGrid}
+        comingSoon={comingSoon}
+      />
+      <CanvasDragRail comingSoon={comingSoon} />
       <ControlStrip
         showGrid={showGrid}
         onToggleGrid={onToggleGrid}

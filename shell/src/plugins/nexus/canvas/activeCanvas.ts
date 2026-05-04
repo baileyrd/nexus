@@ -23,6 +23,12 @@ export interface CanvasHandle {
   exportPng(): void
   exportSvg(): void
   exportPdf(): void
+  /** Multiplicative zoom around the viewport centre. */
+  zoomBy(factor: number): void
+  /** Reset camera to zoom = 1, anchored on viewport centre. */
+  resetZoom(): void
+  /** Insert a blank text node at world coordinates (default: viewport centre). */
+  addBlankCard(world?: { x: number; y: number }): void
 }
 
 let active: CanvasHandle | null = null

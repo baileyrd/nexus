@@ -11,6 +11,7 @@ import { CanvasView } from './CanvasView'
 import { canvasPaneViewCreator } from './CanvasPaneView'
 import { makeCanvasKernelClient } from './kernelClient'
 import { withActiveCanvas } from './activeCanvas'
+import { setCanvasApi } from './canvasApi'
 
 /** Command ids are exported so CanvasView can reference them in the
  *  help overlay rather than hard-coding strings. */
@@ -118,6 +119,7 @@ export const canvasPlugin: Plugin = {
 
   async activate(api: PluginAPI) {
     const client = makeCanvasKernelClient(api.kernel)
+    setCanvasApi(api)
 
     viewRegistry.register(
       'canvas',
