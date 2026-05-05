@@ -27,6 +27,7 @@ members = [
     "crates/nexus-linkpreview",
     "crates/nexus-comments",
     "crates/nexus-panic-log",
+    "crates/nexus-gpui",
 ]
 
 [workspace.package]
@@ -135,6 +136,17 @@ rustyline = "14"
 # TUI
 ratatui = "0.30"
 crossterm = "0.29"
+
+# GPU-accelerated native UI (ADR 0026 — gpui desktop shell)
+# Pin to a specific commit once Phase 0 spike validates the build.
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+
+# VTE state machine + terminal grid (ADR 0027)
+alacritty-terminal = "0.24"
+vte = "0.15"
+
+# Force-directed graph layout (Phase 5 global graph view)
+forceatlas2 = "0.4"
 
 # Knowledge graph
 petgraph = "0.7"

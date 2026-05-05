@@ -58,6 +58,8 @@ pub use nexus_formats::canvas::serialize as serialize_canvas;
 pub const CLI_PLUGIN_ID: &str = "com.nexus.cli";
 /// Plugin id for the in-tree Nexus TUI invoker.
 pub const TUI_PLUGIN_ID: &str = "com.nexus.tui";
+/// Plugin id for the in-tree Nexus gpui desktop shell invoker (ADR 0026).
+pub const GPUI_PLUGIN_ID: &str = "com.nexus.gpui";
 
 /// Assembled Nexus runtime handed back to the invoker.
 ///
@@ -130,6 +132,20 @@ pub fn init_forge(forge_root: &std::path::Path) -> Result<()> {
 #[allow(clippy::needless_pass_by_value)]
 pub fn build_tui_runtime(forge_root: PathBuf) -> Result<Runtime> {
     build(&forge_root, TUI_PLUGIN_ID, "Nexus TUI")
+}
+
+/// Build a runtime with the gpui desktop shell registered as the invoker plugin.
+///
+/// Called once at application startup by `nexus-gpui` before the gpui event
+/// loop starts. The returned [`Runtime`] should be wrapped in
+/// `Arc<Mutex<Runtime>>` and shared with gpui background tasks that make
+/// `ipc_call`s via a `tokio::runtime::Runtime::block_on` bridge.
+///
+/// # Errors
+/// See [`build_cli_runtime`].
+#[allow(clippy::needless_pass_by_value)]
+pub fn build_gpui_runtime(forge_root: PathBuf) -> Result<Runtime> {
+    build(&forge_root, GPUI_PLUGIN_ID, "Nexus")
 }
 
 fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &str) -> Result<Runtime> {
