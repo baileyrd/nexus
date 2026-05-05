@@ -2019,6 +2019,12 @@ type = "file_event"
 
     #[test]
     fn file_event_spec_rejects_invalid_regex_and_unknown_event() {
+        // AIG-03 — `parse_workflow_text` now rejects these at parse
+        // time via `validate_trigger`. The runtime spec parser
+        // remains a defence-in-depth layer (community plugins or
+        // direct construction may still hand us a Workflow that
+        // bypassed the parse-layer validator), so we still exercise
+        // `FileEventSpec::from_trigger` here using bare toml decode.
         let bad_pat = r#"
 [workflow]
 name = "FE"
@@ -2027,7 +2033,7 @@ name = "FE"
 type = "file_event"
 pattern = "[unterminated"
 "#;
-        let wf = parse_workflow_text(bad_pat).unwrap();
+        let wf: Workflow = toml::from_str(bad_pat).unwrap();
         assert!(FileEventSpec::from_trigger("FE", &wf).is_err());
 
         let bad_event = r#"
@@ -2038,7 +2044,7 @@ name = "FE"
 type = "file_event"
 events = ["resurrected"]
 "#;
-        let wf = parse_workflow_text(bad_event).unwrap();
+        let wf: Workflow = toml::from_str(bad_event).unwrap();
         assert!(FileEventSpec::from_trigger("FE", &wf).is_err());
     }
 

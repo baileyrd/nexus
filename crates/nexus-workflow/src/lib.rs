@@ -36,6 +36,7 @@ mod interpolate;
 mod parse;
 mod registry;
 pub mod templates;
+mod trigger_validation;
 pub mod webhook;
 
 pub use ai_steps::{
@@ -58,6 +59,7 @@ pub use executor::{
 pub use interpolate::{interpolate_step, substitute, substitute_string, VariableMap};
 pub use parse::{parse_workflow_file, parse_workflow_text, WorkflowParseError};
 pub use registry::{WorkflowRegistry, WorkflowRegistryError};
+pub use trigger_validation::validate_trigger;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

@@ -332,9 +332,14 @@ pub fn build_trigger_vars(req: &ParsedRequest, remote_addr: &str) -> serde_json:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse_workflow_text;
 
     fn workflow_with_trigger(extra: &str) -> Workflow {
+        // Use bare toml decode (not `parse_workflow_text`) so the
+        // AIG-03 trigger validation doesn't pre-empt the unit tests
+        // that exercise `WebhookSpec::from_trigger` directly. The
+        // happy-path tests round-trip the same shape through
+        // `parse_workflow_text` in `trigger_validation::tests` —
+        // duplicating coverage at the parse layer is unnecessary.
         let src = format!(
             r#"
 [workflow]
@@ -345,7 +350,7 @@ type = "webhook"
 {extra}
 "#
         );
-        parse_workflow_text(&src).unwrap()
+        toml::from_str(&src).unwrap()
     }
 
     #[test]

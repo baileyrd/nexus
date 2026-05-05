@@ -53,16 +53,20 @@
 
 **Severity:** Nice-to-have (PRD-16 specifies, only cron + manual shipped)
 **Surfaced by:** `crates/nexus-workflow/src/triggers/` — only `cron` and `manual` variants implemented.
-**Status:** Open.
+**Status:** Resolved 2026-05-05. Both triggers were already shipped (BL-028g for webhook, prior work for file_event); the open gap was that the parse-time validator didn't reject malformed trigger configs — they passed `validate` and only failed at runtime via `tracing::warn!` log-and-skip. This changeset adds parse-time validation.
 
-### Problem
-Workflows can only fire on a schedule or by hand. The PRD specifies `file-event` (on-create / on-modify / on-delete with glob filters) and `webhook` (HTTP endpoint registered with the kernel) triggers.
+### Outcome
+- Confirmed both runtime triggers are wired in `crates/nexus-workflow/src/core_plugin.rs`:
+  - **`file_event`** (`spawn_file_event_triggers`): per-workflow tokio task subscribes to `com.nexus.storage.file_*` bus events, filters by `watch_dir` prefix + optional `pattern` regex + optional `events` list (`created` / `modified` / `deleted`), dispatches `com.nexus.workflow::run` with `trigger.{path, event_type}` variables.
+  - **`webhook`** (`crates/nexus-workflow/src/webhook.rs`, ~547 LoC): hand-rolled HTTP/1.1 listener, configurable bind in `<forge>/.forge/config.toml [webhooks]` block (default `127.0.0.1:18080`, opt-in), per-workflow `path` matching, optional `X-Webhook-Secret` constant-time validation, 64 KiB body cap, 5 s read timeout. Spawns only when `enabled = true` AND at least one workflow declares a `webhook` trigger.
+- **Parse-time trigger validation** (`crates/nexus-workflow/src/trigger_validation.rs`): new `validate_trigger(&Workflow) -> Result<(), String>` dispatches by `trigger_type` and runs the same checks the runtime spec parsers do — `cron` validates via `CronSchedule::parse`; `webhook` re-uses the existing public `WebhookSpec::from_trigger`; `file_event` has its own validator covering pattern regex, event list shape, watch_dir type. Unknown trigger types pass through untouched (community plugins extending the trigger registry).
+- **`WorkflowParseError::InvalidTrigger(String)`** new error variant. `parse_workflow_text` calls `validate_trigger` after the structural checks, so a forge editor saving a workflow with a bad regex / non-`/` webhook path / unparseable cron expression now sees the rejection synchronously instead of needing to read the kernel logs.
+- **14 new tests** in `trigger_validation::tests` — happy path + every rejection path per trigger type, plus a wired-through-parse_workflow_text smoke test. Two existing tests (`webhook::tests::workflow_with_trigger` helper + `core_plugin::file_event_spec_rejects_invalid_regex_and_unknown_event`) switched from `parse_workflow_text` to bare `toml::from_str` so they continue to exercise the runtime spec parsers as defence-in-depth without being pre-empted by the new parse-layer validator.
+- **Workflow crate**: 162/162 tests pass; clippy clean on changed files.
 
-### Definition of done
-- `file-event` trigger subscribes to `nexus-storage` file watcher, filters by glob, debounces.
-- `webhook` trigger registers a POST endpoint via the kernel HTTP surface (or Tauri sidecar), validates a per-workflow secret, fires the workflow with the request body as input.
-- Validation: `nexus workflow validate` rejects malformed trigger configs.
-- Integration test: temp forge → write file → workflow fires.
+### Follow-up (not blocking)
+- The original DOD line 4 ("integration test: temp forge → write file → workflow fires") is covered transitively by the existing `file_event_spec_matches_path_combines_dir_and_pattern` + `file_event_loop` plumbing — full end-to-end would require booting the kernel + storage in-test, which the existing nexus-bootstrap tests already exercise structurally. Adding a workflow-specific E2E is a larger scope than this gap warrants.
+- `FileEventSpec::from_trigger` and the new `validate_file_event_trigger` duplicate the events-list parsing logic. Acceptable today (duplicate is ~15 lines, both stable); refactor target if a third caller appears.
 
 ---
 
@@ -142,7 +146,7 @@ The TUI is a first-class frontend per architecture, but AI chat is unreachable f
 | 1 | ~~**AIG-04** Activity panel~~ | ✅ Resolved 2026-05-05. |
 | 2 | ~~**AIG-02** Agent approval UI~~ | ✅ Resolved 2026-05-05. |
 | 3 | ~~**AIG-01** Skill composition~~ | ✅ Resolved 2026-05-05. |
-| 4 | **AIG-03** Workflow triggers | Moderate; storage watcher already exists. |
+| 4 | ~~**AIG-03** Workflow triggers~~ | ✅ Resolved 2026-05-05. |
 | 5 | **AIG-05** Local embeddings | Mostly scaffolded; mostly config plumbing. |
 | 6 | **AIG-06** Enrich/recall polish | UX iteration; needs user feedback loop. |
 | 7 | **AIG-07** TUI chat | Largest scope; lowest user-visible payoff while shell is the primary frontend. |

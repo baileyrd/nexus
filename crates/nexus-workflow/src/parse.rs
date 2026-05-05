@@ -19,6 +19,12 @@ pub enum WorkflowParseError {
     /// Required fields missing after decode.
     #[error("workflow missing required field: {0}")]
     MissingField(&'static str),
+    /// AIG-03 — trigger config rejected by the type-specific validator
+    /// (invalid cron / non-`/` webhook path / malformed `file_event` regex,
+    /// etc.). Carries the human-readable reason from
+    /// [`crate::validate_trigger`].
+    #[error("invalid trigger config: {0}")]
+    InvalidTrigger(String),
 }
 
 /// Parse a workflow from an in-memory string.
@@ -56,6 +62,11 @@ fn validate(w: &Workflow) -> Result<(), WorkflowParseError> {
             return Err(WorkflowParseError::MissingField("steps[].type"));
         }
     }
+    // AIG-03 — type-specific trigger validation. Catches invalid
+    // cron expressions, non-`/` webhook paths, and malformed
+    // file_event regex / event lists at parse time.
+    crate::trigger_validation::validate_trigger(w)
+        .map_err(WorkflowParseError::InvalidTrigger)?;
     Ok(())
 }
 
