@@ -324,6 +324,38 @@
   filter: brightness(1.08);
 }
 
+/* Inline abort form — appears when the user clicks "Abort session"
+ * instead of routing through the native window.prompt(). */
+.agent-approval__abort {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+}
+
+.agent-approval__abort-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.agent-approval__abort input[type='text'] {
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text-normal);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.agent-approval__abort input[type='text']:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
 /* ── History sidebar ──────────────────────────────────────────────── */
 
 .agent-session__history {

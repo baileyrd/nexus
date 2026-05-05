@@ -11,7 +11,7 @@
  * lets the runtime be unit-tested in isolation.
  */
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
 import './agent.css'
 import {
@@ -229,8 +229,15 @@ interface ApprovalCardProps {
 
 function ApprovalCard({ round, onSubmit }: ApprovalCardProps): JSX.Element {
   const toggleApproval = useAgentSessionStore((s) => s.toggleApproval)
+  const [abortReason, setAbortReason] = useState<string | null>(null)
   const allApproved = round.toolCalls.every((tc) => round.approvals[tc.id] === true)
   const anyApproved = round.toolCalls.some((tc) => round.approvals[tc.id] === true)
+
+  const submitAbort = () => {
+    onSubmit('abort', (abortReason ?? 'user cancelled').trim() || 'user cancelled')
+    setAbortReason(null)
+  }
+
   return (
     <article className="agent-approval" data-testid="agent-approval-card">
       <header>
@@ -248,27 +255,64 @@ function ApprovalCard({ round, onSubmit }: ApprovalCardProps): JSX.Element {
           />
         ))}
       </ul>
-      <footer className="agent-approval__actions">
-        <button
-          type="button"
-          onClick={() => onSubmit(allApproved ? 'approve_all' : 'partial')}
-          disabled={!anyApproved}
-          data-testid="agent-approval-submit"
-        >
-          {allApproved ? 'Approve all' : 'Approve selected'}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            const reason = window.prompt('Why abort?', 'user cancelled')
-            if (reason === null) return
-            onSubmit('abort', reason)
+      {abortReason === null ? (
+        <footer className="agent-approval__actions">
+          <button
+            type="button"
+            onClick={() => onSubmit(allApproved ? 'approve_all' : 'partial')}
+            disabled={!anyApproved}
+            data-testid="agent-approval-submit"
+          >
+            {allApproved ? 'Approve all' : 'Approve selected'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setAbortReason('')}
+            data-testid="agent-approval-abort"
+          >
+            Abort session
+          </button>
+        </footer>
+      ) : (
+        <form
+          className="agent-approval__abort"
+          onSubmit={(e) => {
+            e.preventDefault()
+            submitAbort()
           }}
-          data-testid="agent-approval-abort"
         >
-          Abort session
-        </button>
-      </footer>
+          <label className="agent-approval__abort-label" htmlFor="agent-abort-reason">
+            Reason for aborting (optional)
+          </label>
+          <input
+            id="agent-abort-reason"
+            type="text"
+            autoFocus
+            value={abortReason}
+            placeholder="user cancelled"
+            onChange={(e) => setAbortReason(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setAbortReason(null)
+              }
+            }}
+            data-testid="agent-abort-reason-input"
+          />
+          <div className="agent-approval__actions">
+            <button type="submit" data-testid="agent-abort-confirm">
+              Confirm abort
+            </button>
+            <button
+              type="button"
+              onClick={() => setAbortReason(null)}
+              data-testid="agent-abort-cancel"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
     </article>
   )
 }
