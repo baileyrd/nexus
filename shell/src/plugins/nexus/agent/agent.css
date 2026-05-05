@@ -148,10 +148,42 @@
   color: var(--text-faint);
 }
 
-.agent-round__text {
+/* `.nexus-markdown-body` defaults to a 760px max-width + 24/32px
+ * padding — fine for a full-pane viewer, wasteful in a card.
+ * Tighten when nested inside an agent transcript or approval card. */
+.agent-round__text.nexus-markdown-body,
+.agent-approval__text.nexus-markdown-body {
+  max-width: 100%;
   margin: 0 0 8px;
-  white-space: pre-wrap;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: inherit;
 }
+
+.agent-round__text.nexus-markdown-body h1,
+.agent-approval__text.nexus-markdown-body h1 { font-size: 18px; }
+.agent-round__text.nexus-markdown-body h2,
+.agent-approval__text.nexus-markdown-body h2 { font-size: 16px; }
+.agent-round__text.nexus-markdown-body h3,
+.agent-approval__text.nexus-markdown-body h3 { font-size: 14px; }
+.agent-round__text.nexus-markdown-body h4,
+.agent-round__text.nexus-markdown-body h5,
+.agent-round__text.nexus-markdown-body h6,
+.agent-approval__text.nexus-markdown-body h4,
+.agent-approval__text.nexus-markdown-body h5,
+.agent-approval__text.nexus-markdown-body h6 { font-size: 13px; }
+
+.agent-round__text.nexus-markdown-body pre,
+.agent-approval__text.nexus-markdown-body pre {
+  font-size: 11.5px;
+  padding: 8px 10px;
+}
+
+.agent-round__text.nexus-markdown-body p:first-child,
+.agent-approval__text.nexus-markdown-body p:first-child { margin-top: 0; }
+.agent-round__text.nexus-markdown-body p:last-child,
+.agent-approval__text.nexus-markdown-body p:last-child  { margin-bottom: 0; }
 
 .agent-round__calls {
   list-style: none;
@@ -461,6 +493,10 @@
 .agent-session__history-outcome--errored          { background: color-mix(in srgb, var(--text-error, #d04a4a) 25%, transparent); color: var(--text-normal); }
 .agent-session__history-outcome--max_rounds       { background: var(--background-modifier-hover); color: var(--text-muted); }
 .agent-session__history-outcome--approval_timeout { background: var(--background-modifier-hover); color: var(--text-muted); }
+/* Fallback for legacy / corrupt records that lack a known outcome
+ * (kept distinct so a malformed session is visually flagged
+ * rather than blending into the rest of the list). */
+.agent-session__history-outcome--unknown          { background: var(--background-modifier-hover); color: var(--text-faint); font-style: italic; }
 
 .agent-session__history-time {
   font-size: 10.5px;

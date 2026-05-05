@@ -13,6 +13,11 @@
 
 import { useMemo, useState } from 'react'
 
+// Cross-plugin import: same renderer the chat view uses, so the
+// agent transcript's markdown gets the same heading hierarchy /
+// code blocks / lists treatment instead of rendering as raw
+// `**asterisks**`.
+import { renderMarkdown } from '../editor/markdownRender'
 import './agent.css'
 import {
   useAgentSessionStore,
@@ -194,7 +199,7 @@ function RoundRecordCard({ record }: RoundRecordCardProps): JSX.Element {
   return (
     <article className="agent-round" data-round={record.round}>
       <header>Round {record.round}</header>
-      {record.text ? <p className="agent-round__text">{record.text}</p> : null}
+      {record.text ? <Narration source={record.text} className="agent-round__text" /> : null}
       {record.tool_calls.length === 0 ? null : (
         <ul className="agent-round__calls">
           {record.tool_calls.map((tc) => (
@@ -244,7 +249,7 @@ function ApprovalCard({ round, onSubmit }: ApprovalCardProps): JSX.Element {
         <span className="agent-approval__badge">Pending approval</span>
         <span className="agent-approval__round">Round {round.round}</span>
       </header>
-      {round.text ? <p className="agent-approval__text">{round.text}</p> : null}
+      {round.text ? <Narration source={round.text} className="agent-approval__text" /> : null}
       <ul className="agent-approval__calls">
         {round.toolCalls.map((tc) => (
           <ToolCallRow
@@ -366,9 +371,7 @@ function SessionList({ sessions, selectedId, onSelect, onDelete }: SessionListPr
         >
           <button type="button" onClick={() => onSelect(s.id)}>
             <span className="agent-session__history-goal">{s.goal || '(no goal)'}</span>
-            <span className={`agent-session__history-outcome agent-session__history-outcome--${s.outcome}`}>
-              {s.outcome}
-            </span>
+            <OutcomePill outcome={s.outcome} />
             <span className="agent-session__history-time">{formatTimestamp(s.started_at)}</span>
           </button>
           <button
@@ -397,9 +400,7 @@ function SelectedTranscript({ transcript, error }: SelectedTranscriptProps): JSX
     <div className="agent-session__selected" data-testid="agent-selected-transcript">
       <header>
         <strong>{transcript.goal}</strong>
-        <span className={`agent-session__history-outcome agent-session__history-outcome--${transcript.outcome}`}>
-          {transcript.outcome}
-        </span>
+        <OutcomePill outcome={transcript.outcome} />
       </header>
       {transcript.rounds.map((r) => (
         <RoundRecordCard key={`sel-${r.round}`} record={r} />
@@ -409,6 +410,60 @@ function SelectedTranscript({ transcript, error }: SelectedTranscriptProps): JSX
 }
 
 // ── helpers ────────────────────────────────────────────────────────────
+
+interface NarrationProps {
+  source: string
+  className: string
+}
+
+/**
+ * Render a model narration string as markdown — same renderer the
+ * chat view uses so headings, lists, code blocks, and inline marks
+ * (`**bold**`, `` `code` ``) display properly. The transcript text
+ * the model emits is markdown by convention; rendering it raw makes
+ * agent runs much harder to skim.
+ */
+function Narration({ source, className }: NarrationProps): JSX.Element {
+  const html = useMemo(() => renderMarkdown(source), [source])
+  return (
+    <div
+      className={`${className} nexus-markdown-body`}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
+}
+
+const KNOWN_OUTCOMES = new Set([
+  'complete',
+  'aborted',
+  'errored',
+  'max_rounds',
+  'approval_timeout',
+])
+
+interface OutcomePillProps {
+  outcome: string | undefined | null
+}
+
+/**
+ * Always render the outcome chip — degrades gracefully when the
+ * underlying record has a missing or unrecognised outcome (legacy
+ * sessions on disk, sessions written by buggy earlier shell builds).
+ * Unknown values fall through to a neutral "unknown" chip rather
+ * than disappearing silently from the row.
+ */
+function OutcomePill({ outcome }: OutcomePillProps): JSX.Element {
+  const value = typeof outcome === 'string' && outcome.length > 0 ? outcome : 'unknown'
+  const cssKey = KNOWN_OUTCOMES.has(value) ? value : 'unknown'
+  return (
+    <span
+      className={`agent-session__history-outcome agent-session__history-outcome--${cssKey}`}
+      title={value}
+    >
+      {value}
+    </span>
+  )
+}
 
 function previewJson(value: unknown): string {
   if (value === null || value === undefined) return 'null'
