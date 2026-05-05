@@ -525,17 +525,19 @@ async fn handle_session_run(
         .ok_or_else(|| exec_err("session_run: refusing to write empty id".into()))?;
     let bytes = serde_json::to_vec_pretty(&session)
         .map_err(|e| exec_err(format!("session_run: encode session: {e}")))?;
-    // Route through `com.nexus.storage::write_file` rather than
-    // `ctx.write_file` so we get the storage engine's atomic-write
-    // + mkdir-p semantics. `ctx.write_file` is plain
-    // `tokio::fs::write`, which fails on the first session of a
-    // fresh forge where `.forge/agent/sessions/` doesn't exist yet.
+    // Route through `com.nexus.storage::write_vault_file` rather
+    // than the user-facing `write_file` (which would pollute the
+    // FTS index + knowledge graph with the JSON transcript). The
+    // _vault_file variant atomic-writes + mkdir-p without
+    // touching any indexes — exactly what shell-owned `.forge/`
+    // metadata needs. `ctx.write_file` would have been fine for
+    // raw bytes but doesn't mkdir-p, hence the IPC route.
     let path_str = path
         .to_str()
         .ok_or_else(|| exec_err("session_run: session path not UTF-8".into()))?;
     ctx.ipc_call(
         "com.nexus.storage",
-        "write_file",
+        "write_vault_file",
         serde_json::json!({ "path": path_str, "bytes": bytes }),
         Duration::from_secs(10),
     )
@@ -553,22 +555,30 @@ async fn handle_session_list(
     // on the agent context (it doesn't hold the cap and shouldn't
     // need it — the agent's own contexts are narrowly scoped per
     // ADR 0022).
-    let entries = match ctx
+    //
+    // Storage's contract: `list_dir` takes `{ relpath: string }` and
+    // returns `{ entries: [{ name, path, kind, … }] }`. Sending
+    // `path` instead of `relpath` silently falls back to listing
+    // the forge root.
+    let response = match ctx
         .ipc_call(
             "com.nexus.storage",
             "list_dir",
-            serde_json::json!({ "path": SESSION_DIR }),
+            serde_json::json!({ "relpath": SESSION_DIR }),
             Duration::from_secs(5),
         )
         .await
     {
         Ok(v) => v,
-        // Empty / missing dir is a successful "no sessions" result.
+        // Missing dir / empty / errored: report no sessions.
         Err(_) => return Ok(serde_json::json!([])),
     };
 
     let mut summaries: Vec<serde_json::Value> = Vec::new();
-    let Some(arr) = entries.as_array() else {
+    let Some(arr) = response
+        .get("entries")
+        .and_then(serde_json::Value::as_array)
+    else {
         return Ok(serde_json::json!([]));
     };
     for entry in arr {
