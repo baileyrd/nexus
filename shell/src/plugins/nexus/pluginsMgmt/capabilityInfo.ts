@@ -72,6 +72,16 @@ export const CAPABILITY_INFO: Record<Capability, CapabilityMeta> = {
   FsWriteExternal: { risk: 'high',   description: 'Write files outside this forge' },
   NetHttp:         { risk: 'high',   description: 'Make HTTP requests to arbitrary hosts' },
   ProcessSpawn:    { risk: 'high',   description: 'Spawn external processes' },
+
+  // ── ai.* — ADR 0022 ─────────────────────────────────────────────
+  AiIndex:         { risk: 'low',    description: 'Trigger AI indexing of forge files' },
+  AiSessionRead:   { risk: 'low',    description: 'Read persisted chat / agent sessions' },
+  AiSessionWrite:  { risk: 'low',    description: 'Write or delete persisted chat / agent sessions' },
+  AiChat:          { risk: 'medium', description: 'Invoke AI chat surfaces (model can call tools you grant)' },
+  AiActivityWrite: { risk: 'medium', description: 'Mutate the AI activity timeline' },
+  AiToolsWrite:    { risk: 'medium', description: 'Let the model see write-capable tools (e.g. write_file)' },
+  AiToolsMcp:      { risk: 'medium', description: 'Let the model see MCP-bridged external tools' },
+  AiConfigWrite:   { risk: 'high',   description: 'Hot-swap AI provider credentials at runtime' },
 }
 
 /** All capability variants known to the shell, in stable display order. */

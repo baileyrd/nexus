@@ -29,6 +29,9 @@ test('CAPABILITY_INFO covers every Capability variant', () => {
     'KvRead', 'KvWrite', 'IpcCall',
     'DbQuery', 'DbWrite',
     'EventsPublish', 'UiNotify',
+    // ADR 0022 (per-handler ai.* + tools-policy enforcement)
+    'AiChat', 'AiIndex', 'AiSessionRead', 'AiSessionWrite',
+    'AiConfigWrite', 'AiActivityWrite', 'AiToolsWrite', 'AiToolsMcp',
   ]
   for (const variant of expected) {
     assert.ok(

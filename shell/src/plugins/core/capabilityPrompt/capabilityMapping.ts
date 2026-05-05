@@ -36,6 +36,15 @@ export const CAPABILITY_TO_KERNEL_STRING: Record<Capability, string> = {
   DbWrite:          'db.write',
   EventsPublish:    'events.publish',
   UiNotify:         'ui.notify',
+  // ADR 0022 — per-handler ai.* capability surface.
+  AiChat:           'ai.chat',
+  AiIndex:          'ai.index',
+  AiSessionRead:    'ai.session.read',
+  AiSessionWrite:   'ai.session.write',
+  AiConfigWrite:    'ai.config.write',
+  AiActivityWrite:  'ai.activity.write',
+  AiToolsWrite:     'ai.tools.write',
+  AiToolsMcp:       'ai.tools.mcp',
 }
 
 /** Dotted → PascalCase; inverse of the above. */

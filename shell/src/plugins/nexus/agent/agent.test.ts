@@ -1,661 +1,368 @@
 // shell/src/plugins/nexus/agent/agent.test.ts
 //
-// WI-07 Slice E unit tests for the agent plugin. Covers:
-//
-//   - Pure decoders   (decodePlan / decodeObservation / decodeHistoryList)
-//   - Topic router    (handleAgentTopic against the four kernel events)
-//   - Step machine    (planThenAwaitApproval → approve × N → finishStepRun,
-//                      with skip / stop variants and response capture)
-//   - History flow    (handleLoadHistory + handleDeleteHistory confirm paths)
-//
-// Run from the shell/ package with:
-//   node --import tsx --test \
-//     shell/src/plugins/nexus/agent/agent.test.ts
+// Tests for the session-driven agent runtime (ADR 0024 + 0025
+// Phase 2). Exercises every flow that crosses the kernel boundary:
+//   - goal validation
+//   - session_run lifecycle
+//   - round_proposed → pending state
+//   - round_decide payload shapes (approve_all / partial / abort)
+//   - session_list / session_get / session_delete
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
+import { createAgentRuntime } from './index.ts'
 import {
-  AGENT_PLUGIN_ID,
-  createAgentRuntime,
-  decodeArchetypes,
-  decodeHistoryList,
-  decodePlan,
-  decodeObservation,
-  type AgentRuntimeDeps,
-} from './index.ts'
-import { FALLBACK_ARCHETYPES, useAgentStore } from './agentStore.ts'
+  decodeProposedRound,
+  decodeSessionList,
+  decodeTranscript,
+  useAgentSessionStore,
+} from './sessionStore.ts'
 
-// ── Test helpers ──────────────────────────────────────────────────────────
-
-interface InvokeCall {
+interface KernelCall {
   pluginId: string
-  command: string
+  commandId: string
   args: unknown
-}
-
-interface NotificationCall {
-  type?: string
-  message: string
+  timeoutMs?: number
 }
 
 interface StubKernel {
-  deps: AgentRuntimeDeps
-  invokeCalls: InvokeCall[]
-  notifications: NotificationCall[]
-  /** Push a response (or thrown error) for the next invoke matching `command`. */
-  queue(command: string, value: unknown | Error): void
-  /** Inject a confirm() answer for the next prompt. Defaults to true. */
-  setConfirm(answer: boolean): void
-  /** Manually fire the topic handler (when `kernel.on` was called). */
-  fireTopic(topic: string, payload: unknown): void
+  invoke<T = unknown>(
+    pluginId: string,
+    commandId: string,
+    args?: unknown,
+    timeoutMs?: number,
+  ): Promise<T>
+  on<T = unknown>(
+    topicPrefix: string,
+    handler: (topic: string, payload: T) => void,
+  ): Promise<() => void>
+  available(): Promise<boolean>
+  /** Test handles. */
+  calls: KernelCall[]
+  responses: Map<string, unknown[]>
+  topicSubscribers: Array<(topic: string, payload: unknown) => void>
 }
 
-function makeKernel(): StubKernel {
-  const invokeCalls: InvokeCall[] = []
-  const notifications: NotificationCall[] = []
-  const queues: Record<string, Array<unknown | Error>> = {}
-  let confirmAnswer = true
-  let topicHandler: ((topic: string, payload: unknown) => void) | null = null
-
-  const deps: AgentRuntimeDeps = {
-    kernel: {
-      invoke: async <T = unknown>(
-        pluginId: string,
-        command: string,
-        args?: unknown,
-      ): Promise<T> => {
-        invokeCalls.push({ pluginId, command, args })
-        const queue = queues[command]
-        if (queue && queue.length > 0) {
-          const next = queue.shift()
-          if (next instanceof Error) throw next
-          return next as T
-        }
-        return null as T
-      },
-      on: async <T = unknown>(
-        _topicPrefix: string,
-        handler: (topic: string, payload: T) => void,
-      ): Promise<() => void> => {
-        topicHandler = handler as (t: string, p: unknown) => void
-        return () => {
-          topicHandler = null
-        }
-      },
-      available: async () => true,
-    },
-    input: {
-      confirm: async () => confirmAnswer,
-    },
-    notifications: {
-      show: (n) => {
-        notifications.push({ type: n.type, message: n.message })
-      },
-    },
-  }
-
+function buildKernel(): StubKernel {
+  const calls: KernelCall[] = []
+  const responses = new Map<string, unknown[]>()
+  const subs: Array<(topic: string, payload: unknown) => void> = []
+  const queueKey = (cmd: string) => `com.nexus.agent::${cmd}`
   return {
-    deps,
-    invokeCalls,
-    notifications,
-    queue(command, value) {
-      ;(queues[command] ??= []).push(value)
+    calls,
+    responses,
+    topicSubscribers: subs,
+    async invoke(pluginId, commandId, args, timeoutMs) {
+      calls.push({ pluginId, commandId, args, timeoutMs })
+      const queue = responses.get(queueKey(commandId)) ?? []
+      const next = queue.shift()
+      if (next === undefined) {
+        // Default success-noop response so tests that don't pre-load
+        // can still drive the IPC without throwing.
+        return null as never
+      }
+      if (next instanceof Error) throw next
+      return next as never
     },
-    setConfirm(answer) {
-      confirmAnswer = answer
+    async on(_topicPrefix, handler) {
+      subs.push(handler as (topic: string, payload: unknown) => void)
+      return () => {
+        const idx = subs.indexOf(handler as (t: string, p: unknown) => void)
+        if (idx >= 0) subs.splice(idx, 1)
+      }
     },
-    fireTopic(topic, payload) {
-      if (!topicHandler) throw new Error('No topic handler registered yet — call subscribeAgentTopics first.')
-      topicHandler(topic, payload)
+    async available() {
+      return true
     },
   }
 }
 
-function resetStore(): void {
-  useAgentStore.getState().reset()
-  // `reset()` deliberately preserves the archetype catalogue across
-  // workspace close/open (the catalogue is kernel-wide, not
-  // per-workspace). Tests need a fresh slate per case, so roll it
-  // back to the fallback + unloaded flag explicitly here.
-  useAgentStore.setState({
-    archetypes: [...FALLBACK_ARCHETYPES],
-    archetypesLoaded: false,
-  })
+function buildNotifier() {
+  const shown: Array<{ message: string; type?: string }> = []
+  return {
+    shown,
+    show(n: { message: string; type?: 'info' | 'warning' | 'error' | 'success' }) {
+      shown.push(n)
+    },
+  }
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Decoders
-// ─────────────────────────────────────────────────────────────────────────
+function reset(): void {
+  useAgentSessionStore.getState().reset()
+}
 
-test('decodePlan: happy path produces a Plan with all fields', () => {
-  const plan = decodePlan({
-    id: 'p-1',
-    goal: 'do a thing',
-    steps: [
+// ── Decoder coverage ───────────────────────────────────────────────────
+
+test('decodeProposedRound: accepts a well-formed payload', () => {
+  const payload = {
+    session_id: 'sess-1',
+    round: 1,
+    text: 'reading notes',
+    tool_calls: [
       {
-        id: 's-1',
-        description: 'first',
+        id: 'toolu-abc',
+        name: 'read_file',
         tool_call: {
           target_plugin_id: 'com.nexus.storage',
-          command_id: 'write',
-          args: { path: 'foo.md', content: 'hi' },
+          command_id: 'read_file',
+          args: { path: 'a.md' },
         },
       },
-      { id: 's-2', description: 'informational', tool_call: null },
     ],
-  })
-  assert.ok(plan)
-  assert.equal(plan?.id, 'p-1')
-  assert.equal(plan?.goal, 'do a thing')
-  assert.equal(plan?.steps.length, 2)
-  assert.equal(plan?.steps[0].id, 's-1')
-  assert.equal(plan?.steps[0].tool_call?.target_plugin_id, 'com.nexus.storage')
-  assert.deepEqual(plan?.steps[0].tool_call?.args, { path: 'foo.md', content: 'hi' })
-  assert.equal(plan?.steps[1].tool_call, null)
+  }
+  const decoded = decodeProposedRound('sess-1', payload)
+  assert.ok(decoded, 'decoder must accept the round')
+  assert.equal(decoded?.round, 1)
+  assert.equal(decoded?.toolCalls.length, 1)
+  assert.equal(decoded?.toolCalls[0].name, 'read_file')
+  assert.equal(decoded?.approvals['toolu-abc'], true, 'tool calls default to approved')
 })
 
-test('decodePlan: missing id rejects the whole plan', () => {
-  assert.equal(decodePlan({ goal: 'g', steps: [] }), null)
+test('decodeProposedRound: rejects payloads missing round', () => {
+  assert.equal(decodeProposedRound('s', { session_id: 's' }), null)
 })
 
-test('decodePlan: non-array steps rejects the plan', () => {
-  assert.equal(decodePlan({ id: 'p', goal: 'g', steps: 'nope' }), null)
-})
-
-test('decodePlan: malformed step entries are dropped, valid ones survive', () => {
-  const plan = decodePlan({
-    id: 'p',
-    goal: 'g',
-    steps: [
-      { id: 'good', description: 'ok', tool_call: null },
-      { id: 'no-desc' }, // missing description
-      'not-an-object',
-      null,
-      { description: 'no-id' }, // missing id
+test('decodeTranscript: decodes a round-trip transcript', () => {
+  const transcript = decodeTranscript({
+    id: 'sess-2',
+    goal: 'do thing',
+    archetype: null,
+    started_at: '2026-05-05T00:00:00Z',
+    ended_at: '2026-05-05T00:01:00Z',
+    rounds: [
       {
-        id: 'partial-tool',
-        description: 'tool with bad shape',
-        tool_call: { target_plugin_id: 'x' }, // missing command_id → drops tool_call only
+        round: 1,
+        text: 'doing it',
+        tool_calls: [
+          { id: 't1', name: 'read_file', approved: true, response: { ok: true }, error: '' },
+        ],
+      },
+    ],
+    outcome: 'complete',
+  })
+  assert.ok(transcript)
+  assert.equal(transcript?.rounds.length, 1)
+  assert.equal(transcript?.outcome, 'complete')
+})
+
+test('decodeSessionList: drops malformed rows', () => {
+  const list = decodeSessionList([
+    { id: 'a', goal: 'one', started_at: 't1', ended_at: 't2', outcome: 'complete' },
+    { id: '', goal: 'no id' },
+    'not an object',
+    { id: 'b', goal: 'two', started_at: 't3', ended_at: 't4', outcome: 'aborted' },
+  ])
+  assert.equal(list.length, 2)
+  assert.equal(list[0].id, 'a')
+  assert.equal(list[1].outcome, 'aborted')
+})
+
+// ── Composer / startSession ────────────────────────────────────────────
+
+test('startSession: empty goal does not call session_run', async () => {
+  reset()
+  const kernel = buildKernel()
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  await runtime.startSession()
+  assert.equal(kernel.calls.length, 0)
+  assert.equal(useAgentSessionStore.getState().phase, 'idle')
+})
+
+test('startSession: posts session_run with auto_approve=false and archetype when set', async () => {
+  reset()
+  const kernel = buildKernel()
+  // Pre-load the session_run reply so applyFinalTranscript flips
+  // the phase to 'completed'.
+  const finalTranscript = {
+    id: 'sess-99',
+    goal: 'summarise',
+    archetype: 'writer',
+    started_at: 't',
+    ended_at: 't',
+    rounds: [],
+    outcome: 'complete',
+  }
+  kernel.responses.set('com.nexus.agent::session_run', [finalTranscript])
+  // session_list called by the post-run refresh.
+  kernel.responses.set('com.nexus.agent::session_list', [[]])
+
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  useAgentSessionStore.getState().setGoal('summarise notes')
+  useAgentSessionStore.getState().setArchetype('writer')
+
+  await runtime.startSession()
+
+  const ipc = kernel.calls.find((c) => c.commandId === 'session_run')
+  assert.ok(ipc, 'session_run must be invoked')
+  const args = ipc?.args as Record<string, unknown>
+  assert.equal(args.goal, 'summarise notes')
+  assert.equal(args.auto_approve, false, 'agent runs with interactive approval')
+  assert.equal(args.archetype, 'writer')
+  assert.equal(useAgentSessionStore.getState().phase, 'completed')
+  assert.equal(useAgentSessionStore.getState().currentSessionId, 'sess-99')
+})
+
+test('startSession: surfaces transport errors as liveError', async () => {
+  reset()
+  const kernel = buildKernel()
+  kernel.responses.set('com.nexus.agent::session_run', [new Error('boom')])
+  kernel.responses.set('com.nexus.agent::session_list', [[]])
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  useAgentSessionStore.getState().setGoal('do thing')
+  await runtime.startSession()
+  assert.match(useAgentSessionStore.getState().liveError ?? '', /boom/)
+  assert.equal(useAgentSessionStore.getState().phase, 'errored')
+})
+
+// ── Topic subscription ────────────────────────────────────────────────
+
+test('subscribeTopics: round_proposed populates pendingRound', async () => {
+  reset()
+  const kernel = buildKernel()
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  await runtime.subscribeTopics()
+  // Simulate the agent core plugin emitting a round.
+  kernel.topicSubscribers[0]('com.nexus.agent.round_proposed', {
+    session_id: 'sess-1',
+    round: 1,
+    text: 'fetch a file',
+    tool_calls: [
+      {
+        id: 'toolu-1',
+        name: 'read_file',
+        tool_call: { target_plugin_id: 'com.nexus.storage', command_id: 'read_file', args: {} },
       },
     ],
   })
-  assert.ok(plan)
-  assert.equal(plan?.steps.length, 2)
-  assert.equal(plan?.steps[0].id, 'good')
-  assert.equal(plan?.steps[1].id, 'partial-tool')
-  assert.equal(plan?.steps[1].tool_call, null, 'malformed tool_call collapses to null, step survives')
+  const s = useAgentSessionStore.getState()
+  assert.equal(s.currentSessionId, 'sess-1')
+  assert.equal(s.phase, 'awaiting_approval')
+  assert.equal(s.pendingRound?.toolCalls.length, 1)
 })
 
-test('decodeObservation: happy path with steps + success', () => {
-  const obs = decodeObservation({
-    plan_id: 'p-1',
-    success: true,
-    steps: [
-      { step_id: 's-1', status: 'ok', response: { ok: true } },
-      { step_id: 's-2', status: 'failed', response: 'boom' },
+// ── round_decide payload shapes ───────────────────────────────────────
+
+test('submitDecision approve_all sends kind=approve_all without entries', async () => {
+  reset()
+  const kernel = buildKernel()
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  await runtime.subscribeTopics()
+  kernel.topicSubscribers[0]('com.nexus.agent.round_proposed', {
+    session_id: 'sess-1',
+    round: 1,
+    text: '',
+    tool_calls: [
+      {
+        id: 't1',
+        name: 'read_file',
+        tool_call: { target_plugin_id: 'com.nexus.storage', command_id: 'read_file', args: {} },
+      },
     ],
   })
-  assert.ok(obs)
-  assert.equal(obs?.plan_id, 'p-1')
-  assert.equal(obs?.success, true)
-  assert.equal(obs?.steps.length, 2)
-  assert.equal(obs?.steps[0].status, 'ok')
-  assert.deepEqual(obs?.steps[0].response, { ok: true })
+  await runtime.submitDecision('approve_all')
+  const ipc = kernel.calls.find((c) => c.commandId === 'round_decide')
+  assert.ok(ipc)
+  const args = ipc?.args as Record<string, unknown>
+  assert.equal(args.kind, 'approve_all')
+  assert.equal(args.session_id, 'sess-1')
+  assert.equal('entries' in args, false, 'approve_all carries no entries')
 })
 
-test('decodeObservation: malformed step entries are filtered out', () => {
-  const obs = decodeObservation({
-    plan_id: 'p',
-    steps: [
-      { step_id: 'a', status: 'ok' },
-      { status: 'ok' }, // no step_id → dropped
-      null,
+test('submitDecision partial sends per-tool entries with denial reasons', async () => {
+  reset()
+  const kernel = buildKernel()
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  await runtime.subscribeTopics()
+  kernel.topicSubscribers[0]('com.nexus.agent.round_proposed', {
+    session_id: 'sess-2',
+    round: 1,
+    text: '',
+    tool_calls: [
+      { id: 'a', name: 'read_file', tool_call: { target_plugin_id: 's', command_id: 'r', args: {} } },
+      { id: 'b', name: 'write_file', tool_call: { target_plugin_id: 's', command_id: 'w', args: {} } },
     ],
   })
-  assert.equal(obs?.steps.length, 1)
-  assert.equal(obs?.steps[0].step_id, 'a')
+  // Deny tool b.
+  useAgentSessionStore.getState().toggleApproval('b', false)
+  await runtime.submitDecision('partial')
+  const ipc = kernel.calls.find((c) => c.commandId === 'round_decide')
+  const args = ipc?.args as Record<string, unknown>
+  assert.equal(args.kind, 'partial')
+  const entries = args.entries as Array<{ tool_use_id: string; approve: boolean; reason?: string }>
+  assert.equal(entries.length, 2)
+  const a = entries.find((e) => e.tool_use_id === 'a')
+  const b = entries.find((e) => e.tool_use_id === 'b')
+  assert.equal(a?.approve, true)
+  assert.equal(b?.approve, false)
+  assert.match(b?.reason ?? '', /denied/)
 })
 
-test('decodeObservation: unknown status falls back to failed', () => {
-  const obs = decodeObservation({
-    plan_id: 'p',
-    steps: [{ step_id: 'a', status: 'mystery' }],
+test('submitDecision abort sends kind=abort with reason', async () => {
+  reset()
+  const kernel = buildKernel()
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  await runtime.subscribeTopics()
+  kernel.topicSubscribers[0]('com.nexus.agent.round_proposed', {
+    session_id: 'sess-3',
+    round: 1,
+    text: '',
+    tool_calls: [
+      { id: 'x', name: 'read_file', tool_call: { target_plugin_id: 's', command_id: 'r', args: {} } },
+    ],
   })
-  assert.equal(obs?.steps[0].status, 'failed')
+  await runtime.submitDecision('abort', 'changed my mind')
+  const ipc = kernel.calls.find((c) => c.commandId === 'round_decide')
+  const args = ipc?.args as Record<string, unknown>
+  assert.equal(args.kind, 'abort')
+  assert.equal(args.reason, 'changed my mind')
 })
 
-test('decodeHistoryList: sorts newest-first by created_at', () => {
-  const rows = decodeHistoryList([
-    { plan_id: 'old', created_at: '2024-01-01T00:00:00Z', goal: 'old', success: true, steps: 1, bytes: 10 },
-    { plan_id: 'new', created_at: '2024-06-01T00:00:00Z', goal: 'new', success: true, steps: 1, bytes: 10 },
-    { plan_id: 'mid', created_at: '2024-03-01T00:00:00Z', goal: 'mid', success: true, steps: 1, bytes: 10 },
+// ── Sessions sidebar ──────────────────────────────────────────────────
+
+test('refreshSessions: populates sessions from session_list reply', async () => {
+  reset()
+  const kernel = buildKernel()
+  kernel.responses.set('com.nexus.agent::session_list', [
+    [{ id: 'a', goal: 'do', started_at: 't', ended_at: 't', outcome: 'complete' }],
   ])
-  assert.deepEqual(rows.map((r) => r.plan_id), ['new', 'mid', 'old'])
-})
-
-test('decodeHistoryList: rows missing plan_id are dropped; falls back to plan_id sort when timestamps absent', () => {
-  const rows = decodeHistoryList([
-    { plan_id: 'aaa', goal: 'a' },
-    { goal: 'no-id' },
-    { plan_id: 'ccc', goal: 'c' },
-    { plan_id: 'bbb', goal: 'b' },
-  ])
-  assert.equal(rows.length, 3, 'no-id row dropped')
-  assert.deepEqual(rows.map((r) => r.plan_id), ['ccc', 'bbb', 'aaa'])
-})
-
-test('decodeHistoryList: non-array input yields empty list', () => {
-  assert.deepEqual(decodeHistoryList('nope'), [])
-  assert.deepEqual(decodeHistoryList(null), [])
-})
-
-// ─────────────────────────────────────────────────────────────────────────
-// Topic router (handleAgentTopic)
-// ─────────────────────────────────────────────────────────────────────────
-
-test('handleAgentTopic: step_start flips the matching step to running', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-  await rt.subscribeAgentTopics()
-
-  // Pre-populate a plan so stepRuntime entries exist.
-  useAgentStore.getState().setPlan({
-    id: 'p',
-    goal: 'g',
-    steps: [
-      { id: 's-1', description: 'one', tool_call: null },
-      { id: 's-2', description: 'two', tool_call: null },
-    ],
-  })
-
-  k.fireTopic('com.nexus.agent.step_start', { plan_id: 'p', step_id: 's-1' })
-  assert.equal(useAgentStore.getState().stepRuntime['s-1'].status, 'running')
-  // s-2 untouched.
-  assert.equal(useAgentStore.getState().stepRuntime['s-2'].status, 'queued')
-})
-
-test('handleAgentTopic: step_done routes ok / failed / skipped to setStepStatus', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-  await rt.subscribeAgentTopics()
-  useAgentStore.getState().setPlan({
-    id: 'p',
-    goal: 'g',
-    steps: [
-      { id: 'ok', description: '', tool_call: null },
-      { id: 'fail', description: '', tool_call: null },
-      { id: 'skip', description: '', tool_call: null },
-      { id: 'unknown', description: '', tool_call: null },
-    ],
-  })
-
-  k.fireTopic('com.nexus.agent.step_done', { step_id: 'ok', status: 'ok' })
-  k.fireTopic('com.nexus.agent.step_done', { step_id: 'fail', status: 'failed', error: 'boom' })
-  k.fireTopic('com.nexus.agent.step_done', { step_id: 'skip', status: 'skipped' })
-  // Unknown / missing status → falls into the failed branch.
-  k.fireTopic('com.nexus.agent.step_done', { step_id: 'unknown' })
-
-  const rt2 = useAgentStore.getState().stepRuntime
-  assert.equal(rt2['ok'].status, 'ok')
-  assert.equal(rt2['fail'].status, 'failed')
-  assert.equal(rt2['fail'].error, 'boom')
-  assert.equal(rt2['skip'].status, 'skipped')
-  assert.equal(rt2['unknown'].status, 'failed')
-})
-
-test('handleAgentTopic: run_start and run_done are no-ops on store state', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-  await rt.subscribeAgentTopics()
-  const before = useAgentStore.getState()
-
-  k.fireTopic('com.nexus.agent.run_start', { plan_id: 'p', steps: 3 })
-  k.fireTopic('com.nexus.agent.run_done', { plan_id: 'p', success: true })
-
-  const after = useAgentStore.getState()
-  assert.equal(after.phase, before.phase, 'run_start/run_done must not flip phase')
-  assert.equal(after.plan, before.plan)
-})
-
-test('handleAgentTopic: non-object payload is silently ignored', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-  await rt.subscribeAgentTopics()
-  useAgentStore.getState().setPlan({
-    id: 'p',
-    goal: 'g',
-    steps: [{ id: 's-1', description: '', tool_call: null }],
-  })
-
-  k.fireTopic('com.nexus.agent.step_start', null)
-  k.fireTopic('com.nexus.agent.step_start', 'string-payload')
-  // s-1 still queued — none of the bad payloads should mutate.
-  assert.equal(useAgentStore.getState().stepRuntime['s-1'].status, 'queued')
-})
-
-// ─────────────────────────────────────────────────────────────────────────
-// Step-by-step state machine
-// ─────────────────────────────────────────────────────────────────────────
-
-const SAMPLE_PLAN = {
-  id: 'plan-1',
-  goal: 'two-step plan',
-  steps: [
-    {
-      id: 'step-a',
-      description: 'first',
-      tool_call: { target_plugin_id: 'com.nexus.storage', command_id: 'read', args: {} },
-    },
-    {
-      id: 'step-b',
-      description: 'second',
-      tool_call: null,
-    },
-  ],
-}
-
-test('step machine: plan → approve × 2 → done with Observation built locally', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-
-  useAgentStore.setState({ goal: 'do work' })
-  k.queue('plan', SAMPLE_PLAN)
-  k.queue('execute_step', { step_id: 'step-a', status: 'ok', response: { rows: 7 } })
-  k.queue('execute_step', { step_id: 'step-b', status: 'ok', response: 'second-done' })
-
-  await rt.planThenAwaitApproval('do work')
-  assert.equal(useAgentStore.getState().phase, 'awaiting')
-  assert.equal(useAgentStore.getState().pendingApprovalIndex, 0)
-  assert.equal(useAgentStore.getState().plan?.steps.length, 2)
-
-  await rt.handleApproveStep()
-  // After step-a approved + ok, pending advances to step-b.
-  assert.equal(useAgentStore.getState().pendingApprovalIndex, 1)
-  assert.equal(useAgentStore.getState().stepRuntime['step-a'].status, 'ok')
-  assert.deepEqual(useAgentStore.getState().stepRuntime['step-a'].response, { rows: 7 })
-
-  await rt.handleApproveStep()
-  // Done: observation built, pendingApprovalIndex cleared.
-  const s = useAgentStore.getState()
-  assert.equal(s.phase, 'done')
-  assert.equal(s.pendingApprovalIndex, null)
-  assert.ok(s.observation)
-  assert.equal(s.observation?.success, true)
-  assert.equal(s.observation?.steps.length, 2)
-  assert.equal(s.observation?.steps[0].status, 'ok')
-  assert.deepEqual(s.observation?.steps[0].response, { rows: 7 })
-  assert.equal(s.observation?.steps[1].response, 'second-done')
-
-  // Verify IPC arg shapes.
-  const planCall = k.invokeCalls.find((c) => c.command === 'plan')
-  assert.deepEqual(planCall?.args, { goal: 'do work' }, 'no archetype set → omits the key')
-  const execs = k.invokeCalls.filter((c) => c.command === 'execute_step')
-  assert.equal(execs.length, 2)
-  assert.equal((execs[0].args as { index: number }).index, 0)
-  assert.equal((execs[1].args as { index: number }).index, 1)
-})
-
-test('step machine: skip mid-flow advances index without invoking execute_step', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-
-  k.queue('plan', SAMPLE_PLAN)
-  k.queue('execute_step', { step_id: 'step-b', status: 'ok' })
-
-  await rt.planThenAwaitApproval('go')
-  rt.handleSkipStep() // skip step-a
-  assert.equal(useAgentStore.getState().stepRuntime['step-a'].status, 'skipped')
-  assert.equal(useAgentStore.getState().pendingApprovalIndex, 1)
-
-  await rt.handleApproveStep() // approve step-b
-  const s = useAgentStore.getState()
-  assert.equal(s.phase, 'done')
-  assert.equal(s.observation?.steps[0].status, 'skipped')
-  assert.equal(s.observation?.steps[1].status, 'ok')
-  // Mixed result → success=false.
-  assert.equal(s.observation?.success, false)
-
-  // execute_step only fired once, for step-b.
-  const execs = k.invokeCalls.filter((c) => c.command === 'execute_step')
-  assert.equal(execs.length, 1)
-  assert.equal((execs[0].args as { index: number }).index, 1)
-})
-
-test('step machine: stop after one approval marks remaining as skipped', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-
-  k.queue('plan', SAMPLE_PLAN)
-  k.queue('execute_step', { step_id: 'step-a', status: 'ok' })
-
-  await rt.planThenAwaitApproval('go')
-  await rt.handleApproveStep() // step-a → ok, pending advances to step-b
-  rt.handleStopRun()
-
-  const s = useAgentStore.getState()
-  assert.equal(s.phase, 'done')
-  assert.equal(s.observation?.steps[0].status, 'ok', 'step-a survives the stop')
-  assert.equal(s.observation?.steps[1].status, 'skipped', 'queued step-b marked skipped')
-  assert.equal(s.observation?.success, false)
-  assert.equal(s.pendingApprovalIndex, null)
-})
-
-test('step machine: approve sees a failed status → handleStopRun fires automatically', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-
-  k.queue('plan', SAMPLE_PLAN)
-  k.queue('execute_step', { step_id: 'step-a', status: 'failed' })
-
-  await rt.planThenAwaitApproval('go')
-  await rt.handleApproveStep()
-
-  const s = useAgentStore.getState()
-  assert.equal(s.phase, 'done')
-  assert.equal(s.stepRuntime['step-a'].status, 'failed')
-  assert.equal(s.stepRuntime['step-b'].status, 'skipped', 'failure aborts the rest')
-})
-
-test('step machine: archetype is forwarded into the plan IPC args', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-
-  useAgentStore.getState().setArchetype('coder')
-  k.queue('plan', SAMPLE_PLAN)
-
-  await rt.planThenAwaitApproval('build it')
-  const planCall = k.invokeCalls.find((c) => c.command === 'plan')
-  assert.deepEqual(planCall?.args, { goal: 'build it', archetype: 'coder' })
-})
-
-test('step machine: empty plan finishes immediately with success=true', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-
-  k.queue('plan', { id: 'p-empty', goal: 'g', steps: [] })
-  await rt.planThenAwaitApproval('g')
-
-  const s = useAgentStore.getState()
-  assert.equal(s.phase, 'done')
-  assert.equal(s.observation?.steps.length, 0)
-  // every() over [] → true.
-  assert.equal(s.observation?.success, true)
-})
-
-// ─────────────────────────────────────────────────────────────────────────
-// History flow
-// ─────────────────────────────────────────────────────────────────────────
-
-test('history: handleLoadHistory populates plan + observation + goal', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-
-  k.queue('history_get', {
-    plan: SAMPLE_PLAN,
-    observation: {
-      plan_id: 'plan-1',
-      success: true,
-      steps: [
-        { step_id: 'step-a', status: 'ok', response: { ok: true } },
-        { step_id: 'step-b', status: 'ok', response: null },
-      ],
-    },
-    goal: 'restored goal',
-  })
-
-  rt.handleLoadHistory('plan-1')
-  // handleLoadHistory dispatches a microtask via void loadPlanIntoState — wait for it.
-  await new Promise((r) => setTimeout(r, 0))
-
-  const s = useAgentStore.getState()
-  assert.equal(s.plan?.id, 'plan-1')
-  assert.equal(s.goal, 'restored goal')
-  assert.equal(s.observation?.steps.length, 2)
-  assert.deepEqual(s.observation?.steps[0].response, { ok: true })
-  assert.equal(s.phase, 'done')
-})
-
-test('history: handleDeleteHistory cancelled at confirm prompt does not invoke', async () => {
-  resetStore()
-  const k = makeKernel()
-  k.setConfirm(false)
-  const rt = createAgentRuntime(k.deps)
-
-  await rt.handleDeleteHistory('plan-x')
-  assert.equal(k.invokeCalls.filter((c) => c.command === 'history_delete').length, 0)
-})
-
-test('history: handleDeleteHistory confirmed → invokes delete + clears active plan + refreshes list', async () => {
-  resetStore()
-  const k = makeKernel()
-  k.setConfirm(true)
-  const rt = createAgentRuntime(k.deps)
-
-  // Pre-load the deleted plan as the active one to exercise the
-  // "clear if active" branch.
-  useAgentStore.getState().setPlan(SAMPLE_PLAN)
-  k.queue('history_delete', { ok: true })
-  k.queue('history_list', [])
-
-  await rt.handleDeleteHistory('plan-1')
-
-  const s = useAgentStore.getState()
-  assert.equal(s.plan, null, 'active plan cleared because it matched the deleted id')
-  assert.equal(s.phase, 'idle')
-  // Verify both invokes fired in order.
-  const seq = k.invokeCalls.map((c) => c.command)
-  assert.ok(seq.includes('history_delete'))
-  assert.ok(seq.indexOf('history_delete') < seq.indexOf('history_list'), 'delete precedes list refresh')
-})
-
-test('history: handleDeleteHistory failure surfaces a notification', async () => {
-  resetStore()
-  const k = makeKernel()
-  k.setConfirm(true)
-  const rt = createAgentRuntime(k.deps)
-  k.queue('history_delete', new Error('disk full'))
-
-  await rt.handleDeleteHistory('plan-x')
-
-  assert.equal(k.notifications.length, 1)
-  assert.equal(k.notifications[0].type, 'error')
-  assert.ok(k.notifications[0].message.includes('disk full'))
-})
-
-// Sanity: AGENT_PLUGIN_ID export is the const the tests assume.
-test('AGENT_PLUGIN_ID is the kernel agent plugin id', () => {
-  assert.equal(AGENT_PLUGIN_ID, 'com.nexus.agent')
-})
-
-// ─── OI-04 — list_archetypes ─────────────────────────────────────────────────
-
-test('decodeArchetypes: array of ids → ArchetypeInfo[] with known labels', () => {
-  const list = decodeArchetypes(['writer', 'researcher'])
-  assert.equal(list.length, 2)
-  assert.equal(list[0].id, 'writer')
-  assert.equal(list[0].label, 'Writer')
-  assert.equal(list[1].id, 'researcher')
-  assert.equal(list[1].label, 'Researcher')
-})
-
-test('decodeArchetypes: unknown id gets a titlecased fallback label', () => {
-  const list = decodeArchetypes(['curator'])
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  await runtime.refreshSessions()
+  const list = useAgentSessionStore.getState().sessions
   assert.equal(list.length, 1)
-  assert.equal(list[0].id, 'curator')
-  assert.equal(list[0].label, 'Curator')
-  assert.ok(list[0].description.length > 0)
+  assert.equal(list[0].id, 'a')
 })
 
-test('decodeArchetypes: non-array input returns the fallback catalogue', () => {
-  assert.deepEqual(decodeArchetypes(null), [...FALLBACK_ARCHETYPES])
-  assert.deepEqual(decodeArchetypes(undefined), [...FALLBACK_ARCHETYPES])
-  assert.deepEqual(decodeArchetypes({}), [...FALLBACK_ARCHETYPES])
+test('selectSession: pulls session_get and stores transcript', async () => {
+  reset()
+  const kernel = buildKernel()
+  kernel.responses.set('com.nexus.agent::session_get', [
+    {
+      id: 'a',
+      goal: 'do',
+      archetype: null,
+      started_at: 't',
+      ended_at: 't',
+      rounds: [{ round: 1, text: 'one', tool_calls: [] }],
+      outcome: 'complete',
+    },
+  ])
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  await runtime.selectSession('a')
+  const t = useAgentSessionStore.getState().selectedTranscript
+  assert.equal(t?.id, 'a')
+  assert.equal(t?.rounds[0].text, 'one')
 })
 
-test('decodeArchetypes: empty array returns the fallback catalogue', () => {
-  assert.deepEqual(decodeArchetypes([]), [...FALLBACK_ARCHETYPES])
-})
-
-test('decodeArchetypes: drops non-string entries and dedupes', () => {
-  const list = decodeArchetypes(['writer', 42, 'writer', null, 'coder'])
-  assert.deepEqual(
-    list.map((a) => a.id),
-    ['writer', 'coder'],
-  )
-})
-
-test('loadArchetypes: populates the store from the kernel and flips archetypesLoaded', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-  k.queue('list_archetypes', ['writer', 'coder', 'researcher'])
-
-  await rt.loadArchetypes()
-  const s = useAgentStore.getState()
-  assert.equal(s.archetypesLoaded, true)
-  assert.deepEqual(
-    s.archetypes.map((a) => a.id),
-    ['writer', 'coder', 'researcher'],
-  )
-})
-
-test('loadArchetypes: kernel failure leaves the fallback catalogue in place', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-  k.queue('list_archetypes', new Error('kernel offline'))
-
-  await rt.loadArchetypes()
-  const s = useAgentStore.getState()
-  // Flag stays false so a subsequent workspace-open re-attempts.
-  assert.equal(s.archetypesLoaded, false)
-  assert.deepEqual(s.archetypes, [...FALLBACK_ARCHETYPES])
-})
-
-test('loadArchetypes: second call is a no-op once archetypesLoaded is true', async () => {
-  resetStore()
-  const k = makeKernel()
-  const rt = createAgentRuntime(k.deps)
-  k.queue('list_archetypes', ['writer'])
-
-  await rt.loadArchetypes()
-  const callsAfterFirst = k.invokeCalls.filter((c) => c.command === 'list_archetypes').length
-  assert.equal(callsAfterFirst, 1)
-
-  // Second call must not issue another IPC.
-  await rt.loadArchetypes()
-  const callsAfterSecond = k.invokeCalls.filter((c) => c.command === 'list_archetypes').length
-  assert.equal(callsAfterSecond, 1)
+test('deleteSession: posts session_delete and clears selection if matching', async () => {
+  reset()
+  const kernel = buildKernel()
+  kernel.responses.set('com.nexus.agent::session_delete', [{ deleted: true, id: 'a' }])
+  kernel.responses.set('com.nexus.agent::session_list', [[]])
+  useAgentSessionStore.getState().setSelectedSession('a', null, null)
+  const runtime = createAgentRuntime({ kernel, notifications: buildNotifier() })
+  await runtime.deleteSession('a')
+  const ipc = kernel.calls.find((c) => c.commandId === 'session_delete')
+  assert.ok(ipc)
+  assert.equal(useAgentSessionStore.getState().selectedSessionId, null)
 })
