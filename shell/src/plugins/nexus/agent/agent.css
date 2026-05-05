@@ -325,6 +325,124 @@
   overflow: auto;
 }
 
+/* AIG-02 — risk badge per tool call. */
+.agent-approval__risk {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-family: var(--font-monospace);
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  line-height: 1.4;
+  border: 1px solid transparent;
+}
+
+.agent-approval__risk--safe {
+  color: var(--ok, #2e7d32);
+  background: color-mix(in srgb, var(--ok, #2e7d32) 12%, transparent);
+  border-color: color-mix(in srgb, var(--ok, #2e7d32) 30%, transparent);
+}
+
+.agent-approval__risk--write {
+  color: var(--warm, #c97a18);
+  background: color-mix(in srgb, var(--warm, #c97a18) 14%, transparent);
+  border-color: color-mix(in srgb, var(--warm, #c97a18) 32%, transparent);
+}
+
+.agent-approval__risk--exec,
+.agent-approval__risk--network {
+  color: var(--risk, #b3261e);
+  background: color-mix(in srgb, var(--risk, #b3261e) 14%, transparent);
+  border-color: color-mix(in srgb, var(--risk, #b3261e) 32%, transparent);
+}
+
+.agent-approval__call--risk-exec,
+.agent-approval__call--risk-network {
+  border-left: 3px solid var(--risk, #b3261e);
+}
+
+.agent-approval__call--risk-write {
+  border-left: 3px solid var(--warm, #c97a18);
+}
+
+.agent-approval__call--risk-safe {
+  border-left: 3px solid var(--ok, #2e7d32);
+}
+
+/* AIG-02 — diff preview for write_file approvals. */
+.agent-approval__diff {
+  margin: 6px 0 0 26px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  background: var(--background-secondary);
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  overflow: hidden;
+}
+
+.agent-approval__diff > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 8px;
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.agent-approval__diff--loading {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 8px;
+  color: var(--text-faint);
+}
+
+.agent-approval__diff-path {
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.agent-approval__diff-status {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.agent-approval__diff-body {
+  margin: 0;
+  padding: 6px 8px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre;
+  background: var(--background-secondary);
+}
+
+.agent-approval__diff-line {
+  display: block;
+}
+
+.agent-approval__diff-line--add {
+  color: var(--ok, #2e7d32);
+  background: color-mix(in srgb, var(--ok, #2e7d32) 8%, transparent);
+}
+
+.agent-approval__diff-line--remove {
+  color: var(--risk, #b3261e);
+  background: color-mix(in srgb, var(--risk, #b3261e) 8%, transparent);
+}
+
+.agent-approval__diff-line--context {
+  color: var(--text-muted);
+}
+
+.agent-approval__diff-truncated {
+  padding: 4px 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
 .agent-approval__actions {
   display: flex;
   gap: 8px;

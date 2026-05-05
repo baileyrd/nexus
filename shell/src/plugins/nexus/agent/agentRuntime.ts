@@ -10,17 +10,22 @@
 
 import { clientLogger } from '../../../clientLogger'
 import { LONG_RUNNING_OP_TIMEOUT_MS } from '../constants'
+import { isRoundEntirelySafe } from './riskClassifier'
 import {
   decodeArchetypes,
   decodeProposedRound,
   decodeSessionList,
   decodeTranscript,
   useAgentSessionStore,
+  type PendingRound,
   type RoundRecord,
   type SessionTranscript,
+  type StepPolicy,
 } from './sessionStore'
 
 export const AGENT_PLUGIN_ID = 'com.nexus.agent'
+const STORAGE_PLUGIN_ID = 'com.nexus.storage'
+const STORAGE_READ_FILE = 'read_file'
 const SESSION_RUN = 'session_run'
 const SESSION_LIST = 'session_list'
 const SESSION_GET = 'session_get'
@@ -93,6 +98,22 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
     }
   }
 
+  /**
+   * AIG-02 — decide whether the policy lets us short-circuit the
+   * approval card. Returns `true` when the round is auto-approved
+   * (and the runtime has dispatched `round_decide` itself); `false`
+   * means the card must be shown.
+   */
+  const shouldAutoApprove = (
+    policy: StepPolicy,
+    decoded: PendingRound,
+  ): boolean => {
+    if (policy === 'auto_approve') return true
+    if (policy === 'always_ask') return false
+    // ask_on_risky — allow only when every call is read-only-safe.
+    return isRoundEntirelySafe(decoded.toolCalls)
+  }
+
   // ── Topic subscription ──────────────────────────────────────────────
   const handleTopic = (topic: string, payload: unknown) => {
     if (topic !== TOPIC_ROUND_PROPOSED) return
@@ -113,6 +134,14 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
     }
     const decoded = decodeProposedRound(sessionId, payload)
     if (!decoded) return
+    if (shouldAutoApprove(store.stepPolicy, decoded)) {
+      // Surface the round briefly so the transcript still records
+      // what ran, then submit approval without blocking on the user.
+      // The optimistic transcript append happens inside submitDecision.
+      useAgentSessionStore.getState().setPendingRound(decoded)
+      void submitDecision('approve_all')
+      return
+    }
     useAgentSessionStore.getState().setPendingRound(decoded)
   }
 
@@ -329,6 +358,34 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
     }
   }
 
+  /**
+   * AIG-02 — read a forge file via storage IPC. Powers the diff
+   * preview on `write_file` approval cards. Returns `null` on any
+   * error (most often "file does not exist yet"); the caller renders
+   * a "new file" hint in that case rather than blocking the diff.
+   */
+  const readFile = async (path: string): Promise<string | null> => {
+    if (typeof path !== 'string' || path.length === 0) return null
+    if (!(await isAvailable())) return null
+    try {
+      const raw = await api.kernel.invoke<unknown>(
+        STORAGE_PLUGIN_ID,
+        STORAGE_READ_FILE,
+        { path },
+        QUICK_IPC_TIMEOUT_MS,
+      )
+      if (typeof raw === 'string') return raw
+      if (raw && typeof raw === 'object') {
+        // Some storage handlers wrap the bytes in `{ contents: string }`.
+        const contents = (raw as Record<string, unknown>).contents
+        if (typeof contents === 'string') return contents
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
+
   return {
     loadArchetypes,
     subscribeTopics,
@@ -340,5 +397,6 @@ export function createAgentRuntime(api: AgentRuntimeDeps) {
     refreshSessions,
     selectSession,
     deleteSession,
+    readFile,
   }
 }

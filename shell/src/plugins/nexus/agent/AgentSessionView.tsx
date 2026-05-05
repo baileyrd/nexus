@@ -11,7 +11,7 @@
  * lets the runtime be unit-tested in isolation.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 // Cross-plugin import: same renderer the chat view uses, so the
 // agent transcript's markdown gets the same heading hierarchy /
@@ -20,12 +20,24 @@ import { useMemo, useState } from 'react'
 import { renderMarkdown } from '../editor/markdownRender'
 import './agent.css'
 import {
+  classifyToolCall,
+  riskLabel,
+  type RiskLevel,
+} from './riskClassifier'
+import {
+  diffLines,
+  DIFF_MAX_LINES,
+  extractWriteFileArgs,
+  type DiffLine,
+} from './diffPreview'
+import {
   useAgentSessionStore,
   type ArchetypeInfo,
   type PendingRound,
   type RoundRecord,
   type SessionSummary,
   type SessionTranscript,
+  type StepPolicy,
   type ToolCallProposal,
 } from './sessionStore'
 
@@ -36,12 +48,16 @@ export interface AgentSessionViewProps {
   onDeleteSession(id: string): void
   onRefreshSessions(): void
   onClearLive(): void
+  /** AIG-02 — used by the write_file diff preview. Returns `null`
+   *  when the file does not yet exist or storage IPC fails. */
+  readFile?(path: string): Promise<string | null>
 }
 
 export function AgentSessionView(props: AgentSessionViewProps): JSX.Element {
   const goal = useAgentSessionStore((s) => s.goal)
   const archetype = useAgentSessionStore((s) => s.archetype)
   const archetypes = useAgentSessionStore((s) => s.archetypes)
+  const stepPolicy = useAgentSessionStore((s) => s.stepPolicy)
   const phase = useAgentSessionStore((s) => s.phase)
   const liveTranscript = useAgentSessionStore((s) => s.liveTranscript)
   const pendingRound = useAgentSessionStore((s) => s.pendingRound)
@@ -54,6 +70,7 @@ export function AgentSessionView(props: AgentSessionViewProps): JSX.Element {
   const selectedTranscriptError = useAgentSessionStore((s) => s.selectedTranscriptError)
   const setGoal = useAgentSessionStore((s) => s.setGoal)
   const setArchetype = useAgentSessionStore((s) => s.setArchetype)
+  const setStepPolicy = useAgentSessionStore((s) => s.setStepPolicy)
 
   const running = phase === 'starting' || phase === 'awaiting_round' || phase === 'awaiting_approval'
   const canRun = goal.trim().length > 0 && !running
@@ -79,6 +96,14 @@ export function AgentSessionView(props: AgentSessionViewProps): JSX.Element {
               value={archetype}
               archetypes={archetypes}
               onChange={setArchetype}
+              disabled={running}
+            />
+          </label>
+          <label className="agent-session__field">
+            <span>Approvals</span>
+            <PolicyPicker
+              value={stepPolicy}
+              onChange={setStepPolicy}
               disabled={running}
             />
           </label>
@@ -111,6 +136,14 @@ export function AgentSessionView(props: AgentSessionViewProps): JSX.Element {
               <ApprovalCard
                 round={pendingRound}
                 onSubmit={props.onApprove}
+                onApproveRest={() => {
+                  // AIG-02 — flip the policy to auto_approve so the
+                  // remaining rounds dispatch without prompting, then
+                  // submit the current round as approve_all.
+                  setStepPolicy('auto_approve')
+                  props.onApprove('approve_all')
+                }}
+                readFile={props.readFile}
               />
             ) : null}
             {phase === 'completed' || phase === 'errored' ? (
@@ -163,6 +196,50 @@ function Empty(): JSX.Element {
       Enter a goal above and press Run. Approvals appear inline as the
       session progresses.
     </p>
+  )
+}
+
+interface PolicyPickerProps {
+  value: StepPolicy
+  onChange(value: StepPolicy): void
+  disabled: boolean
+}
+
+const POLICY_OPTIONS: ReadonlyArray<{ value: StepPolicy; label: string; title: string }> = [
+  {
+    value: 'always_ask',
+    label: 'Always ask',
+    title: 'Pause on every round and require approval before any tool runs.',
+  },
+  {
+    value: 'ask_on_risky',
+    label: 'Ask on risky',
+    title:
+      'Auto-approve rounds that only read; pause when a tool writes, runs a process, or hits the network.',
+  },
+  {
+    value: 'auto_approve',
+    label: 'Auto-approve',
+    title: 'Run every round without asking. Use only for trusted goals.',
+  },
+]
+
+function PolicyPicker({ value, onChange, disabled }: PolicyPickerProps): JSX.Element {
+  const selected = POLICY_OPTIONS.find((o) => o.value === value) ?? POLICY_OPTIONS[1]
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as StepPolicy)}
+      disabled={disabled}
+      title={selected.title}
+      data-testid="agent-policy-picker"
+    >
+      {POLICY_OPTIONS.map((o) => (
+        <option key={o.value} value={o.value} title={o.title}>
+          {o.label}
+        </option>
+      ))}
+    </select>
   )
 }
 
@@ -230,9 +307,16 @@ function RoundRecordCard({ record }: RoundRecordCardProps): JSX.Element {
 interface ApprovalCardProps {
   round: PendingRound
   onSubmit(decision: 'approve_all' | 'partial' | 'abort', reason?: string): void
+  onApproveRest(): void
+  readFile?(path: string): Promise<string | null>
 }
 
-function ApprovalCard({ round, onSubmit }: ApprovalCardProps): JSX.Element {
+function ApprovalCard({
+  round,
+  onSubmit,
+  onApproveRest,
+  readFile,
+}: ApprovalCardProps): JSX.Element {
   const toggleApproval = useAgentSessionStore((s) => s.toggleApproval)
   const [abortReason, setAbortReason] = useState<string | null>(null)
   const allApproved = round.toolCalls.every((tc) => round.approvals[tc.id] === true)
@@ -257,6 +341,7 @@ function ApprovalCard({ round, onSubmit }: ApprovalCardProps): JSX.Element {
             call={tc}
             approved={round.approvals[tc.id] === true}
             onToggle={(approve) => toggleApproval(tc.id, approve)}
+            readFile={readFile}
           />
         ))}
       </ul>
@@ -268,14 +353,23 @@ function ApprovalCard({ round, onSubmit }: ApprovalCardProps): JSX.Element {
             disabled={!anyApproved}
             data-testid="agent-approval-submit"
           >
-            {allApproved ? 'Approve all' : 'Approve selected'}
+            {allApproved ? 'Approve' : 'Approve selected'}
+          </button>
+          <button
+            type="button"
+            onClick={onApproveRest}
+            disabled={!allApproved}
+            title="Approve this round and run the rest of the session without further prompts."
+            data-testid="agent-approval-approve-rest"
+          >
+            Approve &amp; continue
           </button>
           <button
             type="button"
             onClick={() => setAbortReason('')}
             data-testid="agent-approval-abort"
           >
-            Abort session
+            Reject
           </button>
         </footer>
       ) : (
@@ -326,12 +420,21 @@ interface ToolCallRowProps {
   call: ToolCallProposal
   approved: boolean
   onToggle(approve: boolean): void
+  readFile?(path: string): Promise<string | null>
 }
 
-function ToolCallRow({ call, approved, onToggle }: ToolCallRowProps): JSX.Element {
+function ToolCallRow({ call, approved, onToggle, readFile }: ToolCallRowProps): JSX.Element {
+  const risk = useMemo(
+    () => classifyToolCall(call.target_plugin_id, call.command_id),
+    [call.target_plugin_id, call.command_id],
+  )
+  const writeFileArgs = useMemo(() => extractWriteFileArgs(call.args), [call.args])
   const argsPreview = useMemo(() => previewJson(call.args), [call.args])
+
   return (
-    <li className={`agent-approval__call agent-approval__call--${approved ? 'ok' : 'denied'}`}>
+    <li
+      className={`agent-approval__call agent-approval__call--${approved ? 'ok' : 'denied'} agent-approval__call--risk-${risk}`}
+    >
       <label>
         <input
           type="checkbox"
@@ -340,12 +443,125 @@ function ToolCallRow({ call, approved, onToggle }: ToolCallRowProps): JSX.Elemen
           data-testid={`agent-approval-toggle-${call.id}`}
         />
         <code>{call.name}</code>
+        <RiskBadge level={risk} />
         <span className="agent-approval__target">
           {call.target_plugin_id}::{call.command_id}
         </span>
       </label>
-      <pre className="agent-approval__args">{argsPreview}</pre>
+      {writeFileArgs && readFile ? (
+        <WriteFileDiff
+          path={writeFileArgs.path}
+          contents={writeFileArgs.contents}
+          readFile={readFile}
+        />
+      ) : (
+        <pre className="agent-approval__args">{argsPreview}</pre>
+      )}
     </li>
+  )
+}
+
+function RiskBadge({ level }: { level: RiskLevel }): JSX.Element {
+  return (
+    <span
+      className={`agent-approval__risk agent-approval__risk--${level}`}
+      title={`Risk: ${level}`}
+      data-testid={`agent-risk-${level}`}
+    >
+      {riskLabel(level)}
+    </span>
+  )
+}
+
+interface WriteFileDiffProps {
+  path: string
+  contents: string
+  readFile(path: string): Promise<string | null>
+}
+
+/**
+ * Loads the current on-disk contents and renders a unified-style
+ * line diff against the model's proposed contents. Falls back to
+ * showing the full proposed body when the file does not yet exist
+ * (`null` from readFile).
+ */
+function WriteFileDiff({ path, contents, readFile }: WriteFileDiffProps): JSX.Element {
+  const [before, setBefore] = useState<string | null | undefined>(undefined)
+  useEffect(() => {
+    let cancelled = false
+    void readFile(path).then((b) => {
+      if (!cancelled) setBefore(b)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [path, readFile])
+
+  if (before === undefined) {
+    return (
+      <div className="agent-approval__diff agent-approval__diff--loading">
+        <span className="agent-approval__diff-path">{path}</span>
+        <span className="agent-approval__diff-status">loading…</span>
+      </div>
+    )
+  }
+
+  if (before === null) {
+    return (
+      <div className="agent-approval__diff">
+        <header>
+          <span className="agent-approval__diff-path">{path}</span>
+          <span className="agent-approval__diff-status">new file</span>
+        </header>
+        <pre className="agent-approval__diff-body">
+          {contents.length > 4000 ? contents.slice(0, 4000) + '\n…' : contents}
+        </pre>
+      </div>
+    )
+  }
+
+  const diff = diffLines(before, contents)
+  if (diff.unchanged) {
+    return (
+      <div className="agent-approval__diff">
+        <header>
+          <span className="agent-approval__diff-path">{path}</span>
+          <span className="agent-approval__diff-status">no changes</span>
+        </header>
+      </div>
+    )
+  }
+
+  return (
+    <div className="agent-approval__diff">
+      <header>
+        <span className="agent-approval__diff-path">{path}</span>
+        <span className="agent-approval__diff-status">
+          {diff.lines.filter((l) => l.kind === 'add').length} added,{' '}
+          {diff.lines.filter((l) => l.kind === 'remove').length} removed
+        </span>
+      </header>
+      <pre className="agent-approval__diff-body">
+        {diff.lines.map((l, i) => (
+          <DiffLineRow key={i} line={l} />
+        ))}
+      </pre>
+      {diff.truncated ? (
+        <footer className="agent-approval__diff-truncated">
+          Diff truncated at {DIFF_MAX_LINES} lines.
+        </footer>
+      ) : null}
+    </div>
+  )
+}
+
+function DiffLineRow({ line }: { line: DiffLine }): JSX.Element {
+  const sigil = line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '
+  return (
+    <span className={`agent-approval__diff-line agent-approval__diff-line--${line.kind}`}>
+      {sigil} {line.text}
+      {'\n'}
+    </span>
   )
 }
 

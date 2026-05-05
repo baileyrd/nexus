@@ -27,16 +27,22 @@ Skills can declare `depends_on: [other-skill-id]` in frontmatter, but the regist
 
 **Severity:** Should-fix (safety-critical; half-built)
 **Surfaced by:** `crates/nexus-agent/` — `StepPolicy` slot reserved; shell `nexus.agent` plugin routes approvals manually with no native confirm dialog.
-**Status:** Open.
+**Status:** Resolved 2026-05-05. Implemented shell-side; the kernel `StepPolicy` slot stays reserved for a future Rust-side policy implementation.
 
-### Problem
-Agent sessions can execute tool calls with side effects (file write, terminal exec, IPC dispatch). Today the user sees the proposed step and clicks "approve" in pane mode, but there's no per-tool risk classification, no diff preview for file writes, and no "approve all in this session" affordance.
+### Outcome
+- **Risk classifier** (`shell/src/plugins/nexus/agent/riskClassifier.ts`): pure function mapping `(target_plugin_id, command_id)` → `'safe' | 'write' | 'exec' | 'network'`. Conservative default — unknown plugins fall through to `write`. Storage reads / git log / AI / skills metadata classified as `safe`; storage writes / commits as `write`; terminal/processes/workflow runs as `exec`; git push/pull/fetch and MCP host calls as `network`.
+- **`StepPolicy` enum** in `sessionStore.ts`: `'always_ask' | 'ask_on_risky' | 'auto_approve'` with `DEFAULT_STEP_POLICY = 'ask_on_risky'`. Lives shell-side because the shell *is* the policy decision-maker via the kernel's `BusBridgePolicy` — no IPC/wire-format change needed.
+- **Auto-decide in `agentRuntime.handleTopic`**: when a `round_proposed` arrives, the policy is consulted; `auto_approve` short-circuits to `submitDecision('approve_all')`, `ask_on_risky` short-circuits when `isRoundEntirelySafe(toolCalls)`, and `always_ask` always surfaces the card. Optimistic transcript append still happens so the run is visible.
+- **Composer policy picker** with three options, tooltips explaining when to pick each, disabled while a session is running.
+- **Approval-card additions**: per-tool risk badge (colour-coded: green/safe, amber/write, red/exec+network) plus a left-border accent on the row matching the highest-risk colour. Three buttons: **Approve** (or "Approve selected" when not all are checked), **Approve & continue** (flips policy to `auto_approve` for the rest of the session, then submits the current round), **Reject** (opens the existing reason form).
+- **Diff preview for `write_file`**: when a tool call's target is `com.nexus.storage::write_file` and args expose `path: string + contents: string`, the row replaces the raw-JSON preview with a unified line diff against the current on-disk contents (fetched via a new `runtime.readFile()` helper that calls `com.nexus.storage::read_file`). Implemented as an LCS-based whole-line diff in `diffPreview.ts`, capped at 200 lines with a "diff truncated" footer; degrades to a "new file" preview when the file doesn't yet exist; "no changes" hint when contents are identical.
+- **Decision still recorded in session history** through the existing `ToolCallRecord.{approved, reason}` path — no schema change.
+- 16 new tests under `aig02.test.ts` (risk classifier, diff helper, auto-decide policy paths, `readFile` happy/error). Full shell suite: 823/823 pass; typecheck clean; no new lint errors.
 
-### Definition of done
-- `StepPolicy` enum implemented (`AlwaysAsk` / `AskOnRisky` / `AutoApprove`) with risk heuristic per tool target plugin.
-- Shell `nexus.agent` plugin renders an inline approval card with: tool name, target plugin, decoded arg summary, optional diff preview for `write_file` tool, and three buttons (Approve / Reject / Approve-rest).
-- Decision recorded in session history.
-- Default policy: `AskOnRisky` (writes, exec, network always asked; reads auto-approved).
+### Follow-up (not blocking)
+- Rust-side `StepPolicy`: a kernel-enforced policy would let headless `nexus agent run` honour the same modes the shell does. Today `nexus agent run --auto-approve true` is the only headless option.
+- Diff renderer is whole-line LCS — adequate for forge markdown but could grow word-level highlighting if users complain about replace-blocks reading as remove+add.
+- `Approve & continue` is session-scoped (lives in the store's `stepPolicy`) — surviving the session means the picker resets to `ask_on_risky` next run, which is the safer default.
 
 ---
 
@@ -131,7 +137,7 @@ The TUI is a first-class frontend per architecture, but AI chat is unreachable f
 | Order | Item | Why |
 |---|---|---|
 | 1 | ~~**AIG-04** Activity panel~~ | ✅ Resolved 2026-05-05. |
-| 2 | **AIG-02** Agent approval UI | Safety-critical; builds on activity infrastructure (decision log shares schema). |
+| 2 | ~~**AIG-02** Agent approval UI~~ | ✅ Resolved 2026-05-05. |
 | 3 | **AIG-01** Skill composition | Backend-only; unblocks skill ecosystem. |
 | 4 | **AIG-03** Workflow triggers | Moderate; storage watcher already exists. |
 | 5 | **AIG-05** Local embeddings | Mostly scaffolded; mostly config plumbing. |

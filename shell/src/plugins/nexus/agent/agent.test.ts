@@ -90,6 +90,11 @@ function buildNotifier() {
 
 function reset(): void {
   useAgentSessionStore.getState().reset()
+  // Default policy auto-approves read-only rounds; the legacy
+  // round_proposed-driven tests assume the card always appears, so
+  // pin to `always_ask` here. The auto-decide behaviour has its own
+  // dedicated tests below.
+  useAgentSessionStore.getState().setStepPolicy('always_ask')
 }
 
 // ── Decoder coverage ───────────────────────────────────────────────────

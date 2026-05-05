@@ -62,6 +62,7 @@ export const agentPlugin: Plugin = {
           onDeleteSession: (id) => void runtime.deleteSession(id),
           onRefreshSessions: () => void runtime.refreshSessions(),
           onClearLive: runtime.clearLive,
+          readFile: runtime.readFile,
         }),
       priority: 20,
     })

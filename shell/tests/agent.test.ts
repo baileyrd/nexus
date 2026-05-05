@@ -10,3 +10,4 @@
  * this file.
  */
 import '../src/plugins/nexus/agent/agent.test.ts'
+import '../src/plugins/nexus/agent/aig02.test.ts'

@@ -113,12 +113,32 @@ export type SessionPhase =
   | 'completed'
   | 'errored'
 
+/**
+ * AIG-02 — per-session approval policy. The decision is shell-side:
+ * the kernel always sends `round_proposed`; the runtime auto-submits
+ * `approve_all` when the policy permits, otherwise it surfaces the
+ * approval card.
+ *
+ * - `always_ask`   — every round shows the card (legacy behaviour).
+ * - `ask_on_risky` — auto-approve rounds whose tool calls are all
+ *   read-only-safe; ask whenever any call writes / execs / hits the
+ *   network. Default.
+ * - `auto_approve` — never ask. The agent runs to completion. Set
+ *   either at session start (composer) or mid-session via the
+ *   "Approve & continue" affordance on the approval card.
+ */
+export type StepPolicy = 'always_ask' | 'ask_on_risky' | 'auto_approve'
+
+export const DEFAULT_STEP_POLICY: StepPolicy = 'ask_on_risky'
+
 export interface AgentSessionState {
   // ── Composer ──────────────────────────────────────────────────────────
   /** Goal text bound to the textarea. */
   goal: string
   /** Archetype id (`null` = default planner). */
   archetype: string | null
+  /** Approval policy applied to incoming `round_proposed` events. */
+  stepPolicy: StepPolicy
   /** Catalogue resolved from `list_archetypes`; falls back to the
    *  hard-coded set until the IPC call lands. */
   archetypes: ArchetypeInfo[]
@@ -155,6 +175,7 @@ export interface AgentSessionState {
   // ── Mutators ──────────────────────────────────────────────────────────
   setGoal(goal: string): void
   setArchetype(archetype: string | null): void
+  setStepPolicy(policy: StepPolicy): void
   setArchetypes(catalogue: ArchetypeInfo[]): void
   beginSession(sessionId: string | null): void
   setPhase(phase: SessionPhase): void
@@ -174,6 +195,7 @@ export interface AgentSessionState {
 const INITIAL: Omit<AgentSessionState, keyof Mutators> = {
   goal: '',
   archetype: null,
+  stepPolicy: DEFAULT_STEP_POLICY,
   archetypes: [...FALLBACK_ARCHETYPES],
   archetypesLoaded: false,
   currentSessionId: null,
@@ -199,6 +221,7 @@ export const useAgentSessionStore = create<AgentSessionState>((set) => ({
   ...INITIAL,
   setGoal: (goal) => set({ goal }),
   setArchetype: (archetype) => set({ archetype }),
+  setStepPolicy: (stepPolicy) => set({ stepPolicy }),
   setArchetypes: (catalogue) =>
     set({
       archetypes: catalogue.length > 0 ? catalogue : [...FALLBACK_ARCHETYPES],
