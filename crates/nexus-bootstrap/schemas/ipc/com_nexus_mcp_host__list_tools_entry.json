@@ -11,6 +11,9 @@
         "null"
       ]
     },
+    "input_schema": {
+      "description": "JSON Schema for the tool's `arguments`, as advertised by the\nMCP server. Forwarded verbatim from `rmcp::model::Tool::input_schema`.\n`None` only when the upstream tool didn't supply one (rmcp\nmakes this required, so in practice every entry carries it).\nRequired by AI tool-bridge consumers (G5b) that surface MCP\ntools to the model — without the schema the model can't\nreliably produce arguments."
+    },
     "name": {
       "description": "Tool name as advertised by the server.",
       "type": "string"

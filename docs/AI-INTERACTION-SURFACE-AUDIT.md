@@ -243,7 +243,7 @@ Full registration (`crates/nexus-mcp/src/core_plugin.rs:13–23`) — supersedes
 | # | Command | Sync/Async | Purpose |
 |---|---|---|---|
 | 1 | `list_servers` | sync | List configured servers |
-| 2 | `list_tools` | async | List tools for one server |
+| 2 | `list_tools` | async | List tools for one server (returns `name`, `description`, `input_schema` per entry — G5a) |
 | 3 | `call_tool` | async | Invoke a tool on a server |
 | 4 | `list_resources` | async | List resources (BL-026) |
 | 5 | `list_prompts` | async | List prompts (BL-026) |

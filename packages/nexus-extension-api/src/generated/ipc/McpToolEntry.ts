@@ -11,4 +11,14 @@ name: string,
 /**
  * Optional human description.
  */
-description: string | null, };
+description: string | null, 
+/**
+ * JSON Schema for the tool's `arguments`, as advertised by the
+ * MCP server. Forwarded verbatim from `rmcp::model::Tool::input_schema`.
+ * `None` only when the upstream tool didn't supply one (rmcp
+ * makes this required, so in practice every entry carries it).
+ * Required by AI tool-bridge consumers (G5b) that surface MCP
+ * tools to the model — without the schema the model can't
+ * reliably produce arguments.
+ */
+input_schema?: Record<string, unknown> | null, };

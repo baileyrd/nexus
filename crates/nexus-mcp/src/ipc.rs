@@ -98,6 +98,16 @@ pub struct McpToolEntry {
     pub name: String,
     /// Optional human description.
     pub description: Option<String>,
+    /// JSON Schema for the tool's `arguments`, as advertised by the
+    /// MCP server. Forwarded verbatim from `rmcp::model::Tool::input_schema`.
+    /// `None` only when the upstream tool didn't supply one (rmcp
+    /// makes this required, so in practice every entry carries it).
+    /// Required by AI tool-bridge consumers (G5b) that surface MCP
+    /// tools to the model — without the schema the model can't
+    /// reliably produce arguments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(type = "Record<string, unknown> | null"))]
+    pub input_schema: Option<serde_json::Value>,
 }
 
 /// One entry in the `list_resources` response array.
@@ -205,4 +215,47 @@ pub struct McpCallToolReply {
     /// `true` when the engine clipped the content array to fit the
     /// response cap.
     pub truncated: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// G5a: HANDLER_LIST_TOOLS must forward the input_schema verbatim
+    /// so AI tool-bridge consumers can drive function-calling. The
+    /// struct also has to round-trip an entry that omits the field
+    /// (for backwards compat with any external producer that hasn't
+    /// upgraded yet).
+    #[test]
+    fn mcp_tool_entry_round_trips_input_schema() {
+        let wire = serde_json::json!({
+            "name": "fetch",
+            "description": "fetch a URL",
+            "input_schema": {
+                "type": "object",
+                "properties": { "url": { "type": "string" } },
+                "required": ["url"]
+            }
+        });
+        let entry: McpToolEntry =
+            serde_json::from_value(wire.clone()).expect("decode populated entry");
+        assert_eq!(entry.name, "fetch");
+        let schema = entry.input_schema.as_ref().expect("input_schema present");
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["required"][0], "url");
+        // Re-serialising drops nothing.
+        let back = serde_json::to_value(&entry).unwrap();
+        assert_eq!(back, wire);
+    }
+
+    #[test]
+    fn mcp_tool_entry_decodes_when_input_schema_absent() {
+        let wire = serde_json::json!({ "name": "x", "description": null });
+        let entry: McpToolEntry = serde_json::from_value(wire).expect("decode bare entry");
+        assert_eq!(entry.name, "x");
+        assert!(entry.input_schema.is_none());
+        // skip_serializing_if keeps the wire shape minimal for absent schemas.
+        let back = serde_json::to_value(&entry).unwrap();
+        assert!(back.get("input_schema").is_none());
+    }
 }

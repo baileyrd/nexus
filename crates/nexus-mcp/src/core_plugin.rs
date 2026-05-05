@@ -239,9 +239,17 @@ impl CorePlugin for McpHostPlugin {
                     let arr = tools
                         .iter()
                         .map(|t| {
+                            // rmcp stores the schema as Arc<JsonObject>;
+                            // wrap it as a JSON object so consumers (the
+                            // AI tool bridge) can pass it through to the
+                            // model verbatim.
+                            let input_schema = serde_json::Value::Object(
+                                t.input_schema.as_ref().clone(),
+                            );
                             json!({
                                 "name": t.name,
                                 "description": t.description,
+                                "input_schema": input_schema,
                             })
                         })
                         .collect::<Vec<_>>();
