@@ -419,3 +419,129 @@ test('BL-022 saveDraft: validation failure sets saveError without IPC', async ()
   assert.equal(invoked, 0)
   assert.match(useSkillsStore.getState().saveError ?? '', /id is required/)
 })
+
+// ── AIG-01 — compose action ──────────────────────────────────────────────
+
+test('composeSkill: caches successful compose and clears stale error', async () => {
+  reset()
+  const { api, calls, responses } = makeKernel()
+  responses.compose = [
+    {
+      root_id: 'child',
+      fragments: [
+        { id: 'parent', name: 'Parent', body: 'P' },
+        { id: 'child', name: 'Child', body: 'C' },
+      ],
+      merged_body: 'P\n\nC',
+      conflicts: [],
+    },
+  ]
+  // Pre-seed an old error to confirm it's cleared on success.
+  useSkillsStore.setState({ composeErrors: { child: 'previous failure' } })
+
+  await useSkillsStore.getState().composeSkill(api, 'child')
+
+  const result = useSkillsStore.getState().composeResults['child']
+  assert.ok(result, 'composeResults should be populated')
+  assert.equal(result.rootId, 'child')
+  assert.equal(result.fragments.length, 2)
+  assert.equal(result.fragments[1].id, 'child') // root is last
+  assert.equal(result.mergedBody, 'P\n\nC')
+  assert.equal(useSkillsStore.getState().composeErrors['child'], undefined)
+  assert.equal(useSkillsStore.getState().composing, null)
+  assert.equal(calls.length, 1)
+  assert.deepEqual(calls[0].args, { id: 'child' })
+})
+
+test('composeSkill: cycle error from kernel surfaces on composeErrors', async () => {
+  reset()
+  // Pre-seed a stale success to confirm it's purged on failure.
+  useSkillsStore.setState({
+    composeResults: {
+      a: { rootId: 'a', fragments: [], mergedBody: 'old', conflicts: [] },
+    },
+  })
+  const api: SkillsKernelAPI = {
+    invoke: async () => {
+      throw new Error('compose: cycle detected: a → b → a')
+    },
+  }
+
+  await useSkillsStore.getState().composeSkill(api, 'a')
+
+  assert.equal(useSkillsStore.getState().composeResults['a'], undefined)
+  assert.match(useSkillsStore.getState().composeErrors['a'] ?? '', /cycle detected/)
+  assert.equal(useSkillsStore.getState().composing, null)
+})
+
+test('composeSkill: malformed payload reported as decoder failure', async () => {
+  reset()
+  const { api, responses } = makeKernel()
+  // Kernel returned something we can't recognise (e.g. bare string).
+  responses.compose = ['oops']
+  await useSkillsStore.getState().composeSkill(api, 'x')
+  assert.match(
+    useSkillsStore.getState().composeErrors['x'] ?? '',
+    /unparseable|compose/i,
+  )
+})
+
+test('composeSkill: parameter_clash conflict survives the round-trip', async () => {
+  reset()
+  const { api, responses } = makeKernel()
+  responses.compose = [
+    {
+      root_id: 'r',
+      fragments: [{ id: 'r', name: 'R', body: '' }],
+      merged_body: '',
+      conflicts: [
+        { kind: 'parameter_clash', parameter: 'tone', skill_ids: ['a', 'b'] },
+        // Unknown conflict shape silently dropped.
+        { kind: 'unknown_kind', skill_ids: ['z'] },
+      ],
+    },
+  ]
+  await useSkillsStore.getState().composeSkill(api, 'r')
+  const conflicts = useSkillsStore.getState().composeResults['r'].conflicts
+  assert.equal(conflicts.length, 1)
+  assert.equal(conflicts[0].kind, 'parameter_clash')
+  if (conflicts[0].kind === 'parameter_clash') {
+    assert.deepEqual(conflicts[0].skill_ids, ['a', 'b'])
+  }
+})
+
+test('toggleComposePanel: opens, fetches once, closes without refetch', async () => {
+  reset()
+  const { api, calls, responses } = makeKernel()
+  responses.compose = [
+    {
+      root_id: 'r',
+      fragments: [{ id: 'r', name: 'R', body: '' }],
+      merged_body: '',
+      conflicts: [],
+    },
+  ]
+  await useSkillsStore.getState().toggleComposePanel(api, 'r')
+  assert.equal(useSkillsStore.getState().composeOpenId, 'r')
+  assert.equal(calls.length, 1, 'first open should fetch')
+
+  // Close and reopen — cache should short-circuit the IPC.
+  await useSkillsStore.getState().toggleComposePanel(api, 'r')
+  assert.equal(useSkillsStore.getState().composeOpenId, null)
+  await useSkillsStore.getState().toggleComposePanel(api, 'r')
+  assert.equal(useSkillsStore.getState().composeOpenId, 'r')
+  assert.equal(calls.length, 1, 'cached result should short-circuit IPC')
+})
+
+test('clearCompose: drops both result and error for the id', () => {
+  reset()
+  useSkillsStore.setState({
+    composeResults: {
+      a: { rootId: 'a', fragments: [], mergedBody: '', conflicts: [] },
+    },
+    composeErrors: { a: 'boom' },
+  })
+  useSkillsStore.getState().clearCompose('a')
+  assert.equal(useSkillsStore.getState().composeResults['a'], undefined)
+  assert.equal(useSkillsStore.getState().composeErrors['a'], undefined)
+})

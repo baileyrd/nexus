@@ -1,4 +1,12 @@
-import { useSkillsStore, type SkillEntry, type SkillParameter, type SkillsKernelAPI } from './skillsStore'
+import {
+  useSkillsStore,
+  type ComposedFragment,
+  type ComposeConflict,
+  type ComposeResult,
+  type SkillEntry,
+  type SkillParameter,
+  type SkillsKernelAPI,
+} from './skillsStore'
 import { SkillEditor } from './SkillEditor'
 import { Icon } from '../../../icons'
 
@@ -268,8 +276,17 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
   const editingId = useSkillsStore((s) => s.editingId)
   const openEditor = useSkillsStore((s) => s.openEditor)
   const deleteSkill = useSkillsStore((s) => s.deleteSkill)
+  // AIG-01 — composition panel state.
+  const composeOpenId = useSkillsStore((s) => s.composeOpenId)
+  const composeResult = useSkillsStore((s) => s.composeResults[skill.id])
+  const composeError = useSkillsStore((s) => s.composeErrors[skill.id])
+  const composing = useSkillsStore((s) => s.composing)
+  const toggleComposePanel = useSkillsStore((s) => s.toggleComposePanel)
   const isFormOpen = renderingId === skill.id
   const isEditing = editingId === skill.id
+  const isComposeOpen = composeOpenId === skill.id
+  const isComposing = composing === skill.id
+  const hasDeps = skill.dependsOn.length > 0
 
   // BL-022 — Edit / Delete affordances. Both are gated on `relpath`
   // because the kernel can't write back to a skill it didn't load
@@ -355,12 +372,37 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
             Delete
           </button>
         ) : null}
+        {hasDeps ? (
+          <button
+            type="button"
+            onClick={() => void toggleComposePanel(kernel, skill.id)}
+            disabled={isComposing}
+            style={chipButton(isComposeOpen)}
+            title={`Resolve depends_on chain (${skill.dependsOn.length} direct dep${skill.dependsOn.length === 1 ? '' : 's'})`}
+            data-testid={`skill-compose-toggle-${skill.id}`}
+          >
+            {isComposing
+              ? 'Composing…'
+              : isComposeOpen
+                ? 'Hide composition'
+                : 'Show composition'}
+          </button>
+        ) : null}
         {!isFormOpen && skill.parameters.length > 0 ? (
           <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
             {skill.parameters.length} parameter{skill.parameters.length === 1 ? '' : 's'}
           </span>
         ) : null}
       </div>
+
+      {isComposeOpen ? (
+        <ComposePanel
+          rootId={skill.id}
+          composing={isComposing}
+          result={composeResult ?? null}
+          error={composeError ?? null}
+        />
+      ) : null}
 
       {isFormOpen ? <RenderForm skill={skill} kernel={kernel} /> : null}
 
@@ -703,6 +745,246 @@ function RenderResultPanel({ skillId, body }: { skillId: string; body: string })
       >
         {body}
       </pre>
+    </div>
+  )
+}
+
+// ── AIG-01 — composition panel ─────────────────────────────────────
+
+interface ComposePanelProps {
+  rootId: string
+  composing: boolean
+  result: ComposeResult | null
+  error: string | null
+}
+
+/**
+ * Inline panel under an expanded skill row showing the resolver
+ * output: the ordered fragments (deepest dep first, root last), the
+ * pre-merged body the kernel feeds the model, and any non-fatal
+ * conflicts. Cycle / missing-dep errors arrive on `error`.
+ */
+function ComposePanel({ rootId, composing, result, error }: ComposePanelProps) {
+  if (composing && !result) {
+    return (
+      <ComposeShell title="Resolving dependencies…">
+        <div style={{ padding: 8, fontSize: 11, color: 'var(--text-faint)' }}>
+          Resolving <code>{rootId}</code>…
+        </div>
+      </ComposeShell>
+    )
+  }
+  if (error) {
+    return (
+      <ComposeShell title="Composition error">
+        <pre
+          role="alert"
+          style={{
+            margin: 0,
+            padding: 8,
+            background: 'var(--background-primary)',
+            border: '1px solid var(--risk)',
+            borderRadius: 'var(--radius-s)',
+            fontFamily: 'var(--font-monospace, monospace)',
+            fontSize: 11,
+            color: 'var(--risk)',
+            whiteSpace: 'pre-wrap',
+          }}
+          data-testid={`skill-compose-error-${rootId}`}
+        >
+          {error}
+        </pre>
+      </ComposeShell>
+    )
+  }
+  if (!result) return null
+
+  return (
+    <ComposeShell
+      title={`Composition (${result.fragments.length} fragment${result.fragments.length === 1 ? '' : 's'})`}
+    >
+      <ol
+        style={{
+          margin: 0,
+          padding: '0 0 0 16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+        }}
+        data-testid={`skill-compose-fragments-${rootId}`}
+      >
+        {result.fragments.map((f, idx) => (
+          <FragmentRow
+            key={f.id}
+            fragment={f}
+            isRoot={idx === result.fragments.length - 1}
+          />
+        ))}
+      </ol>
+      {result.conflicts.length > 0 ? (
+        <ConflictList conflicts={result.conflicts} />
+      ) : null}
+      <details>
+        <summary
+          style={{
+            cursor: 'pointer',
+            fontSize: 10,
+            color: 'var(--text-faint)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+          }}
+        >
+          Merged body
+        </summary>
+        <pre
+          style={{
+            margin: '6px 0 0',
+            padding: 8,
+            background: 'var(--background-primary)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-s)',
+            fontFamily: 'var(--font-monospace, monospace)',
+            fontSize: 11,
+            lineHeight: 1.45,
+            color: 'var(--text-muted)',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            maxHeight: 280,
+            overflow: 'auto',
+          }}
+        >
+          {result.mergedBody}
+        </pre>
+      </details>
+    </ComposeShell>
+  )
+}
+
+function ComposeShell({
+  title,
+  children,
+}: {
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: 8,
+        background: 'var(--background-primary)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          textTransform: 'uppercase',
+          letterSpacing: '0.04em',
+          color: 'var(--text-faint)',
+        }}
+      >
+        {title}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function FragmentRow({
+  fragment,
+  isRoot,
+}: {
+  fragment: ComposedFragment
+  isRoot: boolean
+}) {
+  return (
+    <li
+      style={{
+        listStyle: 'decimal',
+        color: 'var(--text-muted)',
+        fontSize: 11,
+      }}
+    >
+      <span
+        style={{
+          fontFamily: 'var(--font-monospace, monospace)',
+          color: isRoot ? 'var(--text-normal)' : 'var(--text-muted)',
+          fontWeight: isRoot ? 600 : 400,
+        }}
+      >
+        {fragment.id}
+      </span>
+      {isRoot ? (
+        <span
+          style={{
+            marginLeft: 6,
+            padding: '1px 6px',
+            borderRadius: 999,
+            background: 'var(--background-secondary)',
+            color: 'var(--text-faint)',
+            fontSize: 10,
+            fontFamily: 'var(--font-monospace, monospace)',
+          }}
+        >
+          root
+        </span>
+      ) : null}
+      {fragment.name && fragment.name !== fragment.id ? (
+        <span style={{ marginLeft: 6, color: 'var(--text-faint)' }}>
+          — {fragment.name}
+        </span>
+      ) : null}
+    </li>
+  )
+}
+
+function ConflictList({ conflicts }: { conflicts: ComposeConflict[] }) {
+  return (
+    <div
+      role="alert"
+      style={{
+        padding: 6,
+        background: 'var(--background-primary)',
+        border: '1px solid var(--warm, var(--divider-color))',
+        borderRadius: 'var(--radius-s)',
+        fontSize: 11,
+        color: 'var(--text-muted)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          textTransform: 'uppercase',
+          letterSpacing: '0.04em',
+          color: 'var(--warm, var(--text-faint))',
+        }}
+      >
+        {conflicts.length} conflict{conflicts.length === 1 ? '' : 's'}
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {conflicts.map((c, i) => (
+          <li key={i}>
+            {c.kind === 'parameter_clash' ? (
+              <>
+                Parameter <code>{c.parameter}</code> declared by{' '}
+                <code>{c.skill_ids.join(', ')}</code>
+              </>
+            ) : (
+              <>
+                Restrictions on <code>{c.field}</code> disagree across{' '}
+                <code>{c.skill_ids.join(', ')}</code>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

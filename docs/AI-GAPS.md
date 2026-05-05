@@ -10,16 +10,19 @@
 
 **Severity:** Should-fix (PRD-13 §5 open)
 **Surfaced by:** `crates/nexus-skills/src/lib.rs` — `Skill::depends_on` is parsed and stored, but never resolved when a skill is rendered or activated.
-**Status:** Open.
+**Status:** Resolved 2026-05-05. Backend resolver was already shipped as **BL-021** (separate `compose` IPC handler rather than overloading `render`); the agent already prefers the composed body. Remaining work was the Skills-panel surface, which this changeset added.
 
-### Problem
-Skills can declare `depends_on: [other-skill-id]` in frontmatter, but the registry doesn't compose them. An agent activating a skill receives only that skill's body — its dependencies are silently dropped.
+### Outcome
+- Confirmed BL-021 already covered the backend (`crates/nexus-skills/src/compose.rs`, 519 LoC): iterative DFS with white/gray/black colouring for cycle detection (`ComposeError::Cycle` carries the offending path), Kahn-style topo sort with `depends_on` declaration order as the tiebreaker, and three error variants (`UnknownRoot`, `MissingDependency`, `Cycle`). Tests in-place for linear chain, diamond, self-cycle, longer cycle, and missing dependency. `com.nexus.skills::compose` (handler id 7) returns `ComposedSkill { root_id, fragments, merged_body, conflicts }`. Agent integration at `crates/nexus-agent/src/core_plugin.rs:885` calls `compose_skill_body` and prefers the resolved body, falling back to the verbatim body on cycle/missing-dep so a broken DAG never wedges planning.
+- **Wire types** mirrored in `skillsStore.ts`: `ComposedFragment`, `ComposeConflict` (tagged-union: `parameter_clash` and `restrictions_disagree`), `ComposeResult { rootId, fragments, mergedBody, conflicts }`. Unknown conflict variants are silently dropped at decode so a future kernel-side addition doesn't crash older shells.
+- **Store actions**: `composeSkill(api, id)` (single-flight per id; clears stale errors on success and stale results on failure), `toggleComposePanel(api, id)` (opens the panel and triggers a one-shot fetch on first open per session — closing leaves the cache intact so reopen is instant), `clearCompose(id)` (drops both cached result and error).
+- **Inline panel** in `SkillsView.tsx`: shown beneath the action row of an expanded skill when `dependsOn.length > 0`. Renders the resolver output as an ordered list (deepest dep first, root labelled with a "root" pill and bolder text) plus a non-fatal conflict block when ancestors disagree on parameters or restrictions, plus a collapsible `<details>` showing the merged body the kernel will hand to the model. Cycle / missing-dep failures from the kernel surface as a red-bordered alert pre. Loading state shows "Resolving `<id>`…" while the IPC is in flight.
+- **6 new tests** in `skillsStore.test.ts` — successful compose with cache + stale-error clear; cycle-error replaces stale results; malformed-payload decoder failure; `parameter_clash` conflict round-trip with unknown-kind drop; `toggleComposePanel` open/close/cache; `clearCompose`. Full shell suite: 829/829 pass; typecheck clean; no new lint errors.
 
-### Definition of done
-- `com.nexus.skills::render` resolves `depends_on` transitively (cycle-detected, deterministic order) and returns the composed body.
-- Agent auto-activation (`com.nexus.agent::plan`) respects composition.
-- Skills panel surfaces the resolved chain on hover/expand.
-- Unit tests cover: linear chain, diamond, cycle rejection, missing-dep error.
+### Follow-up (not blocking)
+- The DOD originally said "`render` resolves `depends_on`", but in-tree the backend factored composition into a separate `compose` handler — render handles parameter substitution, compose handles dependency layering. That's the better factoring (orthogonal concerns) and the agent uses both; the spec line was speculative.
+- Word-level diff inside the merged body would help users spot which ancestor contributed each line; today the merged body is printed verbatim.
+- Conflicts are non-fatal warnings only — there's no "auto-resolve" affordance. If clashing parameter defaults become a real pain we can add a pin-this-version chip.
 
 ---
 
@@ -138,7 +141,7 @@ The TUI is a first-class frontend per architecture, but AI chat is unreachable f
 |---|---|---|
 | 1 | ~~**AIG-04** Activity panel~~ | ✅ Resolved 2026-05-05. |
 | 2 | ~~**AIG-02** Agent approval UI~~ | ✅ Resolved 2026-05-05. |
-| 3 | **AIG-01** Skill composition | Backend-only; unblocks skill ecosystem. |
+| 3 | ~~**AIG-01** Skill composition~~ | ✅ Resolved 2026-05-05. |
 | 4 | **AIG-03** Workflow triggers | Moderate; storage watcher already exists. |
 | 5 | **AIG-05** Local embeddings | Mostly scaffolded; mostly config plumbing. |
 | 6 | **AIG-06** Enrich/recall polish | UX iteration; needs user feedback loop. |

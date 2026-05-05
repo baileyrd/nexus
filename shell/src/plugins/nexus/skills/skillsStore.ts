@@ -101,12 +101,50 @@ export interface RenderResult {
   body: string
 }
 
+// ── BL-021 / AIG-01 — `compose` wire types ─────────────────────────────
+//
+// Mirror the rust shapes from `crates/nexus-skills/src/compose.rs`.
+// Hand-defined (rather than imported via ts-rs binding) so the panel
+// stays compileable when the skills plugin is disabled — `compose`
+// then returns an error which we render as a non-fatal banner.
+
+export interface ComposedFragment {
+  id: string
+  name: string
+  body: string
+}
+
+/** Non-fatal warning the resolver emits when ancestors disagree. */
+export type ComposeConflict =
+  | {
+      kind: 'parameter_clash'
+      parameter: string
+      skill_ids: string[]
+    }
+  | {
+      kind: 'restrictions_disagree'
+      field: string
+      skill_ids: string[]
+    }
+
+/** Successful `compose` payload, post-decode. */
+export interface ComposeResult {
+  rootId: string
+  /** Fragments in dependency order — deepest dep first, root last. */
+  fragments: ComposedFragment[]
+  /** Pre-merged body the kernel will hand to the model. */
+  mergedBody: string
+  conflicts: ComposeConflict[]
+}
+
 const SKILLS_PLUGIN_ID = 'com.nexus.skills'
 const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 // Verified against crates/nexus-skills/src/core_plugin.rs HANDLER_RENDER (id 6,
 // command name `render`, args `{ id, values? }`).
 const CMD_RENDER = 'render'
 const CMD_RELOAD = 'reload'
+// BL-021 / AIG-01 — `compose` handler id 7 in nexus-skills core_plugin.
+const CMD_COMPOSE = 'compose'
 // Verified against crates/nexus-storage/src/core_plugin.rs:
 //   write_file: { path, bytes: number[] } -> FileMetadata
 //   delete_file: { path } -> {}
@@ -212,6 +250,17 @@ interface SkillsStoreState {
   /** Skill id currently mid-render (single-flight). */
   rendering: string | null
 
+  // ── AIG-01 — composition panel ─────────────────────────────────────
+  /** Skill id whose composition panel is open (`null` = closed). Only
+   *  one open at a time within an expanded row. */
+  composeOpenId: string | null
+  /** Per-skill cached compose payload — keyed by root id. */
+  composeResults: Record<string, ComposeResult>
+  /** Per-skill compose error. Cycle / missing-dep messages live here. */
+  composeErrors: Record<string, string>
+  /** Skill id currently mid-compose (single-flight). */
+  composing: string | null
+
   /** BL-022 — id of the skill currently in edit mode (or
    *  `'__new__'` when creating). Null when no editor is open. */
   editingId: string | null
@@ -242,6 +291,18 @@ interface SkillsStoreState {
    */
   renderSkill(api: SkillsKernelAPI, id: string): Promise<void>
   clearRenderResult(id: string): void
+
+  // ── AIG-01 — composition panel ─────────────────────────────────────
+  /**
+   * Toggle the inline composition panel for `id`. Opening triggers a
+   * single-flight `compose` IPC if no cached result exists; closing
+   * leaves the cache intact so re-opening is instant.
+   */
+  toggleComposePanel(api: SkillsKernelAPI, id: string): Promise<void>
+  /** Force-refresh the cached composition for `id`. */
+  composeSkill(api: SkillsKernelAPI, id: string): Promise<void>
+  /** Drop cached compose result + error for `id`. */
+  clearCompose(id: string): void
 
   /** BL-022 — open the inline editor for an existing skill id. The
    *  draft is hydrated from the listing snapshot (the kernel returns
@@ -287,6 +348,11 @@ export const useSkillsStore = create<SkillsStoreState>((set, get) => ({
   renderResults: {},
   renderErrors: {},
   rendering: null,
+
+  composeOpenId: null,
+  composeResults: {},
+  composeErrors: {},
+  composing: null,
 
   editingId: null,
   draft: null,
@@ -356,6 +422,62 @@ export const useSkillsStore = create<SkillsStoreState>((set, get) => ({
       delete results[id]
       delete errors[id]
       return { renderResults: results, renderErrors: errors }
+    }),
+  toggleComposePanel: async (api, id) => {
+    const open = get().composeOpenId === id
+    if (open) {
+      set({ composeOpenId: null })
+      return
+    }
+    set({ composeOpenId: id })
+    // Fetch on first open per session; cached result short-circuits.
+    if (
+      get().composeResults[id] === undefined &&
+      get().composeErrors[id] === undefined
+    ) {
+      await get().composeSkill(api, id)
+    }
+  },
+  composeSkill: async (api, id) => {
+    if (get().composing === id) return
+    set({ composing: id })
+    try {
+      const raw = await api.invoke<unknown>(SKILLS_PLUGIN_ID, CMD_COMPOSE, {
+        id,
+      })
+      const decoded = decodeComposeResult(raw, id)
+      if (!decoded) {
+        throw new Error('compose: kernel returned an unparseable payload')
+      }
+      set((s) => {
+        const nextErrors = { ...s.composeErrors }
+        delete nextErrors[id]
+        return {
+          composeResults: { ...s.composeResults, [id]: decoded },
+          composeErrors: nextErrors,
+          composing: null,
+        }
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set((s) => {
+        const nextResults = { ...s.composeResults }
+        delete nextResults[id]
+        return {
+          composeResults: nextResults,
+          composeErrors: { ...s.composeErrors, [id]: message },
+          composing: null,
+        }
+      })
+    }
+  },
+  clearCompose: (id) =>
+    set((s) => {
+      const results = { ...s.composeResults }
+      const errors = { ...s.composeErrors }
+      delete results[id]
+      delete errors[id]
+      return { composeResults: results, composeErrors: errors }
     }),
   openEditor: (id) =>
     set((s) => {
@@ -473,6 +595,10 @@ export const useSkillsStore = create<SkillsStoreState>((set, get) => ({
       renderResults: {},
       renderErrors: {},
       rendering: null,
+      composeOpenId: null,
+      composeResults: {},
+      composeErrors: {},
+      composing: null,
       editingId: null,
       draft: null,
       saveError: null,
@@ -561,4 +687,65 @@ function decodeRenderResult(raw: unknown, fallbackId: string): RenderResult {
     name: typeof r.name === 'string' ? r.name : '',
     body: typeof r.body === 'string' ? r.body : '',
   }
+}
+
+/**
+ * AIG-01 — decode `com.nexus.skills::compose`. Returns `null` when
+ * the payload is unrecognisable so the action can surface a generic
+ * error message; cycle / missing-dep failures arrive as IPC errors
+ * (rejected promise from `invoke`) rather than malformed payloads.
+ */
+export function decodeComposeResult(
+  raw: unknown,
+  fallbackId: string,
+): ComposeResult | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const rootId =
+    typeof r.root_id === 'string' && r.root_id.length > 0
+      ? r.root_id
+      : fallbackId
+  const fragments: ComposedFragment[] = []
+  if (Array.isArray(r.fragments)) {
+    for (const item of r.fragments) {
+      if (!item || typeof item !== 'object') continue
+      const f = item as Record<string, unknown>
+      const id = typeof f.id === 'string' ? f.id : null
+      if (!id) continue
+      fragments.push({
+        id,
+        name: typeof f.name === 'string' ? f.name : id,
+        body: typeof f.body === 'string' ? f.body : '',
+      })
+    }
+  }
+  const mergedBody = typeof r.merged_body === 'string' ? r.merged_body : ''
+  const conflicts: ComposeConflict[] = []
+  if (Array.isArray(r.conflicts)) {
+    for (const item of r.conflicts) {
+      if (!item || typeof item !== 'object') continue
+      const c = item as Record<string, unknown>
+      const kind = c.kind
+      const skillIds = Array.isArray(c.skill_ids)
+        ? c.skill_ids.filter((x): x is string => typeof x === 'string')
+        : []
+      if (kind === 'parameter_clash' && typeof c.parameter === 'string') {
+        conflicts.push({
+          kind: 'parameter_clash',
+          parameter: c.parameter,
+          skill_ids: skillIds,
+        })
+      } else if (
+        kind === 'restrictions_disagree' &&
+        typeof c.field === 'string'
+      ) {
+        conflicts.push({
+          kind: 'restrictions_disagree',
+          field: c.field,
+          skill_ids: skillIds,
+        })
+      }
+    }
+  }
+  return { rootId, fragments, mergedBody, conflicts }
 }
