@@ -48,6 +48,30 @@ use crate::{rag, vectorstore};
 /// summarise, write) without letting a runaway loop pin the kernel.
 const MAX_TOOL_ROUNDS: usize = 8;
 
+/// Host-owned system-prompt floor (G3) applied to every
+/// `mode=chat` call. Prepended to whatever `system` the caller
+/// supplied — never replaces it. Skipped for `mode=complete` (the
+/// ghost-completion contract is "raw completion text, no host
+/// scaffolding"). Kept terse: every chat call carries this on the
+/// wire, so token cost matters.
+const HOST_SYSTEM_PROMPT_FLOOR: &str =
+    "You are operating inside Nexus, the user's personal knowledge forge — \
+     a directory of plain-text files (mostly Markdown). All file paths you \
+     see or emit are forge-relative; never use absolute paths or paths \
+     containing `..`. Prefer using available tools (reading, searching, \
+     writing) over guessing. When you modify a file, make minimal targeted \
+     edits and preserve the user's existing structure and tone.";
+
+/// Compose the effective system prompt for `mode=chat`. Returns the
+/// floor when `caller` is empty/`None`; returns `floor + "\n\n" +
+/// caller` otherwise.
+fn compose_chat_system(caller: Option<&str>) -> String {
+    match caller.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(c) => format!("{HOST_SYSTEM_PROMPT_FLOOR}\n\n{c}"),
+        None => HOST_SYSTEM_PROMPT_FLOOR.to_string(),
+    }
+}
+
 /// Reverse-DNS identifier for this plugin.
 pub const PLUGIN_ID: &str = "com.nexus.ai";
 
@@ -868,11 +892,12 @@ async fn handle_stream_chat(
                     return Err(exec_err(e));
                 }
             };
+            let effective_system = compose_chat_system(system.as_deref());
             match run_tool_dispatch_loop(
                 ai.as_ref(),
                 registry_for_loop.as_ref(),
                 messages,
-                system.as_deref(),
+                Some(effective_system.as_str()),
                 &on_chunk,
             )
             .await
@@ -1808,6 +1833,39 @@ fn exec_err<S: Into<String>>(reason: S) -> PluginError {
     PluginError::ExecutionFailed {
         plugin_id: PLUGIN_ID.to_string(),
         reason: reason.into(),
+    }
+}
+
+#[cfg(test)]
+mod system_floor_tests {
+    use super::*;
+
+    #[test]
+    fn floor_alone_when_caller_is_none() {
+        let out = compose_chat_system(None);
+        assert_eq!(out, HOST_SYSTEM_PROMPT_FLOOR);
+    }
+
+    #[test]
+    fn floor_alone_when_caller_is_empty() {
+        assert_eq!(compose_chat_system(Some("")), HOST_SYSTEM_PROMPT_FLOOR);
+        assert_eq!(compose_chat_system(Some("   \n")), HOST_SYSTEM_PROMPT_FLOOR);
+    }
+
+    #[test]
+    fn floor_prepends_caller_supplied_system() {
+        let out = compose_chat_system(Some("Be terse."));
+        assert!(out.starts_with(HOST_SYSTEM_PROMPT_FLOOR));
+        assert!(out.ends_with("Be terse."));
+        // Separated by a blank line so neither blob bleeds into the other.
+        assert!(out.contains("\n\nBe terse."));
+    }
+
+    #[test]
+    fn floor_mentions_forge_relative_paths() {
+        // Catch accidental floor-content drops: the path-confinement
+        // line is the load-bearing safety nudge for tool-using chats.
+        assert!(HOST_SYSTEM_PROMPT_FLOOR.contains("forge-relative"));
     }
 }
 

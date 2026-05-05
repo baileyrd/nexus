@@ -280,7 +280,7 @@ Shell consumers subscribe at `shell/src/plugins/nexus/ai/aiRuntime.ts:51–52`.
 
 ## 14. Prompt Assembly — Where the System Prompt Comes From
 
-- **`stream_chat`** (`crates/nexus-ai/src/core_plugin.rs:793`) — accepts a caller-supplied `system` parameter verbatim. No skills, no RAG, no host-side default. Whatever the shell or CLI sends is what the model sees.
+- **`stream_chat`** (`crates/nexus-ai/src/core_plugin.rs`) — for `mode=chat`, prepends a host-owned floor (`HOST_SYSTEM_PROMPT_FLOOR`) to the caller-supplied `system` via `compose_chat_system()` (G3). The floor identifies the forge environment, enforces forge-relative paths, and nudges toward tool use; ~80 tokens. `mode=complete` skips the floor (ghost-completion contract is "raw text, no host scaffolding"). Caller's `system`, when present, is appended verbatim after a blank line.
 - **`stream_ask`** (line 1480) — calls `build_rag_prompt` to stitch retrieved chunks into a RAG system message.
 - **Agent planner** (`crates/nexus-agent/src/core_plugin.rs:642–701`, `system_prompt_with_skills`) — layers `DEFAULT_SYSTEM_PROMPT` + skill guidance + MCP server hints. This is the only path that injects skills/MCP into the prompt.
 
