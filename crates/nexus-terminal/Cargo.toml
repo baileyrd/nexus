@@ -10,6 +10,7 @@ description = "Nexus terminal & process manager: PTY sessions, shell detection, 
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
 portable-pty = { workspace = true }
+vte = { workspace = true }
 regex-lite = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

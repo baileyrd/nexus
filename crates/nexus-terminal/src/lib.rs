@@ -61,6 +61,7 @@ mod compound;
 mod core_plugin;
 mod env;
 mod error;
+mod grid;
 mod job_object;
 mod lines;
 mod manager;
@@ -85,12 +86,12 @@ pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
 pub use core_plugin::{
     CreateSessionArgs, CreateSessionResponse, OutputStreamPayload, PumpArgs, PumpResponse,
-    ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ResizeArgs, SearchOutputArgs,
-    SendInputArgs, SendRawInputArgs, SessionIdArgs, TerminalCorePlugin,
+    ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ReadScreenArgs, ResizeArgs,
+    SearchOutputArgs, SendInputArgs, SendRawInputArgs, SessionIdArgs, TerminalCorePlugin,
     WaitForPatternArgs, WaitForPatternResponse, EVENT_LIFECYCLE_PREFIX, EVENT_OUTPUT_PREFIX,
     HANDLER_CLOSE_SESSION, HANDLER_CREATE_SESSION,
     HANDLER_GET_SESSION_INFO, HANDLER_LIST_SESSIONS, HANDLER_PUMP, HANDLER_READ_OUTPUT,
-    HANDLER_READ_RAW_SINCE,
+    HANDLER_READ_RAW_SINCE, HANDLER_READ_SCREEN,
     HANDLER_SAVED_CREATE, HANDLER_SAVED_DELETE, HANDLER_SAVED_LIST, HANDLER_SAVED_REORDER,
     HANDLER_SAVED_UPDATE, HANDLER_SEARCH_OUTPUT, HANDLER_SEND_INPUT, HANDLER_SEND_RAW_INPUT,
     HANDLER_WAIT_FOR_PATTERN, PLUGIN_ID,
@@ -104,6 +105,7 @@ pub use env::{
     REDACTED,
 };
 pub use error::TerminalError;
+pub use grid::{ScreenSnapshot, ShellZone, TerminalGrid, ZoneKind};
 pub use job_object::JobObject;
 pub use lines::{Line, LineBuffer};
 pub use manager::{SessionManager, DEFAULT_MAX_SESSIONS};

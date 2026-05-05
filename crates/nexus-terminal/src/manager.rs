@@ -33,20 +33,27 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::buffer::OutputBuffer;
 use crate::error::TerminalError;
+use crate::grid::{ScreenSnapshot, TerminalGrid};
 use crate::lines::{Line, LineBuffer};
 use crate::session::{ProcessState, Session, SessionConfig, SessionId, Signal};
 
 /// PRD-09 §2.3 hard cap on simultaneously-active sessions per workspace.
 pub const DEFAULT_MAX_SESSIONS: usize = 50;
 
-/// One session plus its captured-output rings. The manager owns all
-/// three so consumers never see a live `Session` without the buffers it
-/// feeds: [`OutputBuffer`] holds raw bytes (PRD-09 §3.1), [`LineBuffer`]
-/// holds the ANSI-stripped line view the server API exposes (§3.2).
+/// One session plus its captured-output rings. The manager owns all four so
+/// consumers never see a live `Session` without the buffers it feeds:
+/// [`OutputBuffer`] holds raw bytes (PRD-09 §3.1), [`LineBuffer`] holds the
+/// ANSI-stripped line view the server API exposes (§3.2), and [`TerminalGrid`]
+/// maintains the rendered screen state for AI / structured consumers (§3
+/// addendum).
 struct Entry {
     session: Session,
     buffer: OutputBuffer,
     lines: LineBuffer,
+    /// Server-side VTE grid. Receives the same byte stream as `buffer` and
+    /// `lines` on every [`SessionManager::drain`] call. Enables
+    /// [`SessionManager::grid_snapshot`] and the `read_screen` IPC handler.
+    grid: TerminalGrid,
     last_accessed: Instant,
     /// Optional human-readable label for the programmable API's
     /// `SessionInfo` surface (PRD-09 §11). `None` falls back to the
@@ -139,6 +146,10 @@ impl SessionManager {
                 session,
                 buffer: OutputBuffer::with_capacity(self.default_buffer_capacity),
                 lines: LineBuffer::new(),
+                // Default PTY size is 80 × 24 — the grid will be resized to
+                // the actual PTY size via `SessionManager::resize` as soon as
+                // the UI reports its viewport dimensions.
+                grid: TerminalGrid::new(24, 80),
                 last_accessed: Instant::now(),
                 name: None,
                 created_at: now,
@@ -299,13 +310,17 @@ impl SessionManager {
         entry.session.write(bytes)
     }
 
-    /// Drain whatever is currently available from the PTY into the
-    /// session's ring buffer, blocking up to `timeout` for the first
-    /// byte. Returns the number of bytes read.
+    /// Drain whatever is currently available from the PTY into the session's
+    /// ring buffer, line buffer, and terminal grid, blocking up to `timeout`
+    /// for the first byte. Returns the number of bytes read.
+    ///
+    /// All three consumers ([`OutputBuffer`], [`LineBuffer`], [`TerminalGrid`])
+    /// receive the same raw byte slice in a single pass — callers never need to
+    /// route the bytes themselves.
     ///
     /// # Errors
     /// - [`TerminalError::NotRunning`] if `id` is not tracked.
-    /// - Any I/O error from [`Session::read_into_buffer`].
+    /// - Any I/O error from the underlying PTY read.
     pub fn drain(
         &mut self,
         id: &SessionId,
@@ -313,11 +328,21 @@ impl SessionManager {
     ) -> Result<usize, TerminalError> {
         let entry = self.entry_mut(id)?;
         entry.last_accessed = Instant::now();
-        let Entry { session, buffer, lines, .. } = entry;
-        session.read_into(Some(buffer), Some(lines), timeout)
+        // Read into a stack-local scratch buffer so the same bytes can be
+        // forwarded to all three consumers without an extra allocation.
+        let mut scratch = [0u8; 8192];
+        let Entry { session, buffer, lines, grid, .. } = entry;
+        let n = session.read(&mut scratch, timeout)?;
+        if n > 0 {
+            buffer.push(&scratch[..n]);
+            lines.push(&scratch[..n]);
+            grid.feed(&scratch[..n]);
+        }
+        Ok(n)
     }
 
-    /// Update the PTY's reported window size (PRD-09 §1.1).
+    /// Update the PTY's reported window size (PRD-09 §1.1), and keep the
+    /// terminal grid in sync with the new dimensions.
     ///
     /// # Errors
     /// - [`TerminalError::NotRunning`] if `id` is not tracked.
@@ -330,7 +355,20 @@ impl SessionManager {
     ) -> Result<(), TerminalError> {
         let entry = self.entry_mut(id)?;
         entry.last_accessed = Instant::now();
-        entry.session.resize(cols, rows)
+        entry.session.resize(cols, rows)?;
+        entry.grid.resize(rows, cols);
+        Ok(())
+    }
+
+    /// Return a point-in-time snapshot of the session's visible terminal
+    /// screen. `None` when `id` is not tracked.
+    ///
+    /// The snapshot is computed from the server-side [`TerminalGrid`] which is
+    /// kept current on every [`Self::drain`] call, so the result reflects
+    /// whatever the PTY has produced up to the most recent drain.
+    #[must_use]
+    pub fn grid_snapshot(&self, id: &SessionId) -> Option<ScreenSnapshot> {
+        self.sessions.get(id).map(|e| e.grid.snapshot())
     }
 
     /// Graceful-shutdown ladder (PRD-09 §5.1) on the named session:

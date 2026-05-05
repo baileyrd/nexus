@@ -95,6 +95,7 @@ use schemars::JsonSchema;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
+use crate::grid::ScreenSnapshot;
 use crate::saved::{SavedCommand, SqliteSavedCommandStore};
 use crate::server::{InMemoryTerminalServer, ServerSpawnConfig, TerminalEvent, TerminalServer};
 use crate::session::SessionId;
@@ -159,6 +160,12 @@ pub const HANDLER_READ_RAW_SINCE: u32 = 16;
 /// `resize` handler id. Updates the PTY's reported window size so the
 /// child process receives SIGWINCH and reflows. See [`ResizeArgs`].
 pub const HANDLER_RESIZE: u32 = 17;
+/// `read_screen` handler id. Drains the PTY then returns a [`ScreenSnapshot`]
+/// of the session's visible terminal screen — plain text rows, cursor
+/// position, and OSC 133 semantic zones. The primary consumer is AI agents
+/// that need a rendered view without a JS round-trip. See
+/// [`ReadScreenArgs`].
+pub const HANDLER_READ_SCREEN: u32 = 18;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -369,6 +376,30 @@ pub struct ResizeArgs {
     pub cols: u16,
     /// New row count (character cells).
     pub rows: u16,
+}
+
+/// Arguments for `read_screen`. Drains the PTY for up to `drain_timeout_ms`
+/// milliseconds then returns a [`ScreenSnapshot`] of the visible screen. The
+/// drain step is the same as calling `pump` first — callers can pass `0` to
+/// skip it and snapshot the grid as-is.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ReadScreenArgs {
+    /// Target session id.
+    pub id: String,
+    /// How long to drain the PTY before snapshotting, in milliseconds.
+    /// Defaults to 30 ms — same as [`ReadRawSinceArgs`] — so an idle
+    /// session releases the server mutex promptly.
+    #[serde(default)]
+    pub drain_timeout_ms: Option<u64>,
 }
 
 /// Response from `read_raw_since`.
@@ -930,6 +961,7 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_SAVED_REORDER => self.dispatch_saved_reorder(args),
             HANDLER_READ_RAW_SINCE => self.dispatch_read_raw_since(args),
             HANDLER_RESIZE => self.dispatch_resize(args),
+            HANDLER_READ_SCREEN => self.dispatch_read_screen(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -1094,6 +1126,22 @@ impl TerminalCorePlugin {
             .resize(&id, cols, rows)
             .map_err(crate_err)?;
         Ok(serde_json::Value::Null)
+    }
+
+    fn dispatch_read_screen(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: ReadScreenArgs = parse_args(args, "read_screen")?;
+        let id = SessionId::from_string(a.id);
+        let timeout = Duration::from_millis(a.drain_timeout_ms.unwrap_or(30));
+        let snap: ScreenSnapshot = self
+            .server
+            .lock()
+            .map_err(poisoned)?
+            .read_screen(&id, timeout)
+            .map_err(crate_err)?;
+        to_value(&snap, "read_screen")
     }
 
     fn dispatch_search_output(

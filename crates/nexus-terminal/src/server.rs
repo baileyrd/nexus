@@ -43,6 +43,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::error::TerminalError;
+use crate::grid::ScreenSnapshot;
 use crate::lines::Line;
 use crate::manager::SessionManager;
 use crate::session::{SessionConfig, SessionId};
@@ -328,6 +329,27 @@ pub trait TerminalServer {
     /// - [`TerminalError::NotRunning`] if `id` is not tracked.
     /// - [`TerminalError::Io`] from the underlying ioctl (rare).
     fn resize(&mut self, id: &SessionId, cols: u16, rows: u16) -> Result<(), TerminalError>;
+
+    /// Drain the PTY (up to `drain_timeout`) then return a
+    /// [`ScreenSnapshot`] of the session's visible terminal screen.
+    ///
+    /// The snapshot is built from the server-side [`crate::TerminalGrid`]
+    /// which receives the same byte stream as the raw ring buffer and the
+    /// line buffer on every pump. It gives AI agents and pattern matchers a
+    /// rendered view of the terminal without a JS round-trip:
+    ///
+    /// - `text_rows`: plain text per visible row (trailing whitespace trimmed)
+    /// - `cursor_row` / `cursor_col`: current cursor position
+    /// - `zones`: OSC 133 semantic zones accumulated since session creation
+    ///
+    /// # Errors
+    /// - [`TerminalError::NotRunning`] if `id` is not tracked.
+    /// - Propagates any I/O error from the drain step.
+    fn read_screen(
+        &mut self,
+        id: &SessionId,
+        drain_timeout: Duration,
+    ) -> Result<ScreenSnapshot, TerminalError>;
 }
 
 /// Default [`TerminalServer`] implementation: wraps a
@@ -599,6 +621,18 @@ impl TerminalServer for InMemoryTerminalServer {
 
     fn resize(&mut self, id: &SessionId, cols: u16, rows: u16) -> Result<(), TerminalError> {
         self.manager.resize(id, cols, rows)
+    }
+
+    fn read_screen(
+        &mut self,
+        id: &SessionId,
+        drain_timeout: Duration,
+    ) -> Result<ScreenSnapshot, TerminalError> {
+        // Drain the PTY so the grid includes the latest bytes.
+        let _ = self.pump(id, drain_timeout)?;
+        self.manager
+            .grid_snapshot(id)
+            .ok_or_else(|| TerminalError::NotRunning(id.as_str().to_string()))
     }
 }
 
