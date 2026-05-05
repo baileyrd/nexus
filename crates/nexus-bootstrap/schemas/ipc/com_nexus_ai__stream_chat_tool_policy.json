@@ -12,6 +12,11 @@
       "description": "Advertise no tools — the model cannot issue tool calls.",
       "type": "string",
       "const": "none"
+    },
+    {
+      "description": "`Auto` plus tools dynamically discovered from\n`com.nexus.mcp.host::list_servers` / `list_tools`. Each MCP\ntool is exposed as `mcp__<server>__<tool>` and proxied to\n`call_tool`. Discovery runs once per `stream_chat` call (no\ncache); a server that fails to enumerate is skipped with a\nwarning so the chat call still proceeds.",
+      "type": "string",
+      "const": "auto_with_mcp"
     }
   ]
 }

@@ -184,6 +184,14 @@ pub enum AiToolPolicy {
     Auto,
     /// Advertise no tools — the model cannot issue tool calls.
     None,
+    /// `Auto` plus tools dynamically discovered from
+    /// `com.nexus.mcp.host::list_servers` / `list_tools`. Each MCP
+    /// tool is exposed as `mcp__<server>__<tool>` and proxied to
+    /// `call_tool`. Discovery runs once per `stream_chat` call (no
+    /// cache); a server that fails to enumerate is skipped with a
+    /// warning so the chat call still proceeds.
+    #[serde(rename = "auto_with_mcp")]
+    AutoWithMcp,
 }
 
 /// Args for `com.nexus.ai::stream_chat` (handler id `6`).

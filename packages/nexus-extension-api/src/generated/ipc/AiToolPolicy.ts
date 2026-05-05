@@ -8,4 +8,4 @@
  * list — used by `mode=complete` and by ghost-completion callers that
  * must never trigger side effects.
  */
-export type AiToolPolicy = "auto" | "none";
+export type AiToolPolicy = "auto" | "none" | "auto_with_mcp";

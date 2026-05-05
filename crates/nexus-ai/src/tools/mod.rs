@@ -13,6 +13,7 @@
 //! for context.
 
 pub mod functions;
+pub mod mcp_bridge;
 pub mod registry;
 
 pub use functions::{
@@ -20,4 +21,5 @@ pub use functions::{
     register_storage_builtins, search_forge_schema, write_file_schema, GitLogTool,
     ListBacklinksTool, ReadFileTool, SearchForgeTool, WriteFileTool,
 };
+pub use mcp_bridge::{discover_mcp_tools, McpToolExecutor};
 pub use registry::{RegisteredTool, ToolError, ToolExecutor, ToolRegistry, ToolSchema};

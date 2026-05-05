@@ -91,13 +91,13 @@ End-to-end example: chat → `stream_chat` mode `chat` (lines 64–66) → provi
 - Each `ToolCall` carries `target_plugin_id` (`crates/nexus-agent/src/lib.rs:143–150`); the executor dispatches over kernel IPC.
 - **Important:** agents do not reuse the AI engine's tool registry. The tool-loop in `stream_chat` and the agent planner are two separate mechanisms.
 
-### D. MCP integration — NOT wired to AI
+### D. MCP integration — opt-in via `tools=auto_with_mcp` (G5b)
 
 `com.nexus.mcp.host` (`crates/nexus-mcp/src/core_plugin.rs:38–51`):
 
-- `list_servers` (handler 1), `call_tool` (handler 3) — read `.forge/mcp.toml`, invoke external MCP tools.
+- `list_servers` (handler 1), `list_tools` (handler 2), `call_tool` (handler 3) — read `.forge/mcp.toml`, invoke external MCP tools.
 - Agent planner can auto-discover MCP tools (`IMPLEMENTATION_STATUS.md:155`).
-- **AI engine's `stream_chat` has zero MCP wiring.** The model cannot call MCP tools through chat today.
+- **AI bridge** (`crates/nexus-ai/src/tools/mcp_bridge.rs`): when `stream_chat` is called with `tools=auto_with_mcp`, the engine fans out `list_servers` + per-server `list_tools` (5s discovery timeout, parallel) and merges every advertised tool into the per-call registry under `mcp__<server>__<tool>`. `call_tool` invocations carry a 60s timeout. Failures degrade gracefully — a slow or broken server is logged and skipped. No cache: discovery re-runs each chat call, which is the right v1 default for correctness over latency.
 
 ---
 
@@ -156,7 +156,7 @@ All route through `context.ipc_call("com.nexus.ai", handler, args, 120s)`.
 | Local embeddings | 🟡 Scaffold only | `local_embedding.rs:46–48`; deferred per status doc |
 | `semantic_search` handler | 🟡 Stub | Handler registered, no real impl |
 | Agent ↔ AI tool registry | 🟡 Not unified | Agents go via kernel IPC, not AI's tool loop |
-| MCP ↔ AI | 🟡 Agent-only | `stream_chat` cannot call MCP |
+| MCP ↔ AI | 🟢 Opt-in via `tools=auto_with_mcp` (G5b) | `tools/mcp_bridge.rs` discovers + bridges per call |
 
 ---
 

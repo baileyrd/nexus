@@ -843,6 +843,12 @@ async fn handle_stream_chat(
                 // Physically empty registry so the loop advertises no
                 // schemas and ignores any (impossible) tool_calls.
                 AiToolPolicy::None => Arc::new(ToolRegistry::new()),
+                // Discover MCP-advertised tools per call and merge with
+                // built-ins. Discovery failures degrade gracefully —
+                // discover_mcp_tools always returns a usable registry.
+                AiToolPolicy::AutoWithMcp => {
+                    crate::tools::discover_mcp_tools(Arc::clone(&ctx), registry).await
+                }
             };
             let on_chunk = envelope.chunk_sink();
             let ai = match build_ai_provider(&ai_cfg) {
