@@ -18,9 +18,10 @@ nexus-terminal   = { path = "../nexus-terminal" }
 
 gpui          = { workspace = true }
 comrak        = { workspace = true }
-# Same rev as the workspace `gpui` pin.  The x11 feature is a no-op on
-# non-Linux platforms because gpui_linux is a platform-conditional dep.
-gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform", rev = "20f86a729fc5511515c21a3e9b4fcc9adc7e2eaf", features = ["x11", "font-kit"] }
+# Same rev as the workspace `gpui` pin.  wayland+x11 mirror gpui's own
+# default features so guess_compositor() and gpui_platform agree on which
+# display backend is compiled in (mismatch hits the unreachable!() branch).
+gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform", rev = "20f86a729fc5511515c21a3e9b4fcc9adc7e2eaf", features = ["wayland", "x11", "font-kit"] }
 tokio      = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
