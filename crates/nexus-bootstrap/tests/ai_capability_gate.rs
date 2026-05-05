@@ -105,4 +105,70 @@ fn agent_caps_include_ai_chat_but_not_ai_writes() {
     assert!(!caps.contains(Capability::AiConfigWrite));
     assert!(!caps.contains(Capability::AiActivityWrite));
     assert!(!caps.contains(Capability::AiSessionWrite));
+    // ADR 0022 Phase 2: agent planner advertises write_file so the
+    // model can produce write tool-use blocks (executor approves
+    // per step). MCP reach is opt-in per call, NOT a default.
+    assert!(caps.contains(Capability::AiToolsWrite));
+    assert!(!caps.contains(Capability::AiToolsMcp));
+}
+
+/// ADR 0022 Phase 2 — args-aware tool-policy enforcement on
+/// `stream_chat` and `propose_tool_calls`. White-box test against
+/// the loader's [`required_caller_caps_for_args`] surface.
+#[test]
+fn loader_args_aware_tool_policy_requires_correct_caps() {
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    nexus_storage::StorageEngine::init(dir.path()).expect("init forge");
+    let runtime = nexus_bootstrap::build_cli_runtime(dir.path().to_path_buf())
+        .expect("build runtime");
+    let loader: Arc<dyn IpcDispatcher> =
+        Arc::clone(&runtime.loader) as Arc<dyn IpcDispatcher>;
+
+    // Helper: caps required for stream_chat with the given `tools` arg.
+    let caps_for = |tools: serde_json::Value| {
+        let args = json!({ "messages": [], "tools": tools });
+        loader.required_caller_caps_for_args("com.nexus.ai", "stream_chat", &args)
+    };
+    let caps_for_default = || {
+        // No `tools` field → policy defaults to Auto.
+        let args = json!({ "messages": [] });
+        loader.required_caller_caps_for_args("com.nexus.ai", "stream_chat", &args)
+    };
+
+    // Phase 1 floor: every variant requires AiChat.
+    for case in [json!("auto"), json!("none"), json!("auto_with_mcp"), json!("auto_readonly")] {
+        let caps = caps_for(case.clone());
+        assert!(caps.contains(&Capability::AiChat), "AiChat missing for {case}: {caps:?}");
+    }
+
+    // Phase 2 deltas.
+    let auto = caps_for(json!("auto"));
+    assert!(auto.contains(&Capability::AiToolsWrite), "auto must require AiToolsWrite");
+    assert!(!auto.contains(&Capability::AiToolsMcp), "auto must NOT require AiToolsMcp");
+
+    let auto_mcp = caps_for(json!("auto_with_mcp"));
+    assert!(auto_mcp.contains(&Capability::AiToolsWrite));
+    assert!(auto_mcp.contains(&Capability::AiToolsMcp));
+
+    let none = caps_for(json!("none"));
+    assert!(!none.contains(&Capability::AiToolsWrite));
+    assert!(!none.contains(&Capability::AiToolsMcp));
+
+    let readonly = caps_for(json!("auto_readonly"));
+    assert!(!readonly.contains(&Capability::AiToolsWrite));
+    assert!(!readonly.contains(&Capability::AiToolsMcp));
+
+    // Default = Auto when omitted.
+    let default = caps_for_default();
+    assert!(default.contains(&Capability::AiToolsWrite));
+
+    // propose_tool_calls shares the same closure.
+    let propose_args = json!({ "messages": [], "tools": "auto_with_mcp" });
+    let propose_caps =
+        loader.required_caller_caps_for_args("com.nexus.ai", "propose_tool_calls", &propose_args);
+    assert!(propose_caps.contains(&Capability::AiChat));
+    assert!(propose_caps.contains(&Capability::AiToolsWrite));
+    assert!(propose_caps.contains(&Capability::AiToolsMcp));
 }

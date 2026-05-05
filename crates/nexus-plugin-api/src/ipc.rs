@@ -53,8 +53,10 @@ pub trait IpcDispatcher: Send + Sync {
     /// hold the matching kernel capability rather than laundering the
     /// effect through `IpcCall` alone. See issue #77.
     ///
-    /// [`KernelPluginContext::ipc_call`] consults this **before** dispatch,
-    /// so handlers themselves don't need to re-check.
+    /// [`KernelPluginContext::ipc_call`] consults
+    /// [`Self::required_caller_caps_for_args`] (which defaults to this
+    /// method) **before** dispatch, so handlers themselves don't need
+    /// to re-check.
     fn required_caller_caps(
         &self,
         target_plugin_id: &str,
@@ -62,5 +64,25 @@ pub trait IpcDispatcher: Send + Sync {
     ) -> Vec<Capability> {
         let _ = (target_plugin_id, command_id);
         Vec::new()
+    }
+
+    /// Args-aware extension of [`Self::required_caller_caps`]
+    /// (ADR 0022 Phase 2). Lets dispatchers tighten the caller-cap
+    /// requirement based on what the call is asking for — e.g.
+    /// `com.nexus.ai::stream_chat` requires `ai.tools.write` only
+    /// when `tools=auto` advertises mutating tools.
+    ///
+    /// The default delegates to the args-less form so existing
+    /// implementations and dispatch tables keep their shape;
+    /// implementors that want args-aware policies override this
+    /// directly and may ignore the static fallback.
+    fn required_caller_caps_for_args(
+        &self,
+        target_plugin_id: &str,
+        command_id: &str,
+        args: &serde_json::Value,
+    ) -> Vec<Capability> {
+        let _ = args;
+        self.required_caller_caps(target_plugin_id, command_id)
     }
 }

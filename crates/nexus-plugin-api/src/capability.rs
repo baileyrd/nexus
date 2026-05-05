@@ -55,6 +55,16 @@ pub enum Capability {
     AiConfigWrite,
     /// Mutate the AI activity timeline (`activity_clear`). Per ADR 0022.
     AiActivityWrite,
+    /// Advertise mutating tools (e.g. `write_file`) to the model in
+    /// `stream_chat` / `propose_tool_calls`. Required when `tools=auto`
+    /// because the default registry includes `write_file`. Per ADR
+    /// 0022 Phase 2.
+    AiToolsWrite,
+    /// Advertise MCP-bridged tools to the model
+    /// (`AiToolPolicy::AutoWithMcp`). Distinct from `ai.tools.write`
+    /// so a caller can opt into local writes without granting MCP
+    /// reach. Per ADR 0022 Phase 2.
+    AiToolsMcp,
 }
 
 /// Error parsing a capability string.
@@ -90,6 +100,8 @@ impl Capability {
         Capability::AiSessionWrite,
         Capability::AiConfigWrite,
         Capability::AiActivityWrite,
+        Capability::AiToolsWrite,
+        Capability::AiToolsMcp,
     ];
 
     /// Returns `true` if this capability is classified as HIGH risk.
@@ -132,6 +144,8 @@ impl Capability {
             Capability::AiSessionWrite   => "ai.session.write",
             Capability::AiConfigWrite    => "ai.config.write",
             Capability::AiActivityWrite  => "ai.activity.write",
+            Capability::AiToolsWrite     => "ai.tools.write",
+            Capability::AiToolsMcp       => "ai.tools.mcp",
         }
     }
 
@@ -163,6 +177,8 @@ impl Capability {
             "ai.session.write"   => Ok(Capability::AiSessionWrite),
             "ai.config.write"    => Ok(Capability::AiConfigWrite),
             "ai.activity.write"  => Ok(Capability::AiActivityWrite),
+            "ai.tools.write"     => Ok(Capability::AiToolsWrite),
+            "ai.tools.mcp"       => Ok(Capability::AiToolsMcp),
             other => Err(CapabilityParseError::UnknownString(other.to_string())),
         }
     }
@@ -265,8 +281,8 @@ mod tests {
 
     #[test]
     fn all_slice_covers_all_discriminants() {
-        // 14 base + 6 ai.* per ADR 0022.
-        assert_eq!(Capability::ALL.len(), 20);
+        // 14 base + 6 ai.* (ADR 0022 Phase 1) + 2 ai.tools.* (Phase 2).
+        assert_eq!(Capability::ALL.len(), 22);
     }
 
     #[test]

@@ -23,7 +23,10 @@ use std::sync::{Arc, Mutex};
 pub use composite::{CompositeIpcDispatcher, FallbackCell};
 pub use error::PluginError;
 pub use scaffold::{scaffold, PluginTemplate, ScaffoldConfig};
-pub use loader::{CorePlugin, CorePluginFuture, PluginBackend, PluginLoader, SharedPluginLoader};
+pub use loader::{
+    CapRequirementFn, CorePlugin, CorePluginFuture, PluginBackend, PluginLoader,
+    SharedPluginLoader,
+};
 pub use manifest::{
     ActivationConfig, CliSubcommandReg, EventSubscriberReg, IpcCommandReg, LifecycleConfig,
     ManifestCapabilities, PanelSide, PluginDependency, PluginManifest, PluginRuntime,

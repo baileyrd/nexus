@@ -137,10 +137,12 @@ All route through `context.ipc_call("com.nexus.ai", handler, args, 120s)`.
   Workflow + agent contexts now hold `ai.chat` only — `set_config` and
   `activity_clear` return `CapabilityDenied` when reached from those
   contexts. `ai.config.write` is HIGH-risk (persisted-grant prompt).
-- **Open follow-up (Phase 2):** the `tools` request argument
-  (`AiToolPolicy::Auto` / `None` / `AutoWithMcp`) is still
-  client-controlled. ADR 0022 §"Server-side `tools` policy enforcement"
-  defers `ai.tools.write` / `ai.tools.mcp` to a separate ADR.
+- **Phase 2 landed (ADR 0022 §"Phase 2 — landed inline"):** the
+  `tools` request argument is now server-enforced via an args-aware
+  caller-cap closure (`IpcDispatcher::required_caller_caps_for_args`).
+  `tools=auto` requires `ai.tools.write`; `auto_with_mcp` requires
+  `ai.tools.write` + `ai.tools.mcp`; new `auto_readonly` policy
+  surfaces a read-only subset for callers that hold only `ai.chat`.
 
 ---
 

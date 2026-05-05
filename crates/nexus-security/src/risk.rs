@@ -81,6 +81,13 @@ pub fn risk_level(cap: Capability) -> RiskLevel {
         Capability::AiChat | Capability::AiActivityWrite => RiskLevel::Medium,
 
         Capability::AiConfigWrite => RiskLevel::High,
+
+        // ADR 0022 Phase 2. Both gate which tools the model is shown
+        // in stream_chat / propose_tool_calls. Medium because the
+        // returned tool calls still execute under either the AI
+        // tool-loop's downstream cap checks (write_file via storage)
+        // or the agent's per-step approval policy.
+        Capability::AiToolsWrite | Capability::AiToolsMcp => RiskLevel::Medium,
     }
 }
 

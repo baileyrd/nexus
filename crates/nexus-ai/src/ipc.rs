@@ -179,7 +179,10 @@ pub enum AiStreamChatMode {
 )]
 #[serde(rename_all = "lowercase")]
 pub enum AiToolPolicy {
-    /// Advertise the full registry to the model.
+    /// Advertise the full registry to the model — including
+    /// mutating tools (`write_file`). Per ADR 0022 Phase 2 this
+    /// requires the caller to hold `ai.tools.write` in addition to
+    /// `ai.chat`.
     #[default]
     Auto,
     /// Advertise no tools — the model cannot issue tool calls.
@@ -189,9 +192,35 @@ pub enum AiToolPolicy {
     /// tool is exposed as `mcp__<server>__<tool>` and proxied to
     /// `call_tool`. Discovery runs once per `stream_chat` call (no
     /// cache); a server that fails to enumerate is skipped with a
-    /// warning so the chat call still proceeds.
+    /// warning so the chat call still proceeds. Per ADR 0022
+    /// Phase 2 this requires `ai.tools.write` and `ai.tools.mcp`.
     #[serde(rename = "auto_with_mcp")]
     AutoWithMcp,
+    /// `Auto`, restricted to read-only built-ins (`read_file`,
+    /// `search_forge`, `list_backlinks`, `git_log`). Surfaces a
+    /// productive subset of the registry to callers that hold
+    /// `ai.chat` but not `ai.tools.write`. Per ADR 0022 Phase 2.
+    #[serde(rename = "auto_readonly")]
+    AutoReadOnly,
+}
+
+/// Map a parsed [`AiToolPolicy`] to the additional caller caps
+/// required for the call to land. Shared by the bootstrap-side
+/// `add_cap_requirement_fn` registrations for `stream_chat` and
+/// `propose_tool_calls` (ADR 0022 Phase 2). The unconditional
+/// `Capability::AiChat` requirement is registered separately via
+/// `add_cap_requirement` (Phase 1) — this function returns only the
+/// args-aware deltas.
+#[must_use]
+pub fn extra_caps_for_policy(policy: AiToolPolicy) -> Vec<nexus_kernel::Capability> {
+    use nexus_kernel::Capability;
+    match policy {
+        AiToolPolicy::None | AiToolPolicy::AutoReadOnly => Vec::new(),
+        AiToolPolicy::Auto => vec![Capability::AiToolsWrite],
+        AiToolPolicy::AutoWithMcp => {
+            vec![Capability::AiToolsWrite, Capability::AiToolsMcp]
+        }
+    }
 }
 
 /// Args for `com.nexus.ai::stream_chat` (handler id `6`).

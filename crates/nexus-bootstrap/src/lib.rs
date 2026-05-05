@@ -225,6 +225,30 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         shared.add_cap_requirement("com.nexus.ai", cmd, vec![cap]);
     }
 
+    // ADR 0022 Phase 2 — args-aware tool-policy enforcement. A
+    // caller that requests `tools=auto` (the default) needs
+    // `ai.tools.write` because the registry includes `write_file`;
+    // `auto_with_mcp` additionally needs `ai.tools.mcp`. Read-only
+    // (`tools=auto_readonly`) and no-tools paths add nothing on top
+    // of `ai.chat`. Both `stream_chat` and `propose_tool_calls`
+    // honour the same field, so they share the closure.
+    let tool_policy_fn: nexus_plugins::CapRequirementFn = Arc::new(|args: &serde_json::Value| {
+        // The `tools` field is optional and defaults to Auto. Both
+        // arg envelopes carry `tools` at the top level with the
+        // same shape, so a permissive lookup works for both.
+        let policy = args
+            .get("tools")
+            .and_then(|v| serde_json::from_value::<nexus_ai::ipc::AiToolPolicy>(v.clone()).ok())
+            .unwrap_or_default();
+        nexus_ai::ipc::extra_caps_for_policy(policy)
+    });
+    shared.add_cap_requirement_fn("com.nexus.ai", "stream_chat", Arc::clone(&tool_policy_fn));
+    shared.add_cap_requirement_fn(
+        "com.nexus.ai",
+        "propose_tool_calls",
+        Arc::clone(&tool_policy_fn),
+    );
+
     let dispatcher: Arc<dyn IpcDispatcher> = Arc::clone(&shared) as Arc<dyn IpcDispatcher>;
 
     // Hand the AI plugin its own KernelPluginContext so `ask`/`index_file`
@@ -1445,11 +1469,19 @@ pub fn agent_capabilities() -> CapabilitySet {
         Capability::IpcCall,
         Capability::FsRead,
         Capability::FsWrite,
-        // ADR 0022: planner LLM calls go through `com.nexus.ai::stream_chat`,
-        // which now requires `ai.chat`. No `ai.config.write` /
-        // `ai.activity.write` so a manipulated plan can't rotate
-        // credentials or wipe the audit log.
+        // ADR 0022 Phase 1: planner LLM calls go through
+        // `com.nexus.ai::propose_tool_calls`, which requires
+        // `ai.chat`. No `ai.config.write` / `ai.activity.write` so
+        // a manipulated plan can't rotate credentials or wipe the
+        // audit log.
         Capability::AiChat,
+        // ADR 0022 Phase 2: planner advertises `write_file` so the
+        // model can propose write tool-use blocks (executed under
+        // PlanExecutor's per-step approval policy, not by the AI
+        // tool-loop). Without this the agent could only ever
+        // produce read-only plans. No `ai.tools.mcp` — MCP reach is
+        // opt-in per call.
+        Capability::AiToolsWrite,
     ]
     .into_iter()
     .collect()

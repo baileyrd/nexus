@@ -1820,6 +1820,13 @@ fn plugin_info_from(
 
 // ─── IpcDispatcher impl ──────────────────────────────────────────────────────
 
+/// Type alias for an args-aware capability-requirement closure
+/// registered by [`SharedPluginLoader::add_cap_requirement_fn`]
+/// (ADR 0022 Phase 2). Returned caps are summed with any caps from
+/// the static [`SharedPluginLoader::add_cap_requirement`] table.
+pub type CapRequirementFn =
+    Arc<dyn Fn(&serde_json::Value) -> Vec<Capability> + Send + Sync>;
+
 /// Shared handle that lets a [`nexus_kernel::KernelPluginContext`] dispatch
 /// IPC calls into a [`PluginLoader`].
 ///
@@ -1842,6 +1849,13 @@ pub struct SharedPluginLoader {
     /// Held outside the loader mutex so the on-every-`ipc_call` lookup
     /// doesn't serialize behind plugin loading. See issue #77.
     cap_requirements: std::sync::RwLock<HashMap<(String, String), Vec<Capability>>>,
+    /// Per-(target plugin, command) args-aware capability closures
+    /// (ADR 0022 Phase 2). Lets bootstrap require additional caps
+    /// based on call payload (e.g. `tools=auto_with_mcp` requires
+    /// `ai.tools.mcp`). Both maps are consulted on each call and
+    /// their results are unioned.
+    cap_requirement_fns:
+        std::sync::RwLock<HashMap<(String, String), CapRequirementFn>>,
 }
 
 impl SharedPluginLoader {
@@ -1851,6 +1865,7 @@ impl SharedPluginLoader {
         Self {
             inner: Mutex::new(loader),
             cap_requirements: std::sync::RwLock::new(HashMap::new()),
+            cap_requirement_fns: std::sync::RwLock::new(HashMap::new()),
         }
     }
 
@@ -1911,6 +1926,28 @@ impl SharedPluginLoader {
             .write()
             .expect("ipc cap-requirements lock poisoned");
         map.insert((target_plugin_id.into(), command_id.into()), caps);
+    }
+
+    /// Register an args-aware capability requirement (ADR 0022
+    /// Phase 2). Each call to `(target, command)` invokes `f` with
+    /// the call's args; the returned caps are required of the caller
+    /// in addition to anything from the static table set up by
+    /// [`Self::add_cap_requirement`]. Idempotent on `(target,
+    /// command)`: the latest registration wins.
+    ///
+    /// # Panics
+    /// Panics if the requirements lock is poisoned.
+    pub fn add_cap_requirement_fn(
+        &self,
+        target_plugin_id: impl Into<String>,
+        command_id: impl Into<String>,
+        f: CapRequirementFn,
+    ) {
+        let mut map = self
+            .cap_requirement_fns
+            .write()
+            .expect("ipc cap-requirement-fns lock poisoned");
+        map.insert((target_plugin_id.into(), command_id.into()), f);
     }
 }
 
@@ -2032,6 +2069,34 @@ impl IpcDispatcher for SharedPluginLoader {
         map.get(&(target_plugin_id.to_string(), command_id.to_string()))
             .cloned()
             .unwrap_or_default()
+    }
+
+    fn required_caller_caps_for_args(
+        &self,
+        target_plugin_id: &str,
+        command_id: &str,
+        args: &serde_json::Value,
+    ) -> Vec<Capability> {
+        // Static caps come first (preserves the issue #77 contract).
+        let mut caps = self.required_caller_caps(target_plugin_id, command_id);
+        // Args-aware caps land on top via union (ADR 0022 Phase 2).
+        // Look up the closure outside the `caps` mutation to keep the
+        // lock window tight.
+        let extra = {
+            let key = (target_plugin_id.to_string(), command_id.to_string());
+            self.cap_requirement_fns
+                .read()
+                .ok()
+                .and_then(|map| map.get(&key).cloned())
+        };
+        if let Some(f) = extra {
+            for cap in f(args) {
+                if !caps.contains(&cap) {
+                    caps.push(cap);
+                }
+            }
+        }
+        caps
     }
 }
 

@@ -156,11 +156,42 @@ migration. The follow-up ADR proposes `ai.tools.write` as the gate.
   `CapabilityDenied` before the handler runs, with an audit log line.
   Same UX as the existing `process.spawn` gate.
 
+## Phase 2 — landed inline
+
+**Status:** shipped alongside Phase 1.
+
+The ADR originally deferred `ai.tools.write` / `ai.tools.mcp` to a
+separate ADR. In practice the work was small enough to land directly
+under this ADR's scope:
+
+- New caps **`AiToolsWrite`**, **`AiToolsMcp`** (both Medium risk per
+  `nexus-security::risk`).
+- New tool policy variant **`AiToolPolicy::AutoReadOnly`** for
+  callers that hold `ai.chat` but not `ai.tools.write`. Surfaces
+  read-only built-ins (`read_file`, `search_forge`,
+  `list_backlinks`, `git_log`).
+- Kernel mechanism: `IpcDispatcher::required_caller_caps_for_args`
+  (default falls through to the args-less form so existing impls
+  don't change). `SharedPluginLoader::add_cap_requirement_fn`
+  registers a closure that gets the call's args and returns
+  additional caps. Requirements union with the static table from
+  Phase 1.
+- Bootstrap registers an args-aware closure on `stream_chat` and
+  `propose_tool_calls`. Mapping:
+  - `tools=auto` (default) → `+AiToolsWrite`.
+  - `tools=auto_with_mcp` → `+AiToolsWrite +AiToolsMcp`.
+  - `tools=none` / `tools=auto_readonly` → no extra caps.
+- `agent_capabilities()` gains `AiToolsWrite` so the planner can
+  advertise `write_file`; the agent's `PlanExecutor` still gates
+  every dispatch under `StepPolicy`. No `AiToolsMcp` — MCP reach
+  stays opt-in per call.
+- `workflow_capabilities()` is unchanged — workflow `ai_prompt`
+  steps reach `ask` (no tool advertisement), so they don't need
+  Phase-2 caps.
+
 ## Open follow-ups
 
-- Phase 2 ADR: `ai.tools.write` + `ai.tools.mcp`. Closes the
-  "client-controlled tools policy" half of the audit finding.
 - Manifest schema docs (`docs/writing-your-first-plugin.md`,
   `shell/docs/writing-a-plugin.md`) need an `ai.*` section.
-- Audit doc §4 ("Capability Gating — Weak") needs an amendment once
-  Phase 1 lands.
+- Future "untrusted shell surface" can hold `ai.chat` only and call
+  `stream_chat` with `tools=auto_readonly` for a productive subset.

@@ -78,7 +78,7 @@
       "description": "Tool-advertisement policy for `stream_chat`.\n\n`Auto` (default) hands the registry's full schema list to the\nprovider so the model can call tools. `None` advertises an empty\nlist — used by `mode=complete` and by ghost-completion callers that\nmust never trigger side effects.",
       "oneOf": [
         {
-          "description": "Advertise the full registry to the model.",
+          "description": "Advertise the full registry to the model — including\nmutating tools (`write_file`). Per ADR 0022 Phase 2 this\nrequires the caller to hold `ai.tools.write` in addition to\n`ai.chat`.",
           "type": "string",
           "const": "auto"
         },
@@ -88,9 +88,14 @@
           "const": "none"
         },
         {
-          "description": "`Auto` plus tools dynamically discovered from\n`com.nexus.mcp.host::list_servers` / `list_tools`. Each MCP\ntool is exposed as `mcp__<server>__<tool>` and proxied to\n`call_tool`. Discovery runs once per `stream_chat` call (no\ncache); a server that fails to enumerate is skipped with a\nwarning so the chat call still proceeds.",
+          "description": "`Auto` plus tools dynamically discovered from\n`com.nexus.mcp.host::list_servers` / `list_tools`. Each MCP\ntool is exposed as `mcp__<server>__<tool>` and proxied to\n`call_tool`. Discovery runs once per `stream_chat` call (no\ncache); a server that fails to enumerate is skipped with a\nwarning so the chat call still proceeds. Per ADR 0022\nPhase 2 this requires `ai.tools.write` and `ai.tools.mcp`.",
           "type": "string",
           "const": "auto_with_mcp"
+        },
+        {
+          "description": "`Auto`, restricted to read-only built-ins (`read_file`,\n`search_forge`, `list_backlinks`, `git_log`). Surfaces a\nproductive subset of the registry to callers that hold\n`ai.chat` but not `ai.tools.write`. Per ADR 0022 Phase 2.",
+          "type": "string",
+          "const": "auto_readonly"
         }
       ]
     }

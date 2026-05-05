@@ -325,7 +325,9 @@ impl PluginContext for KernelPluginContext {
         // processes and must require `Capability::ProcessSpawn`).
         // Without this check, `IpcCall` alone would launder the effect
         // of any capability the target plugin holds.
-        for required in dispatcher.required_caller_caps(target_plugin_id, command_id) {
+        for required in
+            dispatcher.required_caller_caps_for_args(target_plugin_id, command_id, &args)
+        {
             if !self.capabilities.contains(required) {
                 audit::log_capability_denied(&self.plugin_id, required.as_str());
                 return Err(IpcError::CapabilityDenied {

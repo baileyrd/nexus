@@ -63,6 +63,61 @@ const HOST_SYSTEM_PROMPT_FLOOR: &str =
      writing) over guessing. When you modify a file, make minimal targeted \
      edits and preserve the user's existing structure and tone.";
 
+/// Names of read-only built-in tools shipped via
+/// [`crate::tools::register_storage_builtins`] / `register_extended_builtins`.
+/// Used by [`filter_to_read_only`] to honour
+/// [`AiToolPolicy::AutoReadOnly`] (ADR 0022 Phase 2). Add a tool
+/// here if a future built-in should be visible without
+/// `ai.tools.write`.
+const READ_ONLY_TOOL_NAMES: &[&str] =
+    &["read_file", "search_forge", "list_backlinks", "git_log"];
+
+/// Build a fresh registry containing only the entries from
+/// `source` whose names appear in [`READ_ONLY_TOOL_NAMES`]. Used for
+/// `AiToolPolicy::AutoReadOnly`. Cloning the executors is cheap
+/// (they're `Arc`-shared inside the registry).
+fn filter_to_read_only(source: &ToolRegistry) -> ToolRegistry {
+    let mut filtered = ToolRegistry::new();
+    for schema in source.schemas() {
+        if !READ_ONLY_TOOL_NAMES.contains(&schema.name.as_str()) {
+            continue;
+        }
+        // The registry doesn't expose `RegisteredTool` lookups by
+        // name — but `execute` does the dispatch we need, so we can
+        // wrap the source registry behind a thin proxy. Simpler:
+        // re-register from the executor table via a forwarding
+        // executor.
+        let name = schema.name.clone();
+        let source_arc = source.clone();
+        let exec: std::sync::Arc<dyn crate::tools::ToolExecutor> =
+            std::sync::Arc::new(ForwardingExecutor {
+                target_name: name.clone(),
+                source: std::sync::Arc::new(source_arc),
+            });
+        filtered.register(name, schema, exec);
+    }
+    filtered
+}
+
+/// Forwards `execute` calls to a named tool in another registry —
+/// used by [`filter_to_read_only`] so the filtered registry shares
+/// the same executors as the source without exposing
+/// `RegisteredTool` lookups on the registry's public surface.
+struct ForwardingExecutor {
+    target_name: String,
+    source: std::sync::Arc<ToolRegistry>,
+}
+
+#[async_trait::async_trait]
+impl crate::tools::ToolExecutor for ForwardingExecutor {
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<String, crate::tools::ToolError> {
+        self.source.execute(&self.target_name, input).await
+    }
+}
+
 /// Compose the effective system prompt for `mode=chat`. Returns the
 /// floor when `caller` is empty/`None`; returns `floor + "\n\n" +
 /// caller` otherwise.
@@ -841,6 +896,10 @@ async fn handle_propose_tool_calls(
             let base = tools.unwrap_or_else(|| Arc::new(ToolRegistry::new()));
             crate::tools::discover_mcp_tools(Arc::clone(&ctx), base).await
         }
+        AiToolPolicy::AutoReadOnly => {
+            let base = tools.unwrap_or_else(|| Arc::new(ToolRegistry::new()));
+            Arc::new(filter_to_read_only(&base))
+        }
     };
 
     let messages = ipc_messages_to_chat(&parsed.messages);
@@ -954,6 +1013,10 @@ async fn handle_stream_chat(
                 AiToolPolicy::AutoWithMcp => {
                     crate::tools::discover_mcp_tools(Arc::clone(&ctx), registry).await
                 }
+                // ADR 0022 Phase 2 — read-only subset. Filter is by
+                // tool name; runtime executors are shared with the
+                // unfiltered registry.
+                AiToolPolicy::AutoReadOnly => Arc::new(filter_to_read_only(&registry)),
             };
             let on_chunk = envelope.chunk_sink();
             let ai = match build_ai_provider(&ai_cfg) {
