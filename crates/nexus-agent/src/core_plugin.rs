@@ -566,10 +566,11 @@ async fn handle_session_list(
     // need it — the agent's own contexts are narrowly scoped per
     // ADR 0022).
     //
-    // Storage's contract: `list_dir` takes `{ relpath: string }` and
-    // returns `{ entries: [{ name, path, kind, … }] }`. Sending
-    // `path` instead of `relpath` silently falls back to listing
-    // the forge root.
+    // Storage's contract: `list_dir` takes `{ relpath: string }`
+    // and returns a bare JSON array of `TreeEntry`. (The
+    // `StorageListDirResult` wrapper type defined in nexus-storage's
+    // ipc.rs is documentation-only — the actual handler serializes
+    // `Vec<TreeEntry>` directly.)
     let response = match ctx
         .ipc_call(
             "com.nexus.storage",
@@ -586,22 +587,14 @@ async fn handle_session_list(
         }
     };
 
-    let Some(arr) = response
-        .get("entries")
-        .and_then(serde_json::Value::as_array)
-    else {
+    let Some(arr) = response.as_array() else {
         tracing::warn!(
             dir = SESSION_DIR,
             response = %response,
-            "session_list: list_dir reply had no 'entries' array"
+            "session_list: list_dir reply was not a JSON array"
         );
         return Ok(serde_json::json!([]));
     };
-    tracing::info!(
-        dir = SESSION_DIR,
-        entries = arr.len(),
-        "session_list: scanning directory"
-    );
     let mut summaries: Vec<serde_json::Value> = Vec::new();
     for entry in arr {
         let Some(name) = entry.get("name").and_then(serde_json::Value::as_str) else {
