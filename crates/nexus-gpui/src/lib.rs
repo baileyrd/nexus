@@ -9,6 +9,8 @@
 //!    gpui's background executor.
 
 mod kernel_bridge;
+mod pane;
+mod theme;
 mod workbench;
 
 use std::path::PathBuf;

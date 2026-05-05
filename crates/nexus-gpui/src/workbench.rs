@@ -1,33 +1,41 @@
-//! Root window view for the Phase 0 spike.
+//! Phase 1 shell skeleton.
 //!
-//! Validates:
-//! - gpui `Entity` + `Render` lifecycle.
-//! - Async IPC call from gpui background executor → tokio bridge.
-//! - Terminal cell grid rendering: a fixed-size colored-cell grid proves that
-//!   gpui can drive the rendering pattern needed by Phase 2's `TerminalView`.
+//! Layout:
+//! ```text
+//! ┌─ TopBar (32px) ────────────────────────────────────────────────┐
+//! │ ActivityBar │ Primary Pane            │ Secondary Pane          │
+//! │   (48px)    │  (flex: 1)              │  (flex: 1)              │
+//! └─ StatusBar (22px) ─────────────────────────────────────────────┘
+//! ```
 //!
-//! The layout is intentionally minimal: a dark workbench with a top bar, a
-//! stats panel, and a mock terminal cell grid. No real PTY is attached yet —
-//! that lands in Phase 2 alongside the `alacritty-terminal` integration.
+//! The activity bar icons update `SplitLayout::primary` via click listeners.
+//! Each pane slot dispatches to either the terminal cell mock (Phase 0 grid,
+//! retained for render validation) or a labelled placeholder for panes that
+//! land in later phases.
 
 use std::sync::Arc;
 
 use gpui::{
-    div, px, rgb, AsyncApp, Context, IntoElement, ParentElement, Render, Styled, WeakEntity,
-    Window,
+    div, hsla, px, AnyElement, AsyncApp, ClickEvent, Context, InteractiveElement, IntoElement,
+    ParentElement, Render, StatefulInteractiveElement, Styled, WeakEntity, Window,
 };
 use serde::Deserialize;
 
-use crate::KernelBridge;
+use crate::{
+    pane::{PaneKind, SplitLayout},
+    theme::Theme,
+    KernelBridge,
+};
 
-// ── Colours (matches the default Nexus dark theme tokens) ────────────────────
+// ── Activity-bar entry table ──────────────────────────────────────────────────
 
-const BG_BASE: u32 = 0x1a1b26;
-const BG_PANEL: u32 = 0x24253a;
-const BG_TOPBAR: u32 = 0x1e1f2e;
-const FG_MUTED: u32 = 0x6b7280;
-const FG_TEXT: u32 = 0xc0caf5;
-const ACCENT: u32 = 0x7aa2f7;
+const ACTIVITY_ENTRIES: &[(PaneKind, &str)] = &[
+    (PaneKind::Terminal, "act-terminal"),
+    (PaneKind::Editor,   "act-editor"),
+    (PaneKind::Ai,       "act-ai"),
+    (PaneKind::Graph,    "act-graph"),
+    (PaneKind::Settings, "act-settings"),
+];
 
 // ── Forge stats DTO ───────────────────────────────────────────────────────────
 
@@ -38,12 +46,12 @@ struct GraphStats {
     unresolved_count: usize,
 }
 
-// ── Mock terminal cell ────────────────────────────────────────────────────────
+// ── Terminal cell (Phase 0 mock, retained for render validation) ──────────────
 
 struct Cell {
-    ch: char,
-    fg: u32,
-    bg: u32,
+    ch:  char,
+    fg:  u32,
+    bg:  u32,
 }
 
 impl Cell {
@@ -54,27 +62,24 @@ impl Cell {
 
 // ── WorkbenchView ─────────────────────────────────────────────────────────────
 
-/// Phase 0 spike root view.
 pub struct WorkbenchView {
-    stats: Option<GraphStats>,
+    theme:       Theme,
+    layout:      SplitLayout,
+    stats:       Option<GraphStats>,
     stats_error: Option<String>,
-    /// Static mock terminal grid for cell-rendering validation.
-    mock_cells: Vec<Vec<Cell>>,
+    mock_cells:  Vec<Vec<Cell>>,
 }
 
 impl WorkbenchView {
     pub fn new(bridge: Arc<KernelBridge>, cx: &mut Context<Self>) -> Self {
-        // Kick off an async IPC call to fetch forge stats. This validates the
-        // tokio bridge from within gpui's background executor.
         cx.spawn(async move |weak: WeakEntity<WorkbenchView>, cx: &mut AsyncApp| {
             let result = cx
                 .background_executor()
                 .spawn(async move { bridge.call_empty("com.nexus.storage", "graph_stats") })
                 .await;
-
             weak.update(cx, |this, cx| {
                 match result {
-                    Ok(v) => this.stats = serde_json::from_value(v).ok(),
+                    Ok(v)  => this.stats = serde_json::from_value(v).ok(),
                     Err(e) => this.stats_error = Some(format!("IPC error: {e}")),
                 }
                 cx.notify();
@@ -84,180 +89,262 @@ impl WorkbenchView {
         .detach();
 
         Self {
-            stats: None,
+            theme:       Theme::dark(),
+            layout:      SplitLayout::default(),
+            stats:       None,
             stats_error: None,
-            mock_cells: build_mock_grid(),
+            mock_cells:  build_mock_grid(),
         }
     }
 }
 
 impl Render for WorkbenchView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let top_bar    = self.render_top_bar();
+        let act_bar    = self.render_activity_bar(cx);
+        let content    = self.render_content_area();
+        let status_bar = self.render_status_bar();
+
         div()
             .flex()
             .flex_col()
             .size_full()
-            .bg(rgb(BG_BASE))
+            .bg(self.theme.bg_base)
             .font_family("monospace")
-            .child(render_topbar())
+            .child(top_bar)
             .child(
                 div()
                     .flex()
+                    .flex_row()
                     .flex_1()
-                    .child(render_stats_panel(&self.stats, &self.stats_error))
-                    .child(render_terminal_grid(&self.mock_cells)),
+                    .child(act_bar)
+                    .child(content),
             )
-            .child(render_status_bar())
+            .child(status_bar)
     }
 }
 
 // ── Sub-renders ───────────────────────────────────────────────────────────────
 
-fn render_topbar() -> impl IntoElement {
-    div()
-        .h(px(32.))
-        .px(px(16.))
-        .flex()
-        .items_center()
-        .bg(rgb(BG_TOPBAR))
-        .border_b_1()
-        .border_color(rgb(0x2e3150))
-        .child(
-            div()
-                .text_color(rgb(ACCENT))
-                .text_sm()
-                .child("Nexus  ·  Phase 0 Spike"),
-        )
-}
-
-fn render_stats_panel(stats: &Option<GraphStats>, error: &Option<String>) -> impl IntoElement {
-    let body: gpui::AnyElement = if let Some(e) = error {
+impl WorkbenchView {
+    fn render_top_bar(&self) -> impl IntoElement {
         div()
-            .text_color(rgb(0xf7768e))
-            .child(e.clone())
-            .into_any_element()
-    } else if let Some(s) = stats {
+            .h(px(32.))
+            .px(px(16.))
+            .flex()
+            .items_center()
+            .justify_between()
+            .bg(self.theme.bg_elevated)
+            .border_b_1()
+            .border_color(self.theme.border)
+            .child(
+                div()
+                    .text_color(self.theme.accent)
+                    .text_sm()
+                    .child("Nexus  ·  Phase 1 Shell Skeleton"),
+            )
+            .child(
+                div()
+                    .text_color(self.theme.fg_muted)
+                    .text_xs()
+                    .child("gpui"),
+            )
+    }
+
+    fn render_activity_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let active  = self.layout.primary;
+        let accent  = self.theme.accent;
+        let border  = self.theme.border;
+        let panel   = self.theme.bg_panel;
+        let elevated = self.theme.bg_elevated;
+        let fg_muted = self.theme.fg_muted;
+        let transparent = hsla(0., 0., 0., 0.);
+
+        let items: Vec<AnyElement> = ACTIVITY_ENTRIES
+            .iter()
+            .map(|&(kind, id)| {
+                let is_active    = kind == active;
+                let item_bg      = if is_active { panel }       else { transparent };
+                let item_fg      = if is_active { accent }      else { fg_muted };
+                let left_border  = if is_active { accent }      else { transparent };
+
+                div()
+                    .id(id)
+                    .w(px(48.))
+                    .h(px(48.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(item_bg)
+                    .border_l_2()
+                    .border_color(left_border)
+                    .text_color(item_fg)
+                    .text_sm()
+                    .cursor_pointer()
+                    .child(kind.icon())
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
+                        this.layout.primary = kind;
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+
         div()
-            .text_color(rgb(FG_TEXT))
-            .child(format!("nodes  {}", s.node_count))
-            .child(div().child(format!("edges  {}", s.edge_count)))
-            .child(div().child(format!("unresolved  {}", s.unresolved_count)))
-            .into_any_element()
-    } else {
+            .w(px(48.))
+            .flex()
+            .flex_col()
+            .bg(elevated)
+            .border_r_1()
+            .border_color(border)
+            .children(items)
+    }
+
+    fn render_content_area(&self) -> impl IntoElement {
+        let primary_pane   = self.render_pane(self.layout.primary);
+        let secondary_kind = self.layout.secondary;
+        let border         = self.theme.border;
+
+        let mut row = div().flex().flex_row().flex_1();
+        row = row.child(div().flex_1().child(primary_pane));
+
+        if let Some(kind) = secondary_kind {
+            let secondary_pane = self.render_pane(kind);
+            row = row
+                .child(div().w(px(1.)).bg(border))
+                .child(div().flex_1().child(secondary_pane));
+        }
+
+        row
+    }
+
+    fn render_pane(&self, kind: PaneKind) -> AnyElement {
+        match kind {
+            PaneKind::Terminal => self.render_terminal_pane().into_any_element(),
+            other              => self.render_placeholder_pane(other).into_any_element(),
+        }
+    }
+
+    /// Renders the Phase 0 mock terminal grid, proving cell-grid rendering works.
+    fn render_terminal_pane(&self) -> impl IntoElement {
+        let cell_w = px(9.);
+        let cell_h = px(18.);
+
+        let rows: Vec<AnyElement> = self
+            .mock_cells
+            .iter()
+            .map(|row| {
+                let cols: Vec<AnyElement> = row
+                    .iter()
+                    .map(|cell| {
+                        div()
+                            .w(cell_w)
+                            .h(cell_h)
+                            .bg(gpui::rgb(cell.bg))
+                            .text_color(gpui::rgb(cell.fg))
+                            .text_xs()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(cell.ch.to_string())
+                            .into_any_element()
+                    })
+                    .collect();
+                div()
+                    .flex()
+                    .flex_row()
+                    .children(cols)
+                    .into_any_element()
+            })
+            .collect();
+
         div()
-            .text_color(rgb(FG_MUTED))
-            .child("loading forge stats…")
-            .into_any_element()
-    };
+            .size_full()
+            .p(px(12.))
+            .flex()
+            .flex_col()
+            .bg(self.theme.bg_base)
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(self.theme.fg_muted)
+                    .mb(px(8.))
+                    .child("Terminal cell grid (mock — Phase 0 render validation)"),
+            )
+            .children(rows)
+    }
 
-    div()
-        .w(px(220.))
-        .p(px(16.))
-        .flex()
-        .flex_col()
-        .gap(px(8.))
-        .bg(rgb(BG_PANEL))
-        .border_r_1()
-        .border_color(rgb(0x2e3150))
-        .child(
-            div()
-                .text_sm()
-                .text_color(rgb(FG_MUTED))
-                .child("Forge stats"),
-        )
-        .child(body)
-        .child(
-            div()
-                .mt(px(16.))
-                .text_xs()
-                .text_color(rgb(FG_MUTED))
-                .child("IPC: com.nexus.storage/graph_stats"),
-        )
-}
+    /// Renders a labelled placeholder for panes not yet implemented.
+    fn render_placeholder_pane(&self, kind: PaneKind) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(12.))
+            .bg(self.theme.bg_base)
+            .child(
+                div()
+                    .text_size(px(28.))
+                    .text_color(self.theme.accent)
+                    .child(kind.icon()),
+            )
+            .child(
+                div()
+                    .text_color(self.theme.fg_text)
+                    .text_sm()
+                    .child(kind.label()),
+            )
+            .child(
+                div()
+                    .text_color(self.theme.fg_muted)
+                    .text_xs()
+                    .child(kind.phase_note()),
+            )
+    }
 
-/// Render a static mock terminal grid.
-///
-/// Each cell is a fixed-size rectangle (cell_w × cell_h) with a background
-/// colour and a text character. This validates gpui's ability to lay out and
-/// paint a dense grid of coloured monospace cells — the same rendering pattern
-/// that Phase 2's `TerminalView` will use with live `alacritty_terminal::Term`
-/// data.
-fn render_terminal_grid(cells: &[Vec<Cell>]) -> impl IntoElement {
-    let cell_w = px(9.);
-    let cell_h = px(18.);
+    fn render_status_bar(&self) -> impl IntoElement {
+        let stats_text = match (&self.stats, &self.stats_error) {
+            (_, Some(e))    => format!("IPC error: {e}"),
+            (Some(s), None) => format!("nodes {} · edges {} · unresolved {}", s.node_count, s.edge_count, s.unresolved_count),
+            (None, None)    => "loading forge stats…".to_string(),
+        };
 
-    let rows: Vec<_> = cells
-        .iter()
-        .map(|row| {
-            let cols: Vec<_> = row
-                .iter()
-                .map(|cell| {
-                    div()
-                        .w(cell_w)
-                        .h(cell_h)
-                        .bg(rgb(cell.bg))
-                        .text_color(rgb(cell.fg))
-                        .text_xs()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(cell.ch.to_string())
-                })
-                .collect();
-            div().flex().flex_row().children(cols)
-        })
-        .collect();
-
-    div()
-        .flex_1()
-        .p(px(12.))
-        .flex()
-        .flex_col()
-        .bg(rgb(BG_BASE))
-        .child(
-            div()
-                .text_xs()
-                .text_color(rgb(FG_MUTED))
-                .mb(px(8.))
-                .child("Terminal cell grid (mock — Phase 0 render validation)"),
-        )
-        .children(rows)
-}
-
-fn render_status_bar() -> impl IntoElement {
-    div()
-        .h(px(22.))
-        .px(px(12.))
-        .flex()
-        .items_center()
-        .justify_between()
-        .bg(rgb(ACCENT))
-        .child(
-            div()
-                .text_xs()
-                .text_color(rgb(0x1a1b26))
-                .child("Nexus — kernel booted"),
-        )
-        .child(
-            div()
-                .text_xs()
-                .text_color(rgb(0x1a1b26))
-                .child("Phase 0 spike · gpui"),
-        )
+        div()
+            .h(px(22.))
+            .px(px(12.))
+            .flex()
+            .items_center()
+            .justify_between()
+            .bg(self.theme.status_bar_bg)
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(self.theme.status_bar_fg)
+                    .child("Nexus — kernel booted"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(self.theme.status_bar_fg)
+                    .child(stats_text),
+            )
+    }
 }
 
 // ── Mock grid builder ─────────────────────────────────────────────────────────
 
-/// Build a 6-row static grid that exercises the cell colour palette.
-/// Mimics what a real terminal screen would look like after
-/// `alacritty_terminal::Term::renderable_content()` is wired up in Phase 2.
 fn build_mock_grid() -> Vec<Vec<Cell>> {
     const GRN: u32 = 0x9ece6a;
     const YLW: u32 = 0xe0af68;
     const RED: u32 = 0xf7768e;
     const CYN: u32 = 0x7dcfff;
+    const FG:  u32 = 0xc0caf5;
+    const ACC: u32 = 0x7aa2f7;
+    const BG:  u32 = 0x1a1b26;
 
-    let rows: Vec<&str> = vec![
+    let rows: &[&str] = &[
         "user@nexus:~/forge$ ls notes/",
         "architecture.md   daily/   index.md   projects/",
         "user@nexus:~/forge$ cat notes/index.md",
@@ -265,8 +352,7 @@ fn build_mock_grid() -> Vec<Vec<Cell>> {
         "Welcome to your knowledge base.                  ",
         "user@nexus:~/forge$ _                            ",
     ];
-
-    let palette: Vec<u32> = vec![GRN, FG_TEXT, GRN, CYN, FG_TEXT, YLW];
+    let palette: &[u32] = &[GRN, FG, GRN, CYN, FG, YLW];
 
     rows.iter()
         .zip(palette.iter())
@@ -275,11 +361,11 @@ fn build_mock_grid() -> Vec<Vec<Cell>> {
                 .map(|ch| {
                     let cell_fg = match ch {
                         '$' => RED,
-                        '_' => ACCENT,
+                        '_' => ACC,
                         '#' => YLW,
-                        _ => fg,
+                        _   => fg,
                     };
-                    Cell::new(ch, cell_fg, BG_BASE)
+                    Cell::new(ch, cell_fg, BG)
                 })
                 .collect()
         })
