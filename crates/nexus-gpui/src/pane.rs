@@ -33,8 +33,8 @@ impl PaneKind {
         match self {
             Self::Terminal => "Phase 2 — alacritty-terminal + cell renderer",
             Self::Editor   => "Phase 3 — pulldown-cmark + file tree",
-            Self::Ai       => "Phase 4 — chat, agent panel, terminal context",
-            Self::Graph    => "Phase 4 — forceatlas2 canvas",
+            Self::Ai       => "Phase 4 — stream_chat, multi-turn history",
+            Self::Graph    => "Phase 4 — FR force layout, node canvas",
             Self::Settings => "Phase 5 — settings UI",
         }
     }

@@ -22,7 +22,9 @@ use nexus_terminal::term_grid::{CellColor, ScreenRow};
 use nexus_terminal::{CreateSessionResponse, PLUGIN_ID};
 
 use crate::{
+    ai::AiView,
     editor::EditorView,
+    graph::GraphView,
     pane::{PaneKind, SplitLayout},
     theme::Theme,
     KernelBridge,
@@ -64,6 +66,10 @@ pub struct WorkbenchView {
     screen:      Option<Vec<ScreenRow>>,
     /// Phase 3 editor / markdown pane entity.
     editor:      Entity<EditorView>,
+    /// Phase 4 AI chat panel entity.
+    ai:          Entity<AiView>,
+    /// Phase 4 knowledge-graph canvas entity.
+    graph:       Entity<GraphView>,
 }
 
 impl WorkbenchView {
@@ -163,6 +169,8 @@ impl WorkbenchView {
         .detach();
 
         let editor = cx.new(|cx| EditorView::new(Arc::clone(&bridge), cx));
+        let ai     = cx.new(|cx| AiView::new(Arc::clone(&bridge), cx));
+        let graph  = cx.new(|cx| GraphView::new(Arc::clone(&bridge), cx));
 
         Self {
             theme:       Theme::dark(),
@@ -174,6 +182,8 @@ impl WorkbenchView {
             session_id:  None,
             screen:      None,
             editor,
+            ai,
+            graph,
         }
     }
 }
@@ -221,7 +231,7 @@ impl WorkbenchView {
                 div()
                     .text_color(self.theme.accent)
                     .text_sm()
-                    .child("Nexus  ·  Phase 3 — Terminal + Editor"),
+                    .child("Nexus  ·  Phase 4 — Terminal + Editor + AI + Graph"),
             )
             .child(
                 div()
@@ -302,6 +312,8 @@ impl WorkbenchView {
         match kind {
             PaneKind::Terminal => self.render_terminal_pane(cx).into_any_element(),
             PaneKind::Editor   => self.editor.clone().into_any_element(),
+            PaneKind::Ai       => self.ai.clone().into_any_element(),
+            PaneKind::Graph    => self.graph.clone().into_any_element(),
             other              => self.render_placeholder_pane(other).into_any_element(),
         }
     }

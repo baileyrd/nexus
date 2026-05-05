@@ -8,7 +8,9 @@
 //! 3. Async `ipc_call`s work via a [`tokio::runtime::Runtime`] bridge from
 //!    gpui's background executor.
 
+mod ai;
 mod editor;
+mod graph;
 mod kernel_bridge;
 mod pane;
 mod theme;
