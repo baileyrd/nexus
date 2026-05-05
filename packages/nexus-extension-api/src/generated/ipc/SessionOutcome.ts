@@ -3,4 +3,4 @@
 /**
  * Why a session ended.
  */
-export type SessionOutcome = "complete" | "aborted" | "errored" | "max_rounds";
+export type SessionOutcome = "complete" | "aborted" | "errored" | "max_rounds" | "approval_timeout";

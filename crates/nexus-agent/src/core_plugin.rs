@@ -116,6 +116,14 @@ pub const HANDLER_SESSION_GET: u32 = 15;
 /// `session_delete` — remove one session transcript. Args:
 /// `{ id: string }`. Returns `{ deleted: bool }`.
 pub const HANDLER_SESSION_DELETE: u32 = 16;
+/// `round_decide` (ADR 0024 Phase 2b) — caller pushes a
+/// [`crate::RoundDecision`]-shaped reply for a pending session
+/// round. Args: `{ session_id: string, kind: "approve_all" |
+/// "abort" | "partial", reason?: string, entries?: [...] }`.
+/// Returns `{ delivered: bool }`. The session loop on the agent
+/// side awaits a `oneshot` populated by this handler before
+/// dispatching tools.
+pub const HANDLER_ROUND_DECIDE: u32 = 17;
 
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
@@ -124,10 +132,34 @@ const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(60);
 /// latency. Matches the bootstrap bridge.
 const DEFAULT_CHAT_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// Map of pending approval awaits keyed by session id.
+/// Phase 2b — `BusBridgePolicy::allow_round` inserts a oneshot
+/// sender here when it emits the `round_proposed` event;
+/// `handle_round_decide` looks up the matching session and pushes
+/// the caller's decision through. Wrapped in `Arc<Mutex<>>` so
+/// the policy and the handler can share the map across
+/// async-task boundaries.
+type PendingApprovals = std::sync::Mutex<
+    std::collections::HashMap<String, tokio::sync::oneshot::Sender<crate::RoundDecision>>,
+>;
+
+/// Default approval-callback timeout for `auto_approve: false`
+/// sessions. 30 minutes is generous enough that a user can step
+/// away to think about a high-stakes call without losing the
+/// session, but not unbounded — a stale session eventually frees
+/// the slot in `PendingApprovals` instead of leaking forever.
+const DEFAULT_APPROVAL_TIMEOUT_SECS: u64 = 1800;
+/// Hard cap on the caller-supplied `approval_timeout_secs`
+/// override. Above this we silently clamp. One hour matches the
+/// kernel's longest sleep window and stays well under typical
+/// HTTP/keepalive timeouts on the IPC bridge.
+const MAX_APPROVAL_TIMEOUT_SECS: u64 = 3600;
+
 /// Core plugin instance.
 pub struct AgentCorePlugin {
     context: Option<Arc<KernelPluginContext>>,
     orchestrator: std::sync::Mutex<Option<Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>>>>,
+    pending_approvals: Arc<PendingApprovals>,
 }
 
 impl AgentCorePlugin {
@@ -139,6 +171,9 @@ impl AgentCorePlugin {
         Self {
             context: None,
             orchestrator: std::sync::Mutex::new(None),
+            pending_approvals: Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 
@@ -212,6 +247,7 @@ impl CorePlugin for AgentCorePlugin {
         }
         let ctx = self.context.clone();
         let orchestrator = ctx.as_ref().map(|c| self.orchestrator(c));
+        let pending_approvals = Arc::clone(&self.pending_approvals);
         let args = args.clone();
         Some(Box::pin(async move {
             let ctx = ctx.ok_or_else(|| {
@@ -235,10 +271,13 @@ impl CorePlugin for AgentCorePlugin {
                     handle_pipeline(orchestrator.expect("ctx present"), &args).await
                 }
                 HANDLER_TRACE_GET => handle_trace_get(orchestrator.expect("ctx present")).await,
-                HANDLER_SESSION_RUN => handle_session_run(ctx, &args).await,
+                HANDLER_SESSION_RUN => {
+                    handle_session_run(ctx, pending_approvals, &args).await
+                }
                 HANDLER_SESSION_LIST => handle_session_list(ctx).await,
                 HANDLER_SESSION_GET => handle_session_get(ctx, &args).await,
                 HANDLER_SESSION_DELETE => handle_session_delete(ctx, &args).await,
+                HANDLER_ROUND_DECIDE => handle_round_decide(pending_approvals, &args).await,
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
         }))
@@ -665,10 +704,19 @@ struct SessionRunArgs {
     archetype: Option<String>,
     #[serde(default)]
     system: Option<String>,
-    /// Phase 2a accepts only `true`. Phase 2b will plumb `false`
-    /// through the bus-bridge approval callback.
+    /// `true` for headless / auto-approve sessions. `false` (Phase
+    /// 2b) requires the caller to handle
+    /// `com.nexus.agent.round_proposed` events and reply via
+    /// `round_decide` before [`SessionRunArgs::approval_timeout_secs`]
+    /// elapses.
     #[serde(default)]
     auto_approve: bool,
+    /// Caller-side approval-callback timeout for `auto_approve =
+    /// false` sessions. Clamped to
+    /// `[1, MAX_APPROVAL_TIMEOUT_SECS]`. Defaults to
+    /// `DEFAULT_APPROVAL_TIMEOUT_SECS`.
+    #[serde(default)]
+    approval_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -678,16 +726,10 @@ struct SessionIdArgs {
 
 async fn handle_session_run(
     ctx: Arc<KernelPluginContext>,
+    pending_approvals: Arc<PendingApprovals>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let parsed: SessionRunArgs = parse(args, "session_run")?;
-    if !parsed.auto_approve {
-        return Err(exec_err(
-            "session_run: auto_approve=false requires the bus-bridge \
-             approval callback (ADR 0024 Phase 2b) — not yet implemented"
-                .into(),
-        ));
-    }
 
     let driver = AiChatBridge {
         ctx: Arc::clone(&ctx),
@@ -703,22 +745,56 @@ async fn handle_session_run(
         (None, Some(name)) => {
             // Reuse the archetype's prompt directly. Skill-aware
             // assembly is for the legacy `plan` flow; sessions
-            // can compose later via Phase 2b.
+            // can compose later in a follow-up.
             let (_, prompt) = crate::archetypes::resolve_prompt(Some(name));
             prompt.to_string()
         }
         (None, None) => DEFAULT_SYSTEM_PROMPT.to_string(),
     };
 
-    let session = crate::session::run_session(
-        &driver,
-        &dispatcher,
-        &crate::session::AutoApproveAll,
-        &parsed.goal,
-        &system,
-        parsed.archetype.clone(),
-    )
-    .await;
+    let session = if parsed.auto_approve {
+        crate::session::run_session(
+            &driver,
+            &dispatcher,
+            &crate::session::AutoApproveAll,
+            &parsed.goal,
+            &system,
+            parsed.archetype.clone(),
+        )
+        .await
+    } else {
+        let timeout = parsed
+            .approval_timeout_secs
+            .unwrap_or(DEFAULT_APPROVAL_TIMEOUT_SECS)
+            .clamp(1, MAX_APPROVAL_TIMEOUT_SECS);
+        let policy = BusBridgePolicy {
+            session_id: uuid::Uuid::new_v4().to_string(),
+            ctx: Arc::clone(&ctx),
+            pending: Arc::clone(&pending_approvals),
+            timeout: Duration::from_secs(timeout),
+        };
+        // BusBridgePolicy generates a session_id up-front so the
+        // round_proposed event payload can carry it BEFORE
+        // run_session has assigned its own. We accept a tiny
+        // mismatch here: the persisted session.id will differ
+        // from the policy's session_id. Fix is to plumb the policy's
+        // id into run_session as a starter — done below.
+        let policy_session_id = policy.session_id.clone();
+        let session = crate::session::run_session_with_id(
+            &driver,
+            &dispatcher,
+            &policy,
+            &parsed.goal,
+            &system,
+            parsed.archetype.clone(),
+            policy_session_id,
+        )
+        .await;
+        // Defensive cleanup: if the loop exited with a pending
+        // entry still in the map (e.g. internal bug), drop it.
+        drop_pending(&pending_approvals, &session.id);
+        session
+    };
 
     // Persist before returning so a crash mid-call still leaves a
     // record on disk.
@@ -818,6 +894,162 @@ async fn handle_session_delete(
         .await
         .map_err(|e| exec_err(format!("session_delete: {e}")))?;
     Ok(serde_json::json!({ "deleted": true, "id": a.id }))
+}
+
+// ── Phase 2b: bus-bridge approval callback ──────────────────────────────────
+
+/// Wire shape of `com.nexus.agent::round_decide` args.
+/// Mirrors `crate::RoundDecision` as a tagged enum so the caller
+/// can express any of the three decision shapes over IPC.
+///
+/// Intentionally without `deny_unknown_fields`: `#[serde(flatten)]`
+/// combined with strict deny rejects the inner enum's `kind` /
+/// `entries` / `reason` fields as "unknown" on the outer struct.
+#[derive(Debug, Deserialize)]
+struct RoundDecideArgs {
+    session_id: String,
+    #[serde(flatten)]
+    decision: RoundDecideKind,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum RoundDecideKind {
+    ApproveAll,
+    Abort {
+        #[serde(default)]
+        reason: String,
+    },
+    Partial {
+        entries: Vec<crate::RoundDecisionEntry>,
+    },
+}
+
+impl From<RoundDecideKind> for crate::RoundDecision {
+    fn from(k: RoundDecideKind) -> Self {
+        match k {
+            RoundDecideKind::ApproveAll => crate::RoundDecision::ApproveAll,
+            RoundDecideKind::Abort { reason } => crate::RoundDecision::Abort(reason),
+            RoundDecideKind::Partial { entries } => crate::RoundDecision::Partial(entries),
+        }
+    }
+}
+
+async fn handle_round_decide(
+    pending: Arc<PendingApprovals>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: RoundDecideArgs = parse(args, "round_decide")?;
+    let tx = {
+        let mut map = pending
+            .lock()
+            .map_err(|e| exec_err(format!("round_decide: pending lock poisoned: {e}")))?;
+        map.remove(&parsed.session_id)
+    };
+    let Some(tx) = tx else {
+        return Err(exec_err(format!(
+            "round_decide: no pending approval for session '{}'",
+            parsed.session_id
+        )));
+    };
+    if tx.send(parsed.decision.into()).is_err() {
+        // Receiver was dropped — session loop already moved on
+        // (e.g. timeout fired between map lookup and our send).
+        // Surface as an error so the caller knows their decision
+        // didn't land.
+        return Err(exec_err(format!(
+            "round_decide: session '{}' is no longer awaiting a decision",
+            parsed.session_id
+        )));
+    }
+    Ok(serde_json::json!({ "delivered": true, "session_id": parsed.session_id }))
+}
+
+/// Defensive helper: drop any leftover pending entry for `id`.
+/// Called after a session ends so a leak on a long-running plugin
+/// is bounded by session count, not by uptime.
+fn drop_pending(pending: &Arc<PendingApprovals>, id: &str) {
+    if let Ok(mut map) = pending.lock() {
+        map.remove(id);
+    }
+}
+
+/// Bus-bridge approval policy (ADR 0024 Phase 2b). Each
+/// `allow_round` call:
+///
+/// 1. Allocates a `oneshot` and stashes the sender under
+///    `session_id` in the agent plugin's `PendingApprovals` map.
+/// 2. Publishes a `com.nexus.agent.round_proposed` event so the
+///    caller's UI can render an approval prompt.
+/// 3. Awaits the receiver with `timeout`. The caller responds via
+///    `com.nexus.agent::round_decide`, which runs
+///    [`handle_round_decide`] and pushes the [`RoundDecision`]
+///    through the oneshot.
+///
+/// On timeout, returns [`RoundDecision::Timeout`] and removes the
+/// stashed sender (so a late-arriving `round_decide` gets a clean
+/// "no pending approval" error rather than racing into a dropped
+/// receiver).
+struct BusBridgePolicy {
+    session_id: String,
+    ctx: Arc<KernelPluginContext>,
+    pending: Arc<PendingApprovals>,
+    timeout: Duration,
+}
+
+#[async_trait]
+impl crate::SessionPolicy for BusBridgePolicy {
+    async fn allow_round(&self, round: &crate::ProposedRound) -> crate::RoundDecision {
+        let (tx, rx) = tokio::sync::oneshot::channel::<crate::RoundDecision>();
+        // Insert before publishing so a fast caller that races
+        // round_decide against the event sees a populated map.
+        match self.pending.lock() {
+            Ok(mut map) => {
+                map.insert(self.session_id.clone(), tx);
+            }
+            Err(e) => {
+                return crate::RoundDecision::Abort(format!(
+                    "session approval map poisoned: {e}"
+                ));
+            }
+        };
+
+        let payload = serde_json::json!({
+            "session_id": self.session_id,
+            "round": round.round,
+            "text": round.text,
+            "tool_calls": round.tool_calls,
+        });
+        if let Err(e) = self
+            .ctx
+            .publish("com.nexus.agent.round_proposed", payload)
+        {
+            // Clean up before bailing.
+            drop_pending(&self.pending, &self.session_id);
+            return crate::RoundDecision::Abort(format!("publish round_proposed: {e}"));
+        }
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(decision)) => decision,
+            Ok(Err(_recv_err)) => {
+                // Sender was dropped without delivering — should
+                // only happen if `handle_round_decide` removes the
+                // entry without sending, which it doesn't. Treat
+                // as abort.
+                drop_pending(&self.pending, &self.session_id);
+                crate::RoundDecision::Abort(
+                    "approval channel closed without a decision".into(),
+                )
+            }
+            Err(_elapsed) => {
+                drop_pending(&self.pending, &self.session_id);
+                crate::RoundDecision::Timeout(format!(
+                    "no decision within {} seconds",
+                    self.timeout.as_secs()
+                ))
+            }
+        }
+    }
 }
 
 /// Resolve a session id to its on-disk path. Validates the id is
@@ -1340,5 +1572,99 @@ mod tests {
         let mut plugin = AgentCorePlugin::new();
         let fut = plugin.dispatch_async(HANDLER_LIST_ARCHETYPES, &serde_json::Value::Null);
         assert!(fut.is_none(), "list_archetypes must not return an async future");
+    }
+
+    /// Phase 2b — `round_decide` routes the caller's decision into
+    /// the matching session's pending oneshot. Smoke tests the
+    /// happy path (approve_all) and the error paths (no pending,
+    /// dropped receiver).
+    #[tokio::test]
+    async fn round_decide_delivers_approve_all_to_pending_session() {
+        let pending: Arc<PendingApprovals> =
+            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let (tx, rx) = tokio::sync::oneshot::channel::<crate::RoundDecision>();
+        pending
+            .lock()
+            .unwrap()
+            .insert("sess-abc".to_string(), tx);
+
+        let args = serde_json::json!({ "session_id": "sess-abc", "kind": "approve_all" });
+        let reply = handle_round_decide(Arc::clone(&pending), &args)
+            .await
+            .expect("round_decide ok");
+        assert_eq!(reply["delivered"], true);
+        assert_eq!(reply["session_id"], "sess-abc");
+
+        // Receiver got the right decision.
+        match rx.await.expect("oneshot recv") {
+            crate::RoundDecision::ApproveAll => {}
+            other => panic!("unexpected decision: {other:?}"),
+        }
+        // Map cleaned out.
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn round_decide_errors_when_no_pending_session() {
+        let pending: Arc<PendingApprovals> =
+            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let args = serde_json::json!({ "session_id": "ghost", "kind": "approve_all" });
+        let err = handle_round_decide(pending, &args).await.unwrap_err();
+        assert!(
+            format!("{err:?}").contains("no pending approval"),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn round_decide_partial_threads_entries_through() {
+        let pending: Arc<PendingApprovals> =
+            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let (tx, rx) = tokio::sync::oneshot::channel::<crate::RoundDecision>();
+        pending
+            .lock()
+            .unwrap()
+            .insert("sess-1".to_string(), tx);
+
+        let args = serde_json::json!({
+            "session_id": "sess-1",
+            "kind": "partial",
+            "entries": [
+                { "tool_use_id": "u1", "approve": true },
+                { "tool_use_id": "u2", "approve": false, "reason": "too risky" }
+            ]
+        });
+        let _ = handle_round_decide(Arc::clone(&pending), &args)
+            .await
+            .expect("decide ok");
+
+        match rx.await.expect("recv") {
+            crate::RoundDecision::Partial(entries) => {
+                assert_eq!(entries.len(), 2);
+                assert!(entries[0].approve);
+                assert!(!entries[1].approve);
+                assert_eq!(entries[1].reason, "too risky");
+            }
+            other => panic!("unexpected decision: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn round_decide_errors_when_receiver_already_dropped() {
+        let pending: Arc<PendingApprovals> =
+            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let (tx, rx) = tokio::sync::oneshot::channel::<crate::RoundDecision>();
+        pending
+            .lock()
+            .unwrap()
+            .insert("sess-2".to_string(), tx);
+        drop(rx); // Simulate the session loop having timed out.
+
+        let args = serde_json::json!({ "session_id": "sess-2", "kind": "approve_all" });
+        let err = handle_round_decide(pending, &args).await.unwrap_err();
+        assert!(
+            format!("{err:?}").contains("no longer awaiting"),
+            "{err:?}"
+        );
     }
 }

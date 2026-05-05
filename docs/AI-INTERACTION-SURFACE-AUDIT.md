@@ -242,10 +242,11 @@ Full registration (`crates/nexus-agent/src/core_plugin.rs:18–31`) — supersed
 | 10 | `parallel` | async | Fan-out `(archetype, goal)` jobs (BL-027) |
 | 11 | `pipeline` | async | Sequential stages (BL-027) |
 | 12 | `trace_get` | async | Orchestrator trace log (BL-027) |
-| 13 | `session_run` | async | ADR 0024 Phase 2a — multi-round tool-loop session, persists transcript |
+| 13 | `session_run` | async | ADR 0024 — multi-round tool-loop session, persists transcript. `auto_approve: true` for headless; `false` uses bus-bridge approval (Phase 2b) |
 | 14 | `session_list` | async | Enumerate persisted sessions newest-first |
 | 15 | `session_get` | async | Load one session transcript by id |
 | 16 | `session_delete` | async | Remove one session transcript |
+| 17 | `round_decide` | async | ADR 0024 Phase 2b — caller's reply to a `round_proposed` event for an awaiting session |
 
 ---
 
@@ -275,6 +276,7 @@ Published by the AI plugin (`crates/nexus-ai/src/core_plugin.rs`):
 | `com.nexus.ai.stream_chunk` | 1072–1076, 1497–1504 | per-token text + index |
 | `com.nexus.ai.stream_done` | 1084–1088, 1521–1529 | final text + citations |
 | `com.nexus.ai.activity_appended` | `activity_log.rs` (`ActivityRecorder`) | timeline entry |
+| `com.nexus.agent.round_proposed` | `core_plugin.rs::BusBridgePolicy::allow_round` | session_id, round, text, tool_calls — ADR 0024 Phase 2b. Caller's UI consumes this to render the approval prompt and replies via `com.nexus.agent::round_decide` |
 
 Shell consumers subscribe at `shell/src/plugins/nexus/ai/aiRuntime.ts:51–52`.
 

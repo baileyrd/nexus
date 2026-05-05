@@ -57,6 +57,10 @@ pub enum SessionOutcome {
     Errored,
     /// The session ran to [`MAX_AGENT_ROUNDS`] without completing.
     MaxRounds,
+    /// A round's policy didn't return a decision within the
+    /// configured timeout. Phase 2b — emitted by `BusBridgePolicy`
+    /// when no `round_decide` IPC arrives before the deadline.
+    ApprovalTimeout,
 }
 
 /// One model turn the policy is asked to approve.
@@ -116,6 +120,11 @@ pub enum RoundDecision {
     /// Stop the session. No more dispatches; loop exits with
     /// [`SessionOutcome::Aborted`].
     Abort(String),
+    /// Stop the session because the policy didn't decide in time.
+    /// Loop exits with [`SessionOutcome::ApprovalTimeout`].
+    /// Phase 2b — used by `BusBridgePolicy` when the
+    /// `round_decide` IPC doesn't arrive before its deadline.
+    Timeout(String),
 }
 
 /// Approval policy consulted once per round. Strictly more
@@ -257,6 +266,28 @@ where
     T: ToolDispatcher + ?Sized,
 {
     let id = uuid::Uuid::new_v4().to_string();
+    run_session_with_id(driver, dispatcher, policy, goal, system, archetype, id).await
+}
+
+/// Like [`run_session`] but accepts a caller-supplied session id.
+/// Used when the policy needs the id before the loop starts —
+/// e.g. `BusBridgePolicy` (Phase 2b) embeds the id in the
+/// `round_proposed` event payload so the caller can correlate
+/// approvals back to the right session.
+pub async fn run_session_with_id<D, P, T>(
+    driver: &D,
+    dispatcher: &T,
+    policy: &P,
+    goal: &str,
+    system: &str,
+    archetype: Option<String>,
+    id: String,
+) -> AgentSession
+where
+    D: ChatDriver + ?Sized,
+    P: SessionPolicy + ?Sized,
+    T: ToolDispatcher + ?Sized,
+{
     let started_at = chrono::Utc::now().to_rfc3339();
     let mut session = AgentSession {
         id: id.clone(),
@@ -316,7 +347,7 @@ where
         };
         let decision = policy.allow_round(&proposed).await;
 
-        let (records, abort_reason) =
+        let (records, stop_reason) =
             execute_round(dispatcher, round_idx, &proposal.text, proposal.tool_calls, decision)
                 .await;
 
@@ -328,13 +359,21 @@ where
             tool_calls: records,
         });
 
-        if let Some(reason) = abort_reason {
-            session.outcome = SessionOutcome::Aborted;
-            // Record the abort reason as a synthetic narration round so
+        if let Some(stop) = stop_reason {
+            let (outcome, label, reason) = match stop {
+                RoundStopReason::Aborted(r) => {
+                    (SessionOutcome::Aborted, "session aborted", r)
+                }
+                RoundStopReason::Timeout(r) => {
+                    (SessionOutcome::ApprovalTimeout, "approval timeout", r)
+                }
+            };
+            session.outcome = outcome;
+            // Record the stop reason as a synthetic narration round so
             // the transcript shows why the loop stopped.
             session.rounds.push(RoundRecord {
                 round: round_idx + 1,
-                text: format!("session aborted: {reason}"),
+                text: format!("{label}: {reason}"),
                 tool_calls: Vec::new(),
             });
             break;
@@ -362,16 +401,23 @@ where
     session
 }
 
+/// Marker indicating why a round caused the session to stop.
+/// Returned alongside per-call records by [`execute_round`].
+enum RoundStopReason {
+    Aborted(String),
+    Timeout(String),
+}
+
 /// Apply a [`RoundDecision`] to a list of proposed tool calls,
 /// returning the per-call records produced this round and an
-/// optional abort reason that should stop the session.
+/// optional reason for the session to stop.
 async fn execute_round<T: ToolDispatcher + ?Sized>(
     dispatcher: &T,
     _round_idx: u32,
     _text: &str,
     proposed: Vec<ProposedToolCall>,
     decision: RoundDecision,
-) -> (Vec<ToolCallRecord>, Option<String>) {
+) -> (Vec<ToolCallRecord>, Option<RoundStopReason>) {
     match decision {
         RoundDecision::Abort(reason) => (
             proposed
@@ -386,7 +432,22 @@ async fn execute_round<T: ToolDispatcher + ?Sized>(
                     error: format!("session aborted: {reason}"),
                 })
                 .collect(),
-            Some(reason),
+            Some(RoundStopReason::Aborted(reason)),
+        ),
+        RoundDecision::Timeout(reason) => (
+            proposed
+                .into_iter()
+                .map(|p| ToolCallRecord {
+                    id: p.id,
+                    name: p.name,
+                    tool_call: p.tool_call,
+                    approved: false,
+                    reason: reason.clone(),
+                    response: None,
+                    error: format!("approval timeout: {reason}"),
+                })
+                .collect(),
+            Some(RoundStopReason::Timeout(reason)),
         ),
         RoundDecision::ApproveAll => {
             let mut out = Vec::with_capacity(proposed.len());
@@ -707,6 +768,38 @@ mod tests {
         .await;
         assert_eq!(session.outcome, SessionOutcome::MaxRounds);
         assert_eq!(session.rounds.len() as u32, MAX_AGENT_ROUNDS);
+    }
+
+    /// Phase 2b smoke test: a policy that returns
+    /// [`RoundDecision::Timeout`] flips the session outcome to
+    /// `ApprovalTimeout` and records a synthetic stop-reason round.
+    #[tokio::test]
+    async fn timeout_decision_flips_outcome_to_approval_timeout() {
+        struct TimeoutPolicy;
+        #[async_trait]
+        impl SessionPolicy for TimeoutPolicy {
+            async fn allow_round(&self, _round: &ProposedRound) -> RoundDecision {
+                RoundDecision::Timeout("no decision within 5 seconds".into())
+            }
+        }
+        let driver = ScriptedDriver::new(vec![Proposal {
+            text: String::new(),
+            tool_calls: vec![read_tool("u1", "x.md")],
+        }]);
+        let dispatcher = CountingDispatcher::new();
+        let session = run_session(
+            &driver,
+            &dispatcher,
+            &TimeoutPolicy,
+            "do thing",
+            "system",
+            None,
+        )
+        .await;
+        assert_eq!(session.outcome, SessionOutcome::ApprovalTimeout);
+        assert_eq!(session.rounds.len(), 2);
+        assert!(session.rounds[1].text.contains("approval timeout"));
+        assert_eq!(dispatcher.calls.lock().unwrap().len(), 0);
     }
 
     #[tokio::test]

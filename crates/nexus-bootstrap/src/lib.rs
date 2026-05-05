@@ -258,6 +258,16 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         "session_run",
         vec![Capability::AiChat],
     );
+    // round_decide is the caller's reply to a round_proposed event;
+    // mirroring the cap on session_run keeps the surface consistent
+    // (a caller without ai.chat couldn't have started the session
+    // anyway, but pinning the gate avoids a future regression where
+    // a bystander plugin pushes decisions into someone else's session).
+    shared.add_cap_requirement(
+        "com.nexus.agent",
+        "round_decide",
+        vec![Capability::AiChat],
+    );
 
     let dispatcher: Arc<dyn IpcDispatcher> = Arc::clone(&shared) as Arc<dyn IpcDispatcher>;
 
@@ -1109,6 +1119,8 @@ fn register_core_plugins(
                     ("session_list", nexus_agent::core_plugin::HANDLER_SESSION_LIST),
                     ("session_get", nexus_agent::core_plugin::HANDLER_SESSION_GET),
                     ("session_delete", nexus_agent::core_plugin::HANDLER_SESSION_DELETE),
+                    // ADR 0024 Phase 2b — caller-side approval reply.
+                    ("round_decide", nexus_agent::core_plugin::HANDLER_ROUND_DECIDE),
                 ],
             ),
             forge_root,

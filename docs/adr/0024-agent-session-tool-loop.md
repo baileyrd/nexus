@@ -1,8 +1,8 @@
 # ADR 0024: Agent Session Tool-Loop (ADR-0023 Phase 2)
 
 **Date:** 2026-05-05
-**Status:** Accepted (Phase 2a). Phase 2b — bus-bridge approval
-callback — tracked under §"Open follow-ups".
+**Status:** Accepted. Phase 2a (library + auto-approve IPC) and
+Phase 2b (bus-bridge approval callback) both shipped.
 **Supersedes-section:** ADR 0023 §"Phase 2 — deferred follow-up ADR"
 
 ## Context
@@ -270,15 +270,40 @@ loop on every approval. It also fits Phase-2's value proposition
 **Recommend A**, with B available as an optimisation for
 auto-approve flows that don't need callback latency.
 
+## Phase 2b — landed
+
+**Status:** shipped. `session_run` now accepts `auto_approve:
+false`; the agent plugin holds a per-session
+`HashMap<session_id, oneshot::Sender<RoundDecision>>` and:
+
+1. `BusBridgePolicy::allow_round` allocates a oneshot, stashes
+   the sender in the map, publishes
+   `com.nexus.agent.round_proposed` with the round payload, and
+   awaits the receiver under
+   `tokio::time::timeout(approval_timeout_secs)`.
+2. `com.nexus.agent::round_decide` (IPC handler 17) decodes a
+   tagged-enum decision (`approve_all` / `abort` / `partial`),
+   pops the matching sender, and pushes the decision through.
+   Errors loud when there's no pending session or the receiver
+   has already been dropped.
+3. Timeout returns [`RoundDecision::Timeout`], which the session
+   loop maps to [`SessionOutcome::ApprovalTimeout`] and a
+   synthetic stop-reason narration round.
+
+`approval_timeout_secs` defaults to
+`DEFAULT_APPROVAL_TIMEOUT_SECS = 1800` (30 min) and clamps to
+`MAX_APPROVAL_TIMEOUT_SECS = 3600` (1 hour). Both `session_run`
+and `round_decide` are gated on `Capability::AiChat`.
+
+Shell approval-prompt UX is its own piece of work — the IPC
+contract is stable and any caller (shell, CLI, MCP wrapper) can
+implement against it.
+
 ## Open follow-ups
-- **Phase 2b** — bus-bridge approval callback. Today (Phase 2a)
-  the `session_run` IPC handler accepts `auto_approve: true` only;
-  passing `false` returns "not yet implemented". Phase 2b lands
-  the `com.nexus.agent.round_proposed` event + `round_decide` IPC
-  + per-session oneshot wiring with a configurable timeout. Shell
-  approval-prompt UX is a separate piece of work.
 - A small ADR to delete the legacy `plan` / `run` / `run_plan` /
   `execute_step` IPC handlers once shell + CLI callers migrate.
+- Shell-side approval-prompt UI consuming
+  `com.nexus.agent.round_proposed` and posting `round_decide`.
 - Token-budget integration — sessions can run long; the existing
   budget redactor (G1) covers RAG, but per-round messages don't
   carry the same budgeting story. Needs a separate look.

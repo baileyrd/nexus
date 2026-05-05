@@ -65,9 +65,9 @@ pub use executor::{PlanExecutor, StepResult, StepStatus};
 pub use llm::{ChatDriver, LlmAgent, Proposal, ProposedToolCall, DEFAULT_SYSTEM_PROMPT};
 pub use orchestrator::{AgentOrchestrator, TraceEntry};
 pub use session::{
-    run_session, AgentSession, AutoApproveAll, ProposedRound, RoundDecision,
-    RoundDecisionEntry, RoundRecord, SessionOutcome, SessionPolicy, ToolCallRecord,
-    MAX_AGENT_ROUNDS,
+    run_session, run_session_with_id, AgentSession, AutoApproveAll, ProposedRound,
+    RoundDecision, RoundDecisionEntry, RoundRecord, SessionOutcome, SessionPolicy,
+    ToolCallRecord, MAX_AGENT_ROUNDS,
 };
 
 /// A unit of work produced by an [`Agent`] and consumed by a
