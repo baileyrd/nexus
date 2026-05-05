@@ -73,6 +73,7 @@ mod saved;
 mod server;
 mod session;
 mod shell;
+pub mod term_grid;
 mod urls;
 
 pub use adhoc::{AdHocRecord, AdHocStatus, SqliteAdHocStore};
@@ -85,15 +86,15 @@ pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
 pub use core_plugin::{
     CreateSessionArgs, CreateSessionResponse, OutputStreamPayload, PumpArgs, PumpResponse,
-    ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ResizeArgs, SearchOutputArgs,
-    SendInputArgs, SendRawInputArgs, SessionIdArgs, TerminalCorePlugin,
+    ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ReadScreenArgs, ResizeArgs,
+    SearchOutputArgs, SendInputArgs, SendRawInputArgs, SessionIdArgs, TerminalCorePlugin,
     WaitForPatternArgs, WaitForPatternResponse, EVENT_LIFECYCLE_PREFIX, EVENT_OUTPUT_PREFIX,
     HANDLER_CLOSE_SESSION, HANDLER_CREATE_SESSION,
     HANDLER_GET_SESSION_INFO, HANDLER_LIST_SESSIONS, HANDLER_PUMP, HANDLER_READ_OUTPUT,
-    HANDLER_READ_RAW_SINCE,
+    HANDLER_READ_RAW_SINCE, HANDLER_READ_SCREEN, HANDLER_READ_SCREEN_TEXT,
     HANDLER_SAVED_CREATE, HANDLER_SAVED_DELETE, HANDLER_SAVED_LIST, HANDLER_SAVED_REORDER,
     HANDLER_SAVED_UPDATE, HANDLER_SEARCH_OUTPUT, HANDLER_SEND_INPUT, HANDLER_SEND_RAW_INPUT,
-    HANDLER_WAIT_FOR_PATTERN, PLUGIN_ID,
+    HANDLER_WAIT_FOR_PATTERN, HANDLER_RESIZE, PLUGIN_ID,
 };
 pub use compound::{
     execute_chain, parse_command_chain, requires_single_shell, ChainOutcome, CommandStep,

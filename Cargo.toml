@@ -142,7 +142,9 @@ crossterm = "0.29"
 gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
 
 # VTE state machine + terminal grid (ADR 0027)
-alacritty-terminal = "0.24"
+# Use git instead of crates.io: the 0.24.2 release has a rustix/rustix-openpty
+# version conflict in tty/unix.rs that makes it fail to compile.
+alacritty_terminal = { git = "https://github.com/alacritty/alacritty", package = "alacritty_terminal" }
 vte = "0.15"
 
 # Force-directed graph layout (Phase 5 global graph view)

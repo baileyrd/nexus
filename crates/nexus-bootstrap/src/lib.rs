@@ -1294,6 +1294,12 @@ fn register_core_plugins(
                         "saved_reorder",
                         nexus_terminal::HANDLER_SAVED_REORDER,
                     ),
+                    ("resize", nexus_terminal::HANDLER_RESIZE),
+                    ("read_screen", nexus_terminal::HANDLER_READ_SCREEN),
+                    (
+                        "read_screen_text",
+                        nexus_terminal::HANDLER_READ_SCREEN_TEXT,
+                    ),
                 ],
             ),
             forge_root,

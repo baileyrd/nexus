@@ -1,6 +1,7 @@
 use gpui::{hsla, Hsla};
 
 /// Nexus dark theme — Tokyo Night palette mapped to semantic tokens.
+#[derive(Clone, Copy)]
 pub struct Theme {
     pub bg_base: Hsla,
     pub bg_panel: Hsla,

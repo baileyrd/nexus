@@ -159,6 +159,12 @@ pub const HANDLER_READ_RAW_SINCE: u32 = 16;
 /// `resize` handler id. Updates the PTY's reported window size so the
 /// child process receives SIGWINCH and reflows. See [`ResizeArgs`].
 pub const HANDLER_RESIZE: u32 = 17;
+/// `read_screen` handler id — returns the visible screen as structured cell
+/// rows (ADR 0027 handler 18). Args: `{ id: string }`.
+pub const HANDLER_READ_SCREEN: u32 = 18;
+/// `read_screen_text` handler id — returns the visible screen as plain text
+/// (ADR 0027 handler 19). Args: `{ id: string }`.
+pub const HANDLER_READ_SCREEN_TEXT: u32 = 19;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -369,6 +375,22 @@ pub struct ResizeArgs {
     pub cols: u16,
     /// New row count (character cells).
     pub rows: u16,
+}
+
+/// Arguments for `read_screen` and `read_screen_text` (ADR 0027 §18–19).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ReadScreenArgs {
+    /// Target session id.
+    pub id: String,
 }
 
 /// Response from `read_raw_since`.
@@ -930,6 +952,8 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_SAVED_REORDER => self.dispatch_saved_reorder(args),
             HANDLER_READ_RAW_SINCE => self.dispatch_read_raw_since(args),
             HANDLER_RESIZE => self.dispatch_resize(args),
+            HANDLER_READ_SCREEN => self.dispatch_read_screen(args),
+            HANDLER_READ_SCREEN_TEXT => self.dispatch_read_screen_text(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -1088,12 +1112,46 @@ impl TerminalCorePlugin {
         // addon can occasionally propose zero before layout settles.
         let cols = a.cols.max(1);
         let rows = a.rows.max(1);
+        // resize_grid keeps the TermGrid in sync with the PTY dimensions.
         self.server
             .lock()
             .map_err(poisoned)?
-            .resize(&id, cols, rows)
+            .manager_mut()
+            .resize_grid(&id, cols, rows)
             .map_err(crate_err)?;
         Ok(serde_json::Value::Null)
+    }
+
+    fn dispatch_read_screen(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: ReadScreenArgs = parse_args(args, "read_screen")?;
+        let id = SessionId::from_string(a.id);
+        let rows = self
+            .server
+            .lock()
+            .map_err(poisoned)?
+            .manager()
+            .read_screen(&id)
+            .ok_or_else(|| exec_err(format!("read_screen: session {} not found", id.as_str())))?;
+        to_value(&rows, "read_screen")
+    }
+
+    fn dispatch_read_screen_text(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: ReadScreenArgs = parse_args(args, "read_screen_text")?;
+        let id = SessionId::from_string(a.id);
+        let text = self
+            .server
+            .lock()
+            .map_err(poisoned)?
+            .manager()
+            .read_screen_text(&id)
+            .ok_or_else(|| exec_err(format!("read_screen_text: session {} not found", id.as_str())))?;
+        to_value(&text, "read_screen_text")
     }
 
     fn dispatch_search_output(

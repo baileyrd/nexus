@@ -35,18 +35,23 @@ use crate::buffer::OutputBuffer;
 use crate::error::TerminalError;
 use crate::lines::{Line, LineBuffer};
 use crate::session::{ProcessState, Session, SessionConfig, SessionId, Signal};
+use crate::term_grid::TermGrid;
 
 /// PRD-09 §2.3 hard cap on simultaneously-active sessions per workspace.
 pub const DEFAULT_MAX_SESSIONS: usize = 50;
 
 /// One session plus its captured-output rings. The manager owns all
-/// three so consumers never see a live `Session` without the buffers it
+/// four so consumers never see a live `Session` without the buffers it
 /// feeds: [`OutputBuffer`] holds raw bytes (PRD-09 §3.1), [`LineBuffer`]
-/// holds the ANSI-stripped line view the server API exposes (§3.2).
+/// holds the ANSI-stripped line view the server API exposes (§3.2),
+/// and [`TermGrid`] holds the full VTE screen state (ADR 0027).
 struct Entry {
     session: Session,
     buffer: OutputBuffer,
     lines: LineBuffer,
+    /// VTE terminal grid — authoritative screen state for IPC handlers
+    /// 18 (`read_screen`) and 19 (`read_screen_text`). Defaults to 80×24.
+    term_grid: TermGrid,
     last_accessed: Instant,
     /// Optional human-readable label for the programmable API's
     /// `SessionInfo` surface (PRD-09 §11). `None` falls back to the
@@ -139,6 +144,7 @@ impl SessionManager {
                 session,
                 buffer: OutputBuffer::with_capacity(self.default_buffer_capacity),
                 lines: LineBuffer::new(),
+                term_grid: TermGrid::new(80, 24),
                 last_accessed: Instant::now(),
                 name: None,
                 created_at: now,
@@ -313,8 +319,35 @@ impl SessionManager {
     ) -> Result<usize, TerminalError> {
         let entry = self.entry_mut(id)?;
         entry.last_accessed = Instant::now();
-        let Entry { session, buffer, lines, .. } = entry;
-        session.read_into(Some(buffer), Some(lines), timeout)
+        let Entry { session, buffer, lines, term_grid, .. } = entry;
+        session.read_into(Some(buffer), Some(lines), Some(term_grid), timeout)
+    }
+
+    /// Return the visible terminal screen for `id` as structured cell rows.
+    /// Returns `None` if the session is not found.
+    pub fn read_screen(
+        &self,
+        id: &SessionId,
+    ) -> Option<Vec<crate::term_grid::ScreenRow>> {
+        self.sessions.get(id).map(|e| e.term_grid.read_screen())
+    }
+
+    /// Return the visible terminal screen for `id` as plain text.
+    /// Returns `None` if the session is not found.
+    pub fn read_screen_text(&self, id: &SessionId) -> Option<String> {
+        self.sessions.get(id).map(|e| e.term_grid.read_screen_text())
+    }
+
+    /// Resize the terminal grid for `id` to match the new PTY dimensions.
+    pub fn resize_grid(
+        &mut self,
+        id: &SessionId,
+        cols: u16,
+        rows: u16,
+    ) -> Result<(), TerminalError> {
+        let entry = self.entry_mut(id)?;
+        entry.term_grid.resize(cols as usize, rows as usize);
+        entry.session.resize(cols, rows)
     }
 
     /// Update the PTY's reported window size (PRD-09 §1.1).

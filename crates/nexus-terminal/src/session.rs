@@ -609,6 +609,7 @@ impl Session {
         &mut self,
         bytes: Option<&mut crate::OutputBuffer>,
         lines: Option<&mut crate::LineBuffer>,
+        grid:  Option<&mut crate::term_grid::TermGrid>,
         timeout: Duration,
     ) -> Result<usize, TerminalError> {
         let mut scratch = [0u8; 8192];
@@ -619,6 +620,9 @@ impl Session {
             }
             if let Some(l) = lines {
                 l.push(&scratch[..n]);
+            }
+            if let Some(g) = grid {
+                g.process_bytes(&scratch[..n]);
             }
         }
         Ok(n)
