@@ -191,3 +191,106 @@ Everything beyond file I/O — terminal commands, DB queries, git history, exter
 3. **Introduce per-handler capabilities** (`ai.chat`, `ai.index`, `ai.session.write`) for proper gating.
 4. **Unify agent and AI tool-calling** so `LlmAgent` can reuse the registered tool registry instead of free-form JSON plans.
 5. **Wire token-budget redactor into streaming handler request paths**, not only RAG assembly.
+
+---
+
+## 9. Skills Plugin (`com.nexus.skills`)
+
+Registered handlers (`crates/nexus-skills/src/core_plugin.rs:9–20`):
+
+| # | Command | Sync/Async | Purpose |
+|---|---|---|---|
+| 1 | `list` | sync | All loaded skills |
+| 2 | `get` | sync | One skill by id |
+| 3 | `list_by_context` | sync | Skills matching applicable contexts |
+| 4 | `triggered_by` | sync | Skills whose triggers match input text |
+| 5 | `reload` | sync | Re-scan skills directory |
+| 6 | `render` | sync | Render skill with parameter substitution |
+| 7 | `compose` | sync | Resolve `depends_on` closure (BL-021) |
+
+**Wired into AI?** Only via the **agent** path, not chat. `crates/nexus-agent/src/core_plugin.rs:651, 712–713, 820–825` — `system_prompt_with_skills`, `compose_skill_body`, `render_skill_body` pull skills into the planner system prompt. `stream_chat` does **not** consult the skills registry.
+
+---
+
+## 10. Agent Plugin Handlers (`com.nexus.agent`)
+
+Full registration (`crates/nexus-agent/src/core_plugin.rs:18–31`) — supersedes the partial description in §2C:
+
+| # | Command | Sync/Async | Purpose |
+|---|---|---|---|
+| 1 | `plan` | async | Produce a Plan from a goal |
+| 2 | `run` | async | Plan + execute in one shot |
+| 3 | `run_plan` | async | Execute a preset Plan |
+| 4 | `execute_step` | async | Execute a single step |
+| 5 | `history_list` | async | List persisted histories |
+| 6 | `history_get` | async | Load one history |
+| 7 | `history_delete` | async | Delete one history |
+| 8 | `list_archetypes` | sync | Return archetype catalogue |
+| 9 | `delegate` | async | One archetype → goal → observation (BL-027) |
+| 10 | `parallel` | async | Fan-out `(archetype, goal)` jobs (BL-027) |
+| 11 | `pipeline` | async | Sequential stages (BL-027) |
+| 12 | `trace_get` | async | Orchestrator trace log (BL-027) |
+
+---
+
+## 11. MCP Host Handlers (`com.nexus.mcp.host`)
+
+Full registration (`crates/nexus-mcp/src/core_plugin.rs:13–23`) — supersedes the partial list in §2D:
+
+| # | Command | Sync/Async | Purpose |
+|---|---|---|---|
+| 1 | `list_servers` | sync | List configured servers |
+| 2 | `list_tools` | async | List tools for one server |
+| 3 | `call_tool` | async | Invoke a tool on a server |
+| 4 | `list_resources` | async | List resources (BL-026) |
+| 5 | `list_prompts` | async | List prompts (BL-026) |
+| 6 | `connect` | async | Explicitly establish connection |
+| 7 | `disconnect` | async | Gracefully close connection |
+
+---
+
+## 12. Bus Events Emitted by AI
+
+Published by the AI plugin (`crates/nexus-ai/src/core_plugin.rs`):
+
+| Event | Sites | Payload |
+|---|---|---|
+| `com.nexus.ai.stream_start` | 1057–1060, 1482–1488 | session id; optional RAG source list |
+| `com.nexus.ai.stream_chunk` | 1072–1076, 1497–1504 | per-token text + index |
+| `com.nexus.ai.stream_done` | 1084–1088, 1521–1529 | final text + citations |
+| `com.nexus.ai.activity_appended` | `activity_log.rs` (`ActivityRecorder`) | timeline entry |
+
+Shell consumers subscribe at `shell/src/plugins/nexus/ai/aiRuntime.ts:51–52`.
+
+---
+
+## 13. Shell AI Plugin Contributions
+
+`shell/src/plugins/nexus/ai/index.ts`:
+
+- **Commands** (line 246): `nexus.ai.focus`, `nexus.ai.clear`, `nexus.ai.openSettings`, `nexus.ai.cmdI.open`, `nexus.ai.cmdI.close`, `nexus.ai.reindexForge`.
+- **Keybindings** (line 255): focus binding for the chat view.
+- **Settings schema** (line 93): `ai.provider`, `ai.model`, `ai.apiKey`, `ai.baseUrl`, `ai.embedProvider`, `ai.embedModel`, `ai.embedApiKey`, plus inline-completion toggles.
+- **Views** (lines 310–339): `nexus.ai.view` (chat panel) and `nexus.ai.cmdI.overlay` (command palette overlay).
+
+---
+
+## 14. Prompt Assembly — Where the System Prompt Comes From
+
+- **`stream_chat`** (`crates/nexus-ai/src/core_plugin.rs:793`) — accepts a caller-supplied `system` parameter verbatim. No skills, no RAG, no host-side default. Whatever the shell or CLI sends is what the model sees.
+- **`stream_ask`** (line 1480) — calls `build_rag_prompt` to stitch retrieved chunks into a RAG system message.
+- **Agent planner** (`crates/nexus-agent/src/core_plugin.rs:642–701`, `system_prompt_with_skills`) — layers `DEFAULT_SYSTEM_PROMPT` + skill guidance + MCP server hints. This is the only path that injects skills/MCP into the prompt.
+
+Implication: the chat tool-loop has **no host-controlled system prompt floor**. A shell that forgets to pass `system` gets whatever the provider defaults to.
+
+---
+
+## 15. Token-Budget Redactor — Code Path
+
+- **Defined:** `crates/nexus-ai/src/privacy.rs:1–238`. `Redactor::with_default_patterns()` (line 106) ships 6 patterns (AWS keys, generic API tokens, GitHub PATs, private keys, …).
+- **Called from:** `build_rag_prompt_budgeted` only (`crates/nexus-ai/src/rag.rs:443–510`, redaction applied at line 471 before prompt stitching).
+- **NOT called from:**
+  - `stream_chat` (line 793) — caller-supplied system prompt passes through unredacted.
+  - `stream_ask`'s non-budgeted path via `build_rag_prompt` (`rag.rs:127`) — retrieved file content is injected raw.
+
+This is the concrete shape of the gap noted in §6: redaction is wired into one RAG branch, not into either of the two streaming entry points that actually carry user/file content to the provider.
