@@ -399,18 +399,15 @@ enum AgentCommand {
         #[arg(long)]
         archetype: Option<String>,
     },
-    /// Plan + execute a goal end-to-end
+    /// Run a session against a goal end-to-end (auto-approve every
+    /// tool call). Drives `com.nexus.agent::session_run`. Per
+    /// ADR 0025 Phase 1 this replaces the legacy `run` IPC handler.
     Run {
         /// Natural-language goal
         goal: String,
         /// Archetype — writer / coder / researcher / general (default)
         #[arg(long)]
         archetype: Option<String>,
-    },
-    /// Execute a preset plan from a JSON file produced by `plan`
-    RunPlan {
-        /// Path to the plan JSON file
-        file: PathBuf,
     },
 }
 
@@ -1418,9 +1415,6 @@ fn main() {
             }
             AgentCommand::Run { goal, archetype } => {
                 commands::agent::run(&mut app, &goal, archetype.as_deref())
-            }
-            AgentCommand::RunPlan { file } => {
-                commands::agent::run_plan(&mut app, &file.to_string_lossy())
             }
         },
 

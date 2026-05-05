@@ -61,11 +61,26 @@ pub const PLUGIN_ID: &str = "com.nexus.agent";
 /// `plan` handler id — produce a plan for the given goal.
 pub const HANDLER_PLAN: u32 = 1;
 /// `run` handler id — plan + execute in one call.
+///
+/// **Deprecated (ADR 0025 Phase 1):** use
+/// `com.nexus.agent::session_run` with `auto_approve: true`. The
+/// session model produces a richer transcript and supports
+/// interactive approval (Phase 2b). This handler emits a
+/// once-per-instance `tracing::warn!` on each dispatch.
 pub const HANDLER_RUN: u32 = 2;
 /// `run_plan` handler id — execute a preset plan.
+///
+/// **Deprecated (ADR 0025 Phase 1):** there is no session-model
+/// equivalent. Callers that need to replay a fixed sequence of
+/// tool calls should iterate `Vec<ToolCall>` and `ipc_call` each
+/// directly — that's what this handler did internally.
 pub const HANDLER_RUN_PLAN: u32 = 3;
 /// `execute_step` handler id — execute a single step of a preset
 /// plan. Enables per-step approval flows driven by the UI.
+///
+/// **Deprecated (ADR 0025 Phase 1):** see `run_plan`. A single
+/// `ipc_call` with the step's `target_plugin_id` / `command_id` /
+/// `args` does the same thing without the legacy plan envelope.
 pub const HANDLER_EXECUTE_STEP: u32 = 4;
 /// `history_list` handler id — enumerate persisted plan histories
 /// under `<forge>/.forge/agent/history/`.
@@ -84,19 +99,32 @@ pub const HANDLER_LIST_ARCHETYPES: u32 = 8;
 /// `delegate` handler id — orchestrator hands one goal to one
 /// archetype, plans + executes, returns an [`crate::Observation`].
 /// Args: [`DelegateArgs`]. (BL-027.)
+///
+/// **Deprecated (ADR 0025 Phase 1):** use
+/// `com.nexus.agent::session_run` with the `archetype` arg. Never
+/// had any external callers.
 pub const HANDLER_DELEGATE: u32 = 9;
 /// `parallel` handler id — fan out a list of `(archetype, goal)`
 /// jobs in parallel; results come back in input order. Args:
 /// [`ParallelArgs`]. (BL-027.)
+///
+/// **Deprecated (ADR 0025 Phase 1):** caller should fan out N
+/// `session_run` calls. Never had any external callers.
 pub const HANDLER_PARALLEL: u32 = 10;
 /// `pipeline` handler id — run stages sequentially; each stage's
 /// summary becomes `{{prev}}` in the next stage's `goal_template`.
 /// Stops on first failure and returns partial results. Args:
 /// [`PipelineArgs`]. (BL-027.)
+///
+/// **Deprecated (ADR 0025 Phase 1):** caller should chain
+/// `session_run` outputs manually. Never had any external callers.
 pub const HANDLER_PIPELINE: u32 = 11;
 /// `trace_get` handler id — return the orchestrator's trace log
 /// (one [`crate::TraceEntry`] per delegated stage). Payload: `[]`.
 /// (BL-027.)
+///
+/// **Deprecated (ADR 0025 Phase 1):** session_list + session_get
+/// expose richer per-run records. Never had any external callers.
 pub const HANDLER_TRACE_GET: u32 = 12;
 
 /// `session_run` (ADR 0024 Phase 2a) — drive a multi-round
@@ -124,6 +152,30 @@ pub const HANDLER_SESSION_DELETE: u32 = 16;
 /// side awaits a `oneshot` populated by this handler before
 /// dispatching tools.
 pub const HANDLER_ROUND_DECIDE: u32 = 17;
+
+/// ADR 0025 Phase 1 — handlers that are deprecated and slated for
+/// deletion. Tuple is `(handler_id, command_name, replacement_hint)`
+/// where the hint is a one-line pointer surfaced in the
+/// `tracing::warn!` so log readers can see what to use instead.
+const DEPRECATED_HANDLERS: &[(u32, &str, &str)] = &[
+    (HANDLER_RUN, "run", "session_run with auto_approve: true"),
+    (HANDLER_RUN_PLAN, "run_plan", "build a Vec<ToolCall> + ipc_call per call"),
+    (HANDLER_EXECUTE_STEP, "execute_step", "ipc_call directly"),
+    (HANDLER_DELEGATE, "delegate", "session_run with archetype arg"),
+    (HANDLER_PARALLEL, "parallel", "fan out N session_run calls"),
+    (HANDLER_PIPELINE, "pipeline", "chain session_run outputs manually"),
+    (HANDLER_TRACE_GET, "trace_get", "session_list + session_get"),
+];
+
+/// Look up a deprecated handler by id. Returns
+/// `Some((command_name, replacement_hint))` when the id is
+/// flagged for retirement under ADR 0025.
+fn deprecation_for(handler_id: u32) -> Option<(&'static str, &'static str)> {
+    DEPRECATED_HANDLERS
+        .iter()
+        .find(|(id, _, _)| *id == handler_id)
+        .map(|(_, name, hint)| (*name, *hint))
+}
 
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
@@ -160,6 +212,11 @@ pub struct AgentCorePlugin {
     context: Option<Arc<KernelPluginContext>>,
     orchestrator: std::sync::Mutex<Option<Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>>>>,
     pending_approvals: Arc<PendingApprovals>,
+    /// ADR 0025 Phase 1 — set of handler ids that have already
+    /// emitted their once-per-instance deprecation warning. Avoids
+    /// drowning logs when a caller drives the legacy surface in a
+    /// loop. Cleared on plugin reload.
+    warned_deprecated: Arc<std::sync::Mutex<std::collections::HashSet<u32>>>,
 }
 
 impl AgentCorePlugin {
@@ -173,6 +230,9 @@ impl AgentCorePlugin {
             orchestrator: std::sync::Mutex::new(None),
             pending_approvals: Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
+            )),
+            warned_deprecated: Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
             )),
         }
     }
@@ -245,6 +305,25 @@ impl CorePlugin for AgentCorePlugin {
         if handler_id == HANDLER_LIST_ARCHETYPES {
             return None;
         }
+        // ADR 0025 Phase 1 — once-per-instance deprecation log for
+        // every retired-but-still-functional handler. Emitted up
+        // here (before the async block) so the warning surfaces
+        // even if the handler returns synchronously.
+        if let Some((name, hint)) = deprecation_for(handler_id) {
+            let mut seen = self
+                .warned_deprecated
+                .lock()
+                .expect("agent deprecation set poisoned");
+            if seen.insert(handler_id) {
+                tracing::warn!(
+                    plugin_id = PLUGIN_ID,
+                    command = name,
+                    replacement = hint,
+                    "deprecated agent IPC handler called; see ADR 0025"
+                );
+            }
+        }
+
         let ctx = self.context.clone();
         let orchestrator = ctx.as_ref().map(|c| self.orchestrator(c));
         let pending_approvals = Arc::clone(&self.pending_approvals);
@@ -1572,6 +1651,36 @@ mod tests {
         let mut plugin = AgentCorePlugin::new();
         let fut = plugin.dispatch_async(HANDLER_LIST_ARCHETYPES, &serde_json::Value::Null);
         assert!(fut.is_none(), "list_archetypes must not return an async future");
+    }
+
+    /// ADR 0025 Phase 1 — every deprecated handler id resolves
+    /// to a `(name, replacement_hint)` pair, and non-deprecated
+    /// ids resolve to `None`. Pin the table so a future
+    /// "deprecate-by-renaming" attempt doesn't accidentally drop
+    /// the warning surface.
+    #[test]
+    fn deprecation_table_covers_every_legacy_handler() {
+        let expected: Vec<(u32, &str)> = vec![
+            (HANDLER_RUN, "run"),
+            (HANDLER_RUN_PLAN, "run_plan"),
+            (HANDLER_EXECUTE_STEP, "execute_step"),
+            (HANDLER_DELEGATE, "delegate"),
+            (HANDLER_PARALLEL, "parallel"),
+            (HANDLER_PIPELINE, "pipeline"),
+            (HANDLER_TRACE_GET, "trace_get"),
+        ];
+        for (id, name) in expected {
+            let (resolved_name, hint) =
+                deprecation_for(id).unwrap_or_else(|| panic!("missing deprecation for {name}"));
+            assert_eq!(resolved_name, name);
+            assert!(!hint.is_empty(), "hint must be non-empty for {name}");
+        }
+        // Non-deprecated ids must NOT show up.
+        assert!(deprecation_for(HANDLER_PLAN).is_none());
+        assert!(deprecation_for(HANDLER_HISTORY_LIST).is_none());
+        assert!(deprecation_for(HANDLER_LIST_ARCHETYPES).is_none());
+        assert!(deprecation_for(HANDLER_SESSION_RUN).is_none());
+        assert!(deprecation_for(HANDLER_ROUND_DECIDE).is_none());
     }
 
     /// Phase 2b — `round_decide` routes the caller's decision into

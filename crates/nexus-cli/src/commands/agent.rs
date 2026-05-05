@@ -1,8 +1,13 @@
-//! Agent command handlers — `nexus agent plan|run|run-plan`.
+//! Agent command handlers — `nexus agent plan|run`.
 //!
-//! All three drive through `com.nexus.agent` via `ipc_call`; the CLI
+//! Both drive through `com.nexus.agent` via `ipc_call`; the CLI
 //! never links `nexus-agent` directly. Matches the shape of
 //! `commands::ai` so agents and AI share a consistent surface.
+//!
+//! Per ADR 0025 Phase 1, `run` now drives `session_run`
+//! (auto-approve mode) and renders the resulting transcript.
+//! `run-plan` was removed — there's no session-model equivalent
+//! for replaying a static plan.
 
 use std::time::Duration;
 
@@ -26,10 +31,15 @@ pub fn plan(app: &mut App, goal: &str, archetype: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// `nexus agent run <goal> [--archetype ..]` — plan + execute.
+/// `nexus agent run <goal> [--archetype ..]` — drive a session
+/// end-to-end with auto-approve, then render the transcript.
 pub fn run(app: &mut App, goal: &str, archetype: Option<&str>) -> Result<()> {
-    let response = call(app, "run", goal_args(goal, archetype))?;
-    print_observation(&response);
+    let mut args = goal_args(goal, archetype);
+    if let Some(map) = args.as_object_mut() {
+        map.insert("auto_approve".into(), Value::Bool(true));
+    }
+    let response = call(app, "session_run", args)?;
+    print_session(&response);
     Ok(())
 }
 
@@ -40,18 +50,6 @@ fn goal_args(goal: &str, archetype: Option<&str>) -> Value {
         map.insert("archetype".into(), Value::String(a.into()));
     }
     Value::Object(map)
-}
-
-/// `nexus agent run-plan <file.json>` — execute a preset plan loaded
-/// from disk. Useful for replaying a plan produced by `plan` earlier.
-pub fn run_plan(app: &mut App, plan_path: &str) -> Result<()> {
-    let raw = std::fs::read_to_string(plan_path)
-        .with_context(|| format!("reading plan from {plan_path}"))?;
-    let plan: Value = serde_json::from_str(&raw)
-        .with_context(|| format!("plan file is not valid JSON: {plan_path}"))?;
-    let response = call(app, "run_plan", serde_json::json!({ "plan": plan }))?;
-    print_observation(&response);
-    Ok(())
 }
 
 // ── Printers ────────────────────────────────────────────────────────────────
@@ -89,34 +87,59 @@ fn print_plan(plan: &Value) {
     }
 }
 
-fn print_observation(obs: &Value) {
-    let plan_id = obs
-        .get("plan_id")
+fn print_session(session: &Value) {
+    let id = session.get("id").and_then(Value::as_str).unwrap_or("<no-id>");
+    let goal = session
+        .get("goal")
         .and_then(Value::as_str)
-        .unwrap_or("<no-id>");
-    let success = obs
-        .get("success")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let steps = obs
-        .get("steps")
+        .unwrap_or("<no-goal>");
+    let outcome = session
+        .get("outcome")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let rounds = session
+        .get("rounds")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    println!("Plan  : {plan_id}");
-    println!("State : {}", if success { "success" } else { "partial / failed" });
-    for step in &steps {
-        let sid = step.get("step_id").and_then(Value::as_str).unwrap_or("?");
-        let status = step
-            .get("status")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        print!("  [{status}] {sid}");
-        if let Some(resp) = step.get("response").filter(|v| !v.is_null()) {
-            let preview = preview_json(resp, 160);
-            print!(" — {preview}");
+    println!("Session : {id}");
+    println!("Goal    : {goal}");
+    println!("Outcome : {outcome}");
+    println!("Rounds  : {}", rounds.len());
+    for round in &rounds {
+        let n = round.get("round").and_then(Value::as_u64).unwrap_or(0);
+        let text = round.get("text").and_then(Value::as_str).unwrap_or("");
+        let calls = round
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        println!("  round {n}");
+        if !text.is_empty() {
+            for line in text.lines() {
+                println!("    {line}");
+            }
         }
-        println!();
+        for tc in &calls {
+            let name = tc.get("name").and_then(Value::as_str).unwrap_or("?");
+            let approved = tc.get("approved").and_then(Value::as_bool).unwrap_or(false);
+            let error = tc.get("error").and_then(Value::as_str).unwrap_or("");
+            let marker = if !error.is_empty() {
+                "✗"
+            } else if approved {
+                "✓"
+            } else {
+                "·"
+            };
+            print!("    {marker} {name}");
+            if !error.is_empty() {
+                print!(" — {error}");
+            } else if let Some(resp) = tc.get("response").filter(|v| !v.is_null()) {
+                let preview = preview_json(resp, 160);
+                print!(" — {preview}");
+            }
+            println!();
+        }
     }
 }
 
