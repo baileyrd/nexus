@@ -122,15 +122,28 @@
 
 **Severity:** Nice-to-have (default-off; UX scaffolding)
 **Surfaced by:** `nexus.enrich` and `nexus.recall` plugins ship default-disabled.
-**Status:** Open.
+**Status:** Resolved 2026-05-05. Per-field enrich accept and recall preview/highlight/insert-as-link landed; default-on flip deliberately deferred (see follow-up).
 
-### Problem
-Auto-enrichment proposes tags/summary on save but the accept-gate is intrusive; recall overlay (Cmd+Shift+R) lacks preview and insertion affordances. Both ship off because they're not yet pleasant.
+### Outcome
+- Confirmed the enrich accept-gate was already a non-blocking toast (`position: fixed; right/bottom: 16`) — the original DOD line "non-blocking toast replaces modal" was a misread of the existing surface. The actual remaining work was per-field accept.
+- **Backend safety fix** (`crates/nexus-ai/src/enrichment.rs::merge_frontmatter`): an empty `proposal.summary` or empty `proposal.related` previously caused the existing line to be deleted from the merged frontmatter (the `kept` filter dropped `tags|summary|related` unconditionally and the re-emit loop only re-added non-empty values). Changed the filter to drop only the keys the proposal will actually replace — empty fields no-op rather than destroy. This is what makes per-field accept on the shell side safe: applying tags-only no longer wipes an existing summary. `tags` continues to drop unconditionally because the merge is a union, not a replacement. 4 new unit tests cover both directions (preserve-when-empty, replace-when-present, block-list summary preservation, related-replacement).
+- **Enrich shell** (`enrichRuntime.ts`, `EnrichAcceptGate.tsx`):
+  - `applyPending(api, fields?)` now accepts an `EnrichFieldSelection` (`'all' | 'tags' | 'summary' | 'related'`, default `'all'`).
+  - New `filterProposal(proposal, fields)` helper (exported, pure) builds the per-field-filtered proposal — tags-only zeros summary + related, summary-only zeros tags + related, etc. Backed by the kernel's preserve-on-empty semantics.
+  - The toast renders "Tags only" + "Summary only" buttons alongside "Apply all" only when the proposal carries both tags AND summary (otherwise "Apply" already does the right thing for whichever single field is populated).
+  - Notification message reflects the field selection — "Applied tags to …" vs "Enriched …".
+- **Recall shell** (`insertFormat.ts`, `recallRuntime.ts`, `RecallOverlay.tsx`):
+  - `formatRecallLink(match)` returns a bare `[[basename]]` (no quote body) — useful when the user wants to reference the source note without copying its content.
+  - `insertSelectedAsLink()` wraps `insertSelectedFormatted` with the link formatter; `insertSelectedSnippet` refactored to share that helper.
+  - Overlay grew an inline preview pane (40/60 list+preview split, dialog widened from 640 to 880px) showing the full `chunk_text` of the selected match with `[file_path]` caption above. Both panes scroll independently so a long preview doesn't push the list out of view.
+  - `highlightRuns(text, query)` (exported, pure) splits the chunk text into matching/non-matching runs based on the whitespace-separated query terms (case-insensitive, regex metacharacters escaped to prevent injection — verified by a dedicated test). The preview pane wraps matches in a `<mark>` tag styled with `var(--text-highlight)`.
+  - Action footer with three buttons (Insert as quote, Insert as link, Copy) plus a keyboard cheatsheet (Enter / Shift+Enter / ⌘Enter). **Shift+Enter** inserts a bare wikilink at the editor caret; Enter still inserts the quoted snippet; Cmd/Ctrl+Enter still copies.
+- **Tests:** 4 new merge_frontmatter cases + 2 formatRecallLink + 6 highlightRuns + 4 filterProposal = 16 new. nexus-ai 198/198, shell 841/841 (was 833), typecheck clean, no new lint errors.
 
-### Definition of done
-- Enrich: non-blocking toast with "Review" CTA replaces modal accept-gate; per-field accept (tags vs summary independently).
-- Recall: result preview pane with snippet highlighting; "insert as quote" / "insert as link" actions; keyboard nav.
-- Both default-on after UX review.
+### Follow-up (not blocking)
+- The original DOD line 3 ("Both default-on after UX review") was deferred. The broader catalog convention is that *every* AI plugin (`nexus.ai`, `nexus.agent`, `nexus.mcp`, `nexus.workflow`, etc.) is default-off — the polished experience is opt-in via Settings → Plugins. Flipping just enrich + recall on while leaving the chat surface itself off would be inconsistent, and enrich auto-fires AI calls on every save in inbox-scope files which has cost implications for users running paid providers. The polish improvements (this work) are the deliverable; flipping the AI-plugin family default is an org-wide product decision.
+- Per-field enrich UI doesn't yet support partial-field edits (e.g. "accept these 3 of 5 tags"). Today the user accepts the whole tag list or none.
+- Recall preview has no scroll-into-view glue when the user arrows past the visible window; selecting via mouse always works.
 
 ---
 
@@ -160,5 +173,5 @@ The TUI is a first-class frontend per architecture, but AI chat is unreachable f
 | 3 | ~~**AIG-01** Skill composition~~ | ✅ Resolved 2026-05-05. |
 | 4 | ~~**AIG-03** Workflow triggers~~ | ✅ Resolved 2026-05-05. |
 | 5 | ~~**AIG-05** Local embeddings~~ | ✅ Resolved 2026-05-05. |
-| 6 | **AIG-06** Enrich/recall polish | UX iteration; needs user feedback loop. |
+| 6 | ~~**AIG-06** Enrich/recall polish~~ | ✅ Resolved 2026-05-05. |
 | 7 | **AIG-07** TUI chat | Largest scope; lowest user-visible payoff while shell is the primary frontend. |

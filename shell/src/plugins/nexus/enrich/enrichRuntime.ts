@@ -162,22 +162,43 @@ export async function forceEnrichActiveFile(api: PluginAPI): Promise<void> {
   await runProposal(api, active.relpath)
 }
 
-/** Apply the head (oldest) pending proposal. UI handler. */
-export async function applyPending(api: PluginAPI): Promise<void> {
+/**
+ * AIG-06 — which fields of the head proposal to apply. Selecting a
+ * subset sends a filtered proposal where omitted fields are blanked
+ * (`""` / `[]`). The kernel's `merge_frontmatter` treats those empty
+ * values as "leave existing alone" rather than "delete" — see
+ * `crates/nexus-ai/src/enrichment.rs::merge_frontmatter`.
+ */
+export type EnrichFieldSelection =
+  | 'all'
+  | 'tags'
+  | 'summary'
+  | 'related'
+
+/**
+ * Apply the head (oldest) pending proposal, optionally filtered to
+ * a single field. Defaults to `'all'` for backwards compatibility
+ * with the original button.
+ */
+export async function applyPending(
+  api: PluginAPI,
+  fields: EnrichFieldSelection = 'all',
+): Promise<void> {
   const state = useEnrichStore.getState()
   const proposal = state.pending.values().next().value
   if (!proposal) return
+  const filtered = filterProposal(proposal, fields)
   state.setApplying(true)
   try {
     const raw = await api.kernel.invoke(AI_PLUGIN, COMMAND_ENRICH_APPLY, {
-      proposal,
+      proposal: filtered,
     })
     const result = raw as { applied: boolean; reason?: string | null }
     if (result.applied) {
       useEnrichStore.getState().dismiss(proposal.path)
       api.notifications.show({
         type: 'info',
-        message: `Enriched ${proposal.path}`,
+        message: messageForFields(fields, proposal.path),
       })
     } else {
       useEnrichStore.getState().setError(
@@ -189,5 +210,33 @@ export async function applyPending(api: PluginAPI): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err)
     useEnrichStore.getState().setError(msg)
     useEnrichStore.getState().setApplying(false)
+  }
+}
+
+/** Pure helper — exported so unit tests can verify the wire shape
+ *  without driving `applyPending` through a mock kernel. */
+export function filterProposal(
+  proposal: EnrichmentProposal,
+  fields: EnrichFieldSelection,
+): EnrichmentProposal {
+  if (fields === 'all') return proposal
+  return {
+    ...proposal,
+    tags: fields === 'tags' ? proposal.tags : [],
+    summary: fields === 'summary' ? proposal.summary : '',
+    related: fields === 'related' ? proposal.related : [],
+  }
+}
+
+function messageForFields(fields: EnrichFieldSelection, path: string): string {
+  switch (fields) {
+    case 'tags':
+      return `Applied tags to ${path}`
+    case 'summary':
+      return `Applied summary to ${path}`
+    case 'related':
+      return `Applied related links to ${path}`
+    case 'all':
+      return `Enriched ${path}`
   }
 }

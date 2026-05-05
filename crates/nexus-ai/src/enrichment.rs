@@ -349,8 +349,17 @@ pub fn merge_frontmatter(original: &str, proposal: &EnrichmentProposal) -> Strin
         }
     }
 
-    // Drop the lines we are about to rewrite (tags, summary, related)
-    // from the existing frontmatter, keeping every other line intact.
+    // AIG-06 — Drop the lines we're about to *replace* from the
+    // existing frontmatter; keep every other line intact, including
+    // existing `summary:` / `related:` lines when the proposal omits
+    // those fields. Empty proposal fields no-op instead of deleting
+    // existing values, which is what "per-field accept" needs:
+    // applying tags-only must not blow away an existing summary.
+    //
+    // `tags` is always rewritten because the merge is a union — we
+    // re-emit existing + new rather than appending.
+    let drop_summary = !proposal.summary.is_empty();
+    let drop_related = !proposal.related.is_empty();
     let mut kept: Vec<&str> = Vec::new();
     let mut skip_block = false;
     for line in existing.lines() {
@@ -364,7 +373,13 @@ pub fn merge_frontmatter(original: &str, proposal: &EnrichmentProposal) -> Strin
             skip_block = false;
         }
         if let Some(key) = yaml_key(line) {
-            if matches!(key.as_str(), "tags" | "summary" | "related") {
+            let drop = match key.as_str() {
+                "tags" => true,
+                "summary" => drop_summary,
+                "related" => drop_related,
+                _ => false,
+            };
+            if drop {
                 // If the value is on the same line we just drop the
                 // single line; if it's a block list, drop subsequent
                 // indented lines too.
@@ -661,5 +676,75 @@ mod tests {
         };
         let out = merge_frontmatter("body\n", &proposal);
         assert!(out.contains("summary: \"Title: subtitle\""), "got: {out}");
+    }
+
+    // ── AIG-06 — per-field-accept safety ───────────────────────────
+
+    #[test]
+    fn merge_preserves_existing_summary_when_proposal_summary_empty() {
+        // Tags-only application path: shell sends a proposal with the
+        // accepted tags and `summary: ""` / `related: []`. The merge
+        // must NOT erase an existing summary line.
+        let original = "---\nsummary: hand-written summary\ntags: [old]\n---\nbody\n";
+        let proposal = EnrichmentProposal {
+            path: "n.md".into(),
+            body_hash: "h".into(),
+            tags: vec!["new".into()],
+            summary: String::new(),
+            related: vec![],
+        };
+        let out = merge_frontmatter(original, &proposal);
+        assert!(out.contains("summary: hand-written summary"), "got: {out}");
+        assert!(out.contains("tags: [old, new]"), "got: {out}");
+    }
+
+    #[test]
+    fn merge_preserves_existing_related_when_proposal_related_empty() {
+        let original = "---\nrelated: [\"[[old]]\"]\n---\nbody\n";
+        let proposal = EnrichmentProposal {
+            path: "n.md".into(),
+            body_hash: "h".into(),
+            tags: vec!["t".into()],
+            summary: String::new(),
+            related: vec![],
+        };
+        let out = merge_frontmatter(original, &proposal);
+        assert!(out.contains("related: [\"[[old]]\"]"), "got: {out}");
+    }
+
+    #[test]
+    fn merge_preserves_block_list_summary_when_proposal_summary_empty() {
+        // Block-form summary (rare but legal) with continuation lines.
+        // The skip_block path must not eat the body when we keep
+        // summary intact.
+        let original = "---\nsummary:\n  multi-line\n  example\ntags: [a]\n---\nbody\n";
+        let proposal = EnrichmentProposal {
+            path: "n.md".into(),
+            body_hash: "h".into(),
+            tags: vec![],
+            summary: String::new(),
+            related: vec![],
+        };
+        let out = merge_frontmatter(original, &proposal);
+        assert!(out.contains("summary:"), "got: {out}");
+        assert!(out.contains("multi-line"), "got: {out}");
+        assert!(out.contains("example"), "got: {out}");
+    }
+
+    #[test]
+    fn merge_replaces_summary_when_proposal_summary_present() {
+        // The default-on path: a non-empty proposal.summary still
+        // replaces the existing line.
+        let original = "---\nsummary: stale\n---\nbody\n";
+        let proposal = EnrichmentProposal {
+            path: "n.md".into(),
+            body_hash: "h".into(),
+            tags: vec![],
+            summary: "fresh".into(),
+            related: vec![],
+        };
+        let out = merge_frontmatter(original, &proposal);
+        assert!(out.contains("summary: fresh"), "got: {out}");
+        assert!(!out.contains("stale"), "got: {out}");
     }
 }

@@ -43,3 +43,12 @@ export function formatRecallSnippet(match: RecallMatch): string {
   const title = stripMdSuffix(basename(match.file_path))
   return `${quoted}\n>\n> — [[${title}]]\n`
 }
+
+/**
+ * AIG-06 — bare wikilink to the source note, no quoted body. Useful
+ * when the user wants to reference the recalled note without copying
+ * its content into the current document.
+ */
+export function formatRecallLink(match: RecallMatch): string {
+  return `[[${stripMdSuffix(basename(match.file_path))}]]`
+}

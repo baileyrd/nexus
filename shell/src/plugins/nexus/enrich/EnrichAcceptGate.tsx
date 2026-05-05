@@ -10,7 +10,7 @@
 // either way without affecting the underlying file.
 
 import { headPending, useEnrichStore } from './enrichStore'
-import { applyPending } from './enrichRuntime'
+import { applyPending, type EnrichFieldSelection } from './enrichRuntime'
 import { getEnrichApi } from './enrichApi'
 import { zIndex } from '../../../shell/zIndex'
 
@@ -31,10 +31,17 @@ export function EnrichAcceptGate() {
 
   if (!pending && !error) return null
 
-  const onAccept = () => {
+  const onAccept = (fields: EnrichFieldSelection = 'all') => {
     const api = getEnrichApi()
-    void applyPending(api)
+    void applyPending(api, fields)
   }
+
+  const hasTags = (pending?.tags.length ?? 0) > 0
+  const hasSummary = (pending?.summary ?? '').length > 0
+  // Per-field buttons appear only when both tags AND summary are
+  // proposed — otherwise "Apply" already does the right thing for
+  // whichever single field is populated.
+  const showFieldButtons = pending != null && hasTags && hasSummary
 
   return (
     <div
@@ -158,10 +165,48 @@ export function EnrichAcceptGate() {
         >
           Dismiss
         </button>
+        {showFieldButtons && (
+          <>
+            <button
+              type="button"
+              onClick={() => onAccept('tags')}
+              disabled={applying}
+              title="Apply only the suggested tags; leave summary and related untouched."
+              style={{
+                padding: '4px 10px',
+                background: 'transparent',
+                color: 'var(--text-normal)',
+                border: '1px solid var(--background-modifier-border)',
+                borderRadius: 4,
+                cursor: applying ? 'not-allowed' : 'pointer',
+              }}
+              data-testid="enrich-accept-tags"
+            >
+              Tags only
+            </button>
+            <button
+              type="button"
+              onClick={() => onAccept('summary')}
+              disabled={applying}
+              title="Apply only the suggested summary; leave tags and related untouched."
+              style={{
+                padding: '4px 10px',
+                background: 'transparent',
+                color: 'var(--text-normal)',
+                border: '1px solid var(--background-modifier-border)',
+                borderRadius: 4,
+                cursor: applying ? 'not-allowed' : 'pointer',
+              }}
+              data-testid="enrich-accept-summary"
+            >
+              Summary only
+            </button>
+          </>
+        )}
         {pending && (
           <button
             type="button"
-            onClick={onAccept}
+            onClick={() => onAccept('all')}
             disabled={applying}
             style={{
               padding: '4px 10px',
@@ -171,8 +216,9 @@ export function EnrichAcceptGate() {
               borderRadius: 4,
               cursor: applying ? 'not-allowed' : 'pointer',
             }}
+            data-testid="enrich-accept-all"
           >
-            {applying ? 'Applying…' : 'Accept'}
+            {applying ? 'Applying…' : showFieldButtons ? 'Apply all' : 'Apply'}
           </button>
         )}
       </div>

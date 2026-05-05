@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { formatRecallSnippet } from './insertFormat.ts'
+import { formatRecallLink, formatRecallSnippet } from './insertFormat.ts'
 
 test('formats a single-line chunk as a quote block with [[basename]] attribution', () => {
   const out = formatRecallSnippet({
@@ -60,4 +60,26 @@ test('strips .md suffix only (not .markdown / no suffix)', () => {
     formatRecallSnippet({ file_path: 'NoSuffix', chunk_text: 'x', score: 0 }),
     '> x\n>\n> — [[NoSuffix]]\n',
   )
+})
+
+// ── AIG-06 — formatRecallLink ───────────────────────────────────────
+
+test('formatRecallLink returns a bare wikilink to the basename', () => {
+  assert.equal(
+    formatRecallLink({ file_path: 'a/b/Foo.md', chunk_text: 'ignored', score: 0 }),
+    '[[Foo]]',
+  )
+  assert.equal(
+    formatRecallLink({ file_path: 'NoSuffix', chunk_text: '', score: 0 }),
+    '[[NoSuffix]]',
+  )
+})
+
+test('formatRecallLink ignores chunk_text — quote body is dropped', () => {
+  const out = formatRecallLink({
+    file_path: 'Inbox.md',
+    chunk_text: 'A long\nmulti-line\ncapture',
+    score: 0.5,
+  })
+  assert.equal(out, '[[Inbox]]')
 })

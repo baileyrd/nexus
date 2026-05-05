@@ -17,12 +17,13 @@
 //   Enter               → insert at editor caret + close
 //   Cmd/Ctrl+Enter      → copy formatted snippet to clipboard + close
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useRecallStore } from './recallStore'
 import { applyCodeFilter, applyLanguageFilter, availableLanguages } from './codeFilter'
 import {
   cancelPendingSearch,
   copySelectedSnippet,
+  insertSelectedAsLink,
   insertSelectedSnippet,
   searchDebounced,
 } from './recallRuntime'
@@ -33,6 +34,67 @@ import { getRecallApi } from './recallApi'
 function basename(p: string): string {
   const i = p.lastIndexOf('/')
   return i === -1 ? p : p.slice(i + 1)
+}
+
+/** AIG-06 — split `text` into runs that either match one of the
+ *  whitespace-separated `query` terms (case-insensitive) or fill the
+ *  gaps between matches. Empty / whitespace-only queries pass through
+ *  as a single non-matching run so the preview renders unchanged.
+ *
+ *  Exported for unit testing the splitter independently of React.
+ */
+export function highlightRuns(
+  text: string,
+  query: string,
+): Array<{ text: string; match: boolean }> {
+  const terms = query
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0)
+  if (terms.length === 0) return [{ text, match: false }]
+  const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const re = new RegExp(`(${escaped.join('|')})`, 'gi')
+  const out: Array<{ text: string; match: boolean }> = []
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) {
+      out.push({ text: text.slice(last, m.index), match: false })
+    }
+    out.push({ text: m[0], match: true })
+    last = m.index + m[0].length
+    // Defensive: zero-length matches would loop forever. Bump.
+    if (m.index === re.lastIndex) re.lastIndex += 1
+  }
+  if (last < text.length) {
+    out.push({ text: text.slice(last), match: false })
+  }
+  return out
+}
+
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  const runs = useMemo(() => highlightRuns(text, query), [text, query])
+  return (
+    <>
+      {runs.map((r, i) =>
+        r.match ? (
+          <mark
+            key={i}
+            style={{
+              background: 'var(--text-highlight, var(--interactive-accent-soft))',
+              color: 'inherit',
+              padding: '0 1px',
+              borderRadius: 2,
+            }}
+          >
+            {r.text}
+          </mark>
+        ) : (
+          <span key={i}>{r.text}</span>
+        ),
+      )}
+    </>
+  )
 }
 
 function ResultRow({
@@ -218,9 +280,17 @@ export function RecallOverlay() {
         void copySelectedSnippet().finally(() => close())
         return
       }
-      // Plain Enter → insert at editor caret. If no editor is active
-      // the splice is a silent no-op; we still close so the user
-      // isn't stuck inside a half-functional overlay.
+      if (e.shiftKey) {
+        // AIG-06 — Shift+Enter → bare wikilink at editor caret.
+        // Useful when you want to reference the source note without
+        // copying its body into the current document.
+        insertSelectedAsLink()
+        close()
+        return
+      }
+      // Plain Enter → insert quoted snippet at editor caret. If no
+      // editor is active the splice is a silent no-op; we still close
+      // so the user isn't stuck inside a half-functional overlay.
       insertSelectedSnippet()
       close()
       return
@@ -249,7 +319,7 @@ export function RecallOverlay() {
         role="dialog"
         aria-label="Recall from capture notes"
         style={{
-          width: 640,
+          width: 880,
           maxWidth: '92vw',
           background: 'var(--background-secondary)',
           border: '1px solid var(--background-modifier-border)',
@@ -279,10 +349,181 @@ export function RecallOverlay() {
           }}
         />
         <FilterChips />
-        <ResultList />
+        <div
+          style={{
+            display: 'flex',
+            borderTop: '1px solid var(--divider-color)',
+            // Split: list 40%, preview 60%. Both panes scroll
+            // independently so a long preview doesn't push the list
+            // out of view.
+          }}
+        >
+          <div style={{ flex: '0 0 40%', minWidth: 0, borderRight: '1px solid var(--divider-color)' }}>
+            <ResultList />
+          </div>
+          <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+            <PreviewPane />
+          </div>
+        </div>
+        <ActionFooter onClose={close} />
       </div>
     </div>
   )
+}
+
+// ── AIG-06 — preview pane + action footer ──────────────────────────
+
+function PreviewPane() {
+  const rawResults = useRecallStore((s) => s.results)
+  const codeOnly = useRecallStore((s) => s.codeOnly)
+  const selectedLanguages = useRecallStore((s) => s.selectedLanguages)
+  const selectedIndex = useRecallStore((s) => s.selectedIndex)
+  const query = useRecallStore((s) => s.query)
+  const results = applyLanguageFilter(
+    applyCodeFilter(rawResults, codeOnly),
+    selectedLanguages,
+  )
+  const match = results[selectedIndex]
+  if (!match) {
+    return (
+      <div
+        style={{
+          padding: 16,
+          color: 'var(--text-faint)',
+          fontFamily: 'var(--font-interface)',
+          fontSize: 12,
+          maxHeight: 320,
+          minHeight: 120,
+          overflow: 'auto',
+        }}
+      >
+        Select a result to preview it.
+      </div>
+    )
+  }
+  return (
+    <div
+      style={{
+        padding: '12px 16px',
+        maxHeight: 320,
+        overflow: 'auto',
+        fontFamily: 'var(--font-interface)',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          color: 'var(--text-faint)',
+          marginBottom: 8,
+          fontFamily: 'var(--font-monospace)',
+          wordBreak: 'break-all',
+        }}
+      >
+        {match.file_path}
+      </div>
+      <pre
+        style={{
+          margin: 0,
+          fontFamily: 'var(--font-monospace)',
+          fontSize: 12,
+          lineHeight: 1.5,
+          color: 'var(--text-normal)',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        <HighlightedText text={match.chunk_text} query={query} />
+      </pre>
+    </div>
+  )
+}
+
+function ActionFooter({ onClose }: { onClose: () => void }) {
+  const rawResults = useRecallStore((s) => s.results)
+  const codeOnly = useRecallStore((s) => s.codeOnly)
+  const selectedLanguages = useRecallStore((s) => s.selectedLanguages)
+  const selectedIndex = useRecallStore((s) => s.selectedIndex)
+  const visibleResults = applyLanguageFilter(
+    applyCodeFilter(rawResults, codeOnly),
+    selectedLanguages,
+  )
+  const hasSelection = visibleResults[selectedIndex] != null
+
+  const onInsertQuote = () => {
+    insertSelectedSnippet()
+    onClose()
+  }
+  const onInsertLink = () => {
+    insertSelectedAsLink()
+    onClose()
+  }
+  const onCopy = () => {
+    void copySelectedSnippet().finally(onClose)
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 8,
+        padding: '8px 12px',
+        borderTop: '1px solid var(--divider-color)',
+        background: 'var(--background-primary)',
+        fontFamily: 'var(--font-interface)',
+        fontSize: 12,
+      }}
+    >
+      <span style={{ marginRight: 'auto', color: 'var(--text-faint)', alignSelf: 'center' }}>
+        <kbd>Enter</kbd> quote · <kbd>Shift+Enter</kbd> link · <kbd>⌘Enter</kbd> copy
+      </span>
+      <button
+        type="button"
+        disabled={!hasSelection}
+        onClick={onInsertQuote}
+        title="Insert a markdown blockquote of the chunk with a wikilink footer"
+        style={footerButtonStyle(hasSelection, true)}
+        data-testid="recall-insert-quote"
+      >
+        Insert as quote
+      </button>
+      <button
+        type="button"
+        disabled={!hasSelection}
+        onClick={onInsertLink}
+        title="Insert a bare [[wikilink]] to the source note"
+        style={footerButtonStyle(hasSelection, false)}
+        data-testid="recall-insert-link"
+      >
+        Insert as link
+      </button>
+      <button
+        type="button"
+        disabled={!hasSelection}
+        onClick={onCopy}
+        title="Copy the formatted snippet to the clipboard"
+        style={footerButtonStyle(hasSelection, false)}
+        data-testid="recall-copy"
+      >
+        Copy
+      </button>
+    </div>
+  )
+}
+
+function footerButtonStyle(enabled: boolean, primary: boolean): React.CSSProperties {
+  return {
+    padding: '4px 10px',
+    background: primary && enabled ? 'var(--interactive-accent)' : 'transparent',
+    color: primary && enabled
+      ? 'var(--interactive-accent-ink, white)'
+      : 'var(--text-normal)',
+    border: '1px solid var(--background-modifier-border)',
+    borderRadius: 4,
+    fontFamily: 'var(--font-interface)',
+    fontSize: 12,
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    opacity: enabled ? 1 : 0.55,
+  }
 }
 
 /** BL-046 phase 2/3 — filter-chip row above the result list. The

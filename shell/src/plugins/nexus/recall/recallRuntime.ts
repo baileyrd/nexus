@@ -31,7 +31,7 @@
 
 import type { PluginAPI } from '../../../types/plugin'
 import { getActiveCmView } from '../editor/runtime'
-import { formatRecallSnippet } from './insertFormat'
+import { formatRecallLink, formatRecallSnippet } from './insertFormat'
 import { useRecallStore, type RecallMatch } from './recallStore'
 
 const AI_PLUGIN_ID = 'com.nexus.ai'
@@ -200,17 +200,30 @@ export async function runSearch(api: PluginAPI, query: string): Promise<void> {
  *  `true` when an editor was reachable and the splice fired,
  *  `false` when no editor is active. */
 export function insertSelectedSnippet(): boolean {
+  return insertSelectedFormatted(formatRecallSnippet)
+}
+
+/** AIG-06 — splice a bare `[[basename]]` link to the source note at
+ *  the active editor's caret. Same return semantics as
+ *  [`insertSelectedSnippet`]. */
+export function insertSelectedAsLink(): boolean {
+  return insertSelectedFormatted(formatRecallLink)
+}
+
+function insertSelectedFormatted(
+  format: (match: RecallMatchInternal) => string,
+): boolean {
   const state = useRecallStore.getState()
   const match = state.results[state.selectedIndex]
   if (!match) return false
   const view = getActiveCmView()
   if (!view) return false
-  const snippet = formatRecallSnippet(match)
+  const snippet = format(match)
   const head = view.state.selection.main.head
   view.dispatch({
     changes: { from: head, to: head, insert: snippet },
-    // Place the caret AFTER the inserted snippet so the user can
-    // keep typing without manually escaping the quote block.
+    // Place the caret AFTER the insertion so the user can keep
+    // typing without manually escaping a quote block / link.
     selection: { anchor: head + snippet.length },
   })
   // Pull focus back to the editor so the next keystroke lands in the
@@ -218,6 +231,11 @@ export function insertSelectedSnippet(): boolean {
   view.focus()
   return true
 }
+
+// Local alias — the formatter helpers are typed against the same
+// RecallMatch the store uses; importing the type by name keeps the
+// helper signature legible without a runtime hop.
+type RecallMatchInternal = Parameters<typeof formatRecallSnippet>[0]
 
 /** Write the formatted snippet of the selected match to the
  *  clipboard. Returns the snippet so callers can show a confirmation

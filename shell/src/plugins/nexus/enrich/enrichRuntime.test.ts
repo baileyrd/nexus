@@ -15,6 +15,7 @@ import assert from 'node:assert/strict'
 
 import {
   applyPending,
+  filterProposal,
   forceEnrichActiveFile,
   isInInboxScope,
 } from './enrichRuntime.ts'
@@ -206,4 +207,62 @@ test('applyPending: stores reason on rejection and keeps proposal queued', async
   assert.equal(state.pending.size, 1, 'rejected proposal must remain')
   assert.equal(state.error, 'body drift')
   assert.equal(state.applying, false)
+})
+
+// ── AIG-06 — per-field filterProposal ───────────────────────────────
+
+test('filterProposal "all" passes the proposal through unchanged', () => {
+  const p: EnrichmentProposal = {
+    path: 'a.md',
+    body_hash: 'h',
+    tags: ['t1', 't2'],
+    summary: 's',
+    related: ['[[r]]'],
+  }
+  assert.deepEqual(filterProposal(p, 'all'), p)
+})
+
+test('filterProposal "tags" zeroes summary + related, keeps tags', () => {
+  const p: EnrichmentProposal = {
+    path: 'a.md',
+    body_hash: 'h',
+    tags: ['t1', 't2'],
+    summary: 'will-be-cleared',
+    related: ['[[r]]'],
+  }
+  const filtered = filterProposal(p, 'tags')
+  assert.deepEqual(filtered.tags, ['t1', 't2'])
+  assert.equal(filtered.summary, '')
+  assert.deepEqual(filtered.related, [])
+  // Identity: path + body_hash always preserved.
+  assert.equal(filtered.path, 'a.md')
+  assert.equal(filtered.body_hash, 'h')
+})
+
+test('filterProposal "summary" zeroes tags + related, keeps summary', () => {
+  const p: EnrichmentProposal = {
+    path: 'a.md',
+    body_hash: 'h',
+    tags: ['t1'],
+    summary: 'keep me',
+    related: ['[[r]]'],
+  }
+  const filtered = filterProposal(p, 'summary')
+  assert.deepEqual(filtered.tags, [])
+  assert.equal(filtered.summary, 'keep me')
+  assert.deepEqual(filtered.related, [])
+})
+
+test('filterProposal "related" zeroes tags + summary, keeps related', () => {
+  const p: EnrichmentProposal = {
+    path: 'a.md',
+    body_hash: 'h',
+    tags: ['t1'],
+    summary: 's',
+    related: ['[[r1]]', '[[r2]]'],
+  }
+  const filtered = filterProposal(p, 'related')
+  assert.deepEqual(filtered.tags, [])
+  assert.equal(filtered.summary, '')
+  assert.deepEqual(filtered.related, ['[[r1]]', '[[r2]]'])
 })
