@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    div, hsla, px, AnyElement, AsyncApp, ClickEvent, Context, FocusHandle,
+    div, hsla, px, AnyElement, AppContext, AsyncApp, ClickEvent, Context, Entity, FocusHandle,
     InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render,
     StatefulInteractiveElement, Styled, WeakEntity, Window,
 };
@@ -22,6 +22,7 @@ use nexus_terminal::term_grid::{CellColor, ScreenRow};
 use nexus_terminal::{CreateSessionResponse, PLUGIN_ID};
 
 use crate::{
+    editor::EditorView,
     pane::{PaneKind, SplitLayout},
     theme::Theme,
     KernelBridge,
@@ -61,6 +62,8 @@ pub struct WorkbenchView {
     session_id:  Option<String>,
     /// Latest rendered screen from `read_screen`, updated every ~50 ms.
     screen:      Option<Vec<ScreenRow>>,
+    /// Phase 3 editor / markdown pane entity.
+    editor:      Entity<EditorView>,
 }
 
 impl WorkbenchView {
@@ -159,6 +162,8 @@ impl WorkbenchView {
         })
         .detach();
 
+        let editor = cx.new(|cx| EditorView::new(Arc::clone(&bridge), cx));
+
         Self {
             theme:       Theme::dark(),
             layout:      SplitLayout::default(),
@@ -168,6 +173,7 @@ impl WorkbenchView {
             term_focus:  cx.focus_handle(),
             session_id:  None,
             screen:      None,
+            editor,
         }
     }
 }
@@ -215,7 +221,7 @@ impl WorkbenchView {
                 div()
                     .text_color(self.theme.accent)
                     .text_sm()
-                    .child("Nexus  ·  Phase 2 Live Terminal"),
+                    .child("Nexus  ·  Phase 3 — Terminal + Editor"),
             )
             .child(
                 div()
@@ -295,6 +301,7 @@ impl WorkbenchView {
     fn render_pane(&self, kind: PaneKind, cx: &mut Context<Self>) -> AnyElement {
         match kind {
             PaneKind::Terminal => self.render_terminal_pane(cx).into_any_element(),
+            PaneKind::Editor   => self.editor.clone().into_any_element(),
             other              => self.render_placeholder_pane(other).into_any_element(),
         }
     }
@@ -468,7 +475,7 @@ fn indexed_to_rgb(i: u8) -> u32 {
 }
 
 /// Convert a `CellColor` to a `gpui::Rgba`.
-fn cell_color_to_rgba(c: &CellColor, is_bg: bool, theme: &Theme) -> gpui::Rgba {
+fn cell_color_to_rgba(c: &CellColor, is_bg: bool, _theme: &Theme) -> gpui::Rgba {
     match c {
         CellColor::Default => {
             if is_bg { gpui::rgb(0x1a1b26) } else { gpui::rgb(0xc0caf5) }
