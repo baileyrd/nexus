@@ -13,6 +13,7 @@
 
 import { useMemo } from 'react'
 
+import './agent.css'
 import {
   useAgentSessionStore,
   type ArchetypeInfo,

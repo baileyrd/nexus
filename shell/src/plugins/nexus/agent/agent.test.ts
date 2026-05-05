@@ -11,7 +11,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createAgentRuntime } from './index.ts'
+import { createAgentRuntime } from './agentRuntime.ts'
 import {
   decodeProposedRound,
   decodeSessionList,

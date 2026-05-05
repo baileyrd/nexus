@@ -525,9 +525,22 @@ async fn handle_session_run(
         .ok_or_else(|| exec_err("session_run: refusing to write empty id".into()))?;
     let bytes = serde_json::to_vec_pretty(&session)
         .map_err(|e| exec_err(format!("session_run: encode session: {e}")))?;
-    ctx.write_file(&path, &bytes)
-        .await
-        .map_err(|e| exec_err(format!("session_run: persist: {e}")))?;
+    // Route through `com.nexus.storage::write_file` rather than
+    // `ctx.write_file` so we get the storage engine's atomic-write
+    // + mkdir-p semantics. `ctx.write_file` is plain
+    // `tokio::fs::write`, which fails on the first session of a
+    // fresh forge where `.forge/agent/sessions/` doesn't exist yet.
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| exec_err("session_run: session path not UTF-8".into()))?;
+    ctx.ipc_call(
+        "com.nexus.storage",
+        "write_file",
+        serde_json::json!({ "path": path_str, "bytes": bytes }),
+        Duration::from_secs(10),
+    )
+    .await
+    .map_err(|e| exec_err(format!("session_run: persist: {e}")))?;
 
     serde_json::to_value(&session)
         .map_err(|e| exec_err(format!("session_run: encode reply: {e}")))
