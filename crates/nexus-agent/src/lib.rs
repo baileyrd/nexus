@@ -45,9 +45,7 @@ use thiserror::Error;
 mod agents;
 mod archetypes;
 pub mod core_plugin;
-mod executor;
 mod llm;
-pub mod orchestrator;
 pub mod session;
 
 pub use agents::EchoAgent;
@@ -56,14 +54,10 @@ pub use archetypes::{
     WRITER_ID, WRITER_SYSTEM_PROMPT,
 };
 pub use core_plugin::{
-    AgentCorePlugin, HANDLER_DELEGATE, HANDLER_EXECUTE_STEP, HANDLER_HISTORY_DELETE,
-    HANDLER_HISTORY_GET, HANDLER_HISTORY_LIST, HANDLER_LIST_ARCHETYPES, HANDLER_PARALLEL,
-    HANDLER_PIPELINE, HANDLER_PLAN, HANDLER_RUN, HANDLER_RUN_PLAN, HANDLER_TRACE_GET,
-    PLUGIN_ID,
+    AgentCorePlugin, HANDLER_HISTORY_DELETE, HANDLER_HISTORY_GET, HANDLER_HISTORY_LIST,
+    HANDLER_LIST_ARCHETYPES, HANDLER_PLAN, PLUGIN_ID,
 };
-pub use executor::{PlanExecutor, StepResult, StepStatus};
 pub use llm::{ChatDriver, LlmAgent, Proposal, ProposedToolCall, DEFAULT_SYSTEM_PROMPT};
-pub use orchestrator::{AgentOrchestrator, TraceEntry};
 pub use session::{
     run_session, run_session_with_id, AgentSession, AutoApproveAll, ProposedRound,
     RoundDecision, RoundDecisionEntry, RoundRecord, SessionOutcome, SessionPolicy,
@@ -156,81 +150,33 @@ pub struct ToolCall {
     pub args: serde_json::Value,
 }
 
-/// Whether the executor may proceed with a given step. The
-/// user-approval flow wraps a `StepPolicy` impl around a prompt; the
-/// default [`AutoApprove`] policy accepts every step.
-pub trait StepPolicy: Send + Sync {
-    /// Called once per step before it's dispatched. Return
-    /// [`PolicyDecision::Approve`] to run it, [`PolicyDecision::Deny`]
-    /// to abort the plan.
-    fn allow(&self, step: &Step) -> PolicyDecision;
-}
-
-/// Response a [`StepPolicy`] can return.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PolicyDecision {
-    /// Run this step.
-    Approve,
-    /// Abort the plan with a human-readable reason.
-    Deny(String),
-}
-
-/// Auto-approve every step. Useful for scripted / trusted agents;
-/// interactive agents should pass their own policy through
-/// [`PlanExecutor::run_with_policy`].
-pub struct AutoApprove;
-
-impl StepPolicy for AutoApprove {
-    fn allow(&self, _step: &Step) -> PolicyDecision {
-        PolicyDecision::Approve
-    }
-}
-
-/// Adapter for the transport layer a [`PlanExecutor`] uses when a
-/// step carries a [`ToolCall`]. Implemented by callers; in tree the
-/// production implementation is a thin wrapper over
-/// [`nexus_kernel::PluginContext::ipc_call`] — but keeping the trait
-/// here means the agent library itself stays kernel-free and tests
-/// can supply a mock dispatcher.
+/// Adapter for the transport layer the session loop (and agents
+/// generally) use when dispatching a [`ToolCall`]. Implemented by
+/// callers; in tree the production implementation is a thin
+/// wrapper over [`nexus_kernel::PluginContext::ipc_call`] — but
+/// keeping the trait here means the agent library itself stays
+/// kernel-free and tests can supply a mock dispatcher.
 #[async_trait]
 pub trait ToolDispatcher: Send + Sync {
-    /// Dispatch a tool call and return its raw JSON response. Errors
-    /// are surfaced as [`AgentError::ToolFailed`] by the executor.
+    /// Dispatch a tool call and return its raw JSON response.
     async fn dispatch(&self, call: &ToolCall) -> Result<serde_json::Value, String>;
 }
 
-/// An agent: produces plans from goals.
+/// An agent: produces a tool-call plan for a goal. After ADR 0025
+/// Phase 2 the only producer in tree is [`LlmAgent`] driving
+/// `propose_tool_calls`; the trait remains so out-of-tree
+/// archetypes (and the existing [`EchoAgent`] fixture) keep
+/// working.
 #[async_trait]
 pub trait Agent: Send + Sync {
-    /// Stable archetype id, e.g. `"com.nexus.agent.writer"`. Used for
-    /// observability and to let plan persistence survive across
-    /// agent-impl upgrades.
+    /// Stable archetype id, e.g. `"com.nexus.agent.writer"`. Used
+    /// for observability and to let plan persistence survive
+    /// across agent-impl upgrades.
     fn id(&self) -> &str;
 
-    /// Produce a plan for the given goal. Errors when the goal can't
-    /// be decomposed (e.g. missing required context).
+    /// Produce a plan for the given goal. Errors when the goal
+    /// can't be decomposed (e.g. missing required context).
     async fn plan(&self, goal: &str) -> Result<Plan, AgentError>;
-}
-
-/// What the executor hands back after running a [`Plan`]. A single
-/// observation carries one entry per attempted step.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
-#[cfg_attr(
-    feature = "ts-export",
-    ts(
-        export,
-        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
-    )
-)]
-#[serde(deny_unknown_fields)]
-pub struct Observation {
-    /// Plan id this observation describes.
-    pub plan_id: String,
-    /// Outcome per step, in execution order.
-    pub steps: Vec<StepResult>,
-    /// `true` when every step succeeded and the policy allowed each.
-    pub success: bool,
 }
 
 /// Errors the agent library can surface to its callers.
@@ -240,22 +186,4 @@ pub enum AgentError {
     /// or referenced unavailable tools.
     #[error("planning failed: {0}")]
     PlanningFailed(String),
-
-    /// A step's tool call returned an error.
-    #[error("tool call failed at step '{step_id}': {reason}")]
-    ToolFailed {
-        /// The failing step's id.
-        step_id: String,
-        /// Human-readable reason.
-        reason: String,
-    },
-
-    /// The policy denied a step.
-    #[error("step '{step_id}' denied by policy: {reason}")]
-    StepDenied {
-        /// The denied step's id.
-        step_id: String,
-        /// Denial reason.
-        reason: String,
-    },
 }

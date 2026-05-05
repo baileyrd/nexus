@@ -1100,20 +1100,10 @@ fn register_core_plugins(
                 LifecycleFlags::NONE,
                 &[
                     ("plan", nexus_agent::HANDLER_PLAN),
-                    ("run", nexus_agent::HANDLER_RUN),
-                    ("run_plan", nexus_agent::HANDLER_RUN_PLAN),
-                    ("execute_step", nexus_agent::HANDLER_EXECUTE_STEP),
                     ("history_list", nexus_agent::HANDLER_HISTORY_LIST),
                     ("history_get", nexus_agent::HANDLER_HISTORY_GET),
                     ("history_delete", nexus_agent::HANDLER_HISTORY_DELETE),
                     ("list_archetypes", nexus_agent::HANDLER_LIST_ARCHETYPES),
-                    // BL-027 orchestrator surface (delegate / parallel /
-                    // pipeline / trace_get) is exposed via the same
-                    // dispatch_async path; manifest entries:
-                    ("delegate", nexus_agent::HANDLER_DELEGATE),
-                    ("parallel", nexus_agent::HANDLER_PARALLEL),
-                    ("pipeline", nexus_agent::HANDLER_PIPELINE),
-                    ("trace_get", nexus_agent::HANDLER_TRACE_GET),
                     // ADR 0024 Phase 2a — agent session tool-loop.
                     ("session_run", nexus_agent::core_plugin::HANDLER_SESSION_RUN),
                     ("session_list", nexus_agent::core_plugin::HANDLER_SESSION_LIST),

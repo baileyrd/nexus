@@ -231,17 +231,15 @@ Full registration (`crates/nexus-agent/src/core_plugin.rs:18–31`) — supersed
 | # | Command | Sync/Async | Purpose |
 |---|---|---|---|
 | 1 | `plan` | async | Produce a Plan from a goal |
-| 2 | `run` | async | **Deprecated (ADR 0025 Phase 1)** — use `session_run`. Logs `tracing::warn!` once per instance |
-| 3 | `run_plan` | async | **Deprecated** — no session-model equivalent; iterate `Vec<ToolCall>` + `ipc_call` instead |
-| 4 | `execute_step` | async | **Deprecated** — single `ipc_call` does the same |
-| 5 | `history_list` | async | List persisted histories |
+| 5 | `history_list` | async | List persisted histories (pre-Phase-2a JSON) |
 | 6 | `history_get` | async | Load one history |
 | 7 | `history_delete` | async | Delete one history |
 | 8 | `list_archetypes` | sync | Return archetype catalogue |
-| 9 | `delegate` | async | **Deprecated** — use `session_run` with `archetype` arg |
-| 10 | `parallel` | async | **Deprecated** — caller fans out N `session_run`s |
-| 11 | `pipeline` | async | **Deprecated** — caller chains `session_run` outputs |
-| 12 | `trace_get` | async | **Deprecated** — superseded by `session_list` + `session_get` |
+
+Handler ids 2–4 (`run`, `run_plan`, `execute_step`) and 9–12
+(`delegate`, `parallel`, `pipeline`, `trace_get`) were retired in
+ADR 0025 Phase 2. Their slots stay reserved — adding a new handler
+should pick a fresh id.
 | 13 | `session_run` | async | ADR 0024 — multi-round tool-loop session, persists transcript. `auto_approve: true` for headless; `false` uses bus-bridge approval (Phase 2b) |
 | 14 | `session_list` | async | Enumerate persisted sessions newest-first |
 | 15 | `session_get` | async | Load one session transcript by id |

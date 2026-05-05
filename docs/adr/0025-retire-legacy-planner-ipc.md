@@ -1,8 +1,8 @@
 # ADR 0025: Retire Legacy Planner IPC
 
 **Date:** 2026-05-05
-**Status:** Accepted (Phase 1). Phase 2 deletion deferred to a
-follow-up PR per §"Phase 2".
+**Status:** Accepted. Phase 1 (deprecation + CLI migration) and
+Phase 2 (handler/library/orchestrator deletion) both shipped.
 **Supersedes-section:** ADR 0024 §"Open follow-ups" (legacy
 planner retirement)
 

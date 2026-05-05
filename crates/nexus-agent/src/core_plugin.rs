@@ -45,8 +45,8 @@ use schemars::JsonSchema;
 use ts_rs::TS;
 
 use crate::{
-    build_archetype, orchestrator::AgentOrchestrator, Agent, AgentError, ChatDriver, LlmAgent,
-    Plan, PlanExecutor, ToolCall, ToolDispatcher, TraceEntry, DEFAULT_SYSTEM_PROMPT,
+    build_archetype, Agent, AgentError, ChatDriver, Plan, ToolCall, ToolDispatcher,
+    DEFAULT_SYSTEM_PROMPT,
 };
 
 /// Short archetype names accepted by [`crate::archetypes::resolve_prompt`].
@@ -60,28 +60,11 @@ pub const PLUGIN_ID: &str = "com.nexus.agent";
 
 /// `plan` handler id — produce a plan for the given goal.
 pub const HANDLER_PLAN: u32 = 1;
-/// `run` handler id — plan + execute in one call.
-///
-/// **Deprecated (ADR 0025 Phase 1):** use
-/// `com.nexus.agent::session_run` with `auto_approve: true`. The
-/// session model produces a richer transcript and supports
-/// interactive approval (Phase 2b). This handler emits a
-/// once-per-instance `tracing::warn!` on each dispatch.
-pub const HANDLER_RUN: u32 = 2;
-/// `run_plan` handler id — execute a preset plan.
-///
-/// **Deprecated (ADR 0025 Phase 1):** there is no session-model
-/// equivalent. Callers that need to replay a fixed sequence of
-/// tool calls should iterate `Vec<ToolCall>` and `ipc_call` each
-/// directly — that's what this handler did internally.
-pub const HANDLER_RUN_PLAN: u32 = 3;
-/// `execute_step` handler id — execute a single step of a preset
-/// plan. Enables per-step approval flows driven by the UI.
-///
-/// **Deprecated (ADR 0025 Phase 1):** see `run_plan`. A single
-/// `ipc_call` with the step's `target_plugin_id` / `command_id` /
-/// `args` does the same thing without the legacy plan envelope.
-pub const HANDLER_EXECUTE_STEP: u32 = 4;
+// Handler ids 2 (`run`), 3 (`run_plan`), 4 (`execute_step`),
+// 9 (`delegate`), 10 (`parallel`), 11 (`pipeline`), 12 (`trace_get`)
+// were retired by ADR 0025 Phase 2. The ids stay reserved — adding
+// a new handler here should pick a fresh id rather than re-using
+// these slots.
 /// `history_list` handler id — enumerate persisted plan histories
 /// under `<forge>/.forge/agent/history/`.
 pub const HANDLER_HISTORY_LIST: u32 = 5;
@@ -96,36 +79,6 @@ pub const HANDLER_HISTORY_DELETE: u32 = 7;
 /// `com.nexus.agent.writer`). The shell uses this to populate the
 /// archetype picker without a hardcoded catalogue.
 pub const HANDLER_LIST_ARCHETYPES: u32 = 8;
-/// `delegate` handler id — orchestrator hands one goal to one
-/// archetype, plans + executes, returns an [`crate::Observation`].
-/// Args: [`DelegateArgs`]. (BL-027.)
-///
-/// **Deprecated (ADR 0025 Phase 1):** use
-/// `com.nexus.agent::session_run` with the `archetype` arg. Never
-/// had any external callers.
-pub const HANDLER_DELEGATE: u32 = 9;
-/// `parallel` handler id — fan out a list of `(archetype, goal)`
-/// jobs in parallel; results come back in input order. Args:
-/// [`ParallelArgs`]. (BL-027.)
-///
-/// **Deprecated (ADR 0025 Phase 1):** caller should fan out N
-/// `session_run` calls. Never had any external callers.
-pub const HANDLER_PARALLEL: u32 = 10;
-/// `pipeline` handler id — run stages sequentially; each stage's
-/// summary becomes `{{prev}}` in the next stage's `goal_template`.
-/// Stops on first failure and returns partial results. Args:
-/// [`PipelineArgs`]. (BL-027.)
-///
-/// **Deprecated (ADR 0025 Phase 1):** caller should chain
-/// `session_run` outputs manually. Never had any external callers.
-pub const HANDLER_PIPELINE: u32 = 11;
-/// `trace_get` handler id — return the orchestrator's trace log
-/// (one [`crate::TraceEntry`] per delegated stage). Payload: `[]`.
-/// (BL-027.)
-///
-/// **Deprecated (ADR 0025 Phase 1):** session_list + session_get
-/// expose richer per-run records. Never had any external callers.
-pub const HANDLER_TRACE_GET: u32 = 12;
 
 /// `session_run` (ADR 0024 Phase 2a) — drive a multi-round
 /// tool-loop session and persist the transcript. Args:
@@ -152,30 +105,6 @@ pub const HANDLER_SESSION_DELETE: u32 = 16;
 /// side awaits a `oneshot` populated by this handler before
 /// dispatching tools.
 pub const HANDLER_ROUND_DECIDE: u32 = 17;
-
-/// ADR 0025 Phase 1 — handlers that are deprecated and slated for
-/// deletion. Tuple is `(handler_id, command_name, replacement_hint)`
-/// where the hint is a one-line pointer surfaced in the
-/// `tracing::warn!` so log readers can see what to use instead.
-const DEPRECATED_HANDLERS: &[(u32, &str, &str)] = &[
-    (HANDLER_RUN, "run", "session_run with auto_approve: true"),
-    (HANDLER_RUN_PLAN, "run_plan", "build a Vec<ToolCall> + ipc_call per call"),
-    (HANDLER_EXECUTE_STEP, "execute_step", "ipc_call directly"),
-    (HANDLER_DELEGATE, "delegate", "session_run with archetype arg"),
-    (HANDLER_PARALLEL, "parallel", "fan out N session_run calls"),
-    (HANDLER_PIPELINE, "pipeline", "chain session_run outputs manually"),
-    (HANDLER_TRACE_GET, "trace_get", "session_list + session_get"),
-];
-
-/// Look up a deprecated handler by id. Returns
-/// `Some((command_name, replacement_hint))` when the id is
-/// flagged for retirement under ADR 0025.
-fn deprecation_for(handler_id: u32) -> Option<(&'static str, &'static str)> {
-    DEPRECATED_HANDLERS
-        .iter()
-        .find(|(id, _, _)| *id == handler_id)
-        .map(|(_, name, hint)| (*name, *hint))
-}
 
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
@@ -210,13 +139,7 @@ const MAX_APPROVAL_TIMEOUT_SECS: u64 = 3600;
 /// Core plugin instance.
 pub struct AgentCorePlugin {
     context: Option<Arc<KernelPluginContext>>,
-    orchestrator: std::sync::Mutex<Option<Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>>>>,
     pending_approvals: Arc<PendingApprovals>,
-    /// ADR 0025 Phase 1 — set of handler ids that have already
-    /// emitted their once-per-instance deprecation warning. Avoids
-    /// drowning logs when a caller drives the legacy surface in a
-    /// loop. Cleared on plugin reload.
-    warned_deprecated: Arc<std::sync::Mutex<std::collections::HashSet<u32>>>,
 }
 
 impl AgentCorePlugin {
@@ -227,43 +150,12 @@ impl AgentCorePlugin {
     pub fn new() -> Self {
         Self {
             context: None,
-            orchestrator: std::sync::Mutex::new(None),
             pending_approvals: Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
-            )),
-            warned_deprecated: Arc::new(std::sync::Mutex::new(
-                std::collections::HashSet::new(),
             )),
         }
     }
 
-    /// Lazily build (or return the cached) orchestrator. State —
-    /// scratch + trace — persists for the plugin's lifetime so
-    /// `trace_get` can read entries appended by earlier
-    /// `delegate` / `parallel` / `pipeline` calls.
-    fn orchestrator(
-        &self,
-        ctx: &Arc<KernelPluginContext>,
-    ) -> Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>> {
-        let mut guard = self
-            .orchestrator
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(existing) = guard.as_ref() {
-            return Arc::clone(existing);
-        }
-        let driver = AiChatBridge {
-            ctx: Arc::clone(ctx),
-            timeout: DEFAULT_CHAT_TIMEOUT,
-        };
-        let dispatcher = KernelToolBridge {
-            ctx: Arc::clone(ctx),
-            timeout: DEFAULT_TOOL_TIMEOUT,
-        };
-        let built = Arc::new(AgentOrchestrator::new(driver, dispatcher));
-        *guard = Some(Arc::clone(&built));
-        built
-    }
 }
 
 impl Default for AgentCorePlugin {
@@ -305,27 +197,8 @@ impl CorePlugin for AgentCorePlugin {
         if handler_id == HANDLER_LIST_ARCHETYPES {
             return None;
         }
-        // ADR 0025 Phase 1 — once-per-instance deprecation log for
-        // every retired-but-still-functional handler. Emitted up
-        // here (before the async block) so the warning surfaces
-        // even if the handler returns synchronously.
-        if let Some((name, hint)) = deprecation_for(handler_id) {
-            let mut seen = self
-                .warned_deprecated
-                .lock()
-                .expect("agent deprecation set poisoned");
-            if seen.insert(handler_id) {
-                tracing::warn!(
-                    plugin_id = PLUGIN_ID,
-                    command = name,
-                    replacement = hint,
-                    "deprecated agent IPC handler called; see ADR 0025"
-                );
-            }
-        }
 
         let ctx = self.context.clone();
-        let orchestrator = ctx.as_ref().map(|c| self.orchestrator(c));
         let pending_approvals = Arc::clone(&self.pending_approvals);
         let args = args.clone();
         Some(Box::pin(async move {
@@ -334,22 +207,9 @@ impl CorePlugin for AgentCorePlugin {
             })?;
             match handler_id {
                 HANDLER_PLAN => handle_plan(ctx, &args).await,
-                HANDLER_RUN => handle_run(ctx, &args).await,
-                HANDLER_RUN_PLAN => handle_run_plan(ctx, &args).await,
-                HANDLER_EXECUTE_STEP => handle_execute_step(ctx, &args).await,
                 HANDLER_HISTORY_LIST => handle_history_list(ctx).await,
                 HANDLER_HISTORY_GET => handle_history_get(ctx, &args).await,
                 HANDLER_HISTORY_DELETE => handle_history_delete(ctx, &args).await,
-                HANDLER_DELEGATE => {
-                    handle_delegate(orchestrator.expect("ctx present"), &args).await
-                }
-                HANDLER_PARALLEL => {
-                    handle_parallel(orchestrator.expect("ctx present"), &args).await
-                }
-                HANDLER_PIPELINE => {
-                    handle_pipeline(orchestrator.expect("ctx present"), &args).await
-                }
-                HANDLER_TRACE_GET => handle_trace_get(orchestrator.expect("ctx present")).await,
                 HANDLER_SESSION_RUN => {
                     handle_session_run(ctx, pending_approvals, &args).await
                 }
@@ -408,30 +268,11 @@ async fn handle_plan(
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, PluginError> {
     let a: GoalArgs = parse(args, "plan")?;
-    let agent = build_planner(Arc::clone(&ctx), &a).await;
-    let plan = agent.plan(&a.goal).await.map_err(|e| agent_err(&e))?;
-    to_value(&plan, "plan")
-}
-
-async fn handle_run(
-    ctx: Arc<KernelPluginContext>,
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, PluginError> {
-    let a: GoalArgs = parse(args, "run")?;
-    let agent = build_planner(Arc::clone(&ctx), &a).await;
-    let plan = agent.plan(&a.goal).await.map_err(|e| agent_err(&e))?;
-    run_plan_internal(ctx, plan, Some(a.goal)).await
-}
-
-async fn build_planner(
-    ctx: Arc<KernelPluginContext>,
-    args: &GoalArgs,
-) -> LlmAgent<AiChatBridge> {
-    let skills_prompt = system_prompt_with_skills(&ctx, &args.goal).await;
-    // `system_prompt_with_skills` returns DEFAULT_SYSTEM_PROMPT as its
-    // baseline when no skills match; strip that prefix so we can layer
-    // the archetype's prompt as the new baseline without duplicating
-    // the schema block.
+    let skills_prompt = system_prompt_with_skills(&ctx, &a.goal).await;
+    // `system_prompt_with_skills` returns DEFAULT_SYSTEM_PROMPT as
+    // its baseline when no skills match; strip that prefix so the
+    // archetype's prompt becomes the new baseline without doubling
+    // up the schema block.
     let extra = skills_prompt
         .strip_prefix(DEFAULT_SYSTEM_PROMPT)
         .map(str::trim_start)
@@ -440,166 +281,18 @@ async fn build_planner(
         ctx,
         timeout: DEFAULT_CHAT_TIMEOUT,
     };
-    build_archetype(args.archetype.as_deref(), driver, extra)
+    let agent = build_archetype(a.archetype.as_deref(), driver, extra);
+    let plan = agent.plan(&a.goal).await.map_err(|e| agent_err(&e))?;
+    to_value(&plan, "plan")
 }
 
-async fn handle_run_plan(
-    ctx: Arc<KernelPluginContext>,
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, PluginError> {
-    let a: PlanArgs = parse(args, "run_plan")?;
-    run_plan_internal(ctx, a.plan, None).await
-}
-
-/// Args for `com.nexus.agent::execute_step` (handler id `4`). Lifted
-/// from inline by audit-2026-05-01 P1-3 (#113).
-#[derive(Deserialize, Serialize)]
-#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
-#[cfg_attr(
-    feature = "ts-export",
-    ts(
-        export,
-        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
-    )
-)]
-#[serde(deny_unknown_fields)]
-pub struct ExecuteStepArgs {
-    plan: Plan,
-    index: usize,
-}
-
-async fn handle_execute_step(
-    ctx: Arc<KernelPluginContext>,
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, PluginError> {
-    let a: ExecuteStepArgs = parse(args, "execute_step")?;
-    let executor = PlanExecutor::new(KernelToolBridge {
-        ctx,
-        timeout: DEFAULT_TOOL_TIMEOUT,
-    });
-    let result = executor
-        .execute_step_at(&a.plan, a.index)
-        .await
-        .map_err(|e| agent_err(&e))?;
-    to_value(&result, "execute_step")
-}
-
-async fn run_plan_internal(
-    ctx: Arc<KernelPluginContext>,
-    plan: Plan,
-    goal: Option<String>,
-) -> Result<serde_json::Value, PluginError> {
-    let executor = PlanExecutor::new(KernelToolBridge {
-        ctx: Arc::clone(&ctx),
-        timeout: DEFAULT_TOOL_TIMEOUT,
-    });
-
-    // Drive the plan step-by-step so we can publish kernel-bus events
-    // around each dispatch. The UI subscribes via `ctx.kernel.on` in the
-    // shell's agent plugin and updates the pending-plan card live instead
-    // of blocking until the whole plan completes.
-    let _ = ctx.publish(
-        EVENT_RUN_START,
-        serde_json::json!({
-            "plan_id": plan.id,
-            "steps": plan.steps.len(),
-            "goal": goal,
-        }),
-    );
-
-    let mut results: Vec<crate::StepResult> = Vec::with_capacity(plan.steps.len());
-    let mut abort: Option<AgentError> = None;
-
-    for (idx, step) in plan.steps.iter().enumerate() {
-        if abort.is_some() {
-            results.push(crate::StepResult {
-                step_id: step.id.clone(),
-                response: None,
-                status: crate::StepStatus::Skipped,
-            });
-            let _ = ctx.publish(
-                EVENT_STEP_DONE,
-                serde_json::json!({
-                    "plan_id": plan.id,
-                    "step_id": step.id,
-                    "index": idx,
-                    "status": "skipped",
-                }),
-            );
-            continue;
-        }
-        let _ = ctx.publish(
-            EVENT_STEP_START,
-            serde_json::json!({
-                "plan_id": plan.id,
-                "step_id": step.id,
-                "index": idx,
-                "description": step.description,
-            }),
-        );
-        match executor.execute_step_at(&plan, idx).await {
-            Ok(result) => {
-                let _ = ctx.publish(
-                    EVENT_STEP_DONE,
-                    serde_json::json!({
-                        "plan_id": plan.id,
-                        "step_id": step.id,
-                        "index": idx,
-                        "status": "ok",
-                    }),
-                );
-                results.push(result);
-            }
-            Err(err) => {
-                results.push(crate::StepResult {
-                    step_id: step.id.clone(),
-                    response: None,
-                    status: crate::StepStatus::Failed,
-                });
-                let _ = ctx.publish(
-                    EVENT_STEP_DONE,
-                    serde_json::json!({
-                        "plan_id": plan.id,
-                        "step_id": step.id,
-                        "index": idx,
-                        "status": "failed",
-                        "error": err.to_string(),
-                    }),
-                );
-                abort = Some(err);
-            }
-        }
-    }
-
-    let success = abort.is_none();
-    let observation = crate::Observation {
-        plan_id: plan.id.clone(),
-        steps: results,
-        success,
-    };
-    let _ = ctx.publish(
-        EVENT_RUN_DONE,
-        serde_json::json!({
-            "plan_id": plan.id,
-            "success": success,
-        }),
-    );
-    save_history(&ctx, &plan, &observation, goal.as_deref()).await;
-    to_value(&observation, "run")
-}
-
-/// Kernel-bus topics emitted while a plan runs. Consumed by the shell's
-/// agent plugin via `ctx.kernel.on("com.nexus.agent.")` for live
-/// pending-plan updates (historically mirrored as `agent:run_start` /
-/// `agent:step_start` / `agent:step_done` / `agent:run_done` Tauri events
-/// by the legacy shell, which has since been retired).
-pub const EVENT_RUN_START: &str = "com.nexus.agent.run_start";
-/// See [`EVENT_RUN_START`].
-pub const EVENT_STEP_START: &str = "com.nexus.agent.step_start";
-/// See [`EVENT_RUN_START`].
-pub const EVENT_STEP_DONE: &str = "com.nexus.agent.step_done";
-/// See [`EVENT_RUN_START`].
-pub const EVENT_RUN_DONE: &str = "com.nexus.agent.run_done";
+// ── BL-027 orchestrator + per-plan executor were retired in
+//    ADR 0025 Phase 2. The session loop in `crate::session`
+//    handles every former responsibility (plan-then-execute,
+//    per-step events, history). EVENT_RUN_START / STEP_START /
+//    STEP_DONE / RUN_DONE bus topics retired alongside —
+//    `com.nexus.agent.round_proposed` (Phase 2b) is the
+//    replacement for live UI updates.
 
 // ── History persistence ─────────────────────────────────────────────────────
 
@@ -620,60 +313,11 @@ fn history_path(plan_id: &str) -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from(HISTORY_DIR).join(format!("{plan_id}.json")))
 }
 
-/// Best-effort — history failures are logged but never bubble up as
-/// plugin errors. The caller has a good run; persistence is
-/// secondary.
-async fn save_history(
-    ctx: &KernelPluginContext,
-    plan: &Plan,
-    observation: &crate::Observation,
-    goal: Option<&str>,
-) {
-    let Some(path) = history_path(&plan.id) else {
-        tracing::warn!(plan_id = %plan.id, "skipping history save — unsafe plan id");
-        return;
-    };
-    let record = serde_json::json!({
-        "plan_id": plan.id,
-        "goal": goal,
-        "plan": plan,
-        "observation": observation,
-        "created_at": timestamp(),
-    });
-    match serde_json::to_vec_pretty(&record) {
-        Ok(bytes) => {
-            // Route through storage `write_file` so the atomic-write
-            // helper's mkdir -p runs. `ctx.write_file` is plain
-            // `tokio::fs::write` and would silently fail on a fresh
-            // forge where `.forge/agent/history/` doesn't yet exist.
-            let Some(path_str) = path.to_str() else {
-                tracing::warn!(plan_id = %plan.id, "history path not UTF-8");
-                return;
-            };
-            let call = ctx
-                .ipc_call(
-                    "com.nexus.storage",
-                    "write_file",
-                    serde_json::json!({ "path": path_str, "bytes": bytes }),
-                    Duration::from_secs(10),
-                )
-                .await;
-            if let Err(err) = call {
-                tracing::warn!(plan_id = %plan.id, %err, "history write failed");
-            }
-        }
-        Err(err) => tracing::warn!(plan_id = %plan.id, %err, "history encode failed"),
-    }
-}
-
-fn timestamp() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("ts-{secs}")
-}
+// `save_history` retired alongside the legacy `run` handler in
+// ADR 0025 Phase 2 — new transcripts go to `.forge/agent/sessions/`
+// via `handle_session_run`. The `history_*` read handlers below
+// continue to surface any pre-Phase-2a JSON in
+// `.forge/agent/history/`.
 
 async fn handle_history_list(
     ctx: Arc<KernelPluginContext>,
@@ -812,11 +456,11 @@ async fn handle_session_run(
 
     let driver = AiChatBridge {
         ctx: Arc::clone(&ctx),
-        timeout: Duration::from_secs(300),
+        timeout: DEFAULT_CHAT_TIMEOUT,
     };
     let dispatcher = KernelToolBridge {
         ctx: Arc::clone(&ctx),
-        timeout: Duration::from_secs(60),
+        timeout: DEFAULT_TOOL_TIMEOUT,
     };
 
     let system = match (&parsed.system, &parsed.archetype) {
@@ -1471,155 +1115,10 @@ fn to_value<T: serde::Serialize>(
 // ── Orchestrator handlers (BL-027) ──────────────────────────────────────────
 
 /// Args for [`HANDLER_DELEGATE`]: pick one archetype and a goal.
-#[derive(Deserialize, Serialize)]
-#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
-#[cfg_attr(
-    feature = "ts-export",
-    ts(
-        export,
-        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
-    )
-)]
-#[serde(deny_unknown_fields)]
-pub struct DelegateArgs {
-    /// Archetype short name (`"writer"`, `"coder"`, `"researcher"`).
-    pub archetype: String,
-    /// Natural-language goal forwarded to the archetype's planner.
-    pub goal: String,
-}
-
-/// One job for [`HANDLER_PARALLEL`].
-#[derive(Deserialize, Serialize)]
-#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
-#[cfg_attr(
-    feature = "ts-export",
-    ts(
-        export,
-        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
-    )
-)]
-#[serde(deny_unknown_fields)]
-pub struct ParallelJob {
-    /// Archetype short name.
-    pub archetype: String,
-    /// Natural-language goal.
-    pub goal: String,
-}
-
-/// Args for [`HANDLER_PARALLEL`].
-#[derive(Deserialize, Serialize)]
-#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
-#[cfg_attr(
-    feature = "ts-export",
-    ts(
-        export,
-        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
-    )
-)]
-#[serde(deny_unknown_fields)]
-pub struct ParallelArgs {
-    /// Jobs fanned out concurrently; results returned in input order.
-    pub jobs: Vec<ParallelJob>,
-}
-
-/// One stage in [`HANDLER_PIPELINE`].
-#[derive(Deserialize, Serialize)]
-#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
-#[cfg_attr(
-    feature = "ts-export",
-    ts(
-        export,
-        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
-    )
-)]
-#[serde(deny_unknown_fields)]
-pub struct PipelineStage {
-    /// Archetype short name.
-    pub archetype: String,
-    /// Goal template — `{{prev}}` is substituted with the previous
-    /// stage's textual summary before planning.
-    pub goal_template: String,
-}
-
-/// Args for [`HANDLER_PIPELINE`].
-#[derive(Deserialize, Serialize)]
-#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
-#[cfg_attr(
-    feature = "ts-export",
-    ts(
-        export,
-        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
-    )
-)]
-#[serde(deny_unknown_fields)]
-pub struct PipelineArgs {
-    /// Stages run sequentially; first failure stops the pipeline and
-    /// the partial observation list is returned.
-    pub stages: Vec<PipelineStage>,
-}
-
-/// Response wrapper for [`HANDLER_TRACE_GET`].
-#[derive(serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
-#[cfg_attr(
-    feature = "ts-export",
-    ts(
-        export,
-        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
-    )
-)]
-#[serde(deny_unknown_fields)]
-pub struct TraceResponse {
-    /// Trace entries in append order.
-    pub entries: Vec<TraceEntry>,
-}
-
-async fn handle_delegate(
-    orch: Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>>,
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, PluginError> {
-    let a: DelegateArgs = parse(args, "delegate")?;
-    let obs = orch
-        .delegate(&a.archetype, &a.goal, None)
-        .await
-        .map_err(|e| agent_err(&e))?;
-    to_value(&obs, "delegate")
-}
-
-async fn handle_parallel(
-    orch: Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>>,
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, PluginError> {
-    let a: ParallelArgs = parse(args, "parallel")?;
-    let jobs: Vec<(String, String)> = a
-        .jobs
-        .into_iter()
-        .map(|j| (j.archetype, j.goal))
-        .collect();
-    let observations = orch.parallel(&jobs).await;
-    to_value(&observations, "parallel")
-}
-
-async fn handle_pipeline(
-    orch: Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>>,
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, PluginError> {
-    let a: PipelineArgs = parse(args, "pipeline")?;
-    let stages: Vec<(String, String)> = a
-        .stages
-        .into_iter()
-        .map(|s| (s.archetype, s.goal_template))
-        .collect();
-    let observations = orch.pipeline(&stages).await;
-    to_value(&observations, "pipeline")
-}
-
-async fn handle_trace_get(
-    orch: Arc<AgentOrchestrator<AiChatBridge, KernelToolBridge>>,
-) -> Result<serde_json::Value, PluginError> {
-    let entries = orch.trace().await;
-    to_value(&TraceResponse { entries }, "trace_get")
-}
+// BL-027 orchestrator IPC types (`DelegateArgs`, `ParallelArgs`,
+// `PipelineArgs`, `TraceResponse`) and their handlers were retired
+// in ADR 0025 Phase 2 alongside the underlying `AgentOrchestrator`.
+// Callers should fan out / chain `session_run` directly.
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
@@ -1653,37 +1152,7 @@ mod tests {
         assert!(fut.is_none(), "list_archetypes must not return an async future");
     }
 
-    /// ADR 0025 Phase 1 — every deprecated handler id resolves
-    /// to a `(name, replacement_hint)` pair, and non-deprecated
-    /// ids resolve to `None`. Pin the table so a future
-    /// "deprecate-by-renaming" attempt doesn't accidentally drop
-    /// the warning surface.
-    #[test]
-    fn deprecation_table_covers_every_legacy_handler() {
-        let expected: Vec<(u32, &str)> = vec![
-            (HANDLER_RUN, "run"),
-            (HANDLER_RUN_PLAN, "run_plan"),
-            (HANDLER_EXECUTE_STEP, "execute_step"),
-            (HANDLER_DELEGATE, "delegate"),
-            (HANDLER_PARALLEL, "parallel"),
-            (HANDLER_PIPELINE, "pipeline"),
-            (HANDLER_TRACE_GET, "trace_get"),
-        ];
-        for (id, name) in expected {
-            let (resolved_name, hint) =
-                deprecation_for(id).unwrap_or_else(|| panic!("missing deprecation for {name}"));
-            assert_eq!(resolved_name, name);
-            assert!(!hint.is_empty(), "hint must be non-empty for {name}");
-        }
-        // Non-deprecated ids must NOT show up.
-        assert!(deprecation_for(HANDLER_PLAN).is_none());
-        assert!(deprecation_for(HANDLER_HISTORY_LIST).is_none());
-        assert!(deprecation_for(HANDLER_LIST_ARCHETYPES).is_none());
-        assert!(deprecation_for(HANDLER_SESSION_RUN).is_none());
-        assert!(deprecation_for(HANDLER_ROUND_DECIDE).is_none());
-    }
-
-    /// Phase 2b — `round_decide` routes the caller's decision into
+/// Phase 2b — `round_decide` routes the caller's decision into
     /// the matching session's pending oneshot. Smoke tests the
     /// happy path (approve_all) and the error paths (no pending,
     /// dropped receiver).
