@@ -5,6 +5,7 @@
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use nexus_bootstrap::storage as ipc;
@@ -12,6 +13,7 @@ use nexus_bootstrap::storage::{BacklinkResult, SearchResult, TaskFilter, TaskRec
 use nexus_bootstrap::terminal as term_ipc;
 use nexus_bootstrap::terminal::OutputLine;
 use nexus_bootstrap::{build_tui_runtime, Runtime};
+use nexus_kernel::PluginContext;
 use ratatui::widgets::ListState;
 use tokio::runtime::Runtime as TokioRuntime;
 
@@ -28,6 +30,9 @@ pub enum Mode {
     Find,
     /// Terminal input mode — keystrokes go to the PTY.
     Terminal,
+    /// AIG-07 — AI chat input mode. Keystrokes go to the prompt at
+    /// the bottom of the AI panel.
+    AiInput,
 }
 
 /// Which pane has keyboard focus.
@@ -498,6 +503,115 @@ impl Default for TerminalPanelState {
     }
 }
 
+// ── AiPanelState (AIG-07) ─────────────────────────────────────────────────────
+
+/// One turn in the AI chat transcript. The role drives rendering
+/// (user vs assistant prefix); the content is markdown emitted by
+/// the model — rendered as plain text in the TUI for now since
+/// ratatui doesn't ship a markdown renderer.
+#[derive(Debug, Clone)]
+pub struct AiMessage {
+    /// Either `"user"` or `"assistant"`.
+    pub role: AiRole,
+    /// Free-form text. For assistant turns, this is the model's
+    /// reply; user turns hold the submitted question verbatim.
+    pub text: String,
+}
+
+/// Role of an [`AiMessage`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiRole {
+    User,
+    Assistant,
+}
+
+/// State of the right-pane AI chat surface (AIG-07). The TUI uses
+/// `com.nexus.ai::ask` for one-shot RAG-grounded chat — same
+/// retrieval path the shell's `stream_ask` uses, just collected
+/// into a single response since the TUI doesn't subscribe to the
+/// kernel bus for token-level streaming.
+pub struct AiPanelState {
+    /// True when the panel is visible. Toggled with `a` in Normal
+    /// mode.
+    pub active: bool,
+    /// Conversation transcript, oldest first. The current `ask`
+    /// handler is single-turn (it doesn't take prior context), so
+    /// these are kept for display purposes only — multi-turn
+    /// follow-up is a follow-up improvement.
+    pub messages: Vec<AiMessage>,
+    /// Current prompt buffer. Submitted to `ask` on Enter.
+    pub input: String,
+    /// Caret position within `input` (char index, not byte).
+    pub cursor: usize,
+    /// True while a `com.nexus.ai::ask` call is being awaited via
+    /// `rt.block_on`. The render loop pre-paints "Thinking…" so the
+    /// freeze is at least narrated; streaming token feedback is
+    /// deferred (would require an `Arc<KernelPluginContext>` on the
+    /// Runtime, which is a larger refactor).
+    pub in_flight: bool,
+    /// Most recent error (transport / no provider configured /
+    /// kernel error). Cleared at the start of every new submit.
+    pub last_error: Option<String>,
+    /// Provider/model status string from `com.nexus.ai::status`.
+    /// Populated on first activation; refreshed on demand. `None`
+    /// while not yet loaded; `Some(text)` for the rendered string.
+    pub provider_status: Option<String>,
+    /// Vertical scroll offset for the transcript. Up/Down arrows in
+    /// panel-Normal mode adjust it; auto-pinned to the bottom when
+    /// a new message arrives.
+    pub scroll: u16,
+}
+
+impl AiPanelState {
+    /// Create a fresh, inactive panel.
+    pub fn new() -> Self {
+        Self {
+            active: false,
+            messages: Vec::new(),
+            input: String::new(),
+            cursor: 0,
+            in_flight: false,
+            last_error: None,
+            provider_status: None,
+            scroll: 0,
+        }
+    }
+
+    /// Insert a single character at the caret. Used by `Mode::AiInput`.
+    pub fn insert_char(&mut self, c: char) {
+        let byte = self.char_index_to_byte(self.cursor);
+        self.input.insert(byte, c);
+        self.cursor += 1;
+    }
+
+    /// Backspace: delete the character before the caret.
+    pub fn backspace(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let byte_end = self.char_index_to_byte(self.cursor);
+        let byte_start = self.char_index_to_byte(self.cursor - 1);
+        self.input.replace_range(byte_start..byte_end, "");
+        self.cursor -= 1;
+    }
+
+    /// Translate a char index into a byte offset within `input`.
+    /// Needed because Rust strings are byte-indexed but the cursor is
+    /// expressed in chars (so emoji / combining marks don't break).
+    fn char_index_to_byte(&self, char_idx: usize) -> usize {
+        self.input
+            .char_indices()
+            .nth(char_idx)
+            .map_or(self.input.len(), |(b, _)| b)
+    }
+}
+
+impl Default for AiPanelState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── TuiApp ────────────────────────────────────────────────────────────────────
 
 /// Top-level application state.
@@ -520,6 +634,8 @@ pub struct TuiApp {
     pub task_view: TaskViewState,
     /// Terminal panel state.
     pub terminal: TerminalPanelState,
+    /// AIG-07 — AI chat panel state.
+    pub ai: AiPanelState,
     /// Cached status bar statistics.
     pub status_info: StatusInfo,
     /// Nexus runtime providing the kernel plugin context used for all storage
@@ -561,6 +677,7 @@ impl TuiApp {
             backlinks: BacklinksState::new(),
             task_view: TaskViewState::new(),
             terminal: TerminalPanelState::new(),
+            ai: AiPanelState::new(),
             status_info: StatusInfo::new(),
             runtime,
             rt,
@@ -927,5 +1044,220 @@ impl TuiApp {
             result.push(entry);
         }
         result
+    }
+
+    // ── AIG-07 — AI chat panel ──────────────────────────────────────
+
+    /// Toggle the AI chat panel. First activation kicks off a status
+    /// refresh so the header shows the configured provider.
+    pub fn toggle_ai_panel(&mut self) {
+        self.ai.active = !self.ai.active;
+        if self.ai.active && self.ai.provider_status.is_none() {
+            self.refresh_ai_status();
+        }
+    }
+
+    /// Pull the active provider/model from `com.nexus.ai::status`.
+    /// Best-effort: a missing or errored response leaves the
+    /// header showing "(no provider)".
+    pub fn refresh_ai_status(&mut self) {
+        let result = self.rt.block_on(async {
+            self.runtime
+                .context
+                .ipc_call(
+                    "com.nexus.ai",
+                    "status",
+                    serde_json::json!({}),
+                    Duration::from_secs(5),
+                )
+                .await
+        });
+        match result {
+            Ok(value) => {
+                let provider = value
+                    .get("ai_provider")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let model = value
+                    .get("ai_model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let label = match (provider, model) {
+                    ("", _) => "(no provider)".to_string(),
+                    (p, "") => p.to_string(),
+                    (p, m) => format!("{p} / {m}"),
+                };
+                self.ai.provider_status = Some(label);
+            }
+            Err(_) => {
+                self.ai.provider_status = Some("(no provider)".to_string());
+            }
+        }
+    }
+
+    /// Submit the current prompt to `com.nexus.ai::ask`. Blocks the
+    /// render loop on the IPC call (see [`AiPanelState::in_flight`]
+    /// for the limitation note). Same pattern as the storage /
+    /// terminal helpers — long-running calls freeze the UI until
+    /// they complete or the timeout fires.
+    pub fn submit_ai(&mut self) {
+        let question = self.ai.input.trim().to_string();
+        if question.is_empty() || self.ai.in_flight {
+            return;
+        }
+        self.ai.messages.push(AiMessage {
+            role: AiRole::User,
+            text: question.clone(),
+        });
+        self.ai.input.clear();
+        self.ai.cursor = 0;
+        self.ai.last_error = None;
+        self.ai.in_flight = true;
+        // Auto-pin to the bottom whenever a new turn lands.
+        self.ai.scroll = u16::MAX;
+
+        // Generous timeout — same ceiling the shell uses for chat
+        // calls.
+        let timeout = Duration::from_secs(180);
+        let result = self.rt.block_on(async {
+            self.runtime
+                .context
+                .ipc_call(
+                    "com.nexus.ai",
+                    "ask",
+                    serde_json::json!({ "question": question }),
+                    timeout,
+                )
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|value| extract_ask_answer(&value))
+        });
+        self.ai.in_flight = false;
+        match result {
+            Ok(answer) => {
+                self.ai.messages.push(AiMessage {
+                    role: AiRole::Assistant,
+                    text: answer,
+                });
+                self.ai.scroll = u16::MAX;
+            }
+            Err(err) => {
+                self.ai.last_error = Some(err);
+            }
+        }
+    }
+}
+
+/// AIG-07 — pull the answer string out of a `com.nexus.ai::ask`
+/// response. The handler returns a serialised `RagResponse` whose
+/// `answer` field carries the model's reply; the rest (citations,
+/// scores) we don't render in the TUI v1.
+fn extract_ask_answer(value: &serde_json::Value) -> Result<String, String> {
+    if let Some(s) = value.get("answer").and_then(|v| v.as_str()) {
+        return Ok(s.to_string());
+    }
+    // Some kernel error paths return a bare string; treat that as
+    // the answer for forward compat.
+    if let Some(s) = value.as_str() {
+        return Ok(s.to_string());
+    }
+    Err(format!(
+        "ask: unrecognised response shape ({})",
+        value
+    ))
+}
+
+#[cfg(test)]
+mod aig07_tests {
+    use super::*;
+
+    // ── extract_ask_answer ─────────────────────────────────────────
+
+    #[test]
+    fn extract_ask_answer_pulls_answer_field() {
+        let v = serde_json::json!({
+            "answer": "the model said this",
+            "citations": []
+        });
+        assert_eq!(
+            extract_ask_answer(&v).unwrap(),
+            "the model said this".to_string(),
+        );
+    }
+
+    #[test]
+    fn extract_ask_answer_falls_back_to_bare_string() {
+        // Forward-compat: some kernel error paths return a string
+        // directly. The TUI surfaces it as the answer rather than
+        // an "unrecognised shape" error.
+        let v = serde_json::Value::String("plain reply".into());
+        assert_eq!(extract_ask_answer(&v).unwrap(), "plain reply".to_string());
+    }
+
+    #[test]
+    fn extract_ask_answer_rejects_unknown_shape() {
+        let v = serde_json::json!({ "foo": 1 });
+        let err = extract_ask_answer(&v).unwrap_err();
+        assert!(err.contains("unrecognised"), "got: {err}");
+    }
+
+    // ── AiPanelState input editing ─────────────────────────────────
+
+    #[test]
+    fn insert_char_appends_at_end() {
+        let mut s = AiPanelState::new();
+        for c in "hello".chars() {
+            s.insert_char(c);
+        }
+        assert_eq!(s.input, "hello");
+        assert_eq!(s.cursor, 5);
+    }
+
+    #[test]
+    fn insert_char_at_caret_within_existing_text() {
+        let mut s = AiPanelState::new();
+        for c in "hlo".chars() {
+            s.insert_char(c);
+        }
+        // Move caret to position 1 (between 'h' and 'l') and insert.
+        s.cursor = 1;
+        s.insert_char('e');
+        s.insert_char('l');
+        assert_eq!(s.input, "hello");
+        assert_eq!(s.cursor, 3);
+    }
+
+    #[test]
+    fn insert_char_supports_multibyte_chars() {
+        let mut s = AiPanelState::new();
+        s.insert_char('é');
+        s.insert_char('a');
+        assert_eq!(s.input, "éa");
+        assert_eq!(s.cursor, 2);
+        // Backspace should delete a full grapheme even though `é`
+        // is multi-byte.
+        s.backspace();
+        assert_eq!(s.input, "é");
+        assert_eq!(s.cursor, 1);
+    }
+
+    #[test]
+    fn backspace_at_zero_is_a_noop() {
+        let mut s = AiPanelState::new();
+        s.backspace();
+        assert_eq!(s.input, "");
+        assert_eq!(s.cursor, 0);
+    }
+
+    #[test]
+    fn backspace_removes_char_before_caret() {
+        let mut s = AiPanelState::new();
+        for c in "abc".chars() {
+            s.insert_char(c);
+        }
+        s.cursor = 2; // between 'b' and 'c'
+        s.backspace();
+        assert_eq!(s.input, "ac");
+        assert_eq!(s.cursor, 1);
     }
 }

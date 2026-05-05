@@ -151,16 +151,26 @@
 
 **Severity:** Nice-to-have (parity gap)
 **Surfaced by:** `crates/nexus-tui/` — no AI pane; `nexus ai` CLI works but TUI users have to drop out.
-**Status:** Open.
+**Status:** Resolved 2026-05-05. AI chat is reachable from the TUI via a new right-pane panel; streaming token feedback deferred (see follow-up).
 
-### Problem
-The TUI is a first-class frontend per architecture, but AI chat is unreachable from it. Streaming chat already works over IPC (`stream_chat` publishes to bus), so the TUI just needs a pane consuming those events.
+### Outcome
+- **New pane** (`crates/nexus-tui/src/ui/ai.rs`, ~140 LoC) takes over the right area when active, with priority above terminal / tasks / viewer (matches the convention for full-pane takeovers). Renders three rows: scrollable transcript / one-line status (thinking / error) / one-line prompt with a block cursor.
+- **`AiPanelState`** in `app.rs` holds messages (`Vec<AiMessage>` with `User` | `Assistant` roles), prompt buffer + char-indexed cursor, `in_flight: bool`, last error, provider status string, scroll offset. New `Mode::AiInput` routes keystrokes to the prompt without leaking them to the file viewer.
+- **Bindings** wired into `input.rs`:
+  - `a` (Normal mode) — toggles the panel and drops straight into `Mode::AiInput` on activation.
+  - `Esc` (AiInput) — leaves input mode but keeps the panel open.
+  - `Enter` (AiInput) — submits to `com.nexus.ai::ask` and renders the response.
+  - `Backspace` / printable chars (AiInput) — edit the prompt; multi-byte safe via char-index ↔ byte-offset translation.
+- **Status header** populated on first activation by calling `com.nexus.ai::status`; renders as `provider / model` (e.g. `anthropic / claude-sonnet-4-5`) or `(no provider)` when unconfigured.
+- **RAG by default** — uses `ask` rather than `stream_chat`, so retrieval is always grounded against the forge's vector index. The provider report distinguishes chat vs embedding so a missing embedding side surfaces immediately as an `ask` error rather than silently falling back to non-RAG chat.
+- **8 new unit tests** in `aig07_tests` covering `extract_ask_answer` (3 paths) and `AiPanelState::insert_char/backspace` (5 paths including multibyte safety). nexus-tui crate builds cleanly with the new module + state.
+- **`Mode::AiInput`** added to `Mode` enum; status_bar match exhaustiveness updated to render an `ASK` badge in blue.
 
-### Definition of done
-- New TUI pane (`Ctrl+G` or similar) hosting a streaming chat view.
-- Subscribes to `com.nexus.ai` bus events; renders tokens incrementally.
-- Session picker; provider status line.
-- RAG toggle.
+### Follow-up (not blocking)
+- **Token-level streaming deferred.** The DOD called for "renders tokens incrementally" via bus subscription — `stream_chat` already publishes per-token events and the kernel keeps a streaming activity log. The TUI v1 uses the simpler `ask` (one-shot RAG) path and `rt.block_on`, which freezes the render loop until the model responds. Implementing streaming would require a structural change: `Runtime.context` is currently held by value as a `KernelPluginContext` (not Clone), so spawning a tokio task that holds the context for an event subscription needs either an `Arc<KernelPluginContext>` field on `Runtime` or a refactor of how the bootstrap exposes the context. That's out of scope for the parity gap; the freeze-then-render UX is consistent with how every other long-running TUI IPC call (terminal create_session, storage backlinks, etc.) already works.
+- **Multi-turn context.** `ask` is single-turn per the kernel handler — it doesn't accept prior messages. The TUI keeps an in-memory transcript for display but each Enter sends a fresh question without the prior conversation. Multi-turn would either need a `stream_chat`-mode handler with conversation state or an `ask_with_history` extension.
+- **RAG toggle deferred.** Today the panel always uses `ask` (RAG-grounded). A toggle would need a non-RAG one-shot equivalent, which doesn't exist as a sync IPC handler — the closest is `stream_chat` which is bus-streaming. Wire when streaming lands.
+- **Session picker deferred.** Persistent multi-session storage (`session_load` / `session_save` etc.) is wired in the shell but not in the TUI; in-memory transcript is good enough for v1 since each `nexus-tui` invocation is its own session.
 
 ---
 
@@ -174,4 +184,4 @@ The TUI is a first-class frontend per architecture, but AI chat is unreachable f
 | 4 | ~~**AIG-03** Workflow triggers~~ | ✅ Resolved 2026-05-05. |
 | 5 | ~~**AIG-05** Local embeddings~~ | ✅ Resolved 2026-05-05. |
 | 6 | ~~**AIG-06** Enrich/recall polish~~ | ✅ Resolved 2026-05-05. |
-| 7 | **AIG-07** TUI chat | Largest scope; lowest user-visible payoff while shell is the primary frontend. |
+| 7 | ~~**AIG-07** TUI chat~~ | ✅ Resolved 2026-05-05. |

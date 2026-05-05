@@ -43,6 +43,7 @@ pub fn handle_event(app: &mut TuiApp, event: Event) -> Result<()> {
             Mode::Search => handle_search_key(app, key)?,
             Mode::Find => handle_find_key(app, key)?,
             Mode::Terminal => handle_terminal_key(app, key)?,
+            Mode::AiInput => handle_ai_input_key(app, key)?,
         },
         Event::Mouse(mouse) => handle_mouse(app, mouse)?,
         _ => {}
@@ -103,6 +104,16 @@ fn handle_normal_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
             app.open_terminal();
             if app.terminal.active {
                 app.mode = Mode::Terminal;
+            }
+            return Ok(());
+        }
+        // AIG-07 — toggle the AI chat panel + drop straight into
+        // input mode on first activation so the user can start
+        // typing immediately. `a` is unused elsewhere.
+        (KeyModifiers::NONE, KeyCode::Char('a')) => {
+            app.toggle_ai_panel();
+            if app.ai.active {
+                app.mode = Mode::AiInput;
             }
             return Ok(());
         }
@@ -407,5 +418,45 @@ fn open_in_editor(app: &mut TuiApp) -> Result<()> {
         app.viewer.load_content(path, text);
     }
 
+    Ok(())
+}
+
+// ── AIG-07 — AI input mode ───────────────────────────────────────────────────
+
+fn handle_ai_input_key(app: &mut TuiApp, key: KeyEvent) -> Result<()> {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    match (key.modifiers, key.code) {
+        // Esc closes input mode but keeps the panel open. Hitting
+        // Esc again from Normal mode (with focus on the AI panel)
+        // hides the panel; that's the FileTree/Viewer-style escape
+        // hatch.
+        (_, KeyCode::Esc) => {
+            app.mode = Mode::Normal;
+            return Ok(());
+        }
+        // Submit on Enter. The blocking `submit_ai` call freezes
+        // the render loop until the model responds — same pattern
+        // as the storage / terminal helpers; documented in the
+        // AiPanelState::in_flight field comment.
+        (KeyModifiers::NONE, KeyCode::Enter) => {
+            app.submit_ai();
+            return Ok(());
+        }
+        (KeyModifiers::NONE, KeyCode::Backspace)
+        | (KeyModifiers::SHIFT, KeyCode::Backspace) => {
+            app.ai.backspace();
+            return Ok(());
+        }
+        // Plain printable input. Excludes the modifier-prefixed
+        // arrow keys etc. that crossterm reports as Char-with-
+        // -modifier; those fall through to the catch-all below.
+        (KeyModifiers::NONE, KeyCode::Char(c))
+        | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            app.ai.insert_char(c);
+            return Ok(());
+        }
+        _ => {}
+    }
     Ok(())
 }

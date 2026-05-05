@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::app::{Mode, TuiApp};
 
+mod ai;
 mod backlinks;
 mod file_tree;
 mod status_bar;
@@ -31,8 +32,14 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
 
     file_tree::render(frame, app, tree_area);
 
-    // Right pane: terminal panel wins over task view wins over viewer.
-    if app.terminal.active {
+    // Right pane priority: AI panel > terminal > tasks > viewer.
+    // The AI panel takes precedence so the user can chat without
+    // the right pane fighting with the file viewer for keystrokes
+    // (the AiInput mode routes them away from the viewer anyway,
+    // but visually the chat surface should dominate when active).
+    if app.ai.active {
+        ai::render(frame, app, right_area);
+    } else if app.terminal.active {
         terminal::render(frame, app, right_area);
     } else if app.task_view.active {
         tasks::render(frame, app, right_area);
