@@ -32,17 +32,24 @@ later revised, write a new ADR that supersedes the old one.
 | [0008](0008-tech-stack-defaults.md) | Tech stack defaults | Accepted |
 | [0009](0009-keyring-hard-fail-policy.md) | Keyring hard-fail policy | Accepted |
 | [0010](0010-no-plugin-signing-in-m1.md) | No plugin signature verification in M1 | Accepted |
-| [0011](0011-adopt-plugin-first-shell.md) | Adopt plugin-first shell, retire legacy `app/` | Accepted (executed v0.4.0) |
+| [0011](0011-adopt-plugin-first-shell.md) | Adopt plugin-first shell, retire legacy `app/` | Superseded by ADR 0026 |
 | [0012](0012-drop-named-layout-presets.md) | Drop named layout presets in v1 | Rejected |
 | [0013](0013-menu-bar-strategy.md) | Palette-first menu-bar strategy | Accepted |
 | [0014](0014-ribbon-vs-activity-bar-api-alignment.md) | Ribbon vs activity-bar API naming alignment | Accepted |
-| [0015](0015-iframe-sandbox-plugin-runtime.md) | Iframe sandbox as the community-plugin runtime | Accepted |
+| [0015](0015-iframe-sandbox-plugin-runtime.md) | Iframe sandbox as the community-plugin runtime | Superseded by ADR 0028 (desktop shell) |
 | [0016](0016-microkernel-native-vs-wasm-plugin-split.md) | Microkernel: native vs WASM plugin split | Accepted |
 | [0017](0017-block-id-stability.md) | Block-ID stability via lazy inline stamping | Accepted |
 | [0018](0018-embedding-backend.md) | Local embedding backend (fastembed-rs) | Accepted |
 | [0019](0019-obsidian-base-format.md) | Read-only support for Obsidian `.base` format | Accepted |
-| [0020](0020-popout-window-architecture.md) | Popout window architecture (BL-029 Phase 2) | Accepted |
+| [0020](0020-popout-window-architecture.md) | Popout window architecture (BL-029 Phase 2) | Superseded by ADR 0026 (gpui multi-window) |
 | [0021](0021-ipc-handler-versioning.md) | IPC handler versioning convention | Accepted |
+| [0022](0022-per-handler-ai-capabilities.md) | Per-handler AI capability grants | Accepted |
+| [0023](0023-unify-agent-on-ai-tool-registry.md) | Unify agent on AI tool registry | Accepted |
+| [0024](0024-agent-session-tool-loop.md) | Agent session tool loop | Accepted |
+| [0025](0025-retire-legacy-planner-ipc.md) | Retire legacy planner IPC | Accepted |
+| [0026](0026-adopt-gpui-desktop-shell.md) | Adopt gpui as desktop shell; retire Tauri/TypeScript shell | Accepted |
+| [0027](0027-alacritty-terminal-vte-backend.md) | alacritty-terminal as VTE backend for nexus-terminal | Accepted |
+| [0028](0028-rust-native-contribution-api.md) | Rust-native contribution API; community plugins headless-first | Accepted |
 
 ## How ADRs relate to PRDs and BACKLOG
 
