@@ -73,7 +73,7 @@ pub fn build_archetype<D: ChatDriver>(
         .with_system_prompt(final_prompt)
 }
 
-fn resolve_prompt(name: Option<&str>) -> (&'static str, &'static str) {
+pub(crate) fn resolve_prompt(name: Option<&str>) -> (&'static str, &'static str) {
     match name.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
         Some("writer") => (WRITER_ID, WRITER_SYSTEM_PROMPT),
         Some("coder") => (CODER_ID, CODER_SYSTEM_PROMPT),

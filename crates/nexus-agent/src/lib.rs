@@ -48,6 +48,7 @@ pub mod core_plugin;
 mod executor;
 mod llm;
 pub mod orchestrator;
+pub mod session;
 
 pub use agents::EchoAgent;
 pub use archetypes::{
@@ -63,6 +64,11 @@ pub use core_plugin::{
 pub use executor::{PlanExecutor, StepResult, StepStatus};
 pub use llm::{ChatDriver, LlmAgent, Proposal, ProposedToolCall, DEFAULT_SYSTEM_PROMPT};
 pub use orchestrator::{AgentOrchestrator, TraceEntry};
+pub use session::{
+    run_session, AgentSession, AutoApproveAll, ProposedRound, RoundDecision,
+    RoundDecisionEntry, RoundRecord, SessionOutcome, SessionPolicy, ToolCallRecord,
+    MAX_AGENT_ROUNDS,
+};
 
 /// A unit of work produced by an [`Agent`] and consumed by a
 /// [`PlanExecutor`]. Steps are deliberately simple — agents that

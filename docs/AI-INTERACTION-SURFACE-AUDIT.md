@@ -242,6 +242,10 @@ Full registration (`crates/nexus-agent/src/core_plugin.rs:18–31`) — supersed
 | 10 | `parallel` | async | Fan-out `(archetype, goal)` jobs (BL-027) |
 | 11 | `pipeline` | async | Sequential stages (BL-027) |
 | 12 | `trace_get` | async | Orchestrator trace log (BL-027) |
+| 13 | `session_run` | async | ADR 0024 Phase 2a — multi-round tool-loop session, persists transcript |
+| 14 | `session_list` | async | Enumerate persisted sessions newest-first |
+| 15 | `session_get` | async | Load one session transcript by id |
+| 16 | `session_delete` | async | Remove one session transcript |
 
 ---
 

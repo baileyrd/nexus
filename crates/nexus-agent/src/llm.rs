@@ -19,6 +19,12 @@
 //! informational step carrying the model's narration.
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "ts-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
 
 use crate::{Agent, AgentError, Plan, Step, ToolCall};
 
@@ -39,7 +45,16 @@ respond with text and no tool calls.";
 /// driver runs the AI plugin's `dispatch_target` mapping before
 /// surfacing the proposal here, so `target_plugin_id` and
 /// `command_id` are already resolved.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
 pub struct ProposedToolCall {
     /// Provider-issued id (used for diagnostics; not threaded into
     /// the executor today).

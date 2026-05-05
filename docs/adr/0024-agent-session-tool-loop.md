@@ -1,7 +1,8 @@
 # ADR 0024: Agent Session Tool-Loop (ADR-0023 Phase 2)
 
 **Date:** 2026-05-05
-**Status:** Proposed
+**Status:** Accepted (Phase 2a). Phase 2b — bus-bridge approval
+callback — tracked under §"Open follow-ups".
 **Supersedes-section:** ADR 0023 §"Phase 2 — deferred follow-up ADR"
 
 ## Context
@@ -270,6 +271,12 @@ loop on every approval. It also fits Phase-2's value proposition
 auto-approve flows that don't need callback latency.
 
 ## Open follow-ups
+- **Phase 2b** — bus-bridge approval callback. Today (Phase 2a)
+  the `session_run` IPC handler accepts `auto_approve: true` only;
+  passing `false` returns "not yet implemented". Phase 2b lands
+  the `com.nexus.agent.round_proposed` event + `round_decide` IPC
+  + per-session oneshot wiring with a configurable timeout. Shell
+  approval-prompt UX is a separate piece of work.
 - A small ADR to delete the legacy `plan` / `run` / `run_plan` /
   `execute_step` IPC handlers once shell + CLI callers migrate.
 - Token-budget integration — sessions can run long; the existing

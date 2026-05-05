@@ -99,6 +99,24 @@ pub const HANDLER_PIPELINE: u32 = 11;
 /// (BL-027.)
 pub const HANDLER_TRACE_GET: u32 = 12;
 
+/// `session_run` (ADR 0024 Phase 2a) — drive a multi-round
+/// tool-loop session and persist the transcript. Args:
+/// `{ goal: string, archetype?: string, system?: string,
+///    auto_approve: bool }`. Phase 2a accepts `auto_approve: true`
+/// only; setting it to `false` returns "not yet implemented" until
+/// Phase 2b lands the bus-bridge approval callback.
+pub const HANDLER_SESSION_RUN: u32 = 13;
+/// `session_list` — enumerate persisted session transcripts under
+/// `<forge>/.forge/agent/sessions/`. No args; returns
+/// `[{ id, goal, started_at, outcome }]` newest-first.
+pub const HANDLER_SESSION_LIST: u32 = 14;
+/// `session_get` — load one session transcript by id. Args:
+/// `{ id: string }`. Returns the [`crate::AgentSession`] JSON.
+pub const HANDLER_SESSION_GET: u32 = 15;
+/// `session_delete` — remove one session transcript. Args:
+/// `{ id: string }`. Returns `{ deleted: bool }`.
+pub const HANDLER_SESSION_DELETE: u32 = 16;
+
 /// Default per-tool-call timeout used by the executor when no
 /// caller-provided override lands. Matches the bootstrap bridge.
 const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -217,6 +235,10 @@ impl CorePlugin for AgentCorePlugin {
                     handle_pipeline(orchestrator.expect("ctx present"), &args).await
                 }
                 HANDLER_TRACE_GET => handle_trace_get(orchestrator.expect("ctx present")).await,
+                HANDLER_SESSION_RUN => handle_session_run(ctx, &args).await,
+                HANDLER_SESSION_LIST => handle_session_list(ctx).await,
+                HANDLER_SESSION_GET => handle_session_get(ctx, &args).await,
+                HANDLER_SESSION_DELETE => handle_session_delete(ctx, &args).await,
                 other => Err(exec_err(format!("unknown handler id {other}"))),
             }
         }))
@@ -630,6 +652,185 @@ async fn handle_history_delete(
         .await
         .map_err(|e| exec_err(format!("history_delete: {e}")))?;
     Ok(serde_json::json!({ "deleted": true, "plan_id": a.plan_id }))
+}
+
+// ── Session handlers (ADR 0024 Phase 2a) ───────────────────────────────────
+
+const SESSION_DIR: &str = ".forge/agent/sessions";
+
+#[derive(Debug, Deserialize)]
+struct SessionRunArgs {
+    goal: String,
+    #[serde(default)]
+    archetype: Option<String>,
+    #[serde(default)]
+    system: Option<String>,
+    /// Phase 2a accepts only `true`. Phase 2b will plumb `false`
+    /// through the bus-bridge approval callback.
+    #[serde(default)]
+    auto_approve: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct SessionIdArgs {
+    id: String,
+}
+
+async fn handle_session_run(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: SessionRunArgs = parse(args, "session_run")?;
+    if !parsed.auto_approve {
+        return Err(exec_err(
+            "session_run: auto_approve=false requires the bus-bridge \
+             approval callback (ADR 0024 Phase 2b) — not yet implemented"
+                .into(),
+        ));
+    }
+
+    let driver = AiChatBridge {
+        ctx: Arc::clone(&ctx),
+        timeout: Duration::from_secs(300),
+    };
+    let dispatcher = KernelToolBridge {
+        ctx: Arc::clone(&ctx),
+        timeout: Duration::from_secs(60),
+    };
+
+    let system = match (&parsed.system, &parsed.archetype) {
+        (Some(s), _) => s.clone(),
+        (None, Some(name)) => {
+            // Reuse the archetype's prompt directly. Skill-aware
+            // assembly is for the legacy `plan` flow; sessions
+            // can compose later via Phase 2b.
+            let (_, prompt) = crate::archetypes::resolve_prompt(Some(name));
+            prompt.to_string()
+        }
+        (None, None) => DEFAULT_SYSTEM_PROMPT.to_string(),
+    };
+
+    let session = crate::session::run_session(
+        &driver,
+        &dispatcher,
+        &crate::session::AutoApproveAll,
+        &parsed.goal,
+        &system,
+        parsed.archetype.clone(),
+    )
+    .await;
+
+    // Persist before returning so a crash mid-call still leaves a
+    // record on disk.
+    let path = session_path(&session.id)
+        .ok_or_else(|| exec_err("session_run: refusing to write empty id".into()))?;
+    let bytes = serde_json::to_vec_pretty(&session)
+        .map_err(|e| exec_err(format!("session_run: encode session: {e}")))?;
+    ctx.write_file(&path, &bytes)
+        .await
+        .map_err(|e| exec_err(format!("session_run: persist: {e}")))?;
+
+    serde_json::to_value(&session)
+        .map_err(|e| exec_err(format!("session_run: encode reply: {e}")))
+}
+
+async fn handle_session_list(
+    ctx: Arc<KernelPluginContext>,
+) -> Result<serde_json::Value, PluginError> {
+    // Use storage's list_dir IPC so we don't need fs.read directly
+    // on the agent context (it doesn't hold the cap and shouldn't
+    // need it — the agent's own contexts are narrowly scoped per
+    // ADR 0022).
+    let entries = match ctx
+        .ipc_call(
+            "com.nexus.storage",
+            "list_dir",
+            serde_json::json!({ "path": SESSION_DIR }),
+            Duration::from_secs(5),
+        )
+        .await
+    {
+        Ok(v) => v,
+        // Empty / missing dir is a successful "no sessions" result.
+        Err(_) => return Ok(serde_json::json!([])),
+    };
+
+    let mut summaries: Vec<serde_json::Value> = Vec::new();
+    let Some(arr) = entries.as_array() else {
+        return Ok(serde_json::json!([]));
+    };
+    for entry in arr {
+        let Some(name) = entry.get("name").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if !name.ends_with(".json") {
+            continue;
+        }
+        let id = name.trim_end_matches(".json").to_string();
+        let Some(path) = session_path(&id) else {
+            continue;
+        };
+        let Ok(bytes) = ctx.read_file(&path).await else {
+            continue;
+        };
+        let Ok(session) = serde_json::from_slice::<crate::AgentSession>(&bytes) else {
+            continue;
+        };
+        summaries.push(serde_json::json!({
+            "id": session.id,
+            "goal": session.goal,
+            "started_at": session.started_at,
+            "ended_at": session.ended_at,
+            "outcome": session.outcome,
+        }));
+    }
+    summaries.sort_by(|a, b| {
+        b.get("started_at")
+            .and_then(serde_json::Value::as_str)
+            .cmp(&a.get("started_at").and_then(serde_json::Value::as_str))
+    });
+    Ok(serde_json::Value::Array(summaries))
+}
+
+async fn handle_session_get(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: SessionIdArgs = parse(args, "session_get")?;
+    let path = session_path(&a.id)
+        .ok_or_else(|| exec_err(format!("session_get: invalid id '{}'", a.id)))?;
+    let bytes = ctx
+        .read_file(&path)
+        .await
+        .map_err(|e| exec_err(format!("session_get: {e}")))?;
+    serde_json::from_slice::<serde_json::Value>(&bytes)
+        .map_err(|e| exec_err(format!("session_get: invalid JSON on disk: {e}")))
+}
+
+async fn handle_session_delete(
+    ctx: Arc<KernelPluginContext>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let a: SessionIdArgs = parse(args, "session_delete")?;
+    let path = session_path(&a.id)
+        .ok_or_else(|| exec_err(format!("session_delete: invalid id '{}'", a.id)))?;
+    ctx.delete_file(&path)
+        .await
+        .map_err(|e| exec_err(format!("session_delete: {e}")))?;
+    Ok(serde_json::json!({ "deleted": true, "id": a.id }))
+}
+
+/// Resolve a session id to its on-disk path. Validates the id is
+/// non-empty and contains only `[a-zA-Z0-9-]` so a maliciously
+/// shaped id can't path-traverse out of the sessions directory.
+fn session_path(id: &str) -> Option<std::path::PathBuf> {
+    if id.is_empty() {
+        return None;
+    }
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    Some(std::path::PathBuf::from(format!("{SESSION_DIR}/{id}.json")))
 }
 
 // ── Skill-aware system prompt assembly ─────────────────────────────────────

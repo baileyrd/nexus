@@ -249,6 +249,16 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         Arc::clone(&tool_policy_fn),
     );
 
+    // ADR 0024 Phase 2a — agent session_run drives the same
+    // tool-loop machinery as stream_chat, just with approval policy
+    // injected. Gate on ai.chat (consistent with propose_tool_calls)
+    // so a caller without it can't reach session_run either.
+    shared.add_cap_requirement(
+        "com.nexus.agent",
+        "session_run",
+        vec![Capability::AiChat],
+    );
+
     let dispatcher: Arc<dyn IpcDispatcher> = Arc::clone(&shared) as Arc<dyn IpcDispatcher>;
 
     // Hand the AI plugin its own KernelPluginContext so `ask`/`index_file`
@@ -1087,6 +1097,18 @@ fn register_core_plugins(
                     ("history_get", nexus_agent::HANDLER_HISTORY_GET),
                     ("history_delete", nexus_agent::HANDLER_HISTORY_DELETE),
                     ("list_archetypes", nexus_agent::HANDLER_LIST_ARCHETYPES),
+                    // BL-027 orchestrator surface (delegate / parallel /
+                    // pipeline / trace_get) is exposed via the same
+                    // dispatch_async path; manifest entries:
+                    ("delegate", nexus_agent::HANDLER_DELEGATE),
+                    ("parallel", nexus_agent::HANDLER_PARALLEL),
+                    ("pipeline", nexus_agent::HANDLER_PIPELINE),
+                    ("trace_get", nexus_agent::HANDLER_TRACE_GET),
+                    // ADR 0024 Phase 2a — agent session tool-loop.
+                    ("session_run", nexus_agent::core_plugin::HANDLER_SESSION_RUN),
+                    ("session_list", nexus_agent::core_plugin::HANDLER_SESSION_LIST),
+                    ("session_get", nexus_agent::core_plugin::HANDLER_SESSION_GET),
+                    ("session_delete", nexus_agent::core_plugin::HANDLER_SESSION_DELETE),
                 ],
             ),
             forge_root,
