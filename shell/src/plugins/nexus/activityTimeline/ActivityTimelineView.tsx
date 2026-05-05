@@ -3,7 +3,36 @@ import {
   useActivityTimelineStore,
   type ActivityEntry,
   type ActivitySurface,
+  type IsoDate,
 } from './activityTimelineStore'
+
+/**
+ * Local-date prefix (`YYYY-MM-DD`) of an entry timestamp. Returns null
+ * when the timestamp is unparseable so the date filter degrades to "no
+ * match" rather than throwing.
+ */
+function entryLocalDate(ts: string): IsoDate | null {
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return null
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+/** Inclusive on both bounds; either side may be null. */
+function entryInDateRange(
+  e: ActivityEntry,
+  from: IsoDate | null,
+  to: IsoDate | null,
+): boolean {
+  if (from === null && to === null) return true
+  const day = entryLocalDate(e.timestamp)
+  if (day === null) return false
+  if (from !== null && day < from) return false
+  if (to !== null && day > to) return false
+  return true
+}
 
 /**
  * BL-037 — pane-mode view for the AI activity timeline.
@@ -97,27 +126,48 @@ function entryMatchesFilter(e: ActivityEntry, needle: string): boolean {
 
 function Toolbar({
   filteredCount,
+  sessionOptions,
+  filtersActive,
   onClear,
 }: {
   filteredCount: number
+  sessionOptions: string[]
+  filtersActive: boolean
   onClear: () => void
 }) {
   const filter = useActivityTimelineStore((s) => s.filter)
   const setFilter = useActivityTimelineStore((s) => s.setFilter)
   const surfaceFilter = useActivityTimelineStore((s) => s.surfaceFilter)
   const setSurfaceFilter = useActivityTimelineStore((s) => s.setSurfaceFilter)
+  const sessionFilter = useActivityTimelineStore((s) => s.sessionFilter)
+  const setSessionFilter = useActivityTimelineStore((s) => s.setSessionFilter)
+  const dateFrom = useActivityTimelineStore((s) => s.dateFrom)
+  const dateTo = useActivityTimelineStore((s) => s.dateTo)
+  const setDateRange = useActivityTimelineStore((s) => s.setDateRange)
+  const resetFilters = useActivityTimelineStore((s) => s.resetFilters)
   const total = useActivityTimelineStore((s) => s.entries.length)
+
+  const inputBaseStyle = {
+    height: 24,
+    background: 'var(--background-secondary)',
+    color: 'var(--text-normal)',
+    border: '1px solid var(--divider-color)',
+    borderRadius: 4,
+    fontSize: 11,
+    fontFamily: 'var(--font-interface)',
+    padding: '0 6px',
+  } as const
 
   return (
     <div
       style={{
-        height: 36,
         flexShrink: 0,
         borderBottom: '1px solid var(--divider-color)',
         display: 'flex',
+        flexWrap: 'wrap',
         alignItems: 'center',
-        padding: '0 12px',
-        gap: 12,
+        padding: '6px 12px',
+        gap: 8,
         background: 'var(--background-primary)',
       }}
     >
@@ -128,7 +178,7 @@ function Toolbar({
         onChange={(e) => setFilter(e.target.value)}
         style={{
           flex: 1,
-          minWidth: 0,
+          minWidth: 160,
           maxWidth: 320,
           height: 24,
           padding: '0 8px',
@@ -147,16 +197,7 @@ function Toolbar({
           const v = e.target.value
           setSurfaceFilter(v === '' ? null : (v as ActivitySurface))
         }}
-        style={{
-          height: 24,
-          background: 'var(--background-secondary)',
-          color: 'var(--text-normal)',
-          border: '1px solid var(--divider-color)',
-          borderRadius: 4,
-          fontSize: 11,
-          fontFamily: 'var(--font-interface)',
-          padding: '0 6px',
-        }}
+        style={inputBaseStyle}
         title="Filter by surface"
       >
         <option value="">all surfaces</option>
@@ -166,18 +207,60 @@ function Toolbar({
           </option>
         ))}
       </select>
+      <select
+        value={sessionFilter ?? ''}
+        onChange={(e) => {
+          const v = e.target.value
+          setSessionFilter(v === '' ? null : v)
+        }}
+        style={{ ...inputBaseStyle, maxWidth: 160 }}
+        title="Filter by session id"
+        disabled={sessionOptions.length === 0}
+      >
+        <option value="">all sessions</option>
+        {sessionOptions.map((id) => (
+          <option key={id} value={id}>
+            {id.length > 18 ? `${id.slice(0, 8)}…${id.slice(-6)}` : id}
+          </option>
+        ))}
+      </select>
+      <input
+        type="date"
+        value={dateFrom ?? ''}
+        max={dateTo ?? undefined}
+        onChange={(e) => setDateRange(e.target.value || null, dateTo)}
+        style={inputBaseStyle}
+        title="From date (inclusive)"
+      />
+      <input
+        type="date"
+        value={dateTo ?? ''}
+        min={dateFrom ?? undefined}
+        onChange={(e) => setDateRange(dateFrom, e.target.value || null)}
+        style={inputBaseStyle}
+        title="To date (inclusive)"
+      />
+      {filtersActive && (
+        <button
+          onClick={resetFilters}
+          title="Clear all filters"
+          style={{
+            ...inputBaseStyle,
+            background: 'transparent',
+            color: 'var(--text-muted)',
+            cursor: 'pointer',
+          }}
+        >
+          Reset
+        </button>
+      )}
       <button
         onClick={onClear}
         title="Clear timeline (deletes the on-disk log)"
         style={{
-          height: 24,
-          padding: '0 8px',
+          ...inputBaseStyle,
           background: 'transparent',
           color: 'var(--text-muted)',
-          border: '1px solid var(--divider-color)',
-          borderRadius: 4,
-          fontSize: 11,
-          fontFamily: 'var(--font-interface)',
           cursor: 'pointer',
         }}
       >
@@ -191,9 +274,7 @@ function Toolbar({
           fontSize: 11,
         }}
       >
-        {filter.length > 0 || surfaceFilter !== null
-          ? `${filteredCount} / ${total}`
-          : `${total}`}
+        {filtersActive ? `${filteredCount} / ${total}` : `${total}`}
       </div>
     </div>
   )
@@ -344,15 +425,20 @@ function EntryList() {
   const entries = useActivityTimelineStore((s) => s.entries)
   const filter = useActivityTimelineStore((s) => s.filter)
   const surfaceFilter = useActivityTimelineStore((s) => s.surfaceFilter)
+  const sessionFilter = useActivityTimelineStore((s) => s.sessionFilter)
+  const dateFrom = useActivityTimelineStore((s) => s.dateFrom)
+  const dateTo = useActivityTimelineStore((s) => s.dateTo)
   const hydrated = useActivityTimelineStore((s) => s.hydrated)
 
   const filtered = useMemo(() => {
     return entries.filter(
       (e) =>
         (surfaceFilter === null || e.surface === surfaceFilter) &&
+        (sessionFilter === null || e.session_id === sessionFilter) &&
+        entryInDateRange(e, dateFrom, dateTo) &&
         entryMatchesFilter(e, filter.trim()),
     )
-  }, [entries, filter, surfaceFilter])
+  }, [entries, filter, surfaceFilter, sessionFilter, dateFrom, dateTo])
 
   if (!hydrated) {
     return (
@@ -377,17 +463,36 @@ function EntryList() {
         style={{
           flex: 1,
           display: 'flex',
+          flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
+          gap: 8,
           color: 'var(--text-faint)',
           fontSize: 12,
           padding: 24,
           textAlign: 'center',
+          lineHeight: 1.6,
         }}
       >
-        No AI activity yet.
-        <br />
-        Run a chat, Cmd+I, or ask command and it will appear here.
+        <div>No AI activity yet.</div>
+        <div>
+          Every chat, Cmd+I, ask, ghost completion, or auto-enrich is
+          recorded here — prompt, model, files touched, tools, and
+          outcome.
+        </div>
+        <div style={{ marginTop: 6 }}>
+          <a
+            href="https://github.com/nexus-app/nexus/blob/main/docs/PRDs/12-ai-engine.md"
+            target="_blank"
+            rel="noreferrer noopener"
+            style={{
+              color: 'var(--text-muted)',
+              textDecoration: 'underline',
+            }}
+          >
+            What gets recorded?
+          </a>
+        </div>
       </div>
     )
   }
@@ -434,17 +539,41 @@ export function ActivityTimelineView({
   const entries = useActivityTimelineStore((s) => s.entries)
   const filter = useActivityTimelineStore((s) => s.filter)
   const surfaceFilter = useActivityTimelineStore((s) => s.surfaceFilter)
+  const sessionFilter = useActivityTimelineStore((s) => s.sessionFilter)
+  const dateFrom = useActivityTimelineStore((s) => s.dateFrom)
+  const dateTo = useActivityTimelineStore((s) => s.dateTo)
+
+  const sessionOptions = useMemo(() => {
+    const seen = new Set<string>()
+    const ordered: string[] = []
+    for (const e of entries) {
+      if (e.session_id && !seen.has(e.session_id)) {
+        seen.add(e.session_id)
+        ordered.push(e.session_id)
+      }
+    }
+    return ordered
+  }, [entries])
+
+  const filtersActive =
+    filter.length > 0 ||
+    surfaceFilter !== null ||
+    sessionFilter !== null ||
+    dateFrom !== null ||
+    dateTo !== null
 
   const filteredCount = useMemo(() => {
     return entries.reduce(
       (n, e) =>
         (surfaceFilter === null || e.surface === surfaceFilter) &&
+        (sessionFilter === null || e.session_id === sessionFilter) &&
+        entryInDateRange(e, dateFrom, dateTo) &&
         entryMatchesFilter(e, filter.trim())
           ? n + 1
           : n,
       0,
     )
-  }, [entries, filter, surfaceFilter])
+  }, [entries, filter, surfaceFilter, sessionFilter, dateFrom, dateTo])
 
   return (
     <div
@@ -470,7 +599,12 @@ export function ActivityTimelineView({
       >
         Activity Timeline
       </div>
-      <Toolbar filteredCount={filteredCount} onClear={onClear} />
+      <Toolbar
+        filteredCount={filteredCount}
+        sessionOptions={sessionOptions}
+        filtersActive={filtersActive}
+        onClear={onClear}
+      />
       <EntryList />
     </div>
   )

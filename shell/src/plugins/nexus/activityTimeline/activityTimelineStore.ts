@@ -52,6 +52,10 @@ export interface ActivityEntry {
  *  oversized JSONL file doesn't blow the renderer up. */
 export const TIMELINE_ENTRIES_CAP = 1000
 
+/** ISO-8601 calendar date (`YYYY-MM-DD`) as accepted by `<input type="date">`.
+ *  Compared against the entry timestamp's local-date prefix. */
+export type IsoDate = string
+
 interface ActivityTimelineState {
   /** Newest entry first. */
   entries: ActivityEntry[]
@@ -59,6 +63,12 @@ interface ActivityTimelineState {
   filter: string
   /** Surface filter. `null` = all surfaces. */
   surfaceFilter: ActivitySurface | null
+  /** Session filter. `null` = all sessions. */
+  sessionFilter: string | null
+  /** Inclusive date-range filter (`YYYY-MM-DD`); either bound may be
+   *  null, meaning unbounded on that side. */
+  dateFrom: IsoDate | null
+  dateTo: IsoDate | null
   /** Has the initial hydrate completed? Used to render an empty state
    *  vs a loading state when the user opens the pane. */
   hydrated: boolean
@@ -67,6 +77,9 @@ interface ActivityTimelineState {
   prepend(entry: ActivityEntry): void
   setFilter(filter: string): void
   setSurfaceFilter(s: ActivitySurface | null): void
+  setSessionFilter(id: string | null): void
+  setDateRange(from: IsoDate | null, to: IsoDate | null): void
+  resetFilters(): void
   clear(): void
 }
 
@@ -75,6 +88,9 @@ export const useActivityTimelineStore = create<ActivityTimelineState>(
     entries: [],
     filter: '',
     surfaceFilter: null,
+    sessionFilter: null,
+    dateFrom: null,
+    dateTo: null,
     hydrated: false,
 
     hydrate: (entries) =>
@@ -96,6 +112,16 @@ export const useActivityTimelineStore = create<ActivityTimelineState>(
 
     setFilter: (filter) => set({ filter }),
     setSurfaceFilter: (surfaceFilter) => set({ surfaceFilter }),
+    setSessionFilter: (sessionFilter) => set({ sessionFilter }),
+    setDateRange: (dateFrom, dateTo) => set({ dateFrom, dateTo }),
+    resetFilters: () =>
+      set({
+        filter: '',
+        surfaceFilter: null,
+        sessionFilter: null,
+        dateFrom: null,
+        dateTo: null,
+      }),
     clear: () => set({ entries: [] }),
   }),
 )
