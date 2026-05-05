@@ -535,6 +535,12 @@ async fn handle_session_run(
     let path_str = path
         .to_str()
         .ok_or_else(|| exec_err("session_run: session path not UTF-8".into()))?;
+    tracing::info!(
+        session_id = %session.id,
+        path = %path_str,
+        bytes = bytes.len(),
+        "session_run: persisting transcript"
+    );
     ctx.ipc_call(
         "com.nexus.storage",
         "write_vault_file",
@@ -542,7 +548,11 @@ async fn handle_session_run(
         Duration::from_secs(10),
     )
     .await
-    .map_err(|e| exec_err(format!("session_run: persist: {e}")))?;
+    .map_err(|e| {
+        tracing::warn!(session_id = %session.id, error = %e, "session_run: persist failed");
+        exec_err(format!("session_run: persist: {e}"))
+    })?;
+    tracing::info!(session_id = %session.id, "session_run: persisted ok");
 
     serde_json::to_value(&session)
         .map_err(|e| exec_err(format!("session_run: encode reply: {e}")))
@@ -570,17 +580,29 @@ async fn handle_session_list(
         .await
     {
         Ok(v) => v,
-        // Missing dir / empty / errored: report no sessions.
-        Err(_) => return Ok(serde_json::json!([])),
+        Err(e) => {
+            tracing::info!(error = %e, dir = SESSION_DIR, "session_list: list_dir errored, reporting empty");
+            return Ok(serde_json::json!([]));
+        }
     };
 
-    let mut summaries: Vec<serde_json::Value> = Vec::new();
     let Some(arr) = response
         .get("entries")
         .and_then(serde_json::Value::as_array)
     else {
+        tracing::warn!(
+            dir = SESSION_DIR,
+            response = %response,
+            "session_list: list_dir reply had no 'entries' array"
+        );
         return Ok(serde_json::json!([]));
     };
+    tracing::info!(
+        dir = SESSION_DIR,
+        entries = arr.len(),
+        "session_list: scanning directory"
+    );
+    let mut summaries: Vec<serde_json::Value> = Vec::new();
     for entry in arr {
         let Some(name) = entry.get("name").and_then(serde_json::Value::as_str) else {
             continue;
