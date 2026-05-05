@@ -28,3 +28,8 @@ anyhow     = { workspace = true }
 tracing    = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap       = { workspace = true }
+
+# Explicit pin so Cargo's macOS resolver picks 0.10.0 (gpui's exact constraint)
+# rather than 0.10.1, which would conflict with gpui's =0.10.0 requirement.
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "=0.10.0"
