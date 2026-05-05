@@ -128,12 +128,20 @@ All route through `context.ipc_call("com.nexus.ai", handler, args, 120s)`.
 
 ---
 
-## 4. Capability Gating — Weak
+## 4. Capability Gating
 
-- AI plugin holds `Capability::IpcCall` by default (`core_plugin.rs:2386` test wiring).
+- AI plugin holds `Capability::IpcCall` by default (`core_plugin.rs` test wiring).
 - Storage tools propagate: `read_file`/`write_file` → `ipc_call` → kernel validates caller's `ipc.call` capability → storage's own checks.
-- **No `ai.chat` capability exists.** Any caller with `ipc.call` can invoke any AI handler — no per-handler granularity (e.g. allow `chat`, deny `index_file`).
-- The `tools` request argument (`stream_chat` lines 225, 181) is **client-controlled, not server-enforced**.
+- **Per-handler `ai.*` caps wired (G6, ADR 0022).** Bootstrap registers
+  `ai.chat`, `ai.index`, `ai.session.{read,write}`, `ai.config.write`,
+  `ai.activity.write` via `add_cap_requirement` for every gated AI handler.
+  Workflow + agent contexts now hold `ai.chat` only — `set_config` and
+  `activity_clear` return `CapabilityDenied` when reached from those
+  contexts. `ai.config.write` is HIGH-risk (persisted-grant prompt).
+- **Open follow-up (Phase 2):** the `tools` request argument
+  (`AiToolPolicy::Auto` / `None` / `AutoWithMcp`) is still
+  client-controlled. ADR 0022 §"Server-side `tools` policy enforcement"
+  defers `ai.tools.write` / `ai.tools.mcp` to a separate ADR.
 
 ---
 

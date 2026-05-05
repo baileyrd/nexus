@@ -1,7 +1,7 @@
 # ADR 0022: Per-Handler Capabilities for the AI Plugin
 
 **Date:** 2026-05-05
-**Status:** Proposed
+**Status:** Accepted
 **Audit reference:** [`docs/AI-INTERACTION-SURFACE-AUDIT.md`](../AI-INTERACTION-SURFACE-AUDIT.md) §4 (G6)
 
 ## Context

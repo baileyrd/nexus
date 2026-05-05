@@ -200,6 +200,30 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         vec![Capability::ProcessSpawn],
     );
 
+    // Per-handler ai.* capability gates per ADR 0022. Closes the AI
+    // audit's §4 finding ("any caller with ipc.call can invoke any AI
+    // handler"). Read-only handlers (status, config, index_status,
+    // vectorstore_count, activity_list, apply) keep the ipc.call-only
+    // default — they're either inert or already gated downstream
+    // (apply writes via storage, which has its own fs.write check).
+    for (cmd, cap) in [
+        ("stream_chat", Capability::AiChat),
+        ("stream_ask", Capability::AiChat),
+        ("ask", Capability::AiChat),
+        ("semantic_search", Capability::AiChat),
+        ("enrich_file", Capability::AiChat),
+        ("index_file", Capability::AiIndex),
+        ("index_trigger", Capability::AiIndex),
+        ("session_load", Capability::AiSessionRead),
+        ("session_list", Capability::AiSessionRead),
+        ("session_save", Capability::AiSessionWrite),
+        ("session_delete", Capability::AiSessionWrite),
+        ("set_config", Capability::AiConfigWrite),
+        ("activity_clear", Capability::AiActivityWrite),
+    ] {
+        shared.add_cap_requirement("com.nexus.ai", cmd, vec![cap]);
+    }
+
     let dispatcher: Arc<dyn IpcDispatcher> = Arc::clone(&shared) as Arc<dyn IpcDispatcher>;
 
     // Hand the AI plugin its own KernelPluginContext so `ask`/`index_file`
@@ -1407,9 +1431,18 @@ pub fn all_caps() -> CapabilitySet {
 /// agent → mcp, …) is tracked under #77.
 #[must_use]
 pub fn agent_capabilities() -> CapabilitySet {
-    [Capability::IpcCall, Capability::FsRead, Capability::FsWrite]
-        .into_iter()
-        .collect()
+    [
+        Capability::IpcCall,
+        Capability::FsRead,
+        Capability::FsWrite,
+        // ADR 0022: planner LLM calls go through `com.nexus.ai::stream_chat`,
+        // which now requires `ai.chat`. No `ai.config.write` /
+        // `ai.activity.write` so a manipulated plan can't rotate
+        // credentials or wipe the audit log.
+        Capability::AiChat,
+    ]
+    .into_iter()
+    .collect()
 }
 
 /// Capabilities granted to the `com.nexus.workflow` `KernelPluginContext`
@@ -1426,7 +1459,13 @@ pub fn agent_capabilities() -> CapabilitySet {
 /// IpcCall-laundering surface as for `agent_capabilities`.
 #[must_use]
 pub fn workflow_capabilities() -> CapabilitySet {
-    [Capability::IpcCall].into_iter().collect()
+    // ADR 0022: workflow `ai_prompt` steps reach `stream_chat` via
+    // `ipc_call`, which now requires `ai.chat`. No write/config/activity
+    // ai.* caps so a user-authored workflow step can't rotate
+    // credentials or wipe the audit log.
+    [Capability::IpcCall, Capability::AiChat]
+        .into_iter()
+        .collect()
 }
 
 /// BL-028g — pull `[webhooks]` out of `<forge>/.forge/config.toml`.

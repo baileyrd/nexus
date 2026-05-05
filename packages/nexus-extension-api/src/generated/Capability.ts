@@ -7,4 +7,4 @@
  * system. Plugin manifests reference them as hierarchical dot-namespaced
  * strings (e.g., `"fs.read"`); this enum is the canonical in-memory form.
  */
-export type Capability = "FsRead" | "FsWrite" | "FsReadExternal" | "FsWriteExternal" | "NetHttp" | "NetHttpLocalhost" | "ProcessSpawn" | "KvRead" | "KvWrite" | "IpcCall" | "DbQuery" | "DbWrite" | "EventsPublish" | "UiNotify";
+export type Capability = "FsRead" | "FsWrite" | "FsReadExternal" | "FsWriteExternal" | "NetHttp" | "NetHttpLocalhost" | "ProcessSpawn" | "KvRead" | "KvWrite" | "IpcCall" | "DbQuery" | "DbWrite" | "EventsPublish" | "UiNotify" | "AiChat" | "AiIndex" | "AiSessionRead" | "AiSessionWrite" | "AiConfigWrite" | "AiActivityWrite";

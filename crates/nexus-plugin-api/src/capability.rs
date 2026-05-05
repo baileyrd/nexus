@@ -39,6 +39,22 @@ pub enum Capability {
     EventsPublish,
     /// Show UI notifications (toasts) to the user.
     UiNotify,
+    /// Invoke AI chat surfaces (`stream_chat`, `stream_ask`, `ask`,
+    /// `semantic_search`, `enrich_file`). Per ADR 0022.
+    AiChat,
+    /// Trigger AI indexing (`index_file`, `index_trigger`). Per ADR 0022.
+    AiIndex,
+    /// Read persisted chat sessions (`session_load`, `session_list`).
+    /// Per ADR 0022.
+    AiSessionRead,
+    /// Write/delete persisted chat sessions (`session_save`,
+    /// `session_delete`). Per ADR 0022.
+    AiSessionWrite,
+    /// Hot-swap AI provider credentials (`set_config`). HIGH risk per
+    /// ADR 0022 — equivalent in surface to `process.spawn`.
+    AiConfigWrite,
+    /// Mutate the AI activity timeline (`activity_clear`). Per ADR 0022.
+    AiActivityWrite,
 }
 
 /// Error parsing a capability string.
@@ -68,6 +84,12 @@ impl Capability {
         Capability::DbWrite,
         Capability::EventsPublish,
         Capability::UiNotify,
+        Capability::AiChat,
+        Capability::AiIndex,
+        Capability::AiSessionRead,
+        Capability::AiSessionWrite,
+        Capability::AiConfigWrite,
+        Capability::AiActivityWrite,
     ];
 
     /// Returns `true` if this capability is classified as HIGH risk.
@@ -82,6 +104,7 @@ impl Capability {
                 | Capability::NetHttp
                 | Capability::ProcessSpawn
                 | Capability::IpcCall
+                | Capability::AiConfigWrite
         )
     }
 
@@ -103,6 +126,12 @@ impl Capability {
             Capability::DbWrite          => "db.write",
             Capability::EventsPublish    => "events.publish",
             Capability::UiNotify         => "ui.notify",
+            Capability::AiChat           => "ai.chat",
+            Capability::AiIndex          => "ai.index",
+            Capability::AiSessionRead    => "ai.session.read",
+            Capability::AiSessionWrite   => "ai.session.write",
+            Capability::AiConfigWrite    => "ai.config.write",
+            Capability::AiActivityWrite  => "ai.activity.write",
         }
     }
 
@@ -128,6 +157,12 @@ impl Capability {
             "db.write"           => Ok(Capability::DbWrite),
             "events.publish"     => Ok(Capability::EventsPublish),
             "ui.notify"          => Ok(Capability::UiNotify),
+            "ai.chat"            => Ok(Capability::AiChat),
+            "ai.index"           => Ok(Capability::AiIndex),
+            "ai.session.read"    => Ok(Capability::AiSessionRead),
+            "ai.session.write"   => Ok(Capability::AiSessionWrite),
+            "ai.config.write"    => Ok(Capability::AiConfigWrite),
+            "ai.activity.write"  => Ok(Capability::AiActivityWrite),
             other => Err(CapabilityParseError::UnknownString(other.to_string())),
         }
     }
@@ -230,6 +265,17 @@ mod tests {
 
     #[test]
     fn all_slice_covers_all_discriminants() {
-        assert_eq!(Capability::ALL.len(), 14);
+        // 14 base + 6 ai.* per ADR 0022.
+        assert_eq!(Capability::ALL.len(), 20);
+    }
+
+    #[test]
+    fn ai_config_write_is_high_risk() {
+        assert!(Capability::AiConfigWrite.is_high_risk());
+    }
+
+    #[test]
+    fn ai_chat_is_not_high_risk() {
+        assert!(!Capability::AiChat.is_high_risk());
     }
 }

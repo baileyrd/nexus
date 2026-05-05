@@ -69,6 +69,18 @@ pub fn risk_level(cap: Capability) -> RiskLevel {
         // Showing toasts has no destructive effect but is a user-visible
         // side effect; low risk, but spam potential warrants a gate.
         Capability::UiNotify => RiskLevel::Low,
+
+        // ai.* capabilities (ADR 0022). Read-side and indexing are Low;
+        // write-side handlers and chat (which can drive tools) are
+        // Medium; ai.config.write rotates provider credentials and is
+        // High by analogy with process.spawn.
+        Capability::AiIndex
+        | Capability::AiSessionRead
+        | Capability::AiSessionWrite => RiskLevel::Low,
+
+        Capability::AiChat | Capability::AiActivityWrite => RiskLevel::Medium,
+
+        Capability::AiConfigWrite => RiskLevel::High,
     }
 }
 
