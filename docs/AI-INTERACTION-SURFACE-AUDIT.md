@@ -48,23 +48,24 @@ The AI plugin registers as `com.nexus.ai` with **19 IPC handlers** (`crates/nexu
 
 ## 2. What AI Can Call OUT To
 
-### A. Built-in tools registered to the model — exactly two
+### A. Built-in tools registered to the model — five
 
-`register_storage_builtins()` (`crates/nexus-ai/src/tools/functions.rs:219–230`) registers:
+Two registration helpers in `crates/nexus-ai/src/tools/functions.rs` populate the registry, both called from `core_plugin.rs::wire_context`:
 
-1. **`read_file`** (schema lines 41–61)
-   - Input: `{"path": "forge-relative-path"}`
-   - Dispatches to `com.nexus.storage::read_file` (line 139)
-   - Returns UTF-8 content or "not found" error
+**`register_storage_builtins()`** — read/write file pair:
 
-2. **`write_file`** (schema lines 63–90)
-   - Input: `{"path": "...", "content": "..."}`
-   - Dispatches to `com.nexus.storage::write_file` (line 199)
-   - Returns `"Wrote N bytes to <path>"`
+1. **`read_file`** — dispatches to `com.nexus.storage::read_file`. Returns UTF-8 content or "not found" error.
+2. **`write_file`** — dispatches to `com.nexus.storage::write_file`. Returns `"Wrote N bytes to <path>"`.
 
-Both run through `KernelPluginContext::ipc_call` with a 30 s timeout. **Functional and tested** (`core_plugin.rs:1854–2350` contains 15+ unit tests exercising the dispatch loop).
+**`register_extended_builtins()`** (G4) — read-only KG/VCS lookups, hard-capped at 25 results per call:
 
-The comments at `tools/functions.rs:14–18` list `terminal_exec`, `database_query`, `search_knowledge_graph` as deferred — **no implementations exist**.
+3. **`search_forge`** — dispatches to `com.nexus.storage::search`. Tantivy full-text query, default limit 10.
+4. **`list_backlinks`** — dispatches to `com.nexus.storage::backlinks`. Incoming wikilinks for a path.
+5. **`git_log`** — dispatches to `com.nexus.git::log`. Recent commits; the git plugin returns a clear error when the forge isn't a repo, surfaced verbatim to the model.
+
+All five run through `KernelPluginContext::ipc_call` with a 30 s timeout. Schema/arg-decoding tests live alongside in `tools/functions.rs`; the dispatch loop integration is exercised by `core_plugin.rs` tests (`semantic_search_dispatch_tests` and friends).
+
+`terminal_exec` and `database_query` from PRD-12 §8.2 remain deferred — they need their own capability surface (`process.spawn`, etc.) that doesn't exist yet.
 
 ### B. Tool-aware dispatch loop
 
@@ -144,12 +145,14 @@ All route through `context.ipc_call("com.nexus.ai", handler, args, 120s)`.
 | OpenAI chat + tool-calling | ✅ Fully wired | `openai.rs:177+` |
 | Ollama chat + tool-calling | ✅ Fully wired | `ollama.rs:260+` |
 | Tool dispatch loop (8 rounds) | ✅ Fully wired | `core_plugin.rs:1265–1350` |
-| `read_file` / `write_file` tools | ✅ Fully wired | `tools/functions.rs:219–230` |
+| `read_file` / `write_file` tools | ✅ Fully wired | `tools/functions.rs` `register_storage_builtins` |
+| `search_forge` / `list_backlinks` / `git_log` (G4) | ✅ Fully wired | `tools/functions.rs` `register_extended_builtins` |
 | Streaming (per-token events) | ✅ Fully wired | `ipc.rs:141–163`, `core_plugin.rs:776–870` |
 | RAG + vector search | ✅ Fully wired | `core_plugin.rs:1+`, `rag.rs` |
 | Session persistence | ✅ Fully wired | `core_plugin.rs:73–85` |
-| Terminal / database / git tools | 🔴 Not implemented | `tools/functions.rs:14–18` (deferred comment) |
-| Knowledge-graph search tool | 🔴 Not implemented | No code; only Tantivy used internally for RAG |
+| Terminal / database tools | 🔴 Not implemented | `tools/functions.rs` module doc — needs new capability surface |
+| Git tool | 🟢 `git_log` shipped | Read-only; mutation tools (`commit`, `stage_*`) still deferred |
+| Knowledge-graph search tool | 🟢 `search_forge` + `list_backlinks` shipped | Read-only Tantivy + backlink lookup |
 | Local embeddings | 🟡 Scaffold only | `local_embedding.rs:46–48`; deferred per status doc |
 | `semantic_search` handler | 🟡 Stub | Handler registered, no real impl |
 | Agent ↔ AI tool registry | 🟡 Not unified | Agents go via kernel IPC, not AI's tool loop |

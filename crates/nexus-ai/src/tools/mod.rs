@@ -16,6 +16,8 @@ pub mod functions;
 pub mod registry;
 
 pub use functions::{
-    read_file_schema, register_storage_builtins, write_file_schema, ReadFileTool, WriteFileTool,
+    git_log_schema, list_backlinks_schema, read_file_schema, register_extended_builtins,
+    register_storage_builtins, search_forge_schema, write_file_schema, GitLogTool,
+    ListBacklinksTool, ReadFileTool, SearchForgeTool, WriteFileTool,
 };
 pub use registry::{RegisteredTool, ToolError, ToolExecutor, ToolRegistry, ToolSchema};

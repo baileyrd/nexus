@@ -37,7 +37,9 @@ use crate::ipc::{
 use crate::ollama::OllamaProvider;
 use crate::openai::OpenAiProvider;
 use crate::provider::{AiProvider, ChatMessage, ChatTurn, ToolCall};
-use crate::tools::{register_storage_builtins, ToolError, ToolRegistry};
+use crate::tools::{
+    register_extended_builtins, register_storage_builtins, ToolError, ToolRegistry,
+};
 use crate::{rag, vectorstore};
 
 /// Hard cap on tool-call rounds inside a single `stream_chat`
@@ -379,6 +381,7 @@ impl CorePlugin for AiCorePlugin {
     fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
         let mut registry = ToolRegistry::new();
         register_storage_builtins(&mut registry, Arc::clone(&ctx));
+        register_extended_builtins(&mut registry, Arc::clone(&ctx));
         self.tools = Some(Arc::new(registry));
 
         // BL-037 — bind the activity recorder to the same context so
