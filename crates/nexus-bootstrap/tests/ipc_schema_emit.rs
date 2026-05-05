@@ -19,9 +19,9 @@ use std::path::PathBuf;
 use schemars::{schema_for, JsonSchema};
 
 use nexus_ai::ipc::{
-    AiActivityListArgs, AiActivityListResult, AiStreamAskArgs, AiStreamAskMessage,
-    AiStreamAskResult, AiStreamAskRole, AiStreamAskSource, AiStreamChatArgs, AiStreamChatMode,
-    AiToolPolicy,
+    AiActivityListArgs, AiActivityListResult, AiProposeArgs, AiProposeReply, AiProposedToolCall,
+    AiStreamAskArgs, AiStreamAskMessage, AiStreamAskResult, AiStreamAskRole, AiStreamAskSource,
+    AiStreamChatArgs, AiStreamChatMode, AiToolPolicy, AiUnmappedToolCall,
 };
 // FU-13 — RAG response shape (BL-038). TS bindings shipped already;
 // emitting JSON Schema lets MCP / external tools consume the same
@@ -165,6 +165,14 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<AiStreamChatArgs>("com_nexus_ai__stream_chat", "args");
     write_schema::<AiStreamChatMode>("com_nexus_ai__stream_chat", "mode");
     write_schema::<AiToolPolicy>("com_nexus_ai__stream_chat", "tool_policy");
+
+    // ── com.nexus.ai::propose_tool_calls (G7 / ADR 0023) ─────────────────
+    // Single-turn provider call that returns mapped tool-use blocks
+    // without executing them; consumed by the agent migration.
+    write_schema::<AiProposeArgs>("com_nexus_ai__propose_tool_calls", "args");
+    write_schema::<AiProposeReply>("com_nexus_ai__propose_tool_calls", "reply");
+    write_schema::<AiProposedToolCall>("com_nexus_ai__propose_tool_calls", "tool_call");
+    write_schema::<AiUnmappedToolCall>("com_nexus_ai__propose_tool_calls", "unmapped");
 
     // ── com.nexus.ai::ask (BL-038 RAG response) ──────────────────────────
     // The MCP surface re-uses this shape to expose RAG answers + their

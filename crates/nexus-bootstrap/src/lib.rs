@@ -212,6 +212,7 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         ("ask", Capability::AiChat),
         ("semantic_search", Capability::AiChat),
         ("enrich_file", Capability::AiChat),
+        ("propose_tool_calls", Capability::AiChat),
         ("index_file", Capability::AiIndex),
         ("index_trigger", Capability::AiIndex),
         ("session_load", Capability::AiSessionRead),
@@ -830,6 +831,15 @@ fn register_core_plugins(
                     (
                         "activity_clear",
                         nexus_ai::core_plugin::HANDLER_ACTIVITY_CLEAR,
+                    ),
+                    // G7 / ADR 0023 — single-turn provider call that
+                    // returns mapped tool-use blocks without executing
+                    // them. Consumed by the agent migration (Phase 1b);
+                    // exposed here so the IPC contract is reachable
+                    // independently of caller wiring.
+                    (
+                        "propose_tool_calls",
+                        nexus_ai::core_plugin::HANDLER_PROPOSE_TOOL_CALLS,
                     ),
                 ],
             ),

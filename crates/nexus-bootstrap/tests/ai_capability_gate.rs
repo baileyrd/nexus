@@ -27,6 +27,7 @@ const AI_GATES: &[(&str, Capability)] = &[
     ("ask", Capability::AiChat),
     ("semantic_search", Capability::AiChat),
     ("enrich_file", Capability::AiChat),
+    ("propose_tool_calls", Capability::AiChat),
     ("index_file", Capability::AiIndex),
     ("index_trigger", Capability::AiIndex),
     ("session_load", Capability::AiSessionRead),

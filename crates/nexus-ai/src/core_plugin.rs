@@ -31,8 +31,9 @@ use crate::embedding::EmbeddingProvider;
 use crate::indexing_daemon::{self, DaemonMsg, EmbedderFactory, IndexingDaemon, SharedStatus};
 use tokio::sync::mpsc::UnboundedSender;
 use crate::ipc::{
-    AiActivityListArgs, AiActivityListResult, AiStreamAskMessage, AiStreamAskRole, AiStreamChatArgs,
-    AiStreamChatMode, AiToolPolicy,
+    AiActivityListArgs, AiActivityListResult, AiProposeArgs, AiProposeReply, AiProposedToolCall,
+    AiStreamAskMessage, AiStreamAskRole, AiStreamChatArgs, AiStreamChatMode, AiToolPolicy,
+    AiUnmappedToolCall,
 };
 use crate::ollama::OllamaProvider;
 use crate::openai::OpenAiProvider;
@@ -161,6 +162,13 @@ pub const HANDLER_ACTIVITY_LIST: u32 = 18;
 /// BL-037 — `activity_clear`: truncate the activity log to zero
 /// bytes. No args, returns `{ cleared: true }`.
 pub const HANDLER_ACTIVITY_CLEAR: u32 = 19;
+
+/// G7 — `propose_tool_calls`: single-turn provider call that returns
+/// the model's tool-use blocks WITHOUT executing them. Used by
+/// `nexus-agent` (ADR 0023) to derive a `Plan` for later
+/// approval-gated execution. Args [`AiProposeArgs`], reply
+/// [`AiProposeReply`].
+pub const HANDLER_PROPOSE_TOOL_CALLS: u32 = 20;
 
 /// Core plugin for AI integration.
 pub struct AiCorePlugin {
@@ -387,6 +395,9 @@ impl CorePlugin for AiCorePlugin {
                 }
                 HANDLER_ENRICH_FILE => handle_enrich_file(&ctx, ai_cfg, embed_cfg, &args).await,
                 HANDLER_ENRICH_APPLY => handle_enrich_apply(&ctx, &args).await,
+                HANDLER_PROPOSE_TOOL_CALLS => {
+                    handle_propose_tool_calls(ctx, ai_cfg, tools, &args).await
+                }
                 _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
             }
         }))
@@ -800,6 +811,76 @@ fn config_snapshot(ai_cfg: Option<&AiConfig>, embed_cfg: Option<&AiConfig>) -> s
 // branch would just push the same record_activity_error call out to
 // callers.
 #[allow(clippy::too_many_lines, reason = "BL-037 records on every exit path; flow stays linear")]
+/// G7 — single-turn provider call that returns the model's tool-use
+/// blocks without executing any of them, for the agent's
+/// plan-then-approve flow (ADR 0023).
+///
+/// Mirrors `stream_chat`'s setup (registry resolution per
+/// `AiToolPolicy`, including the MCP bridge under `AutoWithMcp`)
+/// but uses `chat_turn_with_tools` exactly once with a no-op chunk
+/// sink. Streaming events are intentionally NOT published — this
+/// handler is for backgrounded planning, not user-visible chat.
+async fn handle_propose_tool_calls(
+    ctx: Arc<KernelPluginContext>,
+    ai_cfg: Option<AiConfig>,
+    tools: Option<Arc<ToolRegistry>>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: AiProposeArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("propose_tool_calls: args decode: {e}")))?;
+
+    let ai_cfg = ai_cfg
+        .ok_or_else(|| exec_err("propose_tool_calls: no AI chat provider configured"))?;
+    let ai = build_ai_provider(&ai_cfg).map_err(exec_err)?;
+
+    let policy = parsed.tools.unwrap_or_default();
+    let registry: Arc<ToolRegistry> = match policy {
+        AiToolPolicy::None => Arc::new(ToolRegistry::new()),
+        AiToolPolicy::Auto => tools.unwrap_or_else(|| Arc::new(ToolRegistry::new())),
+        AiToolPolicy::AutoWithMcp => {
+            let base = tools.unwrap_or_else(|| Arc::new(ToolRegistry::new()));
+            crate::tools::discover_mcp_tools(Arc::clone(&ctx), base).await
+        }
+    };
+
+    let messages = ipc_messages_to_chat(&parsed.messages);
+    let turns = messages_to_turns(messages);
+    let schemas = registry.schemas();
+    let on_chunk = |_: String| {};
+    let output = ai
+        .chat_turn_with_tools(&turns, parsed.system.as_deref(), &schemas, &on_chunk)
+        .await
+        .map_err(|e| exec_err(format!("propose_tool_calls: provider: {e}")))?;
+
+    let mut mapped: Vec<AiProposedToolCall> = Vec::new();
+    let mut unmapped: Vec<AiUnmappedToolCall> = Vec::new();
+    for call in output.tool_calls {
+        match crate::tools::dispatch_target(&call.name, call.input.clone()) {
+            Ok(target) => mapped.push(AiProposedToolCall {
+                id: call.id,
+                name: call.name,
+                target_plugin_id: target.target_plugin_id,
+                command_id: target.command_id,
+                args: target.args,
+            }),
+            Err(e) => unmapped.push(AiUnmappedToolCall {
+                id: call.id,
+                name: call.name,
+                input: call.input,
+                error: e.to_string(),
+            }),
+        }
+    }
+
+    let reply = AiProposeReply {
+        text: output.text,
+        tool_calls: mapped,
+        unmapped_tool_calls: unmapped,
+    };
+    serde_json::to_value(&reply)
+        .map_err(|e| exec_err(format!("propose_tool_calls: encode reply: {e}")))
+}
+
 async fn handle_stream_chat(
     ctx: Arc<KernelPluginContext>,
     ai_cfg: Option<AiConfig>,

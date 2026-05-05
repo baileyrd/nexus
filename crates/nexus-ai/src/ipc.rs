@@ -256,6 +256,124 @@ pub struct AiStreamChatArgs {
     pub surface: Option<String>,
 }
 
+// ─── G7 — propose_tool_calls (no-execute single-turn) ─────────────────────
+
+/// Args for `com.nexus.ai::propose_tool_calls`.
+///
+/// Single-turn entry point that runs the provider once with the
+/// registry advertised, returns the model's `tool_use` blocks
+/// **without executing any of them**, and exits. Unlike
+/// `stream_chat` there is no dispatch loop: the caller is
+/// responsible for invoking the returned tool calls (or not).
+///
+/// Used by `nexus-agent` (ADR 0023) to derive a [`Plan`] from
+/// provider tool-use blocks instead of free-form JSON; preserves
+/// the agent's pre-execution approval flow.
+///
+/// [`Plan`]: nexus_agent::Plan
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiProposeArgs {
+    /// Conversation messages — same shape as `stream_chat`. Most
+    /// callers pass a single user turn carrying the goal.
+    pub messages: Vec<AiStreamAskMessage>,
+    /// Optional system prompt forwarded to the provider verbatim.
+    /// Unlike `stream_chat`, this handler does NOT prepend the host
+    /// system-prompt floor — agent planning prompts are caller-owned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    /// Tool-advertisement policy. Omit for the default `auto`. The
+    /// policy controls which schemas the model sees; the handler
+    /// returns whatever tool calls the model requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<AiToolPolicy>,
+}
+
+/// One element of [`AiProposeReply::tool_calls`] — a model
+/// tool-use block whose name was successfully resolved to an IPC
+/// dispatch triple via `crate::tools::dispatch_target`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiProposedToolCall {
+    /// Provider-issued id (e.g. `toolu_…` for Anthropic).
+    pub id: String,
+    /// Tool name as advertised in the registry.
+    pub name: String,
+    /// Reverse-DNS plugin id resolved by `dispatch_target`.
+    pub target_plugin_id: String,
+    /// Command id within the target plugin.
+    pub command_id: String,
+    /// Args ready to hand to `ipc_call`. May differ from the model's
+    /// raw input when the tool requires reshape (e.g. `write_file`'s
+    /// `content` → `bytes`).
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
+    pub args: serde_json::Value,
+}
+
+/// One element of [`AiProposeReply::unmapped_tool_calls`] — a tool
+/// call the model issued under a name `dispatch_target` didn't
+/// recognise. Surfaced to callers for diagnostics rather than
+/// silently dropped.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiUnmappedToolCall {
+    /// Provider-issued id.
+    pub id: String,
+    /// Name the model used.
+    pub name: String,
+    /// Raw input the model emitted.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
+    pub input: serde_json::Value,
+    /// Why mapping failed (unknown tool, malformed mcp name, etc.).
+    pub error: String,
+}
+
+/// Reply for `com.nexus.ai::propose_tool_calls`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AiProposeReply {
+    /// Aggregated text the model produced this turn — narration the
+    /// model emitted alongside (or instead of) tool calls.
+    pub text: String,
+    /// Tool calls that mapped cleanly to an IPC dispatch triple.
+    pub tool_calls: Vec<AiProposedToolCall>,
+    /// Tool calls the mapper rejected. Empty in the happy path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unmapped_tool_calls: Vec<AiUnmappedToolCall>,
+}
+
 // ─── BL-037 — activity timeline IPC ────────────────────────────────────────
 
 /// Args for `com.nexus.ai::activity_list`. Currently a unit shape;

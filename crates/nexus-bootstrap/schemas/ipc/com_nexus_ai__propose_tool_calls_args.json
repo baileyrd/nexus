@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiProposeArgs",
+  "description": "Args for `com.nexus.ai::propose_tool_calls`.\n\nSingle-turn entry point that runs the provider once with the\nregistry advertised, returns the model's `tool_use` blocks\n**without executing any of them**, and exits. Unlike\n`stream_chat` there is no dispatch loop: the caller is\nresponsible for invoking the returned tool calls (or not).\n\nUsed by `nexus-agent` (ADR 0023) to derive a [`Plan`] from\nprovider tool-use blocks instead of free-form JSON; preserves\nthe agent's pre-execution approval flow.\n\n[`Plan`]: nexus_agent::Plan",
+  "type": "object",
+  "properties": {
+    "messages": {
+      "description": "Conversation messages — same shape as `stream_chat`. Most\ncallers pass a single user turn carrying the goal.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AiStreamAskMessage"
+      }
+    },
+    "system": {
+      "description": "Optional system prompt forwarded to the provider verbatim.\nUnlike `stream_chat`, this handler does NOT prepend the host\nsystem-prompt floor — agent planning prompts are caller-owned.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tools": {
+      "description": "Tool-advertisement policy. Omit for the default `auto`. The\npolicy controls which schemas the model sees; the handler\nreturns whatever tool calls the model requests.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AiToolPolicy"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "messages"
+  ],
+  "$defs": {
+    "AiStreamAskMessage": {
+      "description": "One message in a chat conversation. Mirror of\n[`crate::provider::ChatMessage`].",
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "Text content of the message.",
+          "type": "string"
+        },
+        "role": {
+          "description": "The role of the message sender.",
+          "$ref": "#/$defs/AiStreamAskRole"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "content"
+      ]
+    },
+    "AiStreamAskRole": {
+      "description": "Role of a participant in a chat conversation. Mirror of\n[`crate::provider::Role`] for schema emission.",
+      "oneOf": [
+        {
+          "description": "System-level instructions.",
+          "type": "string",
+          "const": "system"
+        },
+        {
+          "description": "User input.",
+          "type": "string",
+          "const": "user"
+        },
+        {
+          "description": "Assistant response.",
+          "type": "string",
+          "const": "assistant"
+        }
+      ]
+    },
+    "AiToolPolicy": {
+      "description": "Tool-advertisement policy for `stream_chat`.\n\n`Auto` (default) hands the registry's full schema list to the\nprovider so the model can call tools. `None` advertises an empty\nlist — used by `mode=complete` and by ghost-completion callers that\nmust never trigger side effects.",
+      "oneOf": [
+        {
+          "description": "Advertise the full registry to the model.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Advertise no tools — the model cannot issue tool calls.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "`Auto` plus tools dynamically discovered from\n`com.nexus.mcp.host::list_servers` / `list_tools`. Each MCP\ntool is exposed as `mcp__<server>__<tool>` and proxied to\n`call_tool`. Discovery runs once per `stream_chat` call (no\ncache); a server that fails to enumerate is skipped with a\nwarning so the chat call still proceeds.",
+          "type": "string",
+          "const": "auto_with_mcp"
+        }
+      ]
+    }
+  }
+}

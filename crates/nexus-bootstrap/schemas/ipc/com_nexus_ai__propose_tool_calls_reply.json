@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiProposeReply",
+  "description": "Reply for `com.nexus.ai::propose_tool_calls`.",
+  "type": "object",
+  "properties": {
+    "text": {
+      "description": "Aggregated text the model produced this turn — narration the\nmodel emitted alongside (or instead of) tool calls.",
+      "type": "string"
+    },
+    "tool_calls": {
+      "description": "Tool calls that mapped cleanly to an IPC dispatch triple.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AiProposedToolCall"
+      }
+    },
+    "unmapped_tool_calls": {
+      "description": "Tool calls the mapper rejected. Empty in the happy path.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AiUnmappedToolCall"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "text",
+    "tool_calls"
+  ],
+  "$defs": {
+    "AiProposedToolCall": {
+      "description": "One element of [`AiProposeReply::tool_calls`] — a model\ntool-use block whose name was successfully resolved to an IPC\ndispatch triple via `crate::tools::dispatch_target`.",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Args ready to hand to `ipc_call`. May differ from the model's\nraw input when the tool requires reshape (e.g. `write_file`'s\n`content` → `bytes`)."
+        },
+        "command_id": {
+          "description": "Command id within the target plugin.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Provider-issued id (e.g. `toolu_…` for Anthropic).",
+          "type": "string"
+        },
+        "name": {
+          "description": "Tool name as advertised in the registry.",
+          "type": "string"
+        },
+        "target_plugin_id": {
+          "description": "Reverse-DNS plugin id resolved by `dispatch_target`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "target_plugin_id",
+        "command_id",
+        "args"
+      ]
+    },
+    "AiUnmappedToolCall": {
+      "description": "One element of [`AiProposeReply::unmapped_tool_calls`] — a tool\ncall the model issued under a name `dispatch_target` didn't\nrecognise. Surfaced to callers for diagnostics rather than\nsilently dropped.",
+      "type": "object",
+      "properties": {
+        "error": {
+          "description": "Why mapping failed (unknown tool, malformed mcp name, etc.).",
+          "type": "string"
+        },
+        "id": {
+          "description": "Provider-issued id.",
+          "type": "string"
+        },
+        "input": {
+          "description": "Raw input the model emitted."
+        },
+        "name": {
+          "description": "Name the model used.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "input",
+        "error"
+      ]
+    }
+  }
+}

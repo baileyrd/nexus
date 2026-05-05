@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiUnmappedToolCall",
+  "description": "One element of [`AiProposeReply::unmapped_tool_calls`] — a tool\ncall the model issued under a name `dispatch_target` didn't\nrecognise. Surfaced to callers for diagnostics rather than\nsilently dropped.",
+  "type": "object",
+  "properties": {
+    "error": {
+      "description": "Why mapping failed (unknown tool, malformed mcp name, etc.).",
+      "type": "string"
+    },
+    "id": {
+      "description": "Provider-issued id.",
+      "type": "string"
+    },
+    "input": {
+      "description": "Raw input the model emitted."
+    },
+    "name": {
+      "description": "Name the model used.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "input",
+    "error"
+  ]
+}

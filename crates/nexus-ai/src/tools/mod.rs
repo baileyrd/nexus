@@ -12,10 +12,12 @@
 //! See `docs/PRDs/BACKLOG.md` BL-016 and `docs/PRDs/12-ai-engine.md` §8
 //! for context.
 
+pub mod dispatch_target;
 pub mod functions;
 pub mod mcp_bridge;
 pub mod registry;
 
+pub use dispatch_target::{dispatch_target, DispatchTarget, DispatchTargetError};
 pub use functions::{
     git_log_schema, list_backlinks_schema, read_file_schema, register_extended_builtins,
     register_storage_builtins, search_forge_schema, write_file_schema, GitLogTool,

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AiProposedToolCall",
+  "description": "One element of [`AiProposeReply::tool_calls`] — a model\ntool-use block whose name was successfully resolved to an IPC\ndispatch triple via `crate::tools::dispatch_target`.",
+  "type": "object",
+  "properties": {
+    "args": {
+      "description": "Args ready to hand to `ipc_call`. May differ from the model's\nraw input when the tool requires reshape (e.g. `write_file`'s\n`content` → `bytes`)."
+    },
+    "command_id": {
+      "description": "Command id within the target plugin.",
+      "type": "string"
+    },
+    "id": {
+      "description": "Provider-issued id (e.g. `toolu_…` for Anthropic).",
+      "type": "string"
+    },
+    "name": {
+      "description": "Tool name as advertised in the registry.",
+      "type": "string"
+    },
+    "target_plugin_id": {
+      "description": "Reverse-DNS plugin id resolved by `dispatch_target`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "target_plugin_id",
+    "command_id",
+    "args"
+  ]
+}
