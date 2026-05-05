@@ -132,6 +132,25 @@ function isHtml(name: string): boolean {
   return /\.(html?|xhtml)$/i.test(name)
 }
 
+// Override styles appended to HTML files so the iframe always exposes
+// scrollbars when content overflows. webkit2gtk (Tauri on Linux) hides
+// overlay scrollbars by default, which made wide HTML docs appear
+// truncated with no way to reach the right edge.
+const HTML_VIEWER_OVERRIDES = `
+<style>
+  html, body { overflow: auto !important; }
+  ::-webkit-scrollbar { width: 12px; height: 12px; }
+  ::-webkit-scrollbar-thumb { background: rgba(127,127,127,0.5); border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(127,127,127,0.75); }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>`
+
+function withHtmlViewerOverrides(content: string): string {
+  // Append rather than prepend so our rules win the cascade on ties and
+  // we don't disturb a leading `<!doctype>` declaration.
+  return content + HTML_VIEWER_OVERRIDES
+}
+
 /**
  * Editor view: tab row with per-tab dirty dot + a mode-toggle button
  * at the right end of the tab row, above a body that renders the
@@ -812,7 +831,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
       <iframe
         key={`html:${tab.relpath}`}
         title={tab.name}
-        srcDoc={tab.content}
+        srcDoc={withHtmlViewerOverrides(tab.content)}
         sandbox=""
         style={{ width: '100%', height: '100%', border: 0 }}
       />
