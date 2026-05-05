@@ -288,9 +288,6 @@ Implication: the chat tool-loop has **no host-controlled system prompt floor**. 
 ## 15. Token-Budget Redactor — Code Path
 
 - **Defined:** `crates/nexus-ai/src/privacy.rs:1–238`. `Redactor::with_default_patterns()` (line 106) ships 6 patterns (AWS keys, generic API tokens, GitHub PATs, private keys, …).
-- **Called from:** `build_rag_prompt_budgeted` only (`crates/nexus-ai/src/rag.rs:443–510`, redaction applied at line 471 before prompt stitching).
-- **NOT called from:**
-  - `stream_chat` (line 793) — caller-supplied system prompt passes through unredacted.
-  - `stream_ask`'s non-budgeted path via `build_rag_prompt` (`rag.rs:127`) — retrieved file content is injected raw.
-
-This is the concrete shape of the gap noted in §6: redaction is wired into one RAG branch, not into either of the two streaming entry points that actually carry user/file content to the provider.
+- **Called from:** `build_rag_prompt_budgeted` (`crates/nexus-ai/src/rag.rs:443–510`, redaction applied at line 471 before prompt stitching) **and** `query()` (`rag.rs:127–138`, post-fix) — both paths now pass `Some(&Redactor::with_default_patterns())`.
+- **Intentionally NOT called from `stream_chat`** — see `privacy.rs:9–17`: *"silently mutating user input would be surprising and the user already chose to send what they pasted."* The caller-supplied `system` and message content flow through unredacted by design. RAG-injected file content is the boundary the redactor is meant to cover, and §15's previous wording was wrong to frame `stream_chat` as a gap.
+- **Closed gap:** `stream_ask`'s non-budgeted RAG path (`rag.rs:127`) previously injected retrieved chunk text raw. `query()` now routes through `build_rag_prompt_budgeted` with the default redactor; covered by `query_redacts_secrets_in_retrieved_chunks` in `rag.rs` tests.

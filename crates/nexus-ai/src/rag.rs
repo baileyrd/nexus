@@ -124,7 +124,16 @@ pub async fn query(
         .ok_or_else(|| AiError::Provider("embedding returned no vectors".into()))?;
 
     let sources = vectorstore::search(ctx, &q_embedding, limit).await?;
-    let system = build_rag_prompt(&sources);
+    // Run retrieved chunks through the default secret redactor before
+    // they're stitched into the system prompt — same boundary as the
+    // budgeted RAG path. Use an effectively unbounded budget so this
+    // wrapper's source-acceptance behaviour matches build_rag_prompt;
+    // only the chunk text changes.
+    let mut budget = TokenBudget::new(usize::MAX, 0);
+    let counter = crate::tokens::ApproxTokenCounter;
+    let redactor = Redactor::with_default_patterns();
+    let (system, _warnings) =
+        build_rag_prompt_budgeted(&sources, &mut budget, &counter, Some(&redactor));
 
     let messages = vec![ChatMessage {
         role: Role::User,
@@ -1148,5 +1157,61 @@ mod tests {
     fn truncate_excerpt_passthrough_when_under_limit() {
         let text = "short";
         assert_eq!(truncate_excerpt(text, 100), "short");
+    }
+
+    /// G1: `query()` must redact secrets from retrieved chunks before
+    /// they reach the model. Regression test for the gap where the
+    /// non-budgeted RAG path bypassed `Redactor`.
+    #[tokio::test]
+    async fn query_redacts_secrets_in_retrieved_chunks() {
+        struct CapturingAi {
+            seen_system: Mutex<Option<String>>,
+        }
+        #[async_trait]
+        impl crate::provider::AiProvider for CapturingAi {
+            async fn chat(
+                &self,
+                _messages: &[crate::provider::ChatMessage],
+                system: Option<&str>,
+            ) -> Result<String, AiError> {
+                *self.seen_system.lock().unwrap() = system.map(str::to_string);
+                Ok("ok".into())
+            }
+            fn model_name(&self) -> &'static str {
+                "stub-1"
+            }
+        }
+
+        // AKIA + 16 alphanum chars matches the aws-access-key pattern.
+        let leaky = "config: AKIAIOSFODNN7EXAMPLE belongs to bob".to_string();
+        let canned = vec![ChunkMatch {
+            file_path: "notes/leaky.md".into(),
+            block_id: 1,
+            chunk_text: leaky.clone(),
+            score: 0.9,
+        }];
+        let dispatcher = Arc::new(StubDispatcher::new(canned));
+        let embedder = StubEmbedder {
+            vector: vec![0.1, 0.2],
+            seen: Mutex::new(Vec::new()),
+        };
+        let ai = CapturingAi {
+            seen_system: Mutex::new(None),
+        };
+        let (ctx, _tmp) = make_ctx(dispatcher);
+
+        query(&ctx, &ai, &embedder, "what's in the notes", 5)
+            .await
+            .expect("rag::query ok");
+
+        let seen = ai.seen_system.lock().unwrap().clone().expect("system passed");
+        assert!(
+            !seen.contains("AKIAIOSFODNN7EXAMPLE"),
+            "raw key leaked into system prompt: {seen}"
+        );
+        assert!(
+            seen.contains("[REDACTED:aws-access-key]"),
+            "expected redaction placeholder in system prompt: {seen}"
+        );
     }
 }
