@@ -16,6 +16,25 @@
 
 _BL-009 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
+### BL-052: Universal activity timeline (beyond AI)
+
+**Source**: AIG-04 follow-up (2026-05-05) — see [../AI-GAPS.md](../AI-GAPS.md#aig-04--activity-audit-panel)
+**Effort**: Medium (1 week)
+**Crates**: `nexus-kernel` (event bus convention), `nexus-storage`/`nexus-git`/`nexus-terminal`/`nexus-workflow` (emitters), `shell/src/plugins/nexus/activityTimeline/` (consumer)
+**Related**: AIG-02 agent approval log shares this schema
+
+Today the `nexus.activityTimeline` pane (BL-037) is AI-only — it hydrates from `com.nexus.ai::activity_list` and subscribes to one bus topic. The same surface is the natural home for **every** observable side effect a user-or-agent triggers: file writes, git commits/pushes, terminal commands, workflow runs, plugin enables/disables, capability grants. Without it, the audit story is partial — the model writing a file is logged, but the user (or another plugin) writing the same file isn't.
+
+**Definition of done:**
+- Generalised `ActivityEntry` schema lifted out of `nexus-ai` into `nexus-types` (or a shared `nexus-activity` crate) with an `origin` discriminator: `ai` / `user` / `plugin:<id>` / `workflow:<id>` / `agent:<session>`.
+- Bus topic convention: `com.nexus.activity.appended` (kernel-owned), with each emitter publishing a typed payload. Existing `com.nexus.ai.activity_appended` becomes one source.
+- Storage emits on file write/delete/rename; git on commit/push/pull; terminal on command-exit; workflow on run-start/end; capability system on grant/revoke.
+- Timeline pane gains an `origin` filter chip alongside the existing surface filter; rename plugin id from `nexus.activityTimeline` to `nexus.activity` (with a settings-key migration shim).
+- Per-emitter opt-out via plugin config so noisy emitters don't drown the pane.
+- Privacy: redactor pass shared with PRD-12 §privacy applies to all emitters, not just AI.
+
+**Why this matters:** transparency parity — once agents (AIG-02) can dispatch tools that span all subsystems, the user needs one place to see every effect, not five separate logs.
+
 ## Partially New Features (concept exists in PRDs but design is unspecified)
 
 ### BL-007: CRDT-over-Git Transport
