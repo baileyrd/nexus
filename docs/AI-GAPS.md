@@ -93,16 +93,28 @@
 
 **Severity:** Nice-to-have (deferred per PRD-12)
 **Surfaced by:** `crates/nexus-ai/src/local_embedding.rs` is feature-gated and inert; UI config has no toggle.
-**Status:** Open.
+**Status:** Resolved 2026-05-05 — `set_config`/UI toggle/status reporting all wired. The feature stays opt-in at build time (see follow-up); flipping it on by default requires resolving the libonnxruntime runtime dependency.
 
-### Problem
-`local_embedding` feature exists but isn't surfaced in `set_config` or the chat-settings UI. Users wanting fully-local RAG (Ollama chat + local embeddings) can't enable it without rebuilding.
+### Outcome
+- Confirmed the local backend is fully implemented (BL-019 / ADR 0018): `crates/nexus-ai/src/local_embedding.rs` (~422 LoC) wraps `fastembed::TextEmbedding`, supports BGE-small/base/large, MxBai-Embed-Large, Nomic-Embed-Text, MiniLM-L6 via the public `map_model` resolver, ships a DashMap embedding cache, and integrates with the `EmbeddingProvider` trait. The `local-embeddings` cargo feature pulls fastembed + dashmap + xxhash-rust; fastembed uses `ort-load-dynamic` so onnxruntime is resolved at run-time via `ORT_DYLIB_PATH` or the system loader path. `crates/nexus-ai/src/config.rs::detect_local_embedding` already wires the env-var path.
+- **Backend wiring:**
+  - `parse_config_field` in `core_plugin.rs` now lifts the `model` field into `local_embedding_model` whenever the embedding side declares `provider = "local"` (the canonical slot the `LocalEmbedding` constructor reads from). Other providers preserve the chat-style `model` field unchanged.
+  - `config_snapshot` exposes `local_embedding_model` in the embedding view (skipped for non-local providers via `skip_serializing_if`).
+  - `handle_status` now reports `embedding_model` (resolved from the local slot for `provider = "local"`, otherwise the chat-style `model`) and `embedding_dimension` (from a new `pub fn dimension_for(name: &str) -> Option<usize>` in `local_embedding.rs` that returns the fastembed dimension without instantiating the model — no 33 MB download just to satisfy a status query).
+  - `dimension_for` is feature-gated; `resolve_embedding_dimension` returns `None` when the feature is off so non-local builds stay zero-cost.
+- **Shell wiring:**
+  - `'local'` added to the `ai.embedProvider` settings dropdown alongside `''`, `'openai'`, `'ollama'`.
+  - `ai.embedModel` description rewritten to list the supported fastembed identifiers and warn about the first-use download (~33–500 MB to `~/.cache/fastembed/`).
+  - `buildSetConfigPayload` (now exported for testing) routes `provider = 'local'` to a minimal `{ provider: 'local', model: ... }` payload — no `api_key` / `base_url` since the in-process backend has no auth or endpoint surface. The chat key is *not* reused for the local embedding side (a chat=openai + embed=local user shouldn't bleed `sk-...` into the embedding payload).
+- **Tests:**
+  - 7 new in `core_plugin::aig05_local_embedding_config_tests` (feature-off path) plus +1 with `--features local-embeddings` covering `dimension_for` resolution.
+  - 4 new in `aiStore.test.ts` covering `buildSetConfigPayload` with local-only, blank-model fallback, no-chat-key-bleed, and remote-still-emits-all-fields.
+  - Backend: nexus-ai 194/194 pass with feature off, 195/195 with feature on.
+  - Shell: 833/833 pass; typecheck clean; no new lint errors.
 
-### Definition of done
-- Feature compiled in by default with a fallback path (no model bundled — pulls on first use).
-- `set_config` accepts `embedding_provider: "local"` with a model identifier.
-- Settings tab exposes the toggle with a clear "downloads ~N MB on first use" hint.
-- Status handler reports embedding model + dimension.
+### Follow-up (not blocking)
+- The original DOD line 1 ("Feature compiled in by default with a fallback path — pulls on first use") would force fastembed + ort-load-dynamic into every Rust build, requiring `libonnxruntime.{so,dylib,dll}` to be resolvable at runtime for *all* users. The model-pull side is already lazy (fastembed downloads to `~/.cache/fastembed/<model>/` on first call), but the ORT system dependency isn't. Defaulting on would break clean builds for users without onnxruntime installed. Better tradeoff: wire the IPC + UI toggle (this work) and keep the cargo feature opt-in until either a) onnxruntime is bundled (adds ~50 MB to binaries), or b) fastembed gains an alternative runtime.
+- The settings tab can't currently introspect "is `local-embeddings` compiled in?" — the kernel reports a clear error if the user picks `local` on a build without the feature, but a soft preflight that hides the option in unsupported builds would be nicer.
 
 ---
 
@@ -147,6 +159,6 @@ The TUI is a first-class frontend per architecture, but AI chat is unreachable f
 | 2 | ~~**AIG-02** Agent approval UI~~ | ✅ Resolved 2026-05-05. |
 | 3 | ~~**AIG-01** Skill composition~~ | ✅ Resolved 2026-05-05. |
 | 4 | ~~**AIG-03** Workflow triggers~~ | ✅ Resolved 2026-05-05. |
-| 5 | **AIG-05** Local embeddings | Mostly scaffolded; mostly config plumbing. |
+| 5 | ~~**AIG-05** Local embeddings~~ | ✅ Resolved 2026-05-05. |
 | 6 | **AIG-06** Enrich/recall polish | UX iteration; needs user feedback loop. |
 | 7 | **AIG-07** TUI chat | Largest scope; lowest user-visible payoff while shell is the primary frontend. |

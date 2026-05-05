@@ -339,6 +339,7 @@ import {
   deleteSession,
   renameSession,
   flushAutosave,
+  buildSetConfigPayload,
 } from './aiRuntime.ts'
 
 interface InvokeCall {
@@ -662,4 +663,78 @@ test('Slice C: renameSession with empty / whitespace-only title is a no-op', asy
   })
   await renameSession(api, 'sess-A', '   ')
   assert.equal(saveCalled, false, 'whitespace-only title rejected without IPC')
+})
+
+// ── AIG-05 — local embedding payload shape ──────────────────────────
+
+test('buildSetConfigPayload: local embedding sends provider+model only', () => {
+  const payload = buildSetConfigPayload({
+    provider: 'anthropic',
+    model: 'claude-sonnet-4-5',
+    apiKey: 'sk-ant-...',
+    baseUrl: '',
+    embedProvider: 'local',
+    embedModel: 'bge-small-en-v1.5-int8',
+    embedApiKey: 'should-be-ignored',
+    embedBaseUrl: 'should-be-ignored',
+  })
+  const embedding = payload.embedding as Record<string, unknown> | undefined
+  assert.ok(embedding, 'embedding side present')
+  assert.equal(embedding!.provider, 'local')
+  assert.equal(embedding!.model, 'bge-small-en-v1.5-int8')
+  // Local backend has no auth / endpoint surface — those fields are
+  // omitted rather than nulled so the payload stays minimal.
+  assert.equal('api_key' in embedding!, false, 'api_key omitted for local')
+  assert.equal('base_url' in embedding!, false, 'base_url omitted for local')
+})
+
+test('buildSetConfigPayload: local embedding with blank model sends null', () => {
+  const payload = buildSetConfigPayload({
+    provider: '',
+    model: '',
+    apiKey: '',
+    baseUrl: '',
+    embedProvider: 'local',
+    embedModel: '',
+    embedApiKey: '',
+    embedBaseUrl: '',
+  })
+  const embedding = payload.embedding as Record<string, unknown>
+  assert.equal(embedding.provider, 'local')
+  assert.equal(embedding.model, null, 'blank model becomes null so kernel uses default')
+})
+
+test('buildSetConfigPayload: explicit local does not get reused chat key/url', () => {
+  // A user with chat=openai + embed=local should NOT carry the OpenAI
+  // api_key into the embedding payload — local takes nothing.
+  const payload = buildSetConfigPayload({
+    provider: 'openai',
+    model: '',
+    apiKey: 'sk-...',
+    baseUrl: '',
+    embedProvider: 'local',
+    embedModel: 'bge-base-en-v1.5',
+    embedApiKey: '',
+    embedBaseUrl: '',
+  })
+  const embedding = payload.embedding as Record<string, unknown>
+  assert.equal('api_key' in embedding, false)
+})
+
+test('buildSetConfigPayload: remote embedding still emits all four fields', () => {
+  const payload = buildSetConfigPayload({
+    provider: 'openai',
+    model: '',
+    apiKey: 'sk-chat',
+    baseUrl: '',
+    embedProvider: 'openai',
+    embedModel: 'text-embedding-3-small',
+    embedApiKey: 'sk-embed',
+    embedBaseUrl: 'https://api.example.com',
+  })
+  const embedding = payload.embedding as Record<string, unknown>
+  assert.equal(embedding.provider, 'openai')
+  assert.equal(embedding.model, 'text-embedding-3-small')
+  assert.equal(embedding.api_key, 'sk-embed')
+  assert.equal(embedding.base_url, 'https://api.example.com')
 })

@@ -732,12 +732,47 @@ async fn handle_status(
     let count = vectorstore::count(ctx)
         .await
         .map_err(|e| exec_err(format!("status: vectorstore_count: {e}")))?;
+    let embedding_model = embed_cfg.as_ref().and_then(resolve_embedding_model);
+    let embedding_dimension = embed_cfg.as_ref().and_then(resolve_embedding_dimension);
     Ok(serde_json::json!({
         "ai_provider": ai_cfg.as_ref().map(|c| c.provider.clone()),
         "ai_model": ai_cfg.as_ref().and_then(|c| c.model.clone()),
         "embedding_provider": embed_cfg.as_ref().map(|c| c.provider.clone()),
+        "embedding_model": embedding_model,
+        "embedding_dimension": embedding_dimension,
         "indexed_chunks": count,
     }))
+}
+
+/// AIG-05 — resolve the embedding model identifier for status
+/// reporting. For `provider = "local"` we prefer the
+/// `local_embedding_model` slot (the canonical place the local
+/// backend reads from); other providers fall back to the chat-style
+/// `model` field.
+fn resolve_embedding_model(cfg: &AiConfig) -> Option<String> {
+    if cfg.provider == "local" {
+        return cfg.local_embedding_model.clone();
+    }
+    cfg.model.clone()
+}
+
+/// AIG-05 — embedding-vector dimension when the local backend is the
+/// configured provider AND the `local-embeddings` feature is built
+/// in. Returns `None` for remote providers (the wire shape isn't
+/// universally exposed) and for unrecognised local model
+/// identifiers.
+#[cfg(feature = "local-embeddings")]
+fn resolve_embedding_dimension(cfg: &AiConfig) -> Option<usize> {
+    if cfg.provider != "local" {
+        return None;
+    }
+    let id = cfg.local_embedding_model.as_deref().unwrap_or("");
+    crate::local_embedding::dimension_for(id)
+}
+
+#[cfg(not(feature = "local-embeddings"))]
+fn resolve_embedding_dimension(_cfg: &AiConfig) -> Option<usize> {
+    None
 }
 
 /// Live-update the in-memory `AiConfig` for chat and/or embedding.
@@ -828,11 +863,23 @@ fn parse_config_field(value: &serde_json::Value) -> Result<Option<AiConfig>, Plu
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(ToString::to_string);
+    // AIG-05 — `provider = "local"` lifts the `model` field into
+    // `local_embedding_model`, the slot
+    // `crate::config::detect_local_embedding` populates from
+    // `NEXUS_LOCAL_EMBEDDING_MODEL`. Empty string and a missing key
+    // both fall back to the canonical default
+    // (`crate::local_embedding::DEFAULT_LOCAL_MODEL`).
+    let local_embedding_model = if provider == "local" {
+        model.clone()
+    } else {
+        None
+    };
     Ok(Some(AiConfig {
         provider,
         model,
         api_key,
         base_url,
+        local_embedding_model,
         ..AiConfig::default()
     }))
 }
@@ -845,6 +892,11 @@ fn config_snapshot(ai_cfg: Option<&AiConfig>, embed_cfg: Option<&AiConfig>) -> s
         model: Option<&'a str>,
         base_url: Option<&'a str>,
         has_api_key: bool,
+        /// AIG-05 — populated only for `provider = "local"` so the
+        /// shell can render the resolved local-embedding identifier
+        /// without inferring it from the chat-style `model` field.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        local_embedding_model: Option<&'a str>,
     }
     fn view(cfg: &AiConfig) -> ConfigView<'_> {
         ConfigView {
@@ -852,6 +904,11 @@ fn config_snapshot(ai_cfg: Option<&AiConfig>, embed_cfg: Option<&AiConfig>) -> s
             model: cfg.model.as_deref(),
             base_url: cfg.base_url.as_deref(),
             has_api_key: cfg.api_key.is_some(),
+            local_embedding_model: if cfg.provider == "local" {
+                cfg.local_embedding_model.as_deref()
+            } else {
+                None
+            },
         }
     }
     serde_json::json!({
@@ -1977,6 +2034,139 @@ fn exec_err<S: Into<String>>(reason: S) -> PluginError {
     PluginError::ExecutionFailed {
         plugin_id: PLUGIN_ID.to_string(),
         reason: reason.into(),
+    }
+}
+
+#[cfg(test)]
+mod aig05_local_embedding_config_tests {
+    //! AIG-05 — set_config / config_snapshot / status round-trip for
+    //! the `provider = "local"` embedding case. These cover the
+    //! parse-layer wiring; the `local-embeddings` feature gate is
+    //! exercised separately via `dimension_for` (only callable when
+    //! the feature is on).
+
+    use super::*;
+
+    #[test]
+    fn parse_config_field_lifts_local_model_into_canonical_slot() {
+        let payload = serde_json::json!({
+            "provider": "local",
+            "model": "bge-small-en-v1.5",
+        });
+        let cfg = parse_config_field(&payload).unwrap().unwrap();
+        assert_eq!(cfg.provider, "local");
+        assert_eq!(cfg.model.as_deref(), Some("bge-small-en-v1.5"));
+        assert_eq!(
+            cfg.local_embedding_model.as_deref(),
+            Some("bge-small-en-v1.5"),
+            "local provider must populate the canonical slot",
+        );
+    }
+
+    #[test]
+    fn parse_config_field_does_not_lift_for_remote_providers() {
+        let payload = serde_json::json!({
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+        });
+        let cfg = parse_config_field(&payload).unwrap().unwrap();
+        assert_eq!(cfg.local_embedding_model, None);
+    }
+
+    #[test]
+    fn config_snapshot_exposes_local_embedding_model_only_for_local() {
+        let local = AiConfig {
+            provider: "local".into(),
+            local_embedding_model: Some("bge-large-en-v1.5".into()),
+            ..AiConfig::default()
+        };
+        let snap = config_snapshot(None, Some(&local));
+        let model = snap
+            .pointer("/embedding/local_embedding_model")
+            .and_then(|v| v.as_str());
+        assert_eq!(model, Some("bge-large-en-v1.5"));
+
+        let remote = AiConfig {
+            provider: "openai".into(),
+            model: Some("text-embedding-3-small".into()),
+            ..AiConfig::default()
+        };
+        let snap = config_snapshot(None, Some(&remote));
+        // Remote providers omit the field rather than emitting null.
+        assert!(snap.pointer("/embedding/local_embedding_model").is_none());
+    }
+
+    #[test]
+    fn resolve_embedding_model_prefers_local_slot_for_local_provider() {
+        let cfg = AiConfig {
+            provider: "local".into(),
+            model: Some("ignored".into()),
+            local_embedding_model: Some("bge-base-en-v1.5".into()),
+            ..AiConfig::default()
+        };
+        assert_eq!(
+            resolve_embedding_model(&cfg).as_deref(),
+            Some("bge-base-en-v1.5"),
+        );
+    }
+
+    #[test]
+    fn resolve_embedding_model_falls_through_to_chat_style_field_for_remote() {
+        let cfg = AiConfig {
+            provider: "openai".into(),
+            model: Some("text-embedding-3-small".into()),
+            ..AiConfig::default()
+        };
+        assert_eq!(
+            resolve_embedding_model(&cfg).as_deref(),
+            Some("text-embedding-3-small"),
+        );
+    }
+
+    #[test]
+    #[cfg(not(feature = "local-embeddings"))]
+    fn resolve_embedding_dimension_returns_none_without_feature() {
+        let cfg = AiConfig {
+            provider: "local".into(),
+            local_embedding_model: Some("bge-small-en-v1.5-int8".into()),
+            ..AiConfig::default()
+        };
+        assert_eq!(resolve_embedding_dimension(&cfg), None);
+    }
+
+    #[test]
+    #[cfg(feature = "local-embeddings")]
+    fn resolve_embedding_dimension_resolves_known_local_model() {
+        let cfg = AiConfig {
+            provider: "local".into(),
+            local_embedding_model: Some("bge-base-en-v1.5".into()),
+            ..AiConfig::default()
+        };
+        // bge-base / nomic-embed → 768; see local_embedding::model_dimension.
+        assert_eq!(resolve_embedding_dimension(&cfg), Some(768));
+    }
+
+    #[test]
+    #[cfg(feature = "local-embeddings")]
+    fn resolve_embedding_dimension_defaults_for_empty_identifier() {
+        // Empty model string falls back to the canonical default
+        // (BGE-small / 384-dim) per local_embedding::map_model.
+        let cfg = AiConfig {
+            provider: "local".into(),
+            local_embedding_model: None,
+            ..AiConfig::default()
+        };
+        assert_eq!(resolve_embedding_dimension(&cfg), Some(384));
+    }
+
+    #[test]
+    fn resolve_embedding_dimension_returns_none_for_remote_providers() {
+        let cfg = AiConfig {
+            provider: "ollama".into(),
+            model: Some("nomic-embed-text".into()),
+            ..AiConfig::default()
+        };
+        assert_eq!(resolve_embedding_dimension(&cfg), None);
     }
 }
 

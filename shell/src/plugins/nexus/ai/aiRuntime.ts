@@ -316,8 +316,10 @@ function normalizeBaseUrl(raw: string | null | undefined): string | null {
 }
 
 /** Build the kernel-side `set_config` payload from a user config. An
- *  empty `provider` clears that side (kernel falls back to env). */
-function buildSetConfigPayload(user: AiUserConfig): Record<string, unknown> {
+ *  empty `provider` clears that side (kernel falls back to env).
+ *  Exported so unit tests can exercise the payload shape without
+ *  mocking the kernel. */
+export function buildSetConfigPayload(user: AiUserConfig): Record<string, unknown> {
   const payload: Record<string, unknown> = {}
   const ai = (user.provider ?? '').trim()
   if (ai.length === 0) {
@@ -333,9 +335,21 @@ function buildSetConfigPayload(user: AiUserConfig): Record<string, unknown> {
   // Embedding side: explicit provider always wins; otherwise mirror
   // the chat provider when it supports embeddings (OpenAI/Ollama),
   // reusing the chat key/url so the user only fills one form.
+  //
+  // AIG-05 — `provider = "local"` routes to the in-process
+  // fastembed-rs backend. It takes a `model` identifier (mapped to
+  // a fastembed `EmbeddingModel` enum kernel-side) but no api_key /
+  // base_url — there's no network, no auth surface. We deliberately
+  // omit those fields rather than send `null` so the payload stays
+  // minimal.
   const explicitEmbed = (user.embedProvider ?? '').trim()
   const embedModel = (user.embedModel ?? '').trim() || null
-  if (explicitEmbed.length > 0) {
+  if (explicitEmbed === 'local') {
+    payload.embedding = {
+      provider: 'local',
+      model: embedModel,
+    }
+  } else if (explicitEmbed.length > 0) {
     payload.embedding = {
       provider: explicitEmbed,
       model: embedModel,

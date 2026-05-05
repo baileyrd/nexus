@@ -128,16 +128,16 @@ export const aiPlugin: Plugin = {
             key: 'ai.embedProvider',
             title: 'Embedding provider',
             description:
-              'Provider for the RAG retrieval embeddings. OpenAI gives higher quality; Ollama runs locally. Leave blank to share the chat provider where supported.',
+              'Provider for the RAG retrieval embeddings. OpenAI gives higher quality; Ollama runs locally with a model server; "local" uses the in-process fastembed-rs backend (no network, requires the local-embeddings build feature). Leave blank to share the chat provider where supported.',
             type: 'select' as const,
             default: '',
-            options: ['', 'openai', 'ollama'],
+            options: ['', 'openai', 'ollama', 'local'],
           },
           {
             key: 'ai.embedModel',
             title: 'Embedding model',
             description:
-              'Ollama model used for RAG embeddings (e.g. nomic-embed-text, mxbai-embed-large). Leave blank for the provider default (nomic-embed-text).',
+              'For Ollama: the embedding model name (nomic-embed-text, mxbai-embed-large). For "local": the fastembed identifier (bge-small-en-v1.5-int8 default, also bge-small/base/large-en-v1.5, mxbai-embed-large-v1, nomic-embed-text-v1.5, all-mini-lm-l6-v2). First use of a local model downloads ~33–500 MB to ~/.cache/fastembed/. Leave blank for the provider default.',
             type: 'string' as const,
             default: '',
           },

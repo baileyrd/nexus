@@ -264,6 +264,18 @@ pub fn map_model(name: &str) -> Result<EmbeddingModel, AiError> {
     }
 }
 
+/// AIG-05 — vector dimension for a local model identifier, without
+/// instantiating the embedding backend (no model download). Returns
+/// `None` for unrecognised identifiers; the canonical default and an
+/// empty string both resolve to the BGE-small / 384-dim path. Used by
+/// `handle_status` so the AI status surface can report the dimension
+/// without paying the 33 MB first-call cost of a real
+/// [`LocalEmbedding`] construction.
+#[must_use]
+pub fn dimension_for(model_name: &str) -> Option<usize> {
+    map_model(model_name).ok().map(|m| model_dimension(&m))
+}
+
 fn model_dimension(model: &EmbeddingModel) -> usize {
     // Default falls through to 384 (BGE-small / MiniLM family + any
     // future fastembed variant we haven't catalogued — callers verify

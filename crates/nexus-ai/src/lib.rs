@@ -44,7 +44,8 @@ pub use enrichment::{body_hash, merge_frontmatter, strip_frontmatter, Enrichment
 pub use error::AiError;
 #[cfg(feature = "local-embeddings")]
 pub use local_embedding::{
-    LocalEmbedding, BATCH_CACHE_BYPASS_THRESHOLD, DEFAULT_CACHE_MAX_ENTRIES, DEFAULT_LOCAL_MODEL,
+    dimension_for as local_embedding_dimension_for, LocalEmbedding,
+    BATCH_CACHE_BYPASS_THRESHOLD, DEFAULT_CACHE_MAX_ENTRIES, DEFAULT_LOCAL_MODEL,
 };
 pub use ollama::OllamaProvider;
 pub use openai::OpenAiProvider;
