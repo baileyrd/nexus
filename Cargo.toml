@@ -138,8 +138,9 @@ ratatui = "0.30"
 crossterm = "0.29"
 
 # GPU-accelerated native UI (ADR 0026 — gpui desktop shell)
-# Pin to a specific commit once Phase 0 spike validates the build.
-gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+# Pinned to the commit used during Phase 0–4 development.  Do not bump
+# without verifying on both Linux (x11) and macOS (metal).
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "20f86a729fc5511515c21a3e9b4fcc9adc7e2eaf" }
 
 # VTE state machine + terminal grid (ADR 0027)
 # Use git instead of crates.io: the 0.24.2 release has a rustix/rustix-openpty
