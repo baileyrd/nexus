@@ -16,7 +16,7 @@ nexus-kernel     = { path = "../nexus-kernel" }
 nexus-types      = { path = "../nexus-types" }
 
 gpui          = { workspace = true }
-gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform", features = ["x11", "font-kit"] }
 tokio      = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
