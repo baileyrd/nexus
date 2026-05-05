@@ -305,19 +305,31 @@ mod tests {
     use super::*;
     use crate::ToolCall;
 
+    /// Canned driver: returns a fixed proposal regardless of input.
+    /// Post-G7-1b drivers emit [`crate::Proposal`] directly rather
+    /// than a JSON-encoded plan blob.
     #[derive(Clone)]
     struct CannedDriver {
-        reply: Arc<String>,
+        proposal: Arc<crate::Proposal>,
     }
     impl CannedDriver {
-        fn new(reply: &str) -> Self {
-            Self { reply: Arc::new(reply.to_string()) }
+        fn new_text(text: &str) -> Self {
+            Self {
+                proposal: Arc::new(crate::Proposal {
+                    text: text.into(),
+                    tool_calls: Vec::new(),
+                }),
+            }
         }
     }
     #[async_trait]
     impl ChatDriver for CannedDriver {
-        async fn chat(&self, _system: &str, _user: &str) -> Result<String, String> {
-            Ok((*self.reply).clone())
+        async fn propose(
+            &self,
+            _system: &str,
+            _user: &str,
+        ) -> Result<crate::Proposal, String> {
+            Ok((*self.proposal).clone())
         }
     }
 
@@ -333,13 +345,9 @@ mod tests {
         }
     }
 
-    fn one_step_reply(desc: &str) -> String {
-        format!(r#"{{"steps":[{{"description":"{desc}","tool_call":null}}]}}"#)
-    }
-
     #[tokio::test]
     async fn delegate_runs_and_appends_trace() {
-        let driver = CannedDriver::new(&one_step_reply("research"));
+        let driver = CannedDriver::new_text("research");
         let orch = AgentOrchestrator::new(driver, CountingDispatcher::default());
         let obs = orch.delegate("researcher", "find stuff", None).await.unwrap();
         assert!(obs.success);
@@ -355,7 +363,7 @@ mod tests {
     #[tokio::test]
     async fn scratch_state_round_trips() {
         let orch = AgentOrchestrator::new(
-            CannedDriver::new(&one_step_reply("noop")),
+            CannedDriver::new_text("noop"),
             CountingDispatcher::default(),
         );
         assert!(orch.scratch_get("k").await.is_none());
@@ -366,7 +374,7 @@ mod tests {
     #[tokio::test]
     async fn trace_ordering_reflects_append_order() {
         let orch = AgentOrchestrator::new(
-            CannedDriver::new(&one_step_reply("step")),
+            CannedDriver::new_text("step"),
             CountingDispatcher::default(),
         );
         orch.delegate("writer", "a", None).await.unwrap();

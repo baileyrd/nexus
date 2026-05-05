@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use nexus_agent::{ChatDriver, ToolCall, ToolDispatcher};
+use nexus_agent::{ChatDriver, Proposal, ProposedToolCall, ToolCall, ToolDispatcher};
 use nexus_kernel::{KernelPluginContext, PluginContext};
 use serde::Deserialize;
 
@@ -73,10 +73,12 @@ impl ToolDispatcher for KernelToolDispatcher {
     }
 }
 
-/// [`ChatDriver`] that dispatches to `com.nexus.ai::stream_chat` and
-/// returns the final text once the stream closes. Per-token streaming
-/// still happens on the bus — the driver itself only cares about the
-/// terminal value for plan assembly.
+/// [`ChatDriver`] that dispatches to
+/// `com.nexus.ai::propose_tool_calls` (G7-1b / ADR 0023). Returns
+/// the model's `tool_use` blocks already mapped to `(target,
+/// command, args)` triples by the AI plugin's `dispatch_target`,
+/// ready for `LlmAgent` to fold into a [`nexus_agent::Plan`]. No
+/// streaming events are published — planning runs are silent.
 pub struct AiChatDriver {
     ctx: Arc<KernelPluginContext>,
     timeout: Duration,
@@ -100,26 +102,64 @@ impl AiChatDriver {
     }
 }
 
+/// Wire shape of `com.nexus.ai::propose_tool_calls`'s reply.
+/// Mirrors `nexus_ai::ipc::AiProposeReply` without taking a hard
+/// dependency on it.
 #[derive(Deserialize)]
-struct StreamChatResponse {
+struct ProposeWire {
     #[serde(default)]
     text: String,
+    #[serde(default)]
+    tool_calls: Vec<ProposedWire>,
+}
+
+#[derive(Deserialize)]
+struct ProposedWire {
+    id: String,
+    name: String,
+    target_plugin_id: String,
+    command_id: String,
+    args: serde_json::Value,
 }
 
 #[async_trait]
 impl ChatDriver for AiChatDriver {
-    async fn chat(&self, system: &str, user_message: &str) -> Result<String, String> {
+    async fn propose(
+        &self,
+        system: &str,
+        user_message: &str,
+    ) -> Result<Proposal, String> {
         let args = serde_json::json!({
             "messages": [{ "role": "user", "content": user_message }],
             "system": system,
         });
         let raw = self
             .ctx
-            .ipc_call("com.nexus.ai", "stream_chat", args, self.timeout)
+            .ipc_call(
+                "com.nexus.ai",
+                "propose_tool_calls",
+                args,
+                self.timeout,
+            )
             .await
             .map_err(|e| e.to_string())?;
-        let parsed: StreamChatResponse =
-            serde_json::from_value(raw).map_err(|e| e.to_string())?;
-        Ok(parsed.text)
+        let parsed: ProposeWire = serde_json::from_value(raw).map_err(|e| e.to_string())?;
+        let tool_calls = parsed
+            .tool_calls
+            .into_iter()
+            .map(|t| ProposedToolCall {
+                id: t.id,
+                name: t.name,
+                tool_call: ToolCall {
+                    target_plugin_id: t.target_plugin_id,
+                    command_id: t.command_id,
+                    args: t.args,
+                },
+            })
+            .collect();
+        Ok(Proposal {
+            text: parsed.text,
+            tool_calls,
+        })
     }
 }

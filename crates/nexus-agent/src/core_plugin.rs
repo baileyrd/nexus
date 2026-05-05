@@ -843,24 +843,68 @@ struct AiChatBridge {
 
 #[async_trait]
 impl ChatDriver for AiChatBridge {
-    async fn chat(&self, system: &str, user_message: &str) -> Result<String, String> {
-        #[derive(Deserialize)]
-        struct ChatResp {
-            #[serde(default)]
-            text: String,
-        }
-        let args = serde_json::json!({
-            "messages": [{ "role": "user", "content": user_message }],
-            "system": system,
-        });
-        let raw = self
-            .ctx
-            .ipc_call("com.nexus.ai", "stream_chat", args, self.timeout)
-            .await
-            .map_err(|e| e.to_string())?;
-        let parsed: ChatResp = serde_json::from_value(raw).map_err(|e| e.to_string())?;
-        Ok(parsed.text)
+    async fn propose(
+        &self,
+        system: &str,
+        user_message: &str,
+    ) -> Result<crate::Proposal, String> {
+        propose_via_ai(&self.ctx, self.timeout, system, user_message).await
     }
+}
+
+/// Shared `propose_tool_calls` IPC dance used by the in-tree
+/// `AiChatBridge` and `nexus_bootstrap::agent::AiChatDriver` (G7-1b,
+/// ADR 0023). Decodes [`AiProposeReply`]-shaped JSON into the
+/// agent-side [`crate::Proposal`] without taking a dependency on
+/// `nexus-ai`'s types.
+async fn propose_via_ai(
+    ctx: &KernelPluginContext,
+    timeout: Duration,
+    system: &str,
+    user_message: &str,
+) -> Result<crate::Proposal, String> {
+    #[derive(Deserialize)]
+    struct ProposeWire {
+        #[serde(default)]
+        text: String,
+        #[serde(default)]
+        tool_calls: Vec<ProposedWire>,
+    }
+    #[derive(Deserialize)]
+    struct ProposedWire {
+        id: String,
+        name: String,
+        target_plugin_id: String,
+        command_id: String,
+        args: serde_json::Value,
+    }
+
+    let args = serde_json::json!({
+        "messages": [{ "role": "user", "content": user_message }],
+        "system": system,
+    });
+    let raw = ctx
+        .ipc_call("com.nexus.ai", "propose_tool_calls", args, timeout)
+        .await
+        .map_err(|e| e.to_string())?;
+    let parsed: ProposeWire = serde_json::from_value(raw).map_err(|e| e.to_string())?;
+    let tool_calls = parsed
+        .tool_calls
+        .into_iter()
+        .map(|t| crate::ProposedToolCall {
+            id: t.id,
+            name: t.name,
+            tool_call: ToolCall {
+                target_plugin_id: t.target_plugin_id,
+                command_id: t.command_id,
+                args: t.args,
+            },
+        })
+        .collect();
+    Ok(crate::Proposal {
+        text: parsed.text,
+        tool_calls,
+    })
 }
 
 #[derive(Clone)]

@@ -14,45 +14,36 @@
 use crate::{ChatDriver, LlmAgent, DEFAULT_SYSTEM_PROMPT};
 
 /// Writer archetype — biases the planner toward markdown-authoring
-/// outputs, pushes it to prefer `com.nexus.storage` writes over
-/// shell-like operations.
+/// outputs, pushes it to prefer file writes over shell-like
+/// operations. Tool schemas come from the AI registry; the prompt
+/// only describes posture.
 pub const WRITER_SYSTEM_PROMPT: &str = "\
-You are Nexus's Writer planner. Given a user goal, produce a minimal \
-JSON plan that favours producing markdown content over tool automation. \
-Respond with JSON only — no prose, no code fences. Schema:\n\
-  {\"steps\":[{\"description\":string,\"tool_call\":null | \
-  {\"target_plugin_id\":string,\"command_id\":string,\"args\":object}}]}\n\
-Prefer `com.nexus.storage` for writing notes, `com.nexus.ai` for draft \
-generation, and informational steps (tool_call=null) when the answer is \
-naturally prose. Avoid shell / git unless the goal explicitly involves \
-code or version control.";
+You are Nexus's Writer planner. Choose tool calls that favour \
+producing markdown content. Prefer `write_file` for finalising notes \
+and `read_file` / `search_forge` for grounding. Avoid `git_log` or \
+shell-like tools unless the goal explicitly involves version control. \
+If the goal is naturally prose and no tool call is needed, respond \
+with text and no tool calls.";
 
 /// Coder archetype — biases the planner toward code edits + git +
 /// build operations.
 pub const CODER_SYSTEM_PROMPT: &str = "\
-You are Nexus's Coder planner. Given a user goal, produce a minimal \
-JSON plan focused on software-engineering tasks. Respond with JSON \
-only — no prose, no code fences. Schema:\n\
-  {\"steps\":[{\"description\":string,\"tool_call\":null | \
-  {\"target_plugin_id\":string,\"command_id\":string,\"args\":object}}]}\n\
-Prefer `com.nexus.storage` for file reads/writes, `com.nexus.git` for \
-status / diff / commit, and `com.nexus.terminal` for builds and tests. \
-Stage small, reversible steps so failed builds don't strand the \
-working tree.";
+You are Nexus's Coder planner. Choose tool calls focused on \
+software-engineering tasks. Prefer `read_file` / `write_file` for \
+source edits and `git_log` to orient yourself before non-trivial \
+changes. Stage small, reversible operations so a failed build \
+doesn't strand the working tree.";
 
-/// Researcher archetype — biases the planner toward RAG + storage
-/// search + knowledge-graph traversal, with a strong preference for
-/// reading over writing.
+/// Researcher archetype — biases the planner toward search +
+/// knowledge-graph traversal, with a strong preference for reading
+/// over writing.
 pub const RESEARCHER_SYSTEM_PROMPT: &str = "\
-You are Nexus's Researcher planner. Given a user goal, produce a \
-minimal JSON plan centred on gathering + synthesising information. \
-Respond with JSON only — no prose, no code fences. Schema:\n\
-  {\"steps\":[{\"description\":string,\"tool_call\":null | \
-  {\"target_plugin_id\":string,\"command_id\":string,\"args\":object}}]}\n\
-Prefer `com.nexus.storage::search`, `com.nexus.ai::query` (RAG), and \
-graph traversal over writes. Avoid destructive tool calls; if a write \
-is needed, end with a single summarising note. Cite source paths in \
-the plan's step descriptions when known.";
+You are Nexus's Researcher planner. Choose tool calls centred on \
+gathering and synthesising information. Prefer `search_forge`, \
+`list_backlinks`, and `read_file` over writes. Avoid destructive \
+tool calls; if a write is needed, end with a single summarising \
+note via `write_file`. Reference source paths in your narration so \
+the user can audit the trail.";
 
 /// Identifier for the Writer archetype — `com.nexus.agent.writer`.
 pub const WRITER_ID: &str = "com.nexus.agent.writer";
@@ -101,8 +92,15 @@ mod tests {
 
     #[async_trait]
     impl ChatDriver for CannedDriver {
-        async fn chat(&self, _system: &str, _user: &str) -> Result<String, String> {
-            Ok(r#"{"steps":[{"description":"ok","tool_call":null}]}"#.into())
+        async fn propose(
+            &self,
+            _system: &str,
+            _user: &str,
+        ) -> Result<crate::Proposal, String> {
+            Ok(crate::Proposal {
+                text: "ok".into(),
+                tool_calls: Vec::new(),
+            })
         }
     }
 

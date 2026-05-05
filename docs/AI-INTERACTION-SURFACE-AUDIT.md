@@ -81,15 +81,14 @@ All five run through `KernelPluginContext::ipc_call` with a 30 s timeout. Schema
 
 End-to-end example: chat → `stream_chat` mode `chat` (lines 64–66) → provider gets `read_file`+`write_file` schemas (line 1273) → model calls `read_file("notes/agenda.md")` → registry executes via IPC → result fed back → model can compose summary and `write_file` it back (lines 1313–1339).
 
-### C. Agent system — separate path, NOT integrated with AI tool registry
+### C. Agent system — unified on the AI tool registry (G7-1b, ADR 0023)
 
 `com.nexus.agent` (`crates/nexus-agent/`):
 
-- `LlmAgent<D>` (`llm.rs`) calls a `ChatDriver` to generate a JSON plan (lines 64–139).
-- Production driver wraps `com.nexus.ai::stream_chat`.
-- Planner prompt (lines 41–49) lists available plugins: `com.nexus.storage`, `com.nexus.database`, `com.nexus.git`, `com.nexus.terminal`, `com.nexus.ai`.
-- Each `ToolCall` carries `target_plugin_id` (`crates/nexus-agent/src/lib.rs:143–150`); the executor dispatches over kernel IPC.
-- **Important:** agents do not reuse the AI engine's tool registry. The tool-loop in `stream_chat` and the agent planner are two separate mechanisms.
+- `LlmAgent<D>` (`llm.rs`) calls `ChatDriver::propose` and folds the returned [`Proposal`] into a [`Plan`]: each provider tool-use block becomes one [`Step`] whose `tool_call` is already resolved to `(target_plugin_id, command_id, args)`. Narration without tool calls becomes a single informational step.
+- Production driver (`AiChatDriver`) calls `com.nexus.ai::propose_tool_calls` (G7-1a) — single-turn provider call that runs the AI plugin's tool-loop machinery once with no execution and returns mapped tool-use blocks.
+- The agent's plan-then-execute data model is preserved; `PlanExecutor` and `StepPolicy` (per-step approval) still gate every dispatch. ADR 0023 Phase 2 considers collapsing plan-and-execute into a single tool-loop session — deferred.
+- The model never sees a hand-written JSON plan schema; the AI tool registry's per-tool schemas validate arguments at the provider layer. Adding a new built-in (e.g. via `register_extended_builtins`) automatically becomes reachable from the agent.
 
 ### D. MCP integration — opt-in via `tools=auto_with_mcp` (G5b)
 
@@ -163,7 +162,7 @@ All route through `context.ipc_call("com.nexus.ai", handler, args, 120s)`.
 | Knowledge-graph search tool | 🟢 `search_forge` + `list_backlinks` shipped | Read-only Tantivy + backlink lookup |
 | Local embeddings | 🟡 Scaffold only | `local_embedding.rs:46–48`; deferred per status doc |
 | `semantic_search` handler | 🟡 Stub | Handler registered, no real impl |
-| Agent ↔ AI tool registry | 🟡 Not unified | Agents go via kernel IPC, not AI's tool loop |
+| Agent ↔ AI tool registry | 🟢 Unified (G7-1b) | `LlmAgent` consumes `propose_tool_calls`; built-ins auto-propagate |
 | MCP ↔ AI | 🟢 Opt-in via `tools=auto_with_mcp` (G5b) | `tools/mcp_bridge.rs` discovers + bridges per call |
 
 ---

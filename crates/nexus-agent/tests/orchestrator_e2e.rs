@@ -15,35 +15,44 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nexus_agent::{AgentOrchestrator, ChatDriver, ToolCall, ToolDispatcher};
+use nexus_agent::{AgentOrchestrator, ChatDriver, Proposal, ToolCall, ToolDispatcher};
 use serde_json::Value;
 
 /// Driver that branches on the system prompt — the archetype-specific
 /// prompt let us tell Researcher and Writer apart inside one shared
 /// driver instance, so the orchestrator can run both archetypes
 /// without juggling two driver factories.
+///
+/// Post-G7-1b drivers return [`Proposal`]s instead of JSON strings;
+/// the canned proposals here carry the planner's narration as `text`
+/// with no tool calls, which becomes an informational `Step` in the
+/// resulting `Plan`.
 #[derive(Clone)]
 struct BranchingDriver {
-    researcher_reply: Arc<String>,
-    writer_reply: Arc<String>,
+    researcher_text: Arc<String>,
+    writer_text: Arc<String>,
     /// Captures every `(system, user)` pair the planner sent — lets
     /// the test assert `{{prev}}` was substituted before reaching
-    /// `chat`, not just before reaching `delegate`.
+    /// the driver, not just before reaching `delegate`.
     seen: Arc<std::sync::Mutex<Vec<(String, String)>>>,
 }
 
 #[async_trait]
 impl ChatDriver for BranchingDriver {
-    async fn chat(&self, system: &str, user: &str) -> Result<String, String> {
+    async fn propose(&self, system: &str, user: &str) -> Result<Proposal, String> {
         self.seen
             .lock()
             .map_err(|e| e.to_string())?
             .push((system.to_string(), user.to_string()));
-        if system.to_ascii_lowercase().contains("research") {
-            Ok((*self.researcher_reply).clone())
+        let text = if system.to_ascii_lowercase().contains("research") {
+            (*self.researcher_text).clone()
         } else {
-            Ok((*self.writer_reply).clone())
-        }
+            (*self.writer_text).clone()
+        };
+        Ok(Proposal {
+            text,
+            tool_calls: Vec::new(),
+        })
     }
 }
 
@@ -60,16 +69,11 @@ impl ToolDispatcher for CountingDispatcher {
     }
 }
 
-fn plan_with_description(desc: &str) -> String {
-    // The LLM planner accepts `{ "steps": [ { "description": ..., "tool_call": null } ] }`.
-    format!(r#"{{"steps":[{{"description":"{desc}","tool_call":null}}]}}"#)
-}
-
 #[tokio::test]
 async fn pipeline_substitutes_prev_and_returns_two_observations() {
     let driver = BranchingDriver {
-        researcher_reply: Arc::new(plan_with_description("find data X")),
-        writer_reply: Arc::new(plan_with_description("summary of: {prev}")),
+        researcher_text: Arc::new("find data X".into()),
+        writer_text: Arc::new("summary of: {prev}".into()),
         seen: Arc::new(std::sync::Mutex::new(Vec::new())),
     };
     let orch = AgentOrchestrator::new(driver.clone(), CountingDispatcher::default());

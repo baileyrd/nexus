@@ -61,7 +61,7 @@ pub use core_plugin::{
     PLUGIN_ID,
 };
 pub use executor::{PlanExecutor, StepResult, StepStatus};
-pub use llm::{ChatDriver, LlmAgent, DEFAULT_SYSTEM_PROMPT};
+pub use llm::{ChatDriver, LlmAgent, Proposal, ProposedToolCall, DEFAULT_SYSTEM_PROMPT};
 pub use orchestrator::{AgentOrchestrator, TraceEntry};
 
 /// A unit of work produced by an [`Agent`] and consumed by a
