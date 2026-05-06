@@ -117,6 +117,92 @@ The lifecycle forwarder thread already publishes `com.nexus.terminal.events.<id>
 
 ---
 
+### BL-066: Terminal sidebar hover buttons
+
+**Source**: Terminal Integration Assessment (2026-05-06); CommandBook evaluation (2026-05-06)
+**Effort**: Tiny (0.5 day)
+**Crates**: `shell/src/plugins/nexus/terminal/SavedCommandsView.tsx`
+**Related**: BL-055 (run_saved handler must exist for start button to have a target)
+
+Every polished process manager surfaces start/stop/restart actions inline on each sidebar row without requiring a right-click. `SavedCommandsView` has run/copy buttons but not contextual hover buttons. Users must open a context menu for the most common actions.
+
+**Definition of done:**
+- Each sidebar row gains hover-revealed icon buttons: Start (if stopped), Stop (if running), Restart, Dismiss (remove from active sessions without deleting the saved command)
+- Buttons dispatch to `com.nexus.terminal` IPC handlers directly — no modal, no confirmation for Start/Stop/Restart
+- Visual treatment matches existing shell hover patterns (opacity fade-in, same icon size)
+
+---
+
+### BL-065: Windows pre-command support (cmd.exe / PowerShell)
+
+**Source**: Terminal Integration Assessment (2026-05-06) — Phase Q follow-up
+**Effort**: Medium (2 days)
+**Crates**: `nexus-terminal/src/precmd.rs`
+**Related**: PRD-09 §4.4; Phase Q (POSIX-only sentinel approach shipped)
+
+`run_pre_commands` uses a POSIX sentinel (`; printf '<SENTINEL> %d\n' $?`) to capture exit codes while preserving shell state across steps. This doesn't work on cmd.exe or PowerShell, where the sentinel syntax is different and state inheritance across commands works differently.
+
+**Definition of done:**
+- `precmd.rs` detects shell family (bash/zsh/fish vs. cmd.exe vs. pwsh) and uses the appropriate sentinel:
+  - cmd.exe: `& echo <SENTINEL> %ERRORLEVEL%`
+  - PowerShell: `; Write-Host "<SENTINEL> $LASTEXITCODE"`
+- Pre-command state inheritance tested on Windows (PATH changes, env exports, directory changes carry forward)
+- Existing POSIX tests continue to pass; Windows tests added (can be skipped on non-Windows CI)
+
+---
+
+### BL-064: Terminal AI suggestion LLM bridge
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap in `ai.rs`
+**Effort**: Small–Medium (1 day)
+**Crates**: `nexus-terminal/src/ai.rs`, `nexus-terminal/src/core_plugin.rs`
+**Related**: PRD-09 §12; `AiSuggestionEngine` shipped Phase S; `com.nexus.ai::stream_ask`
+
+`AiSuggestionEngine` has 5 built-in pattern-match rules that return static suggestion strings. When a rule matches, the explanation is a hardcoded string rather than an LLM-generated response. The `SuggestionRule` trait already supports extension, and the IPC path to `com.nexus.ai` exists.
+
+**Definition of done:**
+- New `com.nexus.terminal::suggest` handler (id 23): takes `{ session_id, line_count }`, runs `AiSuggestionEngine` over recent output, and if a rule matches routes the matched context + rule explanation through `com.nexus.ai::stream_ask` for an enriched response
+- Falls back to the static rule explanation if `com.nexus.ai` is unavailable or times out (10s)
+- Shell terminal panel surfaces the suggestion as a dismissible chip below the output pane with a "Run suggested command" action
+- Requires `ai.chat` capability; no additional capability needed (read-only terminal access)
+
+---
+
+### BL-063: Terminal FTS5 scrollback index
+
+**Source**: Terminal Integration Assessment (2026-05-06); PRD-09 §19.3
+**Effort**: Medium (2–3 days)
+**Crates**: `nexus-terminal/src/persist.rs`, `nexus-terminal/src/core_plugin.rs`, `shell/src/plugins/nexus/terminal/`
+**Related**: PRD-09 §19.3; `SqliteSessionStore` shipped Phase M
+
+Current output search (`search_output`, handler 7) is per-session substring/regex over in-memory `LineBuffer`. There's no way to search across sessions or query scrollback that has been evicted from the in-memory buffer. FTS5 over the persisted scrollback blobs enables cross-session search and historical grep.
+
+**Definition of done:**
+- `SqliteSessionStore` gains an FTS5 virtual table (`scrollback_fts`) over `session_id` + `line_text` + `timestamp`
+- Scrollback lines are indexed on write (`save_scrollback` path) with ANSI codes stripped before ingest
+- New handler `cross_session_search` (id 24): `{ query, is_regex, session_ids?, since_ts?, limit? }` → `Vec<{ session_id, line_index, text, timestamp }>` — searches FTS5 index, optionally constrained to specific sessions or time range
+- Shell terminal plugin gains a "Search all sessions" mode (⌘⇧F) that calls `cross_session_search` and renders results grouped by session with jump-to links
+- FTS5 index excluded from SQLite backup exports (rebuildable; reduces export size)
+
+---
+
+### BL-062: Terminal session LRU eviction policy
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap in `manager.rs`
+**Effort**: Small (0.5 day)
+**Crates**: `nexus-terminal/src/manager.rs`
+**Related**: PRD-09 §2.3; `last_accessed` timestamp tracked but policy not implemented
+
+`SessionManager` enforces the 50-session cap by hard-rejecting new spawns when at capacity. The `last_accessed` timestamp is tracked per session but nothing reads it. A forge with many long-lived sessions can exhaust the cap and block new spawns indefinitely.
+
+**Definition of done:**
+- `SessionManager::spawn` checks cap; if at limit, finds the oldest stopped session by `last_accessed` and evicts it (persisting scrollback first via `SqliteSessionStore`)
+- If all sessions are running, returns a `SessionLimitExceeded` error (current behavior) rather than killing a live process
+- `last_accessed` updated on every `drain`, `read_output`, `send_input` call
+- Eviction emits a `SessionEvicted { id, reason: "lru" }` lifecycle event on the kernel bus
+
+---
+
 ### BL-055: Terminal commands in agent tool registry
 
 **Source**: Terminal Integration Assessment (2026-05-06) — gap #1 (highest leverage)
