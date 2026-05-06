@@ -5,6 +5,15 @@ overlay. The shell's design system reads ~497 variables; a theme
 defines values for some or all of them, and the shell hot-applies the
 result.
 
+> **Building a built-in (Rust-side) theme instead?** The bundled themes
+> under `crates/nexus-theme/themes/` use a TOML manifest
+> (`NEXUS.toml`) rather than the plugin format described below. A
+> commented template lives at
+> [`crates/nexus-theme/themes/_template/NEXUS.toml`](../../../crates/nexus-theme/themes/_template/NEXUS.toml) —
+> copy that directory and register the new theme in
+> `crates/nexus-theme/src/theme.rs::BUILTIN_THEMES`. Schema is defined
+> in `crates/nexus-theme/src/manifest.rs`.
+
 ## Scaffold
 
 ```bash

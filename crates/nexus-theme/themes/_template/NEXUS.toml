@@ -1,0 +1,133 @@
+# Theme template for the Nexus UI.
+#
+# Copy this directory to a new name (e.g. `my-theme/`) and edit the values
+# below. The loader only registers themes listed in
+# `crates/nexus-theme/src/theme.rs::BUILTIN_THEMES`, so this `_template`
+# directory is intentionally NOT picked up at runtime — it is reference
+# material, not a live theme. Schema lives in
+# `crates/nexus-theme/src/manifest.rs`.
+#
+# Variables here are sparse on purpose: only set what you want to override.
+# Anything unset falls back to the resolver's defaults (see
+# `crates/nexus-theme/src/variables.rs`). The full surface is ~497 vars; the
+# block below is the practical minimum for a theme that looks intentional.
+
+# ── Required metadata ────────────────────────────────────────────────────────
+[theme]
+name             = "My Theme"                      # internal name
+version          = "0.1.0"                          # semver
+author           = "Your Name"
+description      = "One-line description shown in the theme picker."
+
+# Optional metadata (defaults shown).
+license          = "MIT"                            # SPDX id
+nexus_min_version = "0.1.0"
+nexus_max_version = "*"
+display_name     = "My Theme"                       # long-form picker label
+# icon           = "data:image/png;base64,..."      # 32×32 PNG or URL
+
+# Picker filter: "light" | "dark" | "sepia" | "high-contrast" | "custom"
+category         = "dark"
+
+# Modes this theme supports. The shell uses this to decide whether to honor
+# the theme under "Auto" mode.
+supports         = ["dark"]
+
+# Platforms for which `[platforms.*]` sections below have entries. Leave
+# empty if you don't ship any platform overrides.
+platform_specific = []
+
+# ── CSS variable overrides ───────────────────────────────────────────────────
+# Keys must be `--nx-*`. Values are any valid CSS value (hex, rgb(), rgba(),
+# var(), shadow stacks, etc.). See `nexus-light` / `nexus-dark` for canonical
+# value shapes.
+[variables]
+# Brand
+"--nx-color-primary"        = "#6BA3FF"
+"--nx-color-primary-light"  = "#8FBFFF"
+"--nx-color-primary-dark"   = "#3D72C4"
+"--nx-color-primary-soft"   = "rgba(107, 163, 255, 0.16)"
+
+# Surfaces (low → high elevation)
+"--nx-bg-primary"           = "#1A1A1A"
+"--nx-bg-secondary"         = "#242424"
+"--nx-bg-tertiary"          = "#2F2F2F"
+"--nx-bg-elevated"          = "#2A2A2A"
+"--nx-bg-overlay"           = "rgba(0, 0, 0, 0.75)"
+
+# Text (most → least prominent)
+"--nx-text-primary"         = "#F5F5F5"
+"--nx-text-secondary"       = "#D4D4D4"
+"--nx-text-tertiary"        = "#A0A0A0"
+"--nx-text-muted"           = "#737373"
+"--nx-text-inverted"        = "#0F0F0F"
+
+# Interaction states — translucent so they read on any surface.
+"--nx-interactive-hover"    = "rgba(255, 255, 255, 0.06)"
+"--nx-interactive-active"   = "rgba(255, 255, 255, 0.12)"
+"--nx-border"               = "rgba(255, 255, 255, 0.10)"
+
+# Elevation
+"--nx-shadow-sm"            = "0 1px 2px rgba(0, 0, 0, 0.3)"
+"--nx-shadow-md"            = "0 4px 6px rgba(0, 0, 0, 0.4)"
+"--nx-shadow-lg"            = "0 10px 15px rgba(0, 0, 0, 0.5)"
+
+# Syntax (editor + code blocks). Drop this block to inherit defaults.
+"--nx-syntax-keyword"       = "#FF6B6B"
+"--nx-syntax-string"        = "#A3E48F"
+"--nx-syntax-comment"       = "#7A7A7A"
+"--nx-syntax-number"        = "#FFB347"
+"--nx-syntax-function"      = "#6BA3FF"
+
+# Density tokens — three presets the user can switch between at runtime.
+# Override only if you want to retune row heights / font sizes; otherwise
+# delete the block and inherit.
+"--nx-density-cozy-ui-size"               = "13px"
+"--nx-density-cozy-row-h"                 = "26px"
+"--nx-density-cozy-body-size"             = "16px"
+"--nx-density-cozy-chrome-row-height"     = "36px"
+"--nx-density-cozy-chrome-icon-size"      = "24px"
+"--nx-density-compact-ui-size"            = "12px"
+"--nx-density-compact-row-h"              = "22px"
+"--nx-density-compact-body-size"          = "15px"
+"--nx-density-compact-chrome-row-height"  = "30px"
+"--nx-density-compact-chrome-icon-size"   = "20px"
+"--nx-density-spacious-ui-size"           = "14px"
+"--nx-density-spacious-row-h"             = "30px"
+"--nx-density-spacious-body-size"         = "17px"
+"--nx-density-spacious-chrome-row-height" = "40px"
+"--nx-density-spacious-chrome-icon-size"  = "28px"
+
+# ── Typography ───────────────────────────────────────────────────────────────
+# Font stacks — drop a key to inherit. `font_imports` lets you pull remote
+# fonts (e.g. Google Fonts) at load time.
+[typography]
+sans_font  = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+mono_font  = "'JetBrains Mono', 'Monaco', 'Courier New', monospace"
+serif_font = "'Georgia', 'Times New Roman', serif"
+# font_imports = ["https://fonts.googleapis.com/css2?family=Inter&display=swap"]
+
+# ── Platform-specific overrides ──────────────────────────────────────────────
+# Layered on top of `[variables]` when the OS matches. List the platforms you
+# touch in `theme.platform_specific` above so the picker can flag them.
+[platforms.macos]
+# "--nx-color-primary" = "#0A84FF"
+# "--nx-bg-elevated"   = "rgba(42, 42, 42, 0.85)"
+
+[platforms.windows]
+# "--nx-bg-secondary"  = "rgba(32, 32, 32, 0.7)"
+
+[platforms.linux]
+# (usually empty)
+
+# ── Discovery metadata ───────────────────────────────────────────────────────
+# Powers the picker's search and filters.
+[tags]
+keywords          = ["dark", "high-contrast"]
+color_temperature = "cool"     # "cool" | "warm" | "neutral"
+contrast_level    = "aa"       # "aa" | "aaa" | "low"
+use_case          = ["coding", "reviewing"]
+
+# ── Changelog ────────────────────────────────────────────────────────────────
+[version_history]
+"0.1.0" = "Initial release"

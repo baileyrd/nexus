@@ -1,0 +1,110 @@
+[theme]
+name = "Forge Ember (Light)"
+version = "1.0.0"
+author = "Nexus"
+description = "Ember on warm off-white — light counterpart to Forge Ember Dark, with a slightly redder accent for legibility."
+license = "MIT OR Apache-2.0"
+nexus_min_version = "0.1.0"
+nexus_max_version = "*"
+display_name = "Forge Ember — Light"
+category = "light"
+supports = ["light"]
+
+[variables]
+# ── Surfaces (warm off-whites) ─────────────────────────────────────────────
+"--nx-bg-primary"           = "oklch(0.985 0.004 80)"
+"--nx-bg-secondary"         = "oklch(0.965 0.004 80)"
+"--nx-bg-tertiary"          = "oklch(0.975 0.008 80)"
+"--nx-bg-elevated"          = "oklch(0.985 0.004 80)"
+"--nx-bg-sunken"            = "oklch(0.95 0.004 80)"
+"--nx-bg-hover"             = "oklch(0.945 0.004 80)"
+"--nx-bg-pressed"           = "oklch(0.92 0.006 80)"
+"--nx-bg-selected"          = "oklch(0.62 0.15 45 / 0.14)"
+"--nx-bg-disabled"          = "oklch(0.965 0.004 80 / 0.6)"
+"--nx-bg-overlay"           = "oklch(0.22 0.012 260 / 0.45)"
+"--nx-bg-backdrop"          = "oklch(0.22 0.012 260 / 0.32)"
+"--nx-bg-highlight"         = "oklch(0.62 0.15 45 / 0.10)"
+"--nx-bg-code-block"        = "oklch(0.96 0.006 80)"
+"--nx-bg-inline-code"       = "oklch(0.965 0.004 80)"
+
+# ── Text (cool slate ink, three weights) ───────────────────────────────────
+"--nx-text-primary"         = "oklch(0.22 0.012 260)"
+"--nx-text-secondary"       = "oklch(0.42 0.012 260)"
+"--nx-text-tertiary"        = "oklch(0.58 0.012 260)"
+"--nx-text-muted"           = "oklch(0.58 0.012 260)"
+"--nx-text-inverted"        = "oklch(0.98 0.01 60)"
+
+# ── Interaction overlays ───────────────────────────────────────────────────
+"--nx-interactive-hover"    = "oklch(0.22 0.012 260 / 0.05)"
+"--nx-interactive-active"   = "oklch(0.62 0.15 45 / 0.14)"
+"--nx-interactive-focus-ring" = "oklch(0.62 0.15 45)"
+"--nx-interactive-disabled" = "oklch(0.22 0.012 260 / 0.04)"
+
+# ── Borders ────────────────────────────────────────────────────────────────
+"--nx-border"               = "oklch(0.88 0.005 80)"
+"--nx-border-default"       = "oklch(0.88 0.005 80)"
+"--nx-border-primary"       = "oklch(0.88 0.005 80)"
+"--nx-border-strong"        = "oklch(0.82 0.005 80)"
+"--nx-border-subtle"        = "oklch(0.92 0.005 80)"
+"--nx-border-inverted"      = "oklch(0.22 0.012 260)"
+"--nx-border-focus"         = "oklch(0.62 0.15 45)"
+"--nx-border-success"       = "oklch(0.62 0.12 165)"
+"--nx-border-warning"       = "oklch(0.70 0.14 75)"
+"--nx-border-error"         = "oklch(0.58 0.18 28)"
+"--nx-border-info"          = "oklch(0.60 0.10 230)"
+
+# ── Brand / accent (slightly redder for bright surfaces) ──────────────────
+"--nx-color-primary"        = "oklch(0.62 0.15 45)"
+"--nx-color-primary-light"  = "oklch(0.72 0.14 50)"
+"--nx-color-primary-dark"   = "oklch(0.50 0.16 35)"
+"--nx-color-primary-soft"   = "oklch(0.62 0.15 45 / 0.14)"
+"--nx-color-secondary"      = "oklch(0.60 0.10 230)"
+
+# ── Semantic status — same roles, retuned for light backgrounds ───────────
+"--nx-color-success"        = "oklch(0.62 0.12 165)"
+"--nx-color-warning"        = "oklch(0.70 0.14 75)"
+"--nx-color-error"          = "oklch(0.58 0.18 28)"
+"--nx-color-info"           = "oklch(0.60 0.10 230)"
+
+# ── Syntax ────────────────────────────────────────────────────────────────
+"--nx-syntax-keyword"       = "oklch(0.55 0.18 28)"
+"--nx-syntax-string"        = "oklch(0.55 0.14 145)"
+"--nx-syntax-comment"       = "oklch(0.58 0.012 260)"
+"--nx-syntax-number"        = "oklch(0.62 0.15 60)"
+"--nx-syntax-function"      = "oklch(0.55 0.12 230)"
+
+# ── Shadows ────────────────────────────────────────────────────────────────
+"--nx-shadow-sm"            = "0 1px 2px oklch(0.22 0.012 260 / 0.06)"
+"--nx-shadow-md"            = "0 4px 8px oklch(0.22 0.012 260 / 0.10)"
+"--nx-shadow-lg"            = "0 12px 24px oklch(0.22 0.012 260 / 0.14)"
+
+# ── Density ────────────────────────────────────────────────────────────────
+"--nx-density-cozy-ui-size"               = "13px"
+"--nx-density-cozy-row-h"                 = "26px"
+"--nx-density-cozy-body-size"             = "16px"
+"--nx-density-cozy-chrome-row-height"     = "36px"
+"--nx-density-cozy-chrome-icon-size"      = "24px"
+"--nx-density-compact-ui-size"            = "12px"
+"--nx-density-compact-row-h"              = "22px"
+"--nx-density-compact-body-size"          = "15px"
+"--nx-density-compact-chrome-row-height"  = "30px"
+"--nx-density-compact-chrome-icon-size"   = "20px"
+"--nx-density-spacious-ui-size"           = "14px"
+"--nx-density-spacious-row-h"             = "30px"
+"--nx-density-spacious-body-size"         = "17px"
+"--nx-density-spacious-chrome-row-height" = "40px"
+"--nx-density-spacious-chrome-icon-size"  = "28px"
+
+[typography]
+sans_font  = "ui-sans-serif, 'Inter', system-ui, sans-serif"
+mono_font  = "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace"
+serif_font = "'Fraunces', Georgia, serif"
+
+[tags]
+keywords = ["forge", "ember", "warm", "off-white", "oklch"]
+color_temperature = "warm"
+contrast_level = "aa"
+use_case = ["writing", "coding", "reviewing"]
+
+[version_history]
+"1.0.0" = "Initial release — based on Forge Color System v0.1"
