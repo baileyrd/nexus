@@ -12,13 +12,17 @@ supports = ["dark"]
 
 [variables]
 # ── Surfaces (cool slate, layered by elevation) ────────────────────────────
-"--nx-bg-primary"           = "oklch(0.185 0.008 260)"   # window canvas, editor body
-"--nx-bg-secondary"         = "oklch(0.215 0.008 260)"   # tabs, inputs, cards
-"--nx-bg-tertiary"          = "oklch(0.235 0.009 60)"    # paper-warm reference column
-"--nx-bg-elevated"          = "oklch(0.215 0.008 260)"
-"--nx-bg-sunken"            = "oklch(0.16 0.008 260)"
-"--nx-bg-hover"             = "oklch(0.27 0.01 260)"
-"--nx-bg-pressed"           = "oklch(0.32 0.012 260)"
+# Chroma bumped well above the original Forge spec values (0.008→0.025) so the
+# slate tint is actually visible against neutral dark surfaces. The paper-feel
+# tertiary surface (warm hue 60) is a clear amber-leaning off-charcoal to read
+# as a different material from the cool primary.
+"--nx-bg-primary"           = "oklch(0.195 0.025 260)"   # window canvas, editor body
+"--nx-bg-secondary"         = "oklch(0.225 0.028 260)"   # tabs, inputs, cards
+"--nx-bg-tertiary"          = "oklch(0.245 0.022 60)"    # paper-warm reference column
+"--nx-bg-elevated"          = "oklch(0.225 0.028 260)"
+"--nx-bg-sunken"            = "oklch(0.16 0.022 260)"
+"--nx-bg-hover"             = "oklch(0.28 0.030 260)"
+"--nx-bg-pressed"           = "oklch(0.33 0.034 260)"
 "--nx-bg-selected"          = "oklch(0.78 0.14 70 / 0.16)"
 "--nx-bg-disabled"          = "oklch(0.215 0.008 260 / 0.6)"
 "--nx-bg-overlay"           = "oklch(0 0 0 / 0.6)"
@@ -41,11 +45,11 @@ supports = ["dark"]
 "--nx-interactive-disabled" = "oklch(1 0 0 / 0.04)"
 
 # ── Borders (two strokes only — structural + internal) ─────────────────────
-"--nx-border"               = "oklch(0.30 0.008 260)"
-"--nx-border-default"       = "oklch(0.30 0.008 260)"
-"--nx-border-primary"       = "oklch(0.30 0.008 260)"
-"--nx-border-strong"        = "oklch(0.36 0.008 260)"
-"--nx-border-subtle"        = "oklch(0.26 0.008 260)"
+"--nx-border"               = "oklch(0.32 0.022 260)"
+"--nx-border-default"       = "oklch(0.32 0.022 260)"
+"--nx-border-primary"       = "oklch(0.32 0.022 260)"
+"--nx-border-strong"        = "oklch(0.40 0.025 260)"
+"--nx-border-subtle"        = "oklch(0.27 0.022 260)"
 "--nx-border-inverted"      = "oklch(0.94 0.005 80)"
 "--nx-border-focus"         = "oklch(0.78 0.14 70)"
 "--nx-border-success"       = "oklch(0.78 0.12 165)"
