@@ -217,3 +217,82 @@ pub struct GitCommitReply {
     /// Short hex hash of the newly-created commit.
     pub hash: String,
 }
+
+// ── New handlers added for the git panel (BL-084) ────────────────────────────
+
+/// One entry in the `file_statuses` response (handler id `11`).
+/// Status is the `Debug` string of [`crate::types::FileStatus`]:
+/// `"Untracked"`, `"Modified"`, `"Staged"`, `"Removed"`,
+/// `"Renamed"`, `"Conflicted"`, or `"Added"`. Unmodified files
+/// are excluded by the engine's status options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitFileStatus {
+    /// Forge-relative path of the file.
+    pub path: String,
+    /// One of: `"Untracked"`, `"Modified"`, `"Staged"`,
+    /// `"Removed"`, `"Renamed"`, `"Conflicted"`, `"Added"`.
+    pub status: String,
+}
+
+/// One file with its staged diff hunks. Used in the `diff_staged`
+/// response array (handler id `12`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitFileDiff {
+    /// Forge-relative path.
+    pub path: String,
+    /// Diff hunks for this file.
+    pub hunks: Vec<GitDiffHunk>,
+}
+
+/// Args for `switch_branch` (13), `create_branch` (14),
+/// `delete_branch` (15).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitBranchArgs {
+    /// Branch name to operate on.
+    pub name: String,
+}
+
+/// Args for `push` (handler id `16`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitPushArgs {
+    /// Remote name (e.g. `"origin"`).
+    pub remote: String,
+    /// Branch name to push (e.g. `"main"`).
+    pub branch: String,
+}

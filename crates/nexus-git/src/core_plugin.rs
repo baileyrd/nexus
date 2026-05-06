@@ -48,6 +48,18 @@ pub const HANDLER_COMMIT: u32 = 8;
 pub const HANDLER_STAGE_ALL: u32 = 9;
 /// IPC handler: unstages all staged files.
 pub const HANDLER_UNSTAGE_ALL: u32 = 10;
+/// IPC handler: returns all changed files with their status.
+pub const HANDLER_FILE_STATUSES: u32 = 11;
+/// IPC handler: returns the diff of staged changes (index vs HEAD).
+pub const HANDLER_DIFF_STAGED: u32 = 12;
+/// IPC handler: switches to a branch (args: `{"name": "..."}`).
+pub const HANDLER_SWITCH_BRANCH: u32 = 13;
+/// IPC handler: creates a branch from HEAD (args: `{"name": "..."}`).
+pub const HANDLER_CREATE_BRANCH: u32 = 14;
+/// IPC handler: deletes a branch (args: `{"name": "..."}`).
+pub const HANDLER_DELETE_BRANCH: u32 = 15;
+/// IPC handler: pushes to a remote (args: `{"remote": "...", "branch": "..."}`).
+pub const HANDLER_PUSH: u32 = 16;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const POLL_TICK: Duration = Duration::from_millis(200);
@@ -253,6 +265,60 @@ impl CorePlugin for GitCorePlugin {
                 h.with(|e| e.unstage_all()).map_err(map_err)?;
                 Ok(json!({"ok": true}))
             }
+            HANDLER_FILE_STATUSES => {
+                let statuses = h.with(|e| e.file_statuses()).map_err(map_err)?;
+                let arr: Vec<_> = statuses
+                    .iter()
+                    .map(|s| json!({
+                        "path": s.path.to_string_lossy(),
+                        "status": format!("{:?}", s.status),
+                    }))
+                    .collect();
+                Ok(serde_json::Value::Array(arr))
+            }
+            HANDLER_DIFF_STAGED => {
+                let diffs = h.with(|e| e.diff_staged()).map_err(map_err)?;
+                let arr: Vec<_> = diffs
+                    .iter()
+                    .map(|(path, hunks)| {
+                        json!({
+                            "path": path,
+                            "hunks": hunks.iter().map(|hunk| json!({
+                                "old_start": hunk.old_start,
+                                "old_count": hunk.old_count,
+                                "new_start": hunk.new_start,
+                                "new_count": hunk.new_count,
+                                "lines": hunk.lines.iter().map(|l| json!({
+                                    "kind": format!("{:?}", l.kind),
+                                    "content": l.content,
+                                })).collect::<Vec<_>>(),
+                            })).collect::<Vec<_>>(),
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::Value::Array(arr))
+            }
+            HANDLER_SWITCH_BRANCH => {
+                let name = string_arg(args, "name")?;
+                h.with(move |e| e.switch_branch(&name)).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
+            HANDLER_CREATE_BRANCH => {
+                let name = string_arg(args, "name")?;
+                h.with(move |e| e.create_branch(&name)).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
+            HANDLER_DELETE_BRANCH => {
+                let name = string_arg(args, "name")?;
+                h.with(move |e| e.delete_branch(&name)).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
+            HANDLER_PUSH => {
+                let remote = string_arg(args, "remote")?;
+                let branch = string_arg(args, "branch")?;
+                h.with(move |e| e.push(&remote, &branch)).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("unknown handler_id {handler_id}"),
@@ -292,6 +358,17 @@ fn path_arg(args: &serde_json::Value, forge_root: &Path) -> Result<PathBuf, Plug
         }
     })?;
     Ok(PathBuf::from(raw))
+}
+
+/// Extract a plain string argument from the IPC args object.
+fn string_arg(args: &serde_json::Value, key: &str) -> Result<String, PluginError> {
+    args.get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: format!("missing '{key}' argument"),
+        })
 }
 
 // Passed as a function pointer to `.map_err(map_err)`; wrapping in a
