@@ -44,10 +44,16 @@ interface ThemePickerState {
   // ── Theme builder ──────────────────────────────────────────────────
   /** Which theme the builder is starting from. null = use active theme. */
   builderBaseThemeId: string | null
-  /** Variable overrides being edited. Empty = no changes from base. */
+  /** Variable overrides for single mode (or light column in dual mode). */
   builderOverrides: Record<string, string>
   builderThemeName: string
   builderThemeAuthor: string
+  // Dual-mode state
+  builderDualMode: boolean
+  builderLightOverrides: Record<string, string>
+  builderDarkOverrides: Record<string, string>
+  builderHueLock: boolean
+  builderActiveColumn: 'light' | 'dark'
 
   open(tab?: PickerTab): void
   close(): void
@@ -62,6 +68,13 @@ interface ThemePickerState {
   resetBuilderOverrides(): void
   setBuilderThemeName(name: string): void
   setBuilderThemeAuthor(author: string): void
+  setBuilderDualMode(on: boolean): void
+  setBuilderLightOverride(key: string, value: string): void
+  clearBuilderLightOverride(key: string): void
+  setBuilderDarkOverride(key: string, value: string): void
+  clearBuilderDarkOverride(key: string): void
+  setBuilderHueLock(on: boolean): void
+  setBuilderActiveColumn(col: 'light' | 'dark'): void
 }
 
 export const useThemePickerStore = create<ThemePickerState>((set) => ({
@@ -76,6 +89,11 @@ export const useThemePickerStore = create<ThemePickerState>((set) => ({
   builderOverrides: {},
   builderThemeName: '',
   builderThemeAuthor: '',
+  builderDualMode: false,
+  builderLightOverrides: {},
+  builderDarkOverrides: {},
+  builderHueLock: false,
+  builderActiveColumn: 'light',
 
   open: (tab = 'themes') => set({ visible: true, activeTab: tab, query: '', categoryFilter: 'all' }),
   close: () => set({ visible: false }),
@@ -93,7 +111,30 @@ export const useThemePickerStore = create<ThemePickerState>((set) => ({
       delete next[key]
       return { builderOverrides: next }
     }),
-  resetBuilderOverrides: () => set({ builderOverrides: {} }),
+  resetBuilderOverrides: () => set({
+    builderOverrides: {},
+    builderLightOverrides: {},
+    builderDarkOverrides: {},
+  }),
   setBuilderThemeName: (name) => set({ builderThemeName: name }),
   setBuilderThemeAuthor: (author) => set({ builderThemeAuthor: author }),
+  setBuilderDualMode: (on) => set({ builderDualMode: on }),
+  setBuilderLightOverride: (key, value) =>
+    set((s) => ({ builderLightOverrides: { ...s.builderLightOverrides, [key]: value } })),
+  clearBuilderLightOverride: (key) =>
+    set((s) => {
+      const next = { ...s.builderLightOverrides }
+      delete next[key]
+      return { builderLightOverrides: next }
+    }),
+  setBuilderDarkOverride: (key, value) =>
+    set((s) => ({ builderDarkOverrides: { ...s.builderDarkOverrides, [key]: value } })),
+  clearBuilderDarkOverride: (key) =>
+    set((s) => {
+      const next = { ...s.builderDarkOverrides }
+      delete next[key]
+      return { builderDarkOverrides: next }
+    }),
+  setBuilderHueLock: (on) => set({ builderHueLock: on }),
+  setBuilderActiveColumn: (col) => set({ builderActiveColumn: col }),
 }))

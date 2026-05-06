@@ -43,10 +43,11 @@ export function ThemePicker() {
 // ── ThemePickerModal ──────────────────────────────────────────────────────────
 
 function ThemePickerModal() {
-  const close      = useThemePickerStore((s) => s.close)
-  const activeTab  = useThemePickerStore((s) => s.activeTab)
-  const setActiveTab = useThemePickerStore((s) => s.setActiveTab)
-  const kernelMode = useThemeStore((s) => s.kernelMode)
+  const close          = useThemePickerStore((s) => s.close)
+  const activeTab      = useThemePickerStore((s) => s.activeTab)
+  const setActiveTab   = useThemePickerStore((s) => s.setActiveTab)
+  const builderDualMode = useThemePickerStore((s) => s.builderDualMode)
+  const kernelMode     = useThemeStore((s) => s.kernelMode)
 
   const applyMode = (mode: ThemeMode) => {
     void useThemeStore.getState().setMode(getPickerApi(), mode)
@@ -88,8 +89,8 @@ function ThemePickerModal() {
     >
       <div
         style={{
-          width: 660,
-          maxWidth: '94vw',
+          width: activeTab === 'build' && builderDualMode ? 960 : 660,
+          maxWidth: '96vw',
           maxHeight: 'calc(100vh - 160px)',
           background: 'var(--background-secondary)',
           border: '1px solid var(--background-modifier-border)',

@@ -47,3 +47,63 @@ export function contrastRatio(fg: string, bg: string): number | null {
   const darker  = Math.min(l1, l2)
   return (lighter + 0.05) / (darker + 0.05)
 }
+
+// ── HSL utilities (used by hue-lock in the theme builder) ────────────────────
+
+/** Convert hex colour → [h°, s%, l%]. Returns null for non-hex. */
+export function hexToHsl(color: string): [number, number, number] | null {
+  const rgb = parseHex(color)
+  if (!rgb) return null
+  const [r, g, b] = rgb.map((v) => v / 255) as [number, number, number]
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const l = (max + min) / 2
+  if (max === min) return [0, 0, l * 100]
+  const d = max - min
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+  let h: number
+  if (max === r)      h = ((g - b) / d + (g < b ? 6 : 0)) / 6
+  else if (max === g) h = ((b - r) / d + 2) / 6
+  else                h = ((r - g) / d + 4) / 6
+  return [h * 360, s * 100, l * 100]
+}
+
+/** Convert [h°, s%, l%] → 6-digit hex string. */
+export function hslToHex(h: number, s: number, l: number): string {
+  const hh = ((h % 360) + 360) % 360
+  const ss = Math.max(0, Math.min(100, s)) / 100
+  const ll = Math.max(0, Math.min(100, l)) / 100
+  const c  = (1 - Math.abs(2 * ll - 1)) * ss
+  const x  = c * (1 - Math.abs((hh / 60) % 2 - 1))
+  const m  = ll - c / 2
+  let r = 0, g = 0, b = 0
+  if      (hh < 60)  { r = c; g = x }
+  else if (hh < 120) { r = x; g = c }
+  else if (hh < 180) {        g = c; b = x }
+  else if (hh < 240) {        g = x; b = c }
+  else if (hh < 300) { r = x;        b = c }
+  else               { r = c;        b = x }
+  const hex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, '0')
+  return `#${hex(r)}${hex(g)}${hex(b)}`
+}
+
+/**
+ * Apply the hue + saturation delta from (prev → next) to target, keeping
+ * target's lightness unchanged. Returns null if any argument is non-hex.
+ * Used by the dual-mode hue-lock to keep paired colours in harmony.
+ */
+export function applyHueSatDelta(
+  prev: string,
+  next: string,
+  target: string,
+): string | null {
+  const pH = hexToHsl(prev)
+  const nH = hexToHsl(next)
+  const tH = hexToHsl(target)
+  if (!pH || !nH || !tH) return null
+  return hslToHex(
+    tH[0] + (nH[0] - pH[0]),
+    Math.max(0, Math.min(100, tH[1] + (nH[1] - pH[1]))),
+    tH[2],
+  )
+}
