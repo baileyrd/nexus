@@ -8,6 +8,15 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-107: Density tier CSS activation via `[data-density]` ✅ (2026-05-06)
+
+**Source**: Gap found while adding density variable defaults to `nexus-theme` (2026-05-06)
+**Files**: `shell/index.html` (already present), `crates/nexus-theme/src/variables.rs`
+
+Closed as already implemented. `shell/index.html` has contained `[data-density="cozy"/"compact"/"spacious"]` selectors forwarding `--nx-density-*` variables onto the bridge tokens (`--ui-size`, `--row-h`, `--body-size`, `--chrome-row-height`, `--chrome-icon-size`) since SH-014, with hardcoded fallback values to prevent FOUC. The gap was on the kernel side: `--nx-density-*` variables had no defaults in `variables.rs`, so themes could not override density sizing. Adding those defaults in `crates/nexus-theme/src/variables.rs` (2026-05-06) completed the round-trip — the kernel now provides values for all density tokens, themes can override them per `NEXUS.toml`, and the `index.html` selectors were already reading them.
+
+---
+
 ### BL-036: AMB margin suggestions + inline correction ✅ (2026-04-30)
 
 **Source**: [../AI-AMBIENT-COPILOT-PLAN.md](../AI-AMBIENT-COPILOT-PLAN.md) patterns 6 + 9.

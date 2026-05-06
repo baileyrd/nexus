@@ -33,19 +33,7 @@ _BL-009 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md).
 
 ---
 
-### BL-107: Density tier CSS activation via `[data-density]`
-
-**Source**: Gap found while adding density variable defaults to `nexus-theme` (2026-05-06)
-**Effort**: Tiny (2 hours)
-**Files**: `shell/src/shell.css` (or a new `density.css` imported by it)
-**Related**: `themeStore.ts` (`data-density` attribute write); `--nx-density-*` variables added to `crates/nexus-theme/src/variables.rs`
-
-`themeStore.ts` writes `document.documentElement.dataset.density` (`"cozy"` / `"compact"` / `"spacious"`), and `--nx-density-{tier}-*` CSS variables were added to the defaults in `variables.rs`. But no CSS rule reads `[data-density]` to activate the correct tier's values. All three density presets currently resolve identically — the attribute is written but has no visual effect.
-
-**Definition of done:**
-- `shell.css` (or a new `density.css` imported by it) contains `[data-density]` selectors that forward each tier's tokens onto bridge variables (`--nx-ui-size`, `--nx-row-h`, `--nx-body-size`, `--nx-chrome-row-height`, `--nx-chrome-icon-size`)
-- Switching density in Settings immediately resizes the UI without a page reload
-- Sidebar rows and tab-bar height both visibly change as a smoke test
+_BL-107 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
