@@ -7,7 +7,7 @@
 //! check to prevent traversal attacks.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -30,7 +30,11 @@ use crate::log::LogLevel;
 pub struct KernelPluginContext {
     plugin_id: String,
     plugin_version: String,
-    capabilities: CapabilitySet,
+    /// Live, mutable capability set (BL-096). Revoking a capability via
+    /// [`PluginLoader::revoke_capability`] mutates this in place — every
+    /// subsequent `has_capability` / `require_capability` / IPC caller
+    /// check observes the new state without a plugin restart.
+    capabilities: Arc<RwLock<CapabilitySet>>,
     kv: Arc<dyn KvStore>,
     event_bus: Arc<EventBus>,
     /// Canonical form of the forge root, used for path confinement.
@@ -78,7 +82,7 @@ impl KernelPluginContext {
         Ok(Self {
             plugin_id: plugin_id.into(),
             plugin_version: plugin_version.into(),
-            capabilities,
+            capabilities: Arc::new(RwLock::new(capabilities)),
             kv,
             event_bus,
             forge_root_canonical,
@@ -87,10 +91,34 @@ impl KernelPluginContext {
         })
     }
 
+    /// Return a clone of the live capability handle (BL-096).
+    ///
+    /// The plugin loader stashes this so that
+    /// [`PluginLoader::revoke_capability`] can mutate the set in place
+    /// — every subsequent `has_capability` / IPC gate sees the new
+    /// state without a plugin restart.
+    #[must_use]
+    pub fn caps_handle(&self) -> Arc<RwLock<CapabilitySet>> {
+        Arc::clone(&self.capabilities)
+    }
+
+    /// Snapshot the current capability set. Used by the loader's
+    /// `PluginInfo` reporter and tests; live gates should call
+    /// [`has_capability`] instead so the read lock is held for the
+    /// shortest possible window.
+    #[must_use]
+    pub fn capabilities_snapshot(&self) -> CapabilitySet {
+        self.capabilities.read().expect("caps lock").clone()
+    }
+
+    fn caps_contains(&self, cap: Capability) -> bool {
+        self.capabilities.read().expect("caps lock").contains(cap)
+    }
+
     /// Check that the plugin holds `cap`, logging a denial and returning an
     /// error if not.
     fn require_capability(&self, cap: Capability) -> Result<()> {
-        if self.capabilities.contains(cap) {
+        if self.caps_contains(cap) {
             return Ok(());
         }
         audit::log_capability_denied(&self.plugin_id, cap.as_str());
@@ -165,7 +193,7 @@ impl PluginContext for KernelPluginContext {
     }
 
     fn has_capability(&self, cap: Capability) -> bool {
-        self.capabilities.contains(cap)
+        self.caps_contains(cap)
     }
 
     // ---- File system -----------------------------------------------------
@@ -305,7 +333,7 @@ impl PluginContext for KernelPluginContext {
         args: serde_json::Value,
         timeout: Duration,
     ) -> std::result::Result<serde_json::Value, IpcError> {
-        if !self.capabilities.contains(Capability::IpcCall) {
+        if !self.caps_contains(Capability::IpcCall) {
             audit::log_capability_denied(&self.plugin_id, Capability::IpcCall.as_str());
             return Err(IpcError::CapabilityDenied {
                 plugin_id: self.plugin_id.clone(),
@@ -328,7 +356,7 @@ impl PluginContext for KernelPluginContext {
         for required in
             dispatcher.required_caller_caps_for_args(target_plugin_id, command_id, &args)
         {
-            if !self.capabilities.contains(required) {
+            if !self.caps_contains(required) {
                 audit::log_capability_denied(&self.plugin_id, required.as_str());
                 return Err(IpcError::CapabilityDenied {
                     plugin_id: self.plugin_id.clone(),

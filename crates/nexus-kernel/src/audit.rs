@@ -26,6 +26,25 @@ pub fn log_capability_granted(plugin_id: &str, capability: &str) {
     );
 }
 
+/// Log a runtime capability revocation (BL-096). Emitted by the plugin
+/// loader when a HIGH-risk grant is rescinded — both for the disk-side
+/// `granted_caps.json` update and (when a context is wired) the
+/// in-memory cap set on the running plugin's `KernelPluginContext`.
+pub fn log_capability_revoked(plugin_id: &str, capability: &str) {
+    tracing::warn!(
+        audit = true,
+        plugin_id,
+        capability,
+        result = "revoked",
+        "capability revoked"
+    );
+    crate::audit_store::append(
+        "capability_revoked",
+        Some(plugin_id),
+        &serde_json::json!({ "capability": capability }),
+    );
+}
+
 /// Log a capability denial event.
 pub fn log_capability_denied(plugin_id: &str, capability: &str) {
     tracing::warn!(

@@ -699,6 +699,17 @@ enum PluginCommand {
         #[arg(long)]
         set: Option<String>,
     },
+    /// Revoke a previously-granted HIGH-risk capability for a plugin
+    /// (BL-096). Live-mutates the running plugin's wired context, then
+    /// persists to `<plugin>/granted_caps.json`. Capability strings use
+    /// the dotted kernel form (e.g. `fs.write.external`, `process.spawn`,
+    /// `net.http`).
+    Revoke {
+        /// Plugin identifier (e.g. `com.nexus.agent`).
+        plugin_id: String,
+        /// Capability to revoke (dotted form, e.g. `process.spawn`).
+        capability: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1418,6 +1429,9 @@ fn main() {
             }
             PluginCommand::Settings { plugin_id, set } => {
                 commands::plugin::settings(&mut app, &plugin_id, set.as_deref())
+            }
+            PluginCommand::Revoke { plugin_id, capability } => {
+                commands::plugin::revoke(&mut app, &plugin_id, &capability)
             }
         },
 

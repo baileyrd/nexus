@@ -918,6 +918,27 @@ impl PluginManager {
         self.loader.disable(plugin_id)
     }
 
+    /// Revoke a previously-granted HIGH-risk capability from the plugin
+    /// identified by `plugin_id` (BL-096). Live-mutates the running
+    /// plugin's wired context cap set, persists to
+    /// `granted_caps.json`, emits an audit entry, and publishes
+    /// `com.nexus.kernel.capability_revoked` on the kernel bus.
+    ///
+    /// Non-HIGH-risk caps are auto-granted from the manifest and
+    /// cannot be revoked at runtime.
+    ///
+    /// # Errors
+    /// Returns [`PluginError::PluginNotFound`] if the plugin is not
+    /// loaded, or an io-backed error if `granted_caps.json` cannot be
+    /// rewritten.
+    pub fn revoke_capability(
+        &mut self,
+        plugin_id: &str,
+        cap: nexus_kernel::Capability,
+    ) -> Result<(), PluginError> {
+        self.loader.revoke_capability(plugin_id, cap)
+    }
+
     /// Inject the kernel event bus so that plugins can receive events.
     ///
     /// Must be called before loading plugins with event subscriptions.

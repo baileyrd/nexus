@@ -328,6 +328,15 @@ struct LoadedPlugin {
     /// WASM execution.
     backend: Arc<Mutex<PluginBackend>>,
     capabilities: CapabilitySet,
+    /// Live cap handle of the plugin's wired [`KernelPluginContext`],
+    /// stashed by [`PluginLoader::wire_context`] (BL-096). Present only
+    /// for plugins that were given a context in bootstrap;
+    /// [`PluginLoader::revoke_capability`] mutates it in place so
+    /// revocation takes effect on the next operation attempt without a
+    /// plugin restart. `None` means the plugin had no context wired,
+    /// so live revocation has no runtime surface to mutate (the
+    /// disk-side persisted grant is still updated).
+    wired_caps: Option<Arc<RwLock<CapabilitySet>>>,
     status: PluginStatus,
     plugin_dir: PathBuf,
     registrations: PluginRegistrations,
@@ -789,6 +798,7 @@ impl PluginLoader {
                 manifest,
                 backend: Arc::new(Mutex::new(backend)),
                 capabilities,
+                wired_caps: None,
                 status: PluginStatus::Running,
                 plugin_dir: plugin_dir.to_path_buf(),
                 registrations: PluginRegistrations {
@@ -1168,6 +1178,9 @@ impl PluginLoader {
             .loaded
             .get_mut(plugin_id)
             .ok_or_else(|| PluginError::PluginNotFound(plugin_id.to_string()))?;
+        // Stash the live caps handle so `revoke_capability` can mutate
+        // the running plugin's view (BL-096) without a restart.
+        lp.wired_caps = Some(ctx.caps_handle());
         lp.backend
             .lock()
             .map_err(|_| PluginError::PluginNotFound(plugin_id.to_string()))?
@@ -1272,7 +1285,14 @@ impl PluginLoader {
     }
 
     /// Revoke a previously-persisted capability grant for `plugin_id`
-    /// (F-5.1.1). The revoke takes effect on the next plugin load.
+    /// (F-5.1.1). The revoke takes effect *immediately* on the running
+    /// plugin's wired [`KernelPluginContext`] (BL-096) and is also
+    /// persisted to `<plugin_dir>/granted_caps.json` so it survives a
+    /// restart. Plugins without a wired context still get the disk
+    /// update and pick up the new state on next load.
+    ///
+    /// Emits an audit log entry and a `com.nexus.kernel.capability_revoked`
+    /// event on the kernel bus (when a bus is attached).
     ///
     /// # Errors
     /// Returns [`PluginError::PluginNotFound`] if `plugin_id` is not loaded,
@@ -1290,7 +1310,31 @@ impl PluginLoader {
         }
         let plugin_dir = lp.plugin_dir.clone();
         let version = lp.manifest.version.clone();
-        write_grant(&plugin_dir, &version, cap, false)
+
+        // Live-mutate the running context's cap set so the next
+        // `has_capability` / IPC gate sees the revocation.
+        if let Some(handle) = &lp.wired_caps {
+            if let Ok(mut caps) = handle.write() {
+                caps.remove(cap);
+            }
+        }
+
+        write_grant(&plugin_dir, &version, cap, false)?;
+
+        // Audit log + bus event after persistence so observers only see
+        // a revoke that actually landed on disk.
+        nexus_kernel::audit::log_capability_revoked(plugin_id, cap.as_str());
+        if let Some(bus) = &self.event_bus {
+            let _ = bus.publish_plugin(
+                "com.nexus.kernel",
+                "com.nexus.kernel.capability_revoked",
+                serde_json::json!({
+                    "plugin_id": plugin_id,
+                    "capability": cap.as_str(),
+                }),
+            );
+        }
+        Ok(())
     }
 
     // ─── Internal helpers for hot-reload ──────────────────────────────────────
@@ -1986,6 +2030,28 @@ impl SharedPluginLoader {
             .lock()
             .expect("plugin loader mutex poisoned")
             .wire_context(plugin_id, ctx)
+    }
+
+    /// Convenience wrapper over [`PluginLoader::revoke_capability`] (BL-096)
+    /// for callers that hold a `SharedPluginLoader`. Live-mutates the
+    /// running plugin's wired context cap set, persists to
+    /// `granted_caps.json`, emits an audit entry, and publishes a
+    /// `com.nexus.kernel.capability_revoked` bus event.
+    ///
+    /// # Errors
+    /// See [`PluginLoader::revoke_capability`].
+    ///
+    /// # Panics
+    /// Panics if the inner mutex is poisoned.
+    pub fn revoke_capability(
+        &self,
+        plugin_id: &str,
+        cap: Capability,
+    ) -> Result<(), PluginError> {
+        self.inner
+            .lock()
+            .expect("plugin loader mutex poisoned")
+            .revoke_capability(plugin_id, cap)
     }
 
     /// Require callers of `(target_plugin_id, command_id)` to hold every

@@ -151,22 +151,7 @@ All IPC args and returns are `serde_json::Value`. There is no version field on r
 
 ---
 
-### BL-096: Capability revocation at runtime
-
-**Source**: Kernel Integration Assessment (2026-05-06) — gap #5
-**Effort**: Small (1 day)
-**Crates**: `nexus-plugins/src/loader.rs`, `nexus-kernel/src/context_impl.rs`, shell capability settings UI
-**Related**: PRD-02 (security model); `PluginLoader::grant_capability` (grants exist; revoke does not)
-
-Capability grants are permanent for a plugin's lifetime. There is no `revoke_capability()` method. To restrict an over-privileged community plugin, the entire forge must restart. This matters most for community WASM plugins where a post-install audit might find an over-privileged grant.
-
-**Definition of done:**
-- `PluginLoader::revoke_capability(plugin_id, cap)` removes the capability from the runtime `CapabilitySet` for that plugin
-- `KernelPluginContext::has_capability()` reads the live set — revocation takes effect on the next operation attempt, no restart needed
-- Revocation is persisted to `granted_caps.json` so it survives forge restart
-- `com.nexus.kernel::revoke_capability` IPC handler (kernel-internal, requires `IpcCall` + admin token) exposes this to the shell settings UI
-- Shell capability panel gains a "Revoke" button per granted capability per plugin
-- Revocation emits `com.nexus.kernel.capability_revoked` kernel bus event and an audit log entry
+_BL-096 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Live runtime revocation, persistence, audit, bus event, and a `nexus plugin revoke` CLI verb shipped. Dedicated kernel-internal IPC handler + shell "Revoke" button deferred — the existing `set_plugin_granted_capabilities` Tauri command already covers the persisted-grant write path; live-mutation through the shell is a follow-up._
 
 ---
 

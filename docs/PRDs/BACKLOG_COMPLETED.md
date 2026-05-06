@@ -8,6 +8,28 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-096: Capability revocation at runtime ✅ (2026-05-06)
+
+**Source**: Kernel Integration Assessment (2026-05-06) — gap #5
+**Files**: `crates/nexus-kernel/src/{context_impl.rs,audit.rs}`, `crates/nexus-plugins/src/{loader.rs,lib.rs}`, `crates/nexus-cli/src/{main.rs,commands/plugin.rs}`, `crates/nexus-plugins/tests/capability_revocation.rs (new)`
+
+`KernelPluginContext.capabilities` is now `Arc<RwLock<CapabilitySet>>` (was an owned `CapabilitySet`); every gate (`has_capability`, `require_capability`, IPC `IpcCall` check, per-call caller-cap check) goes through a read-locked `caps_contains`. The plugin loader's `wire_context` stashes each running plugin's `caps_handle()` on the `LoadedPlugin` so `revoke_capability` can write-lock the set in place — the next operation attempt observes the revocation without a plugin restart.
+
+`PluginLoader::revoke_capability` (and `SharedPluginLoader::revoke_capability` / `PluginManager::revoke_capability` wrappers) now:
+
+1. Mutates the live wired-context cap set if one is attached.
+2. Persists the revoke to `<plugin>/granted_caps.json` (existing path).
+3. Emits a `capability_revoked` audit entry via the new `audit::log_capability_revoked` helper (reuses BL-094's persisted store).
+4. Publishes `com.nexus.kernel.capability_revoked { plugin_id, capability }` on the kernel bus (when the loader has a bus attached).
+
+User-facing surface: `nexus plugin revoke <plugin_id> <capability>`. Capability strings use the dotted kernel form (`process.spawn`, `fs.write.external`, `net.http`, …); non-HIGH-risk caps are auto-granted from the manifest and reject the verb with a clear error.
+
+Three integration tests in `tests/capability_revocation.rs`: live revocation flips `has_capability` immediately, the disk grant file is rewritten, and a non-HIGH-risk revoke is a documented no-op (no file written).
+
+**Deferred:** dedicated `com.nexus.kernel::revoke_capability` IPC handler + shell "Revoke" button. The shell already writes grants directly via the `set_plugin_granted_capabilities` Tauri command (covering the persisted side); a future change can route that through the new live-mutation path so shell-driven revokes are immediately effective without a kernel-side handler refactor.
+
+---
+
 ### BL-095: Plugin lifecycle hook timeouts ✅ (2026-05-06)
 
 **Source**: Kernel Integration Assessment (2026-05-06) — gap #3

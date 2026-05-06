@@ -101,6 +101,33 @@ pub fn disable(app: &mut App, plugin_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Revoke a HIGH-risk capability previously granted to `plugin_id`
+/// (BL-096). Live-effective on the running plugin and persisted to
+/// `granted_caps.json` for restart.
+pub fn revoke(app: &mut App, plugin_id: &str, capability: &str) -> Result<()> {
+    let cap = nexus_kernel::Capability::from_str(capability)
+        .map_err(|e| anyhow!("invalid capability '{capability}': {e}"))?;
+    if !cap.is_high_risk() {
+        anyhow::bail!(
+            "'{capability}' is not a HIGH-risk capability — only HIGH-risk \
+             grants are revocable; manifest-declared caps cannot be revoked \
+             at runtime."
+        );
+    }
+    app.plugins()?.revoke_capability(plugin_id, cap)?;
+    let format = app.format();
+    print_success(
+        format,
+        &format!("Revoked '{capability}' from '{plugin_id}'."),
+        &serde_json::json!({
+            "plugin_id": plugin_id,
+            "capability": capability,
+            "revoked": true,
+        }),
+    );
+    Ok(())
+}
+
 /// Reset the crash counter for `plugin_id` (F-8.2.1). Quarantined
 /// plugins skip load until this runs. A missing counter file is a no-op.
 pub fn reset_crash(app: &mut App, plugin_id: &str) -> Result<()> {
