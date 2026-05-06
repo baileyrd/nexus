@@ -408,21 +408,7 @@ Stash is the safety net for branch switching with dirty working trees. Currently
 
 ---
 
-### BL-086: Auto-commit scheduler activation
-
-**Source**: Git Integration Assessment (2026-05-06) — gap #2
-**Effort**: Small (0.5 day)
-**Crates**: `nexus-git/src/auto_commit.rs`, `nexus-git/src/core_plugin.rs`, `nexus-bootstrap`
-**Related**: `AutoCommitter` struct (ships today, unactivated); PRD-11 §3.3 "never lose work"
-
-`AutoCommitter` (243 lines) implements debounced "never lose work" commits — debounce window, message template (e.g. `"auto: snapshot 2026-05-06T14:32"`), and configurable enable/disable. The library is complete and tested. No background task activates it. `nexus git auto-commit` exists as a CLI command but must be called manually.
-
-**Definition of done:**
-- `GitCorePlugin::on_start` spawns a background tokio task that calls `auto_committer.check()` every 5 minutes (configurable via forge `config.toml` `git.auto_commit_interval_minutes`)
-- Task subscribes to `com.nexus.storage.file_modified` events and resets the debounce window on each event so rapid edits don't trigger commits mid-typing
-- `git.auto_commit = true/false` in forge config enables/disables (default false — opt-in)
-- Auto-commits emit `com.nexus.activity.appended` event (origin: "git:auto-commit") for the activity timeline
-- `nexus git auto-commit --enable/--disable` CLI flags toggle the config value
+_BL-086 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
