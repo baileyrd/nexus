@@ -2,7 +2,7 @@
 
 > **ASOT pair:** This file tracks **per-PRD status**. Open work items (OI-\*, BL-\*, WI-\*, F-X.X.X) live in [BACKLOG.md](BACKLOG.md). When a PRD's status here references unfinished work, follow the link to BACKLOG.md for the live queue.
 >
-> **Snapshot date:** 2026-05-06 (PRD-11 refreshed: 26-handler `com.nexus.git` IPC surface + `nexus.gitPanel` shell plugin. PRD-07 refreshed: ~547-variable CSS registry, `nexus-manuscript` bundled theme, `nexus.themePicker` shell plugin with Themes/Snippets/Build tabs and activity-bar icon; BL-104 and BL-107 closed. Previous refresh 2026-04-24: Phase 4 `app/` + `crates/nexus-app/` retirement and Phase 5 personal-tool polish — WI-37 legacy-shell retirement, WI-38 unified `nexus` binary, WI-39 plugin scaffold, WI-40 MCP parity, WI-43 default-on/off plugin catalog, WI-45-lite docs reconcile, WI-47 local panic log. Evidence links now point at `shell/src/` and service-crate IPC. Phase 5 formal-release items (WI-41 auto-updater, WI-42 Sentry, WI-44 marketplace, WI-46 beta→GA) are deferred to [REQUIRED-FOR-FORMAL-RELEASE.md](../REQUIRED-FOR-FORMAL-RELEASE.md) per personal-tool scope.)
+> **Snapshot date:** 2026-05-06 (PRD-02 refreshed: `com.nexus.security` IPC handlers shipped — credential vault now reachable via IPC, BL-098 closed, unblocks BL-090. PRD-11 refreshed: 26-handler `com.nexus.git` IPC surface + `nexus.gitPanel` shell plugin. PRD-07 refreshed: ~547-variable CSS registry, `nexus-manuscript` bundled theme, `nexus.themePicker` shell plugin with Themes/Snippets/Build tabs and activity-bar icon; BL-104 and BL-107 closed. Previous refresh 2026-04-24: Phase 4 `app/` + `crates/nexus-app/` retirement and Phase 5 personal-tool polish — WI-37 legacy-shell retirement, WI-38 unified `nexus` binary, WI-39 plugin scaffold, WI-40 MCP parity, WI-43 default-on/off plugin catalog, WI-45-lite docs reconcile, WI-47 local panic log. Evidence links now point at `shell/src/` and service-crate IPC. Phase 5 formal-release items (WI-41 auto-updater, WI-42 Sentry, WI-44 marketplace, WI-46 beta→GA) are deferred to [REQUIRED-FOR-FORMAL-RELEASE.md](../REQUIRED-FOR-FORMAL-RELEASE.md) per personal-tool scope.)
 > **Scope:** PRDs 01–17 in this directory, audited against `crates/**` and `shell/src/**`.
 > **Update cadence:** refresh when a PRD's status tier changes, or at minimum at every minor release.
 >
@@ -24,7 +24,7 @@
 | PRD | Title | Status | One-line state |
 |-----|-------|--------|----------------|
 | 01 | Kernel & Event System | ✅ | Event bus, lifecycle, capability system all live |
-| 02 | Security Model | ✅ | WASM sandbox, capability gating, audit logging, install-time consent shipped |
+| 02 | Security Model | ✅ | WASM sandbox, capability gating, audit logging, install-time consent, credential vault IPC (4 handlers) |
 | 03 | Storage Engine | ✅ | Forge layout + SQLite + Tantivy + graph + watcher + CRDT hooks |
 | 04 | Plugin System | ✅ | Manifest, WASM, hot-reload, activation events, community/core tiers |
 | 05 | CLI | 🟢 | 14+ subcommand groups live (forge, content, plugin, ai, agent, skill, workflow, proc, term, mcp, bases, canvas, config, db, git, graph, logs, watch) |
@@ -49,7 +49,7 @@
 **Evidence:** [crates/nexus-kernel/src/{event,event_bus,kernel,context}.rs](crates/nexus-kernel/src/).
 
 ### PRD-02 — Security Model ✅
-**Shipped:** `Capability` + risk classification, capability gating on IPC / fs / net / events / notify, path-traversal + TOCTOU fixes, audit log helpers, install-time HIGH-risk consent via `granted_caps.json` (F-5.1.1), epoch-deadline execution timeout, fuel-per-call reset.
+**Shipped:** `Capability` + risk classification, capability gating on IPC / fs / net / events / notify, path-traversal + TOCTOU fixes, audit log helpers, install-time HIGH-risk consent via `granted_caps.json` (F-5.1.1), epoch-deadline execution timeout, fuel-per-call reset. **`com.nexus.security` IPC handlers (BL-098, 2026-05-06)** — `get_secret` (1), `set_secret` (2), `delete_secret` (3), `list_secret_names` (4), namespaced by `"{plugin_id}:{name}"` so plugins can't read each other's secrets; in-memory `known_names` index for current-session enumeration (OS keyring doesn't support listing).
 **Gaps:** F-8.1.1 sub-tasks 1–5, F-8.1.1-fo1 (precompiled runtime bundle + hello-world migration), and F-8.1.2 (boundary-bound `pluginId` — orchestrator builds a per-plugin `PluginAPI` from the handshake-set id, `assertValidPluginId` rejects empty / colon-bearing ids) all shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). All red-tier UI-audit items closed.
 **Evidence:** [crates/nexus-security/src/](crates/nexus-security/src/), [crates/nexus-plugins/src/loader.rs](crates/nexus-plugins/src/loader.rs) (`build_capabilities`, grant/revoke).
 

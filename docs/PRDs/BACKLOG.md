@@ -146,29 +146,7 @@ No signature field exists in the plugin manifest. There is no `ed25519_dalek` in
 
 ---
 
-### BL-098: `com.nexus.security` IPC handlers — credential vault via IPC
-
-**Source**: Security Integration Assessment (2026-05-06) — gap #3 (highest leverage)
-**Effort**: Small (1 day)
-**Crates**: `nexus-security/src/core_plugin.rs`, `nexus-security/src/ipc.rs` (new)
-**Related**: BL-090 (SSH passphrase caching for git — blocked on this); PRD-02 §6; microkernel IPC boundary invariant
-
-`com.nexus.security` dispatches zero IPC handlers. The `CredentialVault` is library-only. Any plugin that needs to store or retrieve a secret (git SSH passphrases, MCP server credentials, AI API key rotation) must directly link `nexus-security`, violating the microkernel architecture. This is the highest-leverage single change in the security crate — it unblocks BL-090 and any future credential-using plugin.
-
-**Definition of done:**
-- New `nexus-security/src/ipc.rs` with wire types (TS-exported via `ts-rs`):
-  - `GetSecretArgs { name: String }` → `GetSecretResult { value: Option<String> }`
-  - `SetSecretArgs { name: String, value: String }` → `SetSecretResult { ok: bool }`
-  - `DeleteSecretArgs { name: String }` → `DeleteSecretResult { ok: bool }`
-  - `ListSecretNamesArgs {}` → `ListSecretNamesResult { names: Vec<String> }`
-- Four IPC handlers registered in `core_plugin.rs`:
-  - `get_secret` (id 1) — requires `Capability::KvRead` (secrets are sensitive KV)
-  - `set_secret` (id 2) — requires `Capability::KvWrite`
-  - `delete_secret` (id 3) — requires `Capability::KvWrite`
-  - `list_secret_names` (id 4) — requires `Capability::KvRead`; returns names only, never values
-- Names namespaced internally by plugin ID: `"{plugin_id}:{name}"` — a plugin cannot read another plugin's secrets
-- `scripts/check_ipc_drift.sh` passes (new types exported)
-- Unblocks BL-090 (nexus-git SSH passphrase caching)
+_BL-098 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 

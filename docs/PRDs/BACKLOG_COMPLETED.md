@@ -8,6 +8,15 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-098: `com.nexus.security` IPC handlers — credential vault via IPC ✅ (2026-05-06)
+
+**Source**: Security Integration Assessment (2026-05-06) — gap #3 (highest leverage)
+**Files**: `crates/nexus-security/src/{ipc.rs (new),core_plugin.rs,lib.rs,Cargo.toml}`, `crates/nexus-bootstrap/src/lib.rs`
+
+`com.nexus.security` previously dispatched zero handlers — every credential-using plugin had to link `nexus-security` directly, violating the microkernel boundary. New `ipc.rs` exposes four wire-mirror type pairs (`Get/Set/Delete/ListSecretNames` with TS export). `SecurityCorePlugin` now holds a `CredentialVault` and an in-memory `known_names: HashSet<String>`; dispatch routes handler IDs 1–4 to vault operations with `"{plugin_id}:{name}"` namespacing so plugins can't read each other's secrets. Disabled-mode policy: `get_secret` returns `{value: null}`, `delete_secret` returns `{ok: false}`, `set_secret` surfaces `KeyringDisabled` as a hard error (caller must know the secret wasn't persisted). `list_secret_names` filters `known_names` by `plugin_id` prefix — names from prior sessions are retrievable by exact name but not enumerable (OS keyring limitation). 5 new dispatch tests covering disabled-mode behaviour, missing args, and namespace isolation. Bootstrap switched from `core_manifest()` to `core_manifest_with_ipc()` with the four `(name, id)` pairs. `core_plugin` module made `pub` so bootstrap can reach the `HANDLER_*` constants. Unblocks BL-090 (SSH passphrase caching for `nexus-git`).
+
+---
+
 ### BL-087: Stash support ✅ (2026-05-06)
 
 **Source**: Git Integration Assessment (2026-05-06)
