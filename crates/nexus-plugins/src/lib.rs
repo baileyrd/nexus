@@ -12,6 +12,7 @@ mod composite;
 mod error;
 mod host_fns;
 pub mod manifest;
+mod grants_crypto;
 mod loader;
 mod sandbox;
 mod settings;

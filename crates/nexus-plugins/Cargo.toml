@@ -22,6 +22,10 @@ semver = { workspace = true }
 regex-lite = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
+# BL-101: granted_caps.json at-rest encryption.
+chacha20poly1305 = { workspace = true }
+rand = { workspace = true }
+keyring = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -99,6 +99,16 @@ fn revoke_capability_takes_effect_on_running_context() {
 
 #[test]
 fn revoke_persists_to_granted_caps_json() {
+    // Force the plaintext-JSON path so the assertion is deterministic
+    // regardless of whether the host has a usable OS keyring (BL-101
+    // ships AEAD encryption when one is available; the
+    // grants_crypto unit tests cover that path).
+    // SAFETY: cargo test parallelism is per-process; setting this
+    // var here can be observed by other concurrent tests in this
+    // binary, but every test in the file is intentionally
+    // plaintext-mode.
+    unsafe { std::env::set_var("NEXUS_NO_KEYRING", "1"); }
+
     let plugins_dir = tempfile::tempdir().expect("plugins tempdir");
     let plugin_id = "dev.test.persist";
 

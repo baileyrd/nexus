@@ -14,6 +14,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
+use crate::grants_crypto;
+
 // ─── Reentrancy detection ─────────────────────────────────────────────────────
 //
 // Sync IPC dispatch holds `Arc<Mutex<PluginBackend>>` across the handler call
@@ -1281,7 +1283,7 @@ impl PluginLoader {
         }
         let plugin_dir = lp.plugin_dir.clone();
         let version = lp.manifest.version.clone();
-        write_grant(&plugin_dir, &version, cap, true)
+        write_grant(plugin_id, &plugin_dir, &version, cap, true)
     }
 
     /// Revoke a previously-persisted capability grant for `plugin_id`
@@ -1319,7 +1321,7 @@ impl PluginLoader {
             }
         }
 
-        write_grant(&plugin_dir, &version, cap, false)?;
+        write_grant(plugin_id, &plugin_dir, &version, cap, false)?;
 
         // Audit log + bus event after persistence so observers only see
         // a revoke that actually landed on disk.
@@ -1757,12 +1759,50 @@ struct GrantedCapsFile {
 /// `plugin_version` at `plugin_dir`. Missing file, parse errors, or a
 /// version mismatch all yield an empty set (= deny-all) — operators
 /// re-grant explicitly for the new version.
-fn load_granted_high_risk_caps(plugin_dir: &Path, plugin_version: &str) -> HashSet<Capability> {
+///
+/// BL-101: when the file starts with the encrypted magic header,
+/// decrypt it via the plugin's keyring-stored AEAD key. Decryption
+/// failure → `tracing::warn!` + deny-all (forces re-consent).
+fn load_granted_high_risk_caps(
+    plugin_id: &str,
+    plugin_dir: &Path,
+    plugin_version: &str,
+) -> HashSet<Capability> {
     let path = plugin_dir.join(GRANTED_CAPS_FILE);
-    let Ok(contents) = std::fs::read_to_string(&path) else {
+    let Ok(bytes) = std::fs::read(&path) else {
         return HashSet::new();
     };
-    let parsed: GrantedCapsFile = match serde_json::from_str(&contents) {
+    let json_bytes = if grants_crypto::looks_encrypted(&bytes) {
+        let key = grants_crypto::GrantsKey::for_plugin(plugin_id);
+        match grants_crypto::decrypt_blob(&key, &bytes) {
+            Some(plain) => plain,
+            None => {
+                tracing::warn!(
+                    audit = true,
+                    plugin_id,
+                    path = %path.display(),
+                    "BL-101: granted_caps.json decryption failed (key rotated or file tampered); resetting HIGH-risk grants — user must re-consent",
+                );
+                return HashSet::new();
+            }
+        }
+    } else {
+        bytes
+    };
+    let contents = match std::str::from_utf8(&json_bytes) {
+        Ok(s) => s,
+        Err(err) => {
+            tracing::warn!(
+                audit = true,
+                plugin_id,
+                path = %path.display(),
+                error = %err,
+                "granted_caps.json contents not valid UTF-8 — treating as deny-all",
+            );
+            return HashSet::new();
+        }
+    };
+    let parsed: GrantedCapsFile = match serde_json::from_str(contents) {
         Ok(f) => f,
         Err(err) => {
             tracing::warn!(
@@ -1796,16 +1836,34 @@ fn load_granted_high_risk_caps(plugin_dir: &Path, plugin_version: &str) -> HashS
 /// specified `plugin_version`, and rewrite atomically. Missing / corrupt /
 /// version-mismatched existing files are replaced wholesale — the new grant
 /// pins to the current version.
+///
+/// BL-101: when the OS keyring is reachable the rewritten file is an
+/// AEAD ciphertext blob (`grants_crypto`); otherwise (or when
+/// `NEXUS_NO_KEYRING=1`) it falls back to plain JSON with a
+/// `tracing::warn!` so the reduced security level is visible in logs.
 fn write_grant(
+    plugin_id: &str,
     plugin_dir: &Path,
     plugin_version: &str,
     cap: Capability,
     grant: bool,
 ) -> Result<(), PluginError> {
     let path = plugin_dir.join(GRANTED_CAPS_FILE);
-    let mut file: GrantedCapsFile = std::fs::read_to_string(&path)
+
+    // Re-read the current grants so we don't clobber peers. Decryption
+    // failures and version mismatches both reset the file (deny-all),
+    // matching `load_granted_high_risk_caps`.
+    let key = grants_crypto::GrantsKey::for_plugin(plugin_id);
+    let mut file: GrantedCapsFile = std::fs::read(&path)
         .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
+        .and_then(|bytes| {
+            if grants_crypto::looks_encrypted(&bytes) {
+                grants_crypto::decrypt_blob(&key, &bytes)
+            } else {
+                Some(bytes)
+            }
+        })
+        .and_then(|plain| serde_json::from_slice::<GrantedCapsFile>(&plain).ok())
         .filter(|f: &GrantedCapsFile| f.version == plugin_version)
         .unwrap_or_default();
     file.version = plugin_version.to_string();
@@ -1819,6 +1877,24 @@ fn write_grant(
         path: path.display().to_string(),
         reason: format!("serialize granted_caps.json: {e}"),
     })?;
+
+    if grants_crypto::key_available(&key) {
+        if let Some(blob) = grants_crypto::encrypt_blob(&key, json.as_bytes()) {
+            std::fs::write(&path, blob)?;
+            return Ok(());
+        }
+        tracing::warn!(
+            audit = true,
+            plugin_id,
+            "BL-101: encryption failed unexpectedly; falling back to plaintext grants",
+        );
+    } else {
+        tracing::warn!(
+            audit = true,
+            plugin_id,
+            "BL-101: keyring unavailable; writing granted_caps.json in plaintext (NEXUS_NO_KEYRING)",
+        );
+    }
     std::fs::write(&path, json)?;
     Ok(())
 }
@@ -1845,7 +1921,8 @@ fn build_capabilities(manifest: &PluginManifest, plugin_dir: &Path) -> Capabilit
             Capability::ALL.iter().copied().collect::<CapabilitySet>()
         }
         TrustLevel::Community => {
-            let granted = load_granted_high_risk_caps(plugin_dir, &manifest.version);
+            let granted =
+                load_granted_high_risk_caps(&manifest.id, plugin_dir, &manifest.version);
             let mut denied: Vec<Capability> = Vec::new();
             let caps: Vec<Capability> = manifest
                 .capabilities
@@ -2436,17 +2513,57 @@ mod unit_tests {
 
     #[test]
     fn write_grant_round_trips_and_sorts() {
+        // BL-101: this test runs in `NEXUS_NO_KEYRING=1` mode (set
+        // process-wide below) so the grants file is written as
+        // plaintext JSON and the round-trip is byte-stable. The
+        // encrypted path is exercised by `grants_crypto`'s own unit
+        // tests + `tests/grants_encryption.rs`.
+        // SAFETY: `set_var` is `unsafe` from Rust 1.84+ because
+        // mutating the process env races with concurrent reads;
+        // cargo test parallelism is per-process so test threads see
+        // each other's env. We accept that — every test in this file
+        // already assumes plaintext, and the variable is set once at
+        // the top.
+        unsafe { std::env::set_var("NEXUS_NO_KEYRING", "1"); }
         let dir = tempfile::tempdir().unwrap();
-        write_grant(dir.path(), "1.0.0", Capability::NetHttp, true).unwrap();
-        write_grant(dir.path(), "1.0.0", Capability::ProcessSpawn, true).unwrap();
-        let granted = load_granted_high_risk_caps(dir.path(), "1.0.0");
+        let pid = "dev.test.grants";
+        write_grant(pid, dir.path(), "1.0.0", Capability::NetHttp, true).unwrap();
+        write_grant(pid, dir.path(), "1.0.0", Capability::ProcessSpawn, true).unwrap();
+        let granted = load_granted_high_risk_caps(pid, dir.path(), "1.0.0");
         assert!(granted.contains(&Capability::NetHttp));
         assert!(granted.contains(&Capability::ProcessSpawn));
 
-        write_grant(dir.path(), "1.0.0", Capability::NetHttp, false).unwrap();
-        let granted = load_granted_high_risk_caps(dir.path(), "1.0.0");
+        write_grant(pid, dir.path(), "1.0.0", Capability::NetHttp, false).unwrap();
+        let granted = load_granted_high_risk_caps(pid, dir.path(), "1.0.0");
         assert!(!granted.contains(&Capability::NetHttp));
         assert!(granted.contains(&Capability::ProcessSpawn));
+    }
+
+    #[test]
+    fn load_grants_resets_on_unrecoverable_encrypted_blob() {
+        // BL-101: a tampered or unkeyed encrypted blob must yield
+        // deny-all rather than silently failing open. Write a file
+        // that *looks* encrypted (correct magic + minimum length)
+        // but with junk ciphertext; even when keyring is enabled
+        // the AEAD authentication will fail and the loader should
+        // reset to empty.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(GRANTED_CAPS_FILE);
+        let mut blob = Vec::new();
+        blob.extend_from_slice(b"NXENC1");
+        blob.extend_from_slice(&[0u8; 12]); // nonce
+        blob.extend_from_slice(&[0u8; 32]); // bogus ciphertext + tag
+        std::fs::write(&path, &blob).unwrap();
+
+        let granted = load_granted_high_risk_caps(
+            "dev.test.tampered",
+            dir.path(),
+            "1.0.0",
+        );
+        assert!(
+            granted.is_empty(),
+            "tampered/unauthenticated blob must reset grants to deny-all",
+        );
     }
 }
 

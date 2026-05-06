@@ -105,6 +105,12 @@ rayon = "1.11"
 # Hashing
 sha2 = "0.11"
 
+# Authenticated encryption (BL-101: granted_caps.json at-rest encryption)
+chacha20poly1305 = "0.10"
+
+# Random / nonces (BL-101)
+rand = "0.9"
+
 # YAML frontmatter (serde_yml is the maintained fork of archived serde_yaml)
 serde_yml = "0.0.12"
 

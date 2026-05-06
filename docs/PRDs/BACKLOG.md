@@ -76,22 +76,7 @@ Zero fuzz targets exist in the codebase. The PRD specifies fuzz targets for the 
 
 ---
 
-### BL-101: `granted_caps.json` encryption at rest
-
-**Source**: Security Integration Assessment (2026-05-06) — gap #4
-**Effort**: Small (1 day)
-**Crates**: `nexus-plugins/src/loader.rs` (read/write grants), `nexus-security` (encryption helper)
-**Related**: PRD-02 §6.3 (credential file encryption); `granted_caps.json` currently plaintext JSON
-
-`granted_caps.json` stores which HIGH-risk capabilities the user has approved for each community plugin. It is unencrypted plaintext JSON, directly editable by any process with file access. A user (or malware with file access) can trivially edit it to grant `net.http` or `process.spawn` to any plugin without going through the consent dialog.
-
-**Definition of done:**
-- `granted_caps.json` written as an AEAD-encrypted blob (ChaCha20-Poly1305 or AES-256-GCM) using a key derived from the OS keyring via PBKDF2-SHA256
-- Key derivation: `PBKDF2(forge_path + "granted_caps_key", salt_from_file, 100_000_iter, SHA256)` with salt stored in a companion `.granted_caps.salt` file
-- `load_granted_high_risk_caps` decrypts on read; `grant_capability` re-encrypts on write
-- Decryption failure → log warning + clear grants (prompts user re-consent) rather than aborting
-- `NEXUS_NO_KEYRING=1` disables encryption (grants stored as plaintext with a clear warning in logs)
-- Unit tests use in-memory key (no real keyring) to verify encrypt/decrypt roundtrip
+_BL-101 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). AEAD encryption (ChaCha20-Poly1305) with per-plugin keyring-stored 256-bit master key shipped; PBKDF2 + companion-salt file simplified out as documented in the closure notes (the master key is already uniformly random, so PBKDF2 over a stored salt would not raise the security floor)._
 
 ---
 
