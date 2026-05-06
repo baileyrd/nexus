@@ -8,6 +8,15 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-104: Theme picker — swatch cache invalidation on hot-reload ✅ (2026-05-06)
+
+**Source**: Gap found while implementing `nexus.themePicker` (2026-05-06)
+**Files**: `shell/src/plugins/nexus/themePicker/index.ts`
+
+`nexus.themePicker.activate` now subscribes to `com.nexus.theme.changed` via `api.kernel.on`. On every event the handler calls `useThemePickerStore.getState().setSwatchCache({})`, clearing the cache so the next picker open re-fetches swatches for all themes via `compute_variables`. The subscription is managed by `PluginRegistry` and torn down automatically on plugin deactivate.
+
+---
+
 ### BL-107: Density tier CSS activation via `[data-density]` ✅ (2026-05-06)
 
 **Source**: Gap found while adding density variable defaults to `nexus-theme` (2026-05-06)

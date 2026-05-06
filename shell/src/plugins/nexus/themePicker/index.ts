@@ -2,6 +2,7 @@ import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { ThemePicker } from './ThemePicker'
 import { useThemePickerStore } from './themePickerStore'
 import { setPickerApi } from './pickerRuntime'
+import { THEME_CHANGED_EVENT } from '../../../stores/themeStore'
 
 const COMMAND_OPEN       = 'nexus.themePicker.open'
 const COMMAND_CLOSE      = 'nexus.themePicker.close'
@@ -81,6 +82,14 @@ export const themePickerPlugin: Plugin = {
       priority: 95,
       placement: 'bottom',
       command: COMMAND_OPEN,
+    })
+
+    // Clear the swatch cache whenever the kernel reloads themes so the
+    // next picker open re-fetches fresh colours. PluginRegistry auto-cleans
+    // the unsub on plugin deactivate.
+    void api.kernel.on(THEME_CHANGED_EVENT, (topic) => {
+      if (topic !== THEME_CHANGED_EVENT) return
+      useThemePickerStore.getState().setSwatchCache({})
     })
   },
 }

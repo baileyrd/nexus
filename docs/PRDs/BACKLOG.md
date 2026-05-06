@@ -71,20 +71,7 @@ The shipped Build tab has no contrast validation. BL-068 specified per-token WCA
 
 ---
 
-### BL-104: Theme picker — swatch cache invalidation on hot-reload
-
-**Source**: Gap found while implementing `nexus.themePicker` (2026-05-06)
-**Effort**: Tiny (1 hour)
-**Files**: `shell/src/plugins/nexus/themePicker/index.ts`, `themePickerStore.ts`
-**Related**: `com.nexus.theme.changed` event; `useThemePickerStore.swatchCache`
-
-The swatch cache built on first picker open is never invalidated. When a theme file changes on disk and the kernel hot-reloads it (firing `com.nexus.theme.changed`), the picker continues showing stale colour swatches.
-
-**Definition of done:**
-- `nexus.themePicker` subscribes to `com.nexus.theme.changed` in `activate`
-- On event: `useThemePickerStore.getState().setSwatchCache({})` clears the cache
-- Next picker open re-fetches all swatches
-- The subscription is torn down on plugin deactivate
+_BL-104 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
