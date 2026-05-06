@@ -341,7 +341,18 @@ pub fn remotes(app: &App) -> Result<()> {
 }
 
 /// Auto-commit dirty changes (one-shot or watch mode).
-pub fn auto_commit(app: &App, watch: bool, interval: u64, debounce: u64) -> Result<()> {
+pub fn auto_commit(
+    app: &App,
+    enable: bool,
+    disable: bool,
+    watch: bool,
+    interval: u64,
+    debounce: u64,
+) -> Result<()> {
+    if enable || disable {
+        return toggle_auto_commit(app.forge_root(), enable);
+    }
+
     let mut committer = nexus_git::AutoCommitter::new(app.forge_root(), debounce);
 
     if watch {
@@ -379,6 +390,39 @@ pub fn auto_commit(app: &App, watch: bool, interval: u64, debounce: u64) -> Resu
             println!("Working tree clean — nothing to commit.");
         }
     }
+    Ok(())
+}
+
+/// Write `[git] auto_commit = <enable>` to `.forge/app.toml`.
+///
+/// Reads the existing file as a raw TOML document, updates only the
+/// `git.auto_commit` key, and writes it back so other settings are preserved.
+fn toggle_auto_commit(forge_root: &std::path::Path, enable: bool) -> Result<()> {
+    let dir = forge_root.join(".forge");
+    let path = dir.join("app.toml");
+
+    // Load existing content (tolerates missing file).
+    let mut table: toml::Table = if path.exists() {
+        let text = std::fs::read_to_string(&path)?;
+        toml::from_str(&text).unwrap_or_default()
+    } else {
+        toml::Table::new()
+    };
+
+    // Navigate to [git] section, creating it if absent.
+    let git = table
+        .entry("git")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    if let toml::Value::Table(git_table) = git {
+        git_table.insert("auto_commit".to_string(), toml::Value::Boolean(enable));
+    }
+
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(&path, toml::to_string_pretty(&table)?)?;
+    println!(
+        "Auto-commit {} for this forge. Restart the Nexus kernel to apply.",
+        if enable { "enabled" } else { "disabled" }
+    );
     Ok(())
 }
 

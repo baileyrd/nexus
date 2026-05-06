@@ -17,13 +17,52 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use nexus_kernel::EventBus;
+use nexus_kernel::{EventBus, EventFilter};
 use nexus_plugins::{CorePlugin, PluginError};
+use serde::Deserialize;
 use serde_json::json;
 
-use crate::{GitError, GitState, GitWorker, GitWorkerHandle};
+use crate::{AutoCommitter, GitError, GitState, GitWorker, GitWorkerHandle};
+
+// ── Auto-commit config ────────────────────────────────────────────────────────
+
+/// Minimal subset of `app.toml` for reading auto-commit settings.
+/// Mirrors `nexus_formats::config::GitSettings`; duplicated here to keep
+/// `nexus-git` free of the formats crate dependency.
+#[derive(Deserialize, Default)]
+struct AutoCommitAppConfig {
+    #[serde(default)]
+    git: AutoCommitGitSettings,
+}
+
+#[derive(Deserialize)]
+struct AutoCommitGitSettings {
+    #[serde(default)]
+    auto_commit: bool,
+    #[serde(default = "default_interval")]
+    auto_commit_interval_secs: u64,
+}
+
+fn default_interval() -> u64 { 1800 }
+
+impl Default for AutoCommitGitSettings {
+    fn default() -> Self {
+        Self { auto_commit: false, auto_commit_interval_secs: default_interval() }
+    }
+}
+
+fn read_auto_commit_settings(forge_root: &Path) -> (bool, u64) {
+    let path = forge_root.join(".forge").join("app.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => return (false, default_interval()),
+    };
+    let cfg: AutoCommitAppConfig = toml::from_str(&text).unwrap_or_default();
+    (cfg.git.auto_commit, cfg.git.auto_commit_interval_secs)
+}
+
 
 /// Reverse-DNS identifier for this plugin.
 pub const PLUGIN_ID: &str = "com.nexus.git";
@@ -76,6 +115,8 @@ pub struct GitCorePlugin {
     worker: Option<GitWorker>,
     poller_stop: Option<Arc<AtomicBool>>,
     poller_thread: Option<JoinHandle<()>>,
+    auto_commit_stop: Option<Arc<AtomicBool>>,
+    auto_commit_thread: Option<JoinHandle<()>>,
 }
 
 impl GitCorePlugin {
@@ -88,6 +129,8 @@ impl GitCorePlugin {
             worker: None,
             poller_stop: None,
             poller_thread: None,
+            auto_commit_stop: None,
+            auto_commit_thread: None,
         }
     }
 }
@@ -134,6 +177,27 @@ impl CorePlugin for GitCorePlugin {
         self.poller_stop = Some(stop);
         self.poller_thread = Some(thread);
         tracing::info!(plugin_id = PLUGIN_ID, "git state poller started");
+
+        // Spawn background auto-commit thread if enabled in forge config.
+        let (ac_enabled, ac_interval) = read_auto_commit_settings(&self.forge_root);
+        if ac_enabled {
+            let ac_root  = self.forge_root.clone();
+            let ac_bus   = self.event_bus.clone();
+            let ac_stop  = Arc::new(AtomicBool::new(false));
+            let ac_clone = Arc::clone(&ac_stop);
+            let ac_thread = thread::Builder::new()
+                .name("nexus-git-auto-commit".to_string())
+                .spawn(move || run_auto_committer(ac_root, ac_interval, ac_bus, ac_clone))
+                .map_err(|e| PluginError::LifecycleError {
+                    plugin_id: PLUGIN_ID.to_string(),
+                    hook: "on_start".to_string(),
+                    reason: format!("failed to spawn auto-commit thread: {e}"),
+                })?;
+            self.auto_commit_stop = Some(ac_stop);
+            self.auto_commit_thread = Some(ac_thread);
+            tracing::info!(plugin_id = PLUGIN_ID, interval_secs = ac_interval, "auto-commit thread started");
+        }
+
         Ok(())
     }
 
@@ -145,6 +209,13 @@ impl CorePlugin for GitCorePlugin {
             let _ = t.join();
         }
         tracing::info!(plugin_id = PLUGIN_ID, "git state poller stopped");
+
+        if let Some(stop) = self.auto_commit_stop.take() {
+            stop.store(true, Ordering::Relaxed);
+        }
+        if let Some(t) = self.auto_commit_thread.take() {
+            let _ = t.join();
+        }
     }
 
     #[allow(clippy::too_many_lines)]
@@ -503,6 +574,87 @@ fn publish_changes(bus: &EventBus, prev: Option<&GitState>, curr: &GitState) {
                 "head": curr.head_oid,
             }),
         );
+    }
+}
+
+// ── Auto-commit background loop ───────────────────────────────────────────────
+//
+// Wakes on a 30-second tick. Drains `com.nexus.storage.file_modified` events
+// from the bus to track when the forge was last edited. After `idle_secs` of
+// no file modifications, stages everything and commits.
+
+const AC_TICK: Duration = Duration::from_secs(30);
+
+#[allow(clippy::needless_pass_by_value)]
+fn run_auto_committer(
+    forge_root: PathBuf,
+    idle_secs: u64,
+    bus: Option<Arc<EventBus>>,
+    stop: Arc<AtomicBool>,
+) {
+    let mut committer = AutoCommitter::new(&forge_root, 0); // debounce handled externally
+    let idle = Duration::from_secs(idle_secs);
+    let mut last_modified: Option<Instant> = None;
+
+    let mut sub = bus.as_ref().map(|b| {
+        b.subscribe(EventFilter::CustomPrefix("com.nexus.storage.file_modified".to_string()))
+    });
+
+    loop {
+        if stop.load(Ordering::Relaxed) { break; }
+
+        // Drain file-modified events — each one refreshes the idle timer.
+        if let Some(ref mut s) = sub {
+            loop {
+                match s.try_recv() {
+                    Ok(Some(_)) => { last_modified = Some(Instant::now()); }
+                    Ok(None) | Err(_) => break,
+                }
+            }
+        }
+
+        // Commit once we've been idle for the configured window.
+        if let Some(t) = last_modified {
+            if t.elapsed() >= idle {
+                committer.reset_debounce();
+                match committer.check_and_commit() {
+                    Ok(r) if r.commit_hash.is_some() => {
+                        tracing::info!(
+                            plugin_id = PLUGIN_ID,
+                            hash = r.commit_hash.as_deref().unwrap_or(""),
+                            files = r.files_changed,
+                            "auto-commit: {}",
+                            r.message.as_deref().unwrap_or(""),
+                        );
+                        if let Some(ref b) = bus {
+                            let _ = b.publish_plugin(
+                                PLUGIN_ID,
+                                "com.nexus.activity.appended",
+                                json!({
+                                    "origin": "git:auto-commit",
+                                    "message": r.message,
+                                    "hash": r.commit_hash,
+                                    "files_changed": r.files_changed,
+                                }),
+                            );
+                        }
+                        last_modified = None;
+                    }
+                    Err(e) => {
+                        tracing::debug!(plugin_id = PLUGIN_ID, error = %e, "auto-commit failed");
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Sleep in small ticks so the stop flag is checked promptly.
+        let mut waited = Duration::ZERO;
+        while waited < AC_TICK {
+            if stop.load(Ordering::Relaxed) { return; }
+            thread::sleep(POLL_TICK);
+            waited += POLL_TICK;
+        }
     }
 }
 

@@ -1106,6 +1106,12 @@ enum GitCommand {
     Remotes,
     /// Auto-commit dirty changes
     AutoCommit {
+        /// Enable background auto-commit for this forge (writes to .forge/app.toml)
+        #[arg(long, conflicts_with = "disable")]
+        enable: bool,
+        /// Disable background auto-commit for this forge (writes to .forge/app.toml)
+        #[arg(long, conflicts_with = "enable")]
+        disable: bool,
         /// Run in watch mode (loop with timer)
         #[arg(long)]
         watch: bool,
@@ -1529,8 +1535,8 @@ fn main() {
             GitCommand::Merge { branch, abort } => commands::git::merge(&app, branch.as_deref(), abort),
             GitCommand::Conflicts => commands::git::conflicts(&app),
             GitCommand::Remotes => commands::git::remotes(&app),
-            GitCommand::AutoCommit { watch, interval, debounce } => {
-                commands::git::auto_commit(&app, watch, interval, debounce)
+            GitCommand::AutoCommit { enable, disable, watch, interval, debounce } => {
+                commands::git::auto_commit(&app, enable, disable, watch, interval, debounce)
             }
         },
         Commands::Run(_) => stubs::not_implemented("run"),
