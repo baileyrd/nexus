@@ -6,7 +6,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use git2::{ApplyLocation, DiffOptions, Repository, StatusOptions};
 
 use crate::error::GitError;
-use crate::types::{GitState, RepoState, StatusEntry, FileStatus, HunkDiff, BlameEntry, LogEntry, BranchInfo, MergeResult, DiffLineKind, DiffLine};
+use crate::types::{GitState, RepoState, StatusEntry, FileStatus, HunkDiff, BlameEntry, LogEntry, BranchInfo, MergeResult, DiffLineKind, DiffLine, TagInfo};
 
 /// Git engine backed by `git2::Repository`.
 ///
@@ -544,6 +544,81 @@ impl GitEngine {
         let mut po = git2::PushOptions::new();
         po.remote_callbacks(make_callbacks());
         remote.push(&[&refspec], Some(&mut po))?;
+        Ok(())
+    }
+
+    /// Push all local tags to a remote (`refs/tags/*:refs/tags/*`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on network failure or libgit2 error.
+    pub fn push_tags(&self, remote_name: &str) -> Result<(), GitError> {
+        let mut remote = self.repo.find_remote(remote_name)?;
+        let mut po = git2::PushOptions::new();
+        po.remote_callbacks(make_callbacks());
+        remote.push(&["refs/tags/*:refs/tags/*"], Some(&mut po))?;
+        Ok(())
+    }
+
+    /// List all local tags (annotated and lightweight).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn list_tags(&self) -> Result<Vec<TagInfo>, GitError> {
+        let mut tags = Vec::new();
+        let refs = self.repo.references_glob("refs/tags/*")?;
+        for r in refs {
+            let r = r?;
+            let name = r.shorthand().unwrap_or("").to_string();
+            // Annotated tags: the ref's direct target OID is a tag object.
+            // Lightweight tags: the ref's direct target is a commit OID.
+            // `find_tag(oid)` succeeds iff the OID refers to a tag object.
+            let direct_oid = r.target().unwrap_or(git2::Oid::zero());
+            let (is_annotated, message) = match self.repo.find_tag(direct_oid) {
+                Ok(tag_obj) => {
+                    let msg = tag_obj.message().map(|m| m.trim_end_matches('\n').to_string());
+                    (true, msg)
+                }
+                Err(_) => (false, None),
+            };
+            let commit = r.peel_to_commit()?;
+            let target_hash = commit.id().to_string()[..7].to_string();
+            tags.push(TagInfo { name, target_hash, is_annotated, message });
+        }
+        tags.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(tags)
+    }
+
+    /// Create a tag pointing at HEAD.
+    ///
+    /// If `message` is `Some`, creates an annotated tag (stores the tagger
+    /// signature + message). Otherwise creates a lightweight tag (a bare
+    /// ref to the commit).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure, including if the tag
+    /// already exists (`force = false`).
+    pub fn create_tag(&self, name: &str, message: Option<&str>) -> Result<(), GitError> {
+        let head = self.repo.head()?;
+        let obj = head.peel(git2::ObjectType::Any)?;
+        if let Some(msg) = message {
+            let sig = self.repo.signature()?;
+            self.repo.tag(name, &obj, &sig, msg, false)?;
+        } else {
+            self.repo.tag_lightweight(name, &obj, false)?;
+        }
+        Ok(())
+    }
+
+    /// Delete a local tag by name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] if the tag does not exist or libgit2 fails.
+    pub fn delete_tag(&self, name: &str) -> Result<(), GitError> {
+        self.repo.tag_delete(name)?;
         Ok(())
     }
 
@@ -1209,6 +1284,56 @@ mod tests {
 
         engine.delete_branch("to-delete").unwrap();
         assert!(!engine.branches().unwrap().iter().any(|b| b.name == "to-delete"));
+    }
+
+    #[test]
+    fn list_tags_empty_repo() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "content").unwrap();
+        make_commit(&engine, "initial");
+        let tags = engine.list_tags().unwrap();
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn create_lightweight_tag_and_list() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "content").unwrap();
+        make_commit(&engine, "initial");
+
+        engine.create_tag("v1.0.0", None).unwrap();
+        let tags = engine.list_tags().unwrap();
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, "v1.0.0");
+        assert!(!tags[0].is_annotated);
+        assert!(tags[0].message.is_none());
+    }
+
+    #[test]
+    fn create_annotated_tag_and_list() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "content").unwrap();
+        make_commit(&engine, "initial");
+
+        engine.create_tag("v2.0.0", Some("Release 2.0")).unwrap();
+        let tags = engine.list_tags().unwrap();
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, "v2.0.0");
+        assert!(tags[0].is_annotated);
+        assert_eq!(tags[0].message.as_deref(), Some("Release 2.0"));
+    }
+
+    #[test]
+    fn delete_tag_removes_it() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "content").unwrap();
+        make_commit(&engine, "initial");
+
+        engine.create_tag("v1.0.0", None).unwrap();
+        assert_eq!(engine.list_tags().unwrap().len(), 1);
+
+        engine.delete_tag("v1.0.0").unwrap();
+        assert!(engine.list_tags().unwrap().is_empty());
     }
 
     #[test]

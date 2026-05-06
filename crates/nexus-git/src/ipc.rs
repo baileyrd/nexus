@@ -297,6 +297,49 @@ pub struct GitHunkArgs {
     pub hunk_indices: Vec<u64>,
 }
 
+/// One tag in the `list_tags` response (handler id `19`). Mirrors
+/// [`crate::types::TagInfo`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitTagInfo {
+    /// Short tag name (e.g. `"v1.0.0"`).
+    pub name: String,
+    /// Short hex hash of the tagged commit.
+    pub target_hash: String,
+    /// `true` for annotated tags.
+    pub is_annotated: bool,
+    /// Tag message (annotated tags only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// Args for `create_tag` (handler id `20`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitCreateTagArgs {
+    /// Short tag name (e.g. `"v1.0.0"`).
+    pub name: String,
+    /// Tag message. Provide to create an annotated tag; omit for lightweight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 /// Args for `push` (handler id `16`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]

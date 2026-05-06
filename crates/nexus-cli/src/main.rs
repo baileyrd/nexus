@@ -1070,6 +1070,20 @@ enum GitCommand {
         #[command(subcommand)]
         command: Option<BranchCommand>,
     },
+    /// List, create, delete, or push tags
+    Tag {
+        /// Tag name to create (omit to list all tags)
+        name: Option<String>,
+        /// Create an annotated tag with this message (requires <name>)
+        #[arg(short = 'm', long)]
+        message: Option<String>,
+        /// Delete a local tag by name
+        #[arg(short = 'd', long, value_name = "NAME")]
+        delete: Option<String>,
+        /// Push all local tags to this remote
+        #[arg(long, value_name = "REMOTE")]
+        push: Option<String>,
+    },
     /// Fetch refs from a remote
     Fetch {
         /// Remote name (default: origin)
@@ -1529,6 +1543,9 @@ fn main() {
             GitCommand::UnstageHunk { path, hunks } => commands::git::unstage_hunk(&app, &path, &hunks),
             GitCommand::Commit { message } => commands::git::commit(&app, &message),
             GitCommand::Branch { command } => commands::git::branch(&app, command),
+            GitCommand::Tag { name, message, delete, push } => {
+                commands::git::tag(&app, name.as_deref(), message.as_deref(), delete.as_deref(), push.as_deref())
+            }
             GitCommand::Fetch { remote } => commands::git::fetch(&app, &remote),
             GitCommand::Push { remote, branch } => commands::git::push(&app, &remote, branch.as_deref()),
             GitCommand::Pull { remote, branch } => commands::git::pull(&app, &remote, branch.as_deref()),

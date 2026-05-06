@@ -152,6 +152,55 @@ pub fn unstage(app: &App, path: Option<&str>, all: bool) -> Result<()> {
     Ok(())
 }
 
+/// List, create, delete, or push tags.
+pub fn tag(
+    app: &App,
+    name: Option<&str>,
+    message: Option<&str>,
+    delete: Option<&str>,
+    push: Option<&str>,
+) -> Result<()> {
+    let engine = open_engine(app)?;
+
+    if let Some(remote) = push {
+        engine.push_tags(remote).map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("Pushed all tags to '{remote}'.");
+        return Ok(());
+    }
+
+    if let Some(tag_name) = delete {
+        engine.delete_tag(tag_name).map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("Deleted tag '{tag_name}'.");
+        return Ok(());
+    }
+
+    if let Some(tag_name) = name {
+        engine.create_tag(tag_name, message).map_err(|e| anyhow::anyhow!("{e}"))?;
+        if message.is_some() {
+            println!("Created annotated tag '{tag_name}'.");
+        } else {
+            println!("Created lightweight tag '{tag_name}'.");
+        }
+        return Ok(());
+    }
+
+    // Default: list all tags.
+    let tags = engine.list_tags().map_err(|e| anyhow::anyhow!("{e}"))?;
+    if tags.is_empty() {
+        println!("No tags.");
+    } else {
+        for t in &tags {
+            let kind = if t.is_annotated { "annotated" } else { "lightweight" };
+            if let Some(msg) = &t.message {
+                println!("{} ({}) {} — {}", t.name, t.target_hash, kind, msg.lines().next().unwrap_or(""));
+            } else {
+                println!("{} ({}) {}", t.name, t.target_hash, kind);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Stage specific hunks within a file.
 pub fn stage_hunk(app: &App, path: &str, hunk_indices: &[usize]) -> Result<()> {
     let engine = open_engine(app)?;

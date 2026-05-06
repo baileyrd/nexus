@@ -171,3 +171,16 @@ pub struct StatusEntry {
     /// Git status.
     pub status: FileStatus,
 }
+
+/// A git tag (annotated or lightweight).
+#[derive(Debug, Clone)]
+pub struct TagInfo {
+    /// Short tag name (e.g. `"v1.0.0"`).
+    pub name: String,
+    /// Short hex hash of the tagged commit (7 chars).
+    pub target_hash: String,
+    /// `true` for annotated tags (have their own object + message).
+    pub is_annotated: bool,
+    /// Tag message (annotated tags only).
+    pub message: Option<String>,
+}

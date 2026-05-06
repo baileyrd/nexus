@@ -103,6 +103,14 @@ pub const HANDLER_PUSH: u32 = 16;
 pub const HANDLER_STAGE_HUNKS: u32 = 17;
 /// IPC handler: unstages specific hunks (args: `{"path": "...", "hunk_indices": [0]}`).
 pub const HANDLER_UNSTAGE_HUNKS: u32 = 18;
+/// IPC handler: lists all local tags.
+pub const HANDLER_LIST_TAGS: u32 = 19;
+/// IPC handler: creates a tag at HEAD (args: `{"name": "...", "message": "..."}`).
+pub const HANDLER_CREATE_TAG: u32 = 20;
+/// IPC handler: deletes a local tag (args: `{"name": "..."}`).
+pub const HANDLER_DELETE_TAG: u32 = 21;
+/// IPC handler: pushes all tags to a remote (args: `{"remote": "..."}`).
+pub const HANDLER_PUSH_TAGS: u32 = 22;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const POLL_TICK: Duration = Duration::from_millis(200);
@@ -404,6 +412,35 @@ impl CorePlugin for GitCorePlugin {
                 let path = path_arg(args, &self.forge_root)?;
                 let indices = hunk_indices_arg(args)?;
                 h.with(move |e| e.unstage_hunks(&path, &indices)).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
+            HANDLER_LIST_TAGS => {
+                let tags = h.with(|e| e.list_tags()).map_err(map_err)?;
+                let arr: Vec<_> = tags
+                    .iter()
+                    .map(|t| json!({
+                        "name":         t.name,
+                        "target_hash":  t.target_hash,
+                        "is_annotated": t.is_annotated,
+                        "message":      t.message,
+                    }))
+                    .collect();
+                Ok(serde_json::Value::Array(arr))
+            }
+            HANDLER_CREATE_TAG => {
+                let name = string_arg(args, "name")?;
+                let message = args.get("message").and_then(|v| v.as_str()).map(str::to_string);
+                h.with(move |e| e.create_tag(&name, message.as_deref())).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
+            HANDLER_DELETE_TAG => {
+                let name = string_arg(args, "name")?;
+                h.with(move |e| e.delete_tag(&name)).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
+            HANDLER_PUSH_TAGS => {
+                let remote = string_arg(args, "remote")?;
+                h.with(move |e| e.push_tags(&remote)).map_err(map_err)?;
                 Ok(json!({"ok": true}))
             }
             _ => Err(PluginError::ExecutionFailed {
