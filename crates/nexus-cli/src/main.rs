@@ -740,6 +740,39 @@ enum LogsCommand {
     },
     /// Print path to the log directory
     Path,
+    /// Query the persisted audit log (newest first)
+    List {
+        /// Restrict to one plugin id
+        #[arg(long)]
+        plugin: Option<String>,
+        /// Restrict to one event type (e.g. capability_denied)
+        #[arg(long = "type")]
+        event_type: Option<String>,
+        /// Only entries on or after this ISO date / datetime (UTC, e.g. 2026-05-01)
+        #[arg(long)]
+        since: Option<String>,
+        /// Max rows to return
+        #[arg(short = 'n', long, default_value_t = 100)]
+        limit: u32,
+    },
+    /// Export audit entries to stdout
+    Export {
+        /// ISO start date (UTC). Inclusive.
+        #[arg(long)]
+        start: Option<String>,
+        /// ISO end date (UTC). Exclusive.
+        #[arg(long)]
+        end: Option<String>,
+        /// Output format
+        #[arg(long, default_value = "jsonl")]
+        format: String,
+    },
+    /// Delete audit entries older than N days
+    Clear {
+        /// Delete entries older than this many days (defaults to 90)
+        #[arg(long = "older-than", default_value_t = 90)]
+        older_than: u32,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1396,6 +1429,15 @@ fn main() {
             }
             LogsCommand::Show { date } => commands::logs::show(&app, &date),
             LogsCommand::Path => commands::logs::path(&app),
+            LogsCommand::List { plugin, event_type, since, limit } => {
+                commands::logs::audit_list(&mut app, plugin, event_type, since, limit)
+            }
+            LogsCommand::Export { start, end, format } => {
+                commands::logs::audit_export(&mut app, start, end, &format)
+            }
+            LogsCommand::Clear { older_than } => {
+                commands::logs::audit_clear(&mut app, older_than)
+            }
         },
 
         Commands::Graph(args) => match args.command {

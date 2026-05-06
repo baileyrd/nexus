@@ -54,6 +54,11 @@ pub trait AuditStore: Send + Sync {
 
     /// Query stored events in reverse chronological order (newest first).
     fn query(&self, q: &AuditQuery) -> Vec<AuditEntry>;
+
+    /// Delete entries with `ts_ms < before_ts`. Returns the number of
+    /// rows removed. Best-effort: implementations log and return 0 on
+    /// failure rather than propagating errors.
+    fn clear(&self, before_ts: i64) -> u64;
 }
 
 // ── Global access ─────────────────────────────────────────────────────────────
@@ -81,6 +86,15 @@ pub fn query(filter: &AuditQuery) -> Vec<AuditEntry> {
         .get()
         .map(|s| s.query(filter))
         .unwrap_or_default()
+}
+
+/// Delete entries older than `before_ts` from the global store. Returns
+/// the number of rows removed, or 0 if no store is installed.
+pub fn clear(before_ts: i64) -> u64 {
+    AUDIT_STORE
+        .get()
+        .map(|s| s.clear(before_ts))
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -123,6 +137,13 @@ mod tests {
                 rows.truncate(limit as usize);
             }
             rows
+        }
+
+        fn clear(&self, before_ts: i64) -> u64 {
+            let mut g = self.events.lock().unwrap();
+            let before = g.len();
+            g.retain(|e| e.ts_ms >= before_ts);
+            (before - g.len()) as u64
         }
     }
 

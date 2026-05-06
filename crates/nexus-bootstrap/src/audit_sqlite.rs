@@ -116,6 +116,26 @@ impl AuditStore for SqliteAuditStore {
             }
         }
     }
+
+    fn clear(&self, before_ts: i64) -> u64 {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "audit store mutex poisoned");
+                return 0;
+            }
+        };
+        match conn.execute(
+            "DELETE FROM audit_events WHERE ts_ms < ?1",
+            rusqlite::params![before_ts],
+        ) {
+            Ok(n) => n as u64,
+            Err(e) => {
+                tracing::warn!(error = %e, "audit clear failed");
+                0
+            }
+        }
+    }
 }
 
 /// Open a SQLite audit store at `path` and install it as the kernel's
@@ -196,6 +216,25 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(limited.len(), 2);
+    }
+
+    #[test]
+    fn clear_removes_entries_below_cutoff_only() {
+        let (_dir, store) = temp_store();
+        for _ in 0..3 {
+            store.append("x", Some("a"), &json!({}));
+        }
+        // ts_ms cutoff = now+1h ⇒ everything is "older" and gets removed.
+        let future = chrono::Utc::now().timestamp_millis() + 3_600_000;
+        let removed = store.clear(future);
+        assert_eq!(removed, 3);
+        assert!(store.query(&AuditQuery::default()).is_empty());
+
+        // Re-append; cutoff in the past keeps everything.
+        store.append("x", Some("a"), &json!({}));
+        let past = 0;
+        assert_eq!(store.clear(past), 0);
+        assert_eq!(store.query(&AuditQuery::default()).len(), 1);
     }
 
     #[test]

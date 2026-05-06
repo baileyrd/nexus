@@ -435,6 +435,7 @@ fn register_core_plugins(
                     ("delete_secret", nexus_security::core_plugin::HANDLER_DELETE_SECRET),
                     ("list_secret_names", nexus_security::core_plugin::HANDLER_LIST_SECRET_NAMES),
                     ("query_audit_log", nexus_security::core_plugin::HANDLER_QUERY_AUDIT_LOG),
+                    ("clear_audit_log", nexus_security::core_plugin::HANDLER_CLEAR_AUDIT_LOG),
                 ],
             ),
             forge_root,

@@ -95,25 +95,7 @@ Zero fuzz targets exist in the codebase. The PRD specifies fuzz targets for the 
 
 ---
 
-### BL-100: Audit log CLI export and rolling file persistence
-
-**Source**: Security Integration Assessment (2026-05-06) — gap #2 follow-up
-**Effort**: Small (1 day)
-**Crates**: `nexus-cli/src/commands/` (new `nexus logs` subcommand), `nexus-kernel/src/audit.rs`
-**Related**: BL-094 (kernel audit SQLite store — **required first**); PRD-02 §11.3 (rolling files + CLI export)
-
-BL-094 adds the SQLite audit store backing. This BL adds the user-facing surfaces that PRD-02 §11 specifies but are separate from the kernel infrastructure: the CLI export command, rolling file output, and retention enforcement.
-
-**Blocked by:** BL-094 must ship first (needs the `com.nexus.kernel::audit_query` IPC handler).
-
-**Definition of done:**
-- `nexus logs` CLI subcommand tree:
-  - `nexus logs list [--plugin <id>] [--type <event_type>] [--since <date>] [--limit N]` — query audit store
-  - `nexus logs export [--start <date>] [--end <date>] [--format jsonl|csv]` — export to stdout or file
-  - `nexus logs clear [--older-than <days>]` — prune old entries
-- Optional rolling file output: `KernelConfig::audit_log_dir` enables writing JSONL files, rotating at 100 MB, compressing to `.gz`, keeping 90 days
-- Rolling file writer plugs into the `tracing-appender` stack alongside the terminal subscriber
-- 90-day retention policy enforced on forge open (prune entries older than `retention_days` from both SQLite and rolling files)
+_BL-100 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Optional rolling-file JSONL output deferred (the `tracing-appender` daily rotation in `nexus-cli` already covers operational logs; SQLite is the authoritative audit store)._
 
 ---
 

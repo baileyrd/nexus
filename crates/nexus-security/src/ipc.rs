@@ -177,6 +177,43 @@ pub struct AuditLogEntry {
     pub detail_json: String,
 }
 
+// ── clear_audit_log (BL-100) ──────────────────────────────────────────────────
+
+/// Args for `com.nexus.security::clear_audit_log` (handler id `6`).
+///
+/// Removes every entry with `ts_ms < before_ts`. Useful for `nexus logs
+/// clear --older-than <days>`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ClearAuditLogArgs {
+    /// Unix-millis cutoff: rows with `ts_ms < before_ts` are deleted.
+    pub before_ts: i64,
+}
+
+/// Return type for `com.nexus.security::clear_audit_log`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct ClearAuditLogResult {
+    /// Number of rows actually deleted.
+    pub removed: u64,
+}
+
 // ── list_secret_names ─────────────────────────────────────────────────────────
 
 /// Args for `com.nexus.security::list_secret_names` (handler id `4`).

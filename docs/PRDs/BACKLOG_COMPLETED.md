@@ -8,6 +8,23 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-100: Audit log CLI subcommands ✅ (2026-05-06)
+
+**Source**: Security Integration Assessment (2026-05-06) — gap #2 follow-up
+**Files**: `crates/nexus-cli/src/commands/logs.rs`, `crates/nexus-cli/src/main.rs`, `crates/nexus-security/src/{core_plugin.rs,ipc.rs}`, `crates/nexus-bootstrap/src/{lib.rs,audit_sqlite.rs}`, `crates/nexus-kernel/src/audit_store.rs`
+
+Builds on BL-094's persisted audit store. Three new CLI subcommands route through the existing `com.nexus.security` plugin so they work uniformly across CLI, TUI, and shell:
+
+- `nexus logs list [--plugin <id>] [--type <event_type>] [--since <YYYY-MM-DD|RFC3339>] [-n <limit>]` — newest-first tabular view, calls `query_audit_log`.
+- `nexus logs export [--start <date>] [--end <date>] [--format jsonl|csv]` — dumps entries to stdout. `end` is filtered client-side since the store query only supports `since_ts` natively.
+- `nexus logs clear [--older-than <days>]` — prunes via the new `clear_audit_log` handler (id 6); defaults to 90 days. Backed by a new `AuditStore::clear(before_ts) -> u64` trait method, implemented in both the kernel's `FakeStore` and the SQLite store.
+
+90-day retention on forge open is already enforced by `SqliteAuditStore::open` (BL-094). The "optional rolling JSONL file output" line in the original DoD is deferred — the `tracing-appender` daily rotation in `nexus-cli` already covers operational logs, and SQLite is the authoritative audit surface (queryable, retention-bounded, structured). Adding a parallel JSONL stream would duplicate state without a current consumer.
+
+End-to-end smoke confirmed via `nexus forge init` + `nexus logs list/clear/export` against a fresh forge — shows boot-time capability-grant entries and the JSONL/CSV formatters round-trip correctly.
+
+---
+
 ### BL-094: Audit event persistence ✅ (2026-05-06)
 
 **Source**: Kernel Integration Assessment (2026-05-06) — gap #2
