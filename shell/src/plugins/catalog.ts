@@ -95,8 +95,16 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     popoutCompatible: false,
     dependsOn: ['nexus.workspace'],
-    description: 'Status bar branch + dirty indicator for the forge’s git repository.',
+    description: "Status bar branch + dirty indicator for the forge's git repository.",
     load: () => import('./nexus/gitStatus').then(m => m.gitStatusPlugin),
+  },
+  {
+    id: 'nexus.gitPanel', name: 'Git Panel',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    dependsOn: ['nexus.workspace', 'nexus.activityBar', 'nexus.gitStatus'],
+    description: 'Source control sidebar — staged/unstaged files, commit UI, branch picker, and commit log.',
+    load: () => import('./nexus/gitPanel').then(m => m.gitPanelPlugin),
   },
   // ── Chrome ─────────────────────────────────────────────────────────────────
   {
@@ -356,7 +364,7 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
   {
     id: 'nexus.fileProperties', name: 'File Properties',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    description: 'Edit the active note’s frontmatter as a typed key/value form.',
+    description: "Edit the active note's frontmatter as a typed key/value form.",
     load: () => import('./nexus/fileProperties').then(m => m.filePropertiesPlugin),
   },
   {
