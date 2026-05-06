@@ -8,6 +8,15 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-090: SSH passphrase caching via nexus-security ✅ (2026-05-06)
+
+**Source**: Git Integration Assessment (2026-05-06) — gap #6
+**Files**: `crates/nexus-git/src/engine.rs` (make_callbacks), `crates/nexus-git/Cargo.toml`, `crates/nexus-cli/src/{main.rs,commands/git.rs}`
+
+Added `nexus-security` as a path dep on `nexus-git` (intra-crate direct access — `make_callbacks` runs synchronously inside libgit2 from the `GitWorker` thread far from any kernel context, so going through IPC isn't practical here). The credentials callback now tries: ssh-agent → unencrypted default keys → cached passphrase from OS keyring under `ssh-passphrase:<key_name>` → fall through. Two new CLI commands: `nexus git set-passphrase <key>` (reads from stdin, stores via `CredentialVault::store`) and `nexus git clear-passphrase <key>` (deletes; soft-pass on CredentialNotFound). Encrypted SSH keys now work for push/pull/fetch without ssh-agent — store the passphrase once, the keychain handles the rest.
+
+---
+
 ### BL-098: `com.nexus.security` IPC handlers — credential vault via IPC ✅ (2026-05-06)
 
 **Source**: Security Integration Assessment (2026-05-06) — gap #3 (highest leverage)

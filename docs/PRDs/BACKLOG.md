@@ -306,20 +306,7 @@ Git-LFS (Large File Storage) stores large binary files (images, audio, video, da
 
 ---
 
-### BL-090: SSH passphrase caching via nexus-security
-
-**Source**: Git Integration Assessment (2026-05-06) — gap #6
-**Effort**: Small (1 day)
-**Crates**: `nexus-git/src/engine.rs` (`make_callbacks`), `nexus-security` (keyring read)
-**Related**: `nexus-security` OS keyring vault; PRD-11 §auth
-
-SSH keys with passphrases currently block the `GitWorker` thread with a libgit2 passphrase prompt if `ssh-agent` isn't running. There's no integration with `nexus-security`'s OS keyring. Users must either run `ssh-agent` or use passphrase-less keys.
-
-**Definition of done:**
-- `make_callbacks()` in `engine.rs` adds a passphrase-lookup step: before prompting, call `com.nexus.security::get_secret("ssh-passphrase:<key-fingerprint>")` via IPC
-- If found, use it; if not, fall back to existing behavior (agent then prompt)
-- On successful remote op after a prompt, offer to store the passphrase in the keyring (dispatches `com.nexus.security::set_secret`)
-- `nexus git clear-passphrase <key-fingerprint>` CLI command removes a stored passphrase
+_BL-090 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
