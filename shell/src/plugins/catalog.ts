@@ -175,6 +175,14 @@ export const DEFAULT_ON_PLUGINS: PluginEntry[] = [
     description: 'Toggles edit / read / source modes on the active pane and persists per-leaf state.',
     load: () => import('./nexus/paneMode').then(m => m.paneModePlugin),
   },
+  {
+    id: 'nexus.themePicker', name: 'Theme Picker',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    popoutCompatible: false,
+    dependsOn: ['core.theme-service'],
+    description: 'Browse and apply colour themes — Ctrl+Shift+T opens the picker overlay.',
+    load: () => import('./nexus/themePicker').then(m => m.themePickerPlugin),
+  },
   // ── Search ─────────────────────────────────────────────────────────────────
   {
     id: 'nexus.search', name: 'Search',
