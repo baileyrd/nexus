@@ -372,24 +372,7 @@ git2 exposes `repo.rebase()` for non-interactive rebase and `repo.cherrypick()` 
 
 ---
 
-### BL-087: Stash support
-
-**Source**: Git Integration Assessment (2026-05-06) — deferred feature
-**Effort**: Small (0.5–1 day)
-**Crates**: `nexus-git/src/engine.rs`, `nexus-git/src/core_plugin.rs`
-**Related**: PRD-11; git2 `repo.stash_save` + `repo.stash_apply` + `repo.stash_drop`
-
-Stash is the safety net for branch switching with dirty working trees. Currently `switch_branch` uses force checkout which discards working tree changes silently. Stash support lets users save and restore work-in-progress without committing.
-
-**Definition of done:**
-- `GitEngine::stash_push(message?)` → stash entry index
-- `GitEngine::stash_list()` → `Vec<{ index, message, oid }>`
-- `GitEngine::stash_pop(index?)` → apply + drop (defaults to most recent)
-- `GitEngine::stash_apply(index?)` → apply without dropping
-- `GitEngine::stash_drop(index?)` → discard without applying
-- New IPC handlers: `stash_push` (id 20), `stash_list` (id 21), `stash_pop` (id 22), `stash_drop` (id 23)
-- `nexus git stash`, `nexus git stash list`, `nexus git stash pop`, `nexus git stash drop` CLI subcommands
-- `switch_branch` gains a `--stash` flag that auto-stashes before switching and auto-pops on return
+_BL-087 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
