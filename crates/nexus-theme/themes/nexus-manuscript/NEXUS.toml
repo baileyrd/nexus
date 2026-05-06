@@ -1,0 +1,255 @@
+# nexus-manuscript — warm parchment content canvas on a dark chrome shell.
+#
+# Inspired by the dual-tone aesthetic where the sidebar/chrome is dark and the
+# document canvas is a warm cream/parchment. Switches the editor to a serif
+# body font for long-form reading and writing comfort.
+
+[theme]
+name             = "Manuscript"
+version          = "1.0.0"
+author           = "Nexus"
+description      = "Warm parchment document canvas on a dark chrome shell — serif body, amber accent."
+license          = "MIT OR Apache-2.0"
+nexus_min_version = "0.1.0"
+nexus_max_version = "*"
+display_name     = "Manuscript"
+category         = "sepia"
+supports         = ["light"]
+platform_specific = ["macos", "windows"]
+
+[variables]
+# ── Brand / accent ───────────────────────────────────────────────────────────
+"--nx-color-primary"       = "#C8915A"
+"--nx-color-primary-light" = "#DFB080"
+"--nx-color-primary-dark"  = "#A0692C"
+"--nx-color-primary-soft"  = "rgba(200, 145, 90, 0.16)"
+
+# ── Chrome surfaces (dark warm shell) ────────────────────────────────────────
+# bg-primary maps to the document canvas; chrome lives on bg-secondary/tertiary.
+"--nx-bg-primary"   = "#F7F2E8"   # parchment — editor, active tab
+"--nx-bg-secondary" = "#252220"   # dark warm — sidebar, inactive tabs, panels
+"--nx-bg-tertiary"  = "#2E2B28"   # slightly lighter dark — hover rows, dividers
+"--nx-bg-elevated"  = "#312E2B"   # menus / dropdowns on dark chrome
+"--nx-bg-overlay"   = "rgba(0, 0, 0, 0.65)"
+
+# Parchment canvas variants
+"--nx-bg-sunken"       = "#EDE6D6"   # inset well, gutter
+"--nx-bg-code-block"   = "#EDE6D6"
+"--nx-bg-inline-code"  = "#EDE6D6"
+"--nx-bg-selected"     = "rgba(200, 145, 90, 0.18)"
+"--nx-bg-highlight"    = "rgba(200, 145, 90, 0.25)"
+"--nx-bg-hover"        = "rgba(200, 145, 90, 0.10)"
+"--nx-bg-pressed"      = "rgba(200, 145, 90, 0.20)"
+
+# ── Text (defaults for dark chrome surfaces) ─────────────────────────────────
+# The document renderer overrides these via --nx-prose-* variables below.
+"--nx-text-primary"   = "#D8CCBA"   # main body on dark chrome
+"--nx-text-secondary" = "#A89880"   # secondary on dark
+"--nx-text-tertiary"  = "#7A6B5A"   # muted on dark
+"--nx-text-muted"     = "#5A4E42"
+"--nx-text-inverted"  = "#F7F2E8"   # dark-on-light (used on parchment)
+
+# ── Interactions (on dark chrome) ────────────────────────────────────────────
+"--nx-interactive-hover"     = "rgba(200, 145, 90, 0.10)"
+"--nx-interactive-active"    = "rgba(200, 145, 90, 0.20)"
+"--nx-interactive-focus-ring" = "2px solid #C8915A"
+
+# ── Borders (on dark chrome) ─────────────────────────────────────────────────
+"--nx-border-subtle"  = "rgba(255, 255, 255, 0.06)"
+"--nx-border-default" = "rgba(255, 255, 255, 0.10)"
+"--nx-border-strong"  = "rgba(255, 255, 255, 0.18)"
+"--nx-border-focus"   = "#C8915A"
+
+# ── Elevation (warmer shadows) ────────────────────────────────────────────────
+"--nx-shadow-sm" = "0 1px 2px rgba(0, 0, 0, 0.40)"
+"--nx-shadow-md" = "0 4px 6px rgba(0, 0, 0, 0.50)"
+"--nx-shadow-lg" = "0 10px 15px rgba(0, 0, 0, 0.60)"
+
+# ── Ribbon (far-left icon strip) ─────────────────────────────────────────────
+"--nx-ribbon-bg"          = "#1A1714"
+"--nx-ribbon-text"        = "#7A6B5A"
+"--nx-ribbon-border"      = "rgba(255, 255, 255, 0.04)"
+"--nx-ribbon-item-hover"  = "rgba(200, 145, 90, 0.12)"
+"--nx-ribbon-item-active" = "rgba(200, 145, 90, 0.22)"
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+"--nx-sidebar-bg"               = "#252220"
+"--nx-sidebar-border"           = "rgba(255, 255, 255, 0.06)"
+"--nx-sidebar-item-hover"       = "rgba(200, 145, 90, 0.10)"
+"--nx-sidebar-item-active-bg"   = "rgba(200, 145, 90, 0.18)"
+"--nx-sidebar-item-active-text" = "#DFC9A8"
+"--nx-sidebar-selector-bg"      = "#252220"
+"--nx-sidebar-footer-bg"        = "#1A1714"
+
+# ── Tab bar ───────────────────────────────────────────────────────────────────
+"--nx-tabbar-bg"           = "#252220"
+"--nx-tabbar-active-bg"    = "#F7F2E8"     # matches editor parchment
+"--nx-tabbar-active-border"= "#C8915A"
+"--nx-tabbar-inactive-text"= "#A89880"
+"--nx-tabbar-active-text"  = "#2C1F14"     # dark brown on parchment
+"--nx-tabbar-hover-bg"     = "rgba(200, 145, 90, 0.10)"
+"--nx-tabbar-border"       = "rgba(255, 255, 255, 0.06)"
+"--nx-tabbar-dirty"        = "#E8A44E"
+"--nx-tabbar-close-hover"  = "#B5451F"
+
+# ── Status bar ────────────────────────────────────────────────────────────────
+"--nx-statusbar-bg"        = "#1A1714"
+"--nx-statusbar-text"      = "#7A6B5A"
+"--nx-statusbar-border"    = "rgba(255, 255, 255, 0.04)"
+"--nx-statusbar-item-hover"= "rgba(200, 145, 90, 0.10)"
+
+# ── Inspector panel (Outline / Backlinks / Graph) ────────────────────────────
+"--nx-inspector-bg"              = "#252220"
+"--nx-inspector-border"          = "rgba(255, 255, 255, 0.06)"
+"--nx-inspector-header-bg"       = "#252220"
+"--nx-inspector-tab-active-bg"   = "#2E2B28"
+"--nx-inspector-tab-active-text" = "#DFC9A8"
+"--nx-inspector-section-header"  = "#7A6B5A"
+"--nx-inspector-width"           = "280px"
+
+# ── Forge metadata bar (FORGE · <name>  UPDATED <date>) ─────────────────────
+"--nx-forge-meta-bg"     = "transparent"   # inherits parchment from editor
+"--nx-forge-meta-text"   = "#A89880"
+"--nx-forge-meta-border" = "rgba(0, 0, 0, 0.08)"
+
+# ── Editor canvas (parchment) ────────────────────────────────────────────────
+"--nx-editor-bg"                  = "#F7F2E8"
+"--nx-editor-font-family"         = "'Georgia', 'Palatino Linotype', 'Book Antiqua', serif"
+"--nx-editor-content-max-width"   = "72ch"
+"--nx-editor-content-padding-x"   = "48px"
+"--nx-editor-content-padding-top" = "40px"
+"--nx-editor-gutter-bg"           = "#EDE6D6"
+"--nx-editor-gutter-border"       = "rgba(0, 0, 0, 0.06)"
+"--nx-editor-line-number"         = "#B8A892"
+"--nx-editor-cursor"              = "#2C1F14"
+"--nx-editor-selection"           = "rgba(200, 145, 90, 0.35)"
+"--nx-editor-active-line"         = "rgba(200, 145, 90, 0.06)"
+"--nx-editor-line-highlight"      = "rgba(200, 145, 90, 0.08)"
+"--nx-editor-find-match"          = "rgba(200, 145, 90, 0.50)"
+"--nx-editor-find-match-highlight"= "rgba(200, 145, 90, 0.25)"
+"--nx-editor-indent-guide"        = "rgba(0, 0, 0, 0.06)"
+"--nx-editor-ruler"               = "rgba(0, 0, 0, 0.06)"
+"--nx-editor-whitespace"          = "rgba(0, 0, 0, 0.12)"
+"--nx-editor-fold-marker"         = "#B8A892"
+
+# ── Prose / document text (rendered on parchment canvas) ────────────────────
+"--nx-prose-heading-color"     = "#1A1207"
+"--nx-prose-body-color"        = "#2C1F14"
+"--nx-prose-blockquote-bg"     = "#EDE6D6"
+"--nx-prose-blockquote-border" = "#C8915A"
+"--nx-prose-hr-color"          = "rgba(0, 0, 0, 0.12)"
+"--nx-prose-table-header-bg"   = "#EDE6D6"
+"--nx-prose-table-border"      = "rgba(0, 0, 0, 0.10)"
+"--nx-prose-table-stripe"      = "rgba(200, 145, 90, 0.05)"
+"--nx-prose-link-color"        = "#A0692C"
+"--nx-prose-link-hover"        = "#C8915A"
+
+# ── Callout blocks ────────────────────────────────────────────────────────────
+"--nx-callout-bg"          = "#EDE6D6"
+"--nx-callout-border"      = "#C8915A"
+"--nx-callout-title-color" = "#2C1F14"
+"--nx-callout-body-color"  = "#4A3828"
+"--nx-callout-radius"      = "6px"
+"--nx-callout-padding"     = "12px 16px"
+
+# ── File tree ─────────────────────────────────────────────────────────────────
+"--nx-file-tree-indent-width" = "16px"
+"--nx-file-tree-indent-guide" = "rgba(255, 255, 255, 0.08)"
+"--nx-file-tree-folder-color" = "#A89880"
+"--nx-file-tree-file-color"   = "#D8CCBA"
+"--nx-file-tree-icon-color"   = "#7A6B5A"
+
+# ── Code blocks (on parchment) ────────────────────────────────────────────────
+"--nx-code-block-bg"     = "#EDE6D6"
+"--nx-code-block-border" = "rgba(0, 0, 0, 0.08)"
+
+# ── Syntax highlighting (warm palette for parchment canvas) ─────────────────
+"--nx-syntax-keyword"   = "#B5451F"   # warm red-orange
+"--nx-syntax-string"    = "#4A7C47"   # muted forest green
+"--nx-syntax-comment"   = "#9A8870"   # warm gray
+"--nx-syntax-number"    = "#B07020"   # amber
+"--nx-syntax-function"  = "#2B5EA7"   # deep blue
+"--nx-syntax-type"      = "#6B3A8C"   # deep plum
+"--nx-syntax-class"     = "#1A6B5A"   # dark teal
+"--nx-syntax-namespace" = "#7A4A6B"   # muted purple
+"--nx-syntax-operator"  = "#4A3828"   # warm near-black
+"--nx-syntax-heading"   = "#1A1207"   # matches prose-heading-color
+"--nx-syntax-link-text" = "#A0692C"
+"--nx-syntax-link-url"  = "#7A6B5A"
+"--nx-syntax-quote"     = "#6B5A48"
+"--nx-syntax-bold"      = "#2C1F14"
+"--nx-syntax-italic"    = "#2C1F14"
+"--nx-syntax-strikethrough" = "#A89880"
+
+# ── Selection (on parchment) ─────────────────────────────────────────────────
+"--nx-selection-bg"          = "rgba(200, 145, 90, 0.35)"
+"--nx-selection-inactive-bg" = "rgba(200, 145, 90, 0.18)"
+
+# ── Links (on parchment) ─────────────────────────────────────────────────────
+"--nx-text-link"         = "#A0692C"
+"--nx-text-link-hover"   = "#C8915A"
+"--nx-text-link-visited" = "#7A4A6B"
+
+# ── Scrollbar (on parchment) ─────────────────────────────────────────────────
+"--nx-scrollbar-thumb"       = "rgba(0, 0, 0, 0.18)"
+"--nx-scrollbar-thumb-hover" = "rgba(0, 0, 0, 0.28)"
+
+# ── Modals / dialogs ─────────────────────────────────────────────────────────
+"--nx-modal-bg"       = "#2E2B28"
+"--nx-modal-border"   = "rgba(255, 255, 255, 0.08)"
+"--nx-modal-backdrop" = "rgba(0, 0, 0, 0.65)"
+
+# ── Tooltips ─────────────────────────────────────────────────────────────────
+"--nx-tooltip-bg"   = "#1A1714"
+"--nx-tooltip-text" = "#D8CCBA"
+
+# ── Context menu ─────────────────────────────────────────────────────────────
+"--nx-menu-bg"            = "#2E2B28"
+"--nx-menu-text"          = "#D8CCBA"
+"--nx-menu-border"        = "rgba(255, 255, 255, 0.08)"
+"--nx-menu-item-hover-bg" = "rgba(200, 145, 90, 0.12)"
+"--nx-menu-item-active-bg"= "rgba(200, 145, 90, 0.20)"
+"--nx-menu-separator"     = "rgba(255, 255, 255, 0.06)"
+
+# ── Graph canvas ─────────────────────────────────────────────────────────────
+"--nx-graph-node-bg"     = "#2E2B28"
+"--nx-graph-node-border" = "#C8915A"
+"--nx-graph-edge-stroke" = "#7A6B5A"
+"--nx-graph-grid"        = "rgba(255, 255, 255, 0.04)"
+
+# ── Density ──────────────────────────────────────────────────────────────────
+"--nx-density-cozy-ui-size"               = "13px"
+"--nx-density-cozy-row-h"                 = "26px"
+"--nx-density-cozy-body-size"             = "16px"
+"--nx-density-cozy-chrome-row-height"     = "36px"
+"--nx-density-cozy-chrome-icon-size"      = "24px"
+"--nx-density-compact-ui-size"            = "12px"
+"--nx-density-compact-row-h"              = "22px"
+"--nx-density-compact-body-size"          = "15px"
+"--nx-density-compact-chrome-row-height"  = "30px"
+"--nx-density-compact-chrome-icon-size"   = "20px"
+"--nx-density-spacious-ui-size"           = "14px"
+"--nx-density-spacious-row-h"             = "30px"
+"--nx-density-spacious-body-size"         = "17px"
+"--nx-density-spacious-chrome-row-height" = "40px"
+"--nx-density-spacious-chrome-icon-size"  = "28px"
+
+[typography]
+sans_font  = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+serif_font = "'Georgia', 'Palatino Linotype', 'Book Antiqua', serif"
+mono_font  = "'JetBrains Mono', 'Fira Code', 'Monaco', 'Courier New', monospace"
+
+[platforms.macos]
+"--nx-bg-elevated" = "rgba(49, 46, 43, 0.88)"   # vibrancy-ready dark
+
+[platforms.windows]
+"--nx-bg-secondary" = "rgba(37, 34, 32, 0.88)"  # Mica-ready dark
+
+[tags]
+keywords          = ["sepia", "warm", "manuscript", "parchment", "serif", "writing"]
+color_temperature = "warm"
+contrast_level    = "aa"
+use_case          = ["writing", "long-sessions", "reading"]
+
+[version_history]
+"1.0.0" = "Initial release — warm parchment canvas with dark chrome shell"

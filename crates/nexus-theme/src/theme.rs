@@ -52,6 +52,10 @@ pub const BUILTIN_EMBER_DARK_TOML: &str =
 pub const BUILTIN_EMBER_LIGHT_TOML: &str =
     include_str!("../themes/nexus-ember-light/NEXUS.toml");
 
+/// Bundled Manuscript theme manifest — warm parchment canvas on dark chrome.
+pub const BUILTIN_MANUSCRIPT_TOML: &str =
+    include_str!("../themes/nexus-manuscript/NEXUS.toml");
+
 /// Identifier for the bundled light theme.
 pub const BUILTIN_LIGHT_ID: &str = "nexus-light";
 
@@ -82,6 +86,9 @@ pub const BUILTIN_EMBER_DARK_ID: &str = "nexus-ember-dark";
 /// Identifier for the bundled Forge Ember light theme.
 pub const BUILTIN_EMBER_LIGHT_ID: &str = "nexus-ember-light";
 
+/// Identifier for the bundled Manuscript theme.
+pub const BUILTIN_MANUSCRIPT_ID: &str = "nexus-manuscript";
+
 /// Canonical list of every theme bundled with the crate. Adding a new
 /// built-in theme only requires appending an `(id, toml)` tuple here —
 /// [`Theme::builtins`] and the `builtins_parse` test both read from this
@@ -97,6 +104,7 @@ pub const BUILTIN_THEMES: &[(&str, &str)] = &[
     (BUILTIN_TOMORROW_NIGHT_ID, BUILTIN_TOMORROW_NIGHT_TOML),
     (BUILTIN_EMBER_DARK_ID, BUILTIN_EMBER_DARK_TOML),
     (BUILTIN_EMBER_LIGHT_ID, BUILTIN_EMBER_LIGHT_TOML),
+    (BUILTIN_MANUSCRIPT_ID, BUILTIN_MANUSCRIPT_TOML),
 ];
 
 /// A loaded theme package — identifier + parsed manifest + source path if any.

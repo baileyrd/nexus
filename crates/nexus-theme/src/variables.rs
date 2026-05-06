@@ -567,6 +567,67 @@ pub const DEFAULT_VARIABLES: &[(&str, &str)] = &[
     ("--nx-form-invalid", "var(--nx-color-error)"),
     ("--nx-form-pending", "var(--nx-color-warning)"),
     ("--nx-form-loading", "var(--nx-color-info)"),
+    // === Density presets (cozy / compact / spacious) ==================
+    // Three row-density tiers the user can switch between at runtime.
+    // Themes may retune these; the active tier is applied by the shell.
+    ("--nx-density-cozy-ui-size",               "13px"),
+    ("--nx-density-cozy-row-h",                 "26px"),
+    ("--nx-density-cozy-body-size",             "16px"),
+    ("--nx-density-cozy-chrome-row-height",     "36px"),
+    ("--nx-density-cozy-chrome-icon-size",      "24px"),
+    ("--nx-density-compact-ui-size",            "12px"),
+    ("--nx-density-compact-row-h",              "22px"),
+    ("--nx-density-compact-body-size",          "15px"),
+    ("--nx-density-compact-chrome-row-height",  "30px"),
+    ("--nx-density-compact-chrome-icon-size",   "20px"),
+    ("--nx-density-spacious-ui-size",           "14px"),
+    ("--nx-density-spacious-row-h",             "30px"),
+    ("--nx-density-spacious-body-size",         "17px"),
+    ("--nx-density-spacious-chrome-row-height", "40px"),
+    ("--nx-density-spacious-chrome-icon-size",  "28px"),
+    // === Editor canvas ================================================
+    // Separate from --nx-type-sans so themes can use serif/mono on the
+    // document canvas without changing the chrome UI typeface.
+    ("--nx-editor-font-family",         "var(--nx-type-sans)"),
+    ("--nx-editor-content-max-width",   "72ch"),
+    ("--nx-editor-content-padding-x",   "48px"),
+    ("--nx-editor-content-padding-top", "40px"),
+    // === Prose (rendered markdown document) ==========================
+    ("--nx-prose-heading-color",     "var(--nx-text-primary)"),
+    ("--nx-prose-body-color",        "var(--nx-text-primary)"),
+    ("--nx-prose-blockquote-bg",     "var(--nx-bg-secondary)"),
+    ("--nx-prose-blockquote-border", "var(--nx-color-primary)"),
+    ("--nx-prose-hr-color",          "var(--nx-border-default)"),
+    ("--nx-prose-table-header-bg",   "var(--nx-bg-secondary)"),
+    ("--nx-prose-table-border",      "var(--nx-border-subtle)"),
+    ("--nx-prose-table-stripe",      "var(--nx-bg-secondary)"),
+    ("--nx-prose-link-color",        "var(--nx-text-link)"),
+    ("--nx-prose-link-hover",        "var(--nx-text-link-hover)"),
+    // === Callout blocks ===============================================
+    ("--nx-callout-bg",          "var(--nx-bg-secondary)"),
+    ("--nx-callout-border",      "var(--nx-color-primary)"),
+    ("--nx-callout-title-color", "var(--nx-text-primary)"),
+    ("--nx-callout-body-color",  "var(--nx-text-secondary)"),
+    ("--nx-callout-radius",      "var(--nx-radius-md)"),
+    ("--nx-callout-padding",     "12px 16px"),
+    // === Inspector panel ==============================================
+    ("--nx-inspector-bg",              "var(--nx-bg-secondary)"),
+    ("--nx-inspector-border",          "var(--nx-border-subtle)"),
+    ("--nx-inspector-header-bg",       "var(--nx-bg-secondary)"),
+    ("--nx-inspector-tab-active-bg",   "var(--nx-bg-primary)"),
+    ("--nx-inspector-tab-active-text", "var(--nx-text-primary)"),
+    ("--nx-inspector-section-header",  "var(--nx-text-tertiary)"),
+    ("--nx-inspector-width",           "280px"),
+    // === Forge metadata bar ===========================================
+    ("--nx-forge-meta-bg",     "transparent"),
+    ("--nx-forge-meta-text",   "var(--nx-text-muted)"),
+    ("--nx-forge-meta-border", "var(--nx-border-subtle)"),
+    // === File tree ====================================================
+    ("--nx-file-tree-indent-width",  "16px"),
+    ("--nx-file-tree-indent-guide",  "var(--nx-border-subtle)"),
+    ("--nx-file-tree-folder-color",  "var(--nx-text-secondary)"),
+    ("--nx-file-tree-file-color",    "var(--nx-text-primary)"),
+    ("--nx-file-tree-icon-color",    "var(--nx-icon-secondary)"),
 ];
 
 /// Returns the default variables as a fresh owned [`VariableMap`].
