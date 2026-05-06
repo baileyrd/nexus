@@ -230,6 +230,62 @@ Three tools are sufficient to unlock the core use cases:
 
 ---
 
+### BL-068: Theme Builder — visual token editor with live preview
+
+**Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
+**Effort**: ~1 week (0.5d `preview_override` handler + 4d UI + 0.5d export)
+**Crates**: `nexus-theme` (new `preview_override` IPC handler), new `shell/src/plugins/nexus/themeBuilder/`
+**Related**: PRD-07 (theming system), BL-053 (forge visual target), bundled ember themes
+
+Nexus themes are TOML files that override 400+ CSS variables (`--nx-{category}-{property}-{variant}`). Today, authoring one means editing the file externally and waiting for the file-watcher to hot-reload. The Theme Builder closes that loop inside the shell: a visual token editor with live preview, WCAG contrast checking, and one-click export to `.forge/themes/<name>/`.
+
+The theme system already has live reload; the only new backend work is a `preview_override` handler that applies an in-memory token overlay without touching any files — cleared on cancel, persisted on save.
+
+**Key surfaces:**
+- Token palette grouped by category (Surface, Text, Accent, Border, Editor/Syntax) with color pickers and sliders
+- Live split-view preview against a representative forge document (headings, code blocks, tables, callouts)
+- Base theme selector — start from any installed theme, write only the delta
+- Per-token WCAG AA/AAA contrast pass/fail against auto-detected background pairs
+- Light/dark side-by-side when theme supports both modes
+- Export writes `.theme.toml` to `.forge/themes/` and activates immediately
+
+**Definition of done:**
+- `com.nexus.theme::preview_override` handler applies in-memory token overlay; `preview_clear` reverts
+- Builder plugin opens from command palette, renders token palette + live preview split
+- Save writes valid TOML and activates via existing file-watcher path
+- `scripts/check_ipc_drift.sh` passes
+
+---
+
+### BL-067: Shell View Builder — visual layout composer for plugin panels
+
+**Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
+**Effort**: ~1.5–2 weeks (1d introspection API + 5–7d drag-drop UI + 1d export-as-plugin template)
+**Crates**: `ExtensionHost` (JS introspection API), new `shell/src/plugins/nexus/viewBuilder/`
+**Related**: ADR 0011 (plugin-first shell), BL-053 (forge visual target), BL-054 (Nexus OS Mode)
+
+Every panel, sidebar, and pane in the Nexus shell is a registered plugin contribution loaded by `ExtensionHost`. Arranging them today requires editing TypeScript. The View Builder exposes that composition layer as a visual drag-and-drop tool — move panels, resize splits, configure options — and saves the result as a layout definition file (`.forge/layouts/<name>.layout.toml`) the shell already knows how to read.
+
+The output is immediately usable and optionally exportable as a redistributable shell plugin.
+
+**Key surfaces:**
+- Live canvas showing current layout alongside the actual shell — drag to reorder, drag dividers to resize
+- Plugin contribution palette — searchable list of all registered `contributes.views` entries
+- Per-panel configuration (default size, dock side, float vs. docked)
+- Named layouts saved to forge and switchable from the command palette
+- "Export as plugin" — generates a valid `manifest.toml` + contribution block
+
+**One prerequisite:** `ExtensionHost` needs a read-only JS introspection API exposing the current contribution layout as a structured snapshot. Currently implicit; must be explicit before the UI can read it.
+
+**Definition of done:**
+- `ExtensionHost.getLayoutSnapshot()` returns current panel arrangement as a typed structure
+- Builder plugin opens from command palette, renders editable layout canvas
+- Drag-and-drop repositioning updates the live shell in real time
+- Named layouts persist to `.forge/layouts/` and restore on forge open
+- "Export as plugin" generates a runnable plugin directory
+
+---
+
 ### BL-054: Nexus OS Mode — Agentic OS methodology layer
 
 **Source**: AI Integration Assessment + Chase AI "Agentic OS" framework analysis (2026-05-06) — full plan in [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md)
