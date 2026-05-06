@@ -16,6 +16,120 @@
 
 _BL-009 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
+### BL-074: Collaborative editing — CRDT layer
+
+**Source**: Editor Integration Assessment (2026-05-06) — gap #5
+**Effort**: Large (4–6 weeks)
+**Crates**: new `nexus-crdt`, `nexus-editor` (sync loop), `nexus-storage` (conflict merge)
+**Related**: BL-007 (CRDT-over-Git transport); PRD-08 collaborative editing spec; stable block IDs (ADR 0017) were built for this
+
+The block model was designed with collaboration in mind — stable IDs survive upstream edits, annotation ranges adjust on insert/delete, and the transaction system is invertible. The CRDT merge semantics are documented in the spec. What's missing is the live sync loop: a mechanism for two sessions on the same forge to exchange operations and converge.
+
+This is the only editor gap that requires genuinely new infrastructure rather than wiring existing pieces.
+
+**Definition of done:**
+- `nexus-crdt` crate implements operation-based CRDT over the `Operation` type from `nexus-editor`
+- Two sessions opening the same file exchange operations via the kernel event bus (`com.nexus.editor.ops.<path>`)
+- Merge conflicts (concurrent edits to the same block) resolve via CRDT semantics; no user intervention needed for text edits
+- Structural conflicts (concurrent delete + edit of same block) surface as a user-resolvable dialog
+- BL-007 (CRDT-over-Git) becomes the persistence layer for async collaboration
+
+---
+
+### BL-073: Block auto-stamping on first reference
+
+**Source**: Editor Integration Assessment (2026-05-06) — gap #4
+**Effort**: Tiny (0.5 day)
+**Crates**: `nexus-editor/src/core_plugin.rs`
+**Related**: ADR 0017 (stable block IDs); `stamp_block` handler (id 11) ships today
+
+Stable block IDs (`<!-- ^<uuid> -->` comments) require an explicit `stamp_block` IPC call to assign. Nothing auto-assigns them. A user who creates a wikilink to a specific block (`[[file#^uuid]]`) must first manually stamp the target block — a friction point that breaks the linking flow.
+
+**Definition of done:**
+- When `resolve_block_link` is called with a target block that has no stable ID, it auto-stamps the block, writes the comment to the file, and returns the newly assigned ID
+- `apply_transaction` auto-stamps any block that gains a `Wikilink` annotation pointing to it (inbound-link trigger)
+- Auto-stamped IDs are UUID v4; no user-visible change except the comment appears in the markdown source
+
+---
+
+### BL-072: Undo history persistence across sessions
+
+**Source**: Editor Integration Assessment (2026-05-06) — gap #3
+**Effort**: Small–Medium (1 week)
+**Crates**: `nexus-editor/src/undo_tree.rs`, `nexus-editor/src/core_plugin.rs`, `nexus-storage`
+**Related**: PRD-08 §undo; `UndoTree` struct fully implemented; session-local today
+
+Closing an editor tab destroys the undo tree. On reopen the file loads from disk and history starts fresh. For long documents with complex edit histories this is a real limitation — a crash or accidental close forfeits all undo depth.
+
+**Definition of done:**
+- `UndoTree` serializes to JSON (serde derives already present on all operation types)
+- On `close(path)`, serialize and write to `.forge/.editor/undo/<path-hash>.json` via `com.nexus.storage`
+- On `open(path)`, check for a persisted undo file; if found and the file's current content matches the tree's head state, restore it
+- Cap persisted history at 500 operations (ring-buffer eviction); cap file age at 7 days (stale eviction on forge open)
+- `close` still clears in-memory session as before; persistence is additive
+
+---
+
+### BL-071: Emacs keybindings mode
+
+**Source**: Editor Integration Assessment (2026-05-06) — gap #2b; PRD-08 §9
+**Effort**: Small (2–3 days)
+**Crates**: `shell/src/plugins/nexus/editor/cm/` (new `emacsKeymap.ts`)
+**Related**: BL-070 (Vim mode — do that first, same infrastructure); CM6 `keymap` extension API
+
+PRD-08 §9 specifies Emacs keybinding support. CM6's keymap extension supports multiple layers; Emacs mode is additive on top of the default bindings. Standard Emacs navigation (C-f/b/n/p movement, C-a/e line, M-f/b word, C-k kill-line, C-y yank, C-space mark, M-w copy, C-w cut) covers the bulk of what Emacs users expect.
+
+**Definition of done:**
+- New CM6 extension `emacsKeymap.ts` implements the standard Emacs navigation and editing bindings
+- Toggle via Settings → Editor → Keybindings (alongside Default and Vim)
+- Mark ring (C-space) stores up to 16 positions; C-y yanks last killed text from kill ring
+- Keybinding mode persisted to forge settings; applied on editor mount
+
+---
+
+### BL-070: Vim keybindings mode
+
+**Source**: Editor Integration Assessment (2026-05-06) — gap #2a; PRD-08 §9
+**Effort**: Small–Medium (3–5 days)
+**Crates**: `shell/src/plugins/nexus/editor/cm/` (new `vimKeymap.ts`)
+**Related**: BL-071 (Emacs mode — parallel, same infrastructure); CM6 `@replit/codemirror-vim` or custom
+
+PRD-08 §9 specifies Vim keybinding support. CM6 has `@replit/codemirror-vim` as a well-maintained extension that provides modal editing (Normal/Insert/Visual), motion commands, operators, and ex commands. The integration is a package addition + settings toggle.
+
+The key tension: Nexus slash commands use `/` which conflicts with Vim's search. The extension should intercept `/` in Normal mode for Vim search and pass it through in Insert mode for Nexus slash commands.
+
+**Definition of done:**
+- `@replit/codemirror-vim` integrated as a CM6 extension, activated when `editor.keybindings = "vim"` in settings
+- Normal/Insert/Visual modes work; mode indicator shown in editor status bar
+- `/` in Normal mode → Vim search; `/` in Insert mode → Nexus slash command palette
+- `:w` saves the current file via `com.nexus.editor::save`; `:q` closes the tab
+- Keybinding mode persisted to forge settings; applied on editor mount
+- Settings → Editor → Keybindings toggle (Default / Vim / Emacs)
+
+---
+
+### BL-069: Database query executor for `[[{db:query}]]` blocks
+
+**Source**: Editor Integration Assessment (2026-05-06) — gap #1 (largest functional gap)
+**Effort**: Medium–Large (2–3 weeks)
+**Crates**: `nexus-editor/src/core_plugin.rs` (`execute_database_view` handler), `nexus-database`, `nexus-storage`
+**Related**: PRD-08 database view spec; PRD-10 (database engine); `execute_database_view` handler (id 12) registered but query executor missing; BL-012 (DB query blocks)
+
+The database view renderers are complete — Table, Kanban, Calendar, and Gallery layouts all render, the filter engine has 14 operators, and the sort engine supports multi-level null-last sorting. The gap is the query executor: `[[{db:query}]]` inline blocks parse and display a widget, but the widget doesn't fetch or display data.
+
+`execute_database_view` (handler 12) is registered and callable. It needs to be wired to `com.nexus.database` to run the query, apply filters and sorts, and return `{ records, groups }` to the view renderer.
+
+**Definition of done:**
+- `execute_database_view` handler calls `com.nexus.database::query` with the view's filter + sort spec, returns typed records
+- Table view renders live rows with column types respected (text, number, date, select, checkbox)
+- Kanban view groups records by the specified column, drag-to-reorder updates the record's group field
+- Calendar view places records on month grid by ISO date field; undated bucket shown below
+- Gallery view renders records as cards with configurable cover field
+- Filter + sort round-trip: changes in the view UI write back to the block's frontmatter via `apply_transaction`
+- `com.nexus.editor::execute_database_view` timeout: 30s (large datasets)
+
+---
+
 ### BL-061: Terminal memory backpressure — enforce kill policy
 
 **Source**: Terminal Integration Assessment (2026-05-06) — gap #5
