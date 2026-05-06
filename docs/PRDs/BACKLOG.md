@@ -16,6 +16,90 @@
 
 _BL-009 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
+### BL-108: Snippet row — mode and scope metadata in Snippets tab
+
+**Source**: UX gap found during `nexus.themePicker` build (2026-05-06)
+**Effort**: Tiny (1 hour)
+**Files**: `shell/src/plugins/nexus/themePicker/ThemePicker.tsx`
+**Related**: `AvailableSnippet` extra fields (`mode`, `scope`) in `themeStore.ts`
+
+`SnippetRow` shows name and description but not the snippet's `mode` (Light / Dark / All) or `scope` (Global / per-surface). Both fields are present in the `AvailableSnippet` objects as extra fields but not surfaced in the UI. A Dark-only snippet enabled in Light mode silently has no effect — nothing tells the user why.
+
+**Definition of done:**
+- `SnippetRow` reads `snippet.mode` and `snippet.scope` from the extra-field bag with string type-guards
+- If `mode` is `"light"` or `"dark"`: show a small pill badge ("Light only" / "Dark only") after the description
+- If `scope` is not `"global"`: show a "Scoped" badge with a tooltip containing the raw CSS selector
+- Active-mode mismatch: if the snippet's `mode` doesn't match `kernelMode`, dim the toggle and add a warning icon
+
+---
+
+### BL-107: Density tier CSS activation via `[data-density]`
+
+**Source**: Gap found while adding density variable defaults to `nexus-theme` (2026-05-06)
+**Effort**: Tiny (2 hours)
+**Files**: `shell/src/shell.css` (or a new `density.css` imported by it)
+**Related**: `themeStore.ts` (`data-density` attribute write); `--nx-density-*` variables added to `crates/nexus-theme/src/variables.rs`
+
+`themeStore.ts` writes `document.documentElement.dataset.density` (`"cozy"` / `"compact"` / `"spacious"`), and `--nx-density-{tier}-*` CSS variables were added to the defaults in `variables.rs`. But no CSS rule reads `[data-density]` to activate the correct tier's values. All three density presets currently resolve identically — the attribute is written but has no visual effect.
+
+**Definition of done:**
+- `shell.css` (or a new `density.css` imported by it) contains `[data-density]` selectors that forward each tier's tokens onto bridge variables (`--nx-ui-size`, `--nx-row-h`, `--nx-body-size`, `--nx-chrome-row-height`, `--nx-chrome-icon-size`)
+- Switching density in Settings immediately resizes the UI without a page reload
+- Sidebar rows and tab-bar height both visibly change as a smoke test
+
+---
+
+### BL-106: Theme builder — light/dark side-by-side preview
+
+**Source**: BL-068 remaining feature (2026-05-06)
+**Effort**: Medium (2–3 days)
+**Files**: `shell/src/plugins/nexus/themePicker/ThemeBuilder.tsx`, `themePickerStore.ts`
+**Related**: BL-068 (theme builder spec); `ThemeMode` in `themeStore.ts`
+
+The shipped Build tab edits a single mode at a time. BL-068 specified side-by-side light and dark columns with proportional hue/saturation propagation when the base theme supports both modes.
+
+**Definition of done:**
+- "Dual mode" toggle in the Build tab header; enabled when the selected base declares `supports = ["light", "dark"]`
+- Dual-mode expands the modal to two variable columns (light overrides | dark overrides)
+- Hue-lock option: editing a colour in one column adjusts the equivalent token in the other by the same hue/saturation delta
+- TOML export separates shared and mode-specific tokens across `[variables]` and mode-specific blocks
+
+---
+
+### BL-105: Theme builder — WCAG contrast checker
+
+**Source**: BL-068 remaining feature (2026-05-06)
+**Effort**: Small (1 day)
+**Files**: `shell/src/plugins/nexus/themePicker/ThemeBuilder.tsx`
+**Related**: BL-068 (theme builder spec); WCAG 2.1 §1.4.3 / §1.4.6
+
+The shipped Build tab has no contrast validation. BL-068 specified per-token WCAG AA/AAA pass/fail badges against auto-detected background pairs.
+
+**Definition of done:**
+- `contrast.ts` utility with `contrastRatio(fg: string, bg: string): number` (WCAG 2.1 relative-luminance formula)
+- Static pairing manifest mapping `--nx-text-*` → likely surface token and `--nx-syntax-*` → `--nx-editor-bg`
+- Each paired VarRow shows a badge: ✓ AAA (≥7:1), ✓ AA (≥4.5:1), ✗ Fail (<4.5:1); only when both sides resolve to parseable hex
+- Badge updates live as overrides change
+
+---
+
+### BL-104: Theme picker — swatch cache invalidation on hot-reload
+
+**Source**: Gap found while implementing `nexus.themePicker` (2026-05-06)
+**Effort**: Tiny (1 hour)
+**Files**: `shell/src/plugins/nexus/themePicker/index.ts`, `themePickerStore.ts`
+**Related**: `com.nexus.theme.changed` event; `useThemePickerStore.swatchCache`
+
+The swatch cache built on first picker open is never invalidated. When a theme file changes on disk and the kernel hot-reloads it (firing `com.nexus.theme.changed`), the picker continues showing stale colour swatches.
+
+**Definition of done:**
+- `nexus.themePicker` subscribes to `com.nexus.theme.changed` in `activate`
+- On event: `useThemePickerStore.getState().setSwatchCache({})` clears the cache
+- Next picker open re-fetches all swatches
+- The subscription is torn down on plugin deactivate
+
+---
+
 ### BL-103: Security fuzz targets
 
 **Source**: Security Integration Assessment (2026-05-06) — gap #6
@@ -994,6 +1078,8 @@ Three tools are sufficient to unlock the core use cases:
 
 ### BL-068: Theme Builder — visual token editor with live preview
 
+> **Core shipped 2026-05-06** as the Build tab in `nexus.themePicker` (`shell/src/plugins/nexus/themePicker/`). Remaining features tracked in BL-105 (contrast checker) and BL-106 (light/dark side-by-side). Original spec: [BL-067-068-builders.md](BL-067-068-builders.md).
+
 **Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
 **Effort**: ~1 week (0.5d `preview_override` handler + 4d UI + 0.5d export)
 **Crates**: `nexus-theme` (new `preview_override` IPC handler), new `shell/src/plugins/nexus/themeBuilder/`
@@ -1004,18 +1090,15 @@ Nexus themes are TOML files that override 400+ CSS variables (`--nx-{category}-{
 The theme system already has live reload; the only new backend work is a `preview_override` handler that applies an in-memory token overlay without touching any files — cleared on cancel, persisted on save.
 
 **Key surfaces:**
-- Token palette grouped by category (Surface, Text, Accent, Border, Editor/Syntax) with color pickers and sliders
-- Live split-view preview against a representative forge document (headings, code blocks, tables, callouts)
-- Base theme selector — start from any installed theme, write only the delta
-- Per-token WCAG AA/AAA contrast pass/fail against auto-detected background pairs
-- Light/dark side-by-side when theme supports both modes
-- Export writes `.theme.toml` to `.forge/themes/` and activates immediately
+- Token palette grouped by category (Surface, Text, Accent, Border, Editor/Syntax) with color pickers and sliders ✅ shipped
+- Base theme selector — start from any installed theme, write only the delta ✅ shipped
+- Export writes `.theme.toml` to `.forge/themes/` and activates via hot-reload ✅ shipped (save-to-disk + `reload` handler call)
+- Live split-view preview against a representative forge document ⬜ not built (uses live shell as preview instead)
+- Per-token WCAG AA/AAA contrast pass/fail → **BL-105**
+- Light/dark side-by-side when theme supports both modes → **BL-106**
 
-**Definition of done:**
-- `com.nexus.theme::preview_override` handler applies in-memory token overlay; `preview_clear` reverts
-- Builder plugin opens from command palette, renders token palette + live preview split
-- Save writes valid TOML and activates via existing file-watcher path
-- `scripts/check_ipc_drift.sh` passes
+**Definition of done (remaining):**
+- See BL-105 and BL-106
 
 ---
 
