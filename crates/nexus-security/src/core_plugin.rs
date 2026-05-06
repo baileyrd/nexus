@@ -12,15 +12,26 @@
 //! gets `KeyringDisabled` on individual credential operations rather than a
 //! startup abort.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use nexus_kernel::EventBus;
 use nexus_plugins::{CorePlugin, PluginError};
+use serde_json::json;
 
 use crate::{CredentialVault, SecurityError};
 
 /// Reverse-DNS identifier for this plugin.
 pub const PLUGIN_ID: &str = "com.nexus.security";
+
+/// IPC handler: read a secret by `(plugin_id, name)`.
+pub const HANDLER_GET_SECRET: u32 = 1;
+/// IPC handler: store a secret under `(plugin_id, name)`.
+pub const HANDLER_SET_SECRET: u32 = 2;
+/// IPC handler: remove a secret by `(plugin_id, name)`.
+pub const HANDLER_DELETE_SECRET: u32 = 3;
+/// IPC handler: list secret names for `plugin_id` (current session only).
+pub const HANDLER_LIST_SECRET_NAMES: u32 = 4;
 
 /// Type-erased probe used by `on_init` to decide whether the OS keyring is
 /// reachable. The default impl calls `CredentialVault::new().available()`;
@@ -43,6 +54,12 @@ fn default_keyring_probe() -> KeyringProbe {
 pub struct SecurityCorePlugin {
     event_bus: Option<Arc<EventBus>>,
     keyring_probe: KeyringProbe,
+    vault: CredentialVault,
+    /// In-memory index of namespaced keys (`"{plugin_id}:{name}"`) set during
+    /// the current session. Used by `list_secret_names` since the OS keyring
+    /// does not support enumeration. Cleared on plugin restart — names from
+    /// previous sessions are still retrievable by exact name but not listable.
+    known_names: HashSet<String>,
 }
 
 impl SecurityCorePlugin {
@@ -53,6 +70,8 @@ impl SecurityCorePlugin {
         Self {
             event_bus,
             keyring_probe: default_keyring_probe(),
+            vault: CredentialVault::new(),
+            known_names: HashSet::new(),
         }
     }
 
@@ -67,6 +86,8 @@ impl SecurityCorePlugin {
         Self {
             event_bus,
             keyring_probe: Box::new(probe),
+            vault: CredentialVault::disabled(),
+            known_names: HashSet::new(),
         }
     }
 
@@ -133,14 +154,79 @@ impl CorePlugin for SecurityCorePlugin {
     fn dispatch(
         &mut self,
         handler_id: u32,
-        _args: &serde_json::Value,
+        args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        Err(PluginError::ExecutionFailed {
+        match handler_id {
+            HANDLER_GET_SECRET => {
+                let key = vault_key(args)?;
+                match self.vault.retrieve(&key) {
+                    Ok(value) => Ok(json!({ "value": value })),
+                    Err(SecurityError::CredentialNotFound(_))
+                    | Err(SecurityError::KeyringDisabled) => {
+                        Ok(json!({ "value": null }))
+                    }
+                    Err(e) => Err(map_err(e)),
+                }
+            }
+            HANDLER_SET_SECRET => {
+                let key = vault_key(args)?;
+                let value = string_arg(args, "value")?;
+                self.vault.store(&key, &value).map_err(map_err)?;
+                self.known_names.insert(key);
+                Ok(json!({ "ok": true }))
+            }
+            HANDLER_DELETE_SECRET => {
+                let key = vault_key(args)?;
+                match self.vault.delete(&key) {
+                    Ok(()) | Err(SecurityError::CredentialNotFound(_)) => {
+                        self.known_names.remove(&key);
+                        Ok(json!({ "ok": true }))
+                    }
+                    Err(SecurityError::KeyringDisabled) => Ok(json!({ "ok": false })),
+                    Err(e) => Err(map_err(e)),
+                }
+            }
+            HANDLER_LIST_SECRET_NAMES => {
+                let plugin_id = string_arg(args, "plugin_id")?;
+                let prefix = format!("{plugin_id}:");
+                let names: Vec<String> = self
+                    .known_names
+                    .iter()
+                    .filter_map(|k| k.strip_prefix(&prefix).map(str::to_string))
+                    .collect();
+                Ok(json!({ "names": names }))
+            }
+            _ => Err(PluginError::ExecutionFailed {
+                plugin_id: PLUGIN_ID.to_string(),
+                reason: format!("unknown handler id {handler_id}"),
+            }),
+        }
+    }
+}
+
+/// Build the namespaced vault key `"{plugin_id}:{name}"` from IPC args.
+fn vault_key(args: &serde_json::Value) -> Result<String, PluginError> {
+    let plugin_id = string_arg(args, "plugin_id")?;
+    let name = string_arg(args, "name")?;
+    Ok(format!("{plugin_id}:{name}"))
+}
+
+/// Extract a required string argument by key.
+fn string_arg(args: &serde_json::Value, key: &str) -> Result<String, PluginError> {
+    args.get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| PluginError::ExecutionFailed {
             plugin_id: PLUGIN_ID.to_string(),
-            reason: format!(
-                "unknown handler id {handler_id}; security IPC commands not yet registered"
-            ),
+            reason: format!("missing '{key}' argument"),
         })
+}
+
+/// Map a `SecurityError` to a `PluginError` for IPC return.
+fn map_err(e: SecurityError) -> PluginError {
+    PluginError::ExecutionFailed {
+        plugin_id: PLUGIN_ID.to_string(),
+        reason: e.to_string(),
     }
 }
 
@@ -220,6 +306,100 @@ mod tests {
         let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
         let result = plugin.dispatch(42, &serde_json::json!({}));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn dispatch_get_secret_returns_null_when_disabled() {
+        // with_probe initialises a disabled vault — retrieve returns
+        // KeyringDisabled which we map to {"value": null} so callers
+        // can fall through to a default without special-casing the error.
+        let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
+        let result = plugin
+            .dispatch(
+                HANDLER_GET_SECRET,
+                &serde_json::json!({"plugin_id": "nexus.test", "name": "foo"}),
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!({"value": null}));
+    }
+
+    #[test]
+    fn dispatch_set_secret_in_disabled_mode_errors() {
+        // store() returns KeyringDisabled in disabled mode. Unlike
+        // get/delete (which we soften to null/false), set surfaces the
+        // error so the caller knows their secret was never persisted.
+        let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
+        let err = plugin
+            .dispatch(
+                HANDLER_SET_SECRET,
+                &serde_json::json!({
+                    "plugin_id": "nexus.test",
+                    "name": "foo",
+                    "value": "bar",
+                }),
+            )
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { plugin_id, .. } => assert_eq!(plugin_id, PLUGIN_ID),
+            other => panic!("expected ExecutionFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dispatch_set_secret_missing_plugin_id_errors() {
+        let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
+        let err = plugin
+            .dispatch(
+                HANDLER_SET_SECRET,
+                &serde_json::json!({"name": "foo", "value": "bar"}),
+            )
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("plugin_id"), "got: {reason}");
+            }
+            other => panic!("expected ExecutionFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dispatch_list_secret_names_filters_by_plugin_id() {
+        // Pre-populate known_names directly (simulating prior set_secret
+        // calls) — the keyring isn't consulted by list_secret_names since
+        // the OS keyring doesn't support enumeration.
+        let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
+        plugin.known_names.insert("nexus.foo:secret_a".to_string());
+        plugin.known_names.insert("nexus.foo:secret_b".to_string());
+        plugin.known_names.insert("nexus.bar:other".to_string());
+
+        let result = plugin
+            .dispatch(
+                HANDLER_LIST_SECRET_NAMES,
+                &serde_json::json!({"plugin_id": "nexus.foo"}),
+            )
+            .unwrap();
+        let mut names: Vec<String> = result["names"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["secret_a".to_string(), "secret_b".to_string()]);
+    }
+
+    #[test]
+    fn dispatch_delete_secret_in_disabled_mode_returns_ok_false() {
+        // delete in disabled mode soft-fails so callers can run
+        // best-effort cleanup without worrying about disabled keyrings.
+        let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
+        let result = plugin
+            .dispatch(
+                HANDLER_DELETE_SECRET,
+                &serde_json::json!({"plugin_id": "nexus.test", "name": "foo"}),
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!({"ok": false}));
     }
 
     #[test]

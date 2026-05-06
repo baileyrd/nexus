@@ -13,9 +13,12 @@
 /// dep cycle through `nexus-security`.
 pub use nexus_kernel::audit;
 
-mod core_plugin;
+/// Core plugin (`com.nexus.security`) and IPC handler constants.
+pub mod core_plugin;
 mod credential;
 mod error;
+/// IPC wire types for `com.nexus.security`.
+pub mod ipc;
 mod path;
 mod risk;
 

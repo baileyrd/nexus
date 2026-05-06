@@ -406,7 +406,7 @@ fn register_core_plugins(
     // Security first so audit events are available before other plugins emit.
     loader
         .register_core(
-            core_manifest(
+            core_manifest_with_ipc(
                 "com.nexus.security",
                 "Security",
                 LifecycleFlags {
@@ -414,6 +414,12 @@ fn register_core_plugins(
                     on_start: true,
                     on_stop: true,
                 },
+                &[
+                    ("get_secret", nexus_security::core_plugin::HANDLER_GET_SECRET),
+                    ("set_secret", nexus_security::core_plugin::HANDLER_SET_SECRET),
+                    ("delete_secret", nexus_security::core_plugin::HANDLER_DELETE_SECRET),
+                    ("list_secret_names", nexus_security::core_plugin::HANDLER_LIST_SECRET_NAMES),
+                ],
             ),
             forge_root,
             Box::new(SecurityCorePlugin::new(Some(Arc::clone(event_bus)))),
