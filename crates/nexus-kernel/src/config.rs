@@ -23,6 +23,13 @@ pub struct KernelConfig {
 
     /// Enable hot-reload of plugins when their WASM files change on disk.
     pub hot_reload_enabled: bool,
+
+    /// Per-hook deadline for `on_init` / `on_start` lifecycle hooks
+    /// (BL-095). A hook exceeding this returns
+    /// `PluginError::LifecycleTimeout` and the worker thread is
+    /// detached so a hung plugin cannot block bootstrap. Default 30s;
+    /// `0` disables the watchdog (hooks run inline).
+    pub lifecycle_timeout_secs: u64,
 }
 
 impl KernelConfig {
@@ -78,6 +85,7 @@ impl KernelConfig {
             event_bus_capacity: raw.event_bus_capacity.unwrap_or(2048),
             plugin_search_paths: raw.plugin_search_paths.unwrap_or_default(),
             hot_reload_enabled: raw.hot_reload_enabled.unwrap_or(true),
+            lifecycle_timeout_secs: raw.lifecycle_timeout_secs.unwrap_or(30),
         })
     }
 }
@@ -89,6 +97,7 @@ impl Default for KernelConfig {
             event_bus_capacity: 2048,
             plugin_search_paths: vec![],
             hot_reload_enabled: true,
+            lifecycle_timeout_secs: 30,
         }
     }
 }
@@ -100,6 +109,7 @@ struct RawConfig {
     event_bus_capacity: Option<usize>,
     plugin_search_paths: Option<Vec<PathBuf>>,
     hot_reload_enabled: Option<bool>,
+    lifecycle_timeout_secs: Option<u64>,
 }
 
 #[cfg(test)]

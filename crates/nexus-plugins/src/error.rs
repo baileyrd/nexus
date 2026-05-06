@@ -66,6 +66,20 @@ pub enum PluginError {
         reason: String,
     },
 
+    /// A plugin lifecycle hook (`on_init` / `on_start`) exceeded the
+    /// configured deadline. The loader detaches the worker thread and
+    /// excludes the plugin so a hung hook cannot block bootstrap. See
+    /// BL-095.
+    #[error("lifecycle timeout for {plugin_id} in {hook} after {timeout_secs}s")]
+    LifecycleTimeout {
+        /// The plugin identifier that hung.
+        plugin_id: String,
+        /// The lifecycle hook that exceeded the deadline (`"init"` or `"start"`).
+        hook: String,
+        /// The configured timeout in seconds.
+        timeout_secs: u64,
+    },
+
     /// A plugin attempted to use a capability it was not granted.
     #[error("capability denied for {plugin_id}: {capability}")]
     CapabilityDenied {

@@ -172,6 +172,9 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
         loader.add_search_path(extra.clone());
     }
     loader.set_event_bus(Arc::clone(&event_bus));
+    loader.set_lifecycle_timeout(std::time::Duration::from_secs(
+        kernel.config().lifecycle_timeout_secs,
+    ));
 
     // Register every in-tree core plugin. Order matters where lifecycle hooks
     // of later plugins rely on earlier ones publishing events; in practice

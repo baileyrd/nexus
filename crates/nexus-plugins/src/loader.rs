@@ -12,6 +12,7 @@ use std::sync::{Mutex, RwLock};
 
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Duration;
 
 // ─── Reentrancy detection ─────────────────────────────────────────────────────
 //
@@ -382,6 +383,11 @@ pub struct PluginLoader {
     ///
     /// [`set_event_bus`]: PluginLoader::set_event_bus
     event_bus: Option<Arc<EventBus>>,
+    /// Per-hook deadline for `on_init` / `on_start` (BL-095). A hook that
+    /// exceeds this returns [`PluginError::LifecycleTimeout`] and the
+    /// worker thread is detached so a hung plugin cannot block bootstrap.
+    /// Default: 30 seconds.
+    lifecycle_timeout: Duration,
 }
 
 impl PluginLoader {
@@ -399,6 +405,7 @@ impl PluginLoader {
             cli_registry: HashMap::new(),
             settings: SettingsManager::new(),
             event_bus: None,
+            lifecycle_timeout: Duration::from_secs(30),
         }
     }
 
@@ -406,6 +413,12 @@ impl PluginLoader {
     /// `0` disables auto-quarantine. The default is 3.
     pub fn set_max_timeout_streak(&mut self, max: u32) {
         self.max_timeout_streak = max;
+    }
+
+    /// Override the per-hook lifecycle deadline (BL-095). Default 30s.
+    /// `Duration::ZERO` disables the watchdog and runs hooks inline.
+    pub fn set_lifecycle_timeout(&mut self, timeout: Duration) {
+        self.lifecycle_timeout = timeout;
     }
 
     /// Inspect a dispatch result and update the per-plugin timeout
@@ -683,11 +696,28 @@ impl PluginLoader {
         }
 
         // Call lifecycle hooks directly on the native implementation.
+        // Each hook runs under a deadline (BL-095) so a hung plugin
+        // cannot block bootstrap. `set_lifecycle_timeout(Duration::ZERO)`
+        // opts out and runs hooks inline (used by tests that expect
+        // panics to surface, and where the spawn_thread overhead is
+        // measurable).
         if manifest.lifecycle.on_init {
-            plugin.on_init()?;
+            plugin = run_hook_with_timeout(
+                plugin,
+                &plugin_id,
+                "init",
+                self.lifecycle_timeout,
+                |p| p.on_init(),
+            )?;
         }
         if manifest.lifecycle.on_start {
-            plugin.on_start()?;
+            plugin = run_hook_with_timeout(
+                plugin,
+                &plugin_id,
+                "start",
+                self.lifecycle_timeout,
+                |p| p.on_start(),
+            )?;
         }
 
         let capabilities = build_capabilities(&manifest, plugin_dir);
@@ -1587,6 +1617,68 @@ fn check_api_version(requested: &str, plugin_id: &str) -> Result<(), PluginError
 /// loader and its sandbox can share a single mutable view. Any error
 /// (missing schema, invalid file, I/O) degrades to `"{}"` — a usable
 /// default that plugins can parse without special-casing.
+/// Run a lifecycle hook with a deadline (BL-095).
+///
+/// Spawns a worker thread that takes ownership of `plugin`, calls the
+/// hook closure, then sends the box + result back. On timeout the
+/// channel `recv_timeout` returns and the worker thread is detached —
+/// the hung plugin's resources may leak but it cannot block bootstrap
+/// further. `Duration::ZERO` runs the hook inline without a worker
+/// thread (used by tests).
+fn run_hook_with_timeout<F>(
+    mut plugin: Box<dyn CorePlugin>,
+    plugin_id: &str,
+    hook: &'static str,
+    timeout: Duration,
+    f: F,
+) -> Result<Box<dyn CorePlugin>, PluginError>
+where
+    F: FnOnce(&mut dyn CorePlugin) -> Result<(), PluginError> + Send + 'static,
+{
+    if timeout.is_zero() {
+        f(&mut *plugin)?;
+        return Ok(plugin);
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let pid = plugin_id.to_string();
+    std::thread::Builder::new()
+        .name(format!("plugin-lifecycle-{pid}-{hook}"))
+        .spawn(move || {
+            let mut p = plugin;
+            let result = f(&mut *p);
+            // If the loader has already given up on us the receive end
+            // is dropped — `send` errors silently, which is fine.
+            let _ = tx.send((p, result));
+        })
+        .map_err(|e| PluginError::LifecycleError {
+            plugin_id: plugin_id.to_string(),
+            hook: hook.to_string(),
+            reason: format!("failed to spawn watchdog thread: {e}"),
+        })?;
+
+    match rx.recv_timeout(timeout) {
+        Ok((p, Ok(()))) => Ok(p),
+        Ok((_p, Err(e))) => Err(e),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err(PluginError::LifecycleTimeout {
+                plugin_id: plugin_id.to_string(),
+                hook: hook.to_string(),
+                timeout_secs: timeout.as_secs(),
+            })
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err(PluginError::LifecycleError {
+                plugin_id: plugin_id.to_string(),
+                hook: hook.to_string(),
+                reason: "lifecycle worker disconnected before sending result \
+                    (likely panicked inside the hook)"
+                    .to_string(),
+            })
+        }
+    }
+}
+
 fn load_settings_cache(
     settings: &SettingsManager,
     plugin_id: &str,

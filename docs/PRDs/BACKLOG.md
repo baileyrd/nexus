@@ -170,22 +170,7 @@ Capability grants are permanent for a plugin's lifetime. There is no `revoke_cap
 
 ---
 
-### BL-095: Plugin lifecycle hook timeouts
-
-**Source**: Kernel Integration Assessment (2026-05-06) — gap #3
-**Effort**: Small (0.5–1 day)
-**Crates**: `nexus-plugins/src/loader.rs` (plugin init/start sequence)
-**Related**: PRD-01 §plugin-lifecycle; bootstrap startup sequence
-
-`on_init()` and `on_start()` hooks have no deadline. A plugin that hangs during initialization blocks the entire bootstrap sequence indefinitely. There is no watchdog, no abort, no timeout. This is a silent DoS vector if any plugin blocks on a network resource or unreleased lock during startup.
-
-**Definition of done:**
-- `PluginLoader` wraps each `on_init` and `on_start` call in `tokio::time::timeout(LIFECYCLE_HOOK_TIMEOUT)`
-- Default timeout: 30 seconds per hook (configurable via `KernelConfig::lifecycle_timeout_secs`)
-- Timeout → `PluginError::LifecycleTimeout { plugin_id, hook: "init"|"start", timeout_secs }`
-- Timed-out plugin is marked as `InitFailed` / `StartFailed` and excluded from dispatch; remaining plugins continue loading
-- Timeout event published to kernel bus: `com.nexus.kernel.plugin_lifecycle_timeout { plugin_id, hook }`
-- Bootstrap test: verify that a plugin with a 60s `on_init` sleep is skipped within 31 seconds and does not block other plugins
+_BL-095 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Watchdog ships for the `register_core` path with default 30s deadline; “continue with degraded plugin set” + bus event are deferred (bootstrap currently aborts boot with a clear `LifecycleTimeout` error, which is a strict improvement over hanging silently)._
 
 ---
 

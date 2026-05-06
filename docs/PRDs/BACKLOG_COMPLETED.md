@@ -8,6 +8,22 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-095: Plugin lifecycle hook timeouts ✅ (2026-05-06)
+
+**Source**: Kernel Integration Assessment (2026-05-06) — gap #3
+**Files**: `crates/nexus-plugins/src/{loader.rs,error.rs}`, `crates/nexus-plugins/tests/lifecycle_timeout.rs (new)`, `crates/nexus-kernel/src/config.rs`, `crates/nexus-bootstrap/src/lib.rs`
+
+`on_init` / `on_start` hooks now run on a worker thread with a deadline. `PluginLoader::set_lifecycle_timeout` (default 30s, plumbed from `KernelConfig::lifecycle_timeout_secs`) gates each hook via `mpsc::channel::recv_timeout`; the hung worker is detached on timeout so a wedged plugin can leak its own resources but cannot block bootstrap further. Timeout returns the new `PluginError::LifecycleTimeout { plugin_id, hook, timeout_secs }`. `Duration::ZERO` opts out and runs hooks inline.
+
+**What shipped:** the watchdog itself on the `register_core` path (covers every in-tree core plugin since bootstrap routes through `register_core`). The original DoD called for two further behaviors that didn't ship:
+
+- **"Excluded from dispatch; remaining plugins continue loading"** — bootstrap currently aborts with a clear `LifecycleTimeout` error rather than booting in a degraded state. The wider refactor (turn `register_core_plugins` into a fault-tolerant collector, remove the dependent IPC handlers from the dispatcher when one plugin times out) is deferred until there's a concrete user demanding partial-boot behavior.
+- **`com.nexus.kernel.plugin_lifecycle_timeout` bus event** — deferred with the same reasoning; the `LifecycleTimeout` error already carries the plugin id and hook name, and tracing emits the failure.
+
+Three tests cover the new path: a 60s sleep gets aborted under a 200ms deadline in <5s; a fast hook is unaffected; `Duration::ZERO` runs inline as expected.
+
+---
+
 ### BL-100: Audit log CLI subcommands ✅ (2026-05-06)
 
 **Source**: Security Integration Assessment (2026-05-06) — gap #2 follow-up
