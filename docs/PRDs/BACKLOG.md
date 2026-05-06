@@ -58,21 +58,12 @@ Zero fuzz targets exist in the codebase. The PRD specifies fuzz targets for the 
 
 ---
 
-### BL-102: TLS pinning for AI provider HTTP clients
+_BL-102 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Verifier scaffolding shipped (rustls custom `ServerCertVerifier`, `KernelConfig::tls_pinning_enabled`, `SecurityError::CertificatePinMismatch`/`NoPinsConfigured`, `NEXUS_TLS_PINNING=1` env opt-in). Default **off** because the shipped `tls_pins::HOST_PINS` table is empty — an operator with network access seeds real fingerprints, then flips the flag. The `nexus ai status` `tls_pinned` field is still TODO._
 
-**Source**: Security Integration Assessment (2026-05-06) — gap #5
-**Effort**: Small (1 day)
-**Crates**: `nexus-ai/src/anthropic.rs`, `nexus-ai/src/openai.rs`, `nexus-security/src/` (pinning config)
-**Related**: PRD-02 §7.2 (TLS pinning); `SecureConnection::connect_with_pinning` defined but never called
-
-`SecureConnection::connect_with_pinning` is defined in `nexus-security`. The AI provider HTTP clients (`anthropic.rs`, `openai.rs`) never call it. A MITM between Nexus and the Anthropic or OpenAI API is currently undetectable by the application — the TLS handshake completes against any valid certificate.
-
-**Definition of done:**
-- `nexus-ai` HTTP clients (reqwest-based) built with a custom `rustls` config that pins the expected root CA certificate for `api.anthropic.com` and `api.openai.com`
-- Pinned certificate SHA-256 fingerprints stored in `nexus-security/src/tls_pins.rs` as compile-time constants
-- Connection fails with `SecurityError::CertificatePinMismatch { host, expected, actual }` if the server certificate doesn't match
-- `KernelConfig::tls_pinning_enabled` (default `true`) allows opt-out for corporate proxy environments
-- `nexus ai status` CLI output includes `tls_pinned: true/false` for the active provider
+**Operator action required to actually pin:**
+1. Capture leaf SHA-256 for `api.anthropic.com` and `api.openai.com` per the procedure documented in `crates/nexus-security/src/tls_pins.rs`.
+2. Populate `HOST_PINS` with at least two values per host (current + expected next leaf) so a routine cert rotation doesn't take the app offline.
+3. Set `tls_pinning_enabled = true` in `<forge>/.nexus/config.toml` (or `NEXUS_TLS_PINNING=1` for an ad-hoc test).
 
 ---
 

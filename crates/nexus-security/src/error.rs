@@ -38,6 +38,34 @@ pub enum SecurityError {
     /// A plugin attempted an operation without the required capability.
     #[error("capability denied: {0}")]
     CapabilityDenied(Capability),
+
+    /// TLS pin mismatch (BL-102). The leaf certificate's
+    /// SubjectPublicKeyInfo SHA-256 hash did not match any pin
+    /// configured for `host`. Connection is aborted before any
+    /// request bytes are sent.
+    #[error(
+        "TLS pin mismatch for {host}: expected one of {expected:?}, got {actual}"
+    )]
+    CertificatePinMismatch {
+        /// The hostname that triggered the verifier.
+        host: String,
+        /// The configured pins for this host (hex-encoded SHA-256).
+        expected: Vec<String>,
+        /// The leaf certificate's actual SPKI SHA-256 (hex).
+        actual: String,
+    },
+
+    /// `tls_pinning_enabled` is on but the host has no configured
+    /// pins. Fail loud rather than silently allowing the connection.
+    #[error(
+        "TLS pinning is enabled but no pins are configured for {host} \
+         — set pins in nexus-security/src/tls_pins.rs or set \
+         tls_pinning_enabled = false to opt out"
+    )]
+    NoPinsConfigured {
+        /// The hostname that lacks pins.
+        host: String,
+    },
 }
 
 #[cfg(test)]

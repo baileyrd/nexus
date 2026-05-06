@@ -39,6 +39,16 @@ pub struct AiConfig {
     /// default and [`crate::local_embedding::map_model`] for accepted
     /// identifiers.
     pub local_embedding_model: Option<String>,
+    /// Pin TLS connections to provider endpoints (BL-102). When
+    /// `true`, the HTTP client built for `anthropic` / `openai`
+    /// providers uses `nexus_security::tls::pinned_client_config`
+    /// — every handshake must present a leaf cert whose SHA-256
+    /// matches one of the pins in
+    /// `nexus_security::tls_pins::HOST_PINS`. Defaults to `false`
+    /// because the shipped pin table is empty (operator with
+    /// network access seeds it). Sourced from
+    /// `KernelConfig::tls_pinning_enabled` at boot.
+    pub tls_pinning_enabled: bool,
 }
 
 impl Default for AiConfig {
@@ -53,6 +63,7 @@ impl Default for AiConfig {
             reserved_response_tokens: 1024,
             privacy: PrivacyPolicy::Off,
             local_embedding_model: None,
+            tls_pinning_enabled: false,
         }
     }
 }

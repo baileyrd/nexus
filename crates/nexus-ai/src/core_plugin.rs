@@ -1979,11 +1979,13 @@ fn build_ai_provider(cfg: &AiConfig) -> Result<Box<dyn AiProvider>, String> {
             cfg.api_key.clone().unwrap_or_default(),
             cfg.model.clone(),
             cfg.max_tokens,
+            cfg.tls_pinning_enabled,
         ))),
         "openai" => Ok(Box::new(OpenAiProvider::new(
             cfg.api_key.clone().unwrap_or_default(),
             cfg.model.clone(),
             cfg.max_tokens,
+            cfg.tls_pinning_enabled,
         ))),
         "ollama" => Ok(Box::new(OllamaProvider::new(
             cfg.base_url.clone(),
@@ -2000,6 +2002,7 @@ fn build_embedding_provider(cfg: &AiConfig) -> Result<Box<dyn EmbeddingProvider>
             cfg.api_key.clone().unwrap_or_default(),
             None,
             4096,
+            cfg.tls_pinning_enabled,
         ))),
         "ollama" => Ok(Box::new(OllamaProvider::new(
             cfg.base_url.clone(),

@@ -21,6 +21,10 @@ mod error;
 pub mod ipc;
 mod path;
 mod risk;
+/// TLS pinning verifier for outbound HTTPS (BL-102).
+pub mod tls;
+/// Per-host TLS pin table (BL-102).
+pub mod tls_pins;
 
 pub use core_plugin::SecurityCorePlugin;
 pub use credential::CredentialVault;

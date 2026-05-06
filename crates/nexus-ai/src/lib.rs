@@ -18,6 +18,7 @@ mod config;
 pub mod core_plugin;
 mod embedding;
 pub mod enrichment;
+mod http_client;
 mod error;
 pub mod indexing_daemon;
 #[cfg(feature = "local-embeddings")]

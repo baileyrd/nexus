@@ -40,10 +40,18 @@ impl OpenAiProvider {
     ///
     /// If `model` is `None`, defaults to `gpt-4o` for chat and
     /// `text-embedding-3-small` for embeddings.
+    /// `tls_pinning_enabled` (BL-102) installs the
+    /// [`nexus_security::tls`] verifier on the underlying reqwest
+    /// client when `true`.
     #[must_use]
-    pub fn new(api_key: String, model: Option<String>, max_tokens: u32) -> Self {
+    pub fn new(
+        api_key: String,
+        model: Option<String>,
+        max_tokens: u32,
+        tls_pinning_enabled: bool,
+    ) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: crate::http_client::build_client(tls_pinning_enabled),
             api_key,
             chat_model: model.unwrap_or_else(|| DEFAULT_CHAT_MODEL.to_string()),
             max_tokens,

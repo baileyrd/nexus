@@ -111,6 +111,13 @@ chacha20poly1305 = "0.10"
 # Random / nonces (BL-101)
 rand = "0.9"
 
+# TLS pinning (BL-102). Versions track the rustls graph reqwest 0.12
+# pulls in; bumping any of these without bumping reqwest will produce
+# duplicated rustls in the dep graph.
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+rustls-pki-types = "1"
+webpki-roots = "1"
+
 # YAML frontmatter (serde_yml is the maintained fork of archived serde_yaml)
 serde_yml = "0.0.12"
 

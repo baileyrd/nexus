@@ -30,6 +30,19 @@ pub struct KernelConfig {
     /// detached so a hung plugin cannot block bootstrap. Default 30s;
     /// `0` disables the watchdog (hooks run inline).
     pub lifecycle_timeout_secs: u64,
+
+    /// Pin TLS connections to outbound AI provider endpoints
+    /// (BL-102). When `true`, every HTTPS request from
+    /// `nexus-ai` to a host listed in
+    /// `nexus_security::tls_pins::HOST_PINS` must present a leaf
+    /// certificate whose SHA-256 hash matches one of the configured
+    /// pins; mismatch (or missing pins for an enabled host) aborts
+    /// the connection.
+    ///
+    /// Defaults to `false` because the shipped `HOST_PINS` table
+    /// is empty (an operator with network access seeds it). Flip
+    /// to `true` once pins are populated.
+    pub tls_pinning_enabled: bool,
 }
 
 impl KernelConfig {
@@ -86,6 +99,7 @@ impl KernelConfig {
             plugin_search_paths: raw.plugin_search_paths.unwrap_or_default(),
             hot_reload_enabled: raw.hot_reload_enabled.unwrap_or(true),
             lifecycle_timeout_secs: raw.lifecycle_timeout_secs.unwrap_or(30),
+            tls_pinning_enabled: raw.tls_pinning_enabled.unwrap_or(false),
         })
     }
 }
@@ -98,6 +112,7 @@ impl Default for KernelConfig {
             plugin_search_paths: vec![],
             hot_reload_enabled: true,
             lifecycle_timeout_secs: 30,
+            tls_pinning_enabled: false,
         }
     }
 }
@@ -110,6 +125,7 @@ struct RawConfig {
     plugin_search_paths: Option<Vec<PathBuf>>,
     hot_reload_enabled: Option<bool>,
     lifecycle_timeout_secs: Option<u64>,
+    tls_pinning_enabled: Option<bool>,
 }
 
 #[cfg(test)]

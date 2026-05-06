@@ -8,6 +8,29 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-102: TLS pinning infrastructure for AI provider HTTP clients ✅ (2026-05-06, default-off)
+
+**Source**: Security Integration Assessment (2026-05-06) — gap #5
+**Files**: `crates/nexus-security/src/{tls.rs (new),tls_pins.rs (new),lib.rs,error.rs,Cargo.toml}`, `crates/nexus-ai/src/{http_client.rs (new),anthropic.rs,openai.rs,config.rs,core_plugin.rs,lib.rs,Cargo.toml}`, `crates/nexus-kernel/src/config.rs`, workspace `Cargo.toml`
+
+`nexus-security::tls::PinnedServerCertVerifier` wraps `rustls::client::WebPkiServerVerifier`: standard webpki chain validation runs first, then the leaf cert's SHA-256 is checked against the per-host pin list in `tls_pins::HOST_PINS`. Mismatch (or empty pins for a target host while pinning is on) returns `rustls::Error::General` carrying the BL-102 prefix, which `reqwest` surfaces as a connection error before any request bytes leave the client. `pinned_client_config()` wires the verifier into a `rustls::ClientConfig` and installs the `ring` crypto provider as a process-wide default on first call (idempotent — duplicate `install_default` is silently dropped).
+
+`nexus-ai/src/http_client.rs` is the single point where every provider's `reqwest::Client` is built. It accepts a `tls_pinning_enabled` bool (sourced from `AiConfig::tls_pinning_enabled`, which mirrors `KernelConfig::tls_pinning_enabled`) and ORs in `NEXUS_TLS_PINNING=1` so an operator can opt in for a session without editing config. With the flag off (the shipped default), behaviour is identical to `reqwest::Client::new()` — the new module imposes zero overhead in the steady state.
+
+**Hash domain.** The shipped pin format is the full leaf cert DER SHA-256 (lowercase hex). Switching to SPKI pinning is a planned follow-up — the on-disk pin format stays the same, only `leaf_fingerprint()` in `tls.rs` changes. Full-cert hashing was chosen for the initial drop because it avoids ASN.1 parsing; SPKI would buy resilience across leaf renewals when the keypair is reused.
+
+**Default-off shipping posture.** `KernelConfig::tls_pinning_enabled` defaults to `false` because the shipped `HOST_PINS` table is empty — turning it on now would fail every connection with `BL-102: no pins are configured for ...`, and I don't have network access from this session to fetch live fingerprints from `api.anthropic.com` / `api.openai.com`. With pinning *off* the verifier path isn't installed at all, so the empty pin table is a no-op. The PRD's "default true" target is an operational change once pins are seeded.
+
+**Deferred from the original DoD:**
+
+- `nexus ai status` `tls_pinned: true/false` field — additive change to the AI plugin's status snapshot.
+- Real fingerprint constants in `HOST_PINS` — explicit operator-action item documented in the placeholder constants and in the BACKLOG closure entry.
+- SPKI hashing instead of full-cert hashing — see "Hash domain" above.
+
+**Tests.** `tls::tests::pinned_client_config_constructs_without_panic` proves the verifier + crypto provider wire up cleanly. `tls_pins` lookup tests exercise the case-insensitive + trailing-dot normalisation. The empty-pins safety contract is covered by the verifier's explicit "no pins configured" error path.
+
+---
+
 ### BL-101: `granted_caps.json` encryption at rest ✅ (2026-05-06)
 
 **Source**: Security Integration Assessment (2026-05-06) — gap #4

@@ -27,10 +27,19 @@ impl AnthropicProvider {
     /// Create a new Anthropic provider.
     ///
     /// If `model` is `None`, defaults to `claude-sonnet-4-20250514`.
+    /// `tls_pinning_enabled` (BL-102) installs the
+    /// [`nexus_security::tls`] verifier on the underlying reqwest
+    /// client when `true`; defaults to `false` everywhere via
+    /// [`AiConfig::tls_pinning_enabled`].
     #[must_use]
-    pub fn new(api_key: String, model: Option<String>, max_tokens: u32) -> Self {
+    pub fn new(
+        api_key: String,
+        model: Option<String>,
+        max_tokens: u32,
+        tls_pinning_enabled: bool,
+    ) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: crate::http_client::build_client(tls_pinning_enabled),
             api_key,
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
             max_tokens,
