@@ -33,6 +33,69 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ─── Form controls (theme-aware) ────────────────────────────────────────────
+   WebKitGTK / Tauri renders <select> and <input> with native widget chrome by
+   default, which ignores our background/color tokens. Strip the native look
+   so the alias bridge in index.html (--background-primary → --nx-bg-primary,
+   etc.) actually paints. Plugins and views can opt out per-element. */
+select,
+input[type="text"],
+input[type="search"],
+input[type="number"],
+input[type="email"],
+input[type="password"],
+input[type="url"],
+input[type="tel"],
+textarea {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  outline: none;
+}
+
+select {
+  /* Custom caret to replace the native arrow. Inline SVG colored via
+     currentColor inherits the active theme's text color. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px 6px;
+  padding-right: 26px;
+  cursor: pointer;
+}
+
+select option {
+  /* The popup list is OS-rendered; only background/color reliably apply. */
+  background: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+select:hover,
+input:hover,
+textarea:hover {
+  border-color: var(--text-faint);
+}
+
+select:focus,
+input:focus,
+textarea:focus {
+  border-color: var(--interactive-accent);
+}
+
+select:disabled,
+input:disabled,
+textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* ─── Shell root ─────────────────────────────────────────────────────────── */
 .shell-root {
   display: flex;
@@ -375,19 +438,7 @@ body {
 
 .settings-field-control input,
 .settings-field-control select {
-  background: var(--background-primary);
-  color: var(--text-normal);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 13px;
-  outline: none;
   min-width: 200px;
-}
-
-.settings-field-control input:focus,
-.settings-field-control select:focus {
-  border-color: var(--interactive-accent);
 }
 
 .settings-empty {
