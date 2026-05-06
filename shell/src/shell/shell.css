@@ -532,6 +532,8 @@ textarea:disabled {
 .activity-bar__item:hover             { opacity: 1; }
 .activity-bar__item--active           { opacity: 1; }
 
+.activity-bar__item--active           { color: var(--interactive-accent); }
+
 .activity-bar__active-indicator {
   position: absolute;
   left: 0;
@@ -539,7 +541,7 @@ textarea:disabled {
   transform: translateY(-50%);
   width: 2px;
   height: 24px;
-  background: var(--text-normal);
+  background: var(--interactive-accent);
   border-radius: 0 2px 2px 0;
 }
 
@@ -621,7 +623,21 @@ textarea:disabled {
 }
 
 .tree-node:hover               { background: var(--background-modifier-hover); }
-.tree-node--selected           { background: var(--background-modifier-active); }
+.tree-node--selected           {
+  background: var(--interactive-accent-soft);
+  color: var(--text-normal);
+  position: relative;
+}
+.tree-node--selected::before   {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--interactive-accent);
+  border-radius: 0 2px 2px 0;
+}
 .tree-node__icon               { flex-shrink: 0; width: 14px; color: var(--text-muted); }
 .tree-node__name               { overflow: hidden; text-overflow: ellipsis; }
 
