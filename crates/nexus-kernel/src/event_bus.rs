@@ -98,6 +98,9 @@ impl EventBus {
         };
         let published = Arc::new(PublishedEvent { metadata, event });
         let _ = self.sender.send(published);
+        if let Some(m) = crate::metrics::global() {
+            m.record_event_publish(source_plugin_id);
+        }
         Ok(())
     }
 
@@ -125,6 +128,9 @@ impl EventBus {
         };
         let published = Arc::new(PublishedEvent { metadata, event });
         let _ = self.sender.send(published);
+        if let Some(m) = crate::metrics::global() {
+            m.record_event_publish(plugin_id);
+        }
         Ok(())
     }
 

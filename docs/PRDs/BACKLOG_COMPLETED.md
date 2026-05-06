@@ -8,6 +8,60 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-093: Kernel metrics and observability exports ✅ (2026-05-06)
+
+**Source**: Kernel Integration Assessment (2026-05-06) — gap #4
+**Files**: `crates/nexus-kernel/src/{metrics.rs (new),lib.rs,event_bus.rs,audit.rs,context_impl.rs}`, `crates/nexus-kernel/tests/metrics_smoke.rs (new)`, `crates/nexus-plugins/src/loader.rs`, `crates/nexus-bootstrap/src/lib.rs`, `crates/nexus-security/src/core_plugin.rs`
+
+In-process metrics registry with `AtomicU64`-backed counters and bucketed histograms (no `metrics` / `prometheus` workspace dep — kept the kernel clean). Histogram strategy: 9 fixed exponential buckets (1µs / 10µs / 100µs / 1ms / 10ms / 100ms / 1s / 10s / +∞) with cumulative-count percentile interpolation; `count + sum_ns + p50/p95/p99` per snapshot. Cardinality cap of 4096 keys per metric with a sentinel `metrics_dropped_total` counter so the cap is observable rather than silent.
+
+Recording surfaces wired:
+
+- **IPC dispatch** (`KernelPluginContext::ipc_call`): `ipc_calls_total{plugin_id, command, status}` + `ipc_call_duration{plugin_id, command}`. Outer `ipc_call` brackets the dispatch with a timer and classifies on every exit (`Ok` / `CapabilityDenied` / `NotFound` / `Timeout` / `Error`); the existing body moved into `ipc_call_inner`.
+- **Event bus** (`publish_plugin` + `publish_core`): `event_bus_published_total{plugin_id}`.
+- **Capability checks** (audit helpers): `capability_checks_total{plugin_id, capability, granted|denied}` recorded alongside the existing tracing + audit-store emission.
+- **Plugin lifecycle** (`run_hook_with_timeout` inline branch): `plugin_lifecycle_duration{plugin_id, hook}` records the elapsed time when the watchdog is bypassed (the worker-thread branch uses a channel and isn't a clean spot to instrument from the loader thread; future change can attach there too).
+
+Snapshot accessor: `KernelMetrics::snapshot() -> MetricsSnapshot` (Serialize). Bootstrap installs `nexus_kernel::metrics::install(Arc::new(KernelMetrics::new()))` *before* kernel construction so boot-time grants are recorded. The IPC handler `com.nexus.security::metrics_snapshot` (handler id 7) returns the snapshot as JSON; smoke test in `tests/metrics_smoke.rs` confirms install → record → snapshot round-trips.
+
+**Deferred from the original DoD:**
+
+- `event_bus_queue_depth` gauge — needs a sampler thread reading the broadcast channel's lag, which is a non-trivial addition and depends on the broadcast channel exposing depth information (it doesn't directly today).
+- Optional Prometheus scrape endpoint on `KernelConfig::prometheus_port` — the JSON snapshot is sufficient for CLI/TUI/shell consumption today; a scrape endpoint can be a follow-up that translates the existing `MetricsSnapshot` into Prometheus exposition format.
+- Shell health panel UI displaying live p95 + queue depth.
+
+Six unit tests (counter, event-publish counter, capability check, lifecycle histogram, percentile bucket attribution, dropped sentinel) plus the integration smoke test.
+
+---
+
+### BL-092: Kernel IPC latency benchmarks ✅ (2026-05-06)
+
+**Source**: Kernel Integration Assessment (2026-05-06) — gap #1
+**Files**: `crates/nexus-kernel/{benches/event_bus.rs (new),Cargo.toml}`, `crates/nexus-plugins/{benches/ipc_dispatch.rs (new),Cargo.toml}`, workspace `Cargo.toml`
+
+Criterion harnesses for the two hottest dispatch paths:
+
+- `crates/nexus-kernel/benches/event_bus.rs` — `publish_no_subscribers`, `publish_one_subscriber`, `publish_ten_subscribers`, `subscribe_filter_match`, `subscribe_filter_no_match`.
+- `crates/nexus-plugins/benches/ipc_dispatch.rs` — `noop_handler` (pure dispatch overhead with caller context + capability gate), `capability_check` (lock-read on the live `Arc<RwLock<CapabilitySet>>`), `serial_ten` (10 sequential dispatches; approximates queue depth under load).
+
+**Measured baselines on this dev box (release profile, `--quick`):**
+
+| Bench                                 | Time     | PRD target |
+|---                                    |---       |---         |
+| event_bus/publish_no_subscribers      | ~304ns   | <1µs ✓ |
+| event_bus/publish_ten_subscribers     | ~308ns   | <10µs ✓ |
+| ipc_dispatch/noop_handler             | ~30µs    | <100µs ✓ |
+| ipc_dispatch/capability_check         | ~30ns    | <1µs ✓ |
+
+All metrics are comfortably inside the PRD targets, which means the *current* SLO assertions would pass everywhere. The benches print numbers but don't assert hard thresholds yet — measured baselines should live in CI alongside the harness, and absent a stable CI bench runner, baking thresholds in here would just produce flaky failures on dev boxes with different CPU performance.
+
+**Deferred from the original DoD:**
+
+- CI integration with stored baseline + 10%-regression gate — the harness is in place; an operator can wire it into CI by running `cargo bench -p nexus-kernel --bench event_bus` and `cargo bench -p nexus-plugins --bench ipc_dispatch`, archiving criterion's `target/criterion/` baseline, and adding a CI step that re-runs and diffs.
+- `dispatch_async_handler` — the existing core-plugin benches use the sync path because it's the simpler steady-state surface; an async benchmark needs a fixture plugin that exposes a `dispatch_async` future, which is more wiring than this incremental ship justifies.
+
+---
+
 ### BL-099: Plugin manifest signing verification ✅ (2026-05-06)
 
 **Source**: Security Integration Assessment (2026-05-06) — gap #1; PRD-02 §5

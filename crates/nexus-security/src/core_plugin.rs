@@ -38,6 +38,9 @@ pub const HANDLER_QUERY_AUDIT_LOG: u32 = 5;
 /// IPC handler: prune persisted audit entries older than `before_ts` (BL-100).
 /// Args: `{before_ts: i64}` → `{removed: u64}`.
 pub const HANDLER_CLEAR_AUDIT_LOG: u32 = 6;
+/// IPC handler: snapshot the kernel-metrics registry (BL-093). Args
+/// are ignored; returns the full `MetricsSnapshot` JSON.
+pub const HANDLER_METRICS_SNAPSHOT: u32 = 7;
 
 /// Type-erased probe used by `on_init` to decide whether the OS keyring is
 /// reachable. The default impl calls `CredentialVault::new().available()`;
@@ -212,6 +215,11 @@ impl CorePlugin for SecurityCorePlugin {
                 };
                 let entries = nexus_kernel::audit_store::query(&filter);
                 Ok(serde_json::to_value(&entries).unwrap_or(json!([])))
+            }
+            HANDLER_METRICS_SNAPSHOT => {
+                let snap = nexus_kernel::metrics::global()
+                    .map(nexus_kernel::KernelMetrics::snapshot);
+                Ok(serde_json::to_value(&snap).unwrap_or(json!(null)))
             }
             HANDLER_CLEAR_AUDIT_LOG => {
                 let before_ts = args

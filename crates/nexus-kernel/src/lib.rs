@@ -26,6 +26,8 @@ mod ipc;
 mod kernel;
 mod kv_store;
 mod log;
+/// BL-093: kernel-side metrics registry.
+pub mod metrics;
 mod plugin;
 
 // Stable plugin-api types (defined in nexus-plugin-api, shim-re-exported via
@@ -49,4 +51,5 @@ pub use context_impl::KernelPluginContext;
 pub use error::{ConfigError, Error, KvError, PluginError, RecvError, Result};
 pub use event_bus::{EventBus, EventSubscription};
 pub use kernel::Kernel;
+pub use metrics::{CallStatus, HistogramSnapshot, KernelMetrics, MetricsSnapshot};
 pub use kv_store::{InMemoryKvStore, KvStore};

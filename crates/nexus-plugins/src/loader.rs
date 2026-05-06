@@ -1751,7 +1751,16 @@ where
     F: FnOnce(&mut dyn CorePlugin) -> Result<(), PluginError> + Send + 'static,
 {
     if timeout.is_zero() {
-        f(&mut *plugin)?;
+        let started = std::time::Instant::now();
+        let result = f(&mut *plugin);
+        if let Some(m) = nexus_kernel::metrics::global() {
+            m.record_lifecycle_duration(
+                plugin_id,
+                hook,
+                u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            );
+        }
+        result?;
         return Ok(plugin);
     }
 

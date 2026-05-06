@@ -36,6 +36,11 @@ sha2 = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "ipc_dispatch"
+harness = false
 # Compile WAT (WebAssembly Text Format) fixtures at test time so we don't
 # vendor `.wasm` binaries for every regression test. Pure-Rust, no extra
 # toolchain.

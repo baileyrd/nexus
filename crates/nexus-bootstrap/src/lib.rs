@@ -162,6 +162,12 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
             format!("failed to open kernel KV store at '{}'", kv_path.display())
         })?);
 
+    // BL-093: install the global kernel-metrics registry before
+    // any plugin lifecycle hooks fire so boot-time capability
+    // grants and the security plugin's `on_init` already get
+    // recorded.
+    nexus_kernel::metrics::install(Arc::new(nexus_kernel::KernelMetrics::new()));
+
     let kernel = Kernel::new(config, kv_store).context("failed to build kernel")?;
     let event_bus: Arc<EventBus> = kernel.event_bus();
     let kv_store = kernel.kv_store();
@@ -440,6 +446,7 @@ fn register_core_plugins(
                     ("list_secret_names", nexus_security::core_plugin::HANDLER_LIST_SECRET_NAMES),
                     ("query_audit_log", nexus_security::core_plugin::HANDLER_QUERY_AUDIT_LOG),
                     ("clear_audit_log", nexus_security::core_plugin::HANDLER_CLEAR_AUDIT_LOG),
+                    ("metrics_snapshot", nexus_security::core_plugin::HANDLER_METRICS_SNAPSHOT),
                 ],
             ),
             forge_root,

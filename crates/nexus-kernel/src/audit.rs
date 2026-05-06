@@ -24,6 +24,9 @@ pub fn log_capability_granted(plugin_id: &str, capability: &str) {
         Some(plugin_id),
         &serde_json::json!({ "capability": capability }),
     );
+    if let Some(m) = crate::metrics::global() {
+        m.record_capability_check(plugin_id, capability, true);
+    }
 }
 
 /// Log a runtime capability revocation (BL-096). Emitted by the plugin
@@ -59,6 +62,9 @@ pub fn log_capability_denied(plugin_id: &str, capability: &str) {
         Some(plugin_id),
         &serde_json::json!({ "capability": capability }),
     );
+    if let Some(m) = crate::metrics::global() {
+        m.record_capability_check(plugin_id, capability, false);
+    }
 }
 
 /// Log a plugin lifecycle transition (e.g. "loaded", "initialized", "started", "stopped", "crashed").

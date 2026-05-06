@@ -115,6 +115,75 @@ impl KernelPluginContext {
         self.capabilities.read().expect("caps lock").contains(cap)
     }
 
+    /// Body of [`ipc_call`](Self::ipc_call) extracted so the public
+    /// method can wrap the whole flow in a metrics timer (BL-093)
+    /// and classify the result on every exit path.
+    async fn ipc_call_inner(
+        &self,
+        target_plugin_id: &str,
+        command_id: &str,
+        args: serde_json::Value,
+        timeout: Duration,
+    ) -> std::result::Result<serde_json::Value, IpcError> {
+        if !self.caps_contains(Capability::IpcCall) {
+            audit::log_capability_denied(&self.plugin_id, Capability::IpcCall.as_str());
+            return Err(IpcError::CapabilityDenied {
+                plugin_id: self.plugin_id.clone(),
+            });
+        }
+
+        let dispatcher = self
+            .ipc_dispatcher
+            .clone()
+            .ok_or(IpcError::DispatcherUnavailable)?;
+
+        for required in
+            dispatcher.required_caller_caps_for_args(target_plugin_id, command_id, &args)
+        {
+            if !self.caps_contains(required) {
+                audit::log_capability_denied(&self.plugin_id, required.as_str());
+                return Err(IpcError::CapabilityDenied {
+                    plugin_id: self.plugin_id.clone(),
+                });
+            }
+        }
+
+        let target = target_plugin_id.to_string();
+        let command = command_id.to_string();
+        let timeout_ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
+
+        if let Some(fut) = dispatcher.dispatch_async(&target, &command, args.clone()) {
+            return match tokio::time::timeout(timeout, fut).await {
+                Ok(result) => result,
+                Err(_elapsed) => Err(IpcError::Timeout {
+                    plugin_id: target,
+                    command,
+                    timeout_ms,
+                }),
+            };
+        }
+
+        let join = tokio::task::spawn_blocking({
+            let target = target.clone();
+            let command = command.clone();
+            move || dispatcher.dispatch(&target, &command, &args)
+        });
+
+        match tokio::time::timeout(timeout, join).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_panic)) => Err(IpcError::PluginCrashedDuringCall {
+                plugin_id: target,
+                command,
+                reason: String::new(),
+            }),
+            Err(_elapsed) => Err(IpcError::Timeout {
+                plugin_id: target,
+                command,
+                timeout_ms,
+            }),
+        }
+    }
+
     /// Check that the plugin holds `cap`, logging a denial and returning an
     /// error if not.
     fn require_capability(&self, cap: Capability) -> Result<()> {
@@ -333,75 +402,31 @@ impl PluginContext for KernelPluginContext {
         args: serde_json::Value,
         timeout: Duration,
     ) -> std::result::Result<serde_json::Value, IpcError> {
-        if !self.caps_contains(Capability::IpcCall) {
-            audit::log_capability_denied(&self.plugin_id, Capability::IpcCall.as_str());
-            return Err(IpcError::CapabilityDenied {
-                plugin_id: self.plugin_id.clone(),
-            });
-        }
-
-        let dispatcher = self
-            .ipc_dispatcher
-            .clone()
-            .ok_or(IpcError::DispatcherUnavailable)?;
-
-        // Per-(target, command) capability gate (issue #77). The
-        // dispatcher's policy is empty by default; bootstrap populates
-        // it for high-impact handlers (e.g.
-        // `com.nexus.terminal::create_session` and
-        // `com.nexus.mcp.host::connect`, both of which spawn arbitrary
-        // processes and must require `Capability::ProcessSpawn`).
-        // Without this check, `IpcCall` alone would launder the effect
-        // of any capability the target plugin holds.
-        for required in
-            dispatcher.required_caller_caps_for_args(target_plugin_id, command_id, &args)
-        {
-            if !self.caps_contains(required) {
-                audit::log_capability_denied(&self.plugin_id, required.as_str());
-                return Err(IpcError::CapabilityDenied {
-                    plugin_id: self.plugin_id.clone(),
-                });
-            }
-        }
-
-        let target = target_plugin_id.to_string();
-        let command = command_id.to_string();
-        let timeout_ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
-
-        // Prefer the async path: handlers that perform HTTP / nested IPC must
-        // not block the shared plugin-loader mutex, so they expose a Future
-        // instead of a sync callable.
-        if let Some(fut) = dispatcher.dispatch_async(&target, &command, args.clone()) {
-            return match tokio::time::timeout(timeout, fut).await {
-                Ok(result) => result,
-                Err(_elapsed) => Err(IpcError::Timeout {
-                    plugin_id: target,
-                    command,
-                    timeout_ms,
-                }),
+        // BL-093: bracket the entire dispatch with a timer so every
+        // exit path records `ipc_calls_total` + `ipc_call_duration`.
+        let started = std::time::Instant::now();
+        let result =
+            self.ipc_call_inner(target_plugin_id, command_id, args, timeout).await;
+        if let Some(m) = crate::metrics::global() {
+            let status = match &result {
+                Ok(_) => crate::metrics::CallStatus::Ok,
+                Err(IpcError::CapabilityDenied { .. }) => {
+                    crate::metrics::CallStatus::CapabilityDenied
+                }
+                Err(IpcError::CommandNotFound { .. } | IpcError::PluginNotFound { .. }) => {
+                    crate::metrics::CallStatus::NotFound
+                }
+                Err(IpcError::Timeout { .. }) => crate::metrics::CallStatus::Timeout,
+                _ => crate::metrics::CallStatus::Error,
             };
+            m.record_ipc_call(
+                target_plugin_id,
+                command_id,
+                status,
+                u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            );
         }
-
-        // Fall back to sync dispatch on the blocking thread pool.
-        let join = tokio::task::spawn_blocking({
-            let target = target.clone();
-            let command = command.clone();
-            move || dispatcher.dispatch(&target, &command, &args)
-        });
-
-        match tokio::time::timeout(timeout, join).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_panic)) => Err(IpcError::PluginCrashedDuringCall {
-                plugin_id: target,
-                command,
-                reason: String::new(),
-            }),
-            Err(_elapsed) => Err(IpcError::Timeout {
-                plugin_id: target,
-                command,
-                timeout_ms,
-            }),
-        }
+        result
     }
 
     // ---- Logging ---------------------------------------------------------
