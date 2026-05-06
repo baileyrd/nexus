@@ -83,6 +83,15 @@ pub struct PluginManifest {
     /// Lazy-activation triggers for script plugins (UI F-3.2.1). Empty
     /// means eager activation at shell start.
     pub activation: ActivationConfig,
+    /// Optional cryptographic signature over the manifest (BL-099).
+    /// Present when a plugin has been signed by a trusted publisher;
+    /// the loader verifies it via
+    /// [`crate::signing::PluginSignatureVerifier`] when
+    /// `KernelConfig::require_signatures = true` (or whenever a
+    /// signature is present, even with the gate off, so a malformed
+    /// signature still fails loud rather than silently being
+    /// ignored).
+    pub signature: Option<PluginSignature>,
     /// Declared dependencies on other plugins (PRD-04 §12). Each entry
     /// names a plugin ID and a semver [`VersionReq`](semver::VersionReq)
     /// string. The loader rejects a plugin whose dependencies are missing
@@ -422,6 +431,26 @@ pub struct LifecycleConfig {
     pub on_settings_changed: bool,
 }
 
+/// Cryptographic signature attached to a plugin manifest (BL-099).
+///
+/// Wire form (TOML):
+/// ```toml
+/// [signature]
+/// algorithm = "ed25519"
+/// signer_key_id = "com.example.author"
+/// signature = "<base64>"
+/// ```
+#[derive(Debug, Clone)]
+pub struct PluginSignature {
+    /// Signature algorithm. Currently only `"ed25519"` is supported.
+    pub algorithm: String,
+    /// Identifier of the signing key, looked up in the trusted
+    /// keyring (`~/.nexus/keys/community.json`). Reverse-DNS form.
+    pub signer_key_id: String,
+    /// Base64-encoded signature bytes.
+    pub signature: String,
+}
+
 // ─── Private TOML shadow types ────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -442,6 +471,15 @@ struct TomlManifest {
     activation: TomlActivation,
     #[serde(default)]
     dependencies: std::collections::BTreeMap<String, String>,
+    /// BL-099: optional `[signature]` block.
+    signature: Option<TomlSignature>,
+}
+
+#[derive(Deserialize)]
+struct TomlSignature {
+    algorithm: String,
+    signer_key_id: String,
+    signature: String,
 }
 
 // `on_*` fields mirror the manifest TOML keys `on_command`,
@@ -874,6 +912,11 @@ fn convert(raw: TomlManifest, path: &str) -> Result<PluginManifest, PluginError>
                 version_req,
             })
             .collect(),
+        signature: raw.signature.map(|s| PluginSignature {
+            algorithm: s.algorithm,
+            signer_key_id: s.signer_key_id,
+            signature: s.signature,
+        }),
     })
 }
 

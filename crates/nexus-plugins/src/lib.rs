@@ -14,6 +14,8 @@ mod host_fns;
 pub mod manifest;
 mod grants_crypto;
 mod loader;
+/// BL-099: plugin manifest signing verification.
+pub mod signing;
 mod sandbox;
 mod settings;
 mod hot_reload;

@@ -118,6 +118,11 @@ rustls = { version = "0.23", default-features = false, features = ["std", "ring"
 rustls-pki-types = "1"
 webpki-roots = "1"
 
+# Plugin manifest signing (BL-099).
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "rand_core"] }
+base64 = "0.22"
+dirs = "5"
+
 # YAML frontmatter (serde_yml is the maintained fork of archived serde_yaml)
 serde_yml = "0.0.12"
 

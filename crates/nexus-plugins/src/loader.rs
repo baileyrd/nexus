@@ -399,6 +399,17 @@ pub struct PluginLoader {
     /// worker thread is detached so a hung plugin cannot block bootstrap.
     /// Default: 30 seconds.
     lifecycle_timeout: Duration,
+    /// Verifier for plugin manifest signatures (BL-099). When a
+    /// plugin manifest carries a `[signature]` block, the loader
+    /// runs it through this verifier; when `require_signatures` is
+    /// `true`, an unsigned community plugin is rejected at load.
+    /// `None` is equivalent to "no trusted keys" — all signed
+    /// manifests fail with `KeyNotTrusted` (loud) rather than
+    /// silently passing.
+    signature_verifier: Option<Arc<crate::signing::PluginSignatureVerifier>>,
+    /// Require every community plugin to carry a valid signature
+    /// (BL-099). Default `false`.
+    require_signatures: bool,
 }
 
 impl PluginLoader {
@@ -417,6 +428,61 @@ impl PluginLoader {
             settings: SettingsManager::new(),
             event_bus: None,
             lifecycle_timeout: Duration::from_secs(30),
+            signature_verifier: None,
+            require_signatures: false,
+        }
+    }
+
+    /// Install a signature verifier for community plugin manifests
+    /// (BL-099). Pass `None` to clear. The default loader has no
+    /// verifier installed; bootstrap wires one when the kernel is
+    /// configured with `require_signatures = true` or when a
+    /// keyring is otherwise made available.
+    pub fn set_signature_verifier(
+        &mut self,
+        verifier: Option<Arc<crate::signing::PluginSignatureVerifier>>,
+    ) {
+        self.signature_verifier = verifier;
+    }
+
+    /// Mirror of [`KernelConfig::require_signatures`] (BL-099).
+    pub fn set_require_signatures(&mut self, require: bool) {
+        self.require_signatures = require;
+    }
+
+    /// BL-099 — verify the plugin manifest's `[signature]` block (if
+    /// present) and enforce `require_signatures`. A manifest with a
+    /// declared signature is *always* verified, even when
+    /// `require_signatures` is off, so a malformed signature is a
+    /// loud failure rather than a silent ignore.
+    fn verify_manifest_signature(
+        &self,
+        manifest_path: &Path,
+        manifest: &PluginManifest,
+    ) -> Result<(), PluginError> {
+        match (&manifest.signature, self.require_signatures) {
+            (None, false) => Ok(()),
+            (None, true) => Err(PluginError::ManifestInvalid {
+                path: manifest_path.display().to_string(),
+                reason: format!(
+                    "BL-099: plugin '{}' has no signature but require_signatures is enabled",
+                    manifest.id
+                ),
+            }),
+            (Some(sig), _) => {
+                let raw = std::fs::read_to_string(manifest_path)?;
+                let canonical = crate::signing::canonicalize_manifest_for_signing(&raw);
+                let verifier = match &self.signature_verifier {
+                    Some(v) => Arc::clone(v),
+                    None => Arc::new(crate::signing::PluginSignatureVerifier::from_user_home()),
+                };
+                verifier
+                    .verify(canonical.as_bytes(), sig)
+                    .map_err(|e| PluginError::ManifestInvalid {
+                        path: manifest_path.display().to_string(),
+                        reason: format!("BL-099: signature verification failed: {e}"),
+                    })
+            }
         }
     }
 
@@ -576,6 +642,9 @@ impl PluginLoader {
 
         // Step 2a (F-9.2.1): enforce api_version major compatibility.
         check_api_version(&manifest.api_version, &manifest.id)?;
+
+        // Step 2c (BL-099): cryptographic provenance check.
+        self.verify_manifest_signature(&manifest_path, &manifest)?;
 
         // Step 2b (PRD-04 §12): ensure every declared dependency is
         // present and its installed version satisfies the requested
@@ -2448,6 +2517,7 @@ mod unit_tests {
             lifecycle: LifecycleConfig::default(),
             activation: ActivationConfig::default(),
             dependencies: vec![],
+            signature: None,
         }
     }
 

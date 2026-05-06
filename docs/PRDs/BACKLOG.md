@@ -75,32 +75,7 @@ _BL-100 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-099: Plugin signing verification
-
-**Source**: Security Integration Assessment (2026-05-06) — gap #1; PRD-02 §5
-**Effort**: Medium (3 days)
-**Crates**: `nexus-plugins/src/loader.rs`, `nexus-plugins/src/manifest.rs`, new `nexus-security/src/signing.rs`
-**Related**: PRD-02 §5 (plugin signing + CRL); community marketplace (WI-44); `ed25519_dalek`
-
-No signature field exists in the plugin manifest. There is no `ed25519_dalek` in the workspace. A WASM binary can be swapped at install time with no detection. Plugin provenance is entirely unverifiable. This is a deferred decision — it matters when community plugins can be published externally — but it should be tracked explicitly as a marketplace prerequisite.
-
-**Blocked by:** Community plugin marketplace infrastructure (WI-44). Shipping signing without distribution is incomplete; treat this as a marketplace gate item.
-
-**Definition of done:**
-- `PluginManifest` gains optional `signature: Option<PluginSignature>` field:
-  ```toml
-  [signature]
-  algorithm = "ed25519"
-  signer_key_id = "com.example.author"
-  signature = "<base64>"
-  ```
-- `nexus-security/src/signing.rs` implements `PluginSignatureVerifier` using `ed25519_dalek`:
-  - `verify_manifest(manifest_bytes, signature, public_key)` → `Result<(), SignatureError>`
-  - Verifier checks against a community keyring at `~/.nexus/keys/community.json`
-- `PluginLoader::load` calls verifier if signature present; if `require_signatures = true` in `KernelConfig` and no signature, loading fails
-- CRL format defined: `~/.nexus/keys/revoked.json` — list of revoked `key_id` values; plugin with revoked signer key is rejected
-- `nexus plugin verify <path>` CLI command verifies a plugin directory manually
-- `require_signatures = false` default (backward-compat); set to `true` when marketplace ships
+_BL-099 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Verifier infrastructure shipped: ed25519 signature/CRL/keyring + manifest field + loader gate + `nexus plugin verify` CLI. Module landed in `nexus-plugins/src/signing.rs` rather than `nexus-security` to avoid the existing nexus-security → nexus-plugins dep direction. `require_signatures` defaults to `false` per the PRD; flip on once a signed-plugin distribution channel exists._
 
 ---
 

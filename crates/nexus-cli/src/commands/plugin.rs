@@ -128,6 +128,38 @@ pub fn revoke(app: &mut App, plugin_id: &str, capability: &str) -> Result<()> {
     Ok(())
 }
 
+/// Verify a plugin manifest's `[signature]` block against the
+/// trusted-key ring (BL-099). Used by operators to spot-check a
+/// downloaded plugin before installing.
+pub fn verify(plugin_dir: &Path, keys_dir: Option<&Path>) -> Result<()> {
+    let manifest_path = plugin_dir.join("manifest.toml");
+    let raw = std::fs::read_to_string(&manifest_path).with_context(|| {
+        format!("read manifest at {}", manifest_path.display())
+    })?;
+    let manifest = nexus_plugins::parse_manifest(&raw, manifest_path.to_string_lossy().as_ref())
+        .map_err(|e| anyhow!("parse manifest: {e}"))?;
+    let Some(sig) = manifest.signature.as_ref() else {
+        anyhow::bail!(
+            "{} has no [signature] block — nothing to verify",
+            manifest_path.display()
+        );
+    };
+    let verifier = match keys_dir {
+        Some(dir) => nexus_plugins::signing::PluginSignatureVerifier::with_keys_dir(dir)
+            .map_err(|e| anyhow!("load keyring at {}: {e}", dir.display()))?,
+        None => nexus_plugins::signing::PluginSignatureVerifier::from_user_home(),
+    };
+    let canonical = nexus_plugins::signing::canonicalize_manifest_for_signing(&raw);
+    verifier
+        .verify(canonical.as_bytes(), sig)
+        .map_err(|e| anyhow!("signature verification failed: {e}"))?;
+    println!(
+        "OK — {} signed by '{}' ({})",
+        manifest.id, sig.signer_key_id, sig.algorithm
+    );
+    Ok(())
+}
+
 /// Reset the crash counter for `plugin_id` (F-8.2.1). Quarantined
 /// plugins skip load until this runs. A missing counter file is a no-op.
 pub fn reset_crash(app: &mut App, plugin_id: &str) -> Result<()> {

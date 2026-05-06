@@ -710,6 +710,17 @@ enum PluginCommand {
         /// Capability to revoke (dotted form, e.g. `process.spawn`).
         capability: String,
     },
+    /// Verify a plugin's manifest signature (BL-099) without
+    /// loading the plugin. Reads the trusted-key ring from
+    /// `~/.nexus/keys/` (or `--keys-dir` if supplied).
+    Verify {
+        /// Path to the plugin directory (containing `manifest.toml`).
+        path: PathBuf,
+        /// Optional override for the trusted-key directory; defaults
+        /// to `~/.nexus/keys`.
+        #[arg(long)]
+        keys_dir: Option<PathBuf>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1432,6 +1443,9 @@ fn main() {
             }
             PluginCommand::Revoke { plugin_id, capability } => {
                 commands::plugin::revoke(&mut app, &plugin_id, &capability)
+            }
+            PluginCommand::Verify { path, keys_dir } => {
+                commands::plugin::verify(&path, keys_dir.as_deref())
             }
         },
 

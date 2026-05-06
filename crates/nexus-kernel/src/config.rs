@@ -43,6 +43,18 @@ pub struct KernelConfig {
     /// is empty (an operator with network access seeds it). Flip
     /// to `true` once pins are populated.
     pub tls_pinning_enabled: bool,
+
+    /// Require every community plugin to ship with a verified
+    /// `[signature]` block (BL-099). When `true`, an unsigned
+    /// community plugin returns `PluginError::SignatureRequired` at
+    /// load time. Defaults to `false` — signing is a marketplace
+    /// prerequisite, not a local-development gate. Flip on once a
+    /// signed-plugin distribution channel exists.
+    ///
+    /// Note: a plugin that *does* declare a signature is always
+    /// verified even with this flag off, so a malformed signature
+    /// fails loud rather than being silently ignored.
+    pub require_signatures: bool,
 }
 
 impl KernelConfig {
@@ -100,6 +112,7 @@ impl KernelConfig {
             hot_reload_enabled: raw.hot_reload_enabled.unwrap_or(true),
             lifecycle_timeout_secs: raw.lifecycle_timeout_secs.unwrap_or(30),
             tls_pinning_enabled: raw.tls_pinning_enabled.unwrap_or(false),
+            require_signatures: raw.require_signatures.unwrap_or(false),
         })
     }
 }
@@ -113,6 +126,7 @@ impl Default for KernelConfig {
             hot_reload_enabled: true,
             lifecycle_timeout_secs: 30,
             tls_pinning_enabled: false,
+            require_signatures: false,
         }
     }
 }
@@ -126,6 +140,7 @@ struct RawConfig {
     hot_reload_enabled: Option<bool>,
     lifecycle_timeout_secs: Option<u64>,
     tls_pinning_enabled: Option<bool>,
+    require_signatures: Option<bool>,
 }
 
 #[cfg(test)]
