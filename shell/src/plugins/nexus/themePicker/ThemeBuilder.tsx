@@ -242,6 +242,7 @@ export function ThemeBuilderPanel() {
     const dir = path.substring(0, path.lastIndexOf(sep))
     if (dir) await api.platform.fs.mkdir(dir, { recursive: true })
     await api.platform.fs.writeText(path, tomlOutput)
+    await api.kernel.invoke(THEME_PLUGIN_ID, 'reload', {})
     setSaved(true)
     setTimeout(() => setSaved(false), 3000)
   }, [tomlOutput])
