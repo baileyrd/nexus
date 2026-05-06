@@ -3,10 +3,12 @@ import { ThemePicker } from './ThemePicker'
 import { useThemePickerStore } from './themePickerStore'
 import { setPickerApi } from './pickerRuntime'
 
-const COMMAND_OPEN  = 'nexus.themePicker.open'
-const COMMAND_CLOSE = 'nexus.themePicker.close'
-const VIEW_ID       = 'nexus.themePicker.overlay'
-const CONTEXT_KEY   = 'nexus.themePicker.visible'
+const COMMAND_OPEN       = 'nexus.themePicker.open'
+const COMMAND_CLOSE      = 'nexus.themePicker.close'
+const VIEW_ID            = 'nexus.themePicker.overlay'
+const CONTEXT_KEY        = 'nexus.themePicker.visible'
+const ACTIVITY_ITEM_ID   = 'nexus.themePicker.activityBarItem'
+const ACTIVITY_VIEW_SLOT = 'nexus.themePicker.activityView'
 
 export const themePickerPlugin: Plugin = {
   manifest: {
@@ -16,6 +18,7 @@ export const themePickerPlugin: Plugin = {
     core: false,
     activationEvents: ['onStartup'],
     popoutCompatible: false,
+    dependsOn: ['nexus.activityBar'],
     contributes: {
       commands: [
         {
@@ -67,6 +70,17 @@ export const themePickerPlugin: Plugin = {
       slot: 'overlay',
       component: ThemePicker,
       priority: 15,
+    })
+
+    api.activityBar.addItem({
+      id: ACTIVITY_ITEM_ID,
+      icon: '',
+      iconName: 'sliders',
+      title: 'Themes',
+      viewId: ACTIVITY_VIEW_SLOT,
+      priority: 95,
+      placement: 'bottom',
+      command: COMMAND_OPEN,
     })
   },
 }
