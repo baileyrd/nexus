@@ -345,22 +345,7 @@ SSH keys with passphrases currently block the `GitWorker` thread with a libgit2 
 
 ---
 
-### BL-089: Git tags — create, list, delete, push
-
-**Source**: Git Integration Assessment (2026-05-06) — deferred feature
-**Effort**: Small (1 day)
-**Crates**: `nexus-git/src/engine.rs`, `nexus-git/src/core_plugin.rs`
-**Related**: PRD-11; git2 `repo.tag*` API
-
-Tags are commonly used for releases and version markers. git2 provides `repo.tag()`, `repo.tag_lightweight()`, `repo.find_tag()`, and `repo.references_glob("refs/tags/*")` — all straightforward.
-
-**Definition of done:**
-- `GitEngine::list_tags()` → `Vec<{ name, target_hash, is_annotated, message? }>`
-- `GitEngine::create_tag(name, message?)` — annotated if message provided, lightweight otherwise; targets HEAD
-- `GitEngine::delete_tag(name)` — local only
-- `GitEngine::push_tags(remote)` — pushes `refs/tags/*` refspec
-- New IPC handlers: `list_tags` (id 12), `create_tag` (id 13), `delete_tag` (id 14), `push_tags` (id 15)
-- `nexus git tag`, `nexus git tag <name> [--message <msg>]`, `nexus git tag --delete <name>` CLI subcommands
+_BL-089 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 

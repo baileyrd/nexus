@@ -8,6 +8,15 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-089: Git tags — create, list, delete, push ✅ (2026-05-06)
+
+**Source**: Git Integration Assessment (2026-05-06)
+**Files**: `crates/nexus-git/src/{types,engine,ipc,core_plugin}.rs`, `crates/nexus-bootstrap/src/lib.rs`, `crates/nexus-cli/src/`
+
+`TagInfo { name, target_hash, is_annotated, message? }` added to `types.rs`. Four engine methods: `list_tags` (glob `refs/tags/*`, uses `repo.find_tag(direct_oid)` to distinguish annotated from lightweight), `create_tag(name, message?)` (annotated if message, lightweight otherwise, HEAD target, `force=false`), `delete_tag(name)`, `push_tags(remote)` (`refs/tags/*:refs/tags/*` refspec). IPC handlers 19–22 with `GitTagInfo` and `GitCreateTagArgs` wire types. Bootstrap registered. CLI: `nexus git tag` (list), `nexus git tag <name>` (lightweight), `nexus git tag <name> --message <msg>` (annotated), `nexus git tag --delete <name>`, `nexus git tag --push <remote>`. 4 engine tests.
+
+---
+
 ### BL-086: Auto-commit scheduler activation ✅ (2026-05-06)
 
 **Source**: Git Integration Assessment (2026-05-06) — gap #2
