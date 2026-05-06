@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { clientLogger } from '../../../clientLogger'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -244,9 +244,9 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       }
     }
 
-    onSessionChange(useTerminalStore.getState().sessionId)
+    onSessionChange(useTerminalStore.getState().activeSessionId)
     const offSessionSub = useTerminalStore.subscribe((s) => {
-      onSessionChange(s.sessionId)
+      onSessionChange(s.activeSessionId)
     })
 
     /**
@@ -261,7 +261,7 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
      */
     const tick = async () => {
       if (disposed) return
-      const id = useTerminalStore.getState().sessionId
+      const id = useTerminalStore.getState().activeSessionId
       if (!id) return
       const streamCursor =
         useTerminalStore.getState().streams[id]?.lastCursor ?? 0
@@ -296,7 +296,7 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     // tab-completion) reach the shell verbatim. send_input appends a
     // newline which would be wrong for arbitrary keystrokes.
     const sendBytesToPty = (bytes: Uint8Array | number[]) => {
-      const id = useTerminalStore.getState().sessionId
+      const id = useTerminalStore.getState().activeSessionId
       if (!id) return
       const arr = Array.isArray(bytes) ? bytes : Array.from(bytes)
       void kernel
@@ -390,7 +390,7 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       if (cols === lastCols && rows === lastRows) return
       lastCols = cols
       lastRows = rows
-      const id = useTerminalStore.getState().sessionId
+      const id = useTerminalStore.getState().activeSessionId
       if (!id) return
       void kernel
         .invoke(PLUGIN_ID, CMD_RESIZE, { id, cols, rows })
@@ -444,5 +444,25 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     // hold across renders without re-running the effect.
   }, [])
 
-  return <div ref={containerRef} className="nexus-terminal-root" />
+  const activeId = useTerminalStore((s) => s.activeSessionId)
+  const sessionName = useTerminalStore((s) =>
+    s.activeSessionId ? (s.sessions[s.activeSessionId]?.name ?? s.activeSessionId) : null,
+  )
+
+  return (
+    <div className="nexus-terminal-wrap">
+      {sessionName !== null && (
+        <div className="nexus-terminal-header">
+          <span className="nexus-terminal-header-dot" />
+          <span className="nexus-terminal-header-name">{sessionName}</span>
+        </div>
+      )}
+      <div
+        ref={containerRef}
+        className="nexus-terminal-root"
+        // When no session is active yet, show a placeholder message.
+        data-empty={activeId === null ? '' : undefined}
+      />
+    </div>
+  )
 }

@@ -3,21 +3,17 @@ import { create } from 'zustand'
 /**
  * Shell-side view-model for `nexus.terminal`.
  *
- * Holds the current session id (assigned when the kernel's
- * `com.nexus.terminal::create_session` returns) and a coarse
- * visibility flag mirrored from layoutStore. `visible` is redundant
- * with `layoutStore.panelArea.visible` but kept here so TerminalView
- * can read a single source without subscribing to the whole layout
- * store.
+ * Supports multiple concurrent PTY sessions — one per saved command that
+ * the user has started, plus ad-hoc sessions opened via "New Terminal".
+ * The active session drives what TerminalView renders; the saved-commands
+ * sidebar shows a status dot per entry and lets the user switch sessions
+ * by clicking a row.
  *
  * WI-12 (TS half) — also owns the per-session stream-bookkeeping for
  * the `com.nexus.terminal.output.<session_id>` kernel event topic. The
  * subscription is wired up in `index.ts::activate`; bytes arrive via
  * `handleStreamChunk` and are routed to the registered xterm sink for
- * that session. Multiple sessions never cross-contaminate because the
- * sink registry is keyed by session id; the current single-session UI
- * still benefits because a stale session id (workspace-switch race)
- * has no sink and its chunks are simply dropped.
+ * that session.
  */
 
 /**
@@ -48,6 +44,17 @@ export type RecoverFn = (
   lastCursor: number,
 ) => Promise<{ cursor: number; data: Uint8Array } | null>
 
+/** Metadata tracked client-side for each open session. */
+export interface SessionEntry {
+  /** Human-readable label shown in the sidebar and the terminal header. */
+  name: string
+  /**
+   * Slug of the saved command that spawned this session, if any.
+   * Ad-hoc sessions (opened via "New Terminal") leave this undefined.
+   */
+  savedCommandSlug?: string
+}
+
 interface SessionStreamState {
   /** Last chunk `seq` we accepted; 0 means no chunks yet. */
   lastSeq: number
@@ -63,13 +70,33 @@ interface SessionStreamState {
 }
 
 interface TerminalState {
-  sessionId: string | null
+  /** Session currently rendered in the terminal pane. */
+  activeSessionId: string | null
+  /** All open sessions keyed by session id. */
+  sessions: Record<string, SessionEntry>
+  /**
+   * Reverse lookup: saved-command slug → session id. Only populated for
+   * sessions that were spawned from a saved command.
+   */
+  slugSessions: Record<string, string>
+  /** Coarse panel-visibility flag mirrored from layoutStore. */
   visible: boolean
+
   streams: Record<string, SessionStreamState>
   sinks: Record<string, SessionSink>
   recoverFn: RecoverFn | null
 
+  /** Register a new open session in the store. */
+  addSession(id: string, entry: SessionEntry): void
+  /** Remove a session (e.g. after close_session). Switches active to another session if needed. */
+  removeSession(id: string): void
+  /** Switch which session the terminal pane renders. */
+  setActiveSession(id: string | null): void
+  /** Backward-compat alias for setActiveSession; used by test reset helpers. */
   setSession(id: string | null): void
+  /** Clear all session metadata (called on workspace close). */
+  resetSessions(): void
+
   setVisible(v: boolean): void
 
   /**
@@ -86,27 +113,17 @@ interface TerminalState {
   /**
    * Route an output chunk for `sessionId`. Detects seq gaps and
    * triggers recovery via `recoverFn` when one is observed.
-   *
-   * Out-of-order / gap behaviour: on detecting `seq !== lastSeq + 1`
-   * we drop the offending chunk and call `recoverFn` with our last
-   * cursor; the snapshot's bytes are written to the sink and
-   * `lastCursor` advances. Per the WI-12 brief option (a) we then
-   * accept the *next* chunk's seq as the new baseline (i.e. set
-   * `lastSeq = 0` so the next-arriving chunk's seq becomes the new
-   * baseline) — `read_raw_since` is byte-authoritative so continuity
-   * post-recovery is guaranteed by bytes, not by seq.
    */
   handleStreamChunk(sessionId: string, payload: OutputStreamPayload): void
 
   /**
    * Synchronise `lastCursor` to a value the pump path observed (used
    * by the 5s defensive heartbeat in TerminalView). Only advances —
-   * never rewinds — so a slow stream chunk arriving after a pump
-   * can't undo the catch-up.
+   * never rewinds.
    */
   advanceCursor(sessionId: string, cursor: number): void
 
-  /** Clear all per-session bookkeeping — used on workspace close. */
+  /** Clear all per-session stream bookkeeping and sinks. */
   resetStreams(): void
 }
 
@@ -115,13 +132,55 @@ function emptyStream(): SessionStreamState {
 }
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
-  sessionId: null,
+  activeSessionId: null,
+  sessions: {},
+  slugSessions: {},
   visible: false,
   streams: {},
   sinks: {},
   recoverFn: null,
 
-  setSession: (id) => set({ sessionId: id }),
+  addSession: (id, entry) =>
+    set((s) => ({
+      sessions: { ...s.sessions, [id]: entry },
+      slugSessions: entry.savedCommandSlug
+        ? { ...s.slugSessions, [entry.savedCommandSlug]: id }
+        : s.slugSessions,
+      activeSessionId: s.activeSessionId ?? id,
+    })),
+
+  removeSession: (id) =>
+    set((s) => {
+      const nextSessions = { ...s.sessions }
+      delete nextSessions[id]
+
+      const nextSlug = { ...s.slugSessions }
+      for (const [slug, sid] of Object.entries(nextSlug)) {
+        if (sid === id) delete nextSlug[slug]
+      }
+
+      // If the removed session was active, fall through to the first
+      // remaining session (sidebar order) or null.
+      const nextActive =
+        s.activeSessionId === id
+          ? (Object.keys(nextSessions)[0] ?? null)
+          : s.activeSessionId
+
+      return { sessions: nextSessions, slugSessions: nextSlug, activeSessionId: nextActive }
+    }),
+
+  setActiveSession: (id) => set({ activeSessionId: id }),
+
+  setSession: (id) => {
+    if (id === null) {
+      set({ activeSessionId: null })
+    } else {
+      set({ activeSessionId: id })
+    }
+  },
+
+  resetSessions: () => set({ sessions: {}, slugSessions: {}, activeSessionId: null }),
+
   setVisible: (v) => set({ visible: v }),
 
   registerSink: (sessionId, sink) => {
@@ -145,25 +204,14 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const stream = state.streams[sessionId] ?? emptyStream()
     const sink = state.sinks[sessionId]
 
-    // Recovery in flight — drop the chunk; the snapshot bytes will
-    // cover the gap and any subsequent chunks beyond that re-baseline.
     if (stream.recoveryInFlight) return
 
-    // Gap detection: lastSeq === 0 means we're at the baseline (first
-    // chunk after subscription / session start / post-recovery), so
-    // any seq is acceptable and becomes the new baseline.
     const isFirst = stream.lastSeq === 0
     const expected = stream.lastSeq + 1
     if (!isFirst && payload.seq !== expected) {
-      // Trigger recovery via read_raw_since. This is fire-and-forget;
-      // the store stays sync. Subsequent chunks arriving while
-      // `recoveryInFlight` is true are dropped above.
       const recover = state.recoverFn
       if (recover) {
-        const next: SessionStreamState = {
-          ...stream,
-          recoveryInFlight: true,
-        }
+        const next: SessionStreamState = { ...stream, recoveryInFlight: true }
         set((s) => ({ streams: { ...s.streams, [sessionId]: next } }))
         void recover(sessionId, stream.lastCursor).then((snapshot) => {
           const after = get()
@@ -171,8 +219,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           if (snapshot && liveSink) {
             liveSink(snapshot.data)
           }
-          // Option (a): post-recovery, accept the next chunk's seq as
-          // the new baseline. lastSeq=0 signals "first chunk wins".
           set((s) => ({
             streams: {
               ...s.streams,
@@ -185,8 +231,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           }))
         })
       } else {
-        // No recoverFn wired — best effort, accept the chunk and
-        // re-baseline so we don't loop on every subsequent gap.
         const bytes = new Uint8Array(payload.data)
         if (sink) sink(bytes)
         set((s) => ({
@@ -203,7 +247,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return
     }
 
-    // Normal path: write bytes, advance cursor + seq.
     const bytes = new Uint8Array(payload.data)
     if (sink) sink(bytes)
     set((s) => ({

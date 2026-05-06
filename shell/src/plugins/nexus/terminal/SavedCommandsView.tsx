@@ -1,46 +1,50 @@
 // shell/src/plugins/nexus/terminal/SavedCommandsView.tsx
 //
-// WI-05 — sub-view of nexus.terminal that lists user-saved shell
-// commands with CRUD + reorder + click-to-execute. Mirrors the legacy
-// SavedCommandsPanel UX (from the legacy shell's SavedCommandsPanel.tsx, retired Phase 4 WI-37)
-// without copying the implementation.
+// CommandBook-style sidebar: each saved command is a persistent named
+// process. Clicking a running entry switches the terminal pane to its
+// session output. Clicking a stopped entry spawns a dedicated session
+// for that command and reveals the terminal pane.
 //
-// Lives as a sidebar leaf (side: 'left') alongside the terminal so the
-// user can keep the terminal visible while picking a command. Clicking
-// a command sends it to the active terminal session via
-// `com.nexus.terminal::send_input`; if no session exists we ask the
-// terminal plugin to create one (via the existing focus command) and
-// retry once.
+// Layout:
+//   ┌─ header ──────────────────────────────────────┐
+//   │  Processes              [+ New] [⊕ Terminal]  │
+//   ├───────────────────────────────────────────────┤
+//   │  ● Dev server                  [Stop]   […]   │
+//   │    npm run dev                               │
+//   │  ○ Tests                       [Run]    […]   │
+//   │    cargo test                               │
+//   └───────────────────────────────────────────────┘
 //
-// Reorder is up/down buttons rather than HTML5 drag-drop. The legacy
-// panel used the same affordance and it survives keyboard navigation;
-// drag-drop reorder is a Phase 3 polish item.
+// ● green = active session exists  ○ gray = no session
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { KernelAPI, NotificationsAPI } from '../../../types/plugin'
 import { useConfigValue } from '../../../stores/configStore'
-import { useTerminalStore } from './terminalStore'
-
-const CMD_SAVE_NOTIFICATION_MS = 3000
-const CMD_COPIED_NOTIFICATION_MS = 1800
+import { useTerminalStore, type SessionEntry } from './terminalStore'
+import { useWorkspaceStore } from '../workspace/workspaceStore'
 import {
   useSavedCommandsStore,
   type SavedCommand,
   type SavedCommandDraft,
 } from './savedCommandsStore'
 
+const CMD_SAVE_NOTIFICATION_MS = 3000
+
 const PLUGIN_ID = 'com.nexus.terminal'
-// `send_input` (HANDLER_SEND_INPUT = 3) appends a newline if the input
-// doesn't already end in one — exactly what we want for click-to-run.
-const CMD_SEND_INPUT = 'send_input'
+const HANDLER_CREATE_SESSION = 'create_session'
+const HANDLER_CLOSE_SESSION = 'close_session'
+
+interface CreateSessionResponse {
+  id: string
+}
 
 interface SavedCommandsViewProps {
   kernel: KernelAPI
   notifications: NotificationsAPI
-  /** Called when the user wants to open the terminal pane (no active
-   *  session yet, or just-ran-a-command UX). The plugin's index.ts
-   *  registers this command (`nexus.terminal.focus`). */
+  /** Reveals the terminal pane and focuses xterm. */
   focusTerminal: () => void
+  /** Creates a new ad-hoc interactive terminal and reveals the pane. */
+  onNewTerminal: () => Promise<void>
 }
 
 const EMPTY_DRAFT: SavedCommandDraft = {
@@ -57,10 +61,6 @@ type EditorState =
   | { mode: 'add'; draft: SavedCommandDraft }
   | { mode: 'edit'; original: SavedCommand; draft: SavedCommandDraft }
 
-/** Slugify a freeform name into a URL-safe primary key. The kernel does
- *  not enforce any specific shape — it just uses `slug` as the rowid —
- *  but a-z0-9-dash keeps URLs and file paths sane if the slug ever
- *  shows up in either. Falls back to a timestamp suffix on conflict. */
 function slugify(name: string): string {
   const base = name
     .toLowerCase()
@@ -71,9 +71,9 @@ function slugify(name: string): string {
 }
 
 export function SavedCommandsView(props: SavedCommandsViewProps) {
-  const { kernel, notifications, focusTerminal } = props
+  const { kernel, notifications, focusTerminal, onNewTerminal } = props
   const cmdSaveMs = useConfigValue('ui.commandSaveNotificationMs', CMD_SAVE_NOTIFICATION_MS)
-  const cmdCopiedMs = useConfigValue('ui.commandCopiedNotificationMs', CMD_COPIED_NOTIFICATION_MS)
+
   const commands = useSavedCommandsStore((s) => s.commands)
   const loaded = useSavedCommandsStore((s) => s.loaded)
   const error = useSavedCommandsStore((s) => s.error)
@@ -83,21 +83,20 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
   const deleteSaved = useSavedCommandsStore((s) => s.deleteSaved)
   const reorderSaved = useSavedCommandsStore((s) => s.reorderSaved)
 
+  // Read multi-session state from the terminal store.
+  const slugSessions = useTerminalStore((s) => s.slugSessions)
+  const activeSessionId = useTerminalStore((s) => s.activeSessionId)
+
   const [editor, setEditor] = useState<EditorState>({ mode: 'closed' })
   const [localError, setLocalError] = useState<string | null>(null)
+  const [starting, setStarting] = useState<Set<string>>(new Set())
 
-  // Hydrate on first mount (and any subsequent re-mount after the leaf
-  // was torn down). Cheap if already loaded — `saved_list` returns from
-  // an in-process sqlite store with no IO churn.
   useEffect(() => {
     if (!loaded) void loadSaved(kernel)
   }, [loaded, loadSaved, kernel])
 
   const slugSet = useMemo(() => new Set(commands.map((c) => c.slug)), [commands])
 
-  /** Pick a slug that doesn't collide with an existing row. Append a
-   *  short suffix on collision — guarantees forward progress without
-   *  asking the user to retype. */
   const pickSlug = useCallback(
     (name: string): string => {
       const base = slugify(name)
@@ -111,40 +110,77 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
     [slugSet],
   )
 
+  /**
+   * Start a dedicated session for `cmd`.
+   *
+   * Flow: create_session → send_input (the command text) → addSession →
+   * setActiveSession → focusTerminal. The shell opens at the command's
+   * working_dir if set; the shell binary uses the saved command's `shell`
+   * field (falling back to platform default when empty).
+   */
   const runCommand = useCallback(
     async (cmd: SavedCommand) => {
-      setLocalError(null)
-      const sessionId = useTerminalStore.getState().sessionId
-      if (!sessionId) {
-        // No live session — open the terminal so the workspace handler
-        // creates one, then surface a hint. We deliberately don't loop
-        // here: the create path is async and racing it would risk
-        // double-sending. The user clicks again once the terminal is
-        // up.
+      // If a session already exists for this slug, just switch to it.
+      const existingId = useTerminalStore.getState().slugSessions[cmd.slug]
+      if (existingId) {
+        useTerminalStore.getState().setActiveSession(existingId)
         focusTerminal()
-        notifications.show({
-          message: 'Opening terminal — click the command again to run it.',
-          type: 'info',
-          duration: cmdSaveMs ?? CMD_SAVE_NOTIFICATION_MS,
-        })
         return
       }
+
+      setLocalError(null)
+      setStarting((prev) => new Set(prev).add(cmd.slug))
+
       try {
-        await kernel.invoke(PLUGIN_ID, CMD_SEND_INPUT, {
-          id: sessionId,
+        const workspaceRoot = useWorkspaceStore.getState().rootPath
+        const resp = await kernel.invoke<CreateSessionResponse>(
+          PLUGIN_ID,
+          HANDLER_CREATE_SESSION,
+          {
+            name: cmd.name,
+            shell: cmd.shell || undefined,
+            working_dir: cmd.working_dir ?? workspaceRoot ?? undefined,
+          },
+        )
+
+        const entry: SessionEntry = { name: cmd.name, savedCommandSlug: cmd.slug }
+        useTerminalStore.getState().addSession(resp.id, entry)
+        useTerminalStore.getState().setActiveSession(resp.id)
+
+        // Send the command text so the shell runs it immediately.
+        await kernel.invoke(PLUGIN_ID, 'send_input', {
+          id: resp.id,
           input: cmd.shell_cmd,
         })
+
         focusTerminal()
-        notifications.show({
-          message: `Sent "${cmd.name}" to terminal`,
-          type: 'success',
-          duration: cmdCopiedMs ?? CMD_COPIED_NOTIFICATION_MS,
+      } catch (err) {
+        setLocalError(String(err))
+      } finally {
+        setStarting((prev) => {
+          const next = new Set(prev)
+          next.delete(cmd.slug)
+          return next
         })
+      }
+    },
+    [kernel, focusTerminal],
+  )
+
+  /** Close the session associated with `slug`. */
+  const stopCommand = useCallback(
+    async (slug: string) => {
+      const id = useTerminalStore.getState().slugSessions[slug]
+      if (!id) return
+      setLocalError(null)
+      try {
+        useTerminalStore.getState().removeSession(id)
+        await kernel.invoke(PLUGIN_ID, HANDLER_CLOSE_SESSION, { id })
       } catch (err) {
         setLocalError(String(err))
       }
     },
-    [kernel, notifications, focusTerminal, cmdSaveMs, cmdCopiedMs],
+    [kernel],
   )
 
   const handleSubmit = useCallback(async () => {
@@ -157,8 +193,6 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
     setLocalError(null)
     try {
       if (editor.mode === 'add') {
-        // Pick the slug at submit time, not on every keystroke, so the
-        // user can rename freely without our slug churning under them.
         const slug = pickSlug(draft.name)
         await createSaved(kernel, { ...draft, slug })
       } else {
@@ -172,6 +206,8 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
 
   const handleDelete = useCallback(
     async (slug: string) => {
+      // Stop the session first so there's no orphan.
+      await stopCommand(slug)
       setLocalError(null)
       try {
         await deleteSaved(kernel, slug)
@@ -179,7 +215,7 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
         setLocalError(String(err))
       }
     },
-    [deleteSaved, kernel],
+    [deleteSaved, kernel, stopCommand],
   )
 
   const handleMove = useCallback(
@@ -191,10 +227,7 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
       next.splice(target, 0, row)
       setLocalError(null)
       try {
-        await reorderSaved(
-          kernel,
-          next.map((c) => c.slug),
-        )
+        await reorderSaved(kernel, next.map((c) => c.slug))
       } catch (err) {
         setLocalError(String(err))
       }
@@ -205,14 +238,25 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
   return (
     <div className="nexus-saved-commands">
       <header className="nexus-saved-commands-header">
-        <h3>Saved commands</h3>
-        <button
-          type="button"
-          className="nexus-saved-commands-add"
-          onClick={() => setEditor({ mode: 'add', draft: { ...EMPTY_DRAFT } })}
-        >
-          + New
-        </button>
+        <h3>Processes</h3>
+        <div className="nexus-saved-commands-header-actions">
+          <button
+            type="button"
+            className="nexus-saved-commands-add"
+            onClick={() => setEditor({ mode: 'add', draft: { ...EMPTY_DRAFT } })}
+            title="Add saved command"
+          >
+            + New
+          </button>
+          <button
+            type="button"
+            className="nexus-saved-commands-new-terminal"
+            onClick={() => void onNewTerminal()}
+            title="Open a new interactive terminal"
+          >
+            ⊕
+          </button>
+        </div>
       </header>
 
       {(error || localError) && (
@@ -247,70 +291,117 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
       )}
 
       <ul className="nexus-saved-commands-list">
-        {commands.map((cmd, idx) => (
-          <li key={cmd.slug} className="nexus-saved-command">
-            <button
-              type="button"
-              className="nexus-saved-command-body"
-              onClick={() => void runCommand(cmd)}
-              title="Run in active terminal"
+        {commands.map((cmd, idx) => {
+          const sessionId = slugSessions[cmd.slug]
+          const isRunning = Boolean(sessionId)
+          const isActive = isRunning && sessionId === activeSessionId
+          const isStarting = starting.has(cmd.slug)
+
+          return (
+            <li
+              key={cmd.slug}
+              className={[
+                'nexus-saved-command',
+                isRunning ? 'nexus-saved-command--running' : '',
+                isActive ? 'nexus-saved-command--active' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
             >
-              <div className="nexus-saved-command-name">{cmd.name}</div>
-              <code className="nexus-saved-command-cmd">{cmd.shell_cmd}</code>
-              {(cmd.shell || cmd.working_dir) && (
-                <div className="nexus-saved-command-meta">
-                  {cmd.shell && <span>shell: {cmd.shell}</span>}
-                  {cmd.working_dir && <span>cwd: {cmd.working_dir}</span>}
+              <button
+                type="button"
+                className="nexus-saved-command-body"
+                onClick={() => void runCommand(cmd)}
+                disabled={isStarting}
+                title={isRunning ? 'Switch to this session' : 'Run in new session'}
+              >
+                <div className="nexus-saved-command-name">
+                  <span
+                    className={`nexus-session-dot nexus-session-dot--${isRunning ? 'running' : 'stopped'}`}
+                    aria-label={isRunning ? 'Running' : 'Stopped'}
+                  />
+                  {cmd.name}
+                  {isStarting && (
+                    <span className="nexus-session-starting"> starting…</span>
+                  )}
                 </div>
-              )}
-            </button>
-            <div className="nexus-saved-command-actions">
-              <button
-                type="button"
-                onClick={() =>
-                  setEditor({
-                    mode: 'edit',
-                    original: cmd,
-                    draft: {
-                      slug: cmd.slug,
-                      name: cmd.name,
-                      shell: cmd.shell,
-                      shell_cmd: cmd.shell_cmd,
-                      working_dir: cmd.working_dir,
-                      icon: cmd.icon,
-                    },
-                  })
-                }
-                aria-label={`Edit ${cmd.name}`}
-              >
-                Edit
+                <code className="nexus-saved-command-cmd">{cmd.shell_cmd}</code>
+                {(cmd.shell || cmd.working_dir) && (
+                  <div className="nexus-saved-command-meta">
+                    {cmd.shell && <span>shell: {cmd.shell}</span>}
+                    {cmd.working_dir && <span>cwd: {cmd.working_dir}</span>}
+                  </div>
+                )}
               </button>
-              <button
-                type="button"
-                onClick={() => void handleDelete(cmd.slug)}
-                aria-label={`Delete ${cmd.name}`}
-              >
-                Delete
-              </button>
-              <button
-                type="button"
-                disabled={idx === 0}
-                onClick={() => void handleMove(idx, -1)}
-                aria-label="Move up"
-              >
-                {'↑'}
-              </button>
-              <button
-                type="button"
-                disabled={idx === commands.length - 1}
-                onClick={() => void handleMove(idx, 1)}
-                aria-label="Move down"
-              >
-                {'↓'}
-              </button>
-            </div>
-          </li>
-        ))}
+
+              <div className="nexus-saved-command-actions">
+                {isRunning ? (
+                  <button
+                    type="button"
+                    className="nexus-saved-command-stop"
+                    onClick={() => void stopCommand(cmd.slug)}
+                    aria-label={`Stop ${cmd.name}`}
+                  >
+                    Stop
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="nexus-saved-command-run"
+                    onClick={() => void runCommand(cmd)}
+                    disabled={isStarting}
+                    aria-label={`Run ${cmd.name}`}
+                  >
+                    Run
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditor({
+                      mode: 'edit',
+                      original: cmd,
+                      draft: {
+                        slug: cmd.slug,
+                        name: cmd.name,
+                        shell: cmd.shell,
+                        shell_cmd: cmd.shell_cmd,
+                        working_dir: cmd.working_dir,
+                        icon: cmd.icon,
+                      },
+                    })
+                  }
+                  aria-label={`Edit ${cmd.name}`}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDelete(cmd.slug)}
+                  aria-label={`Delete ${cmd.name}`}
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  disabled={idx === 0}
+                  onClick={() => void handleMove(idx, -1)}
+                  aria-label="Move up"
+                >
+                  {'↑'}
+                </button>
+                <button
+                  type="button"
+                  disabled={idx === commands.length - 1}
+                  onClick={() => void handleMove(idx, 1)}
+                  aria-label="Move down"
+                >
+                  {'↓'}
+                </button>
+              </div>
+            </li>
+          )
+        })}
       </ul>
     </div>
   )

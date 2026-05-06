@@ -8,10 +8,50 @@
  * below (--background-secondary) shows through.
  */
 
-.nexus-terminal-root {
+/* Outer wrapper — flex column so the header sits above the canvas. */
+.nexus-terminal-wrap {
+  display: flex;
+  flex-direction: column;
   height: 100%;
   width: 100%;
   background: var(--background-secondary);
+  overflow: hidden;
+}
+
+/* Thin session-name bar at the top of the terminal pane. */
+.nexus-terminal-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+  background: var(--background-primary-alt);
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.nexus-terminal-header-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3fb950; /* GitHub-green "running" indicator */
+  flex-shrink: 0;
+}
+
+.nexus-terminal-header-name {
+  font-family: var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nexus-terminal-root {
+  flex: 1;
+  min-height: 0;
+  background: transparent;
   padding: 0;
   box-sizing: border-box;
   overflow: hidden;
@@ -56,6 +96,12 @@
   margin-bottom: 8px;
 }
 
+.nexus-saved-commands-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .nexus-saved-commands-header h3 {
   margin: 0;
   font-size: 12px;
@@ -77,6 +123,23 @@
 
 .nexus-saved-commands-add:hover {
   background: var(--background-modifier-hover);
+}
+
+/* "⊕ New Terminal" button in the sidebar header. Same size as "+ New". */
+.nexus-saved-commands-new-terminal {
+  font-size: 13px;
+  padding: 1px 6px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.nexus-saved-commands-new-terminal:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
 }
 
 .nexus-saved-commands-error {
@@ -226,4 +289,68 @@
   background: var(--interactive-accent);
   border-color: var(--interactive-accent);
   color: var(--accent-fg);
+}
+
+/*
+ * Session status dot — inline before the command name.
+ * ● green = session running   ○ gray = no session
+ */
+.nexus-session-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 5px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}
+
+.nexus-session-dot--running {
+  background: #3fb950;
+  box-shadow: 0 0 0 1.5px rgba(63, 185, 80, 0.25);
+}
+
+.nexus-session-dot--stopped {
+  background: transparent;
+  border: 1.5px solid var(--text-faint);
+}
+
+/* "starting…" label shown while create_session is in flight. */
+.nexus-session-starting {
+  font-size: 10px;
+  color: var(--text-faint);
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+/* Running rows get a subtle left-border accent. */
+.nexus-saved-command--running {
+  border-left-color: rgba(63, 185, 80, 0.5);
+  border-left-width: 2px;
+}
+
+/* Active session row is slightly brighter. */
+.nexus-saved-command--active {
+  background: var(--background-modifier-hover);
+}
+
+/* Run button (green tint) / Stop button (muted red tint). */
+.nexus-saved-command-run {
+  color: #3fb950 !important;
+  border-color: rgba(63, 185, 80, 0.4) !important;
+}
+
+.nexus-saved-command-run:hover:not(:disabled) {
+  background: rgba(63, 185, 80, 0.1) !important;
+}
+
+.nexus-saved-command-stop {
+  color: var(--accent-danger, #f85149) !important;
+  border-color: rgba(248, 81, 73, 0.35) !important;
+}
+
+.nexus-saved-command-stop:hover {
+  background: rgba(248, 81, 73, 0.1) !important;
 }
