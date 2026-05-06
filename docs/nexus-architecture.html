@@ -98,10 +98,16 @@
 </head>
 <body>
 
+<div style="background:#5a1e1e;color:#fca5a5;padding:10px 20px;font-size:0.85rem;border-bottom:1px solid #7f1d1d">
+  ⚠️ <strong>Historical snapshot — partially outdated.</strong> This page was generated when the workspace had 14 crates.
+  The authoritative living document is <a href="ARCHITECTURE.html" style="color:#fca5a5;text-decoration:underline">ARCHITECTURE.html</a>.
+  Notable changes since this snapshot: workspace is now 25 crates; <code>nexus-app</code> was retired and replaced by <code>nexus-shell</code> (ADR 0011, Phase 4 WI-37, 2026-04-24).
+</div>
+
 <div class="header">
   <h1>Nexus Architecture</h1>
   <p>AI-native, plugin-extensible knowledge environment — microkernel design in Rust</p>
-  <div class="badge">14 CRATES &middot; MICROKERNEL &middot; MULTI-UI</div>
+  <div class="badge">25 CRATES &middot; MICROKERNEL &middot; MULTI-UI</div>
   <div class="version">v0.1.0 &middot; MIT / Apache-2.0</div>
 </div>
 
@@ -203,8 +209,8 @@
       <text x="482" y="215" fill="#3fb950" font-size="7.5">Uses: nexus-storage, nexus-kernel</text>
 
       <rect x="685" y="120" width="195" height="100" rx="8" fill="#0e2a4d" stroke="#58a6ff" stroke-width="1.5"/>
-      <text x="782" y="142" fill="#58a6ff" font-size="12" font-weight="600" text-anchor="middle">nexus-app</text>
-      <text x="782" y="158" fill="#8b949e" font-size="9" text-anchor="middle">Tauri 2 Desktop Shell</text>
+      <text x="782" y="142" fill="#58a6ff" font-size="12" font-weight="600" text-anchor="middle">nexus-shell</text>
+      <text x="782" y="158" fill="#8b949e" font-size="9" text-anchor="middle">Tauri 2 Desktop Shell (retired nexus-app)</text>
       <line x1="697" y1="165" x2="868" y2="165" stroke="#30363d" stroke-width="0.5"/>
       <text x="697" y="179" fill="#8b949e" font-size="8">IPC commands → Rust backend</text>
       <text x="697" y="191" fill="#8b949e" font-size="8">ts-rs TypeScript bindings</text>
@@ -480,7 +486,7 @@
 <!-- ============================================================ -->
 <div id="crates" class="tab-content">
   <div class="section-title">Crate-by-Crate Details</div>
-  <div class="section-sub">All 14 crates in the Cargo workspace with their roles, dependencies, and key exports</div>
+  <div class="section-sub">14 crates shown (snapshot); workspace now has 25 crates — see ARCHITECTURE.html for the complete current listing</div>
 
   <table class="comparison-table">
     <thead>
@@ -513,12 +519,12 @@
       <tr><td colspan="4" style="background:var(--surface2);color:var(--accent-blue);font-weight:600;font-size:0.85rem">APPLICATION BINARIES</td></tr>
       <tr><td><b>nexus-cli</b></td><td>Headless CLI binary (<code>nexus</code>)</td><td>All crates + clap 4.6, comfy-table</td><td>15+ subcommands: forge, content, graph, ai, mcp, plugin</td></tr>
       <tr><td><b>nexus-tui</b></td><td>Terminal UI binary (<code>nexus-tui</code>)</td><td>nexus-storage, nexus-kernel, ratatui 0.30, crossterm 0.29</td><td><code>TuiApp</code>: tree / viewer / search / tasks</td></tr>
-      <tr><td><b>nexus-app</b></td><td>Tauri 2 desktop shell</td><td>nexus-theme, tauri</td><td>IPC commands, WebView host</td></tr>
+      <tr><td><b>nexus-shell</b></td><td>Tauri 2 desktop shell (replaced nexus-app, ADR 0011)</td><td>nexus-theme, tauri</td><td>IPC commands, WebView host, ExtensionHost plugin system</td></tr>
     </tbody>
   </table>
 
   <div class="section-title" style="margin-top:40px">Crate Dependency Graph</div>
-  <div class="section-sub">How the 14 crates depend on each other (→ means "depends on")</div>
+  <div class="section-sub">Dependency graph for the 14 crates shown in this snapshot (→ means "depends on")</div>
 
   <div class="details-grid">
     <div class="detail-card">
@@ -557,7 +563,7 @@
       <ul>
         <li><code>nexus-cli</code> → all core crates + clap</li>
         <li><code>nexus-tui</code> → nexus-storage, nexus-kernel + ratatui</li>
-        <li><code>nexus-app</code> → nexus-theme + tauri</li>
+        <li><code>nexus-shell</code> → nexus-theme + tauri (replaced nexus-app)</li>
       </ul>
     </div>
     <div class="detail-card">
