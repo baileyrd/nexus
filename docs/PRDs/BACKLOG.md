@@ -426,23 +426,7 @@ Stash is the safety net for branch switching with dirty working trees. Currently
 
 ---
 
-### BL-085: Hunk-level staging
-
-**Source**: Git Integration Assessment (2026-05-06) — gap #4
-**Effort**: Small–Medium (1 week)
-**Crates**: `nexus-git/src/engine.rs`, `nexus-git/src/core_plugin.rs`
-**Related**: BL-079 (git gutter — the UI surface for this); `diff_file` handler already ships hunks
-
-The backend already returns `Vec<HunkDiff>` from `diff_file` and `diff_staged`. What's missing is writing a partial patch back to the index — staging a specific hunk (or even specific lines within a hunk) rather than the whole file.
-
-**Implementation:** Build a patch string from the selected hunks in unified diff format, apply it to the index via `repo.apply(diff, ApplyLocation::Index, None)` (git2 `apply` API). This avoids shelling out to `git add -p`.
-
-**Definition of done:**
-- `GitEngine::stage_hunks(path, hunk_indices)` — applies only the specified hunks to the index, leaves others unstaged
-- `GitEngine::unstage_hunks(path, hunk_indices)` — reverse-applies hunks from index back to working tree
-- New IPC handlers: `stage_hunks({ path, hunk_indices })` (id 24), `unstage_hunks({ path, hunk_indices })` (id 25)
-- BL-079 diff viewer wires the "Stage hunk" / "Unstage hunk" buttons to these handlers
-- `nexus git stage-hunk <path> <hunk-index>` CLI subcommand
+_BL-085 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 

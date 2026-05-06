@@ -8,6 +8,15 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-085: Hunk-level staging ✅ (2026-05-06)
+
+**Source**: Git Integration Assessment (2026-05-06) — gap #4
+**Files**: `crates/nexus-git/src/engine.rs`, `ipc.rs`, `core_plugin.rs`, `nexus-bootstrap/src/lib.rs`, `nexus-cli/src/`, `shell/src/plugins/nexus/gitPanel/GitPanel.tsx`
+
+`GitEngine::stage_hunks(path, hunk_indices)` and `unstage_hunks(path, hunk_indices)` added. Both call `build_patch_for_hunks()` which assembles a minimal unified-diff patch (`diff --git a/… b/…` header + selected `@@` hunk blocks with normalized line terminators) then applies it to the index via `repo.apply(diff, ApplyLocation::Index, None)` — no shell-out to `git add -p`. Unstaging reverses `+`/`-` prefixes and transposes `@@` old/new counts. Two engine tests cover the round-trips. IPC handlers 17 (`stage_hunks`) and 18 (`unstage_hunks`) expose these as `GitHunkArgs { path, hunk_indices: Vec<u64> }`. `nexus git stage-hunk <path> <hunk>...` and `unstage-hunk` CLI subcommands added. In the git panel `DiffViewer` each `@@` hunk header now renders a "Stage hunk" (for unstaged files) or "Unstage hunk" (for staged files) button; clicking reloads both the file list and the diff.
+
+---
+
 ### BL-106: Theme builder — light/dark side-by-side preview ✅ (2026-05-06)
 
 **Source**: BL-068 remaining feature (2026-05-06)
