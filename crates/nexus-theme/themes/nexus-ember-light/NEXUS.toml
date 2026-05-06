@@ -1,12 +1,12 @@
 [theme]
-name = "Forge Ember (Light)"
+name = "Nexus Forge (Light)"
 version = "1.0.0"
 author = "Nexus"
-description = "Ember on warm off-white — light counterpart to Forge Ember Dark, with a slightly redder accent for legibility."
+description = "Ember on warm off-white — light counterpart to Nexus Forge Dark, with a slightly redder accent for legibility."
 license = "MIT OR Apache-2.0"
 nexus_min_version = "0.1.0"
 nexus_max_version = "*"
-display_name = "Forge Ember — Light"
+display_name = "Nexus Forge — Light"
 category = "light"
 supports = ["light"]
 

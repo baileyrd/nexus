@@ -1,12 +1,12 @@
 [theme]
-name = "Forge Ember (Dark)"
+name = "Nexus Forge (Dark)"
 version = "1.0.0"
 author = "Nexus"
 description = "Ember on slate — cool slate surfaces with a single warm ember accent. Long-session dark theme."
 license = "MIT OR Apache-2.0"
 nexus_min_version = "0.1.0"
 nexus_max_version = "*"
-display_name = "Forge Ember — Dark"
+display_name = "Nexus Forge — Dark"
 category = "dark"
 supports = ["dark"]
 
