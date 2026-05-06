@@ -1041,6 +1041,24 @@ enum GitCommand {
         #[arg(short, long)]
         all: bool,
     },
+    /// Stage specific hunks within a file
+    #[command(name = "stage-hunk")]
+    StageHunk {
+        /// Forge-relative path of the file
+        path: String,
+        /// 0-based hunk index to stage (repeat for multiple hunks)
+        #[arg(required = true, num_args = 1..)]
+        hunks: Vec<usize>,
+    },
+    /// Unstage specific hunks within a file
+    #[command(name = "unstage-hunk")]
+    UnstageHunk {
+        /// Forge-relative path of the file
+        path: String,
+        /// 0-based hunk index to unstage (repeat for multiple hunks)
+        #[arg(required = true, num_args = 1..)]
+        hunks: Vec<usize>,
+    },
     /// Create a commit from staged changes
     Commit {
         /// Commit message
@@ -1501,6 +1519,8 @@ fn main() {
             GitCommand::Log { limit, file } => commands::git::log(&app, limit, file.as_deref()),
             GitCommand::Stage { path, all } => commands::git::stage(&app, path.as_deref(), all),
             GitCommand::Unstage { path, all } => commands::git::unstage(&app, path.as_deref(), all),
+            GitCommand::StageHunk { path, hunks } => commands::git::stage_hunk(&app, &path, &hunks),
+            GitCommand::UnstageHunk { path, hunks } => commands::git::unstage_hunk(&app, &path, &hunks),
             GitCommand::Commit { message } => commands::git::commit(&app, &message),
             GitCommand::Branch { command } => commands::git::branch(&app, command),
             GitCommand::Fetch { remote } => commands::git::fetch(&app, &remote),

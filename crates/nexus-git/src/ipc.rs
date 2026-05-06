@@ -279,6 +279,24 @@ pub struct GitBranchArgs {
     pub name: String,
 }
 
+/// Args for `stage_hunks` (17) and `unstage_hunks` (18).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitHunkArgs {
+    /// Forge-relative path of the file.
+    pub path: String,
+    /// 0-based indices of the hunks to stage or unstage.
+    pub hunk_indices: Vec<u64>,
+}
+
 /// Args for `push` (handler id `16`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]

@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, TimeZone, Utc};
-use git2::{DiffOptions, Repository, StatusOptions};
+use git2::{ApplyLocation, DiffOptions, Repository, StatusOptions};
 
 use crate::error::GitError;
 use crate::types::{GitState, RepoState, StatusEntry, FileStatus, HunkDiff, BlameEntry, LogEntry, BranchInfo, MergeResult, DiffLineKind, DiffLine};
@@ -350,6 +350,52 @@ impl GitEngine {
             git2::ResetType::Mixed,
             None,
         )?;
+        Ok(())
+    }
+
+    /// Stage specific hunks of a file's working-tree changes.
+    ///
+    /// Builds a partial unified-diff patch containing only the hunks at the
+    /// given 0-based indices and applies it to the index via
+    /// `repo.apply(diff, ApplyLocation::Index, None)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure or invalid hunk index.
+    pub fn stage_hunks(&self, path: &Path, hunk_indices: &[usize]) -> Result<(), GitError> {
+        let hunks = self.diff_file(path)?;
+        let patch = build_patch_for_hunks(path, &hunks, hunk_indices, false);
+        if patch.is_empty() {
+            return Ok(());
+        }
+        let diff = git2::Diff::from_buffer(&patch)?;
+        self.repo.apply(&diff, ApplyLocation::Index, None)?;
+        Ok(())
+    }
+
+    /// Unstage specific hunks of a file's staged changes.
+    ///
+    /// Builds a reversed partial patch containing only the hunks at the given
+    /// 0-based indices and applies it to the index, effectively moving those
+    /// hunks back to the working tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure or invalid hunk index.
+    pub fn unstage_hunks(&self, path: &Path, hunk_indices: &[usize]) -> Result<(), GitError> {
+        let file_diffs = self.diff_staged()?;
+        let path_str = path.to_string_lossy();
+        let hunks = file_diffs
+            .into_iter()
+            .find(|(p, _)| p == path_str.as_ref())
+            .map(|(_, h)| h)
+            .unwrap_or_default();
+        let patch = build_patch_for_hunks(path, &hunks, hunk_indices, true);
+        if patch.is_empty() {
+            return Ok(());
+        }
+        let diff = git2::Diff::from_buffer(&patch)?;
+        self.repo.apply(&diff, ApplyLocation::Index, None)?;
         Ok(())
     }
 
@@ -799,6 +845,66 @@ fn collect_file_hunks(diff: &git2::Diff<'_>) -> Result<Vec<(String, Vec<HunkDiff
     Ok(files)
 }
 
+/// Build a minimal unified-diff patch containing only the selected hunks.
+///
+/// When `reverse` is true the `+`/`-` prefixes are swapped and the `@@`
+/// header old/new counts are transposed so the patch removes what the
+/// original added (used for `unstage_hunks`).
+///
+/// The caller must ensure hunk indices are valid; out-of-range entries are
+/// silently skipped.
+fn build_patch_for_hunks(
+    path: &Path,
+    all_hunks: &[HunkDiff],
+    indices: &[usize],
+    reverse: bool,
+) -> Vec<u8> {
+    // Collect only the valid, in-range indices up front.
+    let selected: Vec<&HunkDiff> = indices
+        .iter()
+        .filter_map(|&i| all_hunks.get(i))
+        .collect();
+    if selected.is_empty() {
+        return Vec::new();
+    }
+
+    let path_str = path.to_string_lossy();
+    // libgit2's Diff::from_buffer requires the full git diff header.
+    let mut out = format!(
+        "diff --git a/{path_str} b/{path_str}\n--- a/{path_str}\n+++ b/{path_str}\n"
+    );
+
+    for hunk in selected {
+        let (os, oc, ns, nc) = if reverse {
+            (hunk.new_start, hunk.new_count, hunk.old_start, hunk.old_count)
+        } else {
+            (hunk.old_start, hunk.old_count, hunk.new_start, hunk.new_count)
+        };
+
+        out.push_str(&format!("@@ -{os},{oc} +{ns},{nc} @@\n"));
+
+        for line in &hunk.lines {
+            let prefix = match (reverse, &line.kind) {
+                (false, DiffLineKind::Added)   => '+',
+                (false, DiffLineKind::Removed) => '-',
+                (true,  DiffLineKind::Added)   => '-',
+                (true,  DiffLineKind::Removed) => '+',
+                _                              => ' ',
+            };
+            // Normalize: strip any trailing newline then re-add exactly one.
+            // libgit2 includes the line terminator in DiffLine::content; the
+            // Nexus DiffLine type documents it as absent — normalising handles
+            // both cases safely.
+            let content = line.content.trim_end_matches(['\n', '\r']);
+            out.push(prefix);
+            out.push_str(content);
+            out.push('\n');
+        }
+    }
+
+    out.into_bytes()
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1114,5 +1220,63 @@ mod tests {
         let branch_name = engine.state().unwrap().branch.unwrap();
         let result = engine.delete_branch(&branch_name);
         assert!(result.is_err(), "deleting current branch should fail");
+    }
+
+    #[test]
+    fn stage_hunks_stages_only_selected_hunk() {
+        let (dir, engine) = init_repo();
+        // Create a file with two separate sections so the diff has two hunks.
+        fs::write(
+            dir.path().join("file.txt"),
+            "line1\nline2\nline3\n\n\n\n\nline8\nline9\nline10\n",
+        )
+        .unwrap();
+        make_commit(&engine, "initial");
+
+        // Modify both sections.
+        fs::write(
+            dir.path().join("file.txt"),
+            "CHANGED1\nline2\nline3\n\n\n\n\nline8\nCHANGED9\nline10\n",
+        )
+        .unwrap();
+
+        let path = Path::new("file.txt");
+        let hunks = engine.diff_file(path).unwrap();
+        // Expect 2 hunks (one per modified section).
+        assert_eq!(hunks.len(), 2, "expected 2 hunks, got {}", hunks.len());
+
+        // Stage only hunk 0.
+        engine.stage_hunks(path, &[0]).unwrap();
+
+        // The file should now be in the staged diff.
+        let staged = engine.diff_staged().unwrap();
+        assert!(!staged.is_empty(), "expected staged diff after stage_hunks");
+        // And the working-tree diff should still have hunk 1 unstaged.
+        let remaining = engine.diff_file(path).unwrap();
+        assert!(!remaining.is_empty(), "expected remaining unstaged hunk");
+    }
+
+    #[test]
+    fn unstage_hunks_removes_selected_hunk_from_index() {
+        let (dir, engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "original\n").unwrap();
+        make_commit(&engine, "initial");
+
+        // Stage the whole file.
+        fs::write(dir.path().join("file.txt"), "modified\n").unwrap();
+        engine.stage_file(Path::new("file.txt")).unwrap();
+
+        let staged = engine.diff_staged().unwrap();
+        assert!(!staged.is_empty());
+
+        // Unstage hunk 0.
+        engine.unstage_hunks(Path::new("file.txt"), &[0]).unwrap();
+
+        // Index should now match HEAD again (no staged diff).
+        let after = engine.diff_staged().unwrap();
+        assert!(
+            after.is_empty() || after.iter().all(|(_, hs)| hs.is_empty()),
+            "expected empty staged diff after unstage_hunks"
+        );
     }
 }

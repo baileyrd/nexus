@@ -166,11 +166,34 @@ function ChangesTab() {
   const stagedFiles   = files.filter((f) => f.status === 'Staged' || f.status === 'Added')
   const unstagedFiles = files.filter((f) => f.status !== 'Staged' && f.status !== 'Added')
 
+  // Whether the currently selected file is in the staged section.
+  const selectedFileIsStaged = !!selectedFile && stagedFiles.some((f) => f.path === selectedFile)
+
   const selectFile = useCallback((entry: GitFileEntry) => {
     const isStaged = entry.status === 'Staged' || entry.status === 'Added'
     useGitPanelStore.getState().setSelectedFile(entry.path)
     void loadDiff(entry.path, isStaged)
   }, [])
+
+  const handleStageHunk = useCallback(async (hunkIndex: number) => {
+    if (!selectedFile) return
+    await getGitPanelApi().kernel.invoke(GIT_ID, 'stage_hunks', {
+      path: selectedFile,
+      hunk_indices: [hunkIndex],
+    })
+    await loadFiles()
+    await loadDiff(selectedFile, false)
+  }, [selectedFile])
+
+  const handleUnstageHunk = useCallback(async (hunkIndex: number) => {
+    if (!selectedFile) return
+    await getGitPanelApi().kernel.invoke(GIT_ID, 'unstage_hunks', {
+      path: selectedFile,
+      hunk_indices: [hunkIndex],
+    })
+    await loadFiles()
+    await loadDiff(selectedFile, true)
+  }, [selectedFile])
 
   const stageFile = useCallback(async (path: string) => {
     await getGitPanelApi().kernel.invoke(GIT_ID, 'stage_file', { path })
@@ -290,7 +313,11 @@ function ChangesTab() {
           ) : selectedHunks.length === 0 ? (
             <div style={MUTED_ROW}>No diff available.</div>
           ) : (
-            <DiffViewer hunks={selectedHunks} />
+            <DiffViewer
+              hunks={selectedHunks}
+              onStageHunk={!selectedFileIsStaged ? (i) => void handleStageHunk(i) : undefined}
+              onUnstageHunk={selectedFileIsStaged ? (i) => void handleUnstageHunk(i) : undefined}
+            />
           )}
         </div>
       )}
@@ -619,20 +646,71 @@ function LogTab() {
 
 // ── DiffViewer ────────────────────────────────────────────────────────────────
 
-function DiffViewer({ hunks }: { hunks: DiffHunk[] }) {
+function DiffViewer({
+  hunks,
+  onStageHunk,
+  onUnstageHunk,
+}: {
+  hunks: DiffHunk[]
+  onStageHunk?: (hunkIndex: number) => void
+  onUnstageHunk?: (hunkIndex: number) => void
+}) {
   return (
     <div style={{ fontFamily: 'var(--font-monospace)', fontSize: 11, lineHeight: 1.4 }}>
       {hunks.map((hunk, hi) => (
         <div key={hi}>
           <div
             style={{
-              padding: '2px 10px',
+              display: 'flex',
+              alignItems: 'center',
+              padding: '2px 6px 2px 10px',
               background: 'var(--background-modifier-border)',
               color: 'var(--text-muted)',
               userSelect: 'none',
+              gap: 6,
             }}
           >
-            @@ -{hunk.old_start},{hunk.old_count} +{hunk.new_start},{hunk.new_count} @@
+            <span style={{ flex: 1, fontFamily: 'var(--font-monospace)', fontSize: 10 }}>
+              @@ -{hunk.old_start},{hunk.old_count} +{hunk.new_start},{hunk.new_count} @@
+            </span>
+            {onStageHunk && (
+              <button
+                onClick={() => onStageHunk(hi)}
+                title="Stage this hunk"
+                style={{
+                  background: 'transparent',
+                  border: '1px solid var(--interactive-accent)',
+                  borderRadius: 'var(--radius-xs, 2px)',
+                  color: 'var(--interactive-accent)',
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-interface)',
+                  fontSize: 10,
+                  padding: '1px 6px',
+                  flexShrink: 0,
+                }}
+              >
+                Stage hunk
+              </button>
+            )}
+            {onUnstageHunk && (
+              <button
+                onClick={() => onUnstageHunk(hi)}
+                title="Unstage this hunk"
+                style={{
+                  background: 'transparent',
+                  border: '1px solid var(--background-modifier-border-hover, var(--background-modifier-border))',
+                  borderRadius: 'var(--radius-xs, 2px)',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-interface)',
+                  fontSize: 10,
+                  padding: '1px 6px',
+                  flexShrink: 0,
+                }}
+              >
+                Unstage hunk
+              </button>
+            )}
           </div>
           {hunk.lines.map((line, li) => {
             const isAdded   = line.kind === 'Added'

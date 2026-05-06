@@ -60,6 +60,10 @@ pub const HANDLER_CREATE_BRANCH: u32 = 14;
 pub const HANDLER_DELETE_BRANCH: u32 = 15;
 /// IPC handler: pushes to a remote (args: `{"remote": "...", "branch": "..."}`).
 pub const HANDLER_PUSH: u32 = 16;
+/// IPC handler: stages specific hunks (args: `{"path": "...", "hunk_indices": [0, 1]}`).
+pub const HANDLER_STAGE_HUNKS: u32 = 17;
+/// IPC handler: unstages specific hunks (args: `{"path": "...", "hunk_indices": [0]}`).
+pub const HANDLER_UNSTAGE_HUNKS: u32 = 18;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const POLL_TICK: Duration = Duration::from_millis(200);
@@ -319,6 +323,18 @@ impl CorePlugin for GitCorePlugin {
                 h.with(move |e| e.push(&remote, &branch)).map_err(map_err)?;
                 Ok(json!({"ok": true}))
             }
+            HANDLER_STAGE_HUNKS => {
+                let path = path_arg(args, &self.forge_root)?;
+                let indices = hunk_indices_arg(args)?;
+                h.with(move |e| e.stage_hunks(&path, &indices)).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
+            HANDLER_UNSTAGE_HUNKS => {
+                let path = path_arg(args, &self.forge_root)?;
+                let indices = hunk_indices_arg(args)?;
+                h.with(move |e| e.unstage_hunks(&path, &indices)).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("unknown handler_id {handler_id}"),
@@ -358,6 +374,27 @@ fn path_arg(args: &serde_json::Value, forge_root: &Path) -> Result<PathBuf, Plug
         }
     })?;
     Ok(PathBuf::from(raw))
+}
+
+/// Extract the `hunk_indices` array from IPC args as `Vec<usize>`.
+fn hunk_indices_arg(args: &serde_json::Value) -> Result<Vec<usize>, PluginError> {
+    let arr = args
+        .get("hunk_indices")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| PluginError::ExecutionFailed {
+            plugin_id: PLUGIN_ID.to_string(),
+            reason: "missing 'hunk_indices' array argument".to_string(),
+        })?;
+    arr.iter()
+        .map(|v| {
+            v.as_u64()
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(|| PluginError::ExecutionFailed {
+                    plugin_id: PLUGIN_ID.to_string(),
+                    reason: "hunk_indices entries must be non-negative integers".to_string(),
+                })
+        })
+        .collect()
 }
 
 /// Extract a plain string argument from the IPC args object.

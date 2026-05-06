@@ -152,6 +152,28 @@ pub fn unstage(app: &App, path: Option<&str>, all: bool) -> Result<()> {
     Ok(())
 }
 
+/// Stage specific hunks within a file.
+pub fn stage_hunk(app: &App, path: &str, hunk_indices: &[usize]) -> Result<()> {
+    let engine = open_engine(app)?;
+    engine
+        .stage_hunks(std::path::Path::new(path), hunk_indices)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let n = hunk_indices.len();
+    println!("Staged {n} hunk{} in {path}", if n == 1 { "" } else { "s" });
+    Ok(())
+}
+
+/// Unstage specific hunks within a file.
+pub fn unstage_hunk(app: &App, path: &str, hunk_indices: &[usize]) -> Result<()> {
+    let engine = open_engine(app)?;
+    engine
+        .unstage_hunks(std::path::Path::new(path), hunk_indices)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let n = hunk_indices.len();
+    println!("Unstaged {n} hunk{} in {path}", if n == 1 { "" } else { "s" });
+    Ok(())
+}
+
 /// Create a commit from staged changes.
 pub fn commit(app: &App, message: &str) -> Result<()> {
     let engine = open_engine(app)?;

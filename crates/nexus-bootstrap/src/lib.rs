@@ -1189,6 +1189,8 @@ fn register_core_plugins(
                     ("create_branch", nexus_git::core_plugin::HANDLER_CREATE_BRANCH),
                     ("delete_branch", nexus_git::core_plugin::HANDLER_DELETE_BRANCH),
                     ("push", nexus_git::core_plugin::HANDLER_PUSH),
+                    ("stage_hunks", nexus_git::core_plugin::HANDLER_STAGE_HUNKS),
+                    ("unstage_hunks", nexus_git::core_plugin::HANDLER_UNSTAGE_HUNKS),
                 ],
             ),
             forge_root,
