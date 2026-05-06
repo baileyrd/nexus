@@ -30,7 +30,7 @@ export const SWATCH_KEYS = [
   '--nx-syntax-keyword',
 ] as const
 
-export type PickerTab = 'themes' | 'snippets'
+export type PickerTab = 'themes' | 'snippets' | 'build'
 
 interface ThemePickerState {
   visible: boolean
@@ -41,6 +41,12 @@ interface ThemePickerState {
   swatchCache: Record<string, Record<string, string>>
   loadingSwatches: boolean
 
+  // ── Theme builder ──────────────────────────────────────────────────
+  /** Variable overrides being edited. Empty = no changes from base. */
+  builderOverrides: Record<string, string>
+  builderThemeName: string
+  builderThemeAuthor: string
+
   open(tab?: PickerTab): void
   close(): void
   setActiveTab(tab: PickerTab): void
@@ -48,6 +54,11 @@ interface ThemePickerState {
   setCategoryFilter(cat: CategoryFilter): void
   setSwatchCache(cache: Record<string, Record<string, string>>): void
   setLoadingSwatches(loading: boolean): void
+  setBuilderOverride(key: string, value: string): void
+  clearBuilderOverride(key: string): void
+  resetBuilderOverrides(): void
+  setBuilderThemeName(name: string): void
+  setBuilderThemeAuthor(author: string): void
 }
 
 export const useThemePickerStore = create<ThemePickerState>((set) => ({
@@ -58,6 +69,10 @@ export const useThemePickerStore = create<ThemePickerState>((set) => ({
   swatchCache: {},
   loadingSwatches: false,
 
+  builderOverrides: {},
+  builderThemeName: '',
+  builderThemeAuthor: '',
+
   open: (tab = 'themes') => set({ visible: true, activeTab: tab, query: '', categoryFilter: 'all' }),
   close: () => set({ visible: false }),
   setActiveTab: (tab) => set({ activeTab: tab }),
@@ -65,4 +80,15 @@ export const useThemePickerStore = create<ThemePickerState>((set) => ({
   setCategoryFilter: (cat) => set({ categoryFilter: cat }),
   setSwatchCache: (cache) => set({ swatchCache: cache }),
   setLoadingSwatches: (loading) => set({ loadingSwatches: loading }),
+  setBuilderOverride: (key, value) =>
+    set((s) => ({ builderOverrides: { ...s.builderOverrides, [key]: value } })),
+  clearBuilderOverride: (key) =>
+    set((s) => {
+      const next = { ...s.builderOverrides }
+      delete next[key]
+      return { builderOverrides: next }
+    }),
+  resetBuilderOverrides: () => set({ builderOverrides: {} }),
+  setBuilderThemeName: (name) => set({ builderThemeName: name }),
+  setBuilderThemeAuthor: (author) => set({ builderThemeAuthor: author }),
 }))

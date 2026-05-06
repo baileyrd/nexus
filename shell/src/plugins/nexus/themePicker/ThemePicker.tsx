@@ -13,6 +13,7 @@ import {
   type PickerTab,
 } from './themePickerStore'
 import { getPickerApi } from './pickerRuntime'
+import { ThemeBuilderPanel } from './ThemeBuilder'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -114,13 +115,13 @@ function ThemePickerModal() {
         >
           {/* Tab buttons */}
           <div style={{ display: 'flex', flex: 1 }}>
-            {(['themes', 'snippets'] as PickerTab[]).map((tab) => (
+            {(['themes', 'snippets', 'build'] as PickerTab[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 style={TAB_STYLE(activeTab === tab)}
               >
-                {tab === 'themes' ? 'Themes' : 'Snippets'}
+                {tab === 'themes' ? 'Themes' : tab === 'snippets' ? 'Snippets' : 'Build'}
               </button>
             ))}
           </div>
@@ -190,7 +191,13 @@ function ThemePickerModal() {
         </div>
 
         {/* ── Body ── */}
-        {activeTab === 'themes' ? <ThemesTab /> : <SnippetsPanel />}
+        {activeTab === 'themes' ? (
+          <ThemesTab />
+        ) : activeTab === 'snippets' ? (
+          <SnippetsPanel />
+        ) : (
+          <ThemeBuilderPanel />
+        )}
       </div>
     </div>
   )
