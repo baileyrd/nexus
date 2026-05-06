@@ -448,46 +448,31 @@ The backend already returns `Vec<HunkDiff>` from `diff_file` and `diff_staged`. 
 
 ### BL-084: Shell git panel — commit UI, branch picker, log graph
 
+> **3 of 4 surfaces shipped 2026-05-06** in `shell/src/plugins/nexus/gitPanel/`. Remaining: conflict resolution panel. Note: the original assessment that "all `com.nexus.git` handlers already ship" was incorrect — 6 new IPC handlers (11–16) were added as part of this work.
+
 **Source**: Git Integration Assessment (2026-05-06) — gap #1 (largest UX gap)
 **Effort**: Large (3–4 weeks)
-**Crates**: new `shell/src/plugins/nexus/gitPanel/`
-**Related**: BL-079 (git gutter + diff viewer — do first or in parallel); all `com.nexus.git` handlers already ship
+**Crates**: `shell/src/plugins/nexus/gitPanel/`, `crates/nexus-git/src/core_plugin.rs`
+**Related**: BL-079 (git gutter + diff viewer); BL-085 (hunk-level staging)
 
-The Rust backend is complete. The shell exposes only a status bar (branch + dirty indicator). Users have no way to commit, switch branches, view log history, or resolve conflicts from within the shell.
+**New IPC handlers added (2026-05-06):**
+- Handler 11 `file_statuses` — `{}` → `[{path, status}]`
+- Handler 12 `diff_staged` — `{}` → `[{path, hunks[]}]`
+- Handler 13 `switch_branch` — `{name}` → `GitOk`
+- Handler 14 `create_branch` — `{name}` → `GitOk`
+- Handler 15 `delete_branch` — `{name}` → `GitOk`
+- Handler 16 `push` — `{remote, branch}` → `GitOk`
 
-**Surfaces needed (each independently shippable):**
+**Surfaces:**
 
-**Commit panel:**
-- Staged/unstaged file list with checkboxes (calls `stage_file`/`unstage_file`)
-- Diff preview on file click (calls `diff_file` or `diff_staged`)
-- Commit message input with conventional-commit template helper
-- Commit button (calls `commit`) + push toggle (calls `push` after commit)
-- Empty-state prompts when nothing to commit
+- **Commit panel** ✅ shipped — staged/unstaged file lists, inline diff preview (`diff_file` / `diff_staged`), stage/unstage individual or all, commit message (⌘Enter), push-after-commit checkbox
+- **Branch picker** ✅ shipped — branch list with HEAD + upstream labels, switch, create+switch, delete with confirmation
+- **Log** ✅ shipped — 50 most recent commits, hash chip (copy), HEAD badge, author, relative date; click-to-show-diff deferred
+- **Conflict resolution panel** ❌ not built — triggered on `repo_state: Merge`, three-way diff, per-hunk accept/reject, abort merge
 
-**Branch picker:**
-- Dropdown or popover from status bar showing all local branches
-- Click to switch (calls `switch_branch`); warns if dirty (prompts stash or discard)
-- "New branch" input (calls `create_branch` then `switch_branch`)
-- Delete button per branch with confirmation (calls `delete_branch`)
-
-**Log graph:**
-- Scrollable commit list from `log` handler — hash chip, author, date, message
-- Click commit to show its diff
-- "Copy hash" action
-- HEAD marker, branch labels
-
-**Conflict resolution panel:**
-- Triggered when `repo_state = "Merge"` event fires
-- Lists conflicted files from `conflict_files` handler
-- Click file opens three-way diff view (ours / base / theirs)
-- "Accept ours" / "Accept theirs" / "Accept both" per-hunk buttons
-- "Abort merge" button (calls `abort_merge`)
-- After resolving all conflicts: stage + commit flow
-
-**Definition of done:**
-- All four surfaces accessible from command palette and a dedicated sidebar panel
-- Commit panel is the MVP — ships first; branch picker and log graph follow
+**Definition of done (remaining):**
 - Conflict panel activates automatically when `com.nexus.git.state` publishes `repo_state: Merge`
+- Per-hunk accept/reject wired to `conflict_files`, `abort_merge` handlers (not yet exposed via IPC)
 
 ---
 
