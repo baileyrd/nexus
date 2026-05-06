@@ -279,6 +279,62 @@ pub struct GitBranchArgs {
     pub name: String,
 }
 
+/// One entry in the `stash_list` response (handler id `24`). Mirrors
+/// [`crate::types::StashEntry`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitStashEntry {
+    /// 0-based position in the stash stack (0 = most recent).
+    pub index: usize,
+    /// Human-readable stash message.
+    pub message: String,
+    /// Short hex hash of the stash commit.
+    pub oid: String,
+}
+
+/// Args for `stash_push` (handler id `23`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitStashPushArgs {
+    /// Optional stash message. A default `"WIP on <branch>: <head>"` is
+    /// generated if omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// Args for `stash_pop` and `stash_drop` (handler ids `25`, `26`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitStashIndexArgs {
+    /// 0-based stash index. Defaults to `0` (most recent) when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+}
+
 /// Args for `stage_hunks` (17) and `unstage_hunks` (18).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]

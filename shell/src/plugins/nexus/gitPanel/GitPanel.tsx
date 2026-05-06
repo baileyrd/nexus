@@ -6,6 +6,7 @@ import {
   type GitFileEntry,
   type BranchEntry,
   type LogEntry,
+  type StashEntry,
 } from './gitPanelStore'
 import { getGitPanelApi } from './gitPanelRuntime'
 
@@ -60,6 +61,20 @@ async function loadLog(): Promise<void> {
   }
 }
 
+async function loadStash(): Promise<void> {
+  const s = useGitPanelStore.getState()
+  s.setLoadingStash(true)
+  try {
+    const api = getGitPanelApi()
+    const entries = await api.kernel.invoke<StashEntry[]>(GIT_ID, 'stash_list', {})
+    s.setStashEntries(entries)
+  } catch {
+    s.setStashEntries([])
+  } finally {
+    s.setLoadingStash(false)
+  }
+}
+
 async function loadDiff(path: string, staged: boolean): Promise<void> {
   const s = useGitPanelStore.getState()
   s.setLoadingDiff(true)
@@ -95,6 +110,7 @@ export function GitPanel() {
     void loadFiles()
     void loadBranches()
     void loadLog()
+    void loadStash()
   }, [status])
 
   if (!status) {
@@ -162,6 +178,8 @@ function ChangesTab() {
   const setCommitMessage = useGitPanelStore((s) => s.setCommitMessage)
   const setCommitting  = useGitPanelStore((s) => s.setCommitting)
   const setPush        = useGitPanelStore((s) => s.setPushAfterCommit)
+
+  const stashEntries  = useGitPanelStore((s) => s.stashEntries)
 
   const stagedFiles   = files.filter((f) => f.status === 'Staged' || f.status === 'Added')
   const unstagedFiles = files.filter((f) => f.status !== 'Staged' && f.status !== 'Added')
@@ -239,6 +257,23 @@ function ChangesTab() {
       setCommitting(false)
     }
   }, [commitMessage, committing, pushAfterCommit, setCommitting, setCommitMessage])
+
+  const handleStashPush = useCallback(async () => {
+    await getGitPanelApi().kernel.invoke(GIT_ID, 'stash_push', {})
+    await loadFiles()
+    await loadStash()
+  }, [])
+
+  const handleStashPop = useCallback(async (index: number) => {
+    await getGitPanelApi().kernel.invoke(GIT_ID, 'stash_pop', { index })
+    await loadFiles()
+    await loadStash()
+  }, [])
+
+  const handleStashDrop = useCallback(async (index: number) => {
+    await getGitPanelApi().kernel.invoke(GIT_ID, 'stash_drop', { index })
+    await loadStash()
+  }, [])
 
   const canCommit = stagedFiles.length > 0 && commitMessage.trim().length > 0 && !committing
 
@@ -321,6 +356,14 @@ function ChangesTab() {
           )}
         </div>
       )}
+
+      {/* Stash section */}
+      <StashSection
+        entries={stashEntries}
+        onStash={() => void handleStashPush()}
+        onPop={(i) => void handleStashPop(i)}
+        onDrop={(i) => void handleStashDrop(i)}
+      />
 
       {/* Commit area */}
       <div
@@ -743,6 +786,132 @@ function DiffViewer({
       ))}
     </div>
   )
+}
+
+// ── StashSection ─────────────────────────────────────────────────────────────
+
+interface StashSectionProps {
+  entries: StashEntry[]
+  onStash(): void
+  onPop(index: number): void
+  onDrop(index: number): void
+}
+
+function StashSection({ entries, onStash, onPop, onDrop }: StashSectionProps) {
+  return (
+    <div
+      style={{
+        borderTop: '1px solid var(--background-modifier-border)',
+        flexShrink: 0,
+      }}
+    >
+      {/* Header row */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '4px 12px',
+          background: 'var(--background-secondary)',
+        }}
+      >
+        <span
+          style={{
+            fontFamily: 'var(--font-interface)',
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'var(--text-muted)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            flex: 1,
+          }}
+        >
+          Stash{entries.length > 0 ? ` (${entries.length})` : ''}
+        </span>
+        <button
+          onClick={onStash}
+          title="Stash all uncommitted changes"
+          style={{
+            background: 'transparent',
+            border: '1px solid var(--background-modifier-border)',
+            borderRadius: 'var(--radius-s)',
+            color: 'var(--text-muted)',
+            cursor: 'pointer',
+            fontFamily: 'var(--font-interface)',
+            fontSize: 11,
+            padding: '2px 8px',
+          }}
+        >
+          Stash
+        </button>
+      </div>
+
+      {/* Stash entries */}
+      {entries.map((entry) => (
+        <div
+          key={entry.index}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 12px',
+          }}
+        >
+          <span
+            style={{
+              fontFamily: 'var(--font-monospace)',
+              fontSize: 10,
+              color: 'var(--text-muted)',
+              background: 'var(--background-modifier-border)',
+              borderRadius: 'var(--radius-xs, 2px)',
+              padding: '0 4px',
+              flexShrink: 0,
+            }}
+          >
+            {entry.oid}
+          </span>
+          <span
+            style={{
+              fontFamily: 'var(--font-interface)',
+              fontSize: 11,
+              color: 'var(--text-muted)',
+              flex: 1,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {entry.message}
+          </span>
+          <button
+            onClick={() => onPop(entry.index)}
+            title="Apply and remove this stash"
+            style={STASH_BTN}
+          >
+            Pop
+          </button>
+          <button
+            onClick={() => onDrop(entry.index)}
+            title="Discard this stash"
+            style={{ ...STASH_BTN, color: 'var(--text-error, #E74C3C)' }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const STASH_BTN: React.CSSProperties = {
+  background: 'transparent',
+  border: '1px solid var(--background-modifier-border)',
+  borderRadius: 'var(--radius-s)',
+  color: 'var(--text-muted)',
+  cursor: 'pointer',
+  fontFamily: 'var(--font-interface)',
+  fontSize: 11,
+  padding: '1px 6px',
+  flexShrink: 0,
 }
 
 // ── Helper components ─────────────────────────────────────────────────────────

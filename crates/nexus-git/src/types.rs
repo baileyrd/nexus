@@ -172,6 +172,17 @@ pub struct StatusEntry {
     pub status: FileStatus,
 }
 
+/// A stash entry.
+#[derive(Debug, Clone)]
+pub struct StashEntry {
+    /// 0-based position in the stash stack (0 = most recent).
+    pub index: usize,
+    /// Human-readable stash message (e.g. `"WIP on main: abc1234 …"`).
+    pub message: String,
+    /// Short hex hash of the stash commit.
+    pub oid: String,
+}
+
 /// A git tag (annotated or lightweight).
 #[derive(Debug, Clone)]
 pub struct TagInfo {

@@ -39,6 +39,12 @@ export interface LogEntry {
   parents: string[]
 }
 
+export interface StashEntry {
+  index: number
+  message: string
+  oid: string
+}
+
 export type GitPanelTab = 'changes' | 'branches' | 'log'
 
 interface GitPanelState {
@@ -63,6 +69,10 @@ interface GitPanelState {
   logEntries: LogEntry[]
   loadingLog: boolean
 
+  // ── Stash ──────────────────────────────────────────────────────────
+  stashEntries: StashEntry[]
+  loadingStash: boolean
+
   // ── Actions ────────────────────────────────────────────────────────
   setActiveTab(tab: GitPanelTab): void
   setFiles(files: GitFileEntry[]): void
@@ -78,6 +88,8 @@ interface GitPanelState {
   setNewBranchName(name: string): void
   setLogEntries(entries: LogEntry[]): void
   setLoadingLog(v: boolean): void
+  setStashEntries(entries: StashEntry[]): void
+  setLoadingStash(v: boolean): void
   reset(): void
 }
 
@@ -96,6 +108,8 @@ export const useGitPanelStore = create<GitPanelState>((set) => ({
   newBranchName: '',
   logEntries: [],
   loadingLog: false,
+  stashEntries: [],
+  loadingStash: false,
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setFiles: (files) => set({ files }),
@@ -111,6 +125,8 @@ export const useGitPanelStore = create<GitPanelState>((set) => ({
   setNewBranchName: (name) => set({ newBranchName: name }),
   setLogEntries: (entries) => set({ logEntries: entries }),
   setLoadingLog: (v) => set({ loadingLog: v }),
+  setStashEntries: (entries) => set({ stashEntries: entries }),
+  setLoadingStash: (v) => set({ loadingStash: v }),
   reset: () => set({
     files: [], selectedFile: null, selectedHunks: [],
     branches: [], logEntries: [], commitMessage: '',

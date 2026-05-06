@@ -44,14 +44,16 @@ export const gitPanelPlugin: Plugin = {
       if (!status) return
 
       const s = useGitPanelStore.getState()
-      const [files, branches, log] = await Promise.all([
+      const [files, branches, log, stash] = await Promise.all([
         api.kernel.invoke<Array<{ path: string; status: string }>>(GIT_ID, 'file_statuses', {}).catch(() => []),
         api.kernel.invoke<Array<{ name: string; is_head: boolean; upstream?: string }>>(GIT_ID, 'branches', {}).catch(() => []),
         api.kernel.invoke<Array<{ hash: string; author: string; date: string; message: string; parents: string[] }>>(GIT_ID, 'log', { limit: 50 }).catch(() => []),
+        api.kernel.invoke<Array<{ index: number; message: string; oid: string }>>(GIT_ID, 'stash_list', {}).catch(() => []),
       ])
       s.setFiles(files)
       s.setBranches(branches)
       s.setLogEntries(log)
+      s.setStashEntries(stash)
     }
 
     // Refresh on git events (branch change, commit, dirty toggle).

@@ -1084,6 +1084,11 @@ enum GitCommand {
         #[arg(long, value_name = "REMOTE")]
         push: Option<String>,
     },
+    /// Stash uncommitted changes
+    Stash {
+        #[command(subcommand)]
+        command: Option<StashCommand>,
+    },
     /// Fetch refs from a remote
     Fetch {
         /// Remote name (default: origin)
@@ -1150,6 +1155,9 @@ enum BranchCommand {
     Switch {
         /// Branch name
         name: String,
+        /// Stash uncommitted changes before switching (no auto-pop)
+        #[arg(long)]
+        stash: bool,
     },
     /// Delete a branch
     Delete {
@@ -1157,6 +1165,26 @@ enum BranchCommand {
         name: String,
     },
 }
+
+/// Stash subcommands.
+#[derive(Subcommand)]
+enum StashCommand {
+    /// List all stash entries
+    List,
+    /// Apply the most-recent (or specified) stash and remove it from the stack
+    Pop {
+        /// 0-based stash index (default: 0 = most recent)
+        #[arg(default_value_t = 0)]
+        index: usize,
+    },
+    /// Discard a stash entry without applying it
+    Drop {
+        /// 0-based stash index (default: 0 = most recent)
+        #[arg(default_value_t = 0)]
+        index: usize,
+    },
+}
+
 
 // ---------------------------------------------------------------------------
 // Stub — used for not-yet-implemented command groups
@@ -1543,6 +1571,7 @@ fn main() {
             GitCommand::UnstageHunk { path, hunks } => commands::git::unstage_hunk(&app, &path, &hunks),
             GitCommand::Commit { message } => commands::git::commit(&app, &message),
             GitCommand::Branch { command } => commands::git::branch(&app, command),
+            GitCommand::Stash { command } => commands::git::stash(&app, command),
             GitCommand::Tag { name, message, delete, push } => {
                 commands::git::tag(&app, name.as_deref(), message.as_deref(), delete.as_deref(), push.as_deref())
             }

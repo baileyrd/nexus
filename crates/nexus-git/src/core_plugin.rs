@@ -103,6 +103,14 @@ pub const HANDLER_PUSH: u32 = 16;
 pub const HANDLER_STAGE_HUNKS: u32 = 17;
 /// IPC handler: unstages specific hunks (args: `{"path": "...", "hunk_indices": [0]}`).
 pub const HANDLER_UNSTAGE_HUNKS: u32 = 18;
+/// IPC handler: saves working-tree state to the stash (args: `{"message": "…"}` optional).
+pub const HANDLER_STASH_PUSH: u32 = 23;
+/// IPC handler: lists all stash entries.
+pub const HANDLER_STASH_LIST: u32 = 24;
+/// IPC handler: applies the top stash entry and removes it (args: `{"index": 0}` optional).
+pub const HANDLER_STASH_POP: u32 = 25;
+/// IPC handler: discards a stash entry without applying (args: `{"index": 0}` optional).
+pub const HANDLER_STASH_DROP: u32 = 26;
 /// IPC handler: lists all local tags.
 pub const HANDLER_LIST_TAGS: u32 = 19;
 /// IPC handler: creates a tag at HEAD (args: `{"name": "...", "message": "..."}`).
@@ -412,6 +420,33 @@ impl CorePlugin for GitCorePlugin {
                 let path = path_arg(args, &self.forge_root)?;
                 let indices = hunk_indices_arg(args)?;
                 h.with(move |e| e.unstage_hunks(&path, &indices)).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
+            HANDLER_STASH_PUSH => {
+                let message = args.get("message").and_then(|v| v.as_str()).map(str::to_string);
+                let idx = h.with(move |e| e.stash_push(message.as_deref())).map_err(map_err)?;
+                Ok(json!({"ok": true, "index": idx}))
+            }
+            HANDLER_STASH_LIST => {
+                let entries = h.with(|e| e.stash_list()).map_err(map_err)?;
+                let arr: Vec<_> = entries
+                    .iter()
+                    .map(|s| json!({"index": s.index, "message": s.message, "oid": s.oid}))
+                    .collect();
+                Ok(serde_json::Value::Array(arr))
+            }
+            HANDLER_STASH_POP => {
+                let idx = args.get("index").and_then(|v| v.as_u64())
+                    .and_then(|n| usize::try_from(n).ok())
+                    .unwrap_or(0);
+                h.with(move |e| e.stash_pop(idx)).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
+            HANDLER_STASH_DROP => {
+                let idx = args.get("index").and_then(|v| v.as_u64())
+                    .and_then(|n| usize::try_from(n).ok())
+                    .unwrap_or(0);
+                h.with(move |e| e.stash_drop(idx)).map_err(map_err)?;
                 Ok(json!({"ok": true}))
             }
             HANDLER_LIST_TAGS => {

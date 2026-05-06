@@ -233,7 +233,7 @@ pub fn commit(app: &App, message: &str) -> Result<()> {
 
 /// Branch operations: list, create, switch, delete.
 pub fn branch(app: &App, command: Option<crate::BranchCommand>) -> Result<()> {
-    let engine = open_engine(app)?;
+    let mut engine = open_engine(app)?;
 
     match command {
         None => {
@@ -255,7 +255,11 @@ pub fn branch(app: &App, command: Option<crate::BranchCommand>) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             println!("Created branch: {name}");
         }
-        Some(crate::BranchCommand::Switch { name }) => {
+        Some(crate::BranchCommand::Switch { name, stash }) => {
+            if stash {
+                engine.stash_push(None).map_err(|e| anyhow::anyhow!("{e}"))?;
+                println!("Stashed uncommitted changes.");
+            }
             engine
                 .switch_branch(&name)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -266,6 +270,38 @@ pub fn branch(app: &App, command: Option<crate::BranchCommand>) -> Result<()> {
                 .delete_branch(&name)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             println!("Deleted branch: {name}");
+        }
+    }
+    Ok(())
+}
+
+/// Stash operations: push (default), list, pop, drop.
+pub fn stash(app: &App, command: Option<crate::StashCommand>) -> Result<()> {
+    let mut engine = open_engine(app)?;
+
+    match command {
+        // Default (no subcommand): push current dirty state.
+        None => {
+            let idx = engine.stash_push(None).map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Stashed working tree changes as stash@{{{idx}}}.");
+        }
+        Some(crate::StashCommand::List) => {
+            let entries = engine.stash_list().map_err(|e| anyhow::anyhow!("{e}"))?;
+            if entries.is_empty() {
+                println!("No stash entries.");
+            } else {
+                for e in &entries {
+                    println!("stash@{{{}}} ({}) {}", e.index, e.oid, e.message);
+                }
+            }
+        }
+        Some(crate::StashCommand::Pop { index }) => {
+            engine.stash_pop(index).map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Applied and dropped stash@{{{index}}}.");
+        }
+        Some(crate::StashCommand::Drop { index }) => {
+            engine.stash_drop(index).map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Dropped stash@{{{index}}}.");
         }
     }
     Ok(())

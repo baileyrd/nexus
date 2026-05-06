@@ -6,7 +6,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use git2::{ApplyLocation, DiffOptions, Repository, StatusOptions};
 
 use crate::error::GitError;
-use crate::types::{GitState, RepoState, StatusEntry, FileStatus, HunkDiff, BlameEntry, LogEntry, BranchInfo, MergeResult, DiffLineKind, DiffLine, TagInfo};
+use crate::types::{GitState, RepoState, StatusEntry, FileStatus, HunkDiff, BlameEntry, LogEntry, BranchInfo, MergeResult, DiffLineKind, DiffLine, TagInfo, StashEntry};
 
 /// Git engine backed by `git2::Repository`.
 ///
@@ -619,6 +619,86 @@ impl GitEngine {
     /// Returns [`GitError`] if the tag does not exist or libgit2 fails.
     pub fn delete_tag(&self, name: &str) -> Result<(), GitError> {
         self.repo.tag_delete(name)?;
+        Ok(())
+    }
+
+    // ── Stash ─────────────────────────────────────────────────────────────────
+
+    /// Save the current dirty state to the stash stack.
+    ///
+    /// Returns the index of the new stash entry (always 0 — stash is a stack
+    /// and the new entry is pushed to the top).
+    ///
+    /// If `message` is `None` a default `"WIP on {branch}: {head}"` message
+    /// is generated. Returns an error if the working tree is clean (nothing
+    /// to stash).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn stash_push(&mut self, message: Option<&str>) -> Result<usize, GitError> {
+        let sig = self.repo.signature()?;
+        let default_msg;
+        let msg = if let Some(m) = message {
+            m
+        } else {
+            let state = self.state()?;
+            let branch = state.branch.as_deref().unwrap_or("HEAD");
+            default_msg = format!("WIP on {branch}: {}", state.head_oid);
+            &default_msg
+        };
+        self.repo.stash_save(&sig, msg, None)?;
+        Ok(0)
+    }
+
+    /// List all stash entries (newest first).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn stash_list(&mut self) -> Result<Vec<StashEntry>, GitError> {
+        let mut entries = Vec::new();
+        self.repo.stash_foreach(|index, message, oid| {
+            entries.push(StashEntry {
+                index,
+                message: message.to_string(),
+                oid: oid.to_string()[..7].to_string(),
+            });
+            true // continue iteration
+        })?;
+        Ok(entries)
+    }
+
+    /// Apply a stash entry to the working tree and remove it from the stack.
+    ///
+    /// `index` defaults to 0 (most recent stash). After this call the stash
+    /// entry is gone regardless of whether the apply had conflicts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn stash_pop(&mut self, index: usize) -> Result<(), GitError> {
+        self.repo.stash_pop(index, None)?;
+        Ok(())
+    }
+
+    /// Apply a stash entry to the working tree without removing it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn stash_apply(&mut self, index: usize) -> Result<(), GitError> {
+        self.repo.stash_apply(index, None)?;
+        Ok(())
+    }
+
+    /// Drop a stash entry from the stack without applying it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn stash_drop(&mut self, index: usize) -> Result<(), GitError> {
+        self.repo.stash_drop(index)?;
         Ok(())
     }
 
@@ -1284,6 +1364,62 @@ mod tests {
 
         engine.delete_branch("to-delete").unwrap();
         assert!(!engine.branches().unwrap().iter().any(|b| b.name == "to-delete"));
+    }
+
+    #[test]
+    fn stash_push_and_list() {
+        let (dir, mut engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "original").unwrap();
+        make_commit(&engine, "initial");
+
+        // Modify the file to make the tree dirty.
+        fs::write(dir.path().join("file.txt"), "dirty").unwrap();
+        assert!(engine.state().unwrap().is_dirty);
+
+        // Stash.
+        let idx = engine.stash_push(Some("my stash")).unwrap();
+        assert_eq!(idx, 0);
+
+        // Working tree should be clean after stash.
+        assert!(!engine.state().unwrap().is_dirty);
+
+        // List should have one entry.
+        let entries = engine.stash_list().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].index, 0);
+        assert!(entries[0].message.contains("my stash"));
+    }
+
+    #[test]
+    fn stash_pop_restores_changes() {
+        let (dir, mut engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "original").unwrap();
+        make_commit(&engine, "initial");
+
+        fs::write(dir.path().join("file.txt"), "dirty").unwrap();
+        engine.stash_push(None).unwrap();
+        assert!(!engine.state().unwrap().is_dirty);
+
+        engine.stash_pop(0).unwrap();
+        assert!(engine.state().unwrap().is_dirty);
+
+        // Stash should be empty after pop.
+        assert!(engine.stash_list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn stash_drop_discards_entry() {
+        let (dir, mut engine) = init_repo();
+        fs::write(dir.path().join("file.txt"), "original").unwrap();
+        make_commit(&engine, "initial");
+
+        fs::write(dir.path().join("file.txt"), "dirty").unwrap();
+        engine.stash_push(None).unwrap();
+
+        engine.stash_drop(0).unwrap();
+        // Still clean — drop doesn't apply.
+        assert!(!engine.state().unwrap().is_dirty);
+        assert!(engine.stash_list().unwrap().is_empty());
     }
 
     #[test]
