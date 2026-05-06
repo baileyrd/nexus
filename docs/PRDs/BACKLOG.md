@@ -16,6 +16,142 @@
 
 _BL-009 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
+### BL-103: Security fuzz targets
+
+**Source**: Security Integration Assessment (2026-05-06) — gap #6
+**Effort**: Medium (1 week)
+**Crates**: new `crates/nexus-fuzz/` workspace member; targets `nexus-types` (path validator), `nexus-plugins` (sandbox, host_fns), `nexus-kernel` (event bus, capability system)
+**Related**: PRD-02 §15 (security testing); cargo-fuzz / libFuzzer integration
+
+Zero fuzz targets exist in the codebase. The PRD specifies fuzz targets for the WASM sandbox, path validator, capability gates, and AI prompt handling. For security-critical code that processes untrusted inputs (plugin WASM bytes, file paths, event type IDs, AI responses), fuzzing is the most effective way to find edge cases that unit tests miss.
+
+**Definition of done:**
+- `crates/nexus-fuzz/` workspace member with `cargo fuzz` targets:
+  - `fuzz_path_validator` — exercises `ForgePathValidator::validate` + `validate_for_write` with arbitrary byte strings; corpus seeded with traversal attack patterns (`../`, null bytes, absolute paths, long paths, symlink chains)
+  - `fuzz_wasm_instantiation` — exercises `WasmSandbox::new` with arbitrary WASM bytes; should not panic or escape the sandbox
+  - `fuzz_event_type_id` — exercises `type_id_in_namespace` with arbitrary plugin_id + type_id pairs; validates namespace spoofing prevention
+  - `fuzz_capability_set` — exercises `CapabilitySet` operations with random capability bitmasks
+  - `fuzz_manifest_parse` — exercises `PluginManifest::from_toml` with arbitrary TOML strings
+- CI runs fuzz targets for 60 seconds each on merge to main (fast-fuzz gate)
+- Corpus artifacts stored in `crates/nexus-fuzz/corpus/` and checked in
+- Any crash reproducer → immediate P1 bug + test added to unit suite before fix merges
+
+---
+
+### BL-102: TLS pinning for AI provider HTTP clients
+
+**Source**: Security Integration Assessment (2026-05-06) — gap #5
+**Effort**: Small (1 day)
+**Crates**: `nexus-ai/src/anthropic.rs`, `nexus-ai/src/openai.rs`, `nexus-security/src/` (pinning config)
+**Related**: PRD-02 §7.2 (TLS pinning); `SecureConnection::connect_with_pinning` defined but never called
+
+`SecureConnection::connect_with_pinning` is defined in `nexus-security`. The AI provider HTTP clients (`anthropic.rs`, `openai.rs`) never call it. A MITM between Nexus and the Anthropic or OpenAI API is currently undetectable by the application — the TLS handshake completes against any valid certificate.
+
+**Definition of done:**
+- `nexus-ai` HTTP clients (reqwest-based) built with a custom `rustls` config that pins the expected root CA certificate for `api.anthropic.com` and `api.openai.com`
+- Pinned certificate SHA-256 fingerprints stored in `nexus-security/src/tls_pins.rs` as compile-time constants
+- Connection fails with `SecurityError::CertificatePinMismatch { host, expected, actual }` if the server certificate doesn't match
+- `KernelConfig::tls_pinning_enabled` (default `true`) allows opt-out for corporate proxy environments
+- `nexus ai status` CLI output includes `tls_pinned: true/false` for the active provider
+
+---
+
+### BL-101: `granted_caps.json` encryption at rest
+
+**Source**: Security Integration Assessment (2026-05-06) — gap #4
+**Effort**: Small (1 day)
+**Crates**: `nexus-plugins/src/loader.rs` (read/write grants), `nexus-security` (encryption helper)
+**Related**: PRD-02 §6.3 (credential file encryption); `granted_caps.json` currently plaintext JSON
+
+`granted_caps.json` stores which HIGH-risk capabilities the user has approved for each community plugin. It is unencrypted plaintext JSON, directly editable by any process with file access. A user (or malware with file access) can trivially edit it to grant `net.http` or `process.spawn` to any plugin without going through the consent dialog.
+
+**Definition of done:**
+- `granted_caps.json` written as an AEAD-encrypted blob (ChaCha20-Poly1305 or AES-256-GCM) using a key derived from the OS keyring via PBKDF2-SHA256
+- Key derivation: `PBKDF2(forge_path + "granted_caps_key", salt_from_file, 100_000_iter, SHA256)` with salt stored in a companion `.granted_caps.salt` file
+- `load_granted_high_risk_caps` decrypts on read; `grant_capability` re-encrypts on write
+- Decryption failure → log warning + clear grants (prompts user re-consent) rather than aborting
+- `NEXUS_NO_KEYRING=1` disables encryption (grants stored as plaintext with a clear warning in logs)
+- Unit tests use in-memory key (no real keyring) to verify encrypt/decrypt roundtrip
+
+---
+
+### BL-100: Audit log CLI export and rolling file persistence
+
+**Source**: Security Integration Assessment (2026-05-06) — gap #2 follow-up
+**Effort**: Small (1 day)
+**Crates**: `nexus-cli/src/commands/` (new `nexus logs` subcommand), `nexus-kernel/src/audit.rs`
+**Related**: BL-094 (kernel audit SQLite store — **required first**); PRD-02 §11.3 (rolling files + CLI export)
+
+BL-094 adds the SQLite audit store backing. This BL adds the user-facing surfaces that PRD-02 §11 specifies but are separate from the kernel infrastructure: the CLI export command, rolling file output, and retention enforcement.
+
+**Blocked by:** BL-094 must ship first (needs the `com.nexus.kernel::audit_query` IPC handler).
+
+**Definition of done:**
+- `nexus logs` CLI subcommand tree:
+  - `nexus logs list [--plugin <id>] [--type <event_type>] [--since <date>] [--limit N]` — query audit store
+  - `nexus logs export [--start <date>] [--end <date>] [--format jsonl|csv]` — export to stdout or file
+  - `nexus logs clear [--older-than <days>]` — prune old entries
+- Optional rolling file output: `KernelConfig::audit_log_dir` enables writing JSONL files, rotating at 100 MB, compressing to `.gz`, keeping 90 days
+- Rolling file writer plugs into the `tracing-appender` stack alongside the terminal subscriber
+- 90-day retention policy enforced on forge open (prune entries older than `retention_days` from both SQLite and rolling files)
+
+---
+
+### BL-099: Plugin signing verification
+
+**Source**: Security Integration Assessment (2026-05-06) — gap #1; PRD-02 §5
+**Effort**: Medium (3 days)
+**Crates**: `nexus-plugins/src/loader.rs`, `nexus-plugins/src/manifest.rs`, new `nexus-security/src/signing.rs`
+**Related**: PRD-02 §5 (plugin signing + CRL); community marketplace (WI-44); `ed25519_dalek`
+
+No signature field exists in the plugin manifest. There is no `ed25519_dalek` in the workspace. A WASM binary can be swapped at install time with no detection. Plugin provenance is entirely unverifiable. This is a deferred decision — it matters when community plugins can be published externally — but it should be tracked explicitly as a marketplace prerequisite.
+
+**Blocked by:** Community plugin marketplace infrastructure (WI-44). Shipping signing without distribution is incomplete; treat this as a marketplace gate item.
+
+**Definition of done:**
+- `PluginManifest` gains optional `signature: Option<PluginSignature>` field:
+  ```toml
+  [signature]
+  algorithm = "ed25519"
+  signer_key_id = "com.example.author"
+  signature = "<base64>"
+  ```
+- `nexus-security/src/signing.rs` implements `PluginSignatureVerifier` using `ed25519_dalek`:
+  - `verify_manifest(manifest_bytes, signature, public_key)` → `Result<(), SignatureError>`
+  - Verifier checks against a community keyring at `~/.nexus/keys/community.json`
+- `PluginLoader::load` calls verifier if signature present; if `require_signatures = true` in `KernelConfig` and no signature, loading fails
+- CRL format defined: `~/.nexus/keys/revoked.json` — list of revoked `key_id` values; plugin with revoked signer key is rejected
+- `nexus plugin verify <path>` CLI command verifies a plugin directory manually
+- `require_signatures = false` default (backward-compat); set to `true` when marketplace ships
+
+---
+
+### BL-098: `com.nexus.security` IPC handlers — credential vault via IPC
+
+**Source**: Security Integration Assessment (2026-05-06) — gap #3 (highest leverage)
+**Effort**: Small (1 day)
+**Crates**: `nexus-security/src/core_plugin.rs`, `nexus-security/src/ipc.rs` (new)
+**Related**: BL-090 (SSH passphrase caching for git — blocked on this); PRD-02 §6; microkernel IPC boundary invariant
+
+`com.nexus.security` dispatches zero IPC handlers. The `CredentialVault` is library-only. Any plugin that needs to store or retrieve a secret (git SSH passphrases, MCP server credentials, AI API key rotation) must directly link `nexus-security`, violating the microkernel architecture. This is the highest-leverage single change in the security crate — it unblocks BL-090 and any future credential-using plugin.
+
+**Definition of done:**
+- New `nexus-security/src/ipc.rs` with wire types (TS-exported via `ts-rs`):
+  - `GetSecretArgs { name: String }` → `GetSecretResult { value: Option<String> }`
+  - `SetSecretArgs { name: String, value: String }` → `SetSecretResult { ok: bool }`
+  - `DeleteSecretArgs { name: String }` → `DeleteSecretResult { ok: bool }`
+  - `ListSecretNamesArgs {}` → `ListSecretNamesResult { names: Vec<String> }`
+- Four IPC handlers registered in `core_plugin.rs`:
+  - `get_secret` (id 1) — requires `Capability::KvRead` (secrets are sensitive KV)
+  - `set_secret` (id 2) — requires `Capability::KvWrite`
+  - `delete_secret` (id 3) — requires `Capability::KvWrite`
+  - `list_secret_names` (id 4) — requires `Capability::KvRead`; returns names only, never values
+- Names namespaced internally by plugin ID: `"{plugin_id}:{name}"` — a plugin cannot read another plugin's secrets
+- `scripts/check_ipc_drift.sh` passes (new types exported)
+- Unblocks BL-090 (nexus-git SSH passphrase caching)
+
+---
+
 ### BL-097: IPC schema versioning
 
 **Source**: Kernel Integration Assessment (2026-05-06) — gap #6
