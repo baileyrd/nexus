@@ -108,6 +108,163 @@ The key tension: Nexus slash commands use `/` which conflicts with Vim's search.
 
 ---
 
+### BL-081: DAP debugger integration
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
+**Effort**: Large (4–6 weeks)
+**Crates**: new `nexus-dap`, new `shell/src/plugins/nexus/debugger/`
+**Related**: BL-076 (nexus-lsp — do first); Debug Adapter Protocol (DAP)
+
+DAP is the debugger equivalent of LSP. Requires a `nexus-dap` core plugin (same spawn+bridge architecture as `nexus-lsp`) and a full debug panel shell plugin (Variables, Call Stack, Watch, Breakpoints, toolbar). Breakpoint gutter decorations in CM6. Deferred until the LSP track (BL-075–077) ships — debug without language awareness is painful.
+
+**Definition of done:**
+- `nexus-dap` spawns configured DAP adapters (e.g. `codelldb`, `js-debug`) from `.forge/dap.toml`
+- Debug panel: Variables, Call Stack, Watch, Breakpoints panels visible in shell
+- CM6 breakpoint gutter: click to set/clear, red dot indicator
+- Debug toolbar: Continue, Step Over, Step Into, Step Out, Restart, Stop
+- `com.nexus.dap` IPC surface mirrors DAP request/response types
+
+---
+
+### BL-080: File tree / project explorer
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
+**Effort**: Small (3 days)
+**Crates**: `shell/src/plugins/nexus/fileTree/` (new shell plugin)
+**Related**: `com.nexus.storage` file enumeration (already ships); no new backend work
+
+A project-explorer panel showing the forge as a directory tree with file-type icons, expand/collapse, drag-to-reorder, and a right-click context menu (new file, rename, delete, copy path, reveal in OS). Pure shell work — `com.nexus.storage` already enumerates all forge files and emits file-change events on the kernel bus for live updates.
+
+**Definition of done:**
+- `nexus.fileTree` shell plugin registers a sidebar panel
+- Tree renders forge root with expand/collapse per directory
+- File-type icons (at minimum: `.md`, `.rs`, `.ts`, `.py`, `.toml`, `.json`, generic)
+- Right-click context menu: New File, New Folder, Rename, Delete, Copy Path
+- Click opens file in editor (document mode for `.md`, code mode for everything else once BL-075 lands)
+- File-change bus events keep tree in sync without manual refresh
+
+---
+
+### BL-079: Git gutter + diff viewer
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
+**Effort**: Medium (1.5 weeks)
+**Crates**: `shell/src/plugins/nexus/editor/cm/` (new `gitGutter.ts`), `shell/src/plugins/nexus/diffView/` (new panel); `nexus-git` backend already ships
+**Related**: PRD-11 (git integration); `nexus-git` `git diff` already operational
+
+`nexus-git` provides `git diff` output today. What's missing is surface: line-level change indicators in the editor margin and a side-by-side diff panel.
+
+**Definition of done:**
+- `gitGutter.ts` CM6 extension: green bar (added), yellow bar (modified), red triangle (deleted) in the left margin; hover shows the removed lines
+- Clicking a gutter mark opens an inline diff hunk with Stage/Revert actions dispatched to `com.nexus.git`
+- Diff view panel: side-by-side or unified mode via CM6 `MergeView`; opens from palette or file-tree context menu
+- Inline blame: `com.nexus.git::blame` result shown as muted end-of-line annotation on hover (togglable)
+- No new IPC handlers needed — `com.nexus.git` already exposes diff, blame, and stage operations
+
+---
+
+### BL-078: Multi-file search and replace
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
+**Effort**: Medium (1 week)
+**Crates**: `shell/src/plugins/nexus/searchPanel/` (new shell plugin); `com.nexus.storage` Tantivy FTS already ships
+**Related**: `com.nexus.storage::search` (existing FTS); `com.nexus.storage::write_file` (replace path)
+
+`com.nexus.storage` has Tantivy FTS and file enumeration. A search panel that queries across all forge files and supports in-place replacement is pure shell work with no new backend infrastructure.
+
+**Definition of done:**
+- `nexus.searchPanel` shell plugin opens via ⌘⇧F; supports plain text, regex, case-sensitive, whole-word
+- Results grouped by file with surrounding context lines; click jumps to match
+- Replace field: preview all replacements before applying; apply-all or per-file confirmation
+- CM6 decorations highlight all matches in open tabs when search is active
+- Progress indicator for large forges; results stream incrementally via existing FTS pagination
+
+---
+
+### BL-077: CM6 LSP client extension
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
+**Effort**: Medium (1 week)
+**Crates**: `shell/src/plugins/nexus/editor/cm/` (new `lspClient.ts`)
+**Related**: BL-076 (nexus-lsp — required first); BL-075 (dual-mode routing — required first); `codemirror-languageserver` (MIT)
+
+`codemirror-languageserver` provides a CM6 extension that handles completion widget, diagnostic squiggles, hover tooltip, and go-to-definition for any LSP server. The adapter proxies CM6 LSP requests through `com.nexus.lsp` IPC instead of a WebSocket.
+
+**Blocked by:** BL-075 (dual-mode routing must exist so LSP client only activates in code mode) and BL-076 (`nexus-lsp` plugin must be running).
+
+**Definition of done:**
+- `lspClient.ts` CM6 extension activates only in code mode (file-type gated)
+- Completion widget shows LSP suggestions with kind icons (method, variable, keyword, etc.) and documentation popover
+- Diagnostic squiggles: red (error), yellow (warning), blue (info) underlines; hover shows message
+- Hover tooltip shows type signature + documentation for symbol under cursor
+- Cmd+Click (go-to-definition) opens the target file at the correct line
+- Format on save: calls `com.nexus.lsp::format` on `⌘S`
+- Change notifications fire on every CM6 transaction (no 800ms debounce in code mode)
+
+---
+
+### BL-076: `nexus-lsp` — Language Server Protocol core plugin
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
+**Effort**: Large (2–3 weeks)
+**Crates**: new `nexus-lsp`
+**Related**: BL-075 (dual-mode routing — do first); BL-077 (CM6 client — do after); mirrors `nexus-mcp` architecture
+
+The load-bearing piece. Without LSP, code editing in Nexus is a syntax-highlighted textarea. With it, completions, diagnostics, hover, go-to-definition, rename, and format-on-save all become available for any language with a language server.
+
+Architecture mirrors `nexus-mcp`: reads `.forge/lsp.toml` for server configs, spawns each server as a child process over stdin/stdout JSON-RPC, bridges requests/responses to the kernel IPC surface, manages server lifecycle (restart on crash, shut down on forge close). The `ConnectionPool` + reconnect pattern from `nexus-mcp` is the template.
+
+**IPC surface (`com.nexus.lsp`, ~12 handlers):**
+```
+open_file(path, content, language_id)
+close_file(path)
+change_file(path, content, version)
+completions(path, line, col)           → CompletionList
+hover(path, line, col)                 → Hover
+definition(path, line, col)            → Location[]
+references(path, line, col)            → Location[]
+rename(path, line, col, new_name)      → WorkspaceEdit
+code_actions(path, range)             → CodeAction[]
+format(path)                          → TextEdit[]
+list_servers()                        → Vec<LspServerInfo>
+```
+
+**Push events:** `com.nexus.lsp.diagnostics.<path>` published on every server push.
+
+**Definition of done:**
+- `nexus-lsp` crate registered by `nexus-bootstrap`
+- `rust-analyzer` confirmed working end-to-end (completions, diagnostics, go-to-def)
+- `typescript-language-server` confirmed working
+- Server crash triggers automatic restart with exponential backoff
+- `scripts/check_ipc_drift.sh` passes (new IPC types exported via ts-rs)
+
+---
+
+### BL-075: Dual-mode editor — code files vs. document files
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
+**Effort**: Small (3 days)
+**Crates**: `shell/src/plugins/nexus/editor/EditorView.tsx`, `shell/src/plugins/nexus/editor/sessionManager.ts`
+**Related**: BL-076 (nexus-lsp — this is its prerequisite); PRD-08 editor spec
+
+The current editor routes all files through the `nexus-editor` block tree. Code files (`.rs`, `.ts`, `.py`, etc.) should bypass the block tree entirely and open in a raw CM6 mode backed by `nexus-lsp` instead of `nexus-editor`.
+
+**Two modes:**
+- **Document mode** (existing): `.md` + forge notes → block tree + `com.nexus.editor` IPC. Unchanged.
+- **Code mode** (new): all other text files → raw CM6 on file content, `com.nexus.lsp` IPC, no block tree.
+
+The routing decision is made at file open by checking the file extension against a configurable code-file list. The CM6 instance in code mode uses standard language extensions (via `@codemirror/lang-*` packages) instead of the custom block handle/slash command extensions.
+
+**Definition of done:**
+- `EditorView.tsx` accepts a `mode: "document" | "code"` prop; code mode renders bare CM6 without block-tree extensions
+- `sessionManager.ts` routes opens by file type; `.md` → document mode, everything else → code mode
+- Code mode reads file content via `com.nexus.storage::read_file` directly (no `com.nexus.editor::open`)
+- Code mode saves via `com.nexus.storage::write_file` on ⌘S
+- Code mode applies correct CM6 language extension for common types (Rust, TypeScript, Python, Go, TOML, JSON, YAML, Markdown-in-code)
+- File-type list configurable in Settings → Editor
+
+---
+
 ### BL-069: Database query executor for `[[{db:query}]]` blocks
 
 **Source**: Editor Integration Assessment (2026-05-06) — gap #1 (largest functional gap)
