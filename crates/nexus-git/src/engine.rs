@@ -861,13 +861,30 @@ fn make_callbacks() -> git2::RemoteCallbacks<'static> {
             if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
                 return Ok(cred);
             }
-            // Try default SSH keys.
+            // Try each default key, optionally using a cached passphrase.
+            // BL-090: passphrases are looked up from the OS keyring under
+            // `ssh-passphrase:<key_name>` so encrypted keys work without
+            // ssh-agent. The vault is cheap to construct (`disabled: bool`),
+            // so creating one per credential probe is fine.
             if let Some(home) = std::env::var_os("HOME") {
                 let home = std::path::PathBuf::from(home);
+                let vault = nexus_security::CredentialVault::new();
                 for key_name in &["id_ed25519", "id_rsa"] {
                     let key_path = home.join(".ssh").join(key_name);
-                    if key_path.exists() {
-                        if let Ok(cred) = git2::Cred::ssh_key(username, None, &key_path, None) {
+                    if !key_path.exists() {
+                        continue;
+                    }
+                    // 1. Unencrypted key (no passphrase needed).
+                    if let Ok(cred) = git2::Cred::ssh_key(username, None, &key_path, None) {
+                        return Ok(cred);
+                    }
+                    // 2. Cached passphrase from OS keyring.
+                    if let Ok(passphrase) =
+                        vault.retrieve(&format!("ssh-passphrase:{key_name}"))
+                    {
+                        if let Ok(cred) =
+                            git2::Cred::ssh_key(username, None, &key_path, Some(&passphrase))
+                        {
                             return Ok(cred);
                         }
                     }

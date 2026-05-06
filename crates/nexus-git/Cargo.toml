@@ -16,6 +16,7 @@ serde_json = { workspace = true }
 toml = { workspace = true }
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
+nexus-security = { path = "../nexus-security" }
 nexus-types = { path = "../nexus-types" }
 ts-rs = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }

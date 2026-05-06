@@ -478,6 +478,48 @@ pub fn auto_commit(
     Ok(())
 }
 
+/// Cache an SSH key passphrase in the OS keyring (BL-090).
+///
+/// Reads the passphrase from stdin and stores it under
+/// `ssh-passphrase:<key>`. The git engine's credential callback consults
+/// the same key on push/pull/fetch so encrypted SSH keys work without
+/// running ssh-agent.
+pub fn set_passphrase(key: &str) -> Result<()> {
+    use std::io::Write;
+    print!("Enter SSH passphrase for '{key}' (will be stored in OS keyring): ");
+    std::io::stdout().flush()?;
+    let mut passphrase = String::new();
+    std::io::stdin().read_line(&mut passphrase)?;
+    let passphrase = passphrase.trim_end_matches(['\n', '\r']);
+    if passphrase.is_empty() {
+        anyhow::bail!("passphrase cannot be empty");
+    }
+
+    let vault = nexus_security::CredentialVault::new();
+    vault
+        .store(&format!("ssh-passphrase:{key}"), passphrase)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!("Cached SSH passphrase for '{key}'.");
+    Ok(())
+}
+
+/// Remove a cached SSH passphrase from the OS keyring.
+pub fn clear_passphrase(key: &str) -> Result<()> {
+    let vault = nexus_security::CredentialVault::new();
+    let name = format!("ssh-passphrase:{key}");
+    match vault.delete(&name) {
+        Ok(()) => {
+            println!("Cleared cached passphrase for '{key}'.");
+            Ok(())
+        }
+        Err(nexus_security::SecurityError::CredentialNotFound(_)) => {
+            println!("No passphrase cached for '{key}'.");
+            Ok(())
+        }
+        Err(e) => Err(anyhow::anyhow!("{e}")),
+    }
+}
+
 /// Write `[git] auto_commit = <enable>` to `.forge/app.toml`.
 ///
 /// Reads the existing file as a raw TOML document, updates only the

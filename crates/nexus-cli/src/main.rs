@@ -1141,6 +1141,18 @@ enum GitCommand {
         #[arg(long, default_value_t = 5)]
         debounce: u64,
     },
+    /// Cache an SSH key passphrase in the OS keyring (BL-090)
+    #[command(name = "set-passphrase")]
+    SetPassphrase {
+        /// Key file basename (e.g. `id_ed25519`, `id_rsa`); read from `~/.ssh/<key>`
+        key: String,
+    },
+    /// Remove a cached SSH passphrase from the OS keyring
+    #[command(name = "clear-passphrase")]
+    ClearPassphrase {
+        /// Key file basename whose passphrase should be removed
+        key: String,
+    },
 }
 
 /// Branch subcommands.
@@ -1584,6 +1596,8 @@ fn main() {
             GitCommand::AutoCommit { enable, disable, watch, interval, debounce } => {
                 commands::git::auto_commit(&app, enable, disable, watch, interval, debounce)
             }
+            GitCommand::SetPassphrase { key } => commands::git::set_passphrase(&key),
+            GitCommand::ClearPassphrase { key } => commands::git::clear_passphrase(&key),
         },
         Commands::Run(_) => stubs::not_implemented("run"),
 
