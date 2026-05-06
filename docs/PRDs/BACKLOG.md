@@ -207,23 +207,7 @@ Capability grants are permanent for a plugin's lifetime. There is no `revoke_cap
 
 ---
 
-### BL-094: Audit event persistence
-
-**Source**: Kernel Integration Assessment (2026-05-06) — gap #2
-**Effort**: Medium (1 week)
-**Crates**: `nexus-kernel/src/audit.rs`, `nexus-storage` (write path), new `nexus-kernel/src/audit_store.rs`
-**Related**: BL-052 (universal activity timeline); `audit.rs` already emits structured tracing events
-
-Kernel audit events (capability grants/denials, path traversal blocks, plugin crashes, IPC errors) are emitted via `tracing` but not persisted. A forge restart loses all audit history. For any multi-plugin environment or community plugin deployment, this is an operational gap — there's no way to answer "which plugin was denied `FsWriteExternal` last Tuesday?"
-
-**Definition of done:**
-- New `AuditStore` trait with SQLite implementation backed by `.forge/.kernel/audit.db`
-- Table: `audit_events (id, ts_ms, event_type, plugin_id, detail_json)`
-- `audit::log_capability_denied`, `log_capability_granted`, `log_path_traversal_denied` each append to `AuditStore` in addition to tracing
-- `com.nexus.kernel::audit_query` IPC handler: `{ event_type?, plugin_id?, since_ts?, limit? }` → `Vec<AuditEntry>`
-- Retention policy: entries older than 90 days pruned on forge open (configurable)
-- Shell security panel can query and display audit log
-- **Blocked by:** none; additive change to `audit.rs`
+_BL-094 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
