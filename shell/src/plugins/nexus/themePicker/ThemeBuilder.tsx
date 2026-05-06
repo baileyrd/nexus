@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useThemeStore, THEME_PLUGIN_ID } from '../../../stores/themeStore'
 import { useThemePickerStore } from './themePickerStore'
 import { getPickerApi } from './pickerRuntime'
+import { contrastRatio } from './contrast'
 
 // ── Variable group manifest ───────────────────────────────────────────────────
 
@@ -67,6 +68,24 @@ const BUILDER_GROUPS: VarGroup[] = [
     ],
   },
 ]
+
+// Maps a foreground variable key → its likely background key for WCAG checking.
+// Only variables where a meaningful text-on-surface pairing exists are listed;
+// surface/accent/border variables have no single background to check against.
+const CONTRAST_PAIRS: Record<string, string> = {
+  '--nx-text-primary':        '--nx-bg-primary',
+  '--nx-text-secondary':      '--nx-bg-secondary',
+  '--nx-text-tertiary':       '--nx-bg-secondary',
+  '--nx-text-muted':          '--nx-bg-secondary',
+  '--nx-prose-heading-color': '--nx-editor-bg',
+  '--nx-prose-link-color':    '--nx-editor-bg',
+  '--nx-syntax-keyword':      '--nx-editor-bg',
+  '--nx-syntax-string':       '--nx-editor-bg',
+  '--nx-syntax-comment':      '--nx-editor-bg',
+  '--nx-syntax-function':     '--nx-editor-bg',
+  '--nx-syntax-number':       '--nx-editor-bg',
+  '--nx-syntax-type':         '--nx-editor-bg',
+}
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -573,17 +592,24 @@ function VariableGroup({
         )}
       </button>
 
-      {open && group.vars.map((entry) => (
-        <VarRow
-          key={entry.key}
-          entry={entry}
-          baseValue={baseVars[entry.key] ?? ''}
-          loadingBase={loadingBase}
-          override={overrides[entry.key]}
-          onSet={onSet}
-          onClear={onClear}
-        />
-      ))}
+      {open && group.vars.map((entry) => {
+        const bgKey = CONTRAST_PAIRS[entry.key]
+        const contrastBgValue = bgKey
+          ? (overrides[bgKey] ?? baseVars[bgKey] ?? '')
+          : undefined
+        return (
+          <VarRow
+            key={entry.key}
+            entry={entry}
+            baseValue={baseVars[entry.key] ?? ''}
+            loadingBase={loadingBase}
+            override={overrides[entry.key]}
+            contrastBgValue={contrastBgValue}
+            onSet={onSet}
+            onClear={onClear}
+          />
+        )
+      })}
     </section>
   )
 }
@@ -596,15 +622,21 @@ interface VarRowProps {
   baseValue: string
   loadingBase: boolean
   override: string | undefined
+  /** Effective background value for WCAG contrast check; undefined = no pairing. */
+  contrastBgValue?: string
   onSet(key: string, value: string): void
   onClear(key: string): void
 }
 
-function VarRow({ entry, baseValue, loadingBase, override, onSet, onClear }: VarRowProps) {
+function VarRow({ entry, baseValue, loadingBase, override, contrastBgValue, onSet, onClear }: VarRowProps) {
   const effectiveValue = override ?? baseValue
   const isHex = isHexColor(effectiveValue)
   const colorInputRef = useRef<HTMLInputElement | null>(null)
   const [hovered, setHovered] = useState(false)
+
+  const ratio = contrastBgValue !== undefined
+    ? contrastRatio(effectiveValue, contrastBgValue)
+    : null
 
   const handleTextChange = (raw: string) => {
     raw === '' ? onClear(entry.key) : onSet(entry.key, raw)
@@ -705,6 +737,9 @@ function VarRow({ entry, baseValue, loadingBase, override, onSet, onClear }: Var
         }}
       />
 
+      {/* WCAG contrast badge */}
+      {ratio !== null && <ContrastBadge ratio={ratio} />}
+
       {/* Clear override */}
       <button
         onClick={() => onClear(entry.key)}
@@ -727,6 +762,38 @@ function VarRow({ entry, baseValue, loadingBase, override, onSet, onClear }: Var
         ×
       </button>
     </div>
+  )
+}
+
+// ── ContrastBadge ─────────────────────────────────────────────────────────────
+
+function ContrastBadge({ ratio }: { ratio: number }) {
+  const isAAA = ratio >= 7
+  const isAA  = ratio >= 4.5
+  const label  = isAAA ? 'AAA' : isAA ? 'AA' : '✗'
+  const color  = isAAA ? '#27AE60' : isAA ? 'var(--interactive-accent, #3498DB)' : '#E74C3C'
+  const bg     = isAAA ? 'rgba(39,174,96,0.12)'  : isAA ? 'rgba(74,144,226,0.12)'  : 'rgba(231,76,60,0.12)'
+  const border = isAAA ? 'rgba(39,174,96,0.3)'   : isAA ? 'rgba(74,144,226,0.3)'   : 'rgba(231,76,60,0.3)'
+  const tip = `${ratio.toFixed(1)}:1 — ${isAAA ? 'Passes WCAG AAA (≥7:1)' : isAA ? 'Passes WCAG AA (≥4.5:1)' : 'Fails WCAG AA (need ≥4.5:1)'}`
+  return (
+    <span
+      title={tip}
+      style={{
+        fontFamily: 'var(--font-monospace)',
+        fontSize: 10,
+        fontWeight: 600,
+        color,
+        background: bg,
+        border: `1px solid ${border}`,
+        borderRadius: 'var(--radius-s)',
+        padding: '2px 5px',
+        flexShrink: 0,
+        cursor: 'default',
+        userSelect: 'none',
+      }}
+    >
+      {label}
+    </span>
   )
 }
 

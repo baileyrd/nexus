@@ -41,20 +41,7 @@ The shipped Build tab edits a single mode at a time. BL-068 specified side-by-si
 
 ---
 
-### BL-105: Theme builder — WCAG contrast checker
-
-**Source**: BL-068 remaining feature (2026-05-06)
-**Effort**: Small (1 day)
-**Files**: `shell/src/plugins/nexus/themePicker/ThemeBuilder.tsx`
-**Related**: BL-068 (theme builder spec); WCAG 2.1 §1.4.3 / §1.4.6
-
-The shipped Build tab has no contrast validation. BL-068 specified per-token WCAG AA/AAA pass/fail badges against auto-detected background pairs.
-
-**Definition of done:**
-- `contrast.ts` utility with `contrastRatio(fg: string, bg: string): number` (WCAG 2.1 relative-luminance formula)
-- Static pairing manifest mapping `--nx-text-*` → likely surface token and `--nx-syntax-*` → `--nx-editor-bg`
-- Each paired VarRow shows a badge: ✓ AAA (≥7:1), ✓ AA (≥4.5:1), ✗ Fail (<4.5:1); only when both sides resolve to parseable hex
-- Badge updates live as overrides change
+_BL-105 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
@@ -1040,7 +1027,7 @@ Three tools are sufficient to unlock the core use cases:
 
 ### BL-068: Theme Builder — visual token editor with live preview
 
-> **Core shipped 2026-05-06** as the Build tab in `nexus.themePicker` (`shell/src/plugins/nexus/themePicker/`). Remaining features tracked in BL-105 (contrast checker) and BL-106 (light/dark side-by-side). Original spec: [BL-067-068-builders.md](BL-067-068-builders.md).
+> **Core shipped 2026-05-06** as the Build tab in `nexus.themePicker` (`shell/src/plugins/nexus/themePicker/`). BL-105 (contrast checker) closed 2026-05-06. Remaining: BL-106 (light/dark side-by-side). Original spec: [BL-067-068-builders.md](BL-067-068-builders.md).
 
 **Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
 **Effort**: ~1 week (0.5d `preview_override` handler + 4d UI + 0.5d export)
@@ -1056,11 +1043,11 @@ The theme system already has live reload; the only new backend work is a `previe
 - Base theme selector — start from any installed theme, write only the delta ✅ shipped
 - Export writes `.theme.toml` to `.forge/themes/` and activates via hot-reload ✅ shipped (save-to-disk + `reload` handler call)
 - Live split-view preview against a representative forge document ⬜ not built (uses live shell as preview instead)
-- Per-token WCAG AA/AAA contrast pass/fail → **BL-105**
+- Per-token WCAG AA/AAA contrast pass/fail ✅ BL-105 closed 2026-05-06
 - Light/dark side-by-side when theme supports both modes → **BL-106**
 
 **Definition of done (remaining):**
-- See BL-105 and BL-106
+- See BL-106
 
 ---
 
