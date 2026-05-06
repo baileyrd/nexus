@@ -16,6 +16,133 @@
 
 _BL-009 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
+### BL-097: IPC schema versioning
+
+**Source**: Kernel Integration Assessment (2026-05-06) — gap #6
+**Effort**: Medium (1.5 weeks)
+**Crates**: `nexus-plugin-api/src/ipc.rs`, all `nexus-<service>/src/ipc.rs` files, `scripts/check_ipc_drift.sh`
+**Related**: ADR 0021 (IPC handler versioning convention); `ts-rs` type exports; `check_ipc_drift.sh`
+
+All IPC args and returns are `serde_json::Value`. There is no version field on requests, no schema negotiation between caller and handler, and no deprecation path. A breaking change to a handler's argument shape produces a silent deserialization error or misparse. This is manageable in a monorepo but becomes a maintenance hazard when community plugins ship against a stable API.
+
+**Definition of done:**
+- `IpcRequest` envelope gains a `schema_version: u32` field (default 1, optional for backward compat)
+- Each handler registers its current `schema_version` alongside its handler ID in the plugin manifest
+- `IpcDispatcher::dispatch` checks request `schema_version` ≤ handler's registered version; if higher, returns new `IpcError::SchemaVersionMismatch { handler_version, caller_version }`
+- `scripts/check_ipc_drift.sh` extended to also emit a `schema_versions.json` snapshot; diff against previous snapshot to detect version bumps required on change
+- Handlers that add fields use `#[serde(default)]` to remain backward-compatible with version N-1 callers (document this convention)
+- `nexus-plugin-api` changelog notes every handler version bump
+
+---
+
+### BL-096: Capability revocation at runtime
+
+**Source**: Kernel Integration Assessment (2026-05-06) — gap #5
+**Effort**: Small (1 day)
+**Crates**: `nexus-plugins/src/loader.rs`, `nexus-kernel/src/context_impl.rs`, shell capability settings UI
+**Related**: PRD-02 (security model); `PluginLoader::grant_capability` (grants exist; revoke does not)
+
+Capability grants are permanent for a plugin's lifetime. There is no `revoke_capability()` method. To restrict an over-privileged community plugin, the entire forge must restart. This matters most for community WASM plugins where a post-install audit might find an over-privileged grant.
+
+**Definition of done:**
+- `PluginLoader::revoke_capability(plugin_id, cap)` removes the capability from the runtime `CapabilitySet` for that plugin
+- `KernelPluginContext::has_capability()` reads the live set — revocation takes effect on the next operation attempt, no restart needed
+- Revocation is persisted to `granted_caps.json` so it survives forge restart
+- `com.nexus.kernel::revoke_capability` IPC handler (kernel-internal, requires `IpcCall` + admin token) exposes this to the shell settings UI
+- Shell capability panel gains a "Revoke" button per granted capability per plugin
+- Revocation emits `com.nexus.kernel.capability_revoked` kernel bus event and an audit log entry
+
+---
+
+### BL-095: Plugin lifecycle hook timeouts
+
+**Source**: Kernel Integration Assessment (2026-05-06) — gap #3
+**Effort**: Small (0.5–1 day)
+**Crates**: `nexus-plugins/src/loader.rs` (plugin init/start sequence)
+**Related**: PRD-01 §plugin-lifecycle; bootstrap startup sequence
+
+`on_init()` and `on_start()` hooks have no deadline. A plugin that hangs during initialization blocks the entire bootstrap sequence indefinitely. There is no watchdog, no abort, no timeout. This is a silent DoS vector if any plugin blocks on a network resource or unreleased lock during startup.
+
+**Definition of done:**
+- `PluginLoader` wraps each `on_init` and `on_start` call in `tokio::time::timeout(LIFECYCLE_HOOK_TIMEOUT)`
+- Default timeout: 30 seconds per hook (configurable via `KernelConfig::lifecycle_timeout_secs`)
+- Timeout → `PluginError::LifecycleTimeout { plugin_id, hook: "init"|"start", timeout_secs }`
+- Timed-out plugin is marked as `InitFailed` / `StartFailed` and excluded from dispatch; remaining plugins continue loading
+- Timeout event published to kernel bus: `com.nexus.kernel.plugin_lifecycle_timeout { plugin_id, hook }`
+- Bootstrap test: verify that a plugin with a 60s `on_init` sleep is skipped within 31 seconds and does not block other plugins
+
+---
+
+### BL-094: Audit event persistence
+
+**Source**: Kernel Integration Assessment (2026-05-06) — gap #2
+**Effort**: Medium (1 week)
+**Crates**: `nexus-kernel/src/audit.rs`, `nexus-storage` (write path), new `nexus-kernel/src/audit_store.rs`
+**Related**: BL-052 (universal activity timeline); `audit.rs` already emits structured tracing events
+
+Kernel audit events (capability grants/denials, path traversal blocks, plugin crashes, IPC errors) are emitted via `tracing` but not persisted. A forge restart loses all audit history. For any multi-plugin environment or community plugin deployment, this is an operational gap — there's no way to answer "which plugin was denied `FsWriteExternal` last Tuesday?"
+
+**Definition of done:**
+- New `AuditStore` trait with SQLite implementation backed by `.forge/.kernel/audit.db`
+- Table: `audit_events (id, ts_ms, event_type, plugin_id, detail_json)`
+- `audit::log_capability_denied`, `log_capability_granted`, `log_path_traversal_denied` each append to `AuditStore` in addition to tracing
+- `com.nexus.kernel::audit_query` IPC handler: `{ event_type?, plugin_id?, since_ts?, limit? }` → `Vec<AuditEntry>`
+- Retention policy: entries older than 90 days pruned on forge open (configurable)
+- Shell security panel can query and display audit log
+- **Blocked by:** none; additive change to `audit.rs`
+
+---
+
+### BL-093: Kernel metrics and observability exports
+
+**Source**: Kernel Integration Assessment (2026-05-06) — gap #4 (highest pre-shipping value)
+**Effort**: Medium (1 week)
+**Crates**: `nexus-kernel/src/metrics.rs` (new), `nexus-kernel/src/context_impl.rs`, `nexus-kernel/src/event_bus.rs`
+**Related**: BL-092 (benchmarks — do that first to establish baselines); `tracing` already in use
+
+No Prometheus counters, no IPC latency histograms, no event bus queue depth gauge. The system produces no time-series data. It is impossible to determine from outside the process whether the kernel is healthy, backlogged, or thrashing. This is the gap that matters most in production — you cannot operate what you cannot observe.
+
+**Definition of done:**
+- New `nexus-kernel/src/metrics.rs` with a `KernelMetrics` struct backed by `metrics` crate (or `prometheus` — decide at implementation time)
+- **IPC metrics:** `ipc_calls_total{plugin_id, command, status}` counter + `ipc_call_duration_seconds{plugin_id, command}` histogram (p50/p95/p99)
+- **Event bus metrics:** `event_bus_published_total{plugin_id}` counter + `event_bus_queue_depth` gauge (sampled every 100ms)
+- **Capability metrics:** `capability_checks_total{plugin_id, capability, result}` counter
+- **Plugin lifecycle:** `plugin_lifecycle_duration_seconds{plugin_id, hook}` histogram
+- `com.nexus.kernel::metrics_snapshot` IPC handler returns current counter/gauge values as JSON (no scraping required for CLI)
+- Optional Prometheus scrape endpoint (HTTP) if `KernelConfig::prometheus_port` is set
+- Shell health panel displays live IPC latency p95 + event bus depth
+
+---
+
+### BL-092: Kernel IPC latency benchmarks and SLOs
+
+**Source**: Kernel Integration Assessment (2026-05-06) — gap #1 (foundation for everything else)
+**Effort**: Small (2–3 days)
+**Crates**: `nexus-kernel/benches/` (new), `nexus-plugins/benches/` (new)
+**Related**: BL-093 (metrics — build after establishing baselines); PRD-01 §performance
+
+Zero benchmarks exist for the kernel. IPC call latency, event bus publish throughput, and capability check overhead are all unknowns. For a central dispatch layer that every subsystem routes through, this is a real operational risk — there's no baseline to detect regressions.
+
+**Definition of done:**
+- `crates/nexus-kernel/benches/event_bus.rs` — criterion benchmarks:
+  - `publish_no_subscribers` (baseline overhead)
+  - `publish_one_subscriber` (single consumer latency)
+  - `publish_ten_subscribers` (fan-out cost)
+  - `subscribe_filter_match` / `subscribe_filter_no_match` (filter evaluation)
+- `crates/nexus-plugins/benches/ipc_dispatch.rs` — criterion benchmarks:
+  - `dispatch_noop_handler` (pure dispatch overhead, no work)
+  - `dispatch_with_capability_check` (cap check cost)
+  - `dispatch_async_handler` (async overhead vs sync)
+  - `dispatch_ten_concurrent` (queue depth under load)
+- **Stated SLOs** (targets to validate against; fail bench if exceeded):
+  - Event publish (no subscribers): < 1µs
+  - Event publish (10 subscribers, filtered): < 10µs
+  - IPC dispatch round-trip (noop handler): < 100µs
+  - Capability check: < 1µs
+- Benchmarks run in CI on a dedicated job; results compared against stored baseline (fail on >10% regression)
+
+---
+
 ### BL-091: Git-LFS support
 
 **Source**: Git Integration Assessment + user request (2026-05-06)
