@@ -16,6 +16,134 @@
 
 _BL-009 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
+### BL-061: Terminal memory backpressure — enforce kill policy
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap #5
+**Effort**: Small (0.5 days)
+**Crates**: `nexus-terminal` (`memory.rs`, `manager.rs`, `core_plugin.rs`)
+**Related**: PRD-09 §7 (memory monitoring); `MemoryMonitor` shipped Phase R
+
+`MemoryMonitor` tracks RSS per session and exposes `SoftExceeded`/`HardExceeded` thresholds. Nothing reads those thresholds and acts on them. A long-running process that leaks memory accumulates indefinitely.
+
+**Definition of done:**
+- `SessionManager` or the drainer thread polls `MemoryMonitor` results and calls `manager.kill(id)` when a session crosses `hard_mb`
+- `com.nexus.terminal.events.<id>` publishes a `MemoryLimitExceeded { rss_mb, limit_mb }` lifecycle event before kill
+- `get_session_info` response includes current RSS so the shell UI can display it
+
+---
+
+### BL-060: Ad-hoc command history — IPC exposure and shell UI
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap #3
+**Effort**: Small–Medium (1 day)
+**Crates**: `nexus-terminal` (`core_plugin.rs`, `adhoc.rs`), `shell/src/plugins/nexus/terminal/`
+**Related**: PRD-09 §10; `SqliteAdHocStore` shipped Phase M; IPC exposure deferred
+
+`SqliteAdHocStore` exists with deduplication (same command + cwd increments `run_count`), status tracking, and promotion to saved commands. No IPC handlers expose it. Users can't browse, re-run, or promote their command history from the shell or CLI.
+
+**Definition of done:**
+- New handlers on `com.nexus.terminal`: `adhoc_list` (id 18), `adhoc_get` (id 19), `adhoc_delete` (id 20), `adhoc_promote` (id 21 — wraps existing `promote_adhoc_to_saved`)
+- Shell UI gains a "History" tab or panel in the terminal plugin listing ad-hoc entries with run count, last-run time, status chip, re-run button, and promote-to-saved button
+- `nexus proc history` CLI subcommand wraps `adhoc_list`
+- `scripts/check_ipc_drift.sh` passes (new IPC types exported)
+
+---
+
+### BL-059: "Open in external terminal" escape hatch
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap #6; CommandBook evaluation (2026-05-06)
+**Effort**: Small (0.5–1 day)
+**Crates**: `nexus-terminal` (new handler), `shell/src/plugins/nexus/terminal/SavedCommandsView.tsx`
+**Related**: `docs/research/commandbook-evaluation.md` — "Run in Terminal" pattern
+
+Nexus terminal doesn't support PTY-dependent programs (`vim`, `htop`, `less`, interactive REPLs). There's no escape hatch to hand a saved command's working directory and environment to an external emulator. Users who need interactivity have no path back to the forge's process context.
+
+**Definition of done:**
+- New IPC handler `com.nexus.terminal::open_in_terminal` (id 22): takes a `SavedCommand` slug, detects available terminal emulators in priority order (iTerm2, Warp, Ghostty, Kitty, Alacritty, Terminal.app, system default), opens a new window at the command's `working_dir` with env vars pre-loaded
+- Context menu on `SavedCommandsView` sidebar items gains "Open in Terminal" entry
+- Detection order configurable in Settings → Terminal
+
+---
+
+### BL-058: Terminal URL chip extraction — shell UI surface
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap #2; CommandBook evaluation (2026-05-06)
+**Effort**: Small (0.5 day)
+**Crates**: `shell/src/plugins/nexus/terminal/TerminalView.tsx`
+**Related**: `nexus-terminal/src/urls.rs` (410 lines, fully implemented, not wired to UI)
+
+`urls.rs` detects HTTP(S), FTP, SSH, and `file://` URLs from output lines and classifies them by kind. Nothing surfaces this in the shell. The CommandBook URL-pin pattern (top-5 detected links pinned above the output pane, always visible regardless of scroll position, single-click to open) is the highest-value terminal UI pattern identified in the CommandBook evaluation.
+
+**Definition of done:**
+- `TerminalView.tsx` gains a `useUrlExtraction` hook that subscribes to the output stream, runs URL detection on new lines, and maintains a deduped top-5 list
+- URLs render as pill chips above the output pane; click opens in default browser / file manager / SSH client per `UrlKind`
+- Chips clear when the session is reset or explicitly dismissed
+- Zero new backend work — all detection happens via the existing library exposed through `read_output`
+
+---
+
+### BL-057: Terminal activity timeline integration
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap #4
+**Effort**: Small (0.5 day)
+**Crates**: `nexus-terminal/src/core_plugin.rs`
+**Related**: BL-052 (universal activity timeline — defines the schema and topic convention); PRD-09 lifecycle events
+
+The lifecycle forwarder thread already publishes `com.nexus.terminal.events.<id>` for `SessionCreated`, `ProcessCrashed`, and `SessionClosed`. It does not publish to the universal `com.nexus.activity.appended` topic. The activity timeline is therefore blind to all terminal events — a user can't audit what processes started, crashed, or exited alongside their AI tool calls.
+
+**Blocked by:** BL-052 (generalized `ActivityEntry` schema must land first so the emitter format is stable).
+
+**Definition of done:**
+- On `SessionCreated`, `ProcessCrashed`, and `SessionClosed` events, the core plugin publishes a parallel `com.nexus.activity.appended` event with `origin: "terminal:<session_id>"`, `surface: "process"`, and relevant metadata (slug, exit_code, crash reason)
+- Activity timeline panel renders terminal events with a terminal icon and appropriate filter chip
+- No schema changes to `nexus-terminal` types — payload is assembled in `core_plugin.rs` from existing `SessionInfo`
+
+---
+
+### BL-056: Terminal workflow step type
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap #1 (part 2)
+**Effort**: Small (1 day)
+**Crates**: `nexus-workflow/src/executor.rs`, `nexus-workflow/src/ai_steps.rs`
+**Related**: BL-055 (agent tool registry — do that first); PRD-16 §step-types
+
+`com.nexus.workflow` can dispatch `ipc` step types, but there's no `terminal` step type. Foundation-class workflows (always-on dev services started at forge open) and capability-class workflows (build triggers, test runners, linters on file save) all need to start/stop named saved commands.
+
+**Definition of done:**
+- New step type `type = "terminal"` in `.workflow.toml` with fields: `slug` (required, matches a `SavedCommand`), `action` (start | stop | restart | run_adhoc), `command` (for `run_adhoc` only), `working_dir` (override)
+- `executor.rs` dispatches terminal steps through `com.nexus.terminal::run_saved` (BL-055) via `PluginContext::ipc_call`
+- Workflow validate handler rejects `terminal` steps where `slug` doesn't match any saved command at validation time
+- `nexus workflow run` respects terminal steps in CLI context
+
+---
+
+### BL-055: Terminal commands in agent tool registry
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap #1 (highest leverage)
+**Effort**: Small (0.5–1 day)
+**Crates**: `nexus-ai/src/tools/registry.rs`, `nexus-terminal/src/core_plugin.rs`
+**Related**: PRD-15 (agent system); PRD-12 §tool-calling; `com.nexus.terminal` IPC surface
+
+The agent tool registry (`com.nexus.ai`) has no terminal tools. An agent that needs to start a dev server, run a build, check process status, or send a signal has no IPC path to do it. The terminal is the most common execution surface for developer workflows and it's entirely absent from agent plans.
+
+Three tools are sufficient to unlock the core use cases:
+
+| Tool name | IPC target | Purpose |
+|---|---|---|
+| `terminal_run_saved` | `com.nexus.terminal::run_saved` (new, wraps handler 1) | Start a saved command by slug |
+| `terminal_get_status` | `com.nexus.terminal::get_session_info` (handler 9) | Check if a process is running, get exit code |
+| `terminal_send_signal` | `com.nexus.terminal::send_raw_input` (handler 4) | Send SIGINT, SIGTERM, etc. |
+
+**Definition of done:**
+- New `run_saved` handler (id 18 on `com.nexus.terminal`) starts the named `SavedCommand`, returns the new session id — reuses `SessionManager::spawn` + `SavedCommand` lookup
+- `ToolRegistry` gains three built-in terminal tools with JSON Schema definitions
+- Tool advertisement policy `auto` includes terminal tools; `auto_readonly` excludes them (writes to processes are write-class)
+- `ai.tools.write` capability required for `terminal_run_saved` and `terminal_send_signal`; `ai.chat` sufficient for `terminal_get_status`
+- Agent planner system prompt updated to describe available terminal tools
+- `scripts/check_ipc_drift.sh` passes
+
+---
+
 ### BL-054: Nexus OS Mode — Agentic OS methodology layer
 
 **Source**: AI Integration Assessment + Chase AI "Agentic OS" framework analysis (2026-05-06) — full plan in [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md)
