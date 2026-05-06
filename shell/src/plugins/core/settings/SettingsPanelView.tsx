@@ -11,7 +11,6 @@ import { useConfigStore, useConfigValue } from '../../../stores/configStore'
 import {
   useThemeStore,
   type AvailableSnippet,
-  type ThemeMode,
 } from '../../../stores/themeStore'
 import type { ConfigSection, ConfigSchema, PluginAPI, SettingsTabEntry } from '../../../types/plugin'
 import type { CommunityPluginManifest } from '../../../host/communityPluginLoader'
@@ -1784,7 +1783,6 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
   const availableSnippets = useThemeStore(s => s.availableSnippets)
   const activeThemeId     = useThemeStore(s => s.activeThemeId)
   const enabledSnippets   = useThemeStore(s => s.enabledSnippets)
-  const mode              = useThemeStore(s => s.theme)
   const loaded            = useThemeStore(s => s.loaded)
 
   const [busy,  setBusy]  = useState(false)
@@ -1818,13 +1816,6 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
     void run('Apply theme', () =>
       useThemeStore.getState().setActiveTheme(api!, id),
     )
-  }
-
-  const handleModeChange = (next: ThemeMode) => {
-    // setMode in themeStore handles the kernel call and then auto-
-    // applies a theme of the matching category — no extra coupling
-    // needed here.
-    void run('Set mode', () => useThemeStore.getState().setMode(api!, next))
   }
 
   const handleSnippetToggle = (id: string) => {
@@ -1874,13 +1865,7 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
   const activeCategory =
     typeof activeMeta?.category === 'string' ? activeMeta.category : undefined
   const scheme: 'light' | 'dark' =
-    activeCategory === 'light'
-      ? 'light'
-      : activeCategory === 'dark'
-      ? 'dark'
-      : mode === 'light'
-      ? 'light'
-      : 'dark'
+    activeCategory === 'light' ? 'light' : 'dark'
 
   const comingSoon = useComingSoon(api)
 
@@ -1902,22 +1887,6 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
       )}
 
       {/* ── Top group ─────────────────────────────────────────── */}
-      <StubRow
-        title="Base color scheme"
-        description="Choose Nexus's default color scheme."
-        control={
-          <select
-            value={mode}
-            disabled={busy}
-            onChange={(e) => handleModeChange(e.target.value as ThemeMode)}
-            title="Light, dark, or follow the OS preference."
-          >
-            <option value="system">Adapt to system</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
-        }
-      />
       <StubRow
         title="Accent color"
         description="Choose the accent color used throughout the app."
@@ -1958,14 +1927,7 @@ function AppearanceTab({ api }: { api?: PluginAPI }) {
                 <option value="">{loaded ? 'No themes installed' : 'Loading...'}</option>
               )}
               {availableThemes.map((t) => (
-                <option
-                  key={t.id}
-                  value={t.id}
-                  style={{
-                    background: scheme === 'dark' ? '#1f1f1f' : '#ffffff',
-                    color: scheme === 'dark' ? '#e5e5e5' : '#1a1a1a',
-                  }}
-                >
+                <option key={t.id} value={t.id}>
                   {t.name}
                 </option>
               ))}
