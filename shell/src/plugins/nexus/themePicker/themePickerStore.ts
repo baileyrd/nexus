@@ -30,16 +30,20 @@ export const SWATCH_KEYS = [
   '--nx-syntax-keyword',
 ] as const
 
+export type PickerTab = 'themes' | 'snippets'
+
 interface ThemePickerState {
   visible: boolean
+  activeTab: PickerTab
   query: string
   categoryFilter: CategoryFilter
   /** themeId → resolved variables (subset: SWATCH_KEYS). Cached on open. */
   swatchCache: Record<string, Record<string, string>>
   loadingSwatches: boolean
 
-  open(): void
+  open(tab?: PickerTab): void
   close(): void
+  setActiveTab(tab: PickerTab): void
   setQuery(q: string): void
   setCategoryFilter(cat: CategoryFilter): void
   setSwatchCache(cache: Record<string, Record<string, string>>): void
@@ -48,13 +52,15 @@ interface ThemePickerState {
 
 export const useThemePickerStore = create<ThemePickerState>((set) => ({
   visible: false,
+  activeTab: 'themes',
   query: '',
   categoryFilter: 'all',
   swatchCache: {},
   loadingSwatches: false,
 
-  open: () => set({ visible: true, query: '', categoryFilter: 'all' }),
+  open: (tab = 'themes') => set({ visible: true, activeTab: tab, query: '', categoryFilter: 'all' }),
   close: () => set({ visible: false }),
+  setActiveTab: (tab) => set({ activeTab: tab }),
   setQuery: (q) => set({ query: q }),
   setCategoryFilter: (cat) => set({ categoryFilter: cat }),
   setSwatchCache: (cache) => set({ swatchCache: cache }),
