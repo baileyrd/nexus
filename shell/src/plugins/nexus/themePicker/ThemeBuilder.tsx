@@ -199,6 +199,7 @@ export function ThemeBuilderPanel() {
 
   const [applied, setApplied] = useState(false)
   const [copied, setCopied]   = useState(false)
+  const [saved, setSaved]     = useState(false)
 
   const handleApplyNow = useCallback(async () => {
     await getPickerApi().kernel.invoke(THEME_PLUGIN_ID, 'set_plugin_overrides', {
@@ -225,6 +226,24 @@ export function ThemeBuilderPanel() {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
+  }, [tomlOutput])
+
+  const handleSaveToDisk = useCallback(async () => {
+    const api = getPickerApi()
+    const path = await api.platform.dialog.saveFile({
+      title: 'Save Theme Manifest',
+      defaultPath: 'NEXUS.toml',
+      filters: [{ name: 'Nexus Theme Manifest', extensions: ['toml'] }],
+    })
+    if (!path) return
+    // Create the parent directory in case the user navigated to a new
+    // folder (e.g. ~/.nexus/themes/<id>/ which doesn't exist yet).
+    const sep = path.includes('/') ? '/' : '\\'
+    const dir = path.substring(0, path.lastIndexOf(sep))
+    if (dir) await api.platform.fs.mkdir(dir, { recursive: true })
+    await api.platform.fs.writeText(path, tomlOutput)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 3000)
   }, [tomlOutput])
 
   const hasOverrides = Object.keys(builderOverrides).length > 0
@@ -367,15 +386,26 @@ export function ThemeBuilderPanel() {
             >
               Export TOML
             </span>
-            <button
-              onClick={handleCopyToml}
-              style={{
-                ...GHOST_BTN_STYLE,
-                color: copied ? 'var(--interactive-accent)' : 'var(--text-muted)',
-              }}
-            >
-              {copied ? 'Copied ✓' : 'Copy'}
-            </button>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                onClick={handleCopyToml}
+                style={{
+                  ...GHOST_BTN_STYLE,
+                  color: copied ? 'var(--interactive-accent)' : 'var(--text-muted)',
+                }}
+              >
+                {copied ? 'Copied ✓' : 'Copy'}
+              </button>
+              <button
+                onClick={() => void handleSaveToDisk()}
+                style={{
+                  ...GHOST_BTN_STYLE,
+                  color: saved ? 'var(--interactive-accent)' : 'var(--text-muted)',
+                }}
+              >
+                {saved ? 'Saved ✓' : 'Save to disk'}
+              </button>
+            </div>
           </div>
           <textarea
             readOnly
