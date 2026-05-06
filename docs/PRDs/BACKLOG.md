@@ -16,20 +16,7 @@
 
 _BL-009 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
-### BL-108: Snippet row — mode and scope metadata in Snippets tab
-
-**Source**: UX gap found during `nexus.themePicker` build (2026-05-06)
-**Effort**: Tiny (1 hour)
-**Files**: `shell/src/plugins/nexus/themePicker/ThemePicker.tsx`
-**Related**: `AvailableSnippet` extra fields (`mode`, `scope`) in `themeStore.ts`
-
-`SnippetRow` shows name and description but not the snippet's `mode` (Light / Dark / All) or `scope` (Global / per-surface). Both fields are present in the `AvailableSnippet` objects as extra fields but not surfaced in the UI. A Dark-only snippet enabled in Light mode silently has no effect — nothing tells the user why.
-
-**Definition of done:**
-- `SnippetRow` reads `snippet.mode` and `snippet.scope` from the extra-field bag with string type-guards
-- If `mode` is `"light"` or `"dark"`: show a small pill badge ("Light only" / "Dark only") after the description
-- If `scope` is not `"global"`: show a "Scoped" badge with a tooltip containing the raw CSS selector
-- Active-mode mismatch: if the snippet's `mode` doesn't match `kernelMode`, dim the toggle and add a warning icon
+_BL-108 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 

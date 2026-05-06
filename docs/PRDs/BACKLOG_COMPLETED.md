@@ -8,6 +8,15 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-108: Snippet row — mode and scope metadata in Snippets tab ✅ (2026-05-06)
+
+**Source**: UX gap found during `nexus.themePicker` build (2026-05-06)
+**Files**: `shell/src/plugins/nexus/themePicker/ThemePicker.tsx`
+
+`SnippetRow` now reads `snippet.mode` and `snippet.scope` from the `AvailableSnippet` extra-field bag with string type-guards. Additions: "Light only" / "Dark only" pill badges (amber / accent-blue) shown below the description when `mode` is `"light"` or `"dark"`; a "Scoped" pill with the raw selector as a tooltip when `scope` is not `"global"`; the toggle is dimmed to 45 % opacity and a ⚠ warning icon appears next to the name when an enabled snippet's mode doesn't match the active `kernelMode` (skipped when `kernelMode === 'system'`).
+
+---
+
 ### BL-104: Theme picker — swatch cache invalidation on hot-reload ✅ (2026-05-06)
 
 **Source**: Gap found while implementing `nexus.themePicker` (2026-05-06)

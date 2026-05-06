@@ -707,7 +707,22 @@ function SnippetRow({
   onMoveUp,
   onMoveDown,
 }: SnippetRowProps) {
+  const kernelMode = useThemeStore((s) => s.kernelMode)
   const [hovered, setHovered] = useState(false)
+
+  // Extract mode and scope from the opaque extra-field bag.
+  const snippetMode = typeof snippet.mode === 'string' ? snippet.mode : 'all'
+  const snippetScope = typeof snippet.scope === 'string' ? snippet.scope : null
+  const isScoped = snippetScope !== null && snippetScope !== 'global'
+
+  // Mismatch: snippet targets one mode but a different concrete mode is active.
+  const isMismatch =
+    enabled &&
+    kernelMode !== 'system' &&
+    snippetMode !== 'all' &&
+    snippetMode !== kernelMode
+
+  const hasBadges = snippetMode === 'light' || snippetMode === 'dark' || isScoped
 
   const ICON_BTN: React.CSSProperties = {
     background: 'transparent',
@@ -720,6 +735,15 @@ function SnippetRow({
     padding: '2px 5px',
     display: 'flex',
     alignItems: 'center',
+  }
+
+  const PILL: React.CSSProperties = {
+    fontFamily: 'var(--font-interface)',
+    fontSize: 10,
+    borderRadius: 'var(--radius-full, 9999px)',
+    padding: '1px 6px',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
   }
 
   return (
@@ -735,11 +759,12 @@ function SnippetRow({
         transition: 'background 80ms',
       }}
     >
-      {/* Toggle */}
+      {/* Toggle — dimmed when snippet won't apply in the current mode */}
       <button
         onClick={onToggle}
         aria-pressed={enabled}
         aria-label={enabled ? `Disable ${snippet.name}` : `Enable ${snippet.name}`}
+        title={isMismatch ? `Only applies in ${snippetMode} mode — no effect in ${kernelMode} mode` : undefined}
         style={{
           flexShrink: 0,
           width: 32,
@@ -749,7 +774,8 @@ function SnippetRow({
           background: enabled ? 'var(--interactive-accent)' : 'var(--background-modifier-border)',
           cursor: 'pointer',
           position: 'relative',
-          transition: 'background 150ms',
+          transition: 'background 150ms, opacity 150ms',
+          opacity: isMismatch ? 0.45 : 1,
         }}
       >
         <span
@@ -767,21 +793,37 @@ function SnippetRow({
         />
       </button>
 
-      {/* Name + description */}
+      {/* Name + description + badges */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontFamily: 'var(--font-interface)',
-            fontSize: 13,
-            fontWeight: enabled ? 600 : 400,
-            color: enabled ? 'var(--text-normal)' : 'var(--text-muted)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {snippet.name}
+        {/* Name row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+          <span
+            style={{
+              fontFamily: 'var(--font-interface)',
+              fontSize: 13,
+              fontWeight: enabled ? 600 : 400,
+              color: enabled ? 'var(--text-normal)' : 'var(--text-muted)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            {snippet.name}
+          </span>
+          {isMismatch && (
+            <span
+              title={`Only applies in ${snippetMode} mode — no effect while ${kernelMode} mode is active`}
+              aria-label="Mode mismatch warning"
+              style={{ fontSize: 12, flexShrink: 0, cursor: 'default' }}
+            >
+              ⚠
+            </span>
+          )}
         </div>
+
+        {/* Description */}
         {snippet.description && (
           <div
             style={{
@@ -794,6 +836,49 @@ function SnippetRow({
             }}
           >
             {snippet.description}
+          </div>
+        )}
+
+        {/* Mode / scope badges */}
+        {hasBadges && (
+          <div style={{ display: 'flex', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
+            {snippetMode === 'light' && (
+              <span
+                style={{
+                  ...PILL,
+                  background: 'rgba(243, 156, 18, 0.12)',
+                  color: 'var(--color-yellow, #C8915A)',
+                  border: '1px solid rgba(243, 156, 18, 0.25)',
+                }}
+              >
+                Light only
+              </span>
+            )}
+            {snippetMode === 'dark' && (
+              <span
+                style={{
+                  ...PILL,
+                  background: 'rgba(74, 144, 226, 0.12)',
+                  color: 'var(--interactive-accent, #6BA3FF)',
+                  border: '1px solid rgba(74, 144, 226, 0.25)',
+                }}
+              >
+                Dark only
+              </span>
+            )}
+            {isScoped && (
+              <span
+                title={`Scoped to: ${snippetScope}`}
+                style={{
+                  ...PILL,
+                  background: 'var(--background-modifier-border)',
+                  color: 'var(--text-muted)',
+                  cursor: 'default',
+                }}
+              >
+                Scoped
+              </span>
+            )}
           </div>
         )}
       </div>
