@@ -16,6 +16,198 @@
 
 _BL-009 shipped 2026-04-28 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
+### BL-091: Git-LFS support
+
+**Source**: Git Integration Assessment + user request (2026-05-06)
+**Effort**: Medium (1.5–2 weeks)
+**Crates**: `nexus-git/src/engine.rs`, `nexus-git/src/core_plugin.rs`, `nexus-storage` (binary file handling)
+**Related**: PRD-11 git integration; git2 LFS pointer parsing; `nexus-storage::read_file` (binary path)
+
+Git-LFS (Large File Storage) stores large binary files (images, audio, video, datasets, model weights) as pointer files in the repo, with the actual content stored on a remote LFS server. Without LFS support, Nexus silently serves the raw pointer text to users when they open an LFS-tracked file, which is confusing and wrong.
+
+**What LFS support means in practice:**
+- Detect LFS pointer files on read (header `version https://git-lfs.github.com/spec/v1`)
+- For binary attachments (images, audio, video) — transparently fetch the actual object from the LFS server and serve bytes to the caller
+- For tracked markdown files — warn user that content may be a pointer if LFS server is unavailable
+- On write — if a file matches `.gitattributes` LFS filter patterns, write the pointer and stage the object via `git lfs` CLI subprocess (git2 has no native LFS API)
+
+**Implementation approach:** git2 has no native LFS support. The right path is a hybrid:
+- Read: detect pointer headers in `nexus-storage::read_file`; if LFS, invoke `git lfs smudge` subprocess to fetch real content
+- Write: detect LFS-tracked patterns from `.gitattributes`; if match, invoke `git lfs clean` subprocess before staging
+- `nexus-git` exposes `lfs_status()` handler — lists tracked patterns from `.gitattributes` and which tracked files are locally available vs. pointer-only
+
+**Definition of done:**
+- `com.nexus.git::lfs_status` (handler id 11) returns `{ tracked_patterns: [], pointer_files: [], available_files: [] }`
+- `com.nexus.storage::read_file` detects LFS pointer header, invokes `git lfs smudge <path>` if `git-lfs` binary found, returns real bytes; falls back to pointer text with a warning event if LFS unavailable
+- `com.nexus.git::stage_file` detects LFS-tracked path and routes through `git lfs clean` before staging
+- `nexus git lfs-status` CLI subcommand lists LFS-tracked files and their local availability
+- Graceful degradation: if `git-lfs` binary not found, log warning and operate on pointer text
+
+---
+
+### BL-090: SSH passphrase caching via nexus-security
+
+**Source**: Git Integration Assessment (2026-05-06) — gap #6
+**Effort**: Small (1 day)
+**Crates**: `nexus-git/src/engine.rs` (`make_callbacks`), `nexus-security` (keyring read)
+**Related**: `nexus-security` OS keyring vault; PRD-11 §auth
+
+SSH keys with passphrases currently block the `GitWorker` thread with a libgit2 passphrase prompt if `ssh-agent` isn't running. There's no integration with `nexus-security`'s OS keyring. Users must either run `ssh-agent` or use passphrase-less keys.
+
+**Definition of done:**
+- `make_callbacks()` in `engine.rs` adds a passphrase-lookup step: before prompting, call `com.nexus.security::get_secret("ssh-passphrase:<key-fingerprint>")` via IPC
+- If found, use it; if not, fall back to existing behavior (agent then prompt)
+- On successful remote op after a prompt, offer to store the passphrase in the keyring (dispatches `com.nexus.security::set_secret`)
+- `nexus git clear-passphrase <key-fingerprint>` CLI command removes a stored passphrase
+
+---
+
+### BL-089: Git tags — create, list, delete, push
+
+**Source**: Git Integration Assessment (2026-05-06) — deferred feature
+**Effort**: Small (1 day)
+**Crates**: `nexus-git/src/engine.rs`, `nexus-git/src/core_plugin.rs`
+**Related**: PRD-11; git2 `repo.tag*` API
+
+Tags are commonly used for releases and version markers. git2 provides `repo.tag()`, `repo.tag_lightweight()`, `repo.find_tag()`, and `repo.references_glob("refs/tags/*")` — all straightforward.
+
+**Definition of done:**
+- `GitEngine::list_tags()` → `Vec<{ name, target_hash, is_annotated, message? }>`
+- `GitEngine::create_tag(name, message?)` — annotated if message provided, lightweight otherwise; targets HEAD
+- `GitEngine::delete_tag(name)` — local only
+- `GitEngine::push_tags(remote)` — pushes `refs/tags/*` refspec
+- New IPC handlers: `list_tags` (id 12), `create_tag` (id 13), `delete_tag` (id 14), `push_tags` (id 15)
+- `nexus git tag`, `nexus git tag <name> [--message <msg>]`, `nexus git tag --delete <name>` CLI subcommands
+
+---
+
+### BL-088: Rebase and cherry-pick
+
+**Source**: Git Integration Assessment (2026-05-06) — deferred feature
+**Effort**: Medium (1.5 weeks)
+**Crates**: `nexus-git/src/engine.rs`, shell git panel (BL-084)
+**Related**: PRD-11 §3.4 (deferred); git2 `repo.rebase*` + `repo.cherrypick` API
+
+git2 exposes `repo.rebase()` for non-interactive rebase and `repo.cherrypick()` for cherry-pick. Interactive rebase (editing the todo list) requires shelling out to `git rebase -i` since git2 doesn't expose it.
+
+**Definition of done (non-interactive rebase):**
+- `GitEngine::rebase(onto_branch)` — rebases current branch onto `onto_branch`; returns `RebaseResult { conflicts: [], commits_rebased: u32 }` or conflict list
+- `GitEngine::abort_rebase()` — restores pre-rebase state
+- `com.nexus.git::rebase` + `abort_rebase` handlers (ids 16–17)
+- `nexus git rebase <branch>`, `nexus git rebase --abort` CLI subcommands
+
+**Definition of done (cherry-pick):**
+- `GitEngine::cherry_pick(commit_hash)` — applies a single commit to working tree; returns conflict list if any
+- `GitEngine::abort_cherry_pick()` — restores pre-cherry-pick state
+- `com.nexus.git::cherry_pick` + `abort_cherry_pick` handlers (ids 18–19)
+- `nexus git cherry-pick <hash>` CLI subcommand
+
+---
+
+### BL-087: Stash support
+
+**Source**: Git Integration Assessment (2026-05-06) — deferred feature
+**Effort**: Small (0.5–1 day)
+**Crates**: `nexus-git/src/engine.rs`, `nexus-git/src/core_plugin.rs`
+**Related**: PRD-11; git2 `repo.stash_save` + `repo.stash_apply` + `repo.stash_drop`
+
+Stash is the safety net for branch switching with dirty working trees. Currently `switch_branch` uses force checkout which discards working tree changes silently. Stash support lets users save and restore work-in-progress without committing.
+
+**Definition of done:**
+- `GitEngine::stash_push(message?)` → stash entry index
+- `GitEngine::stash_list()` → `Vec<{ index, message, oid }>`
+- `GitEngine::stash_pop(index?)` → apply + drop (defaults to most recent)
+- `GitEngine::stash_apply(index?)` → apply without dropping
+- `GitEngine::stash_drop(index?)` → discard without applying
+- New IPC handlers: `stash_push` (id 20), `stash_list` (id 21), `stash_pop` (id 22), `stash_drop` (id 23)
+- `nexus git stash`, `nexus git stash list`, `nexus git stash pop`, `nexus git stash drop` CLI subcommands
+- `switch_branch` gains a `--stash` flag that auto-stashes before switching and auto-pops on return
+
+---
+
+### BL-086: Auto-commit scheduler activation
+
+**Source**: Git Integration Assessment (2026-05-06) — gap #2
+**Effort**: Small (0.5 day)
+**Crates**: `nexus-git/src/auto_commit.rs`, `nexus-git/src/core_plugin.rs`, `nexus-bootstrap`
+**Related**: `AutoCommitter` struct (ships today, unactivated); PRD-11 §3.3 "never lose work"
+
+`AutoCommitter` (243 lines) implements debounced "never lose work" commits — debounce window, message template (e.g. `"auto: snapshot 2026-05-06T14:32"`), and configurable enable/disable. The library is complete and tested. No background task activates it. `nexus git auto-commit` exists as a CLI command but must be called manually.
+
+**Definition of done:**
+- `GitCorePlugin::on_start` spawns a background tokio task that calls `auto_committer.check()` every 5 minutes (configurable via forge `config.toml` `git.auto_commit_interval_minutes`)
+- Task subscribes to `com.nexus.storage.file_modified` events and resets the debounce window on each event so rapid edits don't trigger commits mid-typing
+- `git.auto_commit = true/false` in forge config enables/disables (default false — opt-in)
+- Auto-commits emit `com.nexus.activity.appended` event (origin: "git:auto-commit") for the activity timeline
+- `nexus git auto-commit --enable/--disable` CLI flags toggle the config value
+
+---
+
+### BL-085: Hunk-level staging
+
+**Source**: Git Integration Assessment (2026-05-06) — gap #4
+**Effort**: Small–Medium (1 week)
+**Crates**: `nexus-git/src/engine.rs`, `nexus-git/src/core_plugin.rs`
+**Related**: BL-079 (git gutter — the UI surface for this); `diff_file` handler already ships hunks
+
+The backend already returns `Vec<HunkDiff>` from `diff_file` and `diff_staged`. What's missing is writing a partial patch back to the index — staging a specific hunk (or even specific lines within a hunk) rather than the whole file.
+
+**Implementation:** Build a patch string from the selected hunks in unified diff format, apply it to the index via `repo.apply(diff, ApplyLocation::Index, None)` (git2 `apply` API). This avoids shelling out to `git add -p`.
+
+**Definition of done:**
+- `GitEngine::stage_hunks(path, hunk_indices)` — applies only the specified hunks to the index, leaves others unstaged
+- `GitEngine::unstage_hunks(path, hunk_indices)` — reverse-applies hunks from index back to working tree
+- New IPC handlers: `stage_hunks({ path, hunk_indices })` (id 24), `unstage_hunks({ path, hunk_indices })` (id 25)
+- BL-079 diff viewer wires the "Stage hunk" / "Unstage hunk" buttons to these handlers
+- `nexus git stage-hunk <path> <hunk-index>` CLI subcommand
+
+---
+
+### BL-084: Shell git panel — commit UI, branch picker, log graph
+
+**Source**: Git Integration Assessment (2026-05-06) — gap #1 (largest UX gap)
+**Effort**: Large (3–4 weeks)
+**Crates**: new `shell/src/plugins/nexus/gitPanel/`
+**Related**: BL-079 (git gutter + diff viewer — do first or in parallel); all `com.nexus.git` handlers already ship
+
+The Rust backend is complete. The shell exposes only a status bar (branch + dirty indicator). Users have no way to commit, switch branches, view log history, or resolve conflicts from within the shell.
+
+**Surfaces needed (each independently shippable):**
+
+**Commit panel:**
+- Staged/unstaged file list with checkboxes (calls `stage_file`/`unstage_file`)
+- Diff preview on file click (calls `diff_file` or `diff_staged`)
+- Commit message input with conventional-commit template helper
+- Commit button (calls `commit`) + push toggle (calls `push` after commit)
+- Empty-state prompts when nothing to commit
+
+**Branch picker:**
+- Dropdown or popover from status bar showing all local branches
+- Click to switch (calls `switch_branch`); warns if dirty (prompts stash or discard)
+- "New branch" input (calls `create_branch` then `switch_branch`)
+- Delete button per branch with confirmation (calls `delete_branch`)
+
+**Log graph:**
+- Scrollable commit list from `log` handler — hash chip, author, date, message
+- Click commit to show its diff
+- "Copy hash" action
+- HEAD marker, branch labels
+
+**Conflict resolution panel:**
+- Triggered when `repo_state = "Merge"` event fires
+- Lists conflicted files from `conflict_files` handler
+- Click file opens three-way diff view (ours / base / theirs)
+- "Accept ours" / "Accept theirs" / "Accept both" per-hunk buttons
+- "Abort merge" button (calls `abort_merge`)
+- After resolving all conflicts: stage + commit flow
+
+**Definition of done:**
+- All four surfaces accessible from command palette and a dedicated sidebar panel
+- Commit panel is the MVP — ships first; branch picker and log graph follow
+- Conflict panel activates automatically when `com.nexus.git.state` publishes `repo_state: Merge`
+
+---
+
 ### BL-083: Forge-to-forge import and migration tool
 
 **Source**: Storage Integration Assessment (2026-05-06) — gap #5
