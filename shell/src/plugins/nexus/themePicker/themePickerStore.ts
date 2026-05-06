@@ -42,6 +42,8 @@ interface ThemePickerState {
   loadingSwatches: boolean
 
   // ── Theme builder ──────────────────────────────────────────────────
+  /** Which theme the builder is starting from. null = use active theme. */
+  builderBaseThemeId: string | null
   /** Variable overrides being edited. Empty = no changes from base. */
   builderOverrides: Record<string, string>
   builderThemeName: string
@@ -54,6 +56,7 @@ interface ThemePickerState {
   setCategoryFilter(cat: CategoryFilter): void
   setSwatchCache(cache: Record<string, Record<string, string>>): void
   setLoadingSwatches(loading: boolean): void
+  setBuilderBaseThemeId(id: string | null): void
   setBuilderOverride(key: string, value: string): void
   clearBuilderOverride(key: string): void
   resetBuilderOverrides(): void
@@ -69,6 +72,7 @@ export const useThemePickerStore = create<ThemePickerState>((set) => ({
   swatchCache: {},
   loadingSwatches: false,
 
+  builderBaseThemeId: null,
   builderOverrides: {},
   builderThemeName: '',
   builderThemeAuthor: '',
@@ -80,6 +84,7 @@ export const useThemePickerStore = create<ThemePickerState>((set) => ({
   setCategoryFilter: (cat) => set({ categoryFilter: cat }),
   setSwatchCache: (cache) => set({ swatchCache: cache }),
   setLoadingSwatches: (loading) => set({ loadingSwatches: loading }),
+  setBuilderBaseThemeId: (id) => set({ builderBaseThemeId: id }),
   setBuilderOverride: (key, value) =>
     set((s) => ({ builderOverrides: { ...s.builderOverrides, [key]: value } })),
   clearBuilderOverride: (key) =>
