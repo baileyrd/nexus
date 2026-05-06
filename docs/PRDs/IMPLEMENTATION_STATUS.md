@@ -54,8 +54,8 @@
 **Evidence:** [crates/nexus-security/src/](crates/nexus-security/src/), [crates/nexus-plugins/src/loader.rs](crates/nexus-plugins/src/loader.rs) (`build_capabilities`, grant/revoke).
 
 ### PRD-03 — Storage Engine ✅
-**Shipped:** Forge init, SQLite (files/blocks/links/tags/properties), Tantivy FTS, atomic writes, notify-debouncer watcher, kernel-bus event forwarding, petgraph knowledge graph with backlinks + unresolved-link tracking, CRDT state persistence.
-**Gaps:** `BL-003` scoping operators (`tag:`, `path:`, `prop:`, `type:`) parse but post-filter incomplete; `BL-004` 3-tier link resolution cascade; `BL-006` block-level RAG chunk context prefix.
+**Shipped:** Forge init, SQLite (files/blocks/links/tags/properties), Tantivy FTS, atomic writes, notify-debouncer watcher, kernel-bus event forwarding, petgraph knowledge graph with backlinks + unresolved-link tracking, CRDT state persistence. Search scoping operators (`tag:`, `path:`, `prop:`, `type:`) with post-filter (BL-003 ✅ 2026-04-18). 3-tier wikilink resolution — exact → basename → case-insensitive stem, bidirectional phantom-link upgrade (BL-004 ✅ 2026-04-18). Block-level RAG chunking with heading-context prefix (BL-006 ✅ 2026-04-18).
+**Gaps:** Symlink deduplication in watcher + reconcile (BL-082); forge-to-forge import tool (BL-083); CRDT operational merge — state vectors tracked but no peer sync (BL-074).
 **Evidence:** [crates/nexus-storage/src/{schema,search,graph,watcher}.rs](crates/nexus-storage/src/).
 
 ### PRD-04 — Plugin System ✅
