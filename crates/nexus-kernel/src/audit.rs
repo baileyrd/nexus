@@ -19,6 +19,11 @@ pub fn log_capability_granted(plugin_id: &str, capability: &str) {
         result = "granted",
         "capability granted"
     );
+    crate::audit_store::append(
+        "capability_granted",
+        Some(plugin_id),
+        &serde_json::json!({ "capability": capability }),
+    );
 }
 
 /// Log a capability denial event.
@@ -30,6 +35,11 @@ pub fn log_capability_denied(plugin_id: &str, capability: &str) {
         result = "denied",
         "capability denied"
     );
+    crate::audit_store::append(
+        "capability_denied",
+        Some(plugin_id),
+        &serde_json::json!({ "capability": capability }),
+    );
 }
 
 /// Log a plugin lifecycle transition (e.g. "loaded", "initialized", "started", "stopped", "crashed").
@@ -39,6 +49,11 @@ pub fn log_plugin_lifecycle(plugin_id: &str, transition: &str) {
         plugin_id,
         transition,
         "plugin lifecycle"
+    );
+    crate::audit_store::append(
+        "plugin_lifecycle",
+        Some(plugin_id),
+        &serde_json::json!({ "transition": transition }),
     );
 }
 
@@ -50,6 +65,14 @@ pub fn log_credential_access(credential_name: &str, action: &str) {
         action,
         "credential access"
     );
+    crate::audit_store::append(
+        "credential_access",
+        None,
+        &serde_json::json!({
+            "credential_name": credential_name,
+            "action": action,
+        }),
+    );
 }
 
 /// Log a path traversal denial.
@@ -60,6 +83,14 @@ pub fn log_path_traversal_denied(plugin_id: &str, requested_path: &Path, forge_r
         requested_path = %requested_path.display(),
         forge_root = %forge_root.display(),
         "path traversal denied"
+    );
+    crate::audit_store::append(
+        "path_traversal_denied",
+        Some(plugin_id),
+        &serde_json::json!({
+            "requested_path": requested_path.display().to_string(),
+            "forge_root": forge_root.display().to_string(),
+        }),
     );
 }
 

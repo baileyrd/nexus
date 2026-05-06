@@ -14,6 +14,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod audit;
+pub mod audit_store;
 mod capability;
 mod config;
 mod context;

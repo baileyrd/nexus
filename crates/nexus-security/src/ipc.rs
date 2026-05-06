@@ -121,6 +121,62 @@ pub struct DeleteSecretResult {
     pub ok: bool,
 }
 
+// ── query_audit_log (BL-094) ──────────────────────────────────────────────────
+
+/// Args for `com.nexus.security::query_audit_log` (handler id `5`).
+///
+/// All filters are optional. Default returns the most recent 1000 events
+/// across all event types and plugins.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct QueryAuditLogArgs {
+    /// Restrict to this event type (e.g. `"capability_denied"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_type: Option<String>,
+    /// Restrict to this plugin id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_id: Option<String>,
+    /// Only entries with `ts_ms >= since_ts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since_ts: Option<i64>,
+    /// Cap on returned rows (default 1000).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One audit event row in the `query_audit_log` response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AuditLogEntry {
+    /// Auto-increment row id.
+    pub id: i64,
+    /// Unix milliseconds at insertion.
+    pub ts_ms: i64,
+    /// Event type discriminator.
+    pub event_type: String,
+    /// Plugin id, when applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugin_id: Option<String>,
+    /// Event-specific payload as a JSON string (caller parses).
+    pub detail_json: String,
+}
+
 // ── list_secret_names ─────────────────────────────────────────────────────────
 
 /// Args for `com.nexus.security::list_secret_names` (handler id `4`).

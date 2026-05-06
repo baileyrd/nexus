@@ -36,6 +36,7 @@ use nexus_plugins::{
 };
 
 pub mod agent;
+mod audit_sqlite;
 pub mod database;
 pub mod storage;
 pub mod terminal;
@@ -141,6 +142,20 @@ fn build(forge_root: &std::path::Path, invoker_id: &'static str, invoker_name: &
     let forge_dir = forge_root.join(".forge");
     std::fs::create_dir_all(&forge_dir)
         .with_context(|| format!("failed to create forge dir '{}'", forge_dir.display()))?;
+
+    // BL-094: install the global audit-event store before any plugin
+    // loads so capability grants/denials at boot are persisted.
+    // Failure is logged but non-fatal — audit emission falls back to
+    // tracing-only when the store is absent.
+    let audit_path = forge_dir.join(".kernel").join("audit.db");
+    if let Err(e) = audit_sqlite::init(&audit_path) {
+        tracing::warn!(
+            path = %audit_path.display(),
+            error = %e,
+            "audit store init failed; events will trace-only"
+        );
+    }
+
     let kv_path = forge_dir.join("kv.sqlite3");
     let kv_store: Arc<dyn nexus_kernel::KvStore> =
         Arc::new(nexus_kv::SqliteKvStore::open(&kv_path).with_context(|| {
@@ -419,6 +434,7 @@ fn register_core_plugins(
                     ("set_secret", nexus_security::core_plugin::HANDLER_SET_SECRET),
                     ("delete_secret", nexus_security::core_plugin::HANDLER_DELETE_SECRET),
                     ("list_secret_names", nexus_security::core_plugin::HANDLER_LIST_SECRET_NAMES),
+                    ("query_audit_log", nexus_security::core_plugin::HANDLER_QUERY_AUDIT_LOG),
                 ],
             ),
             forge_root,

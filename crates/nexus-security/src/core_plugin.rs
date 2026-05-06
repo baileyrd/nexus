@@ -32,6 +32,9 @@ pub const HANDLER_SET_SECRET: u32 = 2;
 pub const HANDLER_DELETE_SECRET: u32 = 3;
 /// IPC handler: list secret names for `plugin_id` (current session only).
 pub const HANDLER_LIST_SECRET_NAMES: u32 = 4;
+/// IPC handler: query the persisted audit log (BL-094).
+/// Args: `{event_type?, plugin_id?, since_ts?, limit?}` → `Vec<AuditLogEntry>`.
+pub const HANDLER_QUERY_AUDIT_LOG: u32 = 5;
 
 /// Type-erased probe used by `on_init` to decide whether the OS keyring is
 /// reachable. The default impl calls `CredentialVault::new().available()`;
@@ -195,6 +198,17 @@ impl CorePlugin for SecurityCorePlugin {
                     .filter_map(|k| k.strip_prefix(&prefix).map(str::to_string))
                     .collect();
                 Ok(json!({ "names": names }))
+            }
+            HANDLER_QUERY_AUDIT_LOG => {
+                // Each filter is optional; missing → None → no constraint.
+                let filter = nexus_kernel::audit_store::AuditQuery {
+                    event_type: args.get("event_type").and_then(|v| v.as_str()).map(str::to_string),
+                    plugin_id:  args.get("plugin_id").and_then(|v| v.as_str()).map(str::to_string),
+                    since_ts:   args.get("since_ts").and_then(serde_json::Value::as_i64),
+                    limit:      args.get("limit").and_then(serde_json::Value::as_u64).and_then(|n| u32::try_from(n).ok()),
+                };
+                let entries = nexus_kernel::audit_store::query(&filter);
+                Ok(serde_json::to_value(&entries).unwrap_or(json!([])))
             }
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
