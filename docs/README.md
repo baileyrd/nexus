@@ -14,7 +14,7 @@ or the Tauri bridge.
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Policies, guardrails, the `dep_invariants` test |
 | [`architecture/C4.md`](architecture/C4.md) | C4 model: System Context → Containers → Components → Code |
 | [`architecture/invariants.md`](architecture/invariants.md) | The four rules and how each is enforced |
-| [`adr/README.md`](adr/README.md) | ADR conventions; jump from there to the 20 numbered ADRs |
+| [`adr/README.md`](adr/README.md) | ADR conventions; jump from there to the 25 numbered ADRs |
 | [`PRDs/IMPLEMENTATION_STATUS.md`](PRDs/IMPLEMENTATION_STATUS.md) | What's shipped, in-progress, blocked — the live state doc |
 | [`PRDs/BACKLOG.md`](PRDs/BACKLOG.md) | Live work-item index referenced by other planning docs |
 | [`ipc-schemas.md`](ipc-schemas.md) | IPC drift-check policy; generated dirs are the listing |
@@ -110,7 +110,7 @@ docs/
 │
 │   ── Product (current) ──
 ├── PRDs/                                  PRDs 01-17, IMPLEMENTATION_STATUS, BACKLOG
-├── adr/                                   architecture decision records (0001-0020)
+├── adr/                                   architecture decision records (0001-0025)
 │
 │   ── Audiences ──
 ├── plugin-authors/                        plugin author journey (quickstart + index)

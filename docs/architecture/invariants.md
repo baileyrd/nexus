@@ -20,7 +20,7 @@ explicitly designed as derived state.
 
 ## 2. Microkernel isolation
 
-`nexus-kernel` depends only on `nexus-types`. Subsystem crates depend on the
+`nexus-kernel` depends only on `nexus-types` and `nexus-plugin-api` (both are leaf crates with no internal `nexus-*` dependencies). Subsystem crates depend on the
 kernel; the kernel never depends on a subsystem. Frontends and service crates
 must not reach around the IPC boundary by linking subsystems directly (e.g.,
 `nexus-cli` cannot import `rusqlite`).

@@ -1,7 +1,8 @@
 # ADR 0023: Unify Agent Planning on the AI Tool Registry
 
 **Date:** 2026-05-05
-**Status:** Proposed
+**Status:** Accepted. Shipped as Phase 1 of ADR 0024.
+**Superseded-by-section:** ADR 0025 (legacy planner retirement — Phase 2 cleanup)
 **Audit reference:** [`docs/AI-INTERACTION-SURFACE-AUDIT.md`](../AI-INTERACTION-SURFACE-AUDIT.md) §2C / §5 (G7)
 
 ## Context
