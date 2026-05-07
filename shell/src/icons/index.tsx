@@ -23,6 +23,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  Pencil,
   Grid3x3,
   Info,
   Link,
@@ -137,6 +138,7 @@ const ICON_MAP = {
   // Editing / sort
   sortAZ:      { component: ArrowDownUp },
   crosshair:   { component: Crosshair },
+  pencil:      { component: Pencil },
 
   // Controls / glyphs
   plus:        { component: Plus },

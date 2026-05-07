@@ -157,25 +157,57 @@
   display: flex;
   gap: 4px;
   margin-top: 4px;
+  /* BL-066: hover-revealed action row. The buttons fade in on row
+     hover or when one of them holds keyboard focus, so the resting
+     state of the sidebar is uncluttered text-only entries. */
+  opacity: 0;
+  transition: opacity 80ms ease-out;
+}
+
+.nexus-saved-command:hover .nexus-saved-command-actions,
+.nexus-saved-command:focus-within .nexus-saved-command-actions {
+  opacity: 1;
+}
+
+/* Touch devices have no hover state — fall back to always-visible
+   actions so the icons remain reachable. Same convention as the
+   files-tree row affordances. */
+@media (hover: none) {
+  .nexus-saved-command-actions {
+    opacity: 1;
+  }
 }
 
 .nexus-saved-command-actions button {
-  font-size: 10px;
-  padding: 2px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
   background: transparent;
-  border: 1px solid var(--background-modifier-border);
+  border: 1px solid transparent;
   border-radius: 3px;
-  color: var(--text-normal);
+  color: var(--text-muted);
   cursor: pointer;
+  line-height: 0;
 }
 
 .nexus-saved-command-actions button:hover:not(:disabled) {
   background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border);
+  color: var(--text-normal);
 }
 
 .nexus-saved-command-actions button:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* Make the destructive action visually distinct on hover so
+   "Delete" doesn't feel identical to "Edit" / "Run". */
+.nexus-saved-command-actions button.is-destructive:hover:not(:disabled) {
+  color: var(--text-error, #c53030);
 }
 
 .nexus-saved-command-form {

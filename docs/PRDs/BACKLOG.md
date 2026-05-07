@@ -405,19 +405,7 @@ The lifecycle forwarder thread already publishes `com.nexus.terminal.events.<id>
 
 ---
 
-### BL-066: Terminal sidebar hover buttons
-
-**Source**: Terminal Integration Assessment (2026-05-06); CommandBook evaluation (2026-05-06)
-**Effort**: Tiny (0.5 day)
-**Crates**: `shell/src/plugins/nexus/terminal/SavedCommandsView.tsx`
-**Related**: BL-055 (run_saved handler must exist for start button to have a target)
-
-Every polished process manager surfaces start/stop/restart actions inline on each sidebar row without requiring a right-click. `SavedCommandsView` has run/copy buttons but not contextual hover buttons. Users must open a context menu for the most common actions.
-
-**Definition of done:**
-- Each sidebar row gains hover-revealed icon buttons: Start (if stopped), Stop (if running), Restart, Dismiss (remove from active sessions without deleting the saved command)
-- Buttons dispatch to `com.nexus.terminal` IPC handlers directly — no modal, no confirmation for Start/Stop/Restart
-- Visual treatment matches existing shell hover patterns (opacity fade-in, same icon size)
+_BL-066 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Hover-fade icon row replaces the always-visible text buttons on `SavedCommandsView`: Run / External (when `working_dir` is set) / Edit / ↑ / ↓ / Delete (red on hover). Stop / Restart / Dismiss deferred until BL-055 lands a `run_saved` handler with managed-session state — without procmgr-shaped state, those buttons would have no target._
 
 ---
 

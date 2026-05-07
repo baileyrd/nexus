@@ -8,6 +8,28 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-066: Terminal sidebar hover buttons ✅ (2026-05-06)
+
+**Source**: Terminal Integration Assessment (2026-05-06); CommandBook evaluation
+**Files**: `shell/src/plugins/nexus/terminal/{SavedCommandsView.tsx, terminal.css}`, `shell/src/icons/index.tsx`
+**Related**: BL-055 (would unlock the Stop / Restart / Dismiss tier)
+
+Replaces the always-visible text buttons on `SavedCommandsView` rows with a hover-revealed icon row.
+
+- **Visual.** `.nexus-saved-command-actions` is `opacity: 0` at rest with an 80 ms ease-out transition; the row fades in on `:hover` of `.nexus-saved-command` or when any action holds keyboard focus (`:focus-within`). Touch devices (`@media (hover: none)`) get an always-visible fallback so the icons stay reachable. Buttons render as 22×22 squares with no border at rest, picking up the standard `--background-modifier-hover` background and a border on hover.
+- **Action set** (left to right). Run (`play` icon → `runCommand`, mirrors the row-body click); External (`external` icon → BL-059's `openInExternalTerminal`, only when `working_dir` is set); Edit (`pencil` icon, new); ↑ / ↓ reorder (Unicode arrows kept — no equivalent Lucide glyph reads as cleanly at this size); Delete (`trash` icon with `is-destructive` class — red text on hover).
+- **Icons.** Two new entries in `icons/index.tsx`'s `ICON_MAP`: `pencil` (Lucide `Pencil`). The other glyphs (`play`, `external`, `trash`) were already present.
+
+The row body's whole-row click → `runCommand` is preserved, so users with the explicit Run icon hidden (between hovers) still have the obvious primary affordance.
+
+**Deferred from the original DoD:**
+
+- *Start (if stopped) / Stop (if running) / Restart / Dismiss.* Those map cleanly only on top of a `run_saved` handler that returns a managed-session id, plus per-saved-command state that tracks "is this currently running". Both are owned by BL-055 and don't exist today — wiring buttons to no backend state would either always show "Start" (useless distinction) or wire to the inferior `send_input` workflow (which already has the row-body click path). When BL-055 lands, the backend state can drive a four-way toggle in this same hover row.
+
+All 892 shell tests still pass; typecheck clean.
+
+---
+
 ### BL-059: "Open in external terminal" escape hatch ✅ (2026-05-06)
 
 **Source**: Terminal Integration Assessment (2026-05-06) — gap #6; CommandBook evaluation

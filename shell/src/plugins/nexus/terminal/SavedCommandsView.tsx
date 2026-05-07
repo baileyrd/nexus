@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { KernelAPI, NotificationsAPI } from '../../../types/plugin'
 import { useConfigValue } from '../../../stores/configStore'
+import { Icon } from '../../../icons'
 import { useTerminalStore } from './terminalStore'
 
 const CMD_SAVE_NOTIFICATION_MS = 3000
@@ -299,7 +300,31 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
                 </div>
               )}
             </button>
+            {/* BL-066: hover-revealed icon row. The whole-row body
+                click (line above) is still the primary "run" affordance,
+                but the explicit play icon mirrors what every modern
+                process-manager surface provides — see the closure
+                notes for why Stop / Restart / Dismiss are deferred
+                until BL-055 lands a managed-session backend. */}
             <div className="nexus-saved-command-actions">
+              <button
+                type="button"
+                onClick={() => void runCommand(cmd)}
+                aria-label={`Run ${cmd.name} in active terminal`}
+                title="Run in active terminal"
+              >
+                <Icon name="play" size={12} />
+              </button>
+              {cmd.working_dir && (
+                <button
+                  type="button"
+                  onClick={() => void openInExternalTerminal(cmd)}
+                  aria-label={`Open ${cmd.name} in external terminal`}
+                  title="Open in external terminal"
+                >
+                  <Icon name="external" size={12} />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() =>
@@ -317,31 +342,16 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
                   })
                 }
                 aria-label={`Edit ${cmd.name}`}
+                title="Edit"
               >
-                Edit
-              </button>
-              {cmd.working_dir && (
-                <button
-                  type="button"
-                  onClick={() => void openInExternalTerminal(cmd)}
-                  aria-label={`Open ${cmd.name} in external terminal`}
-                  title="Open in external terminal (BL-059)"
-                >
-                  External
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => void handleDelete(cmd.slug)}
-                aria-label={`Delete ${cmd.name}`}
-              >
-                Delete
+                <Icon name="pencil" size={12} />
               </button>
               <button
                 type="button"
                 disabled={idx === 0}
                 onClick={() => void handleMove(idx, -1)}
                 aria-label="Move up"
+                title="Move up"
               >
                 {'↑'}
               </button>
@@ -350,8 +360,18 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
                 disabled={idx === commands.length - 1}
                 onClick={() => void handleMove(idx, 1)}
                 aria-label="Move down"
+                title="Move down"
               >
                 {'↓'}
+              </button>
+              <button
+                type="button"
+                className="is-destructive"
+                onClick={() => void handleDelete(cmd.slug)}
+                aria-label={`Delete ${cmd.name}`}
+                title="Delete"
+              >
+                <Icon name="trash" size={12} />
               </button>
             </div>
           </li>
