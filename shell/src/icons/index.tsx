@@ -15,6 +15,8 @@ import {
   Crosshair,
   Database,
   ExternalLink,
+  FileBraces,
+  FileCode,
   FilePlus2,
   FileText,
   Flame,
@@ -86,6 +88,9 @@ const ICON_MAP = {
   folderPlus:  { component: FolderPlus },
   filePlus:    { component: FilePlus2 },
   doc:         { component: FileText },
+  // BL-080: per-extension file glyphs for the file tree.
+  fileCode:    { component: FileCode },
+  fileJson:    { component: FileBraces },
   archive:     { component: Archive },
   trash:       { component: Trash2 },
 

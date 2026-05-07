@@ -207,22 +207,7 @@ DAP is the debugger equivalent of LSP. Requires a `nexus-dap` core plugin (same 
 
 ---
 
-### BL-080: File tree / project explorer
-
-**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
-**Effort**: Small (3 days)
-**Crates**: `shell/src/plugins/nexus/fileTree/` (new shell plugin)
-**Related**: `com.nexus.storage` file enumeration (already ships); no new backend work
-
-A project-explorer panel showing the forge as a directory tree with file-type icons, expand/collapse, drag-to-reorder, and a right-click context menu (new file, rename, delete, copy path, reveal in OS). Pure shell work — `com.nexus.storage` already enumerates all forge files and emits file-change events on the kernel bus for live updates.
-
-**Definition of done:**
-- `nexus.fileTree` shell plugin registers a sidebar panel
-- Tree renders forge root with expand/collapse per directory
-- File-type icons (at minimum: `.md`, `.rs`, `.ts`, `.py`, `.toml`, `.json`, generic)
-- Right-click context menu: New File, New Folder, Rename, Delete, Copy Path
-- Click opens file in editor (document mode for `.md`, code mode for everything else once BL-075 lands)
-- File-change bus events keep tree in sync without manual refresh
+_BL-080 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Almost everything in the DoD already shipped under `nexus.files` (sidebar tree, expand/collapse, drag-to-reorder, full context menu, live `com.nexus.storage` event sync). The only material gap was the file-type icon set, now closed via a `getFileIcon(name)` helper covering `.md` / source files / structured config and a generic fallback._
 
 ---
 

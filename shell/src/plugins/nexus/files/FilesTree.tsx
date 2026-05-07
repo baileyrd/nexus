@@ -5,6 +5,7 @@ import { useWorkspaceStore } from '../workspace/workspaceStore'
 import { useEditorStore } from '../editor/editorStore'
 import { createDir, createFile, loadChildren, renameEntry } from './kernelClient'
 import { Icon } from '../../../icons'
+import { getFileIcon } from './fileIcon'
 import { getApi } from './runtime'
 import { NavActionButton, NavButtonsContainer, NavHeader } from '../../../primitives/NavHeader'
 import { FilesContextMenu, type FilesContextMenuItem } from './ContextMenu'
@@ -918,7 +919,7 @@ function Row({
         {showAsDir ? (
           <Icon name={expanded ? 'folderOpen' : 'folder'} size={14} />
         ) : (
-          <Icon name="doc" size={14} />
+          <Icon name={getFileIcon(entry.name)} size={14} />
         )}
       </span>
       <span className={`tree-item-inner ${contentClass}`}>

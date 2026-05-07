@@ -8,6 +8,40 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-080: File tree / project explorer ✅ (2026-05-06)
+
+**Source**: Code editor capability analysis (2026-05-06)
+**Files**: `shell/src/plugins/nexus/files/{fileIcon.ts (new), FilesTree.tsx}`, `shell/src/icons/index.tsx`
+**Related**: existing `nexus.files` plugin; `com.nexus.storage::list_dir`
+
+The project-explorer functionality the DoD called out was already shipping under the existing `nexus.files` shell plugin: a sidebar-mounted directory tree with expand/collapse per folder, drag-to-reorder via `rename_entry`, a right-click context menu (New note, New folder, Rename, Delete, Reveal in OS, Copy Path), live sync against `com.nexus.storage`'s `file_*` bus events, and click-to-open routed through the editor. The DoD asked for a fresh `nexus.fileTree` plugin; spinning up a duplicate sidebar panel would only have confused users — the gap was the file-type icon set.
+
+That gap is now closed:
+
+- `shell/src/icons/index.tsx` adds two Lucide-backed glyphs to `ICON_MAP`: `fileCode` (`FileCode`) and `fileJson` (`FileBraces`). The existing `book` glyph (`BookOpen`) covers markdown, and the generic `doc` glyph (`FileText`) remains the fallback.
+- `shell/src/plugins/nexus/files/fileIcon.ts` exports a pure `getFileIcon(name): IconName` helper that maps an extension to one of the four glyphs. Coverage extends past the DoD's minimum list (`.md`, `.rs`, `.ts`, `.py`, `.toml`, `.json`) to include the cluster a user typically mixes in alongside (`.tsx`, `.jsx`, `.go`, `.rb`, `.java`, `.kt`, `.swift`, `.cpp`, `.cc`, `.c`, `.h`, `.hpp`, `.cs`, `.mjs`, `.cjs`, `.markdown`, `.jsonc`, `.json5`, `.yaml`, `.yml`). Anything else falls through to `doc`.
+- `FilesTree.tsx` renders the per-file icon via `getFileIcon(entry.name)` instead of the fixed `doc` glyph.
+
+The helper is case-insensitive, strips trailing `?…` / `#…` fragments defensively (the file tree never feeds those in, but the helper is reusable from other surfaces), treats leading-dot files like `.gitignore` as `doc` (no real extension), and handles the `''` / `weird.` edge cases without throwing.
+
+**Tests.** Six unit tests in `fileIcon.test.ts` (re-exported via `tests/file-icon.test.ts`):
+
+- Markdown → `book`, including `.markdown` and uppercase.
+- Source-code extensions → `fileCode` (loops over the full list).
+- Structured-config extensions → `fileJson` (loops over the full list).
+- Unknown / extensionless / hidden-file shapes → `doc`.
+- Empty string and `weird.` (trailing dot) → `doc`.
+- Query / hash fragment stripping.
+
+All 863 shell tests pass (was 857; +6 file-icon).
+
+**Deferred from the original DoD:**
+
+- *Distinct icon for `.toml` vs `.json` vs `.yaml`* — they all share `fileJson` for now (Lucide doesn't ship a clean `.toml` glyph and visually distinguishing structured-config formats isn't worth a custom SVG). Most users care about "config-shaped" vs "code-shaped" vs "doc-shaped" — that distinction lands.
+- *Code-mode editor behaviour from the click-to-open contract* (last DoD bullet) — gated on BL-075's dual-mode editor; today everything that isn't `.md` opens with the same source view, which is the existing behaviour.
+
+---
+
 ### BL-071: Emacs keybindings mode ✅ (2026-05-06)
 
 **Source**: Editor Integration Assessment (2026-05-06) — gap #2b; PRD-08 §9
