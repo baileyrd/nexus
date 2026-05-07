@@ -8,6 +8,34 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-088: Non-interactive rebase + cherry-pick ✅ (2026-05-06)
+
+**Source**: Git Integration Assessment (2026-05-06) — deferred feature
+**Files**: `crates/nexus-git/src/{engine.rs,types.rs,core_plugin.rs}`, `crates/nexus-git/tests/integration.rs`, `crates/nexus-bootstrap/src/lib.rs`, `crates/nexus-cli/src/{main.rs,commands/git.rs}`
+
+Two new pairs of `GitEngine` methods backed by libgit2:
+
+- **Rebase**: `rebase(onto_branch) -> RebaseResult { commits_rebased, conflicts }` drives `Repository::rebase` as an iterator, replaying each picked commit with the original author + the operator's signature; halts on the first commit whose merge produces conflicts and returns them in the result. `abort_rebase()` calls `Rebase::abort()` to restore pre-rebase HEAD.
+- **Cherry-pick**: `cherry_pick(commit_hash) -> CherryPickResult { commit_hash, conflicts }` calls `Repository::cherrypick`, then either commits the resulting tree (clean) or returns the conflict list (caller resolves manually). `abort_cherry_pick()` mirrors `abort_merge` (`reset --hard HEAD` + `cleanup_state`).
+
+Both follow the same error/conflict shape as the existing `merge` path so callers handle them uniformly. New shared helper `collect_conflict_paths(&Index)` deduplicates the conflict-iteration code that already lived inside `merge`.
+
+**IPC + CLI surface:**
+
+- Handlers 28 (rebase), 29 (abort_rebase), 30 (cherry_pick), 31 (abort_cherry_pick) registered in bootstrap with `with_v1_aliases` per ADR 0021.
+- `nexus git rebase <onto>` / `nexus git rebase --abort` / `nexus git cherry-pick <hash>` / `nexus git cherry-pick --abort`. Conflict output formats the file list and prompts the operator to resolve + commit manually or abort.
+
+Four new integration tests in `crates/nexus-git/tests/integration.rs`: clean rebase replays both feature commits onto a forward-moving main; conflicting rebase pauses and aborts cleanly; clean cherry-pick lands a single commit; conflicting cherry-pick pauses and aborts. End-to-end CLI smoke against a hand-built repo confirmed `nexus git rebase main` produces a linear history.
+
+**Required helper:** `LogEntry.hash` is the 7-char short form which doesn't round-trip through `Oid::from_str` because libgit2 zero-pads the suffix during lookup. Tests resolve full SHAs via a `revwalk` helper (`full_oid_for_message`) rather than parsing the short form. Real callers using `cherry_pick` from the IPC handler hand it the full SHA from `git log` / Git tooling, so this is purely a test-helper concern.
+
+**Deferred from the original DoD:**
+
+- *Interactive rebase* (`-i` with the editable todo list) — libgit2 doesn't expose this; shipping it means shelling out to `git rebase -i` and either invoking `$EDITOR` directly (good for CLI / TUI) or surfacing a panel-driven editor (shell). Worth a separate BL once the shell git panel (BL-084) lands.
+- *Conflict-resolution UI* — the engine returns the conflict list; the user resolves with their normal editor or via `git mergetool` / shell support. A nicer in-Nexus resolution UI is also scoped to BL-084.
+
+---
+
 ### BL-091: Git-LFS read-path support and status surface ✅ (2026-05-06)
 
 **Source**: Git Integration Assessment + user request (2026-05-06)

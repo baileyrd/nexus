@@ -101,26 +101,7 @@ _BL-089 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
-### BL-088: Rebase and cherry-pick
-
-**Source**: Git Integration Assessment (2026-05-06) — deferred feature
-**Effort**: Medium (1.5 weeks)
-**Crates**: `nexus-git/src/engine.rs`, shell git panel (BL-084)
-**Related**: PRD-11 §3.4 (deferred); git2 `repo.rebase*` + `repo.cherrypick` API
-
-git2 exposes `repo.rebase()` for non-interactive rebase and `repo.cherrypick()` for cherry-pick. Interactive rebase (editing the todo list) requires shelling out to `git rebase -i` since git2 doesn't expose it.
-
-**Definition of done (non-interactive rebase):**
-- `GitEngine::rebase(onto_branch)` — rebases current branch onto `onto_branch`; returns `RebaseResult { conflicts: [], commits_rebased: u32 }` or conflict list
-- `GitEngine::abort_rebase()` — restores pre-rebase state
-- `com.nexus.git::rebase` + `abort_rebase` handlers (ids 16–17)
-- `nexus git rebase <branch>`, `nexus git rebase --abort` CLI subcommands
-
-**Definition of done (cherry-pick):**
-- `GitEngine::cherry_pick(commit_hash)` — applies a single commit to working tree; returns conflict list if any
-- `GitEngine::abort_cherry_pick()` — restores pre-cherry-pick state
-- `com.nexus.git::cherry_pick` + `abort_cherry_pick` handlers (ids 18–19)
-- `nexus git cherry-pick <hash>` CLI subcommand
+_BL-088 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Non-interactive rebase + cherry-pick shipped end-to-end (engine, IPC handlers 28–31, CLI verbs). Interactive rebase (`-i`) deferred — requires shelling out to `git rebase -i` since libgit2 doesn't expose the editable todo list._
 
 ---
 

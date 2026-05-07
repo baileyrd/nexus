@@ -152,6 +152,30 @@ pub struct MergeResult {
     pub commit_hash: Option<String>,
 }
 
+/// Result of a non-interactive rebase (BL-088).
+#[derive(Debug, Clone)]
+pub struct RebaseResult {
+    /// Number of commits successfully replayed onto the new base.
+    /// Zero on a noop / up-to-date rebase or when the first
+    /// operation produced conflicts.
+    pub commits_rebased: u32,
+    /// Files with unresolved conflicts. Non-empty means the rebase
+    /// is paused and the caller should either resolve + recommit
+    /// or call `abort_rebase`.
+    pub conflicts: Vec<String>,
+}
+
+/// Result of a cherry-pick (BL-088).
+#[derive(Debug, Clone)]
+pub struct CherryPickResult {
+    /// Files with unresolved conflicts. Non-empty means the
+    /// caller must resolve them and commit manually (or abort).
+    pub conflicts: Vec<String>,
+    /// Hash of the new commit on success; `None` when there were
+    /// conflicts or the picked commit was already in HEAD.
+    pub commit_hash: Option<String>,
+}
+
 /// Information about a local branch.
 #[derive(Debug, Clone)]
 pub struct BranchInfo {

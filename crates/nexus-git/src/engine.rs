@@ -6,7 +6,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use git2::{ApplyLocation, DiffOptions, Repository, StatusOptions};
 
 use crate::error::GitError;
-use crate::types::{GitState, RepoState, StatusEntry, FileStatus, HunkDiff, BlameEntry, LogEntry, BranchInfo, MergeResult, DiffLineKind, DiffLine, TagInfo, StashEntry};
+use crate::types::{GitState, RepoState, StatusEntry, FileStatus, HunkDiff, BlameEntry, LogEntry, BranchInfo, MergeResult, RebaseResult, CherryPickResult, DiffLineKind, DiffLine, TagInfo, StashEntry};
 
 /// Git engine backed by `git2::Repository`.
 ///
@@ -838,6 +838,125 @@ impl GitEngine {
         Ok(())
     }
 
+    /// Non-interactive rebase of the current branch onto
+    /// `onto_branch` (BL-088). Drives libgit2's `Rebase` iterator,
+    /// committing each replayed commit with the original
+    /// author/committer and message; stops on the first operation
+    /// that introduces conflicts and returns them in the
+    /// [`RebaseResult`]. The repository is left in the in-progress
+    /// rebase state — the caller resolves + commits manually or
+    /// calls [`abort_rebase`](Self::abort_rebase).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitError`] for any libgit2 failure (target branch
+    /// not found, detached HEAD, etc.).
+    pub fn rebase(&self, onto_branch: &str) -> Result<RebaseResult, GitError> {
+        let onto_ref = self
+            .repo
+            .find_reference(&format!("refs/heads/{onto_branch}"))
+            .or_else(|_| self.repo.find_reference(&format!("refs/remotes/{onto_branch}")))?;
+        let onto = self.repo.reference_to_annotated_commit(&onto_ref)?;
+
+        let head_ref = self.repo.head()?;
+        let upstream = self.repo.reference_to_annotated_commit(&head_ref)?;
+        // Reset HEAD to onto so the working tree starts clean before
+        // we replay our commits.
+        let branch = upstream;
+
+        let mut rebase = self.repo.rebase(Some(&branch), Some(&onto), Some(&onto), None)?;
+
+        let mut commits_rebased: u32 = 0;
+        loop {
+            let Some(op_result) = rebase.next() else { break };
+            let _op = op_result?;
+
+            // Conflicts surface as a non-empty index conflicts iter.
+            let index = self.repo.index()?;
+            if index.has_conflicts() {
+                let conflicts = collect_conflict_paths(&index)?;
+                return Ok(RebaseResult { commits_rebased, conflicts });
+            }
+
+            // No conflicts on this op — commit it and advance.
+            let sig = self.repo.signature()?;
+            match rebase.commit(None, &sig, None) {
+                Ok(_oid) => commits_rebased += 1,
+                Err(e) if e.code() == git2::ErrorCode::Applied => {
+                    // Already applied (empty commit after rebase) — skip.
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        rebase.finish(None)?;
+        Ok(RebaseResult { commits_rebased, conflicts: Vec::new() })
+    }
+
+    /// Abort an in-progress rebase (BL-088), restoring the
+    /// pre-rebase HEAD and working tree.
+    ///
+    /// # Errors
+    /// Returns [`GitError`] if there is no rebase in progress or
+    /// libgit2 fails to roll back.
+    pub fn abort_rebase(&self) -> Result<(), GitError> {
+        let mut rebase = self.repo.open_rebase(None)?;
+        rebase.abort()?;
+        Ok(())
+    }
+
+    /// Cherry-pick a single commit onto the working tree (BL-088).
+    /// On a clean apply, creates a new commit with the original
+    /// commit's message + author and returns the new hash. On
+    /// conflict, the working tree + index hold the in-progress
+    /// state and the caller must resolve + commit manually or
+    /// call [`abort_cherry_pick`](Self::abort_cherry_pick).
+    ///
+    /// # Errors
+    /// Returns [`GitError`] for any libgit2 failure.
+    pub fn cherry_pick(&self, commit_hash: &str) -> Result<CherryPickResult, GitError> {
+        let oid = git2::Oid::from_str(commit_hash)?;
+        let commit = self.repo.find_commit(oid)?;
+        self.repo.cherrypick(&commit, None)?;
+
+        let mut index = self.repo.index()?;
+        if index.has_conflicts() {
+            let conflicts = collect_conflict_paths(&index)?;
+            return Ok(CherryPickResult { conflicts, commit_hash: None });
+        }
+
+        let tree_id = index.write_tree()?;
+        let tree = self.repo.find_tree(tree_id)?;
+        let head_commit = self.repo.head()?.peel_to_commit()?;
+        let sig = self.repo.signature()?;
+        let new_oid = self.repo.commit(
+            Some("HEAD"),
+            &commit.author(),
+            &sig,
+            commit.message().unwrap_or(""),
+            &tree,
+            &[&head_commit],
+        )?;
+        self.repo.cleanup_state()?;
+        Ok(CherryPickResult {
+            conflicts: Vec::new(),
+            commit_hash: Some(new_oid.to_string()[..7].to_string()),
+        })
+    }
+
+    /// Abort an in-progress cherry-pick (BL-088), restoring the
+    /// pre-pick HEAD + working tree via `reset --hard` +
+    /// `cleanup_state`. Mirrors [`abort_merge`](Self::abort_merge).
+    ///
+    /// # Errors
+    /// Returns [`GitError`] on any libgit2 failure.
+    pub fn abort_cherry_pick(&self) -> Result<(), GitError> {
+        let head = self.repo.head()?.peel_to_commit()?;
+        self.repo.reset(head.as_object(), git2::ResetType::Hard, None)?;
+        self.repo.cleanup_state()?;
+        Ok(())
+    }
+
     /// Get the HEAD tree, or `None` for an empty repo.
     fn head_tree(&self) -> Result<Option<git2::Tree<'_>>, GitError> {
         match self.repo.head() {
@@ -851,6 +970,21 @@ impl GitEngine {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Collect conflict paths from a git2 `Index`. Used by both
+/// [`GitEngine::rebase`] and [`GitEngine::cherry_pick`] to surface
+/// the same conflict-list shape `merge` already returns.
+fn collect_conflict_paths(index: &git2::Index) -> Result<Vec<String>, GitError> {
+    let mut out = Vec::new();
+    for c in index.conflicts()?.flatten() {
+        if let Some(entry) = c.our.as_ref().or(c.their.as_ref()) {
+            if let Ok(path) = String::from_utf8(entry.path.clone()) {
+                out.push(path);
+            }
+        }
+    }
+    Ok(out)
+}
 
 fn make_callbacks() -> git2::RemoteCallbacks<'static> {
     let mut callbacks = git2::RemoteCallbacks::new();

@@ -478,3 +478,156 @@ fn auto_commit_full_workflow() {
     // Working tree should be clean now.
     assert!(!engine.state().unwrap().is_dirty);
 }
+
+// ── Rebase + cherry-pick (BL-088) ────────────────────────────────────────────
+
+/// Walk the repo's HEAD history and return the full 40-char OID of
+/// the first commit whose message starts with `needle`. Used by the
+/// cherry-pick tests because `LogEntry.hash` is the 7-char short
+/// form which does not round-trip through `Oid::from_str`.
+fn full_oid_for_message(dir: &Path, needle: &str) -> String {
+    let repo = git2::Repository::open(dir).unwrap();
+    let mut walk = repo.revwalk().unwrap();
+    walk.push_head().unwrap();
+    for oid in walk.flatten() {
+        if let Ok(commit) = repo.find_commit(oid) {
+            if commit.message().unwrap_or("").starts_with(needle) {
+                return oid.to_string();
+            }
+        }
+    }
+    panic!("no commit message starts with {needle:?}");
+}
+
+#[test]
+fn rebase_replays_commits_onto_target_branch() {
+    let (dir, engine) = setup();
+    fs::write(dir.path().join("base.txt"), "base").unwrap();
+    commit(dir.path(), "initial");
+    let main = engine.state().unwrap().branch.unwrap();
+
+    // Diverge: feature branch picks up two commits with new files.
+    engine.create_branch("feature").unwrap();
+    engine.switch_branch("feature").unwrap();
+    fs::write(dir.path().join("a.txt"), "a").unwrap();
+    commit(dir.path(), "feature: add a.txt");
+    fs::write(dir.path().join("b.txt"), "b").unwrap();
+    commit(dir.path(), "feature: add b.txt");
+
+    // Main moves forward independently.
+    engine.switch_branch(&main).unwrap();
+    fs::write(dir.path().join("main-only.txt"), "main").unwrap();
+    commit(dir.path(), "main: add main-only.txt");
+
+    // Rebase feature onto main.
+    engine.switch_branch("feature").unwrap();
+    let result = engine.rebase(&main).unwrap();
+    assert_eq!(result.commits_rebased, 2);
+    assert!(result.conflicts.is_empty(), "no conflicts expected");
+
+    // After rebase, feature contains both feature commits and the
+    // main-only file from the new base.
+    assert!(dir.path().join("a.txt").exists());
+    assert!(dir.path().join("b.txt").exists());
+    assert!(dir.path().join("main-only.txt").exists());
+}
+
+#[test]
+fn rebase_pauses_on_conflict_and_aborts_cleanly() {
+    let (dir, engine) = setup();
+    fs::write(dir.path().join("conflict.txt"), "shared base\n").unwrap();
+    commit(dir.path(), "initial");
+    let main = engine.state().unwrap().branch.unwrap();
+
+    // Feature edits the file one way.
+    engine.create_branch("feat-conflict").unwrap();
+    engine.switch_branch("feat-conflict").unwrap();
+    fs::write(dir.path().join("conflict.txt"), "feature edit\n").unwrap();
+    commit(dir.path(), "feature edit");
+
+    // Main edits the same file differently.
+    engine.switch_branch(&main).unwrap();
+    fs::write(dir.path().join("conflict.txt"), "main edit\n").unwrap();
+    commit(dir.path(), "main edit");
+
+    engine.switch_branch("feat-conflict").unwrap();
+    let result = engine.rebase(&main).unwrap();
+    assert!(
+        !result.conflicts.is_empty(),
+        "rebase should report conflicts on overlapping edit"
+    );
+    assert!(result.conflicts.iter().any(|p| p.contains("conflict.txt")));
+
+    // Abort restores pre-rebase state without surfacing an error.
+    engine.abort_rebase().expect("abort_rebase");
+}
+
+#[test]
+fn cherry_pick_applies_single_commit_cleanly() {
+    let (dir, engine) = setup();
+    fs::write(dir.path().join("base.txt"), "base").unwrap();
+    commit(dir.path(), "initial");
+    let main = engine.state().unwrap().branch.unwrap();
+
+    // Feature branch with one commit we want to cherry-pick.
+    engine.create_branch("feat-cp").unwrap();
+    engine.switch_branch("feat-cp").unwrap();
+    fs::write(dir.path().join("picked.txt"), "picked!").unwrap();
+    commit(dir.path(), "feat: add picked.txt");
+    // LogEntry.hash is the short (7-char) form; git2 also accepts
+    // full SHAs but our short rendering pads to bogus zeros under
+    // `Oid::from_str`. Re-resolve to a full oid via libgit2 directly.
+    let target_hash = full_oid_for_message(dir.path(), "feat: add picked.txt");
+
+    // Back to main; cherry-pick the feature commit.
+    engine.switch_branch(&main).unwrap();
+    let result = engine.cherry_pick(&target_hash).unwrap();
+    assert!(result.conflicts.is_empty(), "expected clean pick");
+    assert!(result.commit_hash.is_some(), "expected new commit hash");
+    assert!(dir.path().join("picked.txt").exists());
+
+    // The new commit is on main, not the original hash.
+    let log_after = engine.log(5).unwrap();
+    assert!(
+        log_after.iter().any(|e| e.message.starts_with("feat: add picked.txt")),
+        "cherry-picked commit must appear in main's log"
+    );
+}
+
+#[test]
+fn cherry_pick_pauses_on_conflict_and_aborts_cleanly() {
+    // Diverging edits to the same file → conflict on cherry-pick.
+    // libgit2's cherrypick performs a safety-checked checkout
+    // before applying the merge; switching branches via
+    // `engine.switch_branch` (which calls `checkout_head` with
+    // `force()`) leaves a clean tree but libgit2's working-tree
+    // index occasionally lags. Use the engine's own stage_all +
+    // commit so the index agrees with HEAD before the cherry-pick.
+    let (dir, engine) = setup();
+    fs::write(dir.path().join("conflict.txt"), "base\n").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("initial").unwrap();
+    let main = engine.state().unwrap().branch.unwrap();
+
+    engine.create_branch("feat-cp-conflict").unwrap();
+    engine.switch_branch("feat-cp-conflict").unwrap();
+    fs::write(dir.path().join("conflict.txt"), "feature edit\n").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("feature: change conflict.txt").unwrap();
+    let target_hash = full_oid_for_message(dir.path(), "feature: change conflict.txt");
+
+    engine.switch_branch(&main).unwrap();
+    fs::write(dir.path().join("conflict.txt"), "main edit\n").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("main: change conflict.txt").unwrap();
+    assert!(!engine.state().unwrap().is_dirty, "tree must be clean before cherry-pick");
+
+    let result = engine.cherry_pick(&target_hash).unwrap();
+    assert!(
+        !result.conflicts.is_empty(),
+        "cherry-pick onto a divergent edit must report conflicts"
+    );
+    assert!(result.commit_hash.is_none());
+
+    engine.abort_cherry_pick().expect("abort_cherry_pick");
+}

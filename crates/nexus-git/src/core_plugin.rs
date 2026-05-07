@@ -124,6 +124,22 @@ pub const HANDLER_PUSH_TAGS: u32 = 22;
 ///    git_lfs_installed }`. Inspects `.gitattributes` for `filter=lfs`
 /// rules and walks the working tree classifying matched files.
 pub const HANDLER_LFS_STATUS: u32 = 27;
+/// IPC handler: non-interactive rebase onto a target branch
+/// (BL-088). Args: `{"onto": "<branch>"}`. Returns
+/// `{commits_rebased, conflicts}`; non-empty `conflicts` means the
+/// rebase paused mid-flight and the caller should resolve + commit
+/// manually or invoke `abort_rebase`.
+pub const HANDLER_REBASE: u32 = 28;
+/// IPC handler: abort an in-progress rebase (BL-088). No args.
+pub const HANDLER_ABORT_REBASE: u32 = 29;
+/// IPC handler: cherry-pick a single commit onto HEAD (BL-088).
+/// Args: `{"commit": "<hash>"}`. Returns `{commit_hash, conflicts}`;
+/// non-empty `conflicts` means the working tree holds the
+/// in-progress state and the caller resolves manually or invokes
+/// `abort_cherry_pick`.
+pub const HANDLER_CHERRY_PICK: u32 = 30;
+/// IPC handler: abort an in-progress cherry-pick (BL-088). No args.
+pub const HANDLER_ABORT_CHERRY_PICK: u32 = 31;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const POLL_TICK: Duration = Duration::from_millis(200);
@@ -484,6 +500,30 @@ impl CorePlugin for GitCorePlugin {
                 Ok(json!({"ok": true}))
             }
             HANDLER_LFS_STATUS => Ok(lfs_status_snapshot(&self.forge_root)),
+            HANDLER_REBASE => {
+                let onto = string_arg(args, "onto")?;
+                let r = h.with(move |e| e.rebase(&onto)).map_err(map_err)?;
+                Ok(json!({
+                    "commits_rebased": r.commits_rebased,
+                    "conflicts": r.conflicts,
+                }))
+            }
+            HANDLER_ABORT_REBASE => {
+                h.with(|e| e.abort_rebase()).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
+            HANDLER_CHERRY_PICK => {
+                let commit = string_arg(args, "commit")?;
+                let r = h.with(move |e| e.cherry_pick(&commit)).map_err(map_err)?;
+                Ok(json!({
+                    "commit_hash": r.commit_hash,
+                    "conflicts": r.conflicts,
+                }))
+            }
+            HANDLER_ABORT_CHERRY_PICK => {
+                h.with(|e| e.abort_cherry_pick()).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("unknown handler_id {handler_id}"),

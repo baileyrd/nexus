@@ -504,6 +504,68 @@ pub fn set_passphrase(key: &str) -> Result<()> {
 }
 
 /// Remove a cached SSH passphrase from the OS keyring.
+/// Non-interactive rebase or rebase abort (BL-088).
+pub fn rebase(app: &App, onto: Option<&str>, abort: bool) -> Result<()> {
+    let engine = open_engine(app)?;
+    if abort {
+        engine.abort_rebase().map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("Rebase aborted.");
+        return Ok(());
+    }
+    let onto = onto.ok_or_else(|| {
+        anyhow::anyhow!("'nexus git rebase' requires <onto> branch (or --abort)")
+    })?;
+    let result = engine.rebase(onto).map_err(|e| anyhow::anyhow!("{e}"))?;
+    if !result.conflicts.is_empty() {
+        println!(
+            "Rebase paused after {} commit(s) — conflicts in:",
+            result.commits_rebased
+        );
+        for f in &result.conflicts {
+            println!("  {f}");
+        }
+        println!(
+            "\nResolve, then `git add` + `git rebase --continue`, or run \
+             `nexus git rebase --abort`."
+        );
+    } else {
+        println!(
+            "Rebased {} commit(s) onto {onto} cleanly.",
+            result.commits_rebased
+        );
+    }
+    Ok(())
+}
+
+/// Cherry-pick a single commit or abort an in-progress pick (BL-088).
+pub fn cherry_pick(app: &App, commit: Option<&str>, abort: bool) -> Result<()> {
+    let engine = open_engine(app)?;
+    if abort {
+        engine.abort_cherry_pick().map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("Cherry-pick aborted.");
+        return Ok(());
+    }
+    let commit = commit.ok_or_else(|| {
+        anyhow::anyhow!("'nexus git cherry-pick' requires <commit> hash (or --abort)")
+    })?;
+    let result = engine.cherry_pick(commit).map_err(|e| anyhow::anyhow!("{e}"))?;
+    if !result.conflicts.is_empty() {
+        println!("Cherry-pick paused — conflicts in:");
+        for f in &result.conflicts {
+            println!("  {f}");
+        }
+        println!(
+            "\nResolve, then commit manually, or run \
+             `nexus git cherry-pick --abort`."
+        );
+    } else if let Some(hash) = result.commit_hash {
+        println!("Cherry-picked as {hash}.");
+    } else {
+        println!("Cherry-pick produced no new commit (already in HEAD).");
+    }
+    Ok(())
+}
+
 /// Print Git-LFS state for the active forge (BL-091).
 pub fn lfs_status(app: &mut App) -> Result<()> {
     let snapshot = nexus_git::core_plugin::lfs_status_for_forge(app.forge_root());

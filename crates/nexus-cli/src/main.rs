@@ -1212,6 +1212,27 @@ enum GitCommand {
     /// and locally-materialised files (BL-091).
     #[command(name = "lfs-status")]
     LfsStatus,
+    /// Rebase the current branch onto another branch (BL-088).
+    /// Conflicts pause the rebase; resolve and commit manually
+    /// or invoke `nexus git rebase --abort`.
+    Rebase {
+        /// Branch to rebase onto (e.g. `main`).
+        onto: Option<String>,
+        /// Abort an in-progress rebase, restoring pre-rebase state.
+        #[arg(long, conflicts_with = "onto")]
+        abort: bool,
+    },
+    /// Cherry-pick a single commit onto HEAD (BL-088). Conflicts
+    /// pause the operation; resolve manually or
+    /// `nexus git cherry-pick --abort`.
+    #[command(name = "cherry-pick")]
+    CherryPick {
+        /// Commit hash to apply (full or short form accepted).
+        commit: Option<String>,
+        /// Abort an in-progress cherry-pick.
+        #[arg(long, conflicts_with = "commit")]
+        abort: bool,
+    },
 }
 
 /// Branch subcommands.
@@ -1673,6 +1694,12 @@ fn main() {
             GitCommand::SetPassphrase { key } => commands::git::set_passphrase(&key),
             GitCommand::ClearPassphrase { key } => commands::git::clear_passphrase(&key),
             GitCommand::LfsStatus => commands::git::lfs_status(&mut app),
+            GitCommand::Rebase { onto, abort } => {
+                commands::git::rebase(&app, onto.as_deref(), abort)
+            }
+            GitCommand::CherryPick { commit, abort } => {
+                commands::git::cherry_pick(&app, commit.as_deref(), abort)
+            }
         },
         Commands::Run(_) => stubs::not_implemented("run"),
 
