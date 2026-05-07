@@ -8,6 +8,30 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-054 Phase 1: Forge OS template ✅ (2026-05-07)
+
+**Source**: BL-054 companion plan, Phase 1 — [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md) §Phased implementation
+**Files**: `crates/nexus-cli/src/main.rs`, `crates/nexus-cli/src/commands/forge.rs`, new `crates/nexus-cli/templates/os/CLAUDE.md`, new `crates/nexus-cli/templates/os/architecture.md`
+**Related**: BL-054 Phase 2 (architecture panel — reads `architecture.md`), BL-054 Phase 5 (OS Setup skill — fills `architecture.md`)
+
+Phase 1 of BL-054 — adds a `--template os` flag to `nexus forge init` that scaffolds the BL-054 §Phased-implementation directory layout plus a memory-map `CLAUDE.md` and an `architecture.md` placeholder.
+
+- **CLI flag.** `ForgeCommand::Init` gained `--template <os>` (clap `value_parser = ["os"]` so the only currently-valid value is enforced at parse time, with a clean error for unknown templates surfaced from `forge::init` itself for symmetry with future templates).
+- **Scaffolder.** `forge::scaffold_os_template(root)` runs after `init_forge` (so `.forge/` exists) and before the index rebuild (so the seeded files land in the index in the same pass). Lays down `raw/`, `wiki/`, `output/`, `projects/`, `ops/`, `personal/`, `archive/` with a `.gitkeep` in each — empty directories don't survive `git add`. Then writes the root `CLAUDE.md` (memory-map operator manual) and `architecture.md` (placeholder pointing at Phase 5's OS Setup skill). `write_if_absent` skips any file the user pre-created so the scaffolder is idempotent and never destroys existing content.
+- **Templates.** Both files live in `crates/nexus-cli/templates/os/` and are pulled in via `include_str!` so the binary ships with them. `CLAUDE.md` documents the eight directory roles, the four memory-write rules, the architecture pointer, and AI-agent conventions (root selection, wikilink usage, citation chains). `architecture.md` is intentionally empty — the four-attribute task tag format is illustrated in a fenced code block so the user / future skill knows the schema, but no domains or tasks are registered until Phase 5's elicitation interview runs.
+- **Tests.** Four new `#[cfg(test)]` cases in `commands/forge.rs`: every directory created with `.gitkeep`; root files seeded with the right content shape; pre-existing `CLAUDE.md` / `architecture.md` preserved (not overwritten); idempotent (second invocation on a populated tree is a no-op).
+
+**Tested**: `cargo test -p nexus-cli` 60/60 pass (47 unit + 10 integration + 3 smoke). `cargo clippy -p nexus-cli` clean for the new module — no new warnings on the touched code paths.
+
+**Definition of done coverage** (per Phase 1 §6 of the companion plan):
+- ✅ `nexus forge init --template os <path>` creates the layout above with the template `CLAUDE.md`
+- ⏭ Shell new-forge flow offers "OS layout" as an option alongside blank — **deferred**. The launcher's "Open Folder…" command goes through `nexus.workspace.open` → `invoke('init_forge', { path })` which today only accepts `path`. Adding a template option requires lifting `scaffold_os_template` out of `nexus-cli` (it's `pub(crate)` to that crate) into `nexus-bootstrap` so both `init_forge` Tauri command and the CLI can share it, plus a UI affordance in `LauncherView`. That refactor + UI work is bigger than a half-day Phase 1 slice; track as a Phase 1 follow-up. CLI is the primary surface for forge creation today.
+- ✅ Template `CLAUDE.md` passes drift — no IPC changes (no new schemas, no new handlers).
+
+**Deferred from Phase 1:**
+- Shell launcher "OS layout" toggle — needs `nexus-bootstrap` extraction first; tracked as Phase 1 follow-up.
+- `os-setup.skill.md` — that's BL-054 Phase 5's deliverable (not in scope here); the `architecture.md` placeholder references it by name so the linkage is documented.
+
 ### BL-053 Phase 2: Forge visual target — inline rendering ✅ (2026-05-07)
 
 **Source**: BL-053 companion plan, Phase 2 — [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md) §3

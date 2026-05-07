@@ -156,6 +156,11 @@ enum ForgeCommand {
     Init {
         /// Directory in which to create the forge (defaults to current dir)
         dir: Option<PathBuf>,
+        /// Optional scaffold template. `os` lays out the
+        /// raw / wiki / output / projects / ops / personal / archive
+        /// folders + a memory-map `CLAUDE.md` per BL-054 Phase 1.
+        #[arg(long, value_parser = ["os"])]
+        template: Option<String>,
     },
     /// Show forge status
     Status,
@@ -1411,7 +1416,9 @@ fn main() {
         },
 
         Commands::Forge(args) => match args.command {
-            ForgeCommand::Init { dir } => commands::forge::init(&app, dir),
+            ForgeCommand::Init { dir, template } => {
+                commands::forge::init(&app, dir, template.as_deref())
+            }
             ForgeCommand::Status => commands::forge::status(&mut app),
             ForgeCommand::Reindex => commands::forge::reindex(&mut app),
             ForgeCommand::Import { source, dry_run, on_conflict } => {
