@@ -24,7 +24,7 @@ use serde_json::Value;
 
 use crate::markdown::{MarkdownParser, MarkdownSerializer, ParseOptions};
 use crate::tree::BlockTree;
-use crate::undo_tree::UndoTree;
+use crate::undo_tree::{PersistedUndoTree, UndoTree};
 
 /// Plugin id of the storage core plugin — the target of the editor's
 /// IPC `read_file`/`write_file` calls.
@@ -274,6 +274,9 @@ impl CorePlugin for EditorCorePlugin {
     fn dispatch(&mut self, handler_id: u32, args: &Value) -> Result<Value, PluginError> {
         match handler_id {
             HANDLER_OPEN => handle_open_sync(&self.forge_root, &self.sessions, args),
+            // BL-072: persistent undo writes happen on the async path
+            // (storage IPC). The sync entry point still drops the
+            // session — unit tests use it directly.
             HANDLER_CLOSE => handle_close(&self.sessions, args),
             HANDLER_GET_TREE => handle_get_tree(&self.sessions, args),
             HANDLER_SAVE => handle_save_sync(&self.forge_root, &self.sessions, args),
@@ -310,6 +313,7 @@ impl CorePlugin for EditorCorePlugin {
     fn dispatch_async(&mut self, handler_id: u32, args: &Value) -> Option<CorePluginFuture> {
         match handler_id {
             HANDLER_OPEN
+            | HANDLER_CLOSE
             | HANDLER_SAVE
             | HANDLER_EXECUTE_DATABASE_VIEW
             | HANDLER_RESOLVE_BLOCK_LINK => {}
@@ -327,6 +331,7 @@ impl CorePlugin for EditorCorePlugin {
         Some(Box::pin(async move {
             match handler_id {
                 HANDLER_OPEN => handle_open_async(&forge_root, sessions, ctx, &args).await,
+                HANDLER_CLOSE => handle_close_async(sessions, ctx, &args).await,
                 HANDLER_SAVE => handle_save_async(&forge_root, sessions, ctx, &args).await,
                 HANDLER_EXECUTE_DATABASE_VIEW => {
                     handle_execute_database_view(ctx, &args).await
@@ -362,6 +367,20 @@ fn finish_open(
     relpath: &str,
     source: &str,
 ) -> Result<Value, PluginError> {
+    finish_open_with_undo(sessions, relpath, source, None)
+}
+
+/// Like [`finish_open`], but installs `restored_undo` (typically from
+/// a successful BL-072 probe) into the new session instead of the
+/// default empty [`UndoTree`]. The session revision starts at 0 either
+/// way — `revision` is a per-session monotonic mutation counter, not
+/// a serialized cross-session sequence.
+fn finish_open_with_undo(
+    sessions: &Mutex<HashMap<String, Session>>,
+    relpath: &str,
+    source: &str,
+    restored_undo: Option<UndoTree>,
+) -> Result<Value, PluginError> {
     let parser = MarkdownParser::new(ParseOptions {
         file_path: relpath.to_string(),
         ..ParseOptions::default()
@@ -372,7 +391,7 @@ fn finish_open(
 
     let session = Session {
         tree,
-        undo: UndoTree::new(),
+        undo: restored_undo.unwrap_or_default(),
         relpath: relpath.to_string(),
         revision: 0,
     };
@@ -402,7 +421,7 @@ async fn handle_open_async(
 ) -> Result<Value, PluginError> {
     let relpath = relpath_arg(args, "open")?;
 
-    let source = if let Some(ctx) = ctx.as_deref() {
+    let source_bytes = if let Some(ctx) = ctx.as_deref() {
         // Preferred path: fetch through `com.nexus.storage` so capability
         // checks, atomic-write audit, and future observability hooks all
         // cover editor reads.
@@ -421,18 +440,30 @@ async fn handle_open_async(
             .map_err(|e| exec_err(format!("open: storage.read_file: {e}")))?;
         let resp: Resp = serde_json::from_value(value)
             .map_err(|e| exec_err(format!("open: storage.read_file decode: {e}")))?;
-        String::from_utf8(resp.bytes)
-            .map_err(|_| exec_err(format!("open: '{relpath}' is not UTF-8")))?
+        resp.bytes
     } else {
         // Fallback used only when no context has been wired (unit tests
         // that drive the plugin directly without a runtime).
         let abs =
             resolve_within(forge_root, &relpath).map_err(|e| exec_err(format!("open: {e}")))?;
-        fs::read_to_string(&abs)
-            .map_err(|e| exec_err(format!("open: read '{}': {e}", abs.display())))?
+        fs::read(&abs).map_err(|e| exec_err(format!("open: read '{}': {e}", abs.display())))?
     };
 
-    finish_open(&sessions, &relpath, &source)
+    let source = String::from_utf8(source_bytes.clone())
+        .map_err(|_| exec_err(format!("open: '{relpath}' is not UTF-8")))?;
+
+    // BL-072: probe for a persisted undo tree against the same source
+    // bytes. The integrity check is hash-based rather than mtime-based
+    // — file-as-truth means the only correct answer to "does this
+    // history match?" is "did the bytes change?".
+    let restored_undo = if let Some(ctx) = ctx.as_deref() {
+        let hash = content_hash_hex(&source_bytes);
+        try_restore_undo(ctx, &relpath, &hash).await
+    } else {
+        None
+    };
+
+    finish_open_with_undo(&sessions, &relpath, &source, restored_undo)
 }
 
 fn handle_close(
@@ -442,6 +473,237 @@ fn handle_close(
     let relpath = relpath_arg(args, "close")?;
     let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
     guard.remove(&relpath);
+    Ok(serde_json::json!({}))
+}
+
+// ── BL-072: persistent undo history ──────────────────────────────────────────
+
+/// Persisted undo cap. The serialized snapshot keeps at most this many
+/// transactions on the current branch (older / off-branch entries are
+/// dropped). Roughly 500 bulk-insert transactions × ~1 KiB JSON each is
+/// around 500 KiB on disk, comfortable below the 1 MiB-ish point where
+/// reads start showing up in profiles.
+const UNDO_PERSIST_MAX_OPS: usize = 500;
+
+/// Stale-file age. Persisted undo files older than this are treated as
+/// missing on open and the file is deleted opportunistically.
+const UNDO_STALE_AFTER_SECS: u64 = 7 * 24 * 60 * 60;
+
+/// On-disk wrapper around [`PersistedUndoTree`] that records what file
+/// content the history was attached to, so a mismatch on reopen
+/// (external edit, unsaved close, etc.) skips the restore instead of
+/// applying undo against the wrong tree shape.
+#[derive(Serialize, Deserialize)]
+struct PersistedUndoState {
+    /// Schema version. Bump when the on-disk shape changes; older
+    /// versions are ignored on read so we degrade gracefully rather
+    /// than panic.
+    version: u32,
+    /// Wall-clock seconds since the unix epoch at write time.
+    persisted_at_unix: u64,
+    /// SHA-256 (hex) of the source bytes the history was built
+    /// against. Computed at close time over the canonical-markdown
+    /// serialization of the in-memory tree (matches what `save`
+    /// writes), and re-checked on open against the bytes returned by
+    /// `storage.read_file` for the same path.
+    content_hash: String,
+    undo: PersistedUndoTree,
+}
+
+const UNDO_STATE_VERSION: u32 = 1;
+
+/// Build the `.forge/.editor/undo/<sha-of-relpath>.json` storage path
+/// for `relpath`. We hash the path so the on-disk filename is opaque
+/// (no traversal, no clashes with `/`-bearing relpaths) — the source
+/// path is recoverable from inside the file via the schema if needed.
+fn undo_state_path(relpath: &str) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    let mut hasher = Sha256::new();
+    hasher.update(relpath.as_bytes());
+    let digest = hasher.finalize();
+    // 16 hex chars / 64 bits is enough for collision resistance over
+    // the few hundred files a forge actually edits in a session.
+    let mut hex = String::with_capacity(16);
+    for b in digest.iter().take(8) {
+        write!(&mut hex, "{b:02x}").expect("write to String");
+    }
+    format!(".forge/.editor/undo/{hex}.json")
+}
+
+/// SHA-256 hex of `bytes`. Used as the integrity tag on persisted
+/// undo state so an external edit between close and open invalidates
+/// the cached history.
+fn content_hash_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(64);
+    for b in &digest {
+        write!(&mut hex, "{b:02x}").expect("write to String");
+    }
+    hex
+}
+
+fn now_unix_secs() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Try to load a persisted [`PersistedUndoState`] for `relpath` whose
+/// `content_hash` matches `expected_hash`. Returns the hydrated
+/// [`UndoTree`] on success, `None` for any of: file missing, stale
+/// (>`UNDO_STALE_AFTER_SECS`), version mismatch, hash mismatch, or
+/// any decode failure. Stale / version-mismatched files are deleted
+/// opportunistically.
+async fn try_restore_undo(
+    ctx: &KernelPluginContext,
+    relpath: &str,
+    expected_hash: &str,
+) -> Option<UndoTree> {
+    #[derive(Deserialize)]
+    struct ReadResp {
+        bytes: Vec<u8>,
+    }
+
+    let path = undo_state_path(relpath);
+    let read = ctx
+        .ipc_call(
+            STORAGE_PLUGIN_ID,
+            "read_file",
+            serde_json::json!({ "path": path }),
+            STORAGE_IPC_TIMEOUT,
+        )
+        .await
+        .ok()?;
+    let resp: ReadResp = serde_json::from_value(read).ok()?;
+
+    let state: PersistedUndoState = match serde_json::from_slice(&resp.bytes) {
+        Ok(s) => s,
+        Err(err) => {
+            tracing::debug!(
+                plugin = PLUGIN_ID,
+                relpath,
+                %err,
+                "BL-072: persisted undo decode failed; ignoring"
+            );
+            delete_undo_file(ctx, &path).await;
+            return None;
+        }
+    };
+
+    if state.version != UNDO_STATE_VERSION {
+        delete_undo_file(ctx, &path).await;
+        return None;
+    }
+    let now = now_unix_secs();
+    if now.saturating_sub(state.persisted_at_unix) > UNDO_STALE_AFTER_SECS {
+        delete_undo_file(ctx, &path).await;
+        return None;
+    }
+    if state.content_hash != expected_hash {
+        // The file changed between close and open (unsaved edits,
+        // external edit, etc.). Don't apply the cached history —
+        // its op offsets are anchored to the old tree shape. Leave
+        // the file in place: the user might re-save and reopen.
+        return None;
+    }
+    Some(UndoTree::from(state.undo))
+}
+
+async fn delete_undo_file(ctx: &KernelPluginContext, path: &str) {
+    let _ = ctx
+        .ipc_call(
+            STORAGE_PLUGIN_ID,
+            "delete_file",
+            serde_json::json!({ "path": path }),
+            STORAGE_IPC_TIMEOUT,
+        )
+        .await;
+}
+
+/// Persist `undo` for `relpath` against `content_hash`. Truncates to
+/// [`UNDO_PERSIST_MAX_OPS`] on the current branch. Errors are logged
+/// at warn level and swallowed: persistence is additive, a write
+/// failure must not surface as a close failure.
+async fn persist_undo(
+    ctx: &KernelPluginContext,
+    relpath: &str,
+    content_hash: String,
+    undo: &UndoTree,
+) {
+    if undo.is_empty() {
+        // Nothing to restore; opportunistically clear any stale file
+        // for this relpath so the on-disk state matches.
+        delete_undo_file(ctx, &undo_state_path(relpath)).await;
+        return;
+    }
+    let state = PersistedUndoState {
+        version: UNDO_STATE_VERSION,
+        persisted_at_unix: now_unix_secs(),
+        content_hash,
+        undo: undo.to_persisted(Some(UNDO_PERSIST_MAX_OPS)),
+    };
+    let bytes = match serde_json::to_vec(&state) {
+        Ok(b) => b,
+        Err(err) => {
+            tracing::warn!(
+                plugin = PLUGIN_ID,
+                relpath,
+                %err,
+                "BL-072: serialize persisted undo failed"
+            );
+            return;
+        }
+    };
+    let path = undo_state_path(relpath);
+    if let Err(err) = ctx
+        .ipc_call(
+            STORAGE_PLUGIN_ID,
+            "write_vault_file",
+            serde_json::json!({ "path": path, "bytes": bytes }),
+            STORAGE_IPC_TIMEOUT,
+        )
+        .await
+    {
+        tracing::warn!(
+            plugin = PLUGIN_ID,
+            relpath,
+            %err,
+            "BL-072: write persisted undo failed"
+        );
+    }
+}
+
+async fn handle_close_async(
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    ctx: Option<Arc<KernelPluginContext>>,
+    args: &Value,
+) -> Result<Value, PluginError> {
+    let relpath = relpath_arg(args, "close")?;
+
+    // Capture the session's tree + undo before removing it so the
+    // persistence write happens against a consistent snapshot but the
+    // session map is freed for re-open as soon as possible.
+    let captured = {
+        let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+        guard.remove(&relpath).map(|s| (s.tree, s.undo))
+    };
+
+    if let (Some(ctx), Some((tree, undo))) = (ctx.as_deref(), captured) {
+        // Hash the canonical-markdown serialization — that's what
+        // `save` would write to disk, and what `open` will compare
+        // against on reload.
+        let markdown = MarkdownSerializer::serialize(&tree);
+        let hash = content_hash_hex(markdown.as_bytes());
+        persist_undo(ctx, &relpath, hash, &undo).await;
+    }
+
     Ok(serde_json::json!({}))
 }
 

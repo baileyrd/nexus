@@ -8,6 +8,36 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-072: Undo history persistence across sessions ✅ (2026-05-06)
+
+**Source**: Editor Integration Assessment (2026-05-06) — gap #3
+**Files**: `crates/nexus-editor/src/{undo_tree.rs, core_plugin.rs}`, `crates/nexus-bootstrap/tests/editor_ipc.rs`
+**Related**: PRD-08 §undo; `UndoTree`
+
+The branching `UndoTree` now survives close + reopen instead of dying with the in-memory session.
+
+**Persistence shape.** A new `PersistedUndoTree` proxy mirrors `UndoTree` with the `Arc<Transaction>` indirection unwrapped to `Vec<Transaction>` and the `HashMap<Option<usize>, Vec<usize>>` children/parent maps re-encoded as `Vec<(K, V)>`. JSON-stable encoding matters because `Option<usize>` isn't a legal JSON map key, and serde-json's `HashMap` ordering would otherwise scramble the children order — which `redo` cares about (it picks the most recently added child). `UndoTree` carries `#[serde(into = "...", from = "...")]` and the `From`/`Into` glue lives in `undo_tree.rs` so the private fields stay private.
+
+**Close path (async only).** `handle_close` was promoted into `dispatch_async` so it can route a `write_vault_file` IPC call into `com.nexus.storage`. The handler now: removes the session from the map, serializes the tree to canonical markdown, hashes it (SHA-256 → 64-char hex) as the integrity tag, builds a `PersistedUndoState { version: 1, persisted_at_unix, content_hash, undo: tree.to_persisted(Some(500)) }`, and writes it to `.forge/.editor/undo/<sha8(relpath)>.json`. The relpath is hashed into the filename so user-facing paths with `/` and other filesystem-illegal characters can't appear on disk; the source path can still be recovered from inside the file if needed. Persistence failures log at warn level and don't surface to the close caller (additive contract).
+
+**Open path.** `handle_open_async` now hashes the freshly-loaded source bytes and probes `.forge/.editor/undo/<sha8>.json` via `read_file`. If the file exists and `state.content_hash == current_hash` and `state.persisted_at_unix` is within the 7-day staleness window and `state.version == 1`, the persisted `UndoTree` is installed in the session. Any of: file missing, decode failure, version mismatch, stale, or hash mismatch → the session opens with a fresh empty `UndoTree`. Stale and version-mismatched files are deleted opportunistically on probe; hash-mismatched files are *kept* (the user might re-save and reopen against the same tree shape, in which case the hash will line up again).
+
+**Cap behavior.** `UndoTree::to_persisted(Some(max))` returns a `PersistedUndoTree` capped at `max` ops. If the tree fits, the full branching forest is preserved verbatim. If the cap fires, only the linear ancestor chain ending at `current` is kept — branches off that chain are dropped, and the chain is renumbered into a `0..n` linear sequence with `current = n - 1`. The DoD spec'd "ring-buffer eviction"; linear truncation matches the practical effect (a 500-op back-stack on the main line) without requiring the persisted format to encode arbitrary forest topology after eviction.
+
+**Tests.**
+
+- `undo_tree::persisted_round_trip_preserves_full_history` — verifies the `Vec`-of-pairs encoding faithfully reconstructs the parent/children forest, including a branch (undo + execute on a different child).
+- `undo_tree::persisted_truncation_keeps_only_current_branch_tail` — exercises the cap path and asserts the linearized parent/children layout.
+- `editor_ipc::bl072_undo_history_persists_across_close_and_reopen` — full end-to-end through `build_cli_runtime`: open → apply → save → close → reopen → assert `undo_len == 1` + `undo` walks back to pre-edit content.
+- `editor_ipc::bl072_undo_history_discarded_when_file_changes_externally` — same setup but rewrites the file between close and open; the reopened session has a fresh empty undo tree.
+
+**Deferred from the original DoD:**
+
+- *Cross-process global stale-file sweep* — invalidation is lazy: a stale file on the open path triggers `delete_file`, but files for documents the user never reopens accumulate in `.forge/.editor/undo/`. A periodic sweep (or a kernel-init hook) would clean these up; deferred until the directory actually grows large enough to matter.
+- *Persisting branch structure across the cap* — the cap-truncated form is single-branch. Deep undo branching is rare in practice (no UI surfaces it today) and a multi-branch eviction algorithm wouldn't carry its complexity.
+
+---
+
 ### BL-073: Block auto-stamping on first reference ✅ (2026-05-06)
 
 **Source**: Editor Integration Assessment (2026-05-06) — gap #4

@@ -481,6 +481,172 @@ async fn apply_transaction_emits_changed_event_on_kernel_bus() {
 }
 
 #[tokio::test]
+async fn bl072_undo_history_persists_across_close_and_reopen() {
+    use nexus_editor::{Operation, Transaction, TransactionMetadata};
+
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    write_note(&root, "notes/p.md", "Hello\n");
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open",
+            serde_json::json!({ "relpath": "notes/p.md" }),
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    let para_id = snap.tree.root_blocks[0];
+    assert_eq!(snap.undo_len, 0);
+
+    let tx = Transaction::new(
+        vec![Operation::InsertText {
+            block_id: para_id,
+            pos: 5,
+            text: " world".into(),
+            pre_annotations: Vec::new(),
+        }],
+        TransactionMetadata::default(),
+    );
+    call(
+        &runtime,
+        "apply_transaction",
+        serde_json::json!({
+            "relpath": "notes/p.md",
+            "transaction": serde_json::to_value(&tx).unwrap(),
+        }),
+    )
+    .await
+    .unwrap();
+
+    // Save flushes the canonical-markdown form so the on-disk content
+    // hash matches what `close` records.
+    call(
+        &runtime,
+        "save",
+        serde_json::json!({ "relpath": "notes/p.md" }),
+    )
+    .await
+    .unwrap();
+    call(
+        &runtime,
+        "close",
+        serde_json::json!({ "relpath": "notes/p.md" }),
+    )
+    .await
+    .unwrap();
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open",
+            serde_json::json!({ "relpath": "notes/p.md" }),
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(snap.undo_len, 1, "persisted undo restored on reopen");
+    assert!(snap.can_undo, "restored history is at the executed position");
+    let restored_para = snap.tree.root_blocks[0];
+    assert_eq!(snap.tree.blocks[&restored_para].content, "Hello world");
+
+    // Driving an undo against the restored history proves the persisted
+    // ops are functional, not just present.
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "undo",
+            serde_json::json!({ "relpath": "notes/p.md" }),
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(snap.tree.blocks[&restored_para].content, "Hello");
+}
+
+#[tokio::test]
+async fn bl072_undo_history_discarded_when_file_changes_externally() {
+    use nexus_editor::{Operation, Transaction, TransactionMetadata};
+
+    let forge = scratch_forge();
+    let root = forge.path().to_path_buf();
+    write_note(&root, "notes/q.md", "Hello\n");
+    let runtime = build_cli_runtime(root.clone()).expect("build runtime");
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open",
+            serde_json::json!({ "relpath": "notes/q.md" }),
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    let para_id = snap.tree.root_blocks[0];
+
+    let tx = Transaction::new(
+        vec![Operation::InsertText {
+            block_id: para_id,
+            pos: 5,
+            text: "!".into(),
+            pre_annotations: Vec::new(),
+        }],
+        TransactionMetadata::default(),
+    );
+    call(
+        &runtime,
+        "apply_transaction",
+        serde_json::json!({
+            "relpath": "notes/q.md",
+            "transaction": serde_json::to_value(&tx).unwrap(),
+        }),
+    )
+    .await
+    .unwrap();
+    call(
+        &runtime,
+        "save",
+        serde_json::json!({ "relpath": "notes/q.md" }),
+    )
+    .await
+    .unwrap();
+    call(
+        &runtime,
+        "close",
+        serde_json::json!({ "relpath": "notes/q.md" }),
+    )
+    .await
+    .unwrap();
+
+    // External edit invalidates the cached history — the persisted op
+    // offsets are anchored to the old tree shape, so the safe answer
+    // is "throw it away".
+    fs::write(root.join("notes/q.md"), "Different content entirely\n").unwrap();
+
+    let snap: EditorSnapshot = serde_json::from_value(
+        call(
+            &runtime,
+            "open",
+            serde_json::json!({ "relpath": "notes/q.md" }),
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        snap.undo_len, 0,
+        "external edit discards the cached undo history"
+    );
+    assert!(!snap.can_undo);
+}
+
+#[tokio::test]
 async fn unknown_editor_command_returns_command_not_found() {
     let forge = scratch_forge();
     let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("build runtime");

@@ -13,12 +13,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::{EditorError, Result};
 use crate::transaction::Transaction;
 use crate::tree::BlockTree;
 
 /// Branching undo history.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(into = "PersistedUndoTree", from = "PersistedUndoTree")]
 pub struct UndoTree {
     transactions: Vec<Arc<Transaction>>,
     current: Option<usize>,
@@ -171,6 +174,130 @@ impl UndoTree {
         }
         out.reverse();
         out
+    }
+
+    /// Build a serializable view, optionally truncated to the most
+    /// recent `cap` transactions on the current branch (BL-072 ring-
+    /// buffer eviction). When `cap` is `None` or the history fits, the
+    /// full branching forest is preserved verbatim. When the cap
+    /// triggers, only the linear ancestor chain ending at `current` is
+    /// kept — branches off that chain are dropped.
+    ///
+    /// Linearization is deliberate: the persisted form is for crash-
+    /// recovery undo on the main line, not for cross-branch history
+    /// navigation. Branch structure beyond the cap is rare in practice
+    /// (no UI surfaces deep undo branches today) and reconstructing it
+    /// across reloads would multiply the cap-eviction logic without
+    /// covering an actual workflow.
+    #[must_use]
+    pub fn to_persisted(&self, cap: Option<usize>) -> PersistedUndoTree {
+        match cap {
+            Some(max) if self.transactions.len() > max => self.to_persisted_truncated(max),
+            _ => self.to_persisted_full(),
+        }
+    }
+
+    fn to_persisted_full(&self) -> PersistedUndoTree {
+        let transactions = self
+            .transactions
+            .iter()
+            .map(|tx| (**tx).clone())
+            .collect();
+        let mut parent: Vec<(usize, usize)> = self
+            .parent
+            .iter()
+            .map(|(&c, &p)| (c, p))
+            .collect();
+        parent.sort_unstable();
+        let mut children: Vec<(Option<usize>, Vec<usize>)> = self
+            .children
+            .iter()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        children.sort_by_key(|(k, _)| *k);
+        PersistedUndoTree {
+            transactions,
+            current: self.current,
+            parent,
+            children,
+        }
+    }
+
+    fn to_persisted_truncated(&self, max: usize) -> PersistedUndoTree {
+        // Walk from `current` back through `parent` for at most `max`
+        // hops, then reverse so ancestors come first. The resulting
+        // chain is renumbered into a linear `0..n` range.
+        let mut chain: Vec<usize> = Vec::new();
+        let mut cur = self.current;
+        while let Some(idx) = cur {
+            chain.push(idx);
+            if chain.len() >= max {
+                break;
+            }
+            cur = self.parent.get(&idx).copied();
+        }
+        chain.reverse();
+
+        let transactions: Vec<Transaction> = chain
+            .iter()
+            .map(|&i| (*self.transactions[i]).clone())
+            .collect();
+        let n = transactions.len();
+        let current = if n == 0 { None } else { Some(n - 1) };
+        let mut parent: Vec<(usize, usize)> = Vec::with_capacity(n.saturating_sub(1));
+        let mut children: Vec<(Option<usize>, Vec<usize>)> = Vec::with_capacity(n);
+        for i in 1..n {
+            parent.push((i, i - 1));
+        }
+        if n > 0 {
+            children.push((None, vec![0]));
+            for i in 0..(n - 1) {
+                children.push((Some(i), vec![i + 1]));
+            }
+        }
+        PersistedUndoTree {
+            transactions,
+            current,
+            parent,
+            children,
+        }
+    }
+}
+
+/// Serializable mirror of [`UndoTree`]. Lives in this module because
+/// the `From`/`Into` glue needs access to the private fields.
+///
+/// `parent` and `children` are `Vec<(K, V)>` rather than `HashMap` so
+/// the JSON form has a stable shape (`HashMap<Option<usize>, _>` would
+/// otherwise need a non-string key encoding) and so deserialization
+/// preserves insertion order for `children` — branch order matters
+/// for `redo`, which picks the most recently added child.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PersistedUndoTree {
+    pub transactions: Vec<Transaction>,
+    pub current: Option<usize>,
+    pub parent: Vec<(usize, usize)>,
+    pub children: Vec<(Option<usize>, Vec<usize>)>,
+}
+
+impl From<UndoTree> for PersistedUndoTree {
+    fn from(value: UndoTree) -> Self {
+        value.to_persisted_full()
+    }
+}
+
+impl From<PersistedUndoTree> for UndoTree {
+    fn from(p: PersistedUndoTree) -> Self {
+        let transactions: Vec<Arc<Transaction>> =
+            p.transactions.into_iter().map(Arc::new).collect();
+        let parent: HashMap<usize, usize> = p.parent.into_iter().collect();
+        let children: HashMap<Option<usize>, Vec<usize>> = p.children.into_iter().collect();
+        Self {
+            transactions,
+            current: p.current,
+            parent,
+            children,
+        }
     }
 }
 
@@ -352,6 +479,53 @@ mod tests {
         // Hop back to the A branch (tx 0).
         h.goto(Some(0), &mut tree).unwrap();
         assert_eq!(tree.get(id).unwrap().content, "A");
+    }
+
+    #[test]
+    fn persisted_round_trip_preserves_full_history() {
+        // BL-072: a non-truncated round-trip through the persisted
+        // form must replay every transaction's effect when re-driven
+        // against a fresh tree.
+        let (mut tree, id) = init_tree();
+        let mut h = UndoTree::new();
+        h.execute(append_text_tx(id, 0, "A"), &mut tree).unwrap();
+        h.execute(append_text_tx(id, 1, "B"), &mut tree).unwrap();
+        // Branch off: undo, then a different child.
+        h.undo(&mut tree).unwrap();
+        h.execute(append_text_tx(id, 1, "C"), &mut tree).unwrap();
+
+        let persisted = h.to_persisted(None);
+        let json = serde_json::to_string(&persisted).unwrap();
+        let round: PersistedUndoTree = serde_json::from_str(&json).unwrap();
+        let restored = UndoTree::from(round);
+
+        assert_eq!(restored.len(), h.len());
+        assert_eq!(restored.current(), h.current());
+        // Same parent forest: virtual root has one direct child
+        // (idx 0 = "A"); idx 0 has two children, idx 1 = "B" and
+        // idx 2 = "C" (the branch).
+        assert_eq!(restored.children_of(None), &[0usize]);
+        assert_eq!(restored.children_of(Some(0)), &[1usize, 2usize]);
+    }
+
+    #[test]
+    fn persisted_truncation_keeps_only_current_branch_tail() {
+        // When the cap fires we keep the linear chain leading to
+        // `current` and drop everything else. Branches off the chain
+        // are gone — that's the documented trade-off.
+        let (mut tree, id) = init_tree();
+        let mut h = UndoTree::new();
+        for i in 0..5 {
+            h.execute(append_text_tx(id, i, "x"), &mut tree).unwrap();
+        }
+        let persisted = h.to_persisted(Some(3));
+        assert_eq!(persisted.transactions.len(), 3);
+        assert_eq!(persisted.current, Some(2));
+        // Linear: 0→1→2, virtual root → 0.
+        assert_eq!(persisted.parent, vec![(1, 0), (2, 1)]);
+        // The cap-induced linearization always rebuilds children
+        // mappings, including the virtual-root entry.
+        assert!(persisted.children.iter().any(|(k, v)| *k == None && v == &vec![0usize]));
     }
 
     #[test]

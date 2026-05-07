@@ -177,21 +177,7 @@ _BL-073 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-072: Undo history persistence across sessions
-
-**Source**: Editor Integration Assessment (2026-05-06) — gap #3
-**Effort**: Small–Medium (1 week)
-**Crates**: `nexus-editor/src/undo_tree.rs`, `nexus-editor/src/core_plugin.rs`, `nexus-storage`
-**Related**: PRD-08 §undo; `UndoTree` struct fully implemented; session-local today
-
-Closing an editor tab destroys the undo tree. On reopen the file loads from disk and history starts fresh. For long documents with complex edit histories this is a real limitation — a crash or accidental close forfeits all undo depth.
-
-**Definition of done:**
-- `UndoTree` serializes to JSON (serde derives already present on all operation types)
-- On `close(path)`, serialize and write to `.forge/.editor/undo/<path-hash>.json` via `com.nexus.storage`
-- On `open(path)`, check for a persisted undo file; if found and the file's current content matches the tree's head state, restore it
-- Cap persisted history at 500 operations (ring-buffer eviction); cap file age at 7 days (stale eviction on forge open)
-- `close` still clears in-memory session as before; persistence is additive
+_BL-072 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `UndoTree` round-trips through a `PersistedUndoTree` proxy (Vec-of-pairs encoding for the parent / children maps so the JSON shape stays stable). `close` writes the snapshot to `.forge/.editor/undo/<sha>.json` via `write_vault_file`; `open` re-reads and restores when the file's content hash matches what was on disk at close time. Branching beyond the 500-op cap is dropped to a linear chain on persist (the documented trade-off — no UI surfaces deep undo branches today). Cross-process global stale-file sweep deferred — invalidation is lazy: an open against a stale or hash-mismatched file deletes the file and starts fresh._
 
 ---
 
