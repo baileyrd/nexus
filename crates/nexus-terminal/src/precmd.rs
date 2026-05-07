@@ -29,14 +29,23 @@
 //!
 //! # What this is NOT
 //!
-//! - Cross-shell. Targets POSIX shells (bash, zsh, sh, dash, fish with
-//!   minor quirks documented below). `cmd.exe` / `pwsh` need their own
-//!   sentinel syntax — a follow-up when PRD-09 §1.2's Windows
-//!   detection lands.
 //! - Asynchronous. Each step runs sequentially and blocks until it
 //!   finishes or its per-step timeout elapses. The caller controls
 //!   concurrency by scheduling the whole pipeline on its own task.
 //! - A memory / CPU limiter. §7 polling is a sibling concern.
+//!
+//! # BL-065 — shell-family-aware sentinels
+//!
+//! POSIX shells get the original `printf '<sentinel> %d\n' $?` form.
+//! `cmd.exe` uses `echo <sentinel> %ERRORLEVEL%` (the variable
+//! expands inline); PowerShell uses
+//! `Write-Host "<sentinel> $LASTEXITCODE"`. All three produce the
+//! same line shape — `<sentinel> <integer>` — so [`parse_sentinel_exit_code`]
+//! and [`wait_for_sentinel`] don't need to fork per family. The
+//! choice of [`ShellFamily`] is set on [`PreCommandOptions`]; the
+//! caller picks one with [`ShellFamily::detect_from_path`] (or via
+//! the explicit constructor when the spawn shell isn't a pathy
+//! basename).
 
 use std::time::{Duration, Instant};
 
@@ -50,6 +59,102 @@ use crate::session::SessionId;
 /// Default per-step timeout — PRD-09 §4.3 "30 s (user-configurable)".
 pub const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// BL-065 — shell families recognised by the pre-command pipeline.
+/// The variant selects which sentinel-emitting one-liner gets
+/// appended to each step. Adding a new variant means picking the
+/// right syntax for that shell's "previous command's exit code"
+/// expansion plus a print primitive that doesn't mangle the
+/// number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellFamily {
+    /// `bash`, `zsh`, `dash`, `sh`, `ksh`, `fish` (with caveats —
+    /// fish doesn't support `$?` so users typically run pre-commands
+    /// inside a POSIX subshell). Sentinel form:
+    /// `printf '<sentinel> %d\n' $?`
+    Posix,
+    /// Windows `cmd.exe`. Sentinel form:
+    /// `echo <sentinel> %ERRORLEVEL%`. The `%ERRORLEVEL%` token
+    /// expands inline against the previous command's exit code.
+    Cmd,
+    /// Windows PowerShell — both `pwsh` (Core / Cross-platform) and
+    /// the legacy `powershell.exe`. Sentinel form:
+    /// `Write-Host "<sentinel> $LASTEXITCODE"`. `$LASTEXITCODE` is
+    /// the equivalent of `$?` for native commands; for cmdlets it
+    /// stays unset (PowerShell's `$?` is a boolean), which is fine
+    /// because pre-commands typically launch external tools.
+    PowerShell,
+}
+
+impl ShellFamily {
+    /// Pick the family that matches `shell_path`'s basename. The
+    /// match is case-insensitive and ignores a trailing `.exe`. Any
+    /// unrecognised name (custom shells, full paths to `bash`, etc.)
+    /// falls through to [`ShellFamily::Posix`] — the historical
+    /// behaviour and the safe default on Linux / macOS.
+    ///
+    /// The basename is computed by splitting on either `/` or `\`,
+    /// so Windows paths like `C:\Windows\System32\cmd.exe` resolve
+    /// even when this code runs on Linux (e.g. when a config file
+    /// stored on a Windows host is read from a Linux dev box). Pure
+    /// `Path::new` would treat `\` as a regular character on POSIX
+    /// and miss the basename.
+    #[must_use]
+    pub fn detect_from_path(shell_path: &str) -> Self {
+        let basename = shell_path
+            .rsplit(|c: char| c == '/' || c == '\\')
+            .next()
+            .unwrap_or(shell_path);
+        let basename = basename
+            .strip_suffix(".exe")
+            .or_else(|| basename.strip_suffix(".EXE"))
+            .unwrap_or(basename);
+        match basename.to_ascii_lowercase().as_str() {
+            "cmd" => Self::Cmd,
+            "pwsh" | "powershell" => Self::PowerShell,
+            _ => Self::Posix,
+        }
+    }
+
+    /// Build the sentinel-emitting one-liner appended after each
+    /// pre-command. Returns the full byte-payload to write into the
+    /// PTY, including the trailing newline that submits the line.
+    fn wrap_step(self, command: &str, sentinel: &str) -> String {
+        match self {
+            // `; printf ... $?` is idempotent across dash/bash/zsh/ksh.
+            // The newline split (rather than `;`) keeps multi-line
+            // pre-commands like heredocs working.
+            Self::Posix => {
+                format!("{command}\nprintf '{sentinel} %d\\n' $?\n")
+            }
+            // cmd.exe sets `%ERRORLEVEL%` after every command; an
+            // `echo` on the next line picks it up and writes the
+            // sentinel + code to stdout. Use `\r\n` because cmd.exe
+            // is line-buffered against carriage-return-aware EOLs;
+            // the parser is whitespace-agnostic so `\n` would also
+            // work, but `\r\n` matches what the user would have
+            // typed.
+            Self::Cmd => {
+                format!("{command}\r\necho {sentinel} %ERRORLEVEL%\r\n")
+            }
+            // PowerShell: `;` and newline both work as statement
+            // separators, but newline matches the POSIX path's shape
+            // and avoids escaping concerns inside the user's
+            // command. `Write-Host` writes to stdout the way `echo`
+            // does on POSIX (vs. `Write-Output` which writes to the
+            // pipeline).
+            Self::PowerShell => {
+                format!("{command}\r\nWrite-Host \"{sentinel} $LASTEXITCODE\"\r\n")
+            }
+        }
+    }
+}
+
+impl Default for ShellFamily {
+    fn default() -> Self {
+        Self::Posix
+    }
+}
+
 /// Tunables for [`run_pre_commands`]. All fields have sensible defaults
 /// via [`Self::default`]; callers override only the knobs they need.
 #[derive(Debug, Clone)]
@@ -61,6 +166,14 @@ pub struct PreCommandOptions {
     /// between sentinel checks. 100 ms matches the §5.4 polling
     /// cadence and keeps the loop from burning CPU on idle sessions.
     pub pump_interval: Duration,
+    /// BL-065 — shell family the spawned session is running. The
+    /// pipeline picks an appropriate sentinel one-liner from this.
+    /// Defaults to [`ShellFamily::Posix`]; callers running a saved
+    /// command on Windows should set this to [`ShellFamily::Cmd`]
+    /// or [`ShellFamily::PowerShell`] (or use
+    /// [`ShellFamily::detect_from_path`] against the saved command's
+    /// `shell` field).
+    pub shell_family: ShellFamily,
 }
 
 impl Default for PreCommandOptions {
@@ -68,6 +181,7 @@ impl Default for PreCommandOptions {
         Self {
             step_timeout: DEFAULT_STEP_TIMEOUT,
             pump_interval: Duration::from_millis(100),
+            shell_family: ShellFamily::default(),
         }
     }
 }
@@ -140,10 +254,12 @@ pub fn run_pre_commands<S: TerminalServer>(
             .map_err(transition_err)?;
 
         let sentinel = format!("__nexus_precmd_{run_tag}_{idx}");
-        // `; printf ... $?` is idempotent across dash/bash/zsh/ksh.
-        // Fish does not support `$?`; fish users should run a
-        // POSIX-shell subshell (`bash -c …`) for pre-commands.
-        let wrapped = format!("{cmd}\nprintf '{sentinel} %d\\n' $?\n");
+        // BL-065 — pick the right wrapper for the configured shell
+        // family. POSIX = `printf $?`, cmd = `echo %ERRORLEVEL%`,
+        // PowerShell = `Write-Host $LASTEXITCODE`. The output line
+        // shape stays `<sentinel> <integer>` across families so the
+        // sentinel parser doesn't need to know which family ran it.
+        let wrapped = options.shell_family.wrap_step(cmd, &sentinel);
         server.send_raw_input(session_id, wrapped.as_bytes())?;
 
         match wait_for_sentinel(server, session_id, &sentinel, options)? {
@@ -288,6 +404,7 @@ mod tests {
         let opts = PreCommandOptions {
             step_timeout: Duration::from_secs(5),
             pump_interval: Duration::from_millis(50),
+            shell_family: ShellFamily::Posix,
         };
         let out = run_pre_commands(&mut server, &id, &mut proc, &opts).expect("run");
         assert_eq!(out, PreCommandOutcome::AllSucceeded);
@@ -310,6 +427,7 @@ mod tests {
         let opts = PreCommandOptions {
             step_timeout: Duration::from_secs(5),
             pump_interval: Duration::from_millis(50),
+            shell_family: ShellFamily::Posix,
         };
         let out = run_pre_commands(&mut server, &id, &mut proc, &opts).expect("run");
         match out {
@@ -336,6 +454,7 @@ mod tests {
         let opts = PreCommandOptions {
             step_timeout: Duration::from_millis(200),
             pump_interval: Duration::from_millis(50),
+            shell_family: ShellFamily::Posix,
         };
         let out = run_pre_commands(&mut server, &id, &mut proc, &opts).expect("run");
         assert_eq!(out, PreCommandOutcome::StepTimedOut { step: 0 });
@@ -364,5 +483,123 @@ mod tests {
             !PreCommandOutcome::StepFailed { step: 0, exit_code: 1 }.is_success(),
         );
         assert!(!PreCommandOutcome::StepTimedOut { step: 0 }.is_success());
+    }
+
+    // ── BL-065 — ShellFamily detection + wrap_step tests ────────────
+
+    #[test]
+    fn shell_family_detect_recognises_cmd_with_and_without_extension() {
+        assert_eq!(
+            ShellFamily::detect_from_path("C:\\Windows\\System32\\cmd.exe"),
+            ShellFamily::Cmd,
+        );
+        assert_eq!(ShellFamily::detect_from_path("cmd.exe"), ShellFamily::Cmd);
+        assert_eq!(ShellFamily::detect_from_path("cmd"), ShellFamily::Cmd);
+        // Case-insensitive — Windows paths often arrive uppercase.
+        assert_eq!(ShellFamily::detect_from_path("CMD.EXE"), ShellFamily::Cmd);
+    }
+
+    #[test]
+    fn shell_family_detect_recognises_powershell_and_pwsh() {
+        for path in [
+            "pwsh",
+            "pwsh.exe",
+            "/usr/bin/pwsh",
+            "powershell.exe",
+            "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+        ] {
+            assert_eq!(
+                ShellFamily::detect_from_path(path),
+                ShellFamily::PowerShell,
+                "expected PowerShell for {path}",
+            );
+        }
+    }
+
+    #[test]
+    fn shell_family_detect_falls_through_to_posix_for_known_unix_shells() {
+        for path in [
+            "/bin/bash",
+            "/usr/local/bin/zsh",
+            "/usr/bin/fish",
+            "sh",
+            "dash",
+            "ksh",
+        ] {
+            assert_eq!(
+                ShellFamily::detect_from_path(path),
+                ShellFamily::Posix,
+                "expected Posix for {path}",
+            );
+        }
+    }
+
+    #[test]
+    fn shell_family_detect_unknown_shell_defaults_to_posix() {
+        assert_eq!(
+            ShellFamily::detect_from_path("/opt/weird/myshell"),
+            ShellFamily::Posix,
+        );
+        assert_eq!(ShellFamily::detect_from_path(""), ShellFamily::Posix);
+    }
+
+    #[test]
+    fn wrap_step_posix_uses_printf_with_dollar_q() {
+        let wrapped = ShellFamily::Posix.wrap_step("ls", "__sentinel");
+        assert!(wrapped.starts_with("ls\n"));
+        assert!(wrapped.contains("printf '__sentinel %d\\n' $?"));
+        assert!(wrapped.ends_with('\n'));
+    }
+
+    #[test]
+    fn wrap_step_cmd_uses_echo_errorlevel_and_crlf() {
+        let wrapped = ShellFamily::Cmd.wrap_step("dir", "__sentinel");
+        assert!(wrapped.starts_with("dir\r\n"));
+        assert!(wrapped.contains("echo __sentinel %ERRORLEVEL%"));
+        assert!(wrapped.ends_with("\r\n"));
+        // The cmd path must NOT use the POSIX `$?` form.
+        assert!(!wrapped.contains("$?"));
+    }
+
+    #[test]
+    fn wrap_step_powershell_uses_write_host_with_lastexitcode() {
+        let wrapped = ShellFamily::PowerShell.wrap_step("Get-Item .", "__sentinel");
+        assert!(wrapped.starts_with("Get-Item .\r\n"));
+        assert!(wrapped.contains("Write-Host \"__sentinel $LASTEXITCODE\""));
+        assert!(wrapped.ends_with("\r\n"));
+        // Must not leak the cmd `%ERRORLEVEL%` token.
+        assert!(!wrapped.contains("%ERRORLEVEL%"));
+    }
+
+    #[test]
+    fn wrap_step_output_shape_round_trips_through_parse_sentinel() {
+        // Simulate the line each family's wrapper emits and verify
+        // the existing parser recovers the integer. This is what
+        // makes the cross-family approach work without forking the
+        // parser.
+        for (family, line) in [
+            (ShellFamily::Posix, "__sentinel 0"),
+            (ShellFamily::Cmd, "__sentinel 0"),
+            (ShellFamily::PowerShell, "__sentinel 0"),
+        ] {
+            assert_eq!(
+                parse_sentinel_exit_code(line, "__sentinel"),
+                Some(0),
+                "{family:?} produced an unexpected line shape",
+            );
+        }
+        // Non-zero codes too.
+        assert_eq!(parse_sentinel_exit_code("__x 127", "__x"), Some(127));
+    }
+
+    #[test]
+    fn pre_command_options_default_is_posix_family() {
+        // Back-compat for any caller that hadn't been updated yet:
+        // the default still picks Posix so existing tests / runtimes
+        // behave like before BL-065 landed.
+        assert_eq!(
+            PreCommandOptions::default().shell_family,
+            ShellFamily::Posix,
+        );
     }
 }

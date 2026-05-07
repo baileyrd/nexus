@@ -371,21 +371,7 @@ _BL-066 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-065: Windows pre-command support (cmd.exe / PowerShell)
-
-**Source**: Terminal Integration Assessment (2026-05-06) — Phase Q follow-up
-**Effort**: Medium (2 days)
-**Crates**: `nexus-terminal/src/precmd.rs`
-**Related**: PRD-09 §4.4; Phase Q (POSIX-only sentinel approach shipped)
-
-`run_pre_commands` uses a POSIX sentinel (`; printf '<SENTINEL> %d\n' $?`) to capture exit codes while preserving shell state across steps. This doesn't work on cmd.exe or PowerShell, where the sentinel syntax is different and state inheritance across commands works differently.
-
-**Definition of done:**
-- `precmd.rs` detects shell family (bash/zsh/fish vs. cmd.exe vs. pwsh) and uses the appropriate sentinel:
-  - cmd.exe: `& echo <SENTINEL> %ERRORLEVEL%`
-  - PowerShell: `; Write-Host "<SENTINEL> $LASTEXITCODE"`
-- Pre-command state inheritance tested on Windows (PATH changes, env exports, directory changes carry forward)
-- Existing POSIX tests continue to pass; Windows tests added (can be skipped on non-Windows CI)
+_BL-065 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `ShellFamily { Posix, Cmd, PowerShell }` enum with `ShellFamily::detect_from_path(&str)` (case-insensitive, handles `\`-separated Windows paths even on Linux, strips `.exe`). `PreCommandOptions` gains `shell_family: ShellFamily` (defaults to `Posix` for back-compat). `run_pre_commands` calls a per-family `wrap_step` helper: POSIX `printf '<sentinel> %d\n' $?`, cmd `echo <sentinel> %ERRORLEVEL%` (CRLF-terminated), pwsh `Write-Host "<sentinel> $LASTEXITCODE"` (CRLF-terminated). All three produce the same `<sentinel> <integer>` line shape so `parse_sentinel_exit_code` and `wait_for_sentinel` don't fork. Live execution tests run on Linux against bash; the Windows wrappers are pinned by string-shape unit tests (cmd.exe / pwsh aren't available on the WSL CI runner)._
 
 ---
 

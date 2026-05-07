@@ -120,7 +120,7 @@ pub use memory::{
 };
 pub use persist::{ScrollbackHit, SessionMetadata, SqliteSessionStore};
 pub use precmd::{
-    run_pre_commands, PreCommandOptions, PreCommandOutcome, DEFAULT_STEP_TIMEOUT,
+    run_pre_commands, PreCommandOptions, PreCommandOutcome, ShellFamily, DEFAULT_STEP_TIMEOUT,
 };
 pub use procmgr::{
     ManagedConfig, ManagedProcess, ManagedState, TransitionError,
