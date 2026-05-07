@@ -1,0 +1,17 @@
+[package]
+name = "nexus-fuzz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Nexus security fuzz targets (BL-103). Stable-Rust smoke runner; libFuzzer/cargo-fuzz integration is operator-side."
+
+[dependencies]
+nexus-kernel = { path = "../nexus-kernel" }
+nexus-plugin-api = { workspace = true }
+nexus-plugins = { path = "../nexus-plugins" }
+nexus-types = { path = "../nexus-types" }
+
+[dev-dependencies]
+rand = { workspace = true }
+tempfile = { workspace = true }

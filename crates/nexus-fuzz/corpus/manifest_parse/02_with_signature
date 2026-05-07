@@ -1,0 +1,17 @@
+[plugin]
+id = "com.example.signed"
+name = "Signed"
+version = "1.0.0"
+trust_level = "community"
+api_version = "1"
+
+[wasm]
+module = "plugin.wasm"
+memory_mb = 16
+fuel = 1000000
+max_execution_ms = 5000
+
+[signature]
+algorithm = "ed25519"
+signer_key_id = "com.example.author"
+signature = "AAAA"

@@ -1,0 +1,6 @@
+[plugin]
+id = "com.example.minimal"
+name = "Minimal"
+version = "1.0.0"
+trust_level = "core"
+api_version = "1"

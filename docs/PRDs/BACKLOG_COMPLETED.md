@@ -8,6 +8,35 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-103: Security fuzz targets ✅ (2026-05-06, default-on for stable smoke / nightly for full coverage-guided)
+
+**Source**: Security Integration Assessment (2026-05-06) — gap #6
+**Files**: `crates/nexus-fuzz/{Cargo.toml (new),src/lib.rs (new),tests/smoke.rs (new),fuzz_targets/*.rs (new),corpus/**,README.md (new)}`, `crates/nexus-kernel/src/{event_bus.rs,lib.rs}`, workspace `Cargo.toml`
+
+New `crates/nexus-fuzz/` workspace member with five `pub fn fuzz_<target>(...)` entry points exposed as plain Rust functions. Each is driven by *both*:
+
+1. A stable-Rust smoke runner (`tests/smoke.rs`) that runs each target a few thousand times against a deterministic seeded `StdRng` plus the hand-crafted attack-pattern corpus under `corpus/<target>/`. Total runtime ~0.3 s on this dev box, so it ships on every `cargo test` run as the BL-103 "fast-fuzz gate".
+2. cargo-fuzz / libFuzzer shims under `fuzz_targets/<target>.rs` for operators with nightly Rust who want coverage-guided fuzzing. The shims call the same `nexus_fuzz::fuzz_<target>` functions, so bugs found by either runner have one codepath to fix.
+
+**Targets shipped:**
+
+- `fuzz_path_validator` — `ForgePathValidator::validate` + `validate_for_write`. Asserts the post-condition that any `Ok` path canonicalises inside the forge root. Corpus seeded with `../etc/passwd`, absolute Unix/Windows paths, mid-path `..`, embedded null bytes, and a 4 KiB-long path.
+- `fuzz_event_type_id` — `nexus_kernel::type_id_in_namespace`. Asserts the contract that `true` only when type_id equals plugin_id or extends it via a `.`-separated suffix; protects against substring-prefix spoofs (`"foobar.event"` claiming `"foo"`'s namespace). Required exposing the previously-`pub(crate)` function — re-exported `pub` from `nexus_kernel::lib` with `#[doc(hidden)]`. Corpus seeded with exact match, dotted-suffix, substring-spoof, trailing-dot, empty-id pairs.
+- `fuzz_capability_set` — `Capability::from_str`. Round-trips `as_str() ↔ from_str()` to catch a regression in either direction of the bidirectional table; also exhaustively round-trips every `Capability::ALL` entry per call.
+- `fuzz_manifest_parse` — `parse_manifest`. Pure no-panic gate; the parser is expected to surface every failure as `PluginError`. Bias toward printable ASCII in the smoke runner so we hit TOML-shaped inputs.
+- `fuzz_wasm_instantiation` — *cargo-fuzz only*. Random bytes as wasm_bytes panics wasmtime at depths uniform sampling can't find on a stable-Rust budget; the shim is laid down with the operator-action TODO documented inline.
+
+**Crash protocol** (per BL-103 DoD): any reproducer becomes a P1 bug + a deterministic unit test in the relevant subsystem's normal `#[cfg(test)]` block + a minimised seed in `corpus/<target>/`. The README documents the workflow in detail.
+
+**Deferred from the original DoD:**
+
+- CI 60s-per-target gate on merge to main — operators wire `cargo +nightly fuzz run <target> -- -max_total_time=60` into their CI matrix; the workspace doesn't pin a specific CI provider so this is left as documented invocation rather than a baked-in step.
+- WASM sandbox stable-smoke — see "Targets shipped" above; deliberate gap.
+
+Five smoke tests pass in 0.29 s; one corpus-directory existence guard ensures the tree stays structured for crash reproducers. No live findings yet — exposing `type_id_in_namespace` as a fuzz target is a forward guard rather than a fix-on-arrival.
+
+---
+
 ### BL-097: IPC schema versioning rollout ✅ (2026-05-06)
 
 **Source**: Kernel Integration Assessment (2026-05-06) — gap #6

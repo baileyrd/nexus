@@ -26,7 +26,15 @@ pub struct EventBus {
 /// is true, so a plugin id `com.fo` could spoof `com.foo.event`. The
 /// `.`-separator check is what actually anchors the namespace boundary.
 /// See issue #79.
-pub(crate) fn type_id_in_namespace(type_id: &str, plugin_id: &str) -> bool {
+/// Test whether `type_id` lies within the kernel namespace owned by
+/// `plugin_id`. Exposed `pub` (was `pub(crate)`) so the BL-103 fuzz
+/// crate can drive it directly without simulating a full event-bus
+/// publish; the function itself is pure (no allocations, no I/O) and
+/// the contract — equal to plugin id, or `<plugin_id>.<suffix>`,
+/// nothing else — is the namespace anti-spoofing guarantee for
+/// `EventFilter::CustomPrefix` subscribers.
+#[doc(hidden)]
+pub fn type_id_in_namespace(type_id: &str, plugin_id: &str) -> bool {
     if type_id == plugin_id {
         return true;
     }

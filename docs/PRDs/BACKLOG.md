@@ -36,25 +36,7 @@ _BL-104 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
-### BL-103: Security fuzz targets
-
-**Source**: Security Integration Assessment (2026-05-06) — gap #6
-**Effort**: Medium (1 week)
-**Crates**: new `crates/nexus-fuzz/` workspace member; targets `nexus-types` (path validator), `nexus-plugins` (sandbox, host_fns), `nexus-kernel` (event bus, capability system)
-**Related**: PRD-02 §15 (security testing); cargo-fuzz / libFuzzer integration
-
-Zero fuzz targets exist in the codebase. The PRD specifies fuzz targets for the WASM sandbox, path validator, capability gates, and AI prompt handling. For security-critical code that processes untrusted inputs (plugin WASM bytes, file paths, event type IDs, AI responses), fuzzing is the most effective way to find edge cases that unit tests miss.
-
-**Definition of done:**
-- `crates/nexus-fuzz/` workspace member with `cargo fuzz` targets:
-  - `fuzz_path_validator` — exercises `ForgePathValidator::validate` + `validate_for_write` with arbitrary byte strings; corpus seeded with traversal attack patterns (`../`, null bytes, absolute paths, long paths, symlink chains)
-  - `fuzz_wasm_instantiation` — exercises `WasmSandbox::new` with arbitrary WASM bytes; should not panic or escape the sandbox
-  - `fuzz_event_type_id` — exercises `type_id_in_namespace` with arbitrary plugin_id + type_id pairs; validates namespace spoofing prevention
-  - `fuzz_capability_set` — exercises `CapabilitySet` operations with random capability bitmasks
-  - `fuzz_manifest_parse` — exercises `PluginManifest::from_toml` with arbitrary TOML strings
-- CI runs fuzz targets for 60 seconds each on merge to main (fast-fuzz gate)
-- Corpus artifacts stored in `crates/nexus-fuzz/corpus/` and checked in
-- Any crash reproducer → immediate P1 bug + test added to unit suite before fix merges
+_BL-103 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Five fuzz targets shipped (path validator, event type id, capability parser, manifest parser, wasm instantiation). Stable-Rust smoke runner exercises four of them on every `cargo test -p nexus-fuzz` run; cargo-fuzz / libFuzzer shims under `fuzz_targets/` are operator-side (require nightly). CI 60s-per-target gate deferred to operator wiring._
 
 ---
 

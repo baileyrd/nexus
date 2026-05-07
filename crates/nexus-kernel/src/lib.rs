@@ -49,7 +49,7 @@ pub use config::KernelConfig;
 pub use context::PluginContext;
 pub use context_impl::KernelPluginContext;
 pub use error::{ConfigError, Error, KvError, PluginError, RecvError, Result};
-pub use event_bus::{EventBus, EventSubscription};
+pub use event_bus::{type_id_in_namespace, EventBus, EventSubscription};
 pub use kernel::Kernel;
 pub use metrics::{CallStatus, HistogramSnapshot, KernelMetrics, MetricsSnapshot};
 pub use kv_store::{InMemoryKvStore, KvStore};
