@@ -17,7 +17,7 @@ import { clientLogger } from '../../../clientLogger'
 import type { ActivityEntry } from '../activityTimeline/activityTimelineStore'
 import { OsObservabilityView } from './OsObservabilityView'
 import { osObservabilityPaneViewCreator } from './OsObservabilityPaneView'
-import { useObservabilityStore, type AutomationEntry, type VaultFeedEntry } from './observabilityStore'
+import { useObservabilityStore, type AutomationEntry, type VaultFeedEntry, type WorkflowRunRecord } from './observabilityStore'
 import { aggregateUsage } from './usageAggregate'
 
 const VIEW_ID = 'nexus.osObservability.view'
@@ -99,6 +99,39 @@ export const osObservabilityPlugin: Plugin = {
         }
         decoded.sort((a, b) => a.name.localeCompare(b.name))
         useObservabilityStore.getState().setAutomations(decoded)
+        // BL-054 Phase 4 follow-up — pull persisted run history and
+        // collapse to one record per workflow (the IPC returns
+        // newest-first, so the first hit per name is the latest).
+        try {
+          const rawRuns = await api.kernel.invoke<unknown>(
+            WORKFLOW_PLUGIN_ID,
+            'run_history',
+            {},
+          )
+          const runs = Array.isArray(rawRuns) ? rawRuns : []
+          const byName: Record<string, WorkflowRunRecord> = {}
+          for (const item of runs) {
+            if (!item || typeof item !== 'object') continue
+            const r = item as Record<string, unknown>
+            const name = typeof r.workflow_name === 'string' ? r.workflow_name : null
+            if (!name || byName[name]) continue
+            byName[name] = {
+              finishedAt: typeof r.finished_at === 'string' ? r.finished_at : '',
+              success: r.success === true,
+              conditionSkipped: r.condition_skipped === true,
+              error: typeof r.error === 'string' ? r.error : null,
+            }
+          }
+          useObservabilityStore.getState().setAutomationLastRun(byName)
+        } catch (err) {
+          // Non-fatal: workflow plugin may be older than the
+          // run_history handler. Leave the lastRun map empty so the
+          // tab still renders the workflow list.
+          clientLogger.debug(
+            '[nexus.osObservability] run_history fetch failed:',
+            err,
+          )
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         useObservabilityStore.getState().setAutomationError(msg)
@@ -113,6 +146,9 @@ export const osObservabilityPlugin: Plugin = {
           type: 'info',
           message: `Workflow "${name}" started.`,
         })
+        // Refresh the last-run column so the user sees the freshly-
+        // appended history row without a manual click.
+        void refreshAutomation()
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         api.notifications.show({

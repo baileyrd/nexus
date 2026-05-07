@@ -1065,6 +1065,12 @@ fn register_core_plugins(
                         "templates_init",
                         nexus_workflow::core_plugin::HANDLER_TEMPLATES_INIT,
                     ),
+                    // BL-054 Phase 4 follow-up — persisted run history
+                    // for the observability "Automation" tab.
+                    (
+                        "run_history",
+                        nexus_workflow::HANDLER_RUN_HISTORY,
+                    ),
                 ]),
             ),
             forge_root,

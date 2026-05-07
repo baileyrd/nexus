@@ -261,6 +261,7 @@ function AutomationTab({
   const loading = useObservabilityStore((s) => s.automationLoading)
   const error = useObservabilityStore((s) => s.automationError)
   const all = useObservabilityStore((s) => s.automationWorkflows)
+  const lastRun = useObservabilityStore((s) => s.automationLastRun)
   // Foundation workflows — those whose trigger fires automatically.
   const foundations = all.filter(
     (w) => w.triggerType === 'cron' || w.triggerType === 'file_event',
@@ -282,78 +283,130 @@ function AutomationTab({
         </Empty>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {foundations.map((wf) => (
-          <div
-            key={wf.name}
-            style={{
-              padding: '8px 10px',
-              border: '1px solid var(--divider-color)',
-              borderRadius: 6,
-              background: 'var(--background-secondary)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span
-                style={{
-                  fontFamily: 'var(--font-monospace)',
-                  fontSize: 12,
-                  color: 'var(--text-normal)',
-                  flex: 1,
-                }}
-              >
-                {wf.name}
-              </span>
-              <span
-                style={{
-                  fontFamily: 'var(--font-monospace)',
-                  fontSize: 10,
-                  padding: '1px 6px',
-                  borderRadius: 999,
-                  background: 'var(--ok-soft)',
-                  color: 'var(--ok)',
-                  border: '1px solid var(--ok-soft)',
-                }}
-              >
-                {wf.triggerType}
-              </span>
-              <button
-                type="button"
-                onClick={() => onRun(wf.name)}
-                style={{
-                  fontFamily: 'var(--font-interface)',
-                  fontSize: 11,
-                  padding: '2px 8px',
-                  border: '1px solid var(--divider-color)',
-                  borderRadius: 4,
-                  background: 'transparent',
-                  color: 'var(--text-normal)',
-                  cursor: 'pointer',
-                }}
-                title="Manually invoke this workflow"
-              >
-                Run now
-              </button>
-            </div>
-            {wf.description && (
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                {wf.description}
+        {foundations.map((wf) => {
+          const run = lastRun[wf.name] ?? null
+          return (
+            <div
+              key={wf.name}
+              style={{
+                padding: '8px 10px',
+                border: '1px solid var(--divider-color)',
+                borderRadius: 6,
+                background: 'var(--background-secondary)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span
+                  style={{
+                    fontFamily: 'var(--font-monospace)',
+                    fontSize: 12,
+                    color: 'var(--text-normal)',
+                    flex: 1,
+                  }}
+                >
+                  {wf.name}
+                </span>
+                <span
+                  style={{
+                    fontFamily: 'var(--font-monospace)',
+                    fontSize: 10,
+                    padding: '1px 6px',
+                    borderRadius: 999,
+                    background: 'var(--ok-soft)',
+                    color: 'var(--ok)',
+                    border: '1px solid var(--ok-soft)',
+                  }}
+                >
+                  {wf.triggerType}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onRun(wf.name)}
+                  style={{
+                    fontFamily: 'var(--font-interface)',
+                    fontSize: 11,
+                    padding: '2px 8px',
+                    border: '1px solid var(--divider-color)',
+                    borderRadius: 4,
+                    background: 'transparent',
+                    color: 'var(--text-normal)',
+                    cursor: 'pointer',
+                  }}
+                  title="Manually invoke this workflow"
+                >
+                  Run now
+                </button>
               </div>
-            )}
-            <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-              {wf.stepCount} step{wf.stepCount === 1 ? '' : 's'}
+              {wf.description && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  {wf.description}
+                </div>
+              )}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 11,
+                  color: 'var(--text-faint)',
+                }}
+              >
+                <span>
+                  {wf.stepCount} step{wf.stepCount === 1 ? '' : 's'}
+                </span>
+                <span>·</span>
+                <LastRun record={run} />
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
       <Footnote>
-        Last-run / next-fire columns deferred — the workflow executor
-        doesn't persist run history yet (`com.nexus.workflow::run_history`
-        is the BL-054 Phase 4 follow-up).
+        Next-fire column deferred — would require the cron scheduler to
+        publish its computed next-fire time. Today the trigger spec
+        chip is the closest signal.
       </Footnote>
     </div>
+  )
+}
+
+function LastRun({
+  record,
+}: {
+  record: { finishedAt: string; success: boolean; conditionSkipped: boolean; error: string | null } | null
+}) {
+  if (!record) {
+    return <span style={{ color: 'var(--text-faint)' }}>never run</span>
+  }
+  const colour = record.conditionSkipped
+    ? 'var(--text-muted)'
+    : record.success
+      ? 'var(--ok)'
+      : 'var(--risk)'
+  const label = record.conditionSkipped
+    ? 'skipped'
+    : record.success
+      ? 'ok'
+      : 'failed'
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: colour,
+          flexShrink: 0,
+        }}
+      />
+      <span title={record.error ?? undefined}>
+        {label} · {formatTimestamp(record.finishedAt)}
+      </span>
+    </span>
   )
 }
 

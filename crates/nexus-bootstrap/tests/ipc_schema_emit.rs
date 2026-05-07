@@ -79,7 +79,8 @@ use nexus_skills::core_plugin::{
 // toml::Value>` for forward-compat, which is incompatible with
 // `deny_unknown_fields` (the P0-2 gate's invariant).
 use nexus_workflow::core_plugin::{
-    GetTemplateArgs, GetWorkflowArgs, InitTemplateArgs, RunWorkflowArgs, ValidateWorkflowArgs,
+    GetTemplateArgs, GetWorkflowArgs, InitTemplateArgs, RunHistoryArgs, RunWorkflowArgs,
+    ValidateWorkflowArgs,
 };
 use nexus_terminal::{
     CreateSessionArgs, CreateSessionResponse, OutputStreamPayload, PumpArgs, PumpResponse,
@@ -284,6 +285,7 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<GetTemplateArgs>("com_nexus_workflow__templates_get", "args");
     write_schema::<InitTemplateArgs>("com_nexus_workflow__templates_init", "args");
     write_schema::<ValidateWorkflowArgs>("com_nexus_workflow__validate", "args");
+    write_schema::<RunHistoryArgs>("com_nexus_workflow__run_history", "args");
 
     // ── com.nexus.terminal (P1-3 #113) ───────────────────────────────────
     write_schema::<CreateSessionArgs>("com_nexus_terminal__create_session", "args");

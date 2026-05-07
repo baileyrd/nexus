@@ -20,6 +20,19 @@ export interface AutomationEntry {
   stepCount: number
 }
 
+/** Most recent persisted run for a workflow — projection of
+ *  `com.nexus.workflow::run_history` (BL-054 Phase 4 follow-up). */
+export interface WorkflowRunRecord {
+  /** RFC-3339 UTC timestamp the run finished (success or failure). */
+  finishedAt: string
+  /** True when the executor reported `success` for the run. */
+  success: boolean
+  /** True when the workflow's `[condition]` short-circuited. */
+  conditionSkipped: boolean
+  /** Free-form failure message when `success === false`. */
+  error: string | null
+}
+
 /** A single file-activity event surfaced from the kernel bus. */
 export interface VaultFeedEntry {
   /** Activity entry id; used for de-dup. */
@@ -46,6 +59,9 @@ interface ObservabilityState {
   automationLoading: boolean
   automationError: string | null
   automationWorkflows: AutomationEntry[]
+  /** BL-054 Phase 4 follow-up — last persisted run per workflow
+   *  name. Empty for workflows that haven't run yet. */
+  automationLastRun: Record<string, WorkflowRunRecord>
 
   // ── Vault feed ───────────────────────────────────────────────────
   vaultEntries: VaultFeedEntry[]
@@ -57,6 +73,7 @@ interface ObservabilityState {
   setAutomationLoading(b: boolean): void
   setAutomationError(e: string | null): void
   setAutomations(entries: AutomationEntry[]): void
+  setAutomationLastRun(byName: Record<string, WorkflowRunRecord>): void
   prependVault(entry: VaultFeedEntry): void
   reset(): void
 }
@@ -73,6 +90,7 @@ const INITIAL: Pick<
   | 'automationLoading'
   | 'automationError'
   | 'automationWorkflows'
+  | 'automationLastRun'
   | 'vaultEntries'
 > = {
   activeTab: 'usage',
@@ -83,6 +101,7 @@ const INITIAL: Pick<
   automationLoading: false,
   automationError: null,
   automationWorkflows: [],
+  automationLastRun: {},
   vaultEntries: [],
 }
 
@@ -98,6 +117,7 @@ export const useObservabilityStore = create<ObservabilityState>((set) => ({
   setAutomationError: (e) => set({ automationError: e }),
   setAutomations: (entries) =>
     set({ automationLoading: false, automationError: null, automationWorkflows: entries }),
+  setAutomationLastRun: (byName) => set({ automationLastRun: byName }),
   prependVault: (entry) =>
     set((s) => {
       // Dedup by id — the dual-topic publish (BL-052) means a single

@@ -8,6 +8,28 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-054 Phase 4 follow-up: workflow run_history ✅ (2026-05-07)
+
+**Source**: BL-054 Phase 4 closure note (2026-05-07) — deferred bullet "Automation panel shows last-run for at least one triggered workflow"
+**Files**: new `crates/nexus-workflow/src/run_history.rs`; `crates/nexus-workflow/{Cargo.toml unchanged, src/lib.rs, src/core_plugin.rs}`; `crates/nexus-bootstrap/{src/lib.rs, tests/ipc_schema_emit.rs}`; new `crates/nexus-bootstrap/schemas/ipc/com_nexus_workflow__run_history_args.json`; new `packages/nexus-extension-api/src/generated/ipc/RunHistoryArgs.ts`; `shell/src/plugins/nexus/observability/{index.ts, observabilityStore.ts, OsObservabilityView.tsx}`
+**Related**: BL-054 Phase 4 (this lights up the deferred last-run column)
+
+Closes the deferred Phase 4 DoD bullet by persisting workflow runs to disk and surfacing them on the Automation tab.
+
+- **Persister.** New `nexus_workflow::run_history` module owns `RunHistoryEntry` (workflow_name / started_at / finished_at / success / condition_skipped / step_count / error?) and a `RunHistoryStore` that round-trips through `<workflows_dir>/run_history.json`. Bounded ring of `RUN_HISTORY_CAP = 200` entries (newest first); spillover dropped from the tail. Best-effort writes — corrupt files start the in-memory ring empty without clobbering the on-disk bytes until the first successful append, and write failures log-and-continue rather than breaking the executor that produced the row. 6 unit cases cover open-empty, append-and-roundtrip, name filter, limit cap, cap-drops-oldest, and the corrupt-file safety contract.
+- **Plugin wiring.** `WorkflowCorePlugin` gains an `Arc<RunHistoryStore>` field initialised in `open_full`. The `dispatch_async`'s `HANDLER_RUN` arm now appends a row in three branches: condition-skipped runs (fast path before the future), successful runs (with `step_count` from the executor's `WorkflowRun.steps.len()`), and failed runs (with the error message captured into the `error` column). `started_at` / `finished_at` come from `chrono::Utc::now()` at the relevant boundaries. The `Arc` keeps the store reachable from inside the future without borrowing `self` past `.await`.
+- **IPC handler.** New `HANDLER_RUN_HISTORY: u32 = 11` plus `RunHistoryArgs { name?, limit? }`. Sync dispatch arm — the read path doesn't issue any nested IPC. Bootstrap registers `("run_history", HANDLER_RUN_HISTORY)`; ts-rs binding (`RunHistoryArgs.ts`) and JSON Schema (`com_nexus_workflow__run_history_args.json`) regenerated cleanly through the existing `ipc_schema_emit` test.
+- **Shell side.** `observabilityStore` gains a `WorkflowRunRecord` projection plus `automationLastRun: Record<string, WorkflowRunRecord>` and a setter. `refreshAutomation` now calls `run_history` after `list` and collapses the newest-first array to one record per workflow name (first hit wins). The Automation tab footer renders a colored dot + `ok|failed|skipped · MM-DD HH:MM` line per workflow; `never run` placeholder when the workflow has no history yet. The error message from a failed run lands in the `<span title="…">` tooltip. Manual "Run now" success now triggers a refresh so the new history row surfaces without a click.
+- **Backward-compat.** `run_history` IPC failures are caught and logged at debug — the tab still renders the workflow list when an older workflow plugin is registered without the handler. Footer-text deferred items pruned to just the next-fire column (which now needs scheduler-side work, not executor-side).
+
+**Tested**: `cargo test -p nexus-workflow` 180/180 pass (was 174, +6 new run_history cases); `cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export` 3/3; `cargo build --workspace` clean. `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell test` 951/951 pass; lint 0 errors.
+
+**Definition of done coverage**:
+- ✅ Persisted run-history file under `<forge>/.forge/workflows/run_history.json` (with bounded ring + corrupt-file safety)
+- ✅ `com.nexus.workflow::run_history` IPC handler returning rows with optional name + limit filters
+- ✅ Automation tab surfaces a per-workflow last-run line with outcome chip + timestamp
+- ✅ IPC drift bookkeeping (new schema + TS binding regenerated)
+
 ### BL-054 Phase 4: Observability panels ✅ (2026-05-07)
 
 **Source**: BL-054 companion plan, Phase 4 — [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md) §Phase 4

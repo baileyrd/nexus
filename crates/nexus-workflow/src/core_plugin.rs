@@ -78,6 +78,8 @@ pub const HANDLER_RELOAD: u32 = 3;
 pub const HANDLER_VALIDATE: u32 = 4;
 /// `run` handler id.
 pub const HANDLER_RUN: u32 = 5;
+/// `run_history` handler id (BL-054 Phase 4 follow-up).
+pub const HANDLER_RUN_HISTORY: u32 = 11;
 /// `run_digest` handler id (BL-047).
 pub const HANDLER_RUN_DIGEST: u32 = 6;
 /// FU-7 — `set_digest_config` handler id. Replaces the in-memory
@@ -123,6 +125,30 @@ pub struct RunWorkflowArgs {
     #[serde(default)]
     #[cfg_attr(feature = "ts-export", ts(type = "unknown | null"))]
     pub variables: Option<serde_json::Value>,
+}
+
+/// Args for `com.nexus.workflow::run_history` (handler id `11`,
+/// BL-054 Phase 4 follow-up). Optional filters; no args = full
+/// history (capped to [`crate::run_history::RUN_HISTORY_CAP`]).
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct RunHistoryArgs {
+    /// Optional workflow-name filter; when set, only entries
+    /// matching `name` exactly are returned.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Optional cap on the number of rows returned; when omitted,
+    /// the full in-memory ring (≤ `RUN_HISTORY_CAP`) is returned.
+    #[serde(default)]
+    pub limit: Option<u32>,
 }
 
 /// Args for `com.nexus.workflow::get` (handler id `2`).
@@ -221,6 +247,10 @@ pub struct WorkflowCorePlugin {
     /// only spawns when `enabled = true` and at least one workflow
     /// declares a `webhook` trigger.
     webhook_config: webhook::WebhookConfig,
+    /// BL-054 Phase 4 follow-up — persisted run-history store.
+    /// Wrapped in `Arc` so the async `dispatch_async` futures can
+    /// hold a handle without borrowing `self` past `.await`.
+    run_history: Arc<crate::run_history::RunHistoryStore>,
 }
 
 impl WorkflowCorePlugin {
@@ -277,6 +307,7 @@ impl WorkflowCorePlugin {
                 WorkflowRegistry::empty()
             }
         };
+        let run_history = Arc::new(crate::run_history::RunHistoryStore::open(&workflows_dir));
         Self {
             root: workflows_dir,
             registry: Mutex::new(registry),
@@ -284,6 +315,7 @@ impl WorkflowCorePlugin {
             scheduler_handles: Mutex::new(Vec::new()),
             digest_config: Arc::new(RwLock::new(digest_config)),
             webhook_config,
+            run_history,
         }
     }
 
@@ -1463,6 +1495,7 @@ impl CorePlugin for WorkflowCorePlugin {
             HANDLER_TEMPLATES_LIST => Self::dispatch_templates_list(),
             HANDLER_TEMPLATES_GET => Self::dispatch_templates_get(args),
             HANDLER_TEMPLATES_INIT => self.dispatch_templates_init(args),
+            HANDLER_RUN_HISTORY => self.dispatch_run_history(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -1542,6 +1575,7 @@ impl CorePlugin for WorkflowCorePlugin {
             Err(err) => return Some(Box::pin(async move { Err(err) })),
         };
         let forge_root = self.root.parent().map(std::path::Path::to_path_buf);
+        let run_history = Arc::clone(&self.run_history);
 
         // Evaluate [condition] up front — gate closed means no step
         // dispatches. Errors propagate as plugin failures (if we
@@ -1554,6 +1588,19 @@ impl CorePlugin for WorkflowCorePlugin {
             match evaluate_condition(cond, &eval_ctx) {
                 Ok(false) => {
                     let run = condition_skipped_run(&workflow);
+                    // BL-054 Phase 4 follow-up — persist condition-
+                    // skipped runs too so the automation tab's "last
+                    // run" reflects them.
+                    let now = chrono::Utc::now().to_rfc3339();
+                    run_history.append(crate::run_history::RunHistoryEntry {
+                        workflow_name: workflow.workflow.name.clone(),
+                        started_at: now.clone(),
+                        finished_at: now,
+                        success: true,
+                        condition_skipped: true,
+                        step_count: 0,
+                        error: None,
+                    });
                     let value = to_value(&run, "run");
                     return Some(Box::pin(async move { value }));
                 }
@@ -1573,12 +1620,30 @@ impl CorePlugin for WorkflowCorePlugin {
             })?;
             // BL-052 — emit activity start before dispatching steps.
             let workflow_name = workflow.workflow.name.clone();
+            let started_at = chrono::Utc::now().to_rfc3339();
             publish_workflow_activity(&ctx, &workflow_name, true, None).await;
             let dispatcher = KernelActionDispatcher { ctx: Arc::clone(&ctx) };
             let result = run_workflow_with_variables(&workflow, &dispatcher, &variables).await;
             // BL-052 — emit activity end (success or failure).
             let err_msg = result.as_ref().err().map(std::string::ToString::to_string);
-            publish_workflow_activity(&ctx, &workflow_name, false, err_msg).await;
+            publish_workflow_activity(&ctx, &workflow_name, false, err_msg.clone()).await;
+            // BL-054 Phase 4 follow-up — persist a run-history row in
+            // both branches. `step_count` is taken off the executor
+            // result when present; on `EmptyPlan` we record zero.
+            let finished_at = chrono::Utc::now().to_rfc3339();
+            let (success, step_count, history_err) = match &result {
+                Ok(run) => (run.success, u32::try_from(run.steps.len()).unwrap_or(u32::MAX), None),
+                Err(_) => (false, 0u32, err_msg.clone()),
+            };
+            run_history.append(crate::run_history::RunHistoryEntry {
+                workflow_name,
+                started_at,
+                finished_at,
+                success,
+                condition_skipped: false,
+                step_count,
+                error: history_err,
+            });
             let run = result.map_err(|e| exec_err(format!("run: {e}")))?;
             to_value(&run, "run")
         }))
@@ -2075,6 +2140,17 @@ impl WorkflowCorePlugin {
             "path": target.to_string_lossy(),
             "slug": t.slug,
         }))
+    }
+
+    /// BL-054 Phase 4 follow-up — list persisted run-history rows.
+    fn dispatch_run_history(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: RunHistoryArgs = parse(args, "run_history")?;
+        let limit = a.limit.map(|n| usize::try_from(n).unwrap_or(usize::MAX));
+        let rows = self.run_history.list(a.name.as_deref(), limit);
+        to_value(&rows, "run_history")
     }
 
     fn dispatch_validate(

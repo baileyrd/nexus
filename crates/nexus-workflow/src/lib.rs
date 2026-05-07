@@ -35,6 +35,7 @@ mod executor;
 mod interpolate;
 mod parse;
 mod registry;
+pub mod run_history;
 pub mod templates;
 mod trigger_validation;
 pub mod webhook;
@@ -45,8 +46,10 @@ pub use ai_steps::{
 pub use condition::{evaluate_condition, ConditionError, EvaluationContext};
 pub use core_plugin::{
     WorkflowCorePlugin, HANDLER_GET, HANDLER_LIST, HANDLER_RELOAD, HANDLER_RUN,
-    HANDLER_RUN_DIGEST, HANDLER_SET_DIGEST_CONFIG, HANDLER_VALIDATE, PLUGIN_ID,
+    HANDLER_RUN_DIGEST, HANDLER_RUN_HISTORY, HANDLER_SET_DIGEST_CONFIG, HANDLER_VALIDATE,
+    PLUGIN_ID,
 };
+pub use run_history::{RunHistoryEntry, RunHistoryStore, RUN_HISTORY_CAP};
 pub use digests::{
     build_digest_prompt, digest_window, next_fire, output_path, run_digest, DigestConfig,
     DigestKind, DigestRunReport, DEFAULT_DAILY_CRON, DEFAULT_DIGESTS_DIR, DEFAULT_WEEKLY_CRON,

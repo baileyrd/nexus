@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RunHistoryArgs",
+  "description": "Args for `com.nexus.workflow::run_history` (handler id `11`,\nBL-054 Phase 4 follow-up). Optional filters; no args = full\nhistory (capped to [`crate::run_history::RUN_HISTORY_CAP`]).",
+  "type": "object",
+  "properties": {
+    "limit": {
+      "description": "Optional cap on the number of rows returned; when omitted,\nthe full in-memory ring (≤ `RUN_HISTORY_CAP`) is returned.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "default": null,
+      "minimum": 0
+    },
+    "name": {
+      "description": "Optional workflow-name filter; when set, only entries\nmatching `name` exactly are returned.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    }
+  },
+  "additionalProperties": false
+}
