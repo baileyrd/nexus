@@ -378,20 +378,7 @@ Nexus terminal doesn't support PTY-dependent programs (`vim`, `htop`, `less`, in
 
 ---
 
-### BL-058: Terminal URL chip extraction — shell UI surface
-
-**Source**: Terminal Integration Assessment (2026-05-06) — gap #2; CommandBook evaluation (2026-05-06)
-**Effort**: Small (0.5 day)
-**Crates**: `shell/src/plugins/nexus/terminal/TerminalView.tsx`
-**Related**: `nexus-terminal/src/urls.rs` (410 lines, fully implemented, not wired to UI)
-
-`urls.rs` detects HTTP(S), FTP, SSH, and `file://` URLs from output lines and classifies them by kind. Nothing surfaces this in the shell. The CommandBook URL-pin pattern (top-5 detected links pinned above the output pane, always visible regardless of scroll position, single-click to open) is the highest-value terminal UI pattern identified in the CommandBook evaluation.
-
-**Definition of done:**
-- `TerminalView.tsx` gains a `useUrlExtraction` hook that subscribes to the output stream, runs URL detection on new lines, and maintains a deduped top-5 list
-- URLs render as pill chips above the output pane; click opens in default browser / file manager / SSH client per `UrlKind`
-- Chips clear when the session is reset or explicitly dismissed
-- Zero new backend work — all detection happens via the existing library exposed through `read_output`
+_BL-058 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Detection ported from `nexus-terminal/src/urls.rs` to `shell/src/plugins/nexus/terminal/urls.ts` (no new IPC surface added — the original `read_output`-coupled plan was unnecessary given the existing PTY byte stream); a `createUrlExtractor()` decodes UTF-8 with `stream: true` and emits per-line matches; `UrlChips.tsx` renders a deduped top-5 pill strip above xterm with `api.platform.shell.openExternal` click handling. Chips clear on session change and via an explicit dismiss button._
 
 ---
 

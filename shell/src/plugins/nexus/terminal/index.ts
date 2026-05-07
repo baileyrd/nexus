@@ -130,7 +130,11 @@ export const terminalPlugin: Plugin = {
     viewRegistry.register(
       'terminal',
       terminalPaneViewCreator(() =>
-        createElement(TerminalView, { kernel: api.kernel, events: api.events }),
+        createElement(TerminalView, {
+          kernel: api.kernel,
+          events: api.events,
+          openExternal: (target) => api.platform.shell.openExternal(target),
+        }),
       ),
     )
 

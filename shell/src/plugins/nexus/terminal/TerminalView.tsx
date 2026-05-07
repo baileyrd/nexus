@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { clientLogger } from '../../../clientLogger'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -8,6 +8,26 @@ import './terminal.css'
 import type { KernelAPI, EventsAPI } from '../../../types/plugin'
 import { useTerminalStore } from './terminalStore'
 import { useThemeStore } from '../../../stores/themeStore'
+import { createUrlExtractor } from './urlExtractor'
+import type { UrlMatch } from './urls'
+import { UrlChips } from './UrlChips'
+
+/** BL-058: number of recent URLs pinned above the terminal output. */
+const URL_CHIP_LIMIT = 5
+
+/**
+ * Merge a freshly-detected URL into the displayed list.
+ * - Dedupes by `resolved` so the same URL appearing twice doesn't
+ *   double-pin.
+ * - Most recent at the right (insertion-order kept).
+ * - Caps at `URL_CHIP_LIMIT` by dropping the oldest.
+ */
+function pushUrl(prev: UrlMatch[], next: UrlMatch): UrlMatch[] {
+  const filtered = prev.filter((m) => m.resolved !== next.resolved)
+  filtered.push(next)
+  while (filtered.length > URL_CHIP_LIMIT) filtered.shift()
+  return filtered
+}
 
 const PLUGIN_ID = 'com.nexus.terminal'
 // Handler ids verified in crates/nexus-terminal/src/core_plugin.rs.
@@ -47,6 +67,13 @@ const PTY_PUMP_TIMEOUT_MS = 30
 interface TerminalViewProps {
   kernel: KernelAPI
   events: EventsAPI
+  /**
+   * BL-058: opens a URL in the user's default handler. Wired through
+   * `api.platform.shell.openExternal` from `index.ts::activate` so
+   * this view stays off the `@tauri-apps/*` import path the
+   * plugin-import-hygiene guardrail enforces.
+   */
+  openExternal: (target: string) => Promise<void>
 }
 
 /**
@@ -76,8 +103,13 @@ function readCssVar(name: string, fallback: string): string {
   return raw.length > 0 ? raw : fallback
 }
 
-export function TerminalView({ kernel, events }: TerminalViewProps) {
+export function TerminalView({ kernel, events, openExternal }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  // BL-058: URLs surfaced from the output stream. Per-mount state so a
+  // remount (panel close + reopen) starts fresh; session-change clears
+  // it inline below.
+  const [urls, setUrls] = useState<UrlMatch[]>([])
+  const dismissUrls = useCallback(() => setUrls([]), [])
 
   useEffect(() => {
     const container = containerRef.current
@@ -212,12 +244,24 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     // routed to the next session id.
     let sinkUnsub: (() => void) | null = null
 
+    // BL-058: stream-aware URL extractor. Feeds each completed line
+    // through the regex set ported from `nexus-terminal/src/urls.rs`
+    // and pushes detected URLs onto the React-state chip strip. The
+    // extractor's UTF-8 decoder runs in `stream: true` mode so a
+    // chunk that ends mid-multibyte-sequence picks up cleanly on the
+    // next call.
+    const urlExtractor = createUrlExtractor((m) => {
+      if (disposed) return
+      setUrls((prev) => pushUrl(prev, m))
+    })
+
     /** Hand bytes to xterm. The store calls this synchronously from
      *  handleStreamChunk; we keep it lightweight so the broadcast
      *  forwarder isn't held up by xterm's parser work. */
     const writeBytes = (bytes: Uint8Array) => {
       if (disposed) return
       term.write(bytes)
+      urlExtractor.push(bytes)
     }
 
     /**
@@ -235,6 +279,10 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
       } catch {
         // Disposed underneath us; nothing to do.
       }
+      // BL-058: drop any chips and partial-line buffer left over from
+      // the previous session so URLs can't cross-contaminate.
+      urlExtractor.reset()
+      setUrls([])
       if (sinkUnsub) {
         try { sinkUnsub() } catch {}
         sinkUnsub = null
@@ -444,5 +492,10 @@ export function TerminalView({ kernel, events }: TerminalViewProps) {
     // hold across renders without re-running the effect.
   }, [])
 
-  return <div ref={containerRef} className="nexus-terminal-root" />
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <UrlChips urls={urls} openExternal={openExternal} onDismiss={dismissUrls} />
+      <div ref={containerRef} className="nexus-terminal-root" style={{ flex: 1, minHeight: 0 }} />
+    </div>
+  )
 }
