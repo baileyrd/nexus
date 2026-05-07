@@ -173,19 +173,7 @@ This is the only editor gap that requires genuinely new infrastructure rather th
 
 ---
 
-### BL-073: Block auto-stamping on first reference
-
-**Source**: Editor Integration Assessment (2026-05-06) — gap #4
-**Effort**: Tiny (0.5 day)
-**Crates**: `nexus-editor/src/core_plugin.rs`
-**Related**: ADR 0017 (stable block IDs); `stamp_block` handler (id 11) ships today
-
-Stable block IDs (`<!-- ^<uuid> -->` comments) require an explicit `stamp_block` IPC call to assign. Nothing auto-assigns them. A user who creates a wikilink to a specific block (`[[file#^uuid]]`) must first manually stamp the target block — a friction point that breaks the linking flow.
-
-**Definition of done:**
-- When `resolve_block_link` is called with a target block that has no stable ID, it auto-stamps the block, writes the comment to the file, and returns the newly assigned ID
-- `apply_transaction` auto-stamps any block that gains a `Wikilink` annotation pointing to it (inbound-link trigger)
-- Auto-stamped IDs are UUID v4; no user-visible change except the comment appears in the markdown source
+_BL-073 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `resolve_block_link` (session path) and `apply_transaction` now auto-stamp inbound-link targets to fresh v4 UUIDs. The filesystem-fallback resolve path deliberately does not auto-stamp (mutating the on-disk file from a read-shaped IPC call would be a surprise); if a caller wants the stamp persisted, they keep the session open and the next `save` writes the `<!-- ^<uuid> -->` marker._
 
 ---
 

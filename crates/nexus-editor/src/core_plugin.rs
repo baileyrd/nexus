@@ -321,6 +321,7 @@ impl CorePlugin for EditorCorePlugin {
         let forge_root = self.forge_root.clone();
         let sessions = Arc::clone(&self.sessions);
         let ctx = self.context.clone();
+        let event_bus = self.event_bus.clone();
         let args = args.clone();
 
         Some(Box::pin(async move {
@@ -331,7 +332,14 @@ impl CorePlugin for EditorCorePlugin {
                     handle_execute_database_view(ctx, &args).await
                 }
                 HANDLER_RESOLVE_BLOCK_LINK => {
-                    handle_resolve_block_link_async(&forge_root, sessions, ctx, &args).await
+                    handle_resolve_block_link_async(
+                        &forge_root,
+                        sessions,
+                        ctx,
+                        event_bus.as_ref(),
+                        &args,
+                    )
+                    .await
                 }
                 _ => Err(exec_err(format!("unknown async handler id {handler_id}"))),
             }
@@ -587,16 +595,38 @@ async fn handle_execute_database_view(
 /// ancestor's index in `tree.root_blocks`. Returns `Ok(None)` when
 /// no session exists for `relpath`; the caller falls back to a
 /// fresh parse.
+///
+/// BL-073: when the resolved block has no [`Block::stable_id`] yet,
+/// auto-stamp it via [`BlockTree::rekey`] so the next save persists a
+/// `<!-- ^<uuid> -->` marker. The new stable id is what the lookup
+/// returns. The second tuple element is `Some(revision)` if a stamp
+/// happened (caller publishes a `changed` event), `None` otherwise.
+/// The filesystem-fallback path used for closed sessions deliberately
+/// does **not** auto-stamp — silently mutating the on-disk file from a
+/// read-shaped IPC call would be a surprise.
 fn resolve_in_session(
     sessions: &Mutex<HashMap<String, Session>>,
     relpath: &str,
     block_id: uuid::Uuid,
-) -> Result<Option<Value>, PluginError> {
-    let guard = sessions.lock().map_err(|_| sessions_poisoned())?;
-    let Some(s) = guard.get(relpath) else {
+) -> Result<Option<(Value, Option<u64>)>, PluginError> {
+    let mut guard = sessions.lock().map_err(|_| sessions_poisoned())?;
+    let Some(s) = guard.get_mut(relpath) else {
         return Ok(None);
     };
-    Ok(Some(resolve_in_tree(&s.tree, block_id)))
+    let needs_stamp = matches!(
+        s.tree.get(block_id),
+        Some(block) if block.stable_id.is_none()
+    );
+    if needs_stamp {
+        let new_id = uuid::Uuid::new_v4();
+        s.tree
+            .rekey(block_id, new_id)
+            .map_err(|e| exec_err(format!("resolve_block_link: auto-stamp rekey: {e}")))?;
+        s.revision = s.revision.saturating_add(1);
+        let value = resolve_in_tree(&s.tree, new_id);
+        return Ok(Some((value, Some(s.revision))));
+    }
+    Ok(Some((resolve_in_tree(&s.tree, block_id), None)))
 }
 
 /// Walk `tree.root_blocks` to find which root ancestor contains
@@ -652,7 +682,10 @@ fn handle_resolve_block_link_sync(
 ) -> Result<Value, PluginError> {
     let (relpath, block_id) = parse_resolve_args(args)?;
 
-    if let Some(value) = resolve_in_session(sessions, &relpath, block_id)? {
+    if let Some((value, _stamp_revision)) = resolve_in_session(sessions, &relpath, block_id)? {
+        // The sync entry point is unit-test-only (no kernel context →
+        // no event bus). The async path below publishes a changed
+        // event when an auto-stamp happens.
         return Ok(value);
     }
 
@@ -677,11 +710,15 @@ async fn handle_resolve_block_link_async(
     forge_root: &Path,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
     ctx: Option<Arc<KernelPluginContext>>,
+    event_bus: Option<&Arc<EventBus>>,
     args: &Value,
 ) -> Result<Value, PluginError> {
     let (relpath, block_id) = parse_resolve_args(args)?;
 
-    if let Some(value) = resolve_in_session(&sessions, &relpath, block_id)? {
+    if let Some((value, stamp_revision)) = resolve_in_session(&sessions, &relpath, block_id)? {
+        if let Some(revision) = stamp_revision {
+            publish_changed(event_bus, &relpath, revision, None);
+        }
         return Ok(value);
     }
 
@@ -759,9 +796,17 @@ fn handle_apply_transaction(
                 "apply_transaction: no open session for '{relpath}'"
             ))
         })?;
+        // BL-073: capture the operation set before consuming `tx` so we
+        // can scan new wikilink / block-ref annotations after apply and
+        // auto-stamp inbound-link targets. The post-apply scan reads
+        // the freshly-mutated block content (wikilink fragments live in
+        // the source text, not the annotation payload), so it has to
+        // run after `execute` returns.
+        let ops = tx.operations.clone();
         s.undo
             .execute(tx, &mut s.tree)
             .map_err(|e| exec_err(format!("apply_transaction: {e}")))?;
+        auto_stamp_inbound_targets(&mut s.tree, &ops);
         s.revision = s.revision.saturating_add(1);
         let rev = s.revision;
         let val = snapshot_to_value(&snapshot_of(s), "apply_transaction")?;
@@ -769,6 +814,116 @@ fn handle_apply_transaction(
     };
     publish_changed(event_bus, &relpath, revision, Some(tx_id));
     Ok(value)
+}
+
+/// BL-073 helper: stamp every block in `tree` that newly became the
+/// target of an inbound `Wikilink` (with a `#^<uuid>` fragment) or
+/// `BlockRef` annotation introduced by `ops`. Stamping rekeys the
+/// target's positional id to a fresh v4 UUID and sets `stable_id` so
+/// the next save persists a `<!-- ^<uuid> -->` marker. Idempotent —
+/// blocks that already carry a `stable_id` are skipped, and any
+/// stamping failure (block missing, rekey collision) is silent: the
+/// transaction itself already committed and shouldn't be invalidated
+/// by a metadata-only side effect.
+fn auto_stamp_inbound_targets(tree: &mut BlockTree, ops: &[crate::Operation]) {
+    use crate::Operation;
+
+    let mut targets: Vec<uuid::Uuid> = Vec::new();
+    for op in ops {
+        let (host_id, old, new) = match op {
+            Operation::UpdateAnnotations {
+                block_id,
+                old_annotations,
+                new_annotations,
+            } => (*block_id, old_annotations.as_slice(), new_annotations.as_slice()),
+            Operation::UpdateBlockContent {
+                id,
+                old_annotations,
+                new_annotations,
+                ..
+            } => (*id, old_annotations.as_slice(), new_annotations.as_slice()),
+            _ => continue,
+        };
+        // Annotations carry their own equality, so the simplest "what's
+        // new" view is set difference by structural equality. The
+        // annotation count per block is small (<100 in realistic docs),
+        // so the O(n*m) scan is fine.
+        for ann in new {
+            if old.iter().any(|prev| prev == ann) {
+                continue;
+            }
+            if let Some(target) = inbound_target(tree, host_id, ann) {
+                targets.push(target);
+            }
+        }
+    }
+
+    targets.sort_unstable();
+    targets.dedup();
+    for old_id in targets {
+        let needs_stamp = matches!(tree.get(old_id), Some(b) if b.stable_id.is_none());
+        if !needs_stamp {
+            continue;
+        }
+        let new_id = uuid::Uuid::new_v4();
+        // Best-effort: a rekey collision (impossibly rare with v4) or
+        // a block that disappeared between scan and stamp is harmless
+        // — the user's link still resolves on the next explicit
+        // `stamp_block` or `resolve_block_link` call.
+        let _ = tree.rekey(old_id, new_id);
+    }
+}
+
+/// Resolve a single annotation to the in-tree block id it points at,
+/// when the annotation is one of the inbound-link kinds that BL-073
+/// auto-stamps. Returns the *current* (positional) id of the target
+/// so the caller can pass it to [`BlockTree::rekey`].
+///
+/// `Wikilink`s carry only the file part of the path in their payload
+/// (the fragment is dropped at parse time per
+/// `markdown::inline::parse_wikilink_inner`), so we recover the
+/// `#^<uuid>` fragment from the *content* of the host block — the
+/// raw `[[file#^uuid]]` text lives there and the annotation's
+/// `start`/`end` byte range pins it down.
+fn inbound_target(
+    tree: &BlockTree,
+    host_id: uuid::Uuid,
+    ann: &crate::Annotation,
+) -> Option<uuid::Uuid> {
+    use crate::AnnotationType;
+    match &ann.ty {
+        AnnotationType::BlockRef { block_id } => Some(*block_id),
+        AnnotationType::Wikilink { .. } => {
+            let host = tree.get(host_id)?;
+            let bytes = host.content.as_bytes();
+            if ann.end > bytes.len() || ann.start >= ann.end {
+                return None;
+            }
+            let slice = std::str::from_utf8(&bytes[ann.start..ann.end]).ok()?;
+            extract_wikilink_block_uuid(slice)
+        }
+        _ => None,
+    }
+}
+
+/// Parse a `[[...]]` literal and return the block uuid encoded in its
+/// `#^<uuid>` fragment, when present. Returns `None` for path-only
+/// links, fragment-less links, heading-only fragments (`#section`,
+/// not `#^uuid`), and any uuid parse failure. Mirrors
+/// `markdown::inline::parse_wikilink_inner` but keeps only the
+/// fragment branch we care about.
+fn extract_wikilink_block_uuid(literal: &str) -> Option<uuid::Uuid> {
+    let inner = literal.strip_prefix("[[")?.strip_suffix("]]")?;
+    // Display-text suffix (`|display`) is stripped first so we don't
+    // confuse a `#` inside the display text with the path fragment.
+    let target = match inner.find('|') {
+        Some(pipe) => &inner[..pipe],
+        None => inner,
+    };
+    let hash = target.find('#')?;
+    let fragment = &target[hash + 1..];
+    let id_str = fragment.strip_prefix('^')?;
+    uuid::Uuid::parse_str(id_str).ok()
 }
 
 fn handle_undo(
@@ -1793,6 +1948,10 @@ mod tests {
 
     #[test]
     fn resolve_block_link_returns_block_for_open_session() {
+        // BL-073: the first resolve against an unstamped block
+        // auto-stamps it, so the response carries a fresh `stable_id`
+        // (not the original positional id) and the block's `id` field
+        // is rekeyed to match.
         let (_dir, mut p) = forge_with_file("notes/a.md", "first paragraph\n\nsecond\n");
         let snap = open_value(&mut p, "notes/a.md");
         let block_id = snap.tree.root_blocks[0];
@@ -1809,9 +1968,30 @@ mod tests {
         assert_eq!(resp.get("found").and_then(Value::as_bool), Some(true));
         assert_eq!(resp.get("root_index").and_then(Value::as_u64), Some(0));
         let block = resp.get("block").unwrap();
+        let resolved_id = block.get("id").and_then(Value::as_str).unwrap();
+        let stable_id = block.get("stable_id").and_then(Value::as_str).unwrap();
+        assert_eq!(resolved_id, stable_id, "id and stable_id match after stamp");
+        assert_ne!(
+            resolved_id,
+            block_id.to_string(),
+            "auto-stamp must rekey to a fresh uuid"
+        );
+        // Resolving the same lookup again hits the already-stamped
+        // path and is a no-op.
+        let resp2 = p
+            .dispatch(
+                HANDLER_RESOLVE_BLOCK_LINK,
+                &serde_json::json!({
+                    "file_relpath": "notes/a.md",
+                    "block_id": resolved_id,
+                }),
+            )
+            .unwrap();
+        let block2 = resp2.get("block").unwrap();
         assert_eq!(
-            block.get("id").and_then(Value::as_str),
-            Some(block_id.to_string()).as_deref(),
+            block2.get("id").and_then(Value::as_str),
+            Some(resolved_id),
+            "second resolve preserves the stamped id"
         );
     }
 
@@ -1929,6 +2109,134 @@ mod tests {
             .unwrap_err();
         let s = format!("{err:?}");
         assert!(s.contains("invalid 'block_id'"), "got: {s}");
+    }
+
+    #[test]
+    fn extract_wikilink_block_uuid_handles_common_shapes() {
+        let id = uuid::Uuid::new_v4();
+        let with_fragment = format!("[[notes/foo#^{id}]]");
+        assert_eq!(extract_wikilink_block_uuid(&with_fragment), Some(id));
+
+        let with_display = format!("[[notes/foo#^{id}|see this]]");
+        assert_eq!(extract_wikilink_block_uuid(&with_display), Some(id));
+
+        // Heading fragments aren't block refs.
+        assert_eq!(
+            extract_wikilink_block_uuid("[[notes/foo#section]]"),
+            None,
+        );
+        // Path-only links have no fragment to stamp against.
+        assert_eq!(extract_wikilink_block_uuid("[[notes/foo]]"), None);
+        // Fragment present but not a uuid.
+        assert_eq!(extract_wikilink_block_uuid("[[notes/foo#^abc]]"), None);
+    }
+
+    #[test]
+    fn apply_transaction_auto_stamps_block_ref_target() {
+        // BL-073: a transaction that adds an inbound `BlockRef`
+        // annotation pointing at an unstamped block must auto-stamp
+        // the target so the link can survive the next reload.
+        use crate::{Annotation, AnnotationType, Operation, Transaction, TransactionMetadata};
+        let (_dir, mut p) = forge_with_file(
+            "notes/a.md",
+            "first paragraph\n\nsecond paragraph\n",
+        );
+        let snap = open_value(&mut p, "notes/a.md");
+        let source_id = snap.tree.root_blocks[0];
+        let target_id = snap.tree.root_blocks[1];
+        assert!(snap.tree.blocks[&target_id].stable_id.is_none());
+
+        let source_block = &snap.tree.blocks[&source_id];
+        let new_anns = vec![Annotation {
+            start: 0,
+            end: 1,
+            ty: AnnotationType::BlockRef {
+                block_id: target_id,
+            },
+        }];
+        let tx = Transaction::new(
+            vec![Operation::UpdateAnnotations {
+                block_id: source_id,
+                old_annotations: source_block.annotations.clone(),
+                new_annotations: new_anns,
+            }],
+            TransactionMetadata::default(),
+        );
+        let resp = p
+            .dispatch(
+                HANDLER_APPLY_TRANSACTION,
+                &serde_json::json!({
+                    "relpath": "notes/a.md",
+                    "transaction": serde_json::to_value(&tx).unwrap(),
+                }),
+            )
+            .unwrap();
+        let snap: EditorSnapshot = serde_json::from_value(resp).unwrap();
+        // The target's positional id has been rekeyed; root_blocks[1]
+        // now holds the new stamped id.
+        let stamped_id = snap.tree.root_blocks[1];
+        assert_ne!(stamped_id, target_id, "target was rekeyed");
+        let stamped = &snap.tree.blocks[&stamped_id];
+        assert_eq!(stamped.stable_id, Some(stamped_id));
+    }
+
+    #[test]
+    fn apply_transaction_auto_stamps_wikilink_fragment_target() {
+        // The wikilink fragment lives in the host block's *content*,
+        // not the annotation payload, so auto-stamping has to recover
+        // it via byte-slicing the post-apply content.
+        use crate::{Annotation, AnnotationType, Operation, Transaction, TransactionMetadata};
+        let (_dir, mut p) = forge_with_file(
+            "notes/a.md",
+            "first paragraph\n\nsecond paragraph\n",
+        );
+        let snap = open_value(&mut p, "notes/a.md");
+        let source_id = snap.tree.root_blocks[0];
+        let target_id = snap.tree.root_blocks[1];
+        let source_block = &snap.tree.blocks[&source_id];
+        let old_content = source_block.content.clone();
+        let old_annotations = source_block.annotations.clone();
+
+        // Build content like `<original> [[notes/a#^<target_id>]]` and
+        // attach the wikilink annotation over the bracketed range.
+        let link_text = format!("[[notes/a#^{target_id}]]");
+        let prefix = format!("{old_content} ");
+        let new_content = format!("{prefix}{link_text}");
+        let link_start = prefix.len();
+        let link_end = link_start + link_text.len();
+        let new_annotations = vec![Annotation {
+            start: link_start,
+            end: link_end,
+            ty: AnnotationType::Wikilink {
+                path: "notes/a".into(),
+                display_text: None,
+                is_resolved: false,
+            },
+        }];
+        let tx = Transaction::new(
+            vec![Operation::UpdateBlockContent {
+                id: source_id,
+                old_content,
+                new_content,
+                old_annotations,
+                new_annotations,
+            }],
+            TransactionMetadata::default(),
+        );
+        let resp = p
+            .dispatch(
+                HANDLER_APPLY_TRANSACTION,
+                &serde_json::json!({
+                    "relpath": "notes/a.md",
+                    "transaction": serde_json::to_value(&tx).unwrap(),
+                }),
+            )
+            .unwrap();
+        let snap: EditorSnapshot = serde_json::from_value(resp).unwrap();
+        let stamped_id = snap.tree.root_blocks[1];
+        assert_ne!(stamped_id, target_id, "auto-stamp rekeys to a fresh uuid");
+        let stamped = &snap.tree.blocks[&stamped_id];
+        assert_eq!(stamped.stable_id, Some(stamped_id));
     }
 
     fn open_value(p: &mut EditorCorePlugin, relpath: &str) -> EditorSnapshot {
