@@ -38,8 +38,8 @@ mod substitute;
 pub use builtins::{builtin_filenames, seed_builtins, SeedReport};
 pub use compose::{compose, ComposeConflict, ComposeError, ComposedFragment, ComposedSkill};
 pub use core_plugin::{
-    SkillsCorePlugin, HANDLER_COMPOSE, HANDLER_GET, HANDLER_LIST, HANDLER_LIST_BY_CONTEXT,
-    HANDLER_RELOAD, HANDLER_RENDER, HANDLER_TRIGGERED_BY, PLUGIN_ID,
+    SkillsCorePlugin, HANDLER_COMPOSE, HANDLER_GET, HANDLER_INVOKE, HANDLER_LIST,
+    HANDLER_LIST_BY_CONTEXT, HANDLER_RELOAD, HANDLER_RENDER, HANDLER_TRIGGERED_BY, PLUGIN_ID,
 };
 pub use parse::{parse_skill_file, parse_skill_text, SkillParseError};
 pub use registry::{SkillRegistry, SkillRegistryError};

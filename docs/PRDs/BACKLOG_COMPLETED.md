@@ -8,6 +8,32 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-054 Phase 3: Skills invocation ✅ (2026-05-07)
+
+**Source**: BL-054 companion plan, Phase 3 — [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md) §Phase 3
+**Files**: `crates/nexus-skills/{Cargo.toml, src/lib.rs, src/core_plugin.rs}`, `crates/nexus-bootstrap/{src/lib.rs, tests/ipc_schema_emit.rs}`, `shell/src/plugins/nexus/skills/{skillsStore.ts, SkillsView.tsx}`, regenerated `packages/nexus-extension-api/src/generated/ipc/InvokeSkillArgs.ts` and `crates/nexus-bootstrap/schemas/ipc/com_nexus_skills__invoke_args.json`
+**Related**: BL-021 (skill compose chain — `invoke` reuses it for `system_prompt_extra`), BL-027 (agent session_run — invocation target), BL-054 Phases 1+2 (complete the OS-mode vertical when this lands)
+
+A new `com.nexus.skills::invoke` handler (id 8) plus a Run button on each skill card in the SkillsPanel.
+
+- **Backend handler.** New `InvokeSkillArgs { skill_id, input, archetype? }` lifted into the shared types section; new `HANDLER_INVOKE: u32 = 8` constant (ids are append-only). The sync `dispatch` arm explicitly errors with "use dispatch_async" so a misrouted call surfaces clearly. The async path runs in two halves: a sync `compose_for_invoke(&self, args)` that locks the registry, validates the skill id, runs the existing `compose::compose` chain, and returns the merged body string — then the async future calls `ctx.ipc_call("com.nexus.agent", "session_run", …)` with `goal = input`, `system = composed_body`, `archetype = arg ?? "general"`, `auto_approve = true`. Splitting the work this way means the registry lock never crosses an `.await`, which keeps the future `Send`. Outer 120 s budget on the agent call.
+- **Bootstrap wiring.** `nexus-skills`'s `CorePlugin::wire_context` captures the kernel context so `dispatch_async` can issue nested IPC. Added the new `nexus-kernel` dependency (path-style, mirrors the terminal plugin's BL-064 setup); register block in `nexus-bootstrap` adds `("invoke", HANDLER_INVOKE)` to the alias list.
+- **Shell store.** `useSkillsStore` gains five fields (`invokingId`, `invokeInputs`, `invokeResults`, `invokeErrors`, `invoking`) and four actions (`toggleInvokeForm`, `setInvokeInput`, `runSkill`, `clearInvokeResult`). `runSkill` is single-flight per skill id, validates non-empty input client-side, calls `com.nexus.skills::invoke`, and stashes either the reply on `invokeResults` or the error on `invokeErrors`. `reset()` clears all five.
+- **Run button + form.** Each expanded skill row gains a "Run…" button that toggles a new `InvokeForm` — single-textarea + Run + cancel-via-toggle. The form's intro echoes the skill name and the `agent::session_run` route so the user sees what they're dispatching (matches the BL-054 §3 confirmation requirement without a separate modal). On success the agent's reply is rendered in an `InvokeResultPanel` with a clear button. `formatInvokeReply` falls back through `output` / `final` / `text` / `message` keys before pretty-printing JSON, so common observation shapes display as plain text.
+- **IPC schema regen.** `InvokeSkillArgs` registered in the `ipc_schema_emit` test; both the JSON Schema (`com_nexus_skills__invoke_args.json`) and the ts-rs binding (`InvokeSkillArgs.ts`) generated cleanly.
+- **Tests.** 4 new cargo cases in `core_plugin.rs::tests` (sync routing redirects to async; async-without-context returns a clear message; async with unknown skill id short-circuits in the sync setup; `dispatch_async` returns `None` for unrelated handler ids). New `tokio` dev-dep with `macros + rt` features for a current-thread runtime helper.
+
+**Tested**: `cargo test -p nexus-skills` 55/55 pass (was 51, +4 new); `cargo test -p nexus-bootstrap --test ipc_schema_emit --features ts-export` clean (3/3); `cargo build --workspace` clean. `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell test` 944/944 pass; lint 0 errors.
+
+**Definition of done coverage** (per Phase 3 §6 of the companion plan):
+- ✅ `com.nexus.skills::invoke` handler registered + tested
+- ✅ SkillsPanel "Run" button dispatches through the handler and surfaces output
+- ✅ IPC drift bookkeeping (new schema + TS binding regenerated and committed)
+
+**Deferred:**
+- "Schedule" button on `[foundation]`-class skills that pre-fills a `.workflow.toml` — no schema for skill-class metadata exists yet (skills don't carry a `class` field today; the BL-054 plan mentions it but the parser doesn't honour it). Track as a Phase 3 follow-up once skill frontmatter grows the field.
+- Output streaming into the Chat panel (the open-question UX option) — current shape returns the agent reply as a final observation. Adding live streaming requires bridging the `com.nexus.ai.token` event topic into the Run-form panel; out of scope for the 1d slice.
+
 ### BL-053 Phase 3: Forge visual target — callouts ✅ (2026-05-07)
 
 **Source**: BL-053 companion plan, Phase 3 — [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md) §3

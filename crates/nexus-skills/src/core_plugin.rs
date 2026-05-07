@@ -17,14 +17,17 @@
 //! | 5  | `reload`           | `{}`               | Re-scan the `<forge>/.forge/skills` dir  |
 //! | 6  | `render`           | `{ id, values? }`  | Render a skill's body with parameter substitution |
 //! | 7  | `compose`          | `{ id }`           | BL-021 — resolve `depends_on` closure into ordered fragments + merged body |
+//! | 8  | `invoke`           | `{ skill_id, input, archetype? }` | BL-054 Phase 3 — run a skill via `com.nexus.agent::session_run` |
 //!
 //! Ids are append-only.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use nexus_plugins::{CorePlugin, PluginError};
+use nexus_kernel::{KernelPluginContext, PluginContext};
+use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "ts-export")]
@@ -128,6 +131,36 @@ pub struct ComposeSkillArgs {
     pub id: String,
 }
 
+/// Args for `com.nexus.skills::invoke` (handler id `8`, BL-054 Phase 3).
+///
+/// Runs a skill by composing its `depends_on` closure into a merged
+/// system prompt, then dispatching `com.nexus.agent::session_run`
+/// with the user-supplied `input` as the goal. The reply is the agent
+/// observation JSON returned by `session_run` verbatim.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct InvokeSkillArgs {
+    /// The skill id to run. Must match a `.skill.md` file's
+    /// frontmatter `id`.
+    pub skill_id: String,
+    /// User-supplied goal text — passed to the agent as the `goal`
+    /// argument.
+    pub input: String,
+    /// Optional archetype override. When omitted, defaults to
+    /// `"general"` (matches the BL-054 Phase 3 spec — skills don't
+    /// carry their own archetype today).
+    #[serde(default)]
+    pub archetype: Option<String>,
+}
+
 /// Reverse-DNS identifier.
 pub const PLUGIN_ID: &str = "com.nexus.skills";
 
@@ -145,12 +178,29 @@ pub const HANDLER_RELOAD: u32 = 5;
 pub const HANDLER_RENDER: u32 = 6;
 /// `compose` handler id (BL-021).
 pub const HANDLER_COMPOSE: u32 = 7;
+/// `invoke` handler id (BL-054 Phase 3).
+pub const HANDLER_INVOKE: u32 = 8;
+
+/// BL-054 Phase 3 — total budget for the agent invocation. The agent
+/// session itself enforces a finer-grained per-round timeout; this is
+/// the outer cap so the skills handler can't hang indefinitely on a
+/// stuck provider.
+const INVOKE_AGENT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Default archetype the BL-054 Phase 3 spec calls for when neither
+/// the caller nor (future) skill metadata supplies one.
+const DEFAULT_ARCHETYPE: &str = "general";
 
 /// Core plugin — holds the skills root path + an in-memory registry
 /// behind a mutex so dispatches stay `Send + Sync`.
 pub struct SkillsCorePlugin {
     root: PathBuf,
     registry: Mutex<SkillRegistry>,
+    /// BL-054 Phase 3 — kernel context, captured by `wire_context`.
+    /// Required by `dispatch_async` for the `invoke` handler so it can
+    /// reach `com.nexus.agent::session_run`. None means the plugin was
+    /// loaded without the bootstrap doing the wiring (e.g. unit tests).
+    context: Option<Arc<KernelPluginContext>>,
 }
 
 impl SkillsCorePlugin {
@@ -195,6 +245,7 @@ impl SkillsCorePlugin {
         Self {
             root: skills_dir,
             registry: Mutex::new(registry),
+            context: None,
         }
     }
 }
@@ -213,8 +264,42 @@ impl CorePlugin for SkillsCorePlugin {
             HANDLER_RELOAD => self.dispatch_reload(),
             HANDLER_RENDER => self.dispatch_render(args),
             HANDLER_COMPOSE => self.dispatch_compose(args),
+            // BL-054 Phase 3 — `invoke` is async (it issues a nested
+            // `com.nexus.agent` IPC call). Surfacing the routing
+            // mistake from the sync path makes it obvious if a future
+            // dispatcher loses the async route.
+            HANDLER_INVOKE => Err(exec_err(format!(
+                "handler {HANDLER_INVOKE}: invoke is async; caller should use dispatch_async"
+            ))),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
+    }
+
+    fn dispatch_async(
+        &mut self,
+        handler_id: u32,
+        args: &serde_json::Value,
+    ) -> Option<CorePluginFuture> {
+        if handler_id != HANDLER_INVOKE {
+            return None;
+        }
+        let ctx = self.context.clone();
+        // Lock + compose synchronously so the future doesn't borrow
+        // the registry (which is `!Send` across an .await on some
+        // platforms via the Mutex guard). Failures here surface as
+        // immediate `Err` futures.
+        let composed = match self.compose_for_invoke(args) {
+            Ok(c) => c,
+            Err(e) => return Some(Box::pin(async move { Err(e) })),
+        };
+        let raw_args = args.clone();
+        Some(Box::pin(async move {
+            handle_invoke(ctx.as_ref(), composed, raw_args).await
+        }))
+    }
+
+    fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
+        self.context = Some(ctx);
     }
 }
 
@@ -314,6 +399,28 @@ impl SkillsCorePlugin {
         }
     }
 
+    /// BL-054 Phase 3 — pre-async setup for `invoke`. Parses the args,
+    /// resolves the skill's `depends_on` closure, and returns the
+    /// merged body the agent should use as its system prompt. Lives
+    /// on `&self` so the locked registry guard never crosses an
+    /// `.await` (which would make the future `!Send`).
+    fn compose_for_invoke(&self, args: &serde_json::Value) -> Result<String, PluginError> {
+        let parsed: InvokeSkillArgs = parse(args, "invoke")?;
+        if parsed.skill_id.is_empty() {
+            return Err(exec_err("invoke: skill_id must not be empty".into()));
+        }
+        let reg = self.registry.lock().map_err(poisoned)?;
+        if reg.get(&parsed.skill_id).is_none() {
+            return Err(exec_err(format!(
+                "invoke: no skill with id '{}'",
+                parsed.skill_id
+            )));
+        }
+        let composed = crate::compose::compose(&reg, &parsed.skill_id)
+            .map_err(|e| exec_err(format!("invoke: compose: {e}")))?;
+        Ok(composed.merged_body)
+    }
+
     fn dispatch_reload(&self) -> Result<serde_json::Value, PluginError> {
         let reloaded = SkillRegistry::load(&self.root).unwrap_or_else(|err| {
             tracing::warn!(
@@ -394,6 +501,45 @@ fn to_value<T: serde::Serialize>(v: &T, command: &str) -> Result<serde_json::Val
     serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize: {e}")))
 }
 
+/// BL-054 Phase 3 — async handler for `com.nexus.skills::invoke`.
+/// Composes the skill body (precomputed by `compose_for_invoke` so
+/// the registry lock doesn't cross the `.await`) and dispatches
+/// `com.nexus.agent::session_run` with `goal = input`,
+/// `system = composed body`, `archetype = arg ?? "general"`,
+/// `auto_approve = true`. Returns the agent's reply verbatim — the
+/// caller decides how to render the observation.
+async fn handle_invoke(
+    ctx: Option<&Arc<KernelPluginContext>>,
+    composed_body: String,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: InvokeSkillArgs = serde_json::from_value(args)
+        .map_err(|e| exec_err(format!("invoke: invalid args: {e}")))?;
+    let ctx = ctx.ok_or_else(|| {
+        exec_err("invoke: no kernel context wired (bootstrap did not call wire_context)".into())
+    })?;
+    let archetype = parsed
+        .archetype
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_ARCHETYPE)
+        .to_string();
+    let payload = serde_json::json!({
+        "goal": parsed.input,
+        "archetype": archetype,
+        "system": composed_body,
+        "auto_approve": true,
+    });
+    ctx.ipc_call(
+        "com.nexus.agent",
+        "session_run",
+        payload,
+        INVOKE_AGENT_TIMEOUT,
+    )
+    .await
+    .map_err(|e| exec_err(format!("invoke: agent::session_run failed: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,6 +561,17 @@ body A
 
     fn write_skill(dir: &std::path::Path, filename: &str, contents: &str) {
         std::fs::write(dir.join(filename), contents).unwrap();
+    }
+
+    /// Drive a single future to completion on a fresh tokio current-
+    /// thread runtime — keeps the unit tests free of an extra
+    /// `futures` workspace dep just for `block_on`.
+    fn block_on_test<F: std::future::Future>(fut: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(fut)
     }
 
     #[test]
@@ -594,5 +751,77 @@ body B
             .dispatch(HANDLER_RELOAD, &serde_json::json!({}))
             .unwrap();
         assert_eq!(v["loaded"], 1);
+    }
+
+    // ── BL-054 Phase 3 — invoke routing ─────────────────────────────────
+
+    #[test]
+    fn invoke_sync_dispatch_directs_caller_to_async() {
+        let tmp = TempDir::new().unwrap();
+        write_skill(tmp.path(), "a.skill.md", SKILL_A);
+        let mut plugin = SkillsCorePlugin::open(tmp.path().to_path_buf());
+        let err = plugin
+            .dispatch(
+                HANDLER_INVOKE,
+                &serde_json::json!({ "skill_id": "skill-a", "input": "go" }),
+            )
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("dispatch_async"), "got: {reason}");
+            }
+            _ => panic!("unexpected error"),
+        }
+    }
+
+    #[test]
+    fn invoke_async_without_context_returns_clear_error() {
+        // The bootstrap normally calls `wire_context` after registering
+        // the plugin. Unit-test plugins skip that, so the future
+        // should surface a useful message instead of panicking.
+        let tmp = TempDir::new().unwrap();
+        write_skill(tmp.path(), "a.skill.md", SKILL_A);
+        let mut plugin = SkillsCorePlugin::open(tmp.path().to_path_buf());
+        let fut = plugin
+            .dispatch_async(
+                HANDLER_INVOKE,
+                &serde_json::json!({ "skill_id": "skill-a", "input": "go" }),
+            )
+            .expect("dispatch_async returned None for HANDLER_INVOKE");
+        let err = block_on_test(fut).unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("no kernel context"), "got: {reason}");
+            }
+            _ => panic!("unexpected error"),
+        }
+    }
+
+    #[test]
+    fn invoke_async_unknown_skill_id_short_circuits() {
+        let tmp = TempDir::new().unwrap();
+        let mut plugin = SkillsCorePlugin::open(tmp.path().to_path_buf());
+        let fut = plugin
+            .dispatch_async(
+                HANDLER_INVOKE,
+                &serde_json::json!({ "skill_id": "missing", "input": "go" }),
+            )
+            .expect("dispatch_async returned None for HANDLER_INVOKE");
+        let err = block_on_test(fut).unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("no skill with id"), "got: {reason}");
+            }
+            _ => panic!("unexpected error"),
+        }
+    }
+
+    #[test]
+    fn invoke_async_returns_none_for_unrelated_handler() {
+        let tmp = TempDir::new().unwrap();
+        let mut plugin = SkillsCorePlugin::open(tmp.path().to_path_buf());
+        assert!(plugin
+            .dispatch_async(HANDLER_LIST, &serde_json::json!({}))
+            .is_none());
     }
 }

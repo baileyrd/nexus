@@ -282,10 +282,16 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
   const composeError = useSkillsStore((s) => s.composeErrors[skill.id])
   const composing = useSkillsStore((s) => s.composing)
   const toggleComposePanel = useSkillsStore((s) => s.toggleComposePanel)
+  // BL-054 Phase 3 — invoke panel state.
+  const invokingId = useSkillsStore((s) => s.invokingId)
+  const invokeResult = useSkillsStore((s) => s.invokeResults[skill.id])
+  const invokeError = useSkillsStore((s) => s.invokeErrors[skill.id])
+  const toggleInvokeForm = useSkillsStore((s) => s.toggleInvokeForm)
   const isFormOpen = renderingId === skill.id
   const isEditing = editingId === skill.id
   const isComposeOpen = composeOpenId === skill.id
   const isComposing = composing === skill.id
+  const isInvokeOpen = invokingId === skill.id
   const hasDeps = skill.dependsOn.length > 0
 
   // BL-022 — Edit / Delete affordances. Both are gated on `relpath`
@@ -344,7 +350,15 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
         </pre>
       ) : null}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={() => toggleInvokeForm(skill.id)}
+          style={chipButton(isInvokeOpen)}
+          title="Run this skill via the agent"
+        >
+          {isInvokeOpen ? 'Hide run form' : 'Run…'}
+        </button>
         <button
           type="button"
           onClick={() => toggleRenderForm(skill.id)}
@@ -423,6 +437,24 @@ function ExpandedPanel({ skill, kernel }: { skill: SkillEntry; kernel: SkillsKer
       ) : null}
 
       {renderResult ? <RenderResultPanel skillId={skill.id} body={renderResult.body} /> : null}
+
+      {isInvokeOpen ? <InvokeForm skill={skill} kernel={kernel} /> : null}
+      {invokeError ? (
+        <div
+          role="alert"
+          style={{
+            padding: 8,
+            border: '1px solid var(--risk)',
+            borderRadius: 'var(--radius-s)',
+            color: 'var(--risk)',
+            fontSize: 11,
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {invokeError}
+        </div>
+      ) : null}
+      {invokeResult !== undefined ? <InvokeResultPanel skillId={skill.id} reply={invokeResult} /> : null}
     </div>
   )
 }
@@ -747,6 +779,166 @@ function RenderResultPanel({ skillId, body }: { skillId: string; body: string })
       </pre>
     </div>
   )
+}
+
+// ── BL-054 Phase 3 — invoke form + result panel ─────────────────────
+
+interface InvokeFormProps {
+  skill: SkillEntry
+  kernel: SkillsKernelAPI
+}
+
+/**
+ * Inline form for `com.nexus.skills::invoke`. Single textarea for the
+ * user's prompt + Submit. The skill's `name` / `description` /
+ * `triggers` are echoed above so the user knows what they're about
+ * to dispatch — matches the BL-054 §3 confirmation requirement
+ * without a separate modal.
+ */
+function InvokeForm({ skill, kernel }: InvokeFormProps) {
+  const input = useSkillsStore((s) => s.invokeInputs[skill.id]) ?? ''
+  const invoking = useSkillsStore((s) => s.invoking)
+  const setInvokeInput = useSkillsStore((s) => s.setInvokeInput)
+  const runSkill = useSkillsStore((s) => s.runSkill)
+  const isRunning = invoking === skill.id
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    void runSkill(kernel, skill.id)
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        padding: 8,
+        background: 'var(--background-primary)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
+      }}
+    >
+      <div style={{ fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.45 }}>
+        Run <strong>{skill.name}</strong> through <code>com.nexus.agent::session_run</code>.
+        The composed skill body is the system prompt; your input below is the goal.
+      </div>
+      <textarea
+        value={input}
+        onChange={(e) => setInvokeInput(skill.id, e.target.value)}
+        placeholder="What do you want this skill to do?"
+        rows={4}
+        style={{
+          fontFamily: 'var(--font-interface)',
+          fontSize: 12,
+          padding: 6,
+          background: 'var(--background-primary)',
+          color: 'var(--text-normal)',
+          border: '1px solid var(--divider-color)',
+          borderRadius: 'var(--radius-s)',
+          resize: 'vertical',
+          minHeight: 60,
+        }}
+      />
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="submit"
+          disabled={isRunning || input.trim().length === 0}
+          style={{
+            padding: '4px 10px',
+            fontSize: 11,
+            fontFamily: 'var(--font-interface)',
+            background: isRunning ? 'var(--background-modifier-hover)' : 'var(--interactive-accent)',
+            color: 'var(--text-normal)',
+            border: '1px solid var(--divider-color)',
+            borderRadius: 'var(--radius-s)',
+            cursor: isRunning || input.trim().length === 0 ? 'default' : 'pointer',
+            opacity: isRunning || input.trim().length === 0 ? 0.6 : 1,
+          }}
+        >
+          {isRunning ? 'Running…' : 'Run'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function InvokeResultPanel({ skillId, reply }: { skillId: string; reply: unknown }) {
+  const clearInvokeResult = useSkillsStore((s) => s.clearInvokeResult)
+  const text = formatInvokeReply(reply)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 10,
+          textTransform: 'uppercase',
+          letterSpacing: '0.04em',
+          color: 'var(--text-faint)',
+        }}
+      >
+        <span style={{ flex: '1 1 auto' }}>Agent reply</span>
+        <button
+          type="button"
+          onClick={() => clearInvokeResult(skillId)}
+          aria-label="Clear invoke result"
+          style={{
+            background: 'transparent',
+            border: 0,
+            color: 'var(--text-faint)',
+            cursor: 'pointer',
+            fontSize: 10,
+            padding: 0,
+          }}
+        >
+          clear
+        </button>
+      </div>
+      <pre
+        style={{
+          margin: 0,
+          padding: 8,
+          background: 'var(--background-primary)',
+          border: '1px solid var(--divider-color)',
+          borderRadius: 'var(--radius-s)',
+          fontFamily: 'var(--font-monospace, monospace)',
+          fontSize: 11,
+          lineHeight: 1.45,
+          color: 'var(--text-normal)',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          maxHeight: 320,
+          overflow: 'auto',
+        }}
+      >
+        {text}
+      </pre>
+    </div>
+  )
+}
+
+/** Best-effort textification of the agent::session_run observation.
+ *  The reply shape today carries an `output` / `final` string when the
+ *  session terminates cleanly; we surface that when present and fall
+ *  back to pretty-printed JSON for everything else. */
+function formatInvokeReply(reply: unknown): string {
+  if (reply == null) return ''
+  if (typeof reply === 'string') return reply
+  if (typeof reply === 'object') {
+    const obj = reply as Record<string, unknown>
+    for (const key of ['output', 'final', 'text', 'message']) {
+      const value = obj[key]
+      if (typeof value === 'string' && value.length > 0) return value
+    }
+  }
+  try {
+    return JSON.stringify(reply, null, 2)
+  } catch {
+    return String(reply)
+  }
 }
 
 // ── AIG-01 — composition panel ─────────────────────────────────────

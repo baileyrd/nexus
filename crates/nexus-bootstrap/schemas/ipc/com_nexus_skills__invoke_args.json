@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InvokeSkillArgs",
+  "description": "Args for `com.nexus.skills::invoke` (handler id `8`, BL-054 Phase 3).\n\nRuns a skill by composing its `depends_on` closure into a merged\nsystem prompt, then dispatching `com.nexus.agent::session_run`\nwith the user-supplied `input` as the goal. The reply is the agent\nobservation JSON returned by `session_run` verbatim.",
+  "type": "object",
+  "properties": {
+    "archetype": {
+      "description": "Optional archetype override. When omitted, defaults to\n`\"general\"` (matches the BL-054 Phase 3 spec — skills don't\ncarry their own archetype today).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "input": {
+      "description": "User-supplied goal text — passed to the agent as the `goal`\nargument.",
+      "type": "string"
+    },
+    "skill_id": {
+      "description": "The skill id to run. Must match a `.skill.md` file's\nfrontmatter `id`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "skill_id",
+    "input"
+  ]
+}

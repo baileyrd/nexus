@@ -71,7 +71,8 @@ use nexus_theme::ThemeMode;
 // for forward-compat YAML, which is fundamentally incompatible with
 // `deny_unknown_fields`. Shell-side consumers treat Skill as opaque.
 use nexus_skills::core_plugin::{
-    ComposeSkillArgs, GetSkillArgs, ListByContextArgs, RenderSkillArgs, TriggeredByArgs,
+    ComposeSkillArgs, GetSkillArgs, InvokeSkillArgs, ListByContextArgs, RenderSkillArgs,
+    TriggeredByArgs,
 };
 // nexus-workflow exposes only its Args types — Workflow / Trigger /
 // Step / DigestConfig use `#[serde(flatten)] extra: BTreeMap<String,
@@ -273,6 +274,7 @@ fn emit_pilot_ipc_schemas() {
     write_schema::<TriggeredByArgs>("com_nexus_skills__triggered_by", "args");
     write_schema::<RenderSkillArgs>("com_nexus_skills__render", "args");
     write_schema::<ComposeSkillArgs>("com_nexus_skills__compose", "args");
+    write_schema::<InvokeSkillArgs>("com_nexus_skills__invoke", "args");
 
     // ── com.nexus.workflow (P1-3 #113) ───────────────────────────────────
     // Args only — see import comment for why Workflow/Trigger/Step

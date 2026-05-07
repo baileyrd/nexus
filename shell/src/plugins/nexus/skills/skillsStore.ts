@@ -143,6 +143,7 @@ const STORAGE_PLUGIN_ID = 'com.nexus.storage'
 // command name `render`, args `{ id, values? }`).
 const CMD_RENDER = 'render'
 const CMD_RELOAD = 'reload'
+const CMD_INVOKE = 'invoke'
 // BL-021 / AIG-01 — `compose` handler id 7 in nexus-skills core_plugin.
 const CMD_COMPOSE = 'compose'
 // Verified against crates/nexus-storage/src/core_plugin.rs:
@@ -304,6 +305,24 @@ interface SkillsStoreState {
   /** Drop cached compose result + error for `id`. */
   clearCompose(id: string): void
 
+  // ── BL-054 Phase 3 — invoke (Run a skill) ──────────────────────────
+  /** Skill id whose Run form is currently expanded; null when closed. */
+  invokingId: string | null
+  /** Per-skill input draft for the invoke form. */
+  invokeInputs: Record<string, string>
+  /** Per-skill last invoke reply (the agent observation, kept as JSON). */
+  invokeResults: Record<string, unknown>
+  /** Per-skill last invoke error message. */
+  invokeErrors: Record<string, string>
+  /** Skill id currently mid-invoke (single-flight). */
+  invoking: string | null
+  toggleInvokeForm(id: string): void
+  setInvokeInput(id: string, input: string): void
+  /** Submit the input to `com.nexus.skills::invoke`. Stashes the reply
+   *  on `invokeResults` or the error on `invokeErrors`. */
+  runSkill(api: SkillsKernelAPI, id: string): Promise<void>
+  clearInvokeResult(id: string): void
+
   /** BL-022 — open the inline editor for an existing skill id. The
    *  draft is hydrated from the listing snapshot (the kernel returns
    *  the full body in `list`, so no extra round trip). */
@@ -353,6 +372,12 @@ export const useSkillsStore = create<SkillsStoreState>((set, get) => ({
   composeResults: {},
   composeErrors: {},
   composing: null,
+
+  invokingId: null,
+  invokeInputs: {},
+  invokeResults: {},
+  invokeErrors: {},
+  invoking: null,
 
   editingId: null,
   draft: null,
@@ -422,6 +447,52 @@ export const useSkillsStore = create<SkillsStoreState>((set, get) => ({
       delete results[id]
       delete errors[id]
       return { renderResults: results, renderErrors: errors }
+    }),
+
+  // ── BL-054 Phase 3 — invoke ─────────────────────────────────────────
+  toggleInvokeForm: (id) =>
+    set((s) => ({ invokingId: s.invokingId === id ? null : id })),
+  setInvokeInput: (id, input) =>
+    set((s) => ({ invokeInputs: { ...s.invokeInputs, [id]: input } })),
+  runSkill: async (api, id) => {
+    if (get().invoking === id) return
+    const input = get().invokeInputs[id] ?? ''
+    if (input.trim().length === 0) {
+      set((s) => ({
+        invokeErrors: { ...s.invokeErrors, [id]: 'Provide an input prompt before running.' },
+      }))
+      return
+    }
+    set({ invoking: id })
+    try {
+      const reply = await api.invoke<unknown>(SKILLS_PLUGIN_ID, CMD_INVOKE, {
+        skill_id: id,
+        input,
+      })
+      set((s) => {
+        const nextErrors = { ...s.invokeErrors }
+        delete nextErrors[id]
+        return {
+          invokeResults: { ...s.invokeResults, [id]: reply },
+          invokeErrors: nextErrors,
+          invoking: null,
+        }
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set((s) => ({
+        invokeErrors: { ...s.invokeErrors, [id]: message },
+        invoking: null,
+      }))
+    }
+  },
+  clearInvokeResult: (id) =>
+    set((s) => {
+      const results = { ...s.invokeResults }
+      const errors = { ...s.invokeErrors }
+      delete results[id]
+      delete errors[id]
+      return { invokeResults: results, invokeErrors: errors }
     }),
   toggleComposePanel: async (api, id) => {
     const open = get().composeOpenId === id
@@ -599,6 +670,11 @@ export const useSkillsStore = create<SkillsStoreState>((set, get) => ({
       composeResults: {},
       composeErrors: {},
       composing: null,
+      invokingId: null,
+      invokeInputs: {},
+      invokeResults: {},
+      invokeErrors: {},
+      invoking: null,
       editingId: null,
       draft: null,
       saveError: null,
