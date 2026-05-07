@@ -466,30 +466,7 @@ Current output search (`search_output`, handler 7) is per-session substring/rege
 
 ---
 
-### BL-055: Terminal commands in agent tool registry
-
-**Source**: Terminal Integration Assessment (2026-05-06) — gap #1 (highest leverage)
-**Effort**: Small (0.5–1 day)
-**Crates**: `nexus-ai/src/tools/registry.rs`, `nexus-terminal/src/core_plugin.rs`
-**Related**: PRD-15 (agent system); PRD-12 §tool-calling; `com.nexus.terminal` IPC surface
-
-The agent tool registry (`com.nexus.ai`) has no terminal tools. An agent that needs to start a dev server, run a build, check process status, or send a signal has no IPC path to do it. The terminal is the most common execution surface for developer workflows and it's entirely absent from agent plans.
-
-Three tools are sufficient to unlock the core use cases:
-
-| Tool name | IPC target | Purpose |
-|---|---|---|
-| `terminal_run_saved` | `com.nexus.terminal::run_saved` (new, wraps handler 1) | Start a saved command by slug |
-| `terminal_get_status` | `com.nexus.terminal::get_session_info` (handler 9) | Check if a process is running, get exit code |
-| `terminal_send_signal` | `com.nexus.terminal::send_raw_input` (handler 4) | Send SIGINT, SIGTERM, etc. |
-
-**Definition of done:**
-- New `run_saved` handler (id 18 on `com.nexus.terminal`) starts the named `SavedCommand`, returns the new session id — reuses `SessionManager::spawn` + `SavedCommand` lookup
-- `ToolRegistry` gains three built-in terminal tools with JSON Schema definitions
-- Tool advertisement policy `auto` includes terminal tools; `auto_readonly` excludes them (writes to processes are write-class)
-- `ai.tools.write` capability required for `terminal_run_saved` and `terminal_send_signal`; `ai.chat` sufficient for `terminal_get_status`
-- Agent planner system prompt updated to describe available terminal tools
-- `scripts/check_ipc_drift.sh` passes
+_BL-055 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `com.nexus.terminal::run_saved` handler (id 23 — DoD-suggested 18 was already taken by BL-059's `open_in_terminal`; ids are append-only) spawns a saved command in a fresh PTY session under `<shell> -c "<shell_cmd>"` (or `/C` / `-Command` for cmd.exe / pwsh). Three new built-ins land in the AI tool registry: `terminal_run_saved`, `terminal_get_status`, `terminal_send_signal`. `terminal_get_status` is read-only (added to `READ_ONLY_TOOL_NAMES`); the other two stay write-class and require `ai.tools.write`. `terminal_send_signal` accepts SIGINT / SIGQUIT / SIGTSTP / EOF and reshapes the signal name into the corresponding control byte (0x03 / 0x1c / 0x1a / 0x04) for `send_raw_input`. SIGTERM / SIGKILL of unresponsive processes intentionally not exposed — needs an out-of-band signal path that isn't a PTY byte. Planner system prompt gains a paragraph on when to reach for terminal tools (kept goal-level, not enumerative — the registry still owns per-tool schemas)._
 
 ---
 

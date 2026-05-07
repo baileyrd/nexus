@@ -39,6 +39,7 @@
 //! | 20         | `adhoc_get`          | Single ad-hoc row by id (BL-060)        |
 //! | 21         | `adhoc_delete`       | Forget an ad-hoc row (BL-060)           |
 //! | 22         | `adhoc_promote`      | Promote ad-hoc → saved command (BL-060) |
+//! | 23         | `run_saved`          | Spawn session running saved cmd (BL-055)|
 //!
 //! Ids are **append-only** — never reused after retirement — because
 //! manifest registrations in loaded plugins bake them in.
@@ -195,6 +196,15 @@ pub const HANDLER_ADHOC_DELETE: u32 = 21;
 /// Wraps [`crate::promote_adhoc_to_saved`] and returns the freshly
 /// inserted [`SavedCommand`].
 pub const HANDLER_ADHOC_PROMOTE: u32 = 22;
+
+/// BL-055 — `run_saved` handler id. Args: [`RunSavedArgs`]. Looks up
+/// the saved command by slug, spawns a fresh PTY session running its
+/// `shell_cmd` under its `shell` (with the saved `working_dir` and
+/// `env_vars`), and returns the new session id. Reuses the standard
+/// [`InMemoryTerminalServer::create_session`] path so lifecycle
+/// events, drainer hookup, and persistence behave identically to
+/// `create_session`.
+pub const HANDLER_RUN_SAVED: u32 = 23;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -582,6 +592,27 @@ pub struct AdHocPromoteArgs {
     /// `cmd.exe` elsewhere — see the underlying API).
     #[serde(default)]
     pub shell: Option<String>,
+}
+
+/// BL-055 — arguments for `run_saved`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct RunSavedArgs {
+    /// Slug of the saved command to launch.
+    pub slug: String,
+    /// Optional working-dir override. When omitted the saved command's
+    /// own `working_dir` is used; if both are absent the parent cwd is
+    /// inherited.
+    #[serde(default)]
+    pub working_dir: Option<String>,
 }
 
 // ── The plugin ───────────────────────────────────────────────────────────────
@@ -1056,6 +1087,7 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_ADHOC_GET => self.dispatch_adhoc_get(args),
             HANDLER_ADHOC_DELETE => self.dispatch_adhoc_delete(args),
             HANDLER_ADHOC_PROMOTE => self.dispatch_adhoc_promote(args),
+            HANDLER_RUN_SAVED => self.dispatch_run_saved(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -1547,6 +1579,100 @@ impl TerminalCorePlugin {
         let cmd = promote_adhoc_to_saved(&adhoc_lock, &saved_lock, &a.id, a.name, opts)
             .map_err(crate_err)?;
         to_value(&cmd, "adhoc_promote")
+    }
+
+    // ── BL-055 — run a saved command in a fresh session ──────────────
+
+    /// `run_saved` — look up a saved command and spawn a fresh PTY
+    /// session that runs its `shell_cmd` under its `shell`. Returns
+    /// `{ id }` (matching `create_session`'s response shape) so the
+    /// caller can poll `get_session_info` for exit status.
+    ///
+    /// The session inherits the saved command's `working_dir` (overridable
+    /// per-call) and `env_vars`. `pre_commands` and `auto_restart` are
+    /// **not** honored here — that's the procmgr layer's job. The
+    /// agent surface BL-055 unlocks needs the simpler "run it once,
+    /// observe the exit code" shape; replaying a richer lifecycle
+    /// belongs in a future `run_saved_managed` handler.
+    fn dispatch_run_saved(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: RunSavedArgs = parse_args(args, "run_saved")?;
+
+        let saved = {
+            let store = self.saved_store()?.lock().map_err(poisoned)?;
+            store
+                .get(&a.slug)
+                .map_err(crate_err)?
+                .ok_or_else(|| {
+                    exec_err(format!(
+                        "run_saved: no saved command with slug '{}'",
+                        a.slug
+                    ))
+                })?
+        };
+
+        // Resolve the working dir — caller override beats the saved
+        // value, both can fall back to inheriting the parent cwd.
+        let working_dir = a
+            .working_dir
+            .or_else(|| saved.working_dir.clone())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+
+        // Run the saved cmd through `<shell> -c "<cmd>"`. POSIX shells,
+        // pwsh (`-Command`), and cmd.exe (`/C`) all need a different
+        // flag for non-interactive invocation; pick the right one
+        // based on the shell's basename. Unknown shells fall back to
+        // `-c` which is the POSIX convention.
+        let shell_args = vec![one_shot_flag(&saved.shell).to_string(), saved.shell_cmd.clone()];
+
+        // env_vars is HashMap<String, String> on SavedCommand; the
+        // server expects Vec<(String, String)>. Order is irrelevant
+        // (cmd-line env layering is left-to-right but the spawn
+        // already merges over the inherited env).
+        let env: Vec<(String, String)> =
+            saved.env_vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+
+        let cfg = ServerSpawnConfig {
+            name: Some(format!("saved:{}", saved.slug)),
+            shell: Some(ShellSpec {
+                program: PathBuf::from(saved.shell.clone()),
+                args: shell_args,
+            }),
+            working_dir,
+            env,
+        };
+
+        let id = self
+            .server
+            .lock()
+            .map_err(poisoned)?
+            .create_session(cfg)
+            .map_err(crate_err)?;
+        to_value(
+            &CreateSessionResponse {
+                id: id.as_str().to_string(),
+            },
+            "run_saved",
+        )
+    }
+}
+
+/// Pick the right "run a single command and exit" flag for `shell`.
+/// POSIX shells use `-c`; `pwsh`/`powershell.exe` use `-Command`;
+/// `cmd.exe` uses `/C`. Anything unrecognised falls back to `-c`.
+fn one_shot_flag(shell: &str) -> &'static str {
+    let basename = std::path::Path::new(shell)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.strip_suffix(".exe").unwrap_or(s))
+        .unwrap_or(shell);
+    match basename.to_ascii_lowercase().as_str() {
+        "cmd" => "/C",
+        "pwsh" | "powershell" => "-Command",
+        _ => "-c",
     }
 }
 
@@ -2412,6 +2538,107 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    // ── BL-055 — run_saved dispatch tests ───────────────────────────
+
+    fn seed_saved(store: &SqliteSavedCommandStore, slug: &str, shell: &str, cmd: &str) {
+        let mut row = SavedCommand::new(slug, slug, shell, cmd);
+        row.working_dir = None;
+        store.create(&row).expect("seed saved");
+    }
+
+    #[test]
+    fn run_saved_without_attached_store_surfaces_clear_error() {
+        let mut p = TerminalCorePlugin::new();
+        let err = p
+            .dispatch(HANDLER_RUN_SAVED, &serde_json::json!({ "slug": "any" }))
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(
+                    reason.contains("saved-command store not attached"),
+                    "expected attach-error, got: {reason}",
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_saved_unknown_slug_surfaces_clear_error() {
+        let saved = SqliteSavedCommandStore::in_memory().expect("open saved");
+        let mut p = TerminalCorePlugin::new().with_saved_store(saved);
+        let err = p
+            .dispatch(HANDLER_RUN_SAVED, &serde_json::json!({ "slug": "ghost" }))
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(
+                    reason.contains("no saved command with slug 'ghost'"),
+                    "got: {reason}",
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_saved_spawns_session_and_returns_id_unix() {
+        if !unix_only("run_saved_spawns_session_and_returns_id_unix") {
+            return;
+        }
+        let saved = SqliteSavedCommandStore::in_memory().expect("open saved");
+        seed_saved(&saved, "hello", "/bin/sh", "printf hello");
+        let mut p = TerminalCorePlugin::new().with_saved_store(saved);
+
+        let resp = p
+            .dispatch(HANDLER_RUN_SAVED, &serde_json::json!({ "slug": "hello" }))
+            .expect("run_saved");
+        let body: CreateSessionResponse = serde_json::from_value(resp).expect("decode");
+        assert!(!body.id.is_empty());
+
+        // The new session should appear in `list_sessions` with a name
+        // tag derived from the slug, so the agent surface can recognise
+        // an agent-spawned session at a glance.
+        let list_v = p
+            .dispatch(HANDLER_LIST_SESSIONS, &serde_json::json!({}))
+            .expect("list_sessions");
+        let list: Vec<SessionInfo> = serde_json::from_value(list_v).expect("decode list");
+        let row = list.iter().find(|s| s.id == body.id).expect("present");
+        assert_eq!(row.name, "saved:hello");
+    }
+
+    #[test]
+    fn run_saved_invalid_args_reported_as_execution_failed() {
+        let saved = SqliteSavedCommandStore::in_memory().expect("open saved");
+        let mut p = TerminalCorePlugin::new().with_saved_store(saved);
+        let err = p
+            .dispatch(HANDLER_RUN_SAVED, &serde_json::json!({}))
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("invalid args"), "got: {reason}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn one_shot_flag_picks_the_right_flag_per_shell_family() {
+        // POSIX shells get -c.
+        assert_eq!(one_shot_flag("/bin/sh"), "-c");
+        assert_eq!(one_shot_flag("/usr/bin/bash"), "-c");
+        assert_eq!(one_shot_flag("/usr/bin/zsh"), "-c");
+        assert_eq!(one_shot_flag("/usr/bin/fish"), "-c");
+        // PowerShell variants get -Command (extension stripped first).
+        assert_eq!(one_shot_flag("pwsh"), "-Command");
+        assert_eq!(one_shot_flag("pwsh.exe"), "-Command");
+        assert_eq!(one_shot_flag("powershell.exe"), "-Command");
+        // cmd.exe gets /C.
+        assert_eq!(one_shot_flag("cmd.exe"), "/C");
+        // Unknowns fall back to the POSIX convention.
+        assert_eq!(one_shot_flag("/opt/odd/sh"), "-c");
     }
 
     #[test]

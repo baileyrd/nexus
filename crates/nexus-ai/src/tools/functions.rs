@@ -19,9 +19,19 @@
 //! - [`ListBacklinksTool`] — `list_backlinks` → `com.nexus.storage::backlinks`.
 //! - [`GitLogTool`] — `git_log` → `com.nexus.git::log`.
 //!
-//! `terminal_exec` and `database_query` are still deferred — they
-//! want their own capability surface (`process.spawn` for terminal,
-//! etc.) that doesn't exist yet.
+//! And the BL-055 terminal trio registered by
+//! [`register_terminal_builtins`]:
+//!
+//! - [`TerminalRunSavedTool`] — `terminal_run_saved` →
+//!   `com.nexus.terminal::run_saved`.
+//! - [`TerminalGetStatusTool`] — `terminal_get_status` →
+//!   `com.nexus.terminal::get_session_info`.
+//! - [`TerminalSendSignalTool`] — `terminal_send_signal` →
+//!   `com.nexus.terminal::send_raw_input` (with the right control
+//!   byte for the requested terminal signal).
+//!
+//! `database_query` is still deferred — it wants its own capability
+//! surface that doesn't exist yet.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,6 +48,9 @@ const STORAGE_PLUGIN: &str = "com.nexus.storage";
 
 /// Plugin id of the git core plugin.
 const GIT_PLUGIN: &str = "com.nexus.git";
+
+/// Plugin id of the terminal core plugin (BL-055).
+const TERMINAL_PLUGIN: &str = "com.nexus.terminal";
 
 /// Timeout applied to nested storage `ipc_call`s. File reads / writes
 /// are local disk + index ops; 30s is an extreme upper bound matching
@@ -464,6 +477,279 @@ fn clamp_limit(requested: Option<u32>, default: usize) -> usize {
     n.clamp(1, TOOL_RESULT_HARD_CAP)
 }
 
+// -- BL-055 — terminal built-ins -------------------------------------
+//
+// Three thin proxies onto `com.nexus.terminal` that give an agent a
+// minimal but complete handle on the process surface: start a saved
+// command, ask whether a session is still running / what its exit
+// code was, and shove a control byte (Ctrl-C / Ctrl-Z / Ctrl-D) at
+// it. Anything more elaborate (managed lifecycle, log tailing) goes
+// through subsequent tools rather than growing this set.
+//
+// `terminal_run_saved` and `terminal_send_signal` are write-class —
+// they require `ai.tools.write` per ADR 0022 Phase 2. Only
+// `terminal_get_status` is safe under `ai.chat` alone, so it's the
+// lone terminal tool included in [`AutoReadOnly`].
+
+/// Schema for `terminal_run_saved` — start a saved command in a fresh
+/// session.
+#[must_use]
+pub fn terminal_run_saved_schema() -> ToolSchema {
+    ToolSchema {
+        name: "terminal_run_saved".to_string(),
+        description: "Start a saved shell command in a new terminal \
+                      session. The command runs as `<shell> -c \
+                      \"<shell_cmd>\"` (or the equivalent one-shot flag \
+                      for cmd.exe / pwsh) under the saved command's \
+                      `working_dir` and `env_vars`. Returns the new \
+                      session id; poll `terminal_get_status` to read \
+                      exit status. Use `slug` to identify which saved \
+                      command to launch — list via the user's saved \
+                      commands sidebar."
+            .to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "description": "Slug (URL-safe id) of the saved command."
+                },
+                "working_dir": {
+                    "type": "string",
+                    "description": "Optional working-directory override; \
+                                    falls back to the saved command's own \
+                                    working_dir, or the inherited cwd."
+                }
+            },
+            "required": ["slug"],
+            "additionalProperties": false
+        }),
+    }
+}
+
+/// Schema for `terminal_get_status` — query a session's running /
+/// exit state.
+#[must_use]
+pub fn terminal_get_status_schema() -> ToolSchema {
+    ToolSchema {
+        name: "terminal_get_status".to_string(),
+        description: "Return metadata for a terminal session: whether \
+                      the process is still running, its exit code (if \
+                      any), and basic identifying fields. Read-only — \
+                      safe to call repeatedly while polling for a \
+                      build / test to finish."
+            .to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Session id returned by `terminal_run_saved`."
+                }
+            },
+            "required": ["id"],
+            "additionalProperties": false
+        }),
+    }
+}
+
+/// Schema for `terminal_send_signal` — send a control byte to a
+/// session's PTY so the foreground process group receives the
+/// corresponding terminal signal.
+#[must_use]
+pub fn terminal_send_signal_schema() -> ToolSchema {
+    ToolSchema {
+        name: "terminal_send_signal".to_string(),
+        description: "Send a terminal control character to a running \
+                      session so its foreground process group receives \
+                      the matching signal. Supported values: `SIGINT` \
+                      (Ctrl-C, ETX 0x03), `SIGQUIT` (Ctrl-\\, FS 0x1c), \
+                      `SIGTSTP` (Ctrl-Z, SUB 0x1a), `EOF` (Ctrl-D, EOT \
+                      0x04). For SIGTERM / SIGKILL of unresponsive \
+                      processes, the user must close the session — no \
+                      out-of-band signal path is exposed yet."
+            .to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Session id returned by `terminal_run_saved`."
+                },
+                "signal": {
+                    "type": "string",
+                    "enum": ["SIGINT", "SIGQUIT", "SIGTSTP", "EOF"],
+                    "description": "Which control character to send."
+                }
+            },
+            "required": ["id", "signal"],
+            "additionalProperties": false
+        }),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct TerminalRunSavedArgs {
+    slug: String,
+    #[serde(default)]
+    working_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TerminalSessionIdArgs {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TerminalSendSignalArgs {
+    id: String,
+    signal: String,
+}
+
+/// `terminal_run_saved` — proxies to `com.nexus.terminal::run_saved`.
+pub struct TerminalRunSavedTool {
+    ctx: Arc<KernelPluginContext>,
+}
+
+impl TerminalRunSavedTool {
+    /// Construct a `terminal_run_saved` tool bound to the AI plugin's
+    /// kernel context.
+    #[must_use]
+    pub fn new(ctx: Arc<KernelPluginContext>) -> Self {
+        Self { ctx }
+    }
+}
+
+#[async_trait]
+impl ToolExecutor for TerminalRunSavedTool {
+    async fn execute(&self, input: serde_json::Value) -> Result<String, ToolError> {
+        let args: TerminalRunSavedArgs = serde_json::from_value(input)
+            .map_err(|e| ToolError::InvalidInput(format!("terminal_run_saved: {e}")))?;
+        let mut payload = serde_json::json!({ "slug": args.slug });
+        if let Some(wd) = args.working_dir {
+            payload["working_dir"] = serde_json::Value::String(wd);
+        }
+        let response = self
+            .ctx
+            .ipc_call(
+                TERMINAL_PLUGIN,
+                "run_saved",
+                payload,
+                STORAGE_IPC_TIMEOUT,
+            )
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("terminal run_saved: {e}")))?;
+        Ok(response.to_string())
+    }
+}
+
+/// `terminal_get_status` — proxies to
+/// `com.nexus.terminal::get_session_info`.
+pub struct TerminalGetStatusTool {
+    ctx: Arc<KernelPluginContext>,
+}
+
+impl TerminalGetStatusTool {
+    /// Construct a `terminal_get_status` tool bound to the AI plugin's
+    /// kernel context.
+    #[must_use]
+    pub fn new(ctx: Arc<KernelPluginContext>) -> Self {
+        Self { ctx }
+    }
+}
+
+#[async_trait]
+impl ToolExecutor for TerminalGetStatusTool {
+    async fn execute(&self, input: serde_json::Value) -> Result<String, ToolError> {
+        let args: TerminalSessionIdArgs = serde_json::from_value(input)
+            .map_err(|e| ToolError::InvalidInput(format!("terminal_get_status: {e}")))?;
+        let response = self
+            .ctx
+            .ipc_call(
+                TERMINAL_PLUGIN,
+                "get_session_info",
+                serde_json::json!({ "id": args.id }),
+                STORAGE_IPC_TIMEOUT,
+            )
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("terminal get_session_info: {e}")))?;
+        Ok(response.to_string())
+    }
+}
+
+/// Map a logical signal name to the single byte that, when written
+/// through the controlling PTY, produces the corresponding signal in
+/// the foreground process group. Anything else returns
+/// `InvalidInput` so the model can correct itself.
+fn signal_byte(signal: &str) -> Result<u8, ToolError> {
+    match signal {
+        "SIGINT" => Ok(0x03),  // ETX (Ctrl-C)
+        "SIGQUIT" => Ok(0x1c), // FS  (Ctrl-\)
+        "SIGTSTP" => Ok(0x1a), // SUB (Ctrl-Z)
+        "EOF" => Ok(0x04),     // EOT (Ctrl-D)
+        other => Err(ToolError::InvalidInput(format!(
+            "terminal_send_signal: unsupported signal '{other}'; expected SIGINT|SIGQUIT|SIGTSTP|EOF"
+        ))),
+    }
+}
+
+/// `terminal_send_signal` — proxies to
+/// `com.nexus.terminal::send_raw_input` with the byte that drives the
+/// requested terminal signal.
+pub struct TerminalSendSignalTool {
+    ctx: Arc<KernelPluginContext>,
+}
+
+impl TerminalSendSignalTool {
+    /// Construct a `terminal_send_signal` tool bound to the AI plugin's
+    /// kernel context.
+    #[must_use]
+    pub fn new(ctx: Arc<KernelPluginContext>) -> Self {
+        Self { ctx }
+    }
+}
+
+#[async_trait]
+impl ToolExecutor for TerminalSendSignalTool {
+    async fn execute(&self, input: serde_json::Value) -> Result<String, ToolError> {
+        let args: TerminalSendSignalArgs = serde_json::from_value(input)
+            .map_err(|e| ToolError::InvalidInput(format!("terminal_send_signal: {e}")))?;
+        let byte = signal_byte(&args.signal)?;
+        self.ctx
+            .ipc_call(
+                TERMINAL_PLUGIN,
+                "send_raw_input",
+                serde_json::json!({ "id": args.id, "data": [byte] }),
+                STORAGE_IPC_TIMEOUT,
+            )
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("terminal send_raw_input: {e}")))?;
+        Ok(format!("Sent {} to {}", args.signal, args.id))
+    }
+}
+
+/// Register the BL-055 terminal built-ins (`terminal_run_saved`,
+/// `terminal_get_status`, `terminal_send_signal`) onto an existing
+/// registry. Called alongside [`register_storage_builtins`] /
+/// [`register_extended_builtins`] from `wire_context`.
+pub fn register_terminal_builtins(registry: &mut ToolRegistry, ctx: Arc<KernelPluginContext>) {
+    registry.register(
+        "terminal_run_saved",
+        terminal_run_saved_schema(),
+        Arc::new(TerminalRunSavedTool::new(Arc::clone(&ctx))),
+    );
+    registry.register(
+        "terminal_get_status",
+        terminal_get_status_schema(),
+        Arc::new(TerminalGetStatusTool::new(Arc::clone(&ctx))),
+    );
+    registry.register(
+        "terminal_send_signal",
+        terminal_send_signal_schema(),
+        Arc::new(TerminalSendSignalTool::new(ctx)),
+    );
+}
+
 /// Register the read-only extended built-ins (`search_forge`,
 /// `list_backlinks`, `git_log`) onto an existing registry. Called
 /// alongside [`register_storage_builtins`] from `wire_context`.
@@ -591,6 +877,93 @@ mod tests {
     #[test]
     fn clamp_limit_floor_is_one() {
         assert_eq!(clamp_limit(Some(0), 10), 1);
+    }
+
+    #[test]
+    fn terminal_run_saved_schema_requires_slug() {
+        let s = terminal_run_saved_schema();
+        assert_eq!(s.name, "terminal_run_saved");
+        let required: Vec<&str> = s
+            .input_schema
+            .get("required")
+            .and_then(serde_json::Value::as_array)
+            .expect("required array")
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        assert_eq!(required, ["slug"]);
+    }
+
+    #[test]
+    fn terminal_get_status_schema_requires_id() {
+        let s = terminal_get_status_schema();
+        assert_eq!(s.name, "terminal_get_status");
+        let required: Vec<&str> = s
+            .input_schema
+            .get("required")
+            .and_then(serde_json::Value::as_array)
+            .expect("required array")
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        assert_eq!(required, ["id"]);
+    }
+
+    #[test]
+    fn terminal_send_signal_schema_constrains_signal_enum() {
+        let s = terminal_send_signal_schema();
+        let signal = s.input_schema["properties"]["signal"]["enum"]
+            .as_array()
+            .expect("enum array");
+        let names: Vec<&str> = signal.iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(names, ["SIGINT", "SIGQUIT", "SIGTSTP", "EOF"]);
+    }
+
+    #[test]
+    fn signal_byte_maps_known_signals() {
+        assert_eq!(signal_byte("SIGINT").unwrap(), 0x03);
+        assert_eq!(signal_byte("SIGQUIT").unwrap(), 0x1c);
+        assert_eq!(signal_byte("SIGTSTP").unwrap(), 0x1a);
+        assert_eq!(signal_byte("EOF").unwrap(), 0x04);
+    }
+
+    #[test]
+    fn signal_byte_rejects_unknown_signal_with_invalid_input() {
+        let err = signal_byte("SIGKILL").unwrap_err();
+        match err {
+            ToolError::InvalidInput(msg) => assert!(msg.contains("SIGKILL")),
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn terminal_builtins_register_under_documented_names() {
+        use crate::tools::registry::ToolRegistry;
+        use nexus_kernel::{
+            CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let kv: Arc<dyn KvStore> = Arc::new(InMemoryKvStore::new());
+        let bus = Arc::new(EventBus::new(16));
+        let caps: CapabilitySet = [nexus_kernel::Capability::IpcCall].into_iter().collect();
+        let ctx = Arc::new(
+            KernelPluginContext::new("com.nexus.ai", "0.0.1", caps, kv, bus, dir.path(), None)
+                .unwrap(),
+        );
+        let mut registry = ToolRegistry::new();
+        register_terminal_builtins(&mut registry, ctx);
+        let names: Vec<String> = registry.schemas().into_iter().map(|s| s.name).collect();
+        for expected in [
+            "terminal_run_saved",
+            "terminal_get_status",
+            "terminal_send_signal",
+        ] {
+            assert!(
+                names.iter().any(|n| n == expected),
+                "{expected} missing; saw {names:?}"
+            );
+        }
     }
 
     /// Smoke-test that the extended built-ins all land in the registry

@@ -39,7 +39,8 @@ use crate::ollama::OllamaProvider;
 use crate::openai::OpenAiProvider;
 use crate::provider::{AiProvider, ChatMessage, ChatTurn, ToolCall};
 use crate::tools::{
-    register_extended_builtins, register_storage_builtins, ToolError, ToolRegistry,
+    register_extended_builtins, register_storage_builtins, register_terminal_builtins,
+    ToolError, ToolRegistry,
 };
 use crate::{rag, vectorstore};
 
@@ -64,13 +65,20 @@ const HOST_SYSTEM_PROMPT_FLOOR: &str =
      edits and preserve the user's existing structure and tone.";
 
 /// Names of read-only built-in tools shipped via
-/// [`crate::tools::register_storage_builtins`] / `register_extended_builtins`.
-/// Used by [`filter_to_read_only`] to honour
-/// [`AiToolPolicy::AutoReadOnly`] (ADR 0022 Phase 2). Add a tool
-/// here if a future built-in should be visible without
-/// `ai.tools.write`.
-const READ_ONLY_TOOL_NAMES: &[&str] =
-    &["read_file", "search_forge", "list_backlinks", "git_log"];
+/// [`crate::tools::register_storage_builtins`] / `register_extended_builtins`
+/// / `register_terminal_builtins`. Used by [`filter_to_read_only`]
+/// to honour [`AiToolPolicy::AutoReadOnly`] (ADR 0022 Phase 2). Add
+/// a tool here if a future built-in should be visible without
+/// `ai.tools.write`. `terminal_get_status` is included because it
+/// only reads session metadata; `terminal_run_saved` and
+/// `terminal_send_signal` mutate process state and stay write-class.
+const READ_ONLY_TOOL_NAMES: &[&str] = &[
+    "read_file",
+    "search_forge",
+    "list_backlinks",
+    "git_log",
+    "terminal_get_status",
+];
 
 /// Build a fresh registry containing only the entries from
 /// `source` whose names appear in [`READ_ONLY_TOOL_NAMES`]. Used for
@@ -472,6 +480,7 @@ impl CorePlugin for AiCorePlugin {
         let mut registry = ToolRegistry::new();
         register_storage_builtins(&mut registry, Arc::clone(&ctx));
         register_extended_builtins(&mut registry, Arc::clone(&ctx));
+        register_terminal_builtins(&mut registry, Arc::clone(&ctx));
         self.tools = Some(Arc::new(registry));
 
         // BL-037 — bind the activity recorder to the same context so
@@ -2170,6 +2179,53 @@ mod aig05_local_embedding_config_tests {
             ..AiConfig::default()
         };
         assert_eq!(resolve_embedding_dimension(&cfg), None);
+    }
+}
+
+#[cfg(test)]
+mod read_only_filter_tests {
+    use super::*;
+    use crate::tools::{
+        register_extended_builtins, register_storage_builtins, register_terminal_builtins,
+    };
+    use nexus_kernel::{
+        Capability, CapabilitySet, EventBus, InMemoryKvStore, KernelPluginContext, KvStore,
+    };
+
+    fn ctx_for_test() -> std::sync::Arc<KernelPluginContext> {
+        let dir = tempfile::tempdir().unwrap();
+        let kv: std::sync::Arc<dyn KvStore> = std::sync::Arc::new(InMemoryKvStore::new());
+        let bus = std::sync::Arc::new(EventBus::new(16));
+        let caps: CapabilitySet = [Capability::IpcCall].into_iter().collect();
+        std::sync::Arc::new(
+            KernelPluginContext::new("com.nexus.ai", "0.0.1", caps, kv, bus, dir.path(), None)
+                .unwrap(),
+        )
+    }
+
+    /// `AutoReadOnly` should keep `terminal_get_status` (read-only)
+    /// and drop `terminal_run_saved` / `terminal_send_signal` (mutating).
+    /// Pre-existing read-only entries (`read_file`, `search_forge`,
+    /// `list_backlinks`, `git_log`) survive too; `write_file` does not.
+    #[test]
+    fn filter_keeps_read_only_terminal_tool_only() {
+        let ctx = ctx_for_test();
+        let mut full = ToolRegistry::new();
+        register_storage_builtins(&mut full, std::sync::Arc::clone(&ctx));
+        register_extended_builtins(&mut full, std::sync::Arc::clone(&ctx));
+        register_terminal_builtins(&mut full, ctx);
+        let filtered = filter_to_read_only(&full);
+        let names: Vec<String> = filtered.schemas().into_iter().map(|s| s.name).collect();
+        assert!(names.iter().any(|n| n == "terminal_get_status"));
+        assert!(!names.iter().any(|n| n == "terminal_run_saved"));
+        assert!(!names.iter().any(|n| n == "terminal_send_signal"));
+        // Existing invariants — sanity-check we didn't break the
+        // pre-BL-055 set while extending it.
+        assert!(names.iter().any(|n| n == "read_file"));
+        assert!(!names.iter().any(|n| n == "write_file"));
+        assert!(names.iter().any(|n| n == "search_forge"));
+        assert!(names.iter().any(|n| n == "list_backlinks"));
+        assert!(names.iter().any(|n| n == "git_log"));
     }
 }
 

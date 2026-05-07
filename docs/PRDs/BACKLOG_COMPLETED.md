@@ -8,6 +8,39 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-055: Terminal commands in agent tool registry ✅ (2026-05-07)
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap #1 (highest leverage)
+**Files**: `crates/nexus-terminal/src/{core_plugin.rs, lib.rs}`, `crates/nexus-bootstrap/src/lib.rs`, `crates/nexus-ai/src/tools/{functions.rs, mod.rs, dispatch_target.rs}`, `crates/nexus-ai/src/core_plugin.rs`, `crates/nexus-agent/src/llm.rs`, one new ts-rs binding `RunSavedArgs.ts`
+**Related**: PRD-15 (agent system); PRD-12 §tool-calling; ADR 0022 Phase 2 (capability gating); ADR 0023 (agent dispatch_target). Unblocks BL-056 (terminal workflow step type).
+
+Bridges `com.nexus.terminal` into the AI tool registry so an agent's plan can start a dev server / build, observe process state, and send Ctrl-C / Ctrl-Z without leaving the IPC contract.
+
+- **Backend.** New `com.nexus.terminal::run_saved` handler (id 23 — DoD-suggested 18 was already taken by BL-059's `open_in_terminal`; ids are append-only per the module-level invariant). Looks up the saved command by slug, builds a `ServerSpawnConfig` with `shell = saved.shell`, `shell_args = ["<one_shot_flag>", saved.shell_cmd]`, `working_dir = caller_override.or(saved.working_dir)`, and `env = saved.env_vars`, then calls the same `InMemoryTerminalServer::create_session` path as `create_session` so lifecycle events, drainer hookup, and persistence behave identically. Helper `one_shot_flag(shell)` selects `/C` for cmd.exe, `-Command` for pwsh / powershell, and `-c` for everything else (POSIX). `pre_commands` and `auto_restart` deliberately not honored — the agent surface needs the simpler "run once, observe exit" shape; replaying procmgr's richer lifecycle is a future `run_saved_managed` handler if/when it's needed.
+- **AI tools.** Three new built-ins in `nexus-ai/src/tools/functions.rs`:
+  - `terminal_run_saved` (`{ slug, working_dir? }` → IPC `run_saved`).
+  - `terminal_get_status` (`{ id }` → IPC `get_session_info`). Returns the full `SessionInfo` JSON so the model sees `running`, `exit_code`, `started_at`, etc. without further tool calls.
+  - `terminal_send_signal` (`{ id, signal }` where `signal ∈ {SIGINT, SIGQUIT, SIGTSTP, EOF}` → IPC `send_raw_input` with bytes `[0x03 | 0x1c | 0x1a | 0x04]`). Sending the control byte through the PTY makes the kernel deliver the corresponding terminal signal to the foreground process group — cleaner than racing a separate "signal" syscall path.
+- **Advertisement policy.** `READ_ONLY_TOOL_NAMES` gains `terminal_get_status`; the other two stay write-class. Result: `AutoReadOnly` (caller has only `ai.chat`) advertises read + status without exposing process spawning; `Auto` (caller has `ai.tools.write`) gets the full set. No new top-level capability — `Capability::AiToolsWrite` already covers mutating tools per ADR 0022 Phase 2.
+- **Dispatch.** Three new arms in `tools/dispatch_target.rs` so the planner can resolve tool names to IPC triples without going through the executor. `terminal_send_signal` reshapes `{ id, signal }` → `{ id, data: [byte] }` eagerly, mirroring the `write_file` content→bytes precedent so the agent's executor handles all built-ins uniformly.
+- **System prompt.** `nexus-agent::DEFAULT_SYSTEM_PROMPT` adds a paragraph about when to reach for terminal tools. Kept goal-level rather than enumerating per-tool schemas — the registry still owns those, and an enumerative prompt would drift the moment a new tool lands.
+
+**Tests.**
+
+- 5 new dispatch tests in `nexus-terminal::core_plugin::tests`: missing-store error, unknown-slug error, the unix-only happy path (spawns a session via `/bin/sh -c "printf hello"` and asserts the new id appears in `list_sessions` with `name: "saved:hello"`), invalid-args, and `one_shot_flag` mapping for POSIX / pwsh / cmd.exe / unknown shells.
+- 5 new dispatch_target tests in `nexus-ai`: each new tool name routes to the right `(target_plugin_id, command_id)`; `terminal_send_signal` reshapes every supported signal to the right control byte; rejects unknown signals; rejects missing fields.
+- 4 new schema / executor tests in `nexus-ai::tools::functions::tests`: schemas declare the right `required` arrays, `terminal_send_signal`'s schema constrains `signal` to the four-element enum, `signal_byte` maps known signals and surfaces unknowns as `InvalidInput`, and the registry round-trip lands all three tools.
+- 1 new test in `nexus-ai::core_plugin::read_only_filter_tests`: `filter_to_read_only` keeps `terminal_get_status` and drops `terminal_run_saved` / `terminal_send_signal`. Asserts pre-existing read-only entries (`read_file`, `search_forge`, `list_backlinks`, `git_log`) survive and `write_file` doesn't, so the BL-055 extension didn't accidentally widen the surface.
+- All 277 nexus-terminal tests, 210 nexus-ai tests, and 25 nexus-agent tests pass; ts-export regen produces only the expected `RunSavedArgs.ts` addition.
+
+**Deliberately deferred:**
+
+- **SIGTERM / SIGKILL.** The PTY byte path can't deliver these — they need a separate kill IPC. Today, an unresponsive process needs `close_session`, which is the documented path; the `terminal_send_signal` schema description says so explicitly.
+- **`run_saved_managed`.** Honoring `pre_commands` + `auto_restart` from the saved command means routing through the procmgr layer (`ManagedProcess`), which has its own state machine. The agent's "run once, check exit" use case doesn't need that today — adding it now would couple the agent surface to the managed-lifecycle complexity.
+- **Out-of-band per-command timeout.** A long build / test that hangs forever exhausts agent budget. The current escape is `terminal_send_signal { signal: "SIGINT" }` once the agent decides to give up. A first-class `terminal_run_saved { timeout_ms? }` lands once we have a real-world case where Ctrl-C escalation isn't enough.
+
+---
+
 ### BL-060: Ad-hoc command history — IPC exposure and shell UI ✅ (2026-05-07)
 
 **Source**: Terminal Integration Assessment (2026-05-06) — gap #3

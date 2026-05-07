@@ -45,6 +45,8 @@ const STORAGE_PLUGIN: &str = "com.nexus.storage";
 const GIT_PLUGIN: &str = "com.nexus.git";
 /// Plugin id of the MCP host plugin.
 const MCP_PLUGIN: &str = "com.nexus.mcp.host";
+/// Plugin id of the terminal core plugin (BL-055).
+const TERMINAL_PLUGIN: &str = "com.nexus.terminal";
 
 /// Why a tool name couldn't be mapped to an IPC dispatch triple.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -140,6 +142,60 @@ pub fn dispatch_target(name: &str, input: Value) -> Result<DispatchTarget, Dispa
             command_id: "log".into(),
             args: input,
         }),
+        "terminal_run_saved" => Ok(DispatchTarget {
+            target_plugin_id: TERMINAL_PLUGIN.into(),
+            command_id: "run_saved".into(),
+            args: input,
+        }),
+        "terminal_get_status" => {
+            // Tool surface uses `id`; the underlying handler also takes
+            // `id`, so the input is a straight passthrough.
+            Ok(DispatchTarget {
+                target_plugin_id: TERMINAL_PLUGIN.into(),
+                command_id: "get_session_info".into(),
+                args: input,
+            })
+        }
+        "terminal_send_signal" => {
+            // Reshape `{ id, signal }` → `{ id, data: [<byte>] }` so
+            // the agent's executor can hand args straight to ipc_call
+            // without per-tool special cases — same pattern as
+            // `write_file`'s content→bytes reshape above.
+            let id = input
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| DispatchTargetError::InvalidInput {
+                    tool: "terminal_send_signal".into(),
+                    reason: "missing 'id' string".into(),
+                })?
+                .to_string();
+            let signal = input
+                .get("signal")
+                .and_then(Value::as_str)
+                .ok_or_else(|| DispatchTargetError::InvalidInput {
+                    tool: "terminal_send_signal".into(),
+                    reason: "missing 'signal' string".into(),
+                })?;
+            let byte = match signal {
+                "SIGINT" => 0x03_u8,
+                "SIGQUIT" => 0x1c,
+                "SIGTSTP" => 0x1a,
+                "EOF" => 0x04,
+                other => {
+                    return Err(DispatchTargetError::InvalidInput {
+                        tool: "terminal_send_signal".into(),
+                        reason: format!(
+                            "unsupported signal '{other}'; expected SIGINT|SIGQUIT|SIGTSTP|EOF"
+                        ),
+                    });
+                }
+            };
+            Ok(DispatchTarget {
+                target_plugin_id: TERMINAL_PLUGIN.into(),
+                command_id: "send_raw_input".into(),
+                args: json!({ "id": id, "data": [byte] }),
+            })
+        }
         other if other.starts_with("mcp__") => {
             // Strip prefix, split on the first `__` to recover
             // (server, tool). The bridge's sanitiser may have
@@ -244,6 +300,75 @@ mod tests {
         assert!(matches!(err, DispatchTargetError::MalformedMcp(_)));
         let err = dispatch_target("mcp__server__", json!({})).unwrap_err();
         assert!(matches!(err, DispatchTargetError::MalformedMcp(_)));
+    }
+
+    #[test]
+    fn terminal_run_saved_targets_run_saved() {
+        let t = dispatch_target(
+            "terminal_run_saved",
+            json!({"slug": "dev", "working_dir": "/tmp"}),
+        )
+        .unwrap();
+        assert_eq!(t.target_plugin_id, "com.nexus.terminal");
+        assert_eq!(t.command_id, "run_saved");
+        assert_eq!(t.args["slug"], "dev");
+        assert_eq!(t.args["working_dir"], "/tmp");
+    }
+
+    #[test]
+    fn terminal_get_status_targets_get_session_info() {
+        let t = dispatch_target("terminal_get_status", json!({"id": "sess-1"})).unwrap();
+        assert_eq!(t.target_plugin_id, "com.nexus.terminal");
+        assert_eq!(t.command_id, "get_session_info");
+        assert_eq!(t.args["id"], "sess-1");
+    }
+
+    #[test]
+    fn terminal_send_signal_reshapes_signal_to_byte() {
+        for (signal, expected) in [
+            ("SIGINT", 0x03_u64),
+            ("SIGQUIT", 0x1c),
+            ("SIGTSTP", 0x1a),
+            ("EOF", 0x04),
+        ] {
+            let t = dispatch_target(
+                "terminal_send_signal",
+                json!({"id": "x", "signal": signal}),
+            )
+            .unwrap_or_else(|e| panic!("{signal}: {e:?}"));
+            assert_eq!(t.target_plugin_id, "com.nexus.terminal");
+            assert_eq!(t.command_id, "send_raw_input");
+            assert_eq!(t.args["id"], "x");
+            let data = t.args["data"].as_array().expect("data array");
+            assert_eq!(data.len(), 1);
+            assert_eq!(data[0].as_u64().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn terminal_send_signal_rejects_unknown_signal() {
+        let err =
+            dispatch_target("terminal_send_signal", json!({"id": "x", "signal": "SIGKILL"}))
+                .unwrap_err();
+        match err {
+            DispatchTargetError::InvalidInput { tool, reason } => {
+                assert_eq!(tool, "terminal_send_signal");
+                assert!(reason.contains("SIGKILL"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn terminal_send_signal_rejects_missing_fields() {
+        // Missing id.
+        let err = dispatch_target("terminal_send_signal", json!({"signal": "SIGINT"}))
+            .unwrap_err();
+        assert!(matches!(err, DispatchTargetError::InvalidInput { .. }));
+        // Missing signal.
+        let err =
+            dispatch_target("terminal_send_signal", json!({"id": "x"})).unwrap_err();
+        assert!(matches!(err, DispatchTargetError::InvalidInput { .. }));
     }
 
     #[test]

@@ -20,8 +20,10 @@ pub mod registry;
 pub use dispatch_target::{dispatch_target, DispatchTarget, DispatchTargetError};
 pub use functions::{
     git_log_schema, list_backlinks_schema, read_file_schema, register_extended_builtins,
-    register_storage_builtins, search_forge_schema, write_file_schema, GitLogTool,
-    ListBacklinksTool, ReadFileTool, SearchForgeTool, WriteFileTool,
+    register_storage_builtins, register_terminal_builtins, search_forge_schema,
+    terminal_get_status_schema, terminal_run_saved_schema, terminal_send_signal_schema,
+    write_file_schema, GitLogTool, ListBacklinksTool, ReadFileTool, SearchForgeTool,
+    TerminalGetStatusTool, TerminalRunSavedTool, TerminalSendSignalTool, WriteFileTool,
 };
 pub use mcp_bridge::{discover_mcp_tools, McpToolExecutor};
 pub use registry::{RegisteredTool, ToolError, ToolExecutor, ToolRegistry, ToolSchema};

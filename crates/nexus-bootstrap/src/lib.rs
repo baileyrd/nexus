@@ -1361,6 +1361,7 @@ fn register_core_plugins(
                     ("adhoc_get", nexus_terminal::HANDLER_ADHOC_GET),
                     ("adhoc_delete", nexus_terminal::HANDLER_ADHOC_DELETE),
                     ("adhoc_promote", nexus_terminal::HANDLER_ADHOC_PROMOTE),
+                    ("run_saved", nexus_terminal::HANDLER_RUN_SAVED),
                 ]),
             ),
             forge_root,
