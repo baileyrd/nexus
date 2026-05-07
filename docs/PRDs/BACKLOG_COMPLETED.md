@@ -8,6 +8,27 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-053 Phase 3: Forge visual target — callouts ✅ (2026-05-07)
+
+**Source**: BL-053 companion plan, Phase 3 — [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md) §3
+**Files**: `shell/src/plugins/core/editorArea/MarkdownDoc.tsx`, `shell/src/shell/shell.css`, `shell/tests/markdown-doc-bl053.test.ts`
+**Related**: BL-053 Phases 1 + 2 (chrome polish + inline rendering, shipped earlier today)
+
+Phase 3 of BL-053 — Obsidian-style callout blocks. Q1 (callout syntax) was answered by inspecting the in-tree fixtures: `docs/help/editing/markdown-and-blocks.md` and `docs/PRDs/Nexus_Growth_Plan.md` already use the Obsidian dialect (`> [!type] Title` on the blockquote's first line), so adopting it has zero migration cost.
+
+- **Parser hook.** The existing blockquote pass in `renderMarkdown` now peeks at the first content line; when it matches `^\[!(\w+)\]\s*(.*)$` the block is lifted out of `<blockquote>` and into `<div class="nx-callout nx-callout--{type}">`. Fall-through behaviour is unchanged — anything that doesn't match still renders as a `<blockquote>`. Two new exported helpers (`parseCalloutHeader`, `normaliseCalloutType`) keep the parser logic unit-testable in isolation from the renderer.
+- **Type matrix.** Seven canonical types: `note` / `tip` / `info` / `warning` / `danger` / `quote` / `update`. Aliases (`warn` → `warning`, `risk` → `danger`) collapse onto the canonical set so the CSS only styles seven kinds. `update` is the mockup-specific ember-dotted variant called out in the BL-053 §3.3 plan; not in Obsidian's vocabulary but documented here so authors know it's available. Unknown types collapse to `note` rather than dropping the block — a future `[!todo]` written by an author will still render as a neutral callout.
+- **Body parsing.** Body lines are split on blank `>`-only continuation lines (the `> ` strip turns them into empty body lines). Each paragraph runs through `inline()` so wikilinks / path-style code / bold / italic all work inside callouts.
+- **Header.** `<div class="nx-callout-header">` carries an 8-px dot taking the type's accent token plus the title text (defaulting to the capitalised type label when omitted). Title runs through `inline()` so it can carry wikilinks too.
+- **CSS.** Raised slate surface, 1 px border, 2 px left rail tinted by the type's token (`--ok` for tip, `--cool` for info, `--warn` for warning, `--risk` for danger, `--text-muted` for quote, `--interactive-accent` for update — with a 6-px ember glow on the dot to match the mockup's "Update cadence" callout). `note` keeps the neutral default. All tokens are existing kernel-theme variables, so callouts re-paint correctly when a user switches themes.
+
+**Tested**: 7 new unit cases in `markdown-doc-bl053.test.ts` (header parser positive / negative, alias normalisation, full render with type + title + body, default-title fallback, plain blockquote regression, ember `update` mapping, paragraph split on blank `>`). `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell test` 944/944 pass; lint 0 errors.
+
+**Definition of done coverage** (per Phase 3 §6 of the companion plan): all four bullets shipped — Obsidian dialect adopted (Q1 closed), parser hook in pipeline, six built-in types plus `update`, per-type dot via existing status tokens.
+
+**Deferred (within BL-053):**
+- Phase 4 (status pills + tree dots) — gates on Q2 (where do status values come from), ~3–5d
+
 ### BL-054 Phase 2: Architecture panel ✅ (2026-05-07)
 
 **Source**: BL-054 companion plan, Phase 2 — [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md) §Phase 2

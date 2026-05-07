@@ -1691,6 +1691,54 @@ textarea:disabled {
   font-style: italic;
   border-radius: 0 6px 6px 0;
 }
+
+/* BL-053 Phase 3 — Obsidian-style callouts. The container takes a
+   raised slate surface with a 2px left rail tinted by the type's
+   accent token; the header carries a small dot that takes the same
+   accent so the type reads at a glance even when the title is long. */
+.doc .nx-callout {
+  margin: 18px 0;
+  padding: 10px 16px 4px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-left: 2px solid var(--text-faint);
+  border-radius: 0 6px 6px 0;
+  color: var(--text-normal);
+  font-style: normal;
+}
+.doc .nx-callout-header {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-interface);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.doc .nx-callout-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-faint);
+  flex-shrink: 0;
+}
+.doc .nx-callout-title { font-weight: 600; }
+.doc .nx-callout-body p { margin: 0 0 8px; }
+.doc .nx-callout-body p:last-child { margin-bottom: 4px; }
+/* Per-type accent tokens. `note` keeps the neutral default. */
+.doc .nx-callout--tip      { border-left-color: var(--ok); }
+.doc .nx-callout--tip      .nx-callout-dot { background: var(--ok); }
+.doc .nx-callout--info     { border-left-color: var(--cool); }
+.doc .nx-callout--info     .nx-callout-dot { background: var(--cool); }
+.doc .nx-callout--warning  { border-left-color: var(--warn); }
+.doc .nx-callout--warning  .nx-callout-dot { background: var(--warn); }
+.doc .nx-callout--danger   { border-left-color: var(--risk); }
+.doc .nx-callout--danger   .nx-callout-dot { background: var(--risk); }
+.doc .nx-callout--quote    { border-left-color: var(--text-muted); }
+.doc .nx-callout--quote    .nx-callout-dot { background: var(--text-muted); }
+.doc .nx-callout--update   { border-left-color: var(--interactive-accent); }
+.doc .nx-callout--update   .nx-callout-dot {
+  background: var(--interactive-accent);
+  box-shadow: 0 0 6px var(--interactive-accent);
+}
 .doc code {
   font-family: var(--font-monospace); font-size: 0.88em;
   background: var(--background-secondary);

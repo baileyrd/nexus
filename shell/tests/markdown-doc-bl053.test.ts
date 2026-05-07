@@ -11,6 +11,8 @@ import { test } from 'node:test'
 import {
   extractFrontmatter,
   isCodepath,
+  normaliseCalloutType,
+  parseCalloutHeader,
   renderMarkdown,
 } from '../src/plugins/core/editorArea/MarkdownDoc'
 
@@ -109,4 +111,68 @@ test('extractFrontmatter: malformed lines are dropped, parsing continues', () =>
   const { frontmatter } = extractFrontmatter(src)
   assert.equal(frontmatter['title'], 'Survivor')
   assert.equal(frontmatter['updated'], '2026-04-17')
+})
+
+// ─── BL-053 Phase 3: callouts ───────────────────────────────────────────
+
+test('parseCalloutHeader: pulls type and title off the marker line', () => {
+  assert.deepEqual(parseCalloutHeader('[!info] Heads up'), { type: 'info', title: 'Heads up' })
+  assert.deepEqual(parseCalloutHeader('[!warning]'), { type: 'warning', title: '' })
+  assert.equal(parseCalloutHeader('not a callout'), null)
+  assert.equal(parseCalloutHeader('[!info'), null) // unclosed bracket
+})
+
+test('normaliseCalloutType: collapses aliases and falls back to note', () => {
+  assert.equal(normaliseCalloutType('Warning'), 'warning')
+  assert.equal(normaliseCalloutType('warn'), 'warning')
+  assert.equal(normaliseCalloutType('risk'), 'danger')
+  assert.equal(normaliseCalloutType('UPDATE'), 'update')
+  assert.equal(normaliseCalloutType('mystery'), 'note')
+})
+
+test('renderMarkdown: turns `> [!info] Title` blockquote into a callout div', () => {
+  const src = [
+    '> [!info] Update cadence',
+    '> Body line one.',
+    '> Body line two.',
+  ].join('\n')
+  const { html } = renderMarkdown(src)
+  assert.match(html, /<div class="nx-callout nx-callout--info">/)
+  assert.match(html, /<span class="nx-callout-dot"/)
+  assert.match(html, /Update cadence<\/span>/)
+  assert.match(html, /Body line one\. Body line two\./)
+})
+
+test('renderMarkdown: omits header title when none provided, falls back to type label', () => {
+  const src = '> [!warning]\n> Be careful.'
+  const { html } = renderMarkdown(src)
+  assert.match(html, /<div class="nx-callout nx-callout--warning">/)
+  assert.match(html, />Warning<\/span>/) // default title
+})
+
+test('renderMarkdown: blockquote without callout marker stays a <blockquote>', () => {
+  const { html } = renderMarkdown('> just a quote\n> spanning two lines')
+  assert.match(html, /<blockquote>just a quote spanning two lines<\/blockquote>/)
+  assert.doesNotMatch(html, /nx-callout/)
+})
+
+test('renderMarkdown: ember `update` callout maps to the update class', () => {
+  const { html } = renderMarkdown('> [!update] Build status\n> Green across the board.')
+  assert.match(html, /<div class="nx-callout nx-callout--update">/)
+})
+
+test('renderMarkdown: callout body separates paragraphs on a blank `>` line', () => {
+  // Within a blockquote the "blank" continuation line is `>` alone,
+  // which the strip pass turns into an empty body line — that's the
+  // paragraph break our renderer honours.
+  const src = [
+    '> [!note] Two paragraphs',
+    '> First para.',
+    '>',
+    '> Second para.',
+  ].join('\n')
+  const { html } = renderMarkdown(src)
+  // Two <p> children inside the body
+  const matches = html.match(/<p>/g) ?? []
+  assert.equal(matches.length, 2)
 })

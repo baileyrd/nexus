@@ -201,14 +201,22 @@ export function renderMarkdown(src: string): Rendered {
     // Horizontal rule
     if (/^(\*\*\*|---|___)\s*$/.test(line)) { out.push('<hr/>'); i++; continue }
 
-    // Blockquote block
+    // Blockquote block (also covers BL-053 Phase 3 Obsidian-style
+    // callouts: `> [!type] title` on the first line lifts the block
+    // out of <blockquote> and into <div class="nx-callout …">.)
     if (/^>\s?/.test(line)) {
       const buf: string[] = []
       while (i < lines.length && /^>\s?/.test(lines[i])) {
         buf.push(lines[i].replace(/^>\s?/, ''))
         i++
       }
-      out.push(`<blockquote>${inline(buf.join(' '))}</blockquote>`)
+      const callout = parseCalloutHeader(buf[0] ?? '')
+      if (callout) {
+        const bodyLines = buf.slice(1)
+        out.push(renderCallout(callout.type, callout.title, bodyLines))
+      } else {
+        out.push(`<blockquote>${inline(buf.join(' '))}</blockquote>`)
+      }
       continue
     }
 
@@ -340,4 +348,89 @@ export function safeUrl(raw: string): string {
 
 function slugify(s: string): string {
   return 'h-' + s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48)
+}
+
+// ─── Callouts (BL-053 Phase 3) ──────────────────────────────────────────
+
+/** The canonical callout types. Aliases (`warn` → `warning`, `risk` →
+ *  `danger`) collapse onto these in [`normaliseCalloutType`] so the
+ *  CSS only has to style seven kinds. `update` is the mockup-specific
+ *  ember-dotted variant — not in Obsidian's vocabulary but documented
+ *  in the BL-053 plan §3.3. */
+export type CalloutType = 'note' | 'tip' | 'info' | 'warning' | 'danger' | 'quote' | 'update'
+
+/** Pulls `[!type] optional title` off the leading line of a
+ *  blockquote. Returns null when the line doesn't match the pattern,
+ *  in which case the caller falls back to a plain `<blockquote>`. */
+export function parseCalloutHeader(firstLine: string): { type: CalloutType; title: string } | null {
+  const m = firstLine.match(/^\[!([A-Za-z]+)\]\s*(.*)$/)
+  if (!m) return null
+  return {
+    type: normaliseCalloutType(m[1]),
+    title: m[2].trim(),
+  }
+}
+
+/** Map the raw type token (case-insensitive, alias-tolerant) to the
+ *  canonical [`CalloutType`]. Unknown tokens collapse to `note` so the
+ *  block still renders rather than vanishing. Public so unit tests can
+ *  pin the alias matrix. */
+export function normaliseCalloutType(raw: string): CalloutType {
+  switch (raw.toLowerCase()) {
+    case 'note':    return 'note'
+    case 'tip':     return 'tip'
+    case 'info':    return 'info'
+    case 'warning':
+    case 'warn':    return 'warning'
+    case 'danger':
+    case 'risk':    return 'danger'
+    case 'quote':   return 'quote'
+    case 'update':  return 'update'
+    default:        return 'note'
+  }
+}
+
+function renderCallout(type: CalloutType, title: string, bodyLines: string[]): string {
+  // Body: paragraphs separated by a blank line; blank-only lines split
+  // paragraphs. Inline transforms (wikilink, code, bold, …) run on
+  // each paragraph just like top-level text would.
+  const paragraphs: string[] = []
+  let current: string[] = []
+  for (const line of bodyLines) {
+    if (line.trim() === '') {
+      if (current.length > 0) {
+        paragraphs.push(current.join(' '))
+        current = []
+      }
+    } else {
+      current.push(line)
+    }
+  }
+  if (current.length > 0) paragraphs.push(current.join(' '))
+
+  const headerTitle = title || defaultCalloutTitle(type)
+  const body = paragraphs.length === 0
+    ? ''
+    : paragraphs.map((p) => `<p>${inline(p)}</p>`).join('')
+  return (
+    `<div class="nx-callout nx-callout--${type}">`
+    + `<div class="nx-callout-header">`
+    + `<span class="nx-callout-dot" aria-hidden="true"></span>`
+    + `<span class="nx-callout-title">${inline(headerTitle)}</span>`
+    + `</div>`
+    + (body ? `<div class="nx-callout-body">${body}</div>` : '')
+    + `</div>`
+  )
+}
+
+function defaultCalloutTitle(type: CalloutType): string {
+  switch (type) {
+    case 'note':    return 'Note'
+    case 'tip':     return 'Tip'
+    case 'info':    return 'Info'
+    case 'warning': return 'Warning'
+    case 'danger':  return 'Danger'
+    case 'quote':   return 'Quote'
+    case 'update':  return 'Update'
+  }
 }
