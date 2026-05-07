@@ -14,6 +14,14 @@ export interface Heading {
   text: string
 }
 
+/** Parsed YAML frontmatter — only the small subset BL-053 Phase 2 cares
+ *  about (title / tags / updated / category). Unknown keys are still
+ *  parsed and round-tripped so future surfaces (Phase 4 status pills,
+ *  Bases queries) can read them. */
+export interface Frontmatter {
+  [key: string]: string | string[]
+}
+
 interface Props {
   source: string
   title?: string
@@ -26,7 +34,9 @@ interface Props {
 export function MarkdownDoc({ source, title, onHeadings, onActiveHeading }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
 
-  const { html, headings } = useMemo(() => renderMarkdown(source), [source])
+  const { frontmatter, body } = useMemo(() => extractFrontmatter(source), [source])
+  const { html, headings } = useMemo(() => renderMarkdown(body), [body])
+  const fmTitle = stringValue(frontmatter['title'])
 
   useEffect(() => { onHeadings?.(headings) }, [headings, onHeadings])
 
@@ -53,12 +63,102 @@ export function MarkdownDoc({ source, title, onHeadings, onActiveHeading }: Prop
     return () => observer.disconnect()
   }, [html, onActiveHeading])
 
+  const displayTitle = fmTitle ?? title
+
   return (
     <div className="doc" ref={rootRef}>
-      {title && <div className="title">{title}</div>}
+      {displayTitle && <div className="title">{displayTitle}</div>}
+      <FrontmatterBar frontmatter={frontmatter} />
       <div dangerouslySetInnerHTML={{ __html: html }} />
     </div>
   )
+}
+
+/** Renders a `.metaline` row below the H1 with the BL-053-spec'd
+ *  fields (`category`, `tags`, `updated`). Returns null when none of
+ *  those keys are populated so plain documents stay uncluttered. */
+function FrontmatterBar({ frontmatter }: { frontmatter: Frontmatter }) {
+  const category = stringValue(frontmatter['category'])
+  const tags = listValue(frontmatter['tags'])
+  const updated = stringValue(frontmatter['updated'])
+  if (!category && tags.length === 0 && !updated) return null
+  return (
+    <div className="metaline">
+      {category && <span className="chip">{category}</span>}
+      {tags.map((t) => <span key={t} className="chip">{t}</span>)}
+      {updated && <span>Updated {updated}</span>}
+    </div>
+  )
+}
+
+function stringValue(v: string | string[] | undefined): string | undefined {
+  if (typeof v === 'string') return v.length === 0 ? undefined : v
+  return undefined
+}
+
+function listValue(v: string | string[] | undefined): string[] {
+  if (Array.isArray(v)) return v
+  if (typeof v === 'string' && v.length > 0) return [v]
+  return []
+}
+
+// ─── Frontmatter parser ─────────────────────────────────────────────────
+
+/** Pulls a leading YAML frontmatter block (`---` … `---`) off the
+ *  source and returns the parsed map plus the remaining body. The
+ *  parser handles the shapes Phase 2 actually emits — `key: value`,
+ *  `key: [a, b]`, and a multi-line list block. Anything more exotic
+ *  (nested objects, anchors, multi-line strings) is dropped silently
+ *  so a malformed frontmatter never crashes the editor. */
+export function extractFrontmatter(src: string): { frontmatter: Frontmatter; body: string } {
+  const lf = src.replace(/\r\n/g, '\n')
+  const open = lf.match(/^---\s*\n/)
+  if (!open) return { frontmatter: {}, body: lf }
+  const after = lf.slice(open[0].length)
+  const close = after.search(/(^|\n)---\s*(\n|$)/)
+  if (close < 0) return { frontmatter: {}, body: lf }
+  const yaml = after.slice(0, close).replace(/\n$/, '')
+  const rest = after.slice(close).replace(/^\n?---\s*(\n|$)/, '')
+  return { frontmatter: parseYamlFrontmatter(yaml), body: rest }
+}
+
+function parseYamlFrontmatter(yaml: string): Frontmatter {
+  const out: Frontmatter = {}
+  const lines = yaml.split('\n')
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    if (line.trim() === '' || line.trim().startsWith('#')) { i++; continue }
+    const m = line.match(/^([A-Za-z_][\w-]*)\s*:\s*(.*)$/)
+    if (!m) { i++; continue }
+    const key = m[1]
+    const rawValue = m[2]
+    if (rawValue === '') {
+      // Multi-line list block: scan following indented `- item` lines.
+      const items: string[] = []
+      i++
+      while (i < lines.length && /^\s+-\s+/.test(lines[i])) {
+        items.push(unquote(lines[i].replace(/^\s+-\s+/, '').trim()))
+        i++
+      }
+      if (items.length > 0) out[key] = items
+      continue
+    }
+    if (rawValue.startsWith('[') && rawValue.endsWith(']')) {
+      out[key] = rawValue.slice(1, -1).split(',').map(s => unquote(s.trim())).filter(Boolean)
+    } else {
+      out[key] = unquote(rawValue.trim())
+    }
+    i++
+  }
+  return out
+}
+
+function unquote(s: string): string {
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    return s.slice(1, -1)
+  }
+  return s
 }
 
 // ─── Renderer ────────────────────────────────────────────────────────────
@@ -163,8 +263,12 @@ function inline(text: string): string {
   let s = escapeHtml(text)
   // [[wikilink]] → styled span
   s = s.replace(/\[\[([^\]]+)\]\]/g, (_m, t) => `<a class="wikilink" href="#">${t}</a>`)
-  // `code`
-  s = s.replace(/`([^`]+)`/g, (_m, t) => `<code>${t}</code>`)
+  // `code` — BL-053 Phase 2: tag path-style tokens (slash + restricted
+  // alphabet) so the doc theme can tint them ember without disturbing
+  // prose code like `useState` or `n + 1`.
+  s = s.replace(/`([^`]+)`/g, (_m, t) =>
+    isCodepath(t) ? `<code class="codepath">${t}</code>` : `<code>${t}</code>`,
+  )
   // **bold**
   s = s.replace(/\*\*([^*]+)\*\*/g, (_m, t) => `<strong>${t}</strong>`)
   // _italic_ / *italic*
@@ -174,6 +278,17 @@ function inline(text: string): string {
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
     (_m, t, u) => `<a href="${safeUrl(u)}" target="_blank" rel="noreferrer">${t}</a>`)
   return s
+}
+
+/** True when the inline-code text reads like a file path / glob.
+ *  Heuristic from BL-053 §3 Phase 2: the text contains a `/` and is
+ *  built from `\w` / `.` / `*` / `-` only. Tokens like
+ *  `crates/nexus-storage/src/find_replace.rs` and `docs/PRDs/*.md`
+ *  match; `useState` and `n + 1` do not. The regex applies to the
+ *  HTML-escaped text, so `&` / `<` / `>` / quotes already moot the
+ *  match (they are not in the allowed set). */
+export function isCodepath(text: string): boolean {
+  return text.includes('/') && /^[\w./*-]+$/.test(text)
 }
 
 function splitRow(line: string): string[] {

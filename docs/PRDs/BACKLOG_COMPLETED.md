@@ -8,6 +8,27 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-053 Phase 2: Forge visual target — inline rendering ✅ (2026-05-07)
+
+**Source**: BL-053 companion plan, Phase 2 — [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md) §3
+**Files**: `shell/src/plugins/core/editorArea/MarkdownDoc.tsx`, `shell/src/shell/shell.css`, `shell/tests/markdown-doc-bl053.test.ts`
+**Related**: BL-053 Phase 1 (chrome polish, shipped 2026-05-07)
+
+Phase 2 of BL-053 — adds the three inline-rendering surfaces the mockup uses, on top of Phase 1's chrome. No new dependencies; all three changes live inside the existing bespoke renderer and stay reachable to the future remark+rehype migration mentioned in `MarkdownDoc.tsx`'s file-level comment.
+
+- **Wikilinks were already done.** `inline()` already wraps `[[X]]` as `<a class="wikilink">`, and `.doc .wikilink` was already styled `color: var(--interactive-accent)` with a dashed underline (shell.css:1684 region). No code change required for this DoD bullet — confirmed against the mockup and left as-is.
+- **Path-style inline code.** New `isCodepath(text): boolean` helper exported from `MarkdownDoc.tsx`, called from the existing `\`code\`` regex inside `inline()`. The heuristic matches the §3 spec: text contains `/` and is built from `[\w./*-]+` only — `crates/nexus-storage/src/find_replace.rs` matches; `useState` and `n + 1` don't. Matches get `<code class="codepath">…</code>`; everything else stays neutral. CSS adds `.doc code.codepath` with `color: var(--interactive-accent)`, `background: var(--interactive-accent-soft)`, matching border — keeps the same chrome (border, radius, font) as a regular `<code>` so paths read as ember without becoming loud.
+- **Frontmatter metadata bar.** New `extractFrontmatter(src)` strips a leading `---` … `---` YAML block (CRLF-aware) and returns `{ frontmatter, body }`. The handwritten parser handles the three shapes Phase 2 actually emits — `key: value`, `key: [a, b]`, and the multi-line list block — plus quoted strings and `# comment` / blank line skipping. Anything more exotic (nested objects, anchors, multi-line strings) is dropped silently so a malformed frontmatter never crashes the editor. `MarkdownDoc` runs `extractFrontmatter` before `renderMarkdown`, prefers `frontmatter.title` over the filename-derived prop, and renders a new `<FrontmatterBar>` between the H1 and the body — uses the existing `.doc .metaline` / `.chip` styles (uppercase tracked text + 999 px pills), so no CSS gymnastics. The bar renders nothing when `category` / `tags` / `updated` are all absent, leaving plain documents uncluttered.
+
+**Tested**: 10 new unit tests in `markdown-doc-bl053.test.ts` (codepath positive / negative cases, renderer output, frontmatter parser happy path + edge cases — no opening fence, missing closing fence, CRLF, comments, malformed lines mid-block). `pnpm --filter nexus-shell test` 927 / 927 pass; typecheck clean; lint 0 errors.
+
+**Definition of done coverage** (per Phase 2 §6 of the companion plan): all three surfaces shipped — ember wikilinks ✅ (pre-existing), path-style inline code ✅, frontmatter bar (tags / updated / category) ✅. The `title:` frontmatter override falls into the same parsing pass and is wired in this phase as a no-cost extra.
+
+**Deferred (within BL-053):**
+- Phase 3 (callouts) — gated on Q1 (callout syntax — Obsidian dialect recommended), ~3–5d
+- Phase 4 (status pills + tree dots) — gated on Q2 (where do status values come from), ~3–5d
+- `TypographyBlock → CSS variable` runtime wiring + bundled Fraunces — gated on Q3
+
 ### BL-053 Phase 1: Forge visual target — chrome polish ✅ (2026-05-07)
 
 **Source**: BL-053 companion plan, Phase 1 — [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md) §3

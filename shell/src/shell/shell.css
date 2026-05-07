@@ -1701,6 +1701,15 @@ textarea:disabled {
 }
 /* `.doc code` color is driven by the active kernel theme via
    `--text-normal`; no per-mode override needed. */
+/* BL-053 Phase 2: tint path-style inline code ember so file references
+   read at a glance without disturbing the neutral treatment for prose
+   code. Keeps the same surface chrome (border, radius, font) as a
+   regular `<code>` to avoid making the path tokens loud. */
+.doc code.codepath {
+  color: var(--interactive-accent);
+  background: var(--interactive-accent-soft);
+  border-color: var(--interactive-accent-soft);
+}
 .doc pre {
   font-family: var(--font-monospace);
   background: var(--background-secondary);
