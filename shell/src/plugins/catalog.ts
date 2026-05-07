@@ -393,6 +393,12 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     description: 'Renders ```mermaid``` code blocks as inline diagrams in read-mode previews.',
     load: () => import('./community/mermaid').then(m => m.mermaidPlugin),
   },
+  {
+    id: 'nexus.osArchitecture', name: 'Architecture',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Render architecture.md as a domain → task hierarchy with drift detection against installed skills + workflows (BL-054 Phase 2). Pair with `nexus forge init --template os`.',
+    load: () => import('./nexus/osArchitecture').then(m => m.osArchitecturePlugin),
+  },
 ]
 
 /**

@@ -8,6 +8,31 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-054 Phase 2: Architecture panel ✅ (2026-05-07)
+
+**Source**: BL-054 companion plan, Phase 2 — [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md) §Phase 2
+**Files**: new `shell/src/plugins/nexus/osArchitecture/{index.ts, architectureParser.ts, driftDetect.ts, osArchitectureStore.ts, OsArchitectureView.tsx, OsArchitecturePaneView.tsx}`, new `shell/tests/os-architecture-parser.test.ts`, `shell/src/plugins/catalog.ts`
+**Related**: BL-054 Phase 1 (CLI scaffolder seeds the `architecture.md` placeholder this panel reads), BL-054 Phase 5 (OS Setup skill — fills the placeholder)
+
+A new shell plugin `nexus.osArchitecture` renders `architecture.md` as a domain → task tree and cross-references against the live skill / workflow registries to surface drift. Default-off: registered in `DEFAULT_OFF_PLUGINS` since the surface is OS-template-specific and would otherwise add an activity-bar icon for every user.
+
+- **Tolerant parser.** `parseArchitecture(src)` peels off `## <domain>` blocks, then per-domain looks for list items matching `- <slug>  [type | class | dest | automation]`. The four-attribute tag is required — list items without it are ignored. Anything inside fenced code blocks is opaque (so the example tag in the seeded placeholder doesn't pollute the parse). Unknown values for any of the four tag fields decode to `'unknown'` rather than rejecting the line, so half-authored files still render. Free-form description after the slug is preserved.
+- **Drift detection.** `detectDrift({ architecture, skillIds, workflowNames })` is pure — no IPC, no storage. Three drift kinds: `skillMissing` (task tagged `skill` but no `.skill.md` matches the id), `automationMissing` (foundation+cron task with no workflow whose name matches the task id), `undocumentedSkill` (skill present in the registry with no architecture entry). Returns a `Map<taskKey, DriftItem[]>` plus an `unattached: DriftItem[]` for the orphan-skill list. Manual / capability tasks correctly skip the relevant checks.
+- **View.** Collapsible domain headers (chevron + task count); per-task ember chip row showing type / class / memory-dest / automation; warn-tinted inline drift banner under each task with a non-zero drift list; bottom section listing undocumented skills. Empty state directs the user at `nexus forge init --template os` and the future Phase 5 OS Setup skill. Missing-file state matches — shows a friendly explanation rather than an error.
+- **Plugin wiring.** Reads `architecture.md` via `com.nexus.storage::read_file`; pulls drift inputs in parallel from `com.nexus.skills::list` and `com.nexus.workflow::list`. Either inputs IPC failure degrades to empty-set so the architecture itself still renders. A "not found" error from the storage IPC is detected by message-substring match (`/not found|no such file|enoent/i`) and routes to the `missing` state rather than `error`. Activity-bar entry uses the `compass` icon at priority 45 (next to skills @ 40).
+- **Unit tests.** 10 new cases in `os-architecture-parser.test.ts`: parser empty-source / fenced-block-skip / domain-and-task happy path / unknown-tag tolerance / description capture; drift skill-missing + automation-missing / undocumented-skill ordering / capability-skip / manual-skip.
+
+**Tested**: `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell test` 937/937 pass; lint 0 errors.
+
+**Definition of done coverage** (per Phase 2 §6 of the companion plan):
+- ✅ `nexus.osArchitecture` plugin panel visible in palette and sidebar (activity-bar item registered)
+- ✅ Renders domain/task hierarchy from `architecture.md` parse, tolerant of missing file (shows missing state)
+- ✅ Drift detection against `.forge/skills/` and `.forge/workflows/` directories (via the existing list IPCs)
+- ✅ Per-task badges: execution-type chip, class chip, memory-dest label, automation status
+
+**Deferred:**
+- "Create skill" / "Create workflow" inline action buttons on drift warnings — needs `com.nexus.skills::scaffold` + `com.nexus.workflow::scaffold` IPC handlers that don't exist yet. Tracked as a Phase 2 follow-up.
+
 ### BL-054 Phase 1 follow-up: shell launcher OS-layout toggle ✅ (2026-05-07)
 
 **Source**: BL-054 Phase 1 closure note (2026-05-07) — DoD bullet "Shell new-forge flow offers 'OS layout' as an option alongside blank"
