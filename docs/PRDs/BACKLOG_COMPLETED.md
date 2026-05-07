@@ -8,6 +8,41 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-059: "Open in external terminal" escape hatch ✅ (2026-05-06)
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap #6; CommandBook evaluation
+**Files**: `crates/nexus-terminal/src/{external_terminal.rs (new), core_plugin.rs, lib.rs}`, `crates/nexus-bootstrap/src/lib.rs`, `shell/src/plugins/nexus/terminal/SavedCommandsView.tsx`
+**Related**: `docs/research/commandbook-evaluation.md` — "Run in Terminal" pattern
+
+The escape-hatch for PTY-dependent programs (vim, htop, less, full-screen REPLs that don't play nicely under xterm.js) is now wired up. Saved-command rows whose `working_dir` is set gain an "External" button that hands the directory off to the user's preferred external terminal emulator.
+
+**Backend (`external_terminal.rs`).** A typed `TerminalKind` enum covers twelve well-known emulators across Linux / macOS / Windows; `launch_spec(kind, working_dir)` returns a `LaunchSpec { program, args }` for each, with platform-specific entries (`Iterm2` / `MacTerminal` / `WindowsTerminal`) returning `None` outside their target OS. `pick_first_available(priority, spec, which, working_dir)` is a pure picker that takes the priority list, the spec factory, and a `which`-shaped PATH probe — all three are injectable so unit tests don't need a real emulator on disk. `which_in_path(program)` walks `$PATH` and (on Windows, when the program doesn't already end in `.exe`) also checks `<program>.exe`. `spawn_detached(spec)` runs the chosen emulator with stdio dropped to `/dev/null` and (on Unix) a `pre_exec` `setsid` so a SIGHUP delivered to nexus's process group can't tear the launched terminal down with it. Modern emulators fork-exec themselves on startup so the dropped `Child` exits immediately and gets reaped on the next OS pass.
+
+**Default priority** (`DEFAULT_PRIORITY` const). Ordered to land in the right place when a power-user emulator is installed: iTerm2 → WezTerm → Ghostty → Kitty → Alacritty → Windows Terminal → GNOME Terminal → Konsole → XFCE Terminal → Terminal.app → x-terminal-emulator → xterm. The IPC handler accepts an optional `priority: Vec<String>` arg (snake_case tags, hyphen tolerated) for callers that want a different order. Unknown tags are silently dropped — a typo shouldn't block the whole launch.
+
+**Argv shapes.** Each emulator's flag for "open at this directory" varies: `kitty --directory DIR`, `alacritty --working-directory DIR`, `wezterm start --cwd DIR`, `ghostty --working-directory=DIR` (single-arg with `=`), `gnome-terminal --working-directory=DIR`, `konsole --workdir DIR`, `xfce4-terminal --working-directory=DIR`, `wt -d DIR`, `open -a Terminal DIR` / `open -a iTerm DIR`. `xterm` and `x-terminal-emulator` have no `--cwd` flag, so we shell into `bash -c "cd '<DIR>' && exec $SHELL"` with POSIX single-quoting (`shell_quote` helper) to defend against directory paths containing single quotes.
+
+**IPC handler (id 18).** `com.nexus.terminal::open_in_terminal` looks up the saved command by slug, requires `working_dir` is set, runs the picker, calls `spawn_detached`, and returns `{ kind, program, args, working_dir }` so the caller can show "Opened kitty at /path" in a notification. Surface errors:
+
+- Slug not found → `no saved command with slug '<slug>'`.
+- `working_dir` missing/empty → `saved command '<slug>' has no working_dir`.
+- Nothing on PATH → `no supported terminal emulator found on PATH (tried the configured priority list)`.
+- Spawn failure → `spawning <program> failed: <io::Error>`.
+
+The handler is registered in `nexus-bootstrap` as `open_in_terminal` and added to the `with_v1_aliases` block.
+
+**Shell ("External" button).** `SavedCommandsView` calls the IPC and surfaces a success toast (`Opened kitty at /tmp/work`) or pushes the IPC error onto `localError`. The button only renders when `cmd.working_dir` is set, since the backend rejects an empty path.
+
+**Tests.** Eight unit tests in `external_terminal::tests`: per-kind argv shapes for kitty / alacritty / wezterm / ghostty / xterm; `shell_quote` escaping; `pick_first_available` with a stub `which` walking past an uninstalled emulator and picking the next one; `pick_first_available` returning `None` when nothing resolves; `parse_kind` accepting both snake_case and hyphenated forms. The total nexus-terminal lib test count moved from 254 → 262.
+
+**Deferred from the original DoD:**
+
+- *Per-command env-var passing.* The DoD called out "with env vars pre-loaded", but each emulator's argv shape for "set env on launch" varies (some don't support it at all) and the user's external shell reads their normal login profile, which is what an escape-hatch should give them. If a future workflow needs the saved command's env, the backend can prepend an `env A=1 B=2 …` wrapper at the cost of single-quote-escaping that input. Not implemented today.
+- *Auto-execute the saved command's `shell_cmd`.* Same trade-off — keeps the escape hatch as "open a normal shell here" rather than smuggling the saved command through three layers of quoting.
+- *Settings → Terminal priority editor.* The handler accepts a `priority: Vec<String>` arg today; the settings UI is the missing wiring. Tracked as follow-up; today the default order ships and is generally what users want.
+
+---
+
 ### BL-058: Terminal URL chip extraction ✅ (2026-05-06)
 
 **Source**: Terminal Integration Assessment (2026-05-06) — gap #2; CommandBook evaluation (2026-05-06)

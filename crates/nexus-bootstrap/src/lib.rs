@@ -1341,6 +1341,10 @@ fn register_core_plugins(
                         "saved_reorder",
                         nexus_terminal::HANDLER_SAVED_REORDER,
                     ),
+                    (
+                        "open_in_terminal",
+                        nexus_terminal::HANDLER_OPEN_IN_TERMINAL,
+                    ),
                 ]),
             ),
             forge_root,

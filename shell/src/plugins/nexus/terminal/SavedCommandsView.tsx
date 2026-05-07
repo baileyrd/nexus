@@ -33,6 +33,10 @@ const PLUGIN_ID = 'com.nexus.terminal'
 // `send_input` (HANDLER_SEND_INPUT = 3) appends a newline if the input
 // doesn't already end in one — exactly what we want for click-to-run.
 const CMD_SEND_INPUT = 'send_input'
+// BL-059 — `open_in_terminal` (HANDLER_OPEN_IN_TERMINAL = 18) hands the
+// saved command's `working_dir` off to the user's preferred external
+// terminal emulator.
+const CMD_OPEN_IN_TERMINAL = 'open_in_terminal'
 
 interface SavedCommandsViewProps {
   kernel: KernelAPI
@@ -145,6 +149,37 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
       }
     },
     [kernel, notifications, focusTerminal, cmdSaveMs, cmdCopiedMs],
+  )
+
+  // BL-059 — open the saved command's working directory in the user's
+  // preferred external terminal emulator (vim/htop/REPLs that don't
+  // play nicely under the in-app PTY). Backend handles detection +
+  // detached spawn; we just surface success/failure.
+  const openInExternalTerminal = useCallback(
+    async (cmd: SavedCommand) => {
+      setLocalError(null)
+      if (!cmd.working_dir) {
+        setLocalError(
+          `"${cmd.name}" has no working directory; set one in the Edit dialog first.`,
+        )
+        return
+      }
+      try {
+        const resp = await kernel.invoke<{
+          kind: string
+          program: string
+          working_dir: string
+        }>(PLUGIN_ID, CMD_OPEN_IN_TERMINAL, { slug: cmd.slug })
+        notifications.show({
+          message: `Opened ${resp.program} at ${resp.working_dir}`,
+          type: 'success',
+          duration: cmdCopiedMs ?? CMD_COPIED_NOTIFICATION_MS,
+        })
+      } catch (err) {
+        setLocalError(String(err))
+      }
+    },
+    [kernel, notifications, cmdCopiedMs],
   )
 
   const handleSubmit = useCallback(async () => {
@@ -285,6 +320,16 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
               >
                 Edit
               </button>
+              {cmd.working_dir && (
+                <button
+                  type="button"
+                  onClick={() => void openInExternalTerminal(cmd)}
+                  aria-label={`Open ${cmd.name} in external terminal`}
+                  title="Open in external terminal (BL-059)"
+                >
+                  External
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => void handleDelete(cmd.slug)}

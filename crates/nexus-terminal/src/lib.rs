@@ -61,6 +61,7 @@ mod compound;
 mod core_plugin;
 mod env;
 mod error;
+mod external_terminal;
 mod job_object;
 mod lines;
 mod manager;
@@ -90,10 +91,13 @@ pub use core_plugin::{
     WaitForPatternArgs, WaitForPatternResponse, EVENT_LIFECYCLE_PREFIX, EVENT_OUTPUT_PREFIX,
     HANDLER_CLOSE_SESSION, HANDLER_CREATE_SESSION,
     HANDLER_GET_SESSION_INFO, HANDLER_LIST_SESSIONS, HANDLER_PUMP, HANDLER_READ_OUTPUT,
-    HANDLER_READ_RAW_SINCE,
+    HANDLER_OPEN_IN_TERMINAL, HANDLER_READ_RAW_SINCE,
     HANDLER_SAVED_CREATE, HANDLER_SAVED_DELETE, HANDLER_SAVED_LIST, HANDLER_SAVED_REORDER,
     HANDLER_SAVED_UPDATE, HANDLER_SEARCH_OUTPUT, HANDLER_SEND_INPUT, HANDLER_SEND_RAW_INPUT,
     HANDLER_WAIT_FOR_PATTERN, PLUGIN_ID,
+};
+pub use external_terminal::{
+    parse_kind as parse_terminal_kind, TerminalKind, DEFAULT_PRIORITY,
 };
 pub use compound::{
     execute_chain, parse_command_chain, requires_single_shell, ChainOutcome, CommandStep,

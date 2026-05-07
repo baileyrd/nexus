@@ -362,19 +362,7 @@ The database view renderers are complete — Table, Kanban, Calendar, and Galler
 
 ---
 
-### BL-059: "Open in external terminal" escape hatch
-
-**Source**: Terminal Integration Assessment (2026-05-06) — gap #6; CommandBook evaluation (2026-05-06)
-**Effort**: Small (0.5–1 day)
-**Crates**: `nexus-terminal` (new handler), `shell/src/plugins/nexus/terminal/SavedCommandsView.tsx`
-**Related**: `docs/research/commandbook-evaluation.md` — "Run in Terminal" pattern
-
-Nexus terminal doesn't support PTY-dependent programs (`vim`, `htop`, `less`, interactive REPLs). There's no escape hatch to hand a saved command's working directory and environment to an external emulator. Users who need interactivity have no path back to the forge's process context.
-
-**Definition of done:**
-- New IPC handler `com.nexus.terminal::open_in_terminal` (id 22): takes a `SavedCommand` slug, detects available terminal emulators in priority order (iTerm2, Warp, Ghostty, Kitty, Alacritty, Terminal.app, system default), opens a new window at the command's `working_dir` with env vars pre-loaded
-- Context menu on `SavedCommandsView` sidebar items gains "Open in Terminal" entry
-- Detection order configurable in Settings → Terminal
+_BL-059 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `com.nexus.terminal::open_in_terminal` handler (id 18 — DoD-suggested 22 was just a placeholder; used the next contiguous slot) walks a default priority list (iTerm2, WezTerm, Ghostty, Kitty, Alacritty, Windows Terminal, GNOME Terminal, Konsole, XFCE Terminal, Terminal.app, x-terminal-emulator, xterm), picks the first whose program is on `$PATH`, and spawns it detached at the saved command's `working_dir` (Unix `setsid` so SIGHUP doesn't tear it down with nexus). `SavedCommandsView` gains an "External" button per row when `working_dir` is set. Per-command env-var passing and the Settings → Terminal priority editor are deferred — the IPC accepts a `priority` arg already, so the settings UI is wiring rather than design._
 
 ---
 
