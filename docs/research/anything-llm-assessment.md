@@ -237,7 +237,7 @@ Each item is rated:
 | Create-files tool | **Skip** | Same — `com.nexus.storage::write` exists | — |
 | Memory tool | **Adapt** | Could land in `nexus-kv` + `nexus-ai::tools`; see also `AI-MEMORY-LAYER-PLAN.md` | Existing plan covers most of it. |
 | Summarize tool | **Adapt** | Trivial wrapper over `nexus-ai::chat` | — |
-| Rechart tool | **Skip / low priority** | Niche; defer | — |
+| Rechart / chart-image tool | **Adapt — medium leverage** | New `nexus-charts` crate (or module under `nexus-formats`); IPC `com.nexus.charts::render` taking `{ spec, data }` → SVG/PNG written under `<forge>/attachments/` and referenced from MD | Pure-Rust renderer (e.g. `plotters`) keeps it deterministic, offline, no JS runtime. Natural fit over `nexus-storage::graph`, `nexus-database`, and the bases/canvas work — *not* the niche chat-decoration it is in ALL. |
 | Gmail / Outlook / Google Calendar | **Adapt (eventual)** | OAuth + connector plugins; not core | Heavy auth surface; only do if user demand exists. |
 | MCP client | **Skip** | `nexus-mcp` already does this, including pooled servers | — |
 | MCP server | **Skip** | Already exposed | — |
@@ -277,14 +277,19 @@ leverage/cost.
    carries provenance.
 5. **Web-browse / web-scrape / summarise agent tools** — promotes the
    agent from forge-only to web-capable.
-6. **Audio I/O (Whisper + Piper)** — net-new `nexus-audio` crate; nice for
+6. **Chart-render agent tool** (`nexus-charts`) — deterministic Rust SVG
+   renderer over the knowledge graph / `nexus-database` / bases, output
+   as a forge attachment. Small, self-contained, plays nicely with both
+   the agent loop and the bases/canvas roadmap.
+7. **Audio I/O (Whisper + Piper)** — net-new `nexus-audio` crate; nice for
    journaling/dictation use cases.
-7. **Embed surface + scoped tokens** — only if/when a hosted/multi-user
+8. **Embed surface + scoped tokens** — only if/when a hosted/multi-user
    variant becomes a goal; large blast radius (network listener,
    tenancy), so gate behind explicit ADR.
 
-Items 1–5 fit cleanly under existing PRDs (12 AI engine, 13 Skills, 15
-Agent system, 16 Workflow). Items 6–7 would need new PRDs.
+Items 1–6 fit cleanly under existing PRDs (12 AI engine, 13 Skills, 15
+Agent system, 16 Workflow; charts also touch 06 Formats). Items 7–8 would
+need new PRDs.
 
 ---
 
