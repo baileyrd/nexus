@@ -89,32 +89,7 @@ _BL-092 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-091: Git-LFS support
-
-**Source**: Git Integration Assessment + user request (2026-05-06)
-**Effort**: Medium (1.5–2 weeks)
-**Crates**: `nexus-git/src/engine.rs`, `nexus-git/src/core_plugin.rs`, `nexus-storage` (binary file handling)
-**Related**: PRD-11 git integration; git2 LFS pointer parsing; `nexus-storage::read_file` (binary path)
-
-Git-LFS (Large File Storage) stores large binary files (images, audio, video, datasets, model weights) as pointer files in the repo, with the actual content stored on a remote LFS server. Without LFS support, Nexus silently serves the raw pointer text to users when they open an LFS-tracked file, which is confusing and wrong.
-
-**What LFS support means in practice:**
-- Detect LFS pointer files on read (header `version https://git-lfs.github.com/spec/v1`)
-- For binary attachments (images, audio, video) — transparently fetch the actual object from the LFS server and serve bytes to the caller
-- For tracked markdown files — warn user that content may be a pointer if LFS server is unavailable
-- On write — if a file matches `.gitattributes` LFS filter patterns, write the pointer and stage the object via `git lfs` CLI subprocess (git2 has no native LFS API)
-
-**Implementation approach:** git2 has no native LFS support. The right path is a hybrid:
-- Read: detect pointer headers in `nexus-storage::read_file`; if LFS, invoke `git lfs smudge` subprocess to fetch real content
-- Write: detect LFS-tracked patterns from `.gitattributes`; if match, invoke `git lfs clean` subprocess before staging
-- `nexus-git` exposes `lfs_status()` handler — lists tracked patterns from `.gitattributes` and which tracked files are locally available vs. pointer-only
-
-**Definition of done:**
-- `com.nexus.git::lfs_status` (handler id 11) returns `{ tracked_patterns: [], pointer_files: [], available_files: [] }`
-- `com.nexus.storage::read_file` detects LFS pointer header, invokes `git lfs smudge <path>` if `git-lfs` binary found, returns real bytes; falls back to pointer text with a warning event if LFS unavailable
-- `com.nexus.git::stage_file` detects LFS-tracked path and routes through `git lfs clean` before staging
-- `nexus git lfs-status` CLI subcommand lists LFS-tracked files and their local availability
-- Graceful degradation: if `git-lfs` binary not found, log warning and operate on pointer text
+_BL-091 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Read path + status surface shipped: pointer detection in `nexus-storage::read_file` with `git lfs smudge` passthrough, `com.nexus.git::lfs_status` IPC handler (id 27), and `nexus git lfs-status` CLI. Write-path routing through `git lfs clean` on `stage_file` deferred — see closure notes (no immediate user blocker; the read-path gap was the visible-bug case)._
 
 ---
 

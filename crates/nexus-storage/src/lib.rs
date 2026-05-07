@@ -27,6 +27,8 @@ pub mod config;
 pub mod bases;
 pub mod obsidian_base;
 pub mod core_plugin;
+/// BL-091: Git-LFS pointer detection + smudge passthrough for read paths.
+pub mod lfs;
 pub mod vectorstore;
 
 pub mod ipc;
@@ -316,13 +318,32 @@ impl StorageEngine {
     pub fn read_file(&self, path: &str) -> Result<Vec<u8>, StorageError> {
         // Confine to the forge root; see `write_file` and issue #72.
         let abs = resolve_within(self.forge.root(), path)?;
-        std::fs::read(&abs).map_err(|e| {
+        let bytes = std::fs::read(&abs).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 StorageError::FileNotFound(path.to_string())
             } else {
                 StorageError::Io(e)
             }
-        })
+        })?;
+
+        // BL-091: if the file looks like a Git-LFS pointer, try to
+        // resolve the real content via `git lfs smudge`. Failure
+        // (no git-lfs binary, offline + no cache, etc.) degrades
+        // gracefully to handing back the pointer text with a
+        // tracing warning so the caller still gets a deterministic
+        // result and operators see the degradation in logs.
+        if lfs::is_pointer(&bytes) {
+            if let Some(resolved) = lfs::smudge(self.forge.root(), &bytes) {
+                return Ok(resolved);
+            }
+            tracing::warn!(
+                path,
+                "BL-091: file is a Git-LFS pointer but smudge \
+                 failed (git-lfs missing or offline); returning \
+                 pointer text",
+            );
+        }
+        Ok(bytes)
     }
 
     // ── Canvas operations ─────────────────────────────────────────────────

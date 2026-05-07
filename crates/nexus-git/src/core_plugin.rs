@@ -119,6 +119,11 @@ pub const HANDLER_CREATE_TAG: u32 = 20;
 pub const HANDLER_DELETE_TAG: u32 = 21;
 /// IPC handler: pushes all tags to a remote (args: `{"remote": "..."}`).
 pub const HANDLER_PUSH_TAGS: u32 = 22;
+/// IPC handler: report Git-LFS state (BL-091). No args; returns
+/// `{ tracked_patterns, pointer_files, available_files,
+///    git_lfs_installed }`. Inspects `.gitattributes` for `filter=lfs`
+/// rules and walks the working tree classifying matched files.
+pub const HANDLER_LFS_STATUS: u32 = 27;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const POLL_TICK: Duration = Duration::from_millis(200);
@@ -478,12 +483,122 @@ impl CorePlugin for GitCorePlugin {
                 h.with(move |e| e.push_tags(&remote)).map_err(map_err)?;
                 Ok(json!({"ok": true}))
             }
+            HANDLER_LFS_STATUS => Ok(lfs_status_snapshot(&self.forge_root)),
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
                 reason: format!("unknown handler_id {handler_id}"),
             }),
         }
     }
+}
+
+/// BL-091 — snapshot of Git-LFS state for `lfs_status`.
+#[doc(hidden)]
+pub fn lfs_status_for_forge(forge_root: &Path) -> serde_json::Value {
+    lfs_status_snapshot(forge_root)
+}
+
+
+///
+/// Inspects `<forge>/.gitattributes` for `filter=lfs` rules and (if
+/// the `git-lfs` binary is on `PATH`) shells out to `git lfs
+/// ls-files --json`-style output to classify tracked files as
+/// pointer-only vs locally-materialised. Designed to be robust to
+/// `git-lfs` being absent: in that case `git_lfs_installed = false`,
+/// `tracked_patterns` is still populated from `.gitattributes`, and
+/// the file lists are empty (signalling "we know LFS is in use here
+/// but cannot inspect availability").
+fn lfs_status_snapshot(forge_root: &Path) -> serde_json::Value {
+    let tracked_patterns = read_lfs_patterns(forge_root);
+    let git_lfs_installed = std::process::Command::new("git")
+        .args(["lfs", "version"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .current_dir(forge_root)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    let (pointer_files, available_files) = if git_lfs_installed {
+        match std::process::Command::new("git")
+            .args(["lfs", "ls-files"])
+            .current_dir(forge_root)
+            .output()
+        {
+            Ok(o) if o.status.success() => parse_lfs_ls_files(&o.stdout),
+            Ok(o) => {
+                tracing::warn!(
+                    stderr = %String::from_utf8_lossy(&o.stderr),
+                    "BL-091: `git lfs ls-files` exited non-zero",
+                );
+                (Vec::new(), Vec::new())
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "BL-091: failed to spawn `git lfs ls-files`");
+                (Vec::new(), Vec::new())
+            }
+        }
+    } else {
+        (Vec::new(), Vec::new())
+    };
+
+    json!({
+        "tracked_patterns": tracked_patterns,
+        "pointer_files": pointer_files,
+        "available_files": available_files,
+        "git_lfs_installed": git_lfs_installed,
+    })
+}
+
+/// Read `<forge>/.gitattributes` and pull out any pattern that
+/// declares `filter=lfs`. Lines without the LFS filter are
+/// skipped. Missing file → empty list.
+fn read_lfs_patterns(forge_root: &Path) -> Vec<String> {
+    let path = forge_root.join(".gitattributes");
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if !line.contains("filter=lfs") {
+            continue;
+        }
+        // Pattern is the first whitespace-delimited token.
+        if let Some(pat) = line.split_whitespace().next() {
+            out.push(pat.to_string());
+        }
+    }
+    out
+}
+
+/// Parse the textual output of `git lfs ls-files`. Each line is
+/// `<oid> <flag> <path>`, where `flag` is `*` for fully-resolved
+/// objects and `-` for pointer-only entries. The format is stable
+/// across recent git-lfs versions; if it changes the helper
+/// degrades to empty output (still safe — caller treats missing
+/// data as "unknown availability").
+fn parse_lfs_ls_files(stdout: &[u8]) -> (Vec<String>, Vec<String>) {
+    let text = String::from_utf8_lossy(stdout);
+    let mut pointers = Vec::new();
+    let mut available = Vec::new();
+    for line in text.lines() {
+        // Split on whitespace into at most three pieces — the path
+        // can contain spaces so we keep it as-is.
+        let mut parts = line.splitn(3, char::is_whitespace);
+        let _oid = parts.next();
+        let flag = parts.next();
+        let path = parts.next();
+        match (flag, path) {
+            (Some("*"), Some(p)) => available.push(p.trim().to_string()),
+            (Some("-"), Some(p)) => pointers.push(p.trim().to_string()),
+            _ => continue,
+        }
+    }
+    (pointers, available)
 }
 
 /// Defense-in-depth path validation for git IPC handlers (issue #85).

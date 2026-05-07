@@ -1233,6 +1233,7 @@ fn register_core_plugins(
                     ("create_tag", nexus_git::core_plugin::HANDLER_CREATE_TAG),
                     ("delete_tag", nexus_git::core_plugin::HANDLER_DELETE_TAG),
                     ("push_tags", nexus_git::core_plugin::HANDLER_PUSH_TAGS),
+                    ("lfs_status", nexus_git::core_plugin::HANDLER_LFS_STATUS),
                 ]),
             ),
             forge_root,

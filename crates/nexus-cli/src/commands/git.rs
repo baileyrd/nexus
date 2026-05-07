@@ -504,6 +504,65 @@ pub fn set_passphrase(key: &str) -> Result<()> {
 }
 
 /// Remove a cached SSH passphrase from the OS keyring.
+/// Print Git-LFS state for the active forge (BL-091).
+pub fn lfs_status(app: &mut App) -> Result<()> {
+    let snapshot = nexus_git::core_plugin::lfs_status_for_forge(app.forge_root());
+    let installed = snapshot
+        .get("git_lfs_installed")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let patterns = snapshot
+        .get("tracked_patterns")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let pointers = snapshot
+        .get("pointer_files")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let available = snapshot
+        .get("available_files")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    println!(
+        "git-lfs binary : {}",
+        if installed { "installed" } else { "NOT FOUND on PATH" }
+    );
+
+    println!("\nTracked patterns from .gitattributes ({}):", patterns.len());
+    if patterns.is_empty() {
+        println!("  (none — `filter=lfs` not declared anywhere)");
+    } else {
+        for p in &patterns {
+            if let Some(s) = p.as_str() {
+                println!("  {s}");
+            }
+        }
+    }
+
+    println!("\nPointer-only files ({}):", pointers.len());
+    if pointers.is_empty() {
+        println!("  (none — every LFS file is locally available, or git-lfs is not installed)");
+    } else {
+        for p in &pointers {
+            if let Some(s) = p.as_str() {
+                println!("  {s}");
+            }
+        }
+    }
+
+    println!("\nLocally-available files ({}):", available.len());
+    for p in &available {
+        if let Some(s) = p.as_str() {
+            println!("  {s}");
+        }
+    }
+    Ok(())
+}
+
 pub fn clear_passphrase(key: &str) -> Result<()> {
     let vault = nexus_security::CredentialVault::new();
     let name = format!("ssh-passphrase:{key}");

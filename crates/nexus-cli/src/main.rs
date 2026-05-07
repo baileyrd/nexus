@@ -1208,6 +1208,10 @@ enum GitCommand {
         /// Key file basename whose passphrase should be removed
         key: String,
     },
+    /// Show Git-LFS state — tracked patterns, pointer-only files,
+    /// and locally-materialised files (BL-091).
+    #[command(name = "lfs-status")]
+    LfsStatus,
 }
 
 /// Branch subcommands.
@@ -1668,6 +1672,7 @@ fn main() {
             }
             GitCommand::SetPassphrase { key } => commands::git::set_passphrase(&key),
             GitCommand::ClearPassphrase { key } => commands::git::clear_passphrase(&key),
+            GitCommand::LfsStatus => commands::git::lfs_status(&mut app),
         },
         Commands::Run(_) => stubs::not_implemented("run"),
 

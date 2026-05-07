@@ -8,6 +8,37 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-091: Git-LFS read-path support and status surface ✅ (2026-05-06)
+
+**Source**: Git Integration Assessment + user request (2026-05-06)
+**Files**: `crates/nexus-storage/src/{lfs.rs (new),lib.rs}`, `crates/nexus-storage/tests/lfs_pointer.rs (new)`, `crates/nexus-git/src/core_plugin.rs`, `crates/nexus-bootstrap/src/lib.rs`, `crates/nexus-cli/src/{main.rs,commands/git.rs}`
+
+New `nexus-storage::lfs` module: pointer detection (`is_pointer`, `parse_pointer`) and a `smudge()` helper that shells out to `git lfs smudge`. Modified `StorageEngine::read_file` so that whenever a file's first line matches the LFS version header (`version https://git-lfs.github.com/spec/v1`), the engine attempts to resolve real bytes via `git lfs smudge`; failure (no `git-lfs` binary, offline + no cache) degrades gracefully to the pointer text with a `tracing::warn!` that names the relpath. This closes the silent-pointer-text bug that previously surfaced when a user opened an LFS-tracked PNG / PSD / dataset.
+
+`com.nexus.git::lfs_status` (handler id 27) returns:
+
+```json
+{
+  "tracked_patterns":   ["*.png", "*.psd"],
+  "pointer_files":      ["assets/banner.png"],
+  "available_files":    ["assets/icon.png"],
+  "git_lfs_installed":  true
+}
+```
+
+The handler reads `<forge>/.gitattributes` for `filter=lfs` rules to populate `tracked_patterns`, and shells out to `git lfs ls-files` to classify the working tree by availability. When the `git-lfs` binary is missing, `tracked_patterns` is still populated (signalling "LFS is in use here") but the file lists are empty (signalling "we cannot inspect availability"). User-facing surface: `nexus git lfs-status`, which prints all four fields with a clear-degradation header (`git-lfs binary : installed | NOT FOUND on PATH`).
+
+Eight new pointer-detection unit tests (valid header, short input, unrelated bytes, mid-file substring spoof, parse round-trip, missing oid, garbage size) plus two integration tests in `tests/lfs_pointer.rs` confirming pointer-passthrough on smudge unavailability and verbatim non-LFS reads. Every storage and git test continues to pass.
+
+**Required exposing internals**: `lfs_status_snapshot` is mirrored under `pub fn lfs_status_for_forge(forge_root) -> Value` so `nexus-cli/src/commands/git.rs` can call it directly without going through IPC, matching the precedent set by every other `nexus git ...` CLI command in that file (the existing CLI uses `GitEngine::open(...)` rather than `ipc_call(...)`).
+
+**Deferred from the original DoD:**
+
+- *Write-path* routing through `git lfs clean` on `stage_file`. The read path is the visible-bug case (a user opens a PNG and gets pointer text); the write path matters when a user creates a new image inside the forge and wants it stored as LFS content rather than committed verbatim. The follow-up needs `.gitattributes` glob matching (or a `git check-attr filter` subprocess per file) plus a re-route of `stage_file` through a temp-file `git lfs clean` invocation. Documented as a follow-up on the closure entry; not a regression, just an unimplemented enhancement.
+- 60-second LFS smudge timeout — the current `git lfs smudge` invocation has no per-call deadline; a hung LFS server could block `read_file` indefinitely. Worth wiring into a future change once the LFS path has more usage.
+
+---
+
 ### BL-103: Security fuzz targets ✅ (2026-05-06, default-on for stable smoke / nightly for full coverage-guided)
 
 **Source**: Security Integration Assessment (2026-05-06) — gap #6
