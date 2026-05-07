@@ -1,0 +1,233 @@
+/*
+ * BL-078 — multi-file find / replace panel.
+ *
+ * Same layout language as the terminal cross-session search panel
+ * (BL-063): `.nexus-search-panel` is the root container; hits group
+ * by file with a header row + collapsible body. Inline `<mark>`
+ * highlights the matched span in each hit row.
+ */
+
+.nexus-search-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--text-normal);
+  background: var(--background-secondary);
+  overflow: auto;
+}
+
+.nexus-search-panel-header h3 {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
+.nexus-search-panel-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.nexus-search-panel-input {
+  font-size: 12px;
+  padding: 4px 6px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  color: var(--text-normal);
+}
+
+.nexus-search-panel-flags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.nexus-search-panel-flags label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nexus-search-panel-submit,
+.nexus-search-panel-replace-all,
+.nexus-search-panel-group-replace {
+  font-size: 11px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.nexus-search-panel-submit:disabled,
+.nexus-search-panel-replace-all:disabled,
+.nexus-search-panel-group-replace:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.nexus-search-panel-submit {
+  margin-left: auto;
+}
+
+.nexus-search-panel-replace-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.nexus-search-panel-replace-all {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--accent-fg);
+}
+
+.nexus-search-panel-replace-all:disabled {
+  background: transparent;
+  color: var(--text-faint);
+  border-color: var(--background-modifier-border);
+}
+
+.nexus-search-panel-error {
+  font-size: 11px;
+  color: var(--accent-danger);
+  background: var(--bg-danger-soft);
+  padding: 4px 6px;
+  border-radius: 3px;
+  margin-bottom: 6px;
+}
+
+.nexus-search-panel-summary {
+  font-size: 11px;
+  color: var(--text-faint);
+  padding: 4px 6px;
+  margin-bottom: 6px;
+  border-radius: 3px;
+  background: var(--background-modifier-hover);
+}
+
+.nexus-search-panel-empty {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin: 8px 0;
+}
+
+.nexus-search-panel-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nexus-search-panel-group {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
+.nexus-search-panel-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.nexus-search-panel-group-toggle {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.nexus-search-panel-group-path {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: inherit;
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nexus-search-panel-group-path code {
+  font-family: var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.nexus-search-panel-group-path:hover {
+  color: var(--interactive-accent);
+}
+
+.nexus-search-panel-group-count {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.nexus-search-panel-group-rows {
+  list-style: none;
+  margin: 4px 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.nexus-search-panel-hit-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 4px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  width: 100%;
+  border-radius: 3px;
+}
+
+.nexus-search-panel-hit-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.nexus-search-panel-hit-line {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  min-width: 32px;
+  text-align: right;
+}
+
+.nexus-search-panel-hit-text {
+  flex: 1 1 auto;
+  font-family: var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--text-muted);
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nexus-search-panel-hit-text mark {
+  background: var(--text-highlight-bg, rgba(255, 220, 80, 0.45));
+  color: var(--text-normal);
+  padding: 0 1px;
+  border-radius: 2px;
+}

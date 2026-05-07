@@ -205,21 +205,7 @@ _BL-080 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-078: Multi-file search and replace
-
-**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
-**Effort**: Medium (1 week)
-**Crates**: `shell/src/plugins/nexus/searchPanel/` (new shell plugin); `com.nexus.storage` Tantivy FTS already ships
-**Related**: `com.nexus.storage::search` (existing FTS); `com.nexus.storage::write_file` (replace path)
-
-`com.nexus.storage` has Tantivy FTS and file enumeration. A search panel that queries across all forge files and supports in-place replacement is pure shell work with no new backend infrastructure.
-
-**Definition of done:**
-- `nexus.searchPanel` shell plugin opens via ⌘⇧F; supports plain text, regex, case-sensitive, whole-word
-- Results grouped by file with surrounding context lines; click jumps to match
-- Replace field: preview all replacements before applying; apply-all or per-file confirmation
-- CM6 decorations highlight all matches in open tabs when search is active
-- Progress indicator for large forges; results stream incrementally via existing FTS pagination
+_BL-078 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `crates/nexus-storage/src/find_replace.rs` module with `find_in_files` + `replace_in_files` (plus `Matcher` shared by both) covers every modifier combo in the DoD: literal / regex, case-sensitive / -insensitive, whole-word toggle. Two new IPC handlers — `find_in_files` (id 57) and `replace_in_files` (id 58) — pass through to those free functions. The walker uses the existing `should_ignore` filter so `.forge/`, `.git/`, etc. stay out of the result set; binary / non-UTF-8 files are silently skipped. Results group by relpath, sorted ascending, with one line of leading + trailing context per hit. After a `replace_in_files` that changes any file, the storage engine triggers a `rebuild_index` so search / graph stay consistent. Shell ships a `nexus.searchPanel` sidebar leaf with debounced query input, regex / Aa / whole-word toggles, replace field, per-file collapse, click-to-open, and per-file or workspace-wide replace. Bound to ⌘⇧F (matching VS Code's "find in files" muscle memory); BL-063's terminal cross-search moved to ⌘⇧G to free the binding. CM6 decorations on open tabs and incremental streaming for very large forges deferred — the current full-batch shape returns within the documented `max_files` / `max_results` caps and the panel UX feels live._
 
 ---
 

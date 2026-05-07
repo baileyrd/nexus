@@ -356,6 +356,14 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/bookmarks').then(m => m.bookmarksPlugin),
   },
   {
+    id: 'nexus.searchPanel', name: 'Search in Files',
+    version: '0.1.0', core: false,
+    activationEvents: ['onCommand:nexus.searchPanel.focus', 'onView:search-panel'],
+    description:
+      'BL-078 — multi-file find / replace across the forge. Plain-text, regex, case-sensitive, and whole-word; results grouped by file with click-to-open and per-file or workspace-wide replace.',
+    load: () => import('./nexus/searchPanel').then(m => m.searchPanelPlugin),
+  },
+  {
     id: 'nexus.outgoingLinks', name: 'Outgoing Links',
     version: '0.1.0', core: false, activationEvents: ['onStartup'],
     description: 'Side panel listing every link, embed, and unresolved reference in the active note.',

@@ -136,13 +136,16 @@ export const terminalPlugin: Plugin = {
         // `'`'` is the literal backquote character produced by that
         // chord on both Windows and macOS default layouts.
         { command: COMMAND_TOGGLE, key: 'ctrl+`', mac: 'cmd+`' },
-        // BL-063 — cross-session scrollback search. ⌘⇧F mirrors the
-        // VS Code "find in files" muscle memory, scoped to terminal
-        // history rather than the workspace files.
+        // BL-063 — cross-session scrollback search. Originally bound
+        // to ⌘⇧F to mirror VS Code's "find in files" — but BL-078
+        // ships a workspace-wide find-in-files panel that's a much
+        // closer match for that muscle memory. Moved here to ⌘⇧G
+        // (terminal-only "find") so the file-search keybinding is
+        // available for the workspace surface.
         {
           command: COMMAND_CROSS_SEARCH_SHOW,
-          key: 'ctrl+shift+f',
-          mac: 'cmd+shift+f',
+          key: 'ctrl+shift+g',
+          mac: 'cmd+shift+g',
         },
       ],
       contextKeys: [

@@ -245,6 +245,20 @@ pub const HANDLER_BACKLINKS_TO_BLOCK: u32 = 55;
 /// caller is the trust boundary.
 pub const HANDLER_IMPORT_FORGE: u32 = 56;
 
+/// BL-078 — `find_in_files` handler. Args: [`crate::FindInFilesArgs`].
+/// Returns `Vec<crate::FileMatches>` ordered by forge-relative path
+/// ascending. Walks every non-ignored UTF-8 file under the forge
+/// root and applies the matcher line-by-line; binary / non-UTF-8
+/// files are silently skipped. See [`crate::find_in_files`] for
+/// scope and trade-offs.
+pub const HANDLER_FIND_IN_FILES: u32 = 57;
+
+/// BL-078 — `replace_in_files` handler. Args: [`crate::ReplaceInFilesArgs`].
+/// Returns a [`crate::ReplaceReport`] tallying the files changed,
+/// total replacements applied, and per-file errors that didn't
+/// abort the batch. See [`crate::replace_in_files`].
+pub const HANDLER_REPLACE_IN_FILES: u32 = 58;
+
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
 ///
@@ -1086,6 +1100,35 @@ impl CorePlugin for StorageCorePlugin {
                 // files surface in search / graph.
                 let _ = engine.rebuild_index();
                 to_value(&report, "import_forge")
+            }
+            HANDLER_FIND_IN_FILES => {
+                // BL-078 — args go straight through to the
+                // [`crate::find_in_files`] free function. No engine
+                // dependency; the walk uses the forge_root the
+                // plugin was built with.
+                let parsed: crate::FindInFilesArgs =
+                    serde_json::from_value(args.clone()).map_err(|e| {
+                        exec_err(format!("find_in_files: invalid args: {e}"))
+                    })?;
+                let hits = crate::find_in_files(&self.forge_root, &parsed)
+                    .map_err(|e| exec_err(format!("find_in_files: {e}")))?;
+                to_value(&hits, "find_in_files")
+            }
+            HANDLER_REPLACE_IN_FILES => {
+                // BL-078 — pass-through to [`crate::replace_in_files`].
+                // After a successful replacement we trigger an
+                // index rebuild so search / graph stay consistent
+                // with the rewritten files.
+                let parsed: crate::ReplaceInFilesArgs =
+                    serde_json::from_value(args.clone()).map_err(|e| {
+                        exec_err(format!("replace_in_files: invalid args: {e}"))
+                    })?;
+                let report = crate::replace_in_files(&self.forge_root, &parsed)
+                    .map_err(|e| exec_err(format!("replace_in_files: {e}")))?;
+                if report.files_changed > 0 {
+                    let _ = engine.rebuild_index();
+                }
+                to_value(&report, "replace_in_files")
             }
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }

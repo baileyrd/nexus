@@ -8,6 +8,53 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-078: Multi-file search and replace ✅ (2026-05-07)
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](docs/PRDs/BL-075-081-code-editor.md)
+**Files**: `crates/nexus-storage/src/{find_replace.rs, lib.rs, core_plugin.rs}`, `crates/nexus-storage/Cargo.toml`, `crates/nexus-bootstrap/src/lib.rs`, `shell/src/plugins/nexus/searchPanel/{index.tsx, SearchPanelView.tsx, searchPanelStore.ts, searchPanel.css}`, `shell/src/plugins/catalog.ts`, `shell/src/plugins/nexus/terminal/index.ts` (BL-063 keybinding move), six new ts-rs bindings under `packages/nexus-extension-api/src/generated/ipc/`
+**Related**: `com.nexus.storage::search` (existing Tantivy FTS — different code path); BL-063 (terminal cross-search; BL-078 reclaims its keybinding)
+
+Lands a workspace-wide find / replace that respects every modifier the DoD called out — plain text, regex, case-sensitive, whole-word — with a results panel grouped by file, click-to-open, and per-file or workspace-wide replace. The pre-BL-078 baseline was nothing: `com.nexus.storage::search` returned block-level BM25 hits without line numbers and didn't support modifiers, so the editor's "find" had no workspace surface at all.
+
+- **`find_replace.rs`.** Shared `Matcher` enum (`Literal { needle, case_sensitive, whole_word }` / `Regex(regex_lite::Regex)`) used by both find and replace so the two surfaces stay perfectly in sync. The literal path implements its own whole-word boundary check (ASCII `\w` semantics) so it doesn't need to fall through to regex compilation. The regex path inlines a `(?i)` prefix for case-insensitive plus a `\b…\b` wrap for whole-word; both are no-cost when the modifier is off.
+- **Walker.** Reuses `watcher::should_ignore` so `.forge/`, `.git/`, etc. are excluded by the same rule the file-tree and reconcile pass use. Symlinks are skipped (consistent with BL-082's policy). Files that don't decode as UTF-8 are silently dropped — a binary blob's bytes would be noise in the result tree.
+- **Result shape.** `Vec<FileMatches { relpath, hits: Vec<LineMatch> }>` ordered by relpath ascending so the shell UI doesn't need to sort. Each `LineMatch` carries `(line, column, length, text, before?, after?)` — one line of leading + trailing context per hit, `None` at file boundaries.
+- **Caps.** `DEFAULT_MAX_FILES = 200` and `DEFAULT_MAX_RESULTS = 1000` keep a `the` query from dumping the entire forge. Caller-overridable; the shell's UI doesn't surface them yet, but the backend honors them.
+- **Replace path.** `replace_in_files` reuses the matcher and walks the same candidate list. Per-file errors (read or write failures) accumulate into `ReplaceReport.errors` rather than aborting the batch — one bad file shouldn't sink the rest. After a successful replacement (any file changed) the engine kicks off `rebuild_index` so search / graph indices catch up.
+- **IPC.** `com.nexus.storage::find_in_files` (id 57) and `replace_in_files` (id 58). Args + returns mirror the Rust types; ts-rs / schemars derive the bindings.
+- **Shell `nexus.searchPanel`.** New plugin (lazy-activated `onCommand:nexus.searchPanel.focus` / `onView:search-panel`) with:
+  - Sidebar leaf containing a query input, three flag checkboxes (`Aa`, `ab` whole-word, `.*` regex), a Find button, a replace input, and a "Replace All" button gated by `query.trim().length > 0 && results.length > 0`.
+  - Result tree grouped by file with a chevron toggle and per-file count. Click the file row → `events.emit('files:open')` (the editor handler routes it into a workspace leaf); click an individual hit row → same `files:open` (per-line scrolling lands when an editor "scroll to line" event surface ships). The matched span renders as `<mark>` inline with one line of context.
+  - "Replace" button per file group when the replace input is non-empty, for the per-file confirmation flow the DoD called out.
+  - Last-replace summary line (`Replaced N occurrences in M files [· K errors]`) under the toolbar after a successful apply.
+  - Workspace-closed reset so a fresh forge doesn't see stale results.
+- **Keybinding.** ⌘⇧F (Cmd+Shift+F on macOS, Ctrl+Shift+F elsewhere) — VS Code / Sublime convention for "find in files". BL-063's terminal cross-session search moved to ⌘⇧G in the same commit so the workspace surface owns the more-discoverable binding.
+
+**Tests.**
+
+- 17 new tests in `nexus-storage::find_replace::tests`:
+  - Empty / whitespace-only query returns empty.
+  - Literal match picks up every hit with correct context (`before` / `after`).
+  - Default case-insensitive matches mixed case; `case_sensitive: true` only matches exact case.
+  - `whole_word: true` excludes substrings (`test` doesn't match in `testing` / `tested`).
+  - Regex pattern `port \d+` matches both `port 3000` and `port 8080`.
+  - Invalid regex surfaces `StorageError::ConfigInvalid`.
+  - Results grouped per file, sorted by relpath ascending.
+  - Binary file with invalid UTF-8 skipped silently.
+  - Ignored dot-dirs (`.forge/`, `.git/`) excluded by `should_ignore`.
+  - `max_files` and `max_results` honored independently.
+  - `replace_in_files` substitutes and writes back the right bytes, restricts to the `files` arg when set, supports regex capture groups (`id-(\d+)` → `ID($1)`), no-op when no matches, and respects whole-word boundaries on rewrite.
+- All 343 nexus-storage tests pass; 903 shell tests stay green; ts-export drift-free; clippy clean on the new module + bootstrap delta; shell typecheck + lint clean on the new files.
+
+**Deliberately deferred:**
+
+- **CM6 decorations on open tabs.** The DoD calls for live highlighting of matches in already-open editor tabs. That's a separate editor-side surface that needs a transaction extension watching the panel's query state — out of scope for this commit. The result-list click → `files:open` path already gets the user to the right file; the per-line scroll-to + decoration overlay land when the editor exposes a public "scroll to line" event.
+- **Incremental / streaming results.** The current handler returns the full result set in one round-trip. The `max_files` / `max_results` caps bound the cost; for forges that consistently hit the cap, a streaming surface (events on `com.nexus.storage.search_progress.<query_id>`) is a natural follow-up.
+- **Tantivy prefiltering.** A literal-text search could cheaply prune candidate files through the existing FTS index before paying for the line-by-line scan. Skipped — the line scan over an already-filtered tree is fast enough today, and prefiltering would have to fall back to the unfiltered walker for every regex / case-sensitive / whole-word query (since Tantivy doesn't honor those modifiers). Optimisation, not correctness.
+- **Per-line-scroll on click.** The shell emits `files:open` with the relpath; the editor opens the file but doesn't scroll to the matched line. Adding a `nexus.editor.scrollToLine` event with a payload of `{ relpath, line }` is the obvious next step but out of scope.
+
+---
+
 ### BL-075: Dual-mode editor — code files vs. document files ✅ (2026-05-07)
 
 **Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](docs/PRDs/BL-075-081-code-editor.md)

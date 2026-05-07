@@ -15,6 +15,7 @@ pub mod schema;
 mod parser;
 mod index;
 mod search;
+mod find_replace;
 mod watcher;
 mod reconcile;
 mod tasks;
@@ -67,6 +68,10 @@ pub use tasks::{ParsedTask, TaskRecord, TaskFilter, insert_tasks, query_tasks, t
 pub use index::{BlockRecord, FileFilter, FileMetadata, FileRecord, LinkRecord, RebuildStats, TagResult};
 pub use index::{insert_file, query_files, query_blocks, query_links, query_backlinks, query_tags, delete_file, soft_delete_file, file_by_path};
 pub use search::{SearchIndex, SearchResult};
+pub use find_replace::{
+    find_in_files, replace_in_files, FileMatches, FindInFilesArgs, LineMatch,
+    ReplaceError, ReplaceInFilesArgs, ReplaceReport,
+};
 pub use search_scope::{CmpOp, PropertyOp, ScopeFilter, parse_scoped_query};
 pub use reconcile::{ReconcileDelta, reconcile};
 pub use watcher::{relative_path, should_ignore, StorageEvent, Watcher};

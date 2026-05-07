@@ -485,6 +485,14 @@ fn register_core_plugins(
                         nexus_storage::core_plugin::HANDLER_IMPORT_FORGE,
                     ),
                     (
+                        "find_in_files",
+                        nexus_storage::core_plugin::HANDLER_FIND_IN_FILES,
+                    ),
+                    (
+                        "replace_in_files",
+                        nexus_storage::core_plugin::HANDLER_REPLACE_IN_FILES,
+                    ),
+                    (
                         "query_tasks",
                         nexus_storage::core_plugin::HANDLER_QUERY_TASKS,
                     ),
