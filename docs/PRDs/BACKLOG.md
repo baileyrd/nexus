@@ -389,20 +389,7 @@ _BL-066 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-064: Terminal AI suggestion LLM bridge
-
-**Source**: Terminal Integration Assessment (2026-05-06) — gap in `ai.rs`
-**Effort**: Small–Medium (1 day)
-**Crates**: `nexus-terminal/src/ai.rs`, `nexus-terminal/src/core_plugin.rs`
-**Related**: PRD-09 §12; `AiSuggestionEngine` shipped Phase S; `com.nexus.ai::stream_ask`
-
-`AiSuggestionEngine` has 5 built-in pattern-match rules that return static suggestion strings. When a rule matches, the explanation is a hardcoded string rather than an LLM-generated response. The `SuggestionRule` trait already supports extension, and the IPC path to `com.nexus.ai` exists.
-
-**Definition of done:**
-- New `com.nexus.terminal::suggest` handler (id 23): takes `{ session_id, line_count }`, runs `AiSuggestionEngine` over recent output, and if a rule matches routes the matched context + rule explanation through `com.nexus.ai::stream_ask` for an enriched response
-- Falls back to the static rule explanation if `com.nexus.ai` is unavailable or times out (10s)
-- Shell terminal panel surfaces the suggestion as a dismissible chip below the output pane with a "Run suggested command" action
-- Requires `ai.chat` capability; no additional capability needed (read-only terminal access)
+_BL-064 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `com.nexus.terminal::suggest` handler (id 24 — DoD-suggested 23 was already taken by BL-055's `run_saved`; ids are append-only) walks the tail of a session's line buffer, runs the existing `AiSuggestionEngine`, and on a match routes the matched line + rule context through `com.nexus.ai::stream_chat` (`mode=complete`, `tools=none`) for an enriched explanation. The IPC call is wrapped in a 10 s `tokio::time::timeout`; on timeout / IPC error / no kernel context wired, the handler falls back to the rule's static reason and flips `llm_used: false` in the response. The handler returns JSON `null` when no rule matches. `TerminalCorePlugin` gained `wire_context` (captures the kernel context) and `dispatch_async` (the `suggest` arm); the sync `dispatch` path returns a clear "use dispatch_async" error so a misrouted call is obvious. Shell ships a `SuggestionChip` below the xterm canvas: polls `suggest` every 5 s while the terminal pane has a live session, renders the suggested command + reason with Run / Dismiss controls, and shows a sparkle marker when `llm_used`. Used `stream_chat` instead of the DoD-suggested `stream_ask` because the terminal context isn't a RAG question — RAG would force an embedding provider config that the terminal flow shouldn't depend on._
 
 ---
 

@@ -8,6 +8,40 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-064: Terminal AI suggestion LLM bridge ✅ (2026-05-07)
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap in `ai.rs`
+**Files**: `crates/nexus-terminal/src/{core_plugin.rs, lib.rs}`, `crates/nexus-terminal/Cargo.toml`, `crates/nexus-bootstrap/src/lib.rs`, `shell/src/plugins/nexus/terminal/{SuggestionChip.tsx, TerminalView.tsx, terminal.css}`, two new ts-rs bindings under `packages/nexus-extension-api/src/generated/ipc/`
+**Related**: PRD-09 §12; `AiSuggestionEngine` shipped Phase S; `com.nexus.ai::stream_chat` (handler id 6)
+
+Bridges the existing rule-based `AiSuggestionEngine` to the LLM so a build error or a `Permission denied (publickey)` line surfaces a one-paragraph explanation rather than the rule's static reason. The static reason still appears as a graceful fallback when no AI provider is configured or the call exceeds the 10 s budget.
+
+- **Backend.** New `com.nexus.terminal::suggest` handler (id 24 — DoD-suggested 23 was already taken by BL-055's `run_saved`). Args: `{ session_id, line_count? }` (default 50). The handler walks the tail of the session's line buffer, runs the `AiSuggestionEngine`, finds the first match (newest-first iteration so a fresh breach near the prompt outranks an older error), and either returns the static rule response immediately (no kernel context wired) or routes the matched line + rule context through `com.nexus.ai::stream_chat` with `mode=complete`, `tools=none`, `max_tokens=200` and a brief system prompt. Returns JSON `null` when no rule fires. Used `stream_chat` rather than the DoD-suggested `stream_ask` because terminal output isn't a RAG question — `stream_ask` would force the user to configure an embedding provider for the terminal feature to work, and the suggestion chip's value doesn't depend on retrieving forge notes.
+- **Async wiring.** `TerminalCorePlugin` gained two pieces of plumbing:
+  - `wire_context(...)` — captures the `Arc<KernelPluginContext>` so `dispatch_async` can issue nested `ipc_call`s.
+  - `dispatch_async` — the `suggest` arm builds a `Box::pin(handle_suggest(...))` future. The sync `dispatch` path's `HANDLER_SUGGEST` arm returns a clear "use dispatch_async" error so a misrouted call surfaces obviously rather than panicking at unwind.
+- **Timeout.** `tokio::time::timeout(10s, ipc_call)` wraps the AI round-trip. The inner `ipc_call` already takes a per-call timeout, but a misbehaving provider can leak the future past that deadline; the outer wrapper is the load-bearing guarantee. tokio was added to nexus-terminal's deps with just the `time` feature.
+- **Shell `SuggestionChip`.** Sits between the xterm canvas and any future bottom UI inside `TerminalView`. Polls `suggest` every 5 s while a session id is live (driven by a `useTerminalStore` subscription). Renders a single row: severity-colored marker (✨ when `llm_used`, • otherwise), monospaced command, truncated reason, Run + Dismiss buttons. Run dispatches `send_input` of the suggested command; Dismiss hides via a `(source_rule, text)` dedup key so the chip stays hidden until a different suggestion fires. Failures (poll error, send_input error) are silent — the chip's contract is "show suggestions when we have them", not "explain its own infrastructure".
+
+**Tests.**
+
+- 5 new tests in `nexus-terminal::core_plugin::tests`:
+  - `suggest_returns_null_when_no_rule_fires` — printf "hello" produces no rule match; response is JSON `null`.
+  - `suggest_returns_static_rule_response_when_no_kernel_context` — printf a `cargo could not compile` line, then `handle_suggest(None, ...)` returns the static rule's `(text, reason, severity, source_rule)` and `llm_used: false`. Verifies the fallback path that runs whenever `com.nexus.ai` is unreachable.
+  - `suggest_unknown_session_surfaces_clear_error` — clear error message rather than a panic.
+  - `suggest_invalid_args_reported_as_execution_failed` — schema rejection wrapped as `ExecutionFailed`, matching the rest of the dispatcher.
+  - `dispatch_suggest_via_sync_path_surfaces_async_hint` — calling the sync `dispatch(HANDLER_SUGGEST, ...)` returns the "use dispatch_async" error, pinning the dual-path contract.
+- The IPC-success and IPC-timeout branches go through the live `com.nexus.ai` plugin and are exercised at integration boot. Mocking the kernel just to assert `tokio::time::timeout` does what `tokio::time::timeout` does isn't load-bearing.
+- All 290 nexus-terminal tests pass; ts-export regen produces `SuggestArgs.ts` + `SuggestResponse.ts` only; clippy clean on changed files.
+
+**Deliberately deferred:**
+
+- **Per-line trigger.** The chip polls every 5 s rather than reacting to lifecycle events. A push surface (a `com.nexus.terminal.events.suggestion.<session_id>` topic the handler emits when a rule fires) would be cleaner, but it'd require the engine to run inside the lifecycle forwarder for every line — and most lines don't match a rule. Polling is the cheaper "pull when you care" model; if the suggestion latency ever bothers a user we revisit.
+- **Multi-suggestion ranking.** The handler returns the first match (newest-first). When two rules fire on the same tail (rare in practice), the suggestion chip shows whichever fired most recently. A scoring layer can land alongside future user-pinned-rule preferences.
+- **Capability surfacing.** The DoD called out `ai.chat` as the required capability; that's already the floor for `com.nexus.ai::stream_chat`, so no new capability work was needed. Tightening to a separate `terminal.suggest` cap is a security-review topic, not a BL-064 concern.
+
+---
+
 ### BL-062: Terminal session LRU eviction policy ✅ (2026-05-07)
 
 **Source**: Terminal Integration Assessment (2026-05-06) — gap in `manager.rs`

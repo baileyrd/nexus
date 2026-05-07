@@ -17,6 +17,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+# BL-064 — async timeout wrapping the AI suggestion enrichment IPC.
+# Only `time` feature needed; the dispatch_async future itself is
+# driven by the kernel's runtime (no `rt` flag required here).
+tokio = { workspace = true }
 # SQLite persistence for sessions + ad-hoc command history (PRD-09 §2.2, §10.1).
 rusqlite = { workspace = true }
 ts-rs = { workspace = true, optional = true }

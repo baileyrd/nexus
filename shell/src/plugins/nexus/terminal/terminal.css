@@ -261,6 +261,75 @@
 }
 
 /*
+ * BL-064 — terminal AI suggestion chip.
+ *
+ * Single row below the xterm canvas. Shows the suggested command line
+ * (monospaced), a one-paragraph reason (truncated at one line), and
+ * Run / Dismiss icon buttons. Only visible when `com.nexus.terminal::suggest`
+ * has produced a match for the current session.
+ */
+.nexus-terminal-suggestion-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: var(--background-secondary);
+  border-top: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  /* Reason text overflows in narrow pane widths; clip with ellipsis
+     rather than wrap so the chip stays single-row. */
+  min-height: 24px;
+}
+
+.nexus-terminal-suggestion-chip-marker {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.nexus-terminal-suggestion-chip-cmd {
+  flex: 0 0 auto;
+  font-family: var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-weight: 600;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+
+.nexus-terminal-suggestion-chip-reason {
+  flex: 1 1 auto;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nexus-terminal-suggestion-chip-run,
+.nexus-terminal-suggestion-chip-dismiss {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.nexus-terminal-suggestion-chip-run:hover,
+.nexus-terminal-suggestion-chip-dismiss:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/*
  * Command History sub-view (BL-060).
  *
  * Reuses every other class above — the History rows and Saved-command

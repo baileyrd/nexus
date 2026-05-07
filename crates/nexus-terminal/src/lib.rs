@@ -85,7 +85,7 @@ pub use ai::{
 pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
 pub use core_plugin::{
-    AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs, RunSavedArgs,
+    AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs, RunSavedArgs, SuggestArgs, SuggestResponse,
     CreateSessionArgs, CreateSessionResponse, OutputStreamPayload, PumpArgs, PumpResponse,
     ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ResizeArgs, SearchOutputArgs,
     SendInputArgs, SendRawInputArgs, SessionIdArgs, TerminalCorePlugin,
@@ -93,7 +93,7 @@ pub use core_plugin::{
     HANDLER_ADHOC_DELETE, HANDLER_ADHOC_GET, HANDLER_ADHOC_LIST, HANDLER_ADHOC_PROMOTE,
     HANDLER_CLOSE_SESSION, HANDLER_CREATE_SESSION,
     HANDLER_GET_SESSION_INFO, HANDLER_LIST_SESSIONS, HANDLER_PUMP, HANDLER_READ_OUTPUT,
-    HANDLER_OPEN_IN_TERMINAL, HANDLER_READ_RAW_SINCE, HANDLER_RUN_SAVED,
+    HANDLER_OPEN_IN_TERMINAL, HANDLER_READ_RAW_SINCE, HANDLER_RUN_SAVED, HANDLER_SUGGEST,
     HANDLER_SAVED_CREATE, HANDLER_SAVED_DELETE, HANDLER_SAVED_LIST, HANDLER_SAVED_REORDER,
     HANDLER_SAVED_UPDATE, HANDLER_SEARCH_OUTPUT, HANDLER_SEND_INPUT, HANDLER_SEND_RAW_INPUT,
     HANDLER_WAIT_FOR_PATTERN, PLUGIN_ID,

@@ -11,6 +11,7 @@ import { useThemeStore } from '../../../stores/themeStore'
 import { createUrlExtractor } from './urlExtractor'
 import type { UrlMatch } from './urls'
 import { UrlChips } from './UrlChips'
+import { SuggestionChip } from './SuggestionChip'
 
 /** BL-058: number of recent URLs pinned above the terminal output. */
 const URL_CHIP_LIMIT = 5
@@ -110,6 +111,10 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
   // it inline below.
   const [urls, setUrls] = useState<UrlMatch[]>([])
   const dismissUrls = useCallback(() => setUrls([]), [])
+  // BL-064 — mirror the terminal store's sessionId so the suggestion
+  // chip's polling effect re-runs when the user opens / closes the
+  // pane (i.e. when the session id flips).
+  const sessionId = useTerminalStore((s) => s.sessionId)
 
   useEffect(() => {
     const container = containerRef.current
@@ -496,6 +501,7 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <UrlChips urls={urls} openExternal={openExternal} onDismiss={dismissUrls} />
       <div ref={containerRef} className="nexus-terminal-root" style={{ flex: 1, minHeight: 0 }} />
+      <SuggestionChip kernel={kernel} sessionId={sessionId} />
     </div>
   )
 }

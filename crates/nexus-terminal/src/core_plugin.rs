@@ -40,6 +40,7 @@
 //! | 21         | `adhoc_delete`       | Forget an ad-hoc row (BL-060)           |
 //! | 22         | `adhoc_promote`      | Promote ad-hoc → saved command (BL-060) |
 //! | 23         | `run_saved`          | Spawn session running saved cmd (BL-055)|
+//! | 24         | `suggest`            | LLM-enriched output suggestion (BL-064) |
 //!
 //! Ids are **append-only** — never reused after retirement — because
 //! manifest registrations in loaded plugins bake them in.
@@ -95,8 +96,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use nexus_kernel::EventBus;
-use nexus_plugins::{CorePlugin, PluginError};
+use nexus_kernel::{EventBus, KernelPluginContext, PluginContext};
+use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "ts-export")]
@@ -206,6 +207,16 @@ pub const HANDLER_ADHOC_PROMOTE: u32 = 22;
 /// events, drainer hookup, and persistence behave identically to
 /// `create_session`.
 pub const HANDLER_RUN_SAVED: u32 = 23;
+
+/// BL-064 — `suggest` handler id. Args: [`SuggestArgs`]. Walks the
+/// recent N output lines for a session, runs the
+/// [`crate::AiSuggestionEngine`] over each, and — when a rule fires
+/// — routes the matched context through `com.nexus.ai::stream_chat`
+/// (`mode=complete`, `tools=none`) for an LLM-enriched explanation.
+/// Returns `null` when no rule matches, or [`SuggestResponse`]
+/// otherwise. Falls back to the rule's static reason when the
+/// `com.nexus.ai` call fails or exceeds the 10 s budget.
+pub const HANDLER_SUGGEST: u32 = 24;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -624,6 +635,63 @@ pub struct RunSavedArgs {
     pub command: Option<String>,
 }
 
+/// BL-064 — arguments for `suggest`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct SuggestArgs {
+    /// Target session id.
+    pub session_id: String,
+    /// How many lines from the tail of the buffer to scan. Defaults
+    /// to 50 when omitted — enough to catch the latest error block
+    /// across most build-tool layouts without quadratic-cost regex
+    /// scans on huge scrollbacks.
+    #[serde(default)]
+    pub line_count: Option<u32>,
+}
+
+/// BL-064 — successful suggestion. `null` is returned at the IPC
+/// layer when no rule matched; this struct is only on the wire when
+/// at least one [`SuggestionRule`](crate::SuggestionRule) fired.
+///
+/// `llm_used` distinguishes "the LLM enriched the explanation" from
+/// "we fell back to the rule's static reason because the LLM call
+/// timed out or no provider was configured". UI surfaces can render
+/// the two cases differently (e.g. show a sparkle icon when
+/// `llm_used`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct SuggestResponse {
+    /// Suggested command line — verbatim from the matching rule.
+    pub text: String,
+    /// Human-readable explanation. The LLM-enriched paragraph when
+    /// `llm_used`; the rule's static reason otherwise.
+    pub reason: String,
+    /// Severity tag (`info` / `warning` / `error`) — verbatim from
+    /// the matching rule.
+    pub severity: String,
+    /// Stable rule id (e.g. `cargo.compile_failure`).
+    pub source_rule: String,
+    /// `true` when the response was enriched by `com.nexus.ai`;
+    /// `false` when the static rule explanation was used.
+    pub llm_used: bool,
+}
+
 // ── The plugin ───────────────────────────────────────────────────────────────
 
 /// Core plugin instance. Holds the server behind an [`Arc<Mutex<_>>`]
@@ -692,6 +760,16 @@ pub struct TerminalCorePlugin {
     /// BL-061 — handle to the memory poller thread. Drop signals
     /// stop and joins, mirroring the drainer pattern.
     memory_poller: Option<MemoryPollerHandle>,
+    /// BL-064 — kernel context, captured by `wire_context` so the
+    /// async `suggest` handler can issue nested `ipc_call`s into
+    /// `com.nexus.ai`. `None` until bootstrap finishes wiring; the
+    /// handler returns a clear error if dispatched before then.
+    context: Option<Arc<KernelPluginContext>>,
+    /// BL-064 — pre-built suggestion engine. Holds the default rule
+    /// set so every `suggest` dispatch reuses the same compiled
+    /// regex state. Wrapped in `Arc` so the dispatch_async future
+    /// can clone it without re-instantiating per-call.
+    suggest_engine: Arc<crate::ai::AiSuggestionEngine>,
 }
 
 /// BL-061 — shared memory state held behind a single `Mutex` so the
@@ -831,6 +909,8 @@ impl TerminalCorePlugin {
             memory_limits: None,
             memory_poll_interval: crate::RECOMMENDED_POLL_INTERVAL,
             memory_poller: None,
+            context: None,
+            suggest_engine: Arc::new(crate::ai::AiSuggestionEngine::with_defaults()),
         }
     }
 
@@ -850,6 +930,8 @@ impl TerminalCorePlugin {
             memory_limits: None,
             memory_poll_interval: crate::RECOMMENDED_POLL_INTERVAL,
             memory_poller: None,
+            context: None,
+            suggest_engine: Arc::new(crate::ai::AiSuggestionEngine::with_defaults()),
         }
     }
 
@@ -1335,6 +1417,167 @@ fn publish_lifecycle_event(bus: &EventBus, event: &TerminalEvent) {
     }
 }
 
+/// BL-064 — total budget for the LLM enrichment round-trip. After
+/// this, the handler falls back to the rule's static reason. PRD-09
+/// §12 doesn't specify a number; 10 s mirrors the BL-064 DoD and
+/// keeps the suggestion chip responsive on a slow provider.
+const SUGGEST_LLM_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// BL-064 — default tail-of-buffer scan size when the caller omits
+/// `line_count`. Large enough to catch a build-error block; small
+/// enough that the in-memory rule engine evaluates in microseconds.
+const SUGGEST_DEFAULT_LINE_COUNT: usize = 50;
+
+/// BL-064 — async handler for `com.nexus.terminal::suggest`. Walks
+/// the recent N lines, finds the first matching rule, and (when a
+/// kernel context is wired) routes the matched line + rule through
+/// `com.nexus.ai::stream_chat` for an enriched explanation.
+///
+/// The function is intentionally a free `async fn`: the dispatcher
+/// captures it via `Box::pin(...)` in `dispatch_async`, so it never
+/// borrows `&mut self` past the synchronous setup.
+async fn handle_suggest(
+    ctx: Option<&Arc<KernelPluginContext>>,
+    server: &Arc<Mutex<InMemoryTerminalServer>>,
+    engine: &Arc<crate::ai::AiSuggestionEngine>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, PluginError> {
+    let parsed: SuggestArgs = serde_json::from_value(args.clone())
+        .map_err(|e| exec_err(format!("suggest: invalid args: {e}")))?;
+    let limit = parsed
+        .line_count
+        .map(|n| usize::try_from(n).unwrap_or(SUGGEST_DEFAULT_LINE_COUNT))
+        .unwrap_or(SUGGEST_DEFAULT_LINE_COUNT)
+        .max(1);
+
+    // Read the tail of the line buffer under a brief server lock —
+    // we drop the lock before the (possibly slow) IPC call so the
+    // drainer / IPC dispatcher aren't blocked on the LLM provider.
+    let session_id = SessionId::from_string(parsed.session_id.clone());
+    let lines: Vec<crate::lines::Line> = {
+        let guard = server.lock().map_err(poisoned)?;
+        let manager = guard.manager();
+        let total = manager.line_count(&session_id).ok_or_else(|| {
+            exec_err(format!("suggest: unknown session '{}'", parsed.session_id))
+        })?;
+        let start = total.saturating_sub(limit);
+        manager
+            .lines_snapshot(&session_id, Some(start), Some(total - start))
+            .unwrap_or_default()
+    };
+
+    // First match wins. Iterating lines newest-first means a fresh
+    // breach near the prompt outranks an older error scrolling out
+    // of the tail window.
+    let suggestion = lines
+        .iter()
+        .rev()
+        .find_map(|line| engine.observe(&line.text_only).into_iter().next());
+    let Some(suggestion) = suggestion else {
+        return Ok(serde_json::Value::Null);
+    };
+
+    let static_response = SuggestResponse {
+        text: suggestion.text.clone(),
+        reason: suggestion.reason.clone(),
+        severity: severity_tag(suggestion.severity).to_string(),
+        source_rule: suggestion.source_rule.to_string(),
+        llm_used: false,
+    };
+
+    // No kernel context → no IPC → return the static rule response.
+    let Some(ctx) = ctx else {
+        return to_value(&static_response, "suggest");
+    };
+
+    // Build the enrichment prompt. Keep it tight — we want a 2-3
+    // sentence explanation, not a chat transcript. The matched line
+    // gives the model the concrete output that triggered the rule;
+    // the rule's reason gives it a structural framing.
+    let matched_line: String = lines
+        .iter()
+        .rev()
+        .find(|l| !engine.observe(&l.text_only).is_empty())
+        .map(|l| l.text_only.clone())
+        .unwrap_or_default();
+    let user_prompt = format!(
+        "Terminal pattern matched: {rule}\n\
+         Matched line: `{line}`\n\
+         Suggested command: `{cmd}`\n\n\
+         In 2-3 sentences, explain what's likely wrong and why the suggested \
+         command helps. Be concrete; don't restate the prompt.",
+        rule = suggestion.source_rule,
+        line = matched_line.replace('`', "'"),
+        cmd = suggestion.text,
+    );
+
+    let ai_args = serde_json::json!({
+        "messages": [
+            {"role": "user", "content": user_prompt}
+        ],
+        "system": "You are a developer assistant explaining terminal output. Reply with prose, no markdown lists.",
+        "mode": "complete",
+        "tools": "none",
+        "max_tokens": 200,
+    });
+
+    // Call into `com.nexus.ai::stream_chat` with a hard 10 s budget.
+    // tokio::time::timeout wraps the whole IPC future so a hanging
+    // provider doesn't strand the suggestion chip indefinitely. The
+    // inner `ipc_call` already accepts a per-call timeout, but a
+    // misbehaving provider can still leak the future past the
+    // deadline; the outer timeout is the load-bearing guarantee.
+    let llm_call = ctx.ipc_call(
+        "com.nexus.ai",
+        "stream_chat",
+        ai_args,
+        SUGGEST_LLM_TIMEOUT,
+    );
+    let enriched_text: Option<String> = match tokio::time::timeout(
+        SUGGEST_LLM_TIMEOUT,
+        llm_call,
+    )
+    .await
+    {
+        Ok(Ok(response)) => {
+            let text = response
+                .get("text")
+                .and_then(|v: &serde_json::Value| v.as_str())
+                .map(str::to_string);
+            text.filter(|s: &String| !s.trim().is_empty())
+        }
+        Ok(Err(err)) => {
+            tracing::debug!(plugin = PLUGIN_ID, %err, "suggest: AI call failed; falling back to static rule");
+            None
+        }
+        Err(_) => {
+            tracing::debug!(plugin = PLUGIN_ID, "suggest: AI call timed out after 10s; falling back to static rule");
+            None
+        }
+    };
+
+    let response = match enriched_text {
+        Some(reason) => SuggestResponse {
+            reason,
+            llm_used: true,
+            ..static_response
+        },
+        None => static_response,
+    };
+    to_value(&response, "suggest")
+}
+
+/// Map the [`crate::SuggestionSeverity`] enum to its serde tag — the
+/// IPC response carries the lowercase string verbatim so an off-the-
+/// shelf TS client can switch on it.
+fn severity_tag(s: crate::ai::SuggestionSeverity) -> &'static str {
+    match s {
+        crate::ai::SuggestionSeverity::Info => "info",
+        crate::ai::SuggestionSeverity::Warning => "warning",
+        crate::ai::SuggestionSeverity::Error => "error",
+    }
+}
+
 /// Free-function publish path used by both the drainer and the on-
 /// demand dispatch handlers. Assigns the next per-session sequence
 /// number under the emitters lock so both paths share monotonic seq.
@@ -1419,8 +1662,38 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_ADHOC_DELETE => self.dispatch_adhoc_delete(args),
             HANDLER_ADHOC_PROMOTE => self.dispatch_adhoc_promote(args),
             HANDLER_RUN_SAVED => self.dispatch_run_saved(args),
+            // BL-064 — `suggest` is async (it issues a nested
+            // `com.nexus.ai` IPC call). Surfacing this from the sync
+            // path makes the failure mode obvious if the dispatcher
+            // ever lost its async route.
+            HANDLER_SUGGEST => Err(exec_err(
+                format!(
+                    "handler {HANDLER_SUGGEST}: suggest is async; caller should use dispatch_async"
+                ),
+            )),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
+    }
+
+    fn dispatch_async(
+        &mut self,
+        handler_id: u32,
+        args: &serde_json::Value,
+    ) -> Option<CorePluginFuture> {
+        if handler_id != HANDLER_SUGGEST {
+            return None;
+        }
+        let ctx = self.context.clone();
+        let server = Arc::clone(&self.server);
+        let engine = Arc::clone(&self.suggest_engine);
+        let args = args.clone();
+        Some(Box::pin(async move {
+            handle_suggest(ctx.as_ref(), &server, &engine, &args).await
+        }))
+    }
+
+    fn wire_context(&mut self, ctx: Arc<KernelPluginContext>) {
+        self.context = Some(ctx);
     }
 }
 
@@ -3276,6 +3549,144 @@ mod tests {
                 "rss cache still has the closed session after 2s",
             );
             std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    // ── BL-064 — suggest dispatch tests ─────────────────────────────
+    //
+    // The handler is async (it lives in `dispatch_async`), so the
+    // tests use `tokio::test`. The LLM-enrichment branch is exercised
+    // by calling `handle_suggest` directly with `ctx = None`, which
+    // walks every code path except the IPC call to `com.nexus.ai`.
+    // The IPC-success / timeout paths are integration-level concerns
+    // covered separately when a real `com.nexus.ai` is wired into a
+    // bootstrap-style runtime.
+
+    #[tokio::test]
+    async fn suggest_returns_null_when_no_rule_fires() {
+        if !unix_only("suggest_returns_null_when_no_rule_fires") {
+            return;
+        }
+        let mut p = TerminalCorePlugin::new();
+        // Spawn a short-lived shell that prints something boring.
+        p.dispatch(
+            HANDLER_CREATE_SESSION,
+            &create_args("printf hello"),
+        )
+        .expect("create");
+        let list_v = p
+            .dispatch(HANDLER_LIST_SESSIONS, &serde_json::json!({}))
+            .expect("list");
+        let list: Vec<SessionInfo> = serde_json::from_value(list_v).expect("decode");
+        let id = list.first().expect("one session").id.clone();
+        // Pump a few times so the printf output lands in the line buffer.
+        for _ in 0..10 {
+            let _ = p.dispatch(
+                HANDLER_PUMP,
+                &serde_json::json!({ "id": &id, "timeout_ms": 50 }),
+            );
+        }
+        // The "hello" line shouldn't match any default rule.
+        let resp = handle_suggest(
+            None,
+            &p.server,
+            &p.suggest_engine,
+            &serde_json::json!({ "session_id": id }),
+        )
+        .await
+        .expect("suggest");
+        assert!(resp.is_null(), "expected null, got {resp}");
+    }
+
+    #[tokio::test]
+    async fn suggest_returns_static_rule_response_when_no_kernel_context() {
+        if !unix_only("suggest_returns_static_rule_response_when_no_kernel_context") {
+            return;
+        }
+        let mut p = TerminalCorePlugin::new();
+        p.dispatch(
+            HANDLER_CREATE_SESSION,
+            &create_args("printf 'error: could not compile foo due to errors\\n'"),
+        )
+        .expect("create");
+        let list_v = p
+            .dispatch(HANDLER_LIST_SESSIONS, &serde_json::json!({}))
+            .expect("list");
+        let list: Vec<SessionInfo> = serde_json::from_value(list_v).expect("decode");
+        let id = list.first().expect("one session").id.clone();
+        for _ in 0..30 {
+            let _ = p.dispatch(
+                HANDLER_PUMP,
+                &serde_json::json!({ "id": &id, "timeout_ms": 50 }),
+            );
+        }
+        let resp = handle_suggest(
+            None,
+            &p.server,
+            &p.suggest_engine,
+            &serde_json::json!({ "session_id": id }),
+        )
+        .await
+        .expect("suggest");
+        let body: SuggestResponse = serde_json::from_value(resp).expect("decode");
+        assert_eq!(body.text, "cargo check --message-format=json");
+        assert_eq!(body.source_rule, "cargo.compile_failure");
+        assert_eq!(body.severity, "error");
+        assert!(!body.llm_used, "ctx is None — must fall back to static");
+        assert!(body.reason.contains("error info") || body.reason.contains("crate"),
+            "static reason should mention the rule's hint, got: {}",
+            body.reason);
+    }
+
+    #[tokio::test]
+    async fn suggest_unknown_session_surfaces_clear_error() {
+        let p = TerminalCorePlugin::new();
+        let err = handle_suggest(
+            None,
+            &p.server,
+            &p.suggest_engine,
+            &serde_json::json!({ "session_id": "nope" }),
+        )
+        .await
+        .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("unknown session"), "got: {reason}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn suggest_invalid_args_reported_as_execution_failed() {
+        let p = TerminalCorePlugin::new();
+        let err = handle_suggest(
+            None,
+            &p.server,
+            &p.suggest_engine,
+            &serde_json::json!({ "wrong": "shape" }),
+        )
+        .await
+        .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("invalid args"), "got: {reason}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dispatch_suggest_via_sync_path_surfaces_async_hint() {
+        let mut p = TerminalCorePlugin::new();
+        let err = p
+            .dispatch(HANDLER_SUGGEST, &serde_json::json!({}))
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("dispatch_async"), "got: {reason}");
+            }
+            other => panic!("unexpected: {other:?}"),
         }
     }
 }
