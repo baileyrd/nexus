@@ -1,7 +1,9 @@
 import { useMemo } from 'react'
 import {
+  originKind,
   useActivityTimelineStore,
   type ActivityEntry,
+  type ActivityOriginKind,
   type ActivitySurface,
   type IsoDate,
 } from './activityTimelineStore'
@@ -58,7 +60,25 @@ const SURFACE_OPTIONS: ActivitySurface[] = [
   'ghost',
   'complete',
   'enrich',
+  'file',
+  'process',
+  'git',
+  'workflow',
+  'capability',
   'other',
+]
+
+/** BL-052 — origin filter chip values, in display order. */
+const ORIGIN_OPTIONS: ActivityOriginKind[] = [
+  'ai',
+  'user',
+  'storage',
+  'git',
+  'terminal',
+  'workflow',
+  'agent',
+  'plugin',
+  'capability',
 ]
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -92,8 +112,42 @@ function surfaceColor(s: ActivitySurface): string {
       return 'var(--ok)'
     case 'enrich':
       return 'var(--interactive-accent-soft)'
+    case 'file':
+      return 'var(--text-muted)'
+    case 'process':
+      return 'var(--warm)'
+    case 'git':
+      return 'var(--ok)'
+    case 'workflow':
+      return 'var(--interactive-accent-soft)'
+    case 'capability':
+      return 'var(--risk)'
     default:
       return 'var(--text-faint)'
+  }
+}
+
+/** BL-052 — short label for the origin filter chip. */
+function originLabel(o: ActivityOriginKind): string {
+  switch (o) {
+    case 'ai':
+      return 'AI'
+    case 'user':
+      return 'User'
+    case 'plugin':
+      return 'Plugin'
+    case 'workflow':
+      return 'Workflow'
+    case 'agent':
+      return 'Agent'
+    case 'terminal':
+      return 'Terminal'
+    case 'git':
+      return 'Git'
+    case 'storage':
+      return 'File'
+    case 'capability':
+      return 'Capability'
   }
 }
 
@@ -114,6 +168,7 @@ function entryMatchesFilter(e: ActivityEntry, needle: string): boolean {
   if (needle.length === 0) return true
   const n = needle.toLowerCase()
   if (e.surface.toLowerCase().includes(n)) return true
+  if ((e.origin ?? '').toLowerCase().includes(n)) return true
   if ((e.provider ?? '').toLowerCase().includes(n)) return true
   if ((e.model ?? '').toLowerCase().includes(n)) return true
   if (e.prompt.toLowerCase().includes(n)) return true
@@ -139,6 +194,8 @@ function Toolbar({
   const setFilter = useActivityTimelineStore((s) => s.setFilter)
   const surfaceFilter = useActivityTimelineStore((s) => s.surfaceFilter)
   const setSurfaceFilter = useActivityTimelineStore((s) => s.setSurfaceFilter)
+  const originFilter = useActivityTimelineStore((s) => s.originFilter)
+  const setOriginFilter = useActivityTimelineStore((s) => s.setOriginFilter)
   const sessionFilter = useActivityTimelineStore((s) => s.sessionFilter)
   const setSessionFilter = useActivityTimelineStore((s) => s.setSessionFilter)
   const dateFrom = useActivityTimelineStore((s) => s.dateFrom)
@@ -191,6 +248,22 @@ function Toolbar({
           outline: 'none',
         }}
       />
+      <select
+        value={originFilter ?? ''}
+        onChange={(e) => {
+          const v = e.target.value
+          setOriginFilter(v === '' ? null : (v as ActivityOriginKind))
+        }}
+        style={inputBaseStyle}
+        title="Filter by origin (BL-052)"
+      >
+        <option value="">all origins</option>
+        {ORIGIN_OPTIONS.map((o) => (
+          <option key={o} value={o}>
+            {originLabel(o)}
+          </option>
+        ))}
+      </select>
       <select
         value={surfaceFilter ?? ''}
         onChange={(e) => {
@@ -425,6 +498,7 @@ function EntryList() {
   const entries = useActivityTimelineStore((s) => s.entries)
   const filter = useActivityTimelineStore((s) => s.filter)
   const surfaceFilter = useActivityTimelineStore((s) => s.surfaceFilter)
+  const originFilter = useActivityTimelineStore((s) => s.originFilter)
   const sessionFilter = useActivityTimelineStore((s) => s.sessionFilter)
   const dateFrom = useActivityTimelineStore((s) => s.dateFrom)
   const dateTo = useActivityTimelineStore((s) => s.dateTo)
@@ -434,11 +508,12 @@ function EntryList() {
     return entries.filter(
       (e) =>
         (surfaceFilter === null || e.surface === surfaceFilter) &&
+        (originFilter === null || originKind(e.origin ?? 'ai') === originFilter) &&
         (sessionFilter === null || e.session_id === sessionFilter) &&
         entryInDateRange(e, dateFrom, dateTo) &&
         entryMatchesFilter(e, filter.trim()),
     )
-  }, [entries, filter, surfaceFilter, sessionFilter, dateFrom, dateTo])
+  }, [entries, filter, surfaceFilter, originFilter, sessionFilter, dateFrom, dateTo])
 
   if (!hydrated) {
     return (
@@ -474,11 +549,11 @@ function EntryList() {
           lineHeight: 1.6,
         }}
       >
-        <div>No AI activity yet.</div>
+        <div>No activity yet.</div>
         <div>
-          Every chat, Cmd+I, ask, ghost completion, or auto-enrich is
-          recorded here — prompt, model, files touched, tools, and
-          outcome.
+          Every AI call, file write, git commit, terminal session, and
+          workflow run is recorded here — prompt, model, files touched,
+          tools, and outcome. Use the origin filter to slice by source.
         </div>
         <div style={{ marginTop: 6 }}>
           <a
@@ -539,6 +614,7 @@ export function ActivityTimelineView({
   const entries = useActivityTimelineStore((s) => s.entries)
   const filter = useActivityTimelineStore((s) => s.filter)
   const surfaceFilter = useActivityTimelineStore((s) => s.surfaceFilter)
+  const originFilter = useActivityTimelineStore((s) => s.originFilter)
   const sessionFilter = useActivityTimelineStore((s) => s.sessionFilter)
   const dateFrom = useActivityTimelineStore((s) => s.dateFrom)
   const dateTo = useActivityTimelineStore((s) => s.dateTo)
@@ -558,6 +634,7 @@ export function ActivityTimelineView({
   const filtersActive =
     filter.length > 0 ||
     surfaceFilter !== null ||
+    originFilter !== null ||
     sessionFilter !== null ||
     dateFrom !== null ||
     dateTo !== null
@@ -566,6 +643,7 @@ export function ActivityTimelineView({
     return entries.reduce(
       (n, e) =>
         (surfaceFilter === null || e.surface === surfaceFilter) &&
+        (originFilter === null || originKind(e.origin ?? 'ai') === originFilter) &&
         (sessionFilter === null || e.session_id === sessionFilter) &&
         entryInDateRange(e, dateFrom, dateTo) &&
         entryMatchesFilter(e, filter.trim())
@@ -573,7 +651,7 @@ export function ActivityTimelineView({
           : n,
       0,
     )
-  }, [entries, filter, surfaceFilter, sessionFilter, dateFrom, dateTo])
+  }, [entries, filter, surfaceFilter, originFilter, sessionFilter, dateFrom, dateTo])
 
   return (
     <div

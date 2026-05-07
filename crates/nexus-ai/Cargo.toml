@@ -9,6 +9,8 @@ description = "Nexus AI engine: provider traits, embeddings, RAG pipeline"
 [dependencies]
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
+# BL-052: shared activity-timeline types live here.
+nexus-types = { path = "../nexus-types" }
 # BL-102: TLS pinning verifier for outbound provider HTTPS.
 nexus-security = { path = "../nexus-security" }
 async-trait = { workspace = true }
@@ -34,7 +36,7 @@ xxhash-rust = { version = "0.8", features = ["xxh3"], optional = true }
 # handler types. Off by default so normal Rust builds don't pull ts-rs or
 # schemars. Enable with `cargo test -p nexus-ai --features ts-export` when
 # regenerating bindings.
-ts-export = ["dep:ts-rs", "dep:schemars"]
+ts-export = ["dep:ts-rs", "dep:schemars", "nexus-types/ts-export"]
 # Enable the local fastembed-rs embedding backend (BL-019, ADR 0018).
 # Pulls in fastembed plus the DashMap-backed embedding cache. Off by
 # default so minimal builds and the WASM community-plugin tier don't

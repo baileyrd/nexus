@@ -32,9 +32,14 @@ mod tokens;
 pub mod tools;
 mod vectorstore;
 
-pub use activity_log::{
-    ActivityEntry, ActivityOutcome, ActivityRecorder, ActivitySurface, ActivityToolCall,
-    ACTIVITY_APPENDED_TOPIC, ACTIVITY_LOG_PATH,
+pub use activity_log::{ActivityRecorder, ACTIVITY_LOG_PATH};
+// BL-052 — activity types live in `nexus-types::activity` so non-AI
+// emitters (terminal, git, storage, etc.) can publish without
+// depending on `nexus-ai`. Re-exported here so existing call sites
+// (`use nexus_ai::ActivityEntry`) keep compiling.
+pub use nexus_types::activity::{
+    ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface, ActivityToolCall,
+    ACTIVITY_APPENDED_TOPIC, AI_ACTIVITY_APPENDED_TOPIC,
 };
 pub use anthropic::AnthropicProvider;
 pub use chunker::{chunks_from_blocks, Chunk};

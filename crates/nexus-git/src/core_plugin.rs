@@ -869,6 +869,15 @@ fn publish_changes(bus: &EventBus, prev: Option<&GitState>, curr: &GitState) {
                 "prev_head": prev.head_oid,
             }),
         );
+        // BL-052 — detected HEAD change reaches the universal activity
+        // timeline as a commit-class entry. Branch / dirty events stay
+        // out — branch-only churn isn't audit-worthy.
+        publish_git_activity(
+            bus,
+            "commit",
+            &curr.head_oid,
+            curr.branch.as_deref(),
+        );
     }
 
     if prev.is_dirty != curr.is_dirty {
@@ -881,6 +890,33 @@ fn publish_changes(bus: &EventBus, prev: Option<&GitState>, curr: &GitState) {
                 "head": curr.head_oid,
             }),
         );
+    }
+}
+
+/// BL-052 — publish a git event onto the universal activity topic.
+/// `kind` is a short verb (`commit`, `branch_changed`, etc.); `head`
+/// is the relevant short hash; `branch` carries the optional branch
+/// name. Best-effort — bus failures are logged at debug and swallowed.
+fn publish_git_activity(bus: &EventBus, kind: &str, head: &str, branch: Option<&str>) {
+    use nexus_types::activity::{
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface,
+        ACTIVITY_APPENDED_TOPIC,
+    };
+    let mut entry = ActivityEntry::now(
+        head.to_string(),
+        ActivitySurface::Git,
+        ActivityOrigin::Git,
+    );
+    entry.outcome = ActivityOutcome::Ok;
+    let head_short: String = head.chars().take(7).collect();
+    entry.prompt = match branch {
+        Some(b) => format!("{kind} {head_short} on {b}"),
+        None => format!("{kind} {head_short}"),
+    };
+    if let Ok(payload) = serde_json::to_value(&entry) {
+        if let Err(err) = bus.publish_plugin(PLUGIN_ID, ACTIVITY_APPENDED_TOPIC, payload) {
+            tracing::debug!(plugin_id = PLUGIN_ID, %err, "failed to publish git activity");
+        }
     }
 }
 
@@ -934,16 +970,44 @@ fn run_auto_committer(
                             r.message.as_deref().unwrap_or(""),
                         );
                         if let Some(ref b) = bus {
-                            let _ = b.publish_plugin(
-                                PLUGIN_ID,
-                                "com.nexus.activity.appended",
-                                json!({
-                                    "origin": "git:auto-commit",
-                                    "message": r.message,
-                                    "hash": r.commit_hash,
-                                    "files_changed": r.files_changed,
-                                }),
+                            // BL-052 — well-formed `ActivityEntry`
+                            // payload with `origin: "git"` and surface
+                            // `git`. Carries the commit hash + message
+                            // in `prompt`; the affected file count
+                            // surfaces via the `files_changed` field
+                            // mirrored into `tool_calls` (one synthetic
+                            // entry) so the UI can display "N files".
+                            use nexus_types::activity::{
+                                ActivityEntry, ActivityOrigin, ActivityOutcome,
+                                ActivitySurface, ActivityToolCall,
+                                ACTIVITY_APPENDED_TOPIC,
+                            };
+                            let mut entry = ActivityEntry::now(
+                                r.commit_hash.clone().unwrap_or_default(),
+                                ActivitySurface::Git,
+                                ActivityOrigin::Git,
                             );
+                            entry.outcome = ActivityOutcome::Ok;
+                            let hash_short = r
+                                .commit_hash
+                                .as_deref()
+                                .map_or(String::new(), |h| h.chars().take(7).collect());
+                            entry.prompt = format!(
+                                "auto-commit {} {}",
+                                hash_short,
+                                r.message.as_deref().unwrap_or(""),
+                            );
+                            entry.tool_calls.push(ActivityToolCall {
+                                name: format!("{} files changed", r.files_changed),
+                                ok: true,
+                            });
+                            if let Ok(payload) = serde_json::to_value(&entry) {
+                                let _ = b.publish_plugin(
+                                    PLUGIN_ID,
+                                    ACTIVITY_APPENDED_TOPIC,
+                                    payload,
+                                );
+                            }
                         }
                         last_modified = None;
                     }

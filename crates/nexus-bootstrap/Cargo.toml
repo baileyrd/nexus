@@ -26,6 +26,8 @@ ts-export = [
     "nexus-workflow/ts-export",
     "nexus-terminal/ts-export",
     "nexus-database/ts-export",
+    # BL-052 — activity-timeline types live in `nexus-types::activity`.
+    "nexus-types/ts-export",
 ]
 
 [dependencies]

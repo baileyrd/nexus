@@ -321,8 +321,8 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
   },
   {
     id: 'nexus.activityTimeline', name: 'Activity Timeline',
-    version: '0.1.0', core: false, activationEvents: ['onStartup'],
-    description: 'Chronological feed of recent edits, commits, and AI actions across the forge.',
+    version: '0.2.0', core: false, activationEvents: ['onStartup'],
+    description: 'Chronological feed of every observable side effect — AI calls, file writes, git commits, terminal sessions, workflow runs.',
     load: () => import('./nexus/activityTimeline').then(m => m.activityTimelinePlugin),
   },
   {

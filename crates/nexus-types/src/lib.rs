@@ -11,6 +11,7 @@
 #![deny(missing_docs)]
 #![warn(clippy::pedantic)]
 
+pub mod activity;
 pub mod bases;
 pub mod obsidian_base;
 pub mod path_validator;

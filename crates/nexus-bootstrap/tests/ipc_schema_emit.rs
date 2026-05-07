@@ -26,10 +26,9 @@ use nexus_ai::ipc::{
 // FU-13 — RAG response shape (BL-038). TS bindings shipped already;
 // emitting JSON Schema lets MCP / external tools consume the same
 // contract over the wire.
-use nexus_ai::{
-    activity_log::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall},
-    Citation, RagResponse,
-};
+// BL-052 — activity types now live in `nexus_types::activity`.
+use nexus_ai::{Citation, RagResponse};
+use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface, ActivityToolCall};
 use nexus_storage::ipc::{
     StorageListDirArgs, StorageListDirEntry, StorageListDirResult, StorageNoteAppendArgs,
     StorageNoteAppendResult, StorageReadFileArgs, StorageReadFileResult, StorageSearchArgs,

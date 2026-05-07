@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ActivitySurface",
-  "description": "Surface that originated the AI call. Mirrors the in-product UX\nsurface so users (and future analytics) can slice the timeline.",
+  "description": "Surface that originated the entry. Lossy on the wire — unknown\nvalues land in [`ActivitySurface::Other`] so a future emitter\n(community plugin) doesn't crash deserialisation. Producers that\ndon't fit any AI surface should use [`ActivitySurface::Other`] and\nrely on `origin` for typing.",
   "oneOf": [
     {
       "description": "Chat panel (`stream_chat`, mode=chat).",
@@ -32,6 +32,31 @@
       "description": "Auto-enrichment on save (BL-045).",
       "type": "string",
       "const": "enrich"
+    },
+    {
+      "description": "File-system event surface — write / delete / rename.",
+      "type": "string",
+      "const": "file"
+    },
+    {
+      "description": "Process / terminal session lifecycle (BL-057).",
+      "type": "string",
+      "const": "process"
+    },
+    {
+      "description": "Git command boundary — commit / push / pull / merge.",
+      "type": "string",
+      "const": "git"
+    },
+    {
+      "description": "Workflow run boundary — start / end.",
+      "type": "string",
+      "const": "workflow"
+    },
+    {
+      "description": "Capability grant / revoke (security audit).",
+      "type": "string",
+      "const": "capability"
     },
     {
       "description": "Catch-all when the surface tag is missing or unknown.",

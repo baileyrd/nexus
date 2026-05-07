@@ -1461,6 +1461,14 @@ fn lifecycle_forwarder_loop(
 /// `com.nexus.terminal.events.<session_id>`. Errors are logged at warn
 /// level and swallowed: a serialisation or bus failure is not worth
 /// killing the forwarder over (the next event will likely succeed).
+///
+/// BL-057 — for session-boundary events (`SessionCreated`,
+/// `SessionClosed`, `MemoryLimitExceeded`) the forwarder also publishes
+/// to the universal `com.nexus.activity.appended` topic so the BL-052
+/// activity timeline pane sees terminal events alongside AI / file /
+/// git activity. Streaming variants (`OutputReceived`, `PatternMatched`,
+/// `SessionEvicted`) intentionally don't emit activity — they're
+/// either too chatty or too internal to surface in a user-facing log.
 fn publish_lifecycle_event(bus: &EventBus, event: &TerminalEvent) {
     let session_id = event.session_id();
     let type_id = format!("{EVENT_LIFECYCLE_PREFIX}{session_id}");
@@ -1484,6 +1492,91 @@ fn publish_lifecycle_event(bus: &EventBus, event: &TerminalEvent) {
             "failed to publish terminal lifecycle event",
         );
     }
+
+    // BL-057 — fan out lifecycle events to the universal activity bus.
+    if let Some(entry) = build_activity_entry(event) {
+        if let Ok(activity_payload) = serde_json::to_value(&entry) {
+            // The kernel-owned topic is plugin-namespace-free, so we use
+            // the same `publish_plugin` API but with the universal type
+            // id. EventBus accepts any string type id — the prefix
+            // convention is purely for subscriber filtering.
+            if let Err(err) = bus.publish_plugin(
+                PLUGIN_ID,
+                nexus_types::activity::ACTIVITY_APPENDED_TOPIC,
+                activity_payload,
+            ) {
+                tracing::warn!(
+                    plugin = PLUGIN_ID,
+                    %err,
+                    session = session_id,
+                    "failed to publish activity entry",
+                );
+            }
+        }
+    }
+}
+
+/// BL-057 — translate a [`TerminalEvent`] session-boundary into an
+/// [`nexus_types::activity::ActivityEntry`] tagged with the
+/// `terminal:<session_id>` origin and `process` surface. Returns
+/// `None` for streaming variants we don't want to surface.
+fn build_activity_entry(
+    event: &TerminalEvent,
+) -> Option<nexus_types::activity::ActivityEntry> {
+    use nexus_types::activity::{
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface,
+    };
+
+    let session_id = event.session_id().to_string();
+    let mut entry = ActivityEntry::now(
+        session_id.clone(),
+        ActivitySurface::Process,
+        ActivityOrigin::Terminal(session_id.clone()),
+    );
+
+    match event {
+        TerminalEvent::SessionCreated { id, name } => {
+            entry.outcome = ActivityOutcome::Ok;
+            entry.prompt = match name {
+                Some(n) => format!("started session {n}"),
+                None => format!("started session {id}"),
+            };
+        }
+        TerminalEvent::SessionClosed { id, exit_code } => {
+            // Treat exit code 0 / unknown as Ok; non-zero as Error so
+            // the timeline can flash an error glyph for failed runs.
+            match exit_code {
+                Some(0) | None => {
+                    entry.outcome = ActivityOutcome::Ok;
+                    entry.prompt = format!(
+                        "session {id} exited (code={})",
+                        exit_code.map_or("?".to_string(), |c| c.to_string()),
+                    );
+                }
+                Some(code) => {
+                    entry.outcome = ActivityOutcome::Error;
+                    entry.prompt = format!("session {id} exited (code={code})");
+                    entry.error = Some(format!("non-zero exit code {code}"));
+                }
+            }
+        }
+        TerminalEvent::MemoryLimitExceeded {
+            id,
+            rss_bytes,
+            limit_mb,
+        } => {
+            entry.outcome = ActivityOutcome::Error;
+            entry.prompt = format!(
+                "session {id} killed (OOM): rss={rss_bytes} limit={limit_mb}MB"
+            );
+            entry.error = Some(format!("memory limit exceeded ({limit_mb}MB)"));
+        }
+        // Streaming / internal variants don't reach the activity log.
+        TerminalEvent::OutputReceived { .. }
+        | TerminalEvent::PatternMatched { .. }
+        | TerminalEvent::SessionEvicted { .. } => return None,
+    }
+    Some(entry)
 }
 
 /// BL-064 — total budget for the LLM enrichment round-trip. After

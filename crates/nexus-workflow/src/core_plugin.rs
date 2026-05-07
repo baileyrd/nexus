@@ -1571,10 +1571,15 @@ impl CorePlugin for WorkflowCorePlugin {
                     "workflow plugin context not wired (bootstrap incomplete)".into(),
                 )
             })?;
-            let dispatcher = KernelActionDispatcher { ctx };
-            let run = run_workflow_with_variables(&workflow, &dispatcher, &variables)
-                .await
-                .map_err(|e| exec_err(format!("run: {e}")))?;
+            // BL-052 — emit activity start before dispatching steps.
+            let workflow_name = workflow.workflow.name.clone();
+            publish_workflow_activity(&ctx, &workflow_name, true, None).await;
+            let dispatcher = KernelActionDispatcher { ctx: Arc::clone(&ctx) };
+            let result = run_workflow_with_variables(&workflow, &dispatcher, &variables).await;
+            // BL-052 — emit activity end (success or failure).
+            let err_msg = result.as_ref().err().map(std::string::ToString::to_string);
+            publish_workflow_activity(&ctx, &workflow_name, false, err_msg).await;
+            let run = result.map_err(|e| exec_err(format!("run: {e}")))?;
             to_value(&run, "run")
         }))
     }
@@ -2201,6 +2206,40 @@ fn to_value<T: serde::Serialize>(
     command: &str,
 ) -> Result<serde_json::Value, PluginError> {
     serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize: {e}")))
+}
+
+/// BL-052 — emit a workflow start / end activity entry. `started=true`
+/// labels the prompt as "started <name>"; `started=false` produces
+/// "completed <name>" or, when `error` is set, "failed <name>".
+async fn publish_workflow_activity(
+    ctx: &KernelPluginContext,
+    workflow_name: &str,
+    started: bool,
+    error: Option<String>,
+) {
+    use nexus_types::activity::{
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface,
+        ACTIVITY_APPENDED_TOPIC,
+    };
+    let mut entry = ActivityEntry::now(
+        workflow_name.to_string(),
+        ActivitySurface::Workflow,
+        ActivityOrigin::Workflow(workflow_name.to_string()),
+    );
+    if started {
+        entry.outcome = ActivityOutcome::Ok;
+        entry.prompt = format!("started {workflow_name}");
+    } else if let Some(err) = error.as_ref() {
+        entry.outcome = ActivityOutcome::Error;
+        entry.prompt = format!("failed {workflow_name}");
+        entry.error = Some(err.clone());
+    } else {
+        entry.outcome = ActivityOutcome::Ok;
+        entry.prompt = format!("completed {workflow_name}");
+    }
+    if let Ok(payload) = serde_json::to_value(&entry) {
+        let _ = ctx.publish(ACTIVITY_APPENDED_TOPIC, payload);
+    }
 }
 
 // ── BL-056 — terminal-step parsing tests ────────────────────────────

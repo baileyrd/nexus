@@ -18,7 +18,7 @@
   ],
   "$defs": {
     "ActivityEntry": {
-      "description": "One entry in the activity timeline. Persisted as a single JSON\nobject per line in `.forge/ai-activity.log`.",
+      "description": "One entry in the activity timeline.\n\nAI surfaces (BL-037) persist these as JSONL in `.forge/ai-activity.log`.\nNon-AI emitters publish the entry to [`ACTIVITY_APPENDED_TOPIC`] only\n— there's no on-disk audit log for them in v1; the bus is the audit\nsurface and the shell timeline mirrors what passed through it.",
       "type": "object",
       "properties": {
         "duration_ms": {
@@ -38,7 +38,7 @@
           ]
         },
         "files": {
-          "description": "Files referenced — RAG sources, tool-call file paths.",
+          "description": "Files referenced — RAG sources for AI, the affected paths for\nstorage, the staged paths for git.",
           "type": "array",
           "items": {
             "type": "string"
@@ -55,23 +55,29 @@
             "null"
           ]
         },
+        "origin": {
+          "description": "BL-052 origin discriminator. Defaults to `\"ai\"` so legacy\nJSONL entries (written before BL-052) still parse.",
+          "type": "string",
+          "default": "ai"
+        },
         "outcome": {
           "description": "Final outcome.",
           "$ref": "#/$defs/ActivityOutcome"
         },
         "prompt": {
-          "description": "Truncated prompt text (last user message). Kept short so the\nlog file stays bounded.",
-          "type": "string"
+          "description": "Truncated prompt / message text. AI emitters fill from the last\nuser message; non-AI emitters fill from a short summary line\n(e.g. \"git commit a1b2c3\", \"saved Cargo.toml\").",
+          "type": "string",
+          "default": ""
         },
         "provider": {
-          "description": "Provider name (`anthropic` / `openai` / `ollama`).",
+          "description": "Provider name (`anthropic` / `openai` / `ollama`) when the\nemitter is AI; ignored otherwise.",
           "type": [
             "string",
             "null"
           ]
         },
         "session_id": {
-          "description": "Originating session id (matches `com.nexus.ai.stream_*` events).",
+          "description": "Originating session id (matches `com.nexus.ai.stream_*` events,\nor the per-emitter session id for non-AI surfaces).",
           "type": "string"
         },
         "surface": {
@@ -83,7 +89,7 @@
           "type": "string"
         },
         "tool_calls": {
-          "description": "Tool calls attempted, in order.",
+          "description": "Tool calls / sub-steps. AI emitters fill this; other emitters\nusually leave it empty.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/ActivityToolCall"
@@ -96,32 +102,31 @@
         "timestamp",
         "session_id",
         "surface",
-        "prompt",
         "outcome"
       ]
     },
     "ActivityOutcome": {
-      "description": "Outcome of the AI call. Captures success vs failure separately\nfrom the (possibly error) free-form `error` string so the UI can\nflash an error glyph without parsing.",
+      "description": "Outcome of the activity. Captures success vs failure separately\nfrom the (possibly error) free-form `error` string so the UI can\nflash an error glyph without parsing.",
       "oneOf": [
         {
-          "description": "Provider returned text and the surface accepted it.",
+          "description": "Operation completed successfully.",
           "type": "string",
           "const": "ok"
         },
         {
-          "description": "Provider errored, network failed, or the surface rejected\nthe response.",
+          "description": "Operation errored. `error` carries the message when set.",
           "type": "string",
           "const": "error"
         },
         {
-          "description": "User cancelled mid-stream.",
+          "description": "User cancelled mid-operation.",
           "type": "string",
           "const": "cancelled"
         }
       ]
     },
     "ActivitySurface": {
-      "description": "Surface that originated the AI call. Mirrors the in-product UX\nsurface so users (and future analytics) can slice the timeline.",
+      "description": "Surface that originated the entry. Lossy on the wire — unknown\nvalues land in [`ActivitySurface::Other`] so a future emitter\n(community plugin) doesn't crash deserialisation. Producers that\ndon't fit any AI surface should use [`ActivitySurface::Other`] and\nrely on `origin` for typing.",
       "oneOf": [
         {
           "description": "Chat panel (`stream_chat`, mode=chat).",
@@ -154,6 +159,31 @@
           "const": "enrich"
         },
         {
+          "description": "File-system event surface — write / delete / rename.",
+          "type": "string",
+          "const": "file"
+        },
+        {
+          "description": "Process / terminal session lifecycle (BL-057).",
+          "type": "string",
+          "const": "process"
+        },
+        {
+          "description": "Git command boundary — commit / push / pull / merge.",
+          "type": "string",
+          "const": "git"
+        },
+        {
+          "description": "Workflow run boundary — start / end.",
+          "type": "string",
+          "const": "workflow"
+        },
+        {
+          "description": "Capability grant / revoke (security audit).",
+          "type": "string",
+          "const": "capability"
+        },
+        {
           "description": "Catch-all when the surface tag is missing or unknown.",
           "type": "string",
           "const": "other"
@@ -161,7 +191,7 @@
       ]
     },
     "ActivityToolCall": {
-      "description": "One tool call attempted during a chat round. Captures the tool\nname + ok/error split; the actual input/output is intentionally\nnot persisted (could contain large file contents).",
+      "description": "One tool call attempted during a chat round (AI emitter only) — or,\ngeneralised, any sub-step that an emitter wants to surface inline\ninside a single entry. Captures a name + ok/error split; the full\ninput/output is intentionally not persisted.",
       "type": "object",
       "properties": {
         "name": {

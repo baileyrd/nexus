@@ -1,28 +1,33 @@
 // shell/src/plugins/nexus/activityTimeline/index.ts
 //
-// BL-037 — AI activity timeline pane.
+// BL-037 / BL-052 — universal activity timeline pane.
 //
-// Per-forge log of AI interactions (prompt, model, surface, files
-// touched, tool calls, outcome). Hosted as a pane-mode view (same
-// host pattern as `nexus.processes`) and an activity-bar entry.
+// Per-forge log of all observable side effects: AI calls (prompt /
+// model / files / tools / outcome), file writes, git commits,
+// terminal session lifecycle, workflow runs. Hosted as a pane-mode
+// view (same host pattern as `nexus.processes`) and an activity-bar
+// entry.
 //
 // Data flow:
 //
 //   1. On activate, hydrate the store from
 //      `com.nexus.ai::activity_list`. The kernel returns an empty
 //      list when the recorder isn't wired (e.g. AI plugin disabled),
-//      so a fresh forge keeps an empty pane without errors.
-//   2. Subscribe to `com.nexus.ai.activity_appended`. The kernel
-//      publishes the freshly-recorded `ActivityEntry` after every
-//      successful append (chat / ask / cmdi / ghost / complete /
-//      enrich), and the store prepends it.
+//      so a fresh forge keeps an empty pane without errors. Note that
+//      the AI log is the only on-disk persisted source — non-AI
+//      emitters publish to the bus only and start the pane empty
+//      until events flow.
+//   2. Subscribe to `com.nexus.activity.appended` (BL-052 universal)
+//      AND `com.nexus.ai.activity_appended` (BL-037 legacy). The AI
+//      recorder publishes to both during the back-compat window; the
+//      store dedupes by id.
 //   3. The "Clear" button calls `com.nexus.ai::activity_clear` and
-//      empties the local store. The on-disk JSONL is truncated.
+//      empties the local store. The on-disk JSONL is truncated; bus
+//      entries from non-AI emitters re-populate as new events arrive.
 //
-// The pane sits behind a default-off plugin entry in the catalog —
-// the timeline only matters when the user has the AI surface
-// configured, which mirrors how `nexus.recall` / `nexus.memory` are
-// gated.
+// BL-052 plugin-id rename was deferred — see the comment on
+// `PLUGIN_ID` below. The user-facing strings rename to plain
+// "Activity" (no longer AI-only).
 
 import { createElement } from 'react'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
@@ -34,6 +39,14 @@ import {
   type ActivityEntry,
 } from './activityTimelineStore'
 
+// BL-052 — kept the existing plugin id (`nexus.activityTimeline`) to
+// avoid a settings-state migration for users who already enabled /
+// disabled the panel. The user-facing strings rename to "Activity"
+// (plain, since it now covers more than AI). The settings-key
+// migration shim referenced in the BL-052 DoD is deferred — there
+// are no per-plugin settings keyed off this id today, so a rename
+// would only be cosmetic in `settings.json`. Track as a future cleanup
+// when the catalog grows a `legacyPluginIds` field.
 const PLUGIN_ID = 'nexus.activityTimeline'
 const VIEW_ID = 'nexus.activityTimeline.view'
 const ACTIVITY_ITEM_ID = 'nexus.activityTimeline.activityItem'
@@ -48,7 +61,10 @@ const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
 
 const AI_PLUGIN_ID = 'com.nexus.ai'
-const TOPIC_ACTIVITY_APPENDED = 'com.nexus.ai.activity_appended'
+/** BL-037 legacy AI-only topic. AI recorder still publishes here. */
+const TOPIC_AI_ACTIVITY_APPENDED = 'com.nexus.ai.activity_appended'
+/** BL-052 universal topic — every emitter publishes here. */
+const TOPIC_ACTIVITY_APPENDED = 'com.nexus.activity.appended'
 
 /**
  * Lucide-style "history / timeline" glyph — clock with a backwards
@@ -99,8 +115,8 @@ async function clearTimeline(api: PluginAPI): Promise<void> {
 export const activityTimelinePlugin: Plugin = {
   manifest: {
     id: PLUGIN_ID,
-    name: 'AI Activity Timeline',
-    version: '0.1.0',
+    name: 'Activity Timeline',
+    version: '0.2.0',
     core: false,
     activationEvents: ['onStartup'],
     dependsOn: ['nexus.paneMode', 'nexus.activityBar'],
@@ -108,13 +124,13 @@ export const activityTimelinePlugin: Plugin = {
       commands: [
         {
           id: COMMAND_SHOW,
-          title: 'Show AI Activity Timeline',
-          category: 'AI',
+          title: 'Show Activity Timeline',
+          category: 'Activity',
         },
         {
           id: COMMAND_CLEAR,
-          title: 'Clear AI Activity Timeline',
-          category: 'AI',
+          title: 'Clear Activity Timeline',
+          category: 'Activity',
         },
       ],
     },
@@ -141,7 +157,7 @@ export const activityTimelinePlugin: Plugin = {
       id: ACTIVITY_ITEM_ID,
       icon: '',
       iconPath: TIMELINE_ICON_PATH,
-      title: 'AI Activity',
+      title: 'Activity',
       viewId: VIEW_ID,
       priority: 55,
     })
@@ -173,42 +189,52 @@ export const activityTimelinePlugin: Plugin = {
 
     // ── Bus subscription ──────────────────────────────────────────────
     //
-    // The kernel publishes `com.nexus.ai.activity_appended` after
-    // every successful append. PluginRegistry tracks the disposer
-    // returned from `api.kernel.on` and sweeps it on plugin unload —
-    // we don't need to teardown manually.
-    let kernelUnsub: (() => void) | null = null
+    // BL-052 — subscribe to BOTH the universal topic
+    // (`com.nexus.activity.appended`) and the legacy AI-only topic
+    // (`com.nexus.ai.activity_appended`). The AI recorder publishes
+    // to both during the back-compat window; the store dedupes by
+    // entry id so we don't render twice.
+    //
+    // PluginRegistry tracks the disposer returned from `api.kernel.on`
+    // and sweeps it on plugin unload — we don't need to teardown
+    // manually beyond the explicit unsubscribe in `workspace:closed`.
+    const kernelUnsubs: Array<() => void> = []
 
-    const subscribeBus = async () => {
-      if (kernelUnsub) return
+    const subscribeOne = async (topic: string) => {
       try {
-        kernelUnsub = await api.kernel.on<ActivityEntry>(
-          TOPIC_ACTIVITY_APPENDED,
+        const unsub = await api.kernel.on<ActivityEntry>(
+          topic,
           (_topic, payload) => {
             if (payload && typeof payload === 'object' && 'id' in payload) {
               useActivityTimelineStore.getState().prepend(payload)
             }
           },
         )
+        kernelUnsubs.push(unsub)
       } catch (err) {
         clientLogger.warn(
-          '[nexus.activityTimeline] failed to subscribe to activity bus:',
+          `[${PLUGIN_ID}] failed to subscribe to ${topic}:`,
           err,
         )
       }
     }
 
+    const subscribeBus = async () => {
+      if (kernelUnsubs.length > 0) return
+      await subscribeOne(TOPIC_ACTIVITY_APPENDED)
+      await subscribeOne(TOPIC_AI_ACTIVITY_APPENDED)
+    }
+
     const unsubscribeBus = () => {
-      if (!kernelUnsub) return
-      try {
-        kernelUnsub()
-      } catch (err) {
-        clientLogger.warn(
-          '[nexus.activityTimeline] unsubscribe failed:',
-          err,
-        )
+      while (kernelUnsubs.length > 0) {
+        const unsub = kernelUnsubs.pop()
+        if (!unsub) continue
+        try {
+          unsub()
+        } catch (err) {
+          clientLogger.warn(`[${PLUGIN_ID}] unsubscribe failed:`, err)
+        }
       }
-      kernelUnsub = null
     }
 
     // Lifecycle: subscribe on workspace open, tear down on close.

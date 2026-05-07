@@ -4,8 +4,12 @@ import type { ActivitySurface } from "./ActivitySurface";
 import type { ActivityToolCall } from "./ActivityToolCall";
 
 /**
- * One entry in the activity timeline. Persisted as a single JSON
- * object per line in `.forge/ai-activity.log`.
+ * One entry in the activity timeline.
+ *
+ * AI surfaces (BL-037) persist these as JSONL in `.forge/ai-activity.log`.
+ * Non-AI emitters publish the entry to [`ACTIVITY_APPENDED_TOPIC`] only
+ * — there's no on-disk audit log for them in v1; the bus is the audit
+ * surface and the shell timeline mirrors what passed through it.
  */
 export type ActivityEntry = { 
 /**
@@ -17,7 +21,8 @@ id: string,
  */
 timestamp: string, 
 /**
- * Originating session id (matches `com.nexus.ai.stream_*` events).
+ * Originating session id (matches `com.nexus.ai.stream_*` events,
+ * or the per-emitter session id for non-AI surfaces).
  */
 session_id: string, 
 /**
@@ -25,7 +30,13 @@ session_id: string,
  */
 surface: ActivitySurface, 
 /**
- * Provider name (`anthropic` / `openai` / `ollama`).
+ * BL-052 origin discriminator. Defaults to `"ai"` so legacy
+ * JSONL entries (written before BL-052) still parse.
+ */
+origin: string, 
+/**
+ * Provider name (`anthropic` / `openai` / `ollama`) when the
+ * emitter is AI; ignored otherwise.
  */
 provider?: string | null, 
 /**
@@ -33,16 +44,19 @@ provider?: string | null,
  */
 model?: string | null, 
 /**
- * Truncated prompt text (last user message). Kept short so the
- * log file stays bounded.
+ * Truncated prompt / message text. AI emitters fill from the last
+ * user message; non-AI emitters fill from a short summary line
+ * (e.g. "git commit a1b2c3", "saved Cargo.toml").
  */
 prompt: string, 
 /**
- * Files referenced — RAG sources, tool-call file paths.
+ * Files referenced — RAG sources for AI, the affected paths for
+ * storage, the staged paths for git.
  */
 files?: Array<string>, 
 /**
- * Tool calls attempted, in order.
+ * Tool calls / sub-steps. AI emitters fill this; other emitters
+ * usually leave it empty.
  */
 tool_calls?: Array<ActivityToolCall>, 
 /**

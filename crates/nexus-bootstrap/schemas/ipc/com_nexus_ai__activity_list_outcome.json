@@ -1,20 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ActivityOutcome",
-  "description": "Outcome of the AI call. Captures success vs failure separately\nfrom the (possibly error) free-form `error` string so the UI can\nflash an error glyph without parsing.",
+  "description": "Outcome of the activity. Captures success vs failure separately\nfrom the (possibly error) free-form `error` string so the UI can\nflash an error glyph without parsing.",
   "oneOf": [
     {
-      "description": "Provider returned text and the surface accepted it.",
+      "description": "Operation completed successfully.",
       "type": "string",
       "const": "ok"
     },
     {
-      "description": "Provider errored, network failed, or the surface rejected\nthe response.",
+      "description": "Operation errored. `error` carries the message when set.",
       "type": "string",
       "const": "error"
     },
     {
-      "description": "User cancelled mid-stream.",
+      "description": "User cancelled mid-operation.",
       "type": "string",
       "const": "cancelled"
     }

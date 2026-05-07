@@ -22,9 +22,8 @@ use nexus_kernel::{KernelPluginContext, PluginContext};
 use nexus_plugins::{CorePlugin, CorePluginFuture, PluginError};
 use serde::Serialize;
 
-use crate::activity_log::{
-    ActivityEntry, ActivityOutcome, ActivityRecorder, ActivitySurface,
-};
+use crate::activity_log::ActivityRecorder;
+use nexus_types::activity::{ActivityEntry, ActivityOutcome, ActivitySurface};
 use crate::anthropic::AnthropicProvider;
 use crate::config::{detect_embedding_provider, detect_provider, AiConfig};
 use crate::embedding::EmbeddingProvider;
@@ -1192,6 +1191,7 @@ async fn handle_stream_chat(
             timestamp: chrono::Utc::now().to_rfc3339(),
             session_id: session_id.clone(),
             surface,
+            origin: "ai".into(),
             provider: provider_label,
             model: model_label,
             prompt: prompt_text,
@@ -1248,6 +1248,7 @@ async fn record_activity_error(
         timestamp: chrono::Utc::now().to_rfc3339(),
         session_id: session_id.to_string(),
         surface,
+        origin: "ai".into(),
         provider,
         model,
         prompt,
@@ -1502,7 +1503,7 @@ fn apply_stop<'a>(text: &'a str, stops: &[String]) -> &'a str {
 #[derive(Debug)]
 struct ToolDispatchOutcome {
     text: String,
-    tool_calls: Vec<crate::activity_log::ActivityToolCall>,
+    tool_calls: Vec<nexus_types::activity::ActivityToolCall>,
     files: Vec<String>,
 }
 
@@ -1518,7 +1519,7 @@ async fn run_tool_dispatch_loop(
 
     let mut aggregated = String::new();
     let mut round: usize = 0;
-    let mut tool_calls_recorded: Vec<crate::activity_log::ActivityToolCall> = Vec::new();
+    let mut tool_calls_recorded: Vec<nexus_types::activity::ActivityToolCall> = Vec::new();
     let mut files_recorded: Vec<String> = Vec::new();
 
     loop {
@@ -1556,7 +1557,7 @@ async fn run_tool_dispatch_loop(
         // append a ToolResult turn for each.
         for call in &output.tool_calls {
             let (content, is_error) = execute_tool_call(registry, call).await;
-            tool_calls_recorded.push(crate::activity_log::ActivityToolCall {
+            tool_calls_recorded.push(nexus_types::activity::ActivityToolCall {
                 name: call.name.clone(),
                 ok: !is_error,
             });
@@ -1786,6 +1787,7 @@ async fn handle_stream_ask(
             timestamp: chrono::Utc::now().to_rfc3339(),
             session_id: session_id.clone(),
             surface: ActivitySurface::Ask,
+            origin: "ai".into(),
             provider: provider_label,
             model: model_label,
             prompt: question.clone(),
@@ -3012,16 +3014,16 @@ mod semantic_search_dispatch_tests {
         let plugin = wired_plugin_with_caps(fs_caps());
         let recorder = plugin.activity.clone().expect("recorder wired");
 
-        let mut entry1 = ActivityEntry::now(
+        let mut entry1 = ActivityEntry::now_ai(
             "sess-1".into(),
-            crate::activity_log::ActivitySurface::Chat,
+            nexus_types::activity::ActivitySurface::Chat,
         );
         entry1.prompt = "first prompt".into();
         recorder.append(entry1.clone()).await;
 
-        let mut entry2 = ActivityEntry::now(
+        let mut entry2 = ActivityEntry::now_ai(
             "sess-2".into(),
-            crate::activity_log::ActivitySurface::Ask,
+            nexus_types::activity::ActivitySurface::Ask,
         );
         entry2.prompt = "second prompt".into();
         entry2.files = vec!["notes/a.md".into(), "notes/b.md".into()];
@@ -3055,9 +3057,9 @@ mod semantic_search_dispatch_tests {
         let plugin = wired_plugin_with_caps(fs_caps());
         let recorder = plugin.activity.clone().expect("recorder wired");
         for i in 0..3 {
-            let mut e = ActivityEntry::now(
+            let mut e = ActivityEntry::now_ai(
                 format!("sess-{i}"),
-                crate::activity_log::ActivitySurface::Chat,
+                nexus_types::activity::ActivitySurface::Chat,
             );
             e.prompt = format!("prompt {i}");
             recorder.append(e).await;
@@ -3082,9 +3084,9 @@ mod semantic_search_dispatch_tests {
     async fn activity_clear_truncates_log() {
         let plugin = wired_plugin_with_caps(fs_caps());
         let recorder = plugin.activity.clone().expect("recorder wired");
-        let mut e = ActivityEntry::now(
+        let mut e = ActivityEntry::now_ai(
             "s".into(),
-            crate::activity_log::ActivitySurface::Chat,
+            nexus_types::activity::ActivitySurface::Chat,
         );
         e.prompt = "to be wiped".into();
         recorder.append(e).await;

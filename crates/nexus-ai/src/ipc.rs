@@ -439,7 +439,7 @@ pub struct AiActivityListArgs {
 #[serde(deny_unknown_fields)]
 pub struct AiActivityListResult {
     /// Recorded entries (newest first).
-    pub entries: Vec<crate::activity_log::ActivityEntry>,
+    pub entries: Vec<nexus_types::activity::ActivityEntry>,
 }
 
 #[cfg(test)]

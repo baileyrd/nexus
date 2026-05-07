@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ActivityToolCall",
-  "description": "One tool call attempted during a chat round. Captures the tool\nname + ok/error split; the actual input/output is intentionally\nnot persisted (could contain large file contents).",
+  "description": "One tool call attempted during a chat round (AI emitter only) — or,\ngeneralised, any sub-step that an emitter wants to surface inline\ninside a single entry. Captures a name + ok/error split; the full\ninput/output is intentionally not persisted.",
   "type": "object",
   "properties": {
     "name": {

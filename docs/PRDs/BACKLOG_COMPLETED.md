@@ -8,6 +8,44 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-052: Universal activity timeline ✅ (2026-05-07)
+
+**Source**: AIG-04 follow-up (2026-05-05) — see [../AI-GAPS.md](../AI-GAPS.md#aig-04--activity-audit-panel)
+**Files**: new `crates/nexus-types/src/activity.rs`; `crates/nexus-types/{Cargo.toml, src/lib.rs}`; `crates/nexus-ai/{Cargo.toml, src/lib.rs, src/activity_log.rs, src/core_plugin.rs, src/ipc.rs}`; `crates/nexus-bootstrap/{Cargo.toml, tests/ipc_schema_emit.rs}`; `crates/nexus-storage/src/core_plugin.rs`; `crates/nexus-git/src/core_plugin.rs`; `crates/nexus-workflow/{Cargo.toml, src/core_plugin.rs}`; `crates/nexus-terminal/{Cargo.toml, src/core_plugin.rs}` (BL-057 emitter); `shell/src/plugins/nexus/activityTimeline/{index.ts, activityTimelineStore.ts, ActivityTimelineView.tsx}`; `shell/src/plugins/catalog.ts`; regenerated TS bindings + JSON schemas under `packages/nexus-extension-api/src/generated/ipc/Activity*.ts` and `crates/nexus-bootstrap/schemas/ipc/com_nexus_ai__activity_list_*.json`.
+**Related**: BL-037 (original AI-only timeline); BL-057 (terminal emitter, landed in the same sweep); AIG-02 (agent approval log, future consumer of the same schema)
+
+Lifts the AI-only `ActivityEntry` into a shared crate so every subsystem can publish into one universal audit log.
+
+- **Shared type home.** `nexus_types::activity` now owns `ActivityEntry`, `ActivitySurface`, `ActivityOutcome`, `ActivityToolCall`, plus the new `ActivityOrigin` enum (`Ai` / `User` / `Plugin(id)` / `Workflow(id)` / `Agent(id)` / `Terminal(id)` / `Git` / `Storage` / `Capability`). `nexus-types` gained a feature-gated `ts-export` opt-in (mirrors the per-subsystem pattern) so the regenerator pulls in ts-rs + schemars only when explicitly invoked. `nexus-ai` re-exports the lifted types so existing call sites (`use nexus_ai::ActivityEntry`) keep compiling unchanged.
+- **Origin discriminator.** `ActivityEntry.origin: String` (defaulted to `"ai"` via `serde(default)` so legacy on-disk JSONL parses cleanly). The wire format is `<kind>` for the singletons (`ai` / `user` / `git` / `storage` / `capability`) and `<kind>:<detail>` for the parameterised variants (`plugin:com.example.foo`, `workflow:run-123`, `agent:sess-abc`, `terminal:tty-1`). `ActivityOrigin::to_wire` / `::from_wire` round-trip the form; unknown kinds fall back to `Plugin(<full>)` so a future emitter doesn't crash deserialisation. The shell side ships `originKind(string) → ActivityOriginKind` matching the Rust fallback.
+- **Topics.** New universal kernel topic constant `ACTIVITY_APPENDED_TOPIC = "com.nexus.activity.appended"`. The legacy AI-only `AI_ACTIVITY_APPENDED_TOPIC = "com.nexus.ai.activity_appended"` is preserved; `ActivityRecorder::append` publishes to both during the back-compat window. The shell store dedupes by `id` so the AI's twin-emit doesn't render twice.
+- **Storage emitter.** `nexus_storage::core_plugin::publish_event` adds `publish_file_activity` for every `FileCreated` / `FileModified` / `FileDeleted` / `FileRenamed` (skips `ReconcileRequested` — that's an internal indexer signal, not user-facing audit). Renames carry both paths in `files`. `surface = ActivitySurface::File`, `origin = ActivityOrigin::Storage`.
+- **Git emitter.** Two paths: the polling `publish_changes` now fans `head_oid` changes (commit detection) out via `publish_git_activity` (kind / short-hash / branch); the existing `run_auto_committer` payload was reshaped from an ad-hoc `json!` literal into a proper `ActivityEntry` with `origin: ActivityOrigin::Git`, summary in `prompt`, and the changed-file count in `tool_calls[0].name`. `surface = ActivitySurface::Git`. Push/pull aren't observed by the poller and are explicitly deferred (see closure note).
+- **Workflow emitter.** `WorkflowCorePlugin::dispatch_async`'s `HANDLER_RUN` arm now wraps the executor with `publish_workflow_activity` calls — one entry on start (`outcome=Ok`, `prompt = "started <name>"`), one on end (`Ok` for success or `Error` with the executor error in `error` for failure). `surface = ActivitySurface::Workflow`, `origin = ActivityOrigin::Workflow(<workflow_name>)`.
+- **Terminal emitter (BL-057).** `nexus_terminal::core_plugin::publish_lifecycle_event` translates `SessionCreated` / `SessionClosed` / `MemoryLimitExceeded` to entries via `build_activity_entry`. `SessionClosed` flips outcome to `Error` for non-zero exit codes so the timeline glyph matches user intuition. `OutputReceived` / `PatternMatched` / `SessionEvicted` deliberately don't fan out — too chatty or too internal.
+- **Shell-side surfaces.** `activityTimelineStore.ts` widens the `ActivitySurface` union to 12 values (existing AI surfaces + `file` / `process` / `git` / `workflow` / `capability` / `other`); adds the `origin` field to `ActivityEntry` (legacy entries default to `"ai"`); adds `originFilter: ActivityOriginKind | null` state with `setOriginFilter` reducer; `prepend` now dedupes by id so the dual-topic publish doesn't double-render. The view ships an "all origins" select chip with nine options (`AI` / `User` / `Storage` / `Git` / `Terminal` / `Workflow` / `Agent` / `Plugin` / `Capability`); the EntryList + filter-count both gate on origin alongside surface / session / date. Free-text matcher includes the origin string. Empty-state copy rewrote from "No AI activity yet" to "No activity yet" with a multi-emitter explanation.
+- **Catalog + ID rename.** Plugin-id rename `nexus.activityTimeline` → `nexus.activity` was deferred — the catalog has no `legacyPluginIds` field and a rename without a migration shim would orphan existing user state. The user-facing strings + category renamed to plain "Activity"; the internal id stays. Track as a future cleanup.
+- **Schema invariants.** `ActivityEntry` keeps `serde(deny_unknown_fields)` so the audit-2026-05-01 P0-2 test (`every_object_schema_denies_additional_properties`) passes. The new `origin` field defaults via `serde(default)`; missing-on-read is fine because deny_unknown_fields rejects EXTRA fields, not missing ones. `scripts/check_ipc_drift.sh` regenerates cleanly.
+
+**Definition of done coverage**:
+- ✅ Shared schema crate with origin discriminator
+- ✅ Universal kernel-owned bus topic
+- ✅ Storage / git / workflow emitters (terminal lands as BL-057)
+- ✅ Origin filter chip + multi-topic shell subscription
+- ⏭ Plugin-id rename — visible-string rename done, internal id deferred (see closure note above)
+- ⏭ Per-emitter opt-out config — deferred (no noisy emitter today)
+- ⏭ Shared privacy redactor — deferred; AI-recorder redaction already in place, non-AI emitters today produce structured short prompts that don't carry user-secret content
+- ⏭ Capability grant/revoke emitter — deferred (security audit log exists in SQLite already)
+- ⏭ Git push/pull events — poller doesn't observe remotes today
+
+### BL-057: Terminal activity timeline integration ✅ (2026-05-07)
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap #4
+**Files**: `crates/nexus-terminal/{Cargo.toml, src/core_plugin.rs}`
+**Related**: BL-052 (universal activity timeline — landed in the same sweep)
+
+The lifecycle-forwarder thread's `publish_lifecycle_event` now fans session-boundary events out to `com.nexus.activity.appended` in addition to the per-session `com.nexus.terminal.events.<id>` topic. New `build_activity_entry(&TerminalEvent) -> Option<ActivityEntry>` translator covers the three boundary variants — `SessionCreated` → `outcome=Ok` with prompt `"started session <name|id>"`; `SessionClosed` → `Ok` for exit code 0/None or `Error` for non-zero (with the code in `error`); `MemoryLimitExceeded` → `Error` with the OOM details in `prompt` and threshold in `error`. Streaming variants (`OutputReceived`, `PatternMatched`, `SessionEvicted`) return `None` from the translator so they don't drown the activity pane. Origin is tagged `terminal:<session_id>`; surface is `process`. `nexus-terminal` gained a `nexus-types` dep for the shared `ActivityEntry` shape. No schema change to `nexus-terminal`'s own types — payload is assembled from existing `TerminalEvent` fields.
+
 ### BL-079: Git gutter + diff viewer ✅ (2026-05-07)
 
 **Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](docs/PRDs/BL-075-081-code-editor.md)

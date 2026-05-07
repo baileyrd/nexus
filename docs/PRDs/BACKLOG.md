@@ -296,21 +296,7 @@ _BL-058 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-057: Terminal activity timeline integration
-
-**Source**: Terminal Integration Assessment (2026-05-06) — gap #4
-**Effort**: Small (0.5 day)
-**Crates**: `nexus-terminal/src/core_plugin.rs`
-**Related**: BL-052 (universal activity timeline — defines the schema and topic convention); PRD-09 lifecycle events
-
-The lifecycle forwarder thread already publishes `com.nexus.terminal.events.<id>` for `SessionCreated`, `ProcessCrashed`, and `SessionClosed`. It does not publish to the universal `com.nexus.activity.appended` topic. The activity timeline is therefore blind to all terminal events — a user can't audit what processes started, crashed, or exited alongside their AI tool calls.
-
-**Blocked by:** BL-052 (generalized `ActivityEntry` schema must land first so the emitter format is stable).
-
-**Definition of done:**
-- On `SessionCreated`, `ProcessCrashed`, and `SessionClosed` events, the core plugin publishes a parallel `com.nexus.activity.appended` event with `origin: "terminal:<session_id>"`, `surface: "process"`, and relevant metadata (slug, exit_code, crash reason)
-- Activity timeline panel renders terminal events with a terminal icon and appropriate filter chip
-- No schema changes to `nexus-terminal` types — payload is assembled in `core_plugin.rs` from existing `SessionInfo`
+_BL-057 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Landed alongside BL-052 in the same sweep. The lifecycle forwarder's `publish_lifecycle_event` now fans `SessionCreated` / `SessionClosed` / `MemoryLimitExceeded` out to the universal `com.nexus.activity.appended` topic with `origin: "terminal:<session_id>"`, `surface: "process"`, and a human-readable `prompt` ("started session …", "session … exited (code=N)", "session … killed (OOM): rss=… limit=…MB"). Streaming variants (`OutputReceived`, `PatternMatched`, `SessionEvicted`) deliberately don't emit activity entries — they're either too chatty or too internal. `SessionClosed` flips outcome to `Error` when `exit_code` is non-zero so the timeline glyph matches user intuition. The terminal `nexus-terminal` crate gained a `nexus-types` dep for the shared `ActivityEntry` shape; no terminal-side schema change._
 
 ---
 
@@ -428,24 +414,16 @@ The bundled ember themes ship the right token values, but the shell renders a mu
 
 **Definition of done (per phase):** acceptance criteria filled in when a phase is scoped in — see §6 of the companion doc. The plan itself does not commit to any phase.
 
-### BL-052: Universal activity timeline (beyond AI)
+_BL-052 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `ActivityEntry` / `ActivitySurface` / `ActivityOutcome` / `ActivityToolCall` lifted from `nexus-ai` to `nexus-types::activity` (kept the type names; `nexus-ai` re-exports for back-compat, so existing call sites still compile). New `ActivityOrigin` enum (`Ai` / `User` / `Plugin(id)` / `Workflow(id)` / `Agent(id)` / `Terminal(id)` / `Git` / `Storage` / `Capability`) with a `to_wire` / `from_wire` round-trip; `ActivityEntry` carries it as a `String` field with `serde(default = "ai")` so legacy on-disk JSONL parses cleanly. New universal topic constant `ACTIVITY_APPENDED_TOPIC = "com.nexus.activity.appended"`; the AI recorder now publishes to BOTH this and the legacy `com.nexus.ai.activity_appended` so existing AI-only subscribers keep working. Emitters wired in this sweep: storage (file_created / file_modified / file_deleted / file_renamed via `publish_file_activity`), git (HEAD-changed commit detection via `publish_git_activity` + the auto-committer's existing emit reshaped to a proper `ActivityEntry`), workflow (run start + end via `publish_workflow_activity`), terminal (BL-057 — see its closure note). Shell-side: the `activityTimeline` plugin subscribes to BOTH topics with id-keyed dedup so the AI's twin-emit doesn't render twice; gains an origin filter chip with nine kinds (AI / User / Storage / Git / Terminal / Workflow / Agent / Plugin / Capability); surface union widens to include `file` / `process` / `git` / `workflow` / `capability` plus the existing AI surfaces. Pre-existing schema tests catch the new types via the existing `every_object_schema_denies_additional_properties` invariant — `ActivityEntry` keeps `deny_unknown_fields` (extras rejected; `serde(default)` handles missing-on-read separately).
 
-**Source**: AIG-04 follow-up (2026-05-05) — see [../AI-GAPS.md](../AI-GAPS.md#aig-04--activity-audit-panel)
-**Effort**: Medium (1 week)
-**Crates**: `nexus-kernel` (event bus convention), `nexus-storage`/`nexus-git`/`nexus-terminal`/`nexus-workflow` (emitters), `shell/src/plugins/nexus/activityTimeline/` (consumer)
-**Related**: AIG-02 agent approval log shares this schema
+**Deferred from the DoD:**
+- **Capability grant/revoke emitter** — would need to thread the universal topic through the kernel security path; scoped out as a follow-up because the security audit log already lives in SQLite (`nexus-security` audit table) and a non-trivial subset of grants happens before the bus is fully wired.
+- **Plugin-id rename `nexus.activityTimeline` → `nexus.activity`** — the catalog has no `legacyPluginIds` field, so a rename without a migration shim would orphan any user who'd toggled the plugin off. User-visible strings ("Activity", "Activity Timeline") and category ("Activity") were renamed; the internal id stays `nexus.activityTimeline`. Track as a future cleanup once the catalog gains alias support.
+- **Per-emitter opt-out config** — none of the emitters ships a knob today; the topic is fire-and-forget. Add a `nexus.activity.disabledEmitters` setting once a noisy emitter actually exists in the wild.
+- **Shared privacy redactor** — `nexus-ai`'s `Redactor` (PRD-12 §privacy) applies only to the AI-recorder path. Lifting it to a shared crate touches every emitter and adds a config surface; deferred. Each non-AI emitter today produces short structured prompts (`"renamed a → b"`, `"commit abcdef on main"`) that don't carry user-secret content, so the immediate risk surface is low. Track when an emitter starts surfacing free-form user input.
+- **Push/pull git events** — the existing git poller only watches HEAD; remote-side push/pull aren't observed yet. The auto-committer side is fully covered.
 
-Today the `nexus.activityTimeline` pane (BL-037) is AI-only — it hydrates from `com.nexus.ai::activity_list` and subscribes to one bus topic. The same surface is the natural home for **every** observable side effect a user-or-agent triggers: file writes, git commits/pushes, terminal commands, workflow runs, plugin enables/disables, capability grants. Without it, the audit story is partial — the model writing a file is logged, but the user (or another plugin) writing the same file isn't.
-
-**Definition of done:**
-- Generalised `ActivityEntry` schema lifted out of `nexus-ai` into `nexus-types` (or a shared `nexus-activity` crate) with an `origin` discriminator: `ai` / `user` / `plugin:<id>` / `workflow:<id>` / `agent:<session>`.
-- Bus topic convention: `com.nexus.activity.appended` (kernel-owned), with each emitter publishing a typed payload. Existing `com.nexus.ai.activity_appended` becomes one source.
-- Storage emits on file write/delete/rename; git on commit/push/pull; terminal on command-exit; workflow on run-start/end; capability system on grant/revoke.
-- Timeline pane gains an `origin` filter chip alongside the existing surface filter; rename plugin id from `nexus.activityTimeline` to `nexus.activity` (with a settings-key migration shim).
-- Per-emitter opt-out via plugin config so noisy emitters don't drown the pane.
-- Privacy: redactor pass shared with PRD-12 §privacy applies to all emitters, not just AI.
-
-**Why this matters:** transparency parity — once agents (AIG-02) can dispatch tools that span all subsystems, the user needs one place to see every effect, not five separate logs.
+**Why this matters:** transparency parity — agents (AIG-02) can dispatch tools that span all subsystems, and the user now sees every effect in one pane, not five separate logs._
 
 ## Partially New Features (concept exists in PRDs but design is unspecified)
 

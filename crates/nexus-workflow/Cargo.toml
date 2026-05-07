@@ -20,6 +20,8 @@ fastrand = "2"
 futures = "0.3"
 nexus-kernel = { path = "../nexus-kernel" }
 nexus-plugins = { path = "../nexus-plugins" }
+# BL-052 — universal activity timeline emitter types.
+nexus-types = { path = "../nexus-types" }
 ts-rs = { workspace = true, optional = true, features = ["serde-json-impl"] }
 schemars = { workspace = true, optional = true }
 

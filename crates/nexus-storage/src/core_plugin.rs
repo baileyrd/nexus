@@ -1339,7 +1339,9 @@ fn bridge_loop(
 }
 
 /// Translate one [`StorageEvent`] into a `com.nexus.storage.*` custom event
-/// and publish on the bus.
+/// and publish on the bus. BL-052 — also fans out to the universal
+/// `com.nexus.activity.appended` topic so the timeline pane sees file
+/// writes alongside AI / git / terminal activity.
 fn publish_event(event: &StorageEvent, bus: &EventBus) {
     match event {
         StorageEvent::FileCreated { path, content_hash } => {
@@ -1351,6 +1353,7 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
                     "content_hash": content_hash,
                 }),
             );
+            publish_file_activity(bus, "created", path, None);
         }
 
         StorageEvent::FileModified { path, content_hash } => {
@@ -1362,6 +1365,7 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
                     "content_hash": content_hash,
                 }),
             );
+            publish_file_activity(bus, "modified", path, None);
         }
 
         StorageEvent::ReconcileRequested => {
@@ -1388,6 +1392,7 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
                 "com.nexus.storage.file_deleted",
                 serde_json::json!({ "path": path }),
             );
+            publish_file_activity(bus, "deleted", path, None);
         }
 
         StorageEvent::FileRenamed { from, to, content_hash } => {
@@ -1399,6 +1404,52 @@ fn publish_event(event: &StorageEvent, bus: &EventBus) {
                     "to": to,
                     "content_hash": content_hash,
                 }),
+            );
+            publish_file_activity(bus, "renamed", to, Some(from));
+        }
+    }
+}
+
+/// BL-052 — fan a storage file event out to the universal activity
+/// topic. `kind` is one of `created` / `modified` / `deleted` /
+/// `renamed`; `path` is the affected file (for renames, the new
+/// destination). `extra` carries the rename source when applicable.
+/// Best-effort: a bus failure logs at debug level and is swallowed —
+/// missing one activity entry is preferable to interrupting the
+/// storage event pipeline.
+fn publish_file_activity(
+    bus: &EventBus,
+    kind: &str,
+    path: &str,
+    extra_path: Option<&str>,
+) {
+    use nexus_types::activity::{
+        ActivityEntry, ActivityOrigin, ActivityOutcome, ActivitySurface,
+        ACTIVITY_APPENDED_TOPIC,
+    };
+
+    let mut entry = ActivityEntry::now(
+        // session_id is the path so the timeline can collapse
+        // many edits to the same file under one row if it wants to.
+        path.to_string(),
+        ActivitySurface::File,
+        ActivityOrigin::Storage,
+    );
+    entry.outcome = ActivityOutcome::Ok;
+    entry.prompt = match (kind, extra_path) {
+        ("renamed", Some(from)) => format!("renamed {from} → {path}"),
+        _ => format!("{kind} {path}"),
+    };
+    entry.files = match extra_path {
+        Some(from) => vec![from.to_string(), path.to_string()],
+        None => vec![path.to_string()],
+    };
+    if let Ok(payload) = serde_json::to_value(&entry) {
+        if let Err(err) = bus.publish_plugin(PLUGIN_ID, ACTIVITY_APPENDED_TOPIC, payload) {
+            tracing::debug!(
+                plugin = PLUGIN_ID,
+                %err,
+                "failed to publish storage activity entry",
             );
         }
     }

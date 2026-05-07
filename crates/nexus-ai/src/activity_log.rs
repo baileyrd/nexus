@@ -1,4 +1,4 @@
-//! BL-037 — AI activity timeline.
+//! BL-037 — AI activity log recorder.
 //!
 //! Per-forge JSONL log of AI interactions persisted at
 //! `.forge/ai-activity.log`. Each AI surface (chat, ask, cmd-i, ghost,
@@ -18,22 +18,27 @@
 //! on every `activity_list`. The 256 KiB head-truncation cap keeps
 //! that cheap (≈1k entries of 250 B each). BL-037 follow-ups can
 //! promote storage to a `Tantivy` / `SQLite` index.
+//!
+//! BL-052 — type definitions (`ActivityEntry`, `ActivitySurface`,
+//! `ActivityOutcome`, `ActivityOrigin`, `ActivityToolCall`) live in
+//! `nexus_types::activity` so other emitters can publish without
+//! depending on this crate. The recorder still owns the on-disk JSONL
+//! log for AI surfaces and publishes to both the universal topic and
+//! the legacy AI-only topic.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use nexus_kernel::{KernelPluginContext, PluginContext};
 use nexus_plugins::PluginError;
+use nexus_types::activity::{
+    truncate_prompt, ActivityEntry, ACTIVITY_APPENDED_TOPIC, ACTIVITY_PROMPT_MAX_CHARS,
+    AI_ACTIVITY_APPENDED_TOPIC,
+};
 
-#[cfg(feature = "ts-export")]
-use schemars::JsonSchema;
-#[cfg(feature = "ts-export")]
-use ts_rs::TS;
-
-/// Path inside the forge for the activity log.
+/// Path inside the forge for the AI activity log.
 pub const ACTIVITY_LOG_PATH: &str = ".forge/ai-activity.log";
 
 /// Hard cap on log file size in bytes. When the file would grow past
@@ -41,176 +46,6 @@ pub const ACTIVITY_LOG_PATH: &str = ".forge/ai-activity.log";
 /// so the file stays approximately at this size. 256 KiB ≈ 1k entries
 /// of 250 bytes each — plenty for "what did I do today".
 pub const ACTIVITY_LOG_MAX_BYTES: usize = 256 * 1024;
-
-/// Hard cap on prompt text stored. Truncated with ellipsis. Keeps the
-/// log file bounded even when the user pastes a very long prompt.
-pub const ACTIVITY_PROMPT_MAX_CHARS: usize = 256;
-
-/// Bus topic published after every successful append. Payload is the
-/// freshly-recorded [`ActivityEntry`] serialized to JSON. The shell's
-/// `nexus.activityTimeline` plugin subscribes to keep its store in
-/// sync without polling.
-pub const ACTIVITY_APPENDED_TOPIC: &str = "com.nexus.ai.activity_appended";
-
-/// Surface that originated the AI call. Mirrors the in-product UX
-/// surface so users (and future analytics) can slice the timeline.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
-#[cfg_attr(
-    feature = "ts-export",
-    ts(
-        export,
-        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
-    )
-)]
-#[serde(rename_all = "lowercase")]
-pub enum ActivitySurface {
-    /// Chat panel (`stream_chat`, mode=chat).
-    Chat,
-    /// RAG retrieve + chat (`stream_ask`).
-    Ask,
-    /// Cmd+I command-anywhere overlay (BL-032).
-    CmdI,
-    /// Inline ghost completion (BL-034, mode=complete).
-    Ghost,
-    /// Headless single-shot completion (`complete` CLI / mode=complete).
-    Complete,
-    /// Auto-enrichment on save (BL-045).
-    Enrich,
-    /// Catch-all when the surface tag is missing or unknown.
-    Other,
-}
-
-impl ActivitySurface {
-    /// Parse a wire string into a surface tag, falling back to
-    /// [`ActivitySurface::Other`] for unknown values. Tolerant on
-    /// purpose so a future surface added by a community plugin
-    /// doesn't crash deserialisation.
-    #[must_use]
-    pub fn from_str_lossy(s: &str) -> Self {
-        match s {
-            "chat" => Self::Chat,
-            "ask" => Self::Ask,
-            "cmdi" | "cmd-i" | "cmd_i" => Self::CmdI,
-            "ghost" => Self::Ghost,
-            "complete" => Self::Complete,
-            "enrich" => Self::Enrich,
-            _ => Self::Other,
-        }
-    }
-}
-
-/// Outcome of the AI call. Captures success vs failure separately
-/// from the (possibly error) free-form `error` string so the UI can
-/// flash an error glyph without parsing.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
-#[cfg_attr(
-    feature = "ts-export",
-    ts(
-        export,
-        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
-    )
-)]
-#[serde(rename_all = "lowercase")]
-pub enum ActivityOutcome {
-    /// Provider returned text and the surface accepted it.
-    Ok,
-    /// Provider errored, network failed, or the surface rejected
-    /// the response.
-    Error,
-    /// User cancelled mid-stream.
-    Cancelled,
-}
-
-/// One tool call attempted during a chat round. Captures the tool
-/// name + ok/error split; the actual input/output is intentionally
-/// not persisted (could contain large file contents).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
-#[cfg_attr(
-    feature = "ts-export",
-    ts(
-        export,
-        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
-    )
-)]
-#[serde(deny_unknown_fields)]
-pub struct ActivityToolCall {
-    /// Registered name of the tool (e.g. `read_file`, `write_file`).
-    pub name: String,
-    /// `false` if the executor reported an error.
-    pub ok: bool,
-}
-
-/// One entry in the activity timeline. Persisted as a single JSON
-/// object per line in `.forge/ai-activity.log`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
-#[cfg_attr(
-    feature = "ts-export",
-    ts(
-        export,
-        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
-    )
-)]
-#[serde(deny_unknown_fields)]
-pub struct ActivityEntry {
-    /// UUID v4 — stable across reads, useful for de-duping.
-    pub id: String,
-    /// RFC3339 wall-clock timestamp (UTC).
-    pub timestamp: String,
-    /// Originating session id (matches `com.nexus.ai.stream_*` events).
-    pub session_id: String,
-    /// Surface that triggered the call.
-    pub surface: ActivitySurface,
-    /// Provider name (`anthropic` / `openai` / `ollama`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    /// Concrete model id, when known.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    /// Truncated prompt text (last user message). Kept short so the
-    /// log file stays bounded.
-    pub prompt: String,
-    /// Files referenced — RAG sources, tool-call file paths.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub files: Vec<String>,
-    /// Tool calls attempted, in order.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_calls: Vec<ActivityToolCall>,
-    /// Final outcome.
-    pub outcome: ActivityOutcome,
-    /// Error message when `outcome=error`. Free-form.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    /// Wall-clock duration in milliseconds.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_ms: Option<u64>,
-}
-
-impl ActivityEntry {
-    /// Construct a minimally-populated entry. Fields the recorder
-    /// will fill (`id`, `timestamp`) get sensible defaults; everything
-    /// else is up to the caller.
-    #[must_use]
-    pub fn now(session_id: String, surface: ActivitySurface) -> Self {
-        Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
-            session_id,
-            surface,
-            provider: None,
-            model: None,
-            prompt: String::new(),
-            files: Vec::new(),
-            tool_calls: Vec::new(),
-            outcome: ActivityOutcome::Ok,
-            error: None,
-            duration_ms: None,
-        }
-    }
-}
 
 /// In-process recorder. Holds an `Arc<KernelPluginContext>` so handler
 /// futures clone the handle cheaply. The internal `Mutex<()>` serializes
@@ -242,10 +77,12 @@ impl ActivityRecorder {
         }
     }
 
-    /// Append `entry` to the activity log and publish
-    /// [`ACTIVITY_APPENDED_TOPIC`]. Best-effort: a failed disk write
-    /// emits a `tracing::warn` and returns `Ok(())` so the user's
-    /// chat call never fails because the timeline is full / read-only.
+    /// Append `entry` to the activity log and publish to both the
+    /// universal [`ACTIVITY_APPENDED_TOPIC`] and the legacy
+    /// [`AI_ACTIVITY_APPENDED_TOPIC`]. Best-effort: a failed disk
+    /// write emits a `tracing::warn` and returns silently so the
+    /// user's chat call never fails because the timeline is full or
+    /// read-only.
     pub async fn append(&self, mut entry: ActivityEntry) {
         truncate_prompt(&mut entry.prompt, ACTIVITY_PROMPT_MAX_CHARS);
         // Grab the lock for the entire RMW window. Holding across an
@@ -285,8 +122,14 @@ impl ActivityRecorder {
         }
         // Publish AFTER the disk write succeeds so subscribers can
         // trust that activity_list will return what they just heard.
+        // BL-052 — fire BOTH topics:
+        //   * universal `com.nexus.activity.appended` for the BL-052
+        //     timeline that aggregates across emitters
+        //   * legacy `com.nexus.ai.activity_appended` for any
+        //     subscriber that still listens on the AI-only topic.
         if let Ok(payload) = serde_json::to_value(&entry) {
-            let _ = self.ctx.publish(ACTIVITY_APPENDED_TOPIC, payload);
+            let _ = self.ctx.publish(ACTIVITY_APPENDED_TOPIC, payload.clone());
+            let _ = self.ctx.publish(AI_ACTIVITY_APPENDED_TOPIC, payload);
         }
     }
 
@@ -347,24 +190,6 @@ impl ActivityRecorder {
     }
 }
 
-/// Truncate `s` to at most `max_chars` chars (Unicode-safe), appending
-/// an ellipsis when truncated. No-op when the prompt is already short
-/// enough.
-fn truncate_prompt(s: &mut String, max_chars: usize) {
-    if s.chars().count() <= max_chars {
-        return;
-    }
-    // Reserve room for the ellipsis char. `max_chars` is small so
-    // this collect is cheap and Unicode-correct.
-    let take = max_chars.saturating_sub(1);
-    let mut new = String::with_capacity(take + 1);
-    for c in s.chars().take(take) {
-        new.push(c);
-    }
-    new.push('…');
-    *s = new;
-}
-
 /// Head-trim a JSONL-encoded byte buffer so its length does not exceed
 /// `cap`. Removes whole lines from the front so each remaining line
 /// is still a parseable JSON object. Always preserves at least the
@@ -401,29 +226,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn truncate_prompt_unicode_safe_under_limit_is_noop() {
-        let mut s = "hello".to_string();
-        truncate_prompt(&mut s, 10);
-        assert_eq!(s, "hello");
-    }
-
-    #[test]
-    fn truncate_prompt_preserves_grapheme_boundaries_with_ellipsis() {
-        // 5 emoji chars; multi-byte each. Limit 3 → keep 2 + ellipsis.
-        let mut s = "🦀🦀🦀🦀🦀".to_string();
-        truncate_prompt(&mut s, 3);
-        assert_eq!(s.chars().count(), 3);
-        assert!(s.ends_with('…'));
-    }
-
-    #[test]
-    fn truncate_prompt_at_exact_limit_is_noop() {
-        let mut s = "abcdef".to_string();
-        truncate_prompt(&mut s, 6);
-        assert_eq!(s, "abcdef");
-    }
-
-    #[test]
     fn head_trim_returns_input_when_under_cap() {
         let buf = b"line1\nline2\n".to_vec();
         let out = head_trim_bytes(buf.clone(), 1024);
@@ -450,49 +252,5 @@ mod tests {
         let buf = vec![b'x'; 200];
         let out = head_trim_bytes(buf.clone(), 50);
         assert_eq!(out, buf);
-    }
-
-    #[test]
-    fn surface_from_str_lossy_normalizes_known_aliases() {
-        assert_eq!(ActivitySurface::from_str_lossy("chat"), ActivitySurface::Chat);
-        assert_eq!(ActivitySurface::from_str_lossy("cmdi"), ActivitySurface::CmdI);
-        assert_eq!(ActivitySurface::from_str_lossy("cmd-i"), ActivitySurface::CmdI);
-        assert_eq!(ActivitySurface::from_str_lossy("cmd_i"), ActivitySurface::CmdI);
-        assert_eq!(
-            ActivitySurface::from_str_lossy("not-a-surface"),
-            ActivitySurface::Other,
-        );
-    }
-
-    #[test]
-    fn entry_round_trips_through_jsonl() {
-        let entry = ActivityEntry {
-            id: "id-1".into(),
-            timestamp: "2026-04-29T00:00:00Z".into(),
-            session_id: "sess-1".into(),
-            surface: ActivitySurface::Chat,
-            provider: Some("anthropic".into()),
-            model: Some("claude-sonnet-4-5".into()),
-            prompt: "hi".into(),
-            files: vec!["notes/a.md".into()],
-            tool_calls: vec![ActivityToolCall {
-                name: "read_file".into(),
-                ok: true,
-            }],
-            outcome: ActivityOutcome::Ok,
-            error: None,
-            duration_ms: Some(123),
-        };
-        let line = serde_json::to_string(&entry).unwrap();
-        // Sanity: snake_case + lowercased enums on the wire.
-        assert!(line.contains("\"surface\":\"chat\""));
-        assert!(line.contains("\"outcome\":\"ok\""));
-        // Empty optional fields should not bloat the line.
-        assert!(!line.contains("\"error\""));
-
-        let back: ActivityEntry = serde_json::from_str(&line).unwrap();
-        assert_eq!(back.id, "id-1");
-        assert_eq!(back.surface, ActivitySurface::Chat);
-        assert_eq!(back.tool_calls.len(), 1);
     }
 }
