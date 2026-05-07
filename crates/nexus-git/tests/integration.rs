@@ -595,6 +595,57 @@ fn cherry_pick_applies_single_commit_cleanly() {
 }
 
 #[test]
+fn conflict_versions_returns_three_sides_after_merge_conflict() {
+    // BL-084 — three-way diff primitive. Use the merge path to
+    // produce a genuine three-way conflict (base + ours + theirs)
+    // so all three slots are populated.
+    let (dir, engine) = setup();
+    fs::write(dir.path().join("conflict.txt"), "base line\n").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("initial").unwrap();
+    let main = engine.state().unwrap().branch.unwrap();
+
+    engine.create_branch("their-branch").unwrap();
+    engine.switch_branch("their-branch").unwrap();
+    fs::write(dir.path().join("conflict.txt"), "their line\n").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("theirs").unwrap();
+
+    engine.switch_branch(&main).unwrap();
+    fs::write(dir.path().join("conflict.txt"), "our line\n").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("ours").unwrap();
+
+    let merge = engine.merge("their-branch").unwrap();
+    assert!(!merge.conflicts.is_empty(), "merge should produce conflict");
+
+    let v = engine.conflict_versions("conflict.txt").unwrap();
+    assert_eq!(v.base.as_deref(), Some(b"base line\n".as_slice()));
+    assert_eq!(v.ours.as_deref(), Some(b"our line\n".as_slice()));
+    assert_eq!(v.theirs.as_deref(), Some(b"their line\n".as_slice()));
+
+    // Recovery path: abort cleans up.
+    engine.abort_merge().unwrap();
+}
+
+#[test]
+fn conflict_versions_errors_on_clean_file() {
+    let (dir, engine) = setup();
+    fs::write(dir.path().join("clean.txt"), "x").unwrap();
+    engine.stage_all().unwrap();
+    engine.commit("initial").unwrap();
+    // No merge in progress → has_conflicts is false → NoConflict.
+    let err = engine
+        .conflict_versions("clean.txt")
+        .expect_err("must error when index is clean");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not in conflict"),
+        "expected NoConflict error, got: {msg}"
+    );
+}
+
+#[test]
 fn cherry_pick_pauses_on_conflict_and_aborts_cleanly() {
     // Diverging edits to the same file → conflict on cherry-pick.
     // libgit2's cherrypick performs a safety-checked checkout

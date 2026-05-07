@@ -1233,6 +1233,9 @@ enum GitCommand {
         #[arg(long, conflicts_with = "commit")]
         abort: bool,
     },
+    /// Abort an in-progress merge, restoring pre-merge HEAD (BL-084).
+    #[command(name = "abort-merge")]
+    AbortMerge,
 }
 
 /// Branch subcommands.
@@ -1700,6 +1703,7 @@ fn main() {
             GitCommand::CherryPick { commit, abort } => {
                 commands::git::cherry_pick(&app, commit.as_deref(), abort)
             }
+            GitCommand::AbortMerge => commands::git::abort_merge(&app),
         },
         Commands::Run(_) => stubs::not_implemented("run"),
 

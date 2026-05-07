@@ -28,6 +28,13 @@ pub enum GitError {
     /// re-spawn a fresh [`crate::GitWorker`] if they still need git access.
     #[error("git worker thread is not running: {0}")]
     WorkerGone(String),
+
+    /// `conflict_versions` was asked about a path that isn't currently
+    /// in conflict (BL-084). Caller's responsibility to gate the call
+    /// behind an `index.has_conflicts()` check or a `conflict_files`
+    /// lookup.
+    #[error("path not in conflict: {0}")]
+    NoConflict(String),
 }
 
 #[cfg(test)]

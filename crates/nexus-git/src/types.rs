@@ -176,6 +176,23 @@ pub struct CherryPickResult {
     pub commit_hash: Option<String>,
 }
 
+/// The three index-side versions of a conflicted file (BL-084).
+/// Each side is `None` when libgit2 does not record an entry on
+/// that stage (e.g. a file added on one side only has no `base`).
+/// Bytes are the blob contents at that stage; the caller decodes
+/// to text or renders binary as appropriate.
+#[derive(Debug, Clone, Default)]
+pub struct ConflictVersions {
+    /// Common ancestor (stage 1). `None` when there is no shared base.
+    pub base: Option<Vec<u8>>,
+    /// HEAD side (stage 2 — "ours"). `None` when the file was
+    /// deleted on our side.
+    pub ours: Option<Vec<u8>>,
+    /// Incoming side (stage 3 — "theirs"). `None` when the file was
+    /// deleted on the incoming side.
+    pub theirs: Option<Vec<u8>>,
+}
+
 /// Information about a local branch.
 #[derive(Debug, Clone)]
 pub struct BranchInfo {

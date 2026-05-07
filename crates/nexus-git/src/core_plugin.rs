@@ -140,6 +140,27 @@ pub const HANDLER_ABORT_REBASE: u32 = 29;
 pub const HANDLER_CHERRY_PICK: u32 = 30;
 /// IPC handler: abort an in-progress cherry-pick (BL-088). No args.
 pub const HANDLER_ABORT_CHERRY_PICK: u32 = 31;
+/// IPC handler: list paths with unresolved merge conflicts (BL-084).
+/// No args. Returns `["path/a", "path/b"]`. Empty when the index is
+/// clean. Drives the shell conflict resolution panel's file list.
+pub const HANDLER_CONFLICT_FILES: u32 = 32;
+/// IPC handler: abort an in-progress merge (BL-084). No args. Mirrors
+/// the existing `GitEngine::abort_merge` — restores pre-merge HEAD
+/// via `reset --hard` + `cleanup_state`. Used by the shell conflict
+/// panel's "Abort merge" button.
+pub const HANDLER_ABORT_MERGE: u32 = 33;
+/// IPC handler: read the three index-side versions of a conflicted
+/// file (BL-084). Args: `{"path": "..."}`. Returns
+/// `{base: <bytes-or-null>, ours: <bytes-or-null>, theirs: <bytes-or-null>}`
+/// where each side is the raw blob bytes at that conflict stage.
+/// Drives the shell conflict panel's three-way diff view.
+pub const HANDLER_CONFLICT_VERSIONS: u32 = 34;
+/// IPC handler: merge a branch into HEAD (BL-084). Args: `{"branch": "..."}`.
+/// Returns `{fast_forward, conflicts, commit_hash}` mirroring
+/// `MergeResult`. Drives the shell git panel's "Merge into branch"
+/// flow; conflicts surface through the same `conflict_files` /
+/// `conflict_versions` / `abort_merge` triple as everywhere else.
+pub const HANDLER_MERGE: u32 = 35;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const POLL_TICK: Duration = Duration::from_millis(200);
@@ -523,6 +544,37 @@ impl CorePlugin for GitCorePlugin {
             HANDLER_ABORT_CHERRY_PICK => {
                 h.with(|e| e.abort_cherry_pick()).map_err(map_err)?;
                 Ok(json!({"ok": true}))
+            }
+            HANDLER_CONFLICT_FILES => {
+                let files = h.with(|e| e.conflict_files()).map_err(map_err)?;
+                Ok(json!({"files": files}))
+            }
+            HANDLER_ABORT_MERGE => {
+                h.with(|e| e.abort_merge()).map_err(map_err)?;
+                Ok(json!({"ok": true}))
+            }
+            HANDLER_CONFLICT_VERSIONS => {
+                let path = string_arg(args, "path")?;
+                let v = h
+                    .with(move |e| e.conflict_versions(&path))
+                    .map_err(map_err)?;
+                // Bytes go over the wire as JSON arrays of u8 — the
+                // shell decodes to a Uint8Array, then to text or
+                // binary preview as appropriate.
+                Ok(json!({
+                    "base":   v.base,
+                    "ours":   v.ours,
+                    "theirs": v.theirs,
+                }))
+            }
+            HANDLER_MERGE => {
+                let branch = string_arg(args, "branch")?;
+                let r = h.with(move |e| e.merge(&branch)).map_err(map_err)?;
+                Ok(json!({
+                    "fast_forward": r.fast_forward,
+                    "conflicts":    r.conflicts,
+                    "commit_hash":  r.commit_hash,
+                }))
             }
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),

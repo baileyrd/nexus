@@ -503,7 +503,14 @@ pub fn set_passphrase(key: &str) -> Result<()> {
     Ok(())
 }
 
-/// Remove a cached SSH passphrase from the OS keyring.
+/// Abort an in-progress merge, restoring pre-merge HEAD (BL-084).
+pub fn abort_merge(app: &App) -> Result<()> {
+    let engine = open_engine(app)?;
+    engine.abort_merge().map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!("Merge aborted.");
+    Ok(())
+}
+
 /// Non-interactive rebase or rebase abort (BL-088).
 pub fn rebase(app: &App, onto: Option<&str>, abort: bool) -> Result<()> {
     let engine = open_engine(app)?;

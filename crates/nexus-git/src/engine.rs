@@ -6,7 +6,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use git2::{ApplyLocation, DiffOptions, Repository, StatusOptions};
 
 use crate::error::GitError;
-use crate::types::{GitState, RepoState, StatusEntry, FileStatus, HunkDiff, BlameEntry, LogEntry, BranchInfo, MergeResult, RebaseResult, CherryPickResult, DiffLineKind, DiffLine, TagInfo, StashEntry};
+use crate::types::{GitState, RepoState, StatusEntry, FileStatus, HunkDiff, BlameEntry, LogEntry, BranchInfo, MergeResult, RebaseResult, CherryPickResult, ConflictVersions, DiffLineKind, DiffLine, TagInfo, StashEntry};
 
 /// Git engine backed by `git2::Repository`.
 ///
@@ -836,6 +836,52 @@ impl GitEngine {
         self.repo.reset(head.as_object(), git2::ResetType::Hard, None)?;
         self.repo.cleanup_state()?;
         Ok(())
+    }
+
+    /// Return the three index-side versions of a conflicted file
+    /// (BL-084 — base / ours / theirs). The shell's conflict
+    /// resolution panel uses this to render a 3-way diff before
+    /// the user picks per-hunk overrides.
+    ///
+    /// `relpath` is the repository-relative path; matching is
+    /// exact and the bytes returned are the blob contents at
+    /// each conflict stage.
+    ///
+    /// # Errors
+    /// Returns [`GitError`] when the repo isn't in a merge state,
+    /// the index isn't readable, or the path isn't in conflict.
+    pub fn conflict_versions(&self, relpath: &str) -> Result<ConflictVersions, GitError> {
+        let index = self.repo.index()?;
+        if !index.has_conflicts() {
+            return Err(GitError::NoConflict(relpath.to_string()));
+        }
+        let mut out = ConflictVersions::default();
+        let target = relpath.as_bytes();
+        for c in index.conflicts()?.flatten() {
+            let path = c
+                .ancestor
+                .as_ref()
+                .or(c.our.as_ref())
+                .or(c.their.as_ref())
+                .map(|e| e.path.clone())
+                .unwrap_or_default();
+            if path.as_slice() != target {
+                continue;
+            }
+            for (slot, entry) in [
+                (&mut out.base, c.ancestor.as_ref()),
+                (&mut out.ours, c.our.as_ref()),
+                (&mut out.theirs, c.their.as_ref()),
+            ] {
+                if let Some(e) = entry {
+                    if let Ok(blob) = self.repo.find_blob(e.id) {
+                        *slot = Some(blob.content().to_vec());
+                    }
+                }
+            }
+            return Ok(out);
+        }
+        Err(GitError::NoConflict(relpath.to_string()))
     }
 
     /// Non-interactive rebase of the current branch onto

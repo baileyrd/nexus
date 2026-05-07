@@ -8,6 +8,38 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-084: Shell git panel — conflict-resolution backend ✅ (2026-05-06, UI panel deferred)
+
+**Source**: Git Integration Assessment (2026-05-06) — gap #1
+**Files**: `crates/nexus-git/src/{engine.rs,types.rs,core_plugin.rs,error.rs}`, `crates/nexus-git/tests/integration.rs`, `crates/nexus-bootstrap/src/lib.rs`, `crates/nexus-cli/src/{main.rs,commands/git.rs}`
+
+The commit panel, branch picker, and log surfaces had already shipped in `shell/src/plugins/nexus/gitPanel/`. The conflict-resolution panel was the remaining piece. It is now **unblocked from the backend side**: every IPC handler the shell needs is in place.
+
+**New types:**
+
+- `ConflictVersions { base, ours, theirs }` — three optional `Vec<u8>` slots holding the raw blob bytes at each conflict stage (1 / 2 / 3). The shell decodes to a `Uint8Array` and renders text or binary preview as appropriate.
+- `GitError::NoConflict(String)` — surfaces from `conflict_versions` when the path is clean, so the UI can distinguish "wrong path" from "libgit2 failure".
+
+**New engine method:** `conflict_versions(relpath) -> Result<ConflictVersions, GitError>`. Walks the libgit2 conflict iterator, finds the entry whose ancestor/our/their path matches `relpath`, and resolves each side's blob via `Repository::find_blob`. Returns `NoConflict` when the index is clean or the path isn't conflicted.
+
+**New IPC handlers** (registered with `with_v1_aliases` per ADR 0021):
+
+- 32 `conflict_files` — `{}` → `{files: [...]}`. Already had an engine method; this exposes it to the shell.
+- 33 `abort_merge` — `{}` → `{ok: true}`. Same — engine method existed, IPC surface didn't.
+- 34 `conflict_versions` — `{path}` → `{base, ours, theirs}` with raw bytes. Drives the three-way diff view.
+- 35 `merge` — `{branch}` → `{fast_forward, conflicts, commit_hash}`. Was missing entirely; the commit panel had no way to drive a merge from the shell.
+
+**CLI surface added:** `nexus git abort-merge` (mirrors the existing `nexus git conflicts` lister; gives headless users a clean recovery path). End-to-end smoke against a hand-built two-branch conflict confirmed the listed file, the abort, and the post-abort clean state.
+
+**New tests** in `crates/nexus-git/tests/integration.rs`:
+
+- `conflict_versions_returns_three_sides_after_merge_conflict` — sets up a 3-way conflict via `merge` and verifies all three slots round-trip the right blob bytes.
+- `conflict_versions_errors_on_clean_file` — verifies the `NoConflict` error path.
+
+**Deferred (shell UI):** the React panel under `shell/src/plugins/nexus/gitPanel/conflict/` that subscribes to `com.nexus.git.state`, surfaces a file list from `conflict_files`, renders per-file three-way diffs from `conflict_versions`, and exposes "Abort merge / rebase / cherry-pick" buttons (the rebase + cherry-pick aborts landed in BL-088). UI-only work — no further backend changes needed; estimated 3–5 days of TS/React.
+
+---
+
 ### BL-088: Non-interactive rebase + cherry-pick ✅ (2026-05-06)
 
 **Source**: Git Integration Assessment (2026-05-06) — deferred feature
