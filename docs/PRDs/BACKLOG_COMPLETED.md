@@ -8,6 +8,29 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-053 Phase 1: Forge visual target — chrome polish ✅ (2026-05-07)
+
+**Source**: BL-053 companion plan, Phase 1 — [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md) §3
+**Files**: `shell/src/shell/shell.css`, `shell/src/plugins/nexus/workspace/WorkspaceStatusItem.tsx`
+**Related**: bundled ember themes `nexus-ember-dark` / `nexus-ember-light` (delivered 2026-05-06) supply the tokens this phase styles against
+
+Phase 1 of BL-053 — chrome polish only. Targets ~70% of the visible mockup gap with restyling against existing tokens; no markdown-renderer changes, no new components. Phases 2–4 (inline rendering, callouts, status pills) intentionally deferred.
+
+- **Pill-shaped editor tabs.** `.forge-tab` is now a 28-pill that floats inside a 38-px tab strip with 4-px outer padding. Active state pairs the existing 2-px `--interactive-accent` underline (relocated from top of tab to bottom of strip, sitting flush with the workspace divider) with a new `--interactive-accent-soft` fill plus an ember-tinted file icon. Hover on inactive tabs takes `--background-modifier-hover` for affordance. Per-tab `border-right` removed (pills don't need separators). Plus button rounded to a 28×28 circle to match. Tab-bar background switched from primary to secondary so the pill fill is visually distinguishable.
+- **Inspector segmented control.** `.rtabs` was a flat row with an underline accent on `.rtab.active`; it's now a true segmented control — a single rounded pill (1 px border, 3 px inner padding, 999 px radius) holding three 22-px segments with 2 px gaps. Active segment fills with `--interactive-accent-soft`, gets the existing 2-px ember underline (now positioned 2 px above the segment's bottom so it floats inside the pill rather than slicing it), and the count badge `.n` flips to ember. `.rightpanel` grid row for the strip changed from `32px` to `auto` to absorb the new outer margin without a gap.
+- **Status bar forge name + ember dot.** `WorkspaceStatusItem` previously rendered "Forge synced" with a green `--ok` dot when a workspace was open; mockup item P calls for the forge basename with an ember dot. Now reads `basename(rootPath)` and uses `--interactive-accent` (with a 6-px glow `box-shadow`) when synced. Unsynced state keeps `--text-faint` and the "No workspace" placeholder. The item is registered on `statusBarLeft` (matches Obsidian's convention; mockup says "bottom-right" but doesn't strictly require slot placement).
+- **Fonts.** No code change required. Phase 1's font wiring DoD ("Fraunces serif h1/h2, Inter sans body, JetBrains Mono code — wire consumer CSS to use them") was already satisfied by the existing token cascade: `.doc` → `var(--font-text)` (serif), `.doc h2` → `var(--font-interface)` (small-caps section header per mockup item L), `.doc h3` → `var(--font-text)`, code/pre → `var(--font-monospace)`, shell chrome → `var(--font-interface)`. The ember theme's TOML declares `serif_font = "'Fraunces', Georgia, serif"` but the runtime doesn't yet pipe `TypographyBlock` into CSS variables — the consumer CSS falls back to the index.html-declared `IBM Plex Serif`. Bundling Fraunces (open question Q3) and wiring `TypographyBlock → --nx-*` are tracked for a future phase / IPC contract change.
+
+**Tested**: `pnpm --filter nexus-shell typecheck` clean, `pnpm --filter nexus-shell test` 917 / 917 pass, `pnpm --filter nexus-shell lint` 2 pre-existing errors in unrelated files (`gitPanel/GitPanel.tsx`, `themePicker/ThemeBuilder.tsx`) — neither touched by this phase.
+
+**Definition of done coverage** (per Phase 1 §6 of the companion plan): all five Phase 1 surfaces shipped (pill tabs, segmented inspector, status-bar ember dot, fonts wired through tokens, ember accent visibility — accent visibility was last fine-tuned 2026-05-06 with the bundled ember themes; left untouched here).
+
+**Deferred from the broader BL-053:**
+- Phase 2 (wikilinks + path-style code + frontmatter metadata bar) — markdown-renderer work, ~2d
+- Phase 3 (callouts) — markdown-extension work, ~3–5d, gates on Q1 (callout syntax — Obsidian dialect recommended)
+- Phase 4 (status pills + tree dots) — gates on Q2 (where do status values come from — frontmatter / Bases / inline syntax)
+- `TypographyBlock → CSS variable` runtime wiring + bundled Fraunces — gates on Q3
+
 ### BL-052: Universal activity timeline ✅ (2026-05-07)
 
 **Source**: AIG-04 follow-up (2026-05-05) — see [../AI-GAPS.md](../AI-GAPS.md#aig-04--activity-audit-panel)

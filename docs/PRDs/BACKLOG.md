@@ -403,8 +403,10 @@ No new backend services. Every phase is UI additions or thin IPC handlers over f
 
 ### BL-053: Forge visual target — close the gap to the design mockup
 
+> **Phase 1 closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Pill-shaped editor tabs, ember segmented inspector control, and status-bar forge name + ember dot all shipped. Fonts already wired through tokens. Phases 2–4 remain open (gated on the §5 product decisions).
+
 **Source**: Forge Color System mockup + ember-on-slate exploration (2026-05-06) — full plan in [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md)
-**Effort**: Phase 1 ~1 day · Phase 2 ~2 days · Phase 3 ~3–5 days · Phase 4 ~3–5 days (~3–4 weeks for the lot)
+**Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2 ~2 days · Phase 3 ~3–5 days · Phase 4 ~3–5 days (~3–4 weeks for the lot)
 **Crates**: `shell/src/shell/`, `shell/src/plugins/nexus/editor/`, `shell/src/plugins/nexus/outline/`, `shell/src/plugins/core/editorArea/`, possibly a new markdown-extension surface in `nexus-editor`
 **Related**: bundled themes `nexus-ember-dark` / `nexus-ember-light` (delivered 2026-05-06) supply the tokens; this BL styles against them
 

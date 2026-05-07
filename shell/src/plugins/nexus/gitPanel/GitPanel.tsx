@@ -105,6 +105,14 @@ export function GitPanel() {
   const status   = useGitStatusStore((s) => s.status)
   const activeTab = useGitPanelStore((s) => s.activeTab)
   const setActiveTab = useGitPanelStore((s) => s.setActiveTab)
+  // BL-084: surface non-Clean repo states (Merge / Rebase / CherryPick / …)
+  // with an Abort affordance regardless of which tab is active. The
+  // per-file resolution UI lives in `ChangesTab` so it sits next to
+  // the file list. Hook must precede the early return below to satisfy
+  // rules-of-hooks.
+  const conflictedCount = useGitPanelStore((s) =>
+    s.files.reduce((n, f) => (f.status === 'Conflicted' ? n + 1 : n), 0),
+  )
 
   // Seed data when the panel mounts (kernel may already be running).
   useEffect(() => {
@@ -146,13 +154,6 @@ export function GitPanel() {
     </button>
   )
 
-  // BL-084: surface non-Clean repo states (Merge / Rebase / CherryPick / …)
-  // with an Abort affordance regardless of which tab is active. The
-  // per-file resolution UI lives in `ChangesTab` so it sits next to
-  // the file list.
-  const conflictedCount = useGitPanelStore((s) =>
-    s.files.reduce((n, f) => (f.status === 'Conflicted' ? n + 1 : n), 0),
-  )
   const showBanner = !!status && status.repo_state !== 'Clean'
 
   return (

@@ -1,9 +1,16 @@
 import { useWorkspaceStore } from './workspaceStore'
 
+function basename(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, '')
+  const parts = trimmed.split(/[\\/]/)
+  return parts[parts.length - 1] || trimmed
+}
+
 export function WorkspaceStatusItem() {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const open = useWorkspaceStore((s) => s.open)
   const synced = rootPath !== null
+  const label = synced ? basename(rootPath!) : 'No workspace'
 
   return (
     <button
@@ -29,11 +36,11 @@ export function WorkspaceStatusItem() {
           height: 6,
           borderRadius: '50%',
           flexShrink: 0,
-          background: synced ? 'var(--ok)' : 'var(--text-faint)',
-          boxShadow: synced ? '0 0 4px var(--ok)' : 'none',
+          background: synced ? 'var(--interactive-accent)' : 'var(--text-faint)',
+          boxShadow: synced ? '0 0 6px var(--interactive-accent)' : 'none',
         }}
       />
-      <span>{synced ? 'Forge synced' : 'No workspace'}</span>
+      <span>{label}</span>
     </button>
   )
 }

@@ -718,7 +718,8 @@ function VarRow({ entry, baseValue, loadingBase, override, contrastBgValue, comp
     : null
 
   const handleTextChange = (raw: string) => {
-    raw === '' ? onClear(entry.key) : onSet(entry.key, raw)
+    if (raw === '') onClear(entry.key)
+    else onSet(entry.key, raw)
   }
 
   const labelWidth = compact ? 90 : 160

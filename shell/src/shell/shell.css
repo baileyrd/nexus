@@ -1459,12 +1459,14 @@ textarea:disabled {
   color: var(--interactive-accent-ink); font-weight: 700;
 }
 
-/* ─── Forge editor tab bar ──────────────────────────────────────────────── */
+/* ─── Forge editor tab bar (BL-053 Phase 1: ember pills) ────────────────── */
 .forge-tabbar {
-  display: flex; align-items: stretch;
-  height: 34px;
+  display: flex; align-items: center;
+  height: 38px;
+  padding: 4px 6px 0;
+  gap: 4px;
   border-bottom: 1px solid var(--background-modifier-border);
-  background: var(--background-primary);
+  background: var(--background-secondary);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -1477,24 +1479,31 @@ textarea:disabled {
 .workspace-tab-strip-scroll::-webkit-scrollbar { display: none; }
 .forge-tab {
   display: flex; align-items: center; gap: 8px;
+  height: 28px;
   padding: 0 12px;
-  border-right: 1px solid var(--divider-color);
+  border-radius: 999px;
   color: var(--text-muted);
   font-size: 12.5px;
   cursor: pointer;
   max-width: 220px; min-width: 0;
   position: relative;
+  transition: background-color 120ms ease, color 120ms ease;
 }
-.forge-tab:hover  { color: var(--text-normal); }
-.forge-tab.active { color: var(--text-normal); background: var(--background-primary); }
+.forge-tab:hover  { color: var(--text-normal); background: var(--background-modifier-hover); }
+.forge-tab.active {
+  color: var(--text-normal);
+  background: var(--interactive-accent-soft);
+}
 .forge-tab.active::after {
-  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+  content: ''; position: absolute; left: 12px; right: 12px; bottom: -4px; height: 2px;
   background: var(--interactive-accent);
+  border-radius: 2px 2px 0 0;
 }
 .forge-tab .ficon { color: var(--text-faint); width: 12px; height: 12px; }
+.forge-tab.active .ficon { color: var(--interactive-accent); }
 .forge-tab .tname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .forge-tab .x {
-  width: 16px; height: 16px; border-radius: 3px;
+  width: 16px; height: 16px; border-radius: 50%;
   display: grid; place-items: center;
   color: var(--text-faint);
   opacity: 0;
@@ -1504,7 +1513,8 @@ textarea:disabled {
 .forge-tab .dirty { width: 6px; height: 6px; border-radius: 50%; background: var(--interactive-accent); }
 .forge-tabbar .tab-plus {
   display: grid; place-items: center;
-  width: 32px; color: var(--text-faint); cursor: pointer;
+  width: 28px; height: 28px; border-radius: 50%;
+  color: var(--text-faint); cursor: pointer;
 }
 .forge-tabbar .tab-plus:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 
@@ -1541,26 +1551,48 @@ textarea:disabled {
 /* ─── Right panel (inspector) ───────────────────────────────────────────── */
 .rightpanel {
   display: grid;
-  grid-template-rows: 36px 32px 1fr;
+  grid-template-rows: 36px auto 1fr;
   min-height: 0;
   height: 100%;
   background: var(--background-secondary-alt);
 }
-.rtabs { display: flex; align-items: stretch; border-bottom: 1px solid var(--divider-color); }
+/* BL-053 Phase 1: segmented control treatment.
+   The .rtabs strip is a single rounded pill containing three rtab segments;
+   the active segment fills with --interactive-accent-soft and gets a
+   2px ember underline. Hover only tints text on inactive segments so the
+   active fill stays the dominant signal. */
+.rtabs {
+  display: flex;
+  align-items: stretch;
+  margin: 6px 8px;
+  padding: 3px;
+  background: var(--background-primary);
+  border: 1px solid var(--divider-color);
+  border-radius: 999px;
+  gap: 2px;
+}
 .rtab {
-  flex: 1; display: inline-flex; align-items: center; justify-content: center;
+  flex: 1;
+  display: inline-flex; align-items: center; justify-content: center;
   gap: 6px;
+  height: 22px;
+  border-radius: 999px;
   font-size: 11px; color: var(--text-muted);
   cursor: pointer; user-select: none;
   position: relative;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 .rtab:hover { color: var(--text-normal); }
-.rtab.active { color: var(--text-normal); }
+.rtab.active {
+  color: var(--text-normal);
+  background: var(--interactive-accent-soft);
+}
 .rtab.active::after {
-  content: ''; position: absolute; left: 10px; right: 10px; bottom: 0;
-  height: 2px; background: var(--interactive-accent); border-radius: 2px 2px 0 0;
+  content: ''; position: absolute; left: 14px; right: 14px; bottom: 2px;
+  height: 2px; background: var(--interactive-accent); border-radius: 2px;
 }
 .rtab .n { font-family: var(--font-monospace); font-size: 10px; color: var(--text-faint); }
+.rtab.active .n { color: var(--interactive-accent); }
 .rpanes { overflow-y: auto; min-height: 0; }
 .rpane  { padding: 8px; display: grid; gap: 6px; }
 .ol-section {
@@ -1586,7 +1618,7 @@ textarea:disabled {
 /* ─── Editor surface + Doc typography ───────────────────────────────────── */
 .forge-center {
   display: grid;
-  grid-template-rows: 34px 1fr;
+  grid-template-rows: 38px 1fr;
   min-width: 0;
   min-height: 0;
   flex: 1;
