@@ -9,6 +9,7 @@ import { useWorkspaceField, workspace, type Tabs } from '../../../workspace'
 import { getEditorRuntime, setActiveCmView } from './runtime'
 import { CodeMirrorHost, type CodeMirrorHostHandle } from './cm/CodeMirrorHost'
 import { transactionBridge } from './cm/transactionBridge'
+import { getEditorMode, pickLanguageExtension } from './codeMode'
 import { slashCommandExt } from './cm/slashCommand'
 import { blockSelectionExt } from './cm/blockSelection'
 import { multiCursorPromoteExt } from './cm/multiCursorPromote'
@@ -940,10 +941,38 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
       )
     }
 
-    // Untitled / non-markdown / pre-session fallback — Phase 2 behaviour.
+    // BL-075 — code mode: non-markdown files routed through the
+    // dual-mode router get a CodeMirror with the matching language
+    // extension and *no* block-tree extensions (no slash menu, no
+    // block handles, no live-preview decorations). Document mode
+    // for non-markdown / pre-session files (untitled, plain text)
+    // keeps the Phase-2 fallback shape: bare CM6 with no language.
+    //
+    // The `codeFileExtensions` list comes from the runtime (which
+    // reads the live `nexus.editor.codeFileExtensions` setting), so
+    // a user adding `.sh` to the list opens that file in code mode
+    // on the next reopen.
+    const codeExtensions = runtime?.getCodeFileExtensions()
+    const editorMode = getEditorMode(tab.name, codeExtensions)
+    const languageExtension =
+      editorMode === 'code' ? pickLanguageExtension(tab.name) : null
+    const codeBuildExtensions =
+      languageExtension !== null
+        ? () => [languageExtension]
+        : tab.mode === 'live'
+          ? () => [livePreviewExt()]
+          : undefined
+
+    // Untitled / non-markdown / pre-session fallback. The
+    // `buildExtensions` choice above turns this into either:
+    //   - bare CM6 (no language, document fallback for unrecognised
+    //     names like `LICENSE`),
+    //   - CM6 + livePreviewExt (fallback for live mode on a tab
+    //     with no kernel session — preserves Phase-2 behaviour),
+    //   - CM6 + language extension (BL-075 code mode).
     return (
       <CodeMirrorHost
-        key={`${keymapKey}:${tab.relpath}`}
+        key={`${keymapKey}:${editorMode}:${tab.relpath}`}
         ref={cmViewRef}
         className="nexus-editor-source"
         value={tab.content}
@@ -954,7 +983,15 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
             ? {
                 relpath: tab.relpath,
                 // No session → save is a no-op; close still routes
-                // through the runtime's confirmation flow.
+                // through the runtime's confirmation flow. Code
+                // mode files have a save (storage::write_file via
+                // the COMMAND_SAVE handler), so the vim `:w` plumb
+                // could route through the runtime — but the
+                // existing runtime.confirmAndClose path doesn't yet
+                // expose a save-by-relpath, and the COMMAND_SAVE
+                // handler reads the active tab anyway. ⌘S works as
+                // expected; only the ex-command :w is a no-op,
+                // matching pre-BL-075 behaviour.
                 onSave: () => {},
                 onClose: () => {
                   void runtime.confirmAndClose(tab.relpath)
@@ -965,7 +1002,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
         emacs={
           keybindings === 'emacs' ? { relpath: tab.relpath } : undefined
         }
-        buildExtensions={tab.mode === 'live' ? () => [livePreviewExt()] : undefined}
+        buildExtensions={codeBuildExtensions}
       />
     )
   }

@@ -54,6 +54,14 @@ export interface EditorRuntime {
    * new value; live-mutating an open tab's keymap is out of scope.
    */
   getKeybindings: () => EditorKeybindings
+  /**
+   * BL-075: live read of the `nexus.editor.codeFileExtensions`
+   * setting, parsed into a normalised array of lowercase extensions
+   * with no leading dots and whitespace trimmed. Read at tab-render
+   * time so a setting flip + tab reopen picks up the new value;
+   * live-mutating an open tab's mode is out of scope.
+   */
+  getCodeFileExtensions: () => readonly string[]
 }
 
 let _runtime: EditorRuntime | null = null

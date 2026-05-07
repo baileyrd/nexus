@@ -8,6 +8,49 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-075: Dual-mode editor — code files vs. document files ✅ (2026-05-07)
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](docs/PRDs/BL-075-081-code-editor.md)
+**Files**: `shell/src/plugins/nexus/editor/{codeMode.ts, codeMode.test.ts, EditorView.tsx, runtime.ts, index.ts}`, `shell/tests/code-mode.test.ts`, `shell/package.json`
+**Related**: BL-076 (nexus-lsp — this lands first as the routing infrastructure); PRD-08 editor spec
+
+Pre-BL-075 the editor routed `.md` files through the `com.nexus.editor` block tree (Phase 3+ session lifecycle) and everything else through a bare CodeMirror with no language awareness — opening `main.rs` got a syntax-highlightless textarea. BL-075 adds the language layer + a user-configurable extension list, and clarifies "document vs. code" as a first-class routing decision.
+
+- **`codeMode.ts`.** Single source of truth for the routing decision. Three exports:
+  - `getExtension(name)` — lowercased final segment after the last dot. Handles `.tar.gz`-style multi-dot, trailing-dot edge cases, leading whitespace.
+  - `getEditorMode(name, codeExtensions?)` — returns `'document'` or `'code'`. Markdown variants (`.md`, `.markdown`, `.mdx`) always route document regardless of the override list, so a misconfigured setting can't accidentally break the markdown editor. Unrecognised extensions fall through to `document`, preserving pre-BL-075 behaviour for files like `LICENSE` / `CHANGELOG`.
+  - `pickLanguageExtension(name)` — returns the matching CM6 language extension or `null` for no language.
+  - `DEFAULT_CODE_EXTENSIONS` — `[rs, ts, tsx, js, jsx, mjs, cjs, py, go, json, jsonc, yaml, yml, toml]`.
+- **Language coverage.** Eight languages from the DoD's "common types" list:
+  - Rust → `@codemirror/lang-rust`.
+  - TypeScript (TS / TSX) → `@codemirror/lang-javascript` with `typescript: true`, JSX flag derived from extension.
+  - JavaScript (JS / JSX / MJS / CJS) → `@codemirror/lang-javascript`.
+  - Python → `@codemirror/lang-python`.
+  - JSON / JSONC → `@codemirror/lang-json`.
+  - YAML → `@codemirror/lang-yaml`.
+  - Go → `StreamLanguage.define(go)` from `@codemirror/legacy-modes` (no first-party package).
+  - TOML → `StreamLanguage.define(toml)` from `@codemirror/legacy-modes` (same reason).
+- **`EditorView` wiring.** The non-markdown / pre-session fallback (which existed pre-BL-075 and already used `com.nexus.storage::read_file` for reads + `write_file` on save) now layers the matching language extension into `buildExtensions`. The `key` prop includes `editorMode` so a config flip + tab reopen remounts the host with the new extension stack. The block-tree extensions (`slashCommandExt`, `blockHandleExt`, `livePreviewExt`, etc.) are unchanged in document mode — code mode never mounts them.
+- **Settings.** New `nexus.editor.codeFileExtensions` config (string type, comma-separated) with default `'rs,ts,tsx,js,jsx,mjs,cjs,py,go,json,jsonc,yaml,yml,toml'`. The runtime parses and normalises (trim + lowercase + strip leading dot, so `.RS , ts , .py` all work). Empty / whitespace-only values fall back to `DEFAULT_CODE_EXTENSIONS` rather than disabling code mode — that's almost certainly a settings-UI mistake, not "the user wants no code mode".
+- **Runtime accessor.** `EditorRuntime` gained `getCodeFileExtensions(): readonly string[]`. Read at tab-render time (matching the existing `getKeybindings` pattern), so a settings flip needs a tab reopen to take effect — live-mutating an open tab's mode is intentionally out of scope.
+
+**Tests.**
+
+- 11 new unit tests in `shell/src/plugins/nexus/editor/codeMode.test.ts` (collected by the `tests/code-mode.test.ts` re-export shim, mirroring the existing `block-links` pattern):
+  - `getExtension`: lowercased final segment, multi-dot names, no-extension fallback, trailing-dot edge case, whitespace trimming.
+  - `getEditorMode`: markdown wins regardless of override; every default code extension routes to `'code'`; unknown extensions fall through to `'document'`; caller-supplied override list is honored both ways (adding a new extension, dropping a default).
+  - `pickLanguageExtension`: returns a non-null extension for every default-routed name; returns `null` for unmapped extensions; smoke-test the JSX/TSX flag.
+- All 903 shell tests pass (892 pre-BL-075 + 11 new); typecheck clean; lint clean on the new files.
+
+**Deliberately deferred:**
+
+- **`com.nexus.lsp` integration.** BL-076 (the LSP core plugin) is the natural follow-up and was always the prerequisite this dual-mode infrastructure was meant to enable. Code mode today is "syntax highlighting + raw text editor" — completions / diagnostics / go-to-definition land when BL-076 + BL-077 ship. The mode-flip alone is a 30%-of-the-value step that was worth taking standalone.
+- **Per-file syntax tree introspection.** Outline / breadcrumbs / fold guides for code files would benefit from CM6's `syntaxTree` API. The current `OutlineView` is markdown-headings-only; extending it to e.g. Rust function definitions is a separate plugin concern, not editor-routing.
+- **`tab.mode === 'live' | 'preview'` for code files.** Code-mode tabs flip-flop between `'source'` / `'live'` today via the existing toggle, but the live-preview decorations (`livePreviewExt`) only make sense for markdown, so the toggle is effectively a no-op outside markdown. A future surface could repurpose the toggle (e.g. for read-only preview of compiled output), but the current behaviour is "harmless flip" — not worth a UX intervention.
+- **Untitled-tab code mode.** Untitled tabs (`untitled-N`) have no extension, so they fall through to document mode. Naming an untitled tab via "Save As" with a code extension routes correctly on next reopen; live-flipping the mode of an in-progress untitled buffer is out of scope.
+
+---
+
 ### BL-065: Windows pre-command support (cmd.exe / PowerShell) ✅ (2026-05-07)
 
 **Source**: Terminal Integration Assessment (2026-05-06) — Phase Q follow-up

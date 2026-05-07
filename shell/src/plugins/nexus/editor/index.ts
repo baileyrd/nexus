@@ -12,6 +12,7 @@ import { setEditorRuntime, getActiveCmView } from './runtime'
 import { revealBlockInView } from './cm/blockLinkNav'
 import { makeEditorClient } from './kernelClient'
 import { makeSessionManager } from './sessionManager'
+import { DEFAULT_CODE_EXTENSIONS } from './codeMode'
 import { installSlashMenuStyles } from './cm/slashCommand'
 import {
   installBlockHandleStyles,
@@ -108,6 +109,10 @@ const CONFIG_CONFIRM_CLOSE_DIRTY = 'nexus.editor.confirmCloseDirty'
 const CONFIG_DEFAULT_MODE = 'nexus.editor.defaultMode'
 // BL-070: opt-in modal keybinding layer for the markdown editor.
 const CONFIG_KEYBINDINGS = 'nexus.editor.keybindings'
+// BL-075: comma-separated list of file extensions that open in code
+// mode (raw CM6 with a language extension) rather than document mode
+// (markdown block tree). Read at file-open time.
+const CONFIG_CODE_FILE_EXTENSIONS = 'nexus.editor.codeFileExtensions'
 
 interface FileOpenPayload {
   relpath: string
@@ -474,6 +479,14 @@ export const editorPlugin: Plugin = {
           default: 'default',
           options: ['default', 'vim', 'emacs'],
         },
+        {
+          key: CONFIG_CODE_FILE_EXTENSIONS,
+          title: 'Code-mode file extensions',
+          description:
+            "Comma-separated list of file extensions that open in code mode (raw CodeMirror with a language extension) rather than document mode. Markdown is always document-mode regardless of this list. Default covers Rust, TypeScript, JavaScript, Python, Go, JSON, YAML, and TOML.",
+          type: 'string',
+          default: 'rs,ts,tsx,js,jsx,mjs,cjs,py,go,json,jsonc,yaml,yml,toml',
+        },
       ],
     })
 
@@ -732,6 +745,25 @@ export const editorPlugin: Plugin = {
         if (v === 'vim') return 'vim'
         if (v === 'emacs') return 'emacs'
         return 'default'
+      },
+      getCodeFileExtensions: () => {
+        // Parse the comma-separated config string into a normalised
+        // list. Strip leading dots so users can type either `.rs` or
+        // `rs`; lowercase + trim each token so `RS, ts , .py ` all
+        // round-trip cleanly. An empty / whitespace-only setting
+        // string falls back to the default list rather than
+        // disabling code mode entirely — that's almost certainly a
+        // settings-UI mistake, not "the user wants no code mode".
+        const raw = api.configuration.getValue<string>(
+          CONFIG_CODE_FILE_EXTENSIONS,
+          '',
+        )
+        const parsed = raw
+          .split(',')
+          .map((s) => s.trim().toLowerCase().replace(/^\.+/, ''))
+          .filter((s) => s.length > 0)
+        if (parsed.length > 0) return parsed
+        return DEFAULT_CODE_EXTENSIONS
       },
       reportBridgeError: (message, err) => {
         api.notifications.show({

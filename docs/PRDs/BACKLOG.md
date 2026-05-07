@@ -282,28 +282,7 @@ list_servers()                        → Vec<LspServerInfo>
 
 ---
 
-### BL-075: Dual-mode editor — code files vs. document files
-
-**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
-**Effort**: Small (3 days)
-**Crates**: `shell/src/plugins/nexus/editor/EditorView.tsx`, `shell/src/plugins/nexus/editor/sessionManager.ts`
-**Related**: BL-076 (nexus-lsp — this is its prerequisite); PRD-08 editor spec
-
-The current editor routes all files through the `nexus-editor` block tree. Code files (`.rs`, `.ts`, `.py`, etc.) should bypass the block tree entirely and open in a raw CM6 mode backed by `nexus-lsp` instead of `nexus-editor`.
-
-**Two modes:**
-- **Document mode** (existing): `.md` + forge notes → block tree + `com.nexus.editor` IPC. Unchanged.
-- **Code mode** (new): all other text files → raw CM6 on file content, `com.nexus.lsp` IPC, no block tree.
-
-The routing decision is made at file open by checking the file extension against a configurable code-file list. The CM6 instance in code mode uses standard language extensions (via `@codemirror/lang-*` packages) instead of the custom block handle/slash command extensions.
-
-**Definition of done:**
-- `EditorView.tsx` accepts a `mode: "document" | "code"` prop; code mode renders bare CM6 without block-tree extensions
-- `sessionManager.ts` routes opens by file type; `.md` → document mode, everything else → code mode
-- Code mode reads file content via `com.nexus.storage::read_file` directly (no `com.nexus.editor::open`)
-- Code mode saves via `com.nexus.storage::write_file` on ⌘S
-- Code mode applies correct CM6 language extension for common types (Rust, TypeScript, Python, Go, TOML, JSON, YAML, Markdown-in-code)
-- File-type list configurable in Settings → Editor
+_BL-075 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `codeMode.ts` module exports `getEditorMode(name, codeExtensions?)` and `pickLanguageExtension(name)`. The read/save split was already in place pre-BL-075 (markdown → `com.nexus.editor::open` session, non-markdown → `com.nexus.storage::read_file` / `write_file`); what BL-075 adds is the CM6 language extension layered onto the non-markdown path plus the user-configurable extension list. Eight languages cover the documented "common types": Rust, TypeScript (TS/TSX), JavaScript (JS/JSX/MJS/CJS), Python, Go (via `@codemirror/legacy-modes`), JSON / JSONC, YAML, TOML (also legacy-modes). `EditorView` reads the live `nexus.editor.codeFileExtensions` setting through the runtime's new `getCodeFileExtensions()` accessor; an empty / whitespace-only setting falls back to the default list rather than disabling code mode entirely. Markdown is unconditionally document-mode regardless of the override list, so a misconfigured setting can't break the markdown editor. 11 new unit tests pin the routing matrix; full shell suite at 903 tests stays green._
 
 ---
 
