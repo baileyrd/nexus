@@ -145,22 +145,7 @@ _BL-085 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
-### BL-083: Forge-to-forge import and migration tool
-
-**Source**: Storage Integration Assessment (2026-05-06) — gap #5
-**Effort**: Medium (1 week)
-**Crates**: `nexus-storage` (new `import_forge` handler), `nexus-cli` (new `nexus forge import` subcommand)
-**Related**: PRD-03 §forge-layout; `com.nexus.storage::rebuild_index` (destination reindex path)
-
-Schema version migrations (SQLite `_schema_version` table) handle version upgrades within a single forge. There is no mechanism to import one forge into another, merge two forges, or produce a portable archive beyond raw file copy. For users who want to consolidate forges, migrate to a new machine without losing index state, or merge a team member's forge, the only path today is copying files manually and rebuilding the index.
-
-**Definition of done:**
-- `nexus forge import <source-path> [--into <dest-path>] [--dry-run]` CLI command
-- `--dry-run` reports: files to copy, conflicts (same relative path, different content), skips (identical hash)
-- Conflict resolution strategies: `--on-conflict skip|overwrite|rename` (default: skip with report)
-- After file copy, destination forge runs `rebuild_index` to incorporate imported files
-- New `com.nexus.storage::import_forge` IPC handler wraps the same logic for shell UI use
-- Progress events published to kernel bus during copy phase
+_BL-083 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Plan + apply phases shipped end-to-end (engine, IPC handler 56, `nexus forge import` CLI). Progress-event publishing during copy deferred — no UI surface consumes it yet, the apply phase is fast enough on most forges that synchronous return is acceptable._
 
 ---
 

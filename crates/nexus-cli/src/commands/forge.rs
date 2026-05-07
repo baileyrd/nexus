@@ -94,6 +94,92 @@ pub fn status(app: &mut App) -> Result<()> {
     Ok(())
 }
 
+/// Import another forge into this one (BL-083).
+pub fn import(
+    app: &mut App,
+    source: &std::path::Path,
+    dry_run: bool,
+    on_conflict: &str,
+) -> Result<()> {
+    use std::time::Duration;
+    use nexus_kernel::PluginContext;
+    let abs = source
+        .canonicalize()
+        .map_err(|e| anyhow::anyhow!("import source '{}': {e}", source.display()))?;
+    let (runtime, rt) = app.runtime()?;
+    let resp = rt
+        .block_on(runtime.context.ipc_call(
+            "com.nexus.storage",
+            "import_forge",
+            serde_json::json!({
+                "source": abs.to_string_lossy(),
+                "dry_run": dry_run,
+                "on_conflict": on_conflict,
+            }),
+            Duration::from_secs(600),
+        ))
+        .map_err(|e| anyhow::anyhow!("import_forge ipc: {e}"))?;
+
+    if dry_run {
+        let copies = resp
+            .get("copies")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let skips = resp
+            .get("skips_identical")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let conflicts = resp
+            .get("conflicts")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        println!("Import plan ({}):", abs.display());
+        println!(
+            "  copies:    {} new file(s)",
+            copies.len()
+        );
+        println!("  identical: {} file(s) (no action)", skips.len());
+        println!("  conflicts: {} (strategy = {on_conflict})", conflicts.len());
+        if !conflicts.is_empty() {
+            println!("\nConflicting paths:");
+            for c in &conflicts {
+                if let Some(p) = c.get("relpath").and_then(serde_json::Value::as_str) {
+                    println!("  {p}");
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    let copied = resp.get("copied").and_then(serde_json::Value::as_array).map_or(0, Vec::len);
+    let overwritten = resp
+        .get("overwritten")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    let renamed = resp
+        .get("renamed")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    let skipped_conflicts = resp
+        .get("skipped_conflicts")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    let skipped_identical = resp
+        .get("skipped_identical")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    println!("Import complete:");
+    println!("  copied:            {copied}");
+    println!("  overwritten:       {overwritten}");
+    println!("  renamed:           {renamed}");
+    println!("  skipped (identical): {skipped_identical}");
+    println!("  skipped (conflict):  {skipped_conflicts}");
+    Ok(())
+}
+
 /// Rebuild the index from files on disk.
 ///
 /// Clears the existing index and re-indexes every file in the forge,

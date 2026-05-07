@@ -161,6 +161,19 @@ enum ForgeCommand {
     Status,
     /// Rebuild the index from files on disk
     Reindex,
+    /// Import another forge into this one (BL-083). Walks the
+    /// source, hashes every file, classifies as copy / skip / conflict,
+    /// then either reports the plan (`--dry-run`) or applies it.
+    Import {
+        /// Source forge directory to import.
+        source: PathBuf,
+        /// Report what would happen without touching the destination.
+        #[arg(long)]
+        dry_run: bool,
+        /// Conflict-resolution strategy.
+        #[arg(long, default_value = "skip", value_parser = ["skip", "overwrite", "rename"])]
+        on_conflict: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1392,6 +1405,9 @@ fn main() {
             ForgeCommand::Init { dir } => commands::forge::init(&app, dir),
             ForgeCommand::Status => commands::forge::status(&mut app),
             ForgeCommand::Reindex => commands::forge::reindex(&mut app),
+            ForgeCommand::Import { source, dry_run, on_conflict } => {
+                commands::forge::import(&mut app, &source, dry_run, &on_conflict)
+            }
         },
 
         Commands::Content(args) => match args.command {

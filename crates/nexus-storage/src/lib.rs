@@ -29,6 +29,8 @@ pub mod obsidian_base;
 pub mod core_plugin;
 /// BL-091: Git-LFS pointer detection + smudge passthrough for read paths.
 pub mod lfs;
+/// BL-083: forge-to-forge import / migration planning + apply.
+pub mod import;
 pub mod vectorstore;
 
 pub mod ipc;
@@ -1238,17 +1240,43 @@ impl StorageEngine {
         query_tags(&conn, name)
     }
 
+    /// Plan a forge-to-forge import (BL-083). Walks `source_root`,
+    /// classifies every file against the engine's destination forge
+    /// root, and returns the resulting plan without touching disk.
+    /// Use this for `--dry-run` reporting; pair with
+    /// [`Self::apply_import`] to actually copy.
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Io`] for any IO failure inside the walk.
+    pub fn plan_import(&self, source_root: &Path) -> Result<crate::import::ImportPlan, StorageError> {
+        crate::import::plan_import(source_root, self.forge.root())
+    }
+
+    /// Apply a previously-prepared import plan to the engine's
+    /// destination forge (BL-083). Caller typically reruns
+    /// [`Self::rebuild_index`] afterwards so the destination index
+    /// reflects the imported files.
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Io`] for any IO failure during copy.
+    pub fn apply_import(
+        &self,
+        source_root: &Path,
+        plan: &crate::import::ImportPlan,
+        options: &crate::import::ImportOptions,
+    ) -> Result<crate::import::ImportReport, StorageError> {
+        crate::import::apply_import(source_root, self.forge.root(), plan, options)
+    }
+
     /// Rebuild the `SQLite` index from scratch by reconciling the filesystem.
     ///
     /// Clears all index tables, then runs a full reconciliation pass. Returns
     /// summary statistics.
     ///
     /// # Errors
-    ///
     /// Returns [`StorageError`] on I/O or database failure.
     ///
     /// # Panics
-    ///
     /// Panics if the internal write-connection mutex is poisoned.
     pub fn rebuild_index(&self) -> Result<RebuildStats, StorageError> {
         let start = std::time::Instant::now();

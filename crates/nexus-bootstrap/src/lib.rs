@@ -481,6 +481,10 @@ fn register_core_plugins(
                         nexus_storage::core_plugin::HANDLER_BACKLINKS_TO_BLOCK,
                     ),
                     (
+                        "import_forge",
+                        nexus_storage::core_plugin::HANDLER_IMPORT_FORGE,
+                    ),
+                    (
                         "query_tasks",
                         nexus_storage::core_plugin::HANDLER_QUERY_TASKS,
                     ),

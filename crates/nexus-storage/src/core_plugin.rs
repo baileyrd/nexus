@@ -234,6 +234,16 @@ pub const HANDLER_NOTE_APPEND: u32 = 54;
 /// the BL-049 block-anchored form `^<block_id>` (case-insensitive on the UUID).
 /// Powers the backlinks pane's per-block filter — see BL-049 phase 4.
 pub const HANDLER_BACKLINKS_TO_BLOCK: u32 = 55;
+/// Handler id for `import_forge` (BL-083). Args:
+/// `{ "source": "<absolute-path>", "dry_run": bool,
+///    "on_conflict": "skip"|"overwrite"|"rename" }`. Returns the
+/// [`crate::import::ImportPlan`] when `dry_run = true`, or an
+/// [`crate::import::ImportReport`] after applying. The destination
+/// is the engine's own forge root (no `--into` at the IPC layer —
+/// callers spin up a destination engine and call this on it). Source
+/// is an absolute host path operating outside the sandbox; the
+/// caller is the trust boundary.
+pub const HANDLER_IMPORT_FORGE: u32 = 56;
 
 /// Core plugin that owns a forge watcher and bridges file-system events onto
 /// the kernel event bus.
@@ -1037,6 +1047,45 @@ impl CorePlugin for StorageCorePlugin {
                     .obsidian_base_query(&path)
                     .map_err(|e| exec_err(format!("obsidian_base_query: {e}")))?;
                 to_value(&result, "obsidian_base_query")
+            }
+            HANDLER_IMPORT_FORGE => {
+                let source = args
+                    .get("source")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| exec_err("import_forge: missing 'source' string argument".to_string()))?
+                    .to_string();
+                let source_path = std::path::Path::new(&source);
+                let dry_run = args
+                    .get("dry_run")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let on_conflict = match args
+                    .get("on_conflict")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("skip")
+                {
+                    "overwrite" => crate::import::ConflictStrategy::Overwrite,
+                    "rename" => crate::import::ConflictStrategy::Rename,
+                    _ => crate::import::ConflictStrategy::Skip,
+                };
+
+                let plan = engine
+                    .plan_import(source_path)
+                    .map_err(|e| exec_err(format!("import_forge plan: {e}")))?;
+                if dry_run {
+                    return to_value(&plan, "import_forge");
+                }
+                let report = engine
+                    .apply_import(
+                        source_path,
+                        &plan,
+                        &crate::import::ImportOptions { on_conflict },
+                    )
+                    .map_err(|e| exec_err(format!("import_forge apply: {e}")))?;
+                // Rebuild the destination index so the imported
+                // files surface in search / graph.
+                let _ = engine.rebuild_index();
+                to_value(&report, "import_forge")
             }
             _ => Err(exec_err(format!("unknown handler id {handler_id}"))),
         }

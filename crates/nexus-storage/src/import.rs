@@ -1,0 +1,464 @@
+//! BL-083 — forge-to-forge import / migration.
+//!
+//! Walks a source forge, classifies every file against the
+//! destination, and either reports the plan (`--dry-run`) or applies
+//! it. Conflicts (same relpath, different bytes) are resolved by one
+//! of three strategies:
+//!
+//! - [`ConflictStrategy::Skip`] (default) — leave the destination
+//!   file unchanged and record the path in the report so an operator
+//!   can review.
+//! - [`ConflictStrategy::Overwrite`] — replace the destination file
+//!   with the source bytes.
+//! - [`ConflictStrategy::Rename`] — write the source file to
+//!   `<stem>.imported.<n>.<ext>` so both versions coexist.
+//!
+//! ## What this module does *not* do
+//!
+//! - Does **not** copy `.forge/` (index DB, FTS, config). The source
+//!   forge's index is rebuilt at the destination via
+//!   [`crate::StorageEngine::rebuild_index`] after the file phase
+//!   completes.
+//! - Does **not** publish progress events on the kernel bus. The
+//!   plan + report are returned synchronously; deferred to a future
+//!   change once a UI surface exists for the progress feed.
+//! - Does **not** preserve git history. A forge can be a git repo,
+//!   but `import_forge` operates at the file layer — `git clone` /
+//!   `git push` is the right tool when history matters.
+
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use sha2::{Digest, Sha256};
+
+use crate::error::StorageError;
+
+/// What to do when a source file collides with a different
+/// destination file at the same relpath.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConflictStrategy {
+    /// Leave the destination file unchanged; record the conflict.
+    Skip,
+    /// Replace the destination bytes with the source bytes.
+    Overwrite,
+    /// Write the source file to `<stem>.imported.<n>.<ext>` so both
+    /// versions coexist. Picks the lowest non-colliding `<n>`.
+    Rename,
+}
+
+impl Default for ConflictStrategy {
+    fn default() -> Self {
+        Self::Skip
+    }
+}
+
+/// One conflict in an import plan — the source and destination files
+/// share a relpath but their content hashes differ.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ImportConflict {
+    /// Forge-relative path that exists on both sides.
+    pub relpath: String,
+    /// Hex SHA-256 of the source bytes.
+    pub source_hash: String,
+    /// Hex SHA-256 of the destination bytes.
+    pub dest_hash: String,
+}
+
+/// Output of [`plan_import`] — the three classifications a file can
+/// fall into. Returned both for `--dry-run` reporting and as the
+/// input to [`apply_import`].
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ImportPlan {
+    /// Source files that have no destination counterpart — copied
+    /// unconditionally during apply.
+    pub copies: Vec<String>,
+    /// Source files whose content hash matches the destination — no
+    /// action taken during apply.
+    pub skips_identical: Vec<String>,
+    /// Source files that collide with a different destination file
+    /// at the same relpath — handled per [`ImportOptions::on_conflict`]
+    /// during apply.
+    pub conflicts: Vec<ImportConflict>,
+}
+
+/// Options controlling [`apply_import`].
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ImportOptions {
+    /// What to do when a conflict is encountered. Defaults to
+    /// [`ConflictStrategy::Skip`].
+    #[serde(default)]
+    pub on_conflict: ConflictStrategy,
+}
+
+/// Outcome of [`apply_import`]. Mirrors [`ImportPlan`] but reports
+/// what *actually* happened — strategy choices may have promoted
+/// `conflicts` into `overwrites` or `renames`.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ImportReport {
+    /// Relpaths newly created at the destination.
+    pub copied: Vec<String>,
+    /// Relpaths whose destination bytes were replaced.
+    pub overwritten: Vec<String>,
+    /// `(source_relpath, renamed_relpath)` pairs for the rename
+    /// strategy.
+    pub renamed: Vec<(String, String)>,
+    /// Conflicts left untouched (skip strategy or rename failure).
+    pub skipped_conflicts: Vec<String>,
+    /// Source files identical to the destination — no action.
+    pub skipped_identical: Vec<String>,
+    /// Total source files visited (for sanity checking against the
+    /// plan).
+    pub total_examined: usize,
+}
+
+/// Walk `source_root`, classify every file against `dest_root`, and
+/// return the resulting plan. Reads all source files (and any
+/// destination files at colliding paths) to compute SHA-256 hashes;
+/// for very large forges this is the slow phase but bounded by IO.
+///
+/// Both roots must already exist. The `.forge/` subtree of either
+/// root is excluded from the walk — index data is regenerated by
+/// the destination's `rebuild_index` after import.
+///
+/// # Errors
+///
+/// Returns [`StorageError::Io`] for any IO failure inside the walk.
+pub fn plan_import(source_root: &Path, dest_root: &Path) -> Result<ImportPlan, StorageError> {
+    if !source_root.is_dir() {
+        return Err(StorageError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("import source not found: {}", source_root.display()),
+        )));
+    }
+    if !dest_root.is_dir() {
+        return Err(StorageError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("import destination not found: {}", dest_root.display()),
+        )));
+    }
+
+    let mut plan = ImportPlan::default();
+    walk_for_import(source_root, source_root, dest_root, &mut plan)?;
+    Ok(plan)
+}
+
+fn walk_for_import(
+    root: &Path,
+    cur: &Path,
+    dest_root: &Path,
+    plan: &mut ImportPlan,
+) -> Result<(), StorageError> {
+    for entry in fs::read_dir(cur).map_err(StorageError::Io)? {
+        let entry = entry.map_err(StorageError::Io)?;
+        let path = entry.path();
+        // Skip the per-forge index dir — regenerated at the
+        // destination after import.
+        if path.file_name().and_then(|n| n.to_str()) == Some(".forge") {
+            continue;
+        }
+        let ftype = entry.file_type().map_err(StorageError::Io)?;
+        if ftype.is_dir() {
+            walk_for_import(root, &path, dest_root, plan)?;
+            continue;
+        }
+        if !ftype.is_file() {
+            // Symlinks, sockets, fifos — not part of the file-as-truth contract.
+            continue;
+        }
+        let relpath = path
+            .strip_prefix(root)
+            .map_err(|_| {
+                StorageError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "internal: source walk produced path outside root",
+                ))
+            })?
+            .to_string_lossy()
+            .into_owned();
+
+        let dest_path = dest_root.join(&relpath);
+        let source_bytes = fs::read(&path).map_err(StorageError::Io)?;
+        let source_hash = hex_sha256(&source_bytes);
+
+        if !dest_path.exists() {
+            plan.copies.push(relpath);
+            continue;
+        }
+        let dest_bytes = fs::read(&dest_path).map_err(StorageError::Io)?;
+        let dest_hash = hex_sha256(&dest_bytes);
+        if source_hash == dest_hash {
+            plan.skips_identical.push(relpath);
+        } else {
+            plan.conflicts.push(ImportConflict {
+                relpath,
+                source_hash,
+                dest_hash,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Apply a previously-produced plan, copying / overwriting /
+/// renaming as configured. Returns an [`ImportReport`] describing
+/// what landed.
+///
+/// The destination's `.forge/` index is **not** updated by this
+/// function; the caller (CLI / IPC handler) runs
+/// `StorageEngine::rebuild_index` after a successful apply.
+///
+/// # Errors
+///
+/// Returns [`StorageError::Io`] for any IO failure during copy.
+pub fn apply_import(
+    source_root: &Path,
+    dest_root: &Path,
+    plan: &ImportPlan,
+    options: &ImportOptions,
+) -> Result<ImportReport, StorageError> {
+    let mut report = ImportReport::default();
+    report.total_examined = plan.copies.len() + plan.skips_identical.len() + plan.conflicts.len();
+
+    // Pre-existing rename counters per parent directory so `Rename`
+    // strategy never re-reads disk for `<n>` discovery in the inner loop.
+    let mut rename_counters: HashMap<PathBuf, u32> = HashMap::new();
+
+    for relpath in &plan.copies {
+        copy_file_with_parents(source_root, dest_root, relpath)?;
+        report.copied.push(relpath.clone());
+    }
+
+    report.skipped_identical = plan.skips_identical.clone();
+
+    for conflict in &plan.conflicts {
+        match options.on_conflict {
+            ConflictStrategy::Skip => {
+                report.skipped_conflicts.push(conflict.relpath.clone());
+            }
+            ConflictStrategy::Overwrite => {
+                copy_file_with_parents(source_root, dest_root, &conflict.relpath)?;
+                report.overwritten.push(conflict.relpath.clone());
+            }
+            ConflictStrategy::Rename => {
+                let renamed_rel = next_rename_target(
+                    dest_root,
+                    Path::new(&conflict.relpath),
+                    &mut rename_counters,
+                );
+                if let Some(target_rel) = renamed_rel {
+                    copy_file_to_relpath(source_root, dest_root, &conflict.relpath, &target_rel)?;
+                    report.renamed.push((conflict.relpath.clone(), target_rel));
+                } else {
+                    // Should not happen for sane filesystems, but
+                    // degrade gracefully: leave the conflict, log it.
+                    tracing::warn!(
+                        relpath = %conflict.relpath,
+                        "BL-083: unable to find a free `.imported.<n>` slot; treating as skipped"
+                    );
+                    report.skipped_conflicts.push(conflict.relpath.clone());
+                }
+            }
+        }
+    }
+
+    Ok(report)
+}
+
+fn copy_file_with_parents(
+    source_root: &Path,
+    dest_root: &Path,
+    relpath: &str,
+) -> Result<(), StorageError> {
+    let source = source_root.join(relpath);
+    let dest = dest_root.join(relpath);
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(StorageError::Io)?;
+    }
+    fs::copy(&source, &dest).map_err(StorageError::Io)?;
+    Ok(())
+}
+
+fn copy_file_to_relpath(
+    source_root: &Path,
+    dest_root: &Path,
+    source_rel: &str,
+    target_rel: &str,
+) -> Result<(), StorageError> {
+    let source = source_root.join(source_rel);
+    let dest = dest_root.join(target_rel);
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(StorageError::Io)?;
+    }
+    fs::copy(&source, &dest).map_err(StorageError::Io)?;
+    Ok(())
+}
+
+/// Pick the lowest-numbered `<stem>.imported.<n>.<ext>` (or
+/// `<stem>.imported.<n>` for extensionless files) under the
+/// destination's parent directory that doesn't collide. Returns
+/// the resulting forge-relative path. Caps at `n = 1000` to avoid
+/// pathological loops on a corrupt directory.
+fn next_rename_target(
+    dest_root: &Path,
+    relpath: &Path,
+    counters: &mut HashMap<PathBuf, u32>,
+) -> Option<String> {
+    let parent_rel = relpath.parent().unwrap_or_else(|| Path::new(""));
+    let parent_abs = dest_root.join(parent_rel);
+    let stem = relpath.file_stem()?.to_string_lossy().into_owned();
+    let ext = relpath
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+
+    let counter = counters.entry(parent_abs.clone()).or_insert(1);
+    for _ in 0..1000 {
+        let candidate_name = format!("{stem}.imported.{counter}{ext}");
+        let candidate_abs = parent_abs.join(&candidate_name);
+        *counter += 1;
+        if !candidate_abs.exists() {
+            let target_rel = parent_rel.join(&candidate_name);
+            return Some(target_rel.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut s = String::with_capacity(digest.len() * 2);
+    for b in digest {
+        use std::fmt::Write;
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_file(root: &Path, rel: &str, bytes: &[u8]) {
+        let path = root.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, bytes).unwrap();
+    }
+
+    fn read(root: &Path, rel: &str) -> Vec<u8> {
+        fs::read(root.join(rel)).unwrap()
+    }
+
+    #[test]
+    fn plan_classifies_copies_skips_and_conflicts() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        write_file(src.path(), "a.md", b"hello");
+        write_file(src.path(), "shared.md", b"same body");
+        write_file(src.path(), "diff.md", b"source body");
+        write_file(dst.path(), "shared.md", b"same body");
+        write_file(dst.path(), "diff.md", b"dest body");
+        write_file(dst.path(), "only-dest.md", b"alone");
+
+        let plan = plan_import(src.path(), dst.path()).unwrap();
+        assert_eq!(plan.copies, vec!["a.md".to_string()]);
+        assert_eq!(plan.skips_identical, vec!["shared.md".to_string()]);
+        assert_eq!(plan.conflicts.len(), 1);
+        assert_eq!(plan.conflicts[0].relpath, "diff.md");
+        assert_ne!(plan.conflicts[0].source_hash, plan.conflicts[0].dest_hash);
+    }
+
+    #[test]
+    fn plan_skips_dot_forge() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        write_file(src.path(), ".forge/index.db", b"binary");
+        write_file(src.path(), "note.md", b"x");
+        let plan = plan_import(src.path(), dst.path()).unwrap();
+        assert_eq!(plan.copies, vec!["note.md".to_string()]);
+        assert!(
+            !plan.copies.iter().any(|p| p.starts_with(".forge")),
+            ".forge must be excluded from the walk"
+        );
+    }
+
+    #[test]
+    fn apply_skip_strategy_leaves_destination_alone() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        write_file(src.path(), "diff.md", b"source");
+        write_file(dst.path(), "diff.md", b"dest");
+        let plan = plan_import(src.path(), dst.path()).unwrap();
+        let report = apply_import(src.path(), dst.path(), &plan, &ImportOptions::default()).unwrap();
+        assert_eq!(read(dst.path(), "diff.md"), b"dest");
+        assert_eq!(report.skipped_conflicts, vec!["diff.md".to_string()]);
+    }
+
+    #[test]
+    fn apply_overwrite_strategy_replaces_destination() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        write_file(src.path(), "diff.md", b"source");
+        write_file(dst.path(), "diff.md", b"dest");
+        let plan = plan_import(src.path(), dst.path()).unwrap();
+        let report = apply_import(
+            src.path(),
+            dst.path(),
+            &plan,
+            &ImportOptions { on_conflict: ConflictStrategy::Overwrite },
+        )
+        .unwrap();
+        assert_eq!(read(dst.path(), "diff.md"), b"source");
+        assert_eq!(report.overwritten, vec!["diff.md".to_string()]);
+    }
+
+    #[test]
+    fn apply_rename_strategy_writes_imported_suffix() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        write_file(src.path(), "notes/diff.md", b"source");
+        write_file(dst.path(), "notes/diff.md", b"dest");
+        let plan = plan_import(src.path(), dst.path()).unwrap();
+        let report = apply_import(
+            src.path(),
+            dst.path(),
+            &plan,
+            &ImportOptions { on_conflict: ConflictStrategy::Rename },
+        )
+        .unwrap();
+
+        assert_eq!(read(dst.path(), "notes/diff.md"), b"dest", "destination must be untouched");
+        let renamed = report.renamed.first().expect("rename report entry");
+        assert_eq!(renamed.0, "notes/diff.md");
+        assert!(
+            renamed.1.starts_with("notes/diff.imported."),
+            "rename target must use `.imported.<n>` infix, got {}",
+            renamed.1
+        );
+        assert!(renamed.1.ends_with(".md"));
+        assert_eq!(read(dst.path(), &renamed.1), b"source");
+    }
+
+    #[test]
+    fn apply_copies_new_files() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        write_file(src.path(), "fresh/note.md", b"new!");
+        let plan = plan_import(src.path(), dst.path()).unwrap();
+        let report =
+            apply_import(src.path(), dst.path(), &plan, &ImportOptions::default()).unwrap();
+        assert_eq!(read(dst.path(), "fresh/note.md"), b"new!");
+        assert_eq!(report.copied, vec!["fresh/note.md".to_string()]);
+    }
+
+    #[test]
+    fn plan_errors_on_missing_source() {
+        let dst = tempfile::tempdir().unwrap();
+        let err = plan_import(Path::new("/nope/no-such"), dst.path())
+            .expect_err("missing source must error");
+        assert!(matches!(err, StorageError::Io(_)));
+    }
+}

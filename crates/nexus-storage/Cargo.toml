@@ -31,6 +31,8 @@ libc = { workspace = true }
 fs4 = "0.9"
 petgraph = { workspace = true }
 chrono = { workspace = true }
+# BL-083: forge-to-forge import hashes.
+sha2 = { workspace = true }
 ts-rs = { workspace = true, optional = true, features = ["chrono-impl", "uuid-impl"] }
 schemars = { workspace = true, optional = true }
 
