@@ -135,6 +135,13 @@ pub struct SessionInfo {
     pub line_count: usize,
     /// Unix-seconds creation timestamp.
     pub created_at: u64,
+    /// BL-061 — last RSS sample for the spawned child shell, in bytes.
+    /// `None` when no memory monitor is wired (tests, embedded
+    /// runtimes), when the session is unknown to the monitor, or when
+    /// no sample has landed yet (the poller takes a few seconds to
+    /// observe a freshly-spawned session).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rss_bytes: Option<u64>,
 }
 
 /// PRD-09 §11.2 events published to subscribers. Variants cover the
@@ -178,6 +185,21 @@ pub enum TerminalEvent {
         /// Exit code if known.
         exit_code: Option<u32>,
     },
+    /// BL-061 — the session's RSS crossed the configured hard limit.
+    /// The poller publishes this **before** issuing the kill so a
+    /// subscriber observes the threshold breach and the subsequent
+    /// [`Self::SessionClosed`] in order. `rss_bytes` is the sample
+    /// that triggered the kill; `limit_mb` is the threshold. UI
+    /// surfaces typically render this as a "killed: out of memory"
+    /// chip on the session.
+    MemoryLimitExceeded {
+        /// Session id.
+        id: String,
+        /// Resident-set size at the threshold breach, in bytes.
+        rss_bytes: u64,
+        /// Hard threshold (MB) that was crossed.
+        limit_mb: u32,
+    },
 }
 
 impl TerminalEvent {
@@ -190,7 +212,8 @@ impl TerminalEvent {
             TerminalEvent::SessionCreated { id, .. }
             | TerminalEvent::OutputReceived { id, .. }
             | TerminalEvent::PatternMatched { id, .. }
-            | TerminalEvent::SessionClosed { id, .. } => id,
+            | TerminalEvent::SessionClosed { id, .. }
+            | TerminalEvent::MemoryLimitExceeded { id, .. } => id,
         }
     }
 }
@@ -406,6 +429,7 @@ impl InMemoryTerminalServer {
             working_dir: None,
             line_count,
             created_at,
+            rss_bytes: None,
         })
     }
 

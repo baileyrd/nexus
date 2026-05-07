@@ -329,19 +329,7 @@ The database view renderers are complete — Table, Kanban, Calendar, and Galler
 
 ---
 
-### BL-061: Terminal memory backpressure — enforce kill policy
-
-**Source**: Terminal Integration Assessment (2026-05-06) — gap #5
-**Effort**: Small (0.5 days)
-**Crates**: `nexus-terminal` (`memory.rs`, `manager.rs`, `core_plugin.rs`)
-**Related**: PRD-09 §7 (memory monitoring); `MemoryMonitor` shipped Phase R
-
-`MemoryMonitor` tracks RSS per session and exposes `SoftExceeded`/`HardExceeded` thresholds. Nothing reads those thresholds and acts on them. A long-running process that leaks memory accumulates indefinitely.
-
-**Definition of done:**
-- `SessionManager` or the drainer thread polls `MemoryMonitor` results and calls `manager.kill(id)` when a session crosses `hard_mb`
-- `com.nexus.terminal.events.<id>` publishes a `MemoryLimitExceeded { rss_mb, limit_mb }` lifecycle event before kill
-- `get_session_info` response includes current RSS so the shell UI can display it
+_BL-061 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `with_memory_monitor(MemoryLimits)` builder on `TerminalCorePlugin` plus a memory poller thread (peer of the existing drainer / lifecycle-forwarder) that auto-tracks every spawned session, samples RSS at the configured interval (default 1 s — PRD-09 §7.2), and on `HardExceeded` publishes a `TerminalEvent::MemoryLimitExceeded { id, rss_bytes, limit_mb }` then runs `close_session` (which then emits `SessionClosed`, in causal order). `SessionInfo.rss_bytes: Option<u64>` is layered onto every `get_session_info` and `list_sessions` response so the shell UI can render a memory chip from a single round-trip. Bootstrap wires the monitor with PRD §7.3 defaults (250 MB soft / 500 MB hard) for every session; per-saved-command overrides via `SavedCommand.memory_limit_mb` are still TODO (the field exists on the struct but isn't routed yet) — out of scope for this item._
 
 ---
 

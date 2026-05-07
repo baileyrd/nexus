@@ -8,6 +8,41 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-061: Terminal memory backpressure — enforce kill policy ✅ (2026-05-07)
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap #5
+**Files**: `crates/nexus-terminal/src/{core_plugin.rs, server.rs, session.rs, manager.rs}`, `crates/nexus-bootstrap/src/lib.rs`
+**Related**: PRD-09 §7 (memory monitoring); `MemoryMonitor` shipped Phase R but had no enforcement loop
+
+Wires `MemoryMonitor` into `TerminalCorePlugin` so a runaway / leaky child shell can't accumulate indefinitely. Adds an in-memory poller thread (peer of the existing drainer + lifecycle-forwarder), publishes a new lifecycle event before the kill, and surfaces RSS through `SessionInfo` so the shell UI can render a memory chip without a separate IPC handler.
+
+- **Public surface.**
+  - `Session::pid() -> Option<u32>` (previously private). The poller needs the live PID and the existing PID accessor was only reachable via `send_signal`.
+  - `SessionManager::pid(&SessionId) -> Option<u32>` mirroring the convention of `name` / `created_at`.
+  - `SessionInfo.rss_bytes: Option<u64>` — `serde(default, skip_serializing_if = Option::is_none)` so old payloads decode cleanly and `null` doesn't bloat responses for runtimes without a monitor.
+  - `TerminalEvent::MemoryLimitExceeded { id, rss_bytes, limit_mb }` — the new lifecycle variant. `session_id()` covers it so prefix / exact filters keep working.
+  - `TerminalCorePlugin::with_memory_monitor(MemoryLimits)` and `with_memory_poll_interval(Duration)` builders.
+- **Poller architecture.** New `spawn_memory_poller` mirrors `spawn_drainer` / `spawn_lifecycle_forwarder`: owns a `MemoryPollerHandle` whose Drop signals stop and joins. Each round walks `list_sessions`, snapshots `(id, pid)` pairs under a brief server lock, then under a separate memory lock: drops entries whose pid is `None` (closed-but-still-listed sessions) or whose id no longer appears, tracks newly-spawned pids with the configured limits, samples each tracked pid, and updates the `latest_rss: HashMap<String, u64>` cache. On `HardExceeded` the poller publishes the new event **first** (so subscribers see the breach in causal order with the subsequent `SessionClosed`), then calls `server.close_session(id)` so the existing shutdown ladder (SIGTERM then SIGKILL after a 500 ms window) runs — a process under memory pressure gets a chance to flush before being yanked.
+- **Read path.** `dispatch_get_session_info` and `dispatch_list_sessions` layer the cached RSS onto every row when a monitor is wired. Cache misses (session just spawned, no monitor) surface as `rss_bytes: None`. The cache read path takes the memory lock for milliseconds and never blocks on the platform `read_process_rss` syscall.
+- **Bootstrap.** `nexus-bootstrap` now calls `.with_memory_monitor(MemoryLimits::default_recommended())` (250 MB soft / 500 MB hard from PRD-09 §7.3) before `.with_event_bus(...)` so the poller spawns alongside the drainer. The poll interval stays at the 1 s recommended default.
+
+**Tests.**
+
+- 4 new tests in `nexus-terminal::core_plugin::tests`:
+  - `get_session_info_rss_is_none_when_no_monitor_attached` — the structural guarantee that `rss_bytes: Option<u64>` defaults to `None` without monitoring; runtimes that don't opt in pay nothing.
+  - `poller_populates_rss_cache_for_running_session_unix` — under `MemoryLimits::unlimited()` and a 20 ms poll interval, a freshly-spawned `sleep 5` settles to a positive `rss_bytes` within a 3 s budget.
+  - `poller_publishes_memory_limit_exceeded_before_kill_unix` — under a deliberately impossible 1 MB hard cap, asserts that `MemoryLimitExceeded` lands on the lifecycle prefix *before* `SessionClosed` (causal order is the load-bearing invariant for any subscriber computing "this session died because of memory").
+  - `rss_cache_clears_when_session_is_closed_unix` — after `close_session`, the cache settles to `None` within a couple of poll rounds even though the manager still lists the closed entry. This pins the dual-stale-condition reconcile (id missing OR pid is `None`).
+- All 282 nexus-terminal tests pass; ts-export regen drift-free; clippy clean on changed files.
+
+**Deliberately deferred:**
+
+- **Per-saved-command memory limits.** `SavedCommand.memory_limit_mb` exists on the struct but isn't threaded into the spawn path yet. Today every session uses the bootstrap-wide default; the moment a user wants tighter caps for a specific saved command, it'll need plumbing through `run_saved` + `create_session` to set per-pid limits via `set_limits`.
+- **Soft-limit warning surface.** The monitor distinguishes `SoftExceeded` from `HardExceeded`, and the poller sees both, but it only acts on hard. A future capability (BL-064 / shell badge) can subscribe to a `MemorySoftWarning` event by extending `TerminalEvent`; the poller already has the typed action variant in hand.
+- **Pre-warm the cache on spawn.** A session created at t=0 has `rss_bytes: None` until the next poll round — up to one full `RECOMMENDED_POLL_INTERVAL` of latency. The shell's cold-start UX is fine without it; if it ever matters, `dispatch_create_session` can take a one-shot sample after the spawn returns.
+
+---
+
 ### BL-056: Terminal workflow step type ✅ (2026-05-07)
 
 **Source**: Terminal Integration Assessment (2026-05-06) — gap #1 (part 2)

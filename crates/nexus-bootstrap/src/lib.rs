@@ -1287,6 +1287,17 @@ fn register_core_plugins(
             terminal_plugin
         }
     };
+    // BL-061 — memory monitor: enabled by default with PRD-09 §7.3
+    // recommended limits (250 MB soft / 500 MB hard). The poller is
+    // spawned alongside the byte-stream drainer in `with_event_bus`;
+    // the order here matters so `with_event_bus` sees the configured
+    // monitor and starts the poller. Operators that want measure-only
+    // semantics (RSS chip but no auto-kill) can override per-saved-
+    // command via `SavedCommand.memory_limit_mb` — that plumbing
+    // lands separately; today every session uses the bootstrap-wide
+    // default.
+    let terminal_plugin =
+        terminal_plugin.with_memory_monitor(nexus_terminal::MemoryLimits::default_recommended());
     // Phase 2 WI-12: stream PTY output as kernel events so the shell
     // can switch off its 100ms poll. The legacy `pump` handler still
     // returns its byte count; this is purely additive.

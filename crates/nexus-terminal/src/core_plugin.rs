@@ -105,6 +105,7 @@ use schemars::JsonSchema;
 use ts_rs::TS;
 
 use crate::adhoc::SqliteAdHocStore;
+use crate::memory::{MemoryLimitAction, MemoryLimits, MemoryMonitor};
 use crate::saved::{
     promote_adhoc_to_saved, PromoteOptions, SavedCommand, SqliteSavedCommandStore,
 };
@@ -671,6 +672,71 @@ pub struct TerminalCorePlugin {
     /// `None` when no event bus is wired — the legacy mpsc subscriber
     /// path stays the only consumer in that case.
     lifecycle_forwarder: Option<LifecycleForwarderHandle>,
+    /// BL-061 — memory monitor + last-RSS cache + poller config.
+    /// `None` when the plugin was built without a memory monitor
+    /// (tests, embedded runtimes); the poller thread is only spawned
+    /// alongside [`Self::with_event_bus`] **and** a configured monitor
+    /// because publishing the kill event needs a bus. The cache lets
+    /// `get_session_info` surface RSS without re-reading `/proc`
+    /// every IPC dispatch.
+    memory: Option<Arc<Mutex<MemoryState>>>,
+    /// BL-061 — limits applied to every auto-tracked session.
+    /// `None` = no monitoring (the default until `with_memory_monitor`
+    /// is called); `Some(MemoryLimits::unlimited())` = sample but
+    /// never kill (useful for the shell UI's RSS chip without the
+    /// kill behavior).
+    memory_limits: Option<MemoryLimits>,
+    /// BL-061 — memory poller interval. Defaults to
+    /// [`crate::RECOMMENDED_POLL_INTERVAL`] (1 s) per PRD-09 §7.2.
+    memory_poll_interval: Duration,
+    /// BL-061 — handle to the memory poller thread. Drop signals
+    /// stop and joins, mirroring the drainer pattern.
+    memory_poller: Option<MemoryPollerHandle>,
+}
+
+/// BL-061 — shared memory state held behind a single `Mutex` so the
+/// poller, the IPC dispatcher, and the lifecycle hooks all see a
+/// consistent view.
+struct MemoryState {
+    /// The active monitor — owns per-pid sample histories.
+    monitor: MemoryMonitor,
+    /// Map of `session_id -> latest RSS bytes`, refreshed by every
+    /// poller round. Read by `get_session_info`. Writes are
+    /// effectively single-writer (only the poller updates), but the
+    /// mutex on `MemoryState` keeps reads atomic against a partial
+    /// update.
+    latest_rss: HashMap<String, u64>,
+    /// Reverse map for cleanup: when a session closes, the lifecycle
+    /// forwarder needs to drop the pid from the monitor and the
+    /// session id from `latest_rss`. We can't read pid from a closed
+    /// session, so cache it here at track-time.
+    session_pid: HashMap<String, u32>,
+}
+
+impl MemoryState {
+    fn new(history: usize) -> Self {
+        Self {
+            monitor: MemoryMonitor::with_history(history),
+            latest_rss: HashMap::new(),
+            session_pid: HashMap::new(),
+        }
+    }
+}
+
+/// BL-061 — handle to the memory poller thread + its stop flag. Same
+/// shape as [`DrainerHandle`] / [`LifecycleForwarderHandle`].
+struct MemoryPollerHandle {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Drop for MemoryPollerHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
 }
 
 /// Owns the drainer thread + the stop flag. The flag is checked at the
@@ -761,6 +827,10 @@ impl TerminalCorePlugin {
             emitters: Arc::new(Mutex::new(HashMap::new())),
             drainer: None,
             lifecycle_forwarder: None,
+            memory: None,
+            memory_limits: None,
+            memory_poll_interval: crate::RECOMMENDED_POLL_INTERVAL,
+            memory_poller: None,
         }
     }
 
@@ -776,6 +846,10 @@ impl TerminalCorePlugin {
             emitters: Arc::new(Mutex::new(HashMap::new())),
             drainer: None,
             lifecycle_forwarder: None,
+            memory: None,
+            memory_limits: None,
+            memory_poll_interval: crate::RECOMMENDED_POLL_INTERVAL,
+            memory_poller: None,
         }
     }
 
@@ -794,6 +868,37 @@ impl TerminalCorePlugin {
     #[must_use]
     pub fn with_adhoc_store(mut self, store: SqliteAdHocStore) -> Self {
         self.adhoc = Some(Mutex::new(store));
+        self
+    }
+
+    /// BL-061 — enable per-session memory monitoring with the supplied
+    /// limits. The poller thread is spawned by [`Self::with_event_bus`]
+    /// (it needs the bus to publish [`TerminalEvent::MemoryLimitExceeded`]
+    /// before issuing the kill), so the typical builder chain is
+    /// `.with_memory_monitor(limits).with_event_bus(bus)`. Calling this
+    /// without `with_event_bus` is allowed — the monitor still tracks
+    /// every spawn so `get_session_info` can surface RSS — but no
+    /// auto-kill happens.
+    ///
+    /// `MemoryLimits::unlimited()` produces a measure-only monitor:
+    /// useful when the user wants the RSS chip in the shell UI but
+    /// not the kill behaviour.
+    #[must_use]
+    pub fn with_memory_monitor(mut self, limits: MemoryLimits) -> Self {
+        self.memory = Some(Arc::new(Mutex::new(MemoryState::new(
+            crate::DEFAULT_HISTORY_SAMPLES,
+        ))));
+        self.memory_limits = Some(limits);
+        self
+    }
+
+    /// BL-061 — override the memory poller interval. Defaults to
+    /// [`crate::RECOMMENDED_POLL_INTERVAL`] (1 s); tests can drop this
+    /// to single-digit milliseconds to make the kill path observable
+    /// without sleeping a real second.
+    #[must_use]
+    pub fn with_memory_poll_interval(mut self, interval: Duration) -> Self {
+        self.memory_poll_interval = interval;
         self
     }
 
@@ -844,6 +949,21 @@ impl TerminalCorePlugin {
             Arc::clone(&self.emitters),
             Arc::clone(&bus),
         ));
+        // BL-061 — spawn the memory poller only when both a monitor
+        // and an event bus are present. Without the bus we have no
+        // way to publish `MemoryLimitExceeded`; the monitor field
+        // stays around so RSS sampling can still happen via direct
+        // calls from tests.
+        if let Some(memory) = self.memory.as_ref() {
+            let limits = self.memory_limits.unwrap_or(MemoryLimits::unlimited());
+            self.memory_poller = Some(spawn_memory_poller(
+                Arc::clone(&self.server),
+                Arc::clone(memory),
+                Arc::clone(&bus),
+                limits,
+                self.memory_poll_interval,
+            ));
+        }
         self.event_bus = Some(bus);
         self
     }
@@ -939,6 +1059,196 @@ fn drainer_round(
         }
     }
     Some(found)
+}
+
+/// BL-061 — spawn the memory poller thread. Each cycle the thread:
+///
+/// 1. Walks every session in the manager (under the same lock the
+///    drainer takes) to discover newly-spawned pids and stale entries.
+/// 2. For every tracked pid, samples RSS and runs the supplied limits
+///    against the reading.
+/// 3. On `HardExceeded`, publishes [`TerminalEvent::MemoryLimitExceeded`]
+///    onto the kernel bus **before** the kill (so a subscriber sees
+///    the threshold breach in causal order), then issues
+///    `manager.kill(id)`. The lifecycle forwarder picks up
+///    `SessionClosed` on the next reap.
+/// 4. Refreshes the per-session RSS cache so `get_session_info`
+///    surfaces a current reading.
+///
+/// Termination conditions: the supplied `stop` flag (Drop) or a
+/// poisoned lock. Sleep cadence is `interval` between cycles.
+fn spawn_memory_poller(
+    server: Arc<Mutex<InMemoryTerminalServer>>,
+    memory: Arc<Mutex<MemoryState>>,
+    bus: Arc<EventBus>,
+    limits: MemoryLimits,
+    interval: Duration,
+) -> MemoryPollerHandle {
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_clone = Arc::clone(&stop);
+    let thread = thread::Builder::new()
+        .name("nexus-terminal-memory-poller".into())
+        .spawn(move || memory_poller_loop(&server, &memory, &bus, limits, interval, &stop_clone))
+        .expect("spawn nexus-terminal memory poller thread");
+    MemoryPollerHandle {
+        stop,
+        thread: Some(thread),
+    }
+}
+
+fn memory_poller_loop(
+    server: &Arc<Mutex<InMemoryTerminalServer>>,
+    memory: &Arc<Mutex<MemoryState>>,
+    bus: &Arc<EventBus>,
+    limits: MemoryLimits,
+    interval: Duration,
+    stop: &Arc<AtomicBool>,
+) {
+    while !stop.load(Ordering::Relaxed) {
+        memory_poller_round(server, memory, bus, limits, stop);
+        // Sleep in ~25 ms slices so a Drop signal during a long
+        // interval still exits within ~one tick.
+        let mut remaining = interval;
+        while remaining > Duration::from_millis(0) && !stop.load(Ordering::Relaxed) {
+            let slice = remaining.min(Duration::from_millis(25));
+            thread::sleep(slice);
+            remaining = remaining.saturating_sub(slice);
+        }
+    }
+}
+
+/// One poller round. Returns silently on poisoned locks (the next
+/// round will retry; if it stays poisoned the parent plugin is
+/// already in a degraded state). Splitting the body out keeps the
+/// loop's termination condition crisp.
+fn memory_poller_round(
+    server: &Arc<Mutex<InMemoryTerminalServer>>,
+    memory: &Arc<Mutex<MemoryState>>,
+    bus: &Arc<EventBus>,
+    limits: MemoryLimits,
+    stop: &Arc<AtomicBool>,
+) {
+    // Snapshot the live (id, pid) pairs under a brief server lock so we
+    // don't race with `dispatch_create_session` / `dispatch_close_session`
+    // — the lock-window stays milliseconds even with the 50-session cap.
+    let live: Vec<(SessionId, Option<u32>)> = {
+        let Ok(guard) = server.lock() else {
+            return;
+        };
+        guard
+            .list_sessions()
+            .into_iter()
+            .map(|info| {
+                let id = SessionId::from_string(info.id);
+                let pid = guard.manager().pid(&id);
+                (id, pid)
+            })
+            .collect()
+    };
+
+    // Reconcile: track new pids, untrack stale ones. Done before
+    // sampling so a fresh session sees its first sample this round.
+    //
+    // A session is "stale" in two cases:
+    //   1. The id no longer appears in `list_sessions` — the manager
+    //      removed the entry entirely.
+    //   2. The id still appears but `pid` is `None` — the child has
+    //      been reaped (close_session followed by reap). The
+    //      session struct lingers so the caller can read the final
+    //      buffer, but there's no live process for the poller to
+    //      track.
+    {
+        let Ok(mut mem) = memory.lock() else { return };
+        let live_with_pid: std::collections::HashSet<&str> = live
+            .iter()
+            .filter_map(|(id, pid)| pid.is_some().then_some(id.as_str()))
+            .collect();
+        let stale: Vec<String> = mem
+            .session_pid
+            .keys()
+            .filter(|id| !live_with_pid.contains(id.as_str()))
+            .cloned()
+            .collect();
+        for id in &stale {
+            if let Some(pid) = mem.session_pid.remove(id) {
+                mem.monitor.untrack(pid);
+            }
+            mem.latest_rss.remove(id);
+        }
+        // Track newly seen pids.
+        for (id, pid) in &live {
+            if let Some(pid) = pid {
+                if !mem.session_pid.contains_key(id.as_str()) {
+                    mem.monitor.track(*pid, limits);
+                    mem.session_pid.insert(id.as_str().to_string(), *pid);
+                }
+            }
+        }
+    }
+
+    // Sample under the memory lock; collect kill targets without
+    // holding any lock across the kill path.
+    let mut to_kill: Vec<(SessionId, u64, u32)> = Vec::new();
+    {
+        let Ok(mut mem) = memory.lock() else { return };
+        for (id, pid) in &live {
+            if stop.load(Ordering::Relaxed) {
+                return;
+            }
+            let Some(pid) = pid else { continue };
+            match mem.monitor.sample(*pid) {
+                Ok(action) => {
+                    let bytes = action.bytes();
+                    mem.latest_rss.insert(id.as_str().to_string(), bytes);
+                    if let MemoryLimitAction::HardExceeded { bytes, limit_mb } = action {
+                        to_kill.push((id.clone(), bytes, limit_mb));
+                    }
+                }
+                Err(_) => {
+                    // Process gone / read failed — drop the cache
+                    // entry so a stale RSS doesn't linger after exit.
+                    mem.latest_rss.remove(id.as_str());
+                }
+            }
+        }
+    }
+
+    for (id, rss_bytes, limit_mb) in to_kill {
+        // Publish first so subscribers see the breach before the
+        // ensuing SessionClosed event.
+        let payload = TerminalEvent::MemoryLimitExceeded {
+            id: id.as_str().to_string(),
+            rss_bytes,
+            limit_mb,
+        };
+        if let Ok(payload_value) = serde_json::to_value(&payload) {
+            let topic = format!("{EVENT_LIFECYCLE_PREFIX}{id}", id = id.as_str());
+            if let Err(err) = bus.publish_plugin(PLUGIN_ID, &topic, payload_value) {
+                tracing::warn!(
+                    plugin = PLUGIN_ID,
+                    %err,
+                    session = id.as_str(),
+                    "memory poller: publish MemoryLimitExceeded failed",
+                );
+            }
+        }
+        // Close via the server's shutdown ladder so the lifecycle
+        // forwarder picks up `SessionClosed` after the breach event
+        // (in causal order). `close_session` issues SIGTERM then
+        // SIGKILL after a short window, which is the right behaviour
+        // for memory exhaustion — give the process a chance to flush
+        // before we yank it.
+        if let Ok(mut server_guard) = server.lock() {
+            if let Err(err) = server_guard.close_session(&id) {
+                tracing::warn!(
+                    plugin = PLUGIN_ID,
+                    %err,
+                    session = id.as_str(),
+                    "memory poller: close_session failed",
+                );
+            }
+        }
+    }
 }
 
 /// Spawn the lifecycle forwarder thread (BL-013). The thread owns the
@@ -1299,12 +1609,13 @@ impl TerminalCorePlugin {
     ) -> Result<serde_json::Value, PluginError> {
         let a: SessionIdArgs = parse_args(args, "get_session_info")?;
         let id = SessionId::from_string(a.id);
-        let info = self
+        let mut info = self
             .server
             .lock()
             .map_err(poisoned)?
             .get_session_info(&id)
             .map_err(crate_err)?;
+        info.rss_bytes = self.cached_rss(id.as_str());
         to_value(&info, "get_session_info")
     }
 
@@ -1312,8 +1623,28 @@ impl TerminalCorePlugin {
         &self,
         _args: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        let list = self.server.lock().map_err(poisoned)?.list_sessions();
+        let mut list = self.server.lock().map_err(poisoned)?.list_sessions();
+        // BL-061 — layer the cached RSS onto every row so a single
+        // list_sessions call gives the shell UI everything it needs
+        // for its memory chip without N follow-up `get_session_info`
+        // calls.
+        if self.memory.is_some() {
+            for info in &mut list {
+                info.rss_bytes = self.cached_rss(&info.id);
+            }
+        }
         to_value(&list, "list_sessions")
+    }
+
+    /// BL-061 — read the latest RSS the poller cached for `session_id`.
+    /// Returns `None` when the plugin was built without a memory
+    /// monitor, when the session isn't known to the monitor (e.g. it
+    /// was just spawned and the next poll hasn't run yet), or when
+    /// the memory lock is poisoned.
+    fn cached_rss(&self, session_id: &str) -> Option<u64> {
+        let memory = self.memory.as_ref()?;
+        let mem = memory.lock().ok()?;
+        mem.latest_rss.get(session_id).copied()
     }
 
     /// Read the bytes appended to `id`'s ring buffer since this
@@ -2734,6 +3065,204 @@ mod tests {
                 "no lifecycle event landed within 2s",
             );
             std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    // ── BL-061 — memory backpressure tests ──────────────────────────
+
+    use crate::memory::MemoryLimits as TestMemoryLimits;
+
+    /// Without `with_memory_monitor`, `get_session_info` returns
+    /// `rss_bytes: None` — the field is only populated when the
+    /// monitor is wired.
+    #[test]
+    fn get_session_info_rss_is_none_when_no_monitor_attached() {
+        if !unix_only("get_session_info_rss_is_none_when_no_monitor_attached") {
+            return;
+        }
+        let mut p = TerminalCorePlugin::new();
+        let resp = p
+            .dispatch(HANDLER_CREATE_SESSION, &create_args("sleep 1"))
+            .expect("create");
+        let CreateSessionResponse { id } = serde_json::from_value(resp).expect("decode");
+        let info_v = p
+            .dispatch(HANDLER_GET_SESSION_INFO, &serde_json::json!({ "id": id }))
+            .expect("get_session_info");
+        let info: SessionInfo = serde_json::from_value(info_v).expect("decode");
+        assert!(info.rss_bytes.is_none());
+    }
+
+    /// With a memory monitor + an event bus + a tight poll interval,
+    /// the cache is populated within a couple of poll rounds and a
+    /// freshly-spawned session's RSS surfaces through
+    /// `get_session_info`.
+    #[test]
+    fn poller_populates_rss_cache_for_running_session_unix() {
+        if !unix_only("poller_populates_rss_cache_for_running_session_unix") {
+            return;
+        }
+        let bus = Arc::new(EventBus::new(64));
+        let mut p = TerminalCorePlugin::new()
+            .with_memory_monitor(TestMemoryLimits::unlimited())
+            .with_memory_poll_interval(Duration::from_millis(20))
+            .with_event_bus(Arc::clone(&bus));
+
+        let resp = p
+            .dispatch(HANDLER_CREATE_SESSION, &create_args("sleep 5"))
+            .expect("create");
+        let CreateSessionResponse { id } = serde_json::from_value(resp).expect("decode");
+
+        // Poll up to ~3s for a non-zero RSS to land. The first sample
+        // for a freshly-spawned process can race the kernel's VmRSS
+        // ticking up from 0 — we want the structural guarantee
+        // (cache is populated *and* sample is meaningful), not just
+        // the presence check.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            let info_v = p
+                .dispatch(HANDLER_GET_SESSION_INFO, &serde_json::json!({ "id": &id }))
+                .expect("get_session_info");
+            let info: SessionInfo = serde_json::from_value(info_v).expect("decode");
+            if info.rss_bytes.is_some_and(|b| b > 0) {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "rss_bytes never settled to a positive value within 3s",
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// When a tracked session crosses `hard_mb`, the poller publishes
+    /// `MemoryLimitExceeded` *before* the kill — so a subscriber on
+    /// the lifecycle prefix sees it ahead of the eventual
+    /// `SessionClosed`. We force the breach by setting an absurdly
+    /// low hard limit (1 MB); any real shell exceeds that
+    /// immediately.
+    #[test]
+    fn poller_publishes_memory_limit_exceeded_before_kill_unix() {
+        use nexus_kernel::{EventFilter, NexusEvent};
+        if !unix_only("poller_publishes_memory_limit_exceeded_before_kill_unix") {
+            return;
+        }
+        let bus = Arc::new(EventBus::new(64));
+        let mut sub =
+            bus.subscribe(EventFilter::CustomPrefix(EVENT_LIFECYCLE_PREFIX.to_string()));
+
+        // 1 MB hard cap — any shell will exceed this in its first
+        // sample. soft is left below hard so the evaluation prefers
+        // the hard branch.
+        let limits = TestMemoryLimits {
+            soft_mb: Some(0),
+            hard_mb: Some(1),
+        };
+        let mut p = TerminalCorePlugin::new()
+            .with_memory_monitor(limits)
+            .with_memory_poll_interval(Duration::from_millis(20))
+            .with_event_bus(Arc::clone(&bus));
+
+        let resp = p
+            .dispatch(HANDLER_CREATE_SESSION, &create_args("sleep 30"))
+            .expect("create");
+        let CreateSessionResponse { id } = serde_json::from_value(resp).expect("decode");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let mut saw_breach = false;
+        let mut saw_closed = false;
+        let mut breach_before_closed = false;
+        while std::time::Instant::now() < deadline {
+            if let Some(evt) = sub.try_recv().expect("bus alive") {
+                if let NexusEvent::Custom { type_id, payload, .. } = &evt.event {
+                    if !type_id.ends_with(&id) {
+                        continue;
+                    }
+                    if let Some(kind) = payload.get("kind").and_then(|v| v.as_str()) {
+                        match kind {
+                            "memory_limit_exceeded" => {
+                                saw_breach = true;
+                                let limit_mb =
+                                    payload.get("limit_mb").and_then(|v| v.as_u64());
+                                let rss_bytes =
+                                    payload.get("rss_bytes").and_then(|v| v.as_u64());
+                                assert_eq!(limit_mb, Some(1));
+                                assert!(rss_bytes.is_some_and(|b| b > 0));
+                            }
+                            "session_closed" => {
+                                saw_closed = true;
+                                if saw_breach {
+                                    breach_before_closed = true;
+                                }
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(saw_breach, "MemoryLimitExceeded never published");
+        assert!(saw_closed, "SessionClosed never published after kill");
+        assert!(
+            breach_before_closed,
+            "MemoryLimitExceeded must be published before SessionClosed"
+        );
+    }
+
+    #[test]
+    fn rss_cache_clears_when_session_is_closed_unix() {
+        if !unix_only("rss_cache_clears_when_session_is_closed_unix") {
+            return;
+        }
+        let bus = Arc::new(EventBus::new(64));
+        let mut p = TerminalCorePlugin::new()
+            .with_memory_monitor(TestMemoryLimits::unlimited())
+            .with_memory_poll_interval(Duration::from_millis(20))
+            .with_event_bus(Arc::clone(&bus));
+
+        let resp = p
+            .dispatch(HANDLER_CREATE_SESSION, &create_args("sleep 5"))
+            .expect("create");
+        let CreateSessionResponse { id } = serde_json::from_value(resp).expect("decode");
+
+        // Wait for the cache to populate.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let info_v = p
+                .dispatch(HANDLER_GET_SESSION_INFO, &serde_json::json!({ "id": &id }))
+                .expect("get_session_info");
+            let info: SessionInfo = serde_json::from_value(info_v).expect("decode");
+            if info.rss_bytes.is_some() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "rss_bytes never populated within 2s",
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        // Close — the next poller round should see the session is
+        // gone and prune its cache entry. We re-list_sessions; the
+        // closed id no longer appears, but if for any reason we look
+        // it up directly we must not see stale RSS.
+        p.dispatch(HANDLER_CLOSE_SESSION, &serde_json::json!({ "id": &id }))
+            .expect("close");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            // Direct cache read — bypasses the server's
+            // get_session_info (which returns NotRunning after close).
+            let cached = p.cached_rss(&id);
+            if cached.is_none() {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "rss cache still has the closed session after 2s",
+            );
+            std::thread::sleep(Duration::from_millis(20));
         }
     }
 }

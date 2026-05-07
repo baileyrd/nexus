@@ -315,6 +315,16 @@ impl Session {
         &self.id
     }
 
+    /// OS process id of the spawned child shell. `None` once the child
+    /// has been reaped (`try_wait_exit` returned `Some`) or was never
+    /// spawned. The id is read from the live `portable_pty::Child`
+    /// handle each call — no caching — so a caller can rely on
+    /// `Some(pid)` meaning "this pid is currently meaningful".
+    #[must_use]
+    pub fn pid(&self) -> Option<u32> {
+        self.child.as_ref().and_then(|c| c.process_id())
+    }
+
     /// Write bytes into the child's stdin. Bytes are flushed immediately.
     ///
     /// # Errors

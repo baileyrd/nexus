@@ -170,6 +170,15 @@ impl SessionManager {
         self.sessions.get(id).and_then(|e| e.name.as_deref())
     }
 
+    /// OS process id of the session's spawned child shell, or `None` if
+    /// the session is unknown / the child has been reaped. Powers the
+    /// memory-monitor wiring (BL-061) — the poller needs the live pid
+    /// to read RSS without re-discovering it through the manager API.
+    #[must_use]
+    pub fn pid(&self, id: &SessionId) -> Option<u32> {
+        self.sessions.get(id).and_then(|e| e.session.pid())
+    }
+
     /// Unix-seconds timestamp the session was spawned at, or `None` if
     /// the id is unknown. Feeds the `SessionInfo.created_at` field.
     #[must_use]
