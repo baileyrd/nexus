@@ -215,10 +215,15 @@ impl Default for KernelRuntime {
 /// `create_dir_all`) then calls [`nexus_bootstrap::init_forge`] which runs
 /// `StorageEngine::init` to set up the SQLite schema + search index.
 ///
+/// Optionally applies a scaffold `template` (BL-054 Phase 1: `"os"`
+/// lays down the Agentic OS directory layout + memory-map `CLAUDE.md`).
+/// Idempotent: re-running against an already-templated forge is a
+/// no-op that never overwrites pre-existing user files.
+///
 /// Does NOT boot a kernel — the caller is expected to follow up with
 /// [`boot_kernel`]. Safe to call against an already-initialised forge.
 #[tauri::command]
-pub async fn init_forge(path: String) -> Result<(), String> {
+pub async fn init_forge(path: String, template: Option<String>) -> Result<(), String> {
     let root = PathBuf::from(&path);
     // Mirrors the legacy shell's `forge.rs::init_layout` ordering
     // (retired Phase 4 WI-37): create the top-level skeleton first so
@@ -229,6 +234,11 @@ pub async fn init_forge(path: String) -> Result<(), String> {
             .map_err(|e| format!("failed to create '{}': {e}", dir.display()))?;
     }
     nexus_bootstrap::init_forge(&root).map_err(|e| format!("{e:#}"))?;
+    if let Some(name) = template {
+        let kind = nexus_bootstrap::forge_template::ForgeTemplate::from_str(&name)
+            .ok_or_else(|| format!("unknown forge template '{name}' (expected: os)"))?;
+        nexus_bootstrap::forge_template::apply(&root, kind).map_err(|e| format!("{e:#}"))?;
+    }
     Ok(())
 }
 

@@ -1,7 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
-use nexus_bootstrap::{init_forge, storage as ipc};
+use nexus_bootstrap::{
+    forge_template::{apply as apply_template, ForgeTemplate},
+    init_forge, storage as ipc,
+};
 
 use crate::app::App;
 use crate::output::{print_success, OutputFormat};
@@ -33,10 +36,9 @@ pub fn init(app: &App, dir: Option<PathBuf>, template: Option<&str>) -> Result<(
     // Apply the requested scaffold template, if any. Done before the
     // reindex so the seeded files end up in the index automatically.
     if let Some(name) = template {
-        match name {
-            "os" => scaffold_os_template(&target)?,
-            other => anyhow::bail!("unknown forge template '{other}' (expected: os)"),
-        }
+        let kind = ForgeTemplate::from_str(name)
+            .ok_or_else(|| anyhow::anyhow!("unknown forge template '{name}' (expected: os)"))?;
+        apply_template(&target, kind)?;
     }
 
     // Build a runtime anchored at the new forge and reindex any pre-existing
@@ -231,110 +233,3 @@ pub fn reindex(app: &mut App) -> Result<()> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// BL-054 Phase 1 — Forge OS template
-// ---------------------------------------------------------------------------
-
-/// Top-level directories the OS template lays down. `projects/<name>/`
-/// is created lazily by the user when a project starts; the empty
-/// `projects/` parent gets a `.gitkeep` so the directory is preserved
-/// in version control.
-const OS_DIRS: &[&str] = &[
-    "raw",
-    "wiki",
-    "output",
-    "projects",
-    "ops",
-    "personal",
-    "archive",
-];
-
-/// Files seeded into the forge root. `architecture.md` is intentionally
-/// a placeholder — Phase 5's OS Setup skill fills it in by interviewing
-/// the user. `CLAUDE.md` documents the memory map so the AI navigates
-/// without burning tokens guessing the layout.
-const OS_CLAUDE_MD: &str = include_str!("../../templates/os/CLAUDE.md");
-const OS_ARCHITECTURE_MD: &str = include_str!("../../templates/os/architecture.md");
-
-fn scaffold_os_template(root: &Path) -> Result<()> {
-    for dir in OS_DIRS {
-        let path = root.join(dir);
-        std::fs::create_dir_all(&path)
-            .map_err(|e| anyhow::anyhow!("create '{}': {e}", path.display()))?;
-        // Empty directories don't survive `git add`; drop a .gitkeep so
-        // the OS layout round-trips through version control.
-        let keep = path.join(".gitkeep");
-        if !keep.exists() {
-            std::fs::write(&keep, b"")
-                .map_err(|e| anyhow::anyhow!("write '{}': {e}", keep.display()))?;
-        }
-    }
-
-    // Root files. Don't overwrite a CLAUDE.md the user already wrote
-    // (forge::init's outer guard rejects pre-existing forges, but a
-    // CLAUDE.md sitting in the directory before init isn't a forge —
-    // it's somebody else's content).
-    write_if_absent(&root.join("CLAUDE.md"), OS_CLAUDE_MD)?;
-    write_if_absent(&root.join("architecture.md"), OS_ARCHITECTURE_MD)?;
-    Ok(())
-}
-
-fn write_if_absent(path: &Path, content: &str) -> Result<()> {
-    if path.exists() {
-        return Ok(());
-    }
-    std::fs::write(path, content)
-        .map_err(|e| anyhow::anyhow!("write '{}': {e}", path.display()))?;
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn scaffold_creates_all_directories() {
-        let tmp = tempfile::tempdir().unwrap();
-        scaffold_os_template(tmp.path()).unwrap();
-        for dir in OS_DIRS {
-            let path = tmp.path().join(dir);
-            assert!(path.is_dir(), "expected directory at {}", path.display());
-            assert!(
-                path.join(".gitkeep").exists(),
-                ".gitkeep missing in {}",
-                path.display(),
-            );
-        }
-    }
-
-    #[test]
-    fn scaffold_seeds_root_files() {
-        let tmp = tempfile::tempdir().unwrap();
-        scaffold_os_template(tmp.path()).unwrap();
-        let claude = std::fs::read_to_string(tmp.path().join("CLAUDE.md")).unwrap();
-        assert!(claude.contains("Memory map"), "CLAUDE.md missing memory map header");
-        assert!(claude.contains("raw/"), "CLAUDE.md missing raw/ section");
-        let arch = std::fs::read_to_string(tmp.path().join("architecture.md")).unwrap();
-        assert!(arch.contains("Architecture"), "architecture.md missing Architecture header");
-    }
-
-    #[test]
-    fn scaffold_preserves_pre_existing_files() {
-        let tmp = tempfile::tempdir().unwrap();
-        let claude = tmp.path().join("CLAUDE.md");
-        std::fs::write(&claude, "user-authored content").unwrap();
-        scaffold_os_template(tmp.path()).unwrap();
-        assert_eq!(std::fs::read_to_string(&claude).unwrap(), "user-authored content");
-    }
-
-    #[test]
-    fn scaffold_is_idempotent() {
-        let tmp = tempfile::tempdir().unwrap();
-        scaffold_os_template(tmp.path()).unwrap();
-        // Second run must not error or duplicate.
-        scaffold_os_template(tmp.path()).unwrap();
-        for dir in OS_DIRS {
-            assert!(tmp.path().join(dir).is_dir());
-        }
-    }
-}

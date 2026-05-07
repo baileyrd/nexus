@@ -36,6 +36,7 @@ use nexus_plugins::{
 };
 
 pub mod agent;
+pub mod forge_template;
 mod audit_sqlite;
 pub mod database;
 pub mod storage;

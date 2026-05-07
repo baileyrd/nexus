@@ -384,7 +384,7 @@ The output is immediately usable and optionally exportable as a redistributable 
 
 ### BL-054: Nexus OS Mode — Agentic OS methodology layer
 
-> **Phase 1 closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `nexus forge init --template os` scaffolds the OS layout + memory-map `CLAUDE.md` + `architecture.md` placeholder. Shell launcher "OS layout" toggle deferred to a Phase 1 follow-up (needs scaffolder lifted into `nexus-bootstrap` first). Phases 2–5 remain open.
+> **Phase 1 fully closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `nexus forge init --template os` scaffolds the OS layout + memory-map `CLAUDE.md` + `architecture.md` placeholder; the launcher's "Create OS workspace" row exposes the same scaffold to the shell. Phases 2–5 remain open.
 
 **Source**: AI Integration Assessment + Chase AI "Agentic OS" framework analysis (2026-05-06) — full plan in [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md)
 **Effort**: ~1 week total across 5 independent phases (0.5 _(shipped)_ + 1.5 + 1 + 2 + 0.5 days)

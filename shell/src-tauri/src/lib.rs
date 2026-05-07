@@ -600,7 +600,7 @@ pub fn run() {
                 tokio::time::timeout(
                     std::time::Duration::from_secs(30),
                     async {
-                        bridge::init_forge(vault.clone()).await?;
+                        bridge::init_forge(vault.clone(), None).await?;
                         runtime_state.boot_at(&vault_path).await
                     },
                 )

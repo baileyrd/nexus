@@ -12,6 +12,11 @@ const EVENT_OPENED = 'workspace:opened'
 const EVENT_CLOSED = 'workspace:closed'
 const COMMAND_OPEN = 'nexus.workspace.open'
 const COMMAND_SET_ROOT = 'nexus.workspace.setRoot'
+// BL-054 Phase 1 follow-up: open the folder picker and apply the named
+// scaffold template (currently only `"os"`) before the kernel boots.
+// Distinct from `nexus.workspace.open` so the launcher's "Create OS
+// forge" affordance is a discrete code path rather than an overload.
+const COMMAND_OPEN_WITH_TEMPLATE = 'nexus.workspace.openWithTemplate'
 const COMMAND_CLOSE = 'nexus.workspace.close'
 
 export const workspacePlugin: Plugin = {
@@ -88,7 +93,7 @@ export const workspacePlugin: Plugin = {
     // pure UI-state sync.
     const popoutMode = api.context.get('popoutMode') === true
 
-    const setRoot = async (path: string | null): Promise<void> => {
+    const setRoot = async (path: string | null, template?: string): Promise<void> => {
       const prev = useWorkspaceStore.getState().rootPath
 
       // No-op fast path for null → null; still make sure the UI surfaces
@@ -115,7 +120,7 @@ export const workspacePlugin: Plugin = {
 
       if (path !== null && !popoutMode) {
         try {
-          await invoke('init_forge', { path })
+          await invoke('init_forge', { path, template: template ?? null })
           // In the e2e harness the Rust `setup` hook may have already
           // booted the kernel (NEXUS_E2E_VAULT path) — in that case
           // skip boot_kernel rather than erroring with "kernel already
@@ -207,6 +212,26 @@ export const workspacePlugin: Plugin = {
       if (typeof picked === 'string') {
         // Let boot errors propagate so the launcher can skip recents.
         await setRoot(picked)
+        return picked
+      }
+      return null
+    })
+
+    // BL-054 Phase 1 follow-up: same folder picker as COMMAND_OPEN, but
+    // applies a named scaffold template (currently only `"os"`) before
+    // booting the kernel. Argument: a single template name string.
+    api.commands.register(COMMAND_OPEN_WITH_TEMPLATE, async (...args: unknown[]) => {
+      const template = args[0]
+      if (typeof template !== 'string' || template.length === 0) {
+        throw new Error('openWithTemplate requires a template name')
+      }
+      const picked = await openDialog({
+        directory: true,
+        multiple: false,
+        title: 'Create OS Workspace',
+      })
+      if (typeof picked === 'string') {
+        await setRoot(picked, template)
         return picked
       }
       return null

@@ -22,6 +22,7 @@ import { clientLogger } from '../../../clientLogger'
 const EVENT_OPENED = 'workspace:opened'
 const EVENT_CLOSED = 'workspace:closed'
 const COMMAND_OPEN = 'nexus.workspace.open'
+const COMMAND_OPEN_WITH_TEMPLATE = 'nexus.workspace.openWithTemplate'
 const COMMAND_SET_ROOT = 'nexus.workspace.setRoot'
 
 export const launcherPlugin: Plugin = {
@@ -81,6 +82,20 @@ export const launcherPlugin: Plugin = {
       }
     }
 
+    // BL-054 Phase 1 follow-up: pick a folder and scaffold the OS
+    // layout into it before booting. Same recents semantics as
+    // `onOpenFolder` — only promote on success.
+    const onOpenWithOsTemplate = async () => {
+      try {
+        const picked = await api.commands.execute(COMMAND_OPEN_WITH_TEMPLATE, 'os')
+        if (typeof picked === 'string' && picked.length > 0) {
+          await useLauncherStore.getState().openPath(picked)
+        }
+      } catch (err) {
+        reportBootFailure(null, err)
+      }
+    }
+
     const onActivatePath = async (path: string) => {
       try {
         await api.commands.execute(COMMAND_SET_ROOT, path)
@@ -98,7 +113,7 @@ export const launcherPlugin: Plugin = {
     // createElement since this is a .ts file (not .tsx); the child
     // component itself owns the JSX.
     const LauncherSlot = () =>
-      createElement(LauncherView, { onOpenFolder, onActivatePath })
+      createElement(LauncherView, { onOpenFolder, onOpenWithOsTemplate, onActivatePath })
 
     api.views.register('nexus.launcher.view', {
       slot: 'overlay',

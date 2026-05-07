@@ -19,6 +19,9 @@ const TITLEBAR_HEIGHT = 36
 
 interface LauncherViewProps {
   onOpenFolder: () => void
+  /** BL-054 Phase 1 follow-up: pick a folder + scaffold the OS layout
+   *  before booting. Surfaced as the "Create OS workspace" action. */
+  onOpenWithOsTemplate: () => void
   onActivatePath: (path: string) => void
 }
 
@@ -262,7 +265,7 @@ function ActionRow({
   )
 }
 
-export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps) {
+export function LauncherView({ onOpenFolder, onOpenWithOsTemplate, onActivatePath }: LauncherViewProps) {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const manageReturnTo = useLauncherStore((s) => s.manageReturnTo)
   const clearReturnTo = useLauncherStore((s) => s.setManageReturnTo)
@@ -295,6 +298,10 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
   const onCreate = () => {
     if (manageReturnTo) clearReturnTo(null)
     onOpenFolder()
+  }
+  const onCreateOs = () => {
+    if (manageReturnTo) clearReturnTo(null)
+    onOpenWithOsTemplate()
   }
 
   return (
@@ -440,6 +447,13 @@ export function LauncherView({ onOpenFolder, onActivatePath }: LauncherViewProps
                   buttonLabel="Create"
                   variant="accent"
                   onClick={onCreate}
+                />
+                <ActionRow
+                  heading="Create OS workspace"
+                  description="Scaffold the Agentic OS layout (raw / wiki / output / projects / ops) plus a memory-map CLAUDE.md."
+                  buttonLabel="Create"
+                  variant="neutral"
+                  onClick={onCreateOs}
                 />
                 <ActionRow
                   heading="Open folder as workspace"

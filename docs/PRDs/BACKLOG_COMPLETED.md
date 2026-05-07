@@ -8,6 +8,23 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-054 Phase 1 follow-up: shell launcher OS-layout toggle ✅ (2026-05-07)
+
+**Source**: BL-054 Phase 1 closure note (2026-05-07) — DoD bullet "Shell new-forge flow offers 'OS layout' as an option alongside blank"
+**Files**: new `crates/nexus-bootstrap/src/forge_template.rs`, moved `crates/nexus-bootstrap/templates/os/{CLAUDE.md, architecture.md}` (lifted from `crates/nexus-cli/templates/`); `crates/nexus-bootstrap/src/lib.rs`, `crates/nexus-cli/src/commands/forge.rs`, `shell/src-tauri/src/{bridge.rs, lib.rs}`, `shell/src/plugins/nexus/workspace/index.ts`, `shell/src/plugins/nexus/launcher/{index.ts, LauncherView.tsx}`
+**Related**: BL-054 Phase 1 (CLI surface — shipped earlier today)
+
+Closes the deferred Phase 1 DoD bullet by lifting the scaffolder into shared infrastructure and surfacing it on the launcher.
+
+- **Scaffolder lifted to `nexus-bootstrap`.** New `forge_template` module owns `ForgeTemplate` enum (`Os` only today, with `from_str` / `as_str` round-trip so the CLI flag parser and the IPC arg both validate against the same allowlist) plus the `apply(root, template)` entrypoint. Templates moved from `crates/nexus-cli/templates/` to `crates/nexus-bootstrap/templates/`; `nexus-cli`'s `forge::init` now just calls `apply_template(&target, ForgeTemplate::from_str(name)?)`. The five unit tests followed the code (round-trip parser + apply happy path + idempotence + pre-existing-file preservation).
+- **Tauri command extended.** `bridge::init_forge(path: String, template: Option<String>)` — `None` keeps the legacy "blank forge" behaviour, `Some("os")` runs the scaffolder after `init_forge` and before kernel boot. The lib.rs e2e setup hook (`bridge::init_forge(vault.clone(), None)`) updated to the new arity.
+- **Workspace plugin plumbing.** `setRoot(path, template?)` threads `template` through to `invoke('init_forge', { path, template: template ?? null })`. New command `nexus.workspace.openWithTemplate` opens the folder picker (separate title — "Create OS Workspace") and calls `setRoot(picked, "os")`. Kept distinct from `nexus.workspace.open` so the launcher path is a discrete code branch rather than an overload.
+- **Launcher UI.** Three ActionRows now: "Create new workspace" (blank), "Create OS workspace" (Agentic OS layout), "Open folder as workspace". The new row is wired through `onOpenWithOsTemplate` → `commands.execute('nexus.workspace.openWithTemplate', 'os')`. Description copy spells out what the OS layout actually is (raw / wiki / output / projects / ops + memory-map CLAUDE.md) so users picking blindly know what they're getting.
+
+**Tested**: `cargo test -p nexus-bootstrap --lib forge_template` 5/5 pass; `cargo test -p nexus-cli` 56/56 pass (43 unit + 10 integration + 3 smoke; the 4 forge::tests cases moved with the scaffolder); `cargo build` for both `nexus-bootstrap` and the excluded `shell/src-tauri` crate clean. `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell test` 927/927 pass; lint 0 errors.
+
+**Definition of done coverage**: closes the deferred Phase 1 DoD bullet end-to-end (scaffolder reachable from the shell, surfaced as a discrete action in the launcher). Phase 1 of BL-054 is now fully shipped.
+
 ### BL-054 Phase 1: Forge OS template ✅ (2026-05-07)
 
 **Source**: BL-054 companion plan, Phase 1 — [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md) §Phased implementation
