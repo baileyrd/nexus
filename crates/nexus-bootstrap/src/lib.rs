@@ -439,7 +439,7 @@ fn register_core_plugins(
                     on_start: true,
                     on_stop: true,
                 },
-                &[
+                &with_v1_aliases(&[
                     ("get_secret", nexus_security::core_plugin::HANDLER_GET_SECRET),
                     ("set_secret", nexus_security::core_plugin::HANDLER_SET_SECRET),
                     ("delete_secret", nexus_security::core_plugin::HANDLER_DELETE_SECRET),
@@ -447,7 +447,7 @@ fn register_core_plugins(
                     ("query_audit_log", nexus_security::core_plugin::HANDLER_QUERY_AUDIT_LOG),
                     ("clear_audit_log", nexus_security::core_plugin::HANDLER_CLEAR_AUDIT_LOG),
                     ("metrics_snapshot", nexus_security::core_plugin::HANDLER_METRICS_SNAPSHOT),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(SecurityCorePlugin::new(Some(Arc::clone(event_bus)))),
@@ -680,7 +680,7 @@ fn register_core_plugins(
                 "com.nexus.database",
                 "Database",
                 LifecycleFlags::NONE,
-                &[
+                &with_v1_aliases(&[
                     (
                         "csv_import",
                         nexus_database::core_plugin::HANDLER_CSV_IMPORT,
@@ -697,7 +697,7 @@ fn register_core_plugins(
                         "apply_view",
                         nexus_database::core_plugin::HANDLER_APPLY_VIEW,
                     ),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(nexus_database::DatabaseCorePlugin::new()),
@@ -713,7 +713,7 @@ fn register_core_plugins(
                     on_init: true,
                     ..LifecycleFlags::NONE
                 },
-                &[
+                &with_v1_aliases(&[
                     ("open", nexus_editor::core_plugin::HANDLER_OPEN),
                     ("close", nexus_editor::core_plugin::HANDLER_CLOSE),
                     ("get_tree", nexus_editor::core_plugin::HANDLER_GET_TREE),
@@ -745,7 +745,7 @@ fn register_core_plugins(
                         "resolve_block_link",
                         nexus_editor::core_plugin::HANDLER_RESOLVE_BLOCK_LINK,
                     ),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(EditorCorePlugin::with_event_bus(
@@ -766,7 +766,7 @@ fn register_core_plugins(
                 "com.nexus.theme",
                 "Theme",
                 LifecycleFlags::NONE,
-                &[
+                &with_v1_aliases(&[
                     (
                         "get_available_themes",
                         nexus_theme::core_plugin::HANDLER_GET_AVAILABLE_THEMES,
@@ -805,7 +805,7 @@ fn register_core_plugins(
                         nexus_theme::core_plugin::HANDLER_SET_PLUGIN_OVERRIDES,
                     ),
                     ("reload", nexus_theme::core_plugin::HANDLER_RELOAD),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(ThemeCorePlugin::with_builtins(Some(Arc::clone(event_bus)))),
@@ -827,7 +827,7 @@ fn register_core_plugins(
                     on_stop: true,
                     ..LifecycleFlags::NONE
                 },
-                &[
+                &with_v1_aliases(&[
                     ("ask", nexus_ai::core_plugin::HANDLER_ASK),
                     ("index_file", nexus_ai::core_plugin::HANDLER_INDEX_FILE),
                     (
@@ -919,7 +919,7 @@ fn register_core_plugins(
                         "propose_tool_calls",
                         nexus_ai::core_plugin::HANDLER_PROPOSE_TOOL_CALLS,
                     ),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(AiCorePlugin::new()),
@@ -950,7 +950,7 @@ fn register_core_plugins(
                 "com.nexus.skills",
                 "Skills",
                 LifecycleFlags::NONE,
-                &[
+                &with_v1_aliases(&[
                     ("list", nexus_skills::HANDLER_LIST),
                     ("get", nexus_skills::HANDLER_GET),
                     (
@@ -964,7 +964,7 @@ fn register_core_plugins(
                     ("reload", nexus_skills::HANDLER_RELOAD),
                     ("render", nexus_skills::HANDLER_RENDER),
                     ("compose", nexus_skills::HANDLER_COMPOSE),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(SkillsCorePlugin::open(skills_dir)),
@@ -981,13 +981,13 @@ fn register_core_plugins(
                 "com.nexus.templates",
                 "Templates",
                 LifecycleFlags::NONE,
-                &[
+                &with_v1_aliases(&[
                     ("list", nexus_templates::HANDLER_LIST),
                     ("get", nexus_templates::HANDLER_GET),
                     ("render", nexus_templates::HANDLER_RENDER),
                     ("apply", nexus_templates::HANDLER_APPLY),
                     ("reload", nexus_templates::HANDLER_RELOAD),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(TemplatesCorePlugin::open(forge_root.to_path_buf())),
@@ -1004,10 +1004,10 @@ fn register_core_plugins(
                 "com.nexus.formats",
                 "Formats",
                 LifecycleFlags::NONE,
-                &[
+                &with_v1_aliases(&[
                     ("import_notion", nexus_formats::HANDLER_IMPORT_NOTION),
                     ("export_notion", nexus_formats::HANDLER_EXPORT_NOTION),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(FormatsCorePlugin::open(forge_root.to_path_buf())),
@@ -1024,7 +1024,7 @@ fn register_core_plugins(
                 "com.nexus.workflow",
                 "Workflow",
                 LifecycleFlags::NONE,
-                &[
+                &with_v1_aliases(&[
                     ("list", nexus_workflow::HANDLER_LIST),
                     ("get", nexus_workflow::HANDLER_GET),
                     ("reload", nexus_workflow::HANDLER_RELOAD),
@@ -1051,7 +1051,7 @@ fn register_core_plugins(
                         "templates_init",
                         nexus_workflow::core_plugin::HANDLER_TEMPLATES_INIT,
                     ),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(WorkflowCorePlugin::open_full(
@@ -1072,7 +1072,7 @@ fn register_core_plugins(
                 "com.nexus.linkpreview",
                 "Link preview",
                 LifecycleFlags::NONE,
-                &[("fetch", nexus_linkpreview::core_plugin::HANDLER_FETCH)],
+                &with_v1_aliases(&[("fetch", nexus_linkpreview::core_plugin::HANDLER_FETCH)]),
             ),
             forge_root,
             Box::new(LinkPreviewCorePlugin::new()),
@@ -1089,7 +1089,7 @@ fn register_core_plugins(
                 "com.nexus.comments",
                 "Comments",
                 LifecycleFlags::NONE,
-                &[
+                &with_v1_aliases(&[
                     ("list", nexus_comments::core_plugin::HANDLER_LIST),
                     (
                         "create_thread",
@@ -1115,7 +1115,7 @@ fn register_core_plugins(
                         "edit_comment",
                         nexus_comments::core_plugin::HANDLER_EDIT_COMMENT,
                     ),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(CommentsCorePlugin::new(forge_root)),
@@ -1132,7 +1132,7 @@ fn register_core_plugins(
                 "com.nexus.agent",
                 "Agent",
                 LifecycleFlags::NONE,
-                &[
+                &with_v1_aliases(&[
                     ("plan", nexus_agent::HANDLER_PLAN),
                     ("history_list", nexus_agent::HANDLER_HISTORY_LIST),
                     ("history_get", nexus_agent::HANDLER_HISTORY_GET),
@@ -1145,7 +1145,7 @@ fn register_core_plugins(
                     ("session_delete", nexus_agent::core_plugin::HANDLER_SESSION_DELETE),
                     // ADR 0024 Phase 2b — caller-side approval reply.
                     ("round_decide", nexus_agent::core_plugin::HANDLER_ROUND_DECIDE),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(AgentCorePlugin::new()),
@@ -1166,7 +1166,7 @@ fn register_core_plugins(
                     on_start: true,
                     on_stop: true,
                 },
-                &[
+                &with_v1_aliases(&[
                     (
                         "list_servers",
                         nexus_mcp::core_plugin::HANDLER_LIST_SERVERS,
@@ -1183,7 +1183,7 @@ fn register_core_plugins(
                     ),
                     ("connect", nexus_mcp::core_plugin::HANDLER_CONNECT),
                     ("disconnect", nexus_mcp::core_plugin::HANDLER_DISCONNECT),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(McpHostPlugin::new(
@@ -1206,7 +1206,7 @@ fn register_core_plugins(
                     on_start: true,
                     on_stop: true,
                 },
-                &[
+                &with_v1_aliases(&[
                     ("status", nexus_git::core_plugin::HANDLER_STATUS),
                     ("log", nexus_git::core_plugin::HANDLER_LOG),
                     ("branches", nexus_git::core_plugin::HANDLER_BRANCHES),
@@ -1233,7 +1233,7 @@ fn register_core_plugins(
                     ("create_tag", nexus_git::core_plugin::HANDLER_CREATE_TAG),
                     ("delete_tag", nexus_git::core_plugin::HANDLER_DELETE_TAG),
                     ("push_tags", nexus_git::core_plugin::HANDLER_PUSH_TAGS),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(GitCorePlugin::new(
@@ -1272,7 +1272,7 @@ fn register_core_plugins(
                 "com.nexus.terminal",
                 "Terminal",
                 LifecycleFlags::NONE,
-                &[
+                &with_v1_aliases(&[
                     (
                         "create_session",
                         nexus_terminal::HANDLER_CREATE_SESSION,
@@ -1328,7 +1328,7 @@ fn register_core_plugins(
                         "saved_reorder",
                         nexus_terminal::HANDLER_SAVED_REORDER,
                     ),
-                ],
+                ]),
             ),
             forge_root,
             Box::new(terminal_plugin),

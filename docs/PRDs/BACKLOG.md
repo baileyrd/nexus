@@ -83,22 +83,7 @@ _BL-098 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
-### BL-097: IPC schema versioning
-
-**Source**: Kernel Integration Assessment (2026-05-06) — gap #6
-**Effort**: Medium (1.5 weeks)
-**Crates**: `nexus-plugin-api/src/ipc.rs`, all `nexus-<service>/src/ipc.rs` files, `scripts/check_ipc_drift.sh`
-**Related**: ADR 0021 (IPC handler versioning convention); `ts-rs` type exports; `check_ipc_drift.sh`
-
-All IPC args and returns are `serde_json::Value`. There is no version field on requests, no schema negotiation between caller and handler, and no deprecation path. A breaking change to a handler's argument shape produces a silent deserialization error or misparse. This is manageable in a monorepo but becomes a maintenance hazard when community plugins ship against a stable API.
-
-**Definition of done:**
-- `IpcRequest` envelope gains a `schema_version: u32` field (default 1, optional for backward compat)
-- Each handler registers its current `schema_version` alongside its handler ID in the plugin manifest
-- `IpcDispatcher::dispatch` checks request `schema_version` ≤ handler's registered version; if higher, returns new `IpcError::SchemaVersionMismatch { handler_version, caller_version }`
-- `scripts/check_ipc_drift.sh` extended to also emit a `schema_versions.json` snapshot; diff against previous snapshot to detect version bumps required on change
-- Handlers that add fields use `#[serde(default)]` to remain backward-compatible with version N-1 callers (document this convention)
-- `nexus-plugin-api` changelog notes every handler version bump
+_BL-097 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Honored ADR 0021 (`<cmd>.v<N>` suffix in the command name, not a request envelope field) and rolled out `with_v1_aliases` to every subsystem. New live-registry deprecation-window guard test scans the actual loader on every CI run. The PRD-spec'd `IpcRequest.schema_version` envelope field was deliberately not adopted — see closure notes for the rationale._
 
 ---
 

@@ -946,6 +946,26 @@ impl PluginLoader {
             .map(|lp| plugin_info_from(&lp.manifest, lp.status, &lp.capabilities))
     }
 
+    /// Return every registered IPC command name as
+    /// `(plugin_id, command_name)` pairs. Used by the deprecation
+    /// window guard test (ADR 0021 / BL-097) to scan the live
+    /// registry — every `cmd.v<N>` for `N > 1` must coexist with
+    /// `cmd.v(N-1)`.
+    #[must_use]
+    pub fn list_ipc_commands(&self) -> Vec<(String, String)> {
+        self.loaded
+            .values()
+            .flat_map(|lp| {
+                let pid = lp.manifest.id.clone();
+                lp.manifest
+                    .registrations
+                    .ipc_commands
+                    .iter()
+                    .map(move |r| (pid.clone(), r.id.clone()))
+            })
+            .collect()
+    }
+
     /// Return all registered CLI subcommands as `(id, description)` pairs.
     #[must_use]
     pub fn list_cli_subcommands(&self) -> Vec<(String, String)> {

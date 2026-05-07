@@ -192,6 +192,59 @@ fn deprecation_guard_flags_v2_without_v1() {
 }
 
 #[test]
+fn live_registry_has_v1_alias_for_every_bare_command() {
+    // BL-097 — every subsystem opted into `with_v1_aliases` (ADR
+    // 0021 §"Other subsystems"). Walk the live IPC registry and
+    // assert the invariant: for any registered bare `<command>`
+    // there must also be a `<command>.v1` registration on the
+    // same plugin.
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+    let commands = runtime.loader.lock().list_ipc_commands();
+
+    use std::collections::HashSet;
+    let pairs: HashSet<(String, String)> = commands.iter().cloned().collect();
+
+    let mut missing: Vec<String> = Vec::new();
+    for (plugin_id, cmd) in &commands {
+        // Only check bare names — entries that already end in `.v<N>`
+        // are themselves the explicit pin.
+        if cmd.contains(".v") {
+            continue;
+        }
+        let v1 = format!("{cmd}.v1");
+        if !pairs.contains(&(plugin_id.clone(), v1.clone())) {
+            missing.push(format!("{plugin_id}::{cmd} (no {plugin_id}::{v1})"));
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "BL-097 / ADR 0021: every bare IPC command must have a \
+         matching `.v1` alias. Missing pairs: {missing:#?}"
+    );
+}
+
+#[test]
+fn live_registry_passes_deprecation_window_guard() {
+    // BL-097 — run the synthetic-input deprecation guard against
+    // the live registry. With no `.v2` handlers today this passes
+    // vacuously; the moment a future PR ships a `.v2` without
+    // keeping `.v1` registered, this test surfaces it before
+    // merge.
+    let forge = scratch_forge();
+    let runtime = build_cli_runtime(forge.path().to_path_buf()).expect("runtime");
+    let commands = runtime.loader.lock().list_ipc_commands();
+    let names: Vec<String> = commands.into_iter().map(|(_, c)| c).collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let violations = deprecation_window_violations(&refs);
+    assert!(
+        violations.is_empty(),
+        "BL-097 / ADR 0021: live registry has deprecation-window \
+         violations: {violations:#?}"
+    );
+}
+
+#[test]
 fn deprecation_guard_flags_v3_when_only_v1_present() {
     // Skipping a version is also a violation — the predecessor of v3
     // is v2, not v1. Ship v2 first, retire it later.
