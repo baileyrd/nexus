@@ -1,0 +1,139 @@
+/*
+ * BL-079 — diff-viewer modal styling.
+ *
+ * Centred modal with a translucent overlay; click outside dismisses.
+ * The body scrolls; the header is sticky-ish at the top.
+ */
+
+.nexus-diff-view-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.nexus-diff-view-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(960px, 92vw);
+  height: min(720px, 88vh);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.nexus-diff-view-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.nexus-diff-view-header h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  flex: 1;
+}
+
+.nexus-diff-view-header code {
+  font-family: var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-normal);
+}
+
+.nexus-diff-view-close {
+  background: transparent;
+  border: 0;
+  padding: 4px 8px;
+  font-size: 14px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.nexus-diff-view-close:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.nexus-diff-view-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 8px;
+  font-family: var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+}
+
+.nexus-diff-view-error {
+  color: var(--accent-danger);
+  background: var(--bg-danger-soft);
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.nexus-diff-view-loading,
+.nexus-diff-view-empty {
+  color: var(--text-faint);
+  padding: 24px;
+  text-align: center;
+}
+
+.nexus-diff-view-hunk {
+  margin-bottom: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.nexus-diff-view-hunk-header {
+  background: var(--background-secondary);
+  color: var(--text-faint);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.nexus-diff-view-hunk-body {
+  margin: 0;
+  padding: 0;
+  white-space: pre;
+}
+
+.nexus-diff-view-line {
+  display: block;
+  padding: 0 8px;
+}
+
+.nexus-diff-view-line-added {
+  background: rgba(56, 161, 105, 0.12);
+  color: var(--text-normal);
+}
+
+.nexus-diff-view-line-removed {
+  background: rgba(197, 48, 48, 0.12);
+  color: var(--text-normal);
+}
+
+.nexus-diff-view-line-context {
+  color: var(--text-muted);
+}
+
+.nexus-diff-view-sigil {
+  display: inline-block;
+  width: 12px;
+  color: var(--text-faint);
+  user-select: none;
+}

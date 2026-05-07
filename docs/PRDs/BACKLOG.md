@@ -187,21 +187,7 @@ _BL-080 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-079: Git gutter + diff viewer
-
-**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](BL-075-081-code-editor.md)
-**Effort**: Medium (1.5 weeks)
-**Crates**: `shell/src/plugins/nexus/editor/cm/` (new `gitGutter.ts`), `shell/src/plugins/nexus/diffView/` (new panel); `nexus-git` backend already ships
-**Related**: PRD-11 (git integration); `nexus-git` `git diff` already operational
-
-`nexus-git` provides `git diff` output today. What's missing is surface: line-level change indicators in the editor margin and a side-by-side diff panel.
-
-**Definition of done:**
-- `gitGutter.ts` CM6 extension: green bar (added), yellow bar (modified), red triangle (deleted) in the left margin; hover shows the removed lines
-- Clicking a gutter mark opens an inline diff hunk with Stage/Revert actions dispatched to `com.nexus.git`
-- Diff view panel: side-by-side or unified mode via CM6 `MergeView`; opens from palette or file-tree context menu
-- Inline blame: `com.nexus.git::blame` result shown as muted end-of-line annotation on hover (togglable)
-- No new IPC handlers needed — `com.nexus.git` already exposes diff, blame, and stage operations
+_BL-079 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Backend gained one new IPC handler (`com.nexus.git::blame`, id 36) — the DoD claimed `blame` already shipped but only the engine method existed; the dispatch surface was missing. Shell ships three pieces: `gitGutter.ts` CM6 extension (per-line markers from `diff_file`, hover tooltip with removed lines, auto-refresh on `files:saved`); `gitBlame.ts` extension with togglable end-of-line annotations (`<author> · <hash> · <relative date> · <summary>`) gated by `nexus.editor.toggleBlame`; `DiffView.tsx` modal hunk viewer opened by `nexus.editor.openDiff` rendering hunks unified with red/green tinted lines. Per-line marker classification is the load-bearing logic — `buildLineMarkers` walks `GitDiffHunk[]` tracking a `pendingRemoved` buffer to distinguish added (`+` only) from modified (`+` paired with `-`) from deletion-above (`-` with no replacement); 8 unit tests pin every branch. Click-on-gutter Stage / Revert and side-by-side `MergeView` deferred — the gutter + tooltip + modal already give the user the "what changed?" surface, and stage / revert can route through the existing git panel. `@codemirror/merge` would add a meaningful dependency for marginal value over the current modal._
 
 ---
 

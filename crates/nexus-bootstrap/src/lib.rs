@@ -1254,6 +1254,7 @@ fn register_core_plugins(
                     ("abort_merge", nexus_git::core_plugin::HANDLER_ABORT_MERGE),
                     ("conflict_versions", nexus_git::core_plugin::HANDLER_CONFLICT_VERSIONS),
                     ("merge", nexus_git::core_plugin::HANDLER_MERGE),
+                    ("blame", nexus_git::core_plugin::HANDLER_BLAME),
                 ]),
             ),
             forge_root,

@@ -413,3 +413,31 @@ pub struct GitPushArgs {
     /// Branch name to push (e.g. `"main"`).
     pub branch: String,
 }
+
+/// BL-079 — one entry from `com.nexus.git::blame`. Wire-mirror of
+/// [`crate::types::BlameEntry`] with serde / ts-rs / JsonSchema
+/// derivations the impl type doesn't carry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct GitBlameEntry {
+    /// Short (7-char) commit hash that last touched this line range.
+    pub commit_hash: String,
+    /// Author name from the commit's signature.
+    pub author: String,
+    /// ISO-8601 commit date (UTC).
+    pub date: String,
+    /// First line of the commit message — the "summary".
+    pub message: String,
+    /// 1-based start line of the blame hunk in the current file.
+    pub start_line: u32,
+    /// 1-based end line of the blame hunk in the current file.
+    pub end_line: u32,
+}

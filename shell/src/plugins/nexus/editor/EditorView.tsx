@@ -10,6 +10,10 @@ import { getEditorRuntime, setActiveCmView } from './runtime'
 import { CodeMirrorHost, type CodeMirrorHostHandle } from './cm/CodeMirrorHost'
 import { transactionBridge } from './cm/transactionBridge'
 import { getEditorMode, pickLanguageExtension } from './codeMode'
+import { gitGutterExt } from './cm/gitGutter'
+import { gitBlameExt } from './cm/gitBlame'
+import { useEditorBlameStore } from './blameStore'
+import './cm/gitGutter.css'
 import { slashCommandExt } from './cm/slashCommand'
 import { blockSelectionExt } from './cm/blockSelection'
 import { multiCursorPromoteExt } from './cm/multiCursorPromote'
@@ -784,6 +788,10 @@ interface TabBodyProps {
 }
 
 function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: TabBodyProps) {
+  // BL-079 — inline-blame toggle state, read inline so the
+  // extension stack rebuilds on toggle. The CodeMirrorHost `key`
+  // includes this so a flip triggers a clean remount.
+  const blameEnabled = useEditorBlameStore((s) => s.enabled)
   const centredStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -956,12 +964,45 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
     const editorMode = getEditorMode(tab.name, codeExtensions)
     const languageExtension =
       editorMode === 'code' ? pickLanguageExtension(tab.name) : null
-    const codeBuildExtensions =
-      languageExtension !== null
-        ? () => [languageExtension]
-        : tab.mode === 'live'
-          ? () => [livePreviewExt()]
-          : undefined
+    // BL-079 — code mode gets a git gutter when the runtime has a
+    // generic kernel handle. The gutter calls `com.nexus.git::diff_file`
+    // for the current relpath; rows it doesn't know about render
+    // unmarked. Untitled tabs (no real path) are excluded so the
+    // gutter doesn't spuriously try to diff the placeholder name.
+    const gitGutterExtension =
+      editorMode === 'code' && runtime?.kernel && !isUntitled(tab.relpath)
+        ? gitGutterExt({
+            relpath: tab.relpath,
+            kernel: runtime.kernel,
+            events: eventBus,
+            onError: (err) =>
+              runtime?.reportBridgeError?.('git gutter', err),
+          })
+        : null
+    // BL-079 — inline blame, controlled by `useEditorBlameStore`.
+    // The toggle command flips the boolean; this read happens at
+    // render time so a flip + remount picks up the new value.
+    // Untitled tabs are excluded — they have no committed history.
+    const blameOn = blameEnabled
+    const gitBlameExtension =
+      blameOn && runtime?.kernel && !isUntitled(tab.relpath)
+        ? gitBlameExt({
+            relpath: tab.relpath,
+            kernel: runtime.kernel,
+            onError: (err) =>
+              runtime?.reportBridgeError?.('git blame', err),
+          })
+        : null
+    const codeBuildExtensions = (() => {
+      const base: import('@codemirror/state').Extension[] = []
+      if (languageExtension !== null) base.push(languageExtension)
+      if (gitGutterExtension !== null) base.push(gitGutterExtension)
+      if (gitBlameExtension !== null) base.push(gitBlameExtension)
+      if (tab.mode === 'live' && languageExtension === null) {
+        base.push(livePreviewExt())
+      }
+      return base.length > 0 ? () => base : undefined
+    })()
 
     // Untitled / non-markdown / pre-session fallback. The
     // `buildExtensions` choice above turns this into either:
@@ -972,7 +1013,7 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
     //   - CM6 + language extension (BL-075 code mode).
     return (
       <CodeMirrorHost
-        key={`${keymapKey}:${editorMode}:${tab.relpath}`}
+        key={`${keymapKey}:${editorMode}:blame=${blameOn ? '1' : '0'}:${tab.relpath}`}
         ref={cmViewRef}
         className="nexus-editor-source"
         value={tab.content}

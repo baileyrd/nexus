@@ -8,6 +8,7 @@ import type { EditorView as CMEditorView } from '@codemirror/view'
 import type { EditorKernelClient } from './kernelClient.ts'
 import type { EditorKeybindings } from './cm/extensions.ts'
 import type { SessionManager } from './sessionManager.ts'
+import type { KernelAPI } from '../../../types/plugin.ts'
 
 export interface EditorRuntime {
   confirmAndClose: (relpath: string) => Promise<void>
@@ -62,6 +63,13 @@ export interface EditorRuntime {
    * live-mutating an open tab's mode is out of scope.
    */
   getCodeFileExtensions: () => readonly string[]
+  /**
+   * BL-079 — generic kernel handle for CM extensions that need to
+   * issue arbitrary `ipc_call`s (git gutter, blame, future LSP
+   * client). The typed `kernelClient` above is editor-specific;
+   * this is the raw `KernelAPI` for cross-plugin IPC.
+   */
+  kernel?: KernelAPI
 }
 
 let _runtime: EditorRuntime | null = null

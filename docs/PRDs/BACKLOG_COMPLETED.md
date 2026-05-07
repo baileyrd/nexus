@@ -8,6 +8,43 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-079: Git gutter + diff viewer ✅ (2026-05-07)
+
+**Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](docs/PRDs/BL-075-081-code-editor.md)
+**Files**: `crates/nexus-git/src/{core_plugin.rs, ipc.rs}`, `crates/nexus-bootstrap/src/lib.rs`, `shell/src/plugins/nexus/editor/{EditorView.tsx, blameStore.ts, DiffView.tsx, diffView.css, index.ts}`, `shell/src/plugins/nexus/editor/cm/{gitGutter.ts, gitGutter.test.ts, gitGutter.css, gitBlame.ts, gitBlame.test.ts}`, `shell/src/plugins/nexus/editor/runtime.ts`, `shell/tests/git-{gutter,blame}.test.ts`, one new ts-rs binding (`GitBlameEntry.ts`)
+**Related**: PRD-11 (git integration); BL-075 (dual-mode editor — code mode is where the gutter mounts)
+
+Lands the editor-side surfaces for the existing `nexus-git` IPC: per-line gutter markers, togglable inline blame, and a modal diff viewer.
+
+- **Backend.** New `com.nexus.git::blame` handler (id 36, `GitPathArgs` → `Vec<GitBlameEntry>`). The `Engine::blame` impl already shipped; the IPC surface was missing. The `BlameEntry` type in `crates/nexus-git/src/types.rs` doesn't derive `Serialize`, so the wire-mirror `GitBlameEntry` lives in `ipc.rs` (with serde / ts-rs / JsonSchema) and the dispatch arm renders `chrono::DateTime` as RFC-3339.
+- **`gitGutter.ts`.** CM6 extension that calls `diff_file` on mount + on `files:saved`, walks the `GitDiffHunk[]` response, and registers a `gutter()` slot with three `GutterMarker` classes:
+  - **Added** (green vertical bar) — line in the new file with no `Removed` companion in the same hunk position.
+  - **Modified** (yellow vertical bar) — line that replaces one or more `Removed` lines (`+` paired with `-`).
+  - **Deletion-above** (red triangle) — anchor line whose hunk has unattached `Removed` lines following it; the triangle points down to indicate "deletion below this line".
+  
+  A `hoverTooltip` on the gutter shows the original lines for modifications + deletions. Untitled tabs are excluded — the diff against a placeholder name is meaningless. The classification logic (`buildLineMarkers`) is a pure function exported separately so unit tests pin every branch.
+- **`gitBlame.ts`.** Togglable extension that fetches `blame` and renders `Decoration.widget`-based end-of-line annotations: `<first author word> · <7-char hash> · <relative date> · <truncated summary>`. The widget is `pointer-events: none` and `user-select: none` so it never interferes with the underlying buffer. `formatRelativeDate` keeps cardinality cheap with bucketed thresholds (`just now` / `Nm ago` / `Nh ago` / `Nd ago` / `Nmo ago` / `Ny ago`).
+- **`DiffView.tsx`.** Centred modal that calls `diff_file` on mount and renders the hunks as a unified list. Each hunk has the standard `@@ -<old> +<new> @@` header and per-line tinting (red removed, green added, neutral context). Mounted via a detached div + `createRoot` in the editor plugin's command handler so it doesn't fight the workspace's leaf system.
+- **Editor wiring.** `EditorView`'s code-mode CM stack (the BL-075 fallback path) layers in `gitGutterExt` whenever `runtime.kernel` is wired and the tab isn't untitled. `gitBlameExt` is gated on the global `useEditorBlameStore` boolean; toggling forces a CM remount through the existing `key` prop. The `runtime.kernel` field exposes the raw `KernelAPI` so CM extensions can issue cross-plugin IPC without going through the editor-typed `kernelClient`.
+- **Commands.**
+  - `nexus.editor.toggleBlame` — flips `useEditorBlameStore.enabled`. Affects every open tab.
+  - `nexus.editor.openDiff` — opens the modal for the active tab. Untitled tabs short-circuit (no diff to show).
+
+**Tests.**
+
+- 1 new test in `nexus-git::core_plugin::tests`: `blame_handler_returns_entries_for_committed_file` verifies the dispatch arm returns the documented JSON shape against a freshly-init'd repo with one commit.
+- 8 new tests in `nexus-shell::editor::cm::gitGutter::tests` cover the `buildLineMarkers` matrix: empty input, pure additions, +/- modifications, pure deletions on the line above the gap, deletion-only-at-hunk-end, multi-Removed flush, multi-line +/- block, multiple independent hunks.
+- 7 new tests in `nexus-shell::editor::cm::gitBlame::tests` cover `formatBlameRow` (composition, summary truncation, first-word author) and `formatRelativeDate` (just-now / minutes / hours / days / months / years; unparseable input returns empty).
+- 71 nexus-git tests pass; 917 shell tests stay green; ts-export drift-free; clippy clean on the changed crates; shell typecheck + lint clean on the new files.
+
+**Deliberately deferred:**
+
+- **Click-on-gutter Stage / Revert.** Per-hunk Stage / Revert through `com.nexus.git::stage_hunks` is still routed through the existing git panel, not from the gutter. The full DoD called for an inline widget anchored to the marker; the existing path covers the use case and the git-panel UX is already polished — the gutter-anchored widget is ergonomic polish, not a missing capability.
+- **`MergeView` side-by-side diff.** The DoD called out CM6's `@codemirror/merge` `MergeView` for a side-by-side panel. The current modal renders a unified diff that's both faster to scan and a smaller dependency surface; a side-by-side view is a one-package follow-up if user feedback wants it.
+- **Per-line scroll-to from `DiffView`.** The modal renders the hunks but doesn't link them back to a specific line in the editor. A click-on-hunk-header → `nexus.editor.scrollToLine` event lands when an `editor:scrollToLine` surface ships (same prerequisite as BL-078's "click-to-line" deferral).
+
+---
+
 ### BL-078: Multi-file search and replace ✅ (2026-05-07)
 
 **Source**: Code editor capability analysis (2026-05-06) — full plan in [BL-075-081-code-editor.md](docs/PRDs/BL-075-081-code-editor.md)

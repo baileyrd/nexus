@@ -1,4 +1,7 @@
 import { createElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { DiffView } from './DiffView'
+import './diffView.css'
 import type { Plugin, PluginAPI } from '../../../types/plugin'
 import { clientLogger } from '../../../clientLogger'
 import { viewRegistry, workspace } from '../../../workspace'
@@ -7,6 +10,7 @@ import { EditorView } from './EditorView'
 import { markdownViewCreator } from './MarkdownView'
 import { emptyViewCreator, EMPTY_VIEW_TYPE } from './EmptyView'
 import { useEditorStore, isDirty, type EditorTabMode } from './editorStore'
+import { useEditorBlameStore } from './blameStore'
 import { openSearchPanel } from '@codemirror/search'
 import { setEditorRuntime, getActiveCmView } from './runtime'
 import { revealBlockInView } from './cm/blockLinkNav'
@@ -55,6 +59,13 @@ const COMMAND_REVEAL_IN_NAV = 'nexus.editor.revealInNavigation'
 const COMMAND_REVEAL_IN_OS = 'nexus.editor.revealInOS'
 const COMMAND_OPEN_DEFAULT_APP = 'nexus.editor.openInDefaultApp'
 const COMMAND_DELETE_FILE = 'nexus.editor.deleteFile'
+// BL-079 — toggle the inline-blame annotations on the active tab.
+// Reads / writes `useEditorBlameStore`; the editor view subscribes
+// and remounts CM6 with / without the blame extension on flip.
+const COMMAND_TOGGLE_BLAME = 'nexus.editor.toggleBlame'
+// BL-079 — open the modal diff viewer for the active tab. Reads
+// `com.nexus.git::diff_file` and renders the hunks unified.
+const COMMAND_OPEN_DIFF = 'nexus.editor.openDiff'
 
 // Tab-actions menu placeholders. Each one shows a "Coming soon"
 // notification so users get feedback instead of a dead disabled row.
@@ -165,6 +176,8 @@ export const editorPlugin: Plugin = {
         { id: COMMAND_REVEAL_IN_OS, title: 'Show in System Explorer', category: 'Editor' },
         { id: COMMAND_OPEN_DEFAULT_APP, title: 'Open in Default App', category: 'Editor' },
         { id: COMMAND_DELETE_FILE, title: 'Delete File', category: 'Editor' },
+        { id: COMMAND_TOGGLE_BLAME, title: 'Toggle Inline Git Blame', category: 'Editor' },
+        { id: COMMAND_OPEN_DIFF, title: 'Open Diff for Active File', category: 'Editor' },
         ...STUB_COMMANDS.map((s) => ({ id: s.id, title: s.title, category: 'Editor' })),
       ],
       keybindings: [
@@ -570,6 +583,52 @@ export const editorPlugin: Plugin = {
       s.setMode(tab.relpath, next)
     })
 
+    // BL-079 — flip the inline-blame extension on / off for the
+    // editor view as a whole. The store is global so a flip
+    // affects every open tab; the existing CM remount key picks
+    // up the change.
+    api.commands.register(COMMAND_TOGGLE_BLAME, async () => {
+      useEditorBlameStore.getState().toggle()
+    })
+
+    // BL-079 — modal diff viewer for the active tab. Mounts a
+    // detached div + React root that survives until the user
+    // dismisses the modal; cleaning up on close avoids growing a
+    // pile of stale roots across repeat opens.
+    let openDiffRoot: { el: HTMLElement; root: Root } | null = null
+    const closeDiffRoot = () => {
+      if (!openDiffRoot) return
+      const { el, root } = openDiffRoot
+      try {
+        root.unmount()
+      } catch {
+        // Best-effort: a double-close shouldn't surface as an error
+        // to the user.
+      }
+      el.remove()
+      openDiffRoot = null
+    }
+    api.commands.register(COMMAND_OPEN_DIFF, async () => {
+      const s = useEditorStore.getState()
+      const tab = s.tabs.find((t) => t.relpath === s.activeRelpath)
+      if (!tab || /^untitled-\d+$/i.test(tab.relpath)) return
+      // Replace any prior modal first — keeps the markup tidy if
+      // the user invokes the command twice.
+      closeDiffRoot()
+      const el = document.createElement('div')
+      el.className = 'nexus-diff-view-host'
+      document.body.appendChild(el)
+      const root = createRoot(el)
+      openDiffRoot = { el, root }
+      root.render(
+        createElement(DiffView, {
+          kernel: api.kernel,
+          relpath: tab.relpath,
+          onClose: closeDiffRoot,
+        }),
+      )
+    })
+
     api.commands.register(COMMAND_FIND, async () => {
       const view = getActiveCmView()
       if (!view) {
@@ -772,6 +831,7 @@ export const editorPlugin: Plugin = {
         })
       },
       kernelEvents: api.kernel,
+      kernel: api.kernel,
       onBlockLinkNavigate: (link) => {
         // Best-effort tab-name guess from the basename — matches
         // what the files plugin emits for `files:open`.

@@ -161,6 +161,12 @@ pub const HANDLER_CONFLICT_VERSIONS: u32 = 34;
 /// flow; conflicts surface through the same `conflict_files` /
 /// `conflict_versions` / `abort_merge` triple as everywhere else.
 pub const HANDLER_MERGE: u32 = 35;
+/// BL-079 IPC handler: blame annotations for a file. Args:
+/// [`crate::ipc::GitPathArgs`]. Returns `Vec<GitBlameEntry>` —
+/// one row per contiguous range of lines attributed to the same
+/// commit. Drives the editor's inline-blame toggle so users see
+/// "who last touched this line" without leaving the buffer.
+pub const HANDLER_BLAME: u32 = 36;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const POLL_TICK: Duration = Duration::from_millis(200);
@@ -575,6 +581,28 @@ impl CorePlugin for GitCorePlugin {
                     "conflicts":    r.conflicts,
                     "commit_hash":  r.commit_hash,
                 }))
+            }
+            HANDLER_BLAME => {
+                // BL-079 — wraps `BlameEntry` into the wire-mirror
+                // `GitBlameEntry`. The impl type doesn't derive
+                // `Serialize` and carries a `chrono::DateTime` we
+                // need to render as ISO-8601 for the shell side.
+                let path = path_arg(args, &self.forge_root)?;
+                let entries = h.with(move |e| e.blame(&path)).map_err(map_err)?;
+                let arr: Vec<_> = entries
+                    .iter()
+                    .map(|e| {
+                        json!({
+                            "commit_hash": e.commit_hash,
+                            "author": e.author,
+                            "date": e.date.to_rfc3339(),
+                            "message": e.message,
+                            "start_line": e.start_line,
+                            "end_line": e.end_line,
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::Value::Array(arr))
             }
             _ => Err(PluginError::ExecutionFailed {
                 plugin_id: PLUGIN_ID.to_string(),
@@ -1080,5 +1108,56 @@ mod tests {
             }
             _ => panic!("expected Custom event"),
         }
+    }
+
+    /// BL-079 — `blame` handler returns one entry per committed
+    /// line range with the right shape. The repo is a fresh init
+    /// with one commit; every line in the file should attribute to
+    /// that single commit.
+    #[test]
+    fn blame_handler_returns_entries_for_committed_file() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        // Configure committer identity — `git commit` rejects
+        // operations without it on systems where it isn't already
+        // set globally (e.g. CI containers).
+        let _ = Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(dir.path())
+            .status();
+        let _ = Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir.path())
+            .status();
+
+        std::fs::write(dir.path().join("hello.txt"), "alpha\nbeta\n").unwrap();
+        let _ = Command::new("git")
+            .args(["add", "hello.txt"])
+            .current_dir(dir.path())
+            .status();
+        let _ = Command::new("git")
+            .args(["commit", "-m", "init", "--quiet"])
+            .current_dir(dir.path())
+            .status();
+
+        let mut plugin = GitCorePlugin::new(dir.path().to_path_buf(), None);
+        plugin.on_init().unwrap();
+        let resp = plugin
+            .dispatch(HANDLER_BLAME, &json!({ "path": "hello.txt" }))
+            .expect("blame ok");
+        let arr = resp.as_array().expect("array");
+        assert!(!arr.is_empty(), "expected at least one blame entry");
+        let first = &arr[0];
+        // Every entry mirrors GitBlameEntry's shape.
+        assert!(first["commit_hash"].is_string());
+        assert!(first["author"].is_string());
+        assert!(first["date"].is_string());
+        assert!(first["message"].is_string());
+        assert!(first["start_line"].is_u64());
+        assert!(first["end_line"].is_u64());
+        assert!(
+            first["start_line"].as_u64().unwrap() >= 1,
+            "start_line is 1-based"
+        );
     }
 }

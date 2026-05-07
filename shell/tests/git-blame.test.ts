@@ -1,0 +1,7 @@
+/**
+ * Re-export wrapper so the default `pnpm test` glob (`tests/*.test.ts`)
+ * picks up the BL-079 git-blame formatter tests that live as a sibling
+ * of the implementation under
+ * `shell/src/plugins/nexus/editor/cm/gitBlame.test.ts`.
+ */
+import '../src/plugins/nexus/editor/cm/gitBlame.test.ts'

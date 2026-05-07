@@ -1,0 +1,96 @@
+/*
+ * BL-079 — git gutter visual styling.
+ *
+ * The CM6 `gutter()` API places one slot to the left of the line-
+ * number gutter (or as the first gutter when line numbers are off).
+ * Each marker is a 4×N rect (added/modified) or a small triangle
+ * (deletion); colours follow the muted-tone language used by the
+ * conflict panel + git status chips elsewhere in the shell.
+ */
+
+.cm-gutterElement.nexus-git-gutter {
+  width: 6px;
+  padding: 0;
+  background: transparent;
+}
+
+.nexus-git-gutter-marker {
+  width: 3px;
+  height: 100%;
+  margin-left: 1px;
+  border-radius: 1px;
+  /* Anchor the marker to the line height — CM6 sets gutter cell
+     height to match the line, so this just fills it.  */
+  display: block;
+}
+
+.nexus-git-gutter-added {
+  background: var(--text-success, #38a169);
+}
+
+.nexus-git-gutter-modified {
+  background: var(--text-warning, #b7791f);
+}
+
+.nexus-git-gutter-deletion {
+  /* Render as a small triangle anchored at the bottom of the cell
+     so it points to the *next* line — the convention is "deletion
+     happened just below this line". */
+  width: 0;
+  height: 0;
+  margin: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid var(--text-error, #c53030);
+  /* Push to the bottom of the gutter cell. */
+  position: relative;
+  top: calc(100% - 6px);
+}
+
+/*
+ * Tooltip surface — same look as CM6's built-in tooltips so it
+ * blends with autocomplete / hover surfaces. The `pre` body
+ * preserves whitespace + lets long removed lines wrap.
+ */
+.nexus-git-gutter-tooltip {
+  max-width: 480px;
+  padding: 6px 8px;
+  font-size: 11px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.nexus-git-gutter-tooltip-heading {
+  font-weight: 600;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+
+.nexus-git-gutter-tooltip-body {
+  margin: 0;
+  font-family: var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-error, #c53030);
+}
+
+/*
+ * BL-079 — inline blame annotation. Muted text that reads as
+ * "metadata, not content"; doesn't break the line layout because
+ * the widget is a `Decoration.widget(side: 1)` at the line
+ * terminator (CM6 places it after the visible content).
+ */
+.nexus-git-blame-line {
+  color: var(--text-faint);
+  font-style: italic;
+  opacity: 0.7;
+  user-select: none;
+  pointer-events: none;
+  white-space: pre;
+}
