@@ -469,6 +469,15 @@ enum ProcCommand {
         #[arg(long)]
         order: Option<i32>,
     },
+    /// Show recent ad-hoc command history (BL-060)
+    History {
+        /// Maximum number of rows
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
+        /// Emit raw JSON instead of the table view
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1659,6 +1668,9 @@ fn main() {
             ProcCommand::Delete { slug } => commands::proc::delete(&mut app, &slug),
             ProcCommand::Reorder { slug, order } => {
                 commands::proc::reorder(&mut app, &slug, order)
+            }
+            ProcCommand::History { limit, json } => {
+                commands::proc::history(&mut app, limit, json)
             }
         },
 

@@ -15,6 +15,12 @@ import {
 } from './SavedCommandsPaneView'
 import { SavedCommandsView } from './SavedCommandsView'
 import { useSavedCommandsStore } from './savedCommandsStore'
+import {
+  HISTORY_VIEW_TYPE,
+  historyPaneViewCreator,
+} from './HistoryPaneView'
+import { HistoryView } from './HistoryView'
+import { useHistoryStore } from './historyStore'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 
 const PLUGIN_ID = 'com.nexus.terminal'
@@ -43,6 +49,8 @@ const COMMAND_FOCUS = 'nexus.terminal.focus'
 // Listed in the command palette so the user can pull it up without
 // hunting for an activity-bar entry.
 const COMMAND_SAVED_SHOW = 'nexus.terminal.savedCommands.show'
+// BL-060: dedicated command to reveal the Command History sub-view.
+const COMMAND_HISTORY_SHOW = 'nexus.terminal.history.show'
 
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
@@ -102,6 +110,11 @@ export const terminalPlugin: Plugin = {
         {
           id: COMMAND_SAVED_SHOW,
           title: 'Show Saved Commands',
+          category: 'Terminal',
+        },
+        {
+          id: COMMAND_HISTORY_SHOW,
+          title: 'Show Command History',
           category: 'Terminal',
         },
       ],
@@ -338,11 +351,42 @@ export const terminalPlugin: Plugin = {
       }
     })
 
+    // ── Command History sub-view (BL-060) ───────────────────────────
+    //
+    // Sibling to Saved Commands. Lives in the same sidebar slot but as
+    // its own leaf type so the user can have one or both visible at a
+    // time. Re-run / promote / delete are wired through the
+    // `com.nexus.terminal::adhoc_*` handlers; promote-to-saved updates
+    // both stores.
+    viewRegistry.register(
+      HISTORY_VIEW_TYPE,
+      historyPaneViewCreator(() =>
+        createElement(HistoryView, {
+          kernel: api.kernel,
+          notifications: api.notifications,
+          focusTerminal: () => {
+            void ensureAndReveal().then(() => {
+              api.events.emit(EVENT_TERMINAL_FOCUS, {})
+            })
+          },
+        }),
+      ),
+    )
+
+    api.commands.register(COMMAND_HISTORY_SHOW, async () => {
+      const leaf = await workspace.ensureLeafOfType(HISTORY_VIEW_TYPE, 'left')
+      workspace.revealLeaf(leaf)
+      if (await api.kernel.available()) {
+        void useHistoryStore.getState().loadHistory(api.kernel)
+      }
+    })
+
     // Reset the saved-commands cache when the workspace closes so the
     // next workspace doesn't see stale rows from the previous forge's
-    // procmgr_commands table.
+    // procmgr_commands / procmgr_adhoc_history tables.
     api.events.on(EVENT_WORKSPACE_CLOSED, () => {
       useSavedCommandsStore.getState().reset()
+      useHistoryStore.getState().reset()
     })
 
     // ── Activity bar item ───────────────────────────────────────────

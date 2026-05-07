@@ -34,6 +34,11 @@
 //! | 10         | `list_sessions`      | Metadata for every session              |
 //! | 16         | `read_raw_since`     | Pump + return raw bytes past a cursor   |
 //! | 17         | `resize`             | Update PTY size (cols × rows), SIGWINCH |
+//! | 18         | `open_in_terminal`   | Hand off saved cmd to external emulator |
+//! | 19         | `adhoc_list`         | Recent ad-hoc command history (BL-060)  |
+//! | 20         | `adhoc_get`          | Single ad-hoc row by id (BL-060)        |
+//! | 21         | `adhoc_delete`       | Forget an ad-hoc row (BL-060)           |
+//! | 22         | `adhoc_promote`      | Promote ad-hoc → saved command (BL-060) |
 //!
 //! Ids are **append-only** — never reused after retirement — because
 //! manifest registrations in loaded plugins bake them in.
@@ -73,10 +78,13 @@
 //!
 //! # What this is NOT (yet)
 //!
-//! - Saved-commands / ad-hoc CRUD. Those live in their own tables and
-//!   will get a sibling `com.nexus.terminal.commands` plugin in a
-//!   later slice — keeping the handler surface small here makes it
-//!   easy to audit and version independently.
+//! - Recording new ad-hoc rows over IPC. The `adhoc_*` handlers
+//!   (BL-060) cover read / delete / promote, but the kernel doesn't
+//!   yet observe ad-hoc executions; rows are inserted by the
+//!   process-manager layer through [`crate::SqliteAdHocStore::record`]
+//!   directly. A `record` handler will land alongside the workflow
+//!   step type (BL-056) when running ad-hoc commands becomes a
+//!   first-class IPC verb.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -95,7 +103,10 @@ use schemars::JsonSchema;
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
-use crate::saved::{SavedCommand, SqliteSavedCommandStore};
+use crate::adhoc::SqliteAdHocStore;
+use crate::saved::{
+    promote_adhoc_to_saved, PromoteOptions, SavedCommand, SqliteSavedCommandStore,
+};
 use crate::server::{InMemoryTerminalServer, ServerSpawnConfig, TerminalEvent, TerminalServer};
 use crate::session::SessionId;
 use crate::shell::ShellSpec;
@@ -168,6 +179,22 @@ pub const HANDLER_RESIZE: u32 = 17;
 /// `working_dir`. Returns
 /// `{ "kind": "<snake_case>", "program": String, "args": Vec<String> }`.
 pub const HANDLER_OPEN_IN_TERMINAL: u32 = 18;
+
+/// BL-060 — `adhoc_list` handler id. Args: [`AdHocListArgs`] (`limit`
+/// defaults to 100). Returns the most recent rows from
+/// `procmgr_adhoc_history`, ordered by `executed_at` desc.
+pub const HANDLER_ADHOC_LIST: u32 = 19;
+/// BL-060 — `adhoc_get` handler id. Args: [`AdHocIdArgs`]. Returns the
+/// matching row or `null` when the id is unknown.
+pub const HANDLER_ADHOC_GET: u32 = 20;
+/// BL-060 — `adhoc_delete` handler id. Args: [`AdHocIdArgs`]. Returns
+/// `{ "id": String }` whether or not the row existed (DELETE is a no-op
+/// on a missing id, mirroring [`crate::SqliteAdHocStore::delete`]).
+pub const HANDLER_ADHOC_DELETE: u32 = 21;
+/// BL-060 — `adhoc_promote` handler id. Args: [`AdHocPromoteArgs`].
+/// Wraps [`crate::promote_adhoc_to_saved`] and returns the freshly
+/// inserted [`SavedCommand`].
+pub const HANDLER_ADHOC_PROMOTE: u32 = 22;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -490,6 +517,73 @@ pub struct WaitForPatternResponse {
     pub matched: bool,
 }
 
+/// BL-060 — arguments for `adhoc_list`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AdHocListArgs {
+    /// Maximum number of rows to return. Defaults to 100 when omitted —
+    /// matches the implicit cap the legacy CLI used and keeps a History
+    /// panel responsive on a long-lived forge.
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// BL-060 — arguments for `adhoc_get` / `adhoc_delete`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AdHocIdArgs {
+    /// Row id (UUID) returned by `adhoc_list` / `adhoc_get`.
+    pub id: String,
+}
+
+/// BL-060 — arguments for `adhoc_promote`. Wraps
+/// [`crate::PromoteOptions`] across IPC; field semantics match
+/// [`crate::promote_adhoc_to_saved`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AdHocPromoteArgs {
+    /// Source ad-hoc row id.
+    pub id: String,
+    /// Human-readable label for the new saved command. Required — the
+    /// underlying API derives the slug from this when one isn't passed
+    /// explicitly.
+    pub name: String,
+    /// Optional explicit slug override.
+    #[serde(default)]
+    pub slug: Option<String>,
+    /// Optional icon tag.
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// Optional shell binary override (defaults to `/bin/sh` on Unix,
+    /// `cmd.exe` elsewhere — see the underlying API).
+    #[serde(default)]
+    pub shell: Option<String>,
+}
+
 // ── The plugin ───────────────────────────────────────────────────────────────
 
 /// Core plugin instance. Holds the server behind an [`Arc<Mutex<_>>`]
@@ -504,6 +598,13 @@ pub struct TerminalCorePlugin {
     /// instantiated without a forge path (tests, embedded runtimes) —
     /// the saved-command handlers return a clear error in that case.
     saved: Option<Mutex<SqliteSavedCommandStore>>,
+    /// SQLite-backed ad-hoc command history store (BL-060). `None` when
+    /// the plugin is instantiated without a forge path — the
+    /// `adhoc_*` handlers return a clear error in that case. Lives
+    /// behind a separate `Mutex` from `saved` because the two stores
+    /// own independent rusqlite `Connection`s (a `Connection` is
+    /// `Send` but not `Sync`).
+    adhoc: Option<Mutex<SqliteAdHocStore>>,
     /// Optional kernel event bus. When `Some`, the constructor spawns
     /// the autonomous drainer (see [`Self::drainer`]) and `pump` /
     /// `read_raw_since` dispatches additionally publish on demand for
@@ -616,6 +717,7 @@ impl TerminalCorePlugin {
         Self {
             server: Arc::new(Mutex::new(InMemoryTerminalServer::new())),
             saved: None,
+            adhoc: None,
             event_bus: None,
             emitters: Arc::new(Mutex::new(HashMap::new())),
             drainer: None,
@@ -630,6 +732,7 @@ impl TerminalCorePlugin {
         Self {
             server: Arc::new(Mutex::new(server)),
             saved: None,
+            adhoc: None,
             event_bus: None,
             emitters: Arc::new(Mutex::new(HashMap::new())),
             drainer: None,
@@ -643,6 +746,15 @@ impl TerminalCorePlugin {
     #[must_use]
     pub fn with_saved_store(mut self, store: SqliteSavedCommandStore) -> Self {
         self.saved = Some(Mutex::new(store));
+        self
+    }
+
+    /// Attach an ad-hoc history store so the `adhoc_*` handlers
+    /// (BL-060) become live. Takes ownership — the plugin holds the
+    /// store for its entire lifetime behind a `Mutex`.
+    #[must_use]
+    pub fn with_adhoc_store(mut self, store: SqliteAdHocStore) -> Self {
+        self.adhoc = Some(Mutex::new(store));
         self
     }
 
@@ -940,6 +1052,10 @@ impl CorePlugin for TerminalCorePlugin {
             HANDLER_READ_RAW_SINCE => self.dispatch_read_raw_since(args),
             HANDLER_RESIZE => self.dispatch_resize(args),
             HANDLER_OPEN_IN_TERMINAL => self.dispatch_open_in_terminal(args),
+            HANDLER_ADHOC_LIST => self.dispatch_adhoc_list(args),
+            HANDLER_ADHOC_GET => self.dispatch_adhoc_get(args),
+            HANDLER_ADHOC_DELETE => self.dispatch_adhoc_delete(args),
+            HANDLER_ADHOC_PROMOTE => self.dispatch_adhoc_promote(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -1355,6 +1471,83 @@ impl TerminalCorePlugin {
             "working_dir": working_dir_str,
         }))
     }
+
+    // ── BL-060 — ad-hoc history handlers ─────────────────────────────
+
+    fn adhoc_store(&self) -> Result<&Mutex<SqliteAdHocStore>, PluginError> {
+        self.adhoc.as_ref().ok_or_else(|| {
+            exec_err(
+                "ad-hoc history store not attached (runtime built without a forge path)"
+                    .into(),
+            )
+        })
+    }
+
+    /// `adhoc_list` — most-recent-first slice of the ad-hoc history.
+    ///
+    /// `limit` defaults to 100 to keep payloads bounded; callers that
+    /// genuinely want everything can request a larger value but should
+    /// expect O(rows) cost. Wrapped here rather than in the store so
+    /// the store's plain-library shape stays unchanged.
+    fn dispatch_adhoc_list(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: AdHocListArgs = parse_args(args, "adhoc_list")?;
+        let limit = usize::try_from(a.limit.unwrap_or(100)).unwrap_or(usize::MAX);
+        let store = self.adhoc_store()?.lock().map_err(poisoned)?;
+        let rows = store.recent(limit).map_err(crate_err)?;
+        to_value(&rows, "adhoc_list")
+    }
+
+    /// `adhoc_get` — single row by id, or JSON `null` when unknown.
+    fn dispatch_adhoc_get(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: AdHocIdArgs = parse_args(args, "adhoc_get")?;
+        let store = self.adhoc_store()?.lock().map_err(poisoned)?;
+        let row = store.get(&a.id).map_err(crate_err)?;
+        match row {
+            Some(r) => to_value(&r, "adhoc_get"),
+            None => Ok(serde_json::Value::Null),
+        }
+    }
+
+    /// `adhoc_delete` — idempotent. Returns `{ id }` regardless of
+    /// whether the row existed; the store's `DELETE` is a no-op on a
+    /// missing id and the caller already knows the id they passed.
+    fn dispatch_adhoc_delete(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: AdHocIdArgs = parse_args(args, "adhoc_delete")?;
+        let store = self.adhoc_store()?.lock().map_err(poisoned)?;
+        store.delete(&a.id).map_err(crate_err)?;
+        Ok(serde_json::json!({ "id": a.id }))
+    }
+
+    /// `adhoc_promote` — wraps [`promote_adhoc_to_saved`]. Requires
+    /// both the ad-hoc and saved stores to be attached.
+    fn dispatch_adhoc_promote(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: AdHocPromoteArgs = parse_args(args, "adhoc_promote")?;
+        // Lock the adhoc store for the read, then drop before locking
+        // saved — keeps lock-acquisition order one-way and avoids any
+        // cross-call deadlock with a future handler that takes both.
+        let adhoc_lock = self.adhoc_store()?.lock().map_err(poisoned)?;
+        let saved_lock = self.saved_store()?.lock().map_err(poisoned)?;
+        let opts = PromoteOptions {
+            slug: a.slug,
+            icon: a.icon,
+            shell: a.shell,
+        };
+        let cmd = promote_adhoc_to_saved(&adhoc_lock, &saved_lock, &a.id, a.name, opts)
+            .map_err(crate_err)?;
+        to_value(&cmd, "adhoc_promote")
+    }
 }
 
 // ── Error plumbing ───────────────────────────────────────────────────────────
@@ -1395,6 +1588,7 @@ fn to_value<T: serde::Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adhoc::{AdHocRecord, AdHocStatus};
     use crate::server::{OutputLine, SessionInfo};
 
     fn unix_only(name: &str) -> bool {
@@ -2036,6 +2230,201 @@ mod tests {
             assert_eq!(eid, id);
         } else {
             panic!("expected SessionClosed");
+        }
+    }
+
+    // ── BL-060 — ad-hoc history dispatch tests ──────────────────────
+
+    /// Build a plugin with empty adhoc + saved stores attached.
+    fn plugin_with_adhoc() -> TerminalCorePlugin {
+        let adhoc = SqliteAdHocStore::in_memory().expect("open adhoc");
+        let saved = SqliteSavedCommandStore::in_memory().expect("open saved");
+        TerminalCorePlugin::new()
+            .with_adhoc_store(adhoc)
+            .with_saved_store(saved)
+    }
+
+    /// Seed ad-hoc rows by writing through the store *before* handing
+    /// it to the plugin (the plugin owns the only handle once
+    /// `with_adhoc_store` consumes it). Returns the plugin plus the
+    /// ids of each inserted row in insertion order.
+    fn plugin_with_seeded_adhoc(rows: &[(&str, Option<&str>, Option<i32>, u64)])
+        -> (TerminalCorePlugin, Vec<String>)
+    {
+        let adhoc = SqliteAdHocStore::in_memory().expect("open adhoc");
+        let saved = SqliteSavedCommandStore::in_memory().expect("open saved");
+        let mut ids = Vec::with_capacity(rows.len());
+        for (cmd, cwd, code, dur) in rows {
+            ids.push(adhoc.record(cmd, *cwd, *code, *dur).expect("seed row"));
+            // Stagger executed_at so `recent` ordering is deterministic.
+            std::thread::sleep(std::time::Duration::from_millis(1100));
+        }
+        let plugin = TerminalCorePlugin::new()
+            .with_adhoc_store(adhoc)
+            .with_saved_store(saved);
+        (plugin, ids)
+    }
+
+    #[test]
+    fn adhoc_list_without_attached_store_surfaces_clear_error() {
+        let mut p = TerminalCorePlugin::new(); // no adhoc store
+        let err = p
+            .dispatch(HANDLER_ADHOC_LIST, &serde_json::json!({}))
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(
+                    reason.contains("ad-hoc history store not attached"),
+                    "expected attach-error, got: {reason}",
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn adhoc_list_default_limit_returns_seeded_rows_in_recency_order() {
+        let (mut p, _ids) = plugin_with_seeded_adhoc(&[
+            ("ls", Some("/a"), Some(0), 10),
+            ("pwd", Some("/b"), Some(0), 12),
+            ("date", None, Some(0), 5),
+        ]);
+        let v = p
+            .dispatch(HANDLER_ADHOC_LIST, &serde_json::json!({}))
+            .expect("adhoc_list");
+        let rows: Vec<AdHocRecord> = serde_json::from_value(v).expect("decode");
+        assert_eq!(rows.len(), 3);
+        // Most recent first: insertion order was ls → pwd → date.
+        assert_eq!(rows[0].command, "date");
+        assert_eq!(rows[1].command, "pwd");
+        assert_eq!(rows[2].command, "ls");
+    }
+
+    #[test]
+    fn adhoc_list_respects_explicit_limit() {
+        let (mut p, _ids) = plugin_with_seeded_adhoc(&[
+            ("a", None, Some(0), 1),
+            ("b", None, Some(0), 1),
+            ("c", None, Some(0), 1),
+        ]);
+        let v = p
+            .dispatch(HANDLER_ADHOC_LIST, &serde_json::json!({ "limit": 2 }))
+            .expect("adhoc_list");
+        let rows: Vec<AdHocRecord> = serde_json::from_value(v).expect("decode");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].command, "c");
+    }
+
+    #[test]
+    fn adhoc_get_returns_null_for_unknown_id() {
+        let mut p = plugin_with_adhoc();
+        let v = p
+            .dispatch(HANDLER_ADHOC_GET, &serde_json::json!({ "id": "nope" }))
+            .expect("adhoc_get");
+        assert!(v.is_null());
+    }
+
+    #[test]
+    fn adhoc_get_returns_full_record_for_known_id() {
+        let (mut p, ids) =
+            plugin_with_seeded_adhoc(&[("hang", None, None, 250)]);
+        let id = ids.first().expect("seeded one row").clone();
+        let v = p
+            .dispatch(HANDLER_ADHOC_GET, &serde_json::json!({ "id": id }))
+            .expect("adhoc_get");
+        let row: AdHocRecord = serde_json::from_value(v).expect("decode");
+        assert_eq!(row.id, id);
+        assert_eq!(row.command, "hang");
+        // Killed-without-exit row encodes as Timeout in this surface.
+        assert_eq!(row.status, AdHocStatus::Timeout);
+    }
+
+    #[test]
+    fn adhoc_delete_is_idempotent_for_unknown_id() {
+        let mut p = plugin_with_adhoc();
+        let v = p
+            .dispatch(HANDLER_ADHOC_DELETE, &serde_json::json!({ "id": "ghost" }))
+            .expect("adhoc_delete");
+        assert_eq!(v, serde_json::json!({ "id": "ghost" }));
+    }
+
+    #[test]
+    fn adhoc_delete_removes_row_so_subsequent_get_returns_null() {
+        let (mut p, ids) = plugin_with_seeded_adhoc(&[("rm-me", None, Some(0), 10)]);
+        let id = ids.first().expect("seeded one row").clone();
+        p.dispatch(HANDLER_ADHOC_DELETE, &serde_json::json!({ "id": id }))
+            .expect("adhoc_delete");
+        let v = p
+            .dispatch(HANDLER_ADHOC_GET, &serde_json::json!({ "id": id }))
+            .expect("adhoc_get post-delete");
+        assert!(v.is_null());
+    }
+
+    #[test]
+    fn adhoc_promote_creates_saved_command_with_supplied_name_and_options() {
+        let (mut p, ids) =
+            plugin_with_seeded_adhoc(&[("npm test", Some("/work"), Some(0), 800)]);
+        let id = ids.first().expect("seeded one row").clone();
+        let v = p
+            .dispatch(
+                HANDLER_ADHOC_PROMOTE,
+                &serde_json::json!({
+                    "id": id,
+                    "name": "Run Tests",
+                    "icon": "play-circle",
+                    "shell": "/bin/bash",
+                }),
+            )
+            .expect("adhoc_promote");
+        let saved: SavedCommand = serde_json::from_value(v).expect("decode");
+        // slugify("Run Tests") → "run_tests"
+        assert_eq!(saved.slug, "run_tests");
+        assert_eq!(saved.name, "Run Tests");
+        assert_eq!(saved.shell, "/bin/bash");
+        assert_eq!(saved.shell_cmd, "npm test");
+        assert_eq!(saved.working_dir.as_deref(), Some("/work"));
+        assert_eq!(saved.icon, "play-circle");
+
+        // The new row should round-trip through `saved_list`.
+        let list_v = p
+            .dispatch(HANDLER_SAVED_LIST, &serde_json::json!({}))
+            .expect("saved_list");
+        let saved_rows: Vec<SavedCommand> =
+            serde_json::from_value(list_v).expect("decode saved");
+        assert!(saved_rows.iter().any(|r| r.slug == "run_tests"));
+    }
+
+    #[test]
+    fn adhoc_promote_unknown_id_surfaces_persist_error() {
+        let mut p = plugin_with_adhoc();
+        let err = p
+            .dispatch(
+                HANDLER_ADHOC_PROMOTE,
+                &serde_json::json!({ "id": "ghost", "name": "Ghost" }),
+            )
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(
+                    reason.contains("no adhoc row"),
+                    "expected 'no adhoc row' in error, got: {reason}",
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn adhoc_list_invalid_args_reported_as_execution_failed() {
+        let mut p = plugin_with_adhoc();
+        let err = p
+            .dispatch(HANDLER_ADHOC_LIST, &serde_json::json!({ "limit": "lots" }))
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("invalid args"), "got: {reason}");
+            }
+            other => panic!("unexpected error: {other:?}"),
         }
     }
 

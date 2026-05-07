@@ -259,3 +259,21 @@
   border-color: var(--interactive-accent);
   color: var(--accent-fg);
 }
+
+/*
+ * Command History sub-view (BL-060).
+ *
+ * Reuses every other class above — the History rows and Saved-command
+ * rows look the same on purpose so the user's eye doesn't have to
+ * relearn the affordances. The only delta is that History lists the
+ * raw command line as the row title (Saved lists a human name), so we
+ * inline a monospaced span at the title position rather than the
+ * separate `.nexus-saved-command-cmd` block.
+ */
+.nexus-saved-commands .nexus-saved-command-cmd-inline {
+  font-family: var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+  word-break: break-all;
+}

@@ -1259,10 +1259,11 @@ fn register_core_plugins(
     // Terminal & process manager — PRD-09. Pure-library crate wrapped
     // behind `com.nexus.terminal` so UI / script plugins reach it over
     // dispatch rather than linking it directly (ARCHITECTURE §7 invariant #3).
-    // Saved-commands (§14.1) are persisted via `SqliteSavedCommandStore`
-    // at `<forge>/.forge/procmgr.sqlite`; failure to open the store is
-    // logged and the plugin loads without saved-command handlers
-    // (session IPC stays usable even when SQLite misbehaves).
+    // Saved-commands (§14.1) and ad-hoc history (§10) share the same
+    // SQLite file at `<forge>/.forge/procmgr.sqlite` — separate tables,
+    // separate `Connection`s. Failure to open either store is logged
+    // and the plugin loads without that handler family (session IPC
+    // stays usable even when SQLite misbehaves).
     let saved_db = forge_root.join(".forge").join("procmgr.sqlite");
     let terminal_plugin = match nexus_terminal::SqliteSavedCommandStore::open(&saved_db) {
         Ok(store) => TerminalCorePlugin::new().with_saved_store(store),
@@ -1273,6 +1274,17 @@ fn register_core_plugins(
                 "com.nexus.terminal: saved-commands store unavailable; handlers will return errors"
             );
             TerminalCorePlugin::new()
+        }
+    };
+    let terminal_plugin = match nexus_terminal::SqliteAdHocStore::open(&saved_db) {
+        Ok(store) => terminal_plugin.with_adhoc_store(store),
+        Err(err) => {
+            tracing::warn!(
+                path = %saved_db.display(),
+                err = %err,
+                "com.nexus.terminal: ad-hoc history store unavailable; adhoc_* handlers will return errors"
+            );
+            terminal_plugin
         }
     };
     // Phase 2 WI-12: stream PTY output as kernel events so the shell
@@ -1345,6 +1357,10 @@ fn register_core_plugins(
                         "open_in_terminal",
                         nexus_terminal::HANDLER_OPEN_IN_TERMINAL,
                     ),
+                    ("adhoc_list", nexus_terminal::HANDLER_ADHOC_LIST),
+                    ("adhoc_get", nexus_terminal::HANDLER_ADHOC_GET),
+                    ("adhoc_delete", nexus_terminal::HANDLER_ADHOC_DELETE),
+                    ("adhoc_promote", nexus_terminal::HANDLER_ADHOC_PROMOTE),
                 ]),
             ),
             forge_root,

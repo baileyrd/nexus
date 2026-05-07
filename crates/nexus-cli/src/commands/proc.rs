@@ -1,7 +1,9 @@
-//! Process manager commands — `nexus proc list|show|add|delete|reorder`.
+//! Process manager commands —
+//! `nexus proc list|show|add|delete|reorder|history`.
 //!
-//! Dispatches through `com.nexus.terminal` (handlers 11–15) via
-//! `ipc_call`; no direct `nexus-terminal` linkage.
+//! Dispatches through `com.nexus.terminal` (handlers 11–15 for saved
+//! commands; handler 19 for ad-hoc history per BL-060) via `ipc_call`;
+//! no direct `nexus-terminal` linkage.
 
 use std::time::Duration;
 
@@ -80,6 +82,22 @@ pub fn delete(app: &mut App, slug: &str) -> Result<()> {
     Ok(())
 }
 
+/// `nexus proc history [--limit N] [--json]` — recent ad-hoc command
+/// history (BL-060). Passes through `adhoc_list`; output format is a
+/// fixed-width table by default, raw JSON when `--json` is set.
+pub fn history(app: &mut App, limit: u32, json: bool) -> Result<()> {
+    let response = call(app, "adhoc_list", serde_json::json!({ "limit": limit }))?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&response).unwrap_or_else(|_| response.to_string()),
+        );
+    } else {
+        print_history(&response);
+    }
+    Ok(())
+}
+
 /// `nexus proc reorder <slug> [--order N]` — set the sidebar_order
 /// column. Pass no order to clear the override (nulls sort last).
 pub fn reorder(app: &mut App, slug: &str, order: Option<i32>) -> Result<()> {
@@ -145,6 +163,66 @@ fn print_list(response: &Value) {
             slug_w = slug_w,
             name_w = name_w,
         );
+    }
+}
+
+fn print_history(response: &Value) {
+    let arr = match response.as_array() {
+        Some(a) => a,
+        None => {
+            eprintln!("unexpected response shape: {response}");
+            return;
+        }
+    };
+    if arr.is_empty() {
+        println!("(no ad-hoc history)");
+        return;
+    }
+    let cmd_w = arr
+        .iter()
+        .filter_map(|v| v.get("command").and_then(Value::as_str))
+        .map(str::len)
+        .max()
+        .unwrap_or(7)
+        .clamp(7, 60);
+    println!(
+        "{:<19}  {:<6}  {:>4}  {:<cmd_w$}  CWD",
+        "WHEN", "STATUS", "RUNS", "COMMAND",
+        cmd_w = cmd_w,
+    );
+    for v in arr {
+        let when = v
+            .get("executed_at")
+            .and_then(Value::as_i64)
+            .map(format_executed_at)
+            .unwrap_or_else(|| "?".into());
+        let status = v.get("status").and_then(Value::as_str).unwrap_or("?");
+        let runs = v.get("run_count").and_then(Value::as_u64).unwrap_or(0);
+        let cmd_full = v.get("command").and_then(Value::as_str).unwrap_or("");
+        let cmd = truncate(cmd_full, cmd_w);
+        let cwd = v.get("working_dir").and_then(Value::as_str).unwrap_or("");
+        println!(
+            "{:<19}  {:<6}  {:>4}  {:<cmd_w$}  {}",
+            when, status, runs, cmd, cwd,
+            cmd_w = cmd_w,
+        );
+    }
+}
+
+fn format_executed_at(unix_secs: i64) -> String {
+    chrono::DateTime::from_timestamp(unix_secs, 0)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|| unix_secs.to_string())
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        // Keep one char for the ellipsis so the column boundary is honored.
+        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
     }
 }
 

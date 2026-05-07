@@ -85,10 +85,12 @@ pub use ai::{
 pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
 pub use core_plugin::{
+    AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs,
     CreateSessionArgs, CreateSessionResponse, OutputStreamPayload, PumpArgs, PumpResponse,
     ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ResizeArgs, SearchOutputArgs,
     SendInputArgs, SendRawInputArgs, SessionIdArgs, TerminalCorePlugin,
     WaitForPatternArgs, WaitForPatternResponse, EVENT_LIFECYCLE_PREFIX, EVENT_OUTPUT_PREFIX,
+    HANDLER_ADHOC_DELETE, HANDLER_ADHOC_GET, HANDLER_ADHOC_LIST, HANDLER_ADHOC_PROMOTE,
     HANDLER_CLOSE_SESSION, HANDLER_CREATE_SESSION,
     HANDLER_GET_SESSION_INFO, HANDLER_LIST_SESSIONS, HANDLER_PUMP, HANDLER_READ_OUTPUT,
     HANDLER_OPEN_IN_TERMINAL, HANDLER_READ_RAW_SINCE,

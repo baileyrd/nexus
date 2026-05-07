@@ -345,20 +345,7 @@ The database view renderers are complete — Table, Kanban, Calendar, and Galler
 
 ---
 
-### BL-060: Ad-hoc command history — IPC exposure and shell UI
-
-**Source**: Terminal Integration Assessment (2026-05-06) — gap #3
-**Effort**: Small–Medium (1 day)
-**Crates**: `nexus-terminal` (`core_plugin.rs`, `adhoc.rs`), `shell/src/plugins/nexus/terminal/`
-**Related**: PRD-09 §10; `SqliteAdHocStore` shipped Phase M; IPC exposure deferred
-
-`SqliteAdHocStore` exists with deduplication (same command + cwd increments `run_count`), status tracking, and promotion to saved commands. No IPC handlers expose it. Users can't browse, re-run, or promote their command history from the shell or CLI.
-
-**Definition of done:**
-- New handlers on `com.nexus.terminal`: `adhoc_list` (id 18), `adhoc_get` (id 19), `adhoc_delete` (id 20), `adhoc_promote` (id 21 — wraps existing `promote_adhoc_to_saved`)
-- Shell UI gains a "History" tab or panel in the terminal plugin listing ad-hoc entries with run count, last-run time, status chip, re-run button, and promote-to-saved button
-- `nexus proc history` CLI subcommand wraps `adhoc_list`
-- `scripts/check_ipc_drift.sh` passes (new IPC types exported)
+_BL-060 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Four IPC handlers on `com.nexus.terminal` shipped (`adhoc_list` id 19, `adhoc_get` id 20, `adhoc_delete` id 21, `adhoc_promote` id 22 — handler 18 was already taken by BL-059's `open_in_terminal`, so the contiguous-id allocation slipped by one), each backed by the existing `SqliteAdHocStore`. The plugin attaches both stores against the same `<forge>/.forge/procmgr.sqlite` file (separate `Connection`s, separate tables — `procmgr_commands` vs. `procmgr_adhoc_history`). `nexus proc history [--limit N] [--json]` wraps `adhoc_list` with a fixed-width table renderer. Shell ships a sidebar `History` leaf (`nexus.terminal.history.show`) sibling to Saved Commands, with re-run / promote / delete affordances; the promote form pre-fills from the row's program name and refreshes the saved-commands cache on success. Recording new ad-hoc rows over IPC is intentionally out of scope here — the procmgr layer still calls `SqliteAdHocStore::record` directly. A dispatch-side `adhoc_record` lands when ad-hoc execution becomes a first-class IPC verb (BL-056 follow-up)._
 
 ---
 
