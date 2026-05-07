@@ -8,6 +8,25 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-054 Phase 5: OS Setup skill ✅ (2026-05-07)
+
+**Source**: BL-054 companion plan, Phase 5 — [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md) §Phase 5
+**Files**: new `crates/nexus-skills/builtins/os-setup.skill.md`, `crates/nexus-skills/src/builtins.rs`
+**Related**: BL-054 Phase 1 (architecture.md placeholder this fills), BL-054 Phase 2 (panel that renders the result), BL-054 Phase 3 (Run button that invokes this skill)
+
+Phase 5 of BL-054 — built-in skill that walks the user through the architecture elicitation interview and produces `architecture.md`. Closes the BL-054 vertical: Phase 1 scaffolds the placeholder, Phase 5 fills it, Phase 2 panel renders it, Phase 3 Run button invokes it.
+
+- **Skill body.** Five-step interview matching the BL-054 §Phase 5 spec: brain-dump of recurring work → cluster into 3–7 domains → enumerate kebab-case task slugs per domain → assign the four-attribute tag (`type | class | memory-dest | automation`) per task → assemble + write `architecture.md`. Every step explicitly tells the agent to confirm with the user before moving on so the skill doesn't run away with a one-shot interpretation. The four-attribute schema is documented inline so the agent doesn't have to remember the values.
+- **Storage write path.** Body instructs the agent to call `com.nexus.storage::write_file` with `path = "architecture.md"` when it has the tool available; falls back to "show the content in a fenced code block, point the user at the `nexus.osArchitecture` panel" when it doesn't. Robust to either tool-availability story without the skill author having to know up front which the runtime will offer.
+- **Closure handoff.** Skill ends by listing the next steps the user should take: review the file, scaffold matching `.skill.md` files for tasks tagged `[skill | …]`, scaffold matching `.workflow.toml` files for foundation/cron tasks. Each next step references the BL-054 Phase 2 architecture panel's drift detector so the user knows where the warnings will surface.
+- **Built-in registration.** Added to `BUILTINS` const in `nexus-skills/src/builtins.rs` (id `builtin.os-setup`); existing `every_builtin_parses` test catches any frontmatter / id collision; existing seed tests count `BUILTINS.len()` so adding one is automatic. Tagged `applicable_contexts: [ai-chat, agent]` so the SkillsPanel's existing context filter surfaces it correctly. Triggers chosen to be unambiguous ("set up my forge", "architecture interview", "produce architecture.md", "agentic os setup").
+
+**Tested**: `cargo test -p nexus-skills` 55/55 pass — `every_builtin_parses` validates the new file's frontmatter / body shape; `seed_creates_all_on_fresh_dir` confirms it lands in the seeded skills directory; `cargo build -p nexus-bootstrap` clean.
+
+**Definition of done coverage** (per Phase 5 §6 of the companion plan): all three bullets shipped — `os-setup.skill.md` present in the OS template scaffold, skill produces a parseable `architecture.md`, seeded into `.forge/skills/builtins/` (alongside code-reviewer / daily-journal / meeting-notes / commit-message).
+
+**BL-054 status**: With this, all five phases (1 + 1-followup + 2 + 3 + 5) plus Phase 4 (observability) are accounted for — Phase 4 is the only open piece. The end-to-end OS vertical works today: scaffold an OS forge → enable the Architecture panel → run the OS Setup skill → `architecture.md` populates → drift detector surfaces missing skills / workflows.
+
 ### BL-054 Phase 3: Skills invocation ✅ (2026-05-07)
 
 **Source**: BL-054 companion plan, Phase 3 — [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md) §Phase 3

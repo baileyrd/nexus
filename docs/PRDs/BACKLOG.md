@@ -384,10 +384,10 @@ The output is immediately usable and optionally exportable as a redistributable 
 
 ### BL-054: Nexus OS Mode — Agentic OS methodology layer
 
-> **Phases 1 + 2 + 3 closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Phase 1: `nexus forge init --template os` scaffolds the OS layout + memory-map `CLAUDE.md` + `architecture.md` placeholder; the launcher's "Create OS workspace" row exposes the same scaffold to the shell. Phase 2: `nexus.osArchitecture` plugin (default-off) parses `architecture.md` into a domain → task tree with four-attribute chips and surfaces drift against installed skills + workflows. Phase 3: `com.nexus.skills::invoke` IPC handler + Run button on each SkillsPanel card routes the composed skill body through `com.nexus.agent::session_run`. Phases 4–5 remain open.
+> **Phases 1 + 2 + 3 + 5 closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Phase 1: `nexus forge init --template os` scaffolds the OS layout + memory-map `CLAUDE.md` + `architecture.md` placeholder; the launcher's "Create OS workspace" row exposes the same scaffold to the shell. Phase 2: `nexus.osArchitecture` plugin (default-off) parses `architecture.md` into a domain → task tree with four-attribute chips and surfaces drift against installed skills + workflows. Phase 3: `com.nexus.skills::invoke` IPC handler + Run button on each SkillsPanel card routes the composed skill body through `com.nexus.agent::session_run`. Phase 5: built-in `os-setup` skill walks the architecture elicitation interview and produces `architecture.md`. The end-to-end vertical works today; only Phase 4 (observability) remains.
 
 **Source**: AI Integration Assessment + Chase AI "Agentic OS" framework analysis (2026-05-06) — full plan in [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md)
-**Effort**: ~1 week total across 5 independent phases (0.5 _(shipped)_ + 1.5 _(shipped)_ + 1 _(shipped)_ + 2 + 0.5 days)
+**Effort**: ~1 week total across 5 independent phases (0.5 _(shipped)_ + 1.5 _(shipped)_ + 1 _(shipped)_ + 2 + 0.5 _(shipped)_ days)
 **Crates**: `nexus-skills` (new `invoke` handler), `shell/src/plugins/nexus/skills/`, new `shell/src/plugins/nexus/osArchitecture/`, new `shell/src/plugins/nexus/observability/`
 **Related**: BL-037 (activity timeline), BL-052 (universal activity timeline), PRD-13 (skills), PRD-15 (agent), PRD-16 (workflow)
 

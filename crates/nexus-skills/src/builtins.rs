@@ -32,6 +32,14 @@ const BUILTINS: &[BuiltIn] = &[
         "commit-message.skill.md",
         include_str!("../builtins/commit-message.skill.md"),
     ),
+    // BL-054 Phase 5 — Agentic OS architecture elicitation interview.
+    // Runs through the SkillsPanel Run button (Phase 3). Capability-
+    // class — the user invokes this once when setting up the forge,
+    // not on a schedule.
+    (
+        "os-setup.skill.md",
+        include_str!("../builtins/os-setup.skill.md"),
+    ),
 ];
 
 /// Result of a [`seed_builtins`] call.
