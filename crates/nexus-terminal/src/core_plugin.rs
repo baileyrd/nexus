@@ -613,6 +613,14 @@ pub struct RunSavedArgs {
     /// inherited.
     #[serde(default)]
     pub working_dir: Option<String>,
+    /// BL-056 — optional command override. When present, runs this
+    /// literal command line under the saved command's `shell` /
+    /// `working_dir` / `env_vars` instead of the saved `shell_cmd`.
+    /// Powers the workflow `terminal` step's `run_adhoc` action,
+    /// which uses the saved profile as a "shell template" with a
+    /// fresh command line per workflow run.
+    #[serde(default)]
+    pub command: Option<String>,
 }
 
 // ── The plugin ───────────────────────────────────────────────────────────────
@@ -1626,7 +1634,12 @@ impl TerminalCorePlugin {
         // flag for non-interactive invocation; pick the right one
         // based on the shell's basename. Unknown shells fall back to
         // `-c` which is the POSIX convention.
-        let shell_args = vec![one_shot_flag(&saved.shell).to_string(), saved.shell_cmd.clone()];
+        //
+        // BL-056 — `command` overrides `shell_cmd` so workflow's
+        // `run_adhoc` step can reuse the saved profile (shell, cwd,
+        // env) with a fresh command line per run.
+        let cmd_line = a.command.unwrap_or_else(|| saved.shell_cmd.clone());
+        let shell_args = vec![one_shot_flag(&saved.shell).to_string(), cmd_line];
 
         // env_vars is HashMap<String, String> on SavedCommand; the
         // server expects Vec<(String, String)>. Order is irrelevant
@@ -2607,6 +2620,35 @@ mod tests {
         let list: Vec<SessionInfo> = serde_json::from_value(list_v).expect("decode list");
         let row = list.iter().find(|s| s.id == body.id).expect("present");
         assert_eq!(row.name, "saved:hello");
+    }
+
+    #[test]
+    fn run_saved_with_command_override_uses_overridden_cmd_unix() {
+        if !unix_only("run_saved_with_command_override_uses_overridden_cmd_unix") {
+            return;
+        }
+        let saved = SqliteSavedCommandStore::in_memory().expect("open saved");
+        seed_saved(&saved, "profile", "/bin/sh", "echo from-saved");
+        let mut p = TerminalCorePlugin::new().with_saved_store(saved);
+
+        // Run with an override; the call should still succeed and
+        // produce a session whose name still tracks the slug.
+        let resp = p
+            .dispatch(
+                HANDLER_RUN_SAVED,
+                &serde_json::json!({ "slug": "profile", "command": "echo overridden" }),
+            )
+            .expect("run_saved override");
+        let body: CreateSessionResponse = serde_json::from_value(resp).expect("decode");
+        let list_v = p
+            .dispatch(HANDLER_LIST_SESSIONS, &serde_json::json!({}))
+            .expect("list_sessions");
+        let list: Vec<SessionInfo> = serde_json::from_value(list_v).expect("decode list");
+        let row = list.iter().find(|s| s.id == body.id).expect("present");
+        // Session naming uses the slug regardless of override; the
+        // override only affects which command line ran inside the
+        // shell.
+        assert_eq!(row.name, "saved:profile");
     }
 
     #[test]

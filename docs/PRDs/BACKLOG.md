@@ -375,20 +375,7 @@ The lifecycle forwarder thread already publishes `com.nexus.terminal.events.<id>
 
 ---
 
-### BL-056: Terminal workflow step type
-
-**Source**: Terminal Integration Assessment (2026-05-06) — gap #1 (part 2)
-**Effort**: Small (1 day)
-**Crates**: `nexus-workflow/src/executor.rs`, `nexus-workflow/src/ai_steps.rs`
-**Related**: BL-055 (agent tool registry — do that first); PRD-16 §step-types
-
-`com.nexus.workflow` can dispatch `ipc` step types, but there's no `terminal` step type. Foundation-class workflows (always-on dev services started at forge open) and capability-class workflows (build triggers, test runners, linters on file save) all need to start/stop named saved commands.
-
-**Definition of done:**
-- New step type `type = "terminal"` in `.workflow.toml` with fields: `slug` (required, matches a `SavedCommand`), `action` (start | stop | restart | run_adhoc), `command` (for `run_adhoc` only), `working_dir` (override)
-- `executor.rs` dispatches terminal steps through `com.nexus.terminal::run_saved` (BL-055) via `PluginContext::ipc_call`
-- Workflow validate handler rejects `terminal` steps where `slug` doesn't match any saved command at validation time
-- `nexus workflow run` respects terminal steps in CLI context
+_BL-056 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `type = "terminal"` step with `slug` (required), `action` (start / stop / restart / run_adhoc, default start), `command` (required for `run_adhoc`, ignored otherwise), and `working_dir` (override) lands in `KernelActionDispatcher`. `start` and `run_adhoc` route through `com.nexus.terminal::run_saved` (BL-055); `stop` lists sessions and closes every one whose name matches `saved:<slug>` (the convention `run_saved` writes); `restart` is `stop` followed by `start`. `run_saved` gained an optional `command` override field so `run_adhoc` reuses the saved profile (shell / cwd / env) with a fresh command line per run. The `validate` handler became async-capable: when terminal steps are present and the kernel context is wired, it queries `saved_list` and rejects unknown slugs with a clear error; without a context (test runtimes) it falls back to the parse-only path. `nexus workflow run` and `nexus workflow validate` use these surfaces unchanged through their existing IPC routes._
 
 ---
 

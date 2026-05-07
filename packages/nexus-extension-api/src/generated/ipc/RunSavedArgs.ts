@@ -13,4 +13,13 @@ slug: string,
  * own `working_dir` is used; if both are absent the parent cwd is
  * inherited.
  */
-working_dir: string | null, };
+working_dir: string | null, 
+/**
+ * BL-056 — optional command override. When present, runs this
+ * literal command line under the saved command's `shell` /
+ * `working_dir` / `env_vars` instead of the saved `shell_cmd`.
+ * Powers the workflow `terminal` step's `run_adhoc` action,
+ * which uses the saved profile as a "shell template" with a
+ * fresh command line per workflow run.
+ */
+command: string | null, };

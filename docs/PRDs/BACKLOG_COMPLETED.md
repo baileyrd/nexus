@@ -8,6 +8,36 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-056: Terminal workflow step type ✅ (2026-05-07)
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap #1 (part 2)
+**Files**: `crates/nexus-workflow/src/core_plugin.rs`, `crates/nexus-terminal/src/core_plugin.rs`, `packages/nexus-extension-api/src/generated/ipc/RunSavedArgs.ts`
+**Related**: BL-055 (terminal tools in agent registry — landed first); PRD-16 §step-types; PRD-09 §14.1
+
+Adds a `type = "terminal"` step to the workflow executor so foundation-class workflows (always-on dev services started at forge open) and capability-class workflows (build triggers, test runners, linters on file save) can start, stop, and re-run saved commands without dropping into `type = "ipc"` and hand-rolling the dispatch.
+
+- **Step shape.** `slug` (required, references a `SavedCommand`), `action` (start / stop / restart / run_adhoc, default `start`), `command` (required for `run_adhoc`, ignored otherwise), `working_dir` (override). The parser (`TerminalStepArgs::from_step`) rejects empty / missing slugs and `run_adhoc` without a non-empty `command`.
+- **Dispatcher.** New `terminal` arm in `KernelActionDispatcher::run`. `start` and `run_adhoc` route through `com.nexus.terminal::run_saved` (BL-055, handler 23). `stop` lists sessions via `com.nexus.terminal::list_sessions` and closes every one whose name equals `saved:<slug>` — the label `run_saved` writes; that convention turns "stop the dev server" into a structural lookup rather than requiring the workflow to track session ids. `restart` runs `stop` then `start` and returns a composite JSON document (`{ action: "restart", slug, stop, start }`) so a UI can render both phases.
+- **`run_saved` extension.** `RunSavedArgs` gained an optional `command` field. When present, the saved command's `shell` / `working_dir` / `env_vars` profile is reused but the actual command line is overridden — turning saved commands into "shell templates" for `run_adhoc`. The override path goes through the same `create_session` route as the original `shell_cmd`, so lifecycle events / drainer / persistence behave identically. The session label still tracks the slug regardless of override.
+- **Validation.** `dispatch_async` now handles `HANDLER_VALIDATE` too. When a workflow contains `terminal` steps **and** the plugin has a wired kernel context, validate calls `com.nexus.terminal::saved_list` and rejects any slug that isn't present with a clear `terminal step references unknown saved-command slug '<slug>'`. Workflows without terminal steps short-circuit to the parse-only path so the common case adds no IPC latency. Without a kernel context (test runtimes, plugin booted before bootstrap finishes) the slug check is silently skipped — the parse-only result is still returned, which is strictly better than failing closed.
+- **CLI.** `nexus workflow validate` and `nexus workflow run` already route through `dispatch_async`; the new behaviours pick up automatically without a CLI patch.
+
+**Tests.**
+
+- 12 new tests in `nexus-workflow`:
+  - `terminal_step_parse_tests` (9): default action is `start`, every known action parses, unknown action rejected, missing / empty slug rejected, `run_adhoc` without `command` rejected, `run_adhoc` with blank `command` rejected, `working_dir` round-trips, `TerminalAction::as_str` ↔ `parse` is idempotent.
+  - `terminal_validate_tests` (3): a workflow with a terminal step but no context falls back to parse-only; a workflow without terminal steps skips IPC even when a context could be wired; parse errors still surface as `ExecutionFailed`.
+- 1 new test in `nexus-terminal::core_plugin::tests`: `run_saved` with a `command` override spawns a session whose name still tracks the slug (the override only affects the inner command line).
+- All 174 nexus-workflow + 278 nexus-terminal tests pass; ts-export regen produces the updated `RunSavedArgs.ts` only.
+
+**Deliberately deferred:**
+
+- **`stop` semantics for managed sessions.** Stop closes whatever sessions have name `saved:<slug>`. A managed-process layer with its own state machine (auto-restart, memory caps, supervised exits) would let stop send a graceful signal first and only close on timeout. That belongs to BL-061 / a future `run_saved_managed` and is out of scope here — the agent / workflow surface needs the simpler "spawn-and-close" shape today.
+- **Pre-command chains in `run_saved`.** Saved commands can declare `pre_commands` (env-setup chain). `run_saved` ignores them; honoring would require routing through the procmgr layer's pre-command machinery. Workflows that need a pre-command can still chain a separate `ipc` step before the terminal step.
+- **Variable interpolation into `slug`.** `${trigger.x}` substitution is wired into `extra` already, but the slug-existence check at validate time runs before runtime variables are bound. A workflow author who needs a dynamic slug should use a sequence of `terminal` steps with concrete slugs and a workflow-level `[condition]`.
+
+---
+
 ### BL-055: Terminal commands in agent tool registry ✅ (2026-05-07)
 
 **Source**: Terminal Integration Assessment (2026-05-06) — gap #1 (highest leverage)

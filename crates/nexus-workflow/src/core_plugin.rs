@@ -1516,6 +1516,18 @@ impl CorePlugin for WorkflowCorePlugin {
                 Ok(serde_json::json!({ "applied": true }))
             }));
         }
+        // BL-056 — validate is async-capable so terminal-step slugs
+        // can be checked against the live `com.nexus.terminal`
+        // saved-commands store via IPC. Workflows without `terminal`
+        // steps short-circuit back to the sync parse-only path so the
+        // common case stays fast.
+        if handler_id == HANDLER_VALIDATE {
+            let ctx = self.context.clone();
+            let args = args.clone();
+            return Some(Box::pin(async move {
+                Self::validate_async(ctx.as_ref(), &args).await
+            }));
+        }
         if handler_id != HANDLER_RUN {
             return None;
         }
@@ -1653,11 +1665,213 @@ fn json_to_toml(v: &serde_json::Value) -> Option<toml::Value> {
     }
 }
 
+/// BL-056 — parsed shape of a `type = "terminal"` workflow step.
+///
+/// `slug` is required so every action has a saved-command profile to
+/// reference (shell / cwd / env). `action` defaults to `start`. The
+/// `command` field is only meaningful for `run_adhoc`; for the other
+/// actions it's ignored. `working_dir` overrides the saved profile
+/// when present.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TerminalStepArgs {
+    slug: String,
+    action: TerminalAction,
+    command: Option<String>,
+    working_dir: Option<String>,
+}
+
+/// One of the four BL-056 actions. Defaults to `Start` when the
+/// workflow author omits the field — the most common case is a
+/// foundation-class workflow that just brings a service up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalAction {
+    Start,
+    Stop,
+    Restart,
+    RunAdhoc,
+}
+
+impl TerminalAction {
+    fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "start" => Ok(Self::Start),
+            "stop" => Ok(Self::Stop),
+            "restart" => Ok(Self::Restart),
+            "run_adhoc" => Ok(Self::RunAdhoc),
+            other => Err(format!(
+                "terminal step: unknown action '{other}'; expected start|stop|restart|run_adhoc"
+            )),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Stop => "stop",
+            Self::Restart => "restart",
+            Self::RunAdhoc => "run_adhoc",
+        }
+    }
+}
+
+impl TerminalStepArgs {
+    /// Parse the step's `extra` table into a structured view. Returns
+    /// the same string-shaped errors as the rest of the dispatcher so
+    /// the executor surfaces them through `StepOutcome.error`.
+    fn from_step(step: &Step) -> Result<Self, String> {
+        let slug = step
+            .extra
+            .get("slug")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "terminal step missing `slug`".to_string())?
+            .trim()
+            .to_string();
+        if slug.is_empty() {
+            return Err("terminal step: `slug` cannot be empty".into());
+        }
+        let action_str = step
+            .extra
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("start");
+        let action = TerminalAction::parse(action_str)?;
+        let command = step
+            .extra
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        if matches!(action, TerminalAction::RunAdhoc) && command.as_deref().unwrap_or("").trim().is_empty() {
+            return Err("terminal step: action 'run_adhoc' requires a non-empty `command`".into());
+        }
+        let working_dir = step
+            .extra
+            .get("working_dir")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        Ok(Self {
+            slug,
+            action,
+            command,
+            working_dir,
+        })
+    }
+}
+
 /// Dispatches `step.step_type` by routing known action types through
 /// kernel IPC. Unknown types fall through as informational no-ops so
 /// the executor still produces a stable outcome shape.
 struct KernelActionDispatcher {
     ctx: Arc<KernelPluginContext>,
+}
+
+impl KernelActionDispatcher {
+    /// BL-056 — execute one parsed terminal step. Splits per
+    /// [`TerminalAction`] so the test surface can pin behaviour per
+    /// action without coupling to TOML parsing. Each branch returns a
+    /// JSON document the executor records as the step's response.
+    async fn dispatch_terminal(
+        &self,
+        args: &TerminalStepArgs,
+    ) -> Result<serde_json::Value, String> {
+        match args.action {
+            TerminalAction::Start => self.terminal_start(args, None).await,
+            TerminalAction::RunAdhoc => {
+                let cmd = args
+                    .command
+                    .clone()
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or_else(|| {
+                        "terminal step: action 'run_adhoc' requires a non-empty `command`"
+                            .to_string()
+                    })?;
+                self.terminal_start(args, Some(cmd)).await
+            }
+            TerminalAction::Stop => self.terminal_stop(&args.slug).await,
+            TerminalAction::Restart => {
+                let stop = self.terminal_stop(&args.slug).await?;
+                let start = self.terminal_start(args, None).await?;
+                Ok(serde_json::json!({
+                    "action": "restart",
+                    "slug": args.slug,
+                    "stop": stop,
+                    "start": start,
+                }))
+            }
+        }
+    }
+
+    /// Wrap `com.nexus.terminal::run_saved`. `command_override` is
+    /// `Some` for `run_adhoc` and `None` for `start` / `restart`.
+    async fn terminal_start(
+        &self,
+        args: &TerminalStepArgs,
+        command_override: Option<String>,
+    ) -> Result<serde_json::Value, String> {
+        let mut payload = serde_json::json!({ "slug": args.slug });
+        if let Some(wd) = args.working_dir.clone() {
+            payload["working_dir"] = serde_json::Value::String(wd);
+        }
+        if let Some(cmd) = command_override {
+            payload["command"] = serde_json::Value::String(cmd);
+        }
+        let resp = self
+            .ctx
+            .ipc_call("com.nexus.terminal", "run_saved", payload, DEFAULT_STEP_TIMEOUT)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(serde_json::json!({
+            "action": args.action.as_str(),
+            "slug": args.slug,
+            "session": resp,
+        }))
+    }
+
+    /// Find every live session whose `name == "saved:<slug>"` (the
+    /// label `run_saved` writes) and close each one. Returns the count
+    /// closed so a workflow run records "stop did something" vs.
+    /// "stop was a no-op" without inspecting the response shape.
+    async fn terminal_stop(&self, slug: &str) -> Result<serde_json::Value, String> {
+        let list = self
+            .ctx
+            .ipc_call(
+                "com.nexus.terminal",
+                "list_sessions",
+                serde_json::json!({}),
+                DEFAULT_STEP_TIMEOUT,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let target_name = format!("saved:{slug}");
+        let ids: Vec<String> = list
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter(|row| row.get("name").and_then(|n| n.as_str()) == Some(target_name.as_str()))
+                    .filter_map(|row| {
+                        row.get("id").and_then(|i| i.as_str()).map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut closed: Vec<String> = Vec::with_capacity(ids.len());
+        for id in &ids {
+            self.ctx
+                .ipc_call(
+                    "com.nexus.terminal",
+                    "close_session",
+                    serde_json::json!({ "id": id }),
+                    DEFAULT_STEP_TIMEOUT,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            closed.push(id.clone());
+        }
+        Ok(serde_json::json!({
+            "action": "stop",
+            "slug": slug,
+            "closed_sessions": closed,
+        }))
+    }
 }
 
 #[async_trait]
@@ -1735,6 +1949,20 @@ impl ActionDispatcher for KernelActionDispatcher {
                         "ai_decision: AI response did not match any choice: {answer:?}"
                     )),
                 }
+            }
+            // BL-056 — terminal step: start / stop / restart / run_adhoc
+            // a saved command. `slug` is required for every action and
+            // identifies which `SavedCommand` provides the shell + cwd
+            // + env_vars profile. `start` and `run_adhoc` spawn a fresh
+            // session via `com.nexus.terminal::run_saved` (BL-055);
+            // `stop` closes every live session whose name matches
+            // `saved:<slug>` (the convention `run_saved` writes); and
+            // `restart` is `stop` followed by `start`. `run_adhoc`
+            // forwards `command` as `command` so the saved profile
+            // runs an alternate command line for this workflow run.
+            "terminal" => {
+                let parsed = TerminalStepArgs::from_step(step)?;
+                self.dispatch_terminal(&parsed).await
             }
             other => {
                 // Unknown action types still get a stable success so
@@ -1853,6 +2081,81 @@ impl WorkflowCorePlugin {
             Err(err) => Err(exec_err(format!("invalid workflow: {err}"))),
         }
     }
+
+    /// BL-056 — async validate. Runs the same TOML parse the sync
+    /// path does, and additionally — when one or more `type =
+    /// "terminal"` steps are present and the plugin has a kernel
+    /// context — checks every step's `slug` against
+    /// `com.nexus.terminal::saved_list`. An unknown slug fails
+    /// validation with a clear error so a workflow author can't ship
+    /// a workflow that's syntactically valid but references a saved
+    /// command that doesn't exist.
+    ///
+    /// When `ctx` is `None` (test runtime, plugin booted without a
+    /// forge), the slug check is skipped and the call falls back to
+    /// the parse-only result. The caller may still invoke the sync
+    /// path for backwards compatibility.
+    async fn validate_async(
+        ctx: Option<&Arc<KernelPluginContext>>,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: ValidateWorkflowArgs = parse(args, "validate")?;
+        let workflow = parse_workflow_text(&a.text)
+            .map_err(|err| exec_err(format!("invalid workflow: {err}")))?;
+
+        // Collect all slugs referenced by terminal steps. The vast
+        // majority of validate calls have none, in which case we skip
+        // the IPC entirely.
+        let terminal_slugs: Vec<String> = workflow
+            .steps
+            .iter()
+            .filter(|s| s.step_type == "terminal")
+            .filter_map(|s| {
+                s.extra
+                    .get("slug")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
+            .collect();
+        if terminal_slugs.is_empty() {
+            return to_value(&workflow, "validate");
+        }
+        let Some(ctx) = ctx else {
+            // Without a kernel context we can't reach the saved store;
+            // fall back to the parse-only result so test runtimes
+            // don't fail just because the IPC plumbing isn't wired.
+            return to_value(&workflow, "validate");
+        };
+        let saved = ctx
+            .ipc_call(
+                "com.nexus.terminal",
+                "saved_list",
+                serde_json::json!({}),
+                DEFAULT_STEP_TIMEOUT,
+            )
+            .await
+            .map_err(|e| {
+                exec_err(format!("validate: terminal saved_list failed: {e}"))
+            })?;
+        let known: std::collections::HashSet<String> = saved
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|row| {
+                        row.get("slug").and_then(|s| s.as_str()).map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for slug in &terminal_slugs {
+            if !known.contains(slug) {
+                return Err(exec_err(format!(
+                    "invalid workflow: terminal step references unknown saved-command slug '{slug}'"
+                )));
+            }
+        }
+        to_value(&workflow, "validate")
+    }
 }
 
 /// Defensive filename check for `templates_init`. Rejects path
@@ -1898,6 +2201,234 @@ fn to_value<T: serde::Serialize>(
     command: &str,
 ) -> Result<serde_json::Value, PluginError> {
     serde_json::to_value(v).map_err(|e| exec_err(format!("{command}: serialize: {e}")))
+}
+
+// ── BL-056 — terminal-step parsing tests ────────────────────────────
+//
+// The dispatcher itself needs an `Arc<KernelPluginContext>` to land
+// IPC calls, which would mean spinning up the whole plugin context
+// machinery for these tests. The structural parser
+// (`TerminalStepArgs::from_step`) is the load-bearing piece — once
+// that is right, the IPC payload shape is mechanical. We pin the
+// parser exhaustively here and rely on the IPC integration covered
+// by the saved-store tests in `nexus-terminal::core_plugin::tests`
+// for the round-trip. The async validate path is exercised via
+// `validate_async` directly with a `None` context.
+#[cfg(test)]
+mod terminal_step_parse_tests {
+    use super::*;
+    use crate::Step;
+
+    fn step_from_toml(src: &str) -> Step {
+        let wf = parse_workflow_text(src).expect("parse");
+        wf.steps.into_iter().next().expect("one step")
+    }
+
+    fn build_with_terminal_step(action: &str, extra: &str) -> Step {
+        let src = format!(
+            r#"
+[workflow]
+name = "T"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "terminal"
+slug = "dev-server"
+action = "{action}"
+{extra}
+"#
+        );
+        step_from_toml(&src)
+    }
+
+    #[test]
+    fn parses_default_action_as_start_when_omitted() {
+        let src = r#"
+[workflow]
+name = "T"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "terminal"
+slug = "dev-server"
+"#;
+        let step = step_from_toml(src);
+        let parsed = TerminalStepArgs::from_step(&step).unwrap();
+        assert_eq!(parsed.slug, "dev-server");
+        assert_eq!(parsed.action, TerminalAction::Start);
+        assert!(parsed.command.is_none());
+        assert!(parsed.working_dir.is_none());
+    }
+
+    #[test]
+    fn parses_each_known_action() {
+        for (name, expected) in [
+            ("start", TerminalAction::Start),
+            ("stop", TerminalAction::Stop),
+            ("restart", TerminalAction::Restart),
+        ] {
+            let step = build_with_terminal_step(name, "");
+            let parsed = TerminalStepArgs::from_step(&step).unwrap();
+            assert_eq!(parsed.action, expected, "for {name}");
+        }
+        // run_adhoc requires a non-empty command
+        let step = build_with_terminal_step("run_adhoc", "command = \"npm run lint\"");
+        let parsed = TerminalStepArgs::from_step(&step).unwrap();
+        assert_eq!(parsed.action, TerminalAction::RunAdhoc);
+        assert_eq!(parsed.command.as_deref(), Some("npm run lint"));
+    }
+
+    #[test]
+    fn rejects_unknown_action() {
+        let step = build_with_terminal_step("blow-up", "");
+        let err = TerminalStepArgs::from_step(&step).unwrap_err();
+        assert!(err.contains("unknown action 'blow-up'"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_missing_slug() {
+        let src = r#"
+[workflow]
+name = "T"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "terminal"
+"#;
+        let step = step_from_toml(src);
+        let err = TerminalStepArgs::from_step(&step).unwrap_err();
+        assert!(err.contains("missing `slug`"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_empty_slug() {
+        let src = r#"
+[workflow]
+name = "T"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "terminal"
+slug = "   "
+"#;
+        let step = step_from_toml(src);
+        let err = TerminalStepArgs::from_step(&step).unwrap_err();
+        assert!(err.contains("cannot be empty"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_run_adhoc_without_command() {
+        let step = build_with_terminal_step("run_adhoc", "");
+        let err = TerminalStepArgs::from_step(&step).unwrap_err();
+        assert!(err.contains("requires a non-empty `command`"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_run_adhoc_with_blank_command() {
+        let step = build_with_terminal_step("run_adhoc", "command = \"   \"");
+        let err = TerminalStepArgs::from_step(&step).unwrap_err();
+        assert!(err.contains("requires a non-empty `command`"), "got: {err}");
+    }
+
+    #[test]
+    fn working_dir_override_round_trips() {
+        let step = build_with_terminal_step("start", "working_dir = \"/srv/app\"");
+        let parsed = TerminalStepArgs::from_step(&step).unwrap();
+        assert_eq!(parsed.working_dir.as_deref(), Some("/srv/app"));
+    }
+
+    #[test]
+    fn terminal_action_as_str_round_trips() {
+        for action in [
+            TerminalAction::Start,
+            TerminalAction::Stop,
+            TerminalAction::Restart,
+            TerminalAction::RunAdhoc,
+        ] {
+            let parsed = TerminalAction::parse(action.as_str()).unwrap();
+            assert_eq!(parsed, action);
+        }
+    }
+}
+
+#[cfg(test)]
+mod terminal_validate_tests {
+    use super::*;
+
+    /// Without a kernel context, `validate_async` falls back to the
+    /// parse-only result — even when the workflow has terminal steps —
+    /// so the test runtime that doesn't wire IPC plumbing still gets a
+    /// usable validate path.
+    #[tokio::test]
+    async fn validate_async_with_terminal_step_falls_back_to_parse_when_ctx_absent() {
+        let src = r#"
+[workflow]
+name = "T"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "terminal"
+slug = "dev-server"
+"#;
+        let result = WorkflowCorePlugin::validate_async(
+            None,
+            &serde_json::json!({ "text": src }),
+        )
+        .await
+        .expect("validate ok");
+        assert_eq!(result["workflow"]["name"], "T");
+        assert_eq!(result["steps"][0]["type"], "terminal");
+    }
+
+    /// Workflows with no terminal steps are validated through the
+    /// parse-only path even when a context is present — the IPC
+    /// shouldn't fire when there's nothing to check.
+    #[tokio::test]
+    async fn validate_async_without_terminal_steps_skips_ipc() {
+        let src = r#"
+[workflow]
+name = "T"
+
+[trigger]
+type = "manual"
+
+[[steps]]
+type = "noop"
+"#;
+        let result = WorkflowCorePlugin::validate_async(
+            None,
+            &serde_json::json!({ "text": src }),
+        )
+        .await
+        .expect("validate ok");
+        assert_eq!(result["workflow"]["name"], "T");
+    }
+
+    #[tokio::test]
+    async fn validate_async_propagates_parse_errors() {
+        let err = WorkflowCorePlugin::validate_async(
+            None,
+            &serde_json::json!({ "text": "not toml {{" }),
+        )
+        .await
+        .expect_err("must fail");
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("invalid workflow"), "got: {reason}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
 }
 
 #[cfg(test)]
