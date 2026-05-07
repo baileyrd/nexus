@@ -854,13 +854,17 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
 
     // `key` prefix differs per-mode so toggling source ↔ live cleanly
     // remounts CodeMirrorHost rather than trying to reconcile the
-    // extension list in place.
+    // extension list in place. BL-070: include the active keybinding
+    // layer so a settings flip remounts the host with the new keymap
+    // (the vim layer's modal state can't be hot-swapped in place).
+    const keybindings = runtime?.getKeybindings() ?? 'default'
     const keyPrefix = tab.mode === 'live' ? 'live' : (bridgeEligible ? 'bridge' : 'local')
+    const keymapKey = `${keyPrefix}:${keybindings}`
 
     if (bridgeEligible && runtime) {
       return (
         <CodeMirrorHost
-          key={`${keyPrefix}:${tab.relpath}`}
+          key={`${keymapKey}:${tab.relpath}`}
           ref={cmViewRef}
           className="nexus-editor-source"
           value={tab.content}
@@ -869,6 +873,20 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
             // edit through the kernel; the store's `content` is
             // reconciled lazily when a snapshot update lands.
           }}
+          keybindings={keybindings}
+          vim={
+            keybindings === 'vim'
+              ? {
+                  relpath: tab.relpath,
+                  onSave: () => {
+                    void runtime.kernelClient.saveSession(tab.relpath)
+                  },
+                  onClose: () => {
+                    void runtime.confirmAndClose(tab.relpath)
+                  },
+                }
+              : undefined
+          }
           kernelUndo={{
             relpath: tab.relpath,
             kernelClient: runtime.kernelClient,
@@ -922,11 +940,25 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
     // Untitled / non-markdown / pre-session fallback — Phase 2 behaviour.
     return (
       <CodeMirrorHost
-        key={`${keyPrefix}:${tab.relpath}`}
+        key={`${keymapKey}:${tab.relpath}`}
         ref={cmViewRef}
         className="nexus-editor-source"
         value={tab.content}
         onChange={(v) => useEditorStore.getState().setContent(tab.relpath, v)}
+        keybindings={keybindings}
+        vim={
+          keybindings === 'vim' && runtime
+            ? {
+                relpath: tab.relpath,
+                // No session → save is a no-op; close still routes
+                // through the runtime's confirmation flow.
+                onSave: () => {},
+                onClose: () => {
+                  void runtime.confirmAndClose(tab.relpath)
+                },
+              }
+            : undefined
+        }
         buildExtensions={tab.mode === 'live' ? () => [livePreviewExt()] : undefined}
       />
     )

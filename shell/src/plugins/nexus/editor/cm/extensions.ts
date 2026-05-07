@@ -12,6 +12,10 @@ import { search, searchKeymap } from '@codemirror/search'
 
 import type { EditorKernelClient } from '../kernelClient.ts'
 import { clientLogger } from '../../../../clientLogger'
+import { vimKeymapExt, type VimKeymapOptions } from './vimKeymap'
+
+/** BL-070: opt-in modal keybinding layers. */
+export type EditorKeybindings = 'default' | 'vim'
 
 export interface BaselineExtensionsOptions {
   /**
@@ -28,6 +32,18 @@ export interface BaselineExtensionsOptions {
    * `defaultKeymap` still fires for everything else.
    */
   kernelUndo?: KernelUndoBinding
+  /**
+   * BL-070: when set to `'vim'`, layer
+   * [`vim()`](https://www.npmjs.com/package/@replit/codemirror-vim)
+   * over the default keymap. Requires `vim` to carry the per-tab
+   * `relpath` + ex-command callbacks.
+   */
+  keybindings?: EditorKeybindings
+  /**
+   * Per-tab callbacks for the Vim layer's ex commands. Required when
+   * `keybindings === 'vim'`; ignored otherwise.
+   */
+  vim?: VimKeymapOptions
 }
 
 /** Binding options for the kernel-backed undo/redo keymap. */
@@ -102,5 +118,12 @@ export function baselineExtensions(
     EditorView.lineWrapping,
   ]
   if (opts.lineNumbers) exts.push(lineNumbers())
+  // Vim layers in front of the search/default keymaps so its modal
+  // dispatch takes precedence — Normal-mode `/` reaches the vim
+  // search layer before the default `searchKeymap`'s `Ctrl-F`-shaped
+  // shortcuts can claim it.
+  if (opts.keybindings === 'vim' && opts.vim) {
+    exts.unshift(vimKeymapExt(opts.vim))
+  }
   return exts
 }

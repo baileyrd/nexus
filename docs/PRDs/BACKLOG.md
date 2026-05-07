@@ -198,24 +198,7 @@ PRD-08 §9 specifies Emacs keybinding support. CM6's keymap extension supports m
 
 ---
 
-### BL-070: Vim keybindings mode
-
-**Source**: Editor Integration Assessment (2026-05-06) — gap #2a; PRD-08 §9
-**Effort**: Small–Medium (3–5 days)
-**Crates**: `shell/src/plugins/nexus/editor/cm/` (new `vimKeymap.ts`)
-**Related**: BL-071 (Emacs mode — parallel, same infrastructure); CM6 `@replit/codemirror-vim` or custom
-
-PRD-08 §9 specifies Vim keybinding support. CM6 has `@replit/codemirror-vim` as a well-maintained extension that provides modal editing (Normal/Insert/Visual), motion commands, operators, and ex commands. The integration is a package addition + settings toggle.
-
-The key tension: Nexus slash commands use `/` which conflicts with Vim's search. The extension should intercept `/` in Normal mode for Vim search and pass it through in Insert mode for Nexus slash commands.
-
-**Definition of done:**
-- `@replit/codemirror-vim` integrated as a CM6 extension, activated when `editor.keybindings = "vim"` in settings
-- Normal/Insert/Visual modes work; mode indicator shown in editor status bar
-- `/` in Normal mode → Vim search; `/` in Insert mode → Nexus slash command palette
-- `:w` saves the current file via `com.nexus.editor::save`; `:q` closes the tab
-- Keybinding mode persisted to forge settings; applied on editor mount
-- Settings → Editor → Keybindings toggle (Default / Vim / Emacs)
+_BL-070 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `@replit/codemirror-vim` integrated under a new `nexus.editor.keybindings` setting (`'default' | 'vim'`); `:w` / `:q` / `:wq` / `:x` ex commands route through `saveSession` and `confirmAndClose`. Per-view dispatch via a CM6 `StateField` so multiple tabs hit their own callbacks. Emacs option (BL-071) deferred — same plumbing will receive it when implemented._
 
 ---
 

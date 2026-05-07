@@ -106,6 +106,8 @@ const CONTEXT_KEY_ACTIVE_TAB_DIRTY = 'nexus.editor.activeTabDirty'
 // generates UI from the schema we register in `activate`.
 const CONFIG_CONFIRM_CLOSE_DIRTY = 'nexus.editor.confirmCloseDirty'
 const CONFIG_DEFAULT_MODE = 'nexus.editor.defaultMode'
+// BL-070: opt-in modal keybinding layer for the markdown editor.
+const CONFIG_KEYBINDINGS = 'nexus.editor.keybindings'
 
 interface FileOpenPayload {
   relpath: string
@@ -463,6 +465,15 @@ export const editorPlugin: Plugin = {
           default: 'live',
           options: ['live', 'source', 'preview'],
         },
+        {
+          key: CONFIG_KEYBINDINGS,
+          title: 'Keybindings',
+          description:
+            "Modal keymap layered over the default markdown bindings. 'vim' enables Normal/Insert/Visual modes plus :w / :q ex commands. Applied at tab-open time — close and reopen the tab after changing this.",
+          type: 'select',
+          default: 'default',
+          options: ['default', 'vim'],
+        },
       ],
     })
 
@@ -716,6 +727,10 @@ export const editorPlugin: Plugin = {
       closeAll,
       kernelClient: editorClient,
       sessionManager,
+      getKeybindings: () => {
+        const v = api.configuration.getValue<string>(CONFIG_KEYBINDINGS, 'default')
+        return v === 'vim' ? 'vim' : 'default'
+      },
       reportBridgeError: (message, err) => {
         api.notifications.show({
           type: 'error',

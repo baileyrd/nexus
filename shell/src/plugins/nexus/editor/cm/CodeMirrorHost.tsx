@@ -1,7 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { baselineExtensions, type KernelUndoBinding } from './extensions'
+import {
+  baselineExtensions,
+  type EditorKeybindings,
+  type KernelUndoBinding,
+} from './extensions'
+import type { VimKeymapOptions } from './vimKeymap'
 
 export interface CodeMirrorHostProps {
   value: string
@@ -29,6 +34,10 @@ export interface CodeMirrorHostProps {
    * the bridge layer; the host doesn't fall back to local history.
    */
   kernelUndo?: KernelUndoBinding
+  /** BL-070: which keybinding layer to mount on top of the defaults. */
+  keybindings?: EditorKeybindings
+  /** Required when `keybindings === 'vim'`; ignored otherwise. */
+  vim?: VimKeymapOptions
   className?: string
   style?: React.CSSProperties
 }
@@ -72,6 +81,8 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
       lineNumbers = false,
       buildExtensions,
       kernelUndo,
+      keybindings,
+      vim,
       className,
       style,
     },
@@ -115,7 +126,12 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
         doc: value,
         extensions: [
           baselineCompartment.current.of(
-            baselineExtensions({ lineNumbers, kernelUndo: kernelUndoRef.current }),
+            baselineExtensions({
+              lineNumbers,
+              kernelUndo: kernelUndoRef.current,
+              keybindings,
+              vim,
+            }),
           ),
           readOnlyCompartment.current.of([
             EditorView.editable.of(!readOnly),
@@ -149,15 +165,24 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
     }, [value])
 
     // Reconfigure compartments when gated options flip. Cheap and
-    // preserves doc/selection/scroll state.
+    // preserves doc/selection/scroll state. `keybindings`/`vim` are
+    // intentionally not in the dep list — the parent (`EditorView`)
+    // remounts the host via its `key` when those change, because the
+    // vim layer's modal state can't be cleanly hot-swapped in place.
     useEffect(() => {
       const view = viewRef.current
       if (!view) return
       view.dispatch({
         effects: baselineCompartment.current.reconfigure(
-          baselineExtensions({ lineNumbers, kernelUndo: kernelUndoRef.current }),
+          baselineExtensions({
+              lineNumbers,
+              kernelUndo: kernelUndoRef.current,
+              keybindings,
+              vim,
+            }),
         ),
       })
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [lineNumbers])
 
     useEffect(() => {

@@ -6,6 +6,7 @@
 
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import type { EditorKernelClient } from './kernelClient.ts'
+import type { EditorKeybindings } from './cm/extensions.ts'
 import type { SessionManager } from './sessionManager.ts'
 
 export interface EditorRuntime {
@@ -47,6 +48,12 @@ export interface EditorRuntime {
   onBlockLinkNavigate?: (
     link: import('./blockLinks.ts').ParsedBlockLink,
   ) => void
+  /**
+   * BL-070: live read of the `nexus.editor.keybindings` setting. Read
+   * at tab-render time so a setting flip + tab reopen picks up the
+   * new value; live-mutating an open tab's keymap is out of scope.
+   */
+  getKeybindings: () => EditorKeybindings
 }
 
 let _runtime: EditorRuntime | null = null

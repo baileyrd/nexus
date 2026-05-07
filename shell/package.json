@@ -26,6 +26,7 @@
     "@codemirror/view": "^6.36.0",
     "@lezer/markdown": "^1.6.3",
     "@nexus/extension-api": "workspace:*",
+    "@replit/codemirror-vim": "^6.3.0",
     "@tanstack/react-virtual": "^3.13.24",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
