@@ -28,6 +28,7 @@
 //! `read` over IPC. Nothing in this module reaches into the kernel bus
 //! or capability system; those boundaries live at the core-plugin layer.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -47,7 +48,13 @@ struct Entry {
     session: Session,
     buffer: OutputBuffer,
     lines: LineBuffer,
-    last_accessed: Instant,
+    /// Most-recent access time. `Cell` so read-side accessors that
+    /// take `&self` (e.g. `lines_snapshot`, `buffer_read_since`) can
+    /// bump it without forcing `&mut self` everywhere upstream.
+    /// Single-threaded by construction — `SessionManager` is `!Sync`,
+    /// so callers wrap it in a `Mutex<SessionManager>` and the
+    /// interior mutability is safe.
+    last_accessed: Cell<Instant>,
     /// Optional human-readable label for the programmable API's
     /// `SessionInfo` surface (PRD-09 §11). `None` falls back to the
     /// session id for display.
@@ -139,7 +146,7 @@ impl SessionManager {
                 session,
                 buffer: OutputBuffer::with_capacity(self.default_buffer_capacity),
                 lines: LineBuffer::new(),
-                last_accessed: Instant::now(),
+                last_accessed: Cell::new(Instant::now()),
                 name: None,
                 created_at: now,
             },
@@ -209,6 +216,11 @@ impl SessionManager {
         count: Option<usize>,
     ) -> Option<Vec<Line>> {
         let entry = self.sessions.get(id)?;
+        // BL-062 — bump LRU on every read so a busy session that
+        // only consumes output (no input, no resize) doesn't fall
+        // off the eviction list. `Cell::set` is cheap; the access
+        // is single-threaded under the manager's outer mutex.
+        entry.last_accessed.set(Instant::now());
         let total = entry.lines.len();
         let start = start.unwrap_or(0).min(total);
         let end = match count {
@@ -254,32 +266,55 @@ impl SessionManager {
         }
     }
 
-    /// PRD-09 §2.3 LRU eviction. Closes the least-recently-accessed
-    /// session, returning its id + final scrollback snapshot. The caller
-    /// is expected to persist that snapshot (via
+    /// PRD-09 §2.3 LRU eviction — closes the least-recently-accessed
+    /// **terminated** session and returns its id + final scrollback
+    /// snapshot. Live (still-running) sessions are skipped: BL-062
+    /// makes a deliberate distinction between "free up space by
+    /// reaping a corpse" and "kill someone's running process" — only
+    /// the first is auto-eviction.
+    ///
+    /// The caller is expected to persist the snapshot (via
     /// [`crate::persist::SqliteSessionStore::save_scrollback`] or
     /// equivalent) before dropping it.
     ///
-    /// Returns `None` if the manager is empty.
+    /// Returns `None` when the manager is empty **or** every session
+    /// is still running. Callers that need the "all running" case
+    /// distinguished from "manager empty" can check `len()` first.
     #[must_use]
     pub fn evict_lru(&mut self) -> Option<(SessionId, Vec<u8>)> {
+        // Refresh cached `state()` first — `try_wait_exit` returns
+        // `Some` for any child that has exited but hadn't been reaped
+        // yet, latching `state` to `Exited` / `Killed`. Without this
+        // pass, a session whose child has finished but no one polled
+        // would still report `Running` and skip eviction.
+        let _ = self.reap_exited();
+        // Filter to entries whose underlying session has terminated.
+        // `state()` is a cheap field read — no syscall — so iterating
+        // every session here is fine even at the 50-session cap.
         let victim = self
             .sessions
             .iter()
-            .min_by_key(|(_, entry)| entry.last_accessed)
+            .filter(|(_, entry)| entry.session.state().is_terminated())
+            .min_by_key(|(_, entry)| entry.last_accessed.get())
             .map(|(id, _)| id.clone())?;
         let snapshot = self.remove(&victim)?;
         tracing::debug!(
             session_id = victim.as_str(),
-            "evicted LRU session to make room",
+            "evicted LRU stopped session to make room",
         );
         Some((victim, snapshot))
     }
 
     /// Same as [`Self::spawn`], but when the manager is at its cap this
-    /// evicts the LRU session first (rather than returning an error).
-    /// Returns the fresh id plus, if eviction occurred, the evicted id +
-    /// its final scrollback snapshot so the caller can persist it.
+    /// evicts the LRU **stopped** session first (rather than returning
+    /// an error). When every session is still running, the cap check
+    /// in [`Self::spawn`] surfaces [`TerminalError::ShellDetection`] —
+    /// matching the pre-BL-062 behaviour, deliberately preserved so an
+    /// auto-spawn never SIGKILLs a process the user is actively
+    /// driving.
+    ///
+    /// Returns the fresh id plus, if eviction occurred, the evicted id
+    /// + its final scrollback snapshot so the caller can persist it.
     ///
     /// # Errors
     /// Propagates any error from [`Session::spawn`].
@@ -304,7 +339,7 @@ impl SessionManager {
     /// - Any I/O error from [`Session::write`].
     pub fn write(&mut self, id: &SessionId, bytes: &[u8]) -> Result<(), TerminalError> {
         let entry = self.entry_mut(id)?;
-        entry.last_accessed = Instant::now();
+        entry.last_accessed.set(Instant::now());
         entry.session.write(bytes)
     }
 
@@ -321,7 +356,7 @@ impl SessionManager {
         timeout: Duration,
     ) -> Result<usize, TerminalError> {
         let entry = self.entry_mut(id)?;
-        entry.last_accessed = Instant::now();
+        entry.last_accessed.set(Instant::now());
         let Entry { session, buffer, lines, .. } = entry;
         session.read_into(Some(buffer), Some(lines), timeout)
     }
@@ -338,7 +373,7 @@ impl SessionManager {
         rows: u16,
     ) -> Result<(), TerminalError> {
         let entry = self.entry_mut(id)?;
-        entry.last_accessed = Instant::now();
+        entry.last_accessed.set(Instant::now());
         entry.session.resize(cols, rows)
     }
 
@@ -357,7 +392,7 @@ impl SessionManager {
         step_timeout: Duration,
     ) -> Result<Signal, TerminalError> {
         let entry = self.entry_mut(id)?;
-        entry.last_accessed = Instant::now();
+        entry.last_accessed.set(Instant::now());
         entry.session.request_shutdown(step_timeout)
     }
 
@@ -370,7 +405,7 @@ impl SessionManager {
     /// - Any I/O error from [`Session::kill`].
     pub fn kill(&mut self, id: &SessionId) -> Result<(), TerminalError> {
         let entry = self.entry_mut(id)?;
-        entry.last_accessed = Instant::now();
+        entry.last_accessed.set(Instant::now());
         entry.session.kill()
     }
 
@@ -413,6 +448,12 @@ impl SessionManager {
         id: &SessionId,
         cursor: u64,
     ) -> Option<(u64, Vec<u8>)> {
+        // BL-062: deliberately does NOT bump `last_accessed`. The
+        // WI-12 drainer thread polls this on every active session
+        // every few ms; bumping here would make every session look
+        // active to LRU and pin it forever. The user-facing
+        // `read_raw_since` IPC path already drives a `drain()` call
+        // before this lookup, and `drain` does bump.
         let entry = self.sessions.get(id)?;
         let buf = &entry.buffer;
         let dropped = buf.dropped();
@@ -458,7 +499,7 @@ impl SessionManager {
     /// if the session is unknown. Used by the future LRU eviction pass.
     #[must_use]
     pub fn last_accessed(&self, id: &SessionId) -> Option<Instant> {
-        self.sessions.get(id).map(|e| e.last_accessed)
+        self.sessions.get(id).map(|e| e.last_accessed.get())
     }
 
     /// Poll every tracked session for natural exit (child finished
@@ -675,6 +716,73 @@ mod tests {
         assert_eq!(ev_id, first, "oldest session should be the eviction victim");
         assert!(m.ids().contains(&new_id));
         assert_eq!(m.len(), 2);
+    }
+
+    /// BL-062 — when the manager is at its cap and *every* session
+    /// is still running, `spawn_or_evict` surfaces the underlying
+    /// `spawn` cap error rather than silently killing a live session.
+    /// The DoD's "preserve current SessionLimitExceeded behaviour"
+    /// invariant lives here.
+    #[cfg(unix)]
+    #[test]
+    fn spawn_or_evict_refuses_to_kill_running_sessions_at_cap() {
+        if !unix_only("spawn_or_evict_refuses_to_kill_running_sessions_at_cap") {
+            return;
+        }
+        let mut m = SessionManager::with_limits(2, 1024);
+        // Long-running children — their state stays Running through
+        // the cap check.
+        let _a = m
+            .spawn(SessionConfig {
+                shell: Some(ShellSpec {
+                    program: "/bin/sh".into(),
+                    args: vec!["-c".into(), "sleep 5".into()],
+                }),
+                ..SessionConfig::default()
+            })
+            .expect("spawn a");
+        let _b = m
+            .spawn(SessionConfig {
+                shell: Some(ShellSpec {
+                    program: "/bin/sh".into(),
+                    args: vec!["-c".into(), "sleep 5".into()],
+                }),
+                ..SessionConfig::default()
+            })
+            .expect("spawn b");
+        let err = m
+            .spawn_or_evict(SessionConfig {
+                shell: Some(ShellSpec {
+                    program: "/bin/sh".into(),
+                    args: vec!["-c".into(), "sleep 5".into()],
+                }),
+                ..SessionConfig::default()
+            })
+            .expect_err("should refuse without a stopped session to evict");
+        match err {
+            TerminalError::ShellDetection { reason } => {
+                assert!(reason.contains("session cap reached"), "got: {reason}");
+            }
+            other => panic!("expected ShellDetection, got {other:?}"),
+        }
+        assert_eq!(m.len(), 2, "no live session should have been killed");
+    }
+
+    /// BL-062 — `lines_snapshot` is one of the read accessors the DoD
+    /// wants to count as access; verify the timestamp moves.
+    #[cfg(unix)]
+    #[test]
+    fn lines_snapshot_bumps_last_accessed() {
+        if !unix_only("lines_snapshot_bumps_last_accessed") {
+            return;
+        }
+        let mut m = SessionManager::with_limits(2, 1024);
+        let id = m.spawn(sh_printf("hi")).expect("spawn");
+        let before = m.last_accessed(&id).expect("present");
+        std::thread::sleep(Duration::from_millis(15));
+        let _ = m.lines_snapshot(&id, None, None).expect("snapshot");
+        let after = m.last_accessed(&id).expect("present");
+        assert!(after > before, "lines_snapshot should bump last_accessed");
     }
 
     #[cfg(unix)]

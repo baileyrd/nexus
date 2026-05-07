@@ -200,6 +200,19 @@ pub enum TerminalEvent {
         /// Hard threshold (MB) that was crossed.
         limit_mb: u32,
     },
+    /// BL-062 — the session was removed from the manager to make
+    /// room for a new spawn (LRU eviction). Only **stopped**
+    /// sessions are evicted; a running session is never auto-killed
+    /// by the LRU pass. `reason` is a stable tag (e.g. `"lru"`) so
+    /// future eviction triggers (cap exhaustion under different
+    /// policies) can reuse the variant without growing the enum.
+    SessionEvicted {
+        /// Session id that was removed.
+        id: String,
+        /// Why the eviction happened. `"lru"` for the BL-062 LRU
+        /// pass.
+        reason: String,
+    },
 }
 
 impl TerminalEvent {
@@ -213,7 +226,8 @@ impl TerminalEvent {
             | TerminalEvent::OutputReceived { id, .. }
             | TerminalEvent::PatternMatched { id, .. }
             | TerminalEvent::SessionClosed { id, .. }
-            | TerminalEvent::MemoryLimitExceeded { id, .. } => id,
+            | TerminalEvent::MemoryLimitExceeded { id, .. }
+            | TerminalEvent::SessionEvicted { id, .. } => id,
         }
     }
 }
@@ -353,6 +367,17 @@ pub trait TerminalServer {
     fn resize(&mut self, id: &SessionId, cols: u16, rows: u16) -> Result<(), TerminalError>;
 }
 
+/// BL-062 — callback for persisting an evicted session's scrollback.
+/// Receives the evicted session id and its final byte snapshot;
+/// returns any persistence error so the server can log + drop. The
+/// callback runs synchronously inside `create_session` while the
+/// server lock is held — implementations should write quickly (the
+/// underlying `SqliteSessionStore::save_scrollback` writes one row
+/// + one file blob). `Send + Sync` so a `&InMemoryTerminalServer`
+/// behind an `Arc<Mutex<...>>` can host the callback.
+pub type EvictionPersister =
+    Box<dyn Fn(&str, &[u8]) -> Result<(), TerminalError> + Send + Sync + 'static>;
+
 /// Default [`TerminalServer`] implementation: wraps a
 /// [`SessionManager`], holds a list of subscribers, and tracks per-
 /// session "lines emitted so far" so [`Self::pump`] only fires
@@ -367,6 +392,11 @@ pub struct InMemoryTerminalServer {
     /// the full history — the PRD §11.2 stream is "events from now
     /// on", not a catch-up log.
     emitted_lines: HashMap<SessionId, usize>,
+    /// BL-062 — optional callback that persists the scrollback of
+    /// an LRU-evicted session. `None` (the default) silently drops
+    /// the snapshot, matching the pre-BL-062 behaviour. Bootstrap
+    /// installs a closure that delegates to `SqliteSessionStore`.
+    eviction_persister: Option<EvictionPersister>,
 }
 
 impl InMemoryTerminalServer {
@@ -384,7 +414,16 @@ impl InMemoryTerminalServer {
             manager,
             subscribers: Vec::new(),
             emitted_lines: HashMap::new(),
+            eviction_persister: None,
         }
+    }
+
+    /// BL-062 — install a callback that persists an evicted session's
+    /// scrollback. Replaces any prior persister. Pass [`None`] (or
+    /// don't call this at all) to drop snapshots silently — useful
+    /// for tests that don't care about durability.
+    pub fn set_eviction_persister(&mut self, persister: Option<EvictionPersister>) {
+        self.eviction_persister = persister;
     }
 
     /// Read access to the underlying manager — useful for LRU /
@@ -449,7 +488,33 @@ impl TerminalServer for InMemoryTerminalServer {
             initial_size: None,
             env: cfg.env,
         };
-        let id = self.manager.spawn(session_cfg)?;
+        // BL-062 — at-cap path: evict the LRU stopped session before
+        // spawning. If every session is still running, `spawn_or_evict`
+        // surfaces `ShellDetection { reason: "session cap reached …" }`
+        // (the cap check inside `spawn`), preserving the pre-BL-062
+        // "never auto-kill a live process" invariant. The evicted
+        // snapshot bytes are surfaced through the `SessionEvicted`
+        // payload via [`Self::set_eviction_persister`] when one is
+        // wired; without a persister, the snapshot is dropped silently
+        // — matching the pre-BL-062 behaviour where evicted scrollback
+        // wasn't durable anyway.
+        let (id, evicted) = self.manager.spawn_or_evict(session_cfg)?;
+        if let Some((evicted_id, snapshot)) = evicted {
+            if let Some(persist) = self.eviction_persister.as_ref() {
+                if let Err(err) = persist(evicted_id.as_str(), &snapshot) {
+                    tracing::warn!(
+                        evicted_id = evicted_id.as_str(),
+                        %err,
+                        "BL-062: scrollback persistence failed; dropping snapshot",
+                    );
+                }
+            }
+            self.emit(&TerminalEvent::SessionEvicted {
+                id: evicted_id.as_str().to_string(),
+                reason: "lru".to_string(),
+            });
+            self.emitted_lines.remove(&evicted_id);
+        }
         if let Some(ref name) = cfg.name {
             // Ignore the unknown-id error path — the id was just minted.
             let _ = self.manager.set_name(&id, name.clone());
@@ -1021,5 +1086,95 @@ mod tests {
         let rx = s.subscribe_events();
         let _ = s.create_session(sh_printf("y")).expect("create 2");
         assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok());
+    }
+
+    /// BL-062 — `create_session` at-cap path emits `SessionEvicted`
+    /// before `SessionCreated` so a subscriber sees the eviction in
+    /// causal order. The persister callback receives the evicted
+    /// session id and its scrollback bytes; tests verify both the
+    /// id and the byte payload were forwarded.
+    #[test]
+    fn create_session_at_cap_evicts_lru_emits_event_and_invokes_persister() {
+        if !unix_only("create_session_at_cap_evicts_lru_emits_event_and_invokes_persister") {
+            return;
+        }
+        let mgr = SessionManager::with_limits(2, 1024);
+        let mut s = InMemoryTerminalServer::with_manager(mgr);
+
+        // Wire a persister that records (id, snapshot) so the test
+        // can assert on what landed.
+        let captured: std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured_clone = std::sync::Arc::clone(&captured);
+        s.set_eviction_persister(Some(Box::new(move |id, bytes| {
+            captured_clone
+                .lock()
+                .unwrap()
+                .push((id.to_string(), bytes.to_vec()));
+            Ok(())
+        })));
+
+        let rx = s.subscribe_events();
+
+        // Spawn two short-lived sessions so they exit quickly. The
+        // third spawn forces an LRU eviction.
+        let first = s.create_session(sh_printf("first")).expect("spawn first");
+        std::thread::sleep(Duration::from_millis(50));
+        let second = s.create_session(sh_printf("second")).expect("spawn second");
+        // Drain creation events so the assertion below focuses on
+        // the eviction round.
+        while rx.recv_timeout(Duration::from_millis(50)).is_ok() {}
+        // Pump both sessions so their printf output lands in their
+        // buffers — without this, whichever session ends up the LRU
+        // victim hands an empty snapshot to the persister and the
+        // assertion below fails on a vacuous payload.
+        for _ in 0..20 {
+            let _ = s.pump(&first, Duration::from_millis(20));
+            let _ = s.pump(&second, Duration::from_millis(20));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+
+        let _third = s.create_session(sh_printf("third")).expect("spawn third");
+
+        let mut saw_evicted = false;
+        let mut saw_created = false;
+        let mut evicted_before_created = false;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(TerminalEvent::SessionEvicted { id, reason }) => {
+                    assert_eq!(reason, "lru");
+                    assert!(!id.is_empty());
+                    saw_evicted = true;
+                }
+                Ok(TerminalEvent::SessionCreated { .. }) => {
+                    saw_created = true;
+                    if saw_evicted {
+                        evicted_before_created = true;
+                    }
+                    break;
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        assert!(saw_evicted, "SessionEvicted never published");
+        assert!(saw_created, "SessionCreated never published");
+        assert!(
+            evicted_before_created,
+            "SessionEvicted must be published before the new SessionCreated",
+        );
+
+        // The persister recorded one row.
+        let captured = captured.lock().unwrap();
+        assert_eq!(captured.len(), 1, "persister should have been called once");
+        let (_id, snapshot) = &captured[0];
+        // The captured snapshot should include the printf marker
+        // (either "first" or "second" depending on which was LRU).
+        let s_text = String::from_utf8_lossy(snapshot);
+        assert!(
+            s_text.contains("first") || s_text.contains("second"),
+            "persisted scrollback missing marker: {s_text:?}",
+        );
     }
 }

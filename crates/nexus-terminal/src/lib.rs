@@ -134,8 +134,8 @@ pub use saved::{
     DEFAULT_AUTO_RESTART_DELAY_MS, DEFAULT_ICON,
 };
 pub use server::{
-    InMemoryTerminalServer, OutputLine, ServerSpawnConfig, SessionInfo, TerminalEvent,
-    TerminalServer,
+    EvictionPersister, InMemoryTerminalServer, OutputLine, ServerSpawnConfig, SessionInfo,
+    TerminalEvent, TerminalServer,
 };
 pub use session::{ProcessState, Session, SessionConfig, SessionId, Signal};
 pub use shell::{detect_default_shell, ShellSpec};

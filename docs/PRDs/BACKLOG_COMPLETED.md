@@ -8,6 +8,37 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-062: Terminal session LRU eviction policy ✅ (2026-05-07)
+
+**Source**: Terminal Integration Assessment (2026-05-06) — gap in `manager.rs`
+**Files**: `crates/nexus-terminal/src/{manager.rs, server.rs, core_plugin.rs, lib.rs}`, `crates/nexus-bootstrap/src/lib.rs`
+**Related**: PRD-09 §2.3; `last_accessed` timestamp tracked but no policy read it; `SqliteSessionStore` was shipped Phase M but never wired
+
+Closes the gap where a workspace at the 50-session cap rejected every new spawn — even when most sessions were stopped corpses waiting to be reaped. Auto-evicts the LRU stopped session, persists its scrollback durably, and emits a structural event so subscribers can render "session 7 was retired".
+
+- **Eviction policy.** `SessionManager::evict_lru` now filters to terminated sessions only — a live process is never auto-killed by an LRU pass, preserving the pre-BL-062 invariant. The fn does a `reap_exited()` pass first so cached `state()` reflects whatever finished since the last poll, then `min_by_key(last_accessed)` picks the victim. When every session is running, eviction returns `None` and the cap check inside `spawn` surfaces the existing `ShellDetection { reason: "session cap reached …" }` error.
+- **`last_accessed` accounting.** Switched `Entry::last_accessed` from `Instant` to `Cell<Instant>` so the read accessors that take `&self` (`lines_snapshot`, `buffer_read_since`) can bump LRU without forcing `&mut self` upstream. `lines_snapshot` (the `read_output` IPC path) now bumps, matching the DoD's "drain / read_output / send_input" set. `buffer_read_since` deliberately does **not** bump — the WI-12 drainer thread polls it constantly, and the user-facing `read_raw_since` IPC handler already drives `drain()` first which does bump.
+- **`SessionEvicted` lifecycle event.** New variant `TerminalEvent::SessionEvicted { id, reason }`. `reason` is a stable tag; today only `"lru"` is emitted. The variant carries the same session-id semantics as the rest of the enum so `EventFilter::CustomPrefix` / `CustomExact` subscribers pick it up unchanged.
+- **Server wiring.** `InMemoryTerminalServer::create_session` switched to `spawn_or_evict`. When eviction occurred it: forwards the (id, snapshot) pair to an optional `EvictionPersister` callback, emits `SessionEvicted` on the lifecycle channel, prunes the `emitted_lines` cursor, then proceeds with the normal spawn → `SessionCreated` flow. Causal order on the bus: `SessionEvicted` → `SessionCreated`.
+- **Persistence.** New `EvictionPersister = Box<dyn Fn(&str, &[u8]) -> Result<(), TerminalError> + Send + Sync>` type alias. `InMemoryTerminalServer::set_eviction_persister` and `TerminalCorePlugin::with_eviction_persister` install it. Bootstrap opens a `SqliteSessionStore` at `<forge>/.forge/sessions.sqlite` (scrollback blobs at `<forge>/.forge/sessions/<id>/scrollback.bin`) and wires its `save_scrollback` as the persister. Without the persister (tests, embedded runtimes), the snapshot is dropped silently — matching pre-BL-062 behaviour where evicted scrollback wasn't durable anyway.
+
+**Tests.**
+
+- 3 new tests in `nexus-terminal::manager::tests`:
+  - `spawn_or_evict_refuses_to_kill_running_sessions_at_cap` — fills the cap with `sleep 5` children, asserts `spawn_or_evict` returns the existing `ShellDetection` error (not a kill) and the live count is unchanged.
+  - `lines_snapshot_bumps_last_accessed` — sleeps 15 ms between `last_accessed` reads to assert the snapshot moves forward (the LRU input the DoD relies on).
+  - `evict_lru_returns_oldest_session_with_snapshot` (existing) still passes — the new `reap_exited()` pre-pass + `is_terminated()` filter keeps the contract.
+- 1 new test in `nexus-terminal::server::tests`: `create_session_at_cap_evicts_lru_emits_event_and_invokes_persister` spawns three short-lived sessions through the server (cap=2), asserts `SessionEvicted { reason: "lru" }` is emitted, that it lands **before** the new `SessionCreated`, and that the persister callback received a non-empty snapshot containing one of the printf markers.
+- All 285 nexus-terminal tests pass; bootstrap suites green; ts-export drift-free; clippy clean on changed files.
+
+**Deliberately deferred:**
+
+- **Cross-session restore.** The persister stores scrollback to disk but no IPC handler reads it back yet. Once a "show me the scrollback for session X" surface lands (probably alongside BL-063's FTS5 cross-session search), the read path becomes a one-line addition. Today, the durable storage is forward-looking infrastructure — the user can't yet see an evicted session's scrollback through the UI.
+- **`session_metadata` upsert.** `SqliteSessionStore` has both `save_scrollback` and `save_metadata`; only the former is wired. Saving a `SessionMetadata` row alongside the scrollback would let the future restore path enumerate evicted sessions, but the in-memory store + the BL-066 `SavedCommand` panel already cover live-session bookkeeping. This pairs naturally with the cross-session restore work above.
+- **Eviction watermark / pre-eviction.** The current pass evicts exactly when the cap is hit. A workspace under bursty session creation could pre-evict at a high-water mark (say 80% of cap) to amortise the cost. PRD-09 §2.3 doesn't ask for this; we cross the bridge if a real workload bottlenecks on cap-time evictions.
+
+---
+
 ### BL-061: Terminal memory backpressure — enforce kill policy ✅ (2026-05-07)
 
 **Source**: Terminal Integration Assessment (2026-05-06) — gap #5

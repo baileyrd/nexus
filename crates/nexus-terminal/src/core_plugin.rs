@@ -902,6 +902,19 @@ impl TerminalCorePlugin {
         self
     }
 
+    /// BL-062 — install a callback that persists an evicted session's
+    /// scrollback bytes. Bootstrap supplies a closure that delegates
+    /// to [`crate::SqliteSessionStore::save_scrollback`]; tests
+    /// typically don't bother and let evicted snapshots drop on the
+    /// floor.
+    #[must_use]
+    pub fn with_eviction_persister(self, persister: crate::EvictionPersister) -> Self {
+        if let Ok(mut server) = self.server.lock() {
+            server.set_eviction_persister(Some(persister));
+        }
+        self
+    }
+
     /// Wire the plugin to a kernel event bus and spawn both background
     /// threads:
     ///

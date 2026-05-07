@@ -424,20 +424,7 @@ Current output search (`search_output`, handler 7) is per-session substring/rege
 
 ---
 
-### BL-062: Terminal session LRU eviction policy
-
-**Source**: Terminal Integration Assessment (2026-05-06) — gap in `manager.rs`
-**Effort**: Small (0.5 day)
-**Crates**: `nexus-terminal/src/manager.rs`
-**Related**: PRD-09 §2.3; `last_accessed` timestamp tracked but policy not implemented
-
-`SessionManager` enforces the 50-session cap by hard-rejecting new spawns when at capacity. The `last_accessed` timestamp is tracked per session but nothing reads it. A forge with many long-lived sessions can exhaust the cap and block new spawns indefinitely.
-
-**Definition of done:**
-- `SessionManager::spawn` checks cap; if at limit, finds the oldest stopped session by `last_accessed` and evicts it (persisting scrollback first via `SqliteSessionStore`)
-- If all sessions are running, returns a `SessionLimitExceeded` error (current behavior) rather than killing a live process
-- `last_accessed` updated on every `drain`, `read_output`, `send_input` call
-- Eviction emits a `SessionEvicted { id, reason: "lru" }` lifecycle event on the kernel bus
+_BL-062 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `evict_lru` now filters to terminated sessions (with a `reap_exited` pass first to refresh cached `state()`); `spawn_or_evict` uses that filtered eviction so an at-cap manager with all-running sessions still surfaces `ShellDetection` (preserving the "never silently kill a live process" invariant). `Entry::last_accessed` switched to `Cell<Instant>` so read-side accessors that take `&self` can bump LRU; `lines_snapshot` (the `read_output` path) now bumps. `buffer_read_since` deliberately does NOT bump because the WI-12 drainer thread polls it constantly — the user-facing IPC path drives `drain` first which does bump. `InMemoryTerminalServer::create_session` switched to `spawn_or_evict`, emits `TerminalEvent::SessionEvicted { id, reason: "lru" }` before the new `SessionCreated`, and forwards the snapshot to an optional `EvictionPersister` callback. Bootstrap installs a persister backed by `SqliteSessionStore::save_scrollback` at `<forge>/.forge/sessions.sqlite` (scrollback blobs at `.forge/sessions/<id>/scrollback.bin`); without the persister the snapshot is dropped silently — matching pre-BL-062 behaviour._
 
 ---
 

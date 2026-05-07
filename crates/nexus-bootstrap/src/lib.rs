@@ -1298,6 +1298,39 @@ fn register_core_plugins(
     // default.
     let terminal_plugin =
         terminal_plugin.with_memory_monitor(nexus_terminal::MemoryLimits::default_recommended());
+    // BL-062 — install an eviction persister that durably stashes
+    // the scrollback of any LRU-evicted session. Without this hook
+    // the snapshot is dropped silently (matching pre-BL-062
+    // behaviour). The session store sits alongside the saved /
+    // adhoc stores at `<forge>/.forge/sessions.sqlite`; scrollback
+    // blobs land at `<forge>/.forge/sessions/<session_id>/scrollback.bin`.
+    let session_db = forge_root.join(".forge").join("sessions.sqlite");
+    let scrollback_dir = forge_root.join(".forge").join("sessions");
+    let terminal_plugin = match nexus_terminal::SqliteSessionStore::open(
+        &session_db,
+        &scrollback_dir,
+    ) {
+        Ok(store) => {
+            let store = Arc::new(std::sync::Mutex::new(store));
+            let persister: nexus_terminal::EvictionPersister = Box::new(move |id, bytes| {
+                let g = store
+                    .lock()
+                    .map_err(|_| nexus_terminal::TerminalError::Persist(
+                        "eviction persister: store mutex poisoned".into(),
+                    ))?;
+                g.save_scrollback(id, bytes)
+            });
+            terminal_plugin.with_eviction_persister(persister)
+        }
+        Err(err) => {
+            tracing::warn!(
+                path = %session_db.display(),
+                err = %err,
+                "com.nexus.terminal: session store unavailable; LRU-evicted scrollback will be dropped",
+            );
+            terminal_plugin
+        }
+    };
     // Phase 2 WI-12: stream PTY output as kernel events so the shell
     // can switch off its 100ms poll. The legacy `pump` handler still
     // returns its byte count; this is purely additive.
