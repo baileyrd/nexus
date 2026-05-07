@@ -261,6 +261,128 @@
 }
 
 /*
+ * BL-063 — cross-session scrollback search panel.
+ *
+ * Sibling to Saved Commands / History — same .nexus-saved-commands*
+ * design language so the user's eye treats them as a unified set.
+ */
+.nexus-cross-search {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--text-normal);
+  background: var(--background-secondary);
+  overflow: auto;
+}
+
+.nexus-cross-search-header h3 {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
+.nexus-cross-search-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.nexus-cross-search-input {
+  flex: 1;
+  font-size: 12px;
+  padding: 4px 6px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  color: var(--text-normal);
+}
+
+.nexus-cross-search-regex {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.nexus-cross-search-error {
+  font-size: 11px;
+  color: var(--accent-danger);
+  background: var(--bg-danger-soft);
+  padding: 4px 6px;
+  border-radius: 3px;
+  margin-bottom: 6px;
+}
+
+.nexus-cross-search-loading,
+.nexus-cross-search-empty {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin: 8px 0;
+}
+
+.nexus-cross-search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nexus-cross-search-group {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 6px;
+}
+
+.nexus-cross-search-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.nexus-cross-search-group-id {
+  font-family: var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--text-normal);
+}
+
+.nexus-cross-search-group-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.nexus-cross-search-group-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nexus-cross-search-line {
+  display: block;
+  font-family: var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/*
  * BL-064 — terminal AI suggestion chip.
  *
  * Single row below the xterm canvas. Shows the suggested command line

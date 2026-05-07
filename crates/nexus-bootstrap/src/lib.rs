@@ -1299,11 +1299,15 @@ fn register_core_plugins(
     let terminal_plugin =
         terminal_plugin.with_memory_monitor(nexus_terminal::MemoryLimits::default_recommended());
     // BL-062 — install an eviction persister that durably stashes
-    // the scrollback of any LRU-evicted session. Without this hook
-    // the snapshot is dropped silently (matching pre-BL-062
-    // behaviour). The session store sits alongside the saved /
-    // adhoc stores at `<forge>/.forge/sessions.sqlite`; scrollback
-    // blobs land at `<forge>/.forge/sessions/<session_id>/scrollback.bin`.
+    // the scrollback of any LRU-evicted session. BL-063 — share the
+    // same `SqliteSessionStore` handle with the plugin so the
+    // `cross_session_search` handler can read the FTS5 index that
+    // the persister populates on every save. Without this hook the
+    // snapshot is dropped silently and search returns "store not
+    // configured" (matching pre-BL-062 behaviour). The session store
+    // sits alongside the saved / adhoc stores at
+    // `<forge>/.forge/sessions.sqlite`; scrollback blobs land at
+    // `<forge>/.forge/sessions/<session_id>/scrollback.bin`.
     let session_db = forge_root.join(".forge").join("sessions.sqlite");
     let scrollback_dir = forge_root.join(".forge").join("sessions");
     let terminal_plugin = match nexus_terminal::SqliteSessionStore::open(
@@ -1312,15 +1316,18 @@ fn register_core_plugins(
     ) {
         Ok(store) => {
             let store = Arc::new(std::sync::Mutex::new(store));
+            let persister_store = Arc::clone(&store);
             let persister: nexus_terminal::EvictionPersister = Box::new(move |id, bytes| {
-                let g = store
+                let g = persister_store
                     .lock()
                     .map_err(|_| nexus_terminal::TerminalError::Persist(
                         "eviction persister: store mutex poisoned".into(),
                     ))?;
                 g.save_scrollback(id, bytes)
             });
-            terminal_plugin.with_eviction_persister(persister)
+            terminal_plugin
+                .with_eviction_persister(persister)
+                .with_session_store(store)
         }
         Err(err) => {
             tracing::warn!(
@@ -1407,6 +1414,10 @@ fn register_core_plugins(
                     ("adhoc_promote", nexus_terminal::HANDLER_ADHOC_PROMOTE),
                     ("run_saved", nexus_terminal::HANDLER_RUN_SAVED),
                     ("suggest", nexus_terminal::HANDLER_SUGGEST),
+                    (
+                        "cross_session_search",
+                        nexus_terminal::HANDLER_CROSS_SESSION_SEARCH,
+                    ),
                 ]),
             ),
             forge_root,

@@ -85,13 +85,14 @@ pub use ai::{
 pub use ansi::strip_ansi;
 pub use buffer::OutputBuffer;
 pub use core_plugin::{
-    AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs, RunSavedArgs, SuggestArgs, SuggestResponse,
+    AdHocIdArgs, AdHocListArgs, AdHocPromoteArgs, CrossSessionSearchArgs, RunSavedArgs,
+    SuggestArgs, SuggestResponse,
     CreateSessionArgs, CreateSessionResponse, OutputStreamPayload, PumpArgs, PumpResponse,
     ReadOutputArgs, ReadRawSinceArgs, ReadRawSinceResponse, ResizeArgs, SearchOutputArgs,
     SendInputArgs, SendRawInputArgs, SessionIdArgs, TerminalCorePlugin,
     WaitForPatternArgs, WaitForPatternResponse, EVENT_LIFECYCLE_PREFIX, EVENT_OUTPUT_PREFIX,
     HANDLER_ADHOC_DELETE, HANDLER_ADHOC_GET, HANDLER_ADHOC_LIST, HANDLER_ADHOC_PROMOTE,
-    HANDLER_CLOSE_SESSION, HANDLER_CREATE_SESSION,
+    HANDLER_CLOSE_SESSION, HANDLER_CREATE_SESSION, HANDLER_CROSS_SESSION_SEARCH,
     HANDLER_GET_SESSION_INFO, HANDLER_LIST_SESSIONS, HANDLER_PUMP, HANDLER_READ_OUTPUT,
     HANDLER_OPEN_IN_TERMINAL, HANDLER_READ_RAW_SINCE, HANDLER_RUN_SAVED, HANDLER_SUGGEST,
     HANDLER_SAVED_CREATE, HANDLER_SAVED_DELETE, HANDLER_SAVED_LIST, HANDLER_SAVED_REORDER,
@@ -117,7 +118,7 @@ pub use memory::{
     read_process_rss, MemoryLimitAction, MemoryLimits, MemoryMonitor, MemorySample,
     DEFAULT_HISTORY_SAMPLES, RECOMMENDED_POLL_INTERVAL,
 };
-pub use persist::{SessionMetadata, SqliteSessionStore};
+pub use persist::{ScrollbackHit, SessionMetadata, SqliteSessionStore};
 pub use precmd::{
     run_pre_commands, PreCommandOptions, PreCommandOutcome, DEFAULT_STEP_TIMEOUT,
 };

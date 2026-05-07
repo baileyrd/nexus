@@ -41,6 +41,7 @@
 //! | 22         | `adhoc_promote`      | Promote ad-hoc → saved command (BL-060) |
 //! | 23         | `run_saved`          | Spawn session running saved cmd (BL-055)|
 //! | 24         | `suggest`            | LLM-enriched output suggestion (BL-064) |
+//! | 25         | `cross_session_search` | FTS5 search across scrollback (BL-063)|
 //!
 //! Ids are **append-only** — never reused after retirement — because
 //! manifest registrations in loaded plugins bake them in.
@@ -107,6 +108,7 @@ use ts_rs::TS;
 
 use crate::adhoc::SqliteAdHocStore;
 use crate::memory::{MemoryLimitAction, MemoryLimits, MemoryMonitor};
+use crate::persist::SqliteSessionStore;
 use crate::saved::{
     promote_adhoc_to_saved, PromoteOptions, SavedCommand, SqliteSavedCommandStore,
 };
@@ -217,6 +219,15 @@ pub const HANDLER_RUN_SAVED: u32 = 23;
 /// otherwise. Falls back to the rule's static reason when the
 /// `com.nexus.ai` call fails or exceeds the 10 s budget.
 pub const HANDLER_SUGGEST: u32 = 24;
+
+/// BL-063 — `cross_session_search` handler id. Args:
+/// [`CrossSessionSearchArgs`]. Runs an FTS5 (or regex) query against
+/// the persisted scrollback index. Returns a `Vec<ScrollbackHit>`
+/// ordered newest-first. Requires the session store to be wired
+/// (bootstrap installs it via [`TerminalCorePlugin::with_session_store`]);
+/// without it, the handler returns a clear "not configured" error
+/// rather than silently returning an empty list.
+pub const HANDLER_CROSS_SESSION_SEARCH: u32 = 25;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -692,6 +703,42 @@ pub struct SuggestResponse {
     pub llm_used: bool,
 }
 
+/// BL-063 — arguments for `cross_session_search`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS, JsonSchema))]
+#[cfg_attr(
+    feature = "ts-export",
+    ts(
+        export,
+        export_to = "../../../packages/nexus-extension-api/src/generated/ipc/"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct CrossSessionSearchArgs {
+    /// FTS5 MATCH expression when `is_regex == false`, or a regex
+    /// pattern when `is_regex == true`. Empty / whitespace-only
+    /// queries short-circuit to an empty result rather than
+    /// returning every line.
+    pub query: String,
+    /// When `true`, applies `regex_lite::Regex` over every indexed
+    /// line constrained by `session_ids` / `since_ts`. The literal
+    /// path uses FTS5's `MATCH` for full-text indexing and is
+    /// strictly faster.
+    #[serde(default)]
+    pub is_regex: bool,
+    /// Optional list of session ids to scope the search. `None` (or
+    /// empty) searches every persisted session.
+    #[serde(default)]
+    pub session_ids: Option<Vec<String>>,
+    /// Optional Unix-millis floor on the row timestamp. `None`
+    /// returns hits regardless of age.
+    #[serde(default)]
+    pub since_ts: Option<i64>,
+    /// Hard cap on the number of returned hits. Defaults to 100.
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
 // ── The plugin ───────────────────────────────────────────────────────────────
 
 /// Core plugin instance. Holds the server behind an [`Arc<Mutex<_>>`]
@@ -770,6 +817,13 @@ pub struct TerminalCorePlugin {
     /// regex state. Wrapped in `Arc` so the dispatch_async future
     /// can clone it without re-instantiating per-call.
     suggest_engine: Arc<crate::ai::AiSuggestionEngine>,
+    /// BL-063 — session-store handle for cross-session search.
+    /// `None` when bootstrap didn't open a store (tests, embedded
+    /// runtimes); the `cross_session_search` handler returns a
+    /// clear error in that case. Bootstrap shares this same handle
+    /// with the eviction persister, so a scrollback that the
+    /// persister wrote is immediately searchable.
+    session_store: Option<Arc<Mutex<SqliteSessionStore>>>,
 }
 
 /// BL-061 — shared memory state held behind a single `Mutex` so the
@@ -911,6 +965,7 @@ impl TerminalCorePlugin {
             memory_poller: None,
             context: None,
             suggest_engine: Arc::new(crate::ai::AiSuggestionEngine::with_defaults()),
+            session_store: None,
         }
     }
 
@@ -932,6 +987,7 @@ impl TerminalCorePlugin {
             memory_poller: None,
             context: None,
             suggest_engine: Arc::new(crate::ai::AiSuggestionEngine::with_defaults()),
+            session_store: None,
         }
     }
 
@@ -994,6 +1050,19 @@ impl TerminalCorePlugin {
         if let Ok(mut server) = self.server.lock() {
             server.set_eviction_persister(Some(persister));
         }
+        self
+    }
+
+    /// BL-063 — share the session store with the plugin so the
+    /// `cross_session_search` handler has read access to the FTS5
+    /// index. Bootstrap typically calls this *and* installs a
+    /// persister that delegates to the same store, so a scrollback
+    /// the persister wrote (which auto-indexes) is immediately
+    /// searchable. The handle is `Arc<Mutex<...>>` so multiple
+    /// builders can share ownership.
+    #[must_use]
+    pub fn with_session_store(mut self, store: Arc<Mutex<SqliteSessionStore>>) -> Self {
+        self.session_store = Some(store);
         self
     }
 
@@ -1671,6 +1740,7 @@ impl CorePlugin for TerminalCorePlugin {
                     "handler {HANDLER_SUGGEST}: suggest is async; caller should use dispatch_async"
                 ),
             )),
+            HANDLER_CROSS_SESSION_SEARCH => self.dispatch_cross_session_search(args),
             other => Err(exec_err(format!("unknown handler id {other}"))),
         }
     }
@@ -2287,6 +2357,36 @@ impl TerminalCorePlugin {
             },
             "run_saved",
         )
+    }
+
+    /// BL-063 — `cross_session_search` proxies into
+    /// [`SqliteSessionStore::cross_session_search`]. The store does
+    /// the FTS5 / regex work; the dispatch arm just decodes args and
+    /// surfaces a clear error when no store is wired.
+    fn dispatch_cross_session_search(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let a: CrossSessionSearchArgs = parse_args(args, "cross_session_search")?;
+        let store = self.session_store.as_ref().ok_or_else(|| {
+            exec_err(
+                "session store not attached (runtime built without a forge path)".into(),
+            )
+        })?;
+        let limit =
+            usize::try_from(a.limit.unwrap_or(100)).unwrap_or(100).max(1);
+        let session_ids_slice = a.session_ids.as_deref();
+        let store = store.lock().map_err(poisoned)?;
+        let hits = store
+            .cross_session_search(
+                &a.query,
+                a.is_regex,
+                session_ids_slice,
+                a.since_ts,
+                limit,
+            )
+            .map_err(crate_err)?;
+        to_value(&hits, "cross_session_search")
     }
 }
 
@@ -3674,6 +3774,101 @@ mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    // ── BL-063 — cross_session_search dispatch tests ────────────────
+
+    #[test]
+    fn cross_session_search_without_attached_store_surfaces_clear_error() {
+        let mut p = TerminalCorePlugin::new();
+        let err = p
+            .dispatch(
+                HANDLER_CROSS_SESSION_SEARCH,
+                &serde_json::json!({ "query": "anything" }),
+            )
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(
+                    reason.contains("session store not attached"),
+                    "got: {reason}",
+                );
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cross_session_search_pass_through_returns_indexed_hits() {
+        // Open an in-memory store, populate it with two sessions'
+        // worth of scrollback, attach to the plugin, then dispatch
+        // the IPC and verify the response shape.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = SqliteSessionStore::in_memory(tmp.path()).expect("store");
+        store
+            .save_scrollback("alpha", b"compile error: missing semicolon\n")
+            .expect("save alpha");
+        store
+            .save_scrollback("beta", b"server starting on port 3000\n")
+            .expect("save beta");
+        let store = Arc::new(Mutex::new(store));
+        let mut p = TerminalCorePlugin::new().with_session_store(store);
+
+        let resp = p
+            .dispatch(
+                HANDLER_CROSS_SESSION_SEARCH,
+                &serde_json::json!({ "query": "compile" }),
+            )
+            .expect("search");
+        let hits: Vec<crate::ScrollbackHit> = serde_json::from_value(resp).expect("decode");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].session_id, "alpha");
+        assert!(hits[0].text.contains("missing semicolon"));
+    }
+
+    #[test]
+    fn cross_session_search_invalid_args_reported_as_execution_failed() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = SqliteSessionStore::in_memory(tmp.path()).expect("store");
+        let store = Arc::new(Mutex::new(store));
+        let mut p = TerminalCorePlugin::new().with_session_store(store);
+        let err = p
+            .dispatch(
+                HANDLER_CROSS_SESSION_SEARCH,
+                &serde_json::json!({ "wrong": "shape" }),
+            )
+            .unwrap_err();
+        match err {
+            PluginError::ExecutionFailed { reason, .. } => {
+                assert!(reason.contains("invalid args"), "got: {reason}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cross_session_search_default_limit_is_100() {
+        // Insert > 100 matching lines and verify the response caps
+        // out at the IPC default. The store-level test asserts a
+        // custom `limit` flows through; this test pins the dispatch
+        // arm's default.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = SqliteSessionStore::in_memory(tmp.path()).expect("store");
+        let mut blob = Vec::new();
+        for _ in 0..150 {
+            blob.extend_from_slice(b"abc xyz target\n");
+        }
+        store.save_scrollback("a", &blob).expect("save");
+        let store = Arc::new(Mutex::new(store));
+        let mut p = TerminalCorePlugin::new().with_session_store(store);
+        let resp = p
+            .dispatch(
+                HANDLER_CROSS_SESSION_SEARCH,
+                &serde_json::json!({ "query": "target" }),
+            )
+            .expect("search");
+        let hits: Vec<crate::ScrollbackHit> = serde_json::from_value(resp).expect("decode");
+        assert_eq!(hits.len(), 100, "default limit should cap at 100");
     }
 
     #[test]

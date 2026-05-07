@@ -393,21 +393,7 @@ _BL-064 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-063: Terminal FTS5 scrollback index
-
-**Source**: Terminal Integration Assessment (2026-05-06); PRD-09 §19.3
-**Effort**: Medium (2–3 days)
-**Crates**: `nexus-terminal/src/persist.rs`, `nexus-terminal/src/core_plugin.rs`, `shell/src/plugins/nexus/terminal/`
-**Related**: PRD-09 §19.3; `SqliteSessionStore` shipped Phase M
-
-Current output search (`search_output`, handler 7) is per-session substring/regex over in-memory `LineBuffer`. There's no way to search across sessions or query scrollback that has been evicted from the in-memory buffer. FTS5 over the persisted scrollback blobs enables cross-session search and historical grep.
-
-**Definition of done:**
-- `SqliteSessionStore` gains an FTS5 virtual table (`scrollback_fts`) over `session_id` + `line_text` + `timestamp`
-- Scrollback lines are indexed on write (`save_scrollback` path) with ANSI codes stripped before ingest
-- New handler `cross_session_search` (id 24): `{ query, is_regex, session_ids?, since_ts?, limit? }` → `Vec<{ session_id, line_index, text, timestamp }>` — searches FTS5 index, optionally constrained to specific sessions or time range
-- Shell terminal plugin gains a "Search all sessions" mode (⌘⇧F) that calls `cross_session_search` and renders results grouped by session with jump-to links
-- FTS5 index excluded from SQLite backup exports (rebuildable; reduces export size)
+_BL-063 closed 2026-05-07 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). New `scrollback_fts` FTS5 virtual table on `SqliteSessionStore`; `save_scrollback` ANSI-strips each line and reindexes per save (whole-row replace under a single transaction); `delete` clears the session's FTS rows. New `cross_session_search` method on the store with literal (FTS5 MATCH) and regex (regex_lite scan) paths, plus optional `session_ids` / `since_ts` / `limit` filters. New `com.nexus.terminal::cross_session_search` handler (id 25 — DoD-suggested 24 was already taken by BL-064's `suggest`; ids are append-only). Bootstrap shares the same `SqliteSessionStore` handle between the BL-062 eviction persister and the new search handler so a freshly-evicted scrollback is immediately searchable. Shell ships a "Search all sessions" sidebar leaf (⌘⇧F / Ctrl+Shift+F) with debounced input, regex toggle, and results grouped by session id. The FTS table is intentionally rebuildable from the on-disk scrollback blobs — when a backup-export mechanism lands later, it can skip `scrollback_fts` and still recover the full index._
 
 ---
 

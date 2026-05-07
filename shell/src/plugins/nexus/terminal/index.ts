@@ -21,6 +21,11 @@ import {
 } from './HistoryPaneView'
 import { HistoryView } from './HistoryView'
 import { useHistoryStore } from './historyStore'
+import {
+  CROSS_SEARCH_VIEW_TYPE,
+  crossSearchPaneViewCreator,
+} from './CrossSearchPaneView'
+import { CrossSearchView } from './CrossSearchView'
 import { useWorkspaceStore } from '../workspace/workspaceStore'
 
 const PLUGIN_ID = 'com.nexus.terminal'
@@ -51,6 +56,8 @@ const COMMAND_FOCUS = 'nexus.terminal.focus'
 const COMMAND_SAVED_SHOW = 'nexus.terminal.savedCommands.show'
 // BL-060: dedicated command to reveal the Command History sub-view.
 const COMMAND_HISTORY_SHOW = 'nexus.terminal.history.show'
+// BL-063: cross-session scrollback search.
+const COMMAND_CROSS_SEARCH_SHOW = 'nexus.terminal.crossSearch.show'
 
 const EVENT_WORKSPACE_OPENED = 'workspace:opened'
 const EVENT_WORKSPACE_CLOSED = 'workspace:closed'
@@ -117,6 +124,11 @@ export const terminalPlugin: Plugin = {
           title: 'Show Command History',
           category: 'Terminal',
         },
+        {
+          id: COMMAND_CROSS_SEARCH_SHOW,
+          title: 'Search All Sessions',
+          category: 'Terminal',
+        },
       ],
       keybindings: [
         // VS Code convention: Ctrl-Backquote toggles the integrated
@@ -124,6 +136,14 @@ export const terminalPlugin: Plugin = {
         // `'`'` is the literal backquote character produced by that
         // chord on both Windows and macOS default layouts.
         { command: COMMAND_TOGGLE, key: 'ctrl+`', mac: 'cmd+`' },
+        // BL-063 — cross-session scrollback search. ⌘⇧F mirrors the
+        // VS Code "find in files" muscle memory, scoped to terminal
+        // history rather than the workspace files.
+        {
+          command: COMMAND_CROSS_SEARCH_SHOW,
+          key: 'ctrl+shift+f',
+          mac: 'cmd+shift+f',
+        },
       ],
       contextKeys: [
         {
@@ -379,6 +399,26 @@ export const terminalPlugin: Plugin = {
       if (await api.kernel.available()) {
         void useHistoryStore.getState().loadHistory(api.kernel)
       }
+    })
+
+    // ── Cross-session scrollback search (BL-063) ─────────────────────
+    //
+    // Sibling sidebar leaf to Saved Commands / History. The view
+    // owns its own debounced search input — index.ts only handles
+    // registration + reveal.
+    viewRegistry.register(
+      CROSS_SEARCH_VIEW_TYPE,
+      crossSearchPaneViewCreator(() =>
+        createElement(CrossSearchView, {
+          kernel: api.kernel,
+          notifications: api.notifications,
+        }),
+      ),
+    )
+
+    api.commands.register(COMMAND_CROSS_SEARCH_SHOW, async () => {
+      const leaf = await workspace.ensureLeafOfType(CROSS_SEARCH_VIEW_TYPE, 'left')
+      workspace.revealLeaf(leaf)
     })
 
     // Reset the saved-commands cache when the workspace closes so the
