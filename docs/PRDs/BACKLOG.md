@@ -149,20 +149,7 @@ _BL-083 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-082: Symlink handling in watcher and reconcile
-
-**Source**: Storage Integration Assessment (2026-05-06) — gap #4
-**Effort**: Small (0.5–1 day)
-**Crates**: `nexus-storage/src/watcher.rs`, `nexus-storage/src/reconcile.rs`
-**Related**: PRD-03 §file-watcher; `notify` crate symlink follow behavior
-
-The file watcher and reconcile algorithm treat symlinks as regular files. If a symlink and its target are both within the forge root, reconcile may create two index entries for the same content — one for the symlink path and one for the target path — causing duplicate search results, duplicate backlink entries, and potentially conflicting writes.
-
-**Definition of done:**
-- `reconcile.rs` calls `fs::symlink_metadata` + checks `file_type().is_symlink()` before indexing; symlinks are skipped (not followed) during the walk
-- `watcher.rs` ignores `EventKind::Modify` for paths that resolve to symlinks pointing outside the forge root; for symlinks within the forge root, the watcher follows to the canonical path and deduplicates events
-- Symlink entries in the `files` table are tagged with `file_type = "symlink"` and excluded from FTS indexing, search results, and graph nodes
-- `query_files` accepts an optional `include_symlinks: bool` filter (default false)
+_BL-082 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Reconcile + watcher now skip symlinks (no double-index, no follow out of forge). Schema-side `file_type = "symlink"` tagging and `query_files(include_symlinks)` deferred — skipping is the simpler invariant and matches the no-double-index goal without growing the schema._
 
 ---
 

@@ -229,6 +229,23 @@ fn process_events(
                 continue;
             }
 
+            // BL-082: skip symlink modify/create events. The watcher
+            // sees a symlink as a regular file event, but indexing it
+            // would either double-index (if the target is inside the
+            // forge) or follow the link out of the sandbox (if the
+            // target is outside). Reconcile already excludes symlinks
+            // from the walk; this keeps the live event stream
+            // consistent with that.
+            if let Ok(meta) = std::fs::symlink_metadata(path) {
+                if meta.file_type().is_symlink() {
+                    tracing::debug!(
+                        path = %path.display(),
+                        "BL-082: ignoring file event for symlink",
+                    );
+                    continue;
+                }
+            }
+
             let Some(rel) = relative_path(&forge_root, path) else {
                 continue;
             };

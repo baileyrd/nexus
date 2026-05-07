@@ -208,9 +208,26 @@ fn scan_dir_recursive(
             continue;
         }
 
-        if path.is_dir() {
+        // BL-082: classify against the symlink's own metadata (not
+        // its target). `Path::is_dir` / `is_file` follow symlinks,
+        // which would (a) double-index a file reachable through both
+        // the symlink path and the target path, and (b) follow a
+        // symlink out of the forge root if the user has a stray
+        // symlink to a system folder. `entry.file_type()` is the
+        // documented un-followed shape — `is_symlink()` true means
+        // we skip the entry without recursing.
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            tracing::info!(
+                path = %path.display(),
+                "BL-082: skipping symlink during reconcile (not followed, not indexed)",
+            );
+            continue;
+        }
+
+        if file_type.is_dir() {
             scan_dir_recursive(&path, forge_root, results)?;
-        } else if path.is_file() {
+        } else if file_type.is_file() {
             let bytes = std::fs::read(&path)?;
             let hash = sha256_hex(&bytes);
             let size = entry.metadata()?.len();
@@ -525,5 +542,58 @@ mod tests {
             results.iter().map(|(p, _, _)| p).collect::<Vec<_>>()
         );
         assert_eq!(results[0].0, "notes/visible.md");
+    }
+
+    // ── BL-082: symlinks must be skipped, not followed ───────────────────────
+
+    /// Creating a symlink to a sibling file inside the forge should
+    /// not produce a duplicate scan result for the symlink path. The
+    /// target file is indexed exactly once via its real path.
+    #[cfg(unix)]
+    #[test]
+    fn bl082_intra_forge_symlink_is_skipped() {
+        let dir = TempDir::new().unwrap();
+        let forge_root = dir.path();
+        write_file(forge_root, "notes/real.md", "real content");
+        std::os::unix::fs::symlink(
+            forge_root.join("notes/real.md"),
+            forge_root.join("notes/alias.md"),
+        )
+        .unwrap();
+
+        let mut results = Vec::new();
+        scan_dir_recursive(forge_root, forge_root, &mut results).unwrap();
+        assert_eq!(
+            results.len(),
+            1,
+            "expected the alias to be skipped; got {:?}",
+            results.iter().map(|(p, _, _)| p).collect::<Vec<_>>()
+        );
+        assert_eq!(results[0].0, "notes/real.md");
+    }
+
+    /// A symlink whose target is outside the forge root must not
+    /// follow the link out of the sandbox during reconcile.
+    #[cfg(unix)]
+    #[test]
+    fn bl082_external_symlink_is_skipped() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "off-limits").unwrap();
+        let forge_root = dir.path();
+        std::fs::create_dir_all(forge_root.join("notes")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("secret.txt"),
+            forge_root.join("notes/leak.md"),
+        )
+        .unwrap();
+
+        let mut results = Vec::new();
+        scan_dir_recursive(forge_root, forge_root, &mut results).unwrap();
+        assert!(
+            results.is_empty(),
+            "external-target symlink must not surface in reconcile; got {:?}",
+            results
+        );
     }
 }
