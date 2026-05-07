@@ -469,10 +469,10 @@ export const editorPlugin: Plugin = {
           key: CONFIG_KEYBINDINGS,
           title: 'Keybindings',
           description:
-            "Modal keymap layered over the default markdown bindings. 'vim' enables Normal/Insert/Visual modes plus :w / :q ex commands. Applied at tab-open time — close and reopen the tab after changing this.",
+            "Keymap layered over the default markdown bindings. 'vim' enables Normal/Insert/Visual modes plus :w / :q ex commands. 'emacs' adds C-f/b/n/p navigation, M-f/b word motion, C-Space mark ring, and a kill ring (C-k / C-w / M-w / C-y). Applied at tab-open time — close and reopen the tab after changing this.",
           type: 'select',
           default: 'default',
-          options: ['default', 'vim'],
+          options: ['default', 'vim', 'emacs'],
         },
       ],
     })
@@ -729,7 +729,9 @@ export const editorPlugin: Plugin = {
       sessionManager,
       getKeybindings: () => {
         const v = api.configuration.getValue<string>(CONFIG_KEYBINDINGS, 'default')
-        return v === 'vim' ? 'vim' : 'default'
+        if (v === 'vim') return 'vim'
+        if (v === 'emacs') return 'emacs'
+        return 'default'
       },
       reportBridgeError: (message, err) => {
         api.notifications.show({

@@ -13,9 +13,10 @@ import { search, searchKeymap } from '@codemirror/search'
 import type { EditorKernelClient } from '../kernelClient.ts'
 import { clientLogger } from '../../../../clientLogger'
 import { vimKeymapExt, type VimKeymapOptions } from './vimKeymap'
+import { emacsKeymapExt, type EmacsKeymapOptions } from './emacsKeymap'
 
-/** BL-070: opt-in modal keybinding layers. */
-export type EditorKeybindings = 'default' | 'vim'
+/** BL-070 / BL-071: opt-in keybinding layers. */
+export type EditorKeybindings = 'default' | 'vim' | 'emacs'
 
 export interface BaselineExtensionsOptions {
   /**
@@ -44,6 +45,11 @@ export interface BaselineExtensionsOptions {
    * `keybindings === 'vim'`; ignored otherwise.
    */
   vim?: VimKeymapOptions
+  /**
+   * Per-tab metadata for the Emacs layer. Required when
+   * `keybindings === 'emacs'`; ignored otherwise.
+   */
+  emacs?: EmacsKeymapOptions
 }
 
 /** Binding options for the kernel-backed undo/redo keymap. */
@@ -124,6 +130,12 @@ export function baselineExtensions(
   // shortcuts can claim it.
   if (opts.keybindings === 'vim' && opts.vim) {
     exts.unshift(vimKeymapExt(opts.vim))
+  }
+  // Emacs layers in front of the default keymap so the Nexus-side
+  // overrides (`C-k` with kill-ring routing, `C-w` / `M-w` / `C-y`)
+  // win against any default that might claim the same chord.
+  if (opts.keybindings === 'emacs' && opts.emacs) {
+    exts.unshift(emacsKeymapExt(opts.emacs))
   }
   return exts
 }

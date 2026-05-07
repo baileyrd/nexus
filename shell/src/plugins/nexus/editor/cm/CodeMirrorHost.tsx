@@ -7,6 +7,7 @@ import {
   type KernelUndoBinding,
 } from './extensions'
 import type { VimKeymapOptions } from './vimKeymap'
+import type { EmacsKeymapOptions } from './emacsKeymap'
 
 export interface CodeMirrorHostProps {
   value: string
@@ -38,6 +39,8 @@ export interface CodeMirrorHostProps {
   keybindings?: EditorKeybindings
   /** Required when `keybindings === 'vim'`; ignored otherwise. */
   vim?: VimKeymapOptions
+  /** Required when `keybindings === 'emacs'`; ignored otherwise. */
+  emacs?: EmacsKeymapOptions
   className?: string
   style?: React.CSSProperties
 }
@@ -83,6 +86,7 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
       kernelUndo,
       keybindings,
       vim,
+      emacs,
       className,
       style,
     },
@@ -131,6 +135,7 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
               kernelUndo: kernelUndoRef.current,
               keybindings,
               vim,
+              emacs,
             }),
           ),
           readOnlyCompartment.current.of([
@@ -179,6 +184,7 @@ export const CodeMirrorHost = forwardRef<CodeMirrorHostHandle, CodeMirrorHostPro
               kernelUndo: kernelUndoRef.current,
               keybindings,
               vim,
+              emacs,
             }),
         ),
       })

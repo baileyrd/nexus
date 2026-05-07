@@ -181,24 +181,11 @@ _BL-072 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). 
 
 ---
 
-### BL-071: Emacs keybindings mode
-
-**Source**: Editor Integration Assessment (2026-05-06) — gap #2b; PRD-08 §9
-**Effort**: Small (2–3 days)
-**Crates**: `shell/src/plugins/nexus/editor/cm/` (new `emacsKeymap.ts`)
-**Related**: BL-070 (Vim mode — do that first, same infrastructure); CM6 `keymap` extension API
-
-PRD-08 §9 specifies Emacs keybinding support. CM6's keymap extension supports multiple layers; Emacs mode is additive on top of the default bindings. Standard Emacs navigation (C-f/b/n/p movement, C-a/e line, M-f/b word, C-k kill-line, C-y yank, C-space mark, M-w copy, C-w cut) covers the bulk of what Emacs users expect.
-
-**Definition of done:**
-- New CM6 extension `emacsKeymap.ts` implements the standard Emacs navigation and editing bindings
-- Toggle via Settings → Editor → Keybindings (alongside Default and Vim)
-- Mark ring (C-space) stores up to 16 positions; C-y yanks last killed text from kill ring
-- Keybinding mode persisted to forge settings; applied on editor mount
+_BL-071 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `emacsKeymap.ts` layers `@codemirror/commands` `emacsStyleKeymap` plus Nexus overrides (kill-ring–aware C-k / C-w / M-w / C-y, M-f / M-b word motion, C-Space mark ring up to 16 positions). Process-global kill ring; per-view mark ring stored on the view object. Toggle exposed in the existing `nexus.editor.keybindings` setting (now `'default' | 'vim' | 'emacs'`)._
 
 ---
 
-_BL-070 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `@replit/codemirror-vim` integrated under a new `nexus.editor.keybindings` setting (`'default' | 'vim'`); `:w` / `:q` / `:wq` / `:x` ex commands route through `saveSession` and `confirmAndClose`. Per-view dispatch via a CM6 `StateField` so multiple tabs hit their own callbacks. Emacs option (BL-071) deferred — same plumbing will receive it when implemented._
+_BL-070 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). `@replit/codemirror-vim` integrated under a new `nexus.editor.keybindings` setting; `:w` / `:q` / `:wq` / `:x` ex commands route through `saveSession` and `confirmAndClose`. Per-view dispatch via a CM6 `StateField` so multiple tabs hit their own callbacks._
 
 ---
 

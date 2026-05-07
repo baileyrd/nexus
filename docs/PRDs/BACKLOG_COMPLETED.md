@@ -8,6 +8,37 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-071: Emacs keybindings mode ✅ (2026-05-06)
+
+**Source**: Editor Integration Assessment (2026-05-06) — gap #2b; PRD-08 §9
+**Files**: `shell/src/plugins/nexus/editor/cm/emacsKeymap.ts` (new), `shell/src/plugins/nexus/editor/cm/{extensions.ts,CodeMirrorHost.tsx}`, `shell/src/plugins/nexus/editor/{index.ts,EditorView.tsx}`
+**Related**: BL-070 (Vim mode); shares the BL-070 settings + plumbing
+
+`emacsKeymapExt({ relpath })` layers in front of CodeMirror's stock `emacsStyleKeymap` (which already provides `C-f`/`b`/`n`/`p`/`a`/`e`/`d`/`h`/`o`/`t`/`v`) with the Nexus-side overrides the DoD calls out:
+
+- **Kill ring (process-global, ≤60 entries).** `C-k` (override of the upstream binding), `C-w`, and `M-w` push onto the ring; `C-y` yanks the most recent entry. `C-k` matches Emacs end-of-line behaviour: at line-end the newline itself is killed; mid-line, the killed range stops short of `\n`. `M-w` collapses the selection to the end of the copied region so a follow-up `C-y` lands at the cursor instead of replacing the just-copied text. The ring is exposed for tests via `pushKill`/`peekKill`/`resetKillRingForTests`; production code never sees the ring directly.
+- **Mark ring (per-view, ≤16 entries).** `C-Space` pushes the current cursor onto the view's ring and re-anchors the selection at the cursor (matches Emacs's "set the mark" effect — a subsequent shifted motion extends a region from the mark). The ring is attached as an instance property on the `EditorView` rather than a `StateField` because the DoD scope doesn't include remapping mark positions across edits, and a side-channel array keeps the ring writable from a one-line key handler. `getMarkRing(view)` is the test-facing reader.
+- **Word motion.** `M-f` / `M-b` map to `cursorGroupForward` / `cursorGroupBackward` (with Shift-extending variants), filling a gap in the upstream `emacsStyleKeymap`.
+
+**Settings.** The `nexus.editor.keybindings` schema gained an `'emacs'` option alongside `'default'` and `'vim'`; the runtime's `getKeybindings()` returns `'emacs'` for that value. `BaselineExtensionsOptions` carries an `emacs?: EmacsKeymapOptions` payload threaded through `CodeMirrorHost`. `EditorView.tsx` includes the keybindings value in its `key` prop so a settings flip + tab reopen remounts the host with the new layer (same model as BL-070).
+
+**Tests.** 11 unit tests in `emacsKeymap.test.ts` (re-exported via `tests/emacs-keymap.test.ts`):
+
+- Kill-ring: most-recent-last semantics, empty-string drop, cap at `KILL_RING_LIMIT`.
+- `Ctrl-w` removes the region and pushes it; `Alt-w` copies + collapses; `Ctrl-y` inserts at the cursor; `Ctrl-y` is a no-op on an empty ring.
+- `Ctrl-k` mid-line and at end-of-line.
+- `Ctrl-Space` push and `MARK_RING_LIMIT` ring-buffer eviction.
+
+All 857 shell tests pass (was 846; +11 emacs).
+
+**Deferred from the original DoD:**
+
+- *`C-u C-Space` mark-ring rotation* and *`M-y` yank-pop* — both require a transient `currentKill`/`currentMark` cursor that the next `C-y`/`C-Space` advances. Same data structures, additional state machine — punted until users ask.
+- *`C-x` prefix bindings* — `C-x C-s` (save), `C-x C-c` (close), etc. Nexus already owns `Ctrl/Cmd-S` / `Ctrl/Cmd-W` as application-shell shortcuts; binding the Emacs equivalents would either fight those or require a chord-prefix layer that doesn't exist in CM6 today.
+- *Live in-place reconfigure on settings flip* — same trade-off as BL-070; close-and-reopen is documented in the schema description.
+
+---
+
 ### BL-070: Vim keybindings mode ✅ (2026-05-06)
 
 **Source**: Editor Integration Assessment (2026-05-06) — gap #2a; PRD-08 §9

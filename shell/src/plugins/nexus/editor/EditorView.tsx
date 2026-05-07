@@ -887,6 +887,9 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
                 }
               : undefined
           }
+          emacs={
+            keybindings === 'emacs' ? { relpath: tab.relpath } : undefined
+          }
           kernelUndo={{
             relpath: tab.relpath,
             kernelClient: runtime.kernelClient,
@@ -958,6 +961,9 @@ function TabBody({ tab, markdownHtml, onRetry, markdownBodyRef, cmViewRef }: Tab
                 },
               }
             : undefined
+        }
+        emacs={
+          keybindings === 'emacs' ? { relpath: tab.relpath } : undefined
         }
         buildExtensions={tab.mode === 'live' ? () => [livePreviewExt()] : undefined}
       />
