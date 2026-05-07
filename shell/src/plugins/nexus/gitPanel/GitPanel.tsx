@@ -9,6 +9,8 @@ import {
   type StashEntry,
 } from './gitPanelStore'
 import { getGitPanelApi } from './gitPanelRuntime'
+import { ConflictView } from './conflict/ConflictView'
+import { ConflictBanner } from './conflict/ConflictBanner'
 
 const GIT_ID = 'com.nexus.git'
 
@@ -144,8 +146,20 @@ export function GitPanel() {
     </button>
   )
 
+  // BL-084: surface non-Clean repo states (Merge / Rebase / CherryPick / …)
+  // with an Abort affordance regardless of which tab is active. The
+  // per-file resolution UI lives in `ChangesTab` so it sits next to
+  // the file list.
+  const conflictedCount = useGitPanelStore((s) =>
+    s.files.reduce((n, f) => (f.status === 'Conflicted' ? n + 1 : n), 0),
+  )
+  const showBanner = !!status && status.repo_state !== 'Clean'
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {showBanner && (
+        <ConflictBanner repoState={status.repo_state} conflictCount={conflictedCount} />
+      )}
       {/* Tab bar */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--background-modifier-border)', flexShrink: 0 }}>
         {TAB('changes', 'Changes')}
@@ -186,6 +200,10 @@ function ChangesTab() {
 
   // Whether the currently selected file is in the staged section.
   const selectedFileIsStaged = !!selectedFile && stagedFiles.some((f) => f.path === selectedFile)
+  // BL-084: route Conflicted files into the conflict resolution UI
+  // instead of the regular diff viewer.
+  const selectedFileIsConflicted =
+    !!selectedFile && files.some((f) => f.path === selectedFile && f.status === 'Conflicted')
 
   const selectFile = useCallback((entry: GitFileEntry) => {
     const isStaged = entry.status === 'Staged' || entry.status === 'Added'
@@ -333,8 +351,25 @@ function ChangesTab() {
         )}
       </div>
 
-      {/* Diff preview */}
-      {(selectedFile || loadingDiff) && (
+      {/* Diff preview / conflict resolution. A `Conflicted` file
+          short-circuits the regular diff viewer in favour of the
+          BL-084 conflict UI; the working-tree write-back leaves the
+          file unstaged so the user finishes via the same Stage +
+          Commit flow as any other change. */}
+      {selectedFile && selectedFileIsConflicted ? (
+        <div
+          style={{
+            height: 320,
+            borderTop: '1px solid var(--background-modifier-border)',
+            overflow: 'hidden',
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <ConflictView relpath={selectedFile} />
+        </div>
+      ) : (selectedFile || loadingDiff) ? (
         <div
           style={{
             height: 180,
@@ -355,7 +390,7 @@ function ChangesTab() {
             />
           )}
         </div>
-      )}
+      ) : null}
 
       {/* Stash section */}
       <StashSection

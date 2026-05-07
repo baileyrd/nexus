@@ -8,6 +8,30 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-084: Shell git conflict panel ✅ (2026-05-06)
+
+**Source**: Git Integration Assessment (2026-05-06) — gap #1
+**Files**: `shell/src/plugins/nexus/gitPanel/conflict/{conflictParser.ts (new), ConflictBanner.tsx (new), ConflictView.tsx (new)}`, `shell/src/plugins/nexus/gitPanel/{GitPanel.tsx, gitPanelStore.ts}`
+**Related**: backend handlers 32–35 shipped 2026-05-06 (`d8e5012`, `81070fe`); BL-088 (rebase/cherry-pick abort)
+
+The conflict-resolution UI the backend has been waiting for is now wired up.
+
+**`ConflictBanner` (new).** Sits atop the git panel whenever `repo_state !== 'Clean'`. Displays the operation type (Merge / Rebase / Cherry-pick / Revert / Bisect), a count of unresolved files (or "stage and commit to finish" when zero), and a state-aware Abort button: Merge → `abort_merge`, Rebase / RebaseInteractive → `abort_rebase`, CherryPick → `abort_cherry_pick`. Revert and Bisect have no IPC-exposed abort today, so for those states the banner renders without an abort button rather than pretending to support an action that'd just error out.
+
+**`ConflictView` (new).** Replaces the diff viewer in the Changes tab when a `Conflicted` file is selected. Reads the working-tree contents via `com.nexus.storage::read_file`, parses the conflict markers into hunks, and surfaces three controls per hunk (Use ours / Use theirs / `base` shown read-only when diff3 markers are present) plus whole-file Accept-all-ours / Accept-all-theirs shortcuts. Resolved content writes back through `com.nexus.storage::write_file`; the user stages and commits via the existing Changes-tab UI. When all markers are resolved, the panel switches to a hint pointing at the stage-and-commit flow.
+
+**Conflict-marker parser (new).** `conflictParser.ts` is a pure helper that turns a file's contents into a list of `ConflictHunk` records (start/end byte ranges, ours/theirs/base bodies, `oursLabel` / `theirsLabel`). It tolerates CRLF line endings, missing final newlines, files without any markers, and the diff3 `|||||||` ancestor variant. Malformed shapes — start markers with no `>>>>>>>`, nested `<<<<<<<` before a closing marker — get bailed out cleanly so a corrupt block can't silently resolve to an empty replacement. `applyResolution(content, hunk, replacement)` swaps a single block while preserving the original block's trailing-newline shape; `applyAll(content, parsed, side)` is the convenience for the Accept-all-* buttons.
+
+**Tests.** 11 unit tests in `conflictParser.test.ts` (re-exported via `tests/conflict-parser.test.ts`) cover the happy path, diff3 ancestor capture, multiple hunks in document order, CRLF preservation, missing trailing newline, malformed start-with-no-close, malformed nested-start, single-hunk and whole-file resolution, trailing-newline shape preservation across resolution, and the clean-file no-op. All 874 shell tests pass (was 863; +11 conflict-parser).
+
+**Deferred from the original DoD:**
+
+- *True three-way side-by-side diff against `conflict_versions`.* The inline marker form already shows ours and theirs; mounting a third base column for diff3-only files would be a sizable layout lift for limited additional value over the inline display.
+- *Live `com.nexus.git.state` subscription specifically for the conflict UI.* The git panel already refreshes on the existing `com.nexus.git.*` topic prefix subscription (`gitPanel/index.ts`), so banner state and conflict-file lists update without a dedicated hook.
+- *Custom-edit resolution.* Today the user has three choices: ours, theirs, or open the file in the editor and edit by hand (the regular workflow for the cases ours/theirs can't cleanly cover). A built-in three-way merge editor is a much bigger feature than the scope here.
+
+---
+
 ### BL-080: File tree / project explorer ✅ (2026-05-06)
 
 **Source**: Code editor capability analysis (2026-05-06)

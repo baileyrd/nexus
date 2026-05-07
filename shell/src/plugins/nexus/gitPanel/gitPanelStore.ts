@@ -47,6 +47,20 @@ export interface StashEntry {
 
 export type GitPanelTab = 'changes' | 'branches' | 'log'
 
+/**
+ * BL-084: state for the conflict-resolution flow. Populated when a
+ * conflicted file is selected; cleared on `reset()` and when the user
+ * navigates away or finishes resolving.
+ */
+export interface ConflictState {
+  /** Current working-tree contents of the selected conflicted file. */
+  content: string | null
+  /** `true` while a write is in flight. */
+  saving: boolean
+  /** Most recent error from a load / write, if any. */
+  error: string | null
+}
+
 interface GitPanelState {
   activeTab: GitPanelTab
 
@@ -73,6 +87,9 @@ interface GitPanelState {
   stashEntries: StashEntry[]
   loadingStash: boolean
 
+  // ── Conflict resolution (BL-084) ───────────────────────────────────
+  conflict: ConflictState
+
   // ── Actions ────────────────────────────────────────────────────────
   setActiveTab(tab: GitPanelTab): void
   setFiles(files: GitFileEntry[]): void
@@ -90,6 +107,8 @@ interface GitPanelState {
   setLoadingLog(v: boolean): void
   setStashEntries(entries: StashEntry[]): void
   setLoadingStash(v: boolean): void
+  setConflict(v: Partial<ConflictState>): void
+  resetConflict(): void
   reset(): void
 }
 
@@ -110,6 +129,7 @@ export const useGitPanelStore = create<GitPanelState>((set) => ({
   loadingLog: false,
   stashEntries: [],
   loadingStash: false,
+  conflict: { content: null, saving: false, error: null },
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setFiles: (files) => set({ files }),
@@ -127,9 +147,14 @@ export const useGitPanelStore = create<GitPanelState>((set) => ({
   setLoadingLog: (v) => set({ loadingLog: v }),
   setStashEntries: (entries) => set({ stashEntries: entries }),
   setLoadingStash: (v) => set({ loadingStash: v }),
+  setConflict: (v) => set((s) => ({ conflict: { ...s.conflict, ...v } })),
+  resetConflict: () => set({
+    conflict: { content: null, saving: false, error: null },
+  }),
   reset: () => set({
     files: [], selectedFile: null, selectedHunks: [],
     branches: [], logEntries: [], commitMessage: '',
     newBranchName: '', committing: false,
+    conflict: { content: null, saving: false, error: null },
   }),
 }))

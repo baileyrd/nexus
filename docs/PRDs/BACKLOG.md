@@ -117,31 +117,7 @@ _BL-085 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
 
 ---
 
-### BL-084: Shell git panel — commit UI, branch picker, log graph
-
-> **Backend complete 2026-05-06.** Shell-side conflict panel (the remaining UI surface) is the only piece left and depends on the new IPC handlers landed in this update.
-
-**Source**: Git Integration Assessment (2026-05-06) — gap #1 (largest UX gap)
-**Effort**: Large (3–4 weeks for the original full scope; remaining shell UI ~3–5 days)
-**Crates**: `shell/src/plugins/nexus/gitPanel/`, `crates/nexus-git/src/core_plugin.rs`
-**Related**: BL-079 (git gutter + diff viewer); BL-085 (hunk-level staging)
-
-**IPC handler matrix (after this update):**
-
-| Surface             | Handlers                                              | Status |
-|---------------------|-------------------------------------------------------|--------|
-| Commit panel        | `file_statuses`, `diff_file`, `diff_staged`, `stage_file`, `stage_all`, `unstage_*`, `stage_hunks`, `unstage_hunks`, `commit`, `push` | shipped |
-| Branch picker       | `branches`, `switch_branch`, `create_branch`, `delete_branch` | shipped |
-| Log                 | `log`, `log_file`                                     | shipped |
-| Conflict resolution | `conflict_files` (32), `abort_merge` (33), `conflict_versions` (34), `merge` (35) | **backend shipped 2026-05-06** |
-
-**Remaining work (shell UI):**
-
-- React panel under `shell/src/plugins/nexus/gitPanel/conflict/`.
-- Subscribe to `com.nexus.git.state` and activate when `repo_state` is `Merge` / `RebaseMerge` / `CherryPick`.
-- File list driven by `conflict_files`; per-file three-way diff fed by `conflict_versions`.
-- "Abort merge" / "Abort rebase" / "Abort cherry-pick" buttons routing through the matching IPC handlers (BL-088 added the rebase / cherry-pick variants).
-- Per-hunk accept/reject lands the resolution into the working tree; the user finalises with a normal commit through the commit panel that's already shipped.
+_BL-084 closed 2026-05-06 — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Backend handlers (32–35) shipped 2026-05-06; shell UI shipped now: a `ConflictBanner` over the git panel during any non-Clean repo state with a state-aware Abort button (Merge → `abort_merge`, Rebase / RebaseInteractive → `abort_rebase`, CherryPick → `abort_cherry_pick`), and a `ConflictView` that replaces the diff viewer when a `Conflicted` file is selected — per-hunk Use-ours / Use-theirs plus whole-file Accept-all-ours / Accept-all-theirs, writing resolved content back through `com.nexus.storage::write_file`. True three-way side-by-side rendering against `conflict_versions` deferred (the inline marker form already shows ours and theirs); the user stages and commits via the existing Changes-tab UI._
 
 ---
 
