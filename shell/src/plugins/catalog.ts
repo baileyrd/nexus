@@ -399,6 +399,12 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     description: 'Render architecture.md as a domain → task hierarchy with drift detection against installed skills + workflows (BL-054 Phase 2). Pair with `nexus forge init --template os`.',
     load: () => import('./nexus/osArchitecture').then(m => m.osArchitecturePlugin),
   },
+  {
+    id: 'nexus.osObservability', name: 'Observability',
+    version: '0.1.0', core: false, activationEvents: ['onStartup'],
+    description: 'Three-tab observability panel — usage rollup over the AI activity log, foundation-workflow status with manual run, and a vault-feed of file activity under raw/, wiki/, output/ (BL-054 Phase 4).',
+    load: () => import('./nexus/observability').then(m => m.osObservabilityPlugin),
+  },
 ]
 
 /**

@@ -8,6 +8,35 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-054 Phase 4: Observability panels ✅ (2026-05-07)
+
+**Source**: BL-054 companion plan, Phase 4 — [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md) §Phase 4
+**Files**: new `shell/src/plugins/nexus/observability/{index.ts, observabilityStore.ts, usageAggregate.ts, OsObservabilityView.tsx, OsObservabilityPaneView.tsx}`, new `shell/tests/observability.test.ts`, `shell/src/plugins/catalog.ts`
+**Related**: BL-052 (universal activity topic — vault feed subscribes here), BL-037 (`com.nexus.ai::activity_list` — usage tab reads this), BL-027 (workflow `list` / `run` — automation tab reads + invokes), BL-054 Phases 1+2+3+5 (this closes the BL-054 vertical)
+
+Phase 4 of BL-054 — single shell plugin with three internal tabs over a sidebar leaf. Default-off in the catalog (the surface is OS-template-specific and would clutter the activity bar for plain forges).
+
+- **Usage tab.** Pure projection over `com.nexus.ai::activity_list`. New `aggregateUsage(entries, dayWindow=14, now)` produces per-surface totals (split by ok / error / cancelled, sorted by total desc) plus a backfilled per-day rollup so gap days render as zero bars rather than missing slots. `bySurface` rendered as bar chart with surface label / accent bar / count / error chip; `byDay` rendered as a 14-bar stack with the error count layered on top of the ok count. Footnote spells out the deferral: token / cost columns absent because the activity schema doesn't carry that data today.
+- **Automation tab.** Reads `com.nexus.workflow::list` and filters to `triggerType ∈ {cron, file_event}` — the BL-054 §1 definition of "foundation" workflows. Per-row card shows the workflow slug, trigger-type chip, description, step count, and a "Run now" button that dispatches `com.nexus.workflow::run` with a notification on success/failure. Footnote: last-run / next-fire columns deferred until `com.nexus.workflow::run_history` lands (Phase 4 follow-up — needs a persisted-run schema).
+- **Vault feed tab.** Subscribes to the BL-052 universal `com.nexus.activity.appended` topic in the activate hook. Filters to `surface === 'file'` plus path-prefix match against the OS-template roots (`raw/`, `wiki/`, `output/`, `projects/`, `ops/`). New `isVaultPath(relpath)` exported from the plugin entry point and unit-tested independently — handles `./` prefix and Windows separators. Store dedupes by entry id (the AI recorder's twin-publish from BL-052 means a single event can hit the bus twice). 200-entry cap on the feed so a noisy forge doesn't blow the renderer up.
+- **Single-plugin shape.** The BL-054 plan offered "three plugins or one plugin with tabs" as an open call — chose the single-plugin shape because the three tabs share state (workspace open/close lifecycle, kernel availability check) and the activity bar already has 13+ items; adding three more would crowd the rail.
+- **Activity-bar entry.** Icon `activity`, priority 47 (sits between Skills @ 40 / Architecture @ 45 / Chat @ 50 so the OS-mode surfaces cluster).
+
+**Tested**: 7 new unit cases in `observability.test.ts` (aggregator empty / per-surface / backfill / latest-tracking; `isVaultPath` positive / negative / `./` and Windows-sep tolerance). `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell test` 951/951 pass; lint 0 errors.
+
+**Definition of done coverage** (per Phase 4 §6 of the companion plan):
+- ✅ All three panels registered as a single shell plugin and accessible from the activity bar
+- ✅ Usage panel renders without Anthropic Console API (local activity-log parsing sufficient)
+- ⏭ "Automation panel shows last-run for at least one triggered workflow" — deferred; `com.nexus.workflow::run_history` doesn't exist yet. Tab still surfaces every foundation workflow with manual Run, just without the recency column.
+- ✅ Vault feed subscribes to the existing file-change bus topic
+
+**Deferred / follow-ups:**
+- Tokens / cost columns in usage — requires extending `ActivityEntry` with `input_tokens` / `output_tokens` / `cost_usd` fields (each emitter would have to fill them; AI providers do today, non-AI emitters wouldn't).
+- `com.nexus.workflow::run_history` handler — would need a persisted run-log under `.forge/.workflows/run_history.json` (or similar) plus the executor change to write into it. Adds maybe 0.5–1d.
+- Anthropic Console API integration for billing-grade numbers — requires an org-scoped API key in shell settings; out of scope for the local-first slice.
+
+**BL-054 status**: Closed. Five phases all shipped (1, 1-followup, 2, 3, 4, 5). The OS Mode vertical is end-to-end functional today: scaffold an OS forge → enable Architecture + Observability panels → run the OS Setup skill → architecture.md populates → drift detector + usage rollup + vault feed all light up.
+
 ### BL-054 Phase 5: OS Setup skill ✅ (2026-05-07)
 
 **Source**: BL-054 companion plan, Phase 5 — [BL-054-agentic-os-mode.md](BL-054-agentic-os-mode.md) §Phase 5
