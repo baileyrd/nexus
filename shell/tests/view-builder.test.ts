@@ -3,3 +3,4 @@
  * the BL-067 view-builder tests.
  */
 import '../src/plugins/nexus/viewBuilder/layoutsStore.test.ts'
+import '../src/plugins/nexus/viewBuilder/exporter.test.ts'

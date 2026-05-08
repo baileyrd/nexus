@@ -309,10 +309,14 @@ The theme system already has live reload; the only new backend work is a `previe
 
 ### BL-067: Shell View Builder — visual layout composer for plugin panels
 
-> **Phase 1 closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Programmatic save / switch / delete of named workspace layouts under `<forge>/.forge/layouts/<name>.layout.json`, a sidebar panel that lists saved layouts + the live layout snapshot + the registered viewType inventory, and three commands (`nexus.viewBuilder.show` / `.saveLayoutAs` / `.switchLayout`). The full WYSIWYG drag-drop canvas + "Export as plugin" code generator are deferred to Phase 2.
+> **Phase 1 closed 2026-05-07** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Programmatic save / switch / delete of named workspace layouts under `<forge>/.forge/layouts/<name>.layout.json`, a sidebar panel that lists saved layouts + the live layout snapshot + the registered viewType inventory, and three commands (`nexus.viewBuilder.show` / `.saveLayoutAs` / `.switchLayout`).
+>
+> **Phase 2a + 2d closed 2026-05-08** — see [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md). Catalog became click-to-add (per-row inline `left | right | bottom | main` picker dispatching `workspace.ensureLeafOfType` + `revealLeaf`); per-leaf `×` close button on every snapshot row routing through `workspace.detachLeaf`; saved-layout rows gained an **Export** action that writes `manifest.toml` + `index.ts` + `<slug>.layout.json` + `README.md` under `<forge>/.forge/exports/<slug>/`. The emitted index.ts is a first-party-style shell-plugin source (re-applies the snapshot via `api.workspace.applySnapshot`); the README documents both install paths (drop the layout JSON into a forge to import via the View Builder UI vs. drop the directory into `shell/src/plugins/nexus/` for a baked-in build). Community-plugin / marketplace install (option C in the README) is gated on WI-44.
+>
+> **Phase 2b + 2c (deferred)**: per-panel options UI (move-between-docks, dock size/collapse on the snapshot rows) and the full WYSIWYG drag-drop canvas with drag-divider resize. Both need new `workspace.moveLeafToDock`-class mutators and pointer-event plumbing across docks.
 
 **Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
-**Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2 (canvas + export) ~1.5 weeks (deferred)
+**Effort**: Phase 1 ~1 day _(shipped)_ · Phase 2a + 2d ~1 day _(shipped)_ · Phase 2b + 2c ~1 week (deferred)
 **Crates**: `ExtensionHost` (JS introspection API), new `shell/src/plugins/nexus/viewBuilder/`
 **Related**: ADR 0011 (plugin-first shell), BL-053 (forge visual target), BL-054 (Nexus OS Mode)
 
@@ -320,11 +324,12 @@ Every panel, sidebar, and pane in the Nexus shell is a registered plugin contrib
 
 **Phase 1 closed.** The introspection API was already there — `workspace.serialize()` produces a `WorkspaceJSON` and `workspace.hydrate(json)` round-trips it cleanly — so the bottleneck was a programmatic save/load surface, not new infrastructure. The View Builder ships as `nexus.viewBuilder` (default-on) with a sidebar panel that lists saved layouts, surfaces the live layout snapshot, and lists every registered viewType in a read-only inventory. `workspace.layoutSnapshot()` and `workspace.applySnapshot(json)` are the documented introspection / write-back surface.
 
-**Phase 2 (deferred):**
-- WYSIWYG canvas with drag-to-reorder + drag-divider-to-resize
-- Per-panel configuration UI (default size, dock side, float vs docked)
-- "Export as plugin" code generator that emits a `manifest.toml` + `index.ts` contribution block
-- Plugin-contribution palette as an interactive add-panel surface (today the inventory is read-only)
+**Phase 2 progress:**
+- ✅ Plugin-contribution palette as an interactive add-panel surface (Phase 2a)
+- ✅ Per-leaf close affordances on the live snapshot (Phase 2a)
+- ✅ "Export as plugin" code generator that emits `manifest.toml` + `index.ts` + layout JSON + README (Phase 2d)
+- ⬜ WYSIWYG canvas with drag-to-reorder + drag-divider-to-resize (Phase 2c — deferred)
+- ⬜ Per-panel configuration UI (default size, dock side, float vs docked) (Phase 2b — deferred)
 
 ---
 

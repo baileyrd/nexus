@@ -28,6 +28,7 @@ import {
   saveLayout,
   useLayoutsStore,
 } from './layoutsStore'
+import { buildExportedFiles, writeExportedPlugin } from './exporter'
 
 const VIEW_ID = 'nexus.viewBuilder.view'
 const VIEW_TYPE = 'viewBuilder'
@@ -67,6 +68,12 @@ export const viewBuilderPlugin: Plugin = {
       await refreshLayouts(api.kernel)
     }
 
+    const handleExport = async (name: string): Promise<string> => {
+      const layout = await loadLayout(api.kernel, name)
+      const files = buildExportedFiles(name, layout)
+      return writeExportedPlugin(api.kernel, files)
+    }
+
     const refresh = () => {
       void refreshLayouts(api.kernel).catch((err) => {
         clientLogger.warn('[nexus.viewBuilder] refresh failed', err)
@@ -78,6 +85,7 @@ export const viewBuilderPlugin: Plugin = {
         onApply: handleApply,
         onSave: handleSave,
         onDelete: handleDelete,
+        onExport: handleExport,
         onRefresh: refresh,
       })
 

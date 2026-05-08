@@ -8,6 +8,35 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-067 Phase 2a + 2d: View Builder — interactive add/remove panel + export-as-plugin ✅ (2026-05-08)
+
+**Source**: Idea capture (2026-05-06) — full doc in [BL-067-068-builders.md](BL-067-068-builders.md)
+**Files**: `shell/src/plugins/nexus/viewBuilder/ViewBuilderView.tsx` (catalog click-to-add + per-leaf close + export button + `useLayoutVersion` hook); `shell/src/plugins/nexus/viewBuilder/index.ts` (wire `handleExport`); new `shell/src/plugins/nexus/viewBuilder/exporter.ts`; new `shell/src/plugins/nexus/viewBuilder/exporter.test.ts`; `shell/tests/view-builder.test.ts` (re-export the new test file)
+**Related**: BL-067 Phase 1 (the foundation this layers on), ADR 0011 (plugin-first shell), WI-44 (community marketplace — gates the export's runtime install path)
+
+Phase 2a closes the interactive-add gap and the per-leaf close gap on the Phase 1 panel; Phase 2d closes the export-as-plugin code generator. The remaining Phase 2 work — WYSIWYG drag-drop canvas (2c) and per-panel options UI (2b) — both want new `workspace.moveLeafToDock`-class mutators and stayed deferred.
+
+- **Catalog became click-to-add (2a).** Each viewType row in the registered-views section is now a button. Click expands an inline `left | right | bottom | main` picker; selecting a side calls `workspace.ensureLeafOfType(type, side)` then `workspace.revealLeaf` and shows a one-line feedback chip. The row exposes `aria-expanded` for accessibility. Singletons (the AI panel, the workflow panel, etc.) reveal the existing instance instead of creating a duplicate per `ensureLeafOfType` semantics — the catalog UI documents this in a sub-line so the behaviour isn't a surprise.
+- **Per-leaf close affordance (2a).** Every leaf row in the live snapshot tree gained a `×` button (`leafCloseButton` style). Clicking it looks up the live `Leaf` via `workspace.leaves.get(id)` and calls `workspace.detachLeaf`. A `useLayoutVersion()` hook at the top of `ViewBuilderView` subscribes to the `layout-change` event and forces a re-render on every workspace mutation — without it the in-place tree mutations would leave the snapshot section showing the stale tree until something else triggered a render.
+- **Saved-layout rows gained an Export button (2d).** Clicking it loads the saved JSON, runs the four-file generator, and writes them under `<forge>/.forge/exports/<slug>/` via `com.nexus.storage::write_file`. The feedback chip quotes the destination directory.
+- **`exporter.ts` — pure four-file generator (2d).** `buildExportedFiles(name, layout)` returns an `ExportedFiles` record with `manifest.toml`, `index.ts`, `<slug>.layout.json`, and `README.md`. `slugify` lowercases, swaps whitespace for `-`, strips disallowed characters, collapses runs of `-`, and falls back to `'layout'` for empty input. `camelize` joins slug parts and prefixes `_` when the result starts with a digit, so a `2024-archive` slug emits `_2024Archive` rather than an invalid identifier. The TOML renderer escapes `"` / `\` and collapses CR/LF to a single space so a name like `Hard "name" \ with \quotes` round-trips through the manifest's `name = "..."` field. The emitted index.ts is a first-party-style shell-plugin source: imports `Plugin` / `PluginAPI` from `'../../../types/plugin'`, imports the layout JSON as a sibling module, registers a `<slug>.apply` command on activate that calls `api.workspace.applySnapshot(layout)`. The README spells out three install paths: A — drop the layout JSON into another forge's `.forge/layouts/` and apply via the View Builder UI (works today); B — drop the directory into `shell/src/plugins/nexus/<slug>/` for a baked-in build; C — community-plugin install (deferred until WI-44 marketplace).
+- **`writeExportedPlugin` — storage-write companion (2d).** Best-effort `create_dir` first (swallowed on `AlreadyExists` so a re-export over an existing directory works without surprise), then four `write_file` calls with UTF-8-encoded byte arrays. Returns the forge-relative directory path so the UI can quote it back to the user.
+- **Two-file storage flow.** The export deliberately doesn't go through any new IPC verb. The export directory lives under the forge so it's git-trackable + portable + visible in the existing file tree. Moving the export root to `<forge>/<...>` (outside `.forge/`) was considered but rejected — the `.forge/` namespace is the correct home for tool-generated artifacts that aren't first-class user content.
+
+**Tested**: `pnpm --filter nexus-shell test` 1020/1020 (was ~1007, +13 for the new exporter suite); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` clean for the new files (no errors; pre-existing warnings unchanged). 13 new tests in `exporter.test.ts`: slug / camelCase helpers (4), `buildExportedFiles` shape + cross-file consistency (5), TOML escaping (2), index.ts contract pinning (1), README path coverage (1), `writeExportedPlugin` IPC sequence + UTF-8 encoding + `AlreadyExists` tolerance (3). Existing 12 layoutsStore tests still pass.
+
+**Definition of done coverage** (against the original BL-067 §What the user can do):
+- ✅ See the live layout rendered alongside the actual shell (Phase 1)
+- ✅ Add plugin contributions from a searchable palette of registered panels — Phase 2a delivers click-to-add with a dock-side picker; the search UI lives a layer up (the catalog is alphabetical and small, ~20 entries today)
+- ⏸ Configure panel options — default width / height, minimum size, dock side, float vs docked (Phase 2b — deferred)
+- ✅ Name and save layouts and switch between them (Phase 1 + the View Builder commands)
+- ✅ Export as a plugin contribution block (Phase 2d — three install paths documented in the emitted README; runtime community-plugin install gated on WI-44)
+
+**Deferred from the BL-067 design doc**:
+- WYSIWYG drag-drop canvas with drag-divider resize (Phase 2c) — needs HTML5 DnD across docks, conflicts with existing tab DnD, and would benefit from a `workspace.moveLeafToDock` mutator the store doesn't expose yet.
+- Per-panel configuration UI (Phase 2b) — same `moveLeafToDock` blocker plus a small form surface per leaf.
+- Search box on the catalog when the registered-views list grows past ~50 entries — alphabetical scroll is fine at the current size.
+
 ### BL-053 Phase 4: status pills + tree dots ✅ (2026-05-07)
 
 **Source**: Forge Color System mockup — full plan in [BL-053-forge-visual-target.md](BL-053-forge-visual-target.md)

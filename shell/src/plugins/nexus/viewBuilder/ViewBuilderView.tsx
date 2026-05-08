@@ -13,16 +13,25 @@
 //      currently registered in `ViewRegistry`. The drag-drop /
 //      "add panel" surface is a deferred BL-067 follow-up.
 
-import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  useState,
+  type ReactElement,
+} from 'react'
 
 import { useViewStore, workspace } from '../../../workspace'
 import type {
   SerializedFloating,
+  SerializedLeaf,
   SerializedNode,
   SerializedSplit,
   SerializedTabs,
 } from '../../../workspace/types'
 import { useLayoutsStore, normaliseName } from './layoutsStore'
+
+type DockSide = 'left' | 'right' | 'bottom' | 'main'
 
 interface Props {
   /** Apply the saved layout (by name). The plugin wires this to a
@@ -32,6 +41,9 @@ interface Props {
   onSave: (name: string) => Promise<void>
   /** Delete the named layout from disk. */
   onDelete: (name: string) => Promise<void>
+  /** Export the saved layout (by name) as a plugin directory under
+   *  `<forge>/.forge/exports/<slug>/`. */
+  onExport: (name: string) => Promise<string>
   /** Refresh the saved-layouts list. */
   onRefresh: () => void
 }
@@ -40,8 +52,14 @@ export function ViewBuilderView({
   onApply,
   onSave,
   onDelete,
+  onExport,
   onRefresh,
 }: Props): ReactElement {
+  // Re-render when the live layout mutates (close button, "Add panel"
+  // click, or any other workspace surgery). The snapshot is recomputed
+  // in `CurrentLayoutSection` on every render, so a forced re-render
+  // is enough — no zustand selector indirection needed.
+  useLayoutVersion()
   return (
     <div
       style={{
@@ -61,11 +79,39 @@ export function ViewBuilderView({
         onApply={onApply}
         onSave={onSave}
         onDelete={onDelete}
+        onExport={onExport}
         onRefresh={onRefresh}
       />
       <ViewTypesSection />
     </div>
   )
+}
+
+// ── Workspace-mutation re-render hook ───────────────────────────────────────
+
+/** Force a re-render whenever the workspace fires `layout-change`.
+ *  Mirrors `useLayoutVersion` in `WorkspaceRenderer.tsx` — tree
+ *  mutations are in-place so we can't rely on object identity. */
+function useLayoutVersion(): void {
+  const [, force] = useReducer((x: number) => x + 1, 0)
+  useEffect(() => {
+    const off = workspace.on('layout-change', () => force())
+    return off
+  }, [])
+}
+
+// ── Snapshot-tree leaf actions (Phase 2a) ───────────────────────────────────
+
+/** Look up a live Leaf by its serialized id and detach it. Returns
+ *  `false` when the id is missing from the live workspace (stale
+ *  snapshot — the snapshot is captured fresh on every render so this
+ *  should be rare; we surface the no-op to keep the UI from going
+ *  silent on a race). */
+async function closeLeafById(leafId: string): Promise<boolean> {
+  const leaf = workspace.leaves.get(leafId)
+  if (!leaf) return false
+  await workspace.detachLeaf(leaf)
+  return true
 }
 
 // ── Current layout ──────────────────────────────────────────────────────────
@@ -134,16 +180,12 @@ function NodeTree({ node, depth }: { node: SerializedNode; depth: number }): Rea
           tabs ({tabs.leaves.length})
         </span>
         {tabs.leaves.map((leaf, i) => (
-          <div key={leaf.id} style={{ paddingLeft: (depth + 1) * 12 }}>
-            <span
-              style={{
-                color: i === tabs.activeIndex ? 'var(--interactive-accent)' : 'inherit',
-              }}
-            >
-              {leaf.viewState.type}
-              {i === tabs.activeIndex ? ' ●' : ''}
-            </span>
-          </div>
+          <LeafRow
+            key={leaf.id}
+            leaf={leaf}
+            depth={depth + 1}
+            active={i === tabs.activeIndex}
+          />
         ))}
       </div>
     )
@@ -155,6 +197,55 @@ function NodeTree({ node, depth }: { node: SerializedNode; depth: number }): Rea
     return <NodeTree node={node.child} depth={depth} />
   }
   return <div style={indent}>leaf {(node as { id: string }).id}</div>
+}
+
+function LeafRow({
+  leaf,
+  depth,
+  active,
+}: {
+  leaf: SerializedLeaf
+  depth: number
+  active: boolean
+}): ReactElement {
+  const [busy, setBusy] = useState(false)
+  return (
+    <div
+      style={{
+        paddingLeft: depth * 12,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+      }}
+    >
+      <span
+        style={{
+          flex: 1,
+          color: active ? 'var(--interactive-accent)' : 'inherit',
+        }}
+      >
+        {leaf.viewState.type}
+        {active ? ' ●' : ''}
+      </span>
+      <button
+        type="button"
+        title="Close panel"
+        aria-label={`Close ${leaf.viewState.type}`}
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true)
+          try {
+            await closeLeafById(leaf.id)
+          } finally {
+            setBusy(false)
+          }
+        }}
+        style={leafCloseButton}
+      >
+        ×
+      </button>
+    </div>
+  )
 }
 
 function FloatingList({ floating }: { floating: SerializedFloating[] }): ReactElement {
@@ -174,6 +265,7 @@ function SavedLayoutsSection({
   onApply,
   onSave,
   onDelete,
+  onExport,
   onRefresh,
 }: Props): ReactElement {
   const layouts = useLayoutsStore((s) => s.layouts)
@@ -237,6 +329,21 @@ function SavedLayoutsSection({
       }
     },
     [onDelete, showFeedback],
+  )
+
+  const handleExport = useCallback(
+    async (name: string) => {
+      setBusy(`export:${name}`)
+      try {
+        const dir = await onExport(name)
+        showFeedback(`Exported "${name}" to ${dir}`, 'ok')
+      } catch (err) {
+        showFeedback(err instanceof Error ? err.message : String(err), 'error')
+      } finally {
+        setBusy(null)
+      }
+    },
+    [onExport, showFeedback],
   )
 
   return (
@@ -334,6 +441,15 @@ function SavedLayoutsSection({
               </button>
               <button
                 type="button"
+                onClick={() => void handleExport(row.name)}
+                disabled={busy != null}
+                title="Export as plugin"
+                style={subtleButton}
+              >
+                Export
+              </button>
+              <button
+                type="button"
                 onClick={() => void handleDelete(row.name)}
                 disabled={busy != null}
                 style={dangerButton}
@@ -354,13 +470,47 @@ function ViewTypesSection(): ReactElement {
   const creators = useViewStore((s) => s.creators)
   // Stable sort so the list isn't insertion-ordered on every render.
   const types = [...creators.keys()].sort()
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<string | null>(null)
+
+  const handleAdd = useCallback(
+    async (type: string, side: DockSide) => {
+      setBusy(`${type}:${side}`)
+      try {
+        const leaf = await workspace.ensureLeafOfType(type, side)
+        workspace.revealLeaf(leaf)
+        setFeedback(`Added '${type}' to ${side}.`)
+        setExpanded(null)
+      } catch (err) {
+        setFeedback(err instanceof Error ? err.message : String(err))
+      } finally {
+        setBusy(null)
+      }
+    },
+    [],
+  )
+
   return (
     <section>
-      <h3 style={sectionHeading}>Registered views ({types.length})</h3>
+      <h3 style={sectionHeading}>Add panel ({types.length} view types)</h3>
       <div style={{ fontSize: '0.85em', color: 'var(--text-muted)', marginBottom: 4 }}>
-        Read-only inventory. Drag-to-add and per-panel options land in a
-        future pass.
+        Click a view to add it. Singleton view types reveal the existing
+        instance instead of creating a duplicate.
       </div>
+      {feedback != null && (
+        <div
+          style={{
+            padding: '4px 6px',
+            marginBottom: 6,
+            fontSize: '0.85em',
+            background: 'var(--background-secondary)',
+            borderRadius: 3,
+          }}
+        >
+          {feedback}
+        </div>
+      )}
       <ul
         style={{
           listStyle: 'none',
@@ -378,7 +528,49 @@ function ViewTypesSection(): ReactElement {
               borderBottom: '1px solid var(--background-modifier-border)',
             }}
           >
-            {t}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => setExpanded(expanded === t ? null : t)}
+                disabled={busy != null}
+                style={{
+                  ...subtleButton,
+                  flex: 1,
+                  textAlign: 'left',
+                  fontFamily: 'inherit',
+                  border: 'none',
+                  padding: '2px 4px',
+                }}
+                aria-expanded={expanded === t}
+              >
+                {t}
+              </button>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.85em' }}>
+                {expanded === t ? '▾' : '+'}
+              </span>
+            </div>
+            {expanded === t && (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 4,
+                  padding: '4px 4px 6px',
+                  fontFamily: 'var(--font-interface)',
+                }}
+              >
+                {(['left', 'right', 'bottom', 'main'] as const).map((side) => (
+                  <button
+                    key={side}
+                    type="button"
+                    disabled={busy != null}
+                    onClick={() => void handleAdd(t, side)}
+                    style={subtleButton}
+                  >
+                    {side}
+                  </button>
+                ))}
+              </div>
+            )}
           </li>
         ))}
       </ul>
@@ -434,4 +626,15 @@ const dangerButton: React.CSSProperties = {
   fontSize: '0.8em',
   color: 'var(--text-error, #d04040)',
   cursor: 'pointer',
+}
+
+const leafCloseButton: React.CSSProperties = {
+  background: 'transparent',
+  border: 0,
+  padding: '0 4px',
+  fontSize: '1em',
+  lineHeight: 1,
+  color: 'var(--text-muted)',
+  cursor: 'pointer',
+  fontFamily: 'var(--font-interface)',
 }
