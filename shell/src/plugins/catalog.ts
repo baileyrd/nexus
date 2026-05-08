@@ -356,6 +356,14 @@ export const DEFAULT_OFF_PLUGINS: PluginEntry[] = [
     load: () => import('./nexus/bookmarks').then(m => m.bookmarksPlugin),
   },
   {
+    id: 'nexus.healthPanel', name: 'Kernel Health',
+    version: '0.1.0', core: false,
+    activationEvents: ['onCommand:nexus.healthPanel.focus', 'onView:health-panel'],
+    description:
+      'BL-093 follow-up — kernel health panel. Polls com.nexus.security::metrics_snapshot every 5s and surfaces IPC counts + p50/p95/p99 latency, capability denials, event-bus queue depth, and the metrics-dropped sentinel. Default-off; targeted at developers triaging plugin behaviour.',
+    load: () => import('./nexus/healthPanel').then(m => m.healthPanelPlugin),
+  },
+  {
     id: 'nexus.searchPanel', name: 'Search in Files',
     version: '0.1.0', core: false,
     activationEvents: ['onCommand:nexus.searchPanel.focus', 'onView:search-panel'],

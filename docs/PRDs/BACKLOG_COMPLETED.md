@@ -8,6 +8,30 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-093 follow-up: shell health panel ✅ (2026-05-08)
+
+**Source**: BL-093 closure note (2026-05-06) — explicit deferral: "Prometheus scrape endpoint and shell health panel still deferred"
+**Files**: `shell/src/plugins/nexus/healthPanel/index.tsx` (new sidebar plugin); `shell/src/plugins/nexus/healthPanel/metricsFormat.ts` (pure formatter helpers — counter/duration formatting, IPC / event-bus / capability row-builders); `shell/src/plugins/nexus/healthPanel/metricsFormat.test.ts` (+13 unit tests); `shell/src/plugins/catalog.ts` (registry entry); `shell/tests/health-panel.test.ts` (re-export wrapper for the default `tests/*.test.ts` glob)
+**Related**: BL-093 (the in-process metrics registry + `com.nexus.security::metrics_snapshot` IPC handler)
+
+The BL-093 closure note flagged the shell health panel and a Prometheus scrape endpoint as the two open items. This pass closes the panel half — the snapshot IPC verb already exists, all that was missing was a UI consumer.
+
+- **Sidebar leaf, default-off, lazy-activated.** Reachable via `nexus.healthPanel.focus` command (no default keybinding to avoid stepping on existing chord conventions). Activation events `onCommand:nexus.healthPanel.focus` + `onView:health-panel` so the plugin doesn't load until the user actually opens the panel — a triage tool that shouldn't add boot cost for users who don't need it.
+- **5 s polling cadence.** Matches the snapshot's "cheap to take per IPC handler call" design note in `crates/nexus-kernel/src/metrics.rs`. Kernel-availability gate prevents poll-during-boot errors. Errors during a poll tick render in the header without blanking the body — a transient hiccup keeps the prior snapshot visible.
+- **Three triage gauges + three sorted tables.** Gauges show event-bus queue depth, total capability denials across all plugins, and the metrics-dropped-total sentinel; the latter two flip to red when non-zero. IPC table joins counter rows with their matching duration histogram, sorts by total desc (noisiest path first), error counts highlight in red. Capability table sorts denials first (the most actionable cell). Event-bus table sorts publish counts desc.
+- **Pure formatter helpers.** `formatDuration` picks the right unit (ns / µs / ms / s) based on magnitude; `formatCount` uses `Intl.NumberFormat` with thousands grouping. Row-builders walk the kernel's `<plugin>::<command>::<status>` flat-string keys, parse the trailing `::status` token, and bucket into typed row records. Histograms without a matching counter row still surface (with zero counts) so a latency reading isn't lost. Malformed keys are skipped defensively.
+
+**Tested**: `pnpm --filter nexus-shell test` 1102/1102 (was 1089, +13); `pnpm --filter nexus-shell typecheck` clean; `pnpm --filter nexus-shell lint` clean (preexisting warnings only). The 13 new unit tests cover:
+- `formatDuration` — zero / NaN / negative → em-dash; sub-µs / µs / ms / s unit picking with one-decimal precision (3 tests).
+- `formatCount` — thousands grouping; NaN defensive (2 tests).
+- `buildIpcRows` — joins counter + duration rows, sorts by total desc, histogram-without-counter still surfaces, malformed keys skipped, empty input → empty array, non-ok statuses (capability_denied / not_found / timeout / error) all bucket into errors (5 tests).
+- `buildEventBusRows` — sorted by total desc with alphabetical tiebreak (1 test).
+- `buildCapabilityRows` — granted vs denied bucketed; rows with denials sort first; malformed keys skipped (2 tests).
+
+**Definition of done coverage**: ✅ shell health panel shipped. Prometheus scrape endpoint still deferred — would need a separate HTTP service crate, and the in-process snapshot panel covers the immediate developer-triage use case.
+
+---
+
 ### BL-066 follow-up: Spawn / Stop / Restart icons on SavedCommandsView ✅ (2026-05-08)
 
 **Source**: BL-066 closure note (2026-05-06) — explicit deferral: "Stop / Restart / Dismiss deferred until BL-055 lands a `run_saved` handler with managed-session state"
