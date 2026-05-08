@@ -21,7 +21,7 @@
 
 ### Follow-up (not blocking)
 - The DOD originally said "`render` resolves `depends_on`", but in-tree the backend factored composition into a separate `compose` handler — render handles parameter substitution, compose handles dependency layering. That's the better factoring (orthogonal concerns) and the agent uses both; the spec line was speculative.
-- Word-level diff inside the merged body would help users spot which ancestor contributed each line; today the merged body is printed verbatim.
+- ✅ **Per-fragment attribution in the merged body** — shipped 2026-05-08. The "Merged body" details panel now slices on the kernel's `## Skill: <name> [<id>]` markers and renders each fragment's heading + body in its own `<pre>` block tinted by a deterministic 8-step hue palette (left-border accent + faint background wash). New `splitMergedBody` / `fragmentTint` helpers in `shell/src/plugins/nexus/skills/composeRender.ts` plus a `MergedBodyView` component in `SkillsView.tsx`. Defensive fall-throughs: empty input / unrecognised body / missing fragments all degrade to a single unattributed span. 9 new tests cover the round-trip, heading-only fragments, missing-fragment skip, and palette determinism. The original "word-level diff" framing was a misnomer — what users want is attribution (which ancestor contributed each line), not a between-versions diff.
 - Conflicts are non-fatal warnings only — there's no "auto-resolve" affordance. If clashing parameter defaults become a real pain we can add a pin-this-version chip.
 
 ---

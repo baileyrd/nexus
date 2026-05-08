@@ -9,6 +9,7 @@ import {
 } from './skillsStore'
 import { SkillEditor } from './SkillEditor'
 import { Icon } from '../../../icons'
+import { splitMergedBody, fragmentTint } from './composeRender'
 
 interface SkillsViewProps {
   onRefresh: () => void
@@ -1028,27 +1029,61 @@ function ComposePanel({ rootId, composing, result, error }: ComposePanelProps) {
         >
           Merged body
         </summary>
-        <pre
-          style={{
-            margin: '6px 0 0',
-            padding: 8,
-            background: 'var(--background-primary)',
-            border: '1px solid var(--divider-color)',
-            borderRadius: 'var(--radius-s)',
-            fontFamily: 'var(--font-monospace, monospace)',
-            fontSize: 11,
-            lineHeight: 1.45,
-            color: 'var(--text-muted)',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            maxHeight: 280,
-            overflow: 'auto',
-          }}
-        >
-          {result.mergedBody}
-        </pre>
+        <MergedBodyView result={result} />
       </details>
     </ComposeShell>
+  )
+}
+
+function MergedBodyView({ result }: { result: ComposeResult }) {
+  const spans = splitMergedBody(result.mergedBody, result.fragments)
+  const indexById = new Map(result.fragments.map((f, i) => [f.id, i]))
+  return (
+    <div
+      data-testid={`skill-compose-merged-${result.rootId}`}
+      style={{
+        margin: '6px 0 0',
+        background: 'var(--background-primary)',
+        border: '1px solid var(--divider-color)',
+        borderRadius: 'var(--radius-s)',
+        fontFamily: 'var(--font-monospace, monospace)',
+        fontSize: 11,
+        lineHeight: 1.45,
+        color: 'var(--text-muted)',
+        maxHeight: 280,
+        overflow: 'auto',
+      }}
+    >
+      {spans.map((span, i) => {
+        const tint =
+          span.fragmentId !== null
+            ? fragmentTint(indexById.get(span.fragmentId) ?? 0)
+            : null
+        return (
+          <pre
+            key={i}
+            data-fragment-id={span.fragmentId ?? ''}
+            style={{
+              margin: 0,
+              padding: '4px 8px 4px 10px',
+              borderLeft: tint
+                ? `3px solid ${tint.border}`
+                : '3px solid transparent',
+              background: tint?.background ?? 'transparent',
+              fontFamily: 'inherit',
+              fontSize: 'inherit',
+              lineHeight: 'inherit',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontWeight: span.isHeading ? 600 : 400,
+              color: span.isHeading ? 'var(--text-normal)' : 'inherit',
+            }}
+          >
+            {span.text}
+          </pre>
+        )
+      })}
+    </div>
   )
 }
 

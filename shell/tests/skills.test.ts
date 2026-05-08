@@ -9,3 +9,4 @@
  * imported file are registered as subtests of this file.
  */
 import '../src/plugins/nexus/skills/skillsStore.test.ts'
+import '../src/plugins/nexus/skills/composeRender.test.ts'
