@@ -13,6 +13,9 @@ crates/*/bindings/
 sweep.timestamp
 .DS_Store
 *.swp
+# Windows alternate data streams surfaced by WSL
+*:Zone.Identifier
+*Zone.Identifier
 # LibreOffice lockfiles
 .~lock.*#
 .superpowers/
