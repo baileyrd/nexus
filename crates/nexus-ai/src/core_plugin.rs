@@ -742,6 +742,7 @@ async fn handle_status(
         .map_err(|e| exec_err(format!("status: vectorstore_count: {e}")))?;
     let embedding_model = embed_cfg.as_ref().and_then(resolve_embedding_model);
     let embedding_dimension = embed_cfg.as_ref().and_then(resolve_embedding_dimension);
+    let tls_pinned = tls_pinning_effective(ai_cfg.as_ref());
     Ok(serde_json::json!({
         "ai_provider": ai_cfg.as_ref().map(|c| c.provider.clone()),
         "ai_model": ai_cfg.as_ref().and_then(|c| c.model.clone()),
@@ -749,7 +750,20 @@ async fn handle_status(
         "embedding_model": embedding_model,
         "embedding_dimension": embedding_dimension,
         "indexed_chunks": count,
+        "tls_pinned": tls_pinned,
     }))
+}
+
+/// BL-102 follow-up — mirrors the gate in
+/// [`crate::http_client::build_client`] so the wire field tracks the
+/// HTTP client that actually got built. Pinning is on iff the AI
+/// config flag is set OR `NEXUS_TLS_PINNING=1` is in the environment.
+fn tls_pinning_effective(ai_cfg: Option<&AiConfig>) -> bool {
+    let cfg_flag = ai_cfg.is_some_and(|c| c.tls_pinning_enabled);
+    let env_opt_in = std::env::var("NEXUS_TLS_PINNING")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    cfg_flag || env_opt_in
 }
 
 /// AIG-05 — resolve the embedding model identifier for status
@@ -3117,5 +3131,37 @@ mod semantic_search_dispatch_tests {
             .unwrap();
         let value = fut.await.unwrap();
         assert_eq!(value, serde_json::json!({ "entries": [] }));
+    }
+}
+
+#[cfg(test)]
+mod bl102_tls_pinning_status_tests {
+    //! BL-102 follow-up — `tls_pinning_effective` mirrors the
+    //! `build_client` gate so the `nexus ai status` `tls_pinned` field
+    //! tracks the live HTTP-client configuration.
+
+    use super::{tls_pinning_effective, AiConfig};
+
+    #[test]
+    fn config_flag_enables_pinning_regardless_of_env() {
+        let mut cfg = AiConfig::default();
+        cfg.tls_pinning_enabled = true;
+        // The OR with the env var means a `true` config flag short-
+        // circuits to `true`; this assertion holds whether or not the
+        // ambient `NEXUS_TLS_PINNING` is set.
+        assert!(tls_pinning_effective(Some(&cfg)));
+    }
+
+    #[test]
+    fn no_config_and_no_flag_means_pinning_off_unless_env_set() {
+        // Match build_client semantics: in the absence of the env
+        // opt-in, an unconfigured AI surface reports unpinned.
+        let env_opt_in = std::env::var("NEXUS_TLS_PINNING")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        assert_eq!(tls_pinning_effective(None), env_opt_in);
+
+        let cfg = AiConfig::default();
+        assert_eq!(tls_pinning_effective(Some(&cfg)), env_opt_in);
     }
 }

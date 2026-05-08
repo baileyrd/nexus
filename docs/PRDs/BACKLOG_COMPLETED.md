@@ -8,6 +8,26 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-102 follow-up: `tls_pinned` field in `nexus ai status` ✅ (2026-05-08)
+
+**Source**: BL-102 closure note (2026-05-06) — "The `nexus ai status` `tls_pinned` field is still TODO."
+**Files**: `crates/nexus-ai/src/core_plugin.rs` (new private `tls_pinning_effective` helper; `handle_status` reports `tls_pinned: bool`; +2 unit tests); `crates/nexus-cli/src/commands/ai.rs` (prints `TLS Pinned: yes/no`).
+**Related**: BL-102 (TLS pinning verifier), `nexus-ai/src/http_client.rs` (the `build_client` gate that this field mirrors)
+
+The original BL-102 work shipped the rustls verifier, the `KernelConfig::tls_pinning_enabled` flag, the `NEXUS_TLS_PINNING=1` env opt-in, and the per-provider HTTP client routing through `build_client`. The deferral named on the closure was the status surface — there was no headless way to read whether pinning was actually in effect.
+
+- **`tls_pinning_effective` helper.** Mirrors `build_client`'s gate verbatim: pinning is on iff `ai_cfg.tls_pinning_enabled` OR `NEXUS_TLS_PINNING=1` is in the environment. Single source of truth for the bool, callable from `handle_status` without round-tripping through a real `reqwest::Client`.
+- **`handle_status` adds `tls_pinned: bool`.** Additive change to the JSON snapshot; existing fields untouched. The shape stays back-compat — older CLIs read it via `unwrap_or(false)` fallback.
+- **CLI prints `TLS Pinned: yes/no`.** New line in `nexus ai status` after the existing Indexed Chunks / Index Status block. Old AI-plugin builds that don't ship the field render as `no` (the unwrap fallback) — same shape as the existing `indexed` fallback.
+
+**Tested**: `cargo test -p nexus-ai` 207/207; `cargo build -p nexus-ai -p nexus-cli` clean. Two new unit tests:
+- `config_flag_enables_pinning_regardless_of_env` — short-circuit assertion that holds whether or not `NEXUS_TLS_PINNING` is set in the test process.
+- `no_config_and_no_flag_means_pinning_off_unless_env_set` — env-aware assertion that the helper matches the runtime opt-in (avoids a serial-test gate).
+
+**Definition of done coverage**: ✅ The status surface now reports the BL-102 effective state. With pins seeded and the flag enabled, an operator can confirm `nexus ai status` shows `TLS Pinned: yes` — no need to read logs or grep config.
+
+---
+
 ### BL-096 follow-up: shell-side live-revoke through the consent modal ✅ (2026-05-08)
 
 **Source**: BL-096 closure note (2026-05-06) — "Dedicated kernel-internal IPC handler + shell 'Revoke' button deferred — the existing `set_plugin_granted_capabilities` Tauri command already covers the persisted-grant write path; live-mutation through the shell is a follow-up."

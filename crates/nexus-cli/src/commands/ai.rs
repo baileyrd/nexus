@@ -112,9 +112,15 @@ pub fn status(app: &mut App) -> Result<()> {
         .and_then(Value::as_u64)
         .unwrap_or(0);
 
+    let tls_pinned = response
+        .get("tls_pinned")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
     println!("AI Provider       : {ai_provider} ({ai_model})");
     println!("Embedding Provider: {embed_provider}");
     println!("Indexed Chunks    : {indexed}");
+    println!("TLS Pinned        : {}", if tls_pinned { "yes" } else { "no" });
 
     // FU-10 — surface the BL-041 indexing-daemon snapshot so a
     // headless `nexus ai status` reads as well as the shell badge.
