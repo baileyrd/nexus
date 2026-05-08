@@ -13,7 +13,6 @@ import {
   type PluginRow,
 } from './pluginsMgmtStore'
 import { PLUGINS_ENABLED_CONFIG_KEY } from '../../catalog'
-import { PLUGIN_LIST_CHANGED_EVENT } from '../../../host/pluginActivation'
 import { setApi } from './pluginsMgmtRuntime'
 import { CAPABILITY_INFO, parseManifestCapabilities } from './capabilityInfo'
 import {
@@ -261,16 +260,9 @@ export const pluginsMgmtPlugin: Plugin = {
   async activate(api: PluginAPI) {
     setApi(api)
 
-    // Seed rows whenever the plugin list changes. main.tsx fires
-    // PLUGIN_LIST_CHANGED_EVENT once after boot finishes registering
-    // `pluginList` / `communityPluginManifests` (which happens *after*
-    // every plugin's activate() has run); refreshPluginServices emits
-    // it again when mid-session enable/disable mutates the lists.
-    // Reading at activate-time would race main.tsx and warn on every
-    // boot — defer to the event instead.
-    api.events.on(PLUGIN_LIST_CHANGED_EVENT, () => {
-      usePluginsMgmtStore.getState().setRows(readRows(api))
-    })
+    // Seed rows once on activate. Refreshed on every open() below so
+    // plugin-state transitions since boot show up without a manual action.
+    usePluginsMgmtStore.getState().setRows(readRows(api))
 
     api.commands.register(COMMAND_OPEN, async () => {
       // WI-31: refresh grant cache before we render rows so the

@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexus — Complete Architecture</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2333;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent-blue: #58a6ff;
+    --accent-green: #3fb950;
+    --accent-purple: #bc8cff;
+    --accent-orange: #d29922;
+    --accent-red: #f85149;
+    --accent-teal: #39d4c0;
+    --accent-pink: #f778ba;
+    --accent-yellow: #e3b341;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', -apple-system, sans-serif; line-height: 1.5; }
+
+  .header { text-align: center; padding: 40px 20px 20px; border-bottom: 1px solid var(--border); }
+  .header h1 { font-size: 2rem; font-weight: 600; background: linear-gradient(135deg, var(--accent-teal), var(--accent-blue)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .header p { color: var(--text-muted); margin-top: 8px; font-size: 0.95rem; }
+  .header .badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; background: rgba(57,212,192,0.15); color: var(--accent-teal); border: 1px solid rgba(57,212,192,0.3); margin-top: 10px; }
+  .header .version { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; background: rgba(88,166,255,0.15); color: var(--accent-blue); border: 1px solid rgba(88,166,255,0.3); margin-top: 10px; margin-left: 8px; }
+
+  .tab-bar { display: flex; justify-content: center; gap: 4px; padding: 20px 20px 0; position: sticky; top: 0; background: var(--bg); z-index: 100; }
+  .tab-btn { padding: 10px 24px; border: 1px solid var(--border); border-bottom: none; border-radius: 8px 8px 0 0; background: var(--surface); color: var(--text-muted); cursor: pointer; font-size: 0.9rem; font-weight: 500; transition: all 0.2s; }
+  .tab-btn:hover { color: var(--text); background: var(--surface2); }
+  .tab-btn.active { color: var(--accent-teal); border-color: var(--accent-teal); border-bottom: 2px solid var(--bg); background: var(--bg); }
+
+  .tab-content { display: none; padding: 30px 20px 60px; max-width: 1400px; margin: 0 auto; }
+  .tab-content.active { display: block; }
+
+  .section-title { font-size: 1.3rem; font-weight: 600; margin: 30px 0 6px; }
+  .section-sub { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px; }
+
+  .arch-container { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 30px; margin-bottom: 30px; overflow-x: auto; }
+  svg text { font-family: 'Segoe UI', -apple-system, sans-serif; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 30px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-muted); }
+  .legend-swatch { width: 14px; height: 14px; border-radius: 3px; }
+
+  .details-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin-top: 24px; }
+  .detail-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .detail-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .detail-card h3 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .detail-card ul { list-style: none; padding: 0; }
+  .detail-card li { font-size: 0.82rem; color: var(--text-muted); padding: 3px 0; border-bottom: 1px solid rgba(48,54,61,0.5); }
+  .detail-card li:last-child { border-bottom: none; }
+  .detail-card li code { background: rgba(88,166,255,0.1); color: var(--accent-blue); padding: 1px 5px; border-radius: 3px; font-size: 0.78rem; }
+  .detail-card li .label { font-weight: 600; color: var(--text); }
+
+  .comparison-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+  .comparison-table th { background: var(--surface2); color: var(--text); padding: 10px 14px; text-align: left; font-size: 0.82rem; font-weight: 600; border-bottom: 2px solid var(--border); }
+  .comparison-table td { padding: 8px 14px; font-size: 0.82rem; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+  .comparison-table tr:hover td { background: rgba(88,166,255,0.03); }
+
+  .callout { background: var(--surface2); border-left: 3px solid var(--accent-teal); border-radius: 0 8px 8px 0; padding: 16px 20px; margin: 20px 0; }
+  .callout h4 { font-size: 0.9rem; color: var(--accent-teal); margin-bottom: 6px; }
+  .callout p { font-size: 0.85rem; color: var(--text-muted); }
+
+  .callout-blue { background: var(--surface2); border-left: 3px solid var(--accent-blue); border-radius: 0 8px 8px 0; padding: 16px 20px; margin: 20px 0; }
+  .callout-blue h4 { font-size: 0.9rem; color: var(--accent-blue); margin-bottom: 6px; }
+  .callout-blue p { font-size: 0.85rem; color: var(--text-muted); }
+
+  .flow-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; margin-bottom: 16px; }
+  .flow-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .flow-num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; font-size: 0.8rem; font-weight: 700; }
+  .flow-card h3 { font-size: 1rem; font-weight: 600; }
+  .flow-card p { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px; }
+  .flow-steps { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 0.78rem; color: var(--text-muted); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin-top: 10px; white-space: pre; overflow-x: auto; line-height: 1.6; }
+  .flow-steps .arrow { color: var(--accent-teal); }
+  .flow-steps .component { color: var(--accent-blue); }
+  .flow-steps .event { color: var(--accent-green); }
+
+  .plugin-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; margin-bottom: 16px; }
+  .plugin-card .plugin-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .plugin-card .plugin-id { font-family: monospace; font-size: 0.78rem; padding: 2px 8px; border-radius: 4px; background: rgba(88,166,255,0.1); color: var(--accent-blue); }
+  .plugin-card h3 { font-size: 1rem; font-weight: 600; }
+  .plugin-card p { font-size: 0.85rem; color: var(--text-muted); }
+  .plugin-card .events-list { margin-top: 10px; }
+  .plugin-card .event-tag { display: inline-block; font-family: monospace; font-size: 0.72rem; padding: 2px 8px; border-radius: 4px; background: rgba(63,185,80,0.1); color: var(--accent-green); border: 1px solid rgba(63,185,80,0.2); margin: 2px 4px 2px 0; }
+  .plugin-card .cap-tag { display: inline-block; font-family: monospace; font-size: 0.72rem; padding: 2px 8px; border-radius: 4px; background: rgba(248,81,73,0.1); color: var(--accent-red); border: 1px solid rgba(248,81,73,0.2); margin: 2px 4px 2px 0; }
+
+  .stat-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+  .stat-box { flex: 1; min-width: 140px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: center; }
+  .stat-box .num { font-size: 1.6rem; font-weight: 700; }
+  .stat-box .lbl { font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div style="background:#5a1e1e;color:#fca5a5;padding:10px 20px;font-size:0.85rem;border-bottom:1px solid #7f1d1d">
+  ⚠️ <strong>Historical snapshot — partially outdated.</strong> This page was generated when the workspace had 14 crates.
+  The authoritative living document is <a href="ARCHITECTURE.html" style="color:#fca5a5;text-decoration:underline">ARCHITECTURE.html</a>.
+  Notable changes since this snapshot: workspace is now 25 crates; <code>nexus-app</code> was retired and replaced by <code>nexus-shell</code> (ADR 0011, Phase 4 WI-37, 2026-04-24).
+</div>
+
+<div class="header">
+  <h1>Nexus Architecture</h1>
+  <p>AI-native, plugin-extensible knowledge environment — microkernel design in Rust</p>
+  <div class="badge">25 CRATES &middot; MICROKERNEL &middot; MULTI-UI</div>
+  <div class="version">v0.1.0 &middot; MIT / Apache-2.0</div>
+</div>
+
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="showTab('arch')">Architecture</button>
+  <button class="tab-btn" onclick="showTab('crates')">Crate Details</button>
+  <button class="tab-btn" onclick="showTab('flows')">Data Flows</button>
+  <button class="tab-btn" onclick="showTab('plugins')">Plugin System</button>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 1: ARCHITECTURE -->
+<!-- ============================================================ -->
+<div id="arch" class="tab-content active">
+  <div class="section-title">System Architecture</div>
+  <div class="section-sub">14-crate Cargo workspace. Microkernel core with event bus, capability-gated plugins, and four UI surfaces.</div>
+
+  <div class="stat-row">
+    <div class="stat-box"><div class="num" style="color:var(--accent-teal)">14</div><div class="lbl">Crates</div></div>
+    <div class="stat-box"><div class="num" style="color:var(--accent-blue)">4</div><div class="lbl">UI Surfaces</div></div>
+    <div class="stat-box"><div class="num" style="color:var(--accent-purple)">5</div><div class="lbl">Core Plugins</div></div>
+    <div class="stat-box"><div class="num" style="color:var(--accent-green)">13</div><div class="lbl">MCP Tools</div></div>
+    <div class="stat-box"><div class="num" style="color:var(--accent-red)">12</div><div class="lbl">Capabilities</div></div>
+    <div class="stat-box"><div class="num" style="color:var(--accent-orange)">3</div><div class="lbl">AI Providers</div></div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="background:#58a6ff"></div>UI / Application Layer</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#39d4c0"></div>Kernel &amp; Orchestration</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#3fb950"></div>Storage Engine</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#bc8cff"></div>Plugin System</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#d29922"></div>AI &amp; RAG</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#f85149"></div>Security</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#f778ba"></div>Feature Crates</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#8b949e"></div>On-Disk / External</div>
+  </div>
+
+  <div class="arch-container">
+    <svg viewBox="0 0 1200 1080" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#8b949e"/></marker>
+        <marker id="arrT" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#39d4c0"/></marker>
+        <marker id="arrB" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#58a6ff"/></marker>
+        <marker id="arrG" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#3fb950"/></marker>
+        <marker id="arrP" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#bc8cff"/></marker>
+        <marker id="arrO" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#d29922"/></marker>
+        <marker id="arrR" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#f85149"/></marker>
+      </defs>
+
+      <!-- ============ EXTERNAL CLIENTS ============ -->
+      <rect x="20" y="10" width="1160" height="55" rx="8" fill="none" stroke="#8b949e" stroke-width="1" stroke-dasharray="6,3" opacity="0.3"/>
+      <text x="40" y="30" fill="#8b949e" font-size="10" font-weight="600" opacity="0.6">EXTERNAL CLIENTS</text>
+      <rect x="50" y="38" width="120" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="110" y="52" fill="#8b949e" font-size="9" text-anchor="middle">Claude Code</text>
+      <rect x="185" y="38" width="100" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="235" y="52" fill="#8b949e" font-size="9" text-anchor="middle">Cursor</text>
+      <rect x="300" y="38" width="120" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="360" y="52" fill="#8b949e" font-size="9" text-anchor="middle">MCP Clients</text>
+      <rect x="570" y="38" width="100" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="620" y="52" fill="#8b949e" font-size="9" text-anchor="middle">Terminal</text>
+      <rect x="860" y="38" width="120" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="920" y="52" fill="#8b949e" font-size="9" text-anchor="middle">Desktop User</text>
+
+      <!-- External → UI arrows -->
+      <line x1="235" y1="58" x2="235" y2="86" stroke="#8b949e" stroke-width="1" marker-end="url(#arr)"/>
+      <line x1="620" y1="58" x2="420" y2="86" stroke="#8b949e" stroke-width="1" marker-end="url(#arr)"/>
+      <line x1="620" y1="58" x2="630" y2="86" stroke="#8b949e" stroke-width="1" marker-end="url(#arr)"/>
+      <line x1="920" y1="58" x2="920" y2="86" stroke="#8b949e" stroke-width="1" marker-end="url(#arr)"/>
+
+      <!-- ============ APPLICATION LAYER ============ -->
+      <rect x="20" y="85" width="1160" height="150" rx="10" fill="none" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.4"/>
+      <text x="40" y="108" fill="#58a6ff" font-size="11" font-weight="600" opacity="0.7">APPLICATION LAYER — 4 UI surfaces, single backend</text>
+
+      <rect x="40" y="120" width="195" height="100" rx="8" fill="#0e2a4d" stroke="#58a6ff" stroke-width="1.5"/>
+      <text x="137" y="142" fill="#58a6ff" font-size="12" font-weight="600" text-anchor="middle">nexus-mcp</text>
+      <text x="137" y="158" fill="#8b949e" font-size="9" text-anchor="middle">MCP Server (rmcp)</text>
+      <line x1="52" y1="165" x2="223" y2="165" stroke="#30363d" stroke-width="0.5"/>
+      <text x="52" y="179" fill="#8b949e" font-size="8">13 tools (notes/graph/search/AI)</text>
+      <text x="52" y="191" fill="#8b949e" font-size="8">stdio JSON-RPC transport</text>
+      <text x="52" y="203" fill="#8b949e" font-size="8">schemars for tool schemas</text>
+      <text x="52" y="215" fill="#3fb950" font-size="7.5">Uses: nexus-storage, nexus-ai</text>
+
+      <rect x="255" y="120" width="195" height="100" rx="8" fill="#0e2a4d" stroke="#58a6ff" stroke-width="1.5"/>
+      <text x="352" y="142" fill="#58a6ff" font-size="12" font-weight="600" text-anchor="middle">nexus-cli</text>
+      <text x="352" y="158" fill="#8b949e" font-size="9" text-anchor="middle">Binary: nexus</text>
+      <line x1="267" y1="165" x2="438" y2="165" stroke="#30363d" stroke-width="0.5"/>
+      <text x="267" y="179" fill="#8b949e" font-size="8">15+ commands (clap 4.6)</text>
+      <text x="267" y="191" fill="#8b949e" font-size="8">--format text|json|jsonl|table</text>
+      <text x="267" y="203" fill="#8b949e" font-size="8">forge, content, graph, ai, plugin</text>
+      <text x="267" y="215" fill="#3fb950" font-size="7.5">Entry: main.rs → App facade</text>
+
+      <rect x="470" y="120" width="195" height="100" rx="8" fill="#0e2a4d" stroke="#58a6ff" stroke-width="1.5"/>
+      <text x="567" y="142" fill="#58a6ff" font-size="12" font-weight="600" text-anchor="middle">nexus-tui</text>
+      <text x="567" y="158" fill="#8b949e" font-size="9" text-anchor="middle">Binary: nexus-tui</text>
+      <line x1="482" y1="165" x2="653" y2="165" stroke="#30363d" stroke-width="0.5"/>
+      <text x="482" y="179" fill="#8b949e" font-size="8">ratatui 0.30 + crossterm 0.29</text>
+      <text x="482" y="191" fill="#8b949e" font-size="8">File tree + viewer + search</text>
+      <text x="482" y="203" fill="#8b949e" font-size="8">Vim keybindings, task list</text>
+      <text x="482" y="215" fill="#3fb950" font-size="7.5">Uses: nexus-storage, nexus-kernel</text>
+
+      <rect x="685" y="120" width="195" height="100" rx="8" fill="#0e2a4d" stroke="#58a6ff" stroke-width="1.5"/>
+      <text x="782" y="142" fill="#58a6ff" font-size="12" font-weight="600" text-anchor="middle">nexus-shell</text>
+      <text x="782" y="158" fill="#8b949e" font-size="9" text-anchor="middle">Tauri 2 Desktop Shell (retired nexus-app)</text>
+      <line x1="697" y1="165" x2="868" y2="165" stroke="#30363d" stroke-width="0.5"/>
+      <text x="697" y="179" fill="#8b949e" font-size="8">IPC commands → Rust backend</text>
+      <text x="697" y="191" fill="#8b949e" font-size="8">ts-rs TypeScript bindings</text>
+      <text x="697" y="203" fill="#8b949e" font-size="8">Theme picker, layout editor</text>
+      <text x="697" y="215" fill="#3fb950" font-size="7.5">Uses: nexus-theme</text>
+
+      <rect x="900" y="120" width="260" height="100" rx="8" fill="#0e2a4d" stroke="#58a6ff" stroke-width="1.2" stroke-dasharray="4,2"/>
+      <text x="1030" y="142" fill="#58a6ff" font-size="12" font-weight="600" text-anchor="middle">React Frontend (app/)</text>
+      <text x="1030" y="158" fill="#8b949e" font-size="9" text-anchor="middle">Vite 5.4 + React 18.3 + Zustand</text>
+      <line x1="912" y1="165" x2="1148" y2="165" stroke="#30363d" stroke-width="0.5"/>
+      <text x="912" y="179" fill="#8b949e" font-size="8">@tauri-apps/api IPC bridge</text>
+      <text x="912" y="191" fill="#8b949e" font-size="8">Zustand state management</text>
+      <text x="912" y="203" fill="#8b949e" font-size="8">CSS custom properties (theme)</text>
+      <text x="912" y="215" fill="#58a6ff" font-size="7.5">Served inside Tauri WebView</text>
+
+      <!-- React ↔ Tauri IPC arrow -->
+      <line x1="900" y1="170" x2="880" y2="170" stroke="#58a6ff" stroke-width="1.2" stroke-dasharray="3,2" marker-end="url(#arrB)"/>
+
+      <!-- Apps → Kernel arrow -->
+      <line x1="400" y1="230" x2="400" y2="260" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arr)"/>
+      <line x1="600" y1="230" x2="600" y2="260" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arr)"/>
+
+      <!-- ============ KERNEL LAYER ============ -->
+      <rect x="20" y="260" width="1160" height="155" rx="10" fill="none" stroke="#39d4c0" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.4"/>
+      <text x="40" y="283" fill="#39d4c0" font-size="11" font-weight="600" opacity="0.7">KERNEL LAYER — nexus-kernel + nexus-types</text>
+
+      <rect x="40" y="295" width="280" height="105" rx="8" fill="#0a2e2a" stroke="#39d4c0" stroke-width="1.5"/>
+      <text x="180" y="317" fill="#39d4c0" font-size="13" font-weight="600" text-anchor="middle">Kernel</text>
+      <line x1="52" y1="325" x2="308" y2="325" stroke="#30363d" stroke-width="0.5"/>
+      <text x="52" y="341" fill="#8b949e" font-size="9">KernelConfig { forge_root, bus_cap }</text>
+      <text x="52" y="355" fill="#8b949e" font-size="9">start() → shutdown() lifecycle</text>
+      <text x="52" y="369" fill="#8b949e" font-size="9">event_bus() → Arc&lt;EventBus&gt;</text>
+      <text x="52" y="383" fill="#8b949e" font-size="9">plugins() → PluginRegistry (read-only)</text>
+      <text x="52" y="395" fill="#39d4c0" font-size="8" font-weight="500">Core microkernel — tokio, uuid, chrono</text>
+
+      <rect x="340" y="295" width="320" height="105" rx="8" fill="#0a2e2a" stroke="#39d4c0" stroke-width="1.5"/>
+      <text x="500" y="317" fill="#39d4c0" font-size="13" font-weight="600" text-anchor="middle">EventBus</text>
+      <line x1="352" y1="325" x2="648" y2="325" stroke="#30363d" stroke-width="0.5"/>
+      <text x="352" y="341" fill="#8b949e" font-size="9">broadcast::Sender&lt;Arc&lt;PublishedEvent&gt;&gt;</text>
+      <text x="352" y="355" fill="#8b949e" font-size="9">14 NexusEvent variants + Custom(String, Value)</text>
+      <text x="352" y="369" fill="#8b949e" font-size="9">subscribe(EventFilter) → EventSubscription</text>
+      <text x="352" y="383" fill="#39d4c0" font-size="9">File events → search reindex + graph update</text>
+      <text x="352" y="395" fill="#39d4c0" font-size="8" font-weight="500">Central nervous system for all subsystems</text>
+
+      <rect x="680" y="295" width="230" height="105" rx="8" fill="#0a2e2a" stroke="#39d4c0" stroke-width="1.5"/>
+      <text x="795" y="317" fill="#39d4c0" font-size="12" font-weight="600" text-anchor="middle">Plugin Contracts</text>
+      <line x1="692" y1="325" x2="898" y2="325" stroke="#30363d" stroke-width="0.5"/>
+      <text x="692" y="341" fill="#bc8cff" font-size="9">trait CorePlugin</text>
+      <text x="692" y="355" fill="#8b949e" font-size="9">  on_init / on_start / on_stop</text>
+      <text x="692" y="369" fill="#bc8cff" font-size="9">trait PluginLifecycle</text>
+      <text x="692" y="383" fill="#8b949e" font-size="9">  id / name / version / trust_level</text>
+      <text x="692" y="395" fill="#8b949e" font-size="8">Defined in nexus-plugins/loader.rs</text>
+
+      <rect x="930" y="295" width="230" height="105" rx="8" fill="#0a2e2a" stroke="#39d4c0" stroke-width="1.5"/>
+      <text x="1045" y="317" fill="#39d4c0" font-size="12" font-weight="600" text-anchor="middle">12 Capabilities</text>
+      <line x1="942" y1="325" x2="1148" y2="325" stroke="#30363d" stroke-width="0.5"/>
+      <text x="942" y="341" fill="#8b949e" font-size="8.5">fs.read / fs.write (forge-scoped)</text>
+      <text x="942" y="353" fill="#f85149" font-size="8.5">fs.read.external / fs.write.external</text>
+      <text x="942" y="365" fill="#f85149" font-size="8.5">net.http / process.spawn</text>
+      <text x="942" y="377" fill="#8b949e" font-size="8.5">kv.read / kv.write / ipc.call</text>
+      <text x="942" y="389" fill="#8b949e" font-size="8.5">db.query / db.write</text>
+      <text x="942" y="399" fill="#f85149" font-size="7.5" font-weight="500">HIGH RISK capabilities require approval</text>
+
+      <!-- ============ SECURITY + PLUGINS LAYER ============ -->
+      <rect x="20" y="440" width="440" height="110" rx="10" fill="none" stroke="#f85149" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.4"/>
+      <text x="40" y="463" fill="#f85149" font-size="11" font-weight="600" opacity="0.7">nexus-security</text>
+
+      <rect x="40" y="475" width="125" height="60" rx="6" fill="#2e0e0e" stroke="#f85149" stroke-width="1.2"/>
+      <text x="102" y="497" fill="#f85149" font-size="10" font-weight="600" text-anchor="middle">PathValidator</text>
+      <text x="102" y="511" fill="#8b949e" font-size="8" text-anchor="middle">Forge boundary</text>
+      <text x="102" y="523" fill="#8b949e" font-size="7.5" text-anchor="middle">Symlink protection</text>
+
+      <rect x="178" y="475" width="135" height="60" rx="6" fill="#2e0e0e" stroke="#f85149" stroke-width="1.2"/>
+      <text x="245" y="497" fill="#f85149" font-size="10" font-weight="600" text-anchor="middle">CredentialVault</text>
+      <text x="245" y="511" fill="#8b949e" font-size="8" text-anchor="middle">OS keyring (keyring 3)</text>
+      <text x="245" y="523" fill="#8b949e" font-size="7.5" text-anchor="middle">macOS/Linux/Win</text>
+
+      <rect x="326" y="475" width="120" height="60" rx="6" fill="#2e0e0e" stroke="#f85149" stroke-width="1.2"/>
+      <text x="386" y="497" fill="#f85149" font-size="10" font-weight="600" text-anchor="middle">Audit Log</text>
+      <text x="386" y="511" fill="#8b949e" font-size="8" text-anchor="middle">RiskLevel enum</text>
+      <text x="386" y="523" fill="#8b949e" font-size="7.5" text-anchor="middle">Low / Med / High</text>
+
+      <rect x="480" y="440" width="700" height="110" rx="10" fill="none" stroke="#bc8cff" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.4"/>
+      <text x="500" y="463" fill="#bc8cff" font-size="11" font-weight="600" opacity="0.7">nexus-plugins — WASM sandbox + hot reload</text>
+
+      <rect x="500" y="475" width="160" height="60" rx="6" fill="#1a0e3d" stroke="#bc8cff" stroke-width="1.2"/>
+      <text x="580" y="497" fill="#bc8cff" font-size="10" font-weight="600" text-anchor="middle">PluginManager</text>
+      <text x="580" y="511" fill="#8b949e" font-size="8" text-anchor="middle">load / unload / call</text>
+      <text x="580" y="523" fill="#8b949e" font-size="7.5" text-anchor="middle">Manifest TOML parsing</text>
+
+      <rect x="673" y="475" width="160" height="60" rx="6" fill="#1a0e3d" stroke="#bc8cff" stroke-width="1.2"/>
+      <text x="753" y="497" fill="#bc8cff" font-size="10" font-weight="600" text-anchor="middle">WasmSandbox</text>
+      <text x="753" y="511" fill="#8b949e" font-size="8" text-anchor="middle">wasmtime 42</text>
+      <text x="753" y="523" fill="#8b949e" font-size="7.5" text-anchor="middle">Fuel + memory limits</text>
+
+      <rect x="846" y="475" width="155" height="60" rx="6" fill="#1a0e3d" stroke="#bc8cff" stroke-width="1.2"/>
+      <text x="923" y="497" fill="#bc8cff" font-size="10" font-weight="600" text-anchor="middle">HotReload</text>
+      <text x="923" y="511" fill="#8b949e" font-size="8" text-anchor="middle">Watch .wasm files</text>
+      <text x="923" y="523" fill="#8b949e" font-size="7.5" text-anchor="middle">Reload on change</text>
+
+      <rect x="1014" y="475" width="155" height="60" rx="6" fill="#1a0e3d" stroke="#bc8cff" stroke-width="1.2"/>
+      <text x="1091" y="497" fill="#bc8cff" font-size="10" font-weight="600" text-anchor="middle">Settings</text>
+      <text x="1091" y="511" fill="#8b949e" font-size="8" text-anchor="middle">JSON Schema validate</text>
+      <text x="1091" y="523" fill="#8b949e" font-size="7.5" text-anchor="middle">Plugin-scoped config</text>
+
+      <!-- ============ STORAGE ENGINE ============ -->
+      <rect x="20" y="575" width="730" height="200" rx="10" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.4"/>
+      <text x="40" y="598" fill="#3fb950" font-size="11" font-weight="600" opacity="0.7">nexus-storage — StorageEngine facade (files-as-truth)</text>
+
+      <rect x="40" y="610" width="210" height="150" rx="8" fill="#0e2e1a" stroke="#3fb950" stroke-width="1.5"/>
+      <text x="145" y="632" fill="#3fb950" font-size="12" font-weight="600" text-anchor="middle">StorageEngine</text>
+      <text x="145" y="646" fill="#39d4c0" font-size="8" text-anchor="middle">Central Facade</text>
+      <line x1="52" y1="652" x2="238" y2="652" stroke="#30363d" stroke-width="0.5"/>
+      <text x="52" y="668" fill="#8b949e" font-size="8.5">r2d2 pool (4 read, 1 write)</text>
+      <text x="52" y="682" fill="#8b949e" font-size="8.5">SQLite WAL mode (index.db)</text>
+      <text x="52" y="696" fill="#8b949e" font-size="8.5">Block-level index tables:</text>
+      <text x="52" y="710" fill="#8b949e" font-size="8.5">  files / blocks / links / tags</text>
+      <text x="52" y="724" fill="#8b949e" font-size="8.5">Atomic writes + advisory flock</text>
+      <text x="52" y="738" fill="#8b949e" font-size="8.5">Reconciliation (FS → index sync)</text>
+      <text x="52" y="752" fill="#3fb950" font-size="8">4 concurrent read connections</text>
+
+      <rect x="265" y="610" width="155" height="150" rx="8" fill="#0e2e1a" stroke="#3fb950" stroke-width="1.2"/>
+      <text x="342" y="632" fill="#3fb950" font-size="11" font-weight="600" text-anchor="middle">Parser</text>
+      <text x="342" y="646" fill="#8b949e" font-size="8" text-anchor="middle">comrak 0.52</text>
+      <line x1="277" y1="652" x2="408" y2="652" stroke="#30363d" stroke-width="0.5"/>
+      <text x="277" y="668" fill="#8b949e" font-size="8.5">Headings / paragraphs</text>
+      <text x="277" y="682" fill="#8b949e" font-size="8.5">Code blocks (+ lang)</text>
+      <text x="277" y="696" fill="#8b949e" font-size="8.5">[[wikilinks]] extraction</text>
+      <text x="277" y="710" fill="#8b949e" font-size="8.5">Frontmatter (YAML)</text>
+      <text x="277" y="724" fill="#8b949e" font-size="8.5">Tag extraction (#tag)</text>
+      <text x="277" y="738" fill="#8b949e" font-size="8.5">Task extraction - [ ]</text>
+      <text x="277" y="752" fill="#3fb950" font-size="7.5">→ ParsedFile { blocks, links, tags }</text>
+
+      <rect x="435" y="610" width="145" height="150" rx="8" fill="#0e2e1a" stroke="#3fb950" stroke-width="1.2"/>
+      <text x="507" y="632" fill="#3fb950" font-size="11" font-weight="600" text-anchor="middle">Search</text>
+      <text x="507" y="646" fill="#8b949e" font-size="8" text-anchor="middle">Tantivy 0.26</text>
+      <line x1="447" y1="652" x2="568" y2="652" stroke="#30363d" stroke-width="0.5"/>
+      <text x="447" y="668" fill="#8b949e" font-size="8.5">BM25 full-text</text>
+      <text x="447" y="682" fill="#8b949e" font-size="8.5">Block-level index</text>
+      <text x="447" y="696" fill="#8b949e" font-size="8.5">.forge/search/ dir</text>
+      <text x="447" y="710" fill="#8b949e" font-size="8.5">Snippet generation</text>
+      <text x="447" y="724" fill="#3fb950" font-size="8.5">Sub-document search</text>
+      <text x="447" y="738" fill="#3fb950" font-size="8.5">(better than note-level)</text>
+
+      <rect x="595" y="610" width="140" height="150" rx="8" fill="#0e2e1a" stroke="#3fb950" stroke-width="1.2"/>
+      <text x="665" y="632" fill="#3fb950" font-size="11" font-weight="600" text-anchor="middle">Graph</text>
+      <text x="665" y="646" fill="#8b949e" font-size="8" text-anchor="middle">petgraph 0.7</text>
+      <line x1="607" y1="652" x2="723" y2="652" stroke="#30363d" stroke-width="0.5"/>
+      <text x="607" y="668" fill="#8b949e" font-size="8.5">StableGraph</text>
+      <text x="607" y="682" fill="#8b949e" font-size="8.5">Backlinks query</text>
+      <text x="607" y="696" fill="#8b949e" font-size="8.5">Outgoing links</text>
+      <text x="607" y="710" fill="#8b949e" font-size="8.5">Unresolved tracking</text>
+      <text x="607" y="724" fill="#3fb950" font-size="8.5">Event-driven updates</text>
+
+      <!-- File Watcher (separate small box below storage) -->
+      <rect x="40" y="770" width="250" height="30" rx="5" fill="#0e2e1a" stroke="#3fb950" stroke-width="0.8"/>
+      <text x="165" y="790" fill="#3fb950" font-size="9" text-anchor="middle">File Watcher (notify + debounce 300ms) → StorageEvent</text>
+
+      <!-- EventBus subscription arrows -->
+      <line x1="500" y1="400" x2="665" y2="610" stroke="#39d4c0" stroke-width="1.2" stroke-dasharray="4,2" marker-end="url(#arrT)"/>
+      <text x="540" y="500" fill="#39d4c0" font-size="7.5" transform="rotate(-32, 540, 500)">subscribe(File events)</text>
+
+      <!-- ============ AI & RAG ============ -->
+      <rect x="770" y="575" width="410" height="200" rx="10" fill="none" stroke="#d29922" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.4"/>
+      <text x="790" y="598" fill="#d29922" font-size="11" font-weight="600" opacity="0.7">nexus-ai — Multi-provider AI + RAG</text>
+
+      <rect x="790" y="610" width="180" height="150" rx="8" fill="#2e1a00" stroke="#d29922" stroke-width="1.5"/>
+      <text x="880" y="632" fill="#d29922" font-size="12" font-weight="600" text-anchor="middle">AI Providers</text>
+      <text x="880" y="646" fill="#8b949e" font-size="8" text-anchor="middle">trait AiProvider (async)</text>
+      <line x1="802" y1="652" x2="958" y2="652" stroke="#30363d" stroke-width="0.5"/>
+      <text x="802" y="668" fill="#d29922" font-size="9">AnthropicProvider</text>
+      <text x="802" y="682" fill="#8b949e" font-size="8.5">  Claude API (reqwest 0.12)</text>
+      <text x="802" y="698" fill="#d29922" font-size="9">OpenAiProvider</text>
+      <text x="802" y="712" fill="#8b949e" font-size="8.5">  GPT-4 + embeddings</text>
+      <text x="802" y="728" fill="#d29922" font-size="9">OllamaProvider</text>
+      <text x="802" y="742" fill="#8b949e" font-size="8.5">  Local LLM inference</text>
+      <text x="802" y="752" fill="#8b949e" font-size="7.5">Auto-detect from env vars / keyring</text>
+
+      <rect x="985" y="610" width="180" height="150" rx="8" fill="#2e1a00" stroke="#d29922" stroke-width="1.5"/>
+      <text x="1075" y="632" fill="#d29922" font-size="12" font-weight="600" text-anchor="middle">RAG Pipeline</text>
+      <text x="1075" y="646" fill="#8b949e" font-size="8" text-anchor="middle">rag.rs + chunker + vectorstore</text>
+      <line x1="997" y1="652" x2="1153" y2="652" stroke="#30363d" stroke-width="0.5"/>
+      <text x="997" y="668" fill="#8b949e" font-size="8.5">1. Semantic chunking</text>
+      <text x="997" y="682" fill="#8b949e" font-size="8.5">2. Embed (e5-base/bge)</text>
+      <text x="997" y="696" fill="#8b949e" font-size="8.5">3. SQLite vector store</text>
+      <text x="997" y="710" fill="#8b949e" font-size="8.5">4. Cosine similarity search</text>
+      <text x="997" y="724" fill="#8b949e" font-size="8.5">5. Rerank → LLM response</text>
+      <text x="997" y="738" fill="#3fb950" font-size="8.5">Block-level chunks from</text>
+      <text x="997" y="752" fill="#3fb950" font-size="8.5">StorageEngine (no re-parse!)</text>
+
+      <!-- RAG → Storage arrow -->
+      <line x1="985" y1="730" x2="740" y2="700" stroke="#d29922" stroke-width="1" stroke-dasharray="4,2" marker-end="url(#arrO)"/>
+      <text x="830" y="708" fill="#d29922" font-size="7.5">query blocks</text>
+
+      <!-- ============ FEATURE CRATES ============ -->
+      <rect x="20" y="825" width="1160" height="95" rx="10" fill="none" stroke="#f778ba" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.4"/>
+      <text x="40" y="848" fill="#f778ba" font-size="11" font-weight="600" opacity="0.7">FEATURE CRATES — Extensions &amp; Format Support</text>
+
+      <rect x="40" y="860" width="175" height="48" rx="6" fill="#2e0e2a" stroke="#f778ba" stroke-width="1.2"/>
+      <text x="127" y="880" fill="#f778ba" font-size="10" font-weight="600" text-anchor="middle">nexus-git</text>
+      <text x="127" y="896" fill="#8b949e" font-size="8" text-anchor="middle">libgit2 read-only: status, log, diff, blame</text>
+
+      <rect x="230" y="860" width="195" height="48" rx="6" fill="#2e0e2a" stroke="#f778ba" stroke-width="1.2"/>
+      <text x="327" y="880" fill="#f778ba" font-size="10" font-weight="600" text-anchor="middle">nexus-database</text>
+      <text x="327" y="896" fill="#8b949e" font-size="8" text-anchor="middle">20+ property types, formula lang, CSV</text>
+
+      <rect x="440" y="860" width="175" height="48" rx="6" fill="#2e0e2a" stroke="#f778ba" stroke-width="1.2"/>
+      <text x="527" y="880" fill="#f778ba" font-size="10" font-weight="600" text-anchor="middle">nexus-formats</text>
+      <text x="527" y="896" fill="#8b949e" font-size="8" text-anchor="middle">MDX/JSX parser, Canvas JSON</text>
+
+      <rect x="630" y="860" width="225" height="48" rx="6" fill="#2e0e2a" stroke="#f778ba" stroke-width="1.2"/>
+      <text x="742" y="880" fill="#f778ba" font-size="10" font-weight="600" text-anchor="middle">nexus-theme</text>
+      <text x="742" y="896" fill="#8b949e" font-size="8" text-anchor="middle">~100 CSS vars, TOML manifests, cascade resolver</text>
+
+      <rect x="870" y="860" width="155" height="48" rx="6" fill="#0a2e2a" stroke="#39d4c0" stroke-width="1.2"/>
+      <text x="947" y="880" fill="#39d4c0" font-size="10" font-weight="600" text-anchor="middle">nexus-types</text>
+      <text x="947" y="896" fill="#8b949e" font-size="8" text-anchor="middle">Shared types (leaf crate)</text>
+
+      <!-- ============ ON-DISK STORAGE ============ -->
+      <rect x="20" y="945" width="1160" height="55" rx="10" fill="none" stroke="#8b949e" stroke-width="1" stroke-dasharray="6,3" opacity="0.3"/>
+      <text x="40" y="965" fill="#8b949e" font-size="10" font-weight="600" opacity="0.6">ON-DISK (Forge — source of truth)</text>
+
+      <rect x="50" y="975" width="100" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="100" y="989" fill="#d29922" font-size="8" text-anchor="middle">notes/</text>
+      <rect x="165" y="975" width="120" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="225" y="989" fill="#d29922" font-size="8" text-anchor="middle">attachments/</text>
+      <rect x="300" y="975" width="100" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="350" y="989" fill="#d29922" font-size="8" text-anchor="middle">index.db</text>
+      <rect x="415" y="975" width="100" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="465" y="989" fill="#d29922" font-size="8" text-anchor="middle">search/</text>
+      <rect x="530" y="975" width="100" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="580" y="989" fill="#d29922" font-size="8" text-anchor="middle">plugins/</text>
+      <rect x="645" y="975" width="110" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="700" y="989" fill="#d29922" font-size="8" text-anchor="middle">config.toml</text>
+      <rect x="770" y="975" width="70" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="805" y="989" fill="#d29922" font-size="8" text-anchor="middle">lock</text>
+      <rect x="855" y="975" width="70" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="890" y="989" fill="#d29922" font-size="8" text-anchor="middle">temp/</text>
+      <rect x="940" y="975" width="70" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="975" y="989" fill="#d29922" font-size="8" text-anchor="middle">logs/</text>
+      <rect x="1025" y="975" width="140" height="20" rx="4" fill="#2e0e0e" stroke="#f85149" stroke-width="0.8"/>
+      <text x="1095" y="989" fill="#f85149" font-size="8" text-anchor="middle">OS Keyring (creds)</text>
+
+      <!-- ============ EXTERNAL SERVICES ============ -->
+      <rect x="20" y="1020" width="1160" height="50" rx="8" fill="none" stroke="#8b949e" stroke-width="1" stroke-dasharray="6,3" opacity="0.3"/>
+      <text x="40" y="1040" fill="#8b949e" font-size="10" font-weight="600" opacity="0.6">EXTERNAL SERVICES</text>
+      <rect x="50" y="1045" width="130" height="20" rx="4" fill="#2e1a00" stroke="#d29922" stroke-width="0.8"/>
+      <text x="115" y="1059" fill="#d29922" font-size="8" text-anchor="middle">Claude API</text>
+      <rect x="195" y="1045" width="130" height="20" rx="4" fill="#2e1a00" stroke="#d29922" stroke-width="0.8"/>
+      <text x="260" y="1059" fill="#d29922" font-size="8" text-anchor="middle">OpenAI API</text>
+      <rect x="340" y="1045" width="130" height="20" rx="4" fill="#2e1a00" stroke="#d29922" stroke-width="0.8"/>
+      <text x="405" y="1059" fill="#d29922" font-size="8" text-anchor="middle">Ollama (local)</text>
+      <rect x="550" y="1045" width="130" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="615" y="1059" fill="#8b949e" font-size="8" text-anchor="middle">inotify/FSEvents</text>
+      <rect x="695" y="1045" width="130" height="20" rx="4" fill="#21262d" stroke="#484f58" stroke-width="0.8"/>
+      <text x="760" y="1059" fill="#8b949e" font-size="8" text-anchor="middle">libgit2</text>
+    </svg>
+  </div>
+
+  <div class="callout">
+    <h4>Design Principle: Files-as-Truth</h4>
+    <p>Markdown files on disk are always the authoritative source. The SQLite index, Tantivy search index, and knowledge graph are all fully rebuildable from the filesystem via <code>nexus forge reindex</code>. This means if any index is corrupted or lost, <b>zero data loss</b> — just rebuild. The Forge advisory lock prevents concurrent writers.</p>
+  </div>
+
+  <div class="callout-blue">
+    <h4>Multi-UI, Single Backend</h4>
+    <p>All four UI surfaces (CLI, TUI, MCP, Desktop) share the same <b>StorageEngine</b>, <b>Kernel</b>, and <b>AI engine</b>. There's no separate server or API layer — each binary directly instantiates the crates it needs. The MCP server is launched via <code>nexus mcp</code> and communicates over stdio JSON-RPC.</p>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 2: CRATE DETAILS -->
+<!-- ============================================================ -->
+<div id="crates" class="tab-content">
+  <div class="section-title">Crate-by-Crate Details</div>
+  <div class="section-sub">14 crates shown (snapshot); workspace now has 25 crates — see ARCHITECTURE.html for the complete current listing</div>
+
+  <table class="comparison-table">
+    <thead>
+      <tr><th>Crate</th><th>Purpose</th><th>Key Dependencies</th><th>Key Exports</th></tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="4" style="background:var(--surface2);color:var(--accent-teal);font-weight:600;font-size:0.85rem">KERNEL &amp; TYPES</td></tr>
+      <tr><td><b>nexus-types</b></td><td>Shared types (leaf crate, no deps on other nexus crates)</td><td>serde</td><td>Common type definitions</td></tr>
+      <tr><td><b>nexus-kernel</b></td><td>Event bus, plugin lifecycle, capability system</td><td>tokio, uuid, rusqlite, chrono</td><td><code>Kernel</code>, <code>EventBus</code>, <code>PluginRegistry</code>, <code>Capability</code></td></tr>
+
+      <tr><td colspan="4" style="background:var(--surface2);color:var(--accent-red);font-weight:600;font-size:0.85rem">SECURITY</td></tr>
+      <tr><td><b>nexus-security</b></td><td>Path validation, credential vault, audit logging</td><td>nexus-kernel, keyring 3</td><td><code>CredentialVault</code>, <code>ForgePathValidator</code>, <code>audit::</code></td></tr>
+
+      <tr><td colspan="4" style="background:var(--surface2);color:var(--accent-green);font-weight:600;font-size:0.85rem">STORAGE</td></tr>
+      <tr><td><b>nexus-storage</b></td><td>Forge layout, SQLite index, Tantivy FTS, watcher, knowledge graph</td><td>nexus-kernel, nexus-plugins, tantivy, comrak, notify, petgraph, r2d2_sqlite</td><td><code>StorageEngine</code>, <code>Forge</code>, <code>SearchIndex</code>, <code>KnowledgeGraph</code>, <code>ParsedFile</code></td></tr>
+
+      <tr><td colspan="4" style="background:var(--surface2);color:var(--accent-purple);font-weight:600;font-size:0.85rem">PLUGINS</td></tr>
+      <tr><td><b>nexus-plugins</b></td><td>WASM sandbox, manifest parsing, hot-reload, settings validation</td><td>nexus-kernel, wasmtime 42, jsonschema, notify</td><td><code>PluginManager</code>, <code>PluginLoader</code>, <code>WasmSandbox</code>, <code>HotReloader</code></td></tr>
+
+      <tr><td colspan="4" style="background:var(--surface2);color:var(--accent-orange);font-weight:600;font-size:0.85rem">AI &amp; RAG</td></tr>
+      <tr><td><b>nexus-ai</b></td><td>Provider traits, embeddings, RAG pipeline</td><td>reqwest 0.12, tokio, rusqlite</td><td><code>AiProvider</code>, <code>AnthropicProvider</code>, <code>OpenAiProvider</code>, <code>OllamaProvider</code>, <code>rag_query</code></td></tr>
+      <tr><td><b>nexus-mcp</b></td><td>MCP server — 13 tools for AI agent access</td><td>nexus-storage, nexus-ai, rmcp 1.3, schemars</td><td><code>NexusMcpServer</code>, 13 tool handlers</td></tr>
+
+      <tr><td colspan="4" style="background:var(--surface2);color:var(--accent-pink);font-weight:600;font-size:0.85rem">FEATURE CRATES</td></tr>
+      <tr><td><b>nexus-git</b></td><td>Read-only git integration</td><td>git2 0.20, chrono</td><td><code>GitEngine</code>, <code>AutoCommitter</code></td></tr>
+      <tr><td><b>nexus-database</b></td><td>Rich property types, formula language, relations</td><td>nexus-storage, rusqlite, csv</td><td><code>PropertyValue</code>, <code>PropertyConfig</code>, <code>evaluate_formula</code></td></tr>
+      <tr><td><b>nexus-formats</b></td><td>MDX/JSX parser, Canvas JSON</td><td>comrak, serde_yaml, regex-lite</td><td><code>parse_canvas</code>, <code>parse_mdx</code></td></tr>
+      <tr><td><b>nexus-theme</b></td><td>CSS variables, theme manifests, resolution cascade</td><td>ts-rs, notify</td><td><code>ThemeEngine</code>, <code>ResolvedTheme</code>, <code>VariableMap</code></td></tr>
+
+      <tr><td colspan="4" style="background:var(--surface2);color:var(--accent-blue);font-weight:600;font-size:0.85rem">APPLICATION BINARIES</td></tr>
+      <tr><td><b>nexus-cli</b></td><td>Headless CLI binary (<code>nexus</code>)</td><td>All crates + clap 4.6, comfy-table</td><td>15+ subcommands: forge, content, graph, ai, mcp, plugin</td></tr>
+      <tr><td><b>nexus-tui</b></td><td>Terminal UI binary (<code>nexus-tui</code>)</td><td>nexus-storage, nexus-kernel, ratatui 0.30, crossterm 0.29</td><td><code>TuiApp</code>: tree / viewer / search / tasks</td></tr>
+      <tr><td><b>nexus-shell</b></td><td>Tauri 2 desktop shell (replaced nexus-app, ADR 0011)</td><td>nexus-theme, tauri</td><td>IPC commands, WebView host, ExtensionHost plugin system</td></tr>
+    </tbody>
+  </table>
+
+  <div class="section-title" style="margin-top:40px">Crate Dependency Graph</div>
+  <div class="section-sub">Dependency graph for the 14 crates shown in this snapshot (→ means "depends on")</div>
+
+  <div class="details-grid">
+    <div class="detail-card">
+      <h3><span class="dot" style="background:#39d4c0"></span> Foundation (leaf → core)</h3>
+      <ul>
+        <li><code>nexus-types</code> → (no nexus deps, leaf crate)</li>
+        <li><code>nexus-kernel</code> → nexus-types</li>
+        <li><code>nexus-security</code> → nexus-kernel</li>
+      </ul>
+    </div>
+    <div class="detail-card">
+      <h3><span class="dot" style="background:#3fb950"></span> Storage &amp; Plugins</h3>
+      <ul>
+        <li><code>nexus-plugins</code> → nexus-kernel, nexus-security</li>
+        <li><code>nexus-storage</code> → nexus-kernel, nexus-plugins</li>
+      </ul>
+    </div>
+    <div class="detail-card">
+      <h3><span class="dot" style="background:#d29922"></span> AI Layer</h3>
+      <ul>
+        <li><code>nexus-ai</code> → (standalone, reqwest + rusqlite)</li>
+        <li><code>nexus-mcp</code> → nexus-storage, nexus-ai</li>
+      </ul>
+    </div>
+    <div class="detail-card">
+      <h3><span class="dot" style="background:#f778ba"></span> Feature Crates</h3>
+      <ul>
+        <li><code>nexus-git</code> → (standalone, git2)</li>
+        <li><code>nexus-database</code> → nexus-storage</li>
+        <li><code>nexus-formats</code> → (standalone, comrak)</li>
+        <li><code>nexus-theme</code> → (standalone, ts-rs)</li>
+      </ul>
+    </div>
+    <div class="detail-card">
+      <h3><span class="dot" style="background:#58a6ff"></span> Application Binaries</h3>
+      <ul>
+        <li><code>nexus-cli</code> → all core crates + clap</li>
+        <li><code>nexus-tui</code> → nexus-storage, nexus-kernel + ratatui</li>
+        <li><code>nexus-shell</code> → nexus-theme + tauri (replaced nexus-app)</li>
+      </ul>
+    </div>
+    <div class="detail-card">
+      <h3><span class="dot" style="background:#58a6ff"></span> Frontend (app/)</h3>
+      <ul>
+        <li>React 18.3 + Vite 5.4</li>
+        <li>Zustand state management</li>
+        <li>@tauri-apps/api for IPC</li>
+        <li>ts-rs generated TypeScript bindings</li>
+        <li>CSS custom properties from nexus-theme</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 3: DATA FLOWS -->
+<!-- ============================================================ -->
+<div id="flows" class="tab-content">
+  <div class="section-title">Key Data Flows</div>
+  <div class="section-sub">How data moves through the system for the most important operations</div>
+
+  <div class="flow-card">
+    <div class="flow-header">
+      <span class="flow-num" style="background:rgba(63,185,80,0.2);color:var(--accent-green)">1</span>
+      <h3 style="color:var(--accent-green)">File Change Detection &amp; Reconciliation</h3>
+    </div>
+    <p>When a user edits a markdown file on disk, the watcher detects the change and triggers a full reconciliation cycle — updating SQLite, Tantivy, and the knowledge graph.</p>
+    <div class="flow-steps">User edits <span class="component">notes/hello.md</span> on disk
+  <span class="arrow">↓</span>
+<span class="component">notify</span> detects change (debounce 300ms)
+  <span class="arrow">↓</span>
+Watcher emits <span class="event">StorageEvent::FileModified { path }</span>
+  <span class="arrow">↓</span>
+<span class="component">StorageCorePlugin</span> receives via kernel event bus
+  <span class="arrow">↓</span>
+<span class="component">Reconciler</span>: hash file → compare with index → update:
+  <span class="arrow">├→</span> <span class="component">SQLite</span> index (blocks, links, tags, props)
+  <span class="arrow">├→</span> <span class="component">Tantivy</span> search index (full-text)
+  <span class="arrow">└→</span> <span class="component">KnowledgeGraph</span> (link edges)
+  <span class="arrow">↓</span>
+Publish <span class="event">StorageEvent::Reconciled</span> → TUI / CLI refresh</div>
+  </div>
+
+  <div class="flow-card">
+    <div class="flow-header">
+      <span class="flow-num" style="background:rgba(210,153,34,0.2);color:var(--accent-orange)">2</span>
+      <h3 style="color:var(--accent-orange)">RAG Query (AI-Powered Q&amp;A)</h3>
+    </div>
+    <p>When a user asks a question via <code>nexus ai ask</code>, the RAG pipeline retrieves relevant blocks from the knowledge base, embeds them, and generates an AI response with source citations.</p>
+    <div class="flow-steps">User: <span class="component">nexus ai ask</span> "How does the plugin system work?"
+  <span class="arrow">↓</span>
+<span class="component">RAG::query(question)</span>
+  <span class="arrow">↓</span>
+1. <span class="component">SearchIndex::search</span>(question) → top 5 block-level chunks
+2. <span class="component">Vectorstore</span>: embed question → cosine similarity search
+3. Rerank by relevance
+4. Build prompt: &lt;context&gt; blocks + &lt;question&gt;
+  <span class="arrow">↓</span>
+5. Stream response from <span class="component">AI provider</span> (Anthropic/OpenAI/Ollama)
+  <span class="arrow">↓</span>
+Output: Answer + sources (file paths + block IDs)</div>
+  </div>
+
+  <div class="flow-card">
+    <div class="flow-header">
+      <span class="flow-num" style="background:rgba(88,166,255,0.2);color:var(--accent-blue)">3</span>
+      <h3 style="color:var(--accent-blue)">MCP Tool Invocation (AI Agent Access)</h3>
+    </div>
+    <p>External AI agents (Claude Code, Cursor) invoke MCP tools over stdio JSON-RPC to read, write, and query the knowledge base.</p>
+    <div class="flow-steps">Claude Code invokes: <span class="event">nexus_list_tasks</span> { completed: false }
+  <span class="arrow">↓</span>
+<span class="component">MCP Server</span> (stdio): receives CallToolRequest
+  <span class="arrow">↓</span>
+<span class="component">NexusMcpServer</span> routes to handler: list_tasks()
+  <span class="arrow">↓</span>
+<span class="component">StorageEngine</span>::query_tasks(filter)
+  <span class="arrow">↓</span>
+<span class="component">SQLite</span>: SELECT * FROM tasks WHERE completed = 0
+  <span class="arrow">↓</span>
+Return TaskRecord[] as JSON → stdout (JSON-RPC response)
+  <span class="arrow">↓</span>
+Claude receives tool results → uses in its response</div>
+  </div>
+
+  <div class="flow-card">
+    <div class="flow-header">
+      <span class="flow-num" style="background:rgba(188,140,255,0.2);color:var(--accent-purple)">4</span>
+      <h3 style="color:var(--accent-purple)">WASM Plugin Execution</h3>
+    </div>
+    <p>Community plugins run in a sandboxed WASM environment with capability-gated access to host functions.</p>
+    <div class="flow-steps">User: <span class="component">nexus plugin call</span> my-plugin some-command --args '{...}'
+  <span class="arrow">↓</span>
+<span class="component">PluginManager</span>::call(plugin_id, command, args)
+  <span class="arrow">↓</span>
+<span class="component">PluginLoader</span>::get(plugin_id) → check capabilities
+  <span class="arrow">↓</span>
+<span class="component">WasmSandbox</span>: instantiate WASM module (wasmtime)
+  <span class="arrow">├</span> Fuel limit enforced
+  <span class="arrow">├</span> Memory limit enforced
+  <span class="arrow">└</span> Host functions: storage, events, settings, KV
+  <span class="arrow">↓</span>
+WASM module executes → returns JSON result
+  <span class="arrow">↓</span>
+Output: text/json/table (formatted per --format flag)</div>
+  </div>
+
+  <div class="flow-card">
+    <div class="flow-header">
+      <span class="flow-num" style="background:rgba(247,120,186,0.2);color:var(--accent-pink)">5</span>
+      <h3 style="color:var(--accent-pink)">Theme Resolution (Desktop App)</h3>
+    </div>
+    <p>When the user toggles dark mode, the theme engine resolves CSS variables through a cascade and injects them into the React frontend.</p>
+    <div class="flow-steps">User clicks "Dark mode" in Tauri app
+  <span class="arrow">↓</span>
+React → invoke Tauri IPC: <span class="event">set_mode("dark")</span>
+  <span class="arrow">↓</span>
+<span class="component">ThemeEngine</span>::apply_theme(mode: "dark")
+  <span class="arrow">↓</span>
+Resolution cascade:
+  base_defaults (100 CSS vars)
+  <span class="arrow">+</span> theme_overrides(dark)
+  <span class="arrow">+</span> platform_overrides (OS accent color)
+  <span class="arrow">+</span> snippet_toggles
+  <span class="arrow">+</span> plugin_overrides
+  <span class="arrow">↓</span>
+Result: <span class="component">VariableMap</span> { --color-bg: "#1E1E1E", ... }
+  <span class="arrow">↓</span>
+Serialize JSON → send to React → inject as CSS custom properties</div>
+  </div>
+
+  <div class="flow-card">
+    <div class="flow-header">
+      <span class="flow-num" style="background:rgba(57,212,192,0.2);color:var(--accent-teal)">6</span>
+      <h3 style="color:var(--accent-teal)">Full-Text Search</h3>
+    </div>
+    <p>Search queries hit the Tantivy inverted index at block level — returning sub-document results with snippet previews.</p>
+    <div class="flow-steps">User: <span class="component">nexus content search</span> "knowledge graph"
+  <span class="arrow">↓</span>
+<span class="component">SearchIndex</span>::search(query, limit: 10)
+  <span class="arrow">↓</span>
+<span class="component">Tantivy</span> inverted index (.forge/search/)
+  BM25 scoring at <b>block level</b> (not note level)
+  <span class="arrow">↓</span>
+Return top N results with:
+  <span class="arrow">├</span> file path + block ID
+  <span class="arrow">├</span> snippet preview (highlighted)
+  <span class="arrow">└</span> relevance score
+  <span class="arrow">↓</span>
+Output: formatted per --format flag (text/json/table)</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 4: PLUGIN SYSTEM -->
+<!-- ============================================================ -->
+<div id="plugins" class="tab-content">
+  <div class="section-title">Plugin System</div>
+  <div class="section-sub">5 core plugins (native Rust) + WASM sandbox for community extensions. Two trust tiers with 12 capability gates.</div>
+
+  <div class="callout">
+    <h4>Two-Tier Architecture</h4>
+    <p><b>Core plugins</b> are compiled Rust with full kernel access — they run inside the process with no sandbox overhead. <b>Community plugins</b> are WASM modules sandboxed via wasmtime with fuel metering, memory limits, and capability-gated access to host functions. This gives maximum performance for built-in features while keeping third-party code isolated.</p>
+  </div>
+
+  <div class="section-title" style="font-size:1.1rem">Core Plugins (5)</div>
+
+  <div class="plugin-card">
+    <div class="plugin-header">
+      <h3 style="color:var(--accent-green)">Storage Core Plugin</h3>
+      <span class="plugin-id">com.nexus.storage</span>
+    </div>
+    <p>Bridges the forge file watcher to the kernel event bus. Detects filesystem changes and translates them into typed events that drive search reindexing and graph updates.</p>
+    <p><b>Lifecycle:</b> <code>on_init</code> verifies .forge dir exists · <code>on_start</code> starts watcher + bridge thread · <code>on_stop</code> signals + joins thread</p>
+    <div class="events-list">
+      <span class="event-tag">com.nexus.storage.file_created</span>
+      <span class="event-tag">com.nexus.storage.file_modified</span>
+      <span class="event-tag">com.nexus.storage.file_deleted</span>
+      <span class="event-tag">com.nexus.storage.file_renamed</span>
+      <span class="event-tag">com.nexus.storage.indexing.started</span>
+      <span class="event-tag">com.nexus.storage.indexing.completed</span>
+    </div>
+  </div>
+
+  <div class="plugin-card">
+    <div class="plugin-header">
+      <h3 style="color:var(--accent-red)">Security Core Plugin</h3>
+      <span class="plugin-id">com.nexus.security</span>
+    </div>
+    <p>Manages the security subsystem. Publishes audit events for security-relevant activity. Provides centralized access logging and risk assessment.</p>
+    <p><b>Lifecycle:</b> <code>on_init</code> logs subsystem init · <code>on_start</code> publishes started event · <code>on_stop</code> publishes stopped event</p>
+    <div class="events-list">
+      <span class="event-tag">com.nexus.security.started</span>
+      <span class="event-tag">com.nexus.security.stopped</span>
+      <span class="event-tag">com.nexus.security.audit.*</span>
+    </div>
+  </div>
+
+  <div class="plugin-card">
+    <div class="plugin-header">
+      <h3 style="color:var(--accent-orange)">Database Core Plugin</h3>
+      <span class="plugin-id">com.nexus.database</span>
+    </div>
+    <p>Manages the database engine (20+ property types, formula language, relations). Publishes events for record CRUD and schema changes.</p>
+    <p><b>Lifecycle:</b> <code>on_init</code> logs engine init · <code>on_start</code> publishes started · <code>on_stop</code> publishes stopped</p>
+    <div class="events-list">
+      <span class="event-tag">com.nexus.database.started</span>
+      <span class="event-tag">com.nexus.database.stopped</span>
+    </div>
+  </div>
+
+  <div class="plugin-card">
+    <div class="plugin-header">
+      <h3 style="color:var(--accent-blue)">Git Core Plugin</h3>
+      <span class="plugin-id">com.nexus.git</span>
+    </div>
+    <p>Git integration via libgit2. Verifies the forge root is within a git repository. Enables git-aware features (status, log, diff, blame). Optional — succeeds gracefully if no repo found.</p>
+    <p><b>Lifecycle:</b> <code>on_init</code> verifies git repository exists at forge root</p>
+    <p style="font-size:0.82rem; color:var(--accent-orange)">IPC commands reserved for future (pending serde::Serialize derives)</p>
+  </div>
+
+  <div class="plugin-card">
+    <div class="plugin-header">
+      <h3 style="color:var(--accent-purple)">AI Core Plugin</h3>
+      <span class="plugin-id">com.nexus.ai</span>
+    </div>
+    <p>AI engine integration. Auto-detects configured provider (Anthropic, OpenAI, Ollama) from environment variables and OS keyring. Enables embeddings, chat completions, and RAG queries. Optional — features disabled if no provider found.</p>
+    <p><b>Lifecycle:</b> <code>on_init</code> detects AI provider from env vars + keyring</p>
+    <p style="font-size:0.82rem; color:var(--accent-orange)">IPC commands reserved for future (pending async dispatch support)</p>
+  </div>
+
+  <div class="section-title" style="font-size:1.1rem; margin-top:40px">Capability System (12 Gates)</div>
+  <div class="section-sub">WASM plugins must declare required capabilities in their manifest. High-risk capabilities require explicit user approval.</div>
+
+  <table class="comparison-table">
+    <thead>
+      <tr><th>Capability</th><th>Description</th><th>Risk</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>fs.read</code></td><td>Read files within forge root</td><td style="color:var(--accent-green)">Low</td></tr>
+      <tr><td><code>fs.write</code></td><td>Write files within forge root</td><td style="color:var(--accent-orange)">Medium</td></tr>
+      <tr><td><code>fs.read.external</code></td><td>Read files outside forge root</td><td style="color:var(--accent-red)">High</td></tr>
+      <tr><td><code>fs.write.external</code></td><td>Write files outside forge root</td><td style="color:var(--accent-red)">High</td></tr>
+      <tr><td><code>net.http</code></td><td>Outbound HTTP to any host</td><td style="color:var(--accent-red)">High</td></tr>
+      <tr><td><code>net.http.localhost</code></td><td>Outbound HTTP to localhost only</td><td style="color:var(--accent-orange)">Medium</td></tr>
+      <tr><td><code>process.spawn</code></td><td>Spawn child processes</td><td style="color:var(--accent-red)">High</td></tr>
+      <tr><td><code>kv.read</code></td><td>Read plugin's scoped KV store</td><td style="color:var(--accent-green)">Low</td></tr>
+      <tr><td><code>kv.write</code></td><td>Write plugin's scoped KV store</td><td style="color:var(--accent-green)">Low</td></tr>
+      <tr><td><code>ipc.call</code></td><td>Call IPC commands on other plugins</td><td style="color:var(--accent-red)">High</td></tr>
+      <tr><td><code>db.query</code></td><td>Query SQLite tables</td><td style="color:var(--accent-green)">Low</td></tr>
+      <tr><td><code>db.write</code></td><td>Write to SQLite tables</td><td style="color:var(--accent-orange)">Medium</td></tr>
+    </tbody>
+  </table>
+
+  <div class="section-title" style="font-size:1.1rem; margin-top:40px">MCP Tools (13)</div>
+  <div class="section-sub">Exposed by <code>nexus mcp</code> (stdio transport). Available to Claude Code, Cursor, and other MCP-compatible clients.</div>
+
+  <table class="comparison-table">
+    <thead>
+      <tr><th>Tool</th><th>Input</th><th>Output</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>nexus_read_note</code></td><td>path</td><td>content, size_bytes, modified_at</td></tr>
+      <tr><td><code>nexus_create_note</code></td><td>path, content</td><td>path, size_bytes, content_hash</td></tr>
+      <tr><td><code>nexus_update_note</code></td><td>path, content</td><td>path, size_bytes, content_hash</td></tr>
+      <tr><td><code>nexus_delete_note</code></td><td>path</td><td>deleted: bool</td></tr>
+      <tr><td><code>nexus_list_notes</code></td><td>prefix (optional)</td><td>FileEntry[]</td></tr>
+      <tr><td><code>nexus_search</code></td><td>query, limit</td><td>SearchResult[]</td></tr>
+      <tr><td><code>nexus_backlinks</code></td><td>path</td><td>BacklinkResult[]</td></tr>
+      <tr><td><code>nexus_outgoing_links</code></td><td>path</td><td>OutgoingLink[]</td></tr>
+      <tr><td><code>nexus_graph_status</code></td><td>(none)</td><td>GraphStats</td></tr>
+      <tr><td><code>nexus_list_tags</code></td><td>name</td><td>TagResult[]</td></tr>
+      <tr><td><code>nexus_list_tasks</code></td><td>completed?, file?</td><td>TaskRecord[]</td></tr>
+      <tr><td><code>nexus_toggle_task</code></td><td>task_id</td><td>toggled: bool</td></tr>
+      <tr><td><code>nexus_ask</code></td><td>question</td><td>RagResponse (with sources)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="section-title" style="font-size:1.1rem; margin-top:40px">CLI Plugin Commands</div>
+  <div class="section-sub">Manage the plugin lifecycle from the command line</div>
+
+  <div class="details-grid">
+    <div class="detail-card">
+      <h3><span class="dot" style="background:var(--accent-purple)"></span> Management</h3>
+      <ul>
+        <li><code>nexus plugin install &lt;dir&gt;</code> <span class="label">— Install from directory</span></li>
+        <li><code>nexus plugin uninstall &lt;id&gt;</code> <span class="label">— Unload plugin</span></li>
+        <li><code>nexus plugin list</code> <span class="label">— List all loaded plugins</span></li>
+        <li><code>nexus plugin enable &lt;id&gt;</code> <span class="label">— Enable plugin</span></li>
+        <li><code>nexus plugin disable &lt;id&gt;</code> <span class="label">— Disable plugin</span></li>
+      </ul>
+    </div>
+    <div class="detail-card">
+      <h3><span class="dot" style="background:var(--accent-blue)"></span> Development</h3>
+      <ul>
+        <li><code>nexus plugin call &lt;id&gt; &lt;cmd&gt; &lt;args&gt;</code> <span class="label">— Invoke IPC command</span></li>
+        <li><code>nexus plugin settings &lt;id&gt;</code> <span class="label">— View settings</span></li>
+        <li><code>nexus plugin settings &lt;id&gt; --set &lt;json&gt;</code> <span class="label">— Update settings</span></li>
+        <li><code>nexus plugin scaffold core|community</code> <span class="label">— Generate template</span></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+function showTab(tabId) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById(tabId).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

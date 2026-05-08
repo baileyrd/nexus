@@ -1,0 +1,167 @@
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#4a9eff', 'primaryTextColor': '#fff', 'primaryBorderColor': '#6db3ff', 'lineColor': '#888', 'secondaryColor': '#2d2d2d', 'tertiaryColor': '#1a1a2e', 'background': '#0d1117', 'mainBkg': '#161b22', 'nodeBorder': '#6db3ff', 'clusterBkg': '#161b22', 'clusterBorder': '#30363d', 'titleColor': '#c9d1d9', 'edgeLabelBackground': '#0d1117'}}}%%
+graph TB
+    subgraph UI["User Interfaces"]
+        direction LR
+        CLI["nexus CLI<br/><i>clap + comfy-table</i>"]
+        TUI["nexus-tui<br/><i>ratatui + crossterm</i>"]
+        DESK["Nexus Desktop<br/><i>Tauri 2 + React</i>"]
+        MCP["MCP Server<br/><i>rmcp / stdio</i>"]
+    end
+
+    subgraph FRONTEND["Desktop Frontend (app/)"]
+        direction LR
+        REACT["React 18 + Vite"]
+        ZUSTAND["Zustand State"]
+        IPC["Tauri IPC Bridge"]
+        TSBIND["ts-rs Type Bindings"]
+    end
+
+    subgraph CORE["Kernel & Orchestration"]
+        KERNEL["nexus-kernel<br/><i>Event Bus / Plugin Lifecycle</i>"]
+        SECURITY["nexus-security<br/><i>Capabilities / Audit / Vault</i>"]
+        TYPES["nexus-types<br/><i>Shared Types</i>"]
+    end
+
+    subgraph STORAGE_LAYER["Storage Engine"]
+        STORAGE["nexus-storage<br/><i>Facade</i>"]
+        FORGE["Forge<br/><i>Directory Layout + Lock</i>"]
+        SQLITE["SQLite Index<br/><i>r2d2 Pool + WAL</i>"]
+        TANTIVY["Tantivy FTS<br/><i>Full-Text Search</i>"]
+        GRAPH["Knowledge Graph<br/><i>petgraph</i>"]
+        WATCHER["File Watcher<br/><i>notify + debounce</i>"]
+        PARSER["Markdown Parser<br/><i>comrak</i>"]
+        RECONCILE["Reconciler<br/><i>FS -> Index Sync</i>"]
+    end
+
+    subgraph PLUGINS_LAYER["Plugin System"]
+        PLUGINS["nexus-plugins<br/><i>Manager + Loader</i>"]
+        WASM["WASM Sandbox<br/><i>wasmtime</i>"]
+        HOTRELOAD["Hot Reloader<br/><i>notify</i>"]
+        MANIFEST["Plugin Manifests<br/><i>TOML + JSON Schema</i>"]
+    end
+
+    subgraph AI_LAYER["AI & RAG"]
+        AI["nexus-ai<br/><i>Provider Traits</i>"]
+        CLAUDE["Anthropic<br/>Claude"]
+        OPENAI["OpenAI<br/>GPT-4"]
+        OLLAMA["Ollama<br/>Local LLMs"]
+        EMBED["Embedding<br/>Engine"]
+        RAG["RAG Pipeline<br/><i>Chunk -> Embed -> Retrieve</i>"]
+    end
+
+    subgraph EXTENSIONS["Feature Crates"]
+        direction LR
+        GIT["nexus-git<br/><i>libgit2 (read-only)</i>"]
+        DB["nexus-database<br/><i>20+ Property Types<br/>Formula Language</i>"]
+        FORMATS["nexus-formats<br/><i>MDX / Canvas</i>"]
+        THEME["nexus-theme<br/><i>CSS Vars / Cascade</i>"]
+    end
+
+    subgraph DISK["Forge on Disk (Source of Truth)"]
+        direction LR
+        NOTES["notes/<br/><i>Markdown Files</i>"]
+        ATTACH["attachments/<br/><i>Binary Files</i>"]
+        DOTFORGE[".forge/<br/><i>index.db + search/</i>"]
+    end
+
+    subgraph EXTERNAL["External Services"]
+        direction LR
+        CLAUDE_API["Claude API"]
+        OPENAI_API["OpenAI API"]
+        OLLAMA_SVC["Ollama Server"]
+        KEYRING["OS Keyring<br/><i>macOS/Linux/Win</i>"]
+        MCP_CLIENT["MCP Clients<br/><i>Claude Code, Cursor</i>"]
+    end
+
+    %% UI -> Core connections
+    CLI --> KERNEL
+    CLI --> STORAGE
+    CLI --> PLUGINS
+    CLI --> AI
+    TUI --> STORAGE
+    TUI --> KERNEL
+    MCP --> STORAGE
+    MCP --> AI
+
+    %% Desktop app connections
+    DESK --> IPC
+    IPC --> THEME
+    REACT --> ZUSTAND
+    REACT --> IPC
+    TSBIND -.-> REACT
+
+    %% Core internal
+    TYPES --> KERNEL
+    KERNEL --> SECURITY
+    SECURITY --> KEYRING
+
+    %% Storage internals
+    STORAGE --> FORGE
+    STORAGE --> SQLITE
+    STORAGE --> TANTIVY
+    STORAGE --> GRAPH
+    STORAGE --> WATCHER
+    STORAGE --> PARSER
+    STORAGE --> RECONCILE
+    WATCHER -->|StorageEvent| RECONCILE
+    RECONCILE --> SQLITE
+    RECONCILE --> TANTIVY
+    PARSER --> GRAPH
+
+    %% Storage <-> Kernel
+    STORAGE --> KERNEL
+
+    %% Plugin internals
+    PLUGINS --> WASM
+    PLUGINS --> HOTRELOAD
+    PLUGINS --> MANIFEST
+    PLUGINS --> KERNEL
+    PLUGINS --> SECURITY
+
+    %% AI internals
+    AI --> CLAUDE
+    AI --> OPENAI
+    AI --> OLLAMA
+    AI --> EMBED
+    RAG --> AI
+    RAG --> STORAGE
+    RAG --> EMBED
+    CLAUDE --> CLAUDE_API
+    OPENAI --> OPENAI_API
+    OLLAMA --> OLLAMA_SVC
+
+    %% Extensions
+    GIT --> PLUGINS
+    DB --> STORAGE
+    FORMATS --> PARSER
+    THEME --> DESK
+
+    %% Disk
+    FORGE --> NOTES
+    FORGE --> ATTACH
+    FORGE --> DOTFORGE
+    SQLITE -.->|rebuild from| NOTES
+    TANTIVY -.->|rebuild from| NOTES
+
+    %% MCP external
+    MCP_CLIENT -->|JSON-RPC / stdio| MCP
+
+    %% Styling
+    classDef uiNode fill:#1f6feb,stroke:#58a6ff,color:#fff
+    classDef coreNode fill:#8b5cf6,stroke:#a78bfa,color:#fff
+    classDef storageNode fill:#238636,stroke:#3fb950,color:#fff
+    classDef pluginNode fill:#da3633,stroke:#f85149,color:#fff
+    classDef aiNode fill:#d29922,stroke:#e3b341,color:#000
+    classDef extNode fill:#1f6feb,stroke:#58a6ff,color:#fff,stroke-dasharray: 5 5
+    classDef diskNode fill:#21262d,stroke:#484f58,color:#c9d1d9
+    classDef externalNode fill:#0d1117,stroke:#30363d,color:#8b949e
+
+    class CLI,TUI,DESK,MCP uiNode
+    class KERNEL,SECURITY,TYPES coreNode
+    class STORAGE,FORGE,SQLITE,TANTIVY,GRAPH,WATCHER,PARSER,RECONCILE storageNode
+    class PLUGINS,WASM,HOTRELOAD,MANIFEST pluginNode
+    class AI,CLAUDE,OPENAI,OLLAMA,EMBED,RAG aiNode
+    class GIT,DB,FORMATS,THEME extNode
+    class NOTES,ATTACH,DOTFORGE diskNode
+    class CLAUDE_API,OPENAI_API,OLLAMA_SVC,KEYRING,MCP_CLIENT externalNode
+    class REACT,ZUSTAND,IPC,TSBIND uiNode

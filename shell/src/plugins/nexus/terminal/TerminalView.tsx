@@ -30,52 +30,6 @@ function pushUrl(prev: UrlMatch[], next: UrlMatch): UrlMatch[] {
   return filtered
 }
 
-/**
- * Probe whether the active GPU is a software rasterizer (llvmpipe,
- * SwiftShader, Microsoft Basic Render Driver, generic Mesa software
- * fallback). Result is cached on first call: GPU identity doesn't
- * change for the life of a WebView.
- *
- * Used by the terminal mount path to decide whether to install
- * xterm's WebGL addon. On software GPUs (typical of WSL2 without
- * GPU passthrough) the WebGL renderer overruns its frame budget on
- * every paint and emits a `task queue exceeded allotted deadline`
- * warning; the DOM renderer is both faster and quieter there.
- */
-let cachedSoftwareGpu: boolean | null = null
-function isSoftwareRenderedGpu(): boolean {
-  if (cachedSoftwareGpu !== null) return cachedSoftwareGpu
-  try {
-    const probe = document.createElement('canvas')
-    const gl =
-      (probe.getContext('webgl2') as WebGL2RenderingContext | null) ??
-      (probe.getContext('webgl') as WebGLRenderingContext | null) ??
-      (probe.getContext('experimental-webgl') as WebGLRenderingContext | null)
-    if (!gl) {
-      cachedSoftwareGpu = true
-      return true
-    }
-    const dbg = gl.getExtension('WEBGL_debug_renderer_info')
-    const renderer: string = dbg
-      ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL))
-      : String(gl.getParameter(gl.RENDERER))
-    const lc = renderer.toLowerCase()
-    cachedSoftwareGpu =
-      lc.includes('llvmpipe') ||
-      lc.includes('swiftshader') ||
-      lc.includes('swrast') ||
-      lc.includes('software') ||
-      lc.includes('basic render') ||
-      lc.includes('softpipe')
-    return cachedSoftwareGpu
-  } catch {
-    // Any probe failure → treat as software so we err on the side of
-    // the safer DOM renderer rather than a broken WebGL one.
-    cachedSoftwareGpu = true
-    return true
-  }
-}
-
 const PLUGIN_ID = 'com.nexus.terminal'
 // Handler ids verified in crates/nexus-terminal/src/core_plugin.rs.
 // `send_input` (text + auto-newline) is NOT used — raw keystrokes
@@ -241,29 +195,17 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
     // On context loss (GPU reset, tab suspended too long) dispose the
     // addon — xterm falls back to its DOM renderer automatically and
     // the next mount will re-attach a fresh WebGL context.
-    //
-    // Skip WebGL entirely on software-rendered GPUs. Under WSL2 the
-    // host falls back to llvmpipe / dzn / Mesa software rasterization
-    // (visible as `libEGL warning: failed to get driver name` and
-    // `dzn is not a conformant Vulkan implementation` at boot). The
-    // WebGL renderer still functions there but every frame overruns
-    // its task-queue budget, which xterm-addon-webgl logs as
-    // `task queue exceeded allotted deadline by Nms`. The DOM
-    // renderer is faster on a software GPU and produces no warnings.
-    let webgl: WebglAddon | null = null
-    if (!isSoftwareRenderedGpu()) {
-      webgl = new WebglAddon()
-      webgl.onContextLoss(() => {
-        webgl?.dispose()
-        webgl = null
-      })
-      try {
-        term.loadAddon(webgl)
-      } catch {
-        // No WebGL support (headless tests, ancient GPU) — fall back to
-        // the default DOM renderer silently.
-        webgl = null
-      }
+    let webgl: WebglAddon | null = new WebglAddon()
+    webgl.onContextLoss(() => {
+      webgl?.dispose()
+      webgl = null
+    })
+    try {
+      term.loadAddon(webgl)
+    } catch {
+      // No WebGL support (headless tests, ancient GPU) — fall back to
+      // the default DOM renderer silently.
+      webgl = null
     }
     term.focus()
 
@@ -483,40 +425,17 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
     container.addEventListener('contextmenu', onContextMenu)
 
     // ── Resize: refit xterm's local grid, then propagate cols/rows to
-    // the PTY so the child receives SIGWINCH.
-    //
-    // Two constraints to satisfy together:
-    //   1. FitAddon.fit() mutates xterm's child DOM (cell grid sizing).
-    //      Calling it synchronously inside the ResizeObserver callback
-    //      triggers another resize in the same delivery cycle — that's
-    //      the "ResizeObserver loop completed with undelivered
-    //      notifications" warning. Deferring to the next animation
-    //      frame breaks the cycle.
-    //   2. As the panel mounts, the outer container resizes in stages
-    //      (initial 0×0 → flex layout settles → final size). A naive
-    //      "drop further observations while a frame is pending" would
-    //      lose the late stages, leaving xterm fitted to the early
-    //      small size — that's the "terminal not filling the panel"
-    //      bug.
-    //
-    // The fix: track the latest contentRect from each observation and
-    // schedule a single trailing rAF that reads the live container at
-    // fire time. Outer container size only changes from layout reasons
-    // (parent flex, viewport resize) — fit()'s own inner DOM mutations
-    // don't change the outer contentRect, so the loop is broken without
-    // dropping observations.
+    // the PTY so the child receives SIGWINCH. We dedupe identical
+    // dimensions because ResizeObserver fires for every layout pass
+    // (theme switch, font change, parent reflow) — a no-op resize
+    // would still land an IPC roundtrip.
     let lastCols = -1
     let lastRows = -1
-    let lastObservedW = -1
-    let lastObservedH = -1
-    let pendingRaf: number | null = null
-    const refit = () => {
-      pendingRaf = null
+    const resizeObs = new ResizeObserver(() => {
       try {
         fit.fit()
       } catch {
-        // Container has zero size right now (display:none ancestor,
-        // detached during transition). Next observation will retry.
+        // Size wasn't ready yet; next observation will retry.
         return
       }
       const cols = term.cols
@@ -531,21 +450,6 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
         .catch(() => {
           // Session may have closed between fit() and invoke; ignore.
         })
-    }
-    const resizeObs = new ResizeObserver((entries) => {
-      let outerChanged = false
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect
-        if (width !== lastObservedW || height !== lastObservedH) {
-          lastObservedW = width
-          lastObservedH = height
-          outerChanged = true
-        }
-      }
-      if (!outerChanged) return
-      if (pendingRaf === null) {
-        pendingRaf = window.requestAnimationFrame(refit)
-      }
     })
     resizeObs.observe(container)
 
@@ -570,10 +474,6 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
       try {
         resizeObs.disconnect()
       } catch {}
-      if (pendingRaf !== null) {
-        window.cancelAnimationFrame(pendingRaf)
-        pendingRaf = null
-      }
       try {
         offFocus()
       } catch {}
@@ -598,26 +498,9 @@ export function TerminalView({ kernel, events, openExternal }: TerminalViewProps
   }, [])
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        // The leaf host element doesn't always force its child to fill
-        // — without explicit `width: 100%` here, this flex column shrinks
-        // to its xterm-canvas content and the terminal renders as a
-        // single-column vertical strip. Same reasoning for height.
-        width: '100%',
-        height: '100%',
-        minHeight: 0,
-        minWidth: 0,
-      }}
-    >
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <UrlChips urls={urls} openExternal={openExternal} onDismiss={dismissUrls} />
-      <div
-        ref={containerRef}
-        className="nexus-terminal-root"
-        style={{ flex: 1, minHeight: 0, minWidth: 0 }}
-      />
+      <div ref={containerRef} className="nexus-terminal-root" style={{ flex: 1, minHeight: 0 }} />
       <SuggestionChip kernel={kernel} sessionId={sessionId} />
     </div>
   )

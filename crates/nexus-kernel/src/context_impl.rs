@@ -378,9 +378,7 @@ impl PluginContext for KernelPluginContext {
         // error class regardless of whether the bus call eventually runs.
         // See `event_bus::type_id_in_namespace` for why a plain
         // `starts_with` is unsafe.
-        if !crate::event_bus::type_id_in_namespace(type_id, &self.plugin_id)
-            && !crate::event_bus::is_kernel_owned_shared_topic(type_id)
-        {
+        if !crate::event_bus::type_id_in_namespace(type_id, &self.plugin_id) {
             return Err(BusError::TypeIdNamespaceMismatch {
                 plugin_id: self.plugin_id.clone(),
                 type_id: type_id.to_string(),

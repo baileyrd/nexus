@@ -999,18 +999,7 @@ impl StorageEngine {
     pub fn list_dir(&self, relpath: &str) -> Result<Vec<TreeEntry>, StorageError> {
         let target = resolve_within(self.forge.root(), relpath)?;
         let mut entries: Vec<TreeEntry> = Vec::new();
-        let dir_iter = match std::fs::read_dir(&target) {
-            Ok(it) => it,
-            // A caller asking "what's in <relpath>?" before <relpath> has been
-            // created (e.g. `.forge/agent/sessions` on first agent boot, before
-            // any session has been written) is a normal lifecycle state, not
-            // an error. Surfacing NotFound as `Err` forces every caller to
-            // duplicate the same fallback; emptying it here lets the IPC
-            // contract stay "list returns rows" without crash-on-first-use.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(entries),
-            Err(e) => return Err(e.into()),
-        };
-        for entry in dir_iter {
+        for entry in std::fs::read_dir(&target)? {
             let Ok(entry) = entry else { continue };
             let Ok(ft) = entry.file_type() else { continue };
             let Some(name) = entry.file_name().to_str().map(str::to_string) else {

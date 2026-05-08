@@ -1,0 +1,29 @@
+[plugin]
+id = "{{plugin-id}}"
+name = "{{plugin-name}}"
+version = "0.1.0"
+author = "{{author}}"
+description = "{{description}}"
+kernel_api_version = "1.0.0"
+trust_level = "community"
+
+[capabilities]
+# Community plugins must declare every capability they need.
+#
+# Required capabilities block plugin load if the user denies them.
+# Only list capabilities the plugin genuinely cannot function without.
+required = ["FileRead"]
+
+# Optional capabilities allow the plugin to run in a degraded mode
+# if the user denies them. The plugin must check for these at runtime
+# via ctx.request_capability() and handle CapabilityError::Denied.
+optional = ["FileWrite"]
+
+[dependencies]
+# Other plugin IDs this plugin requires to be loaded first.
+# The kernel uses topological sort to resolve initialization order.
+# If a dependency is missing, the kernel will not load this plugin.
+plugins = []
+
+[build]
+binary_name = "{{plugin-name}}"

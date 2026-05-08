@@ -2,7 +2,7 @@
   "id": "community.mermaid",
   "name": "Mermaid Diagrams",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "index.js",
   "enabled": false,
   "description": "Renders fenced ```mermaid blocks as SVG diagrams in the editor's live and preview modes.",
   "author": "nexus",

@@ -1,0 +1,71 @@
+{
+  "version": "1.0",
+  "nodes": [
+    {
+      "id": "cc4117f2ced47426",
+      "type": "text",
+      "x": -125.0,
+      "y": -30.0,
+      "width": 250.0,
+      "height": 60.0,
+      "collapsed": false,
+      "text": "This is a test"
+    },
+    {
+      "id": "757f5e4bb99a0bbd",
+      "type": "text",
+      "x": -133.0,
+      "y": -172.0,
+      "width": 250.0,
+      "height": 60.0,
+      "collapsed": false,
+      "text": "So is this"
+    },
+    {
+      "id": "19f4b15d7a34c8f6",
+      "type": "text",
+      "x": 270.0087209302326,
+      "y": -154.87499999999994,
+      "width": 250.0,
+      "height": 60.0,
+      "collapsed": false,
+      "text": ""
+    },
+    {
+      "id": "feb5257cb12c10a2",
+      "type": "text",
+      "x": 302.1690356273661,
+      "y": 21.18168604651169,
+      "width": 209.82224344240132,
+      "height": 56.454903833153026,
+      "collapsed": false,
+      "text": ""
+    }
+  ],
+  "edges": [
+    {
+      "id": "91d4fbfa7f738bc5",
+      "fromNode": "cc4117f2ced47426",
+      "toNode": "757f5e4bb99a0bbd",
+      "type": "solid",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "12a0a4b5ecb49299",
+      "fromNode": "757f5e4bb99a0bbd",
+      "toNode": "19f4b15d7a34c8f6",
+      "type": "solid",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "285db0f9ab1d6e78",
+      "fromNode": "19f4b15d7a34c8f6",
+      "toNode": "feb5257cb12c10a2",
+      "type": "solid",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ]
+}
