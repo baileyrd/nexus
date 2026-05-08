@@ -47,6 +47,7 @@ later revised, write a new ADR that supersedes the old one.
 | [0023](0023-unify-agent-on-ai-tool-registry.md) | Unify agent planning on the AI tool registry | Accepted |
 | [0024](0024-agent-session-tool-loop.md) | Agent session tool-loop (ADR-0023 Phase 2) | Accepted |
 | [0025](0025-retire-legacy-planner-ipc.md) | Retire legacy planner IPC | Accepted |
+| [0026](0026-collaborative-editing-crdt-layer.md) | Collaborative editing CRDT layer (BL-074 Phase 1) | Accepted |
 
 ## How ADRs relate to PRDs and BACKLOG
 

@@ -1,0 +1,18 @@
+[package]
+name        = "nexus-crdt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Operation-based CRDT layer for collaborative editing (BL-074, PRD-08 §8)"
+
+[dependencies]
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+uuid        = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+nexus-editor = { path = "../nexus-editor" }
+
+[dev-dependencies]
+nexus-formats = { path = "../nexus-formats" }
