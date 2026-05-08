@@ -236,11 +236,37 @@ fn process_events(
             // target is outside). Reconcile already excludes symlinks
             // from the walk; this keeps the live event stream
             // consistent with that.
-            if let Ok(meta) = std::fs::symlink_metadata(path) {
+            //
+            // The same `symlink_metadata` lookup also gives us the
+            // file/dir discriminator we need below — directories have
+            // their own watcher events but aren't a piece of file-as-
+            // truth content the storage layer should index; we read
+            // it once and route accordingly.
+            let metadata = match std::fs::symlink_metadata(path) {
+                Ok(meta) => Some(meta),
+                Err(_) => None,
+            };
+            if let Some(ref meta) = metadata {
                 if meta.file_type().is_symlink() {
                     tracing::debug!(
                         path = %path.display(),
                         "BL-082: ignoring file event for symlink",
+                    );
+                    continue;
+                }
+                if meta.is_dir() {
+                    // The OS / notify-rs emits aggregate events for
+                    // directories whose contents changed (e.g. files
+                    // inside `notes/Ideas/`). Reading a directory with
+                    // `std::fs::read` returns `Err("Is a directory")`,
+                    // which the previous fall-through misclassified as
+                    // a "file deleted via race". The fix: skip dir
+                    // events outright — the per-file events for the
+                    // children are already emitted separately by the
+                    // recursive watcher.
+                    tracing::debug!(
+                        path = %path.display(),
+                        "ignoring directory event (children fire their own events)",
                     );
                     continue;
                 }
@@ -250,8 +276,9 @@ fn process_events(
                 continue;
             };
 
-            if path.exists() {
-                // File exists — read and hash it, emit FileModified.
+            if metadata.is_some() {
+                // File exists (we just stat'd it above) — read and
+                // hash it, emit FileModified.
                 match std::fs::read(path) {
                     Ok(bytes) => {
                         let hash = nexus_formats::sha256_hex(&bytes);
@@ -261,7 +288,9 @@ fn process_events(
                         });
                     }
                     Err(_) => {
-                        // Race: file disappeared between exists() and read().
+                        // Genuine race: stat succeeded, then the file
+                        // disappeared before we could read it. Treat
+                        // as a deletion.
                         let _ = storage_tx.send(StorageEvent::FileDeleted { path: rel });
                     }
                 }
@@ -444,6 +473,59 @@ mod tests {
                 assert!(!content_hash.is_empty(), "content_hash should not be empty");
             }
             other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    /// Regression: writing files inside a directory used to emit a
+    /// spurious `FileDeleted` for the *parent directory* — the OS
+    /// debouncer aggregates child changes into a directory-level
+    /// event, `path.exists()` returned true (the directory was still
+    /// there), `std::fs::read(path)` returned `Err("Is a directory")`,
+    /// and the previous fall-through misclassified the read failure
+    /// as a deletion race. Every child write fired a phantom
+    /// `notes/<dir>` deletion, fast enough to flood the activity
+    /// timeline and drown out real events.
+    ///
+    /// Post-fix the watcher should never emit a `FileDeleted` whose
+    /// `path` corresponds to a directory that still exists on disk.
+    #[test]
+    fn watcher_does_not_emit_phantom_deletions_for_directories() {
+        use std::time::{Duration, Instant};
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().expect("temp dir");
+        let forge_root = dir.path();
+        let notes_dir = forge_root.join("notes");
+        let ideas_dir = notes_dir.join("Ideas");
+        std::fs::create_dir_all(&ideas_dir).expect("create Ideas dir");
+
+        let watcher = Watcher::start(forge_root, 50).expect("start watcher");
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Write a fresh file inside the watched directory and update
+        // it a few times to provoke directory-aggregate events.
+        for i in 0..5 {
+            let note_path = ideas_dir.join(format!("note-{i}.md"));
+            std::fs::write(&note_path, format!("# Note {i}\n")).expect("write note");
+            std::thread::sleep(Duration::from_millis(60));
+        }
+
+        // Drain the watcher for a generous window. Any event whose
+        // path is `notes/Ideas` or `notes` and is `FileDeleted` is
+        // the regression.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match watcher.events().recv_timeout(remaining) {
+                Ok(StorageEvent::FileDeleted { path }) => {
+                    assert!(
+                        !path.ends_with("Ideas") && path != "notes",
+                        "phantom directory-level deletion: {path}",
+                    );
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
         }
     }
 }
