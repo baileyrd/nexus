@@ -9,3 +9,4 @@
  * imported file are registered as subtests of this file.
  */
 import '../src/plugins/nexus/terminal/savedCommandsStore.test.ts'
+import '../src/plugins/nexus/terminal/parseExternalPriority.test.ts'

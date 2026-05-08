@@ -72,6 +72,50 @@ type EditorState =
   | { mode: 'add'; draft: SavedCommandDraft }
   | { mode: 'edit'; original: SavedCommand; draft: SavedCommandDraft }
 
+/**
+ * BL-059 follow-up — split the `terminal.externalPriority` setting
+ * into a sanitized list. Accepts comma- or whitespace-separated
+ * tokens, normalises kebab to snake (the kernel's `parse_kind`
+ * accepts both), filters out empties + duplicates + obviously
+ * unsupported tags. Unrecognised tokens are silently dropped — the
+ * kernel would error otherwise and the user's intent ("don't use
+ * what I haven't whitelisted") is still honoured.
+ */
+const KNOWN_TERMINAL_KINDS: ReadonlySet<string> = new Set([
+  'iterm2',
+  'iterm',
+  'wezterm',
+  'ghostty',
+  'kitty',
+  'alacritty',
+  'windows_terminal',
+  'wt',
+  'gnome_terminal',
+  'konsole',
+  'xfce4_terminal',
+  'mac_terminal',
+  'terminal',
+  'x_terminal_emulator',
+  'xterm',
+])
+
+export function parseExternalPriority(raw: string): string[] {
+  if (!raw) return []
+  const tokens = raw
+    .split(/[,\s]+/)
+    .map((t) => t.trim().toLowerCase().replace(/-/g, '_'))
+    .filter((t) => t.length > 0)
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const t of tokens) {
+    if (!KNOWN_TERMINAL_KINDS.has(t)) continue
+    if (seen.has(t)) continue
+    seen.add(t)
+    out.push(t)
+  }
+  return out
+}
+
 /** Slugify a freeform name into a URL-safe primary key. The kernel does
  *  not enforce any specific shape — it just uses `slug` as the rowid —
  *  but a-z0-9-dash keeps URLs and file paths sane if the slug ever
@@ -89,6 +133,11 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
   const { kernel, notifications, focusTerminal } = props
   const cmdSaveMs = useConfigValue('ui.commandSaveNotificationMs', CMD_SAVE_NOTIFICATION_MS)
   const cmdCopiedMs = useConfigValue('ui.commandCopiedNotificationMs', CMD_COPIED_NOTIFICATION_MS)
+  // BL-059 follow-up — comma-separated emulator priority. Empty
+  // strings collapse to "use the kernel default". `parseExternalPriority`
+  // is exported as a pure helper so a unit test can pin the
+  // splitting + canonicalisation rules without driving React.
+  const externalPriorityRaw = useConfigValue('terminal.externalPriority', '')
   const commands = useSavedCommandsStore((s) => s.commands)
   const loaded = useSavedCommandsStore((s) => s.loaded)
   const error = useSavedCommandsStore((s) => s.error)
@@ -287,12 +336,15 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
         )
         return
       }
+      const priority = parseExternalPriority(externalPriorityRaw ?? '')
+      const args: { slug: string; priority?: string[] } = { slug: cmd.slug }
+      if (priority.length > 0) args.priority = priority
       try {
         const resp = await kernel.invoke<{
           kind: string
           program: string
           working_dir: string
-        }>(PLUGIN_ID, CMD_OPEN_IN_TERMINAL, { slug: cmd.slug })
+        }>(PLUGIN_ID, CMD_OPEN_IN_TERMINAL, args)
         notifications.show({
           message: `Opened ${resp.program} at ${resp.working_dir}`,
           type: 'success',
@@ -302,7 +354,7 @@ export function SavedCommandsView(props: SavedCommandsViewProps) {
         setLocalError(String(err))
       }
     },
-    [kernel, notifications, cmdCopiedMs],
+    [kernel, notifications, cmdCopiedMs, externalPriorityRaw],
   )
 
   const handleSubmit = useCallback(async () => {

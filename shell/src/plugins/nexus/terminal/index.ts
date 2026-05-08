@@ -109,6 +109,21 @@ export const terminalPlugin: Plugin = {
             type: 'number' as const,
             default: 2000,
           },
+          {
+            // BL-059 follow-up — comma-separated priority list passed to
+            // `com.nexus.terminal::open_in_terminal`. Earlier names win
+            // when multiple emulators are installed. Leave blank for the
+            // built-in cross-platform default. Valid tags (kebab-case
+            // also accepted): iterm2, wezterm, ghostty, kitty,
+            // alacritty, windows-terminal, gnome-terminal, konsole,
+            // xfce4-terminal, mac-terminal, x-terminal-emulator, xterm.
+            key: 'terminal.externalPriority',
+            title: 'External terminal priority',
+            description:
+              'Comma-separated emulator preference for the "Open in external" action. Earlier entries win. Valid: iterm2, wezterm, ghostty, kitty, alacritty, windows-terminal, gnome-terminal, konsole, xfce4-terminal, mac-terminal, x-terminal-emulator, xterm. Leave blank for the built-in cross-platform default.',
+            type: 'string' as const,
+            default: '',
+          },
         ],
       },
       commands: [
