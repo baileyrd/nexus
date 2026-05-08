@@ -35,6 +35,14 @@ pub enum GitError {
     /// lookup.
     #[error("path not in conflict: {0}")]
     NoConflict(String),
+
+    /// Subprocess / IO error from a git-CLI shell-out (BL-091
+    /// follow-up's LFS staging path is the first call site). The
+    /// payload is a free-form description of what went wrong; the
+    /// caller surfaces it as-is to operators rather than masking the
+    /// detail.
+    #[error("git io error: {0}")]
+    Io(String),
 }
 
 #[cfg(test)]

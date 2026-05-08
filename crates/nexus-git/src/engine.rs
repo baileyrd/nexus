@@ -297,13 +297,32 @@ impl GitEngine {
 
     /// Stage a single file by path (repo-relative).
     ///
+    /// BL-091 follow-up — when the path is LFS-tracked
+    /// (`.gitattributes` lists a `filter=lfs` directive that matches
+    /// it), staging routes through the git CLI so its
+    /// `clean` filter pipeline runs `git lfs clean` before the
+    /// index is written. Without this routing, libgit2's
+    /// `index.add_path` would write the raw working-tree bytes
+    /// (e.g. a 50 MB PNG) into the index instead of the 134-byte
+    /// pointer — the BL-091 read-side bug's write-side twin.
+    ///
     /// # Errors
     ///
-    /// Returns [`GitError`] on any libgit2 failure.
+    /// Returns [`GitError`] on any libgit2 failure, or
+    /// [`GitError::Io`] when the LFS-tracked git-CLI shell-out
+    /// fails (caller surfaces — silently falling back to the
+    /// libgit2 path would re-introduce the BL-091 bug we're
+    /// fixing).
     pub fn stage_file(&self, path: &Path) -> Result<(), GitError> {
-        let mut index = self.repo.index()?;
-        // If the file was deleted from disk, remove from index; otherwise add.
         let abs = self.repo_root().join(path);
+        // Only the add-path branch is LFS-relevant. A delete (path
+        // missing from the working tree) takes the libgit2 fast
+        // path because `git lfs clean` would have nothing to read
+        // and the right index update is a `remove_path` regardless.
+        if abs.exists() && crate::lfs::is_lfs_tracked(self.repo_root(), path) {
+            return crate::lfs::stage_via_git_cli(self.repo_root(), path);
+        }
+        let mut index = self.repo.index()?;
         if abs.exists() {
             index.add_path(path)?;
         } else {
@@ -1459,6 +1478,46 @@ mod tests {
         // After staging: added.
         engine.stage_file(Path::new("new.txt")).unwrap();
         let s = engine.file_status(Path::new("new.txt")).unwrap();
+        assert_eq!(s, FileStatus::Added);
+    }
+
+    /// BL-091 follow-up — when `.gitattributes` declares an
+    /// LFS-tracked pattern, `stage_file` routes through the git
+    /// CLI's `add` (which runs the `clean` filter pipeline) rather
+    /// than libgit2's `index.add_path`. We don't assert the staged
+    /// blob is the pointer (that depends on `git-lfs` being
+    /// installed and a working filter registration); the smoke
+    /// test pins that the routing decision compiles + the call
+    /// returns Ok and the file ends up staged.
+    #[test]
+    fn stage_file_routes_lfs_tracked_paths_through_git_cli() {
+        let (dir, engine) = init_repo();
+        fs::write(
+            dir.path().join(".gitattributes"),
+            "*.bin filter=lfs diff=lfs merge=lfs -text\n",
+        )
+        .unwrap();
+        fs::write(dir.path().join("a.bin"), b"raw bytes").unwrap();
+        engine.stage_file(Path::new("a.bin")).unwrap();
+        let s = engine.file_status(Path::new("a.bin")).unwrap();
+        assert_eq!(s, FileStatus::Added);
+    }
+
+    /// Paths whose `.gitattributes` doesn't list `filter=lfs` fall
+    /// through to the libgit2 path. Regression guard so the
+    /// `is_lfs_tracked` gate stays specific (custom non-LFS
+    /// filters or vanilla files don't pay for the shell-out).
+    #[test]
+    fn stage_file_non_lfs_path_uses_libgit2_path_unchanged() {
+        let (dir, engine) = init_repo();
+        fs::write(
+            dir.path().join(".gitattributes"),
+            "*.bin filter=lfs diff=lfs merge=lfs -text\n",
+        )
+        .unwrap();
+        fs::write(dir.path().join("README.md"), "hi").unwrap();
+        engine.stage_file(Path::new("README.md")).unwrap();
+        let s = engine.file_status(Path::new("README.md")).unwrap();
         assert_eq!(s, FileStatus::Added);
     }
 

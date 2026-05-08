@@ -10,6 +10,7 @@
 
 mod error;
 mod engine;
+mod lfs;
 mod types;
 mod auto_commit;
 mod worker;

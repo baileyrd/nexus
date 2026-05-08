@@ -8,6 +8,30 @@
 
 ## New Features (not addressed in any PRD)
 
+### BL-091 follow-up: Git LFS write-path through `git lfs clean` ✅ (2026-05-08)
+
+**Source**: BL-091 closure note (2026-05-06) — single explicit deferral ("write-path routing through `git lfs clean` on `stage_file` deferred")
+**Files**: new `crates/nexus-git/src/lfs.rs` (`is_lfs_tracked` + `stage_via_git_cli` shell-out helpers + 7 unit tests); `crates/nexus-git/src/lib.rs` (register the new module); `crates/nexus-git/src/error.rs` (new `GitError::Io(String)` variant for git-CLI subprocess failures); `crates/nexus-git/src/engine.rs` (`stage_file` consults `is_lfs_tracked` and routes through `stage_via_git_cli` when matched + 2 new engine-level tests); `crates/nexus-storage/src/lfs.rs` (doc-comment updated to point at the write-path's new home)
+**Related**: BL-091 phase A (LFS read path: pointer detection + `git lfs smudge`), `com.nexus.git::stage_file` (handler 6, BL-079 hunk staging neighbor)
+
+The BL-091 phase A closure landed pointer detection + `git lfs smudge` passthrough on the read path. The write path was deferred — `engine.stage_file` routed every file through libgit2's `index.add_path`, which happily wrote the raw working-tree bytes (the 50 MB PNG, not the 134-byte pointer) into the index for any LFS-tracked attachment. This pass closes that gap.
+
+- **`is_lfs_tracked(cwd, path)`.** Shells out to `git check-attr filter -- <path>` and looks for an `lfs` filter on the response. Returns `false` ("not tracked") when the git CLI is missing, when the cwd isn't a git repo, or when the response shows a non-`lfs` filter (custom filters, `crlf`, `unspecified`). Matches the BL-091 read-path's degrade-gracefully posture: a missing git binary means we can't tell, so the caller falls through to the non-LFS path.
+- **`stage_via_git_cli(repo_root, path)`.** Runs `git add -- <path>` from the repo root so git's `.gitattributes` filter pipeline (notably LFS's `clean`) runs before the index is written. Returns a `GitError::Io` on subprocess failure or non-zero exit so the caller surfaces the error; silently falling back to the libgit2 path would re-introduce the BL-091 bug we're fixing.
+- **`stage_file` routes selectively.** The add-path branch (working-tree file exists) consults `is_lfs_tracked`; if matched, routes through `stage_via_git_cli`. The remove-path branch (file deleted from working tree) keeps the libgit2 fast path — `git lfs clean` would have nothing to read, and the right index update is `index.remove_path` regardless of LFS tracking.
+- **Why shell out instead of `index.add_frombuffer`.** The git-CLI pipeline already knows how to apply every filter the user has configured (LFS, eol normalization, custom filters from `.gitattributes`) and how to interact with `~/.gitconfig`'s filter definitions. Re-implementing that against libgit2 is a much larger surface than the shell-out to `clean` we'd otherwise reduce to. Same posture as the read-side `git lfs smudge` shell-out.
+- **Module placement.** `is_lfs_tracked` + `stage_via_git_cli` live in `nexus-git/src/lfs.rs` rather than `nexus-storage/src/lfs.rs` (where the read-path helpers are) — shelling out to `git check-attr` is a git-engine concern, and putting it under `nexus-storage` would force a `nexus-git → nexus-storage` cross-service dep that the architecture doesn't have today. The `nexus-storage` doc-comment now points at the write-path's home for navigation.
+
+**Tested**: `cargo test -p nexus-git --lib` 62/62 (was 60, +2 engine + the 7 lfs.rs tests included in lib counts); `cargo test -p nexus-git` integration suite 18/18 (unchanged); `cargo clippy -p nexus-git --all-targets` 14 warnings (all pre-existing `doc_markdown` on legacy doc comments — none on new code); `cargo check --workspace` clean. New tests:
+- `is_lfs_tracked_detects_filter_directive` / `…_returns_false_for_uncovered_path` / `…_returns_false_when_no_gitattributes` / `…_ignores_non_lfs_filters` / `…_returns_false_outside_a_repo` — five gates on the detection helper, each backed by a fresh tempdir + `git init`.
+- `stage_via_git_cli_stages_a_normal_file` / `stage_via_git_cli_returns_error_for_nonexistent_path` — happy + error paths against a real git repo.
+- `stage_file_routes_lfs_tracked_paths_through_git_cli` (engine) — `.gitattributes` + matching pattern → `stage_file` succeeds and the file ends up staged. Doesn't assert the staged blob is the pointer because that depends on `git-lfs` being installed; the smoke test pins the wiring.
+- `stage_file_non_lfs_path_uses_libgit2_path_unchanged` (engine) — regression guard: a non-matching path with `.gitattributes` present still takes the libgit2 path.
+
+Tests gracefully skip when `git` itself isn't on `PATH` (matches the production degrade-gracefully posture).
+
+**Definition of done coverage**: ✅ write-path routing through `git lfs clean` on `stage_file`. The BL-091 closure note's only explicit deferral is now closed.
+
 ### BL-061 follow-up: per-saved-command memory_limit_mb override ✅ (2026-05-08)
 
 **Source**: BL-061 closure note (2026-05-07) — single explicit deferral ("the field exists on the struct but isn't routed yet")

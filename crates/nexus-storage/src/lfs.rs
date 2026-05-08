@@ -20,11 +20,12 @@
 //!
 //! ## What this module does *not* do
 //!
-//! The *write* path (detecting LFS-tracked patterns from
-//! `.gitattributes` and routing through `git lfs clean` before
-//! staging) is deferred — see BL-091 closure notes. Reads are the
-//! higher-impact gap because they're the path a user hits when
-//! they open an attachment.
+//! The *write* path (detecting LFS-tracked patterns and routing
+//! through `git lfs clean` before staging) lives in
+//! `nexus-git::lfs` rather than here — it's a git-engine concern,
+//! and putting it under `nexus-storage` would force a cross-service
+//! dep. See `crates/nexus-git/src/lfs.rs` (BL-091 follow-up,
+//! 2026-05-08).
 
 use std::path::Path;
 use std::process::{Command, Stdio};
