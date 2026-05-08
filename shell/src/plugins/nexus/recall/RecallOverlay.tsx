@@ -17,7 +17,7 @@
 //   Enter               → insert at editor caret + close
 //   Cmd/Ctrl+Enter      → copy formatted snippet to clipboard + close
 
-import { useEffect, useMemo, useRef } from 'react'
+import { forwardRef, useEffect, useMemo, useRef } from 'react'
 import { useRecallStore } from './recallStore'
 import { applyCodeFilter, applyLanguageFilter, availableLanguages } from './codeFilter'
 import {
@@ -97,19 +97,18 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   )
 }
 
-function ResultRow({
-  filePath,
-  excerpt,
-  selected,
-  onClick,
-}: {
-  filePath: string
-  excerpt: string
-  selected: boolean
-  onClick: () => void
-}) {
+const ResultRow = forwardRef<
+  HTMLLIElement,
+  {
+    filePath: string
+    excerpt: string
+    selected: boolean
+    onClick: () => void
+  }
+>(function ResultRow({ filePath, excerpt, selected, onClick }, ref) {
   return (
     <li
+      ref={ref}
       role="option"
       aria-selected={selected}
       onClick={onClick}
@@ -139,7 +138,7 @@ function ResultRow({
       </div>
     </li>
   )
-}
+})
 
 function ResultList() {
   const rawResults = useRecallStore((s) => s.results)
@@ -191,6 +190,38 @@ function ResultList() {
     )
   }
 
+  return <ResultListView results={results} selectedIndex={selectedIndex} onSelect={setSelectedIndex} />
+}
+
+/**
+ * AIG-06 follow-up — scroll-into-view glue for the recall list.
+ * Whenever the selected index changes (typically via ↑/↓ on the
+ * search input), the corresponding row is brought into view via
+ * `scrollIntoView({ block: 'nearest' })` — the rows already get
+ * their hover/selected styling via the parent state, so no other
+ * coordination is needed. `block: 'nearest'` keeps an in-view row
+ * unmoved (avoids twitchy mid-scroll jumps for mouse users).
+ */
+function ResultListView({
+  results,
+  selectedIndex,
+  onSelect,
+}: {
+  results: ReadonlyArray<{
+    file_path: string
+    chunk_text: string
+    block_id?: string | number | null
+  }>
+  selectedIndex: number
+  onSelect: (i: number) => void
+}) {
+  const rowRefs = useRef<Array<HTMLLIElement | null>>([])
+
+  useEffect(() => {
+    const row = rowRefs.current[selectedIndex]
+    row?.scrollIntoView({ block: 'nearest' })
+  }, [selectedIndex])
+
   return (
     <ul
       role="listbox"
@@ -206,11 +237,14 @@ function ResultList() {
     >
       {results.map((m, i) => (
         <ResultRow
+          ref={(el) => {
+            rowRefs.current[i] = el
+          }}
           key={`${m.file_path}:${m.block_id ?? i}`}
           filePath={m.file_path}
           excerpt={m.chunk_text}
           selected={i === selectedIndex}
-          onClick={() => setSelectedIndex(i)}
+          onClick={() => onSelect(i)}
         />
       ))}
     </ul>
